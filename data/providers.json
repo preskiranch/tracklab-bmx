@@ -1,0 +1,42 @@
+[
+  {
+    "id": "usabmx",
+    "name": "USA BMX / BMX Canada",
+    "regions": ["United States", "Canada"],
+    "sourceUrl": "https://www.usabmx.com/tracks/find-tracks",
+    "status": "connector-ready",
+    "notes": "USA BMX exposes track detail pages with coordinates and Google Static Maps. Use approved exports or a permissioned connector before bulk ingestion."
+  },
+  {
+    "id": "uci",
+    "name": "UCI BMX Racing",
+    "regions": ["Global"],
+    "sourceUrl": "https://www.uci.org/discipline/bmx-racing/2wPEZ3g9zV0Y0rT6rC7IZt",
+    "status": "connector-ready",
+    "notes": "Use official UCI venue/event exports where available."
+  },
+  {
+    "id": "british-cycling",
+    "name": "British Cycling BMX",
+    "regions": ["United Kingdom"],
+    "sourceUrl": "https://www.britishcycling.org.uk/bmx",
+    "status": "connector-ready",
+    "notes": "Regional venue data should be imported from approved club or federation feeds."
+  },
+  {
+    "id": "auscycling",
+    "name": "AusCycling BMX Racing",
+    "regions": ["Australia"],
+    "sourceUrl": "https://www.auscycling.org.au/page/bmx-racing",
+    "status": "connector-ready",
+    "notes": "Regional venue data should be imported from approved AusCycling feeds."
+  },
+  {
+    "id": "cycling-canada",
+    "name": "Cycling Canada BMX",
+    "regions": ["Canada"],
+    "sourceUrl": "https://cyclingcanada.ca/sport/bmx/",
+    "status": "connector-ready",
+    "notes": "Canadian BMX data can merge with BMX Canada / USA BMX where permissions allow."
+  }
+]

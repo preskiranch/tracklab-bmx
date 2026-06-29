@@ -1,0 +1,1856 @@
+{
+  "generatedAt": "2026-06-29T22:29:51.626Z",
+  "providerCount": 5,
+  "trackCount": 10,
+  "providers": [
+    {
+      "id": "usabmx",
+      "name": "USA BMX / BMX Canada",
+      "regions": [
+        "United States",
+        "Canada"
+      ],
+      "sourceUrl": "https://www.usabmx.com/tracks/find-tracks",
+      "status": "connector-ready",
+      "notes": "USA BMX exposes track detail pages with coordinates and Google Static Maps. Use approved exports or a permissioned connector before bulk ingestion."
+    },
+    {
+      "id": "uci",
+      "name": "UCI BMX Racing",
+      "regions": [
+        "Global"
+      ],
+      "sourceUrl": "https://www.uci.org/discipline/bmx-racing/2wPEZ3g9zV0Y0rT6rC7IZt",
+      "status": "connector-ready",
+      "notes": "Use official UCI venue/event exports where available."
+    },
+    {
+      "id": "british-cycling",
+      "name": "British Cycling BMX",
+      "regions": [
+        "United Kingdom"
+      ],
+      "sourceUrl": "https://www.britishcycling.org.uk/bmx",
+      "status": "connector-ready",
+      "notes": "Regional venue data should be imported from approved club or federation feeds."
+    },
+    {
+      "id": "auscycling",
+      "name": "AusCycling BMX Racing",
+      "regions": [
+        "Australia"
+      ],
+      "sourceUrl": "https://www.auscycling.org.au/page/bmx-racing",
+      "status": "connector-ready",
+      "notes": "Regional venue data should be imported from approved AusCycling feeds."
+    },
+    {
+      "id": "cycling-canada",
+      "name": "Cycling Canada BMX",
+      "regions": [
+        "Canada"
+      ],
+      "sourceUrl": "https://cyclingcanada.ca/sport/bmx/",
+      "status": "connector-ready",
+      "notes": "Canadian BMX data can merge with BMX Canada / USA BMX where permissions allow."
+    }
+  ],
+  "tracks": [
+    {
+      "id": "centennial-park-bmx",
+      "name": "Centennial Park BMX",
+      "country": "Canada",
+      "countryCode": "CA",
+      "state": "Ontario",
+      "region": "North America",
+      "source": "Cycling Canada",
+      "sourceUrl": "https://cyclingcanada.ca/sport/bmx/",
+      "lengthMeters": 340,
+      "elevationMeters": 5,
+      "surface": "Outdoor clay and paved turns",
+      "outline": [
+        {
+          "lat": 43.65245,
+          "lng": -79.58904
+        },
+        {
+          "lat": 43.65277,
+          "lng": -79.58871
+        },
+        {
+          "lat": 43.65312,
+          "lng": -79.58895
+        },
+        {
+          "lat": 43.65307,
+          "lng": -79.58951
+        },
+        {
+          "lat": 43.65272,
+          "lng": -79.58973
+        },
+        {
+          "lat": 43.65236,
+          "lng": -79.58952
+        },
+        {
+          "lat": 43.65217,
+          "lng": -79.58919
+        },
+        {
+          "lat": 43.65245,
+          "lng": -79.58904
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 41,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 41,
+          "endMeter": 95,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 95,
+          "endMeter": 133,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 133,
+          "endMeter": 197,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 197,
+          "endMeter": 238,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 238,
+          "endMeter": 306,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 306,
+          "endMeter": 340,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 127,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 122,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 118,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 114,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 59.86,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 56.58,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 52.91,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 50.33,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1266,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1139,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1097,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 965,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chula-vista-elite-bmx",
+      "name": "Chula Vista Elite BMX",
+      "country": "United States",
+      "countryCode": "US",
+      "state": "California",
+      "region": "North America",
+      "source": "USA BMX",
+      "sourceUrl": "https://www.usabmx.com/tracks",
+      "lengthMeters": 365,
+      "elevationMeters": 7,
+      "surface": "Supercross clay with asphalt turns",
+      "outline": [
+        {
+          "lat": 32.62873,
+          "lng": -116.93837
+        },
+        {
+          "lat": 32.62908,
+          "lng": -116.93805
+        },
+        {
+          "lat": 32.62941,
+          "lng": -116.93823
+        },
+        {
+          "lat": 32.62948,
+          "lng": -116.93878
+        },
+        {
+          "lat": 32.62912,
+          "lng": -116.93904
+        },
+        {
+          "lat": 32.62877,
+          "lng": -116.93887
+        },
+        {
+          "lat": 32.62843,
+          "lng": -116.93908
+        },
+        {
+          "lat": 32.62822,
+          "lng": -116.93869
+        },
+        {
+          "lat": 32.62838,
+          "lng": -116.93838
+        },
+        {
+          "lat": 32.62873,
+          "lng": -116.93837
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 44,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 44,
+          "endMeter": 102,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 102,
+          "endMeter": 142,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 142,
+          "endMeter": 212,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 212,
+          "endMeter": 255,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 255,
+          "endMeter": 329,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 329,
+          "endMeter": 365,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 134,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 129,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 125,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 121,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 62.24000000000001,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 58.81999999999999,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 54.94,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 52.22,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1308,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1174,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1132,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 993,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "manchester-bmx-track",
+      "name": "Manchester BMX Track",
+      "country": "United Kingdom",
+      "countryCode": "GB",
+      "state": "England",
+      "region": "Europe",
+      "source": "British Cycling",
+      "sourceUrl": "https://www.britishcycling.org.uk/bmx",
+      "lengthMeters": 360,
+      "elevationMeters": 6,
+      "surface": "Outdoor clay and paved turns",
+      "outline": [
+        {
+          "lat": 53.48504,
+          "lng": -2.19164
+        },
+        {
+          "lat": 53.48535,
+          "lng": -2.19125
+        },
+        {
+          "lat": 53.48573,
+          "lng": -2.19146
+        },
+        {
+          "lat": 53.4857,
+          "lng": -2.1921
+        },
+        {
+          "lat": 53.48531,
+          "lng": -2.19233
+        },
+        {
+          "lat": 53.48493,
+          "lng": -2.19211
+        },
+        {
+          "lat": 53.48478,
+          "lng": -2.19178
+        },
+        {
+          "lat": 53.48504,
+          "lng": -2.19164
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 43,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 43,
+          "endMeter": 101,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 101,
+          "endMeter": 140,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 140,
+          "endMeter": 209,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 209,
+          "endMeter": 252,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 252,
+          "endMeter": 324,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 324,
+          "endMeter": 360,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 132,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 127,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 123,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 119,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 61.56,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 58.18000000000001,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 54.36,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 51.68,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1296,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1164,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1122,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 985,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "north-bay-bmx-napa-valley",
+      "name": "North Bay BMX - Napa Valley",
+      "country": "United States",
+      "countryCode": "US",
+      "state": "California",
+      "region": "North America",
+      "source": "USA BMX",
+      "sourceUrl": "https://www.usabmx.com/tracks/ca-north-bay%20bmx",
+      "lengthMeters": 335,
+      "elevationMeters": 3,
+      "surface": "Outdoor clay race track",
+      "outline": [
+        {
+          "lat": 38.25588,
+          "lng": -122.28374
+        },
+        {
+          "lat": 38.2562,
+          "lng": -122.28344
+        },
+        {
+          "lat": 38.25655,
+          "lng": -122.28362
+        },
+        {
+          "lat": 38.25662,
+          "lng": -122.28412
+        },
+        {
+          "lat": 38.2563,
+          "lng": -122.28439
+        },
+        {
+          "lat": 38.25591,
+          "lng": -122.28425
+        },
+        {
+          "lat": 38.2557,
+          "lng": -122.28398
+        },
+        {
+          "lat": 38.25588,
+          "lng": -122.28374
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 40,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 40,
+          "endMeter": 94,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 94,
+          "endMeter": 131,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 131,
+          "endMeter": 194,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 194,
+          "endMeter": 234,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 234,
+          "endMeter": 302,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 302,
+          "endMeter": 335,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 129,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 124,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 120,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 116,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 60.540000000000006,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 57.22,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 53.489999999999995,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 50.870000000000005,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1278,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1149,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1107,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 973,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "oak-creek-bmx",
+      "name": "Oak Creek BMX",
+      "country": "United States",
+      "countryCode": "US",
+      "state": "California",
+      "region": "North America",
+      "source": "USA BMX",
+      "sourceUrl": "https://www.usabmx.com/tracks/ca-oak-creek-bmx",
+      "lengthMeters": 350,
+      "elevationMeters": 4,
+      "surface": "Outdoor clay race track",
+      "outline": [
+        {
+          "lat": 38.73453,
+          "lng": -121.29106
+        },
+        {
+          "lat": 38.73484,
+          "lng": -121.29078
+        },
+        {
+          "lat": 38.73516,
+          "lng": -121.29094
+        },
+        {
+          "lat": 38.73523,
+          "lng": -121.2914
+        },
+        {
+          "lat": 38.73493,
+          "lng": -121.2917
+        },
+        {
+          "lat": 38.73456,
+          "lng": -121.29157
+        },
+        {
+          "lat": 38.73434,
+          "lng": -121.2913
+        },
+        {
+          "lat": 38.73453,
+          "lng": -121.29106
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 42,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 42,
+          "endMeter": 98,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 98,
+          "endMeter": 137,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 137,
+          "endMeter": 203,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 203,
+          "endMeter": 245,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 245,
+          "endMeter": 315,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 315,
+          "endMeter": 350,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 131,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 126,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 122,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 118,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 61.22,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 57.86,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 54.06999999999999,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 51.41,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1290,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1159,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1117,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 981,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "papendal-bmx-track",
+      "name": "Papendal BMX Track",
+      "country": "Netherlands",
+      "countryCode": "NL",
+      "state": "Gelderland",
+      "region": "Europe",
+      "source": "UCI",
+      "sourceUrl": "https://www.uci.org/discipline/bmx-racing/2wPEZ3g9zV0Y0rT6rC7IZt",
+      "lengthMeters": 390,
+      "elevationMeters": 8,
+      "surface": "Supercross clay and paved turns",
+      "outline": [
+        {
+          "lat": 52.00543,
+          "lng": 5.8184
+        },
+        {
+          "lat": 52.00582,
+          "lng": 5.81805
+        },
+        {
+          "lat": 52.00619,
+          "lng": 5.81839
+        },
+        {
+          "lat": 52.00611,
+          "lng": 5.81902
+        },
+        {
+          "lat": 52.00569,
+          "lng": 5.81922
+        },
+        {
+          "lat": 52.0053,
+          "lng": 5.81901
+        },
+        {
+          "lat": 52.00508,
+          "lng": 5.81858
+        },
+        {
+          "lat": 52.00543,
+          "lng": 5.8184
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 47,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 47,
+          "endMeter": 109,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 109,
+          "endMeter": 152,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 152,
+          "endMeter": 226,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 226,
+          "endMeter": 273,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 273,
+          "endMeter": 351,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 351,
+          "endMeter": 390,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 140,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 135,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 131,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 127,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 64.28,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 60.739999999999995,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 56.67999999999999,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 53.84,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1344,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1204,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1162,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 1017,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rock-hill-bmx-supercross",
+      "name": "Rock Hill BMX Supercross",
+      "country": "United States",
+      "countryCode": "US",
+      "state": "South Carolina",
+      "region": "North America",
+      "source": "USA BMX",
+      "sourceUrl": "https://www.usabmx.com/tracks",
+      "lengthMeters": 400,
+      "elevationMeters": 9,
+      "surface": "Supercross clay and asphalt turns",
+      "outline": [
+        {
+          "lat": 34.97189,
+          "lng": -81.04041
+        },
+        {
+          "lat": 34.97227,
+          "lng": -81.04011
+        },
+        {
+          "lat": 34.97268,
+          "lng": -81.04027
+        },
+        {
+          "lat": 34.97282,
+          "lng": -81.04082
+        },
+        {
+          "lat": 34.97255,
+          "lng": -81.04119
+        },
+        {
+          "lat": 34.97213,
+          "lng": -81.04108
+        },
+        {
+          "lat": 34.97175,
+          "lng": -81.04127
+        },
+        {
+          "lat": 34.97151,
+          "lng": -81.04091
+        },
+        {
+          "lat": 34.97165,
+          "lng": -81.04055
+        },
+        {
+          "lat": 34.97189,
+          "lng": -81.04041
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 48,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 48,
+          "endMeter": 112,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 112,
+          "endMeter": 156,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 156,
+          "endMeter": 232,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 232,
+          "endMeter": 280,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 280,
+          "endMeter": 360,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 360,
+          "endMeter": 400,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 137,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 132,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 128,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 124,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 63.260000000000005,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 59.78,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 55.81,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 53.03,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1326,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1189,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1147,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 1005,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "saint-quentin-bmx-stadium",
+      "name": "Saint-Quentin-en-Yvelines BMX Stadium",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Ile-de-France",
+      "region": "Europe",
+      "source": "UCI",
+      "sourceUrl": "https://www.uci.org/discipline/bmx-racing/2wPEZ3g9zV0Y0rT6rC7IZt",
+      "lengthMeters": 380,
+      "elevationMeters": 8,
+      "surface": "Championship clay and paved turns",
+      "outline": [
+        {
+          "lat": 48.78851,
+          "lng": 2.03222
+        },
+        {
+          "lat": 48.78884,
+          "lng": 2.03191
+        },
+        {
+          "lat": 48.78917,
+          "lng": 2.03218
+        },
+        {
+          "lat": 48.78909,
+          "lng": 2.03272
+        },
+        {
+          "lat": 48.78868,
+          "lng": 2.03291
+        },
+        {
+          "lat": 48.78834,
+          "lng": 2.03268
+        },
+        {
+          "lat": 48.78818,
+          "lng": 2.03235
+        },
+        {
+          "lat": 48.78851,
+          "lng": 2.03222
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 46,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 46,
+          "endMeter": 106,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 106,
+          "endMeter": 148,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 148,
+          "endMeter": 220,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 220,
+          "endMeter": 266,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 266,
+          "endMeter": 342,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 342,
+          "endMeter": 380,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 138,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 133,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 129,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 125,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 63.60000000000001,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 60.099999999999994,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 56.099999999999994,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 53.300000000000004,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1332,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1194,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1152,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 1009,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sleeman-bmx-supercross",
+      "name": "Sleeman BMX Supercross Track",
+      "country": "Australia",
+      "countryCode": "AU",
+      "state": "Queensland",
+      "region": "Oceania",
+      "source": "AusCycling",
+      "sourceUrl": "https://www.auscycling.org.au/page/bmx-racing",
+      "lengthMeters": 395,
+      "elevationMeters": 7,
+      "surface": "Supercross clay and asphalt turns",
+      "outline": [
+        {
+          "lat": -27.51161,
+          "lng": 153.14902
+        },
+        {
+          "lat": -27.51125,
+          "lng": 153.14934
+        },
+        {
+          "lat": -27.51088,
+          "lng": 153.1491
+        },
+        {
+          "lat": -27.51096,
+          "lng": 153.14848
+        },
+        {
+          "lat": -27.51138,
+          "lng": 153.14831
+        },
+        {
+          "lat": -27.51177,
+          "lng": 153.14857
+        },
+        {
+          "lat": -27.51191,
+          "lng": 153.14889
+        },
+        {
+          "lat": -27.51161,
+          "lng": 153.14902
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 47,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 47,
+          "endMeter": 111,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 111,
+          "endMeter": 154,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 154,
+          "endMeter": 229,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 229,
+          "endMeter": 277,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 277,
+          "endMeter": 356,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 356,
+          "endMeter": 395,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 135,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 130,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 126,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 122,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 62.58,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 59.14,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 55.230000000000004,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 52.49,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1314,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1179,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1137,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 997,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tulsa-expo-bmx",
+      "name": "Tulsa Expo Square BMX",
+      "country": "United States",
+      "countryCode": "US",
+      "state": "Oklahoma",
+      "region": "North America",
+      "source": "USA BMX",
+      "sourceUrl": "https://www.usabmx.com/tracks",
+      "lengthMeters": 330,
+      "elevationMeters": 4,
+      "surface": "Indoor event clay",
+      "outline": [
+        {
+          "lat": 36.13457,
+          "lng": -95.93061
+        },
+        {
+          "lat": 36.13483,
+          "lng": -95.9303
+        },
+        {
+          "lat": 36.13518,
+          "lng": -95.93046
+        },
+        {
+          "lat": 36.13523,
+          "lng": -95.93092
+        },
+        {
+          "lat": 36.1349,
+          "lng": -95.93116
+        },
+        {
+          "lat": 36.13455,
+          "lng": -95.93101
+        },
+        {
+          "lat": 36.13433,
+          "lng": -95.93079
+        },
+        {
+          "lat": 36.13457,
+          "lng": -95.93061
+        }
+      ],
+      "zones": [
+        {
+          "id": "z1",
+          "name": "Start hill",
+          "startMeter": 0,
+          "endMeter": 40,
+          "type": "pedal"
+        },
+        {
+          "id": "z2",
+          "name": "First straight",
+          "startMeter": 40,
+          "endMeter": 92,
+          "type": "pedal"
+        },
+        {
+          "id": "z3",
+          "name": "First turn",
+          "startMeter": 92,
+          "endMeter": 129,
+          "type": "technical"
+        },
+        {
+          "id": "z4",
+          "name": "Rhythm section",
+          "startMeter": 129,
+          "endMeter": 191,
+          "type": "pedal"
+        },
+        {
+          "id": "z5",
+          "name": "Second turn",
+          "startMeter": 191,
+          "endMeter": 231,
+          "type": "technical"
+        },
+        {
+          "id": "z6",
+          "name": "Final straight",
+          "startMeter": 231,
+          "endMeter": 297,
+          "type": "pedal"
+        },
+        {
+          "id": "z7",
+          "name": "Finish",
+          "startMeter": 297,
+          "endMeter": 330,
+          "type": "recovery"
+        }
+      ],
+      "leaderboards": {
+        "rpm": [
+          {
+            "rider": "Alex Rider",
+            "value": 130,
+            "unit": "RPM",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 125,
+            "unit": "RPM",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 121,
+            "unit": "RPM",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 117,
+            "unit": "RPM",
+            "date": "2026-06-15"
+          }
+        ],
+        "speed": [
+          {
+            "rider": "Alex Rider",
+            "value": 60.88000000000001,
+            "unit": "MPH",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 57.540000000000006,
+            "unit": "MPH",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 53.78,
+            "unit": "MPH",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 51.14,
+            "unit": "MPH",
+            "date": "2026-06-15"
+          }
+        ],
+        "watts": [
+          {
+            "rider": "Alex Rider",
+            "value": 1284,
+            "unit": "W",
+            "date": "2026-05-18"
+          },
+          {
+            "rider": "Sam Carter",
+            "value": 1154,
+            "unit": "W",
+            "date": "2026-05-23"
+          },
+          {
+            "rider": "Jamie Lee",
+            "value": 1112,
+            "unit": "W",
+            "date": "2026-06-04"
+          },
+          {
+            "rider": "Taylor Smith",
+            "value": 977,
+            "unit": "W",
+            "date": "2026-06-15"
+          }
+        ]
+      }
+    }
+  ]
+}
