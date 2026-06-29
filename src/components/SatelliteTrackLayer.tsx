@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import { useMemo } from 'react';
 import { Bike } from 'lucide-react';
-import { riderLatLng, zonePolyline } from '../lib/googleMaps';
+import { trackBoundsPoints, trackFinishPoint, trackRoute, trackStartPoint, zonePolyline } from '../lib/googleMaps';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type { BikeSample, PlayerSlot, RaceState, RiderState, SpeedUnit, TrackPoint, TrackRecord, TrackZone } from '../types';
 
@@ -101,6 +101,46 @@ function pathFromPoints(points: ProjectedPoint[]) {
   return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
 }
 
+function segmentLengths(points: ProjectedPoint[]) {
+  const lengths: number[] = [];
+  let total = 0;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    total += Math.hypot(current.x - previous.x, current.y - previous.y);
+    lengths.push(total);
+  }
+
+  return { lengths, total };
+}
+
+function pointAtProgress(points: ProjectedPoint[], progress: number) {
+  const { lengths, total } = segmentLengths(points);
+  const target = total * clamp(progress, 0, 1);
+  const segmentIndex = lengths.findIndex((length) => length >= target);
+  const safeSegmentIndex = segmentIndex === -1 ? Math.max(0, points.length - 2) : segmentIndex;
+  const start = points[safeSegmentIndex];
+  const end = points[safeSegmentIndex + 1] ?? start;
+  const previousLength = safeSegmentIndex === 0 ? 0 : lengths[safeSegmentIndex - 1];
+  const segmentLength = Math.max(1, lengths[safeSegmentIndex] - previousLength);
+  const localProgress = segmentIndex === -1 ? 1 : (target - previousLength) / segmentLength;
+
+  return {
+    x: start.x + (end.x - start.x) * localProgress,
+    y: start.y + (end.y - start.y) * localProgress,
+    heading: (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI,
+  };
+}
+
+function finishMarkerPath(point: ProjectedPoint, heading: number) {
+  const radians = (heading * Math.PI) / 180;
+  const normal = { x: -Math.sin(radians), y: Math.cos(radians) };
+  const halfWidth = 30;
+
+  return `M ${(point.x - normal.x * halfWidth).toFixed(2)} ${(point.y - normal.y * halfWidth).toFixed(2)} L ${(point.x + normal.x * halfWidth).toFixed(2)} ${(point.y + normal.y * halfWidth).toFixed(2)}`;
+}
+
 export function SatelliteTrackLayer({
   track,
   activeZones,
@@ -112,8 +152,10 @@ export function SatelliteTrackLayer({
   earthAngle,
 }: SatelliteTrackLayerProps) {
   const layout = useMemo(() => {
-    const zoom = chooseZoom(track.outline);
-    const worldPoints = track.outline.map((point) => projectToWorldPixel(point, zoom));
+    const route = trackRoute(track);
+    const boundsPoints = trackBoundsPoints(track);
+    const zoom = chooseZoom(boundsPoints);
+    const worldPoints = boundsPoints.map((point) => projectToWorldPixel(point, zoom));
     const bounds = boundsFor(worldPoints);
     const centerX = bounds.minX + bounds.width / 2;
     const centerY = bounds.minY + bounds.height / 2;
@@ -144,10 +186,20 @@ export function SatelliteTrackLayer({
       };
     };
 
+    const routePoints = route.map(toLocalPoint);
+    const startPoint = toLocalPoint(trackStartPoint(track));
+    const finishPoint = toLocalPoint(trackFinishPoint(track));
+    const finishRoutePoint = pointAtProgress(routePoints, 1);
+
     return {
       zoom,
       tiles,
-      trackPath: pathFromPoints(track.outline.map(toLocalPoint)),
+      boundaryPath: track.outline.length > 1 ? pathFromPoints(track.outline.map(toLocalPoint)) : '',
+      routePath: pathFromPoints(routePoints),
+      routePoints,
+      startPoint,
+      finishPoint,
+      finishPath: finishMarkerPath(finishPoint, finishRoutePoint.heading),
       zones: activeZones.map((zone) => ({
         ...zone,
         path: pathFromPoints(zonePolyline(track, zone).map(toLocalPoint)),
@@ -156,10 +208,11 @@ export function SatelliteTrackLayer({
     };
   }, [activeZones, track]);
   const tilt = clamp(72 - earthAngle, 4, 54);
+  const routeStatusClass = `route-${track.routeStatus ?? 'estimated'}`;
 
   return (
     <div
-      className="earth-map-plane satellite-live"
+      className={`earth-map-plane satellite-live ${routeStatusClass}`}
       style={{ transform: `rotateX(${tilt}deg) rotateZ(-8deg)` }}
     >
       <div className="satellite-tile-grid" aria-hidden="true">
@@ -179,9 +232,10 @@ export function SatelliteTrackLayer({
       </div>
 
       <svg className="track-svg satellite-overlay" viewBox={`0 0 ${viewWidth} ${viewHeight}`} role="img" aria-label={`${track.name} GPS outline over satellite imagery`}>
-        <path className="track-shadow" d={layout.trackPath} />
-        <path className="track-base" d={layout.trackPath} />
-        <path className="track-centerline" d={layout.trackPath} />
+        {layout.boundaryPath && <path className="track-boundary" d={layout.boundaryPath} />}
+        <path className="track-shadow" d={layout.routePath} />
+        <path className="track-base" d={layout.routePath} />
+        <path className="track-centerline" d={layout.routePath} />
         {layout.zones.map((zone) => (
           <path
             className="zone-stroke"
@@ -190,7 +244,8 @@ export function SatelliteTrackLayer({
             style={{ stroke: zoneColors[zone.type] }}
           />
         ))}
-        <circle className="start-dot" cx={layout.toLocalPoint(track.outline[0]).x} cy={layout.toLocalPoint(track.outline[0]).y} r="10" />
+        <circle className="start-dot" cx={layout.startPoint.x} cy={layout.startPoint.y} r="10" />
+        <path className="finish-line" d={layout.finishPath} />
       </svg>
 
       {riders.map((rider) => {
@@ -200,12 +255,20 @@ export function SatelliteTrackLayer({
         }
 
         const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
-        const position = layout.toLocalPoint(riderLatLng(track, rider.distance));
         const progress = Math.max(0, Math.min(1, rider.distance / track.lengthMeters));
+        const routePosition = pointAtProgress(layout.routePoints, progress);
+        const headingRadians = (routePosition.heading * Math.PI) / 180;
+        const normal = { x: -Math.sin(headingRadians), y: Math.cos(headingRadians) };
+        const laneOffset = [-18, -6, 6, 18][player.id - 1] ?? 0;
+        const position = {
+          x: routePosition.x + normal.x * laneOffset,
+          y: routePosition.y + normal.y * laneOffset,
+        };
         const startOffset = raceState === 'ready' && progress < 0.025 ? player.id - 2.5 : 0;
         const startYOffset = startOffset === 0 ? 0 : Math.abs(startOffset) === 0.5 ? -12 : 12;
         const style = {
           '--player-color': player.accent,
+          '--rider-heading': `${routePosition.heading}deg`,
           '--rider-pitch': `${rider.pitch}deg`,
           '--rider-air': `${rider.air}px`,
           left: `${position.x + startOffset * 22}px`,

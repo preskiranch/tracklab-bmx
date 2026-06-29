@@ -88,15 +88,36 @@ export function loadGoogleMaps() {
 }
 
 export function trackCenter(track: TrackRecord): LatLngLiteral {
-  const total = track.outline.reduce(
+  const points = trackBoundsPoints(track);
+  const total = points.reduce(
     (sum, point) => ({ lat: sum.lat + point.lat, lng: sum.lng + point.lng }),
     { lat: 0, lng: 0 },
   );
 
   return {
-    lat: total.lat / track.outline.length,
-    lng: total.lng / track.outline.length,
+    lat: total.lat / points.length,
+    lng: total.lng / points.length,
   };
+}
+
+export function trackRoute(track: TrackRecord) {
+  return track.centerline && track.centerline.length > 1 ? track.centerline : track.outline;
+}
+
+export function trackBoundsPoints(track: TrackRecord) {
+  const route = trackRoute(track);
+  const points = [...track.outline, ...route];
+  return points.length > 0 ? points : [{ lat: track.latitude ?? 0, lng: track.longitude ?? 0 }];
+}
+
+export function trackStartPoint(track: TrackRecord) {
+  const route = trackRoute(track);
+  return track.startGate ?? route[0];
+}
+
+export function trackFinishPoint(track: TrackRecord) {
+  const route = trackRoute(track);
+  return track.finishLine ?? route[route.length - 1];
 }
 
 function distanceBetween(a: TrackPoint, b: TrackPoint) {
@@ -131,15 +152,16 @@ function pointAtProgress(outline: TrackPoint[], progress: number): LatLngLiteral
 }
 
 export function zonePolyline(track: TrackRecord, zone: TrackZone) {
+  const route = trackRoute(track);
   return Array.from({ length: 24 }, (_, index) => {
     const t = index / 23;
     const meter = zone.startMeter + (zone.endMeter - zone.startMeter) * t;
-    return pointAtProgress(track.outline, meter / track.lengthMeters);
+    return pointAtProgress(route, meter / track.lengthMeters);
   });
 }
 
 export function riderLatLng(track: TrackRecord, distanceMeters: number) {
-  return pointAtProgress(track.outline, distanceMeters / track.lengthMeters);
+  return pointAtProgress(trackRoute(track), distanceMeters / track.lengthMeters);
 }
 
 export type {

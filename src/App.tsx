@@ -30,6 +30,7 @@ import type {
   PlayMode,
   SessionMode,
   SpeedUnit,
+  TrackRecord,
 } from './types';
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
@@ -71,6 +72,7 @@ function formatClock() {
 export default function App() {
   const bridge = useWattbikeBridge();
   const [initialTrack] = useState(readInitialTrack);
+  const [catalogTracks, setCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [players, setPlayers] = useState<PlayerSlot[]>(readStoredPlayers);
   const [appMode, setAppMode] = useState<AppMode>('race');
   const [speedUnit, setSpeedUnit] = useState<SpeedUnit>(readStoredSpeedUnit);
@@ -97,15 +99,59 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const countries = useMemo(() => countriesForCatalog(), []);
-  const states = useMemo(() => statesForCountry(selectedCountry), [selectedCountry]);
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/data/track-database.json')
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Track database returned ${response.status}`);
+        }
+        return response.json() as Promise<{ tracks?: TrackRecord[] }>;
+      })
+      .then((database) => {
+        if (!cancelled && Array.isArray(database.tracks) && database.tracks.length > 0) {
+          setCatalogTracks(database.tracks);
+        }
+      })
+      .catch((error: Error) => {
+        console.warn(`Using bundled seed catalog: ${error.message}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const requestedTrackId = new URLSearchParams(window.location.search).get('track');
+    const nextTrack = catalogTracks.find((track) => track.id === requestedTrackId)
+      ?? catalogTracks.find((track) => track.id === selectedTrackId)
+      ?? catalogTracks[0]
+      ?? defaultTrack;
+
+    if (nextTrack.id !== selectedTrackId || nextTrack.country !== selectedCountry || nextTrack.state !== selectedState) {
+      setSelectedCountry(nextTrack.country);
+      setSelectedState(nextTrack.state);
+      setSelectedTrackId(nextTrack.id);
+    }
+  }, [catalogTracks]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('track', selectedTrackId);
+    window.history.replaceState(null, '', url);
+  }, [selectedTrackId]);
+
+  const countries = useMemo(() => countriesForCatalog(catalogTracks), [catalogTracks]);
+  const states = useMemo(() => statesForCountry(selectedCountry, catalogTracks), [catalogTracks, selectedCountry]);
   const availableTracks = useMemo(
-    () => tracksForLocation(selectedCountry, selectedState),
-    [selectedCountry, selectedState],
+    () => tracksForLocation(selectedCountry, selectedState, catalogTracks),
+    [catalogTracks, selectedCountry, selectedState],
   );
   const selectedTrack = useMemo(
-    () => trackCatalog.find((track) => track.id === selectedTrackId) ?? availableTracks[0] ?? defaultTrack,
-    [availableTracks, selectedTrackId],
+    () => catalogTracks.find((track) => track.id === selectedTrackId) ?? availableTracks[0] ?? defaultTrack,
+    [availableTracks, catalogTracks, selectedTrackId],
   );
 
   const discoveredDeviceIds = useMemo(
@@ -206,16 +252,27 @@ export default function App() {
   }, [autoAssign, liveDeviceIds, players]);
 
   const handleCountryChange = (country: string) => {
-    const nextState = statesForCountry(country)[0];
-    const nextTrack = tracksForLocation(country, nextState)[0];
+    const nextState = statesForCountry(country, catalogTracks)[0];
+    const nextTrack = tracksForLocation(country, nextState, catalogTracks)[0];
     setSelectedCountry(country);
     setSelectedState(nextState);
     setSelectedTrackId(nextTrack.id);
   };
 
   const handleStateChange = (state: string) => {
-    const nextTrack = tracksForLocation(selectedCountry, state)[0];
+    const nextTrack = tracksForLocation(selectedCountry, state, catalogTracks)[0];
     setSelectedState(state);
+    setSelectedTrackId(nextTrack.id);
+  };
+
+  const handleTrackChange = (trackId: string) => {
+    const nextTrack = catalogTracks.find((track) => track.id === trackId);
+    if (!nextTrack) {
+      return;
+    }
+
+    setSelectedCountry(nextTrack.country);
+    setSelectedState(nextTrack.state);
     setSelectedTrackId(nextTrack.id);
   };
 
@@ -330,7 +387,7 @@ export default function App() {
             </label>
             <label>
               <span>Track</span>
-              <select value={selectedTrack.id} onChange={(event) => setSelectedTrackId(event.target.value)}>
+              <select value={selectedTrack.id} onChange={(event) => handleTrackChange(event.target.value)}>
                 {availableTracks.map((track) => <option value={track.id} key={track.id}>{track.name}</option>)}
               </select>
             </label>
@@ -338,7 +395,7 @@ export default function App() {
 
           <div className="catalog-badge">
             <Database size={16} />
-            <span>{trackCatalog.length} seeded tracks</span>
+            <span>{catalogTracks.length} track locator records</span>
           </div>
 
           <div className="global-status">

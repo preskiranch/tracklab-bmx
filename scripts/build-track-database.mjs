@@ -36,9 +36,44 @@ function createZones(lengthMeters) {
   }));
 }
 
+function fallbackGeometry(track) {
+  const lat = Number(track.latitude);
+  const lng = Number(track.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { outline: [], centerline: [] };
+  }
+
+  const lngScale = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+  const latRadius = 0.00022;
+  const lngRadius = latRadius / lngScale;
+  const centerline = [
+    { lat: lat - latRadius * 0.72, lng: lng + lngRadius * 0.62 },
+    { lat: lat - latRadius * 0.95, lng },
+    { lat: lat - latRadius * 0.48, lng: lng - lngRadius * 0.72 },
+    { lat: lat + latRadius * 0.38, lng: lng - lngRadius * 0.8 },
+    { lat: lat + latRadius * 0.88, lng: lng - lngRadius * 0.12 },
+    { lat: lat + latRadius * 0.58, lng: lng + lngRadius * 0.74 },
+    { lat: lat - latRadius * 0.15, lng: lng + lngRadius * 0.86 },
+  ];
+  const outline = [
+    { lat: lat - latRadius * 1.18, lng: lng + lngRadius * 0.86 },
+    { lat: lat - latRadius * 1.22, lng: lng - lngRadius * 0.54 },
+    { lat: lat - latRadius * 0.28, lng: lng - lngRadius * 1.22 },
+    { lat: lat + latRadius * 1.16, lng: lng - lngRadius * 0.72 },
+    { lat: lat + latRadius * 1.2, lng: lng + lngRadius * 0.72 },
+    { lat: lat + latRadius * 0.08, lng: lng + lngRadius * 1.24 },
+    { lat: lat - latRadius * 1.18, lng: lng + lngRadius * 0.86 },
+  ];
+
+  return { outline, centerline };
+}
+
 function normalizeTrack(track) {
   const lengthMeters = Number(track.lengthMeters ?? 350);
   const id = track.id || slug(`${track.country || 'unknown'}-${track.state || 'track'}-${track.name}`);
+  const geometry = fallbackGeometry(track);
+  const outline = Array.isArray(track.outline) && track.outline.length > 0 ? track.outline : geometry.outline;
+  const centerline = Array.isArray(track.centerline) && track.centerline.length > 1 ? track.centerline : geometry.centerline;
 
   return {
     id,
@@ -49,13 +84,58 @@ function normalizeTrack(track) {
     region: track.region,
     source: track.source,
     sourceUrl: track.sourceUrl,
+    sourceTrackId: track.sourceTrackId,
+    address: track.address,
+    city: track.city,
+    postalCode: track.postalCode,
+    latitude: Number.isFinite(Number(track.latitude)) ? Number(track.latitude) : undefined,
+    longitude: Number.isFinite(Number(track.longitude)) ? Number(track.longitude) : undefined,
+    websiteUrl: track.websiteUrl,
+    facebookUrl: track.facebookUrl,
+    instagramUrl: track.instagramUrl,
     lengthMeters,
     elevationMeters: Number(track.elevationMeters ?? 0),
     surface: track.surface ?? 'BMX race track',
-    outline: Array.isArray(track.outline) ? track.outline : [],
+    outline,
+    centerline,
+    startGate: track.startGate ?? centerline[0] ?? outline[0],
+    finishLine: track.finishLine ?? centerline[centerline.length - 1] ?? outline[outline.length - 1],
+    routeStatus: track.routeStatus ?? (track.latitude && track.longitude ? 'locator-only' : 'estimated'),
     zones: Array.isArray(track.zones) ? track.zones : createZones(lengthMeters),
     leaderboards: track.leaderboards ?? { rpm: [], speed: [], watts: [] },
   };
+}
+
+function meaningfulGeometry(track) {
+  return track.routeStatus && track.routeStatus !== 'locator-only';
+}
+
+function mergeTrack(existing, incoming) {
+  const existingHasRoute = meaningfulGeometry(existing);
+  const incomingHasRoute = meaningfulGeometry(incoming);
+  const merged = { ...existing };
+  Object.entries(incoming).forEach(([key, value]) => {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  });
+  merged.leaderboards = Object.values(incoming.leaderboards ?? {}).some((entries) => entries.length > 0)
+    ? incoming.leaderboards
+    : existing.leaderboards;
+
+  if (existingHasRoute && !incomingHasRoute) {
+    merged.outline = existing.outline;
+    merged.centerline = existing.centerline;
+    merged.startGate = existing.startGate;
+    merged.finishLine = existing.finishLine;
+    merged.routeStatus = existing.routeStatus;
+    merged.lengthMeters = existing.lengthMeters;
+    merged.elevationMeters = existing.elevationMeters;
+    merged.surface = existing.surface;
+    merged.zones = existing.zones;
+  }
+
+  return merged;
 }
 
 async function loadSeedCatalog() {
@@ -90,16 +170,28 @@ const [providers, seedTracks, importedTracks] = await Promise.all([
 ]);
 
 const byId = new Map();
-[...seedTracks, ...importedTracks].map(normalizeTrack).forEach((track) => {
-  byId.set(track.id, track);
+[...importedTracks, ...seedTracks].map(normalizeTrack).forEach((track) => {
+  const existing = byId.get(track.id);
+  byId.set(track.id, existing ? mergeTrack(existing, track) : track);
 });
 
-const database = {
-  generatedAt: new Date().toISOString(),
+const databaseBody = {
   providerCount: providers.length,
   trackCount: byId.size,
   providers,
   tracks: [...byId.values()].sort((a, b) => a.name.localeCompare(b.name)),
+};
+const existingDatabase = await readFile(outputPath, 'utf8').then(JSON.parse).catch(() => null);
+const existingBody = existingDatabase
+  ? { ...existingDatabase, generatedAt: undefined }
+  : null;
+const nextBody = { ...databaseBody, generatedAt: undefined };
+const generatedAt = existingBody && JSON.stringify(existingBody) === JSON.stringify(nextBody)
+  ? existingDatabase.generatedAt
+  : new Date().toISOString();
+const database = {
+  generatedAt,
+  ...databaseBody,
 };
 
 await mkdir(new URL('../public/data/', import.meta.url), { recursive: true });

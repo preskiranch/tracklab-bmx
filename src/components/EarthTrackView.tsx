@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { ExternalLink, Map as MapIcon, MapPinned, Satellite, Signal } from 'lucide-react';
+import { ExternalLink, Flag, Map as MapIcon, MapPinned, Satellite, Signal } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { SatelliteTrackLayer } from './SatelliteTrackLayer';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
@@ -39,6 +39,11 @@ export function EarthTrackView({
   const center = trackCenter(track);
   const googleEarthUrl = `https://earth.google.com/web/search/${center.lat},${center.lng}`;
   const imageryLabel = googleMapsConfigured ? 'Google satellite imagery' : 'Esri satellite imagery';
+  const routeStatusLabel = track.routeStatus === 'verified'
+    ? 'Verified ride line'
+    : track.routeStatus === 'locator-only'
+      ? 'Locator-only route'
+      : 'Estimated ride line';
 
   return (
     <section className="earth-panel">
@@ -49,11 +54,12 @@ export function EarthTrackView({
             {imageryLabel}
           </div>
           <h2>{track.name}</h2>
-          <p>{track.state}, {track.country} / {track.lengthMeters} m / {track.surface}</p>
+          <p>{track.address ?? `${track.state}, ${track.country}`} / {track.lengthMeters} m / {track.surface}</p>
         </div>
         <div className="earth-meta">
           <span><MapPinned size={15} /> {track.source}</span>
           <span><MapIcon size={15} /> {track.elevationMeters} m elevation</span>
+          <span><Flag size={15} /> {routeStatusLabel}</span>
           <a href={googleEarthUrl} target="_blank" rel="noreferrer">
             <ExternalLink size={15} /> Open Earth
           </a>
@@ -84,7 +90,7 @@ export function EarthTrackView({
           />
         )}
 
-        <div className="google-map-caption">{imageryLabel} with GPS outline overlay</div>
+        <div className="google-map-caption">{imageryLabel} with ride line overlay</div>
 
         <div className="earth-overlay top-left">
           <span className={`race-dot ${raceState}`} />
@@ -92,7 +98,7 @@ export function EarthTrackView({
         </div>
         <div className="earth-overlay bottom-left">
           <span>Angle {earthAngle} deg</span>
-          <span>GPS outline</span>
+          <span>Ride line</span>
           <span>{activeZones.length} active zone{activeZones.length === 1 ? '' : 's'}</span>
         </div>
       </div>

@@ -39,7 +39,7 @@ The bridge scans for ANT+ Bicycle Power devices. Pedal each Wattbike for a few s
 
 ## Current Platform Features
 
-- **Track database pipeline**: country, state/region, and track selectors backed by `src/data/trackCatalog.ts`, plus generated public database output at `public/data/track-database.json`.
+- **Track locator database**: country, state/region, and track selectors load the generated database at `public/data/track-database.json`, including USA BMX/BMX Canada official locator records.
 - **Satellite / Earth viewer**: real Esri World Imagery satellite tiles by default, optional Google Maps satellite imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured, plus a Google Earth link.
 - **Sprint mode**: full-track race distance based on the selected track length.
 - **Interval mode**: auto-selected pedaling zones or manually chosen track zones.
@@ -74,7 +74,13 @@ Without that key, the app uses the Esri satellite basemap instead of showing fak
 
 ## Track Data Status
 
-The included catalog is a starter seed, not a licensed authoritative global BMX database. The database build pipeline is:
+The included catalog combines hand-seeded race routes with official locator imports. USA BMX/BMX Canada records can be refreshed from the public finder backend with:
+
+```sh
+npm run tracks:import:usabmx
+```
+
+Then rebuild the generated database:
 
 ```sh
 npm run tracks:build
@@ -86,7 +92,9 @@ That command writes:
 public/data/track-database.json
 ```
 
-Approved USA BMX, UCI, British Cycling, AusCycling, Cycling Canada, or other organizer exports can be added under `data/imports/` and merged into the generated database. Do not use Google imagery screenshots as data input.
+USA BMX/BMX Canada imported rows include official names, addresses, states/provinces, countries, postal codes, and lat/lng. They are marked `routeStatus: "locator-only"` until a real `centerline`, `startGate`, and `finishLine` are verified. Hand-routed tracks are marked `estimated` or `verified`.
+
+Approved UCI, British Cycling, AusCycling, Cycling Canada, or other federation exports can be added under `data/imports/` and merged into the generated database. Do not use Google imagery screenshots as data input.
 
 ## Render Deployment
 

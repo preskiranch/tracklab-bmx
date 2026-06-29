@@ -43,7 +43,7 @@ function leaderboard(seed: number): Record<LeaderboardMetric, LeaderboardEntry[]
   };
 }
 
-export const trackCatalog: TrackRecord[] = [
+const seedTrackCatalog: TrackRecord[] = [
   {
     id: 'rock-hill-bmx-supercross',
     name: 'Rock Hill BMX Supercross',
@@ -111,15 +111,29 @@ export const trackCatalog: TrackRecord[] = [
     elevationMeters: 3,
     surface: 'Outdoor clay race track',
     outline: [
-      { lat: 38.25588, lng: -122.28374 },
-      { lat: 38.2562, lng: -122.28344 },
-      { lat: 38.25655, lng: -122.28362 },
-      { lat: 38.25662, lng: -122.28412 },
-      { lat: 38.2563, lng: -122.28439 },
-      { lat: 38.25591, lng: -122.28425 },
-      { lat: 38.2557, lng: -122.28398 },
-      { lat: 38.25588, lng: -122.28374 },
+      { lat: 38.25544, lng: -122.283 },
+      { lat: 38.25544, lng: -122.28478 },
+      { lat: 38.25608, lng: -122.28495 },
+      { lat: 38.25664, lng: -122.28442 },
+      { lat: 38.25662, lng: -122.2831 },
+      { lat: 38.25605, lng: -122.28285 },
+      { lat: 38.25544, lng: -122.283 },
     ],
+    centerline: [
+      { lat: 38.25562, lng: -122.28312 },
+      { lat: 38.25553, lng: -122.28375 },
+      { lat: 38.2555, lng: -122.28448 },
+      { lat: 38.25586, lng: -122.28478 },
+      { lat: 38.2561, lng: -122.28435 },
+      { lat: 38.256, lng: -122.28365 },
+      { lat: 38.25625, lng: -122.28308 },
+      { lat: 38.25652, lng: -122.28335 },
+      { lat: 38.25648, lng: -122.2843 },
+      { lat: 38.25628, lng: -122.28468 },
+    ],
+    startGate: { lat: 38.25562, lng: -122.28312 },
+    finishLine: { lat: 38.25628, lng: -122.28468 },
+    routeStatus: 'estimated',
     zones: zones(335),
     leaderboards: leaderboard(111),
   },
@@ -300,14 +314,32 @@ export const trackCatalog: TrackRecord[] = [
   },
 ];
 
-export function countriesForCatalog() {
-  return [...new Set(trackCatalog.map((track) => track.country))].sort();
+function routeDefaults(track: TrackRecord): TrackRecord {
+  const centerline = track.centerline && track.centerline.length > 1
+    ? track.centerline
+    : track.outline.at(-1)?.lat === track.outline[0]?.lat && track.outline.at(-1)?.lng === track.outline[0]?.lng
+      ? track.outline.slice(0, -1)
+      : track.outline;
+
+  return {
+    ...track,
+    centerline,
+    startGate: track.startGate ?? centerline[0],
+    finishLine: track.finishLine ?? centerline[centerline.length - 1],
+    routeStatus: track.routeStatus ?? 'estimated',
+  };
 }
 
-export function statesForCountry(country: string) {
-  return [...new Set(trackCatalog.filter((track) => track.country === country).map((track) => track.state))].sort();
+export const trackCatalog: TrackRecord[] = seedTrackCatalog.map(routeDefaults);
+
+export function countriesForCatalog(catalog: TrackRecord[] = trackCatalog) {
+  return [...new Set(catalog.map((track) => track.country))].sort();
 }
 
-export function tracksForLocation(country: string, state: string) {
-  return trackCatalog.filter((track) => track.country === country && track.state === state);
+export function statesForCountry(country: string, catalog: TrackRecord[] = trackCatalog) {
+  return [...new Set(catalog.filter((track) => track.country === country).map((track) => track.state))].sort();
+}
+
+export function tracksForLocation(country: string, state: string, catalog: TrackRecord[] = trackCatalog) {
+  return catalog.filter((track) => track.country === country && track.state === state);
 }

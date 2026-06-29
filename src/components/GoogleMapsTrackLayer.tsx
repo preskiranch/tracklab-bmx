@@ -4,7 +4,9 @@ import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import {
   loadGoogleMaps,
   riderLatLng,
+  trackBoundsPoints,
   trackCenter,
+  trackRoute,
   type GoogleMap,
   type GoogleMarker,
   type GooglePolyline,
@@ -40,6 +42,7 @@ export function GoogleMapsTrackLayer({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
+  const boundaryLineRef = useRef<GooglePolyline | null>(null);
   const trackLineRef = useRef<GooglePolyline | null>(null);
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
   const markerRefs = useRef<Map<number, GoogleMarker>>(new Map());
@@ -81,9 +84,11 @@ export function GoogleMapsTrackLayer({
 
     return () => {
       cancelled = true;
+      boundaryLineRef.current?.setMap(null);
       trackLineRef.current?.setMap(null);
       zoneLinesRef.current.forEach((line) => line.setMap(null));
       markerRefs.current.forEach((marker) => marker.setMap(null));
+      boundaryLineRef.current = null;
       trackLineRef.current = null;
       zoneLinesRef.current = [];
       markerRefs.current.clear();
@@ -109,17 +114,26 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
+    boundaryLineRef.current?.setMap(null);
     trackLineRef.current?.setMap(null);
     zoneLinesRef.current.forEach((line) => line.setMap(null));
     zoneLinesRef.current = [];
 
     const bounds = new google.maps.LatLngBounds();
-    track.outline.forEach((point) => bounds.extend(point));
+    trackBoundsPoints(track).forEach((point) => bounds.extend(point));
     map.fitBounds(bounds, 58);
+
+    boundaryLineRef.current = new google.maps.Polyline({
+      map,
+      path: track.outline,
+      strokeColor: '#ffffff',
+      strokeOpacity: 0.48,
+      strokeWeight: 3,
+    });
 
     trackLineRef.current = new google.maps.Polyline({
       map,
-      path: track.outline,
+      path: trackRoute(track),
       strokeColor: '#ffffff',
       strokeOpacity: 0.96,
       strokeWeight: 8,

@@ -545,12 +545,20 @@ input:focus {
 }
 
 .track-shadow,
+.track-boundary,
 .track-base,
 .track-centerline,
-.zone-stroke {
+.zone-stroke,
+.finish-line {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.track-boundary {
+  stroke: rgba(255, 255, 255, 0.58);
+  stroke-width: 4;
+  stroke-dasharray: 18 16;
 }
 
 .track-shadow {
@@ -585,10 +593,25 @@ input:focus {
   stroke: rgba(245, 184, 36, 0.76);
 }
 
+.route-locator-only .track-base {
+  stroke-dasharray: 20 18;
+  stroke-opacity: 0.78;
+}
+
+.route-locator-only .zone-stroke {
+  stroke-dasharray: 16 14;
+}
+
 .start-dot {
   fill: #111827;
   stroke: #ffffff;
   stroke-width: 4;
+}
+
+.finish-line {
+  stroke: #111827;
+  stroke-width: 12;
+  stroke-dasharray: 8 8;
 }
 
 .rider-token {
@@ -602,7 +625,7 @@ input:focus {
   gap: 2px 5px;
   align-items: center;
   min-width: 72px;
-  transform: translate(-50%, -50%) translateY(calc(var(--rider-air) * -1)) rotate(var(--rider-pitch));
+  transform: translate(-50%, -50%) translateY(calc(var(--rider-air) * -1));
   transform-origin: center;
   transition: transform 80ms linear, left 80ms linear, top 80ms linear;
 }
@@ -612,7 +635,7 @@ input:focus {
 }
 
 .rider-token.landing .rider-bike {
-  transform: scaleY(0.9);
+  transform: rotate(calc(var(--rider-heading, 0deg) + var(--rider-pitch))) scaleY(0.9);
 }
 
 .rider-bike {
@@ -625,6 +648,7 @@ input:focus {
   border-radius: 999px;
   background: var(--player-color);
   color: #101418;
+  transform: rotate(calc(var(--rider-heading, 0deg) + var(--rider-pitch)));
   box-shadow: 0 8px 18px rgba(17, 24, 39, 0.18);
 }
 

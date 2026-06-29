@@ -4,8 +4,8 @@
     "name": "USA BMX / BMX Canada",
     "regions": ["United States", "Canada"],
     "sourceUrl": "https://www.usabmx.com/tracks/find-tracks",
-    "status": "connector-ready",
-    "notes": "USA BMX exposes track detail pages with coordinates and Google Static Maps. Use approved exports or a permissioned connector before bulk ingestion."
+    "status": "active-import",
+    "notes": "Importer uses the public USA BMX/BMX Canada find-tracks backend endpoint for official locator records: names, addresses, states/provinces, postal codes, and coordinates. Route centerlines still require per-track verification."
   },
   {
     "id": "uci",

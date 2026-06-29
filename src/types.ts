@@ -88,6 +88,8 @@ export type TrackZone = {
   type: 'pedal' | 'recovery' | 'technical';
 };
 
+export type TrackRouteStatus = 'verified' | 'estimated' | 'locator-only';
+
 export type LeaderboardEntry = {
   rider: string;
   value: number;
@@ -102,12 +104,25 @@ export type TrackRecord = {
   countryCode: string;
   state: string;
   region: string;
-  source: 'USA BMX' | 'UCI' | 'British Cycling' | 'AusCycling' | 'Cycling Canada';
+  source: string;
   sourceUrl: string;
+  sourceTrackId?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+  websiteUrl?: string;
+  facebookUrl?: string;
+  instagramUrl?: string;
   lengthMeters: number;
   elevationMeters: number;
   surface: string;
   outline: TrackPoint[];
+  centerline?: TrackPoint[];
+  startGate?: TrackPoint;
+  finishLine?: TrackPoint;
+  routeStatus?: TrackRouteStatus;
   zones: TrackZone[];
   leaderboards: Record<LeaderboardMetric, LeaderboardEntry[]>;
 };
