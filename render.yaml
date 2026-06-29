@@ -5,6 +5,8 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist
     envVars:
+      - key: VITE_SATELLITE_TILE_URL_TEMPLATE
+        value: https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
       - key: VITE_GOOGLE_MAPS_API_KEY
         sync: false
       - key: VITE_WATTBIKE_BRIDGE_URL

@@ -40,7 +40,7 @@ The bridge scans for ANT+ Bicycle Power devices. Pedal each Wattbike for a few s
 ## Current Platform Features
 
 - **Track database pipeline**: country, state/region, and track selectors backed by `src/data/trackCatalog.ts`, plus generated public database output at `public/data/track-database.json`.
-- **Google satellite / Earth viewer**: real Google Maps satellite imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured; otherwise the app shows a clear configuration state and a Google Earth link.
+- **Satellite / Earth viewer**: real Esri World Imagery satellite tiles by default, optional Google Maps satellite imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured, plus a Google Earth link.
 - **Sprint mode**: full-track race distance based on the selected track length.
 - **Interval mode**: auto-selected pedaling zones or manually chosen track zones.
 - **Metric selection**: choose cadence, speed, and/or power before the race; post-race tables follow that choice.
@@ -48,9 +48,15 @@ The bridge scans for ANT+ Bicycle Power devices. Pedal each Wattbike for a few s
 - **Local/multiplayer shell**: local or multiplayer mode, account-optional toggle, private room code, roster, track sync label, and chat.
 - **Leaderboards**: seeded best RPM, top speed, and watts by track.
 
-## Google Maps / Earth Integration
+## Satellite / Earth Integration
 
 The old Google Earth browser plugin is not a viable production target. The app now uses the supported Google Maps JavaScript API path for satellite imagery and overlays the track GPS outline, zone strokes, and rider markers on top of Google imagery.
+
+Render works without a Google key by using Esri World Imagery tiles as the default satellite basemap:
+
+```text
+VITE_SATELLITE_TILE_URL_TEMPLATE=https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+```
 
 Create a local `.env` from `.env.example`:
 
@@ -64,7 +70,7 @@ Then set:
 VITE_GOOGLE_MAPS_API_KEY=your_google_maps_key
 ```
 
-Without that key, the app intentionally does not show fake satellite imagery.
+Without that key, the app uses the Esri satellite basemap instead of showing fake satellite imagery.
 
 ## Track Data Status
 
@@ -86,14 +92,15 @@ Approved USA BMX, UCI, British Cycling, AusCycling, Cycling Canada, or other org
 
 `render.yaml` is included for a Render Static Site deployment.
 
-Required Render environment variables:
+Render environment variables:
 
 ```text
+VITE_SATELLITE_TILE_URL_TEMPLATE
 VITE_GOOGLE_MAPS_API_KEY
 VITE_WATTBIKE_BRIDGE_URL
 ```
 
-Render can host the web platform and show Google imagery. It cannot directly read a USB ANT+ dongle on your local PC. For real bikes, the PC still needs to run the local bridge, and the hosted app needs a reachable WebSocket bridge URL. Local development defaults to:
+Render can host the web platform and show satellite imagery with the built-in Esri default. Google imagery is optional and requires `VITE_GOOGLE_MAPS_API_KEY`. Render cannot directly read a USB ANT+ dongle on your local PC. For real bikes, the PC still needs to run the local bridge, and the hosted app needs a reachable WebSocket bridge URL. Local development defaults to:
 
 ```text
 VITE_WATTBIKE_BRIDGE_URL=ws://127.0.0.1:8787
