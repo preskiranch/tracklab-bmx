@@ -227,11 +227,11 @@ export function SessionControlPanel({
             Feet
           </button>
           <button
-            className={distanceUnit === 'km' ? 'selected' : ''}
+            className={distanceUnit === 'm' ? 'selected' : ''}
             type="button"
-            onClick={() => onDistanceUnitChange('km')}
+            onClick={() => onDistanceUnitChange('m')}
           >
-            KM
+            Meters
           </button>
         </div>
 

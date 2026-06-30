@@ -100,7 +100,8 @@ function readStoredSpeedUnit(): SpeedUnit {
 }
 
 function readStoredDistanceUnit(): DistanceUnit {
-  return window.localStorage.getItem(distanceUnitStorageKey) === 'km' ? 'km' : 'ft';
+  const stored = window.localStorage.getItem(distanceUnitStorageKey);
+  return stored === 'm' || stored === 'km' ? 'm' : 'ft';
 }
 
 function downloadTrackMapping(mapping: UserTrackMapping) {

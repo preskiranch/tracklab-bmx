@@ -1,6 +1,6 @@
 export type BridgeMode = 'sim' | 'ant' | 'demo';
 export type SpeedUnit = 'kph' | 'mph';
-export type DistanceUnit = 'ft' | 'km';
+export type DistanceUnit = 'ft' | 'm';
 export type SessionMode = 'sprint' | 'interval';
 export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';

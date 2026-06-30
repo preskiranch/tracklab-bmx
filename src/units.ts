@@ -20,11 +20,11 @@ export function speedUnitLabel(unit: SpeedUnit) {
 
 export function formatDistanceMeters(meters: number | null | undefined, unit: DistanceUnit) {
   if (meters == null || !Number.isFinite(meters)) {
-    return unit === 'km' ? '-- km' : '-- ft';
+    return unit === 'm' ? '-- m' : '-- ft';
   }
 
-  if (unit === 'km') {
-    return `${(meters / 1000).toFixed(meters >= 1000 ? 2 : 3)} km`;
+  if (unit === 'm') {
+    return `${Math.round(meters).toLocaleString()} m`;
   }
 
   return `${Math.round(meters * 3.28084).toLocaleString()} ft`;
@@ -34,8 +34,8 @@ export function formatDistanceRangeMeters(startMeters: number, endMeters: number
   const start = Math.max(0, startMeters);
   const end = Math.max(start, endMeters);
 
-  if (unit === 'km') {
-    return `${(start / 1000).toFixed(3)}-${(end / 1000).toFixed(3)} km`;
+  if (unit === 'm') {
+    return `${Math.round(start).toLocaleString()}-${Math.round(end).toLocaleString()} m`;
   }
 
   return `${Math.round(start * 3.28084).toLocaleString()}-${Math.round(end * 3.28084).toLocaleString()} ft`;
