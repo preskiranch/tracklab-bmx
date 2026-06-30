@@ -1,7 +1,6 @@
 import type { CSSProperties } from 'react';
 import { ExternalLink, Flag, Map as MapIcon, MapPinned, Satellite, Signal } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
-import { SatelliteTrackLayer } from './SatelliteTrackLayer';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
 import type {
   BikeSample,
@@ -60,7 +59,7 @@ export function EarthTrackView({
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const center = trackCenter(track);
   const googleEarthUrl = `https://earth.google.com/web/search/${center.lat},${center.lng}`;
-  const imageryLabel = googleMapsConfigured ? 'Google satellite imagery' : 'Esri satellite imagery';
+  const imageryLabel = 'Google Earth view';
   const routeStatusLabel = track.routeStatus === 'verified'
     ? 'Verified ride line'
     : track.routeStatus === 'user-mapped'
@@ -90,7 +89,7 @@ export function EarthTrackView({
         </div>
       </div>
 
-      <div className={`earth-stage ${googleMapsConfigured ? 'google-enabled' : 'satellite-enabled'}`}>
+      <div className="earth-stage google-enabled">
         {googleMapsConfigured ? (
           <GoogleMapsTrackLayer
             track={track}
@@ -108,22 +107,17 @@ export function EarthTrackView({
             onMappingZonePointAdd={onMappingZonePointAdd}
           />
         ) : (
-          <SatelliteTrackLayer
-            track={track}
-            riders={riders}
-            players={players}
-            samplesByDevice={samplesByDevice}
-            speedUnit={speedUnit}
-            raceState={raceState}
-            earthAngle={earthAngle}
-            activeZones={activeZones}
-            mappingMode={mappingMode}
-            mappingEditMode={mappingEditMode}
-            draftPoints={draftPoints}
-            draftZonePoints={draftZonePoints}
-            onMappingPathPointAdd={onMappingPathPointAdd}
-            onMappingZonePointAdd={onMappingZonePointAdd}
-          />
+          <div className="google-key-required">
+            <div>
+              <Satellite size={24} />
+              <strong>Google API key required</strong>
+              <span>Set VITE_GOOGLE_MAPS_API_KEY to load the Google Earth-style satellite view.</span>
+            </div>
+            <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noreferrer">
+              <ExternalLink size={15} />
+              Google credentials
+            </a>
+          </div>
         )}
 
         <div className="google-map-caption">{imageryLabel} with ride line overlay</div>

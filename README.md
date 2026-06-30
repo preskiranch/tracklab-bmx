@@ -40,7 +40,7 @@ The bridge scans for ANT+ Bicycle Power devices. Pedal each Wattbike for a few s
 ## Current Platform Features
 
 - **Track locator database**: country, state/region, and track selectors load the generated database at `public/data/track-database.json`, including USA BMX/BMX Canada official locator records.
-- **Satellite / Earth viewer**: real Esri World Imagery satellite tiles by default, optional Google Maps satellite imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured, plus a Google Earth link.
+- **Google Earth-style viewer**: Google Maps Platform satellite imagery with tilt/heading controls, route overlays, rider markers, and a Google Earth link. A Google Maps API key is required.
 - **Sprint mode**: full-track race distance based on the selected track length.
 - **Manual track mapping**: users can enter Edit map mode on the satellite view, drag to trace the real centerline through straights and turns, click sprint-zone split points along that traced route, then save a user-mapped ride line for that selected track.
 - **Interval mode**: auto-selected pedaling zones or manually chosen track zones. User-mapped routes generate sprint zones from the saved zone split points.
@@ -50,15 +50,22 @@ The bridge scans for ANT+ Bicycle Power devices. Pedal each Wattbike for a few s
 - **Local/multiplayer shell**: local or multiplayer mode, account-optional toggle, private room code, roster, track sync label, and chat.
 - **Leaderboards**: seeded best RPM, top speed, and watts by track.
 
-## Satellite / Earth Integration
+## Google Earth / Maps Integration
 
-The old Google Earth browser plugin is not a viable production target. The app now uses the supported Google Maps JavaScript API path for satellite imagery and overlays the track GPS outline, zone strokes, and rider markers on top of Google imagery.
+The old Google Earth browser plugin is not a viable production target. The app uses the supported Google Maps JavaScript API path for Google satellite imagery and overlays the track GPS outline, zone strokes, and rider markers on top of Google imagery.
 
-Render works without a Google key by using Esri World Imagery tiles as the default satellite basemap:
+The app is intentionally Google-only. Without a Google key, the map panel shows a key-required state instead of loading a non-Google fallback.
 
-```text
-VITE_SATELLITE_TILE_URL_TEMPLATE=https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
-```
+Required Google Cloud setup:
+
+1. Create or select a Google Cloud project with billing enabled.
+2. Enable **Maps JavaScript API**.
+3. Create an API key under Google Maps Platform credentials.
+4. Restrict the key by website referrer:
+   - `https://tracklab-bmx.onrender.com/*`
+   - `http://127.0.0.1:*/*`
+   - `http://localhost:*/*`
+5. Restrict the key to **Maps JavaScript API**.
 
 Create a local `.env` from `.env.example`:
 
@@ -72,7 +79,7 @@ Then set:
 VITE_GOOGLE_MAPS_API_KEY=your_google_maps_key
 ```
 
-Without that key, the app uses the Esri satellite basemap instead of showing fake satellite imagery.
+For Render, add `VITE_GOOGLE_MAPS_API_KEY` as a static site environment variable and redeploy.
 
 ## Track Data Status
 
@@ -118,12 +125,11 @@ The saved JSON can be exported and imported on another machine. Because the curr
 Render environment variables:
 
 ```text
-VITE_SATELLITE_TILE_URL_TEMPLATE
 VITE_GOOGLE_MAPS_API_KEY
 VITE_WATTBIKE_BRIDGE_URL
 ```
 
-Render can host the web platform and show satellite imagery with the built-in Esri default. Google imagery is optional and requires `VITE_GOOGLE_MAPS_API_KEY`. Render cannot directly read a USB ANT+ dongle on your local PC. For real bikes, the PC still needs to run the local bridge, and the hosted app needs a reachable WebSocket bridge URL. Local development defaults to:
+Render can host the web platform and show Google imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured. Render cannot directly read a USB ANT+ dongle on your local PC. For real bikes, the PC still needs to run the local bridge, and the hosted app needs a reachable WebSocket bridge URL. Local development defaults to:
 
 ```text
 VITE_WATTBIKE_BRIDGE_URL=ws://127.0.0.1:8787
