@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { Link, Link2Off, RadioTower, Signal, Usb } from 'lucide-react';
+import { Bluetooth, Link, Link2Off, RadioTower, Signal, Usb } from 'lucide-react';
 import type { BikeSample, PlayerSlot } from '../types';
 
 type PairingRailProps = {
@@ -7,6 +7,10 @@ type PairingRailProps = {
   samplesByDevice: Map<number, BikeSample>;
   onAssign: (playerId: PlayerSlot['id'], deviceId: number | null) => void;
   onAutoAssign: () => void;
+  onBluetoothConnect?: () => void;
+  bluetoothSupported?: boolean;
+  bluetoothStatus?: string;
+  bluetoothDeviceCount?: number;
   title?: string;
   subtitle?: string;
   emptyMessage?: string;
@@ -27,6 +31,10 @@ export function PairingRail({
   samplesByDevice,
   onAssign,
   onAutoAssign,
+  onBluetoothConnect,
+  bluetoothSupported = false,
+  bluetoothStatus,
+  bluetoothDeviceCount = 0,
   title = 'Bike Pairing',
   subtitle,
   emptyMessage = 'Pedal a Wattbike for a few seconds so the ANT+ bridge can detect it.',
@@ -42,16 +50,38 @@ export function PairingRail({
           <h2>{title}</h2>
           <p>{subtitle ?? `${Math.min(4, devices.length)} detected / max 4`}</p>
         </div>
-        <button
-          className="square-button"
-          type="button"
-          onClick={onAutoAssign}
-          disabled={readOnly}
-          aria-label="Auto assign bikes"
-        >
-          <Link size={18} />
-        </button>
+        <div className="rail-actions">
+          {onBluetoothConnect && (
+            <button
+              className="square-button"
+              type="button"
+              onClick={onBluetoothConnect}
+              disabled={readOnly || !bluetoothSupported}
+              aria-label="Pair Bluetooth bike"
+              title={bluetoothStatus}
+            >
+              <Bluetooth size={18} />
+            </button>
+          )}
+          <button
+            className="square-button"
+            type="button"
+            onClick={onAutoAssign}
+            disabled={readOnly}
+            aria-label="Auto assign bikes"
+          >
+            <Link size={18} />
+          </button>
+        </div>
       </div>
+
+      {onBluetoothConnect && (
+        <div className="bluetooth-status">
+          <Bluetooth size={14} />
+          <span>{bluetoothStatus}</span>
+          {bluetoothDeviceCount > 0 && <strong>{bluetoothDeviceCount}</strong>}
+        </div>
+      )}
 
       <div className="pairing-list">
         {players.length === 0 && (

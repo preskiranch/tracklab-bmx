@@ -47,6 +47,7 @@ import {
   zoneBoundariesFromMapping,
 } from './lib/trackMapping';
 import { useRaceEngine } from './hooks/useRaceEngine';
+import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import { useZoneAudioCues } from './hooks/useZoneAudioCues';
@@ -143,6 +144,7 @@ function isReactionBikeSample(sample: { cadence: number | null; speedKph: number
 
 export default function App() {
   const bridge = useWattbikeBridge();
+  const bluetooth = useBluetoothBikes();
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
   const [initialTrack] = useState(readInitialTrack);
@@ -266,7 +268,14 @@ export default function App() {
     [draftPoints],
   );
   const demoPlayers = useMemo(() => createDemoPlayers(demoBikeCount), [demoBikeCount]);
-  const samplesByDevice = demoMode ? demo.samplesByDevice : bridge.samplesByDevice;
+  const connectedBikeSamples = useMemo(() => {
+    const next = new Map(bridge.samplesByDevice);
+    bluetooth.samplesByDevice.forEach((sample, deviceId) => {
+      next.set(deviceId, sample);
+    });
+    return next;
+  }, [bluetooth.samplesByDevice, bridge.samplesByDevice]);
+  const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
   const availablePlayers = demoMode ? demoPlayers : players;
 
   const discoveredDeviceIds = useMemo(
@@ -788,15 +797,35 @@ export default function App() {
     });
   };
 
-  const connectionLabel = demoMode
-    ? 'DEMO race source online'
-    : bridge.connection === 'open'
+  const connectionLabel = (() => {
+    if (demoMode) {
+      return 'DEMO race source online';
+    }
+
+    if (bluetooth.connectedCount > 0 && bridge.connection === 'open') {
+      return 'ANT+ / Bluetooth inputs online';
+    }
+
+    if (bluetooth.connectedCount > 0) {
+      return 'Bluetooth bikes online';
+    }
+
+    return bridge.connection === 'open'
       ? `${bridge.mode.toString().toUpperCase()} bridge online`
       : 'Bridge offline';
-  const connectionStatus = demoMode
-    ? `Simulating ${demoBikeCount} bike${demoBikeCount === 1 ? '' : 's'} with ${demo.variableCount} race variables.`
-    : bridge.error ?? bridge.status;
-  const connectionState = demoMode ? 'open' : bridge.connection;
+  })();
+  const connectionStatus = (() => {
+    if (demoMode) {
+      return `Simulating ${demoBikeCount} bike${demoBikeCount === 1 ? '' : 's'} with ${demo.variableCount} race variables.`;
+    }
+
+    if (bluetooth.connectedCount > 0) {
+      return `${bluetooth.status} ${bridge.connection === 'open' ? bridge.status : bridge.error ?? bridge.status}`;
+    }
+
+    return bridge.error ?? `${bridge.status} ${bluetooth.status}`;
+  })();
+  const connectionState = demoMode || bluetooth.connectedCount > 0 ? 'open' : bridge.connection;
 
   return (
     <div className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}`} ref={raceShellRef}>
@@ -854,10 +883,14 @@ export default function App() {
           samplesByDevice={samplesByDevice}
           onAssign={demoMode ? () => undefined : assignDevice}
           onAutoAssign={demoMode ? () => undefined : autoAssign}
+          onBluetoothConnect={demoMode ? undefined : bluetooth.connectBike}
+          bluetoothSupported={bluetooth.supported}
+          bluetoothStatus={bluetooth.status}
+          bluetoothDeviceCount={bluetooth.connectedCount}
           title={demoMode ? 'Demo Riders' : 'Bike Pairing'}
           subtitle={demoMode ? `${demoBikeCount} simulated / max 4` : undefined}
-          emptyMessage={demoMode ? 'Choose demo riders to generate live race samples.' : undefined}
-          deviceLabel={demoMode ? 'Demo device' : 'ANT device'}
+          emptyMessage={demoMode ? 'Choose demo riders to generate live race samples.' : 'Pedal a Wattbike for bridge discovery, or use Bluetooth pairing for BLE bikes.'}
+          deviceLabel={demoMode ? 'Demo device' : 'Bike device'}
           readOnly={demoMode}
         />
       </aside>

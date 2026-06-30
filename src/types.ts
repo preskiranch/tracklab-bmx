@@ -1,4 +1,4 @@
-export type BridgeMode = 'sim' | 'ant' | 'demo';
+export type BridgeMode = 'sim' | 'ant' | 'demo' | 'bluetooth';
 export type SpeedUnit = 'kph' | 'mph';
 export type DistanceUnit = 'ft' | 'm';
 export type SessionMode = 'sprint' | 'interval';
