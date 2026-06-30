@@ -49,6 +49,14 @@ const zoneColors: Record<TrackZone['type'], string> = {
 };
 const drawSampleMeters = 1.2;
 
+function clampTilt(value: number) {
+  return Math.max(0, Math.min(67, value));
+}
+
+function normalizeHeading(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
 function distanceBetweenPoints(a: TrackPoint, b: TrackPoint) {
   const latScale = 111_320;
   const lngScale = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)) * 111_320;
@@ -83,6 +91,7 @@ export function GoogleMapsTrackLayer({
   const isDrawingRef = useRef(false);
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
   const markerRefs = useRef<Map<number, GoogleMarker>>(new Map());
+  const cameraRef = useRef({ angle: earthAngle, heading: earthHeading });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
 
@@ -153,8 +162,9 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    map.setTilt(Math.max(0, Math.min(67, earthAngle)));
-    map.setHeading(((earthHeading % 360) + 360) % 360);
+    cameraRef.current = { angle: earthAngle, heading: earthHeading };
+    map.setTilt(clampTilt(earthAngle));
+    map.setHeading(normalizeHeading(earthHeading));
   }, [earthAngle, earthHeading]);
 
   useEffect(() => {
@@ -192,6 +202,12 @@ export function GoogleMapsTrackLayer({
     const bounds = new google.maps.LatLngBounds();
     trackBoundsPoints(track).forEach((point) => bounds.extend(point));
     map.fitBounds(bounds, 58);
+    const restoreCamera = () => {
+      map.setTilt(clampTilt(cameraRef.current.angle));
+      map.setHeading(normalizeHeading(cameraRef.current.heading));
+    };
+    restoreCamera();
+    window.requestAnimationFrame(restoreCamera);
 
     const savedRoute = mappedTrackRoute(track);
     if (savedRoute.length < 2) {
