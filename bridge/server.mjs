@@ -1,6 +1,7 @@
 import { WebSocketServer } from 'ws';
 import { createSimulatorSource } from './simulator-source.mjs';
 import { createAntSource } from './ant-source.mjs';
+import { createWattbikeControl } from './wattbike-control.mjs';
 
 const port = Number(process.env.WATTBIKE_BRIDGE_PORT ?? 8787);
 const inputMode = process.env.WATTBIKE_INPUT === 'ant' ? 'ant' : 'sim';
@@ -8,6 +9,7 @@ const wss = new WebSocketServer({ port });
 const clients = new Set();
 
 const source = inputMode === 'ant' ? createAntSource() : createSimulatorSource();
+const wattbikeControl = createWattbikeControl();
 
 function broadcast(payload) {
   const message = JSON.stringify(payload);
@@ -29,6 +31,50 @@ wss.on('connection', (socket) => {
       : 'Simulator bridge running. Use this until the ANT dongle arrives.',
   }));
 
+  socket.on('message', async (data) => {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(data.toString());
+    } catch {
+      socket.send(JSON.stringify({
+        type: 'bike-control-result',
+        action: 'unknown',
+        ok: false,
+        at: Date.now(),
+        message: 'Bridge received invalid JSON command.',
+      }));
+      return;
+    }
+
+    if (parsed.type !== 'bike-control') {
+      return;
+    }
+
+    try {
+      const result = await wattbikeControl.send(parsed);
+      const payload = {
+        type: 'bike-control-result',
+        at: Date.now(),
+        ...result,
+      };
+      socket.send(JSON.stringify(payload));
+      broadcast({
+        type: 'bridge-status',
+        mode: inputMode,
+        at: Date.now(),
+        message: payload.message,
+      });
+    } catch (controlError) {
+      socket.send(JSON.stringify({
+        type: 'bike-control-result',
+        action: parsed.action,
+        ok: false,
+        at: Date.now(),
+        message: controlError instanceof Error ? controlError.message : String(controlError),
+      }));
+    }
+  });
+
   socket.on('close', () => clients.delete(socket));
 });
 
@@ -44,7 +90,9 @@ source.on('error', (error) => {
 
 try {
   await source.start();
+  const controlStatus = await wattbikeControl.status();
   console.log(`[bridge] Wattbike bridge listening on ws://127.0.0.1:${port} (${inputMode})`);
+  console.log(`[bridge] ${controlStatus.message}`);
 } catch (error) {
   console.error('[bridge] Failed to start source:', error);
   broadcast({

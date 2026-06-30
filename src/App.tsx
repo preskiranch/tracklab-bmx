@@ -688,9 +688,13 @@ export default function App() {
       detail: 'Gate open',
       lightIndex: 3,
     });
+    if (!demoMode) {
+      bridge.sendControlCommand('race-start');
+    }
+
     startRace();
     scheduleStartGateStep(420, () => setStartGateStatus(idleStartGateStatus));
-  }, [demoMode, scheduleStartGateStep, startRace]);
+  }, [bridge, demoMode, scheduleStartGateStep, startRace]);
 
   const handleDemoModeChange = (enabled: boolean) => {
     clearStartGateSequence();
@@ -710,6 +714,10 @@ export default function App() {
 
   const handleReset = () => {
     clearStartGateSequence();
+    if (!demoMode) {
+      bridge.sendControlCommand('race-reset');
+    }
+
     if (demoMode) {
       setDemoRaceSeed((seed) => seed + 7919);
       setDemoRaceStartedAt(null);
@@ -738,6 +746,10 @@ export default function App() {
 
     clearStartGateSequence();
     setMappingFullscreen(false);
+    if (!demoMode) {
+      bridge.sendControlCommand('race-arm');
+    }
+
     primeAudioCues();
     if (!document.fullscreenElement) {
       void raceShellRef.current?.requestFullscreen?.().catch(() => undefined);
@@ -851,11 +863,13 @@ export default function App() {
       return `Simulating ${demoBikeCount} bike${demoBikeCount === 1 ? '' : 's'} with ${demo.variableCount} race variables.`;
     }
 
+    const bridgeControlStatus = bridge.controlStatus ? ` ${bridge.controlStatus}` : '';
+
     if (bluetooth.connectedCount > 0) {
-      return `${bluetooth.status} ${bridge.connection === 'open' ? bridge.status : bridge.error ?? bridge.status}`;
+      return `${bluetooth.status} ${bridge.connection === 'open' ? bridge.status : bridge.error ?? bridge.status}${bridgeControlStatus}`;
     }
 
-    return bridge.error ?? `${bridge.status} ${bluetooth.status}`;
+    return `${bridge.error ?? `${bridge.status} ${bluetooth.status}`}${bridgeControlStatus}`;
   })();
   const connectionState = demoMode || bluetooth.connectedCount > 0 ? 'open' : bridge.connection;
 

@@ -1,4 +1,4 @@
-export type BridgeMode = 'sim' | 'ant' | 'demo' | 'bluetooth';
+export type BridgeMode = 'sim' | 'ant' | 'demo' | 'bluetooth' | 'usb';
 export type SpeedUnit = 'kph' | 'mph';
 export type DistanceUnit = 'ft' | 'm';
 export type SessionMode = 'sprint' | 'interval';
@@ -35,6 +35,24 @@ export type BridgeStatusMessage = {
   }>;
 };
 
+export type BikeControlAction = 'race-arm' | 'race-start' | 'race-reset';
+
+export type BikeControlCommand = {
+  type: 'bike-control';
+  action: BikeControlAction;
+  at: number;
+  sessionId?: string;
+};
+
+export type BikeControlResultMessage = {
+  type: 'bike-control-result';
+  action: BikeControlAction;
+  ok: boolean;
+  at: number;
+  message: string;
+  controlledCount?: number;
+};
+
 export type BridgeErrorMessage = {
   type: 'bridge-error';
   message: string;
@@ -45,7 +63,7 @@ export type BikeSampleMessage = BikeSample & {
   type: 'bike-sample';
 };
 
-export type BridgeMessage = BridgeStatusMessage | BridgeErrorMessage | BikeSampleMessage;
+export type BridgeMessage = BridgeStatusMessage | BridgeErrorMessage | BikeSampleMessage | BikeControlResultMessage;
 
 export type PlayerSlot = {
   id: 1 | 2 | 3 | 4;

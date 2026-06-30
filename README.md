@@ -37,6 +37,40 @@ npm run web
 
 The bridge scans for ANT+ Bicycle Power devices. Pedal each Wattbike for a few seconds so its monitor wakes and broadcasts. Detected device IDs appear in Bike Pairing and are auto-assigned to Player 1-4. The UI only creates riders from live connected bikes, capped at four.
 
+## Wattbike Monitor Control
+
+The race UI now sends three monitor-control commands to the local bridge:
+
+- `race-arm` when Start is pressed and the countdown/cadence begins.
+- `race-start` at the exact green-light/gate-drop moment.
+- `race-reset` when Reset is pressed.
+
+By default the bridge runs in safe log mode, so it records those commands but does not send unknown bytes to the monitors. To enable USB/HID control after the Model B reports are captured:
+
+```sh
+npm install node-hid
+WATTBIKE_CONTROL=usb-hid \
+WATTBIKE_HID_PRODUCT_MATCH=Wattbike \
+WATTBIKE_USB_RACE_ARM_HEX=... \
+WATTBIKE_USB_RACE_START_HEX=... \
+WATTBIKE_USB_RACE_RESET_HEX=... \
+npm run bridge
+```
+
+Each `*_HEX` value is the HID output report captured from Wattbike Expert or Wattbike Power Cycling software. Multiple reports can be separated with semicolons. If needed, narrow device matching with `WATTBIKE_HID_VENDOR_ID` and `WATTBIKE_HID_PRODUCT_ID`.
+
+Capture workflow:
+
+1. Install the official Wattbike desktop software on the PC that already controls the bikes.
+2. Install Wireshark with USBPcap on Windows.
+3. Start a USB capture for the USB hub containing the four Wattbike monitors.
+4. In the official software, run one short race/session start and reset.
+5. Filter the capture to HID interrupt/control transfers for each Wattbike monitor.
+6. Extract the output reports sent at arm/countdown, gate drop/start, and reset.
+7. Put those reports into the environment variables above and test with one bike first.
+
+This keeps the implementation focused on interoperability with your own hardware. It does not require decompiling Wattbike software or bypassing licensing.
+
 ## Current Platform Features
 
 - **Track locator database**: country, state/region, and track selectors load the generated database at `public/data/track-database.json`, including USA BMX/BMX Canada official locator records.

@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { BikeSample, BridgeMode, BridgeStatusMessage } from '../types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  BikeControlAction,
+  BikeControlCommand,
+  BikeControlResultMessage,
+  BikeSample,
+  BridgeMode,
+  BridgeStatusMessage,
+} from '../types';
 
 type ConnectionState = 'connecting' | 'open' | 'closed' | 'error';
 
@@ -9,6 +16,8 @@ type BridgeSnapshot = {
   status: string;
   error: string | null;
   samplesByDevice: Map<number, BikeSample>;
+  controlStatus: string | null;
+  sendControlCommand: (action: BikeControlAction) => boolean;
 };
 
 const bridgeUrl = import.meta.env.VITE_WATTBIKE_BRIDGE_URL?.trim() || 'ws://127.0.0.1:8787';
@@ -18,6 +27,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
   const [mode, setMode] = useState<BridgeSnapshot['mode']>('unknown');
   const [status, setStatus] = useState('Connecting to local Wattbike bridge.');
   const [error, setError] = useState<string | null>(null);
+  const [controlStatus, setControlStatus] = useState<string | null>(null);
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -62,6 +72,11 @@ export function useWattbikeBridge(): BridgeSnapshot {
             return next;
           });
         }
+
+        if (parsed.type === 'bike-control-result') {
+          const controlResult = parsed as BikeControlResultMessage;
+          setControlStatus(controlResult.message);
+        }
       });
 
       socket.addEventListener('close', () => {
@@ -87,11 +102,30 @@ export function useWattbikeBridge(): BridgeSnapshot {
     };
   }, []);
 
+  const sendControlCommand = useCallback((action: BikeControlAction) => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setControlStatus('Wattbike bridge is not connected, so bike control command was not sent.');
+      return false;
+    }
+
+    const command: BikeControlCommand = {
+      type: 'bike-control',
+      action,
+      at: Date.now(),
+    };
+    socket.send(JSON.stringify(command));
+    setControlStatus(`Sent ${action.replace('-', ' ')} command to Wattbike bridge.`);
+    return true;
+  }, []);
+
   return useMemo(() => ({
     connection,
+    controlStatus,
     mode,
     status,
     error,
     samplesByDevice,
-  }), [connection, error, mode, samplesByDevice, status]);
+    sendControlCommand,
+  }), [connection, controlStatus, error, mode, samplesByDevice, sendControlCommand, status]);
 }
