@@ -148,6 +148,7 @@ export function GoogleMapsTrackLayer({
 
         googleRef.current = google;
         const center = trackCenter(track);
+        const demoMapId = google.maps.Map.DEMO_MAP_ID;
         const map = new google.maps.Map(containerRef.current, {
           cameraControl: true,
           center,
@@ -160,7 +161,7 @@ export function GoogleMapsTrackLayer({
           headingInteractionEnabled: true,
           isFractionalZoomEnabled: true,
           keyboardShortcuts: true,
-          mapId: google.maps.Map.DEMO_MAP_ID,
+          ...(demoMapId ? { mapId: demoMapId } : {}),
           mapTypeControl: false,
           mapTypeId: 'satellite',
           renderingType: google.maps.RenderingType?.VECTOR,

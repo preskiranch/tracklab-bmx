@@ -47,6 +47,7 @@ type GoogleMapConstructor = {
 
 type GoogleMapsRuntime = {
   maps: {
+    importLibrary?: (libraryName: string) => Promise<unknown>;
     geometry?: {
       spherical?: {
         computeLength: (path: LatLngLiteral[]) => number;
@@ -107,11 +108,27 @@ export function loadGoogleMaps() {
     script.async = true;
     script.defer = true;
     script.onload = () => {
-      if (window.google?.maps) {
-        resolve(window.google);
-      } else {
-        reject(new Error('Google Maps loaded without the maps runtime.'));
-      }
+      const resolveRuntime = async () => {
+        if (!window.google?.maps) {
+          reject(new Error('Google Maps loaded without the maps runtime.'));
+          return;
+        }
+
+        if (window.google.maps.importLibrary) {
+          await Promise.all([
+            window.google.maps.importLibrary('maps'),
+            window.google.maps.importLibrary('geometry'),
+          ]);
+        }
+
+        if (window.google.maps.Map) {
+          resolve(window.google);
+        } else {
+          reject(new Error('Google Maps loaded without the map constructor.'));
+        }
+      };
+
+      resolveRuntime().catch((error: Error) => reject(error));
     };
     script.onerror = () => reject(new Error('Google Maps failed to load.'));
     document.head.appendChild(script);
