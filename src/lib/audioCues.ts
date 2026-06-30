@@ -3,6 +3,10 @@ type AudioWindow = Window & typeof globalThis & {
 };
 
 let audioContext: AudioContext | null = null;
+let activeStartGateAudio: HTMLAudioElement | null = null;
+
+export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
+export const uciVoiceWatchGateOffsetMs = 5300;
 
 function getAudioContext() {
   if (audioContext) {
@@ -22,6 +26,11 @@ export function primeAudioCues() {
   const context = getAudioContext();
   if (context?.state === 'suspended') {
     void context.resume();
+  }
+
+  if (!activeStartGateAudio) {
+    activeStartGateAudio = new Audio(uciRandomStartVoiceUrl);
+    activeStartGateAudio.preload = 'auto';
   }
 }
 
@@ -88,4 +97,28 @@ export function speakStartGatePhrase(text: string) {
   utterance.pitch = 0.82;
   utterance.volume = 0.9;
   window.speechSynthesis.speak(utterance);
+}
+
+export function stopStartGateAudio() {
+  if (activeStartGateAudio) {
+    activeStartGateAudio.pause();
+    activeStartGateAudio.currentTime = 0;
+  }
+
+  window.speechSynthesis?.cancel();
+}
+
+export function playUciRandomStartVoice() {
+  stopStartGateAudio();
+  const audio = activeStartGateAudio ?? new Audio(uciRandomStartVoiceUrl);
+  activeStartGateAudio = audio;
+  audio.preload = 'auto';
+  audio.volume = 1;
+  audio.currentTime = 0;
+
+  void audio.play().catch(() => {
+    speakStartGatePhrase('OK riders, random start. Riders ready. Watch the gate.');
+  });
+
+  return audio;
 }

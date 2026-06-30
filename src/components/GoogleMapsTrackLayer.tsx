@@ -16,8 +16,10 @@ import {
   mappedTrackRoute,
   pathLengthMeters,
   riderLatLng,
+  riderRoutePose,
   trackBoundsPoints,
   trackCenter,
+  type GoogleAdvancedMarker,
   type GoogleMap,
   type GoogleMarker,
   type GoogleMapsEventListener,
@@ -25,7 +27,7 @@ import {
   type GoogleMapsRuntime,
   zonePolyline,
 } from '../lib/googleMaps';
-import { pointAtRouteMeter } from '../lib/trackMapping';
+import { distanceBetweenTrackPoints, pointAtRouteMeter } from '../lib/trackMapping';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -60,12 +62,24 @@ const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
   yellow: '/assets/rider-yellow.png',
 };
 
+type RiderMapMarker = {
+  setMap: (map: GoogleMap | null) => void;
+  setPosition: (position: TrackPoint) => void;
+  setRotation: (rotationDegrees: number) => void;
+  setTitle: (title: string) => void;
+};
+
 function clampTilt(value: number) {
   return Math.max(0, Math.min(67, value));
 }
 
 function normalizeHeading(value: number) {
   return ((value % 360) + 360) % 360;
+}
+
+function headingDifference(a: number, b: number) {
+  const delta = Math.abs(normalizeHeading(a) - normalizeHeading(b));
+  return Math.min(delta, 360 - delta);
 }
 
 function applyCamera(map: GoogleMap, angle: number, heading: number) {
@@ -83,12 +97,6 @@ function applyCamera(map: GoogleMap, angle: number, heading: number) {
   map.setHeading(camera.heading);
 }
 
-function distanceBetweenPoints(a: TrackPoint, b: TrackPoint) {
-  const latScale = 111_320;
-  const lngScale = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)) * 111_320;
-  return Math.hypot((b.lng - a.lng) * lngScale, (b.lat - a.lat) * latScale);
-}
-
 function distanceLabelIcon(text: string, color = '#111827') {
   const width = Math.max(86, text.length * 8 + 22);
   const svg = `
@@ -99,6 +107,94 @@ function distanceLabelIcon(text: string, color = '#111827') {
   `;
 
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function riderScreenRotation(routeBearing: number, mapHeading: number) {
+  return normalizeHeading(routeBearing - mapHeading - 90);
+}
+
+function createRiderMarkerContent(player: PlayerSlot, rotationDegrees: number) {
+  const content = document.createElement('div');
+  content.className = 'google-rider-marker';
+  content.style.setProperty('--rider-rotation', `${rotationDegrees}deg`);
+
+  const image = document.createElement('img');
+  image.alt = '';
+  image.className = 'google-rider-marker-bike';
+  image.draggable = false;
+  image.src = riderIconByColor[player.colorName];
+
+  const label = document.createElement('span');
+  label.className = 'google-rider-marker-label';
+  label.textContent = `P${player.id}`;
+
+  content.append(image, label);
+  return content;
+}
+
+function createRiderMapMarker(
+  google: GoogleMapsRuntime,
+  map: GoogleMap,
+  player: PlayerSlot,
+  position: TrackPoint,
+  rotationDegrees: number,
+  title: string,
+): RiderMapMarker {
+  const AdvancedMarkerElement = google.maps.marker?.AdvancedMarkerElement;
+
+  if (AdvancedMarkerElement) {
+    const content = createRiderMarkerContent(player, rotationDegrees);
+    const marker: GoogleAdvancedMarker = new AdvancedMarkerElement({
+      anchorLeft: '-50%',
+      anchorTop: '-74%',
+      content,
+      map,
+      position,
+      title,
+      zIndex: 760 + player.id,
+    });
+
+    return {
+      setMap: (nextMap) => {
+        marker.map = nextMap;
+      },
+      setPosition: (nextPosition) => {
+        marker.position = nextPosition;
+      },
+      setRotation: (nextRotation) => {
+        content.style.setProperty('--rider-rotation', `${nextRotation}deg`);
+      },
+      setTitle: (nextTitle) => {
+        marker.title = nextTitle;
+      },
+    };
+  }
+
+  const marker = new google.maps.Marker({
+    icon: {
+      anchor: new google.maps.Point(24, 44),
+      labelOrigin: new google.maps.Point(63, 15),
+      scaledSize: new google.maps.Size(58, 66),
+      url: riderIconByColor[player.colorName],
+    },
+    label: {
+      color: '#ffffff',
+      fontSize: '12px',
+      fontWeight: '900',
+      text: `P${player.id}`,
+    },
+    map,
+    optimized: true,
+    position,
+    title,
+  });
+
+  return {
+    setMap: (nextMap) => marker.setMap(nextMap),
+    setPosition: (nextPosition) => marker.setPosition(nextPosition),
+    setRotation: () => undefined,
+    setTitle: () => undefined,
+  };
 }
 
 export function GoogleMapsTrackLayer({
@@ -131,7 +227,7 @@ export function GoogleMapsTrackLayer({
   const mapListenerRefs = useRef<GoogleMapsEventListener[]>([]);
   const isDrawingRef = useRef(false);
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
-  const markerRefs = useRef<Map<number, GoogleMarker>>(new Map());
+  const markerRefs = useRef<Map<number, RiderMapMarker>>(new Map());
   const cameraRef = useRef({ angle: earthAngle, heading: earthHeading });
   const lastFitKeyRef = useRef('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -210,6 +306,17 @@ export function GoogleMapsTrackLayer({
     }
 
     cameraRef.current = { angle: earthAngle, heading: earthHeading };
+    const currentTilt = map.getTilt?.();
+    const currentHeading = map.getHeading?.();
+    if (
+      typeof currentTilt === 'number'
+      && typeof currentHeading === 'number'
+      && Math.abs(currentTilt - earthAngle) < 0.75
+      && headingDifference(currentHeading, earthHeading) < 0.75
+    ) {
+      return;
+    }
+
     applyCamera(map, earthAngle, earthHeading);
   }, [earthAngle, earthHeading]);
 
@@ -220,10 +327,12 @@ export function GoogleMapsTrackLayer({
     }
 
     const syncCamera = () => {
-      onEarthCameraChange({
+      const nextCamera = {
         angle: Math.round(map.getTilt?.() ?? earthAngle),
-        heading: Math.round(map.getHeading?.() ?? earthHeading),
-      });
+        heading: normalizeHeading(Math.round(map.getHeading?.() ?? earthHeading)),
+      };
+      cameraRef.current = nextCamera;
+      onEarthCameraChange(nextCamera);
     };
 
     const listeners = [
@@ -493,7 +602,7 @@ export function GoogleMapsTrackLayer({
       }
 
       const previous = lastDrawPointRef.current;
-      if (previous && distanceBetweenPoints(previous, point) < drawSampleMeters) {
+      if (previous && distanceBetweenTrackPoints(previous, point) < drawSampleMeters) {
         return;
       }
 
@@ -581,42 +690,30 @@ export function GoogleMapsTrackLayer({
       }
 
       const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
-      const position = riderLatLng(track, rider.distance);
+      const pose = riderRoutePose(track, rider.distance);
       const label = `${formatSpeedFromKph(sample?.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const existing = markerRefs.current.get(player.id);
 
-      if (!position) {
+      if (!pose) {
         existing?.setMap(null);
         markerRefs.current.delete(player.id);
         return;
       }
 
+      const rotation = riderScreenRotation(pose.bearing, earthHeading);
+      const title = `${player.name} / ${label}`;
+
       if (existing) {
-        existing.setPosition(position);
+        existing.setPosition(pose.position);
+        existing.setRotation(rotation);
+        existing.setTitle(title);
         return;
       }
 
-      const marker = new google.maps.Marker({
-        icon: {
-          anchor: new google.maps.Point(24, 44),
-          labelOrigin: new google.maps.Point(63, 15),
-          scaledSize: new google.maps.Size(58, 66),
-          url: riderIconByColor[player.colorName],
-        },
-        label: {
-          color: '#ffffff',
-          fontSize: '12px',
-          fontWeight: '900',
-          text: `P${player.id}`,
-        },
-        map,
-        optimized: true,
-        position,
-        title: `${player.name} / ${label}`,
-      });
+      const marker = createRiderMapMarker(google, map, player, pose.position, rotation, title);
       markerRefs.current.set(player.id, marker);
     });
-  }, [players, riders, samplesByDevice, speedUnit, status, track]);
+  }, [earthHeading, players, riders, samplesByDevice, speedUnit, status, track]);
 
   return (
     <>

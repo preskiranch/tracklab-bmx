@@ -26,7 +26,13 @@ import {
   storageKey,
 } from './data';
 import { countriesForCatalog, statesForCountry, trackCatalog, tracksForLocation } from './data/trackCatalog';
-import { playStartGateTone, primeAudioCues, speakStartGatePhrase } from './lib/audioCues';
+import {
+  playStartGateTone,
+  playUciRandomStartVoice,
+  primeAudioCues,
+  stopStartGateAudio,
+  uciVoiceWatchGateOffsetMs,
+} from './lib/audioCues';
 import {
   applyUserTrackMapping,
   createUserTrackMapping,
@@ -569,7 +575,7 @@ export default function App() {
   const clearStartGateSequence = useCallback(() => {
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     startGateTimeoutsRef.current = [];
-    window.speechSynthesis?.cancel();
+    stopStartGateAudio();
     setStartGateStatus(idleStartGateStatus);
   }, []);
 
@@ -648,14 +654,14 @@ export default function App() {
 
     if (startCadenceMode === 'uci') {
       const randomDelayMs = 100 + Math.round(Math.random() * 2600);
-      const firstToneAtMs = 5300 + randomDelayMs;
+      const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
 
       setStartGateStatus({
         active: true,
         label: 'OK RIDERS',
-        detail: 'Random start',
+        detail: 'UCI random start voice',
       });
-      speakStartGatePhrase('OK riders, random start');
+      playUciRandomStartVoice();
 
       scheduleStartGateStep(3300, () => {
         setStartGateStatus({
@@ -663,7 +669,14 @@ export default function App() {
           label: 'RIDERS READY',
           detail: 'Watch the gate',
         });
-        speakStartGatePhrase('Riders ready. Watch the gate.');
+      });
+
+      scheduleStartGateStep(uciVoiceWatchGateOffsetMs, () => {
+        setStartGateStatus({
+          active: true,
+          label: 'RANDOM DELAY',
+          detail: `${(randomDelayMs / 1000).toFixed(2)}s to gate tones`,
+        });
       });
 
       [0, 120, 240].forEach((offsetMs, index) => {
@@ -843,6 +856,8 @@ export default function App() {
                 draftZoneMeters={draftZoneMeters}
                 draftZonePoints={draftZonePoints}
                 onEarthCameraChange={handleEarthCameraChange}
+                onEarthAngleChange={setEarthAngle}
+                onEarthHeadingChange={setEarthHeading}
                 onMappingPathPointAdd={handleMappingPathPointAdd}
                 onMappingZonePointAdd={handleMappingZonePointAdd}
               />

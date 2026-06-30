@@ -524,6 +524,47 @@ input:focus {
   text-decoration: none;
 }
 
+.google-rider-marker {
+  position: relative;
+  width: 92px;
+  height: 88px;
+  pointer-events: none;
+  --rider-rotation: 0deg;
+}
+
+.google-rider-marker-bike {
+  position: absolute;
+  left: 8px;
+  top: 11px;
+  width: 58px;
+  height: 66px;
+  object-fit: contain;
+  transform: rotate(var(--rider-rotation));
+  transform-origin: 50% 58%;
+  transition: transform 90ms linear;
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.36));
+}
+
+.google-rider-marker-label {
+  position: absolute;
+  left: 57px;
+  top: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 29px;
+  height: 25px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 6px;
+  background: rgba(17, 24, 39, 0.9);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow: 0 8px 14px rgba(0, 0, 0, 0.26);
+}
+
 .rider-token {
   position: absolute;
   z-index: 4;
@@ -613,6 +654,64 @@ input:focus {
   padding: 8px 10px;
   font-size: 12px;
   font-weight: 800;
+}
+
+.map-camera-pad {
+  position: absolute;
+  right: 64px;
+  bottom: 62px;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: repeat(3, 34px);
+  grid-template-rows: repeat(3, 34px);
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.76);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 14px 28px rgba(17, 24, 39, 0.24);
+}
+
+.map-camera-pad button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #111827;
+}
+
+.map-camera-pad button:hover {
+  background: #ffffff;
+}
+
+.map-camera-pad button:nth-child(1) {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.map-camera-pad button:nth-child(2) {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.map-camera-pad button:nth-child(3) {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.map-camera-pad button:nth-child(4) {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.map-camera-pad button:nth-child(5) {
+  grid-column: 3;
+  grid-row: 2;
 }
 
 .race-dot {

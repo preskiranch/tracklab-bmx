@@ -1,5 +1,17 @@
 import type { CSSProperties } from 'react';
-import { ExternalLink, Flag, Map as MapIcon, MapPinned, Satellite, Signal } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  Compass,
+  ExternalLink,
+  Flag,
+  Map as MapIcon,
+  MapPinned,
+  RotateCcw,
+  RotateCw,
+  Satellite,
+  Signal,
+} from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
 import { formatDistanceMeters } from '../units';
@@ -33,6 +45,8 @@ type EarthTrackViewProps = {
   draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
   onEarthCameraChange: (camera: { angle?: number; heading?: number }) => void;
+  onEarthAngleChange: (angle: number) => void;
+  onEarthHeadingChange: (heading: number) => void;
   onMappingPathPointAdd: (point: TrackPoint) => void;
   onMappingZonePointAdd: (point: TrackPoint) => void;
 };
@@ -63,6 +77,8 @@ export function EarthTrackView({
   draftZoneMeters,
   draftZonePoints,
   onEarthCameraChange,
+  onEarthAngleChange,
+  onEarthHeadingChange,
   onMappingPathPointAdd,
   onMappingZonePointAdd,
 }: EarthTrackViewProps) {
@@ -154,6 +170,49 @@ export function EarthTrackView({
             </span>
           )}
           <span>{activeZones.length} active zone{activeZones.length === 1 ? '' : 's'}</span>
+        </div>
+
+        <div className="map-camera-pad" aria-label="Map camera controls">
+          <button
+            aria-label="Rotate map left"
+            title="Rotate left"
+            type="button"
+            onClick={() => onEarthHeadingChange((earthHeading + 345) % 360)}
+          >
+            <RotateCcw size={16} />
+          </button>
+          <button
+            aria-label="Tilt map up"
+            title="Tilt up"
+            type="button"
+            onClick={() => onEarthAngleChange(Math.min(67, earthAngle + 5))}
+          >
+            <ChevronUp size={16} />
+          </button>
+          <button
+            aria-label="Reset map north"
+            title="Reset north"
+            type="button"
+            onClick={() => onEarthHeadingChange(0)}
+          >
+            <Compass size={16} />
+          </button>
+          <button
+            aria-label="Tilt map down"
+            title="Tilt down"
+            type="button"
+            onClick={() => onEarthAngleChange(Math.max(0, earthAngle - 5))}
+          >
+            <ChevronDown size={16} />
+          </button>
+          <button
+            aria-label="Rotate map right"
+            title="Rotate right"
+            type="button"
+            onClick={() => onEarthHeadingChange((earthHeading + 15) % 360)}
+          >
+            <RotateCw size={16} />
+          </button>
         </div>
       </div>
 

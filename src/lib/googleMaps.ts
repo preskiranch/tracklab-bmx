@@ -40,6 +40,13 @@ type GoogleMarker = {
   setPosition: (position: LatLngLiteral) => void;
 };
 
+type GoogleAdvancedMarker = {
+  map: GoogleMap | null;
+  position: LatLngLiteral;
+  title?: string;
+  zIndex?: number;
+};
+
 type GoogleMapConstructor = {
   new (element: HTMLElement, options: Record<string, unknown>): GoogleMap;
   DEMO_MAP_ID?: string;
@@ -52,6 +59,9 @@ type GoogleMapsRuntime = {
       spherical?: {
         computeLength: (path: LatLngLiteral[]) => number;
       };
+    };
+    marker?: {
+      AdvancedMarkerElement: new (options: Record<string, unknown>) => GoogleAdvancedMarker;
     };
     LatLngBounds: new () => GoogleLatLngBounds;
     Map: GoogleMapConstructor;
@@ -101,7 +111,7 @@ export function loadGoogleMaps() {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?${new URLSearchParams({
       key: apiKey,
-      libraries: 'geometry',
+      libraries: 'geometry,marker',
       loading: 'async',
       v: 'weekly',
     }).toString()}`;
@@ -118,6 +128,7 @@ export function loadGoogleMaps() {
           await Promise.all([
             window.google.maps.importLibrary('maps'),
             window.google.maps.importLibrary('geometry'),
+            window.google.maps.importLibrary('marker'),
           ]);
         }
 
@@ -240,6 +251,17 @@ function pointAtProgress(outline: TrackPoint[], progress: number): LatLngLiteral
   return outline[outline.length - 1];
 }
 
+function bearingBetweenTrackPoints(start: TrackPoint, end: TrackPoint) {
+  const startLat = start.lat * (Math.PI / 180);
+  const endLat = end.lat * (Math.PI / 180);
+  const deltaLng = (end.lng - start.lng) * (Math.PI / 180);
+  const y = Math.sin(deltaLng) * Math.cos(endLat);
+  const x = Math.cos(startLat) * Math.sin(endLat)
+    - Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLng);
+
+  return ((Math.atan2(y, x) * (180 / Math.PI)) + 360) % 360;
+}
+
 export function zonePolyline(track: TrackRecord, zone: TrackZone) {
   const route = mappedTrackRoute(track);
   if (route.length < 2) {
@@ -262,6 +284,40 @@ export function riderLatLng(track: TrackRecord, distanceMeters: number) {
   return pointAtProgress(route, distanceMeters / track.lengthMeters);
 }
 
+export function riderRoutePose(track: TrackRecord, distanceMeters: number) {
+  const route = mappedTrackRoute(track);
+  if (route.length < 2) {
+    return null;
+  }
+
+  const target = Math.max(0, Math.min(track.lengthMeters, distanceMeters));
+  let traveled = 0;
+
+  for (let index = 1; index < route.length; index += 1) {
+    const start = route[index - 1];
+    const end = route[index];
+    const segmentDistance = distanceBetweenTrackPoints(start, end);
+
+    if (traveled + segmentDistance >= target || index === route.length - 1) {
+      const progress = segmentDistance <= 0 ? 0 : Math.max(0, Math.min(1, (target - traveled) / segmentDistance));
+      return {
+        bearing: bearingBetweenTrackPoints(start, end),
+        position: {
+          lat: start.lat + (end.lat - start.lat) * progress,
+          lng: start.lng + (end.lng - start.lng) * progress,
+        },
+      };
+    }
+
+    traveled += segmentDistance;
+  }
+
+  return {
+    bearing: bearingBetweenTrackPoints(route[route.length - 2], route[route.length - 1]),
+    position: route[route.length - 1],
+  };
+}
+
 export function pathLengthMeters(points: TrackPoint[], google?: GoogleMapsRuntime | null) {
   if (points.length < 2) {
     return 0;
@@ -280,6 +336,7 @@ export function pathLengthMeters(points: TrackPoint[], google?: GoogleMapsRuntim
 
 export type {
   GoogleLatLngBounds,
+  GoogleAdvancedMarker,
   GoogleMap,
   GoogleMapClickEvent,
   GoogleMapsEventListener,
