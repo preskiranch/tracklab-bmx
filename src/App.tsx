@@ -302,14 +302,15 @@ export default function App() {
     effectiveTrack.lengthMeters,
   );
   useZoneAudioCues(raceState, riders, activeZones);
+  const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
 
   useEffect(() => {
-    if (raceState === 'racing' || document.fullscreenElement !== raceShellRef.current) {
+    if (raceViewFullscreen || document.fullscreenElement !== raceShellRef.current) {
       return;
     }
 
     void document.exitFullscreen?.().catch(() => undefined);
-  }, [raceState]);
+  }, [raceViewFullscreen]);
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(players.map(({ id, deviceId }) => ({ id, deviceId }))));
@@ -734,7 +735,7 @@ export default function App() {
   const connectionState = demoMode ? 'open' : bridge.connection;
 
   return (
-    <div className={`platform-shell${raceState === 'racing' ? ' race-fullscreen' : ''}`} ref={raceShellRef}>
+    <div className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}`} ref={raceShellRef}>
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark">
@@ -848,6 +849,7 @@ export default function App() {
                 speedUnit={speedUnit}
                 distanceUnit={distanceUnit}
                 raceState={raceState}
+                raceViewFullscreen={raceViewFullscreen}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
                 activeZones={activeZones}

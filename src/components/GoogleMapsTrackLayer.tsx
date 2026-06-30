@@ -36,6 +36,7 @@ type GoogleMapsTrackLayerProps = {
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
+  raceViewFullscreen?: boolean;
   earthAngle: number;
   earthHeading: number;
   mappingMode?: boolean;
@@ -60,6 +61,9 @@ const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
   blue: '/assets/rider-blue.png',
   yellow: '/assets/rider-yellow.png',
 };
+const riderCanvasSize = 58;
+const riderDrawWidth = 38;
+const riderDrawHeight = 45;
 
 type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
@@ -135,9 +139,9 @@ function uprightRiderOrientation(rotationDegrees: number) {
 
 function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
   return {
-    anchor: new google.maps.Point(34, 70),
-    labelOrigin: new google.maps.Point(76, 21),
-    scaledSize: new google.maps.Size(68, 76),
+    anchor: new google.maps.Point(19, 40),
+    labelOrigin: new google.maps.Point(46, 13),
+    scaledSize: new google.maps.Size(38, 43),
     url: riderIconByColor[player.colorName],
   };
 }
@@ -171,7 +175,7 @@ async function uprightRiderIconUrl(player: PlayerSlot, rotationDegrees: number) 
 
   const image = await loadRiderImage(imageUrl);
   const canvas = document.createElement('canvas');
-  const size = 104;
+  const size = riderCanvasSize;
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext('2d');
@@ -185,7 +189,7 @@ async function uprightRiderIconUrl(player: PlayerSlot, rotationDegrees: number) 
   context.shadowColor = 'rgba(0, 0, 0, 0.35)';
   context.shadowBlur = 8;
   context.shadowOffsetY = 5;
-  context.drawImage(image, -34, -39, 68, 78);
+  context.drawImage(image, -riderDrawWidth / 2, -23, riderDrawWidth, riderDrawHeight);
 
   const dataUrl = canvas.toDataURL('image/png');
   riderIconCache.set(cacheKey, dataUrl);
@@ -226,9 +230,9 @@ function createRiderMapMarker(
         }
 
         marker.setIcon({
-          anchor: new google.maps.Point(52, 87),
-          labelOrigin: new google.maps.Point(91, 24),
-          scaledSize: new google.maps.Size(104, 104),
+          anchor: new google.maps.Point(29, 50),
+          labelOrigin: new google.maps.Point(52, 15),
+          scaledSize: new google.maps.Size(riderCanvasSize, riderCanvasSize),
           url,
         });
       })
@@ -259,6 +263,7 @@ export function GoogleMapsTrackLayer({
   samplesByDevice,
   speedUnit,
   distanceUnit,
+  raceViewFullscreen = false,
   earthAngle,
   earthHeading,
   mappingMode = false,
@@ -283,6 +288,7 @@ export function GoogleMapsTrackLayer({
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
   const markerRefs = useRef<Map<number, RiderMapMarker>>(new Map());
   const cameraRef = useRef({ angle: earthAngle, heading: earthHeading });
+  const suppressCameraSyncRef = useRef(false);
   const lastFitKeyRef = useRef('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -379,6 +385,10 @@ export function GoogleMapsTrackLayer({
     }
 
     const syncCamera = () => {
+      if (suppressCameraSyncRef.current) {
+        return;
+      }
+
       const nextCamera = {
         angle: Math.round(map.getTilt?.() ?? earthAngle),
         heading: normalizeHeading(Math.round(map.getHeading?.() ?? earthHeading)),
@@ -412,12 +422,17 @@ export function GoogleMapsTrackLayer({
     if (lastFitKeyRef.current !== fitKey) {
       const bounds = new google.maps.LatLngBounds();
       trackBoundsPoints(track).forEach((point) => bounds.extend(point));
+      suppressCameraSyncRef.current = true;
       map.fitBounds(bounds, 58);
       const restoreCamera = () => {
         applyCamera(map, cameraRef.current.angle, cameraRef.current.heading);
       };
       restoreCamera();
       window.requestAnimationFrame(restoreCamera);
+      window.setTimeout(() => {
+        restoreCamera();
+        suppressCameraSyncRef.current = false;
+      }, 220);
       lastFitKeyRef.current = fitKey;
     }
 
@@ -483,6 +498,49 @@ export function GoogleMapsTrackLayer({
       }));
     });
   }, [activeZones, distanceUnit, status, track]);
+
+  useEffect(() => {
+    const google = googleRef.current;
+    const map = mapRef.current;
+    if (!google || !map || status !== 'ready' || !raceViewFullscreen) {
+      return undefined;
+    }
+
+    const route = mappedTrackRoute(track);
+    if (route.length < 2) {
+      return undefined;
+    }
+
+    const frameTimers: number[] = [];
+    const releaseTimers: number[] = [];
+    const frameRaceRoute = () => {
+      const bounds = new google.maps.LatLngBounds();
+      route.forEach((point) => bounds.extend(point));
+      suppressCameraSyncRef.current = true;
+      google.maps.event?.trigger(map, 'resize');
+      map.fitBounds(bounds, 16);
+
+      const restoreCamera = () => {
+        applyCamera(map, cameraRef.current.angle, cameraRef.current.heading);
+      };
+      restoreCamera();
+      window.requestAnimationFrame(restoreCamera);
+      releaseTimers.push(window.setTimeout(() => {
+        restoreCamera();
+        suppressCameraSyncRef.current = false;
+      }, 240));
+    };
+
+    [0, 180, 440].forEach((delayMs) => {
+      frameTimers.push(window.setTimeout(frameRaceRoute, delayMs));
+    });
+
+    return () => {
+      frameTimers.forEach((timer) => window.clearTimeout(timer));
+      releaseTimers.forEach((timer) => window.clearTimeout(timer));
+      suppressCameraSyncRef.current = false;
+    };
+  }, [raceViewFullscreen, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;

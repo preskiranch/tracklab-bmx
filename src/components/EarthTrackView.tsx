@@ -36,6 +36,7 @@ type EarthTrackViewProps = {
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
   raceState: RaceState;
+  raceViewFullscreen: boolean;
   earthAngle: number;
   earthHeading: number;
   activeZones: TrackZone[];
@@ -68,6 +69,7 @@ export function EarthTrackView({
   speedUnit,
   distanceUnit,
   raceState,
+  raceViewFullscreen,
   earthAngle,
   earthHeading,
   activeZones,
@@ -120,6 +122,7 @@ export function EarthTrackView({
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
             distanceUnit={distanceUnit}
+            raceViewFullscreen={raceViewFullscreen}
             earthAngle={earthAngle}
             earthHeading={earthHeading}
             activeZones={activeZones}

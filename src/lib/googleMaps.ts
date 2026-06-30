@@ -54,6 +54,9 @@ type GoogleMapsRuntime = {
         computeLength: (path: LatLngLiteral[]) => number;
       };
     };
+    event?: {
+      trigger: (target: unknown, eventName: string) => void;
+    };
     LatLngBounds: new () => GoogleLatLngBounds;
     Map: GoogleMapConstructor;
     Marker: new (options: Record<string, unknown>) => GoogleMarker;
