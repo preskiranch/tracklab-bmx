@@ -86,9 +86,26 @@ export type TrackZone = {
   startMeter: number;
   endMeter: number;
   type: 'pedal' | 'recovery' | 'technical';
+  restAfterSeconds?: number;
 };
 
-export type TrackRouteStatus = 'verified' | 'estimated' | 'locator-only';
+export type TrackRouteStatus = 'verified' | 'estimated' | 'locator-only' | 'user-mapped';
+
+export type UserTrackMapping = {
+  version: 1;
+  trackId: string;
+  trackName: string;
+  country: string;
+  state: string;
+  savedAt: string;
+  routeStatus: 'user-mapped';
+  restAfterSeconds: number;
+  lengthMeters: number;
+  centerline: TrackPoint[];
+  startGate: TrackPoint;
+  finishLine: TrackPoint;
+  zones: TrackZone[];
+};
 
 export type LeaderboardEntry = {
   rider: string;

@@ -484,6 +484,10 @@ input:focus {
   z-index: 2;
 }
 
+.satellite-overlay.mapping-active {
+  cursor: crosshair;
+}
+
 .satellite-attribution {
   position: absolute;
   right: 9px;
@@ -549,7 +553,8 @@ input:focus {
 .track-base,
 .track-centerline,
 .zone-stroke,
-.finish-line {
+.finish-line,
+.mapping-draft-path {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -612,6 +617,27 @@ input:focus {
   stroke: #111827;
   stroke-width: 12;
   stroke-dasharray: 8 8;
+}
+
+.mapping-draft-path {
+  stroke: #d8ff3e;
+  stroke-width: 7;
+  stroke-dasharray: 16 10;
+  filter: drop-shadow(0 3px 8px rgba(17, 24, 39, 0.34));
+}
+
+.mapping-pin circle {
+  fill: #d8ff3e;
+  stroke: #111827;
+  stroke-width: 3;
+}
+
+.mapping-pin text {
+  fill: #111827;
+  font-size: 11px;
+  font-weight: 900;
+  text-anchor: middle;
+  pointer-events: none;
 }
 
 .rider-token {
@@ -867,6 +893,102 @@ input:focus {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.mapping-section {
+  background: #fbfcf7;
+}
+
+.mapping-status-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mapping-status-row span {
+  min-width: 0;
+  min-height: 30px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #364554;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.number-field {
+  display: grid;
+  grid-template-columns: 1fr 78px auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.number-field span,
+.number-field small {
+  color: #3d4d5c;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.number-field input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.mapping-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.mapping-actions button,
+.file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #1d2935;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.mapping-actions button:hover,
+.file-button:hover {
+  border-color: var(--line-strong);
+  background: #f7f9fb;
+}
+
+.mapping-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.file-button {
+  cursor: pointer;
+}
+
+.file-button input {
+  display: none;
 }
 
 .zone-chip {

@@ -6,9 +6,20 @@ type LatLngLiteral = {
 };
 
 type GoogleMap = {
+  addListener: (eventName: string, handler: (event: GoogleMapClickEvent) => void) => GoogleMapsEventListener;
   fitBounds: (bounds: GoogleLatLngBounds, padding?: number) => void;
   setHeading: (heading: number) => void;
   setTilt: (tilt: number) => void;
+};
+
+type GoogleMapClickEvent = {
+  latLng?: {
+    toJSON: () => LatLngLiteral;
+  };
+};
+
+type GoogleMapsEventListener = {
+  remove: () => void;
 };
 
 type GoogleLatLngBounds = {
@@ -167,6 +178,8 @@ export function riderLatLng(track: TrackRecord, distanceMeters: number) {
 export type {
   GoogleLatLngBounds,
   GoogleMap,
+  GoogleMapClickEvent,
+  GoogleMapsEventListener,
   GoogleMapsRuntime,
   GoogleMarker,
   GooglePolyline,

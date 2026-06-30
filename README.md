@@ -42,7 +42,9 @@ The bridge scans for ANT+ Bicycle Power devices. Pedal each Wattbike for a few s
 - **Track locator database**: country, state/region, and track selectors load the generated database at `public/data/track-database.json`, including USA BMX/BMX Canada official locator records.
 - **Satellite / Earth viewer**: real Esri World Imagery satellite tiles by default, optional Google Maps satellite imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured, plus a Google Earth link.
 - **Sprint mode**: full-track race distance based on the selected track length.
-- **Interval mode**: auto-selected pedaling zones or manually chosen track zones.
+- **Manual track mapping**: users can enter Edit pins mode on the satellite view, click the start gate, sprint-zone waypoints, and finish line, then save a user-mapped ride line for that selected track.
+- **Interval mode**: auto-selected pedaling zones or manually chosen track zones. User-mapped routes generate sprint zones from the saved pin segments.
+- **Audible interval cues**: mapped sprint zones can store a rest-gap duration. During a race, the app beeps at the end of a sprint zone and again when the rest gap expires.
 - **Metric selection**: choose cadence, speed, and/or power before the race; post-race tables follow that choice.
 - **Monitor mode**: large-format Wattbike readouts for watts, RPM, speed, signal, source, and last update.
 - **Local/multiplayer shell**: local or multiplayer mode, account-optional toggle, private room code, roster, track sync label, and chat.
@@ -95,6 +97,18 @@ public/data/track-database.json
 USA BMX/BMX Canada imported rows include official names, addresses, states/provinces, countries, postal codes, and lat/lng. They are marked `routeStatus: "locator-only"` until a real `centerline`, `startGate`, and `finishLine` are verified. Hand-routed tracks are marked `estimated` or `verified`.
 
 Approved UCI, British Cycling, AusCycling, Cycling Canada, or other federation exports can be added under `data/imports/` and merged into the generated database. Do not use Google imagery screenshots as data input.
+
+## Manual Track Mapping
+
+Each track can be fine-tuned from the dashboard:
+
+1. Select the country, state/region, and track.
+2. Open **Track Mapping** and switch to **Edit pins**.
+3. Click points on the satellite view in riding order: start gate, each sprint-zone waypoint, then finish.
+4. Set the rest-gap seconds for the stop/start cue between sprint zones.
+5. Save the mapping. The app stores it locally and immediately uses it for rider movement, sprint zones, analytics, and multiplayer track sync.
+
+The saved JSON can be exported and imported on another machine. Because the current Render deployment is a static site, browser saves cannot publish themselves into the global online catalog yet. The next production step is a database-backed mapping service, for example Supabase or Firebase, where authenticated users can publish a mapping, moderation can approve it, and every user selecting that track receives the approved centerline automatically.
 
 ## Render Deployment
 

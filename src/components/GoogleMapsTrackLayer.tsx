@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { BikeSample, PlayerSlot, RiderState, SpeedUnit, TrackRecord, TrackZone } from '../types';
+import type { BikeSample, PlayerSlot, RiderState, SpeedUnit, TrackPoint, TrackRecord, TrackZone } from '../types';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import {
   loadGoogleMaps,
@@ -9,6 +9,7 @@ import {
   trackRoute,
   type GoogleMap,
   type GoogleMarker,
+  type GoogleMapsEventListener,
   type GooglePolyline,
   type GoogleMapsRuntime,
   zonePolyline,
@@ -22,6 +23,9 @@ type GoogleMapsTrackLayerProps = {
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
   earthAngle: number;
+  mappingMode?: boolean;
+  draftPoints?: TrackPoint[];
+  onMappingPointAdd?: (point: TrackPoint) => void;
 };
 
 const zoneColors: Record<TrackZone['type'], string> = {
@@ -38,6 +42,9 @@ export function GoogleMapsTrackLayer({
   samplesByDevice,
   speedUnit,
   earthAngle,
+  mappingMode = false,
+  draftPoints = [],
+  onMappingPointAdd,
 }: GoogleMapsTrackLayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
@@ -45,6 +52,9 @@ export function GoogleMapsTrackLayer({
   const boundaryLineRef = useRef<GooglePolyline | null>(null);
   const trackLineRef = useRef<GooglePolyline | null>(null);
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
+  const draftLineRef = useRef<GooglePolyline | null>(null);
+  const draftMarkerRefs = useRef<GoogleMarker[]>([]);
+  const mapClickListenerRef = useRef<GoogleMapsEventListener | null>(null);
   const markerRefs = useRef<Map<number, GoogleMarker>>(new Map());
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -87,10 +97,16 @@ export function GoogleMapsTrackLayer({
       boundaryLineRef.current?.setMap(null);
       trackLineRef.current?.setMap(null);
       zoneLinesRef.current.forEach((line) => line.setMap(null));
+      draftLineRef.current?.setMap(null);
+      draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      mapClickListenerRef.current?.remove();
       markerRefs.current.forEach((marker) => marker.setMap(null));
       boundaryLineRef.current = null;
       trackLineRef.current = null;
       zoneLinesRef.current = [];
+      draftLineRef.current = null;
+      draftMarkerRefs.current = [];
+      mapClickListenerRef.current = null;
       markerRefs.current.clear();
       mapRef.current = null;
     };
@@ -147,6 +163,80 @@ export function GoogleMapsTrackLayer({
       strokeWeight: 6,
     }));
   }, [activeZones, status, track]);
+
+  useEffect(() => {
+    const google = googleRef.current;
+    const map = mapRef.current;
+    if (!google || !map || status !== 'ready') {
+      return;
+    }
+
+    draftLineRef.current?.setMap(null);
+    draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    draftMarkerRefs.current = [];
+
+    if (!mappingMode || draftPoints.length === 0) {
+      draftLineRef.current = null;
+      return;
+    }
+
+    if (draftPoints.length > 1) {
+      draftLineRef.current = new google.maps.Polyline({
+        map,
+        path: draftPoints,
+        strokeColor: '#d8ff3e',
+        strokeOpacity: 0.96,
+        strokeWeight: 5,
+      });
+    }
+
+    draftMarkerRefs.current = draftPoints.map((point, index) => new google.maps.Marker({
+      icon: {
+        fillColor: '#d8ff3e',
+        fillOpacity: 1,
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 10,
+        strokeColor: '#111827',
+        strokeWeight: 2,
+      },
+      label: {
+        color: '#111827',
+        fontSize: '11px',
+        fontWeight: '900',
+        text: String(index + 1),
+      },
+      map,
+      optimized: true,
+      position: point,
+      title: `Mapping pin ${index + 1}`,
+    }));
+  }, [draftPoints, mappingMode, status]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== 'ready') {
+      return undefined;
+    }
+
+    mapClickListenerRef.current?.remove();
+    mapClickListenerRef.current = null;
+
+    if (!mappingMode || !onMappingPointAdd) {
+      return undefined;
+    }
+
+    mapClickListenerRef.current = map.addListener('click', (event) => {
+      const point = event.latLng?.toJSON();
+      if (point) {
+        onMappingPointAdd(point);
+      }
+    });
+
+    return () => {
+      mapClickListenerRef.current?.remove();
+      mapClickListenerRef.current = null;
+    };
+  }, [mappingMode, onMappingPointAdd, status]);
 
   useEffect(() => {
     const google = googleRef.current;

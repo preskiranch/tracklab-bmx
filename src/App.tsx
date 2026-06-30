@@ -19,8 +19,18 @@ import { PairingRail } from './components/PairingRail';
 import { SessionControlPanel } from './components/SessionControlPanel';
 import { defaultPlayerSlots, liveBikeTimeoutMs, maxPlayers, speedUnitStorageKey, storageKey } from './data';
 import { countriesForCatalog, statesForCountry, trackCatalog, tracksForLocation } from './data/trackCatalog';
+import { primeAudioCues } from './lib/audioCues';
+import {
+  applyUserTrackMapping,
+  createUserTrackMapping,
+  parseUserTrackMapping,
+  readStoredTrackMappings,
+  writeStoredTrackMappings,
+  type StoredTrackMappings,
+} from './lib/trackMapping';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
+import { useZoneAudioCues } from './hooks/useZoneAudioCues';
 import type {
   AppMode,
   IntervalMode,
@@ -30,7 +40,9 @@ import type {
   PlayMode,
   SessionMode,
   SpeedUnit,
+  TrackPoint,
   TrackRecord,
+  UserTrackMapping,
 } from './types';
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
@@ -65,6 +77,18 @@ function readStoredSpeedUnit(): SpeedUnit {
   return window.localStorage.getItem(speedUnitStorageKey) === 'mph' ? 'mph' : 'kph';
 }
 
+function downloadTrackMapping(mapping: UserTrackMapping) {
+  const blob = new Blob([JSON.stringify(mapping, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${mapping.trackId}-tracklab-mapping.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function formatClock() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -73,6 +97,10 @@ export default function App() {
   const bridge = useWattbikeBridge();
   const [initialTrack] = useState(readInitialTrack);
   const [catalogTracks, setCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
+  const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
+  const [mappingMode, setMappingMode] = useState(false);
+  const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
+  const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [players, setPlayers] = useState<PlayerSlot[]>(readStoredPlayers);
   const [appMode, setAppMode] = useState<AppMode>('race');
   const [speedUnit, setSpeedUnit] = useState<SpeedUnit>(readStoredSpeedUnit);
@@ -153,6 +181,11 @@ export default function App() {
     () => catalogTracks.find((track) => track.id === selectedTrackId) ?? availableTracks[0] ?? defaultTrack,
     [availableTracks, catalogTracks, selectedTrackId],
   );
+  const selectedTrackMapping = storedMappings[selectedTrack.id];
+  const effectiveTrack = useMemo(
+    () => (selectedTrackMapping ? applyUserTrackMapping(selectedTrack, selectedTrackMapping) : selectedTrack),
+    [selectedTrack, selectedTrackMapping],
+  );
 
   const discoveredDeviceIds = useMemo(
     () => [...bridge.samplesByDevice.keys()].sort((a, b) => a - b),
@@ -179,20 +212,21 @@ export default function App() {
   );
   const activeZones = useMemo(() => {
     if (sessionMode === 'sprint') {
-      return selectedTrack.zones;
+      return effectiveTrack.zones;
     }
 
     if (intervalMode === 'auto') {
-      return selectedTrack.zones.filter((zone) => zone.type === 'pedal');
+      return effectiveTrack.zones.filter((zone) => zone.type === 'pedal');
     }
 
-    return selectedTrack.zones.filter((zone) => manualZoneIds.includes(zone.id));
-  }, [intervalMode, manualZoneIds, selectedTrack.zones, sessionMode]);
+    return effectiveTrack.zones.filter((zone) => manualZoneIds.includes(zone.id));
+  }, [effectiveTrack.zones, intervalMode, manualZoneIds, sessionMode]);
   const { raceState, riders, startRace, resetRace } = useRaceEngine(
     activePlayers,
     bridge.samplesByDevice,
-    selectedTrack.lengthMeters,
+    effectiveTrack.lengthMeters,
   );
+  useZoneAudioCues(raceState, riders, activeZones);
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(players.map(({ id, deviceId }) => ({ id, deviceId }))));
@@ -204,11 +238,11 @@ export default function App() {
 
   useEffect(() => {
     setManualZoneIds((current) => {
-      const valid = current.filter((zoneId) => selectedTrack.zones.some((zone) => zone.id === zoneId));
-      return valid.length > 0 ? valid : selectedTrack.zones.filter((zone) => zone.type === 'pedal').slice(0, 2).map((zone) => zone.id);
+      const valid = current.filter((zoneId) => effectiveTrack.zones.some((zone) => zone.id === zoneId));
+      return valid.length > 0 ? valid : effectiveTrack.zones.filter((zone) => zone.type === 'pedal').slice(0, 2).map((zone) => zone.id);
     });
     resetRace();
-  }, [resetRace, selectedTrack.id, selectedTrack.zones]);
+  }, [effectiveTrack.id, effectiveTrack.zones, resetRace]);
 
   const assignDevice = useCallback((playerId: PlayerSlot['id'], deviceId: number | null) => {
     setPlayers((current) => current.map((player) => (
@@ -276,6 +310,100 @@ export default function App() {
     setSelectedTrackId(nextTrack.id);
   };
 
+  useEffect(() => {
+    const mapping = storedMappings[selectedTrack.id];
+    setDraftPoints(mapping?.centerline ?? []);
+    setMappingRestSeconds(mapping?.restAfterSeconds ?? 1);
+    setMappingMode(false);
+  }, [selectedTrack.id]);
+
+  const handleMappingModeChange = (enabled: boolean) => {
+    if (enabled && draftPoints.length === 0 && selectedTrackMapping) {
+      setDraftPoints(selectedTrackMapping.centerline);
+      setMappingRestSeconds(selectedTrackMapping.restAfterSeconds);
+    }
+
+    setMappingMode(enabled);
+  };
+
+  const handleMappingPointAdd = useCallback((point: TrackPoint) => {
+    setDraftPoints((current) => [...current, point]);
+  }, []);
+
+  const undoMappingPoint = () => {
+    setDraftPoints((current) => current.slice(0, -1));
+  };
+
+  const clearMappingDraft = () => {
+    setDraftPoints([]);
+  };
+
+  const updateMappingRestSeconds = (seconds: number) => {
+    const safeSeconds = Math.max(0, Math.min(30, Number.isFinite(seconds) ? seconds : 0));
+    setMappingRestSeconds(safeSeconds);
+  };
+
+  const saveMapping = () => {
+    if (draftPoints.length < 2) {
+      return;
+    }
+
+    const mapping = createUserTrackMapping(selectedTrack, draftPoints, mappingRestSeconds);
+    setStoredMappings((current) => {
+      const next = { ...current, [selectedTrack.id]: mapping };
+      writeStoredTrackMappings(next);
+      return next;
+    });
+    resetRace();
+  };
+
+  const removeMapping = () => {
+    setStoredMappings((current) => {
+      const next = { ...current };
+      delete next[selectedTrack.id];
+      writeStoredTrackMappings(next);
+      return next;
+    });
+    setDraftPoints([]);
+    resetRace();
+  };
+
+  const exportMapping = () => {
+    const mapping = storedMappings[selectedTrack.id];
+    if (mapping) {
+      downloadTrackMapping(mapping);
+    }
+  };
+
+  const importMapping = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const mapping = parseUserTrackMapping(String(reader.result ?? ''));
+        setStoredMappings((current) => {
+          const next = { ...current, [mapping.trackId]: mapping };
+          writeStoredTrackMappings(next);
+          return next;
+        });
+
+        const importedTrack = catalogTracks.find((track) => track.id === mapping.trackId);
+        if (importedTrack) {
+          setSelectedCountry(importedTrack.country);
+          setSelectedState(importedTrack.state);
+          setSelectedTrackId(importedTrack.id);
+        }
+
+        setDraftPoints(mapping.centerline);
+        setMappingRestSeconds(mapping.restAfterSeconds);
+        setMappingMode(true);
+        resetRace();
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const toggleManualZone = (zoneId: string) => {
     setManualZoneIds((current) => (
       current.includes(zoneId)
@@ -305,6 +433,11 @@ export default function App() {
       { id: Date.now(), author: playMode === 'local' ? 'Local Coach' : 'Room Host', text, at: formatClock() },
     ].slice(-6));
     setChatDraft('');
+  };
+
+  const handleStart = () => {
+    primeAudioCues();
+    startRace();
   };
 
   const connectionLabel = bridge.connection === 'open'
@@ -414,7 +547,7 @@ export default function App() {
           <>
             <div className="dashboard-grid">
               <EarthTrackView
-                track={selectedTrack}
+                track={effectiveTrack}
                 riders={riders}
                 players={activePlayers}
                 samplesByDevice={bridge.samplesByDevice}
@@ -422,10 +555,13 @@ export default function App() {
                 raceState={raceState}
                 earthAngle={earthAngle}
                 activeZones={activeZones}
+                mappingMode={mappingMode}
+                draftPoints={draftPoints}
+                onMappingPointAdd={handleMappingPointAdd}
               />
 
               <SessionControlPanel
-                track={selectedTrack}
+                track={effectiveTrack}
                 sessionMode={sessionMode}
                 intervalMode={intervalMode}
                 activeZones={activeZones}
@@ -435,20 +571,32 @@ export default function App() {
                 earthAngle={earthAngle}
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
+                mappingMode={mappingMode}
+                draftPointCount={draftPoints.length}
+                hasSavedMapping={Boolean(selectedTrackMapping)}
+                mappingRestSeconds={mappingRestSeconds}
                 onSessionModeChange={setSessionMode}
                 onIntervalModeChange={setIntervalMode}
                 onManualZoneToggle={toggleManualZone}
                 onMetricToggle={toggleMetric}
                 onSpeedUnitChange={setSpeedUnit}
                 onEarthAngleChange={setEarthAngle}
-                onStart={startRace}
+                onMappingModeChange={handleMappingModeChange}
+                onMappingRestSecondsChange={updateMappingRestSeconds}
+                onMappingUndoPoint={undoMappingPoint}
+                onMappingClearDraft={clearMappingDraft}
+                onMappingSave={saveMapping}
+                onMappingRemove={removeMapping}
+                onMappingExport={exportMapping}
+                onMappingImport={importMapping}
+                onStart={handleStart}
                 onReset={resetRace}
               />
             </div>
 
             <div className="lower-grid">
               <AnalyticsPanel
-                track={selectedTrack}
+                track={effectiveTrack}
                 players={activePlayers}
                 riders={riders}
                 samplesByDevice={bridge.samplesByDevice}
@@ -462,8 +610,8 @@ export default function App() {
               <MultiplayerPanel
                 playMode={playMode}
                 accountsEnabled={accountsEnabled}
-                roomCode={`${selectedTrack.countryCode}-${selectedTrack.id.slice(0, 4).toUpperCase()}-${liveDeviceIds.length || 1}24`}
-                track={selectedTrack}
+                roomCode={`${effectiveTrack.countryCode}-${effectiveTrack.id.slice(0, 4).toUpperCase()}-${liveDeviceIds.length || 1}24`}
+                track={effectiveTrack}
                 players={activePlayers}
                 riders={riders}
                 samplesByDevice={bridge.samplesByDevice}
