@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type {
   IntervalMode,
+  MappingEditMode,
   MetricKey,
   RaceState,
   SessionMode,
@@ -36,7 +37,9 @@ type SessionControlPanelProps = {
   raceState: RaceState;
   activeBikeCount: number;
   mappingMode: boolean;
+  mappingEditMode: MappingEditMode;
   draftPointCount: number;
+  draftZoneCount: number;
   hasSavedMapping: boolean;
   mappingRestSeconds: number;
   onSessionModeChange: (mode: SessionMode) => void;
@@ -46,6 +49,7 @@ type SessionControlPanelProps = {
   onSpeedUnitChange: (unit: SpeedUnit) => void;
   onEarthAngleChange: (angle: number) => void;
   onMappingModeChange: (enabled: boolean) => void;
+  onMappingEditModeChange: (mode: MappingEditMode) => void;
   onMappingRestSecondsChange: (seconds: number) => void;
   onMappingUndoPoint: () => void;
   onMappingClearDraft: () => void;
@@ -75,7 +79,9 @@ export function SessionControlPanel({
   raceState,
   activeBikeCount,
   mappingMode,
+  mappingEditMode,
   draftPointCount,
+  draftZoneCount,
   hasSavedMapping,
   mappingRestSeconds,
   onSessionModeChange,
@@ -85,6 +91,7 @@ export function SessionControlPanel({
   onSpeedUnitChange,
   onEarthAngleChange,
   onMappingModeChange,
+  onMappingEditModeChange,
   onMappingRestSecondsChange,
   onMappingUndoPoint,
   onMappingClearDraft,
@@ -97,6 +104,8 @@ export function SessionControlPanel({
 }: SessionControlPanelProps) {
   const canStart = raceState !== 'racing' && activeBikeCount > 0;
   const canSaveMapping = draftPointCount >= 2;
+  const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : 'Undo path';
+  const canUndoMapping = mappingEditMode === 'zones' ? draftZoneCount > 1 : draftPointCount > 0;
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -112,7 +121,7 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Track Mapping</span>
-            <h3>Manual pins</h3>
+            <h3>Trace route</h3>
           </div>
           <MapPinned size={18} />
         </div>
@@ -130,12 +139,32 @@ export function SessionControlPanel({
             type="button"
             onClick={() => onMappingModeChange(true)}
           >
-            Edit pins
+            Edit map
           </button>
         </div>
 
-        <div className="mapping-status-row">
-          <span>{draftPointCount} pin{draftPointCount === 1 ? '' : 's'}</span>
+        {mappingMode && (
+          <div className="segmented-control compact" aria-label="Mapping edit mode">
+            <button
+              className={mappingEditMode === 'draw' ? 'selected' : ''}
+              type="button"
+              onClick={() => onMappingEditModeChange('draw')}
+            >
+              Draw path
+            </button>
+            <button
+              className={mappingEditMode === 'zones' ? 'selected' : ''}
+              type="button"
+              onClick={() => onMappingEditModeChange('zones')}
+            >
+              Add zones
+            </button>
+          </div>
+        )}
+
+        <div className="mapping-status-row three">
+          <span>{draftPointCount} route pt{draftPointCount === 1 ? '' : 's'}</span>
+          <span>{draftZoneCount} sprint zone{draftZoneCount === 1 ? '' : 's'}</span>
           <span>{hasSavedMapping ? 'Saved locally' : 'No saved map'}</span>
         </div>
 
@@ -155,9 +184,9 @@ export function SessionControlPanel({
             </label>
 
             <div className="mapping-actions">
-              <button type="button" onClick={onMappingUndoPoint} disabled={draftPointCount === 0}>
+              <button type="button" onClick={onMappingUndoPoint} disabled={!canUndoMapping}>
                 <Undo2 size={15} />
-                Undo
+                {undoLabel}
               </button>
               <button type="button" onClick={onMappingClearDraft} disabled={draftPointCount === 0}>
                 <Trash2 size={15} />

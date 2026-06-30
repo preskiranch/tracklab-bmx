@@ -486,6 +486,7 @@ input:focus {
 
 .satellite-overlay.mapping-active {
   cursor: crosshair;
+  touch-action: none;
 }
 
 .satellite-attribution {
@@ -626,13 +627,19 @@ input:focus {
   filter: drop-shadow(0 3px 8px rgba(17, 24, 39, 0.34));
 }
 
-.mapping-pin circle {
+.mapping-pin circle,
+.mapping-zone-pin circle {
   fill: #d8ff3e;
   stroke: #111827;
   stroke-width: 3;
 }
 
-.mapping-pin text {
+.mapping-zone-pin circle {
+  fill: #38bdf8;
+}
+
+.mapping-pin text,
+.mapping-zone-pin text {
   fill: #111827;
   font-size: 11px;
   font-weight: 900;
@@ -905,6 +912,10 @@ input:focus {
   gap: 8px;
 }
 
+.mapping-status-row.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .mapping-status-row span {
   min-width: 0;
   min-height: 30px;
@@ -968,7 +979,7 @@ input:focus {
   border-radius: 7px;
   background: #ffffff;
   color: #1d2935;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
 }
 

@@ -3,7 +3,17 @@ import { ExternalLink, Flag, Map as MapIcon, MapPinned, Satellite, Signal } from
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { SatelliteTrackLayer } from './SatelliteTrackLayer';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
-import type { BikeSample, PlayerSlot, RaceState, RiderState, SpeedUnit, TrackPoint, TrackRecord, TrackZone } from '../types';
+import type {
+  BikeSample,
+  MappingEditMode,
+  PlayerSlot,
+  RaceState,
+  RiderState,
+  SpeedUnit,
+  TrackPoint,
+  TrackRecord,
+  TrackZone,
+} from '../types';
 
 type EarthTrackViewProps = {
   track: TrackRecord;
@@ -15,8 +25,11 @@ type EarthTrackViewProps = {
   earthAngle: number;
   activeZones: TrackZone[];
   mappingMode: boolean;
+  mappingEditMode: MappingEditMode;
   draftPoints: TrackPoint[];
-  onMappingPointAdd: (point: TrackPoint) => void;
+  draftZonePoints: TrackPoint[];
+  onMappingPathPointAdd: (point: TrackPoint) => void;
+  onMappingZonePointAdd: (point: TrackPoint) => void;
 };
 
 function formatElapsed(milliseconds: number | null) {
@@ -38,8 +51,11 @@ export function EarthTrackView({
   earthAngle,
   activeZones,
   mappingMode,
+  mappingEditMode,
   draftPoints,
-  onMappingPointAdd,
+  draftZonePoints,
+  onMappingPathPointAdd,
+  onMappingZonePointAdd,
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const center = trackCenter(track);
@@ -85,8 +101,11 @@ export function EarthTrackView({
             earthAngle={earthAngle}
             activeZones={activeZones}
             mappingMode={mappingMode}
+            mappingEditMode={mappingEditMode}
             draftPoints={draftPoints}
-            onMappingPointAdd={onMappingPointAdd}
+            draftZonePoints={draftZonePoints}
+            onMappingPathPointAdd={onMappingPathPointAdd}
+            onMappingZonePointAdd={onMappingZonePointAdd}
           />
         ) : (
           <SatelliteTrackLayer
@@ -99,8 +118,11 @@ export function EarthTrackView({
             earthAngle={earthAngle}
             activeZones={activeZones}
             mappingMode={mappingMode}
+            mappingEditMode={mappingEditMode}
             draftPoints={draftPoints}
-            onMappingPointAdd={onMappingPointAdd}
+            draftZonePoints={draftZonePoints}
+            onMappingPathPointAdd={onMappingPathPointAdd}
+            onMappingZonePointAdd={onMappingZonePointAdd}
           />
         )}
 
@@ -112,7 +134,8 @@ export function EarthTrackView({
         </div>
         <div className="earth-overlay bottom-left">
           <span>Angle {earthAngle} deg</span>
-          <span>{mappingMode ? `${draftPoints.length} draft pin${draftPoints.length === 1 ? '' : 's'}` : 'Ride line'}</span>
+          <span>{mappingMode ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}` : 'Ride line'}</span>
+          {mappingMode && <span>{mappingEditMode === 'draw' ? 'Draw path' : 'Add zones'}</span>}
           <span>{activeZones.length} active zone{activeZones.length === 1 ? '' : 's'}</span>
         </div>
       </div>

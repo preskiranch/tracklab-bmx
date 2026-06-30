@@ -3,6 +3,7 @@ export type SpeedUnit = 'kph' | 'mph';
 export type SessionMode = 'sprint' | 'interval';
 export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
+export type MappingEditMode = 'draw' | 'zones';
 export type MetricKey = 'cadence' | 'speed' | 'power';
 export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
 
@@ -104,6 +105,7 @@ export type UserTrackMapping = {
   centerline: TrackPoint[];
   startGate: TrackPoint;
   finishLine: TrackPoint;
+  zoneBoundaryMeters?: number[];
   zones: TrackZone[];
 };
 

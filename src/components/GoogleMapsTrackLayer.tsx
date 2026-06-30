@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import type { BikeSample, PlayerSlot, RiderState, SpeedUnit, TrackPoint, TrackRecord, TrackZone } from '../types';
+import type {
+  BikeSample,
+  MappingEditMode,
+  PlayerSlot,
+  RiderState,
+  SpeedUnit,
+  TrackPoint,
+  TrackRecord,
+  TrackZone,
+} from '../types';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import {
   loadGoogleMaps,
@@ -24,8 +33,11 @@ type GoogleMapsTrackLayerProps = {
   speedUnit: SpeedUnit;
   earthAngle: number;
   mappingMode?: boolean;
+  mappingEditMode?: MappingEditMode;
   draftPoints?: TrackPoint[];
-  onMappingPointAdd?: (point: TrackPoint) => void;
+  draftZonePoints?: TrackPoint[];
+  onMappingPathPointAdd?: (point: TrackPoint) => void;
+  onMappingZonePointAdd?: (point: TrackPoint) => void;
 };
 
 const zoneColors: Record<TrackZone['type'], string> = {
@@ -33,6 +45,13 @@ const zoneColors: Record<TrackZone['type'], string> = {
   recovery: '#facc15',
   technical: '#38bdf8',
 };
+const drawSampleMeters = 1.2;
+
+function distanceBetweenPoints(a: TrackPoint, b: TrackPoint) {
+  const latScale = 111_320;
+  const lngScale = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)) * 111_320;
+  return Math.hypot((b.lng - a.lng) * lngScale, (b.lat - a.lat) * latScale);
+}
 
 export function GoogleMapsTrackLayer({
   track,
@@ -43,8 +62,11 @@ export function GoogleMapsTrackLayer({
   speedUnit,
   earthAngle,
   mappingMode = false,
+  mappingEditMode = 'draw',
   draftPoints = [],
-  onMappingPointAdd,
+  draftZonePoints = [],
+  onMappingPathPointAdd,
+  onMappingZonePointAdd,
 }: GoogleMapsTrackLayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
@@ -54,7 +76,9 @@ export function GoogleMapsTrackLayer({
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
   const draftLineRef = useRef<GooglePolyline | null>(null);
   const draftMarkerRefs = useRef<GoogleMarker[]>([]);
-  const mapClickListenerRef = useRef<GoogleMapsEventListener | null>(null);
+  const mapListenerRefs = useRef<GoogleMapsEventListener[]>([]);
+  const isDrawingRef = useRef(false);
+  const lastDrawPointRef = useRef<TrackPoint | null>(null);
   const markerRefs = useRef<Map<number, GoogleMarker>>(new Map());
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
@@ -99,14 +123,14 @@ export function GoogleMapsTrackLayer({
       zoneLinesRef.current.forEach((line) => line.setMap(null));
       draftLineRef.current?.setMap(null);
       draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
-      mapClickListenerRef.current?.remove();
+      mapListenerRefs.current.forEach((listener) => listener.remove());
       markerRefs.current.forEach((marker) => marker.setMap(null));
       boundaryLineRef.current = null;
       trackLineRef.current = null;
       zoneLinesRef.current = [];
       draftLineRef.current = null;
       draftMarkerRefs.current = [];
-      mapClickListenerRef.current = null;
+      mapListenerRefs.current = [];
       markerRefs.current.clear();
       mapRef.current = null;
     };
@@ -190,9 +214,54 @@ export function GoogleMapsTrackLayer({
       });
     }
 
-    draftMarkerRefs.current = draftPoints.map((point, index) => new google.maps.Marker({
+    const endpointMarkers = draftPoints.length === 0 ? [] : [
+      new google.maps.Marker({
+        icon: {
+          fillColor: '#d8ff3e',
+          fillOpacity: 1,
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          strokeColor: '#111827',
+          strokeWeight: 2,
+        },
+        label: {
+          color: '#111827',
+          fontSize: '11px',
+          fontWeight: '900',
+          text: 'S',
+        },
+        map,
+        optimized: true,
+        position: draftPoints[0],
+        title: 'Mapping start',
+      }),
+      ...(draftPoints.length > 1 ? [
+        new google.maps.Marker({
+          icon: {
+            fillColor: '#d8ff3e',
+            fillOpacity: 1,
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            strokeColor: '#111827',
+            strokeWeight: 2,
+          },
+          label: {
+            color: '#111827',
+            fontSize: '11px',
+            fontWeight: '900',
+            text: 'F',
+          },
+          map,
+          optimized: true,
+          position: draftPoints[draftPoints.length - 1],
+          title: 'Mapping finish',
+        }),
+      ] : []),
+    ];
+
+    const zoneMarkers = draftZonePoints.map((point, index) => new google.maps.Marker({
       icon: {
-        fillColor: '#d8ff3e',
+        fillColor: '#38bdf8',
         fillOpacity: 1,
         path: google.maps.SymbolPath.CIRCLE,
         scale: 10,
@@ -210,7 +279,9 @@ export function GoogleMapsTrackLayer({
       position: point,
       title: `Mapping pin ${index + 1}`,
     }));
-  }, [draftPoints, mappingMode, status]);
+
+    draftMarkerRefs.current = [...endpointMarkers, ...zoneMarkers];
+  }, [draftPoints, draftZonePoints, mappingMode, status]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -218,25 +289,85 @@ export function GoogleMapsTrackLayer({
       return undefined;
     }
 
-    mapClickListenerRef.current?.remove();
-    mapClickListenerRef.current = null;
+    mapListenerRefs.current.forEach((listener) => listener.remove());
+    mapListenerRefs.current = [];
+    isDrawingRef.current = false;
+    lastDrawPointRef.current = null;
+    map.setOptions({
+      draggable: !mappingMode,
+      draggableCursor: mappingMode ? 'crosshair' : undefined,
+      gestureHandling: mappingMode ? 'none' : 'greedy',
+    });
 
-    if (!mappingMode || !onMappingPointAdd) {
+    if (!mappingMode) {
       return undefined;
     }
 
-    mapClickListenerRef.current = map.addListener('click', (event) => {
-      const point = event.latLng?.toJSON();
-      if (point) {
-        onMappingPointAdd(point);
+    const addDrawPoint = (point: TrackPoint) => {
+      if (!onMappingPathPointAdd) {
+        return;
       }
-    });
+
+      const previous = lastDrawPointRef.current;
+      if (previous && distanceBetweenPoints(previous, point) < drawSampleMeters) {
+        return;
+      }
+
+      lastDrawPointRef.current = point;
+      onMappingPathPointAdd(point);
+    };
+
+    mapListenerRefs.current = [
+      map.addListener('mousedown', (event) => {
+        const point = event.latLng?.toJSON();
+        if (!point) {
+          return;
+        }
+
+        if (mappingEditMode === 'zones') {
+          onMappingZonePointAdd?.(point);
+          return;
+        }
+
+        isDrawingRef.current = true;
+        lastDrawPointRef.current = null;
+        addDrawPoint(point);
+      }),
+      map.addListener('mousemove', (event) => {
+        const point = event.latLng?.toJSON();
+        if (!point || !isDrawingRef.current || mappingEditMode !== 'draw') {
+          return;
+        }
+
+        addDrawPoint(point);
+      }),
+      map.addListener('mouseup', (event) => {
+        const point = event.latLng?.toJSON();
+        if (point && isDrawingRef.current && mappingEditMode === 'draw') {
+          addDrawPoint(point);
+        }
+
+        isDrawingRef.current = false;
+        lastDrawPointRef.current = null;
+      }),
+      map.addListener('click', (event) => {
+        const point = event.latLng?.toJSON();
+        if (point && mappingEditMode === 'zones') {
+          onMappingZonePointAdd?.(point);
+        }
+      }),
+    ];
 
     return () => {
-      mapClickListenerRef.current?.remove();
-      mapClickListenerRef.current = null;
+      mapListenerRefs.current.forEach((listener) => listener.remove());
+      mapListenerRefs.current = [];
+      map.setOptions({
+        draggable: true,
+        draggableCursor: undefined,
+        gestureHandling: 'greedy',
+      });
     };
-  }, [mappingMode, onMappingPointAdd, status]);
+  }, [mappingEditMode, mappingMode, onMappingPathPointAdd, onMappingZonePointAdd, status]);
 
   useEffect(() => {
     const google = googleRef.current;

@@ -1,9 +1,19 @@
-import type { CSSProperties, MouseEvent } from 'react';
+import type { CSSProperties, PointerEvent } from 'react';
 import { useMemo, useRef } from 'react';
 import { Bike } from 'lucide-react';
 import { trackBoundsPoints, trackFinishPoint, trackRoute, trackStartPoint, zonePolyline } from '../lib/googleMaps';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
-import type { BikeSample, PlayerSlot, RaceState, RiderState, SpeedUnit, TrackPoint, TrackRecord, TrackZone } from '../types';
+import type {
+  BikeSample,
+  MappingEditMode,
+  PlayerSlot,
+  RaceState,
+  RiderState,
+  SpeedUnit,
+  TrackPoint,
+  TrackRecord,
+  TrackZone,
+} from '../types';
 
 type ProjectedPoint = {
   x: number;
@@ -27,8 +37,11 @@ type SatelliteTrackLayerProps = {
   raceState: RaceState;
   earthAngle: number;
   mappingMode?: boolean;
+  mappingEditMode?: MappingEditMode;
   draftPoints?: TrackPoint[];
-  onMappingPointAdd?: (point: TrackPoint) => void;
+  draftZonePoints?: TrackPoint[];
+  onMappingPathPointAdd?: (point: TrackPoint) => void;
+  onMappingZonePointAdd?: (point: TrackPoint) => void;
 };
 
 const tileSize = 256;
@@ -37,6 +50,7 @@ const viewHeight = 620;
 const padding = 92;
 const minZoom = 14;
 const maxZoom = 20;
+const drawSamplePixels = 10;
 const esriWorldImageryTemplate = 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 const tileUrlTemplate = import.meta.env.VITE_SATELLITE_TILE_URL_TEMPLATE?.trim() || esriWorldImageryTemplate;
 
@@ -163,10 +177,15 @@ export function SatelliteTrackLayer({
   raceState,
   earthAngle,
   mappingMode = false,
+  mappingEditMode = 'draw',
   draftPoints = [],
-  onMappingPointAdd,
+  draftZonePoints = [],
+  onMappingPathPointAdd,
+  onMappingZonePointAdd,
 }: SatelliteTrackLayerProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const drawingRef = useRef(false);
+  const lastDrawPointRef = useRef<ProjectedPoint | null>(null);
   const layout = useMemo(() => {
     const route = trackRoute(track);
     const boundsPoints = trackBoundsPoints(track);
@@ -208,6 +227,7 @@ export function SatelliteTrackLayer({
 
     const routePoints = route.map(toLocalPoint);
     const draftLocalPoints = draftPoints.map(toLocalPoint);
+    const draftZoneLocalPoints = draftZonePoints.map(toLocalPoint);
     const startPoint = toLocalPoint(trackStartPoint(track));
     const finishPoint = toLocalPoint(trackFinishPoint(track));
     const finishRoutePoint = pointAtProgress(routePoints, 1);
@@ -223,6 +243,7 @@ export function SatelliteTrackLayer({
       finishPath: finishMarkerPath(finishPoint, finishRoutePoint.heading),
       draftPath: draftLocalPoints.length > 1 ? pathFromPoints(draftLocalPoints) : '',
       draftLocalPoints,
+      draftZoneLocalPoints,
       zones: activeZones.map((zone) => ({
         ...zone,
         path: pathFromPoints(zonePolyline(track, zone).map(toLocalPoint)),
@@ -230,17 +251,17 @@ export function SatelliteTrackLayer({
       toLocalPoint,
       toTrackPoint,
     };
-  }, [activeZones, draftPoints, track]);
+  }, [activeZones, draftPoints, draftZonePoints, track]);
   const tilt = clamp(72 - earthAngle, 4, 54);
   const routeStatusClass = `route-${track.routeStatus ?? 'estimated'}`;
-  const handleMapClick = (event: MouseEvent<SVGSVGElement>) => {
-    if (!mappingMode || !onMappingPointAdd || !svgRef.current) {
-      return;
+  const localPointFromEvent = (event: PointerEvent<SVGSVGElement>) => {
+    if (!svgRef.current) {
+      return null;
     }
 
     const matrix = svgRef.current.getScreenCTM();
     if (!matrix) {
-      return;
+      return null;
     }
 
     const screenPoint = svgRef.current.createSVGPoint();
@@ -248,10 +269,68 @@ export function SatelliteTrackLayer({
     screenPoint.y = event.clientY;
     const localPoint = screenPoint.matrixTransform(matrix.inverse());
 
-    onMappingPointAdd(layout.toTrackPoint({
+    return {
       x: clamp(localPoint.x, 0, viewWidth),
       y: clamp(localPoint.y, 0, viewHeight),
-    }));
+    };
+  };
+  const addDrawPoint = (localPoint: ProjectedPoint) => {
+    if (!onMappingPathPointAdd) {
+      return;
+    }
+
+    const previous = lastDrawPointRef.current;
+    if (previous && Math.hypot(previous.x - localPoint.x, previous.y - localPoint.y) < drawSamplePixels) {
+      return;
+    }
+
+    lastDrawPointRef.current = localPoint;
+    onMappingPathPointAdd(layout.toTrackPoint(localPoint));
+  };
+  const handlePointerDown = (event: PointerEvent<SVGSVGElement>) => {
+    if (!mappingMode || !svgRef.current) {
+      return;
+    }
+
+    const localPoint = localPointFromEvent(event);
+    if (!localPoint) {
+      return;
+    }
+
+    if (mappingEditMode === 'zones') {
+      onMappingZonePointAdd?.(layout.toTrackPoint(localPoint));
+      return;
+    }
+
+    event.preventDefault();
+    svgRef.current.setPointerCapture(event.pointerId);
+    drawingRef.current = true;
+    lastDrawPointRef.current = null;
+    addDrawPoint(localPoint);
+  };
+  const handlePointerMove = (event: PointerEvent<SVGSVGElement>) => {
+    if (!drawingRef.current || mappingEditMode !== 'draw') {
+      return;
+    }
+
+    const localPoint = localPointFromEvent(event);
+    if (localPoint) {
+      addDrawPoint(localPoint);
+    }
+  };
+  const handlePointerUp = (event: PointerEvent<SVGSVGElement>) => {
+    if (!svgRef.current || !drawingRef.current) {
+      return;
+    }
+
+    const localPoint = localPointFromEvent(event);
+    if (localPoint) {
+      addDrawPoint(localPoint);
+    }
+
+    drawingRef.current = false;
+    lastDrawPointRef.current = null;
+    svgRef.current.releasePointerCapture(event.pointerId);
   };
 
   return (
@@ -280,7 +359,10 @@ export function SatelliteTrackLayer({
         viewBox={`0 0 ${viewWidth} ${viewHeight}`}
         role="img"
         aria-label={`${track.name} GPS outline over satellite imagery`}
-        onClick={handleMapClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         ref={svgRef}
       >
         {layout.boundaryPath && <path className="track-boundary" d={layout.boundaryPath} />}
@@ -298,8 +380,20 @@ export function SatelliteTrackLayer({
         <circle className="start-dot" cx={layout.startPoint.x} cy={layout.startPoint.y} r="10" />
         <path className="finish-line" d={layout.finishPath} />
         {mappingMode && layout.draftPath && <path className="mapping-draft-path" d={layout.draftPath} />}
-        {mappingMode && layout.draftLocalPoints.map((point, index) => (
-          <g className="mapping-pin" key={`${point.x}-${point.y}-${index}`}>
+        {mappingMode && layout.draftLocalPoints[0] && (
+          <g className="mapping-pin route-endpoint">
+            <circle cx={layout.draftLocalPoints[0].x} cy={layout.draftLocalPoints[0].y} r="12" />
+            <text x={layout.draftLocalPoints[0].x} y={layout.draftLocalPoints[0].y + 4}>S</text>
+          </g>
+        )}
+        {mappingMode && layout.draftLocalPoints.length > 1 && (
+          <g className="mapping-pin route-endpoint">
+            <circle cx={layout.draftLocalPoints[layout.draftLocalPoints.length - 1].x} cy={layout.draftLocalPoints[layout.draftLocalPoints.length - 1].y} r="12" />
+            <text x={layout.draftLocalPoints[layout.draftLocalPoints.length - 1].x} y={layout.draftLocalPoints[layout.draftLocalPoints.length - 1].y + 4}>F</text>
+          </g>
+        )}
+        {mappingMode && layout.draftZoneLocalPoints.map((point, index) => (
+          <g className="mapping-zone-pin" key={`${point.x}-${point.y}-${index}`}>
             <circle cx={point.x} cy={point.y} r="12" />
             <text x={point.x} y={point.y + 4}>{index + 1}</text>
           </g>

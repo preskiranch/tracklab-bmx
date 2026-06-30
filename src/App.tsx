@@ -23,10 +23,15 @@ import { primeAudioCues } from './lib/audioCues';
 import {
   applyUserTrackMapping,
   createUserTrackMapping,
+  distanceBetweenTrackPoints,
+  nearestRouteMeter,
   parseUserTrackMapping,
+  pointAtRouteMeter,
   readStoredTrackMappings,
+  routeLengthMeters,
   writeStoredTrackMappings,
   type StoredTrackMappings,
+  zoneBoundariesFromMapping,
 } from './lib/trackMapping';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
@@ -35,6 +40,7 @@ import type {
   AppMode,
   IntervalMode,
   LeaderboardMetric,
+  MappingEditMode,
   MetricKey,
   PlayerSlot,
   PlayMode,
@@ -99,7 +105,9 @@ export default function App() {
   const [catalogTracks, setCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const [mappingMode, setMappingMode] = useState(false);
+  const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('draw');
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
+  const [draftZoneMeters, setDraftZoneMeters] = useState<number[]>([]);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [players, setPlayers] = useState<PlayerSlot[]>(readStoredPlayers);
   const [appMode, setAppMode] = useState<AppMode>('race');
@@ -185,6 +193,12 @@ export default function App() {
   const effectiveTrack = useMemo(
     () => (selectedTrackMapping ? applyUserTrackMapping(selectedTrack, selectedTrackMapping) : selectedTrack),
     [selectedTrack, selectedTrackMapping],
+  );
+  const draftZonePoints = useMemo(
+    () => draftZoneMeters
+      .map((meter) => pointAtRouteMeter(draftPoints, meter))
+      .filter((point): point is TrackPoint => point != null),
+    [draftPoints, draftZoneMeters],
   );
 
   const discoveredDeviceIds = useMemo(
@@ -313,29 +327,48 @@ export default function App() {
   useEffect(() => {
     const mapping = storedMappings[selectedTrack.id];
     setDraftPoints(mapping?.centerline ?? []);
+    setDraftZoneMeters(mapping ? zoneBoundariesFromMapping(mapping) : []);
     setMappingRestSeconds(mapping?.restAfterSeconds ?? 1);
+    setMappingEditMode('draw');
     setMappingMode(false);
   }, [selectedTrack.id]);
 
   const handleMappingModeChange = (enabled: boolean) => {
     if (enabled && draftPoints.length === 0 && selectedTrackMapping) {
       setDraftPoints(selectedTrackMapping.centerline);
+      setDraftZoneMeters(zoneBoundariesFromMapping(selectedTrackMapping));
       setMappingRestSeconds(selectedTrackMapping.restAfterSeconds);
     }
 
     setMappingMode(enabled);
   };
 
-  const handleMappingPointAdd = useCallback((point: TrackPoint) => {
-    setDraftPoints((current) => [...current, point]);
+  const handleMappingPathPointAdd = useCallback((point: TrackPoint) => {
+    setDraftPoints((current) => {
+      const previous = current[current.length - 1];
+      if (previous && distanceBetweenTrackPoints(previous, point) < 0.75) {
+        return current;
+      }
+
+      return [...current, point];
+    });
   }, []);
 
   const undoMappingPoint = () => {
-    setDraftPoints((current) => current.slice(0, -1));
+    if (mappingEditMode === 'zones') {
+      setDraftZoneMeters((current) => current.slice(0, -1));
+      return;
+    }
+
+    const nextPoints = draftPoints.slice(0, -1);
+    const nextLength = nextPoints.length > 1 ? routeLengthMeters(nextPoints) : 0;
+    setDraftPoints(nextPoints);
+    setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter < nextLength - 1));
   };
 
   const clearMappingDraft = () => {
     setDraftPoints([]);
+    setDraftZoneMeters([]);
   };
 
   const updateMappingRestSeconds = (seconds: number) => {
@@ -348,7 +381,7 @@ export default function App() {
       return;
     }
 
-    const mapping = createUserTrackMapping(selectedTrack, draftPoints, mappingRestSeconds);
+    const mapping = createUserTrackMapping(selectedTrack, draftPoints, mappingRestSeconds, draftZoneMeters);
     setStoredMappings((current) => {
       const next = { ...current, [selectedTrack.id]: mapping };
       writeStoredTrackMappings(next);
@@ -365,6 +398,7 @@ export default function App() {
       return next;
     });
     setDraftPoints([]);
+    setDraftZoneMeters([]);
     resetRace();
   };
 
@@ -394,7 +428,9 @@ export default function App() {
         }
 
         setDraftPoints(mapping.centerline);
+        setDraftZoneMeters(zoneBoundariesFromMapping(mapping));
         setMappingRestSeconds(mapping.restAfterSeconds);
+        setMappingEditMode('draw');
         setMappingMode(true);
         resetRace();
       } catch (error) {
@@ -403,6 +439,24 @@ export default function App() {
     };
     reader.readAsText(file);
   };
+
+  const handleMappingZonePointAdd = useCallback((point: TrackPoint) => {
+    setDraftZoneMeters((current) => {
+      if (draftPoints.length < 2) {
+        return current;
+      }
+
+      const routeLength = draftPoints.reduce((total, draftPoint, index) => (
+        index === 0 ? total : total + distanceBetweenTrackPoints(draftPoints[index - 1], draftPoint)
+      ), 0);
+      const meter = Math.round(nearestRouteMeter(draftPoints, point));
+      if (meter <= 2 || meter >= routeLength - 2 || current.some((boundary) => Math.abs(boundary - meter) < 3)) {
+        return current;
+      }
+
+      return [...current, meter].sort((a, b) => a - b);
+    });
+  }, [draftPoints]);
 
   const toggleManualZone = (zoneId: string) => {
     setManualZoneIds((current) => (
@@ -556,8 +610,11 @@ export default function App() {
                 earthAngle={earthAngle}
                 activeZones={activeZones}
                 mappingMode={mappingMode}
+                mappingEditMode={mappingEditMode}
                 draftPoints={draftPoints}
-                onMappingPointAdd={handleMappingPointAdd}
+                draftZonePoints={draftZonePoints}
+                onMappingPathPointAdd={handleMappingPathPointAdd}
+                onMappingZonePointAdd={handleMappingZonePointAdd}
               />
 
               <SessionControlPanel
@@ -572,7 +629,9 @@ export default function App() {
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
                 mappingMode={mappingMode}
+                mappingEditMode={mappingEditMode}
                 draftPointCount={draftPoints.length}
+                draftZoneCount={draftPoints.length > 1 ? draftZoneMeters.length + 1 : 0}
                 hasSavedMapping={Boolean(selectedTrackMapping)}
                 mappingRestSeconds={mappingRestSeconds}
                 onSessionModeChange={setSessionMode}
@@ -582,6 +641,7 @@ export default function App() {
                 onSpeedUnitChange={setSpeedUnit}
                 onEarthAngleChange={setEarthAngle}
                 onMappingModeChange={handleMappingModeChange}
+                onMappingEditModeChange={setMappingEditMode}
                 onMappingRestSecondsChange={updateMappingRestSeconds}
                 onMappingUndoPoint={undoMappingPoint}
                 onMappingClearDraft={clearMappingDraft}
