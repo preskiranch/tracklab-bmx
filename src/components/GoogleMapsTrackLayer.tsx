@@ -57,6 +57,21 @@ function normalizeHeading(value: number) {
   return ((value % 360) + 360) % 360;
 }
 
+function applyCamera(map: GoogleMap, angle: number, heading: number) {
+  const camera = {
+    heading: normalizeHeading(heading),
+    tilt: clampTilt(angle),
+  };
+
+  if (map.moveCamera) {
+    map.moveCamera(camera);
+    return;
+  }
+
+  map.setTilt(camera.tilt);
+  map.setHeading(camera.heading);
+}
+
 function distanceBetweenPoints(a: TrackPoint, b: TrackPoint) {
   const latScale = 111_320;
   const lngScale = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)) * 111_320;
@@ -117,6 +132,7 @@ export function GoogleMapsTrackLayer({
           heading: earthHeading,
           headingInteractionEnabled: true,
           keyboardShortcuts: true,
+          mapId: google.maps.Map.DEMO_MAP_ID,
           mapTypeControl: false,
           mapTypeId: 'satellite',
           renderingType: google.maps.RenderingType?.VECTOR,
@@ -163,8 +179,7 @@ export function GoogleMapsTrackLayer({
     }
 
     cameraRef.current = { angle: earthAngle, heading: earthHeading };
-    map.setTilt(clampTilt(earthAngle));
-    map.setHeading(normalizeHeading(earthHeading));
+    applyCamera(map, earthAngle, earthHeading);
   }, [earthAngle, earthHeading]);
 
   useEffect(() => {
@@ -203,8 +218,7 @@ export function GoogleMapsTrackLayer({
     trackBoundsPoints(track).forEach((point) => bounds.extend(point));
     map.fitBounds(bounds, 58);
     const restoreCamera = () => {
-      map.setTilt(clampTilt(cameraRef.current.angle));
-      map.setHeading(normalizeHeading(cameraRef.current.heading));
+      applyCamera(map, cameraRef.current.angle, cameraRef.current.heading);
     };
     restoreCamera();
     window.requestAnimationFrame(restoreCamera);

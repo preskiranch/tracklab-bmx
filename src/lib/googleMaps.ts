@@ -10,6 +10,7 @@ type GoogleMap = {
   fitBounds: (bounds: GoogleLatLngBounds, padding?: number) => void;
   getHeading?: () => number | undefined;
   getTilt?: () => number | undefined;
+  moveCamera?: (cameraOptions: Record<string, unknown>) => void;
   setHeading: (heading: number) => void;
   setOptions: (options: Record<string, unknown>) => void;
   setTilt: (tilt: number) => void;
@@ -38,10 +39,15 @@ type GoogleMarker = {
   setPosition: (position: LatLngLiteral) => void;
 };
 
+type GoogleMapConstructor = {
+  new (element: HTMLElement, options: Record<string, unknown>): GoogleMap;
+  DEMO_MAP_ID?: string;
+};
+
 type GoogleMapsRuntime = {
   maps: {
     LatLngBounds: new () => GoogleLatLngBounds;
-    Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMap;
+    Map: GoogleMapConstructor;
     Marker: new (options: Record<string, unknown>) => GoogleMarker;
     Polyline: new (options: Record<string, unknown>) => GooglePolyline;
     RenderingType?: {
