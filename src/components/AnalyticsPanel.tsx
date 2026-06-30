@@ -98,7 +98,11 @@ export function AnalyticsPanel({
   activeZones,
   onLeaderboardMetricChange,
 }: AnalyticsPanelProps) {
-  const zonesToDisplay = activeZones.length > 0 ? activeZones : track.zones;
+  const zonesToDisplay = activeZones.length > 0
+    ? activeZones
+    : track.routeStatus === 'user-mapped'
+      ? track.zones
+      : [];
 
   return (
     <section className="analytics-panel">
@@ -130,7 +134,7 @@ export function AnalyticsPanel({
               </tr>
             </thead>
             <tbody>
-              {zonesToDisplay.map((zone) => (
+              {zonesToDisplay.length > 0 ? zonesToDisplay.map((zone) => (
                 <tr key={zone.id}>
                   <td>
                     <strong>{zone.name}</strong>
@@ -152,7 +156,11 @@ export function AnalyticsPanel({
                     );
                   })}
                 </tr>
-              ))}
+              )) : (
+                <tr>
+                  <td colSpan={Math.max(2, players.length + 2)}>No mapped sprint zones</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

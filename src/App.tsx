@@ -224,17 +224,21 @@ export default function App() {
     () => players.slice(0, Math.min(maxPlayers, liveDeviceIds.length)),
     [liveDeviceIds.length, players],
   );
+  const mappedZones = useMemo(
+    () => (effectiveTrack.routeStatus === 'user-mapped' ? effectiveTrack.zones : []),
+    [effectiveTrack.routeStatus, effectiveTrack.zones],
+  );
   const activeZones = useMemo(() => {
     if (sessionMode === 'sprint') {
-      return effectiveTrack.zones;
+      return mappedZones;
     }
 
     if (intervalMode === 'auto') {
-      return effectiveTrack.zones.filter((zone) => zone.type === 'pedal');
+      return mappedZones.filter((zone) => zone.type === 'pedal');
     }
 
-    return effectiveTrack.zones.filter((zone) => manualZoneIds.includes(zone.id));
-  }, [effectiveTrack.zones, intervalMode, manualZoneIds, sessionMode]);
+    return mappedZones.filter((zone) => manualZoneIds.includes(zone.id));
+  }, [intervalMode, manualZoneIds, mappedZones, sessionMode]);
   const { raceState, riders, startRace, resetRace } = useRaceEngine(
     activePlayers,
     bridge.samplesByDevice,
@@ -252,11 +256,11 @@ export default function App() {
 
   useEffect(() => {
     setManualZoneIds((current) => {
-      const valid = current.filter((zoneId) => effectiveTrack.zones.some((zone) => zone.id === zoneId));
-      return valid.length > 0 ? valid : effectiveTrack.zones.filter((zone) => zone.type === 'pedal').slice(0, 2).map((zone) => zone.id);
+      const valid = current.filter((zoneId) => mappedZones.some((zone) => zone.id === zoneId));
+      return valid.length > 0 ? valid : mappedZones.filter((zone) => zone.type === 'pedal').slice(0, 2).map((zone) => zone.id);
     });
     resetRace();
-  }, [effectiveTrack.id, effectiveTrack.zones, resetRace]);
+  }, [effectiveTrack.id, mappedZones, resetRace]);
 
   const assignDevice = useCallback((playerId: PlayerSlot['id'], deviceId: number | null) => {
     setPlayers((current) => current.map((player) => (
@@ -490,6 +494,10 @@ export default function App() {
   };
 
   const handleStart = () => {
+    if (effectiveTrack.routeStatus !== 'user-mapped') {
+      return;
+    }
+
     primeAudioCues();
     startRace();
   };

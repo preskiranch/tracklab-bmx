@@ -736,6 +736,12 @@ input:focus {
   gap: 6px;
 }
 
+.empty-inline {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .mapping-section {
   background: #fbfcf7;
 }

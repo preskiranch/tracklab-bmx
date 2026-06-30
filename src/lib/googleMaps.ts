@@ -100,8 +100,11 @@ export function loadGoogleMaps() {
   return window.__trackLabGoogleMapsPromise;
 }
 
-export function trackCenter(track: TrackRecord): LatLngLiteral {
-  const points = trackBoundsPoints(track);
+function isFiniteCoordinate(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function averagePoint(points: TrackPoint[]): LatLngLiteral {
   const total = points.reduce(
     (sum, point) => ({ lat: sum.lat + point.lat, lng: sum.lng + point.lng }),
     { lat: 0, lng: 0 },
@@ -113,24 +116,66 @@ export function trackCenter(track: TrackRecord): LatLngLiteral {
   };
 }
 
+function locatorPoint(track: TrackRecord): LatLngLiteral {
+  if (isFiniteCoordinate(track.latitude) && isFiniteCoordinate(track.longitude)) {
+    return { lat: track.latitude, lng: track.longitude };
+  }
+
+  if (track.startGate) {
+    return track.startGate;
+  }
+
+  if (track.centerline && track.centerline.length > 0) {
+    return averagePoint(track.centerline);
+  }
+
+  if (track.outline.length > 0) {
+    return averagePoint(track.outline);
+  }
+
+  return { lat: 0, lng: 0 };
+}
+
+export function hasUserMappedRoute(track: TrackRecord) {
+  return track.routeStatus === 'user-mapped' && Boolean(track.centerline && track.centerline.length > 1);
+}
+
+export function mappedTrackRoute(track: TrackRecord) {
+  return hasUserMappedRoute(track) && track.centerline ? track.centerline : [];
+}
+
+export function trackCenter(track: TrackRecord): LatLngLiteral {
+  const route = mappedTrackRoute(track);
+
+  return route.length > 0 ? averagePoint(route) : locatorPoint(track);
+}
+
 export function trackRoute(track: TrackRecord) {
   return track.centerline && track.centerline.length > 1 ? track.centerline : track.outline;
 }
 
 export function trackBoundsPoints(track: TrackRecord) {
-  const route = trackRoute(track);
-  const points = [...track.outline, ...route];
-  return points.length > 0 ? points : [{ lat: track.latitude ?? 0, lng: track.longitude ?? 0 }];
+  const route = mappedTrackRoute(track);
+  if (route.length > 0) {
+    return route;
+  }
+
+  const center = locatorPoint(track);
+  const offset = 0.0014;
+  return [
+    { lat: center.lat - offset, lng: center.lng - offset },
+    { lat: center.lat + offset, lng: center.lng + offset },
+  ];
 }
 
 export function trackStartPoint(track: TrackRecord) {
-  const route = trackRoute(track);
-  return track.startGate ?? route[0];
+  const route = mappedTrackRoute(track);
+  return track.startGate ?? route[0] ?? locatorPoint(track);
 }
 
 export function trackFinishPoint(track: TrackRecord) {
-  const route = trackRoute(track);
-  return track.finishLine ?? route[route.length - 1];
+  const route = mappedTrackRoute(track);
+  return track.finishLine ?? route[route.length - 1] ?? locatorPoint(track);
 }
 
 function distanceBetween(a: TrackPoint, b: TrackPoint) {
@@ -165,7 +210,11 @@ function pointAtProgress(outline: TrackPoint[], progress: number): LatLngLiteral
 }
 
 export function zonePolyline(track: TrackRecord, zone: TrackZone) {
-  const route = trackRoute(track);
+  const route = mappedTrackRoute(track);
+  if (route.length < 2) {
+    return [];
+  }
+
   return Array.from({ length: 24 }, (_, index) => {
     const t = index / 23;
     const meter = zone.startMeter + (zone.endMeter - zone.startMeter) * t;
@@ -174,7 +223,12 @@ export function zonePolyline(track: TrackRecord, zone: TrackZone) {
 }
 
 export function riderLatLng(track: TrackRecord, distanceMeters: number) {
-  return pointAtProgress(trackRoute(track), distanceMeters / track.lengthMeters);
+  const route = mappedTrackRoute(track);
+  if (route.length < 2) {
+    return null;
+  }
+
+  return pointAtProgress(route, distanceMeters / track.lengthMeters);
 }
 
 export type {

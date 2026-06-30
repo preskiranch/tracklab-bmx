@@ -60,13 +60,9 @@ export function EarthTrackView({
   const center = trackCenter(track);
   const googleEarthUrl = `https://earth.google.com/web/search/${center.lat},${center.lng}`;
   const imageryLabel = 'Google Earth view';
-  const routeStatusLabel = track.routeStatus === 'verified'
-    ? 'Verified ride line'
-    : track.routeStatus === 'user-mapped'
-      ? 'User-mapped ride line'
-    : track.routeStatus === 'locator-only'
-      ? 'Locator-only route'
-      : 'Estimated ride line';
+  const routeStatusLabel = track.routeStatus === 'user-mapped'
+    ? 'User-mapped ride line'
+    : 'Needs manual mapping';
 
   return (
     <section className="earth-panel">
@@ -120,7 +116,9 @@ export function EarthTrackView({
           </div>
         )}
 
-        <div className="google-map-caption">{imageryLabel} with ride line overlay</div>
+        <div className="google-map-caption">
+          {track.routeStatus === 'user-mapped' ? `${imageryLabel} with saved ride line` : imageryLabel}
+        </div>
 
         <div className="earth-overlay top-left">
           <span className={`race-dot ${raceState}`} />
@@ -128,7 +126,13 @@ export function EarthTrackView({
         </div>
         <div className="earth-overlay bottom-left">
           <span>Angle {earthAngle} deg</span>
-          <span>{mappingMode ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}` : 'Ride line'}</span>
+          <span>
+            {mappingMode
+              ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`
+              : track.routeStatus === 'user-mapped'
+                ? 'Saved ride line'
+                : 'No ride line'}
+          </span>
           {mappingMode && <span>{mappingEditMode === 'draw' ? 'Draw path' : 'Add zones'}</span>}
           <span>{activeZones.length} active zone{activeZones.length === 1 ? '' : 's'}</span>
         </div>

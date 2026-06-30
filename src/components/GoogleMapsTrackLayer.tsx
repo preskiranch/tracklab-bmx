@@ -12,10 +12,10 @@ import type {
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import {
   loadGoogleMaps,
+  mappedTrackRoute,
   riderLatLng,
   trackBoundsPoints,
   trackCenter,
-  trackRoute,
   type GoogleMap,
   type GoogleMarker,
   type GoogleMapsEventListener,
@@ -71,7 +71,6 @@ export function GoogleMapsTrackLayer({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
-  const boundaryLineRef = useRef<GooglePolyline | null>(null);
   const trackLineRef = useRef<GooglePolyline | null>(null);
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
   const draftLineRef = useRef<GooglePolyline | null>(null);
@@ -118,14 +117,12 @@ export function GoogleMapsTrackLayer({
 
     return () => {
       cancelled = true;
-      boundaryLineRef.current?.setMap(null);
       trackLineRef.current?.setMap(null);
       zoneLinesRef.current.forEach((line) => line.setMap(null));
       draftLineRef.current?.setMap(null);
       draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
       mapListenerRefs.current.forEach((listener) => listener.remove());
       markerRefs.current.forEach((marker) => marker.setMap(null));
-      boundaryLineRef.current = null;
       trackLineRef.current = null;
       zoneLinesRef.current = [];
       draftLineRef.current = null;
@@ -154,7 +151,6 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    boundaryLineRef.current?.setMap(null);
     trackLineRef.current?.setMap(null);
     zoneLinesRef.current.forEach((line) => line.setMap(null));
     zoneLinesRef.current = [];
@@ -163,29 +159,30 @@ export function GoogleMapsTrackLayer({
     trackBoundsPoints(track).forEach((point) => bounds.extend(point));
     map.fitBounds(bounds, 58);
 
-    boundaryLineRef.current = new google.maps.Polyline({
-      map,
-      path: track.outline,
-      strokeColor: '#ffffff',
-      strokeOpacity: 0.48,
-      strokeWeight: 3,
-    });
+    const savedRoute = mappedTrackRoute(track);
+    if (savedRoute.length < 2) {
+      trackLineRef.current = null;
+      return;
+    }
 
     trackLineRef.current = new google.maps.Polyline({
       map,
-      path: trackRoute(track),
-      strokeColor: '#ffffff',
-      strokeOpacity: 0.96,
-      strokeWeight: 8,
+      path: savedRoute,
+      strokeColor: '#d8ff3e',
+      strokeOpacity: 0.88,
+      strokeWeight: 5,
     });
 
-    zoneLinesRef.current = activeZones.map((zone) => new google.maps.Polyline({
-      map,
-      path: zonePolyline(track, zone),
-      strokeColor: zoneColors[zone.type],
-      strokeOpacity: 0.92,
-      strokeWeight: 6,
-    }));
+    zoneLinesRef.current = activeZones
+      .map((zone) => ({ zone, path: zonePolyline(track, zone) }))
+      .filter(({ path }) => path.length > 1)
+      .map(({ zone, path }) => new google.maps.Polyline({
+        map,
+        path,
+        strokeColor: zoneColors[zone.type],
+        strokeOpacity: 0.92,
+        strokeWeight: 6,
+      }));
   }, [activeZones, status, track]);
 
   useEffect(() => {
@@ -394,6 +391,12 @@ export function GoogleMapsTrackLayer({
       const position = riderLatLng(track, rider.distance);
       const label = `${formatSpeedFromKph(sample?.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const existing = markerRefs.current.get(player.id);
+
+      if (!position) {
+        existing?.setMap(null);
+        markerRefs.current.delete(player.id);
+        return;
+      }
 
       if (existing) {
         existing.setPosition(position);

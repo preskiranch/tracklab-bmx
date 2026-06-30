@@ -102,10 +102,12 @@ export function SessionControlPanel({
   onStart,
   onReset,
 }: SessionControlPanelProps) {
-  const canStart = raceState !== 'racing' && activeBikeCount > 0;
+  const hasMappedRoute = track.routeStatus === 'user-mapped';
+  const canStart = raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
   const canSaveMapping = draftPointCount >= 2;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones' ? draftZoneCount > 1 : draftPointCount > 0;
+  const availableZones = hasMappedRoute ? track.zones : [];
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -266,7 +268,7 @@ export function SessionControlPanel({
 
             {intervalMode === 'manual' && (
               <div className="zone-picker">
-                {track.zones.map((zone) => (
+                {availableZones.map((zone) => (
                   <button
                     className={manualZoneIds.includes(zone.id) ? 'selected' : ''}
                     type="button"
@@ -277,17 +279,18 @@ export function SessionControlPanel({
                     <small>{zone.startMeter}-{zone.endMeter} m</small>
                   </button>
                 ))}
+                {availableZones.length === 0 && <span className="empty-inline">No mapped sprint zones</span>}
               </div>
             )}
           </>
         )}
 
         <div className="active-zone-list">
-          {activeZones.map((zone) => (
+          {activeZones.length > 0 ? activeZones.map((zone) => (
             <span className={`zone-chip ${zone.type}`} key={zone.id}>
               {zone.name}
             </span>
-          ))}
+          )) : <span className="empty-inline">No mapped sprint zones</span>}
         </div>
       </section>
 
@@ -351,7 +354,9 @@ export function SessionControlPanel({
       <section className="panel-section start-panel">
         <button className="action-button primary" type="button" onClick={onStart} disabled={!canStart}>
           <Flag size={18} />
-          {activeBikeCount === 0
+          {!hasMappedRoute
+            ? 'Map Track First'
+            : activeBikeCount === 0
             ? 'No Bikes Connected'
             : raceState === 'finished'
               ? 'Race Again'
