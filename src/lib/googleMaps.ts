@@ -81,6 +81,7 @@ export function loadGoogleMaps() {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?${new URLSearchParams({
       key: apiKey,
+      loading: 'async',
       v: 'weekly',
     }).toString()}`;
     script.async = true;
