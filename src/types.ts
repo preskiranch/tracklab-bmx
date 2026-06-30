@@ -6,7 +6,7 @@ export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
 export type MappingEditMode = 'navigate' | 'draw' | 'zones';
 export type StartCadenceMode = 'countdown' | 'uci';
-export type MetricKey = 'cadence' | 'speed' | 'power';
+export type MetricKey = 'cadence' | 'speed' | 'power' | 'reaction';
 export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
 
 export type BikeSample = {
@@ -54,6 +54,8 @@ export type PlayerSlot = {
   accent: string;
   deviceId: number | null;
 };
+
+export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
 
 export type RaceState = 'ready' | 'racing' | 'finished';
 

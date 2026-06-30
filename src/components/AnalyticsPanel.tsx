@@ -1,11 +1,12 @@
-import { Activity, Gauge, ListFilter, Trophy, Zap } from 'lucide-react';
-import { formatDistanceRangeMeters, formatSpeedFromKph, speedUnitLabel } from '../units';
+import { Activity, Gauge, ListFilter, Timer, Trophy, Zap } from 'lucide-react';
+import { formatDistanceRangeMeters, formatReactionTime, formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
   BikeSample,
   DistanceUnit,
   LeaderboardMetric,
   MetricKey,
   PlayerSlot,
+  ReactionTimesByPlayer,
   RiderState,
   SpeedUnit,
   TrackRecord,
@@ -18,6 +19,7 @@ type AnalyticsPanelProps = {
   riders: RiderState[];
   samplesByDevice: Map<number, BikeSample>;
   selectedMetrics: MetricKey[];
+  reactionTimesByPlayer: ReactionTimesByPlayer;
   leaderboardMetric: LeaderboardMetric;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
@@ -29,6 +31,7 @@ const metricMeta: Record<MetricKey, { label: string; unit: string; icon: typeof 
   cadence: { label: 'Cadence', unit: 'RPM', icon: Activity },
   speed: { label: 'Speed', unit: '', icon: Gauge },
   power: { label: 'Power', unit: 'W', icon: Zap },
+  reaction: { label: 'Reaction', unit: 'RT', icon: Timer },
 };
 
 const leaderboardLabels: Record<LeaderboardMetric, string> = {
@@ -59,8 +62,13 @@ function metricValue(
   sample: BikeSample | undefined,
   rider: RiderState | undefined,
   speedUnit: SpeedUnit,
+  reactionTimeMs: number | null | undefined,
 ) {
   const multiplier = zoneMultiplier(zone);
+
+  if (metric === 'reaction') {
+    return formatReactionTime(reactionTimeMs);
+  }
 
   if (metric === 'cadence') {
     const value = Math.round((sample?.cadence ?? 0) * multiplier);
@@ -95,6 +103,7 @@ export function AnalyticsPanel({
   riders,
   samplesByDevice,
   selectedMetrics,
+  reactionTimesByPlayer,
   leaderboardMetric,
   speedUnit,
   distanceUnit,
@@ -147,12 +156,13 @@ export function AnalyticsPanel({
                   {players.map((player) => {
                     const sample = sampleForPlayer(player, samplesByDevice);
                     const rider = riders.find((item) => item.playerId === player.id);
+                    const reactionTime = reactionTimesByPlayer[player.id];
 
                     return (
                       <td key={player.id}>
                         {selectedMetrics.map((metric) => (
                           <span className="table-metric" key={metric}>
-                            {metricMeta[metric].label}: {metricValue(metric, zone, sample, rider, speedUnit)}
+                            {metricMeta[metric].label}: {metricValue(metric, zone, sample, rider, speedUnit, reactionTime)}
                           </span>
                         ))}
                       </td>

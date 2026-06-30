@@ -59,6 +59,7 @@ import type {
   MetricKey,
   PlayerSlot,
   PlayMode,
+  ReactionTimesByPlayer,
   SessionMode,
   SpeedUnit,
   StartCadenceMode,
@@ -124,13 +125,21 @@ type StartGateStatus = {
   active: boolean;
   label: string;
   detail: string;
+  lightIndex: 0 | 1 | 2 | 3 | null;
 };
 
 const idleStartGateStatus: StartGateStatus = {
   active: false,
   label: '',
   detail: '',
+  lightIndex: null,
 };
+
+const startTreeLabels = ['RED', 'YELLOW 1', 'YELLOW 2', 'GREEN'] as const;
+
+function isReactionBikeSample(sample: { cadence: number | null; speedKph: number | null; watts: number }) {
+  return (sample.cadence ?? 0) > 0 || (sample.speedKph ?? 0) > 0.1 || sample.watts > 5;
+}
 
 export default function App() {
   const bridge = useWattbikeBridge();
@@ -159,12 +168,14 @@ export default function App() {
   const [sessionMode, setSessionMode] = useState<SessionMode>('sprint');
   const [intervalMode, setIntervalMode] = useState<IntervalMode>('auto');
   const [manualZoneIds, setManualZoneIds] = useState<string[]>(['z2', 'z4']);
-  const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power']);
+  const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
   const [earthAngle, setEarthAngle] = useState(45);
   const [earthHeading, setEarthHeading] = useState(0);
   const [startCadenceMode, setStartCadenceMode] = useState<StartCadenceMode>('countdown');
   const [countdownSeconds, setCountdownSeconds] = useState(3);
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
+  const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
+  const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [accountsEnabled, setAccountsEnabled] = useState(false);
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
@@ -313,6 +324,33 @@ export default function App() {
   }, [raceViewFullscreen]);
 
   useEffect(() => {
+    if (reactionStartAt == null || activePlayers.length === 0) {
+      return;
+    }
+
+    setReactionTimesByPlayer((current) => {
+      let changed = false;
+      const next: ReactionTimesByPlayer = { ...current };
+
+      activePlayers.forEach((player) => {
+        if (player.deviceId == null || next[player.id] != null) {
+          return;
+        }
+
+        const sample = samplesByDevice.get(player.deviceId);
+        if (!sample || sample.at < reactionStartAt || !isReactionBikeSample(sample)) {
+          return;
+        }
+
+        next[player.id] = Math.max(0, sample.at - reactionStartAt);
+        changed = true;
+      });
+
+      return changed ? next : current;
+    });
+  }, [activePlayers, reactionStartAt, samplesByDevice]);
+
+  useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(players.map(({ id, deviceId }) => ({ id, deviceId }))));
   }, [players]);
 
@@ -331,6 +369,8 @@ export default function App() {
     });
     resetRace();
     setDemoRaceStartedAt(null);
+    setReactionStartAt(null);
+    setReactionTimesByPlayer({});
   }, [effectiveTrack.id, mappedZones, resetRace]);
 
   const assignDevice = useCallback((playerId: PlayerSlot['id'], deviceId: number | null) => {
@@ -579,6 +619,8 @@ export default function App() {
     startGateTimeoutsRef.current = [];
     stopStartGateAudio();
     setStartGateStatus(idleStartGateStatus);
+    setReactionStartAt(null);
+    setReactionTimesByPlayer({});
   }, []);
 
   useEffect(() => () => clearStartGateSequence(), [clearStartGateSequence]);
@@ -586,6 +628,11 @@ export default function App() {
   const scheduleStartGateStep = useCallback((delayMs: number, action: () => void) => {
     const timeoutId = window.setTimeout(action, delayMs);
     startGateTimeoutsRef.current.push(timeoutId);
+  }, []);
+
+  const armReactionTimer = useCallback(() => {
+    setReactionStartAt(Date.now());
+    setReactionTimesByPlayer({});
   }, []);
 
   const beginRaceAtGateDrop = useCallback(() => {
@@ -596,12 +643,13 @@ export default function App() {
     }
 
     setStartGateStatus({
-      active: false,
+      active: true,
       label: 'GO',
       detail: 'Gate open',
+      lightIndex: 3,
     });
     startRace();
-    scheduleStartGateStep(900, () => setStartGateStatus(idleStartGateStatus));
+    scheduleStartGateStep(420, () => setStartGateStatus(idleStartGateStatus));
   }, [demoMode, scheduleStartGateStep, startRace]);
 
   const handleDemoModeChange = (enabled: boolean) => {
@@ -662,6 +710,7 @@ export default function App() {
         active: true,
         label: 'OK RIDERS',
         detail: 'UCI random start voice',
+        lightIndex: null,
       });
       playUciRandomStartVoice();
 
@@ -670,6 +719,7 @@ export default function App() {
           active: true,
           label: 'RIDERS READY',
           detail: 'Watch the gate',
+          lightIndex: null,
         });
       });
 
@@ -678,15 +728,22 @@ export default function App() {
           active: true,
           label: 'RANDOM DELAY',
           detail: `${(randomDelayMs / 1000).toFixed(2)}s to gate tones`,
+          lightIndex: null,
         });
       });
 
       [0, 120, 240].forEach((offsetMs, index) => {
         scheduleStartGateStep(firstToneAtMs + offsetMs, () => {
+          if (index === 0) {
+            armReactionTimer();
+          }
+
+          const lightIndex = index as 0 | 1 | 2;
           setStartGateStatus({
             active: true,
-            label: `RED ${index + 1}`,
+            label: startTreeLabels[lightIndex],
             detail: 'UCI cadence',
+            lightIndex,
           });
           playStartGateTone('uci-red');
         });
@@ -704,15 +761,22 @@ export default function App() {
       active: true,
       label: `Gate in ${safeCountdownSeconds}`,
       detail: 'Standard countdown',
+      lightIndex: null,
     });
 
     for (let secondsRemaining = safeCountdownSeconds; secondsRemaining >= 1; secondsRemaining -= 1) {
       const delayMs = (safeCountdownSeconds - secondsRemaining) * 1000;
       scheduleStartGateStep(delayMs, () => {
+        if (secondsRemaining === safeCountdownSeconds) {
+          armReactionTimer();
+        }
+
+        const lightIndex = secondsRemaining <= 3 ? (3 - secondsRemaining) as 0 | 1 | 2 : null;
         setStartGateStatus({
           active: true,
-          label: `Gate in ${secondsRemaining}`,
-          detail: 'Standard countdown',
+          label: lightIndex == null ? `Gate in ${secondsRemaining}` : startTreeLabels[lightIndex],
+          detail: lightIndex == null ? 'Standard countdown' : `Gate in ${secondsRemaining}`,
+          lightIndex,
         });
         playStartGateTone('tick');
       });
@@ -850,6 +914,9 @@ export default function App() {
                 distanceUnit={distanceUnit}
                 raceState={raceState}
                 raceViewFullscreen={raceViewFullscreen}
+                startGateActive={startGateStatus.active}
+                startGateLightIndex={startGateStatus.lightIndex}
+                reactionTimesByPlayer={reactionTimesByPlayer}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
                 activeZones={activeZones}
@@ -926,6 +993,7 @@ export default function App() {
                 riders={riders}
                 samplesByDevice={samplesByDevice}
                 selectedMetrics={selectedMetrics}
+                reactionTimesByPlayer={reactionTimesByPlayer}
                 leaderboardMetric={leaderboardMetric}
                 speedUnit={speedUnit}
                 distanceUnit={distanceUnit}

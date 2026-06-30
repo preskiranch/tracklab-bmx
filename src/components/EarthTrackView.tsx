@@ -14,13 +14,14 @@ import {
 } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
-import { formatDistanceMeters } from '../units';
+import { formatDistanceMeters, formatReactionTime } from '../units';
 import type {
   BikeSample,
   DistanceUnit,
   MappingEditMode,
   PlayerSlot,
   RaceState,
+  ReactionTimesByPlayer,
   RiderState,
   SpeedUnit,
   TrackPoint,
@@ -37,6 +38,9 @@ type EarthTrackViewProps = {
   distanceUnit: DistanceUnit;
   raceState: RaceState;
   raceViewFullscreen: boolean;
+  startGateActive: boolean;
+  startGateLightIndex: 0 | 1 | 2 | 3 | null;
+  reactionTimesByPlayer: ReactionTimesByPlayer;
   earthAngle: number;
   earthHeading: number;
   activeZones: TrackZone[];
@@ -61,6 +65,27 @@ function formatElapsed(milliseconds: number | null) {
   return `${seconds.toFixed(2)}s`;
 }
 
+const startTreeLamps = [
+  { className: 'red', label: 'Red' },
+  { className: 'yellow', label: 'Yellow one' },
+  { className: 'yellow', label: 'Yellow two' },
+  { className: 'green', label: 'Green' },
+] as const;
+
+function StartTreeLight({ activeIndex }: { activeIndex: 0 | 1 | 2 | 3 | null }) {
+  return (
+    <div className="start-tree-light" aria-label="BMX start tree light">
+      {startTreeLamps.map((lamp, index) => (
+        <span
+          className={`tree-lamp ${lamp.className}${activeIndex === index ? ' active' : ''}`}
+          aria-label={lamp.label}
+          key={`${lamp.className}-${index}`}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function EarthTrackView({
   track,
   riders,
@@ -70,6 +95,9 @@ export function EarthTrackView({
   distanceUnit,
   raceState,
   raceViewFullscreen,
+  startGateActive,
+  startGateLightIndex,
+  reactionTimesByPlayer,
   earthAngle,
   earthHeading,
   activeZones,
@@ -175,6 +203,10 @@ export function EarthTrackView({
           <span>{activeZones.length} active zone{activeZones.length === 1 ? '' : 's'}</span>
         </div>
 
+        {raceViewFullscreen && startGateActive && (
+          <StartTreeLight activeIndex={startGateLightIndex} />
+        )}
+
         <div className="map-camera-pad" aria-label="Map camera controls">
           <button
             aria-label="Rotate map left"
@@ -225,13 +257,14 @@ export function EarthTrackView({
         ) : riders.map((rider) => {
           const player = players.find((slot) => slot.id === rider.playerId);
           const sample = player?.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
+          const reactionTime = player ? reactionTimesByPlayer[player.id] : null;
 
           return (
             <div className="rider-stat" style={{ '--player-color': player?.accent ?? '#111827' } as CSSProperties} key={rider.playerId}>
               <span className="player-chip">P{rider.playerId}</span>
               <div>
                 <strong>{player?.name ?? `Player ${rider.playerId}`}</strong>
-                <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank}</span>
+                <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank} / RT {formatReactionTime(reactionTime)}</span>
               </div>
               <div className="rider-stat-live">
                 <Signal size={14} />

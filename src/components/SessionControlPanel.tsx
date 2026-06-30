@@ -87,6 +87,7 @@ const metricOptions: Array<{ key: MetricKey; label: string; icon: typeof Activit
   { key: 'cadence', label: 'Cadence', icon: Activity },
   { key: 'speed', label: 'Speed', icon: Gauge },
   { key: 'power', label: 'Power', icon: Zap },
+  { key: 'reaction', label: 'Reaction', icon: Timer },
 ];
 
 export function SessionControlPanel({

@@ -40,3 +40,11 @@ export function formatDistanceRangeMeters(startMeters: number, endMeters: number
 
   return `${Math.round(start * 3.28084).toLocaleString()}-${Math.round(end * 3.28084).toLocaleString()} ft`;
 }
+
+export function formatReactionTime(milliseconds: number | null | undefined) {
+  if (milliseconds == null || !Number.isFinite(milliseconds)) {
+    return '--';
+  }
+
+  return `${(Math.max(0, milliseconds) / 1000).toFixed(3)}s`;
+}
