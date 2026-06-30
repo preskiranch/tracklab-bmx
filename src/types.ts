@@ -80,6 +80,24 @@ export type RiderState = {
   finishedAt: number | null;
 };
 
+export type RaceSummaryEntry = {
+  playerId: PlayerSlot['id'];
+  riderName: string;
+  colorName: PlayerSlot['colorName'];
+  accent: string;
+  deviceLabel: string;
+  rank: number;
+  finishTimeMs: number | null;
+  distanceMeters: number;
+  sampleCount: number;
+  topSpeedKph: number | null;
+  averageSpeedKph: number | null;
+  topCadence: number | null;
+  averageCadence: number | null;
+  topWatts: number | null;
+  averageWatts: number | null;
+};
+
 export type TrackPoint = {
   lat: number;
   lng: number;

@@ -316,7 +316,7 @@ export default function App() {
 
     return mappedZones.filter((zone) => manualZoneIds.includes(zone.id));
   }, [intervalMode, manualZoneIds, mappedZones, sessionMode]);
-  const { raceState, riders, startRace, resetRace } = useRaceEngine(
+  const { raceState, riders, raceSummary, startRace, resetRace } = useRaceEngine(
     activePlayers,
     samplesByDevice,
     effectiveTrack.lengthMeters,
@@ -1024,6 +1024,7 @@ export default function App() {
                 track={effectiveTrack}
                 players={activePlayers}
                 riders={riders}
+                raceSummary={raceSummary}
                 samplesByDevice={samplesByDevice}
                 selectedMetrics={selectedMetrics}
                 reactionTimesByPlayer={reactionTimesByPlayer}

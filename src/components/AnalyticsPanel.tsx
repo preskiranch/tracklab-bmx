@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Activity, Gauge, ListFilter, Timer, Trophy, Zap } from 'lucide-react';
 import { formatDistanceRangeMeters, formatReactionTime, formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
@@ -6,6 +7,7 @@ import type {
   LeaderboardMetric,
   MetricKey,
   PlayerSlot,
+  RaceSummaryEntry,
   ReactionTimesByPlayer,
   RiderState,
   SpeedUnit,
@@ -17,6 +19,7 @@ type AnalyticsPanelProps = {
   track: TrackRecord;
   players: PlayerSlot[];
   riders: RiderState[];
+  raceSummary: RaceSummaryEntry[];
   samplesByDevice: Map<number, BikeSample>;
   selectedMetrics: MetricKey[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
@@ -97,10 +100,42 @@ function leaderboardValue(value: number, metric: LeaderboardMetric, speedUnit: S
   return `${Math.round(value)} ${metric === 'rpm' ? 'RPM' : 'W'}`;
 }
 
+function ordinal(rank: number) {
+  const suffix = rank % 100 >= 11 && rank % 100 <= 13
+    ? 'th'
+    : ['th', 'st', 'nd', 'rd'][rank % 10] ?? 'th';
+  return `${rank}${suffix}`;
+}
+
+function formatFinishTime(milliseconds: number | null) {
+  if (milliseconds == null) {
+    return 'DNF';
+  }
+
+  return `${(milliseconds / 1000).toFixed(2)}s`;
+}
+
+function formatNullableMetric(value: number | null, unit: string) {
+  if (value == null || !Number.isFinite(value)) {
+    return '--';
+  }
+
+  return `${Math.round(value)} ${unit}`;
+}
+
+function formatNullableSpeed(speedKph: number | null, speedUnit: SpeedUnit) {
+  if (speedKph == null || !Number.isFinite(speedKph)) {
+    return '--';
+  }
+
+  return `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+}
+
 export function AnalyticsPanel({
   track,
   players,
   riders,
+  raceSummary,
   samplesByDevice,
   selectedMetrics,
   reactionTimesByPlayer,
@@ -115,6 +150,10 @@ export function AnalyticsPanel({
     : track.routeStatus === 'user-mapped'
       ? track.zones
       : [];
+  const showSpeedSummary = selectedMetrics.includes('speed');
+  const showCadenceSummary = selectedMetrics.includes('cadence');
+  const showPowerSummary = selectedMetrics.includes('power');
+  const showReactionSummary = selectedMetrics.includes('reaction');
 
   return (
     <section className="analytics-panel">
@@ -134,6 +173,70 @@ export function AnalyticsPanel({
           })}
         </div>
       </div>
+
+      {raceSummary.length > 0 && (
+        <div className="race-summary-card">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Race Summary</span>
+              <h3>Final rider results</h3>
+            </div>
+            <Trophy size={18} />
+          </div>
+
+          <div className="race-summary-table-wrap">
+            <table className="race-summary-table">
+              <thead>
+                <tr>
+                  <th>Place</th>
+                  <th>Rider</th>
+                  <th>Finish</th>
+                  {showReactionSummary && <th>Reaction</th>}
+                  {showSpeedSummary && <th>Top speed</th>}
+                  {showSpeedSummary && <th>Avg speed</th>}
+                  {showCadenceSummary && <th>Top cadence</th>}
+                  {showCadenceSummary && <th>Avg cadence</th>}
+                  {showPowerSummary && <th>Top watts</th>}
+                  {showPowerSummary && <th>Avg watts</th>}
+                  <th>Samples</th>
+                </tr>
+              </thead>
+              <tbody>
+                {raceSummary.map((summary) => (
+                  <tr key={summary.playerId}>
+                    <td>
+                      <span className="place-badge">{ordinal(summary.rank)}</span>
+                    </td>
+                    <td>
+                      <div className="summary-rider">
+                        <span
+                          className="player-chip"
+                          style={{ '--player-color': summary.accent } as CSSProperties}
+                        >
+                          P{summary.playerId}
+                        </span>
+                        <div>
+                          <strong>{summary.riderName}</strong>
+                          <span>{summary.deviceLabel}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{formatFinishTime(summary.finishTimeMs)}</td>
+                    {showReactionSummary && <td>{formatReactionTime(reactionTimesByPlayer[summary.playerId])}</td>}
+                    {showSpeedSummary && <td>{formatNullableSpeed(summary.topSpeedKph, speedUnit)}</td>}
+                    {showSpeedSummary && <td>{formatNullableSpeed(summary.averageSpeedKph, speedUnit)}</td>}
+                    {showCadenceSummary && <td>{formatNullableMetric(summary.topCadence, 'RPM')}</td>}
+                    {showCadenceSummary && <td>{formatNullableMetric(summary.averageCadence, 'RPM')}</td>}
+                    {showPowerSummary && <td>{formatNullableMetric(summary.topWatts, 'W')}</td>}
+                    {showPowerSummary && <td>{formatNullableMetric(summary.averageWatts, 'W')}</td>}
+                    <td>{summary.sampleCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="analytics-grid">
         <div className="zone-table-card">

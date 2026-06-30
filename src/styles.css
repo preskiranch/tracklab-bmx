@@ -1453,6 +1453,84 @@ input:focus {
   gap: 8px;
 }
 
+.race-summary-card {
+  display: grid;
+  gap: 12px;
+  margin: 0 12px 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.race-summary-table-wrap {
+  overflow: auto;
+}
+
+.race-summary-table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: collapse;
+}
+
+.race-summary-table th,
+.race-summary-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #edf1f3;
+  color: #1e2934;
+  font-size: 12px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.race-summary-table th {
+  color: #566676;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.race-summary-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.place-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 28px;
+  border-radius: 7px;
+  background: #111827;
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.summary-rider {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 190px;
+}
+
+.summary-rider > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.summary-rider strong,
+.summary-rider span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary-rider span:last-child {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .analytics-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
