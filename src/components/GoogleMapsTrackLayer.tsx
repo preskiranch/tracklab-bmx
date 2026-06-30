@@ -115,9 +115,27 @@ function riderScreenRotation(routeBearing: number, mapHeading: number) {
   return normalizeHeading(routeBearing - mapHeading - 90);
 }
 
+function signedRotationDegrees(rotationDegrees: number) {
+  const normalized = normalizeHeading(rotationDegrees);
+  return normalized > 180 ? normalized - 360 : normalized;
+}
+
+function uprightRiderOrientation(rotationDegrees: number) {
+  const signedRotation = signedRotationDegrees(rotationDegrees);
+  const mirrored = Math.abs(signedRotation) > 90;
+  const facingLean = mirrored
+    ? signedRotation - Math.sign(signedRotation || 1) * 180
+    : signedRotation;
+
+  return {
+    leanDegrees: Math.max(-24, Math.min(24, facingLean)),
+    mirrored,
+  };
+}
+
 function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
   return {
-    anchor: new google.maps.Point(34, 52),
+    anchor: new google.maps.Point(34, 70),
     labelOrigin: new google.maps.Point(76, 21),
     scaledSize: new google.maps.Size(68, 76),
     url: riderIconByColor[player.colorName],
@@ -141,10 +159,11 @@ function loadRiderImage(url: string) {
   return promise;
 }
 
-async function rotatedRiderIconUrl(player: PlayerSlot, rotationDegrees: number) {
+async function uprightRiderIconUrl(player: PlayerSlot, rotationDegrees: number) {
   const imageUrl = riderIconByColor[player.colorName];
-  const rotationBucket = Math.round(normalizeHeading(rotationDegrees) / 3) * 3 % 360;
-  const cacheKey = `${player.colorName}:${rotationBucket}`;
+  const orientation = uprightRiderOrientation(rotationDegrees);
+  const leanBucket = Math.round(orientation.leanDegrees / 2) * 2;
+  const cacheKey = `${player.colorName}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}`;
   const cached = riderIconCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -161,7 +180,8 @@ async function rotatedRiderIconUrl(player: PlayerSlot, rotationDegrees: number) 
   }
 
   context.translate(size / 2, size / 2);
-  context.rotate((rotationBucket * Math.PI) / 180);
+  context.rotate((leanBucket * Math.PI) / 180);
+  context.scale(orientation.mirrored ? -1 : 1, 1);
   context.shadowColor = 'rgba(0, 0, 0, 0.35)';
   context.shadowBlur = 8;
   context.shadowOffsetY = 5;
@@ -199,14 +219,14 @@ function createRiderMapMarker(
   const applyRotation = (nextRotation: number) => {
     iconVersion += 1;
     const version = iconVersion;
-    void rotatedRiderIconUrl(player, nextRotation)
+    void uprightRiderIconUrl(player, nextRotation)
       .then((url) => {
         if (version !== iconVersion) {
           return;
         }
 
         marker.setIcon({
-          anchor: new google.maps.Point(52, 62),
+          anchor: new google.maps.Point(52, 87),
           labelOrigin: new google.maps.Point(91, 24),
           scaledSize: new google.maps.Size(104, 104),
           url,
