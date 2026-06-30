@@ -1,6 +1,7 @@
 import type { ChangeEvent } from 'react';
 import {
   Activity,
+  Bike,
   Compass,
   Download,
   Flag,
@@ -38,6 +39,9 @@ type SessionControlPanelProps = {
   earthHeading: number;
   raceState: RaceState;
   activeBikeCount: number;
+  demoMode: boolean;
+  demoBikeCount: number;
+  demoVariableCount: number;
   mappingMode: boolean;
   mappingEditMode: MappingEditMode;
   draftPointCount: number;
@@ -51,6 +55,8 @@ type SessionControlPanelProps = {
   onSpeedUnitChange: (unit: SpeedUnit) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
+  onDemoModeChange: (enabled: boolean) => void;
+  onDemoBikeCountChange: (count: number) => void;
   onMappingModeChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
   onMappingRestSecondsChange: (seconds: number) => void;
@@ -82,6 +88,9 @@ export function SessionControlPanel({
   earthHeading,
   raceState,
   activeBikeCount,
+  demoMode,
+  demoBikeCount,
+  demoVariableCount,
   mappingMode,
   mappingEditMode,
   draftPointCount,
@@ -95,6 +104,8 @@ export function SessionControlPanel({
   onSpeedUnitChange,
   onEarthAngleChange,
   onEarthHeadingChange,
+  onDemoModeChange,
+  onDemoBikeCountChange,
   onMappingModeChange,
   onMappingEditModeChange,
   onMappingRestSecondsChange,
@@ -229,6 +240,55 @@ export function SessionControlPanel({
             Remove
           </button>
         </div>
+      </section>
+
+      <section className="panel-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Input Mode</span>
+            <h3>Bike source</h3>
+          </div>
+          <Bike size={18} />
+        </div>
+
+        <div className="segmented-control compact" aria-label="Bike source">
+          <button
+            className={!demoMode ? 'selected' : ''}
+            type="button"
+            onClick={() => onDemoModeChange(false)}
+          >
+            Wattbike
+          </button>
+          <button
+            className={demoMode ? 'selected' : ''}
+            type="button"
+            onClick={() => onDemoModeChange(true)}
+          >
+            Demo
+          </button>
+        </div>
+
+        {demoMode && (
+          <>
+            <div className="demo-mode-row">
+              <span>Riders</span>
+              <strong>{demoBikeCount} / 4</strong>
+              <small>{demoVariableCount} race variables</small>
+            </div>
+            <div className="segmented-control compact four-way" aria-label="Demo rider count">
+              {[1, 2, 3, 4].map((count) => (
+                <button
+                  className={demoBikeCount === count ? 'selected' : ''}
+                  type="button"
+                  onClick={() => onDemoBikeCountChange(count)}
+                  key={count}
+                >
+                  {count}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       <section className="panel-section">
@@ -383,12 +443,12 @@ export function SessionControlPanel({
           {!hasMappedRoute
             ? 'Map Track First'
             : activeBikeCount === 0
-            ? 'No Bikes Connected'
-            : raceState === 'finished'
-              ? 'Race Again'
-              : raceState === 'racing'
-                ? 'Racing'
-                : 'Start Session'}
+              ? (demoMode ? 'Choose Riders' : 'No Bikes Connected')
+              : raceState === 'finished'
+                ? 'Race Again'
+                : raceState === 'racing'
+                  ? 'Racing'
+                  : demoMode ? 'Start Demo Race' : 'Start Session'}
         </button>
         <button className="action-button secondary" type="button" onClick={onReset}>
           <RotateCcw size={18} />

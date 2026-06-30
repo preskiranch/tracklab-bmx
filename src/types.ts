@@ -1,4 +1,4 @@
-export type BridgeMode = 'sim' | 'ant';
+export type BridgeMode = 'sim' | 'ant' | 'demo';
 export type SpeedUnit = 'kph' | 'mph';
 export type SessionMode = 'sprint' | 'interval';
 export type IntervalMode = 'auto' | 'manual';

@@ -726,6 +726,10 @@ input:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.segmented-control.four-way {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .segmented-control button {
   display: inline-flex;
   align-items: center;
@@ -743,6 +747,33 @@ input:focus {
 .segmented-control button.selected {
   background: #111827;
   color: #ffffff;
+}
+
+.demo-mode-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fafb;
+}
+
+.demo-mode-row span,
+.demo-mode-row small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.demo-mode-row strong {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.demo-mode-row small {
+  grid-column: 1 / -1;
 }
 
 .zone-picker {
@@ -998,6 +1029,12 @@ input:focus {
   background: #f7f9fb;
 }
 
+.square-button:disabled,
+.clear-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .pairing-rail {
   overflow: hidden;
 }
@@ -1074,6 +1111,19 @@ input:focus {
   width: 100%;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.device-static-value {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #253241;
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .pair-stats {
