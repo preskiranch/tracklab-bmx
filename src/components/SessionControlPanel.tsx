@@ -7,6 +7,8 @@ import {
   Flag,
   Gauge,
   MapPinned,
+  Maximize2,
+  Minimize2,
   RotateCcw,
   Save,
   SlidersHorizontal,
@@ -47,6 +49,7 @@ type SessionControlPanelProps = {
   demoBikeCount: number;
   demoVariableCount: number;
   mappingMode: boolean;
+  mappingFullscreen: boolean;
   mappingEditMode: MappingEditMode;
   draftPointCount: number;
   draftZoneCount: number;
@@ -71,6 +74,7 @@ type SessionControlPanelProps = {
   onStartCadenceModeChange: (mode: StartCadenceMode) => void;
   onCountdownSecondsChange: (seconds: number) => void;
   onMappingModeChange: (enabled: boolean) => void;
+  onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
   onMappingRestSecondsChange: (seconds: number) => void;
   onMappingUndoPoint: () => void;
@@ -107,6 +111,7 @@ export function SessionControlPanel({
   demoBikeCount,
   demoVariableCount,
   mappingMode,
+  mappingFullscreen,
   mappingEditMode,
   draftPointCount,
   draftZoneCount,
@@ -131,6 +136,7 @@ export function SessionControlPanel({
   onStartCadenceModeChange,
   onCountdownSecondsChange,
   onMappingModeChange,
+  onMappingFullscreenChange,
   onMappingEditModeChange,
   onMappingRestSecondsChange,
   onMappingUndoPoint,
@@ -265,6 +271,15 @@ export function SessionControlPanel({
                 Save
               </button>
             </div>
+
+            <button
+              className="mapping-fullscreen-button"
+              type="button"
+              onClick={() => onMappingFullscreenChange(!mappingFullscreen)}
+            >
+              {mappingFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              {mappingFullscreen ? 'Exit full screen' : 'Full screen edit'}
+            </button>
           </>
         )}
 

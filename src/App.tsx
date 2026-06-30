@@ -151,6 +151,7 @@ export default function App() {
   const [catalogTracks, setCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const [mappingMode, setMappingMode] = useState(false);
+  const [mappingFullscreen, setMappingFullscreen] = useState(false);
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
   const [draftZoneMeters, setDraftZoneMeters] = useState<number[]>([]);
@@ -323,14 +324,20 @@ export default function App() {
   );
   useZoneAudioCues(raceState, riders, activeZones);
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
+  const shellFullscreenActive = raceViewFullscreen || mappingFullscreen;
 
   useEffect(() => {
-    if (raceViewFullscreen || document.fullscreenElement !== raceShellRef.current) {
+    if (shellFullscreenActive) {
+      if (!document.fullscreenElement && raceShellRef.current) {
+        void raceShellRef.current.requestFullscreen?.().catch(() => undefined);
+      }
       return;
     }
 
-    void document.exitFullscreen?.().catch(() => undefined);
-  }, [raceViewFullscreen]);
+    if (document.fullscreenElement === raceShellRef.current) {
+      void document.exitFullscreen?.().catch(() => undefined);
+    }
+  }, [shellFullscreenActive]);
 
   useEffect(() => {
     if (reactionStartAt == null || activePlayers.length === 0) {
@@ -459,6 +466,7 @@ export default function App() {
     setMappingRestSeconds(mapping?.restAfterSeconds ?? 1);
     setMappingEditMode('navigate');
     setMappingMode(false);
+    setMappingFullscreen(false);
   }, [selectedTrack.id]);
 
   const handleMappingModeChange = (enabled: boolean) => {
@@ -470,9 +478,19 @@ export default function App() {
 
     if (enabled) {
       setMappingEditMode('navigate');
+    } else {
+      setMappingFullscreen(false);
     }
 
     setMappingMode(enabled);
+  };
+
+  const handleMappingFullscreenChange = (enabled: boolean) => {
+    if (enabled && !mappingMode) {
+      handleMappingModeChange(true);
+    }
+
+    setMappingFullscreen(enabled);
   };
 
   const handleMappingPathPointAdd = useCallback((point: TrackPoint) => {
@@ -483,6 +501,19 @@ export default function App() {
       }
 
       return [...current, point];
+    });
+  }, []);
+
+  const handleMappingPathPointMove = useCallback((index: number, point: TrackPoint) => {
+    setDraftPoints((current) => {
+      if (index < 0 || index >= current.length) {
+        return current;
+      }
+
+      const next = current.map((draftPoint, draftIndex) => (draftIndex === index ? point : draftPoint));
+      const nextLength = next.length > 1 ? routeLengthMeters(next) : 0;
+      setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter > 2 && meter < nextLength - 2));
+      return next;
     });
   }, []);
 
@@ -706,6 +737,7 @@ export default function App() {
     }
 
     clearStartGateSequence();
+    setMappingFullscreen(false);
     primeAudioCues();
     if (!document.fullscreenElement) {
       void raceShellRef.current?.requestFullscreen?.().catch(() => undefined);
@@ -828,7 +860,10 @@ export default function App() {
   const connectionState = demoMode || bluetooth.connectedCount > 0 ? 'open' : bridge.connection;
 
   return (
-    <div className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}`} ref={raceShellRef}>
+    <div
+      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}`}
+      ref={raceShellRef}
+    >
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark">
@@ -954,6 +989,7 @@ export default function App() {
                 earthHeading={earthHeading}
                 activeZones={activeZones}
                 mappingMode={mappingMode}
+                mappingFullscreen={mappingFullscreen}
                 mappingEditMode={mappingEditMode}
                 draftPoints={draftPoints}
                 draftZoneMeters={draftZoneMeters}
@@ -961,7 +997,9 @@ export default function App() {
                 onEarthCameraChange={handleEarthCameraChange}
                 onEarthAngleChange={setEarthAngle}
                 onEarthHeadingChange={setEarthHeading}
+                onMappingFullscreenChange={handleMappingFullscreenChange}
                 onMappingPathPointAdd={handleMappingPathPointAdd}
+                onMappingPathPointMove={handleMappingPathPointMove}
                 onMappingZonePointAdd={handleMappingZonePointAdd}
               />
 
@@ -982,6 +1020,7 @@ export default function App() {
                 demoBikeCount={demoBikeCount}
                 demoVariableCount={demo.variableCount}
                 mappingMode={mappingMode}
+                mappingFullscreen={mappingFullscreen}
                 mappingEditMode={mappingEditMode}
                 draftPointCount={draftPoints.length}
                 draftZoneCount={draftPoints.length > 1 ? draftZoneMeters.length + 1 : 0}
@@ -1006,6 +1045,7 @@ export default function App() {
                 onStartCadenceModeChange={setStartCadenceMode}
                 onCountdownSecondsChange={(seconds) => setCountdownSeconds(Math.max(3, Math.min(6, Math.round(seconds))))}
                 onMappingModeChange={handleMappingModeChange}
+                onMappingFullscreenChange={handleMappingFullscreenChange}
                 onMappingEditModeChange={setMappingEditMode}
                 onMappingRestSecondsChange={updateMappingRestSeconds}
                 onMappingUndoPoint={undoMappingPoint}

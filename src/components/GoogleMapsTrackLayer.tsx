@@ -4,6 +4,7 @@ import type {
   DistanceUnit,
   MappingEditMode,
   PlayerSlot,
+  RaceState,
   RiderState,
   SpeedUnit,
   TrackPoint,
@@ -37,6 +38,7 @@ type GoogleMapsTrackLayerProps = {
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
   raceViewFullscreen?: boolean;
+  raceState: RaceState;
   earthAngle: number;
   earthHeading: number;
   mappingMode?: boolean;
@@ -46,6 +48,7 @@ type GoogleMapsTrackLayerProps = {
   draftZonePoints?: TrackPoint[];
   onEarthCameraChange?: (camera: { angle?: number; heading?: number }) => void;
   onMappingPathPointAdd?: (point: TrackPoint) => void;
+  onMappingPathPointMove?: (index: number, point: TrackPoint) => void;
   onMappingZonePointAdd?: (point: TrackPoint) => void;
 };
 
@@ -109,6 +112,27 @@ function distanceLabelIcon(text: string, color = '#111827') {
     <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="26" viewBox="0 0 ${width} 26">
       <rect x="1" y="1" width="${width - 2}" height="24" rx="6" fill="${color}" fill-opacity="0.92" stroke="#ffffff" stroke-width="1.4"/>
       <text x="${width / 2}" y="17" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="800" fill="#ffffff">${text}</text>
+    </svg>
+  `;
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function finishLineIcon() {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="86" height="34" viewBox="0 0 86 34">
+      <rect x="1" y="1" width="84" height="32" rx="7" fill="#111827" fill-opacity="0.94" stroke="#ffffff" stroke-width="1.5"/>
+      <g transform="translate(12 7)">
+        <rect width="4" height="4" fill="#ffffff"/>
+        <rect x="4" y="4" width="4" height="4" fill="#ffffff"/>
+        <rect y="8" width="4" height="4" fill="#ffffff"/>
+        <rect x="4" y="12" width="4" height="4" fill="#ffffff"/>
+        <rect x="8" width="4" height="4" fill="#ffffff"/>
+        <rect x="12" y="4" width="4" height="4" fill="#ffffff"/>
+        <rect x="8" y="8" width="4" height="4" fill="#ffffff"/>
+        <rect x="12" y="12" width="4" height="4" fill="#ffffff"/>
+      </g>
+      <text x="54" y="22" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="900" fill="#ffffff">FINISH</text>
     </svg>
   `;
 
@@ -264,6 +288,7 @@ export function GoogleMapsTrackLayer({
   speedUnit,
   distanceUnit,
   raceViewFullscreen = false,
+  raceState,
   earthAngle,
   earthHeading,
   mappingMode = false,
@@ -273,6 +298,7 @@ export function GoogleMapsTrackLayer({
   draftZonePoints = [],
   onEarthCameraChange,
   onMappingPathPointAdd,
+  onMappingPathPointMove,
   onMappingZonePointAdd,
 }: GoogleMapsTrackLayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -281,8 +307,10 @@ export function GoogleMapsTrackLayer({
   const trackLineRef = useRef<GooglePolyline | null>(null);
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
   const distanceLabelRefs = useRef<GoogleMarker[]>([]);
+  const finishMarkerRef = useRef<GoogleMarker | null>(null);
   const draftLineRef = useRef<GooglePolyline | null>(null);
   const draftMarkerRefs = useRef<GoogleMarker[]>([]);
+  const draftMarkerListenerRefs = useRef<GoogleMapsEventListener[]>([]);
   const mapListenerRefs = useRef<GoogleMapsEventListener[]>([]);
   const isDrawingRef = useRef(false);
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
@@ -342,15 +370,19 @@ export function GoogleMapsTrackLayer({
       trackLineRef.current?.setMap(null);
       zoneLinesRef.current.forEach((line) => line.setMap(null));
       distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
+      finishMarkerRef.current?.setMap(null);
       draftLineRef.current?.setMap(null);
       draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      draftMarkerListenerRefs.current.forEach((listener) => listener.remove());
       mapListenerRefs.current.forEach((listener) => listener.remove());
       markerRefs.current.forEach((marker) => marker.setMap(null));
       trackLineRef.current = null;
       zoneLinesRef.current = [];
       distanceLabelRefs.current = [];
+      finishMarkerRef.current = null;
       draftLineRef.current = null;
       draftMarkerRefs.current = [];
+      draftMarkerListenerRefs.current = [];
       mapListenerRefs.current = [];
       markerRefs.current.clear();
       mapRef.current = null;
@@ -415,8 +447,10 @@ export function GoogleMapsTrackLayer({
     trackLineRef.current?.setMap(null);
     zoneLinesRef.current.forEach((line) => line.setMap(null));
     distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
+    finishMarkerRef.current?.setMap(null);
     zoneLinesRef.current = [];
     distanceLabelRefs.current = [];
+    finishMarkerRef.current = null;
 
     const fitKey = `${track.id}:${track.routeStatus ?? 'locator'}:${track.centerline?.length ?? 0}`;
     if (lastFitKeyRef.current !== fitKey) {
@@ -442,16 +476,20 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    trackLineRef.current = new google.maps.Polyline({
-      map,
-      path: savedRoute,
-      strokeColor: '#d8ff3e',
-      strokeOpacity: 0.88,
-      strokeWeight: 5,
-    });
+    const hideRaceRoute = raceViewFullscreen || raceState === 'racing';
+
+    if (!hideRaceRoute) {
+      trackLineRef.current = new google.maps.Polyline({
+        map,
+        path: savedRoute,
+        strokeColor: '#d8ff3e',
+        strokeOpacity: 0.88,
+        strokeWeight: 5,
+      });
+    }
 
     const routeMidpoint = riderLatLng(track, track.lengthMeters / 2);
-    if (routeMidpoint) {
+    if (routeMidpoint && !hideRaceRoute) {
       distanceLabelRefs.current.push(new google.maps.Marker({
         icon: {
           anchor: new google.maps.Point(54, 34),
@@ -466,18 +504,24 @@ export function GoogleMapsTrackLayer({
       }));
     }
 
-    zoneLinesRef.current = activeZones
-      .map((zone) => ({ zone, path: zonePolyline(track, zone) }))
-      .filter(({ path }) => path.length > 1)
-      .map(({ zone, path }) => new google.maps.Polyline({
-        map,
-        path,
-        strokeColor: zoneColors[zone.type],
-        strokeOpacity: 0.92,
-        strokeWeight: 6,
-      }));
+    if (!hideRaceRoute) {
+      zoneLinesRef.current = activeZones
+        .map((zone) => ({ zone, path: zonePolyline(track, zone) }))
+        .filter(({ path }) => path.length > 1)
+        .map(({ zone, path }) => new google.maps.Polyline({
+          map,
+          path,
+          strokeColor: zoneColors[zone.type],
+          strokeOpacity: 0.92,
+          strokeWeight: 6,
+        }));
+    }
 
     activeZones.forEach((zone, index) => {
+      if (hideRaceRoute) {
+        return;
+      }
+
       const position = riderLatLng(track, zone.startMeter + (zone.endMeter - zone.startMeter) / 2);
       if (!position) {
         return;
@@ -497,7 +541,23 @@ export function GoogleMapsTrackLayer({
         zIndex: 520,
       }));
     });
-  }, [activeZones, distanceUnit, status, track]);
+
+    const finishPosition = riderLatLng(track, track.lengthMeters);
+    if (finishPosition) {
+      finishMarkerRef.current = new google.maps.Marker({
+        icon: {
+          anchor: new google.maps.Point(43, 18),
+          scaledSize: new google.maps.Size(86, 34),
+          url: finishLineIcon(),
+        },
+        map,
+        optimized: false,
+        position: finishPosition,
+        title: 'Finish line',
+        zIndex: 820,
+      });
+    }
+  }, [activeZones, distanceUnit, raceState, raceViewFullscreen, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -551,7 +611,9 @@ export function GoogleMapsTrackLayer({
 
     draftLineRef.current?.setMap(null);
     draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    draftMarkerListenerRefs.current.forEach((listener) => listener.remove());
     draftMarkerRefs.current = [];
+    draftMarkerListenerRefs.current = [];
 
     if (!mappingMode || draftPoints.length === 0) {
       draftLineRef.current = null;
@@ -608,13 +670,16 @@ export function GoogleMapsTrackLayer({
       });
     }).filter((marker): marker is GoogleMarker => marker != null);
 
-    const endpointMarkers = draftPoints.length === 0 ? [] : [
-      new google.maps.Marker({
+    const pathPointMarkers = draftPoints.map((point, index) => {
+      const isStart = index === 0;
+      const isFinish = index === draftPoints.length - 1 && draftPoints.length > 1;
+      const marker = new google.maps.Marker({
+        draggable: Boolean(onMappingPathPointMove),
         icon: {
-          fillColor: '#d8ff3e',
+          fillColor: isStart || isFinish ? '#d8ff3e' : '#ffffff',
           fillOpacity: 1,
           path: google.maps.SymbolPath.CIRCLE,
-          scale: 10,
+          scale: isStart || isFinish ? 11 : 8,
           strokeColor: '#111827',
           strokeWeight: 2,
         },
@@ -622,36 +687,26 @@ export function GoogleMapsTrackLayer({
           color: '#111827',
           fontSize: '11px',
           fontWeight: '900',
-          text: 'S',
+          text: isStart ? 'S' : isFinish ? 'F' : String(index + 1),
         },
         map,
         optimized: true,
-        position: draftPoints[0],
-        title: 'Mapping start',
-      }),
-      ...(draftPoints.length > 1 ? [
-        new google.maps.Marker({
-          icon: {
-            fillColor: '#d8ff3e',
-            fillOpacity: 1,
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 10,
-            strokeColor: '#111827',
-            strokeWeight: 2,
-          },
-          label: {
-            color: '#111827',
-            fontSize: '11px',
-            fontWeight: '900',
-            text: 'F',
-          },
-          map,
-          optimized: true,
-          position: draftPoints[draftPoints.length - 1],
-          title: 'Mapping finish',
-        }),
-      ] : []),
-    ];
+        position: point,
+        title: isStart ? 'Mapping start' : isFinish ? 'Mapping finish' : `Mapping point ${index + 1}`,
+        zIndex: 620 + index,
+      });
+
+      if (onMappingPathPointMove) {
+        draftMarkerListenerRefs.current.push(marker.addListener('dragend', (event) => {
+          const nextPoint = event?.latLng?.toJSON();
+          if (nextPoint) {
+            onMappingPathPointMove(index, nextPoint);
+          }
+        }));
+      }
+
+      return marker;
+    });
 
     const zoneMarkers = draftZonePoints.map((point, index) => new google.maps.Marker({
       icon: {
@@ -677,10 +732,10 @@ export function GoogleMapsTrackLayer({
     draftMarkerRefs.current = [
       ...draftDistanceMarkers,
       ...draftZoneDistanceMarkers,
-      ...endpointMarkers,
+      ...pathPointMarkers,
       ...zoneMarkers,
     ];
-  }, [distanceUnit, draftPoints, draftZoneMeters, draftZonePoints, mappingMode, status]);
+  }, [distanceUnit, draftPoints, draftZoneMeters, draftZonePoints, mappingMode, onMappingPathPointMove, status]);
 
   useEffect(() => {
     const map = mapRef.current;

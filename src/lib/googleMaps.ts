@@ -36,6 +36,7 @@ type GooglePolyline = {
 };
 
 type GoogleMarker = {
+  addListener: (eventName: string, handler: (event?: GoogleMapClickEvent) => void) => GoogleMapsEventListener;
   setIcon: (icon: Record<string, unknown>) => void;
   setMap: (map: GoogleMap | null) => void;
   setPosition: (position: LatLngLiteral) => void;

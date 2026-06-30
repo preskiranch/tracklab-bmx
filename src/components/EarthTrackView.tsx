@@ -7,6 +7,8 @@ import {
   Flag,
   Map as MapIcon,
   MapPinned,
+  Maximize2,
+  Minimize2,
   RotateCcw,
   RotateCw,
   Satellite,
@@ -45,6 +47,7 @@ type EarthTrackViewProps = {
   earthHeading: number;
   activeZones: TrackZone[];
   mappingMode: boolean;
+  mappingFullscreen: boolean;
   mappingEditMode: MappingEditMode;
   draftPoints: TrackPoint[];
   draftZoneMeters: number[];
@@ -52,7 +55,9 @@ type EarthTrackViewProps = {
   onEarthCameraChange: (camera: { angle?: number; heading?: number }) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
+  onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingPathPointAdd: (point: TrackPoint) => void;
+  onMappingPathPointMove: (index: number, point: TrackPoint) => void;
   onMappingZonePointAdd: (point: TrackPoint) => void;
 };
 
@@ -102,6 +107,7 @@ export function EarthTrackView({
   earthHeading,
   activeZones,
   mappingMode,
+  mappingFullscreen,
   mappingEditMode,
   draftPoints,
   draftZoneMeters,
@@ -109,7 +115,9 @@ export function EarthTrackView({
   onEarthCameraChange,
   onEarthAngleChange,
   onEarthHeadingChange,
+  onMappingFullscreenChange,
   onMappingPathPointAdd,
+  onMappingPathPointMove,
   onMappingZonePointAdd,
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
@@ -151,6 +159,7 @@ export function EarthTrackView({
             speedUnit={speedUnit}
             distanceUnit={distanceUnit}
             raceViewFullscreen={raceViewFullscreen}
+            raceState={raceState}
             earthAngle={earthAngle}
             earthHeading={earthHeading}
             activeZones={activeZones}
@@ -161,6 +170,7 @@ export function EarthTrackView({
             draftZonePoints={draftZonePoints}
             onEarthCameraChange={onEarthCameraChange}
             onMappingPathPointAdd={onMappingPathPointAdd}
+            onMappingPathPointMove={onMappingPathPointMove}
             onMappingZonePointAdd={onMappingZonePointAdd}
           />
         ) : (
@@ -205,6 +215,20 @@ export function EarthTrackView({
 
         {raceViewFullscreen && startGateActive && (
           <StartTreeLight activeIndex={startGateLightIndex} />
+        )}
+
+        {mappingMode && raceState !== 'racing' && (
+          <div className="map-edit-toolbar" aria-label="Map edit view controls">
+            <button
+              type="button"
+              onClick={() => onMappingFullscreenChange(!mappingFullscreen)}
+              aria-label={mappingFullscreen ? 'Exit full screen editing' : 'Full screen editing'}
+              title={mappingFullscreen ? 'Exit full screen' : 'Full screen'}
+            >
+              {mappingFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              <span>{mappingFullscreen ? 'Exit' : 'Full screen'}</span>
+            </button>
+          </div>
         )}
 
         <div className="map-camera-pad" aria-label="Map camera controls">
