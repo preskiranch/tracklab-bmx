@@ -22,11 +22,13 @@ type EarthTrackViewProps = {
   speedUnit: SpeedUnit;
   raceState: RaceState;
   earthAngle: number;
+  earthHeading: number;
   activeZones: TrackZone[];
   mappingMode: boolean;
   mappingEditMode: MappingEditMode;
   draftPoints: TrackPoint[];
   draftZonePoints: TrackPoint[];
+  onEarthCameraChange: (camera: { angle?: number; heading?: number }) => void;
   onMappingPathPointAdd: (point: TrackPoint) => void;
   onMappingZonePointAdd: (point: TrackPoint) => void;
 };
@@ -48,11 +50,13 @@ export function EarthTrackView({
   speedUnit,
   raceState,
   earthAngle,
+  earthHeading,
   activeZones,
   mappingMode,
   mappingEditMode,
   draftPoints,
   draftZonePoints,
+  onEarthCameraChange,
   onMappingPathPointAdd,
   onMappingZonePointAdd,
 }: EarthTrackViewProps) {
@@ -94,11 +98,13 @@ export function EarthTrackView({
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
             earthAngle={earthAngle}
+            earthHeading={earthHeading}
             activeZones={activeZones}
             mappingMode={mappingMode}
             mappingEditMode={mappingEditMode}
             draftPoints={draftPoints}
             draftZonePoints={draftZonePoints}
+            onEarthCameraChange={onEarthCameraChange}
             onMappingPathPointAdd={onMappingPathPointAdd}
             onMappingZonePointAdd={onMappingZonePointAdd}
           />
@@ -126,6 +132,7 @@ export function EarthTrackView({
         </div>
         <div className="earth-overlay bottom-left">
           <span>Angle {earthAngle} deg</span>
+          <span>Heading {earthHeading} deg</span>
           <span>
             {mappingMode
               ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`
@@ -133,7 +140,11 @@ export function EarthTrackView({
                 ? 'Saved ride line'
                 : 'No ride line'}
           </span>
-          {mappingMode && <span>{mappingEditMode === 'draw' ? 'Draw path' : 'Add zones'}</span>}
+          {mappingMode && (
+            <span>
+              {mappingEditMode === 'navigate' ? 'Move map' : mappingEditMode === 'draw' ? 'Draw path' : 'Add zones'}
+            </span>
+          )}
           <span>{activeZones.length} active zone{activeZones.length === 1 ? '' : 's'}</span>
         </div>
       </div>

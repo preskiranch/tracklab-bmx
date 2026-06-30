@@ -32,10 +32,12 @@ type GoogleMapsTrackLayerProps = {
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
   earthAngle: number;
+  earthHeading: number;
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
   draftPoints?: TrackPoint[];
   draftZonePoints?: TrackPoint[];
+  onEarthCameraChange?: (camera: { angle?: number; heading?: number }) => void;
   onMappingPathPointAdd?: (point: TrackPoint) => void;
   onMappingZonePointAdd?: (point: TrackPoint) => void;
 };
@@ -61,10 +63,12 @@ export function GoogleMapsTrackLayer({
   samplesByDevice,
   speedUnit,
   earthAngle,
+  earthHeading,
   mappingMode = false,
   mappingEditMode = 'draw',
   draftPoints = [],
   draftZonePoints = [],
+  onEarthCameraChange,
   onMappingPathPointAdd,
   onMappingZonePointAdd,
 }: GoogleMapsTrackLayerProps) {
@@ -94,15 +98,25 @@ export function GoogleMapsTrackLayer({
         googleRef.current = google;
         const center = trackCenter(track);
         const map = new google.maps.Map(containerRef.current, {
+          cameraControl: true,
           center,
           clickableIcons: false,
-          disableDefaultUI: true,
+          controlSize: 30,
+          disableDefaultUI: false,
+          fullscreenControl: false,
           gestureHandling: 'greedy',
-          heading: 24,
+          heading: earthHeading,
+          headingInteractionEnabled: true,
+          keyboardShortcuts: true,
+          mapTypeControl: false,
           mapTypeId: 'satellite',
-          rotateControl: false,
+          renderingType: google.maps.RenderingType?.VECTOR,
+          rotateControl: true,
+          scaleControl: true,
           streetViewControl: false,
+          tiltInteractionEnabled: true,
           tilt: earthAngle,
+          zoomControl: true,
           zoom: 19,
         });
         mapRef.current = map;
@@ -134,15 +148,35 @@ export function GoogleMapsTrackLayer({
   }, [track]);
 
   useEffect(() => {
-    const google = googleRef.current;
     const map = mapRef.current;
-    if (!google || !map) {
+    if (!map) {
       return;
     }
 
     map.setTilt(Math.max(0, Math.min(67, earthAngle)));
-    map.setHeading(24);
-  }, [earthAngle]);
+    map.setHeading(((earthHeading % 360) + 360) % 360);
+  }, [earthAngle, earthHeading]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== 'ready' || !onEarthCameraChange) {
+      return undefined;
+    }
+
+    const syncCamera = () => {
+      onEarthCameraChange({
+        angle: Math.round(map.getTilt?.() ?? earthAngle),
+        heading: Math.round(map.getHeading?.() ?? earthHeading),
+      });
+    };
+
+    const listeners = [
+      map.addListener('tilt_changed', syncCamera),
+      map.addListener('heading_changed', syncCamera),
+    ];
+
+    return () => listeners.forEach((listener) => listener.remove());
+  }, [earthAngle, earthHeading, onEarthCameraChange, status]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -290,10 +324,14 @@ export function GoogleMapsTrackLayer({
     mapListenerRefs.current = [];
     isDrawingRef.current = false;
     lastDrawPointRef.current = null;
+    const isDrawMode = mappingMode && mappingEditMode === 'draw';
+    const isNavigateMode = !mappingMode || mappingEditMode === 'navigate';
     map.setOptions({
-      draggable: !mappingMode,
-      draggableCursor: mappingMode ? 'crosshair' : undefined,
-      gestureHandling: mappingMode ? 'none' : 'greedy',
+      draggable: !isDrawMode,
+      draggableCursor: mappingMode && !isNavigateMode ? 'crosshair' : undefined,
+      gestureHandling: isDrawMode ? 'none' : 'greedy',
+      headingInteractionEnabled: isNavigateMode,
+      tiltInteractionEnabled: isNavigateMode,
     });
 
     if (!mappingMode) {
@@ -316,8 +354,12 @@ export function GoogleMapsTrackLayer({
 
     mapListenerRefs.current = [
       map.addListener('mousedown', (event) => {
-        const point = event.latLng?.toJSON();
+        const point = event?.latLng?.toJSON();
         if (!point) {
+          return;
+        }
+
+        if (mappingEditMode === 'navigate') {
           return;
         }
 
@@ -331,7 +373,7 @@ export function GoogleMapsTrackLayer({
         addDrawPoint(point);
       }),
       map.addListener('mousemove', (event) => {
-        const point = event.latLng?.toJSON();
+        const point = event?.latLng?.toJSON();
         if (!point || !isDrawingRef.current || mappingEditMode !== 'draw') {
           return;
         }
@@ -339,7 +381,7 @@ export function GoogleMapsTrackLayer({
         addDrawPoint(point);
       }),
       map.addListener('mouseup', (event) => {
-        const point = event.latLng?.toJSON();
+        const point = event?.latLng?.toJSON();
         if (point && isDrawingRef.current && mappingEditMode === 'draw') {
           addDrawPoint(point);
         }
@@ -348,7 +390,7 @@ export function GoogleMapsTrackLayer({
         lastDrawPointRef.current = null;
       }),
       map.addListener('click', (event) => {
-        const point = event.latLng?.toJSON();
+        const point = event?.latLng?.toJSON();
         if (point && mappingEditMode === 'zones') {
           onMappingZonePointAdd?.(point);
         }
@@ -362,6 +404,8 @@ export function GoogleMapsTrackLayer({
         draggable: true,
         draggableCursor: undefined,
         gestureHandling: 'greedy',
+        headingInteractionEnabled: true,
+        tiltInteractionEnabled: true,
       });
     };
   }, [mappingEditMode, mappingMode, onMappingPathPointAdd, onMappingZonePointAdd, status]);

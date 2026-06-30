@@ -1,6 +1,7 @@
 import type { ChangeEvent } from 'react';
 import {
   Activity,
+  Compass,
   Download,
   Flag,
   Gauge,
@@ -34,6 +35,7 @@ type SessionControlPanelProps = {
   selectedMetrics: MetricKey[];
   speedUnit: SpeedUnit;
   earthAngle: number;
+  earthHeading: number;
   raceState: RaceState;
   activeBikeCount: number;
   mappingMode: boolean;
@@ -48,6 +50,7 @@ type SessionControlPanelProps = {
   onMetricToggle: (metric: MetricKey) => void;
   onSpeedUnitChange: (unit: SpeedUnit) => void;
   onEarthAngleChange: (angle: number) => void;
+  onEarthHeadingChange: (heading: number) => void;
   onMappingModeChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
   onMappingRestSecondsChange: (seconds: number) => void;
@@ -76,6 +79,7 @@ export function SessionControlPanel({
   selectedMetrics,
   speedUnit,
   earthAngle,
+  earthHeading,
   raceState,
   activeBikeCount,
   mappingMode,
@@ -90,6 +94,7 @@ export function SessionControlPanel({
   onMetricToggle,
   onSpeedUnitChange,
   onEarthAngleChange,
+  onEarthHeadingChange,
   onMappingModeChange,
   onMappingEditModeChange,
   onMappingRestSecondsChange,
@@ -146,7 +151,14 @@ export function SessionControlPanel({
         </div>
 
         {mappingMode && (
-          <div className="segmented-control compact" aria-label="Mapping edit mode">
+          <div className="segmented-control compact three-way" aria-label="Mapping edit mode">
+            <button
+              className={mappingEditMode === 'navigate' ? 'selected' : ''}
+              type="button"
+              onClick={() => onMappingEditModeChange('navigate')}
+            >
+              Move map
+            </button>
             <button
               className={mappingEditMode === 'draw' ? 'selected' : ''}
               type="button"
@@ -320,18 +332,32 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">View</span>
-            <h3>Earth angle</h3>
+            <h3>Earth camera</h3>
           </div>
-          <span className="angle-value">{earthAngle} deg</span>
+          <span className="angle-value">{earthAngle} deg / {earthHeading} deg</span>
         </div>
-        <input
-          className="angle-slider"
-          type="range"
-          min="20"
-          max="68"
-          value={earthAngle}
-          onChange={(event) => onEarthAngleChange(Number(event.target.value))}
-        />
+        <label className="camera-slider">
+          <span>Tilt</span>
+          <input
+            className="angle-slider"
+            type="range"
+            min="0"
+            max="67"
+            value={earthAngle}
+            onChange={(event) => onEarthAngleChange(Number(event.target.value))}
+          />
+        </label>
+        <label className="camera-slider">
+          <span><Compass size={14} /> Heading</span>
+          <input
+            className="angle-slider"
+            type="range"
+            min="0"
+            max="359"
+            value={earthHeading}
+            onChange={(event) => onEarthHeadingChange(Number(event.target.value))}
+          />
+        </label>
 
         <div className="segmented-control compact" aria-label="Speed unit">
           <button

@@ -94,6 +94,49 @@ input:focus {
   min-height: 100vh;
 }
 
+.platform-shell.race-fullscreen {
+  display: block;
+  width: 100vw;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #05080c;
+}
+
+.race-fullscreen .sidebar,
+.race-fullscreen .platform-topbar,
+.race-fullscreen .control-panel,
+.race-fullscreen .lower-grid {
+  display: none;
+}
+
+.race-fullscreen .platform-main {
+  min-height: 100vh;
+  padding: 0;
+}
+
+.race-fullscreen .dashboard-grid {
+  display: block;
+}
+
+.race-fullscreen .earth-panel {
+  min-height: 100vh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.race-fullscreen .earth-header,
+.race-fullscreen .rider-strip,
+.race-fullscreen .google-map-caption {
+  display: none;
+}
+
+.race-fullscreen .earth-stage {
+  height: 100vh;
+  min-height: 100vh;
+  border: 0;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -679,6 +722,10 @@ input:focus {
   min-height: 36px;
 }
 
+.segmented-control.three-way {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .segmented-control button {
   display: inline-flex;
   align-items: center;
@@ -898,6 +945,20 @@ input:focus {
 .angle-slider {
   width: 100%;
   accent-color: var(--lime);
+}
+
+.camera-slider {
+  display: grid;
+  gap: 7px;
+}
+
+.camera-slider span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #3d4d5c;
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .start-panel {

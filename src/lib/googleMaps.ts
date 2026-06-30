@@ -6,8 +6,10 @@ type LatLngLiteral = {
 };
 
 type GoogleMap = {
-  addListener: (eventName: string, handler: (event: GoogleMapClickEvent) => void) => GoogleMapsEventListener;
+  addListener: (eventName: string, handler: (event?: GoogleMapClickEvent) => void) => GoogleMapsEventListener;
   fitBounds: (bounds: GoogleLatLngBounds, padding?: number) => void;
+  getHeading?: () => number | undefined;
+  getTilt?: () => number | undefined;
   setHeading: (heading: number) => void;
   setOptions: (options: Record<string, unknown>) => void;
   setTilt: (tilt: number) => void;
@@ -42,6 +44,9 @@ type GoogleMapsRuntime = {
     Map: new (element: HTMLElement, options: Record<string, unknown>) => GoogleMap;
     Marker: new (options: Record<string, unknown>) => GoogleMarker;
     Polyline: new (options: Record<string, unknown>) => GooglePolyline;
+    RenderingType?: {
+      VECTOR: unknown;
+    };
     SymbolPath: {
       CIRCLE: unknown;
     };

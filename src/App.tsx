@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -101,11 +101,12 @@ function formatClock() {
 
 export default function App() {
   const bridge = useWattbikeBridge();
+  const raceShellRef = useRef<HTMLDivElement | null>(null);
   const [initialTrack] = useState(readInitialTrack);
   const [catalogTracks, setCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const [mappingMode, setMappingMode] = useState(false);
-  const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('draw');
+  const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
   const [draftZoneMeters, setDraftZoneMeters] = useState<number[]>([]);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
@@ -121,6 +122,7 @@ export default function App() {
   const [manualZoneIds, setManualZoneIds] = useState<string[]>(['z2', 'z4']);
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power']);
   const [earthAngle, setEarthAngle] = useState(45);
+  const [earthHeading, setEarthHeading] = useState(0);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [accountsEnabled, setAccountsEnabled] = useState(false);
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
@@ -247,6 +249,14 @@ export default function App() {
   useZoneAudioCues(raceState, riders, activeZones);
 
   useEffect(() => {
+    if (raceState === 'racing' || document.fullscreenElement !== raceShellRef.current) {
+      return;
+    }
+
+    void document.exitFullscreen?.().catch(() => undefined);
+  }, [raceState]);
+
+  useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(players.map(({ id, deviceId }) => ({ id, deviceId }))));
   }, [players]);
 
@@ -333,7 +343,7 @@ export default function App() {
     setDraftPoints(mapping?.centerline ?? []);
     setDraftZoneMeters(mapping ? zoneBoundariesFromMapping(mapping) : []);
     setMappingRestSeconds(mapping?.restAfterSeconds ?? 1);
-    setMappingEditMode('draw');
+    setMappingEditMode('navigate');
     setMappingMode(false);
   }, [selectedTrack.id]);
 
@@ -342,6 +352,10 @@ export default function App() {
       setDraftPoints(selectedTrackMapping.centerline);
       setDraftZoneMeters(zoneBoundariesFromMapping(selectedTrackMapping));
       setMappingRestSeconds(selectedTrackMapping.restAfterSeconds);
+    }
+
+    if (enabled) {
+      setMappingEditMode('navigate');
     }
 
     setMappingMode(enabled);
@@ -434,7 +448,7 @@ export default function App() {
         setDraftPoints(mapping.centerline);
         setDraftZoneMeters(zoneBoundariesFromMapping(mapping));
         setMappingRestSeconds(mapping.restAfterSeconds);
-        setMappingEditMode('draw');
+        setMappingEditMode('navigate');
         setMappingMode(true);
         resetRace();
       } catch (error) {
@@ -480,6 +494,18 @@ export default function App() {
     });
   };
 
+  const handleEarthCameraChange = useCallback((camera: { angle?: number; heading?: number }) => {
+    if (typeof camera.angle === 'number' && Number.isFinite(camera.angle)) {
+      const nextAngle = Math.max(0, Math.min(67, Math.round(camera.angle)));
+      setEarthAngle((current) => (current === nextAngle ? current : nextAngle));
+    }
+
+    if (typeof camera.heading === 'number' && Number.isFinite(camera.heading)) {
+      const nextHeading = ((Math.round(camera.heading) % 360) + 360) % 360;
+      setEarthHeading((current) => (current === nextHeading ? current : nextHeading));
+    }
+  }, []);
+
   const sendChatMessage = () => {
     const text = chatDraft.trim();
     if (!text) {
@@ -499,6 +525,9 @@ export default function App() {
     }
 
     primeAudioCues();
+    if (!document.fullscreenElement) {
+      void raceShellRef.current?.requestFullscreen?.().catch(() => undefined);
+    }
     startRace();
   };
 
@@ -507,7 +536,7 @@ export default function App() {
     : 'Bridge offline';
 
   return (
-    <div className="platform-shell">
+    <div className={`platform-shell${raceState === 'racing' ? ' race-fullscreen' : ''}`} ref={raceShellRef}>
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark">
@@ -616,11 +645,13 @@ export default function App() {
                 speedUnit={speedUnit}
                 raceState={raceState}
                 earthAngle={earthAngle}
+                earthHeading={earthHeading}
                 activeZones={activeZones}
                 mappingMode={mappingMode}
                 mappingEditMode={mappingEditMode}
                 draftPoints={draftPoints}
                 draftZonePoints={draftZonePoints}
+                onEarthCameraChange={handleEarthCameraChange}
                 onMappingPathPointAdd={handleMappingPathPointAdd}
                 onMappingZonePointAdd={handleMappingZonePointAdd}
               />
@@ -634,6 +665,7 @@ export default function App() {
                 selectedMetrics={selectedMetrics}
                 speedUnit={speedUnit}
                 earthAngle={earthAngle}
+                earthHeading={earthHeading}
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
                 mappingMode={mappingMode}
@@ -648,6 +680,7 @@ export default function App() {
                 onMetricToggle={toggleMetric}
                 onSpeedUnitChange={setSpeedUnit}
                 onEarthAngleChange={setEarthAngle}
+                onEarthHeadingChange={setEarthHeading}
                 onMappingModeChange={handleMappingModeChange}
                 onMappingEditModeChange={setMappingEditMode}
                 onMappingRestSecondsChange={updateMappingRestSeconds}
