@@ -36,20 +36,14 @@ type GooglePolyline = {
 };
 
 type GoogleMarker = {
+  setIcon: (icon: Record<string, unknown>) => void;
   setMap: (map: GoogleMap | null) => void;
   setPosition: (position: LatLngLiteral) => void;
-};
-
-type GoogleAdvancedMarker = {
-  map: GoogleMap | null;
-  position: LatLngLiteral;
-  title?: string;
-  zIndex?: number;
+  setTitle?: (title: string) => void;
 };
 
 type GoogleMapConstructor = {
   new (element: HTMLElement, options: Record<string, unknown>): GoogleMap;
-  DEMO_MAP_ID?: string;
 };
 
 type GoogleMapsRuntime = {
@@ -59,9 +53,6 @@ type GoogleMapsRuntime = {
       spherical?: {
         computeLength: (path: LatLngLiteral[]) => number;
       };
-    };
-    marker?: {
-      AdvancedMarkerElement: new (options: Record<string, unknown>) => GoogleAdvancedMarker;
     };
     LatLngBounds: new () => GoogleLatLngBounds;
     Map: GoogleMapConstructor;
@@ -111,7 +102,7 @@ export function loadGoogleMaps() {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?${new URLSearchParams({
       key: apiKey,
-      libraries: 'geometry,marker',
+      libraries: 'geometry',
       loading: 'async',
       v: 'weekly',
     }).toString()}`;
@@ -128,7 +119,6 @@ export function loadGoogleMaps() {
           await Promise.all([
             window.google.maps.importLibrary('maps'),
             window.google.maps.importLibrary('geometry'),
-            window.google.maps.importLibrary('marker'),
           ]);
         }
 
@@ -336,7 +326,6 @@ export function pathLengthMeters(points: TrackPoint[], google?: GoogleMapsRuntim
 
 export type {
   GoogleLatLngBounds,
-  GoogleAdvancedMarker,
   GoogleMap,
   GoogleMapClickEvent,
   GoogleMapsEventListener,

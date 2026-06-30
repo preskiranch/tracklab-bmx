@@ -524,47 +524,6 @@ input:focus {
   text-decoration: none;
 }
 
-.google-rider-marker {
-  position: relative;
-  width: 92px;
-  height: 88px;
-  pointer-events: none;
-  --rider-rotation: 0deg;
-}
-
-.google-rider-marker-bike {
-  position: absolute;
-  left: 8px;
-  top: 11px;
-  width: 58px;
-  height: 66px;
-  object-fit: contain;
-  transform: rotate(var(--rider-rotation));
-  transform-origin: 50% 58%;
-  transition: transform 90ms linear;
-  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.36));
-}
-
-.google-rider-marker-label {
-  position: absolute;
-  left: 57px;
-  top: 13px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 29px;
-  height: 25px;
-  padding: 0 7px;
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  border-radius: 6px;
-  background: rgba(17, 24, 39, 0.9);
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 950;
-  line-height: 1;
-  box-shadow: 0 8px 14px rgba(0, 0, 0, 0.26);
-}
-
 .rider-token {
   position: absolute;
   z-index: 4;

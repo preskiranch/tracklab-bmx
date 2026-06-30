@@ -19,7 +19,6 @@ import {
   riderRoutePose,
   trackBoundsPoints,
   trackCenter,
-  type GoogleAdvancedMarker,
   type GoogleMap,
   type GoogleMarker,
   type GoogleMapsEventListener,
@@ -69,6 +68,9 @@ type RiderMapMarker = {
   setTitle: (title: string) => void;
 };
 
+const riderImagePromises = new Map<string, Promise<HTMLImageElement>>();
+const riderIconCache = new Map<string, string>();
+
 function clampTilt(value: number) {
   return Math.max(0, Math.min(67, value));
 }
@@ -113,23 +115,61 @@ function riderScreenRotation(routeBearing: number, mapHeading: number) {
   return normalizeHeading(routeBearing - mapHeading - 90);
 }
 
-function createRiderMarkerContent(player: PlayerSlot, rotationDegrees: number) {
-  const content = document.createElement('div');
-  content.className = 'google-rider-marker';
-  content.style.setProperty('--rider-rotation', `${rotationDegrees}deg`);
+function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
+  return {
+    anchor: new google.maps.Point(34, 52),
+    labelOrigin: new google.maps.Point(76, 21),
+    scaledSize: new google.maps.Size(68, 76),
+    url: riderIconByColor[player.colorName],
+  };
+}
 
-  const image = document.createElement('img');
-  image.alt = '';
-  image.className = 'google-rider-marker-bike';
-  image.draggable = false;
-  image.src = riderIconByColor[player.colorName];
+function loadRiderImage(url: string) {
+  const cached = riderImagePromises.get(url);
+  if (cached) {
+    return cached;
+  }
 
-  const label = document.createElement('span');
-  label.className = 'google-rider-marker-label';
-  label.textContent = `P${player.id}`;
+  const promise = new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Could not load rider image ${url}`));
+    image.src = url;
+  });
+  riderImagePromises.set(url, promise);
+  return promise;
+}
 
-  content.append(image, label);
-  return content;
+async function rotatedRiderIconUrl(player: PlayerSlot, rotationDegrees: number) {
+  const imageUrl = riderIconByColor[player.colorName];
+  const rotationBucket = Math.round(normalizeHeading(rotationDegrees) / 3) * 3 % 360;
+  const cacheKey = `${player.colorName}:${rotationBucket}`;
+  const cached = riderIconCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const image = await loadRiderImage(imageUrl);
+  const canvas = document.createElement('canvas');
+  const size = 104;
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return imageUrl;
+  }
+
+  context.translate(size / 2, size / 2);
+  context.rotate((rotationBucket * Math.PI) / 180);
+  context.shadowColor = 'rgba(0, 0, 0, 0.35)';
+  context.shadowBlur = 8;
+  context.shadowOffsetY = 5;
+  context.drawImage(image, -34, -39, 68, 78);
+
+  const dataUrl = canvas.toDataURL('image/png');
+  riderIconCache.set(cacheKey, dataUrl);
+  return dataUrl;
 }
 
 function createRiderMapMarker(
@@ -140,43 +180,9 @@ function createRiderMapMarker(
   rotationDegrees: number,
   title: string,
 ): RiderMapMarker {
-  const AdvancedMarkerElement = google.maps.marker?.AdvancedMarkerElement;
-
-  if (AdvancedMarkerElement) {
-    const content = createRiderMarkerContent(player, rotationDegrees);
-    const marker: GoogleAdvancedMarker = new AdvancedMarkerElement({
-      anchorLeft: '-50%',
-      anchorTop: '-74%',
-      content,
-      map,
-      position,
-      title,
-      zIndex: 760 + player.id,
-    });
-
-    return {
-      setMap: (nextMap) => {
-        marker.map = nextMap;
-      },
-      setPosition: (nextPosition) => {
-        marker.position = nextPosition;
-      },
-      setRotation: (nextRotation) => {
-        content.style.setProperty('--rider-rotation', `${nextRotation}deg`);
-      },
-      setTitle: (nextTitle) => {
-        marker.title = nextTitle;
-      },
-    };
-  }
-
+  let iconVersion = 0;
   const marker = new google.maps.Marker({
-    icon: {
-      anchor: new google.maps.Point(24, 44),
-      labelOrigin: new google.maps.Point(63, 15),
-      scaledSize: new google.maps.Size(58, 66),
-      url: riderIconByColor[player.colorName],
-    },
+    icon: baseRiderIcon(google, player),
     label: {
       color: '#ffffff',
       fontSize: '12px',
@@ -184,16 +190,44 @@ function createRiderMapMarker(
       text: `P${player.id}`,
     },
     map,
-    optimized: true,
+    optimized: false,
     position,
     title,
+    zIndex: 760 + player.id,
   });
+
+  const applyRotation = (nextRotation: number) => {
+    iconVersion += 1;
+    const version = iconVersion;
+    void rotatedRiderIconUrl(player, nextRotation)
+      .then((url) => {
+        if (version !== iconVersion) {
+          return;
+        }
+
+        marker.setIcon({
+          anchor: new google.maps.Point(52, 62),
+          labelOrigin: new google.maps.Point(91, 24),
+          scaledSize: new google.maps.Size(104, 104),
+          url,
+        });
+      })
+      .catch(() => {
+        if (version === iconVersion) {
+          marker.setIcon(baseRiderIcon(google, player));
+        }
+      });
+  };
+
+  applyRotation(rotationDegrees);
 
   return {
     setMap: (nextMap) => marker.setMap(nextMap),
     setPosition: (nextPosition) => marker.setPosition(nextPosition),
-    setRotation: () => undefined,
-    setTitle: () => undefined,
+    setRotation: applyRotation,
+    setTitle: (nextTitle) => {
+      marker.setTitle?.(nextTitle);
+    },
   };
 }
 
@@ -244,7 +278,6 @@ export function GoogleMapsTrackLayer({
 
         googleRef.current = google;
         const center = trackCenter(track);
-        const demoMapId = google.maps.Map.DEMO_MAP_ID;
         const map = new google.maps.Map(containerRef.current, {
           cameraControl: true,
           center,
@@ -257,7 +290,6 @@ export function GoogleMapsTrackLayer({
           headingInteractionEnabled: true,
           isFractionalZoomEnabled: true,
           keyboardShortcuts: true,
-          ...(demoMapId ? { mapId: demoMapId } : {}),
           mapTypeControl: false,
           mapTypeId: 'satellite',
           renderingType: google.maps.RenderingType?.VECTOR,
