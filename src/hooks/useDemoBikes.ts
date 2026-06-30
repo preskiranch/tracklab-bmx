@@ -90,6 +90,7 @@ type DemoBikesOptions = {
   enabled: boolean;
   bikeCount: number;
   raceSeed: number;
+  raceStartedAt: number | null;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -147,11 +148,31 @@ export function createDemoPlayers(bikeCount: number): PlayerSlot[] {
   }));
 }
 
-function sampleForProfile(profile: DemoProfile, elapsedSeconds: number): BikeSample {
+function restingSample(profile: DemoProfile, signal: number): BikeSample {
+  return {
+    at: Date.now(),
+    source: 'demo',
+    deviceId: profile.deviceId,
+    label: profile.label,
+    watts: 0,
+    cadence: 0,
+    speedKph: 0,
+    signal,
+    battery: Math.round(clamp(96 - profile.index * 2, 82, 100)),
+  };
+}
+
+function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: boolean): BikeSample {
   const variables = profile.variables;
   const time = Math.max(0, elapsedSeconds);
   const phase = profile.phaseOffset;
+  const baseSignal = clamp(0.78 + variables.consistency * 0.16 + Math.sin(time * 0.47 + phase) * 0.025, 0.62, 0.99);
+  if (!racing) {
+    return restingSample(profile, baseSignal);
+  }
+
   const startEnvelope = Math.exp(-time / (3.9 + variables.endurance * 2.2));
+  const rollout = clamp(1 - Math.exp(-time / (4.1 + variables.accelerationCurve * 2.4)), 0, 1);
   const fatigue = clamp(
     time / (36 + variables.endurance * 34)
       * (0.42 + variables.fatigueRate * 0.78 + variables.thermalFade * 0.22),
@@ -229,43 +250,48 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number): BikeSam
   ) / 1.5;
   const cadenceDrop = mistakeEnvelope * (12 + variables.cadenceDropOnLanding * 18);
   const cadence = Math.round(clamp(
-    52
-      + variables.cadenceFloor * 16
-      + effort * (44 + variables.maxCadence * 43)
+    rollout * (
+      42
+      + variables.cadenceFloor * 14
+      + effort * (35 + variables.maxCadence * 32)
       + variables.standingTransition * startEnvelope * 12
       - variables.seatedTransition * finishKick * 5
       - cadenceDrop
       + noise * (2 + variables.cadenceNoise * 7)
-      - variables.pedalStrokeAsymmetry * 2,
-    35,
-    158,
+      - variables.pedalStrokeAsymmetry * 2
+    ),
+    0,
+    134,
   ));
   const watts = Math.round(clamp(
-    82
+    rollout * (
+      68
       + variables.powerBase * 105
-      + effort * (230 + variables.sprintPower * 395)
+      + effort * (215 + variables.sprintPower * 315)
       + variables.torque * 75
       + variables.launchSnap * startEnvelope * 150
       + variables.crowdPressure * burstWave * 42
       - variables.gripFatigue * fatigue * 86
       - mistakeEnvelope * 160
-      + noise * (8 + variables.wattNoise * 34),
-    55,
-    1060,
+      + noise * (8 + variables.wattNoise * 34)
+    ),
+    0,
+    920,
   ));
+  const topSpeedKph = 32.2 + variables.firstStraightBurst * 6.2 + variables.finalStraightKick * 5.2 + skill * 3.6 + drivetrain * 2.8;
   const speedKph = Number(clamp(
-    9.5
-      + cadence * 0.075
-      + watts * 0.018
-      + effort * 13
-      + skill * 6.8
-      + drivetrain * 5.4
+    rollout * (
+      topSpeedKph
+      + rhythmWave * 2.1
+      + burstWave * 2.3
+      + finishKick * variables.finalStraightKick * 2.6
+    )
       + variables.wheelSpeedNoise * noise * 1.6
-      - variables.rollingResistance * 2.2
-      - variables.windDrag * 2.4
+      - variables.rollingResistance * rollout * 1.7
+      - variables.windDrag * rollout * 1.8
       - mistakeEnvelope * 5.8,
-    8,
-    58,
+    0,
+    48.6,
   ).toFixed(1));
   const signal = clamp(
     0.78
@@ -289,7 +315,7 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number): BikeSam
   };
 }
 
-export function useDemoBikes({ enabled, bikeCount, raceSeed }: DemoBikesOptions) {
+export function useDemoBikes({ enabled, bikeCount, raceSeed, raceStartedAt }: DemoBikesOptions) {
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
   const profiles = useMemo(() => createProfiles(bikeCount, raceSeed), [bikeCount, raceSeed]);
 
@@ -299,19 +325,19 @@ export function useDemoBikes({ enabled, bikeCount, raceSeed }: DemoBikesOptions)
       return undefined;
     }
 
-    const startedAt = Date.now();
     const updateSamples = () => {
-      const elapsedSeconds = (Date.now() - startedAt) / 1000;
+      const racing = raceStartedAt != null;
+      const elapsedSeconds = racing ? (Date.now() - raceStartedAt) / 1000 : 0;
       setSamplesByDevice(new Map(profiles.map((profile) => [
         profile.deviceId,
-        sampleForProfile(profile, elapsedSeconds),
+        sampleForProfile(profile, elapsedSeconds, racing),
       ])));
     };
 
     updateSamples();
     const timer = window.setInterval(updateSamples, 120);
     return () => window.clearInterval(timer);
-  }, [enabled, profiles]);
+  }, [enabled, profiles, raceStartedAt]);
 
   return {
     samplesByDevice,

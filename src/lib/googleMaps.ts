@@ -1,3 +1,4 @@
+import { distanceBetweenTrackPoints } from './trackMapping';
 import type { TrackPoint, TrackRecord, TrackZone } from '../types';
 
 type LatLngLiteral = {
@@ -46,13 +47,20 @@ type GoogleMapConstructor = {
 
 type GoogleMapsRuntime = {
   maps: {
+    geometry?: {
+      spherical?: {
+        computeLength: (path: LatLngLiteral[]) => number;
+      };
+    };
     LatLngBounds: new () => GoogleLatLngBounds;
     Map: GoogleMapConstructor;
     Marker: new (options: Record<string, unknown>) => GoogleMarker;
+    Point: new (x: number, y: number) => unknown;
     Polyline: new (options: Record<string, unknown>) => GooglePolyline;
     RenderingType?: {
       VECTOR: unknown;
     };
+    Size: new (width: number, height: number) => unknown;
     SymbolPath: {
       CIRCLE: unknown;
     };
@@ -92,6 +100,7 @@ export function loadGoogleMaps() {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?${new URLSearchParams({
       key: apiKey,
+      libraries: 'geometry',
       loading: 'async',
       v: 'weekly',
     }).toString()}`;
@@ -189,17 +198,11 @@ export function trackFinishPoint(track: TrackRecord) {
   return track.finishLine ?? route[route.length - 1] ?? locatorPoint(track);
 }
 
-function distanceBetween(a: TrackPoint, b: TrackPoint) {
-  const latScale = 111_320;
-  const lngScale = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)) * 111_320;
-  return Math.hypot((b.lng - a.lng) * lngScale, (b.lat - a.lat) * latScale);
-}
-
 function pointAtProgress(outline: TrackPoint[], progress: number): LatLngLiteral {
   const segments = outline.slice(1).map((point, index) => ({
     start: outline[index],
     end: point,
-    distance: distanceBetween(outline[index], point),
+    distance: distanceBetweenTrackPoints(outline[index], point),
   }));
   const total = segments.reduce((sum, segment) => sum + segment.distance, 0);
   const target = Math.max(0, Math.min(1, progress)) * total;
@@ -240,6 +243,22 @@ export function riderLatLng(track: TrackRecord, distanceMeters: number) {
   }
 
   return pointAtProgress(route, distanceMeters / track.lengthMeters);
+}
+
+export function pathLengthMeters(points: TrackPoint[], google?: GoogleMapsRuntime | null) {
+  if (points.length < 2) {
+    return 0;
+  }
+
+  const googleLength = google?.maps.geometry?.spherical?.computeLength(points);
+  if (typeof googleLength === 'number' && Number.isFinite(googleLength)) {
+    return googleLength;
+  }
+
+  return points.slice(1).reduce(
+    (total, point, index) => total + distanceBetweenTrackPoints(points[index], point),
+    0,
+  );
 }
 
 export type {

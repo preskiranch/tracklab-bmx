@@ -16,13 +16,16 @@ import {
   Upload,
   Zap,
 } from 'lucide-react';
+import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
 import type {
+  DistanceUnit,
   IntervalMode,
   MappingEditMode,
   MetricKey,
   RaceState,
   SessionMode,
   SpeedUnit,
+  StartCadenceMode,
   TrackRecord,
   TrackZone,
 } from '../types';
@@ -35,6 +38,7 @@ type SessionControlPanelProps = {
   manualZoneIds: string[];
   selectedMetrics: MetricKey[];
   speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
   earthAngle: number;
   earthHeading: number;
   raceState: RaceState;
@@ -46,17 +50,26 @@ type SessionControlPanelProps = {
   mappingEditMode: MappingEditMode;
   draftPointCount: number;
   draftZoneCount: number;
+  draftLengthMeters: number;
   hasSavedMapping: boolean;
   mappingRestSeconds: number;
+  startCadenceMode: StartCadenceMode;
+  countdownSeconds: number;
+  startGateActive: boolean;
+  startGateLabel: string;
+  startGateDetail: string;
   onSessionModeChange: (mode: SessionMode) => void;
   onIntervalModeChange: (mode: IntervalMode) => void;
   onManualZoneToggle: (zoneId: string) => void;
   onMetricToggle: (metric: MetricKey) => void;
   onSpeedUnitChange: (unit: SpeedUnit) => void;
+  onDistanceUnitChange: (unit: DistanceUnit) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoBikeCountChange: (count: number) => void;
+  onStartCadenceModeChange: (mode: StartCadenceMode) => void;
+  onCountdownSecondsChange: (seconds: number) => void;
   onMappingModeChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
   onMappingRestSecondsChange: (seconds: number) => void;
@@ -84,6 +97,7 @@ export function SessionControlPanel({
   manualZoneIds,
   selectedMetrics,
   speedUnit,
+  distanceUnit,
   earthAngle,
   earthHeading,
   raceState,
@@ -95,17 +109,26 @@ export function SessionControlPanel({
   mappingEditMode,
   draftPointCount,
   draftZoneCount,
+  draftLengthMeters,
   hasSavedMapping,
   mappingRestSeconds,
+  startCadenceMode,
+  countdownSeconds,
+  startGateActive,
+  startGateLabel,
+  startGateDetail,
   onSessionModeChange,
   onIntervalModeChange,
   onManualZoneToggle,
   onMetricToggle,
   onSpeedUnitChange,
+  onDistanceUnitChange,
   onEarthAngleChange,
   onEarthHeadingChange,
   onDemoModeChange,
   onDemoBikeCountChange,
+  onStartCadenceModeChange,
+  onCountdownSecondsChange,
   onMappingModeChange,
   onMappingEditModeChange,
   onMappingRestSecondsChange,
@@ -119,11 +142,12 @@ export function SessionControlPanel({
   onReset,
 }: SessionControlPanelProps) {
   const hasMappedRoute = track.routeStatus === 'user-mapped';
-  const canStart = raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
+  const canStart = !startGateActive && raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
   const canSaveMapping = draftPointCount >= 2;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones' ? draftZoneCount > 1 : draftPointCount > 0;
   const availableZones = hasMappedRoute ? track.zones : [];
+  const visibleTrackDistance = draftPointCount > 1 ? draftLengthMeters : hasMappedRoute ? track.lengthMeters : null;
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -187,10 +211,28 @@ export function SessionControlPanel({
           </div>
         )}
 
-        <div className="mapping-status-row three">
+        <div className="mapping-status-row four">
           <span>{draftPointCount} route pt{draftPointCount === 1 ? '' : 's'}</span>
           <span>{draftZoneCount} sprint zone{draftZoneCount === 1 ? '' : 's'}</span>
+          <span>{visibleTrackDistance == null ? 'No distance' : formatDistanceMeters(visibleTrackDistance, distanceUnit)}</span>
           <span>{hasSavedMapping ? 'Saved locally' : 'No saved map'}</span>
+        </div>
+
+        <div className="segmented-control compact" aria-label="Distance unit">
+          <button
+            className={distanceUnit === 'ft' ? 'selected' : ''}
+            type="button"
+            onClick={() => onDistanceUnitChange('ft')}
+          >
+            Feet
+          </button>
+          <button
+            className={distanceUnit === 'km' ? 'selected' : ''}
+            type="button"
+            onClick={() => onDistanceUnitChange('km')}
+          >
+            KM
+          </button>
         </div>
 
         {mappingMode && (
@@ -348,7 +390,7 @@ export function SessionControlPanel({
                     key={zone.id}
                   >
                     <span>{zone.name}</span>
-                    <small>{zone.startMeter}-{zone.endMeter} m</small>
+                    <small>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</small>
                   </button>
                 ))}
                 {availableZones.length === 0 && <span className="empty-inline">No mapped sprint zones</span>}
@@ -364,6 +406,55 @@ export function SessionControlPanel({
             </span>
           )) : <span className="empty-inline">No mapped sprint zones</span>}
         </div>
+      </section>
+
+      <section className="panel-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Start Gate</span>
+            <h3>Cadence</h3>
+          </div>
+          <Timer size={18} />
+        </div>
+
+        <div className="segmented-control compact" aria-label="Start cadence mode">
+          <button
+            className={startCadenceMode === 'countdown' ? 'selected' : ''}
+            type="button"
+            onClick={() => onStartCadenceModeChange('countdown')}
+          >
+            Countdown
+          </button>
+          <button
+            className={startCadenceMode === 'uci' ? 'selected' : ''}
+            type="button"
+            onClick={() => onStartCadenceModeChange('uci')}
+          >
+            UCI
+          </button>
+        </div>
+
+        {startCadenceMode === 'countdown' && (
+          <div className="segmented-control compact four-way" aria-label="Countdown seconds">
+            {[3, 4, 5, 6].map((seconds) => (
+              <button
+                className={countdownSeconds === seconds ? 'selected' : ''}
+                type="button"
+                onClick={() => onCountdownSecondsChange(seconds)}
+                key={seconds}
+              >
+                {seconds}s
+              </button>
+            ))}
+          </div>
+        )}
+
+        {startGateActive && (
+          <div className="start-gate-status">
+            <strong>{startGateLabel}</strong>
+            <span>{startGateDetail}</span>
+          </div>
+        )}
       </section>
 
       <section className="panel-section">
@@ -444,6 +535,8 @@ export function SessionControlPanel({
             ? 'Map Track First'
             : activeBikeCount === 0
               ? (demoMode ? 'Choose Riders' : 'No Bikes Connected')
+              : startGateActive
+                ? startGateLabel || 'Gate Sequence'
               : raceState === 'finished'
                 ? 'Race Again'
                 : raceState === 'racing'

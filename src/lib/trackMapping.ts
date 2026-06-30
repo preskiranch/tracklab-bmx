@@ -4,14 +4,21 @@ export const trackMappingStorageKey = 'tracklab:user-track-mappings:v1';
 
 export type StoredTrackMappings = Record<string, UserTrackMapping>;
 
+const earthRadiusMeters = 6371008.8;
+
 function roundCoordinate(value: number) {
   return Number(value.toFixed(7));
 }
 
 export function distanceBetweenTrackPoints(a: TrackPoint, b: TrackPoint) {
-  const latScale = 111_320;
-  const lngScale = Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)) * 111_320;
-  return Math.hypot((b.lng - a.lng) * lngScale, (b.lat - a.lat) * latScale);
+  const lat1 = a.lat * (Math.PI / 180);
+  const lat2 = b.lat * (Math.PI / 180);
+  const deltaLat = (b.lat - a.lat) * (Math.PI / 180);
+  const deltaLng = (b.lng - a.lng) * (Math.PI / 180);
+  const haversine = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
 export function routeLengthMeters(points: TrackPoint[]) {

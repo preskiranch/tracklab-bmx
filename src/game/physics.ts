@@ -52,9 +52,12 @@ export function stepRiders(
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
     const cadenceLift = Math.min(1.4, cadence / 95);
-    const speedFromPower = 2.1 + Math.sqrt(Math.max(0, watts)) * 0.29 + cadenceLift * 0.8 + boost * 3.6;
+    const isPedaling = watts > 8 || cadence > 4 || (sampledSpeed ?? 0) > 0.8;
+    const speedFromPower = isPedaling
+      ? 1.2 + Math.sqrt(Math.max(0, watts)) * 0.27 + cadenceLift * 0.65 + boost * 2.8
+      : 0;
     const speedFromSensor = sampledSpeed == null ? null : sampledSpeed / 3.6;
-    const targetVelocity = isFresh ? Math.max(speedFromPower, speedFromSensor ?? 0) : 0.35;
+    const targetVelocity = isFresh && isPedaling ? Math.max(speedFromPower, speedFromSensor ?? 0) : 0.05;
     const velocity = rider.velocity + (targetVelocity - rider.velocity) * Math.min(1, dt * 2.5);
     const previousDistance = rider.distance;
     const distance = Math.min(raceLengthMeters, previousDistance + velocity * dt);

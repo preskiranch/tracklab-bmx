@@ -1,7 +1,8 @@
 import { Activity, Gauge, ListFilter, Trophy, Zap } from 'lucide-react';
-import { formatSpeedFromKph, speedUnitLabel } from '../units';
+import { formatDistanceRangeMeters, formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
   BikeSample,
+  DistanceUnit,
   LeaderboardMetric,
   MetricKey,
   PlayerSlot,
@@ -19,6 +20,7 @@ type AnalyticsPanelProps = {
   selectedMetrics: MetricKey[];
   leaderboardMetric: LeaderboardMetric;
   speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
   activeZones: TrackZone[];
   onLeaderboardMetricChange: (metric: LeaderboardMetric) => void;
 };
@@ -95,6 +97,7 @@ export function AnalyticsPanel({
   selectedMetrics,
   leaderboardMetric,
   speedUnit,
+  distanceUnit,
   activeZones,
   onLeaderboardMetricChange,
 }: AnalyticsPanelProps) {
@@ -140,7 +143,7 @@ export function AnalyticsPanel({
                     <strong>{zone.name}</strong>
                     <span>{zone.type}</span>
                   </td>
-                  <td>{zone.startMeter}-{zone.endMeter} m</td>
+                  <td>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</td>
                   {players.map((player) => {
                     const sample = sampleForPlayer(player, samplesByDevice);
                     const rider = riders.find((item) => item.playerId === player.id);

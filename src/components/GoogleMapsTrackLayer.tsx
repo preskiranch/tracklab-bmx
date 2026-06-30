@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   BikeSample,
+  DistanceUnit,
   MappingEditMode,
   PlayerSlot,
   RiderState,
@@ -9,10 +10,11 @@ import type {
   TrackRecord,
   TrackZone,
 } from '../types';
-import { formatSpeedFromKph, speedUnitLabel } from '../units';
+import { formatDistanceMeters, formatSpeedFromKph, speedUnitLabel } from '../units';
 import {
   loadGoogleMaps,
   mappedTrackRoute,
+  pathLengthMeters,
   riderLatLng,
   trackBoundsPoints,
   trackCenter,
@@ -23,6 +25,7 @@ import {
   type GoogleMapsRuntime,
   zonePolyline,
 } from '../lib/googleMaps';
+import { pointAtRouteMeter } from '../lib/trackMapping';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -31,11 +34,13 @@ type GoogleMapsTrackLayerProps = {
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
   earthAngle: number;
   earthHeading: number;
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
   draftPoints?: TrackPoint[];
+  draftZoneMeters?: number[];
   draftZonePoints?: TrackPoint[];
   onEarthCameraChange?: (camera: { angle?: number; heading?: number }) => void;
   onMappingPathPointAdd?: (point: TrackPoint) => void;
@@ -48,6 +53,12 @@ const zoneColors: Record<TrackZone['type'], string> = {
   technical: '#38bdf8',
 };
 const drawSampleMeters = 1.2;
+const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
+  lime: '/assets/rider-lime.png',
+  red: '/assets/rider-red.png',
+  blue: '/assets/rider-blue.png',
+  yellow: '/assets/rider-yellow.png',
+};
 
 function clampTilt(value: number) {
   return Math.max(0, Math.min(67, value));
@@ -78,6 +89,18 @@ function distanceBetweenPoints(a: TrackPoint, b: TrackPoint) {
   return Math.hypot((b.lng - a.lng) * lngScale, (b.lat - a.lat) * latScale);
 }
 
+function distanceLabelIcon(text: string, color = '#111827') {
+  const width = Math.max(86, text.length * 8 + 22);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="26" viewBox="0 0 ${width} 26">
+      <rect x="1" y="1" width="${width - 2}" height="24" rx="6" fill="${color}" fill-opacity="0.92" stroke="#ffffff" stroke-width="1.4"/>
+      <text x="${width / 2}" y="17" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="800" fill="#ffffff">${text}</text>
+    </svg>
+  `;
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
 export function GoogleMapsTrackLayer({
   track,
   activeZones,
@@ -85,11 +108,13 @@ export function GoogleMapsTrackLayer({
   players,
   samplesByDevice,
   speedUnit,
+  distanceUnit,
   earthAngle,
   earthHeading,
   mappingMode = false,
   mappingEditMode = 'draw',
   draftPoints = [],
+  draftZoneMeters = [],
   draftZonePoints = [],
   onEarthCameraChange,
   onMappingPathPointAdd,
@@ -100,6 +125,7 @@ export function GoogleMapsTrackLayer({
   const mapRef = useRef<GoogleMap | null>(null);
   const trackLineRef = useRef<GooglePolyline | null>(null);
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
+  const distanceLabelRefs = useRef<GoogleMarker[]>([]);
   const draftLineRef = useRef<GooglePolyline | null>(null);
   const draftMarkerRefs = useRef<GoogleMarker[]>([]);
   const mapListenerRefs = useRef<GoogleMapsEventListener[]>([]);
@@ -107,6 +133,7 @@ export function GoogleMapsTrackLayer({
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
   const markerRefs = useRef<Map<number, GoogleMarker>>(new Map());
   const cameraRef = useRef({ angle: earthAngle, heading: earthHeading });
+  const lastFitKeyRef = useRef('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
 
@@ -131,6 +158,7 @@ export function GoogleMapsTrackLayer({
           gestureHandling: 'greedy',
           heading: earthHeading,
           headingInteractionEnabled: true,
+          isFractionalZoomEnabled: true,
           keyboardShortcuts: true,
           mapId: google.maps.Map.DEMO_MAP_ID,
           mapTypeControl: false,
@@ -158,12 +186,14 @@ export function GoogleMapsTrackLayer({
       cancelled = true;
       trackLineRef.current?.setMap(null);
       zoneLinesRef.current.forEach((line) => line.setMap(null));
+      distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
       draftLineRef.current?.setMap(null);
       draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
       mapListenerRefs.current.forEach((listener) => listener.remove());
       markerRefs.current.forEach((marker) => marker.setMap(null));
       trackLineRef.current = null;
       zoneLinesRef.current = [];
+      distanceLabelRefs.current = [];
       draftLineRef.current = null;
       draftMarkerRefs.current = [];
       mapListenerRefs.current = [];
@@ -212,16 +242,22 @@ export function GoogleMapsTrackLayer({
 
     trackLineRef.current?.setMap(null);
     zoneLinesRef.current.forEach((line) => line.setMap(null));
+    distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
     zoneLinesRef.current = [];
+    distanceLabelRefs.current = [];
 
-    const bounds = new google.maps.LatLngBounds();
-    trackBoundsPoints(track).forEach((point) => bounds.extend(point));
-    map.fitBounds(bounds, 58);
-    const restoreCamera = () => {
-      applyCamera(map, cameraRef.current.angle, cameraRef.current.heading);
-    };
-    restoreCamera();
-    window.requestAnimationFrame(restoreCamera);
+    const fitKey = `${track.id}:${track.routeStatus ?? 'locator'}:${track.centerline?.length ?? 0}`;
+    if (lastFitKeyRef.current !== fitKey) {
+      const bounds = new google.maps.LatLngBounds();
+      trackBoundsPoints(track).forEach((point) => bounds.extend(point));
+      map.fitBounds(bounds, 58);
+      const restoreCamera = () => {
+        applyCamera(map, cameraRef.current.angle, cameraRef.current.heading);
+      };
+      restoreCamera();
+      window.requestAnimationFrame(restoreCamera);
+      lastFitKeyRef.current = fitKey;
+    }
 
     const savedRoute = mappedTrackRoute(track);
     if (savedRoute.length < 2) {
@@ -237,6 +273,22 @@ export function GoogleMapsTrackLayer({
       strokeWeight: 5,
     });
 
+    const routeMidpoint = riderLatLng(track, track.lengthMeters / 2);
+    if (routeMidpoint) {
+      distanceLabelRefs.current.push(new google.maps.Marker({
+        icon: {
+          anchor: new google.maps.Point(54, 34),
+          scaledSize: new google.maps.Size(108, 26),
+          url: distanceLabelIcon(`Track ${formatDistanceMeters(pathLengthMeters(savedRoute, google), distanceUnit)}`),
+        },
+        map,
+        optimized: false,
+        position: routeMidpoint,
+        title: `Track distance ${formatDistanceMeters(track.lengthMeters, distanceUnit)}`,
+        zIndex: 500,
+      }));
+    }
+
     zoneLinesRef.current = activeZones
       .map((zone) => ({ zone, path: zonePolyline(track, zone) }))
       .filter(({ path }) => path.length > 1)
@@ -247,7 +299,28 @@ export function GoogleMapsTrackLayer({
         strokeOpacity: 0.92,
         strokeWeight: 6,
       }));
-  }, [activeZones, status, track]);
+
+    activeZones.forEach((zone, index) => {
+      const position = riderLatLng(track, zone.startMeter + (zone.endMeter - zone.startMeter) / 2);
+      if (!position) {
+        return;
+      }
+
+      const distance = Math.max(0, zone.endMeter - zone.startMeter);
+      distanceLabelRefs.current.push(new google.maps.Marker({
+        icon: {
+          anchor: new google.maps.Point(43, -4),
+          scaledSize: new google.maps.Size(86, 26),
+          url: distanceLabelIcon(`Z${index + 1} ${formatDistanceMeters(distance, distanceUnit)}`, zoneColors[zone.type]),
+        },
+        map,
+        optimized: false,
+        position,
+        title: `${zone.name} ${formatDistanceMeters(distance, distanceUnit)}`,
+        zIndex: 520,
+      }));
+    });
+  }, [activeZones, distanceUnit, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -274,6 +347,46 @@ export function GoogleMapsTrackLayer({
         strokeWeight: 5,
       });
     }
+
+    const draftLengthMeters = pathLengthMeters(draftPoints, google);
+    const draftDistanceMarkers = draftPoints.length > 1 ? [
+      new google.maps.Marker({
+        icon: {
+          anchor: new google.maps.Point(54, 34),
+          scaledSize: new google.maps.Size(108, 26),
+          url: distanceLabelIcon(`Track ${formatDistanceMeters(draftLengthMeters, distanceUnit)}`),
+        },
+        map,
+        optimized: false,
+        position: pointAtRouteMeter(draftPoints, draftLengthMeters / 2) ?? draftPoints[Math.floor(draftPoints.length / 2)],
+        title: `Draft track distance ${formatDistanceMeters(draftLengthMeters, distanceUnit)}`,
+        zIndex: 540,
+      }),
+    ] : [];
+
+    const draftZoneBreaks = draftPoints.length > 1
+      ? [0, ...draftZoneMeters.filter((meter) => meter > 0 && meter < draftLengthMeters), draftLengthMeters]
+      : [];
+    const draftZoneDistanceMarkers = draftZoneBreaks.slice(1).map((endMeter, index) => {
+      const startMeter = draftZoneBreaks[index];
+      const midpoint = pointAtRouteMeter(draftPoints, startMeter + (endMeter - startMeter) / 2);
+      if (!midpoint) {
+        return null;
+      }
+
+      return new google.maps.Marker({
+        icon: {
+          anchor: new google.maps.Point(43, -4),
+          scaledSize: new google.maps.Size(86, 26),
+          url: distanceLabelIcon(`Z${index + 1} ${formatDistanceMeters(endMeter - startMeter, distanceUnit)}`, '#38bdf8'),
+        },
+        map,
+        optimized: false,
+        position: midpoint,
+        title: `Draft zone ${index + 1} ${formatDistanceMeters(endMeter - startMeter, distanceUnit)}`,
+        zIndex: 545,
+      });
+    }).filter((marker): marker is GoogleMarker => marker != null);
 
     const endpointMarkers = draftPoints.length === 0 ? [] : [
       new google.maps.Marker({
@@ -341,8 +454,13 @@ export function GoogleMapsTrackLayer({
       title: `Mapping pin ${index + 1}`,
     }));
 
-    draftMarkerRefs.current = [...endpointMarkers, ...zoneMarkers];
-  }, [draftPoints, draftZonePoints, mappingMode, status]);
+    draftMarkerRefs.current = [
+      ...draftDistanceMarkers,
+      ...draftZoneDistanceMarkers,
+      ...endpointMarkers,
+      ...zoneMarkers,
+    ];
+  }, [distanceUnit, draftPoints, draftZoneMeters, draftZonePoints, mappingMode, status]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -479,15 +597,13 @@ export function GoogleMapsTrackLayer({
 
       const marker = new google.maps.Marker({
         icon: {
-          fillColor: player.accent,
-          fillOpacity: 1,
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 12,
-          strokeColor: '#ffffff',
-          strokeWeight: 3,
+          anchor: new google.maps.Point(24, 44),
+          labelOrigin: new google.maps.Point(63, 15),
+          scaledSize: new google.maps.Size(58, 66),
+          url: riderIconByColor[player.colorName],
         },
         label: {
-          color: '#111827',
+          color: '#ffffff',
           fontSize: '12px',
           fontWeight: '900',
           text: `P${player.id}`,

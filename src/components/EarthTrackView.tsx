@@ -2,8 +2,10 @@ import type { CSSProperties } from 'react';
 import { ExternalLink, Flag, Map as MapIcon, MapPinned, Satellite, Signal } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
+import { formatDistanceMeters } from '../units';
 import type {
   BikeSample,
+  DistanceUnit,
   MappingEditMode,
   PlayerSlot,
   RaceState,
@@ -20,6 +22,7 @@ type EarthTrackViewProps = {
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
   raceState: RaceState;
   earthAngle: number;
   earthHeading: number;
@@ -27,6 +30,7 @@ type EarthTrackViewProps = {
   mappingMode: boolean;
   mappingEditMode: MappingEditMode;
   draftPoints: TrackPoint[];
+  draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
   onEarthCameraChange: (camera: { angle?: number; heading?: number }) => void;
   onMappingPathPointAdd: (point: TrackPoint) => void;
@@ -48,6 +52,7 @@ export function EarthTrackView({
   players,
   samplesByDevice,
   speedUnit,
+  distanceUnit,
   raceState,
   earthAngle,
   earthHeading,
@@ -55,6 +60,7 @@ export function EarthTrackView({
   mappingMode,
   mappingEditMode,
   draftPoints,
+  draftZoneMeters,
   draftZonePoints,
   onEarthCameraChange,
   onMappingPathPointAdd,
@@ -77,7 +83,7 @@ export function EarthTrackView({
             {imageryLabel}
           </div>
           <h2>{track.name}</h2>
-          <p>{track.address ?? `${track.state}, ${track.country}`} / {track.lengthMeters} m / {track.surface}</p>
+          <p>{track.address ?? `${track.state}, ${track.country}`} / {formatDistanceMeters(track.lengthMeters, distanceUnit)} / {track.surface}</p>
         </div>
         <div className="earth-meta">
           <span><MapPinned size={15} /> {track.source}</span>
@@ -97,12 +103,14 @@ export function EarthTrackView({
             players={players}
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
+            distanceUnit={distanceUnit}
             earthAngle={earthAngle}
             earthHeading={earthHeading}
             activeZones={activeZones}
             mappingMode={mappingMode}
             mappingEditMode={mappingEditMode}
             draftPoints={draftPoints}
+            draftZoneMeters={draftZoneMeters}
             draftZonePoints={draftZonePoints}
             onEarthCameraChange={onEarthCameraChange}
             onMappingPathPointAdd={onMappingPathPointAdd}

@@ -834,6 +834,10 @@ input:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.mapping-status-row.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .mapping-status-row span {
   min-width: 0;
   min-height: 30px;
@@ -943,6 +947,27 @@ input:focus {
 .zone-chip.recovery {
   background: #fff5d8;
   color: #805900;
+}
+
+.start-gate-status {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid #9edc86;
+  border-radius: 7px;
+  background: #f0faea;
+}
+
+.start-gate-status strong {
+  color: #111827;
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.start-gate-status span {
+  color: #4d5c4a;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .metric-picker {

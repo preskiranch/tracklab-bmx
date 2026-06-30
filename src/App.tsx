@@ -17,9 +17,16 @@ import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPane
 import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { SessionControlPanel } from './components/SessionControlPanel';
-import { defaultPlayerSlots, liveBikeTimeoutMs, maxPlayers, speedUnitStorageKey, storageKey } from './data';
+import {
+  defaultPlayerSlots,
+  distanceUnitStorageKey,
+  liveBikeTimeoutMs,
+  maxPlayers,
+  speedUnitStorageKey,
+  storageKey,
+} from './data';
 import { countriesForCatalog, statesForCountry, trackCatalog, tracksForLocation } from './data/trackCatalog';
-import { primeAudioCues } from './lib/audioCues';
+import { playStartGateTone, primeAudioCues, speakStartGatePhrase } from './lib/audioCues';
 import {
   applyUserTrackMapping,
   createUserTrackMapping,
@@ -39,6 +46,7 @@ import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import { useZoneAudioCues } from './hooks/useZoneAudioCues';
 import type {
   AppMode,
+  DistanceUnit,
   IntervalMode,
   LeaderboardMetric,
   MappingEditMode,
@@ -47,6 +55,7 @@ import type {
   PlayMode,
   SessionMode,
   SpeedUnit,
+  StartCadenceMode,
   TrackPoint,
   TrackRecord,
   UserTrackMapping,
@@ -84,6 +93,10 @@ function readStoredSpeedUnit(): SpeedUnit {
   return window.localStorage.getItem(speedUnitStorageKey) === 'mph' ? 'mph' : 'kph';
 }
 
+function readStoredDistanceUnit(): DistanceUnit {
+  return window.localStorage.getItem(distanceUnitStorageKey) === 'km' ? 'km' : 'ft';
+}
+
 function downloadTrackMapping(mapping: UserTrackMapping) {
   const blob = new Blob([JSON.stringify(mapping, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -100,9 +113,22 @@ function formatClock() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+type StartGateStatus = {
+  active: boolean;
+  label: string;
+  detail: string;
+};
+
+const idleStartGateStatus: StartGateStatus = {
+  active: false,
+  label: '',
+  detail: '',
+};
+
 export default function App() {
   const bridge = useWattbikeBridge();
   const raceShellRef = useRef<HTMLDivElement | null>(null);
+  const startGateTimeoutsRef = useRef<number[]>([]);
   const [initialTrack] = useState(readInitialTrack);
   const [catalogTracks, setCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
@@ -115,8 +141,10 @@ export default function App() {
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(maxPlayers);
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
+  const [demoRaceStartedAt, setDemoRaceStartedAt] = useState<number | null>(null);
   const [appMode, setAppMode] = useState<AppMode>('race');
   const [speedUnit, setSpeedUnit] = useState<SpeedUnit>(readStoredSpeedUnit);
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>(readStoredDistanceUnit);
   const [now, setNow] = useState(Date.now());
   const [selectedCountry, setSelectedCountry] = useState(initialTrack.country);
   const [selectedState, setSelectedState] = useState(initialTrack.state);
@@ -127,6 +155,9 @@ export default function App() {
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power']);
   const [earthAngle, setEarthAngle] = useState(45);
   const [earthHeading, setEarthHeading] = useState(0);
+  const [startCadenceMode, setStartCadenceMode] = useState<StartCadenceMode>('countdown');
+  const [countdownSeconds, setCountdownSeconds] = useState(3);
+  const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [accountsEnabled, setAccountsEnabled] = useState(false);
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
@@ -135,7 +166,12 @@ export default function App() {
     { id: 1, author: 'Coach', text: 'Gate cadence looked strong through the first straight.', at: '10:24 AM' },
     { id: 2, author: 'System', text: "Private room opened for today's session.", at: '10:25 AM' },
   ]);
-  const demo = useDemoBikes({ enabled: demoMode, bikeCount: demoBikeCount, raceSeed: demoRaceSeed });
+  const demo = useDemoBikes({
+    enabled: demoMode,
+    bikeCount: demoBikeCount,
+    raceSeed: demoRaceSeed,
+    raceStartedAt: demoRaceStartedAt,
+  });
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -207,6 +243,10 @@ export default function App() {
       .filter((point): point is TrackPoint => point != null),
     [draftPoints, draftZoneMeters],
   );
+  const draftLengthMeters = useMemo(
+    () => (draftPoints.length > 1 ? routeLengthMeters(draftPoints) : 0),
+    [draftPoints],
+  );
   const demoPlayers = useMemo(() => createDemoPlayers(demoBikeCount), [demoBikeCount]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : bridge.samplesByDevice;
   const availablePlayers = demoMode ? demoPlayers : players;
@@ -273,11 +313,16 @@ export default function App() {
   }, [speedUnit]);
 
   useEffect(() => {
+    window.localStorage.setItem(distanceUnitStorageKey, distanceUnit);
+  }, [distanceUnit]);
+
+  useEffect(() => {
     setManualZoneIds((current) => {
       const valid = current.filter((zoneId) => mappedZones.some((zone) => zone.id === zoneId));
       return valid.length > 0 ? valid : mappedZones.filter((zone) => zone.type === 'pedal').slice(0, 2).map((zone) => zone.id);
     });
     resetRace();
+    setDemoRaceStartedAt(null);
   }, [effectiveTrack.id, mappedZones, resetRace]);
 
   const assignDevice = useCallback((playerId: PlayerSlot['id'], deviceId: number | null) => {
@@ -417,6 +462,7 @@ export default function App() {
       writeStoredTrackMappings(next);
       return next;
     });
+    setDemoRaceStartedAt(null);
     resetRace();
   };
 
@@ -429,6 +475,7 @@ export default function App() {
     });
     setDraftPoints([]);
     setDraftZoneMeters([]);
+    setDemoRaceStartedAt(null);
     resetRace();
   };
 
@@ -462,6 +509,7 @@ export default function App() {
         setMappingRestSeconds(mapping.restAfterSeconds);
         setMappingEditMode('navigate');
         setMappingMode(true);
+        setDemoRaceStartedAt(null);
         resetRace();
       } catch (error) {
         console.error(error);
@@ -518,21 +566,57 @@ export default function App() {
     }
   }, []);
 
+  const clearStartGateSequence = useCallback(() => {
+    startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    startGateTimeoutsRef.current = [];
+    window.speechSynthesis?.cancel();
+    setStartGateStatus(idleStartGateStatus);
+  }, []);
+
+  useEffect(() => () => clearStartGateSequence(), [clearStartGateSequence]);
+
+  const scheduleStartGateStep = useCallback((delayMs: number, action: () => void) => {
+    const timeoutId = window.setTimeout(action, delayMs);
+    startGateTimeoutsRef.current.push(timeoutId);
+  }, []);
+
+  const beginRaceAtGateDrop = useCallback(() => {
+    const gateDropAt = Date.now();
+    if (demoMode) {
+      setDemoRaceSeed((seed) => seed + 104729);
+      setDemoRaceStartedAt(gateDropAt);
+    }
+
+    setStartGateStatus({
+      active: false,
+      label: 'GO',
+      detail: 'Gate open',
+    });
+    startRace();
+    scheduleStartGateStep(900, () => setStartGateStatus(idleStartGateStatus));
+  }, [demoMode, scheduleStartGateStep, startRace]);
+
   const handleDemoModeChange = (enabled: boolean) => {
+    clearStartGateSequence();
     setDemoMode(enabled);
     setDemoRaceSeed(Date.now());
+    setDemoRaceStartedAt(null);
     resetRace();
   };
 
   const handleDemoBikeCountChange = (count: number) => {
+    clearStartGateSequence();
     setDemoBikeCount(Math.max(1, Math.min(maxPlayers, Math.round(count))));
     setDemoRaceSeed(Date.now() + count);
+    setDemoRaceStartedAt(null);
     resetRace();
   };
 
   const handleReset = () => {
+    clearStartGateSequence();
     if (demoMode) {
       setDemoRaceSeed((seed) => seed + 7919);
+      setDemoRaceStartedAt(null);
     }
 
     resetRace();
@@ -552,19 +636,77 @@ export default function App() {
   };
 
   const handleStart = () => {
-    if (effectiveTrack.routeStatus !== 'user-mapped') {
+    if (effectiveTrack.routeStatus !== 'user-mapped' || startGateStatus.active || raceState === 'racing') {
       return;
     }
 
-    if (demoMode) {
-      setDemoRaceSeed((seed) => seed + 104729);
-    }
-
+    clearStartGateSequence();
     primeAudioCues();
     if (!document.fullscreenElement) {
       void raceShellRef.current?.requestFullscreen?.().catch(() => undefined);
     }
-    startRace();
+
+    if (startCadenceMode === 'uci') {
+      const randomDelayMs = 100 + Math.round(Math.random() * 2600);
+      const firstToneAtMs = 5300 + randomDelayMs;
+
+      setStartGateStatus({
+        active: true,
+        label: 'OK RIDERS',
+        detail: 'Random start',
+      });
+      speakStartGatePhrase('OK riders, random start');
+
+      scheduleStartGateStep(3300, () => {
+        setStartGateStatus({
+          active: true,
+          label: 'RIDERS READY',
+          detail: 'Watch the gate',
+        });
+        speakStartGatePhrase('Riders ready. Watch the gate.');
+      });
+
+      [0, 120, 240].forEach((offsetMs, index) => {
+        scheduleStartGateStep(firstToneAtMs + offsetMs, () => {
+          setStartGateStatus({
+            active: true,
+            label: `RED ${index + 1}`,
+            detail: 'UCI cadence',
+          });
+          playStartGateTone('uci-red');
+        });
+      });
+
+      scheduleStartGateStep(firstToneAtMs + 360, () => {
+        playStartGateTone('uci-green');
+        beginRaceAtGateDrop();
+      });
+      return;
+    }
+
+    const safeCountdownSeconds = Math.max(3, Math.min(6, Math.round(countdownSeconds)));
+    setStartGateStatus({
+      active: true,
+      label: `Gate in ${safeCountdownSeconds}`,
+      detail: 'Standard countdown',
+    });
+
+    for (let secondsRemaining = safeCountdownSeconds; secondsRemaining >= 1; secondsRemaining -= 1) {
+      const delayMs = (safeCountdownSeconds - secondsRemaining) * 1000;
+      scheduleStartGateStep(delayMs, () => {
+        setStartGateStatus({
+          active: true,
+          label: `Gate in ${secondsRemaining}`,
+          detail: 'Standard countdown',
+        });
+        playStartGateTone('tick');
+      });
+    }
+
+    scheduleStartGateStep(safeCountdownSeconds * 1000, () => {
+      playStartGateTone('gate');
+      beginRaceAtGateDrop();
+    });
   };
 
   const connectionLabel = demoMode
@@ -690,6 +832,7 @@ export default function App() {
                 players={activePlayers}
                 samplesByDevice={samplesByDevice}
                 speedUnit={speedUnit}
+                distanceUnit={distanceUnit}
                 raceState={raceState}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
@@ -697,6 +840,7 @@ export default function App() {
                 mappingMode={mappingMode}
                 mappingEditMode={mappingEditMode}
                 draftPoints={draftPoints}
+                draftZoneMeters={draftZoneMeters}
                 draftZonePoints={draftZonePoints}
                 onEarthCameraChange={handleEarthCameraChange}
                 onMappingPathPointAdd={handleMappingPathPointAdd}
@@ -711,6 +855,7 @@ export default function App() {
                 manualZoneIds={manualZoneIds}
                 selectedMetrics={selectedMetrics}
                 speedUnit={speedUnit}
+                distanceUnit={distanceUnit}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
                 raceState={raceState}
@@ -722,17 +867,26 @@ export default function App() {
                 mappingEditMode={mappingEditMode}
                 draftPointCount={draftPoints.length}
                 draftZoneCount={draftPoints.length > 1 ? draftZoneMeters.length + 1 : 0}
+                draftLengthMeters={draftLengthMeters}
                 hasSavedMapping={Boolean(selectedTrackMapping)}
                 mappingRestSeconds={mappingRestSeconds}
+                startCadenceMode={startCadenceMode}
+                countdownSeconds={countdownSeconds}
+                startGateActive={startGateStatus.active}
+                startGateLabel={startGateStatus.label}
+                startGateDetail={startGateStatus.detail}
                 onSessionModeChange={setSessionMode}
                 onIntervalModeChange={setIntervalMode}
                 onManualZoneToggle={toggleManualZone}
                 onMetricToggle={toggleMetric}
                 onSpeedUnitChange={setSpeedUnit}
+                onDistanceUnitChange={setDistanceUnit}
                 onEarthAngleChange={setEarthAngle}
                 onEarthHeadingChange={setEarthHeading}
                 onDemoModeChange={handleDemoModeChange}
                 onDemoBikeCountChange={handleDemoBikeCountChange}
+                onStartCadenceModeChange={setStartCadenceMode}
+                onCountdownSecondsChange={(seconds) => setCountdownSeconds(Math.max(3, Math.min(6, Math.round(seconds))))}
                 onMappingModeChange={handleMappingModeChange}
                 onMappingEditModeChange={setMappingEditMode}
                 onMappingRestSecondsChange={updateMappingRestSeconds}
@@ -756,6 +910,7 @@ export default function App() {
                 selectedMetrics={selectedMetrics}
                 leaderboardMetric={leaderboardMetric}
                 speedUnit={speedUnit}
+                distanceUnit={distanceUnit}
                 activeZones={activeZones}
                 onLeaderboardMetricChange={setLeaderboardMetric}
               />

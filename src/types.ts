@@ -1,9 +1,11 @@
 export type BridgeMode = 'sim' | 'ant' | 'demo';
 export type SpeedUnit = 'kph' | 'mph';
+export type DistanceUnit = 'ft' | 'km';
 export type SessionMode = 'sprint' | 'interval';
 export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
 export type MappingEditMode = 'navigate' | 'draw' | 'zones';
+export type StartCadenceMode = 'countdown' | 'uci';
 export type MetricKey = 'cadence' | 'speed' | 'power';
 export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
 
