@@ -232,9 +232,13 @@ export type TrackRecord = {
   sourceTrackId?: string;
   address?: string;
   city?: string;
+  county?: string;
+  district?: string;
   postalCode?: string;
   latitude?: number;
   longitude?: number;
+  coordinateSource?: string;
+  coordinateAccuracy?: string;
   websiteUrl?: string;
   facebookUrl?: string;
   instagramUrl?: string;
@@ -248,4 +252,5 @@ export type TrackRecord = {
   routeStatus?: TrackRouteStatus;
   zones: TrackZone[];
   leaderboards: Record<LeaderboardMetric, LeaderboardEntry[]>;
+  sourceRecord?: Record<string, unknown>;
 };

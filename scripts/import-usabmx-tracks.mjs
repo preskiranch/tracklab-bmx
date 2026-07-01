@@ -118,6 +118,8 @@ function normalize(record) {
     postalCode: String(record.postal_code ?? ''),
     latitude,
     longitude,
+    coordinateSource: 'USA BMX / BMX Canada locator endpoint',
+    coordinateAccuracy: 'provider-coordinate',
     facebookUrl: record.facebook_url ?? undefined,
     instagramUrl: record.instagram_url ?? undefined,
     lengthMeters: 350,

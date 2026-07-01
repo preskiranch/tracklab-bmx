@@ -11,6 +11,9 @@
     "ble:inspect": "node bridge/ble-inspector.mjs",
     "assets:clean": "node scripts/clean-sprite-alpha.mjs",
     "tracks:import:usabmx": "node scripts/import-usabmx-tracks.mjs",
+    "tracks:import:ffc": "node scripts/import-ffc-bmx-tracks.mjs",
+    "tracks:import:bmxnz": "node scripts/import-bmxnz-tracks.mjs",
+    "tracks:import:official": "npm run tracks:import:usabmx && npm run tracks:import:ffc && npm run tracks:import:bmxnz",
     "tracks:build": "node scripts/build-track-database.mjs",
     "build": "npm run tracks:build && tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1"

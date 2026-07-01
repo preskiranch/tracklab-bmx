@@ -87,9 +87,13 @@ function normalizeTrack(track) {
     sourceTrackId: track.sourceTrackId,
     address: track.address,
     city: track.city,
+    county: track.county,
+    district: track.district,
     postalCode: track.postalCode,
     latitude: Number.isFinite(Number(track.latitude)) ? Number(track.latitude) : undefined,
     longitude: Number.isFinite(Number(track.longitude)) ? Number(track.longitude) : undefined,
+    coordinateSource: track.coordinateSource,
+    coordinateAccuracy: track.coordinateAccuracy,
     websiteUrl: track.websiteUrl,
     facebookUrl: track.facebookUrl,
     instagramUrl: track.instagramUrl,
@@ -103,6 +107,7 @@ function normalizeTrack(track) {
     routeStatus: track.routeStatus ?? (track.latitude && track.longitude ? 'locator-only' : 'estimated'),
     zones: Array.isArray(track.zones) ? track.zones : createZones(lengthMeters),
     leaderboards: track.leaderboards ?? { rpm: [], speed: [], watts: [] },
+    sourceRecord: track.sourceRecord,
   };
 }
 

@@ -8,6 +8,22 @@ USA BMX / BMX Canada locator records can be refreshed with:
 npm run tracks:import:usabmx
 ```
 
+All active official importers can be refreshed with:
+
+```sh
+npm run tracks:import:official
+```
+
+Current active official importers:
+
+- USA BMX / BMX Canada: official locator endpoint with provider coordinates.
+- Fédération Française de Cyclisme: official BMX Racing Google My Maps KML
+  embedded on the FFC équipements sportifs page, enriched with French city,
+  department, and region from the Base Adresse Nationale reverse geocoding API.
+- BMX New Zealand: official BMXNZ club finder page. BMXNZ lists addresses but
+  not GPS coordinates, so imported GPS values are cached geocodes and are marked
+  `coordinateAccuracy` accordingly.
+
 That command reads the public USA BMX track finder backend used by
 `https://www.usabmx.com/tracks/find-tracks` and writes
 `data/imports/usa-bmx-official.json`.
@@ -18,6 +34,11 @@ postal code, country, and latitude/longitude. They are marked
 start hill, rideable centerline, jump/turn geometry, or finish line. Those
 fields must be verified per track before the race model can claim to follow the
 true lane.
+
+The same route-status rule applies to global locator imports. A track record can
+be used to find the venue on the map immediately, but it should not be treated as
+a rideable race route until a user or verified source maps the start gate,
+centerline, sprint zones, and finish line.
 
 Expected input shape:
 
