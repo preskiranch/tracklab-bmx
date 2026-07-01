@@ -81,6 +81,43 @@ export type GooglePlacePrediction = {
 
 type GoogleAutocompleteSessionToken = object;
 
+type GoogleLegacyAutocompletePrediction = {
+  description?: string;
+  place_id: string;
+  structured_formatting?: {
+    main_text?: string;
+    secondary_text?: string;
+  };
+};
+
+type GoogleLegacyAutocompleteResponse = {
+  predictions?: GoogleLegacyAutocompletePrediction[];
+};
+
+type GoogleLegacyAutocompleteService = {
+  getPlacePredictions: (
+    request: { input: string; sessionToken?: GoogleAutocompleteSessionToken },
+    callback?: (predictions: GoogleLegacyAutocompletePrediction[] | null, status: string) => void,
+  ) => Promise<GoogleLegacyAutocompleteResponse> | void;
+};
+
+type GoogleLegacyPlaceResult = {
+  formatted_address?: string;
+  name?: string;
+  geometry?: {
+    location?: {
+      toJSON: () => LatLngLiteral;
+    };
+  };
+};
+
+type GoogleLegacyPlacesService = {
+  getDetails: (
+    request: { placeId: string; fields: string[]; sessionToken?: GoogleAutocompleteSessionToken },
+    callback?: (place: GoogleLegacyPlaceResult | null, status: string) => void,
+  ) => Promise<{ place?: GoogleLegacyPlaceResult }> | void;
+};
+
 type GoogleAutocompleteSuggestion = {
   placePrediction?: GooglePlacePrediction;
 };
@@ -93,6 +130,8 @@ type GooglePlacesLibrary = {
       sessionToken?: GoogleAutocompleteSessionToken;
     }) => Promise<{ suggestions?: GoogleAutocompleteSuggestion[] }>;
   };
+  AutocompleteService?: new () => GoogleLegacyAutocompleteService;
+  PlacesService?: new (element: HTMLElement) => GoogleLegacyPlacesService;
 };
 
 type GoogleStreetViewPanorama = {
@@ -152,8 +191,15 @@ export type PlacePredictionOption = {
   mainText: string;
   secondaryText: string;
   placeId: string;
-  placePrediction: GooglePlacePrediction;
-};
+} & (
+  | {
+      source: 'new';
+      placePrediction: GooglePlacePrediction;
+    }
+  | {
+      source: 'legacy';
+    }
+);
 
 declare global {
   interface Window {
@@ -327,9 +373,11 @@ async function getPlacesLibrary(google: GoogleMapsRuntime): Promise<GooglePlaces
     : null;
 
   const places = google.maps.places ?? imported ?? {};
-  if (imported && (!places.AutocompleteSessionToken || !places.AutocompleteSuggestion)) {
+  if (imported) {
     places.AutocompleteSessionToken = places.AutocompleteSessionToken ?? imported.AutocompleteSessionToken;
     places.AutocompleteSuggestion = places.AutocompleteSuggestion ?? imported.AutocompleteSuggestion;
+    places.AutocompleteService = places.AutocompleteService ?? imported.AutocompleteService;
+    places.PlacesService = places.PlacesService ?? imported.PlacesService;
   }
 
   google.maps.places = places;
@@ -340,14 +388,10 @@ export function resetPlaceAutocompleteSession() {
   placeAutocompleteSessionToken = null;
 }
 
-export async function fetchLocationPredictions(input: string): Promise<PlacePredictionOption[]> {
-  const trimmed = input.trim();
-  if (trimmed.length < 3 || parseLatLngText(trimmed)) {
-    return [];
-  }
-
-  const google = await loadGoogleMaps();
-  const places = await getPlacesLibrary(google);
+async function fetchModernLocationPredictions(
+  places: GooglePlacesLibrary,
+  input: string,
+): Promise<PlacePredictionOption[]> {
   const AutocompleteSuggestion = places.AutocompleteSuggestion;
   const AutocompleteSessionToken = places.AutocompleteSessionToken;
 
@@ -357,7 +401,7 @@ export async function fetchLocationPredictions(input: string): Promise<PlacePred
 
   placeAutocompleteSessionToken = placeAutocompleteSessionToken ?? new AutocompleteSessionToken();
   const response = await AutocompleteSuggestion.fetchAutocompleteSuggestions({
-    input: trimmed,
+    input,
     sessionToken: placeAutocompleteSessionToken,
   });
 
@@ -377,14 +421,185 @@ export async function fetchLocationPredictions(input: string): Promise<PlacePred
         mainText: mainText || label,
         secondaryText,
         placeId: placePrediction.placeId,
+        source: 'new' as const,
         placePrediction,
       };
     });
 }
 
+function getLegacyAutocompletePredictions(
+  service: GoogleLegacyAutocompleteService,
+  input: string,
+): Promise<GoogleLegacyAutocompletePrediction[]> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (handler: () => void) => {
+      if (!settled) {
+        settled = true;
+        handler();
+      }
+    };
+
+    const request = {
+      input,
+      sessionToken: placeAutocompleteSessionToken ?? undefined,
+    };
+    const response = service.getPlacePredictions(request, (predictions, status) => {
+      if (status === 'OK') {
+        settle(() => resolve(predictions ?? []));
+        return;
+      }
+
+      if (status === 'ZERO_RESULTS') {
+        settle(() => resolve([]));
+        return;
+      }
+
+      settle(() => reject(new Error(`Google Places autocomplete failed (${status}).`)));
+    });
+
+    if (response && typeof response.then === 'function') {
+      response
+        .then((result) => settle(() => resolve(result.predictions ?? [])))
+        .catch((error: unknown) => settle(() => reject(error)));
+    }
+  });
+}
+
+async function fetchLegacyLocationPredictions(
+  places: GooglePlacesLibrary,
+  input: string,
+): Promise<PlacePredictionOption[]> {
+  const AutocompleteService = places.AutocompleteService;
+  if (!AutocompleteService) {
+    throw new Error('Google Places autocomplete is unavailable for this Maps key.');
+  }
+
+  const service = new AutocompleteService();
+  const predictions = await getLegacyAutocompletePredictions(service, input);
+  return predictions.map((prediction, index) => {
+    const mainText = prediction.structured_formatting?.main_text ?? prediction.description ?? prediction.place_id;
+    const secondaryText = prediction.structured_formatting?.secondary_text ?? '';
+    const label = prediction.description ?? [mainText, secondaryText].filter(Boolean).join(', ');
+
+    return {
+      id: `${prediction.place_id}-${index}`,
+      label,
+      mainText,
+      secondaryText,
+      placeId: prediction.place_id,
+      source: 'legacy' as const,
+    };
+  });
+}
+
+export async function fetchLocationPredictions(input: string): Promise<PlacePredictionOption[]> {
+  const trimmed = input.trim();
+  if (trimmed.length < 3 || parseLatLngText(trimmed)) {
+    return [];
+  }
+
+  const google = await loadGoogleMaps();
+  const places = await getPlacesLibrary(google);
+  let modernError: unknown = null;
+
+  try {
+    return await fetchModernLocationPredictions(places, trimmed);
+  } catch (error) {
+    modernError = error;
+  }
+
+  try {
+    return await fetchLegacyLocationPredictions(places, trimmed);
+  } catch {
+    if (modernError instanceof Error) {
+      throw modernError;
+    }
+
+    throw new Error('Google Places autocomplete is unavailable for this Maps key.');
+  }
+}
+
+let legacyPlacesService: GoogleLegacyPlacesService | null = null;
+
+function getLegacyPlacesService(places: GooglePlacesLibrary) {
+  if (!places.PlacesService) {
+    throw new Error('Google Places details are unavailable for this Maps key.');
+  }
+
+  if (!legacyPlacesService) {
+    const element = document.createElement('div');
+    element.hidden = true;
+    document.body.appendChild(element);
+    legacyPlacesService = new places.PlacesService(element);
+  }
+
+  return legacyPlacesService;
+}
+
+function getLegacyPlaceDetails(
+  service: GoogleLegacyPlacesService,
+  placeId: string,
+): Promise<GoogleLegacyPlaceResult> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (handler: () => void) => {
+      if (!settled) {
+        settled = true;
+        handler();
+      }
+    };
+
+    const request = {
+      placeId,
+      fields: ['formatted_address', 'geometry', 'name'],
+      sessionToken: placeAutocompleteSessionToken ?? undefined,
+    };
+    const response = service.getDetails(request, (place, status) => {
+      if (status === 'OK' && place) {
+        settle(() => resolve(place));
+        return;
+      }
+
+      settle(() => reject(new Error(`Google could not resolve that selected address (${status}).`)));
+    });
+
+    if (response && typeof response.then === 'function') {
+      response
+        .then((result) => {
+          if (result.place) {
+            settle(() => resolve(result.place as GoogleLegacyPlaceResult));
+            return;
+          }
+
+          settle(() => reject(new Error('Google could not resolve that selected address.')));
+        })
+        .catch((error: unknown) => settle(() => reject(error)));
+    }
+  });
+}
+
 export async function resolvePlacePrediction(
   prediction: PlacePredictionOption,
 ): Promise<{ point: LatLngLiteral; label?: string }> {
+  if (prediction.source === 'legacy') {
+    const google = await loadGoogleMaps();
+    const places = await getPlacesLibrary(google);
+    const service = getLegacyPlacesService(places);
+    const place = await getLegacyPlaceDetails(service, prediction.placeId);
+    const point = place.geometry?.location?.toJSON();
+    resetPlaceAutocompleteSession();
+
+    if (!point) {
+      throw new Error('Google could not resolve that selected address.');
+    }
+
+    return {
+      point,
+      label: place.formatted_address ?? place.name ?? prediction.label,
+    };
+  }
+
   const place = prediction.placePrediction.toPlace();
   await place.fetchFields({ fields: ['displayName', 'formattedAddress', 'location'] });
   const point = place.location?.toJSON();
