@@ -17,6 +17,9 @@ export type BikeSample = {
   watts: number;
   cadence: number | null;
   speedKph: number | null;
+  wattsAt?: number;
+  cadenceAt?: number;
+  speedAt?: number;
   signal: number;
   battery?: number;
 };
@@ -129,6 +132,9 @@ export type RaceCaptureSample = {
   watts: number;
   cadence: number | null;
   speedKph: number | null;
+  wattsAt?: number;
+  cadenceAt?: number;
+  speedAt?: number;
   signal: number;
   battery?: number;
   riderDistanceMeters: number | null;

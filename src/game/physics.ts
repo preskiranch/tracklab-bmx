@@ -4,9 +4,22 @@ import { crossedTakeoff, surfaceAngleDeg } from './trackProfile';
 const gravityPx = 430;
 const groundRecoveryPerSecond = 4.2;
 const maxAirPx = 34;
+const liveMetricWindowMs = 1800;
+const rollingFrictionMps2 = 0.34;
+const airDragPerMeter = 0.16;
+const stopVelocityMps = 0.04;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function metricIsUsable(sample: BikeSample | null | undefined, metricAt: number | undefined, nowMs: number, raceStartedAt: number) {
+  if (!sample) {
+    return false;
+  }
+
+  const recordedAt = metricAt ?? sample.at;
+  return recordedAt >= raceStartedAt && nowMs - recordedAt <= liveMetricWindowMs;
 }
 
 export function createInitialRiders(players: PlayerSlot[]): RiderState[] {
@@ -43,24 +56,28 @@ export function stepRiders(
 
     const player = players.find((slot) => slot.id === rider.playerId);
     const sample = player?.deviceId == null ? null : samplesByDevice.get(player.deviceId);
-    const isFresh = sample ? Date.now() - sample.at < 2400 : false;
-    const watts = isFresh ? sample?.watts ?? 0 : 0;
-    const cadence = isFresh ? sample?.cadence ?? 0 : 0;
-    const sampledSpeed = isFresh ? sample?.speedKph ?? null : null;
+    const nowMs = Date.now();
+    const watts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt) ? sample?.watts ?? 0 : 0;
+    const cadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
+    const sampledSpeed = metricIsUsable(sample, sample?.speedAt, nowMs, raceStartedAt) ? sample?.speedKph ?? null : null;
 
     const wattsAverage = rider.wattsAverage * 0.94 + watts * 0.06;
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
     const cadenceLift = Math.min(1.4, cadence / 95);
-    const isPedaling = watts > 8 || cadence > 4 || (sampledSpeed ?? 0) > 0.8;
-    const speedFromPower = isPedaling
+    const hasDriveSignal = watts > 8 || cadence > 4;
+    const hasSpeedSignal = (sampledSpeed ?? 0) > 0.8;
+    const speedFromPower = hasDriveSignal
       ? 1.2 + Math.sqrt(Math.max(0, watts)) * 0.27 + cadenceLift * 0.65 + boost * 2.8
       : 0;
     const speedFromSensor = sampledSpeed == null ? null : sampledSpeed / 3.6;
-    const targetVelocity = isFresh && isPedaling ? Math.max(speedFromPower, speedFromSensor ?? 0) : 0.05;
-    const velocity = rider.velocity + (targetVelocity - rider.velocity) * Math.min(1, dt * 2.5);
+    const targetVelocity = hasDriveSignal || hasSpeedSignal ? Math.max(speedFromPower, speedFromSensor ?? 0) : null;
+    const velocity = targetVelocity == null
+      ? Math.max(0, rider.velocity - (rollingFrictionMps2 + rider.velocity * rider.velocity * airDragPerMeter) * dt)
+      : rider.velocity + (targetVelocity - rider.velocity) * Math.min(1, dt * 2.5);
+    const settledVelocity = velocity < stopVelocityMps && targetVelocity == null ? 0 : velocity;
     const previousDistance = rider.distance;
-    const distance = Math.min(raceLengthMeters, previousDistance + velocity * dt);
+    const distance = Math.min(raceLengthMeters, previousDistance + settledVelocity * dt);
     const cadenceRps = Math.max(0.1, cadence / 60);
     const pedalPhase = (rider.pedalPhase + cadenceRps * dt) % 1;
 
@@ -72,9 +89,9 @@ export function stepRiders(
 
     const takeoff = crossedTakeoff(previousDistance, distance);
 
-    if (phase !== 'airborne' && takeoff && velocity > 2.2 && cadence > 18) {
+    if (phase !== 'airborne' && takeoff && settledVelocity > 2.2 && cadence > 18) {
       const cadenceLaunch = clamp(cadence / 110, 0.35, 1.25);
-      const speedLaunch = clamp(velocity / 12, 0.45, 1.3);
+      const speedLaunch = clamp(settledVelocity / 12, 0.45, 1.3);
       verticalVelocity = (145 + speedLaunch * 56 + cadenceLaunch * 32 + boost * 34) * takeoff.lift;
       pitch = -10 - boost * 8;
       landingCompression = 0;
@@ -116,7 +133,7 @@ export function stepRiders(
     return {
       ...rider,
       distance,
-      velocity,
+      velocity: settledVelocity,
       boost,
       air,
       verticalVelocity,

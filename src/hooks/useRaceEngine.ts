@@ -38,6 +38,10 @@ function average(total: number, samples: number) {
   return samples > 0 ? total / samples : null;
 }
 
+function metricIsFromRace(sample: BikeSample, metricAt: number | undefined, raceStartedAt: number) {
+  return (metricAt ?? sample.at) >= raceStartedAt;
+}
+
 function recordRaceSamples(
   players: PlayerSlot[],
   riders: RiderState[],
@@ -58,7 +62,7 @@ function recordRaceSamples(
     const rider = riders.find((item) => item.playerId === player.id);
     const stats = statsByPlayer.get(player.id) ?? createMetricAccumulator(sample.label);
     const fallbackSpeedKph = rider && rider.velocity > 0 ? rider.velocity * 3.6 : null;
-    const speedKph = sample.speedKph ?? fallbackSpeedKph;
+    const speedKph = metricIsFromRace(sample, sample.speedAt, raceStartedAt) ? sample.speedKph ?? fallbackSpeedKph : fallbackSpeedKph;
 
     stats.deviceLabel = sample.label;
     stats.sampleCount += 1;
@@ -70,13 +74,13 @@ function recordRaceSamples(
       stats.speedSamples += 1;
     }
 
-    if (sample.cadence != null && Number.isFinite(sample.cadence)) {
+    if (metricIsFromRace(sample, sample.cadenceAt, raceStartedAt) && sample.cadence != null && Number.isFinite(sample.cadence)) {
       stats.topCadence = Math.max(stats.topCadence, sample.cadence);
       stats.cadenceTotal += sample.cadence;
       stats.cadenceSamples += 1;
     }
 
-    if (Number.isFinite(sample.watts)) {
+    if (metricIsFromRace(sample, sample.wattsAt, raceStartedAt) && Number.isFinite(sample.watts)) {
       stats.topWatts = Math.max(stats.topWatts, sample.watts);
       stats.wattsTotal += sample.watts;
       stats.wattsSamples += 1;

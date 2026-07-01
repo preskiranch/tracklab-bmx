@@ -309,17 +309,25 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   const commitSample = useCallback((deviceId: number, label: string, partial: PartialBikeSample) => {
     setSamplesByDevice((current) => {
       const previous = current.get(deviceId);
+      const receivedAt = Date.now();
+      const hasCadence = partial.cadence !== undefined;
+      const hasSpeed = partial.speedKph !== undefined;
+      const hasWatts = partial.watts !== undefined;
+      const hasMotionValue = hasCadence || hasSpeed || hasWatts;
       const next = new Map(current);
       next.set(deviceId, {
-        at: Date.now(),
+        at: hasMotionValue ? receivedAt : previous?.at ?? receivedAt,
         battery: partial.battery ?? previous?.battery,
-        cadence: partial.cadence ?? previous?.cadence ?? null,
+        cadence: hasCadence ? partial.cadence ?? null : previous?.cadence ?? null,
+        cadenceAt: hasCadence ? receivedAt : previous?.cadenceAt,
         deviceId,
         label,
         signal: 1,
         source: 'bluetooth',
-        speedKph: partial.speedKph ?? previous?.speedKph ?? null,
-        watts: partial.watts ?? previous?.watts ?? 0,
+        speedKph: hasSpeed ? partial.speedKph ?? null : previous?.speedKph ?? null,
+        speedAt: hasSpeed ? receivedAt : previous?.speedAt,
+        watts: hasWatts ? partial.watts ?? 0 : previous?.watts ?? 0,
+        wattsAt: hasWatts ? receivedAt : previous?.wattsAt,
       });
       return next;
     });
