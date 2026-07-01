@@ -260,6 +260,7 @@ export default function App() {
   const [demoBikeCount, setDemoBikeCount] = useState(maxPlayers);
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
   const [demoRaceStartedAt, setDemoRaceStartedAt] = useState<number | null>(null);
+  const [demoSignalsStopped, setDemoSignalsStopped] = useState(false);
   const [appMode, setAppMode] = useState<AppMode>('race');
   const [speedUnit, setSpeedUnit] = useState<SpeedUnit>(readStoredSpeedUnit);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>(readStoredDistanceUnit);
@@ -292,6 +293,7 @@ export default function App() {
     bikeCount: demoBikeCount,
     raceSeed: demoRaceSeed,
     raceStartedAt: demoRaceStartedAt,
+    signalState: demoSignalsStopped ? 'stopped' : demoRaceStartedAt == null ? 'ready' : 'racing',
   });
 
   useEffect(() => {
@@ -425,6 +427,13 @@ export default function App() {
   useZoneAudioCues(raceState, riders, activeZones);
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const shellFullscreenActive = raceViewFullscreen || mappingFullscreen;
+
+  useEffect(() => {
+    if (demoMode && raceState === 'finished') {
+      setDemoSignalsStopped(true);
+      setDemoRaceStartedAt(null);
+    }
+  }, [demoMode, raceState]);
 
   const createRaceCapture = useCallback(() => {
     const createdAt = Date.now();
@@ -661,6 +670,7 @@ export default function App() {
     });
     resetRace();
     setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
     setReactionStartAt(null);
     setReactionTimesByPlayer({});
   }, [effectiveTrack.id, mappedZones, resetRace]);
@@ -827,6 +837,7 @@ export default function App() {
       return next;
     });
     setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
     resetRace();
   };
 
@@ -840,6 +851,7 @@ export default function App() {
     setDraftPoints([]);
     setDraftZoneMeters([]);
     setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
     resetRace();
   };
 
@@ -874,6 +886,7 @@ export default function App() {
         setMappingEditMode('navigate');
         setMappingMode(true);
         setDemoRaceStartedAt(null);
+        setDemoSignalsStopped(false);
         resetRace();
       } catch (error) {
         console.error(error);
@@ -1002,6 +1015,7 @@ export default function App() {
     setDemoMode(enabled);
     setDemoRaceSeed(Date.now());
     setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
     resetRace();
   };
 
@@ -1010,6 +1024,7 @@ export default function App() {
     setDemoBikeCount(Math.max(1, Math.min(maxPlayers, Math.round(count))));
     setDemoRaceSeed(Date.now() + count);
     setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
     resetRace();
   };
 
@@ -1023,6 +1038,7 @@ export default function App() {
     if (demoMode) {
       setDemoRaceSeed((seed) => seed + 7919);
       setDemoRaceStartedAt(null);
+      setDemoSignalsStopped(false);
     }
 
     resetRace();
@@ -1048,6 +1064,7 @@ export default function App() {
 
     clearStartGateSequence();
     setMappingFullscreen(false);
+    setDemoSignalsStopped(false);
     createRaceCapture();
     if (!demoMode) {
       bridge.sendControlCommand('race-arm');

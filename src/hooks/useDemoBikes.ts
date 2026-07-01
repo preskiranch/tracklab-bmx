@@ -91,6 +91,7 @@ type DemoBikesOptions = {
   bikeCount: number;
   raceSeed: number;
   raceStartedAt: number | null;
+  signalState: 'ready' | 'racing' | 'stopped';
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -149,14 +150,18 @@ export function createDemoPlayers(bikeCount: number): PlayerSlot[] {
 }
 
 function restingSample(profile: DemoProfile, signal: number): BikeSample {
+  const at = Date.now();
   return {
-    at: Date.now(),
+    at,
     source: 'demo',
     deviceId: profile.deviceId,
     label: profile.label,
     watts: 0,
     cadence: 0,
     speedKph: 0,
+    wattsAt: at,
+    cadenceAt: at,
+    speedAt: at,
     signal,
     battery: Math.round(clamp(96 - profile.index * 2, 82, 100)),
   };
@@ -302,31 +307,36 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     0.99,
   );
 
+  const at = Date.now();
+
   return {
-    at: Date.now(),
+    at,
     source: 'demo',
     deviceId: profile.deviceId,
     label: profile.label,
     watts,
     cadence,
     speedKph,
+    wattsAt: at,
+    cadenceAt: at,
+    speedAt: at,
     signal,
     battery: Math.round(clamp(92 - time * 0.012 - profile.index * 2 + drivetrain * 4, 76, 100)),
   };
 }
 
-export function useDemoBikes({ enabled, bikeCount, raceSeed, raceStartedAt }: DemoBikesOptions) {
+export function useDemoBikes({ enabled, bikeCount, raceSeed, raceStartedAt, signalState }: DemoBikesOptions) {
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
   const profiles = useMemo(() => createProfiles(bikeCount, raceSeed), [bikeCount, raceSeed]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || signalState === 'stopped') {
       setSamplesByDevice(new Map());
       return undefined;
     }
 
     const updateSamples = () => {
-      const racing = raceStartedAt != null;
+      const racing = signalState === 'racing' && raceStartedAt != null;
       const elapsedSeconds = racing ? (Date.now() - raceStartedAt) / 1000 : 0;
       setSamplesByDevice(new Map(profiles.map((profile) => [
         profile.deviceId,
@@ -337,7 +347,7 @@ export function useDemoBikes({ enabled, bikeCount, raceSeed, raceStartedAt }: De
     updateSamples();
     const timer = window.setInterval(updateSamples, 120);
     return () => window.clearInterval(timer);
-  }, [enabled, profiles, raceStartedAt]);
+  }, [enabled, profiles, raceStartedAt, signalState]);
 
   return {
     samplesByDevice,
