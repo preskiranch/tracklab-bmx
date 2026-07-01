@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-07-01T08:54:53.535Z",
-  "providerCount": 7,
+  "generatedAt": "2026-07-01T18:16:18.185Z",
+  "providerCount": 8,
   "trackCount": 587,
   "providers": [
     {
@@ -78,6 +78,16 @@
       "sourceUrl": "https://www.cyclingnewzealand.nz/bmx/",
       "status": "reference-source",
       "notes": "National BMX reference source. Operational club locator records are imported from BMX New Zealand."
+    },
+    {
+      "id": "openstreetmap-overpass",
+      "name": "OpenStreetMap Overpass BMX Locator",
+      "regions": [
+        "Global"
+      ],
+      "sourceUrl": "https://www.openstreetmap.org/",
+      "status": "supplemental-import",
+      "notes": "Supplemental locator-only importer for countries where federation directories do not expose a usable export. Records are filtered from OpenStreetMap BMX/track tags, enriched with Nominatim reverse geocoding, and marked locator-only so riders still map/verify the actual start gate, centerline, sprint zones, and finish line."
     }
   ],
   "tracks": [

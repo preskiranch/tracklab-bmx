@@ -166,6 +166,8 @@ type GoogleMapsRuntime = {
   };
 };
 
+type GoogleMapsLibraryImport = Record<string, unknown> | null | undefined;
+
 export type PlacePredictionOption = {
   id: string;
   label: string;
@@ -186,6 +188,7 @@ declare global {
   interface Window {
     google?: GoogleMapsRuntime;
     __trackLabGoogleMapsPromise?: Promise<GoogleMapsRuntime>;
+    __trackLabGoogleMapsLoaded?: () => void;
   }
 }
 
@@ -195,6 +198,36 @@ export function getGoogleMapsApiKey() {
 
 export function hasGoogleMapsApiKey() {
   return getGoogleMapsApiKey().length > 0;
+}
+
+function mergeImportedGoogleLibrary(target: Record<string, unknown>, imported: GoogleMapsLibraryImport) {
+  if (!imported || typeof imported !== 'object') {
+    return;
+  }
+
+  Object.assign(target, imported);
+}
+
+function mergeGoogleGeometryLibrary(google: GoogleMapsRuntime, imported: GoogleMapsLibraryImport) {
+  if (!imported || typeof imported !== 'object') {
+    return;
+  }
+
+  google.maps.geometry = {
+    ...(google.maps.geometry ?? {}),
+    ...(imported as NonNullable<GoogleMapsRuntime['maps']['geometry']>),
+  };
+}
+
+function mergeGooglePlacesLibrary(google: GoogleMapsRuntime, imported: GoogleMapsLibraryImport) {
+  if (!imported || typeof imported !== 'object') {
+    return;
+  }
+
+  google.maps.places = {
+    ...(google.maps.places ?? {}),
+    ...(imported as GooglePlacesLibrary),
+  };
 }
 
 export function loadGoogleMaps() {
@@ -212,41 +245,69 @@ export function loadGoogleMaps() {
   }
 
   window.__trackLabGoogleMapsPromise = new Promise((resolve, reject) => {
+    const cleanup = () => {
+      delete window.__trackLabGoogleMapsLoaded;
+    };
+
+    const rejectWithCleanup = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const resolveRuntime = async () => {
+      if (!window.google?.maps) {
+        rejectWithCleanup(new Error('Google Maps loaded without the maps runtime.'));
+        return;
+      }
+
+      if (window.google.maps.importLibrary) {
+        const [
+          coreLibrary,
+          mapsLibrary,
+          markerLibrary,
+          geometryLibrary,
+          geocodingLibrary,
+          placesLibrary,
+        ] = await Promise.all([
+          window.google.maps.importLibrary('core'),
+          window.google.maps.importLibrary('maps'),
+          window.google.maps.importLibrary('marker'),
+          window.google.maps.importLibrary('geometry'),
+          window.google.maps.importLibrary('geocoding'),
+          window.google.maps.importLibrary('places'),
+        ]);
+
+        mergeImportedGoogleLibrary(window.google.maps as unknown as Record<string, unknown>, coreLibrary as GoogleMapsLibraryImport);
+        mergeImportedGoogleLibrary(window.google.maps as unknown as Record<string, unknown>, mapsLibrary as GoogleMapsLibraryImport);
+        mergeImportedGoogleLibrary(window.google.maps as unknown as Record<string, unknown>, markerLibrary as GoogleMapsLibraryImport);
+        mergeImportedGoogleLibrary(window.google.maps as unknown as Record<string, unknown>, geocodingLibrary as GoogleMapsLibraryImport);
+        mergeGoogleGeometryLibrary(window.google, geometryLibrary as GoogleMapsLibraryImport);
+        mergeGooglePlacesLibrary(window.google, placesLibrary as GoogleMapsLibraryImport);
+      }
+
+      if (window.google.maps.Map) {
+        cleanup();
+        resolve(window.google);
+      } else {
+        rejectWithCleanup(new Error('Google Maps loaded without the map constructor.'));
+      }
+    };
+
+    window.__trackLabGoogleMapsLoaded = () => {
+      resolveRuntime().catch((error: Error) => rejectWithCleanup(error));
+    };
+
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?${new URLSearchParams({
       key: apiKey,
       libraries: 'geometry,places',
+      callback: '__trackLabGoogleMapsLoaded',
       loading: 'async',
       v: 'weekly',
     }).toString()}`;
     script.async = true;
     script.defer = true;
-    script.onload = () => {
-      const resolveRuntime = async () => {
-        if (!window.google?.maps) {
-          reject(new Error('Google Maps loaded without the maps runtime.'));
-          return;
-        }
-
-        if (window.google.maps.importLibrary) {
-          await Promise.all([
-            window.google.maps.importLibrary('maps'),
-            window.google.maps.importLibrary('geometry'),
-            window.google.maps.importLibrary('geocoding'),
-            window.google.maps.importLibrary('places'),
-          ]);
-        }
-
-        if (window.google.maps.Map) {
-          resolve(window.google);
-        } else {
-          reject(new Error('Google Maps loaded without the map constructor.'));
-        }
-      };
-
-      resolveRuntime().catch((error: Error) => reject(error));
-    };
-    script.onerror = () => reject(new Error('Google Maps failed to load.'));
+    script.onerror = () => rejectWithCleanup(new Error('Google Maps failed to load.'));
     document.head.appendChild(script);
   });
 

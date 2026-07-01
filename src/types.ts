@@ -1,4 +1,5 @@
 export type BridgeMode = 'sim' | 'ant' | 'demo' | 'bluetooth' | 'usb';
+export type BridgeSourceState = 'idle' | 'starting' | 'running' | 'stopping' | 'error';
 export type SpeedUnit = 'kph' | 'mph';
 export type DistanceUnit = 'ft' | 'm';
 export type SessionMode = 'sprint' | 'interval';
@@ -20,6 +21,7 @@ export type BikeSample = {
   wattsAt?: number;
   cadenceAt?: number;
   speedAt?: number;
+  speedSource?: 'measured' | 'estimated';
   signal: number;
   battery?: number;
 };
@@ -27,6 +29,7 @@ export type BikeSample = {
 export type BridgeStatusMessage = {
   type: 'bridge-status';
   mode: BridgeMode;
+  sourceState?: BridgeSourceState;
   at?: number;
   connectedAt?: number;
   message: string;
@@ -135,6 +138,7 @@ export type RaceCaptureSample = {
   wattsAt?: number;
   cadenceAt?: number;
   speedAt?: number;
+  speedSource?: 'measured' | 'estimated';
   signal: number;
   battery?: number;
   riderDistanceMeters: number | null;

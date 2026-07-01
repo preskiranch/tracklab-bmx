@@ -24,6 +24,16 @@ Current active official importers:
   not GPS coordinates, so imported GPS values are cached geocodes and are marked
   `coordinateAccuracy` accordingly.
 
+Supplemental global locator import:
+
+- OpenStreetMap Overpass: use `npm run tracks:import:osm` to import
+  locator-only BMX Racing track candidates in countries where the federation
+  directory is blocked, missing, or does not expose a public export. The importer
+  filters for BMX/track-like OSM records and reverse-geocodes them through
+  Nominatim for country, state/province, city, and address grouping. These
+  records are supplemental, not source-of-truth replacements for USA BMX/BMX
+  Canada, FFC, BMXNZ, or any future official federation export.
+
 That command reads the public USA BMX track finder backend used by
 `https://www.usabmx.com/tracks/find-tracks` and writes
 `data/imports/usa-bmx-official.json`.

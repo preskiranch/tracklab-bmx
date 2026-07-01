@@ -21,6 +21,13 @@ The local bridge listens on:
 ws://127.0.0.1:8787
 ```
 
+`npm run dev` starts the local bridge in ANT+ mode by default. Use simulator
+mode only when no ANT+ dongle is available:
+
+```sh
+npm run dev:sim
+```
+
 ## ANT+ Mode
 
 After the ANT+ USB dongle is plugged in:
@@ -35,7 +42,57 @@ Then run the web app in another terminal:
 npm run web
 ```
 
-The bridge scans for ANT+ Bicycle Power devices. Pedal each Wattbike for a few seconds so its monitor wakes and broadcasts. Detected device IDs appear in Bike Pairing and are auto-assigned to Player 1-4. The UI only creates riders from live connected bikes, capped at four.
+Or run both together:
+
+```sh
+npm run dev:ant
+```
+
+The bridge scans ANT+ Fitness Equipment, Bicycle Power, Speed/Cadence,
+Cadence, and Speed profiles. Pedal each Wattbike in Just Ride for a few
+seconds so its monitor wakes and broadcasts. Detected device IDs appear in Bike
+Pairing and are auto-assigned to Player 1-4. The UI only creates riders from
+live connected bikes, capped at four.
+
+Wattbike's Model B support material says the monitor exposes separate ANT
+channels for Bike Power, Bike Speed & Cadence, and the bidirectional Wattbike
+channel. Set the monitor ANT channel settings to Bike Power: On, Bike Speed &
+Cadence: On, and Wattbike: Standard. If a receiving device asks for wheel
+circumference, Wattbike specifies 2070 mm. The bridge uses measured ANT speed
+when the Speed/Cadence or Fitness Equipment profile provides it. If the live
+Wattbike only emits Bicycle Power data, the bridge estimates speed from current
+watts and cadence with inertia, then marks the sample as `speedSource:
+"estimated"`.
+
+To capture what a Wattbike is broadcasting over ANT+:
+
+```sh
+npm run ant:capture -- --seconds 120
+```
+
+The capture tool writes JSONL files under `captures/` and prints detected
+watts, cadence, and speed samples in the terminal. Use `--profile power`,
+`--profile fitness`, `--profile speed-cadence`, `--profile cadence`, or
+`--profile speed` to force a specific ANT+ profile; default is `auto`.
+
+## Connecting And Remembering Bikes
+
+1. Plug the ANT+ USB dongle into the computer that is near the Wattbikes.
+2. Start the local app/helper with `npm run dev`.
+3. In the app sidebar, press **Start Local Bridge**.
+4. Put each Wattbike monitor in Just Ride and pedal for a few seconds.
+5. The sidebar indicator changes to Scanning while the bridge is looking for
+   bikes, then the bike status turns live when a Wattbike signal is received.
+6. In Bike Pairing, detected ANT+ device IDs will appear. Assign them to
+   Player 1-4 once.
+7. The player-to-device assignments are saved in browser storage and restored
+   after refresh. Auto-assign fills empty player slots only; it does not erase a
+   remembered bike just because that Wattbike is quiet after a refresh.
+
+ANT+ is broadcast-based, so there is no permanent pairing handshake like
+Bluetooth. To stay connected, leave the local bridge running and keep the
+Wattbike monitor awake. If a monitor goes idle, start pedaling again and the
+same remembered device ID will be matched when it broadcasts.
 
 ## Wattbike Monitor Control
 

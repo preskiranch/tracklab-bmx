@@ -362,6 +362,81 @@ input:focus {
   margin-top: 10px;
 }
 
+.bridge-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 11px;
+}
+
+.bridge-control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.bridge-control-button.start {
+  background: #101827;
+  color: #ffffff;
+}
+
+.bridge-control-button.stop {
+  border-color: #ffd1cc;
+  background: #fff5f3;
+  color: #bf3428;
+}
+
+.bridge-control-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.bridge-live-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f6f8fa;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.bridge-live-pill.waiting {
+  border-color: #ffe0a8;
+  background: #fff8e8;
+  color: #9a6500;
+}
+
+.bridge-live-pill.live {
+  border-color: #b9e9ac;
+  background: #effbe9;
+  color: #207b32;
+}
+
+.bridge-prompt {
+  margin-top: 9px;
+  padding: 8px 9px;
+  border: 1px solid #dce6ef;
+  border-radius: 7px;
+  background: #f8fbfd;
+  color: #465568;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 .connection-dot {
   width: 10px;
   height: 10px;

@@ -2,4 +2,5 @@ node_modules/
 dist/
 captures/
 .npm-cache/
+.env.local
 *.tsbuildinfo

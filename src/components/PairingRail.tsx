@@ -41,14 +41,23 @@ export function PairingRail({
   deviceLabel = 'ANT device',
   readOnly = false,
 }: PairingRailProps) {
-  const devices = [...samplesByDevice.values()].sort((a, b) => a.deviceId - b.deviceId);
+  const detectedDevices = [...samplesByDevice.values()].sort((a, b) => a.deviceId - b.deviceId);
+  const detectedDeviceIds = new Set(detectedDevices.map((device) => device.deviceId));
+  const rememberedDevices = players
+    .map((player) => player.deviceId)
+    .filter((deviceId): deviceId is number => deviceId != null && !detectedDeviceIds.has(deviceId))
+    .map((deviceId) => ({
+      deviceId,
+      label: `Remembered ANT+ device ${deviceId}`,
+    }));
+  const devices = [...detectedDevices, ...rememberedDevices].sort((a, b) => a.deviceId - b.deviceId);
 
   return (
     <aside className="pairing-rail" aria-label="Bike pairing">
       <div className="rail-heading">
         <div>
           <h2>{title}</h2>
-          <p>{subtitle ?? `${Math.min(4, devices.length)} detected / max 4`}</p>
+          <p>{subtitle ?? `${Math.min(4, detectedDevices.length)} detected / ${Math.min(4, devices.length)} remembered / max 4`}</p>
         </div>
         <div className="rail-actions">
           {onBluetoothConnect && (

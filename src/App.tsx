@@ -8,9 +8,11 @@ import {
   Globe2,
   MapPinned,
   Plus,
+  PlayCircle,
   Radio,
   Route,
   Settings,
+  StopCircle,
   Users,
 } from 'lucide-react';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
@@ -256,6 +258,7 @@ function raceCaptureToCsv(capture: RaceCapture) {
     'watts',
     'cadenceRpm',
     'speedKph',
+    'speedSource',
     'wattsAtIso',
     'cadenceAtIso',
     'speedAtIso',
@@ -280,6 +283,7 @@ function raceCaptureToCsv(capture: RaceCapture) {
     sample.watts,
     sample.cadence,
     sample.speedKph,
+    sample.speedSource,
     sample.wattsAt ? new Date(sample.wattsAt).toISOString() : '',
     sample.cadenceAt ? new Date(sample.cadenceAt).toISOString() : '',
     sample.speedAt ? new Date(sample.speedAt).toISOString() : '',
@@ -533,7 +537,8 @@ export default function App() {
       const assignedKnownCount = players.filter((player) => (
         player.deviceId != null && samplesByDevice.has(player.deviceId)
       )).length;
-      const visibleCount = Math.min(maxPlayers, Math.max(discoveredDeviceIds.length, liveDeviceIds.length, assignedKnownCount));
+      const rememberedCount = players.filter((player) => player.deviceId != null).length;
+      const visibleCount = Math.min(maxPlayers, Math.max(discoveredDeviceIds.length, liveDeviceIds.length, assignedKnownCount, rememberedCount));
       return players.slice(0, visibleCount);
     },
     [demoMode, demoPlayers, discoveredDeviceIds.length, liveDeviceIds.length, players, samplesByDevice],
@@ -745,6 +750,7 @@ export default function App() {
         wattsAt: sample.wattsAt,
         cadenceAt: sample.cadenceAt,
         speedAt: sample.speedAt,
+        speedSource: sample.speedSource,
         signal: sample.signal,
         battery: sample.battery,
         riderDistanceMeters: rider ? Number(rider.distance.toFixed(2)) : null,
@@ -824,41 +830,35 @@ export default function App() {
 
   const autoAssign = useCallback(() => {
     setPlayers((current) => {
-      const assigned = new Set<number>();
+      const assigned = new Set(current.map((player) => player.deviceId).filter((deviceId): deviceId is number => deviceId != null));
       return current.map((player, index) => {
-        const existingIsPresent = player.deviceId != null && (
-          liveDeviceIds.includes(player.deviceId) || samplesByDevice.has(player.deviceId)
-        );
-        if (existingIsPresent) {
-          assigned.add(player.deviceId as number);
+        if (player.deviceId != null) {
           return player;
         }
 
         const nextDevice = liveDeviceIds.find((deviceId) => !assigned.has(deviceId));
         if (nextDevice == null || index >= maxPlayers) {
-          return { ...player, deviceId: null };
+          return player;
         }
 
         assigned.add(nextDevice);
         return { ...player, deviceId: nextDevice };
       });
     });
-  }, [liveDeviceIds, samplesByDevice]);
+  }, [liveDeviceIds]);
 
   useEffect(() => {
     if (demoMode) {
       return;
     }
 
-    const knownDeviceIds = new Set(discoveredDeviceIds);
     const assignedLiveDevices = new Set(players.map((player) => player.deviceId).filter(Boolean));
     const needsLiveAssignment = liveDeviceIds.some((deviceId) => !assignedLiveDevices.has(deviceId));
-    const staleAssignment = players.some((player) => player.deviceId != null && !knownDeviceIds.has(player.deviceId));
 
-    if ((needsLiveAssignment || staleAssignment) && liveDeviceIds.length > 0) {
+    if (needsLiveAssignment && liveDeviceIds.length > 0) {
       autoAssign();
     }
-  }, [autoAssign, demoMode, discoveredDeviceIds, liveDeviceIds, players]);
+  }, [autoAssign, demoMode, liveDeviceIds, players]);
 
   const handleCountryChange = (country: string) => {
     const nextState = statesForCountry(country, catalogTracks)[0];
@@ -1456,9 +1456,25 @@ export default function App() {
       return 'Bluetooth bikes online';
     }
 
-    return bridge.connection === 'open'
-      ? `${bridge.mode.toString().toUpperCase()} bridge online`
-      : 'Bridge offline';
+    if (bridge.connection !== 'open') {
+      return 'Local bridge offline';
+    }
+
+    if (bridge.sourceState === 'idle') {
+      return 'Local helper online';
+    }
+
+    if (bridge.sourceState === 'starting') {
+      return 'Starting ANT+ bridge';
+    }
+
+    if (bridge.sourceState === 'error') {
+      return 'ANT+ bridge error';
+    }
+
+    return activePlayers.length > 0
+      ? `${activePlayers.length} bike${activePlayers.length === 1 ? '' : 's'} live`
+      : `${bridge.mode.toString().toUpperCase()} bridge scanning`;
   })();
   const connectionStatus = (() => {
     if (demoMode) {
@@ -1473,7 +1489,45 @@ export default function App() {
 
     return `${bridge.error ?? `${bridge.status} ${bluetooth.status}`}${bridgeControlStatus}`;
   })();
-  const connectionState = demoMode || bluetooth.connectedCount > 0 ? 'open' : bridge.connection;
+  const bridgeBusy = bridge.sourceState === 'starting' || bridge.sourceState === 'stopping';
+  const bridgeRunning = bridge.sourceState === 'running';
+  const bridgeButtonDisabled = demoMode || bridge.connection !== 'open' || bridgeBusy;
+  const bridgeButtonLabel = bridgeBusy
+    ? bridge.sourceState === 'stopping' ? 'Stopping Bridge' : 'Starting Bridge'
+    : bridgeRunning ? 'Stop Bridge' : 'Start Local Bridge';
+  const bridgePrompt = (() => {
+    if (demoMode) {
+      return 'Demo mode is generating bike data.';
+    }
+
+    if (bridge.connection !== 'open') {
+      return 'Start the TrackLab local helper first, then reload this page.';
+    }
+
+    if (bridge.sourceState === 'idle') {
+      return 'Press Start Local Bridge, then put each Wattbike in Just Ride.';
+    }
+
+    if (bridge.sourceState === 'running' && activePlayers.length === 0) {
+      return 'Waiting for bike signal. Put each Wattbike in Just Ride and pedal for a few seconds.';
+    }
+
+    if (activePlayers.length > 0) {
+      return 'Bike signal live. Saved bike IDs will be remembered after refresh.';
+    }
+
+    return bridge.status;
+  })();
+  const connectionState = demoMode || bluetooth.connectedCount > 0 || activePlayers.length > 0
+    ? 'open'
+    : bridge.connection === 'open' && (bridge.sourceState === 'running' || bridge.sourceState === 'starting')
+      ? 'connecting'
+      : bridge.connection;
+  const showBluetoothPairing = !demoMode && bridge.mode !== 'ant';
+  const pairingEmptyMessage = bridge.mode === 'ant'
+    ? 'Put each Wattbike in Just Ride and pedal for a few seconds so the ANT+ bridge can detect it.'
+    : 'Pedal a Wattbike for bridge discovery, or use Bluetooth pairing for BLE bikes.';
+  const pairingDeviceLabel = bridge.mode === 'ant' ? 'ANT+ device' : 'Bike device';
 
   return (
     <div
@@ -1500,6 +1554,23 @@ export default function App() {
             </div>
           </div>
           <p>{connectionStatus}</p>
+          <div className="bridge-controls">
+            <button
+              className={bridgeRunning ? 'bridge-control-button stop' : 'bridge-control-button start'}
+              type="button"
+              onClick={() => {
+                void (bridgeRunning ? bridge.stopLocalBridge() : bridge.startLocalBridge());
+              }}
+              disabled={bridgeButtonDisabled}
+            >
+              {bridgeRunning ? <StopCircle size={16} /> : <PlayCircle size={16} />}
+              <span>{bridgeButtonLabel}</span>
+            </button>
+            <span className={`bridge-live-pill ${activePlayers.length > 0 ? 'live' : bridgeRunning ? 'waiting' : ''}`}>
+              {activePlayers.length > 0 ? 'Bike connected' : bridgeRunning ? 'Scanning' : 'Idle'}
+            </span>
+          </div>
+          <div className="bridge-prompt">{bridgePrompt}</div>
         </section>
 
         <nav className="side-nav" aria-label="Primary">
@@ -1534,14 +1605,14 @@ export default function App() {
           samplesByDevice={samplesByDevice}
           onAssign={demoMode ? () => undefined : assignDevice}
           onAutoAssign={demoMode ? () => undefined : autoAssign}
-          onBluetoothConnect={demoMode ? undefined : bluetooth.connectBike}
+          onBluetoothConnect={showBluetoothPairing ? bluetooth.connectBike : undefined}
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}
           bluetoothDeviceCount={bluetooth.connectedCount}
           title={demoMode ? 'Demo Riders' : 'Bike Pairing'}
           subtitle={demoMode ? `${demoBikeCount} simulated / max 4` : undefined}
-          emptyMessage={demoMode ? 'Choose demo riders to generate live race samples.' : 'Pedal a Wattbike for bridge discovery, or use Bluetooth pairing for BLE bikes.'}
-          deviceLabel={demoMode ? 'Demo device' : 'Bike device'}
+          emptyMessage={demoMode ? 'Choose demo riders to generate live race samples.' : pairingEmptyMessage}
+          deviceLabel={demoMode ? 'Demo device' : pairingDeviceLabel}
           readOnly={demoMode}
         />
       </aside>
