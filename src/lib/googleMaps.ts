@@ -57,6 +57,44 @@ type GoogleGeocoder = {
   }>;
 };
 
+type GooglePlaceTextValue = string | {
+  text?: string;
+  toString?: () => string;
+};
+
+type GooglePlace = {
+  displayName?: string;
+  formattedAddress?: string;
+  location?: {
+    toJSON: () => LatLngLiteral;
+  };
+  fetchFields: (request: { fields: string[] }) => Promise<void>;
+};
+
+export type GooglePlacePrediction = {
+  placeId: string;
+  text?: GooglePlaceTextValue;
+  mainText?: GooglePlaceTextValue;
+  secondaryText?: GooglePlaceTextValue;
+  toPlace: () => GooglePlace;
+};
+
+type GoogleAutocompleteSessionToken = object;
+
+type GoogleAutocompleteSuggestion = {
+  placePrediction?: GooglePlacePrediction;
+};
+
+type GooglePlacesLibrary = {
+  AutocompleteSessionToken?: new () => GoogleAutocompleteSessionToken;
+  AutocompleteSuggestion?: {
+    fetchAutocompleteSuggestions: (request: {
+      input: string;
+      sessionToken?: GoogleAutocompleteSessionToken;
+    }) => Promise<{ suggestions?: GoogleAutocompleteSuggestion[] }>;
+  };
+};
+
 type GoogleStreetViewPanorama = {
   setPano: (pano: string) => void;
   setPosition: (position: LatLngLiteral) => void;
@@ -93,6 +131,7 @@ type GoogleMapsRuntime = {
     Geocoder?: new () => GoogleGeocoder;
     Map: GoogleMapConstructor;
     Marker: new (options: Record<string, unknown>) => GoogleMarker;
+    places?: GooglePlacesLibrary;
     Point: new (x: number, y: number) => unknown;
     Polyline: new (options: Record<string, unknown>) => GooglePolyline;
     RenderingType?: {
@@ -105,6 +144,15 @@ type GoogleMapsRuntime = {
       CIRCLE: unknown;
     };
   };
+};
+
+export type PlacePredictionOption = {
+  id: string;
+  label: string;
+  mainText: string;
+  secondaryText: string;
+  placeId: string;
+  placePrediction: GooglePlacePrediction;
 };
 
 declare global {
@@ -140,7 +188,7 @@ export function loadGoogleMaps() {
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?${new URLSearchParams({
       key: apiKey,
-      libraries: 'geometry',
+      libraries: 'geometry,places',
       loading: 'async',
       v: 'weekly',
     }).toString()}`;
@@ -158,6 +206,7 @@ export function loadGoogleMaps() {
             window.google.maps.importLibrary('maps'),
             window.google.maps.importLibrary('geometry'),
             window.google.maps.importLibrary('geocoding'),
+            window.google.maps.importLibrary('places'),
             window.google.maps.importLibrary('streetView'),
           ]);
         }
@@ -252,6 +301,103 @@ function locatorPoint(track: TrackRecord): LatLngLiteral {
   }
 
   return { lat: 0, lng: 0 };
+}
+
+let placeAutocompleteSessionToken: GoogleAutocompleteSessionToken | null = null;
+
+function placeTextToString(value: GooglePlaceTextValue | undefined) {
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value.text === 'string') {
+    return value.text;
+  }
+
+  return value.toString?.() ?? '';
+}
+
+async function getPlacesLibrary(google: GoogleMapsRuntime): Promise<GooglePlacesLibrary> {
+  const imported = google.maps.importLibrary
+    ? await google.maps.importLibrary('places') as GooglePlacesLibrary
+    : null;
+
+  const places = google.maps.places ?? imported ?? {};
+  if (imported && (!places.AutocompleteSessionToken || !places.AutocompleteSuggestion)) {
+    places.AutocompleteSessionToken = places.AutocompleteSessionToken ?? imported.AutocompleteSessionToken;
+    places.AutocompleteSuggestion = places.AutocompleteSuggestion ?? imported.AutocompleteSuggestion;
+  }
+
+  google.maps.places = places;
+  return places;
+}
+
+export function resetPlaceAutocompleteSession() {
+  placeAutocompleteSessionToken = null;
+}
+
+export async function fetchLocationPredictions(input: string): Promise<PlacePredictionOption[]> {
+  const trimmed = input.trim();
+  if (trimmed.length < 3 || parseLatLngText(trimmed)) {
+    return [];
+  }
+
+  const google = await loadGoogleMaps();
+  const places = await getPlacesLibrary(google);
+  const AutocompleteSuggestion = places.AutocompleteSuggestion;
+  const AutocompleteSessionToken = places.AutocompleteSessionToken;
+
+  if (!AutocompleteSuggestion || !AutocompleteSessionToken) {
+    throw new Error('Google Places autocomplete is unavailable for this Maps key.');
+  }
+
+  placeAutocompleteSessionToken = placeAutocompleteSessionToken ?? new AutocompleteSessionToken();
+  const response = await AutocompleteSuggestion.fetchAutocompleteSuggestions({
+    input: trimmed,
+    sessionToken: placeAutocompleteSessionToken,
+  });
+
+  return (response.suggestions ?? [])
+    .map((suggestion) => suggestion.placePrediction)
+    .filter((prediction): prediction is GooglePlacePrediction => Boolean(prediction))
+    .map((placePrediction, index) => {
+      const mainText = placeTextToString(placePrediction.mainText);
+      const secondaryText = placeTextToString(placePrediction.secondaryText);
+      const label = placeTextToString(placePrediction.text)
+        || [mainText, secondaryText].filter(Boolean).join(', ')
+        || placePrediction.placeId;
+
+      return {
+        id: `${placePrediction.placeId}-${index}`,
+        label,
+        mainText: mainText || label,
+        secondaryText,
+        placeId: placePrediction.placeId,
+        placePrediction,
+      };
+    });
+}
+
+export async function resolvePlacePrediction(
+  prediction: PlacePredictionOption,
+): Promise<{ point: LatLngLiteral; label?: string }> {
+  const place = prediction.placePrediction.toPlace();
+  await place.fetchFields({ fields: ['displayName', 'formattedAddress', 'location'] });
+  const point = place.location?.toJSON();
+  resetPlaceAutocompleteSession();
+
+  if (!point) {
+    throw new Error('Google could not resolve that selected address.');
+  }
+
+  return {
+    point,
+    label: place.formattedAddress ?? place.displayName ?? prediction.label,
+  };
 }
 
 export function hasUserMappedRoute(track: TrackRecord) {

@@ -1244,6 +1244,67 @@ input:focus {
   font-weight: 800;
 }
 
+.location-field {
+  display: grid;
+  gap: 7px;
+}
+
+.location-suggestions {
+  display: grid;
+  gap: 4px;
+  max-height: 186px;
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid #d7e3ec;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(23, 38, 53, 0.13);
+}
+
+.location-suggestions button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #111827;
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-suggestions button:hover,
+.location-suggestions button.selected {
+  border-color: #b7d5be;
+  background: #f1faec;
+}
+
+.location-suggestions strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-suggestions small {
+  overflow: hidden;
+  color: #5b6c7a;
+  font-size: 11px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autocomplete-status {
+  margin: 0;
+  color: #566b78;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .field-status {
   margin: 0;
   padding: 9px 10px;

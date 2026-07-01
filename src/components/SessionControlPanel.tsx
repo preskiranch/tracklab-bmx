@@ -21,6 +21,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
+import type { PlacePredictionOption } from '../lib/googleMaps';
 import type {
   DistanceUnit,
   IntervalMode,
@@ -50,6 +51,9 @@ type SessionControlPanelProps = {
   customRouteName: string;
   customRouteLocation: string;
   customRouteStatus: string | null;
+  customRoutePredictions: PlacePredictionOption[];
+  customRoutePredictionStatus: string | null;
+  selectedCustomRoutePredictionId: string | null;
   raceState: RaceState;
   activeBikeCount: number;
   demoMode: boolean;
@@ -79,6 +83,7 @@ type SessionControlPanelProps = {
   onRouteViewModeChange: (mode: RouteViewMode) => void;
   onCustomRouteNameChange: (value: string) => void;
   onCustomRouteLocationChange: (value: string) => void;
+  onCustomRoutePredictionSelect: (prediction: PlacePredictionOption) => void;
   onCustomRouteCreate: () => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoBikeCountChange: (count: number) => void;
@@ -121,6 +126,9 @@ export function SessionControlPanel({
   customRouteName,
   customRouteLocation,
   customRouteStatus,
+  customRoutePredictions,
+  customRoutePredictionStatus,
+  selectedCustomRoutePredictionId,
   raceState,
   activeBikeCount,
   demoMode,
@@ -150,6 +158,7 @@ export function SessionControlPanel({
   onRouteViewModeChange,
   onCustomRouteNameChange,
   onCustomRouteLocationChange,
+  onCustomRoutePredictionSelect,
   onCustomRouteCreate,
   onDemoModeChange,
   onDemoBikeCountChange,
@@ -207,16 +216,47 @@ export function SessionControlPanel({
           />
         </label>
 
-        <label className="text-field">
-          <span>Start location</span>
-          <input
-            id="custom-route-location-input"
-            type="text"
-            value={customRouteLocation}
-            placeholder="38.7345, -121.2910 or address"
-            onChange={(event) => onCustomRouteLocationChange(event.target.value)}
-          />
-        </label>
+        <div className="location-field">
+          <label className="text-field">
+            <span>Start location</span>
+            <input
+              id="custom-route-location-input"
+              type="text"
+              value={customRouteLocation}
+              placeholder="Start typing an address"
+              autoComplete="off"
+              aria-autocomplete="list"
+              aria-expanded={customRoutePredictions.length > 0}
+              aria-controls="custom-route-location-suggestions"
+              onChange={(event) => onCustomRouteLocationChange(event.target.value)}
+            />
+          </label>
+
+          {customRoutePredictions.length > 0 && (
+            <div
+              className="location-suggestions"
+              id="custom-route-location-suggestions"
+              role="listbox"
+              aria-label="Google address suggestions"
+            >
+              {customRoutePredictions.map((prediction) => (
+                <button
+                  className={selectedCustomRoutePredictionId === prediction.id ? 'selected' : ''}
+                  key={prediction.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selectedCustomRoutePredictionId === prediction.id}
+                  onClick={() => onCustomRoutePredictionSelect(prediction)}
+                >
+                  <strong>{prediction.mainText}</strong>
+                  {prediction.secondaryText && <small>{prediction.secondaryText}</small>}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {customRoutePredictionStatus && <p className="autocomplete-status">{customRoutePredictionStatus}</p>}
+        </div>
 
         {customRouteStatus && <p className="field-status">{customRouteStatus}</p>}
 

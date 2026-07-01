@@ -50,7 +50,13 @@ import {
   type StoredTrackMappings,
   zoneBoundariesFromMapping,
 } from './lib/trackMapping';
-import { resolveLocationText } from './lib/googleMaps';
+import {
+  fetchLocationPredictions,
+  resetPlaceAutocompleteSession,
+  resolveLocationText,
+  resolvePlacePrediction,
+  type PlacePredictionOption,
+} from './lib/googleMaps';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
@@ -353,6 +359,9 @@ export default function App() {
   const [customRouteName, setCustomRouteName] = useState('');
   const [customRouteLocation, setCustomRouteLocation] = useState('');
   const [customRouteStatus, setCustomRouteStatus] = useState<string | null>(null);
+  const [customRoutePredictions, setCustomRoutePredictions] = useState<PlacePredictionOption[]>([]);
+  const [customRoutePredictionStatus, setCustomRoutePredictionStatus] = useState<string | null>(null);
+  const [selectedCustomRoutePrediction, setSelectedCustomRoutePrediction] = useState<PlacePredictionOption | null>(null);
   const [startCadenceMode, setStartCadenceMode] = useState<StartCadenceMode>('countdown');
   const [countdownSeconds, setCountdownSeconds] = useState(3);
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
@@ -866,6 +875,75 @@ export default function App() {
     }, 80);
   };
 
+  const handleCustomRouteLocationChange = useCallback((value: string) => {
+    setCustomRouteLocation(value);
+    setCustomRouteStatus(null);
+    setSelectedCustomRoutePrediction((current) => {
+      if (current && current.label !== value) {
+        resetPlaceAutocompleteSession();
+      }
+
+      return null;
+    });
+  }, []);
+
+  const handleCustomRoutePredictionSelect = useCallback((prediction: PlacePredictionOption) => {
+    setSelectedCustomRoutePrediction(prediction);
+    setCustomRouteLocation(prediction.label);
+    setCustomRoutePredictions([]);
+    setCustomRoutePredictionStatus('Address selected. Add the custom route to center the map there.');
+    setCustomRouteStatus(null);
+
+    if (!customRouteName.trim()) {
+      setCustomRouteName(prediction.mainText);
+    }
+  }, [customRouteName]);
+
+  useEffect(() => {
+    const input = customRouteLocation.trim();
+
+    if (selectedCustomRoutePrediction && selectedCustomRoutePrediction.label === input) {
+      setCustomRoutePredictions([]);
+      return;
+    }
+
+    if (input.length < 3) {
+      setCustomRoutePredictions([]);
+      setCustomRoutePredictionStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setCustomRoutePredictionStatus('Searching Google addresses...');
+      fetchLocationPredictions(input)
+        .then((predictions) => {
+          if (cancelled) {
+            return;
+          }
+
+          setCustomRoutePredictions(predictions);
+          setCustomRoutePredictionStatus(
+            predictions.length > 0 ? null : 'No address suggestions found. Coordinates still work.',
+          );
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
+
+          const message = error instanceof Error ? error.message : String(error);
+          setCustomRoutePredictions([]);
+          setCustomRoutePredictionStatus(`${message} Enable Places API (new), or enter coordinates.`);
+        });
+    }, 320);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [customRouteLocation, selectedCustomRoutePrediction]);
+
   const handleCustomRouteCreate = async () => {
     const name = customRouteName.trim();
     const location = customRouteLocation.trim();
@@ -877,7 +955,9 @@ export default function App() {
 
     setCustomRouteStatus('Finding location...');
     try {
-      const resolved = await resolveLocationText(location);
+      const resolved = selectedCustomRoutePrediction && selectedCustomRoutePrediction.label === location
+        ? await resolvePlacePrediction(selectedCustomRoutePrediction)
+        : await resolveLocationText(location);
       const customRoute = createCustomRouteRecord(name, resolved.label ?? location, resolved.point);
       setCustomRoutes((current) => {
         const next = [...current, customRoute];
@@ -889,6 +969,9 @@ export default function App() {
       setSelectedTrackId(customRoute.id);
       setCustomRouteName('');
       setCustomRouteLocation('');
+      setCustomRoutePredictions([]);
+      setCustomRoutePredictionStatus(null);
+      setSelectedCustomRoutePrediction(null);
       setCustomRouteStatus('Custom route added. Trace the path and save it.');
       setDraftPoints([]);
       setDraftZoneMeters([]);
@@ -899,7 +982,10 @@ export default function App() {
       resetRace();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setCustomRouteStatus(`${message} Coordinates like 38.7345, -121.2910 work without geocoding.`);
+      const suggestionHint = customRoutePredictions.length > 0
+        ? ' Click one of the address suggestions, then add the route.'
+        : ' Coordinates like 38.7345, -121.2910 work without geocoding.';
+      setCustomRouteStatus(`${message}${suggestionHint}`);
     }
   };
 
@@ -1540,6 +1626,9 @@ export default function App() {
                 customRouteName={customRouteName}
                 customRouteLocation={customRouteLocation}
                 customRouteStatus={customRouteStatus}
+                customRoutePredictions={customRoutePredictions}
+                customRoutePredictionStatus={customRoutePredictionStatus}
+                selectedCustomRoutePredictionId={selectedCustomRoutePrediction?.id ?? null}
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
                 demoMode={demoMode}
@@ -1568,7 +1657,8 @@ export default function App() {
                 onEarthHeadingChange={setEarthHeading}
                 onRouteViewModeChange={setRouteViewMode}
                 onCustomRouteNameChange={setCustomRouteName}
-                onCustomRouteLocationChange={setCustomRouteLocation}
+                onCustomRouteLocationChange={handleCustomRouteLocationChange}
+                onCustomRoutePredictionSelect={handleCustomRoutePredictionSelect}
                 onCustomRouteCreate={handleCustomRouteCreate}
                 onDemoModeChange={handleDemoModeChange}
                 onDemoBikeCountChange={handleDemoBikeCountChange}

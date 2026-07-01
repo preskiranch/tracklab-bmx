@@ -446,7 +446,7 @@ export function GoogleMapsTrackLayer({
         motionTracking: false,
         panControl: true,
         showRoadLabels: true,
-        visible: true,
+        visible: false,
         zoomControl: true,
       });
     }
@@ -466,9 +466,10 @@ export function GoogleMapsTrackLayer({
     const heading = riderPose?.bearing ?? earthHeading;
     const requestId = streetViewRequestRef.current + 1;
     streetViewRequestRef.current = requestId;
+    streetViewPanoramaRef.current?.setVisible(false);
     setStreetViewStatus('loading');
 
-    streetViewServiceRef.current.getPanorama({ location: position, radius: 70 })
+    streetViewServiceRef.current.getPanorama({ location: position, radius: 250 })
       .then((response) => {
         if (streetViewRequestRef.current !== requestId || routeViewMode !== 'street-view') {
           return;
@@ -989,16 +990,16 @@ export function GoogleMapsTrackLayer({
     <>
       <div className="google-map-layer" ref={containerRef} />
       <div
-        className={`street-view-layer${routeViewMode === 'street-view' ? ' active' : ''}`}
+        className={`street-view-layer${routeViewMode === 'street-view' && streetViewStatus === 'ready' ? ' active' : ''}`}
         ref={streetViewContainerRef}
       />
       {routeViewMode === 'street-view' && streetViewStatus !== 'ready' && (
         <div className="street-view-status">
-          <strong>{streetViewStatus === 'loading' ? 'Finding Street View' : 'Street View unavailable'}</strong>
+          <strong>{streetViewStatus === 'loading' ? 'Finding Street View' : 'No Street View here'}</strong>
           <span>
             {streetViewStatus === 'loading'
               ? 'Checking for Google Street View imagery near this route point.'
-              : 'No Street View panorama was found near this point. Use satellite view or move the route onto a covered road.'}
+              : 'Google only has Street View on covered public roads. Use satellite view, or move your custom route point closer to a covered road.'}
           </span>
         </div>
       )}
