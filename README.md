@@ -45,19 +45,33 @@ The race UI now sends three monitor-control commands to the local bridge:
 - `race-start` at the exact green-light/gate-drop moment.
 - `race-reset` when Reset is pressed.
 
-By default the bridge runs in safe log mode, so it records those commands but does not send unknown bytes to the monitors. To enable USB/HID control after the Model B reports are captured:
+By default the bridge runs in safe log mode, so it records those commands but does not send unknown bytes to the monitors. Reverse-engineering notes from the official installers are in `docs/reverse-engineering/wattbike-expert-findings.md`.
+
+For USB HID control after the Model B reports are captured:
 
 ```sh
 npm install node-hid
 WATTBIKE_CONTROL=usb-hid \
 WATTBIKE_HID_PRODUCT_MATCH=Wattbike \
-WATTBIKE_USB_RACE_ARM_HEX=... \
-WATTBIKE_USB_RACE_START_HEX=... \
-WATTBIKE_USB_RACE_RESET_HEX=... \
+WATTBIKE_RACE_ARM_HEX=... \
+WATTBIKE_RACE_START_HEX=... \
+WATTBIKE_RACE_RESET_HEX=... \
 npm run bridge
 ```
 
-Each `*_HEX` value is the HID output report captured from Wattbike Expert or Wattbike Power Cycling software. Multiple reports can be separated with semicolons. If needed, narrow device matching with `WATTBIKE_HID_VENDOR_ID` and `WATTBIKE_HID_PRODUCT_ID`.
+For USB serial/FTDI control, which matches the Wattbike Expert Model B code path found in the official binaries:
+
+```sh
+WATTBIKE_CONTROL=serial \
+WATTBIKE_SERIAL_PORTS=COM3,COM4,COM5,COM6 \
+WATTBIKE_SERIAL_BAUD=... \
+WATTBIKE_RACE_ARM_HEX=... \
+WATTBIKE_RACE_START_HEX=... \
+WATTBIKE_RACE_RESET_HEX=... \
+npm run bridge
+```
+
+Each `*_HEX` value is the output command captured from Wattbike Expert or Wattbike Power Cycling software. Multiple command frames can be separated with semicolons. The older `WATTBIKE_USB_RACE_*_HEX` variable names still work as aliases. If needed, narrow HID matching with `WATTBIKE_HID_VENDOR_ID` and `WATTBIKE_HID_PRODUCT_ID`, or serial matching with `WATTBIKE_SERIAL_VENDOR_ID`, `WATTBIKE_SERIAL_PRODUCT_ID`, and `WATTBIKE_SERIAL_PRODUCT_MATCH`.
 
 Capture workflow:
 
@@ -65,8 +79,8 @@ Capture workflow:
 2. Install Wireshark with USBPcap on Windows.
 3. Start a USB capture for the USB hub containing the four Wattbike monitors.
 4. In the official software, run one short race/session start and reset.
-5. Filter the capture to HID interrupt/control transfers for each Wattbike monitor.
-6. Extract the output reports sent at arm/countdown, gate drop/start, and reset.
+5. Filter the capture to the Wattbike monitor interface. On Model B, check FTDI/serial COM traffic first; for newer monitors, check HID interrupt/control transfers.
+6. Extract the output command frames sent at arm/countdown, gate drop/start, and reset.
 7. Put those reports into the environment variables above and test with one bike first.
 
 This keeps the implementation focused on interoperability with your own hardware. It does not require decompiling Wattbike software or bypassing licensing.
