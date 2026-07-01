@@ -319,6 +319,28 @@ function isReactionBikeSample(sample: { cadence: number | null; speedKph: number
   return (sample.cadence ?? 0) > 0 || (sample.speedKph ?? 0) > 0.1 || sample.watts > 5;
 }
 
+function isGoogleLocationPermissionError(message: string) {
+  return /REQUEST_DENIED|blocked|not allowed|not authorized|places\.googleapis\.com|Geocoding Service/i.test(message);
+}
+
+function formatAutocompleteError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (isGoogleLocationPermissionError(message)) {
+    return 'Google address suggestions are blocked for this API key. Enable Places API (new), then add it to this key\'s API restrictions.';
+  }
+
+  return message;
+}
+
+function formatRouteLocationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (isGoogleLocationPermissionError(message)) {
+    return 'Google address lookup is blocked for this API key. Enable Geocoding API and Places API (new), then add both to this key\'s API restrictions.';
+  }
+
+  return message;
+}
+
 export default function App() {
   const bridge = useWattbikeBridge();
   const bluetooth = useBluetoothBikes();
@@ -932,9 +954,8 @@ export default function App() {
             return;
           }
 
-          const message = error instanceof Error ? error.message : String(error);
           setCustomRoutePredictions([]);
-          setCustomRoutePredictionStatus(`${message} Enable Places API (new), or enter coordinates.`);
+          setCustomRoutePredictionStatus(`${formatAutocompleteError(error)} Coordinates still work.`);
         });
     }, 320);
 
@@ -981,7 +1002,7 @@ export default function App() {
       setRouteViewMode('satellite');
       resetRace();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = formatRouteLocationError(error);
       const suggestionHint = customRoutePredictions.length > 0
         ? ' Click one of the address suggestions, then add the route.'
         : ' Coordinates like 38.7345, -121.2910 work without geocoding.';

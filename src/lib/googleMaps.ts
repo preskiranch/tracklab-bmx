@@ -511,7 +511,11 @@ export async function fetchLocationPredictions(input: string): Promise<PlacePred
 
   try {
     return await fetchLegacyLocationPredictions(places, trimmed);
-  } catch {
+  } catch (legacyError) {
+    if (legacyError instanceof Error) {
+      throw legacyError;
+    }
+
     if (modernError instanceof Error) {
       throw modernError;
     }
