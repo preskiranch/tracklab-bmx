@@ -1584,6 +1584,76 @@ input:focus {
   gap: 8px;
 }
 
+.capture-export-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 12px 12px;
+  padding: 10px 12px;
+  border: 1px solid #d8e9d1;
+  border-radius: 7px;
+  background: #f5fbf1;
+}
+
+.capture-export-card > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.capture-export-card strong {
+  color: #172031;
+  font-size: 13px;
+}
+
+.capture-export-card small {
+  color: #566676;
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.capture-status {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.capture-status.armed,
+.capture-status.racing {
+  background: var(--lime);
+  box-shadow: 0 0 0 3px rgba(122, 222, 54, 0.22);
+}
+
+.capture-status.finished {
+  background: var(--blue);
+  box-shadow: 0 0 0 3px rgba(57, 168, 255, 0.18);
+}
+
+.capture-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.capture-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .race-summary-card {
   display: grid;
   gap: 12px;

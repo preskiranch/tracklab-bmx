@@ -116,6 +116,64 @@ export type RaceSummaryEntry = {
   averageWatts: number | null;
 };
 
+export type RaceCaptureStatus = 'armed' | 'racing' | 'finished' | 'reset';
+
+export type RaceCaptureSample = {
+  at: number;
+  elapsedMs: number;
+  playerId: PlayerSlot['id'];
+  riderName: string;
+  deviceId: number;
+  deviceLabel: string;
+  source: BridgeMode;
+  watts: number;
+  cadence: number | null;
+  speedKph: number | null;
+  signal: number;
+  battery?: number;
+  riderDistanceMeters: number | null;
+  riderVelocityMps: number | null;
+  riderPhase: RiderPhase | null;
+  rank: number | null;
+};
+
+export type RaceCaptureEvent = {
+  at: number;
+  elapsedMs: number;
+  type: 'race-arm' | 'race-start' | 'race-finish' | 'race-reset';
+  label: string;
+};
+
+export type RaceCapture = {
+  version: 1;
+  sessionId: string;
+  createdAt: number;
+  startedAt: number | null;
+  endedAt: number | null;
+  status: RaceCaptureStatus;
+  source: 'live' | 'demo';
+  track: {
+    id: string;
+    name: string;
+    country: string;
+    state: string;
+    lengthMeters: number;
+  };
+  sessionMode: SessionMode;
+  selectedMetrics: MetricKey[];
+  players: Array<{
+    id: PlayerSlot['id'];
+    name: string;
+    deviceId: number | null;
+    colorName: PlayerSlot['colorName'];
+  }>;
+  zones: TrackZone[];
+  events: RaceCaptureEvent[];
+  samples: RaceCaptureSample[];
+  reactionTimesByPlayer: ReactionTimesByPlayer;
+  summary: RaceSummaryEntry[];
+};
+
 export type TrackPoint = {
   lat: number;
   lng: number;

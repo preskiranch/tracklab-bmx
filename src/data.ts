@@ -14,3 +14,4 @@ export const defaultPlayerSlots: PlayerSlot[] = [
 export const storageKey = 'wattbike-bmx-player-mapping-v1';
 export const speedUnitStorageKey = 'wattbike-bmx-speed-unit-v1';
 export const distanceUnitStorageKey = 'wattbike-bmx-distance-unit-v1';
+export const raceCaptureStorageKey = 'tracklab-bmx-last-race-capture-v1';

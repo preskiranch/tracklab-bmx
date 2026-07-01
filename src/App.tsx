@@ -22,6 +22,7 @@ import {
   distanceUnitStorageKey,
   liveBikeTimeoutMs,
   maxPlayers,
+  raceCaptureStorageKey,
   speedUnitStorageKey,
   storageKey,
 } from './data';
@@ -60,6 +61,7 @@ import type {
   MetricKey,
   PlayerSlot,
   PlayMode,
+  RaceCapture,
   ReactionTimesByPlayer,
   SessionMode,
   SpeedUnit,
@@ -118,6 +120,96 @@ function downloadTrackMapping(mapping: UserTrackMapping) {
   URL.revokeObjectURL(url);
 }
 
+function downloadTextFile(filename: string, contents: string, type: string) {
+  const blob = new Blob([contents], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function readStoredRaceCapture(): RaceCapture | null {
+  try {
+    const stored = window.localStorage.getItem(raceCaptureStorageKey);
+    if (!stored) {
+      return null;
+    }
+
+    const parsed = JSON.parse(stored) as RaceCapture;
+    return parsed?.version === 1 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeFilenamePart(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'track';
+}
+
+function raceCaptureFilename(capture: RaceCapture, extension: 'json' | 'csv') {
+  const date = new Date(capture.createdAt).toISOString().replace(/[:.]/g, '-');
+  return `${safeFilenamePart(capture.track.name)}-${date}-race-capture.${extension}`;
+}
+
+function csvValue(value: unknown) {
+  if (value == null) {
+    return '';
+  }
+
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function raceCaptureToCsv(capture: RaceCapture) {
+  const headers = [
+    'sessionId',
+    'track',
+    'playerId',
+    'riderName',
+    'deviceId',
+    'deviceLabel',
+    'source',
+    'sampleAtIso',
+    'elapsedMs',
+    'watts',
+    'cadenceRpm',
+    'speedKph',
+    'signal',
+    'battery',
+    'riderDistanceMeters',
+    'riderVelocityMps',
+    'riderPhase',
+    'rank',
+  ];
+
+  const rows = capture.samples.map((sample) => [
+    capture.sessionId,
+    capture.track.name,
+    sample.playerId,
+    sample.riderName,
+    sample.deviceId,
+    sample.deviceLabel,
+    sample.source,
+    new Date(sample.at).toISOString(),
+    sample.elapsedMs,
+    sample.watts,
+    sample.cadence,
+    sample.speedKph,
+    sample.signal,
+    sample.battery,
+    sample.riderDistanceMeters,
+    sample.riderVelocityMps,
+    sample.riderPhase,
+    sample.rank,
+  ]);
+
+  return [headers, ...rows].map((row) => row.map(csvValue).join(',')).join('\n');
+}
+
 function formatClock() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -147,6 +239,7 @@ export default function App() {
   const bluetooth = useBluetoothBikes();
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
+  const capturedSampleKeysRef = useRef<Set<string>>(new Set());
   const [initialTrack] = useState(readInitialTrack);
   const [catalogTracks, setCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
@@ -179,6 +272,7 @@ export default function App() {
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
+  const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [accountsEnabled, setAccountsEnabled] = useState(false);
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
@@ -326,6 +420,81 @@ export default function App() {
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const shellFullscreenActive = raceViewFullscreen || mappingFullscreen;
 
+  const createRaceCapture = useCallback(() => {
+    const createdAt = Date.now();
+    const sessionId = `tlb-${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
+    capturedSampleKeysRef.current = new Set();
+
+    const capture: RaceCapture = {
+      version: 1,
+      sessionId,
+      createdAt,
+      startedAt: null,
+      endedAt: null,
+      status: 'armed',
+      source: demoMode ? 'demo' : 'live',
+      track: {
+        id: effectiveTrack.id,
+        name: effectiveTrack.name,
+        country: effectiveTrack.country,
+        state: effectiveTrack.state,
+        lengthMeters: effectiveTrack.lengthMeters,
+      },
+      sessionMode,
+      selectedMetrics,
+      players: activePlayers.map((player) => ({
+        id: player.id,
+        name: player.name,
+        deviceId: player.deviceId,
+        colorName: player.colorName,
+      })),
+      zones: activeZones,
+      events: [{
+        at: createdAt,
+        elapsedMs: 0,
+        type: 'race-arm',
+        label: 'Race armed / countdown started',
+      }],
+      samples: [],
+      reactionTimesByPlayer: {},
+      summary: [],
+    };
+
+    setRaceCapture(capture);
+  }, [activePlayers, activeZones, demoMode, effectiveTrack, selectedMetrics, sessionMode]);
+
+  const appendRaceCaptureEvent = useCallback((type: RaceCapture['events'][number]['type'], label: string, at = Date.now()) => {
+    setRaceCapture((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const status = type === 'race-start'
+        ? 'racing'
+        : type === 'race-finish'
+          ? 'finished'
+          : type === 'race-reset'
+            ? 'reset'
+            : current.status;
+
+      return {
+        ...current,
+        status,
+        startedAt: type === 'race-start' ? at : current.startedAt,
+        endedAt: type === 'race-finish' || type === 'race-reset' ? at : current.endedAt,
+        events: [
+          ...current.events,
+          {
+            at,
+            elapsedMs: at - current.createdAt,
+            type,
+            label,
+          },
+        ],
+      };
+    });
+  }, []);
+
   useEffect(() => {
     if (shellFullscreenActive) {
       if (!document.fullscreenElement && raceShellRef.current) {
@@ -377,6 +546,104 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(distanceUnitStorageKey, distanceUnit);
   }, [distanceUnit]);
+
+  useEffect(() => {
+    if (!raceCapture) {
+      return;
+    }
+
+    window.localStorage.setItem(raceCaptureStorageKey, JSON.stringify(raceCapture));
+  }, [raceCapture]);
+
+  useEffect(() => {
+    if (!raceCapture || (raceCapture.status !== 'armed' && raceCapture.status !== 'racing')) {
+      return;
+    }
+
+    const captureStartedAt = raceCapture.startedAt ?? raceCapture.createdAt;
+    const capturedSamples = activePlayers.flatMap((player) => {
+      if (player.deviceId == null) {
+        return [];
+      }
+
+      const sample = samplesByDevice.get(player.deviceId);
+      if (!sample || sample.at < raceCapture.createdAt) {
+        return [];
+      }
+
+      const sampleKey = `${raceCapture.sessionId}:${sample.deviceId}:${sample.at}`;
+      if (capturedSampleKeysRef.current.has(sampleKey)) {
+        return [];
+      }
+
+      capturedSampleKeysRef.current.add(sampleKey);
+      const rider = riders.find((item) => item.playerId === player.id);
+
+      return [{
+        at: sample.at,
+        elapsedMs: sample.at - captureStartedAt,
+        playerId: player.id,
+        riderName: player.name,
+        deviceId: sample.deviceId,
+        deviceLabel: sample.label,
+        source: sample.source,
+        watts: sample.watts,
+        cadence: sample.cadence,
+        speedKph: sample.speedKph,
+        signal: sample.signal,
+        battery: sample.battery,
+        riderDistanceMeters: rider ? Number(rider.distance.toFixed(2)) : null,
+        riderVelocityMps: rider ? Number(rider.velocity.toFixed(2)) : null,
+        riderPhase: rider?.phase ?? null,
+        rank: rider?.rank ?? null,
+      }];
+    });
+
+    if (capturedSamples.length === 0) {
+      return;
+    }
+
+    setRaceCapture((current) => {
+      if (!current || current.sessionId !== raceCapture.sessionId) {
+        return current;
+      }
+
+      return {
+        ...current,
+        samples: [...current.samples, ...capturedSamples],
+      };
+    });
+  }, [activePlayers, raceCapture, riders, samplesByDevice]);
+
+  useEffect(() => {
+    if (!raceCapture || raceState !== 'finished' || raceSummary.length === 0 || raceCapture.status === 'finished') {
+      return;
+    }
+
+    const finishedAt = Date.now();
+    setRaceCapture((current) => {
+      if (!current || current.sessionId !== raceCapture.sessionId) {
+        return current;
+      }
+
+      return {
+        ...current,
+        status: 'finished',
+        endedAt: finishedAt,
+        reactionTimesByPlayer,
+        summary: raceSummary,
+        events: [
+          ...current.events,
+          {
+            at: finishedAt,
+            elapsedMs: finishedAt - current.createdAt,
+            type: 'race-finish',
+            label: 'Race finished / summary captured',
+          },
+        ],
+      };
+    });
+  }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer]);
 
   useEffect(() => {
     setManualZoneIds((current) => {
@@ -606,6 +873,30 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  const exportRaceCaptureJson = () => {
+    if (!raceCapture) {
+      return;
+    }
+
+    downloadTextFile(
+      raceCaptureFilename(raceCapture, 'json'),
+      JSON.stringify(raceCapture, null, 2),
+      'application/json',
+    );
+  };
+
+  const exportRaceCaptureCsv = () => {
+    if (!raceCapture) {
+      return;
+    }
+
+    downloadTextFile(
+      raceCaptureFilename(raceCapture, 'csv'),
+      raceCaptureToCsv(raceCapture),
+      'text/csv',
+    );
+  };
+
   const handleMappingZonePointAdd = useCallback((point: TrackPoint) => {
     setDraftZoneMeters((current) => {
       if (draftPoints.length < 2) {
@@ -692,9 +983,10 @@ export default function App() {
       bridge.sendControlCommand('race-start');
     }
 
+    appendRaceCaptureEvent('race-start', 'Gate drop / race started', gateDropAt);
     startRace();
     scheduleStartGateStep(420, () => setStartGateStatus(idleStartGateStatus));
-  }, [bridge, demoMode, scheduleStartGateStep, startRace]);
+  }, [appendRaceCaptureEvent, bridge, demoMode, scheduleStartGateStep, startRace]);
 
   const handleDemoModeChange = (enabled: boolean) => {
     clearStartGateSequence();
@@ -713,6 +1005,7 @@ export default function App() {
   };
 
   const handleReset = () => {
+    appendRaceCaptureEvent('race-reset', 'Race reset');
     clearStartGateSequence();
     if (!demoMode) {
       bridge.sendControlCommand('race-reset');
@@ -746,6 +1039,7 @@ export default function App() {
 
     clearStartGateSequence();
     setMappingFullscreen(false);
+    createRaceCapture();
     if (!demoMode) {
       bridge.sendControlCommand('race-arm');
     }
@@ -1086,6 +1380,9 @@ export default function App() {
                 speedUnit={speedUnit}
                 distanceUnit={distanceUnit}
                 activeZones={activeZones}
+                raceCapture={raceCapture}
+                onRaceCaptureJsonExport={exportRaceCaptureJson}
+                onRaceCaptureCsvExport={exportRaceCaptureCsv}
                 onLeaderboardMetricChange={setLeaderboardMetric}
               />
 

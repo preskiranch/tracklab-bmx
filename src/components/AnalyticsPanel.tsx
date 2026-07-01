@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { Activity, Gauge, ListFilter, Timer, Trophy, Zap } from 'lucide-react';
+import { Activity, Download, Gauge, ListFilter, Timer, Trophy, Zap } from 'lucide-react';
 import { formatDistanceRangeMeters, formatReactionTime, formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
   BikeSample,
@@ -7,6 +7,7 @@ import type {
   LeaderboardMetric,
   MetricKey,
   PlayerSlot,
+  RaceCapture,
   RaceSummaryEntry,
   ReactionTimesByPlayer,
   RiderState,
@@ -27,6 +28,9 @@ type AnalyticsPanelProps = {
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
   activeZones: TrackZone[];
+  raceCapture: RaceCapture | null;
+  onRaceCaptureJsonExport: () => void;
+  onRaceCaptureCsvExport: () => void;
   onLeaderboardMetricChange: (metric: LeaderboardMetric) => void;
 };
 
@@ -143,6 +147,9 @@ export function AnalyticsPanel({
   speedUnit,
   distanceUnit,
   activeZones,
+  raceCapture,
+  onRaceCaptureJsonExport,
+  onRaceCaptureCsvExport,
   onLeaderboardMetricChange,
 }: AnalyticsPanelProps) {
   const zonesToDisplay = activeZones.length > 0
@@ -173,6 +180,28 @@ export function AnalyticsPanel({
           })}
         </div>
       </div>
+
+      {raceCapture && (
+        <div className="capture-export-card">
+          <div>
+            <span className={`capture-status ${raceCapture.status}`} />
+            <strong>Race capture</strong>
+            <small>
+              {raceCapture.status} / {raceCapture.samples.length} samples / {raceCapture.events.length} events
+            </small>
+          </div>
+          <div className="capture-actions">
+            <button type="button" onClick={onRaceCaptureJsonExport}>
+              <Download size={14} />
+              JSON
+            </button>
+            <button type="button" onClick={onRaceCaptureCsvExport}>
+              <Download size={14} />
+              CSV
+            </button>
+          </div>
+        </div>
+      )}
 
       {raceSummary.length > 0 && (
         <div className="race-summary-card">
