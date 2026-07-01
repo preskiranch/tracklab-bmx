@@ -6,6 +6,7 @@ export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
 export type MappingEditMode = 'navigate' | 'draw' | 'zones';
 export type StartCadenceMode = 'countdown' | 'uci';
+export type RouteViewMode = 'satellite' | 'street-view';
 export type MetricKey = 'cadence' | 'speed' | 'power' | 'reaction';
 export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
 
@@ -119,7 +120,7 @@ export type RaceSummaryEntry = {
   averageWatts: number | null;
 };
 
-export type RaceCaptureStatus = 'armed' | 'racing' | 'finished' | 'reset';
+export type RaceCaptureStatus = 'armed' | 'racing' | 'finished' | 'reset' | 'cancelled';
 
 export type RaceCaptureSample = {
   at: number;
@@ -146,7 +147,7 @@ export type RaceCaptureSample = {
 export type RaceCaptureEvent = {
   at: number;
   elapsedMs: number;
-  type: 'race-arm' | 'race-start' | 'race-finish' | 'race-reset';
+  type: 'race-arm' | 'race-start' | 'race-finish' | 'race-reset' | 'race-cancel';
   label: string;
 };
 

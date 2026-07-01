@@ -85,6 +85,55 @@ Capture workflow:
 
 This keeps the implementation focused on interoperability with your own hardware. It does not require decompiling Wattbike software or bypassing licensing.
 
+## Wattbike BLE Inspector
+
+The BLE inspector is a local bridge utility for researching what a Wattbike Model B exposes over Bluetooth. It scans BLE advertisements, connects to one monitor, lists all GATT services and characteristics, safely reads readable characteristics, subscribes to notifications/indications, and writes a JSONL capture file under `captures/`.
+
+Install dependencies first:
+
+```sh
+npm install
+```
+
+Scan for nearby BLE devices:
+
+```sh
+npm run ble:inspect -- --scan --seconds 30
+```
+
+Look for the Wattbike monitor name, id, or address in the terminal output and the generated capture file. Then connect to one monitor and capture data while you interact with it:
+
+```sh
+npm run ble:inspect -- --name Wattbike --seconds 120 --read
+```
+
+If the scan shows a clearer id or address, target that exact device:
+
+```sh
+npm run ble:inspect -- --id 12ab34cd56ef --seconds 120 --read
+```
+
+Recommended Model B capture steps:
+
+1. On the Model B monitor, open `Settings > Remote > Bluetooth On`.
+2. Make sure Wattbike Hub is closed so the monitor is free for the inspector.
+3. Run the scan command and identify the monitor.
+4. Run the connect command for 120 seconds.
+5. During the capture, press the monitor buttons that are safe to press, start/stop a basic session on the monitor if available, and pedal briefly.
+6. Send back the generated `captures/wattbike-ble-*.jsonl` file.
+
+The first file tells us whether the monitor exposes standard services such as Cycling Power, Cycling Speed/Cadence, Fitness Machine, and any proprietary Wattbike service with writable characteristics. A writable proprietary characteristic is the likely target for Hub-style `Play` / session-start behavior.
+
+Important limitation: this inspector cannot eavesdrop on Wattbike Hub while the Hub app is already connected, because BLE central-to-peripheral traffic is not exposed to a second app like a normal network packet stream. If the inspector finds proprietary writable characteristics but not the exact command bytes, the next step is a phone-side Hub packet capture:
+
+1. Use an Android phone if possible.
+2. Enable Developer Options.
+3. Enable Bluetooth HCI snoop log.
+4. Open Wattbike Hub, connect to the Model B, start a Quick Ride/program, stop/reset.
+5. Export the generated Bluetooth HCI log and share it for analysis.
+
+That capture should show the exact BLE write sent by Hub when Play is pressed. Once identified, the bridge can send the same command from this app.
+
 ## Current Platform Features
 
 - **Track locator database**: country, state/region, and track selectors load the generated database at `public/data/track-database.json`, including USA BMX/BMX Canada official locator records.

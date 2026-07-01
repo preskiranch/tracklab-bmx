@@ -8,6 +8,7 @@
     "web": "vite --host 127.0.0.1",
     "bridge": "node bridge/server.mjs",
     "bridge:ant": "WATTBIKE_INPUT=ant node bridge/server.mjs",
+    "ble:inspect": "node bridge/ble-inspector.mjs",
     "assets:clean": "node scripts/clean-sprite-alpha.mjs",
     "tracks:import:usabmx": "node scripts/import-usabmx-tracks.mjs",
     "tracks:build": "node scripts/build-track-database.mjs",
@@ -15,6 +16,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@abandonware/noble": "^1.9.2-26",
     "@vitejs/plugin-react": "^6.0.3",
     "ant-plus-next": "^0.4.0",
     "concurrently": "^9.2.1",
@@ -31,5 +33,9 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "node-gyp": "^13.0.0",
+    "tar": "^7.5.19"
   }
 }

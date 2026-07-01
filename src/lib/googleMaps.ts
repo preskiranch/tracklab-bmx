@@ -9,6 +9,7 @@ type LatLngLiteral = {
 type GoogleMap = {
   addListener: (eventName: string, handler: (event?: GoogleMapClickEvent) => void) => GoogleMapsEventListener;
   fitBounds: (bounds: GoogleLatLngBounds, padding?: number) => void;
+  getCenter?: () => { toJSON: () => LatLngLiteral };
   getHeading?: () => number | undefined;
   getTilt?: () => number | undefined;
   moveCamera?: (cameraOptions: Record<string, unknown>) => void;
@@ -43,6 +44,36 @@ type GoogleMarker = {
   setTitle?: (title: string) => void;
 };
 
+type GoogleGeocoder = {
+  geocode: (request: { address: string }) => Promise<{
+    results?: Array<{
+      formatted_address?: string;
+      geometry?: {
+        location?: {
+          toJSON: () => LatLngLiteral;
+        };
+      };
+    }>;
+  }>;
+};
+
+type GoogleStreetViewPanorama = {
+  setPano: (pano: string) => void;
+  setPosition: (position: LatLngLiteral) => void;
+  setPov: (pov: { heading: number; pitch: number }) => void;
+  setVisible: (visible: boolean) => void;
+};
+
+type GoogleStreetViewService = {
+  getPanorama: (request: { location: LatLngLiteral; radius: number }) => Promise<{
+    data?: {
+      location?: {
+        pano?: string;
+      };
+    };
+  }>;
+};
+
 type GoogleMapConstructor = {
   new (element: HTMLElement, options: Record<string, unknown>): GoogleMap;
 };
@@ -59,6 +90,7 @@ type GoogleMapsRuntime = {
       trigger: (target: unknown, eventName: string) => void;
     };
     LatLngBounds: new () => GoogleLatLngBounds;
+    Geocoder?: new () => GoogleGeocoder;
     Map: GoogleMapConstructor;
     Marker: new (options: Record<string, unknown>) => GoogleMarker;
     Point: new (x: number, y: number) => unknown;
@@ -67,6 +99,8 @@ type GoogleMapsRuntime = {
       VECTOR: unknown;
     };
     Size: new (width: number, height: number) => unknown;
+    StreetViewPanorama?: new (element: HTMLElement, options?: Record<string, unknown>) => GoogleStreetViewPanorama;
+    StreetViewService?: new () => GoogleStreetViewService;
     SymbolPath: {
       CIRCLE: unknown;
     };
@@ -123,6 +157,8 @@ export function loadGoogleMaps() {
           await Promise.all([
             window.google.maps.importLibrary('maps'),
             window.google.maps.importLibrary('geometry'),
+            window.google.maps.importLibrary('geocoding'),
+            window.google.maps.importLibrary('streetView'),
           ]);
         }
 
@@ -140,6 +176,46 @@ export function loadGoogleMaps() {
   });
 
   return window.__trackLabGoogleMapsPromise;
+}
+
+export function parseLatLngText(value: string): LatLngLiteral | null {
+  const match = value.trim().match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!match) {
+    return null;
+  }
+
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return null;
+  }
+
+  return { lat, lng };
+}
+
+export async function resolveLocationText(value: string): Promise<{ point: LatLngLiteral; label?: string }> {
+  const coordinates = parseLatLngText(value);
+  if (coordinates) {
+    return { point: coordinates };
+  }
+
+  const google = await loadGoogleMaps();
+  if (!google.maps.Geocoder) {
+    throw new Error('Google geocoding is unavailable for this Maps key.');
+  }
+
+  const geocoder = new google.maps.Geocoder();
+  const response = await geocoder.geocode({ address: value });
+  const result = response.results?.[0];
+  const point = result?.geometry?.location?.toJSON();
+  if (!result || !point) {
+    throw new Error('No Google location match was found.');
+  }
+
+  return {
+    point,
+    label: result.formatted_address,
+  };
 }
 
 function isFiniteCoordinate(value: unknown): value is number {

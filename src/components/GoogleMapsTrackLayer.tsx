@@ -5,6 +5,7 @@ import type {
   MappingEditMode,
   PlayerSlot,
   RaceState,
+  RouteViewMode,
   RiderState,
   SpeedUnit,
   TrackPoint,
@@ -20,6 +21,7 @@ import {
   riderRoutePose,
   trackBoundsPoints,
   trackCenter,
+  trackStartPoint,
   type GoogleMap,
   type GoogleMarker,
   type GoogleMapsEventListener,
@@ -41,6 +43,7 @@ type GoogleMapsTrackLayerProps = {
   raceState: RaceState;
   earthAngle: number;
   earthHeading: number;
+  routeViewMode: RouteViewMode;
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
   draftPoints?: TrackPoint[];
@@ -67,6 +70,9 @@ const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
 const riderCanvasSize = 58;
 const riderDrawWidth = 38;
 const riderDrawHeight = 45;
+const riderDrawTop = -23;
+const riderFrontTireInset = 1;
+const riderGroundContactInset = 1;
 
 type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
@@ -161,9 +167,26 @@ function uprightRiderOrientation(rotationDegrees: number) {
   };
 }
 
+function riderLeanBucket(rotationDegrees: number) {
+  return Math.round(uprightRiderOrientation(rotationDegrees).leanDegrees / 2) * 2;
+}
+
+function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: number) {
+  const orientation = uprightRiderOrientation(rotationDegrees);
+  const leanBucket = riderLeanBucket(rotationDegrees);
+  const frontTireX = (riderDrawWidth / 2) - riderFrontTireInset;
+  const groundY = riderDrawTop + riderDrawHeight - riderGroundContactInset;
+  const localX = orientation.mirrored ? -frontTireX : frontTireX;
+  const radians = (leanBucket * Math.PI) / 180;
+  const anchorX = (riderCanvasSize / 2) + (localX * Math.cos(radians)) - (groundY * Math.sin(radians));
+  const anchorY = (riderCanvasSize / 2) + (localX * Math.sin(radians)) + (groundY * Math.cos(radians));
+
+  return new google.maps.Point(anchorX, anchorY);
+}
+
 function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
   return {
-    anchor: new google.maps.Point(19, 40),
+    anchor: new google.maps.Point(38, 40),
     labelOrigin: new google.maps.Point(46, 13),
     scaledSize: new google.maps.Size(38, 43),
     url: riderIconByColor[player.colorName],
@@ -190,7 +213,7 @@ function loadRiderImage(url: string) {
 async function uprightRiderIconUrl(player: PlayerSlot, rotationDegrees: number) {
   const imageUrl = riderIconByColor[player.colorName];
   const orientation = uprightRiderOrientation(rotationDegrees);
-  const leanBucket = Math.round(orientation.leanDegrees / 2) * 2;
+  const leanBucket = riderLeanBucket(rotationDegrees);
   const cacheKey = `${player.colorName}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}`;
   const cached = riderIconCache.get(cacheKey);
   if (cached) {
@@ -213,7 +236,7 @@ async function uprightRiderIconUrl(player: PlayerSlot, rotationDegrees: number) 
   context.shadowColor = 'rgba(0, 0, 0, 0.35)';
   context.shadowBlur = 8;
   context.shadowOffsetY = 5;
-  context.drawImage(image, -riderDrawWidth / 2, -23, riderDrawWidth, riderDrawHeight);
+  context.drawImage(image, -riderDrawWidth / 2, riderDrawTop, riderDrawWidth, riderDrawHeight);
 
   const dataUrl = canvas.toDataURL('image/png');
   riderIconCache.set(cacheKey, dataUrl);
@@ -254,7 +277,7 @@ function createRiderMapMarker(
         }
 
         marker.setIcon({
-          anchor: new google.maps.Point(29, 50),
+          anchor: riderFrontTireAnchorPoint(google, nextRotation),
           labelOrigin: new google.maps.Point(52, 15),
           scaledSize: new google.maps.Size(riderCanvasSize, riderCanvasSize),
           url,
@@ -291,6 +314,7 @@ export function GoogleMapsTrackLayer({
   raceState,
   earthAngle,
   earthHeading,
+  routeViewMode,
   mappingMode = false,
   mappingEditMode = 'draw',
   draftPoints = [],
@@ -302,8 +326,12 @@ export function GoogleMapsTrackLayer({
   onMappingZonePointAdd,
 }: GoogleMapsTrackLayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const streetViewContainerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
+  const streetViewPanoramaRef = useRef<InstanceType<NonNullable<GoogleMapsRuntime['maps']['StreetViewPanorama']>> | null>(null);
+  const streetViewServiceRef = useRef<InstanceType<NonNullable<GoogleMapsRuntime['maps']['StreetViewService']>> | null>(null);
+  const streetViewRequestRef = useRef(0);
   const trackLineRef = useRef<GooglePolyline | null>(null);
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
   const distanceLabelRefs = useRef<GoogleMarker[]>([]);
@@ -320,6 +348,7 @@ export function GoogleMapsTrackLayer({
   const lastFitKeyRef = useRef('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
+  const [streetViewStatus, setStreetViewStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
 
   useEffect(() => {
     let cancelled = false;
@@ -386,8 +415,84 @@ export function GoogleMapsTrackLayer({
       mapListenerRefs.current = [];
       markerRefs.current.clear();
       mapRef.current = null;
+      streetViewPanoramaRef.current = null;
+      streetViewServiceRef.current = null;
     };
   }, [track]);
+
+  useEffect(() => {
+    const google = googleRef.current;
+    const container = streetViewContainerRef.current;
+
+    if (!google || !container || status !== 'ready' || routeViewMode !== 'street-view') {
+      streetViewPanoramaRef.current?.setVisible(false);
+      setStreetViewStatus('idle');
+      return;
+    }
+
+    if (!google.maps.StreetViewPanorama || !google.maps.StreetViewService) {
+      setStreetViewStatus('unavailable');
+      return;
+    }
+
+    if (!streetViewPanoramaRef.current) {
+      streetViewPanoramaRef.current = new google.maps.StreetViewPanorama(container, {
+        addressControl: false,
+        clickToGo: true,
+        disableDefaultUI: false,
+        enableCloseButton: false,
+        fullscreenControl: false,
+        linksControl: true,
+        motionTracking: false,
+        panControl: true,
+        showRoadLabels: true,
+        visible: true,
+        zoomControl: true,
+      });
+    }
+
+    if (!streetViewServiceRef.current) {
+      streetViewServiceRef.current = new google.maps.StreetViewService();
+    }
+
+    const leadRider = riders.length > 0
+      ? riders.reduce((leader, rider) => (rider.distance > leader.distance ? rider : leader), riders[0])
+      : null;
+    const riderPose = leadRider && (raceState === 'racing' || raceState === 'finished')
+      ? riderRoutePose(track, leadRider.distance)
+      : null;
+    const startPoint = trackStartPoint(track);
+    const position = riderPose?.position ?? startPoint;
+    const heading = riderPose?.bearing ?? earthHeading;
+    const requestId = streetViewRequestRef.current + 1;
+    streetViewRequestRef.current = requestId;
+    setStreetViewStatus('loading');
+
+    streetViewServiceRef.current.getPanorama({ location: position, radius: 70 })
+      .then((response) => {
+        if (streetViewRequestRef.current !== requestId || routeViewMode !== 'street-view') {
+          return;
+        }
+
+        const pano = response.data?.location?.pano;
+        if (!pano) {
+          streetViewPanoramaRef.current?.setVisible(false);
+          setStreetViewStatus('unavailable');
+          return;
+        }
+
+        streetViewPanoramaRef.current?.setPano(pano);
+        streetViewPanoramaRef.current?.setPov({ heading, pitch: 0 });
+        streetViewPanoramaRef.current?.setVisible(true);
+        setStreetViewStatus('ready');
+      })
+      .catch(() => {
+        if (streetViewRequestRef.current === requestId) {
+          streetViewPanoramaRef.current?.setVisible(false);
+          setStreetViewStatus('unavailable');
+        }
+      });
+  }, [earthHeading, raceState, riders, routeViewMode, status, track]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -883,6 +988,20 @@ export function GoogleMapsTrackLayer({
   return (
     <>
       <div className="google-map-layer" ref={containerRef} />
+      <div
+        className={`street-view-layer${routeViewMode === 'street-view' ? ' active' : ''}`}
+        ref={streetViewContainerRef}
+      />
+      {routeViewMode === 'street-view' && streetViewStatus !== 'ready' && (
+        <div className="street-view-status">
+          <strong>{streetViewStatus === 'loading' ? 'Finding Street View' : 'Street View unavailable'}</strong>
+          <span>
+            {streetViewStatus === 'loading'
+              ? 'Checking for Google Street View imagery near this route point.'
+              : 'No Street View panorama was found near this point. Use satellite view or move the route onto a covered road.'}
+          </span>
+        </div>
+      )}
       {status !== 'ready' && (
         <div className="google-map-status">
           <strong>{status === 'loading' ? 'Loading Google imagery' : 'Google imagery unavailable'}</strong>

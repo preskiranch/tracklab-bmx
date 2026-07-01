@@ -9,6 +9,7 @@ import {
   MapPinned,
   Maximize2,
   Minimize2,
+  Plus,
   RotateCcw,
   Save,
   SlidersHorizontal,
@@ -16,6 +17,7 @@ import {
   Trash2,
   Undo2,
   Upload,
+  X,
   Zap,
 } from 'lucide-react';
 import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
@@ -25,6 +27,7 @@ import type {
   MappingEditMode,
   MetricKey,
   RaceState,
+  RouteViewMode,
   SessionMode,
   SpeedUnit,
   StartCadenceMode,
@@ -43,6 +46,10 @@ type SessionControlPanelProps = {
   distanceUnit: DistanceUnit;
   earthAngle: number;
   earthHeading: number;
+  routeViewMode: RouteViewMode;
+  customRouteName: string;
+  customRouteLocation: string;
+  customRouteStatus: string | null;
   raceState: RaceState;
   activeBikeCount: number;
   demoMode: boolean;
@@ -69,6 +76,10 @@ type SessionControlPanelProps = {
   onDistanceUnitChange: (unit: DistanceUnit) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
+  onRouteViewModeChange: (mode: RouteViewMode) => void;
+  onCustomRouteNameChange: (value: string) => void;
+  onCustomRouteLocationChange: (value: string) => void;
+  onCustomRouteCreate: () => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoBikeCountChange: (count: number) => void;
   onStartCadenceModeChange: (mode: StartCadenceMode) => void;
@@ -84,6 +95,7 @@ type SessionControlPanelProps = {
   onMappingExport: () => void;
   onMappingImport: (file: File) => void;
   onStart: () => void;
+  onCancel: () => void;
   onReset: () => void;
 };
 
@@ -105,6 +117,10 @@ export function SessionControlPanel({
   distanceUnit,
   earthAngle,
   earthHeading,
+  routeViewMode,
+  customRouteName,
+  customRouteLocation,
+  customRouteStatus,
   raceState,
   activeBikeCount,
   demoMode,
@@ -131,6 +147,10 @@ export function SessionControlPanel({
   onDistanceUnitChange,
   onEarthAngleChange,
   onEarthHeadingChange,
+  onRouteViewModeChange,
+  onCustomRouteNameChange,
+  onCustomRouteLocationChange,
+  onCustomRouteCreate,
   onDemoModeChange,
   onDemoBikeCountChange,
   onStartCadenceModeChange,
@@ -146,10 +166,12 @@ export function SessionControlPanel({
   onMappingExport,
   onMappingImport,
   onStart,
+  onCancel,
   onReset,
 }: SessionControlPanelProps) {
   const hasMappedRoute = track.routeStatus === 'user-mapped';
   const canStart = !startGateActive && raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
+  const canCancel = startGateActive || raceState === 'racing';
   const canSaveMapping = draftPointCount >= 2;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones' ? draftZoneCount > 1 : draftPointCount > 0;
@@ -166,6 +188,44 @@ export function SessionControlPanel({
 
   return (
     <aside className="control-panel">
+      <section className="panel-section custom-route-section" id="custom-route-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Custom Route</span>
+            <h3>Create ride</h3>
+          </div>
+          <MapPinned size={18} />
+        </div>
+
+        <label className="text-field">
+          <span>Name</span>
+          <input
+            type="text"
+            value={customRouteName}
+            placeholder="Childhood route"
+            onChange={(event) => onCustomRouteNameChange(event.target.value)}
+          />
+        </label>
+
+        <label className="text-field">
+          <span>Start location</span>
+          <input
+            id="custom-route-location-input"
+            type="text"
+            value={customRouteLocation}
+            placeholder="38.7345, -121.2910 or address"
+            onChange={(event) => onCustomRouteLocationChange(event.target.value)}
+          />
+        </label>
+
+        {customRouteStatus && <p className="field-status">{customRouteStatus}</p>}
+
+        <button className="mapping-fullscreen-button" type="button" onClick={onCustomRouteCreate}>
+          <Plus size={15} />
+          Add Custom Route
+        </button>
+      </section>
+
       <section className="panel-section mapping-section">
         <div className="section-heading">
           <div>
@@ -239,6 +299,23 @@ export function SessionControlPanel({
             onClick={() => onDistanceUnitChange('m')}
           >
             Meters
+          </button>
+        </div>
+
+        <div className="segmented-control compact" aria-label="Route view">
+          <button
+            className={routeViewMode === 'satellite' ? 'selected' : ''}
+            type="button"
+            onClick={() => onRouteViewModeChange('satellite')}
+          >
+            Satellite
+          </button>
+          <button
+            className={routeViewMode === 'street-view' ? 'selected' : ''}
+            type="button"
+            onClick={() => onRouteViewModeChange('street-view')}
+          >
+            Street View
           </button>
         </div>
 
@@ -559,6 +636,12 @@ export function SessionControlPanel({
                   ? 'Racing'
                   : demoMode ? 'Start Demo Race' : 'Start Session'}
         </button>
+        {canCancel && (
+          <button className="action-button danger" type="button" onClick={onCancel}>
+            <X size={18} />
+            Cancel
+          </button>
+        )}
         <button className="action-button secondary" type="button" onClick={onReset}>
           <RotateCcw size={18} />
           Reset

@@ -6,6 +6,8 @@ import {
   Database,
   Gauge,
   Globe2,
+  MapPinned,
+  Plus,
   Radio,
   Route,
   Settings,
@@ -18,6 +20,7 @@ import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { SessionControlPanel } from './components/SessionControlPanel';
 import {
+  customRoutesStorageKey,
   defaultPlayerSlots,
   distanceUnitStorageKey,
   liveBikeTimeoutMs,
@@ -47,6 +50,7 @@ import {
   type StoredTrackMappings,
   zoneBoundariesFromMapping,
 } from './lib/trackMapping';
+import { resolveLocationText } from './lib/googleMaps';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
@@ -63,6 +67,7 @@ import type {
   PlayMode,
   RaceCapture,
   ReactionTimesByPlayer,
+  RouteViewMode,
   SessionMode,
   SpeedUnit,
   StartCadenceMode,
@@ -80,6 +85,74 @@ function readInitialTrack() {
   } catch {
     return defaultTrack;
   }
+}
+
+function readStoredCustomRoutes(): TrackRecord[] {
+  try {
+    const stored = window.localStorage.getItem(customRoutesStorageKey);
+    if (!stored) {
+      return [];
+    }
+
+    const parsed = JSON.parse(stored) as TrackRecord[];
+    return Array.isArray(parsed)
+      ? parsed.filter((track) => track.id && track.name && Number.isFinite(track.latitude) && Number.isFinite(track.longitude))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredCustomRoutes(routes: TrackRecord[]) {
+  window.localStorage.setItem(customRoutesStorageKey, JSON.stringify(routes));
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+    .slice(0, 48) || 'custom-route';
+}
+
+function customRouteOutline(center: TrackPoint): TrackPoint[] {
+  const offset = 0.0012;
+  return [
+    { lat: center.lat - offset, lng: center.lng - offset },
+    { lat: center.lat - offset, lng: center.lng + offset },
+    { lat: center.lat + offset, lng: center.lng + offset },
+    { lat: center.lat + offset, lng: center.lng - offset },
+    { lat: center.lat - offset, lng: center.lng - offset },
+  ];
+}
+
+function createCustomRouteRecord(name: string, locationLabel: string | undefined, point: TrackPoint): TrackRecord {
+  const createdAt = Date.now();
+
+  return {
+    id: `custom-${slugify(name)}-${createdAt.toString(36)}`,
+    name,
+    country: 'Custom Routes',
+    countryCode: 'CUSTOM',
+    state: 'Personal',
+    region: 'Personal',
+    source: 'Custom',
+    sourceUrl: 'local://custom-route',
+    address: locationLabel,
+    latitude: point.lat,
+    longitude: point.lng,
+    lengthMeters: 1000,
+    elevationMeters: 0,
+    surface: 'Custom ride route',
+    outline: customRouteOutline(point),
+    routeStatus: 'locator-only',
+    zones: [],
+    leaderboards: {
+      rpm: [],
+      speed: [],
+      watts: [],
+    },
+  };
 }
 
 function readStoredPlayers(): PlayerSlot[] {
@@ -246,8 +319,10 @@ export default function App() {
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
+  const initialUrlTrackSyncedRef = useRef(false);
   const [initialTrack] = useState(readInitialTrack);
-  const [catalogTracks, setCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
+  const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
+  const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const [mappingMode, setMappingMode] = useState(false);
   const [mappingFullscreen, setMappingFullscreen] = useState(false);
@@ -274,6 +349,10 @@ export default function App() {
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
   const [earthAngle, setEarthAngle] = useState(45);
   const [earthHeading, setEarthHeading] = useState(0);
+  const [routeViewMode, setRouteViewMode] = useState<RouteViewMode>('satellite');
+  const [customRouteName, setCustomRouteName] = useState('');
+  const [customRouteLocation, setCustomRouteLocation] = useState('');
+  const [customRouteStatus, setCustomRouteStatus] = useState<string | null>(null);
   const [startCadenceMode, setStartCadenceMode] = useState<StartCadenceMode>('countdown');
   const [countdownSeconds, setCountdownSeconds] = useState(3);
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
@@ -313,7 +392,7 @@ export default function App() {
       })
       .then((database) => {
         if (!cancelled && Array.isArray(database.tracks) && database.tracks.length > 0) {
-          setCatalogTracks(database.tracks);
+          setBaseCatalogTracks(database.tracks);
         }
       })
       .catch((error: Error) => {
@@ -325,19 +404,29 @@ export default function App() {
     };
   }, []);
 
+  const catalogTracks = useMemo(
+    () => [...baseCatalogTracks, ...customRoutes],
+    [baseCatalogTracks, customRoutes],
+  );
+
   useEffect(() => {
-    const requestedTrackId = new URLSearchParams(window.location.search).get('track');
-    const nextTrack = catalogTracks.find((track) => track.id === requestedTrackId)
-      ?? catalogTracks.find((track) => track.id === selectedTrackId)
+    const requestedTrackId = initialUrlTrackSyncedRef.current
+      ? null
+      : new URLSearchParams(window.location.search).get('track');
+    const requestedTrack = requestedTrackId ? catalogTracks.find((track) => track.id === requestedTrackId) : undefined;
+    const selectedTrackExists = catalogTracks.find((track) => track.id === selectedTrackId);
+    const nextTrack = requestedTrack
+      ?? selectedTrackExists
       ?? catalogTracks[0]
       ?? defaultTrack;
+    initialUrlTrackSyncedRef.current = true;
 
     if (nextTrack.id !== selectedTrackId || nextTrack.country !== selectedCountry || nextTrack.state !== selectedState) {
       setSelectedCountry(nextTrack.country);
       setSelectedState(nextTrack.state);
       setSelectedTrackId(nextTrack.id);
     }
-  }, [catalogTracks]);
+  }, [catalogTracks, selectedCountry, selectedState, selectedTrackId]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -395,14 +484,30 @@ export default function App() {
     [discoveredDeviceIds, now, samplesByDevice],
   );
   const activePlayers = useMemo(
-    () => availablePlayers
-      .filter((player) => player.deviceId != null && liveDeviceIds.includes(player.deviceId))
-      .slice(0, maxPlayers),
-    [availablePlayers, liveDeviceIds],
+    () => {
+      if (demoMode) {
+        return demoPlayers.slice(0, maxPlayers);
+      }
+
+      return availablePlayers
+        .filter((player) => player.deviceId != null && samplesByDevice.has(player.deviceId))
+        .slice(0, maxPlayers);
+    },
+    [availablePlayers, demoMode, demoPlayers, samplesByDevice],
   );
   const pairingPlayers = useMemo(
-    () => (demoMode ? demoPlayers : players.slice(0, Math.min(maxPlayers, liveDeviceIds.length))),
-    [demoMode, demoPlayers, liveDeviceIds.length, players],
+    () => {
+      if (demoMode) {
+        return demoPlayers;
+      }
+
+      const assignedKnownCount = players.filter((player) => (
+        player.deviceId != null && samplesByDevice.has(player.deviceId)
+      )).length;
+      const visibleCount = Math.min(maxPlayers, Math.max(discoveredDeviceIds.length, liveDeviceIds.length, assignedKnownCount));
+      return players.slice(0, visibleCount);
+    },
+    [demoMode, demoPlayers, discoveredDeviceIds.length, liveDeviceIds.length, players, samplesByDevice],
   );
   const mappedZones = useMemo(
     () => (effectiveTrack.routeStatus === 'user-mapped' ? effectiveTrack.zones : []),
@@ -426,6 +531,7 @@ export default function App() {
   );
   useZoneAudioCues(raceState, riders, activeZones);
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
+  const canCancelRace = startGateStatus.active || raceState === 'racing';
   const shellFullscreenActive = raceViewFullscreen || mappingFullscreen;
 
   useEffect(() => {
@@ -490,13 +596,15 @@ export default function App() {
           ? 'finished'
           : type === 'race-reset'
             ? 'reset'
+            : type === 'race-cancel'
+              ? 'cancelled'
             : current.status;
 
       return {
         ...current,
         status,
         startedAt: type === 'race-start' ? at : current.startedAt,
-        endedAt: type === 'race-finish' || type === 'race-reset' ? at : current.endedAt,
+        endedAt: type === 'race-finish' || type === 'race-reset' || type === 'race-cancel' ? at : current.endedAt,
         events: [
           ...current.events,
           {
@@ -689,7 +797,9 @@ export default function App() {
     setPlayers((current) => {
       const assigned = new Set<number>();
       return current.map((player, index) => {
-        const existingIsPresent = player.deviceId != null && liveDeviceIds.includes(player.deviceId);
+        const existingIsPresent = player.deviceId != null && (
+          liveDeviceIds.includes(player.deviceId) || samplesByDevice.has(player.deviceId)
+        );
         if (existingIsPresent) {
           assigned.add(player.deviceId as number);
           return player;
@@ -704,21 +814,22 @@ export default function App() {
         return { ...player, deviceId: nextDevice };
       });
     });
-  }, [liveDeviceIds]);
+  }, [liveDeviceIds, samplesByDevice]);
 
   useEffect(() => {
     if (demoMode) {
       return;
     }
 
+    const knownDeviceIds = new Set(discoveredDeviceIds);
     const assignedLiveDevices = new Set(players.map((player) => player.deviceId).filter(Boolean));
     const needsLiveAssignment = liveDeviceIds.some((deviceId) => !assignedLiveDevices.has(deviceId));
-    const staleAssignment = players.some((player) => player.deviceId != null && !liveDeviceIds.includes(player.deviceId));
+    const staleAssignment = players.some((player) => player.deviceId != null && !knownDeviceIds.has(player.deviceId));
 
     if ((needsLiveAssignment || staleAssignment) && liveDeviceIds.length > 0) {
       autoAssign();
     }
-  }, [autoAssign, demoMode, liveDeviceIds, players]);
+  }, [autoAssign, demoMode, discoveredDeviceIds, liveDeviceIds, players]);
 
   const handleCountryChange = (country: string) => {
     const nextState = statesForCountry(country, catalogTracks)[0];
@@ -743,6 +854,53 @@ export default function App() {
     setSelectedCountry(nextTrack.country);
     setSelectedState(nextTrack.state);
     setSelectedTrackId(nextTrack.id);
+  };
+
+  const handleCustomLocationShortcut = () => {
+    setAppMode('race');
+    setCustomRouteStatus((current) => current ?? 'Enter a route name and location to create a custom ride.');
+
+    window.setTimeout(() => {
+      document.getElementById('custom-route-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById('custom-route-location-input')?.focus();
+    }, 80);
+  };
+
+  const handleCustomRouteCreate = async () => {
+    const name = customRouteName.trim();
+    const location = customRouteLocation.trim();
+
+    if (!name || !location) {
+      setCustomRouteStatus('Add a route name and a start location.');
+      return;
+    }
+
+    setCustomRouteStatus('Finding location...');
+    try {
+      const resolved = await resolveLocationText(location);
+      const customRoute = createCustomRouteRecord(name, resolved.label ?? location, resolved.point);
+      setCustomRoutes((current) => {
+        const next = [...current, customRoute];
+        writeStoredCustomRoutes(next);
+        return next;
+      });
+      setSelectedCountry(customRoute.country);
+      setSelectedState(customRoute.state);
+      setSelectedTrackId(customRoute.id);
+      setCustomRouteName('');
+      setCustomRouteLocation('');
+      setCustomRouteStatus('Custom route added. Trace the path and save it.');
+      setDraftPoints([]);
+      setDraftZoneMeters([]);
+      setMappingRestSeconds(1);
+      setMappingMode(true);
+      setMappingEditMode('navigate');
+      setRouteViewMode('satellite');
+      resetRace();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCustomRouteStatus(`${message} Coordinates like 38.7345, -121.2910 work without geocoding.`);
+    }
   };
 
   useEffect(() => {
@@ -1044,6 +1202,26 @@ export default function App() {
     resetRace();
   };
 
+  const handleCancel = () => {
+    const label = raceState === 'racing'
+      ? 'Race cancelled mid-race'
+      : 'Race cancelled before gate drop';
+    appendRaceCaptureEvent('race-cancel', label);
+    clearStartGateSequence();
+    setMappingFullscreen(false);
+
+    if (!demoMode) {
+      bridge.sendControlCommand('race-reset');
+    }
+
+    if (demoMode) {
+      setDemoRaceStartedAt(null);
+      setDemoSignalsStopped(true);
+    }
+
+    resetRace();
+  };
+
   const sendChatMessage = () => {
     const text = chatDraft.trim();
     if (!text) {
@@ -1287,6 +1465,12 @@ export default function App() {
             </label>
           </div>
 
+          <button className="custom-location-shortcut" type="button" onClick={handleCustomLocationShortcut}>
+            <Plus size={16} />
+            <span>Custom Location</span>
+            <MapPinned size={16} />
+          </button>
+
           <div className="catalog-badge">
             <Database size={16} />
             <span>{catalogTracks.length} track locator records</span>
@@ -1321,7 +1505,9 @@ export default function App() {
                 reactionTimesByPlayer={reactionTimesByPlayer}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
+                routeViewMode={routeViewMode}
                 activeZones={activeZones}
+                canCancelRace={canCancelRace}
                 mappingMode={mappingMode}
                 mappingFullscreen={mappingFullscreen}
                 mappingEditMode={mappingEditMode}
@@ -1331,6 +1517,8 @@ export default function App() {
                 onEarthCameraChange={handleEarthCameraChange}
                 onEarthAngleChange={setEarthAngle}
                 onEarthHeadingChange={setEarthHeading}
+                onRouteViewModeChange={setRouteViewMode}
+                onCancelRace={handleCancel}
                 onMappingFullscreenChange={handleMappingFullscreenChange}
                 onMappingPathPointAdd={handleMappingPathPointAdd}
                 onMappingPathPointMove={handleMappingPathPointMove}
@@ -1348,6 +1536,10 @@ export default function App() {
                 distanceUnit={distanceUnit}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
+                routeViewMode={routeViewMode}
+                customRouteName={customRouteName}
+                customRouteLocation={customRouteLocation}
+                customRouteStatus={customRouteStatus}
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
                 demoMode={demoMode}
@@ -1374,6 +1566,10 @@ export default function App() {
                 onDistanceUnitChange={setDistanceUnit}
                 onEarthAngleChange={setEarthAngle}
                 onEarthHeadingChange={setEarthHeading}
+                onRouteViewModeChange={setRouteViewMode}
+                onCustomRouteNameChange={setCustomRouteName}
+                onCustomRouteLocationChange={setCustomRouteLocation}
+                onCustomRouteCreate={handleCustomRouteCreate}
                 onDemoModeChange={handleDemoModeChange}
                 onDemoBikeCountChange={handleDemoBikeCountChange}
                 onStartCadenceModeChange={setStartCadenceMode}
@@ -1389,6 +1585,7 @@ export default function App() {
                 onMappingExport={exportMapping}
                 onMappingImport={importMapping}
                 onStart={handleStart}
+                onCancel={handleCancel}
                 onReset={handleReset}
               />
             </div>
