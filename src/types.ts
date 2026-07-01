@@ -6,7 +6,6 @@ export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
 export type MappingEditMode = 'navigate' | 'draw' | 'zones';
 export type StartCadenceMode = 'countdown' | 'uci';
-export type RouteViewMode = 'satellite' | 'street-view';
 export type MetricKey = 'cadence' | 'speed' | 'power' | 'reaction';
 export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
 

@@ -73,7 +73,6 @@ import type {
   PlayMode,
   RaceCapture,
   ReactionTimesByPlayer,
-  RouteViewMode,
   SessionMode,
   SpeedUnit,
   StartCadenceMode,
@@ -377,7 +376,6 @@ export default function App() {
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
   const [earthAngle, setEarthAngle] = useState(45);
   const [earthHeading, setEarthHeading] = useState(0);
-  const [routeViewMode, setRouteViewMode] = useState<RouteViewMode>('satellite');
   const [customRouteName, setCustomRouteName] = useState('');
   const [customRouteLocation, setCustomRouteLocation] = useState('');
   const [customRouteStatus, setCustomRouteStatus] = useState<string | null>(null);
@@ -999,7 +997,6 @@ export default function App() {
       setMappingRestSeconds(1);
       setMappingMode(true);
       setMappingEditMode('navigate');
-      setRouteViewMode('satellite');
       resetRace();
     } catch (error) {
       const message = formatRouteLocationError(error);
@@ -1612,7 +1609,6 @@ export default function App() {
                 reactionTimesByPlayer={reactionTimesByPlayer}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
-                routeViewMode={routeViewMode}
                 activeZones={activeZones}
                 canCancelRace={canCancelRace}
                 mappingMode={mappingMode}
@@ -1624,7 +1620,6 @@ export default function App() {
                 onEarthCameraChange={handleEarthCameraChange}
                 onEarthAngleChange={setEarthAngle}
                 onEarthHeadingChange={setEarthHeading}
-                onRouteViewModeChange={setRouteViewMode}
                 onCancelRace={handleCancel}
                 onMappingFullscreenChange={handleMappingFullscreenChange}
                 onMappingPathPointAdd={handleMappingPathPointAdd}
@@ -1643,7 +1638,6 @@ export default function App() {
                 distanceUnit={distanceUnit}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
-                routeViewMode={routeViewMode}
                 customRouteName={customRouteName}
                 customRouteLocation={customRouteLocation}
                 customRouteStatus={customRouteStatus}
@@ -1676,7 +1670,6 @@ export default function App() {
                 onDistanceUnitChange={setDistanceUnit}
                 onEarthAngleChange={setEarthAngle}
                 onEarthHeadingChange={setEarthHeading}
-                onRouteViewModeChange={setRouteViewMode}
                 onCustomRouteNameChange={setCustomRouteName}
                 onCustomRouteLocationChange={handleCustomRouteLocationChange}
                 onCustomRoutePredictionSelect={handleCustomRoutePredictionSelect}

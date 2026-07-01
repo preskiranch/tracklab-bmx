@@ -28,7 +28,6 @@ import type {
   MappingEditMode,
   MetricKey,
   RaceState,
-  RouteViewMode,
   SessionMode,
   SpeedUnit,
   StartCadenceMode,
@@ -47,7 +46,6 @@ type SessionControlPanelProps = {
   distanceUnit: DistanceUnit;
   earthAngle: number;
   earthHeading: number;
-  routeViewMode: RouteViewMode;
   customRouteName: string;
   customRouteLocation: string;
   customRouteStatus: string | null;
@@ -80,7 +78,6 @@ type SessionControlPanelProps = {
   onDistanceUnitChange: (unit: DistanceUnit) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
-  onRouteViewModeChange: (mode: RouteViewMode) => void;
   onCustomRouteNameChange: (value: string) => void;
   onCustomRouteLocationChange: (value: string) => void;
   onCustomRoutePredictionSelect: (prediction: PlacePredictionOption) => void;
@@ -122,7 +119,6 @@ export function SessionControlPanel({
   distanceUnit,
   earthAngle,
   earthHeading,
-  routeViewMode,
   customRouteName,
   customRouteLocation,
   customRouteStatus,
@@ -155,7 +151,6 @@ export function SessionControlPanel({
   onDistanceUnitChange,
   onEarthAngleChange,
   onEarthHeadingChange,
-  onRouteViewModeChange,
   onCustomRouteNameChange,
   onCustomRouteLocationChange,
   onCustomRoutePredictionSelect,
@@ -339,23 +334,6 @@ export function SessionControlPanel({
             onClick={() => onDistanceUnitChange('m')}
           >
             Meters
-          </button>
-        </div>
-
-        <div className="segmented-control compact" aria-label="Route view">
-          <button
-            className={routeViewMode === 'satellite' ? 'selected' : ''}
-            type="button"
-            onClick={() => onRouteViewModeChange('satellite')}
-          >
-            Satellite
-          </button>
-          <button
-            className={routeViewMode === 'street-view' ? 'selected' : ''}
-            type="button"
-            onClick={() => onRouteViewModeChange('street-view')}
-          >
-            Street View
           </button>
         </div>
 

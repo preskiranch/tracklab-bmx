@@ -25,7 +25,6 @@ import type {
   PlayerSlot,
   RaceState,
   ReactionTimesByPlayer,
-  RouteViewMode,
   RiderState,
   SpeedUnit,
   TrackPoint,
@@ -47,7 +46,6 @@ type EarthTrackViewProps = {
   reactionTimesByPlayer: ReactionTimesByPlayer;
   earthAngle: number;
   earthHeading: number;
-  routeViewMode: RouteViewMode;
   activeZones: TrackZone[];
   canCancelRace: boolean;
   mappingMode: boolean;
@@ -59,7 +57,6 @@ type EarthTrackViewProps = {
   onEarthCameraChange: (camera: { angle?: number; heading?: number }) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
-  onRouteViewModeChange: (mode: RouteViewMode) => void;
   onCancelRace: () => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingPathPointAdd: (point: TrackPoint) => void;
@@ -111,7 +108,6 @@ export function EarthTrackView({
   reactionTimesByPlayer,
   earthAngle,
   earthHeading,
-  routeViewMode,
   activeZones,
   canCancelRace,
   mappingMode,
@@ -123,7 +119,6 @@ export function EarthTrackView({
   onEarthCameraChange,
   onEarthAngleChange,
   onEarthHeadingChange,
-  onRouteViewModeChange,
   onCancelRace,
   onMappingFullscreenChange,
   onMappingPathPointAdd,
@@ -172,7 +167,6 @@ export function EarthTrackView({
             raceState={raceState}
             earthAngle={earthAngle}
             earthHeading={earthHeading}
-            routeViewMode={routeViewMode}
             activeZones={activeZones}
             mappingMode={mappingMode}
             mappingEditMode={mappingEditMode}
@@ -199,11 +193,7 @@ export function EarthTrackView({
         )}
 
         <div className="google-map-caption">
-          {routeViewMode === 'street-view'
-            ? 'Google Street View ride camera'
-            : track.routeStatus === 'user-mapped'
-              ? `${imageryLabel} with saved ride line`
-              : imageryLabel}
+          {track.routeStatus === 'user-mapped' ? `${imageryLabel} with saved ride line` : imageryLabel}
         </div>
 
         {canCancelRace && (
@@ -220,7 +210,7 @@ export function EarthTrackView({
         <div className="earth-overlay bottom-left">
           <span>Angle {earthAngle} deg</span>
           <span>Heading {earthHeading} deg</span>
-          <span>{routeViewMode === 'street-view' ? 'Street View' : 'Satellite'}</span>
+          <span>Satellite</span>
           <span>
             {mappingMode
               ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`
@@ -297,22 +287,6 @@ export function EarthTrackView({
           </button>
         </div>
 
-        <div className="route-view-switch" aria-label="Route view">
-          <button
-            className={routeViewMode === 'satellite' ? 'selected' : ''}
-            type="button"
-            onClick={() => onRouteViewModeChange('satellite')}
-          >
-            Map
-          </button>
-          <button
-            className={routeViewMode === 'street-view' ? 'selected' : ''}
-            type="button"
-            onClick={() => onRouteViewModeChange('street-view')}
-          >
-            Street
-          </button>
-        </div>
       </div>
 
       <div className="rider-strip">

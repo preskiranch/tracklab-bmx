@@ -5,7 +5,6 @@ import type {
   MappingEditMode,
   PlayerSlot,
   RaceState,
-  RouteViewMode,
   RiderState,
   SpeedUnit,
   TrackPoint,
@@ -21,7 +20,6 @@ import {
   riderRoutePose,
   trackBoundsPoints,
   trackCenter,
-  trackStartPoint,
   type GoogleMap,
   type GoogleMarker,
   type GoogleMapsEventListener,
@@ -43,7 +41,6 @@ type GoogleMapsTrackLayerProps = {
   raceState: RaceState;
   earthAngle: number;
   earthHeading: number;
-  routeViewMode: RouteViewMode;
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
   draftPoints?: TrackPoint[];
@@ -314,7 +311,6 @@ export function GoogleMapsTrackLayer({
   raceState,
   earthAngle,
   earthHeading,
-  routeViewMode,
   mappingMode = false,
   mappingEditMode = 'draw',
   draftPoints = [],
@@ -326,12 +322,8 @@ export function GoogleMapsTrackLayer({
   onMappingZonePointAdd,
 }: GoogleMapsTrackLayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const streetViewContainerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
-  const streetViewPanoramaRef = useRef<InstanceType<NonNullable<GoogleMapsRuntime['maps']['StreetViewPanorama']>> | null>(null);
-  const streetViewServiceRef = useRef<InstanceType<NonNullable<GoogleMapsRuntime['maps']['StreetViewService']>> | null>(null);
-  const streetViewRequestRef = useRef(0);
   const trackLineRef = useRef<GooglePolyline | null>(null);
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
   const distanceLabelRefs = useRef<GoogleMarker[]>([]);
@@ -348,7 +340,6 @@ export function GoogleMapsTrackLayer({
   const lastFitKeyRef = useRef('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
-  const [streetViewStatus, setStreetViewStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
 
   useEffect(() => {
     let cancelled = false;
@@ -415,85 +406,8 @@ export function GoogleMapsTrackLayer({
       mapListenerRefs.current = [];
       markerRefs.current.clear();
       mapRef.current = null;
-      streetViewPanoramaRef.current = null;
-      streetViewServiceRef.current = null;
     };
   }, [track]);
-
-  useEffect(() => {
-    const google = googleRef.current;
-    const container = streetViewContainerRef.current;
-
-    if (!google || !container || status !== 'ready' || routeViewMode !== 'street-view') {
-      streetViewPanoramaRef.current?.setVisible(false);
-      setStreetViewStatus('idle');
-      return;
-    }
-
-    if (!google.maps.StreetViewPanorama || !google.maps.StreetViewService) {
-      setStreetViewStatus('unavailable');
-      return;
-    }
-
-    if (!streetViewPanoramaRef.current) {
-      streetViewPanoramaRef.current = new google.maps.StreetViewPanorama(container, {
-        addressControl: false,
-        clickToGo: true,
-        disableDefaultUI: false,
-        enableCloseButton: false,
-        fullscreenControl: false,
-        linksControl: true,
-        motionTracking: false,
-        panControl: true,
-        showRoadLabels: true,
-        visible: false,
-        zoomControl: true,
-      });
-    }
-
-    if (!streetViewServiceRef.current) {
-      streetViewServiceRef.current = new google.maps.StreetViewService();
-    }
-
-    const leadRider = riders.length > 0
-      ? riders.reduce((leader, rider) => (rider.distance > leader.distance ? rider : leader), riders[0])
-      : null;
-    const riderPose = leadRider && (raceState === 'racing' || raceState === 'finished')
-      ? riderRoutePose(track, leadRider.distance)
-      : null;
-    const startPoint = trackStartPoint(track);
-    const position = riderPose?.position ?? startPoint;
-    const heading = riderPose?.bearing ?? earthHeading;
-    const requestId = streetViewRequestRef.current + 1;
-    streetViewRequestRef.current = requestId;
-    streetViewPanoramaRef.current?.setVisible(false);
-    setStreetViewStatus('loading');
-
-    streetViewServiceRef.current.getPanorama({ location: position, radius: 250 })
-      .then((response) => {
-        if (streetViewRequestRef.current !== requestId || routeViewMode !== 'street-view') {
-          return;
-        }
-
-        const pano = response.data?.location?.pano;
-        if (!pano) {
-          streetViewPanoramaRef.current?.setVisible(false);
-          setStreetViewStatus('unavailable');
-          return;
-        }
-
-        streetViewPanoramaRef.current?.setPano(pano);
-        streetViewPanoramaRef.current?.setPov({ heading, pitch: 0 });
-        streetViewPanoramaRef.current?.setVisible(true);
-        setStreetViewStatus('ready');
-      })
-      .catch(() => {
-        if (streetViewRequestRef.current === requestId) {
-          streetViewPanoramaRef.current?.setVisible(false);
-          setStreetViewStatus('unavailable');
-        }
-      });
-  }, [earthHeading, raceState, riders, routeViewMode, status, track]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -989,20 +903,6 @@ export function GoogleMapsTrackLayer({
   return (
     <>
       <div className="google-map-layer" ref={containerRef} />
-      <div
-        className={`street-view-layer${routeViewMode === 'street-view' && streetViewStatus === 'ready' ? ' active' : ''}`}
-        ref={streetViewContainerRef}
-      />
-      {routeViewMode === 'street-view' && streetViewStatus !== 'ready' && (
-        <div className="street-view-status">
-          <strong>{streetViewStatus === 'loading' ? 'Finding Street View' : 'No Street View here'}</strong>
-          <span>
-            {streetViewStatus === 'loading'
-              ? 'Checking for Google Street View imagery near this route point.'
-              : 'Google only has Street View on covered public roads. Use satellite view, or move your custom route point closer to a covered road.'}
-          </span>
-        </div>
-      )}
       {status !== 'ready' && (
         <div className="google-map-status">
           <strong>{status === 'loading' ? 'Loading Google imagery' : 'Google imagery unavailable'}</strong>

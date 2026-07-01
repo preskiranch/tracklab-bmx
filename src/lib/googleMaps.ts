@@ -134,23 +134,6 @@ type GooglePlacesLibrary = {
   PlacesService?: new (element: HTMLElement) => GoogleLegacyPlacesService;
 };
 
-type GoogleStreetViewPanorama = {
-  setPano: (pano: string) => void;
-  setPosition: (position: LatLngLiteral) => void;
-  setPov: (pov: { heading: number; pitch: number }) => void;
-  setVisible: (visible: boolean) => void;
-};
-
-type GoogleStreetViewService = {
-  getPanorama: (request: { location: LatLngLiteral; radius: number }) => Promise<{
-    data?: {
-      location?: {
-        pano?: string;
-      };
-    };
-  }>;
-};
-
 type GoogleMapConstructor = {
   new (element: HTMLElement, options: Record<string, unknown>): GoogleMap;
 };
@@ -177,8 +160,6 @@ type GoogleMapsRuntime = {
       VECTOR: unknown;
     };
     Size: new (width: number, height: number) => unknown;
-    StreetViewPanorama?: new (element: HTMLElement, options?: Record<string, unknown>) => GoogleStreetViewPanorama;
-    StreetViewService?: new () => GoogleStreetViewService;
     SymbolPath: {
       CIRCLE: unknown;
     };
@@ -253,7 +234,6 @@ export function loadGoogleMaps() {
             window.google.maps.importLibrary('geometry'),
             window.google.maps.importLibrary('geocoding'),
             window.google.maps.importLibrary('places'),
-            window.google.maps.importLibrary('streetView'),
           ]);
         }
 
