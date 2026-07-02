@@ -735,13 +735,16 @@ export default function App() {
   useZoneAudioCues(raceState, riders, activeZones);
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const stagedRiders = useMemo(() => {
-    if (!raceViewFullscreen || raceState !== 'ready') {
+    if (!startGateStatus.active || raceState === 'racing') {
       return riders;
     }
 
     const liveRidersByPlayer = new Map(riders.map((rider) => [rider.playerId, rider]));
-    return createInitialRiders(activePlayers).map((rider) => liveRidersByPlayer.get(rider.playerId) ?? rider);
-  }, [activePlayers, raceState, raceViewFullscreen, riders]);
+    return createInitialRiders(activePlayers).map((rider) => {
+      const liveRider = liveRidersByPlayer.get(rider.playerId);
+      return liveRider && liveRider.distance <= 1 && !liveRider.finishedAt ? liveRider : rider;
+    });
+  }, [activePlayers, raceState, riders, startGateStatus.active]);
   const canCancelRace = startGateStatus.active || raceState === 'racing';
   const shellFullscreenActive = raceViewFullscreen || mappingFullscreen;
 
