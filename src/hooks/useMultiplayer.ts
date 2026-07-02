@@ -334,6 +334,11 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     return send({ type: 'challenge', targetId, track: currentTrack });
   }, [currentTrack, send]);
 
+  const quickMatch = useCallback(() => {
+    setStatus('Looking for an available rider.');
+    return send({ type: 'quick-match', track: currentTrack });
+  }, [currentTrack, send]);
+
   const respondToChallenge = useCallback((challengeId: string, accepted: boolean) => {
     setIncomingChallenges((current) => current.filter((item) => item.challenge.id !== challengeId));
     return send({ type: 'challenge-response', challengeId, accepted });
@@ -361,6 +366,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     leaveRoom,
     onlineRiders,
     profile,
+    quickMatch,
     respondToChallenge,
     roomMessages,
     roomRaceStates,

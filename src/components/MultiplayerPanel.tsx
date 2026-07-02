@@ -63,6 +63,7 @@ type MultiplayerPanelProps = {
   onLeaveRoom: () => void;
   onShareInvite: () => void;
   onRandomTrack: () => void;
+  onQuickMatch: () => void;
   onChallengeRider: (riderId: string) => void;
   onAcceptChallenge: (challengeId: string) => void;
   onDeclineChallenge: (challengeId: string) => void;
@@ -102,6 +103,7 @@ export function MultiplayerPanel({
   onLeaveRoom,
   onShareInvite,
   onRandomTrack,
+  onQuickMatch,
   onChallengeRider,
   onAcceptChallenge,
   onDeclineChallenge,
@@ -201,6 +203,9 @@ export function MultiplayerPanel({
         <div className="room-actions">
           <button type="button" disabled={!multiplayerOnline} onClick={onCreatePrivateRoom}>
             <UserPlus size={14} /> Create room
+          </button>
+          <button type="button" disabled={!multiplayerOnline} onClick={onQuickMatch}>
+            <Users size={14} /> Quick match
           </button>
           <button type="button" disabled={!currentRoom || !inviteUrl} onClick={onShareInvite}>
             <Link size={14} /> Share link

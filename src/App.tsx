@@ -2188,6 +2188,7 @@ export default function App() {
                 onLeaveRoom={multiplayer.leaveRoom}
                 onShareInvite={shareMultiplayerInvite}
                 onRandomTrack={chooseRandomRoomTrack}
+                onQuickMatch={multiplayer.quickMatch}
                 onChallengeRider={multiplayer.challengeRider}
                 onAcceptChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, true)}
                 onDeclineChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, false)}

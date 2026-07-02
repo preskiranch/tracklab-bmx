@@ -249,6 +249,24 @@ function createRoom(host, track, privateRoom = true) {
   return room;
 }
 
+function sendChallenge(fromClient, targetClient, track, statusPrefix = 'Challenge sent') {
+  const challenge = {
+    id: randomId('CHAL', 8),
+    fromId: fromClient.id,
+    toId: targetClient.id,
+    track: sanitizeTrack(track ?? fromClient.track),
+    createdAt: Date.now(),
+  };
+
+  challenges.set(challenge.id, challenge);
+  send(targetClient, {
+    type: 'challenge-incoming',
+    challenge,
+    from: publicRider(fromClient),
+  });
+  send(fromClient, { type: 'challenge-status', message: `${statusPrefix} to ${targetClient.name}.` });
+}
+
 function handleClientMessage(client, rawMessage) {
   let message = null;
   try {
@@ -380,20 +398,23 @@ function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    const challenge = {
-      id: randomId('CHAL', 8),
-      fromId: client.id,
-      toId: target.id,
-      track: sanitizeTrack(message.track ?? client.track),
-      createdAt: Date.now(),
-    };
-    challenges.set(challenge.id, challenge);
-    send(target, {
-      type: 'challenge-incoming',
-      challenge,
-      from: publicRider(client),
-    });
-    send(client, { type: 'challenge-status', message: `Challenge sent to ${target.name}.` });
+    sendChallenge(client, target, message.track);
+    return;
+  }
+
+  if (message.type === 'quick-match') {
+    const candidates = [...clients.values()]
+      .filter((candidate) => candidate.id !== client.id)
+      .filter((candidate) => candidate.available)
+      .filter((candidate) => candidate.socket.readyState === candidate.socket.OPEN);
+
+    if (candidates.length === 0) {
+      send(client, { type: 'challenge-status', message: 'No available riders are online yet. Stay available and try again.' });
+      return;
+    }
+
+    const target = candidates[Math.floor(Math.random() * candidates.length)];
+    sendChallenge(client, target, message.track, 'Quick match request sent');
     return;
   }
 
