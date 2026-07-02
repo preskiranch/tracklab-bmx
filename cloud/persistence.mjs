@@ -8,6 +8,8 @@ let pool = databaseUrl
   ? new Pool({
     connectionString: databaseUrl,
     max: 6,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
     ssl: databaseUrl.includes('render.com') || databaseUrl.includes('oregon-postgres')
       ? { rejectUnauthorized: false }
       : undefined,

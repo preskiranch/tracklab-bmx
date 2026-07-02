@@ -609,8 +609,7 @@ server.on('upgrade', (request, socket, head) => {
   });
 });
 
-void persistence.initPersistence().finally(() => {
-  server.listen(port, () => {
-    console.log(`[cloud] TrackLab BMX web + multiplayer listening on :${port}`);
-  });
+server.listen(port, () => {
+  console.log(`[cloud] TrackLab BMX web + multiplayer listening on :${port}`);
+  void persistence.initPersistence();
 });
