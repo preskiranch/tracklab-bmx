@@ -1965,11 +1965,11 @@ export default function App() {
     }
 
     if (bridge.sourceState === 'idle') {
-      return 'Press Start Local Bridge, then put each Wattbike in Just Ride.';
+      return 'Press Start Local Bridge, then put each Wattbike in Just Ride at resistance level 1.';
     }
 
     if (bridge.sourceState === 'running' && activePlayers.length === 0) {
-      return 'Waiting for bike signal. Put each Wattbike in Just Ride and pedal for a few seconds.';
+      return 'Waiting for bike signal. Put each Wattbike in Just Ride at level 1 and pedal for a few seconds.';
     }
 
     if (activePlayers.length > 0) {
@@ -1985,7 +1985,7 @@ export default function App() {
       : bridge.connection;
   const showBluetoothPairing = !demoMode && bridge.mode !== 'ant';
   const pairingEmptyMessage = bridge.mode === 'ant'
-    ? 'Put each Wattbike in Just Ride and pedal for a few seconds so the ANT+ bridge can detect it.'
+    ? 'Put each Wattbike in Just Ride at resistance level 1 and pedal for a few seconds so the ANT+ bridge can detect it.'
     : 'Pedal a Wattbike for bridge discovery, or use Bluetooth pairing for BLE bikes.';
   const pairingDeviceLabel = bridge.mode === 'ant' ? 'ANT+ device' : 'Bike device';
 

@@ -266,7 +266,7 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     + fatigueLull * (28 + variables.thermalFade * 30 + variables.gripFatigue * 18);
   const cadence = Math.round(clamp(
     rollout * (
-      96
+      102
       + variables.cadenceFloor * 24
       + effort * (78 + variables.maxCadence * 54)
       + firstStraight * (12 + variables.firstStraightBurst * 24)
@@ -281,16 +281,7 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     0,
     183,
   ));
-  const resistanceLevel = clamp(
-    7.1
-      + variables.sprintPower * 1.1
-      + variables.torque * 0.7
-      + variables.startGateLoad * 0.45
-      + variables.gearFeel * 0.3
-      - variables.rollingResistance * 0.2,
-    6.7,
-    10,
-  );
+  const resistanceLevel = 1;
   const tableWatts = wattbikeProAirHighWattsFromCadence(cadence, resistanceLevel);
   const watts = Math.round(clamp(
     tableWatts * clamp(

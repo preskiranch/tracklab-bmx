@@ -34,17 +34,18 @@ function coastVelocityMps(velocityMps: number, dt: number) {
   return Math.max(0, velocityMps - drag * dt);
 }
 
-function driveAccelerationMps2(watts: number, velocityMps: number, boost: number) {
+function driveAccelerationMps2(watts: number, velocityMps: number, targetVelocityMps: number, boost: number) {
   const speedForPower = Math.max(1.2, velocityMps);
   const powerAcceleration = watts > 0
     ? watts * drivetrainEfficiency / (effectiveRiderBikeMassKg * speedForPower)
     : minimumDriveAccelerationMps2;
+  const cadenceAcceleration = Math.max(0, (targetVelocityMps - velocityMps) * 1.35);
   const launchBonus = velocityMps < 2.5
     ? (1 - velocityMps / 2.5) * lowSpeedLaunchBonusMps2
     : 0;
 
   return clamp(
-    powerAcceleration + launchBonus + boost * 0.45,
+    Math.max(powerAcceleration + launchBonus + boost * 0.45, cadenceAcceleration),
     minimumDriveAccelerationMps2,
     maxDriveAccelerationMps2,
   );
@@ -95,7 +96,7 @@ export function stepRiders(
     const cadenceVelocity = cadence > 0 ? bmxVelocityMpsFromCadence(cadence) : null;
     const driveEngaged = cadenceVelocity != null && cadenceVelocity > coastVelocity + freewheelEngagementToleranceMps;
     const velocity = driveEngaged
-      ? Math.min(cadenceVelocity, coastVelocity + driveAccelerationMps2(watts, coastVelocity, boost) * dt)
+      ? Math.min(cadenceVelocity, coastVelocity + driveAccelerationMps2(watts, coastVelocity, cadenceVelocity, boost) * dt)
       : coastVelocity;
     const settledVelocity = velocity < stopVelocityMps && !driveEngaged ? 0 : velocity;
     const previousDistance = rider.distance;
