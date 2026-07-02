@@ -2220,6 +2220,80 @@ input:focus {
   font-weight: 900;
 }
 
+.monitor-sprint-result {
+  display: grid;
+  gap: 10px;
+  min-height: 86px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfd;
+}
+
+.monitor-sprint-result.empty {
+  place-items: center;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.monitor-sprint-result.capturing {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.monitor-sprint-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.monitor-sprint-head strong {
+  color: #17212b;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.monitor-sprint-head span {
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.monitor-sprint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.monitor-sprint-grid div {
+  display: grid;
+  place-items: center;
+  gap: 3px;
+  min-height: 44px;
+  padding: 7px 5px;
+  border: 1px solid #e8edf1;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.monitor-sprint-grid span {
+  color: #111827;
+  font-size: 23px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.monitor-sprint-grid small {
+  color: #586778;
+  font-size: 10px;
+  font-weight: 850;
+  text-align: center;
+  text-transform: uppercase;
+}
+
 @media (max-width: 1320px) {
   .platform-shell {
     grid-template-columns: 246px minmax(0, 1fr);
