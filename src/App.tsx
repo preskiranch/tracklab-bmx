@@ -61,6 +61,7 @@ import {
   type PlacePredictionOption,
 } from './lib/googleMaps';
 import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
+import { createInitialRiders } from './game/physics';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
@@ -733,6 +734,14 @@ export default function App() {
   );
   useZoneAudioCues(raceState, riders, activeZones);
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
+  const stagedRiders = useMemo(() => {
+    if (!raceViewFullscreen || raceState !== 'ready') {
+      return riders;
+    }
+
+    const liveRidersByPlayer = new Map(riders.map((rider) => [rider.playerId, rider]));
+    return createInitialRiders(activePlayers).map((rider) => liveRidersByPlayer.get(rider.playerId) ?? rider);
+  }, [activePlayers, raceState, raceViewFullscreen, riders]);
   const canCancelRace = startGateStatus.active || raceState === 'racing';
   const shellFullscreenActive = raceViewFullscreen || mappingFullscreen;
 
@@ -2130,7 +2139,7 @@ export default function App() {
             <div className="dashboard-grid">
               <EarthTrackView
                 track={effectiveTrack}
-                riders={riders}
+                riders={stagedRiders}
                 remoteRaceStates={remoteRaceStates}
                 players={activePlayers}
                 samplesByDevice={samplesByDevice}
