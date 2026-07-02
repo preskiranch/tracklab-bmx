@@ -15,6 +15,7 @@ import {
 import type {
   BikeSample,
   MultiplayerChallenge,
+  MultiplayerRaceState,
   MultiplayerRider,
   MultiplayerRoom,
   MultiplayerRoomMessage,
@@ -53,6 +54,7 @@ type MultiplayerPanelProps = {
   samplesByDevice: Map<number, BikeSample>;
   chatMessages: ChatMessage[];
   roomMessages: MultiplayerRoomMessage[];
+  remoteRaceStates: MultiplayerRaceState[];
   chatDraft: string;
   onPlayModeChange: (mode: PlayMode) => void;
   onRiderNameChange: (name: string) => void;
@@ -91,6 +93,7 @@ export function MultiplayerPanel({
   samplesByDevice,
   chatMessages,
   roomMessages,
+  remoteRaceStates,
   chatDraft,
   onPlayModeChange,
   onRiderNameChange,
@@ -121,6 +124,9 @@ export function MultiplayerPanel({
       at: new Date(message.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
     }))
     : chatMessages;
+  const remoteTelemetryRows = remoteRaceStates
+    .flatMap((state) => state.riders.map((rider) => ({ state, rider })))
+    .slice(0, 8);
 
   return (
     <aside className="multiplayer-panel">
@@ -265,6 +271,32 @@ export function MultiplayerPanel({
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {playMode === 'multiplayer' && currentRoom && (
+        <section className="panel-section room-telemetry-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Room Telemetry</span>
+              <h3>{remoteTelemetryRows.length} remote rider{remoteTelemetryRows.length === 1 ? '' : 's'}</h3>
+            </div>
+            <RadioTower size={18} />
+          </div>
+
+          <div className="room-telemetry-list">
+            {remoteTelemetryRows.length === 0 && <div className="empty-compact">Waiting for remote race data.</div>}
+            {remoteTelemetryRows.map(({ state, rider }) => (
+              <div className="room-telemetry-row" style={{ '--player-color': rider.accent } as React.CSSProperties} key={`${state.clientId}-${rider.id}`}>
+                <span className="player-chip">R</span>
+                <div>
+                  <strong>{rider.name}</strong>
+                  <span>{state.raceState} / rank {rider.rank}</span>
+                </div>
+                <strong>{rider.watts} W</strong>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 

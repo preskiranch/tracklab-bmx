@@ -75,6 +75,7 @@ import type {
   LeaderboardMetric,
   MappingEditMode,
   MetricKey,
+  MultiplayerRaceState,
   PlayerSlot,
   PlayMode,
   RaceCapture,
@@ -401,6 +402,8 @@ type StartGateStatus = {
   lightIndex: 0 | 1 | 2 | 3 | null;
 };
 
+type OutgoingMultiplayerRaceState = Omit<MultiplayerRaceState, 'clientId' | 'riderName' | 'roomId' | 'at'>;
+
 const idleStartGateStatus: StartGateStatus = {
   active: false,
   label: '',
@@ -445,6 +448,7 @@ export default function App() {
   const initialUrlTrackSyncedRef = useRef(false);
   const bridgeUserDataLoadedRef = useRef(false);
   const roomTrackApplyRef = useRef<string | null>(null);
+  const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const [initialTrack] = useState(readInitialTrack);
   const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
@@ -719,6 +723,79 @@ export default function App() {
 
     void multiplayer.syncTrack(effectiveTrack);
   }, [effectiveTrack, multiplayer.currentRoom?.id, multiplayer.currentRoom?.track.id, multiplayer.syncTrack, playMode]);
+
+  useEffect(() => {
+    if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
+      latestRaceSyncRef.current = null;
+      return;
+    }
+
+    latestRaceSyncRef.current = {
+      trackId: effectiveTrack.id,
+      raceState,
+      riders: activePlayers
+        .map((player) => {
+          const rider = riders.find((item) => item.playerId === player.id);
+          if (!rider) {
+            return null;
+          }
+
+          const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
+          return {
+            id: `${player.deviceId ?? player.id}`,
+            playerId: player.id,
+            name: player.name,
+            colorName: player.colorName,
+            accent: player.accent,
+            distance: rider.distance,
+            velocity: rider.velocity,
+            boost: rider.boost,
+            air: rider.air,
+            pitch: rider.pitch,
+            phase: rider.phase,
+            rank: rider.rank,
+            finishedAt: rider.finishedAt,
+            watts: sample?.watts ?? rider.lastWatts,
+            cadence: sample?.cadence ?? null,
+            speedKph: sample?.speedKph ?? (rider.velocity > 0 ? rider.velocity * 3.6 : null),
+            signal: sample?.signal ?? 0,
+            sampleAt: sample?.at ?? null,
+          };
+        })
+        .filter((rider): rider is OutgoingMultiplayerRaceState['riders'][number] => rider != null),
+      summary: raceSummary,
+    };
+  }, [activePlayers, effectiveTrack.id, multiplayer.currentRoom, playMode, raceState, raceSummary, riders, samplesByDevice]);
+
+  useEffect(() => {
+    if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
+      return undefined;
+    }
+
+    const sendRaceState = () => {
+      if (latestRaceSyncRef.current) {
+        multiplayer.sendRaceState(latestRaceSyncRef.current);
+      }
+    };
+
+    sendRaceState();
+    const timer = window.setInterval(sendRaceState, raceState === 'racing' ? 150 : 750);
+    return () => window.clearInterval(timer);
+  }, [multiplayer.currentRoom, multiplayer.sendRaceState, playMode, raceState]);
+
+  const remoteRaceStates = useMemo(() => {
+    const roomId = multiplayer.currentRoom?.id;
+    if (!roomId) {
+      return [];
+    }
+
+    return multiplayer.roomRaceStates.filter((state) => (
+      state.clientId !== multiplayer.clientId
+      && state.roomId === roomId
+      && state.trackId === effectiveTrack.id
+      && now - state.at < 6500
+    ));
+  }, [effectiveTrack.id, multiplayer.clientId, multiplayer.currentRoom?.id, multiplayer.roomRaceStates, now]);
 
   useEffect(() => {
     if (demoMode && raceState === 'finished') {
@@ -1966,6 +2043,7 @@ export default function App() {
               <EarthTrackView
                 track={effectiveTrack}
                 riders={riders}
+                remoteRaceStates={remoteRaceStates}
                 players={activePlayers}
                 samplesByDevice={samplesByDevice}
                 speedUnit={speedUnit}
@@ -2101,6 +2179,7 @@ export default function App() {
                 samplesByDevice={samplesByDevice}
                 chatMessages={chatMessages}
                 roomMessages={multiplayer.roomMessages}
+                remoteRaceStates={remoteRaceStates}
                 chatDraft={chatDraft}
                 onPlayModeChange={setPlayMode}
                 onRiderNameChange={(name) => multiplayer.setProfile({ name })}

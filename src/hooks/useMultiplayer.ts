@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   MultiplayerChallenge,
+  MultiplayerRaceState,
   MultiplayerRider,
   MultiplayerRoom,
   MultiplayerRoomMessage,
@@ -100,6 +101,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
   const [rooms, setRooms] = useState<MultiplayerRoom[]>([]);
   const [currentRoom, setCurrentRoom] = useState<MultiplayerRoom | null>(null);
   const [roomMessages, setRoomMessages] = useState<MultiplayerRoomMessage[]>([]);
+  const [roomRaceStates, setRoomRaceStates] = useState<MultiplayerRaceState[]>([]);
   const [incomingChallenges, setIncomingChallenges] = useState<IncomingChallenge[]>([]);
   const [status, setStatus] = useState('Multiplayer offline.');
 
@@ -211,6 +213,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
         if (message.type === 'room-state') {
           setCurrentRoom(message.room ?? null);
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
+          setRoomRaceStates(Array.isArray(message.raceStates) ? message.raceStates : []);
           if (message.room?.id) {
             const url = new URL(window.location.href);
             url.searchParams.set('room', message.room.id);
@@ -221,6 +224,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
         if (message.type === 'room-left') {
           setCurrentRoom(null);
           setRoomMessages([]);
+          setRoomRaceStates([]);
           const url = new URL(window.location.href);
           url.searchParams.delete('room');
           window.history.replaceState(null, '', url);
@@ -228,6 +232,14 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
 
         if (message.type === 'room-chat') {
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
+        }
+
+        if (message.type === 'race-sync' && message.state) {
+          const nextState = message.state as MultiplayerRaceState;
+          setRoomRaceStates((current) => [
+            ...current.filter((state) => state.clientId !== nextState.clientId),
+            nextState,
+          ].slice(-32));
         }
 
         if (message.type === 'room-error' || message.type === 'challenge-status' || message.type === 'error') {
@@ -303,6 +315,20 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     return send({ type: 'room-chat', text });
   }, [send]);
 
+  const sendRaceState = useCallback((state: Omit<MultiplayerRaceState, 'clientId' | 'riderName' | 'roomId' | 'at'>) => {
+    if (!currentRoom) {
+      return false;
+    }
+
+    return send({
+      type: 'race-sync',
+      state: {
+        ...state,
+        roomId: currentRoom.id,
+      },
+    });
+  }, [currentRoom, send]);
+
   const challengeRider = useCallback((targetId: string) => {
     setStatus('Sending challenge.');
     return send({ type: 'challenge', targetId, track: currentTrack });
@@ -337,7 +363,9 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     profile,
     respondToChallenge,
     roomMessages,
+    roomRaceStates,
     rooms,
+    sendRaceState,
     sendRoomChat,
     setProfile,
     status,

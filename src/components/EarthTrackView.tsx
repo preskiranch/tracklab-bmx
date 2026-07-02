@@ -22,6 +22,7 @@ import type {
   BikeSample,
   DistanceUnit,
   MappingEditMode,
+  MultiplayerRaceState,
   PlayerSlot,
   RaceState,
   ReactionTimesByPlayer,
@@ -35,6 +36,7 @@ import type {
 type EarthTrackViewProps = {
   track: TrackRecord;
   riders: RiderState[];
+  remoteRaceStates: MultiplayerRaceState[];
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
@@ -97,6 +99,7 @@ function StartTreeLight({ activeIndex }: { activeIndex: 0 | 1 | 2 | 3 | null }) 
 export function EarthTrackView({
   track,
   riders,
+  remoteRaceStates,
   players,
   samplesByDevice,
   speedUnit,
@@ -159,6 +162,7 @@ export function EarthTrackView({
           <GoogleMapsTrackLayer
             track={track}
             riders={riders}
+            remoteRaceStates={remoteRaceStates}
             players={players}
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
@@ -312,6 +316,20 @@ export function EarthTrackView({
             </div>
           );
         })}
+        {remoteRaceStates.flatMap((state) => state.riders.map((rider) => (
+          <div className="rider-stat remote" style={{ '--player-color': rider.accent } as CSSProperties} key={`${state.clientId}-${rider.id}`}>
+            <span className="player-chip">R</span>
+            <div>
+              <strong>{rider.name}</strong>
+              <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank} / {state.raceState}</span>
+            </div>
+            <div className="rider-stat-live">
+              <Signal size={14} />
+              <span>{rider.sampleAt ? `${Math.round(rider.signal * 100)}%` : 'Remote'}</span>
+            </div>
+            <strong>{formatElapsed(rider.finishedAt)}</strong>
+          </div>
+        )))}
       </div>
     </section>
   );

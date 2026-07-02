@@ -132,6 +132,38 @@ export type MultiplayerChallenge = {
   createdAt: number;
 };
 
+export type MultiplayerRaceRider = {
+  id: string;
+  playerId: PlayerSlot['id'];
+  name: string;
+  colorName: PlayerColorName;
+  accent: string;
+  distance: number;
+  velocity: number;
+  boost: number;
+  air: number;
+  pitch: number;
+  phase: RiderPhase;
+  rank: number;
+  finishedAt: number | null;
+  watts: number;
+  cadence: number | null;
+  speedKph: number | null;
+  signal: number;
+  sampleAt: number | null;
+};
+
+export type MultiplayerRaceState = {
+  clientId: string;
+  riderName: string;
+  roomId: string;
+  trackId: string;
+  raceState: RaceState;
+  at: number;
+  riders: MultiplayerRaceRider[];
+  summary: RaceSummaryEntry[];
+};
+
 export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
 
 export type RaceState = 'ready' | 'racing' | 'finished';

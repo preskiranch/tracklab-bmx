@@ -3,6 +3,8 @@ import type {
   BikeSample,
   DistanceUnit,
   MappingEditMode,
+  MultiplayerRaceState,
+  PlayerId,
   PlayerSlot,
   RaceState,
   RiderState,
@@ -33,6 +35,7 @@ type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
   activeZones: TrackZone[];
   riders: RiderState[];
+  remoteRaceStates?: MultiplayerRaceState[];
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
@@ -247,6 +250,8 @@ function createRiderMapMarker(
   position: TrackPoint,
   rotationDegrees: number,
   title: string,
+  labelText = `P${player.id}`,
+  zIndex = 760 + player.id,
 ): RiderMapMarker {
   let iconVersion = 0;
   const marker = new google.maps.Marker({
@@ -255,13 +260,13 @@ function createRiderMapMarker(
       color: '#ffffff',
       fontSize: '12px',
       fontWeight: '900',
-      text: `P${player.id}`,
+      text: labelText,
     },
     map,
     optimized: false,
     position,
     title,
-    zIndex: 760 + player.id,
+    zIndex,
   });
 
   const applyRotation = (nextRotation: number) => {
@@ -303,6 +308,7 @@ export function GoogleMapsTrackLayer({
   track,
   activeZones,
   riders,
+  remoteRaceStates = [],
   players,
   samplesByDevice,
   speedUnit,
@@ -335,6 +341,7 @@ export function GoogleMapsTrackLayer({
   const isDrawingRef = useRef(false);
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
   const markerRefs = useRef<Map<number, RiderMapMarker>>(new Map());
+  const remoteMarkerRefs = useRef<Map<string, RiderMapMarker>>(new Map());
   const cameraRef = useRef({ angle: earthAngle, heading: earthHeading });
   const suppressCameraSyncRef = useRef(false);
   const lastFitKeyRef = useRef('');
@@ -396,6 +403,7 @@ export function GoogleMapsTrackLayer({
       draftMarkerListenerRefs.current.forEach((listener) => listener.remove());
       mapListenerRefs.current.forEach((listener) => listener.remove());
       markerRefs.current.forEach((marker) => marker.setMap(null));
+      remoteMarkerRefs.current.forEach((marker) => marker.setMap(null));
       trackLineRef.current = null;
       zoneLinesRef.current = [];
       distanceLabelRefs.current = [];
@@ -405,6 +413,7 @@ export function GoogleMapsTrackLayer({
       draftMarkerListenerRefs.current = [];
       mapListenerRefs.current = [];
       markerRefs.current.clear();
+      remoteMarkerRefs.current.clear();
       mapRef.current = null;
     };
   }, [track]);
@@ -899,6 +908,72 @@ export function GoogleMapsTrackLayer({
       markerRefs.current.set(player.id, marker);
     });
   }, [earthHeading, players, riders, samplesByDevice, speedUnit, status, track]);
+
+  useEffect(() => {
+    const google = googleRef.current;
+    const map = mapRef.current;
+    if (!google || !map || status !== 'ready') {
+      return;
+    }
+
+    const activeRemoteKeys = new Set<string>();
+    let remoteIndex = 0;
+
+    remoteRaceStates.forEach((state) => {
+      state.riders.forEach((rider) => {
+        const markerKey = `${state.clientId}:${rider.id}`;
+        activeRemoteKeys.add(markerKey);
+        const pose = riderRoutePose(track, rider.distance);
+        const existing = remoteMarkerRefs.current.get(markerKey);
+
+        if (!pose) {
+          existing?.setMap(null);
+          remoteMarkerRefs.current.delete(markerKey);
+          return;
+        }
+
+        const remotePlayer: PlayerSlot = {
+          id: ((remoteIndex % 8) + 1) as PlayerId,
+          name: rider.name,
+          colorName: rider.colorName,
+          accent: rider.accent,
+          deviceId: null,
+        };
+        const labelText = `R${remoteIndex + 1}`;
+        const speedKph = rider.speedKph ?? (rider.velocity > 0 ? rider.velocity * 3.6 : null);
+        const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+        const rotation = riderScreenRotation(pose.bearing, earthHeading);
+        const title = `${rider.name} / ${label} / remote`;
+
+        if (existing) {
+          existing.setPosition(pose.position);
+          existing.setRotation(rotation);
+          existing.setTitle(title);
+        } else {
+          const marker = createRiderMapMarker(
+            google,
+            map,
+            remotePlayer,
+            pose.position,
+            rotation,
+            title,
+            labelText,
+            900 + remoteIndex,
+          );
+          remoteMarkerRefs.current.set(markerKey, marker);
+        }
+
+        remoteIndex += 1;
+      });
+    });
+
+    remoteMarkerRefs.current.forEach((marker, markerKey) => {
+      if (!activeRemoteKeys.has(markerKey)) {
+        marker.setMap(null);
+        remoteMarkerRefs.current.delete(markerKey);
+      }
+    });
+  }, [earthHeading, remoteRaceStates, speedUnit, status, track]);
 
   return (
     <>

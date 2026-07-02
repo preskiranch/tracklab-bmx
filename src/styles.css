@@ -270,6 +270,7 @@ input:focus {
 .room-actions,
 .multiplayer-status,
 .challenge-card,
+.room-telemetry-row,
 .selected-track-note,
 .online-rider-row,
 .roster-row,
@@ -999,6 +1000,12 @@ input:focus {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #f8fafb;
+}
+
+.rider-stat.remote {
+  border-style: dashed;
+  border-left: 3px solid var(--player-color);
+  background: #fbfcfd;
 }
 
 .rider-stat div {
@@ -1780,7 +1787,8 @@ input:focus {
 }
 
 .challenge-section,
-.online-section {
+.online-section,
+.room-telemetry-section {
   gap: 10px;
 }
 
@@ -1837,13 +1845,40 @@ input:focus {
   gap: 8px;
 }
 
-.online-rider-row {
+.online-rider-row,
+.room-telemetry-row {
   justify-content: space-between;
   gap: 10px;
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #fbfcfd;
+}
+
+.room-telemetry-list {
+  display: grid;
+  gap: 8px;
+}
+
+.room-telemetry-row {
+  border-left: 3px solid var(--player-color);
+}
+
+.room-telemetry-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.room-telemetry-row strong {
+  color: #111827;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.room-telemetry-row span:not(.player-chip) {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .open-room-list {

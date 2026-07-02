@@ -59,6 +59,62 @@ function sanitizeTrack(value) {
   };
 }
 
+function finiteNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function nullableFiniteNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function sanitizeRaceState(value, client, room) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const riders = Array.isArray(value.riders)
+    ? value.riders.slice(0, 8).map((rider, index) => {
+      const colorName = ['lime', 'red', 'blue', 'yellow'].includes(rider?.colorName)
+        ? rider.colorName
+        : ['lime', 'red', 'blue', 'yellow'][index % 4];
+
+      return {
+        id: sanitizeText(rider?.id, `${client.id}:${index + 1}`, 120),
+        playerId: Math.max(1, Math.min(8, Math.round(finiteNumber(rider?.playerId, index + 1)))),
+        name: sanitizeText(rider?.name, `${client.name} ${index + 1}`, 64),
+        colorName,
+        accent: sanitizeText(rider?.accent, '#7ade36', 24),
+        distance: Math.max(0, finiteNumber(rider?.distance, 0)),
+        velocity: Math.max(0, finiteNumber(rider?.velocity, 0)),
+        boost: Math.max(0, Math.min(1, finiteNumber(rider?.boost, 0))),
+        air: Math.max(0, finiteNumber(rider?.air, 0)),
+        pitch: Math.max(-45, Math.min(45, finiteNumber(rider?.pitch, 0))),
+        phase: ['pedaling', 'airborne', 'landing'].includes(rider?.phase) ? rider.phase : 'pedaling',
+        rank: Math.max(1, Math.min(64, Math.round(finiteNumber(rider?.rank, index + 1)))),
+        finishedAt: nullableFiniteNumber(rider?.finishedAt),
+        watts: Math.max(0, Math.round(finiteNumber(rider?.watts, 0))),
+        cadence: nullableFiniteNumber(rider?.cadence),
+        speedKph: nullableFiniteNumber(rider?.speedKph),
+        signal: Math.max(0, Math.min(1, finiteNumber(rider?.signal, 0))),
+        sampleAt: nullableFiniteNumber(rider?.sampleAt),
+      };
+    })
+    : [];
+
+  return {
+    clientId: client.id,
+    riderName: client.name,
+    roomId: room.id,
+    trackId: sanitizeText(value.trackId, room.track.id, 120),
+    raceState: ['ready', 'racing', 'finished'].includes(value.raceState) ? value.raceState : 'ready',
+    at: Date.now(),
+    riders,
+    summary: Array.isArray(value.summary) ? value.summary.slice(0, 16) : [],
+  };
+}
+
 function publicRider(client) {
   return {
     id: client.id,
@@ -118,6 +174,7 @@ function roomState(room) {
     type: 'room-state',
     room: publicRoom(room),
     messages: room.messages,
+    raceStates: [...room.raceStates.values()],
   };
 }
 
@@ -136,6 +193,7 @@ function leaveRoom(client, reason = 'left') {
   }
 
   room.members.delete(client.id);
+  room.raceStates.delete(client.id);
   if (room.hostId === client.id) {
     room.hostId = [...room.members][0] ?? null;
   }
@@ -177,6 +235,7 @@ function createRoom(host, track, privateRoom = true) {
     track: sanitizeTrack(track ?? host.track),
     createdAt: Date.now(),
     members: new Set(),
+    raceStates: new Map(),
     messages: [{
       id: randomId('MSG', 10),
       author: 'TrackLab',
@@ -291,6 +350,26 @@ function handleClientMessage(client, rawMessage) {
 
     room.messages = [...room.messages, chatMessage].slice(-40);
     broadcastRoom(room.id, { type: 'room-chat', message: chatMessage, messages: room.messages });
+    return;
+  }
+
+  if (message.type === 'race-sync') {
+    if (!client.roomId) {
+      return;
+    }
+
+    const room = rooms.get(client.roomId);
+    if (!room) {
+      return;
+    }
+
+    const raceState = sanitizeRaceState(message.state, client, room);
+    if (!raceState) {
+      return;
+    }
+
+    room.raceStates.set(client.id, raceState);
+    broadcastRoom(room.id, { type: 'race-sync', state: raceState });
     return;
   }
 
