@@ -15,6 +15,7 @@
     "cloud": "npm run build && node cloud/server.mjs",
     "ant:capture": "node scripts/capture-ant-wattbike.mjs",
     "ble:inspect": "node bridge/ble-inspector.mjs",
+    "db:migrate:tracklab": "node scripts/migrate-tracklab-postgres.mjs",
     "assets:clean": "node scripts/clean-sprite-alpha.mjs",
     "tracks:import:usabmx": "node scripts/import-usabmx-tracks.mjs",
     "tracks:import:ffc": "node scripts/import-ffc-bmx-tracks.mjs",
