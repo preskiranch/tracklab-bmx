@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { defaultPlayerSlots, maxPlayers } from '../data';
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
+import { wattbikeProAirHighWattsFromCadence } from '../game/wattbikePowerTable';
 import type { BikeSample, PlayerSlot } from '../types';
 
 export const demoDeviceIds = [91001, 91002, 91003, 91004, 91005, 91006, 91007, 91008] as const;
@@ -280,23 +281,31 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     0,
     183,
   ));
-  const rawWatts = rollout * (
-    92
-    + variables.powerBase * 115
-    + effort * (255 + variables.sprintPower * 350)
-    + variables.torque * 90
-    + cadence * (0.45 + variables.crankSmoothness * 0.35)
-    + variables.launchSnap * startEnvelope * 150
-    + variables.crowdPressure * burstWave * 42
-    - variables.gripFatigue * fatigue * 86
-    - fatigueLull * 120
-    - mistakeEnvelope * 180
-    + noise * (8 + variables.wattNoise * 34)
+  const resistanceLevel = clamp(
+    7.1
+      + variables.sprintPower * 1.1
+      + variables.torque * 0.7
+      + variables.startGateLoad * 0.45
+      + variables.gearFeel * 0.3
+      - variables.rollingResistance * 0.2,
+    6.7,
+    10,
   );
+  const tableWatts = wattbikeProAirHighWattsFromCadence(cadence, resistanceLevel);
   const watts = Math.round(clamp(
-    rawWatts * 3.1,
+    tableWatts * clamp(
+      0.94
+        + variables.torque * 0.08
+        + variables.crankSmoothness * 0.04
+        + firstStraight * variables.launchSnap * 0.06
+        + burstWave * variables.anaerobicCapacity * 0.05
+        - fatigueLull * 0.08
+        - mistakeEnvelope * 0.1,
+      0.82,
+      1.16,
+    ),
     0,
-    2400,
+    2500,
   ));
   const speedKph = Number(clamp(
     bmxSpeedKphFromCadence(cadence)
