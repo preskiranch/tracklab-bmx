@@ -149,6 +149,16 @@ export async function initPersistence() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.user_data (
+        guest_key TEXT PRIMARY KEY,
+        track_mappings JSONB NOT NULL DEFAULT '{}'::jsonb,
+        custom_routes JSONB NOT NULL DEFAULT '[]'::jsonb,
+        bike_profiles JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_rooms_created ON ${schema}.rooms (created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_track ON ${schema}.race_results (track_id, created_at DESC)`);
@@ -270,6 +280,48 @@ export async function loadRoom(roomId) {
         at: new Date(message.created_at).toISOString(),
       })),
   };
+}
+
+export async function loadUserData(guestKey) {
+  const result = await query(
+    `SELECT track_mappings, custom_routes, bike_profiles FROM ${schema}.user_data WHERE guest_key = $1`,
+    [guestKey],
+  );
+  const row = result?.rows?.[0];
+
+  return {
+    trackMappings: fromJson(row?.track_mappings, {}),
+    customRoutes: fromJson(row?.custom_routes, []),
+    bikeProfiles: fromJson(row?.bike_profiles, []),
+  };
+}
+
+export async function saveUserData(guestKey, patch) {
+  const current = await loadUserData(guestKey);
+  const next = {
+    trackMappings: patch.trackMappings && typeof patch.trackMappings === 'object'
+      ? patch.trackMappings
+      : current.trackMappings,
+    customRoutes: Array.isArray(patch.customRoutes)
+      ? patch.customRoutes
+      : current.customRoutes,
+    bikeProfiles: Array.isArray(patch.bikeProfiles)
+      ? patch.bikeProfiles
+      : current.bikeProfiles,
+  };
+
+  await query(
+    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, updated_at)
+     VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, now())
+     ON CONFLICT (guest_key) DO UPDATE SET
+       track_mappings = EXCLUDED.track_mappings,
+       custom_routes = EXCLUDED.custom_routes,
+       bike_profiles = EXCLUDED.bike_profiles,
+       updated_at = now()`,
+    [guestKey, json(next.trackMappings), json(next.customRoutes), json(next.bikeProfiles)],
+  );
+
+  return next;
 }
 
 export async function saveChallenge(challenge, fromClient, targetClient) {

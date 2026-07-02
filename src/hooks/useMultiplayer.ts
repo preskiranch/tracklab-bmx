@@ -34,6 +34,10 @@ function createGuestKey() {
   return `guest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function normalizeGuestKey(value: string, fallback: string) {
+  return value.trim().replace(/[^a-zA-Z0-9:._-]/g, '').slice(0, 160) || fallback;
+}
+
 function randomRiderName() {
   return `TrackLab Rider ${Math.floor(1000 + Math.random() * 9000)}`;
 }
@@ -43,8 +47,9 @@ function readProfile(): MultiplayerProfile {
     const stored = window.localStorage.getItem(profileStorageKey);
     if (stored) {
       const parsed = JSON.parse(stored) as Partial<MultiplayerProfile>;
+      const fallbackGuestKey = createGuestKey();
       return {
-        guestKey: typeof parsed.guestKey === 'string' ? parsed.guestKey : createGuestKey(),
+        guestKey: typeof parsed.guestKey === 'string' ? normalizeGuestKey(parsed.guestKey, fallbackGuestKey) : fallbackGuestKey,
         name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim().slice(0, 64) : randomRiderName(),
         available: Boolean(parsed.available),
       };
@@ -134,11 +139,12 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     });
   }, [bikeCount, currentTrack, profile, send]);
 
-  const setProfile = useCallback((patch: Partial<Pick<MultiplayerProfile, 'name' | 'available'>>) => {
+  const setProfile = useCallback((patch: Partial<Pick<MultiplayerProfile, 'guestKey' | 'name' | 'available'>>) => {
     setProfileState((current) => {
       const next = {
         ...current,
         ...patch,
+        guestKey: patch.guestKey != null ? normalizeGuestKey(patch.guestKey, current.guestKey) : current.guestKey,
         name: patch.name != null ? patch.name.trim().slice(0, 64) || current.name : current.name,
       };
       writeProfile(next);

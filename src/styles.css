@@ -1902,6 +1902,18 @@ input:focus {
   background: #fbfcfd;
 }
 
+.profile-key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: end;
+  gap: 8px;
+}
+
+.profile-key-row input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
 .text-field.compact input {
   min-height: 36px;
 }
@@ -2028,6 +2040,26 @@ input:focus {
   color: #17212b;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.open-room-link {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #465867;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.open-room-link:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: #eef4f7;
+  color: #17212b;
 }
 
 .selected-track-note {

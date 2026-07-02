@@ -52,7 +52,10 @@ type GoogleMapsTrackLayerProps = {
   onEarthCameraChange?: (camera: { angle?: number; heading?: number }) => void;
   onMappingPathPointAdd?: (point: TrackPoint) => void;
   onMappingPathPointMove?: (index: number, point: TrackPoint) => void;
+  onMappingPathPointRemove?: (index: number) => void;
   onMappingZonePointAdd?: (point: TrackPoint) => void;
+  onMappingZonePointMove?: (index: number, point: TrackPoint) => void;
+  onMappingZonePointRemove?: (index: number) => void;
 };
 
 const zoneColors: Record<TrackZone['type'], string> = {
@@ -325,7 +328,10 @@ export function GoogleMapsTrackLayer({
   onEarthCameraChange,
   onMappingPathPointAdd,
   onMappingPathPointMove,
+  onMappingPathPointRemove,
   onMappingZonePointAdd,
+  onMappingZonePointMove,
+  onMappingZonePointRemove,
 }: GoogleMapsTrackLayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
@@ -734,29 +740,55 @@ export function GoogleMapsTrackLayer({
         }));
       }
 
+      if (onMappingPathPointRemove) {
+        const removePoint = () => onMappingPathPointRemove(index);
+        draftMarkerListenerRefs.current.push(marker.addListener('dblclick', removePoint));
+        draftMarkerListenerRefs.current.push(marker.addListener('rightclick', removePoint));
+      }
+
       return marker;
     });
 
-    const zoneMarkers = draftZonePoints.map((point, index) => new google.maps.Marker({
-      icon: {
-        fillColor: '#38bdf8',
-        fillOpacity: 1,
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 10,
-        strokeColor: '#111827',
-        strokeWeight: 2,
-      },
-      label: {
-        color: '#111827',
-        fontSize: '11px',
-        fontWeight: '900',
-        text: String(index + 1),
-      },
-      map,
-      optimized: true,
-      position: point,
-      title: `Mapping pin ${index + 1}`,
-    }));
+    const zoneMarkers = draftZonePoints.map((point, index) => {
+      const marker = new google.maps.Marker({
+        draggable: Boolean(onMappingZonePointMove),
+        icon: {
+          fillColor: '#38bdf8',
+          fillOpacity: 1,
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          strokeColor: '#111827',
+          strokeWeight: 2,
+        },
+        label: {
+          color: '#111827',
+          fontSize: '11px',
+          fontWeight: '900',
+          text: String(index + 1),
+        },
+        map,
+        optimized: true,
+        position: point,
+        title: `Mapping pin ${index + 1}`,
+      });
+
+      if (onMappingZonePointMove) {
+        draftMarkerListenerRefs.current.push(marker.addListener('dragend', (event) => {
+          const nextPoint = event?.latLng?.toJSON();
+          if (nextPoint) {
+            onMappingZonePointMove(index, nextPoint);
+          }
+        }));
+      }
+
+      if (onMappingZonePointRemove) {
+        const removeZonePoint = () => onMappingZonePointRemove(index);
+        draftMarkerListenerRefs.current.push(marker.addListener('dblclick', removeZonePoint));
+        draftMarkerListenerRefs.current.push(marker.addListener('rightclick', removeZonePoint));
+      }
+
+      return marker;
+    });
 
     draftMarkerRefs.current = [
       ...draftDistanceMarkers,
@@ -764,7 +796,18 @@ export function GoogleMapsTrackLayer({
       ...pathPointMarkers,
       ...zoneMarkers,
     ];
-  }, [distanceUnit, draftPoints, draftZoneMeters, draftZonePoints, mappingMode, onMappingPathPointMove, status]);
+  }, [
+    distanceUnit,
+    draftPoints,
+    draftZoneMeters,
+    draftZonePoints,
+    mappingMode,
+    onMappingPathPointMove,
+    onMappingPathPointRemove,
+    onMappingZonePointMove,
+    onMappingZonePointRemove,
+    status,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;

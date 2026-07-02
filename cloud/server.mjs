@@ -66,6 +66,57 @@ function sanitizeTrack(value) {
   };
 }
 
+function sanitizeUserDataPatch(value) {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const patch = {};
+  if (value.trackMappings && typeof value.trackMappings === 'object' && !Array.isArray(value.trackMappings)) {
+    patch.trackMappings = value.trackMappings;
+  }
+  if (Array.isArray(value.customRoutes)) {
+    patch.customRoutes = value.customRoutes.slice(0, 250);
+  }
+  if (Array.isArray(value.bikeProfiles)) {
+    patch.bikeProfiles = value.bikeProfiles.slice(0, 64);
+  }
+  return patch;
+}
+
+function readJsonBody(request, maxBytes = 1_000_000) {
+  return new Promise((resolve, reject) => {
+    let totalBytes = 0;
+    const chunks = [];
+
+    request.on('data', (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        reject(new Error('Request body is too large.'));
+        request.destroy();
+        return;
+      }
+
+      chunks.push(chunk);
+    });
+
+    request.on('end', () => {
+      if (chunks.length === 0) {
+        resolve({});
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      } catch {
+        reject(new Error('Request body must be valid JSON.'));
+      }
+    });
+
+    request.on('error', reject);
+  });
+}
+
 function finiteNumber(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -498,6 +549,34 @@ async function handleClientMessage(client, rawMessage) {
 
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  if (requestUrl.pathname === '/api/user-data') {
+    const profileKey = sanitizeGuestKey(requestUrl.searchParams.get('profileKey'), '');
+    if (!profileKey) {
+      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'profileKey is required' }));
+      return;
+    }
+
+    if (request.method === 'GET') {
+      const userData = await persistence.loadUserData(profileKey);
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+      response.end(JSON.stringify(userData));
+      return;
+    }
+
+    if (request.method === 'PATCH' || request.method === 'POST') {
+      const patch = sanitizeUserDataPatch(await readJsonBody(request));
+      const userData = await persistence.saveUserData(profileKey, patch);
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+      response.end(JSON.stringify(userData));
+      return;
+    }
+
+    response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ error: 'Method not allowed' }));
+    return;
+  }
+
   if (requestUrl.pathname === '/api/multiplayer/health') {
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({

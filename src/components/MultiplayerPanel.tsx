@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   Check,
   Copy,
@@ -36,6 +36,7 @@ type MultiplayerPanelProps = {
   playMode: PlayMode;
   connection: string;
   status: string;
+  profileKey: string;
   riderName: string;
   riderAvailable: boolean;
   currentUserId: string | null;
@@ -57,9 +58,12 @@ type MultiplayerPanelProps = {
   remoteRaceStates: MultiplayerRaceState[];
   chatDraft: string;
   onPlayModeChange: (mode: PlayMode) => void;
+  onProfileKeyChange: (profileKey: string) => void;
+  onProfileKeyCopy: () => void;
   onRiderNameChange: (name: string) => void;
   onRiderAvailableChange: (available: boolean) => void;
   onCreatePrivateRoom: () => void;
+  onJoinRoom: (roomId: string) => void;
   onLeaveRoom: () => void;
   onShareInvite: () => void;
   onRandomTrack: () => void;
@@ -79,6 +83,7 @@ export function MultiplayerPanel({
   playMode,
   connection,
   status,
+  profileKey,
   riderName,
   riderAvailable,
   currentUserId,
@@ -97,9 +102,12 @@ export function MultiplayerPanel({
   remoteRaceStates,
   chatDraft,
   onPlayModeChange,
+  onProfileKeyChange,
+  onProfileKeyCopy,
   onRiderNameChange,
   onRiderAvailableChange,
   onCreatePrivateRoom,
+  onJoinRoom,
   onLeaveRoom,
   onShareInvite,
   onRandomTrack,
@@ -110,6 +118,21 @@ export function MultiplayerPanel({
   onChatDraftChange,
   onChatSend,
 }: MultiplayerPanelProps) {
+  const [profileKeyDraft, setProfileKeyDraft] = useState(profileKey);
+
+  useEffect(() => {
+    setProfileKeyDraft(profileKey);
+  }, [profileKey]);
+
+  const commitProfileKey = () => {
+    const nextKey = profileKeyDraft.trim();
+    if (nextKey && nextKey !== profileKey) {
+      onProfileKeyChange(nextKey);
+    } else if (!nextKey) {
+      setProfileKeyDraft(profileKey);
+    }
+  };
+
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     onChatSend();
@@ -181,6 +204,31 @@ export function MultiplayerPanel({
               />
               <span>Available for challenges</span>
             </label>
+            <div className="profile-key-row">
+              <label className="text-field compact">
+                <span>Profile key</span>
+                <input
+                  type="text"
+                  value={profileKeyDraft}
+                  spellCheck={false}
+                  onBlur={commitProfileKey}
+                  onChange={(event) => setProfileKeyDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+              </label>
+              <button
+                className="square-button"
+                type="button"
+                aria-label="Copy profile key"
+                onClick={onProfileKeyCopy}
+              >
+                <Copy size={16} />
+              </button>
+            </div>
           </div>
         )}
 
@@ -272,7 +320,15 @@ export function MultiplayerPanel({
             <div className="open-room-list">
               <span>Live private rooms</span>
               {rooms.slice(0, 4).map((room) => (
-                <small key={room.id}>{room.id} / {room.memberCount} riders / {room.track.name}</small>
+                <button
+                  className="open-room-link"
+                  type="button"
+                  key={room.id}
+                  disabled={!multiplayerOnline || currentRoom?.id === room.id}
+                  onClick={() => onJoinRoom(room.id)}
+                >
+                  {room.id} / {room.memberCount} riders / {room.track.name}
+                </button>
               ))}
             </div>
           )}

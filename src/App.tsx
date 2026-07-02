@@ -61,6 +61,7 @@ import {
   type PlacePredictionOption,
 } from './lib/googleMaps';
 import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
+import { patchCloudUserData, readCloudUserData } from './lib/cloudUserData';
 import { createInitialRiders } from './game/physics';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
@@ -419,6 +420,10 @@ function isReactionBikeSample(sample: { cadence: number | null; speedKph: number
   return (sample.cadence ?? 0) > 0 || (sample.speedKph ?? 0) > 0 || sample.watts > 0;
 }
 
+function isFalseStartBikeSample(sample: { cadence: number | null; speedKph: number | null; watts: number }) {
+  return (sample.cadence ?? 0) >= 12 || (sample.speedKph ?? 0) >= 2 || sample.watts >= 35;
+}
+
 function isGoogleLocationPermissionError(message: string) {
   return /REQUEST_DENIED|blocked|not allowed|not authorized|places\.googleapis\.com|Geocoding Service/i.test(message);
 }
@@ -446,9 +451,13 @@ export default function App() {
   const bluetooth = useBluetoothBikes();
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
+  const startGateArmedAtRef = useRef<number | null>(null);
+  const falseStartHandledRef = useRef(false);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
   const initialUrlTrackSyncedRef = useRef(false);
   const bridgeUserDataLoadedRef = useRef(false);
+  const cloudUserDataLoadedKeyRef = useRef<string | null>(null);
+  const cloudUserDataAvailableRef = useRef(false);
   const roomTrackApplyRef = useRef<string | null>(null);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const [initialTrack] = useState(readInitialTrack);
@@ -691,6 +700,7 @@ export default function App() {
     track: effectiveTrack,
     bikeCount: activePlayers.length,
   });
+  const cloudProfileKey = multiplayer.profile.guestKey;
   const livePlayerCount = useMemo(
     () => activePlayers.filter((player) => {
       if (player.deviceId == null) {
@@ -942,6 +952,26 @@ export default function App() {
     });
   }, []);
 
+  const releaseRaceFullscreen = useCallback(() => {
+    if (document.fullscreenElement === raceShellRef.current) {
+      void document.exitFullscreen?.().catch(() => undefined);
+    }
+  }, []);
+
+  const sendRoomReadyState = useCallback((sessionId: string) => {
+    if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
+      return;
+    }
+
+    multiplayer.sendRaceState({
+      sessionId,
+      trackId: effectiveTrack.id,
+      raceState: 'ready',
+      riders: [],
+      summary: [],
+    });
+  }, [effectiveTrack.id, multiplayer.currentRoom, multiplayer.sendRaceState, playMode]);
+
   useEffect(() => {
     if (shellFullscreenActive) {
       if (!document.fullscreenElement && raceShellRef.current) {
@@ -1042,37 +1072,107 @@ export default function App() {
   }, [bridge.connection]);
 
   useEffect(() => {
+    if (!cloudProfileKey) {
+      return;
+    }
+
+    let cancelled = false;
+    cloudUserDataLoadedKeyRef.current = null;
+    cloudUserDataAvailableRef.current = false;
+
+    readCloudUserData(cloudProfileKey)
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+
+        setStoredMappings((current) => {
+          const next = { ...current, ...data.trackMappings };
+          writeStoredTrackMappings(next);
+          return next;
+        });
+        setCustomRoutes((current) => {
+          const next = mergeCustomRoutes(current, data.customRoutes);
+          writeStoredCustomRoutes(next);
+          return next;
+        });
+        setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
+        cloudUserDataAvailableRef.current = true;
+        cloudUserDataLoadedKeyRef.current = cloudProfileKey;
+      })
+      .catch((error: Error) => {
+        console.warn(`Could not load TrackLab cloud user data: ${error.message}`);
+        cloudUserDataAvailableRef.current = false;
+        cloudUserDataLoadedKeyRef.current = cloudProfileKey;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudProfileKey]);
+
+  useEffect(() => {
     writeStoredBikeProfiles(bikeProfiles);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
+      if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+        void patchCloudUserData(cloudProfileKey, { bikeProfiles }).catch((error: Error) => {
+          console.warn(`Could not save bike profiles to TrackLab cloud: ${error.message}`);
+        });
+      }
       return;
     }
 
     void patchBridgeUserData({ bikeProfiles }).catch((error: Error) => {
       console.warn(`Could not save bike profiles to TrackLab bridge: ${error.message}`);
     });
-  }, [bikeProfiles, bridge.connection]);
+    if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+      void patchCloudUserData(cloudProfileKey, { bikeProfiles }).catch((error: Error) => {
+        console.warn(`Could not save bike profiles to TrackLab cloud: ${error.message}`);
+      });
+    }
+  }, [bikeProfiles, bridge.connection, cloudProfileKey]);
 
   useEffect(() => {
     writeStoredCustomRoutes(customRoutes);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
+      if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+        void patchCloudUserData(cloudProfileKey, { customRoutes }).catch((error: Error) => {
+          console.warn(`Could not save custom routes to TrackLab cloud: ${error.message}`);
+        });
+      }
       return;
     }
 
     void patchBridgeUserData({ customRoutes }).catch((error: Error) => {
       console.warn(`Could not save custom routes to TrackLab bridge: ${error.message}`);
     });
-  }, [bridge.connection, customRoutes]);
+    if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+      void patchCloudUserData(cloudProfileKey, { customRoutes }).catch((error: Error) => {
+        console.warn(`Could not save custom routes to TrackLab cloud: ${error.message}`);
+      });
+    }
+  }, [bridge.connection, cloudProfileKey, customRoutes]);
 
   useEffect(() => {
     writeStoredTrackMappings(storedMappings);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
+      if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+        void patchCloudUserData(cloudProfileKey, { trackMappings: storedMappings }).catch((error: Error) => {
+          console.warn(`Could not save track mappings to TrackLab cloud: ${error.message}`);
+        });
+      }
       return;
     }
 
     void patchBridgeUserData({ trackMappings: storedMappings }).catch((error: Error) => {
       console.warn(`Could not save track mappings to TrackLab bridge: ${error.message}`);
     });
-  }, [bridge.connection, storedMappings]);
+    if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+      void patchCloudUserData(cloudProfileKey, { trackMappings: storedMappings }).catch((error: Error) => {
+        console.warn(`Could not save track mappings to TrackLab cloud: ${error.message}`);
+      });
+    }
+  }, [bridge.connection, cloudProfileKey, storedMappings]);
 
   useEffect(() => {
     window.localStorage.setItem(speedUnitStorageKey, speedUnit);
@@ -1503,6 +1603,19 @@ export default function App() {
     });
   }, []);
 
+  const handleMappingPathPointRemove = useCallback((index: number) => {
+    setDraftPoints((current) => {
+      if (index < 0 || index >= current.length) {
+        return current;
+      }
+
+      const next = current.filter((_, draftIndex) => draftIndex !== index);
+      const nextLength = next.length > 1 ? routeLengthMeters(next) : 0;
+      setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter > 2 && meter < nextLength - 2));
+      return next;
+    });
+  }, []);
+
   const undoMappingPoint = () => {
     if (mappingEditMode === 'zones') {
       setDraftZoneMeters((current) => current.slice(0, -1));
@@ -1637,6 +1750,31 @@ export default function App() {
     });
   }, [draftPoints]);
 
+  const handleMappingZonePointMove = useCallback((index: number, point: TrackPoint) => {
+    setDraftZoneMeters((current) => {
+      if (draftPoints.length < 2 || index < 0 || index >= current.length) {
+        return current;
+      }
+
+      const routeLength = routeLengthMeters(draftPoints);
+      const meter = Math.round(nearestRouteMeter(draftPoints, point));
+      if (meter <= 2 || meter >= routeLength - 2) {
+        return current;
+      }
+
+      return current
+        .map((boundary, boundaryIndex) => (boundaryIndex === index ? meter : boundary))
+        .filter((boundary, boundaryIndex, boundaries) => (
+          boundaryIndex === boundaries.findIndex((candidate) => Math.abs(candidate - boundary) < 3)
+        ))
+        .sort((a, b) => a - b);
+    });
+  }, [draftPoints]);
+
+  const handleMappingZonePointRemove = useCallback((index: number) => {
+    setDraftZoneMeters((current) => current.filter((_, zoneIndex) => zoneIndex !== index));
+  }, []);
+
   const toggleManualZone = (zoneId: string) => {
     setManualZoneIds((current) => (
       current.includes(zoneId)
@@ -1670,6 +1808,7 @@ export default function App() {
   const clearStartGateSequence = useCallback(() => {
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     startGateTimeoutsRef.current = [];
+    startGateArmedAtRef.current = null;
     stopStartGateAudio();
     setStartGateStatus(idleStartGateStatus);
     setReactionStartAt(null);
@@ -1690,6 +1829,7 @@ export default function App() {
 
   const beginRaceAtGateDrop = useCallback(() => {
     const gateDropAt = Date.now();
+    startGateArmedAtRef.current = null;
     if (demoMode) {
       setDemoRaceSeed((seed) => seed + 104729);
       setDemoRaceStartedAt(gateDropAt);
@@ -1710,6 +1850,53 @@ export default function App() {
     scheduleStartGateStep(420, () => setStartGateStatus(idleStartGateStatus));
   }, [appendRaceCaptureEvent, bridge, demoMode, scheduleStartGateStep, startRace]);
 
+  useEffect(() => {
+    if (!startGateStatus.active || raceState === 'racing' || demoMode || falseStartHandledRef.current) {
+      return;
+    }
+
+    const gateArmedAt = startGateArmedAtRef.current;
+    if (gateArmedAt == null) {
+      return;
+    }
+
+    const falseStartPlayer = activePlayers.find((player) => {
+      if (player.deviceId == null) {
+        return false;
+      }
+
+      const sample = samplesByDevice.get(player.deviceId);
+      return Boolean(sample && sample.at >= gateArmedAt + 120 && isFalseStartBikeSample(sample));
+    });
+
+    if (!falseStartPlayer) {
+      return;
+    }
+
+    falseStartHandledRef.current = true;
+    const sessionId = raceCapture?.sessionId ?? `false-start-${Date.now()}`;
+    appendRaceCaptureEvent('race-cancel', `False start: ${falseStartPlayer.name}`);
+    clearStartGateSequence();
+    setMappingFullscreen(false);
+    bridge.sendControlCommand('race-reset');
+    sendRoomReadyState(sessionId);
+    resetRace();
+    releaseRaceFullscreen();
+  }, [
+    activePlayers,
+    appendRaceCaptureEvent,
+    bridge,
+    clearStartGateSequence,
+    demoMode,
+    raceCapture?.sessionId,
+    raceState,
+    releaseRaceFullscreen,
+    resetRace,
+    samplesByDevice,
+    sendRoomReadyState,
+    startGateStatus.active,
+  ]);
+
   const handleDemoModeChange = (enabled: boolean) => {
     clearStartGateSequence();
     setDemoMode(enabled);
@@ -1729,8 +1916,11 @@ export default function App() {
   };
 
   const handleReset = () => {
+    const sessionId = raceCapture?.sessionId ?? `reset-${Date.now()}`;
     appendRaceCaptureEvent('race-reset', 'Race reset');
     clearStartGateSequence();
+    falseStartHandledRef.current = false;
+    setMappingFullscreen(false);
     if (!demoMode) {
       bridge.sendControlCommand('race-reset');
     }
@@ -1742,14 +1932,18 @@ export default function App() {
     }
 
     resetRace();
+    sendRoomReadyState(sessionId);
+    releaseRaceFullscreen();
   };
 
   const handleCancel = () => {
+    const sessionId = raceCapture?.sessionId ?? `cancel-${Date.now()}`;
     const label = raceState === 'racing'
       ? 'Race cancelled mid-race'
       : 'Race cancelled before gate drop';
     appendRaceCaptureEvent('race-cancel', label);
     clearStartGateSequence();
+    falseStartHandledRef.current = false;
     setMappingFullscreen(false);
 
     if (!demoMode) {
@@ -1762,6 +1956,8 @@ export default function App() {
     }
 
     resetRace();
+    sendRoomReadyState(sessionId);
+    releaseRaceFullscreen();
   };
 
   const shareMultiplayerInvite = useCallback(() => {
@@ -1773,6 +1969,16 @@ export default function App() {
       window.prompt('Copy this TrackLab room invite link:', multiplayer.inviteUrl);
     });
   }, [multiplayer.inviteUrl]);
+
+  const copyMultiplayerProfileKey = useCallback(() => {
+    if (!cloudProfileKey) {
+      return;
+    }
+
+    void navigator.clipboard?.writeText(cloudProfileKey).catch(() => {
+      window.prompt('Copy this TrackLab profile key:', cloudProfileKey);
+    });
+  }, [cloudProfileKey]);
 
   const chooseRandomRoomTrack = useCallback(() => {
     const candidates = catalogTracks.filter((track) => (
@@ -1817,6 +2023,8 @@ export default function App() {
     }
 
     clearStartGateSequence();
+    falseStartHandledRef.current = false;
+    startGateArmedAtRef.current = Date.now();
     setMappingFullscreen(false);
     setDemoSignalsStopped(false);
     createRaceCapture();
@@ -2170,7 +2378,10 @@ export default function App() {
                 onMappingFullscreenChange={handleMappingFullscreenChange}
                 onMappingPathPointAdd={handleMappingPathPointAdd}
                 onMappingPathPointMove={handleMappingPathPointMove}
+                onMappingPathPointRemove={handleMappingPathPointRemove}
                 onMappingZonePointAdd={handleMappingZonePointAdd}
+                onMappingZonePointMove={handleMappingZonePointMove}
+                onMappingZonePointRemove={handleMappingZonePointRemove}
               />
 
               <SessionControlPanel
@@ -2268,6 +2479,7 @@ export default function App() {
                 playMode={playMode}
                 connection={multiplayer.connection}
                 status={multiplayer.status}
+                profileKey={cloudProfileKey}
                 riderName={multiplayer.profile.name}
                 riderAvailable={multiplayer.profile.available}
                 currentUserId={multiplayer.clientId}
@@ -2286,9 +2498,12 @@ export default function App() {
                 remoteRaceStates={remoteRaceStates}
                 chatDraft={chatDraft}
                 onPlayModeChange={setPlayMode}
+                onProfileKeyChange={(profileKey) => multiplayer.setProfile({ guestKey: profileKey })}
+                onProfileKeyCopy={copyMultiplayerProfileKey}
                 onRiderNameChange={(name) => multiplayer.setProfile({ name })}
                 onRiderAvailableChange={(available) => multiplayer.setProfile({ available })}
                 onCreatePrivateRoom={multiplayer.createPrivateRoom}
+                onJoinRoom={multiplayer.joinRoom}
                 onLeaveRoom={multiplayer.leaveRoom}
                 onShareInvite={shareMultiplayerInvite}
                 onRandomTrack={chooseRandomRoomTrack}

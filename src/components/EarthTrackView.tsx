@@ -63,7 +63,10 @@ type EarthTrackViewProps = {
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingPathPointAdd: (point: TrackPoint) => void;
   onMappingPathPointMove: (index: number, point: TrackPoint) => void;
+  onMappingPathPointRemove: (index: number) => void;
   onMappingZonePointAdd: (point: TrackPoint) => void;
+  onMappingZonePointMove: (index: number, point: TrackPoint) => void;
+  onMappingZonePointRemove: (index: number) => void;
 };
 
 function formatElapsed(milliseconds: number | null) {
@@ -126,7 +129,10 @@ export function EarthTrackView({
   onMappingFullscreenChange,
   onMappingPathPointAdd,
   onMappingPathPointMove,
+  onMappingPathPointRemove,
   onMappingZonePointAdd,
+  onMappingZonePointMove,
+  onMappingZonePointRemove,
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const center = trackCenter(track);
@@ -180,7 +186,10 @@ export function EarthTrackView({
             onEarthCameraChange={onEarthCameraChange}
             onMappingPathPointAdd={onMappingPathPointAdd}
             onMappingPathPointMove={onMappingPathPointMove}
+            onMappingPathPointRemove={onMappingPathPointRemove}
             onMappingZonePointAdd={onMappingZonePointAdd}
+            onMappingZonePointMove={onMappingZonePointMove}
+            onMappingZonePointRemove={onMappingZonePointRemove}
           />
         ) : (
           <div className="google-key-required">
