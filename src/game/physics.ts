@@ -6,9 +6,15 @@ const gravityPx = 430;
 const groundRecoveryPerSecond = 4.2;
 const maxAirPx = 34;
 const liveMetricWindowMs = 1800;
-const rollingFrictionMps2 = 0.34;
-const airDragPerMeter = 0.16;
+const rollingFrictionMps2 = 0.42;
+const airDragPerMeter = 0.0038;
 const stopVelocityMps = 0.04;
+const freewheelEngagementToleranceMps = 0.05;
+const effectiveRiderBikeMassKg = 86;
+const drivetrainEfficiency = 0.88;
+const minimumDriveAccelerationMps2 = 0.55;
+const maxDriveAccelerationMps2 = 7.5;
+const lowSpeedLaunchBonusMps2 = 2.2;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -21,6 +27,27 @@ function metricIsUsable(sample: BikeSample | null | undefined, metricAt: number 
 
   const recordedAt = metricAt ?? sample.at;
   return recordedAt >= raceStartedAt && nowMs - recordedAt <= liveMetricWindowMs;
+}
+
+function coastVelocityMps(velocityMps: number, dt: number) {
+  const drag = rollingFrictionMps2 + velocityMps * velocityMps * airDragPerMeter;
+  return Math.max(0, velocityMps - drag * dt);
+}
+
+function driveAccelerationMps2(watts: number, velocityMps: number, boost: number) {
+  const speedForPower = Math.max(1.2, velocityMps);
+  const powerAcceleration = watts > 0
+    ? watts * drivetrainEfficiency / (effectiveRiderBikeMassKg * speedForPower)
+    : minimumDriveAccelerationMps2;
+  const launchBonus = velocityMps < 2.5
+    ? (1 - velocityMps / 2.5) * lowSpeedLaunchBonusMps2
+    : 0;
+
+  return clamp(
+    powerAcceleration + launchBonus + boost * 0.45,
+    minimumDriveAccelerationMps2,
+    maxDriveAccelerationMps2,
+  );
 }
 
 export function createInitialRiders(players: PlayerSlot[]): RiderState[] {
@@ -64,12 +91,13 @@ export function stepRiders(
     const wattsAverage = rider.wattsAverage * 0.94 + watts * 0.06;
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
-    const hasDriveSignal = cadence > 0;
-    const rolloutVelocity = hasDriveSignal ? bmxVelocityMpsFromCadence(cadence) : null;
-    const velocity = rolloutVelocity == null
-      ? Math.max(0, rider.velocity - (rollingFrictionMps2 + rider.velocity * rider.velocity * airDragPerMeter) * dt)
-      : rolloutVelocity;
-    const settledVelocity = velocity < stopVelocityMps && rolloutVelocity == null ? 0 : velocity;
+    const coastVelocity = coastVelocityMps(rider.velocity, dt);
+    const cadenceVelocity = cadence > 0 ? bmxVelocityMpsFromCadence(cadence) : null;
+    const driveEngaged = cadenceVelocity != null && cadenceVelocity > coastVelocity + freewheelEngagementToleranceMps;
+    const velocity = driveEngaged
+      ? Math.min(cadenceVelocity, coastVelocity + driveAccelerationMps2(watts, coastVelocity, boost) * dt)
+      : coastVelocity;
+    const settledVelocity = velocity < stopVelocityMps && !driveEngaged ? 0 : velocity;
     const previousDistance = rider.distance;
     const distance = Math.min(raceLengthMeters, previousDistance + settledVelocity * dt);
     const cadenceRps = Math.max(0.1, cadence / 60);
