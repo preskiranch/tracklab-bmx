@@ -54,6 +54,7 @@ type SessionControlPanelProps = {
   selectedCustomRoutePredictionId: string | null;
   raceState: RaceState;
   activeBikeCount: number;
+  maxPlayers: number;
   demoMode: boolean;
   demoBikeCount: number;
   demoVariableCount: number;
@@ -127,6 +128,7 @@ export function SessionControlPanel({
   selectedCustomRoutePredictionId,
   raceState,
   activeBikeCount,
+  maxPlayers,
   demoMode,
   demoBikeCount,
   demoVariableCount,
@@ -425,11 +427,11 @@ export function SessionControlPanel({
           <>
             <div className="demo-mode-row">
               <span>Riders</span>
-              <strong>{demoBikeCount} / 4</strong>
+              <strong>{demoBikeCount} / {maxPlayers}</strong>
               <small>{demoVariableCount} race variables</small>
             </div>
             <div className="segmented-control compact four-way" aria-label="Demo rider count">
-              {[1, 2, 3, 4].map((count) => (
+              {Array.from({ length: maxPlayers }, (_, index) => index + 1).map((count) => (
                 <button
                   className={demoBikeCount === count ? 'selected' : ''}
                   type="button"

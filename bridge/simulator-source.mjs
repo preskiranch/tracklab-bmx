@@ -5,6 +5,10 @@ const players = [
   { deviceId: 18434, name: 'Wattbike B', phase: 1.4, color: 'red' },
   { deviceId: 18452, name: 'Wattbike C', phase: 2.3, color: 'blue' },
   { deviceId: 18477, name: 'Wattbike D', phase: 3.1, color: 'yellow' },
+  { deviceId: 18488, name: 'Wattbike E', phase: 4.0, color: 'lime' },
+  { deviceId: 18499, name: 'Wattbike F', phase: 4.8, color: 'red' },
+  { deviceId: 18510, name: 'Wattbike G', phase: 5.6, color: 'blue' },
+  { deviceId: 18521, name: 'Wattbike H', phase: 6.4, color: 'yellow' },
 ];
 
 export function createSimulatorSource() {
@@ -15,7 +19,7 @@ export function createSimulatorSource() {
   emitter.start = async () => {
     emitter.emit('status', {
       at: Date.now(),
-      message: 'Simulator source active with four virtual Wattbikes.',
+      message: 'Simulator source active with eight virtual Wattbikes.',
       devices: players.map((bike) => ({
         deviceId: bike.deviceId,
         label: bike.name,

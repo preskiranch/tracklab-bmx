@@ -1,4 +1,7 @@
 import { createServer } from 'node:http';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { createSimulatorSource } from './simulator-source.mjs';
 import { createAntSource } from './ant-source.mjs';
@@ -7,6 +10,8 @@ import { createWattbikeControl } from './wattbike-control.mjs';
 const port = Number(process.env.WATTBIKE_BRIDGE_PORT ?? 8787);
 const inputMode = process.env.WATTBIKE_INPUT === 'sim' ? 'sim' : 'ant';
 const autoStart = process.env.WATTBIKE_BRIDGE_AUTOSTART === '1';
+const userDataDirectory = path.join(os.homedir(), 'Library', 'Application Support', 'TrackLab BMX');
+const userDataPath = path.join(userDataDirectory, 'user-data.json');
 const server = createServer(handleHttpRequest);
 const wss = new WebSocketServer({ server });
 const clients = new Set();
@@ -64,11 +69,65 @@ function broadcast(payload) {
 function writeJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json',
   });
   response.end(JSON.stringify(payload));
+}
+
+function defaultUserData() {
+  return {
+    version: 1,
+    updatedAt: Date.now(),
+    trackMappings: {},
+    customRoutes: [],
+    bikeProfiles: [],
+  };
+}
+
+function normalizeUserData(value) {
+  const fallback = defaultUserData();
+  if (!value || typeof value !== 'object') {
+    return fallback;
+  }
+
+  return {
+    version: 1,
+    updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : fallback.updatedAt,
+    trackMappings: value.trackMappings && typeof value.trackMappings === 'object' ? value.trackMappings : {},
+    customRoutes: Array.isArray(value.customRoutes) ? value.customRoutes : [],
+    bikeProfiles: Array.isArray(value.bikeProfiles) ? value.bikeProfiles : [],
+  };
+}
+
+async function readUserData() {
+  try {
+    const contents = await readFile(userDataPath, 'utf8');
+    return normalizeUserData(JSON.parse(contents));
+  } catch {
+    return defaultUserData();
+  }
+}
+
+async function writeUserData(data) {
+  const normalized = normalizeUserData({
+    ...data,
+    updatedAt: Date.now(),
+  });
+  await mkdir(userDataDirectory, { recursive: true });
+  await writeFile(userDataPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+  return normalized;
+}
+
+async function readRequestJson(request) {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+
+  const raw = Buffer.concat(chunks).toString('utf8');
+  return raw ? JSON.parse(raw) : {};
 }
 
 async function startSource() {
@@ -161,6 +220,37 @@ async function handleHttpRequest(request, response) {
   if (request.method === 'POST' && url.pathname === '/api/bridge/stop') {
     const payload = await stopSource();
     writeJson(response, 200, payload);
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/user-data') {
+    writeJson(response, 200, await readUserData());
+    return;
+  }
+
+  if (request.method === 'PATCH' && url.pathname === '/api/user-data') {
+    try {
+      const patch = await readRequestJson(request);
+      const current = await readUserData();
+      const next = await writeUserData({
+        ...current,
+        trackMappings: patch.trackMappings && typeof patch.trackMappings === 'object'
+          ? patch.trackMappings
+          : current.trackMappings,
+        customRoutes: Array.isArray(patch.customRoutes)
+          ? patch.customRoutes
+          : current.customRoutes,
+        bikeProfiles: Array.isArray(patch.bikeProfiles)
+          ? patch.bikeProfiles
+          : current.bikeProfiles,
+      });
+      writeJson(response, 200, next);
+    } catch (error) {
+      writeJson(response, 400, {
+        type: 'user-data-error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
     return;
   }
 

@@ -71,12 +71,23 @@ export type BikeSampleMessage = BikeSample & {
 
 export type BridgeMessage = BridgeStatusMessage | BridgeErrorMessage | BikeSampleMessage | BikeControlResultMessage;
 
+export type PlayerId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type PlayerColorName = 'lime' | 'red' | 'blue' | 'yellow';
+
 export type PlayerSlot = {
-  id: 1 | 2 | 3 | 4;
+  id: PlayerId;
   name: string;
-  colorName: 'lime' | 'red' | 'blue' | 'yellow';
+  colorName: PlayerColorName;
   accent: string;
   deviceId: number | null;
+};
+
+export type BikeProfile = {
+  deviceId: number;
+  name: string;
+  colorName: PlayerColorName;
+  accent: string;
+  updatedAt: number;
 };
 
 export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;

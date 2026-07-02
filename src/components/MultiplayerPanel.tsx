@@ -15,6 +15,7 @@ type MultiplayerPanelProps = {
   roomCode: string;
   track: TrackRecord;
   players: PlayerSlot[];
+  maxPlayers: number;
   riders: RiderState[];
   samplesByDevice: Map<number, BikeSample>;
   chatMessages: ChatMessage[];
@@ -35,6 +36,7 @@ export function MultiplayerPanel({
   roomCode,
   track,
   players,
+  maxPlayers,
   riders,
   samplesByDevice,
   chatMessages,
@@ -111,7 +113,7 @@ export function MultiplayerPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Riders</span>
-            <h3>{players.length} / 4 connected</h3>
+            <h3>{players.length} / {maxPlayers} connected</h3>
           </div>
         </div>
         <div className="roster-list">

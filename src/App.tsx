@@ -22,6 +22,7 @@ import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { SessionControlPanel } from './components/SessionControlPanel';
 import {
+  bikeProfilesStorageKey,
   customRoutesStorageKey,
   defaultPlayerSlots,
   distanceUnitStorageKey,
@@ -59,6 +60,7 @@ import {
   resolvePlacePrediction,
   type PlacePredictionOption,
 } from './lib/googleMaps';
+import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
@@ -66,6 +68,7 @@ import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import { useZoneAudioCues } from './hooks/useZoneAudioCues';
 import type {
   AppMode,
+  BikeProfile,
   DistanceUnit,
   IntervalMode,
   LeaderboardMetric,
@@ -162,21 +165,109 @@ function createCustomRouteRecord(name: string, locationLabel: string | undefined
   };
 }
 
-function readStoredPlayers(): PlayerSlot[] {
+function profileVisual(index: number) {
+  return defaultPlayerSlots[index % defaultPlayerSlots.length] ?? defaultPlayerSlots[0];
+}
+
+function isPlayerColorName(value: unknown): value is PlayerSlot['colorName'] {
+  return value === 'lime' || value === 'red' || value === 'blue' || value === 'yellow';
+}
+
+function defaultBikeName(deviceId: number) {
+  return `Bike ${deviceId}`;
+}
+
+function createBikeProfile(deviceId: number, index: number, name = defaultBikeName(deviceId)): BikeProfile {
+  const visual = profileVisual(index);
+  return {
+    deviceId,
+    name,
+    colorName: visual.colorName,
+    accent: visual.accent,
+    updatedAt: Date.now(),
+  };
+}
+
+function normalizeBikeProfile(value: unknown, index: number): BikeProfile | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const profile = value as Partial<BikeProfile>;
+  const deviceId = Number(profile.deviceId);
+  if (!Number.isFinite(deviceId) || deviceId <= 0) {
+    return null;
+  }
+
+  const visual = profileVisual(index);
+  const name = typeof profile.name === 'string' && profile.name.trim()
+    ? profile.name.trim().slice(0, 64)
+    : defaultBikeName(deviceId);
+
+  return {
+    deviceId,
+    name,
+    colorName: isPlayerColorName(profile.colorName) ? profile.colorName : visual.colorName,
+    accent: typeof profile.accent === 'string' && profile.accent.trim() ? profile.accent : visual.accent,
+    updatedAt: Number.isFinite(profile.updatedAt) ? Number(profile.updatedAt) : Date.now(),
+  };
+}
+
+function dedupeBikeProfiles(profiles: BikeProfile[]) {
+  const byDevice = new Map<number, BikeProfile>();
+  profiles.forEach((profile, index) => {
+    const normalized = normalizeBikeProfile(profile, index);
+    if (!normalized) {
+      return;
+    }
+
+    const current = byDevice.get(normalized.deviceId);
+    if (!current || normalized.updatedAt >= current.updatedAt) {
+      byDevice.set(normalized.deviceId, normalized);
+    }
+  });
+
+  return [...byDevice.values()].sort((a, b) => a.deviceId - b.deviceId);
+}
+
+function mergeBikeProfiles(localProfiles: BikeProfile[], bridgeProfiles: BikeProfile[]) {
+  return dedupeBikeProfiles([...localProfiles, ...bridgeProfiles]);
+}
+
+function mergeCustomRoutes(localRoutes: TrackRecord[], bridgeRoutes: TrackRecord[]) {
+  const byId = new Map<string, TrackRecord>();
+  [...localRoutes, ...bridgeRoutes].forEach((route) => {
+    if (route?.id) {
+      byId.set(route.id, route);
+    }
+  });
+  return [...byId.values()];
+}
+
+function readStoredBikeProfiles(): BikeProfile[] {
   try {
+    const storedProfiles = window.localStorage.getItem(bikeProfilesStorageKey);
+    if (storedProfiles) {
+      const parsedProfiles = JSON.parse(storedProfiles) as BikeProfile[];
+      return Array.isArray(parsedProfiles) ? dedupeBikeProfiles(parsedProfiles) : [];
+    }
+
     const stored = window.localStorage.getItem(storageKey);
     if (!stored) {
-      return defaultPlayerSlots;
+      return [];
     }
 
     const parsed = JSON.parse(stored) as Array<Pick<PlayerSlot, 'id' | 'deviceId'>>;
-    return defaultPlayerSlots.map((slot) => ({
-      ...slot,
-      deviceId: parsed.find((item) => item.id === slot.id)?.deviceId ?? null,
-    }));
+    return dedupeBikeProfiles(parsed
+      .filter((item) => item.deviceId != null)
+      .map((item, index) => createBikeProfile(Number(item.deviceId), index, `Player ${item.id}`)));
   } catch {
-    return defaultPlayerSlots;
+    return [];
   }
+}
+
+function writeStoredBikeProfiles(profiles: BikeProfile[]) {
+  window.localStorage.setItem(bikeProfilesStorageKey, JSON.stringify(dedupeBikeProfiles(profiles)));
 }
 
 function readStoredSpeedUnit(): SpeedUnit {
@@ -351,6 +442,7 @@ export default function App() {
   const startGateTimeoutsRef = useRef<number[]>([]);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
   const initialUrlTrackSyncedRef = useRef(false);
+  const bridgeUserDataLoadedRef = useRef(false);
   const [initialTrack] = useState(readInitialTrack);
   const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
@@ -361,9 +453,9 @@ export default function App() {
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
   const [draftZoneMeters, setDraftZoneMeters] = useState<number[]>([]);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
-  const [players, setPlayers] = useState<PlayerSlot[]>(readStoredPlayers);
+  const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
   const [demoMode, setDemoMode] = useState(false);
-  const [demoBikeCount, setDemoBikeCount] = useState(maxPlayers);
+  const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
   const [demoRaceStartedAt, setDemoRaceStartedAt] = useState<number | null>(null);
   const [demoSignalsStopped, setDemoSignalsStopped] = useState(false);
@@ -501,20 +593,28 @@ export default function App() {
     return next;
   }, [bluetooth.samplesByDevice, bridge.samplesByDevice]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
-  const availablePlayers = demoMode ? demoPlayers : players;
-
-  const discoveredDeviceIds = useMemo(
-    () => [...samplesByDevice.keys()].sort((a, b) => a - b),
-    [samplesByDevice],
+  const connectedDeviceIds = useMemo(
+    () => [...connectedBikeSamples.keys()].sort((a, b) => a - b).slice(0, maxPlayers),
+    [connectedBikeSamples],
   );
-  const liveDeviceIds = useMemo(
-    () => discoveredDeviceIds
-      .filter((deviceId) => {
-        const sample = samplesByDevice.get(deviceId);
-        return sample && now - sample.at < liveBikeTimeoutMs;
-      })
-      .slice(0, maxPlayers),
-    [discoveredDeviceIds, now, samplesByDevice],
+  const profileByDevice = useMemo(
+    () => new Map(bikeProfiles.map((profile) => [profile.deviceId, profile])),
+    [bikeProfiles],
+  );
+  const sessionPlayers = useMemo(
+    () => connectedDeviceIds.map((deviceId, index) => {
+      const visual = profileVisual(index);
+      const profile = profileByDevice.get(deviceId);
+
+      return {
+        id: visual.id,
+        name: profile?.name ?? defaultBikeName(deviceId),
+        colorName: profile?.colorName ?? visual.colorName,
+        accent: profile?.accent ?? visual.accent,
+        deviceId,
+      };
+    }),
+    [connectedDeviceIds, profileByDevice],
   );
   const activePlayers = useMemo(
     () => {
@@ -522,11 +622,20 @@ export default function App() {
         return demoPlayers.slice(0, maxPlayers);
       }
 
-      return availablePlayers
-        .filter((player) => player.deviceId != null && samplesByDevice.has(player.deviceId))
-        .slice(0, maxPlayers);
+      return sessionPlayers;
     },
-    [availablePlayers, demoMode, demoPlayers, samplesByDevice],
+    [demoMode, demoPlayers, sessionPlayers],
+  );
+  const livePlayerCount = useMemo(
+    () => activePlayers.filter((player) => {
+      if (player.deviceId == null) {
+        return false;
+      }
+
+      const sample = samplesByDevice.get(player.deviceId);
+      return Boolean(sample && now - sample.at < liveBikeTimeoutMs);
+    }).length,
+    [activePlayers, now, samplesByDevice],
   );
   const pairingPlayers = useMemo(
     () => {
@@ -534,14 +643,9 @@ export default function App() {
         return demoPlayers;
       }
 
-      const assignedKnownCount = players.filter((player) => (
-        player.deviceId != null && samplesByDevice.has(player.deviceId)
-      )).length;
-      const rememberedCount = players.filter((player) => player.deviceId != null).length;
-      const visibleCount = Math.min(maxPlayers, Math.max(discoveredDeviceIds.length, liveDeviceIds.length, assignedKnownCount, rememberedCount));
-      return players.slice(0, visibleCount);
+      return sessionPlayers;
     },
-    [demoMode, demoPlayers, discoveredDeviceIds.length, liveDeviceIds.length, players, samplesByDevice],
+    [demoMode, demoPlayers, sessionPlayers],
   );
   const mappedZones = useMemo(
     () => (effectiveTrack.routeStatus === 'user-mapped' ? effectiveTrack.zones : []),
@@ -693,8 +797,96 @@ export default function App() {
   }, [activePlayers, reactionStartAt, samplesByDevice]);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(players.map(({ id, deviceId }) => ({ id, deviceId }))));
-  }, [players]);
+    if (demoMode || connectedDeviceIds.length === 0) {
+      return;
+    }
+
+    setBikeProfiles((current) => {
+      let changed = false;
+      const next = [...current];
+      const knownDevices = new Set(next.map((profile) => profile.deviceId));
+
+      connectedDeviceIds.forEach((deviceId, index) => {
+        if (knownDevices.has(deviceId)) {
+          return;
+        }
+
+        next.push(createBikeProfile(deviceId, index));
+        knownDevices.add(deviceId);
+        changed = true;
+      });
+
+      return changed ? dedupeBikeProfiles(next) : current;
+    });
+  }, [connectedDeviceIds, demoMode]);
+
+  useEffect(() => {
+    if (bridge.connection !== 'open' || bridgeUserDataLoadedRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    readBridgeUserData()
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+
+        setStoredMappings((current) => {
+          const next = { ...current, ...data.trackMappings };
+          writeStoredTrackMappings(next);
+          return next;
+        });
+        setCustomRoutes((current) => {
+          const next = mergeCustomRoutes(current, data.customRoutes);
+          writeStoredCustomRoutes(next);
+          return next;
+        });
+        setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
+        bridgeUserDataLoadedRef.current = true;
+      })
+      .catch((error: Error) => {
+        console.warn(`Could not load TrackLab bridge user data: ${error.message}`);
+        bridgeUserDataLoadedRef.current = true;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge.connection]);
+
+  useEffect(() => {
+    writeStoredBikeProfiles(bikeProfiles);
+    if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
+      return;
+    }
+
+    void patchBridgeUserData({ bikeProfiles }).catch((error: Error) => {
+      console.warn(`Could not save bike profiles to TrackLab bridge: ${error.message}`);
+    });
+  }, [bikeProfiles, bridge.connection]);
+
+  useEffect(() => {
+    writeStoredCustomRoutes(customRoutes);
+    if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
+      return;
+    }
+
+    void patchBridgeUserData({ customRoutes }).catch((error: Error) => {
+      console.warn(`Could not save custom routes to TrackLab bridge: ${error.message}`);
+    });
+  }, [bridge.connection, customRoutes]);
+
+  useEffect(() => {
+    writeStoredTrackMappings(storedMappings);
+    if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
+      return;
+    }
+
+    void patchBridgeUserData({ trackMappings: storedMappings }).catch((error: Error) => {
+      console.warn(`Could not save track mappings to TrackLab bridge: ${error.message}`);
+    });
+  }, [bridge.connection, storedMappings]);
 
   useEffect(() => {
     window.localStorage.setItem(speedUnitStorageKey, speedUnit);
@@ -818,47 +1010,68 @@ export default function App() {
     setReactionTimesByPlayer({});
   }, [effectiveTrack.id, mappedZones, resetRace]);
 
-  const assignDevice = useCallback((playerId: PlayerSlot['id'], deviceId: number | null) => {
-    setPlayers((current) => current.map((player) => (
-      player.id === playerId
-        ? { ...player, deviceId }
-        : player.deviceId === deviceId && deviceId !== null
-          ? { ...player, deviceId: null }
-          : player
-    )));
-  }, []);
-
-  const autoAssign = useCallback(() => {
-    setPlayers((current) => {
-      const assigned = new Set(current.map((player) => player.deviceId).filter((deviceId): deviceId is number => deviceId != null));
-      return current.map((player, index) => {
-        if (player.deviceId != null) {
-          return player;
-        }
-
-        const nextDevice = liveDeviceIds.find((deviceId) => !assigned.has(deviceId));
-        if (nextDevice == null || index >= maxPlayers) {
-          return player;
-        }
-
-        assigned.add(nextDevice);
-        return { ...player, deviceId: nextDevice };
-      });
-    });
-  }, [liveDeviceIds]);
-
-  useEffect(() => {
-    if (demoMode) {
+  const renamePlayer = useCallback((playerId: PlayerSlot['id'], name: string) => {
+    const player = sessionPlayers.find((item) => item.id === playerId);
+    if (!player?.deviceId) {
       return;
     }
 
-    const assignedLiveDevices = new Set(players.map((player) => player.deviceId).filter(Boolean));
-    const needsLiveAssignment = liveDeviceIds.some((deviceId) => !assignedLiveDevices.has(deviceId));
+    const deviceId = player.deviceId;
+    const safeName = name.trim().slice(0, 64) || defaultBikeName(deviceId);
+    setBikeProfiles((current) => {
+      const next = current.map((profile) => (
+        profile.deviceId === deviceId
+          ? { ...profile, name: safeName, updatedAt: Date.now() }
+          : profile
+      ));
 
-    if (needsLiveAssignment && liveDeviceIds.length > 0) {
-      autoAssign();
+      return next.some((profile) => profile.deviceId === deviceId)
+        ? dedupeBikeProfiles(next)
+        : dedupeBikeProfiles([...next, createBikeProfile(deviceId, playerId - 1, safeName)]);
+    });
+  }, [sessionPlayers]);
+
+  const assignDevice = useCallback((playerId: PlayerSlot['id'], deviceId: number | null) => {
+    const player = sessionPlayers.find((item) => item.id === playerId);
+    const nextDeviceId = deviceId ?? player?.deviceId;
+    if (!nextDeviceId) {
+      return;
     }
-  }, [autoAssign, demoMode, liveDeviceIds, players]);
+
+    const visual = profileVisual(playerId - 1);
+    setBikeProfiles((current) => {
+      const next = current.map((profile) => (
+        profile.deviceId === nextDeviceId
+          ? {
+            ...profile,
+            name: deviceId == null ? defaultBikeName(nextDeviceId) : player?.name ?? profile.name,
+            colorName: visual.colorName,
+            accent: visual.accent,
+            updatedAt: Date.now(),
+          }
+          : profile
+      ));
+
+      return next.some((profile) => profile.deviceId === nextDeviceId)
+        ? dedupeBikeProfiles(next)
+        : dedupeBikeProfiles([...next, createBikeProfile(nextDeviceId, playerId - 1, player?.name)]);
+    });
+  }, [sessionPlayers]);
+
+  const autoAssign = useCallback(() => {
+    if (connectedDeviceIds.length === 0) {
+      return;
+    }
+
+    setBikeProfiles((current) => {
+      const knownDevices = new Set(current.map((profile) => profile.deviceId));
+      const additions = connectedDeviceIds
+        .filter((deviceId) => !knownDevices.has(deviceId))
+        .map((deviceId, index) => createBikeProfile(deviceId, index));
+
+      return additions.length > 0 ? dedupeBikeProfiles([...current, ...additions]) : current;
+    });
+  }, [connectedDeviceIds]);
 
   const handleCountryChange = (country: string) => {
     const nextState = statesForCountry(country, catalogTracks)[0];
@@ -1473,7 +1686,7 @@ export default function App() {
     }
 
     return activePlayers.length > 0
-      ? `${activePlayers.length} bike${activePlayers.length === 1 ? '' : 's'} live`
+      ? `${livePlayerCount}/${activePlayers.length} bike${activePlayers.length === 1 ? '' : 's'} live`
       : `${bridge.mode.toString().toUpperCase()} bridge scanning`;
   })();
   const connectionStatus = (() => {
@@ -1550,7 +1763,7 @@ export default function App() {
             <span className={`connection-dot ${connectionState}`} />
             <div>
               <strong>{connectionLabel}</strong>
-              <span>{activePlayers.length} / 4 bikes connected</span>
+              <span>{activePlayers.length} / {maxPlayers} bikes connected</span>
             </div>
           </div>
           <p>{connectionStatus}</p>
@@ -1605,15 +1818,17 @@ export default function App() {
           samplesByDevice={samplesByDevice}
           onAssign={demoMode ? () => undefined : assignDevice}
           onAutoAssign={demoMode ? () => undefined : autoAssign}
+          onRename={demoMode ? undefined : renamePlayer}
           onBluetoothConnect={showBluetoothPairing ? bluetooth.connectBike : undefined}
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}
           bluetoothDeviceCount={bluetooth.connectedCount}
           title={demoMode ? 'Demo Riders' : 'Bike Pairing'}
-          subtitle={demoMode ? `${demoBikeCount} simulated / max 4` : undefined}
+          subtitle={demoMode ? `${demoBikeCount} simulated / max ${maxPlayers}` : undefined}
           emptyMessage={demoMode ? 'Choose demo riders to generate live race samples.' : pairingEmptyMessage}
           deviceLabel={demoMode ? 'Demo device' : pairingDeviceLabel}
           readOnly={demoMode}
+          maxPlayers={maxPlayers}
         />
       </aside>
 
@@ -1717,6 +1932,7 @@ export default function App() {
                 selectedCustomRoutePredictionId={selectedCustomRoutePrediction?.id ?? null}
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
+                maxPlayers={maxPlayers}
                 demoMode={demoMode}
                 demoBikeCount={demoBikeCount}
                 demoVariableCount={demo.variableCount}
@@ -1790,6 +2006,7 @@ export default function App() {
                 roomCode={`${effectiveTrack.countryCode}-${effectiveTrack.id.slice(0, 4).toUpperCase()}-${activePlayers.length || 1}24`}
                 track={effectiveTrack}
                 players={activePlayers}
+                maxPlayers={maxPlayers}
                 riders={riders}
                 samplesByDevice={samplesByDevice}
                 chatMessages={chatMessages}

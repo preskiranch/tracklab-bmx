@@ -7,6 +7,7 @@ type PairingRailProps = {
   samplesByDevice: Map<number, BikeSample>;
   onAssign: (playerId: PlayerSlot['id'], deviceId: number | null) => void;
   onAutoAssign: () => void;
+  onRename?: (playerId: PlayerSlot['id'], name: string) => void;
   onBluetoothConnect?: () => void;
   bluetoothSupported?: boolean;
   bluetoothStatus?: string;
@@ -16,6 +17,7 @@ type PairingRailProps = {
   emptyMessage?: string;
   deviceLabel?: string;
   readOnly?: boolean;
+  maxPlayers?: number;
 };
 
 function signalLabel(sample: BikeSample | undefined) {
@@ -31,6 +33,7 @@ export function PairingRail({
   samplesByDevice,
   onAssign,
   onAutoAssign,
+  onRename,
   onBluetoothConnect,
   bluetoothSupported = false,
   bluetoothStatus,
@@ -40,24 +43,16 @@ export function PairingRail({
   emptyMessage = 'Pedal a Wattbike for a few seconds so the ANT+ bridge can detect it.',
   deviceLabel = 'ANT device',
   readOnly = false,
+  maxPlayers = 8,
 }: PairingRailProps) {
   const detectedDevices = [...samplesByDevice.values()].sort((a, b) => a.deviceId - b.deviceId);
-  const detectedDeviceIds = new Set(detectedDevices.map((device) => device.deviceId));
-  const rememberedDevices = players
-    .map((player) => player.deviceId)
-    .filter((deviceId): deviceId is number => deviceId != null && !detectedDeviceIds.has(deviceId))
-    .map((deviceId) => ({
-      deviceId,
-      label: `Remembered ANT+ device ${deviceId}`,
-    }));
-  const devices = [...detectedDevices, ...rememberedDevices].sort((a, b) => a.deviceId - b.deviceId);
 
   return (
     <aside className="pairing-rail" aria-label="Bike pairing">
       <div className="rail-heading">
         <div>
           <h2>{title}</h2>
-          <p>{subtitle ?? `${Math.min(4, detectedDevices.length)} detected / ${Math.min(4, devices.length)} remembered / max 4`}</p>
+          <p>{subtitle ?? `${players.length} connected / ${detectedDevices.length} detected / max ${maxPlayers}`}</p>
         </div>
         <div className="rail-actions">
           {onBluetoothConnect && (
@@ -110,7 +105,16 @@ export function PairingRail({
                   P{player.id}
                 </span>
                 <div>
-                  <h3>{player.name}</h3>
+                  {readOnly || !onRename ? (
+                    <h3>{player.name}</h3>
+                  ) : (
+                    <input
+                      className="player-name-input"
+                      value={player.name}
+                      onChange={(event) => onRename(player.id, event.target.value)}
+                      aria-label={`Name for player ${player.id}`}
+                    />
+                  )}
                   <p>{player.deviceId ? `Device ${player.deviceId}` : 'No bike assigned'}</p>
                 </div>
                 {!readOnly && (
@@ -118,7 +122,8 @@ export function PairingRail({
                     className="clear-button"
                     type="button"
                     onClick={() => onAssign(player.id, null)}
-                    aria-label={`Clear ${player.name} bike assignment`}
+                    aria-label={`Reset ${player.name} saved name`}
+                    title="Reset saved name"
                   >
                     <Link2Off size={15} />
                   </button>
@@ -140,7 +145,7 @@ export function PairingRail({
                   onChange={(event) => onAssign(player.id, event.target.value ? Number(event.target.value) : null)}
                 >
                   <option value="">Unassigned</option>
-                  {devices.map((device) => (
+                  {detectedDevices.map((device) => (
                     <option key={device.deviceId} value={device.deviceId}>
                       {device.label} / {device.deviceId}
                     </option>
