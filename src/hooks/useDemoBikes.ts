@@ -278,24 +278,25 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
       - variables.pedalStrokeAsymmetry * 2
     ),
     0,
-    186,
+    183,
   ));
+  const rawWatts = rollout * (
+    92
+    + variables.powerBase * 115
+    + effort * (255 + variables.sprintPower * 350)
+    + variables.torque * 90
+    + cadence * (0.45 + variables.crankSmoothness * 0.35)
+    + variables.launchSnap * startEnvelope * 150
+    + variables.crowdPressure * burstWave * 42
+    - variables.gripFatigue * fatigue * 86
+    - fatigueLull * 120
+    - mistakeEnvelope * 180
+    + noise * (8 + variables.wattNoise * 34)
+  );
   const watts = Math.round(clamp(
-    rollout * (
-      92
-      + variables.powerBase * 115
-      + effort * (255 + variables.sprintPower * 350)
-      + variables.torque * 90
-      + cadence * (0.45 + variables.crankSmoothness * 0.35)
-      + variables.launchSnap * startEnvelope * 150
-      + variables.crowdPressure * burstWave * 42
-      - variables.gripFatigue * fatigue * 86
-      - fatigueLull * 120
-      - mistakeEnvelope * 180
-      + noise * (8 + variables.wattNoise * 34)
-    ),
+    rawWatts * 3.1,
     0,
-    1180,
+    2400,
   ));
   const speedKph = Number(clamp(
     bmxSpeedKphFromCadence(cadence)
