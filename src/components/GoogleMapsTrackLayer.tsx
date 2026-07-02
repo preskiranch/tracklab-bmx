@@ -883,9 +883,9 @@ export function GoogleMapsTrackLayer({
         return;
       }
 
-      const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
       const pose = riderRoutePose(track, rider.distance);
-      const label = `${formatSpeedFromKph(sample?.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+      const speedKph = rider.velocity > 0 ? rider.velocity * 3.6 : null;
+      const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const existing = markerRefs.current.get(player.id);
 
       if (!pose) {

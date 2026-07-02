@@ -1,4 +1,5 @@
 import type { BikeSample, PlayerSlot, RiderState } from '../types';
+import { bmxVelocityMpsFromCadence } from './bmxRollout';
 import { crossedTakeoff, surfaceAngleDeg } from './trackProfile';
 
 const gravityPx = 430;
@@ -59,23 +60,16 @@ export function stepRiders(
     const nowMs = Date.now();
     const watts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt) ? sample?.watts ?? 0 : 0;
     const cadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
-    const sampledSpeed = metricIsUsable(sample, sample?.speedAt, nowMs, raceStartedAt) ? sample?.speedKph ?? null : null;
 
     const wattsAverage = rider.wattsAverage * 0.94 + watts * 0.06;
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
-    const cadenceLift = Math.min(1.4, cadence / 95);
-    const hasDriveSignal = watts > 10 || cadence > 18;
-    const hasSpeedSignal = (sampledSpeed ?? 0) > 0.8;
-    const speedFromPower = hasDriveSignal
-      ? 1.2 + Math.sqrt(Math.max(0, watts)) * 0.27 + cadenceLift * 0.65 + boost * 2.8
-      : 0;
-    const speedFromSensor = sampledSpeed == null ? null : sampledSpeed / 3.6;
-    const targetVelocity = hasDriveSignal || hasSpeedSignal ? Math.max(speedFromPower, speedFromSensor ?? 0) : null;
-    const velocity = targetVelocity == null
+    const hasDriveSignal = watts > 10 && cadence > 18;
+    const rolloutVelocity = hasDriveSignal ? bmxVelocityMpsFromCadence(cadence) : null;
+    const velocity = rolloutVelocity == null
       ? Math.max(0, rider.velocity - (rollingFrictionMps2 + rider.velocity * rider.velocity * airDragPerMeter) * dt)
-      : rider.velocity + (targetVelocity - rider.velocity) * Math.min(1, dt * 2.5);
-    const settledVelocity = velocity < stopVelocityMps && targetVelocity == null ? 0 : velocity;
+      : rolloutVelocity;
+    const settledVelocity = velocity < stopVelocityMps && rolloutVelocity == null ? 0 : velocity;
     const previousDistance = rider.distance;
     const distance = Math.min(raceLengthMeters, previousDistance + settledVelocity * dt);
     const cadenceRps = Math.max(0.1, cadence / 60);

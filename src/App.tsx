@@ -806,7 +806,7 @@ export default function App() {
             finishedAt: rider.finishedAt,
             watts: sample?.watts ?? rider.lastWatts,
             cadence: sample?.cadence ?? null,
-            speedKph: sample?.speedKph ?? (rider.velocity > 0 ? rider.velocity * 3.6 : null),
+            speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
             signal: sample?.signal ?? 0,
             sampleAt: sample?.at ?? null,
           };

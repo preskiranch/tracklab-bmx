@@ -61,8 +61,7 @@ function recordRaceSamples(
 
     const rider = riders.find((item) => item.playerId === player.id);
     const stats = statsByPlayer.get(player.id) ?? createMetricAccumulator(sample.label);
-    const fallbackSpeedKph = rider && rider.velocity > 0 ? rider.velocity * 3.6 : null;
-    const speedKph = metricIsFromRace(sample, sample.speedAt, raceStartedAt) ? sample.speedKph ?? fallbackSpeedKph : fallbackSpeedKph;
+    const speedKph = rider && rider.velocity > 0 ? rider.velocity * 3.6 : null;
 
     stats.deviceLabel = sample.label;
     stats.sampleCount += 1;

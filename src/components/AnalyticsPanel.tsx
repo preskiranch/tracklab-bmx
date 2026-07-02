@@ -87,11 +87,12 @@ function metricValue(
     return value > 0 ? `${value} W` : '--';
   }
 
-  if (!sample?.speedKph) {
+  const raceSpeedKph = rider && rider.velocity > 0 ? rider.velocity * 3.6 : null;
+  if (raceSpeedKph == null) {
     return '--';
   }
 
-  const adjustedKph = sample.speedKph * multiplier;
+  const adjustedKph = raceSpeedKph * multiplier;
   return `${formatSpeedFromKph(adjustedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
 }
 
