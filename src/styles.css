@@ -1338,6 +1338,142 @@ input:focus {
   line-height: 1.35;
 }
 
+.custom-route-list {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.custom-route-list-header,
+.custom-route-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.custom-route-list-header {
+  color: #566b78;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.custom-route-list-header small {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #e7eef3;
+  color: #2c3b47;
+  font-size: 11px;
+}
+
+.custom-route-row {
+  padding: 4px;
+  border: 1px solid #dfe7ee;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.custom-route-row.selected {
+  border-color: #88cd64;
+  background: #f1faec;
+}
+
+.custom-route-open,
+.custom-route-delete {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.custom-route-open {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 7px;
+  color: #111827;
+  text-align: left;
+}
+
+.custom-route-open:hover,
+.custom-route-delete:hover {
+  background: #eef4f7;
+}
+
+.custom-route-row.selected .custom-route-open:hover {
+  background: #e8f7dd;
+}
+
+.custom-route-open strong,
+.custom-route-open span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-route-open strong {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.custom-route-open span {
+  color: #5b6c7a;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.custom-route-delete {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: #a01f1f;
+}
+
+.custom-route-delete:hover {
+  background: #fff0f0;
+}
+
+.custom-route-confirm {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  gap: 4px;
+}
+
+.custom-route-confirm button {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1d2935;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.custom-route-confirm button:hover {
+  background: #f7f9fb;
+}
+
+.custom-route-confirm button.danger {
+  border-color: #d14343;
+  background: #fff0f0;
+  color: #a01f1f;
+}
+
+.custom-route-confirm button.danger:hover {
+  background: #ffe1e1;
+}
+
 .mapping-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

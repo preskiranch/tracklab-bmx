@@ -1394,6 +1394,45 @@ export default function App() {
     }
   };
 
+  const handleCustomRouteDelete = (trackId: string) => {
+    const customRoute = customRoutes.find((route) => route.id === trackId);
+    if (!customRoute) {
+      return;
+    }
+
+    setCustomRoutes((current) => {
+      const next = current.filter((route) => route.id !== trackId);
+      writeStoredCustomRoutes(next);
+      return next;
+    });
+    setStoredMappings((current) => {
+      if (!current[trackId]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[trackId];
+      writeStoredTrackMappings(next);
+      return next;
+    });
+
+    if (selectedTrackId === trackId) {
+      const fallbackTrack = baseCatalogTracks[0] ?? defaultTrack;
+      setSelectedCountry(fallbackTrack.country);
+      setSelectedState(fallbackTrack.state);
+      setSelectedTrackId(fallbackTrack.id);
+    }
+
+    setDraftPoints([]);
+    setDraftZoneMeters([]);
+    setMappingMode(false);
+    setMappingFullscreen(false);
+    setCustomRouteStatus(`Deleted ${customRoute.name}.`);
+    setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
+    resetRace();
+  };
+
   useEffect(() => {
     const mapping = storedMappings[selectedTrack.id];
     setDraftPoints(mapping?.centerline ?? []);
@@ -2139,6 +2178,8 @@ export default function App() {
                 customRoutePredictions={customRoutePredictions}
                 customRoutePredictionStatus={customRoutePredictionStatus}
                 selectedCustomRoutePredictionId={selectedCustomRoutePrediction?.id ?? null}
+                customRoutes={customRoutes}
+                selectedTrackId={selectedTrack.id}
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
                 maxPlayers={maxPlayers}
@@ -2170,6 +2211,8 @@ export default function App() {
                 onCustomRouteLocationChange={handleCustomRouteLocationChange}
                 onCustomRoutePredictionSelect={handleCustomRoutePredictionSelect}
                 onCustomRouteCreate={handleCustomRouteCreate}
+                onCustomRouteSelect={handleTrackChange}
+                onCustomRouteDelete={handleCustomRouteDelete}
                 onDemoModeChange={handleDemoModeChange}
                 onDemoBikeCountChange={handleDemoBikeCountChange}
                 onStartCadenceModeChange={setStartCadenceMode}

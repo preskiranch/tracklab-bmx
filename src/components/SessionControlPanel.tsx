@@ -1,4 +1,4 @@
-import type { ChangeEvent } from 'react';
+import { useState, type ChangeEvent } from 'react';
 import {
   Activity,
   Bike,
@@ -52,6 +52,8 @@ type SessionControlPanelProps = {
   customRoutePredictions: PlacePredictionOption[];
   customRoutePredictionStatus: string | null;
   selectedCustomRoutePredictionId: string | null;
+  customRoutes: TrackRecord[];
+  selectedTrackId: string;
   raceState: RaceState;
   activeBikeCount: number;
   maxPlayers: number;
@@ -83,6 +85,8 @@ type SessionControlPanelProps = {
   onCustomRouteLocationChange: (value: string) => void;
   onCustomRoutePredictionSelect: (prediction: PlacePredictionOption) => void;
   onCustomRouteCreate: () => void;
+  onCustomRouteSelect: (trackId: string) => void;
+  onCustomRouteDelete: (trackId: string) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoBikeCountChange: (count: number) => void;
   onStartCadenceModeChange: (mode: StartCadenceMode) => void;
@@ -126,6 +130,8 @@ export function SessionControlPanel({
   customRoutePredictions,
   customRoutePredictionStatus,
   selectedCustomRoutePredictionId,
+  customRoutes,
+  selectedTrackId,
   raceState,
   activeBikeCount,
   maxPlayers,
@@ -157,6 +163,8 @@ export function SessionControlPanel({
   onCustomRouteLocationChange,
   onCustomRoutePredictionSelect,
   onCustomRouteCreate,
+  onCustomRouteSelect,
+  onCustomRouteDelete,
   onDemoModeChange,
   onDemoBikeCountChange,
   onStartCadenceModeChange,
@@ -175,6 +183,7 @@ export function SessionControlPanel({
   onCancel,
   onReset,
 }: SessionControlPanelProps) {
+  const [pendingCustomRouteDeleteId, setPendingCustomRouteDeleteId] = useState<string | null>(null);
   const hasMappedRoute = track.routeStatus === 'user-mapped';
   const canStart = !startGateActive && raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
   const canCancel = startGateActive || raceState === 'racing';
@@ -261,6 +270,62 @@ export function SessionControlPanel({
           <Plus size={15} />
           Add Custom Route
         </button>
+
+        {customRoutes.length > 0 && (
+          <div className="custom-route-list" aria-label="Saved custom locations">
+            <div className="custom-route-list-header">
+              <span>Saved locations</span>
+              <small>{customRoutes.length}</small>
+            </div>
+
+            {customRoutes.map((customRoute) => {
+              const isSelected = customRoute.id === selectedTrackId;
+              const isPendingDelete = customRoute.id === pendingCustomRouteDeleteId;
+              const routeLocation = customRoute.address ?? `${customRoute.latitude?.toFixed(5)}, ${customRoute.longitude?.toFixed(5)}`;
+
+              return (
+                <div className={isSelected ? 'custom-route-row selected' : 'custom-route-row'} key={customRoute.id}>
+                  <button
+                    className="custom-route-open"
+                    type="button"
+                    onClick={() => onCustomRouteSelect(customRoute.id)}
+                    aria-pressed={isSelected}
+                  >
+                    <strong>{customRoute.name}</strong>
+                    <span>{routeLocation}</span>
+                  </button>
+                  {isPendingDelete ? (
+                    <div className="custom-route-confirm" aria-label={`Confirm delete ${customRoute.name}`}>
+                      <button type="button" onClick={() => setPendingCustomRouteDeleteId(null)}>
+                        Keep
+                      </button>
+                      <button
+                        className="danger"
+                        type="button"
+                        onClick={() => {
+                          onCustomRouteDelete(customRoute.id);
+                          setPendingCustomRouteDeleteId(null);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="custom-route-delete"
+                      type="button"
+                      onClick={() => setPendingCustomRouteDeleteId(customRoute.id)}
+                      aria-label={`Delete ${customRoute.name}`}
+                      title={`Delete ${customRoute.name}`}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="panel-section mapping-section">
