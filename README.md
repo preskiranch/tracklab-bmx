@@ -270,24 +270,44 @@ Each track can be fine-tuned from the dashboard:
 5. Set the rest-gap seconds for the stop/start cue between sprint zones.
 6. Save the mapping. The app stores it locally and immediately uses it for rider movement, sprint zones, analytics, and multiplayer track sync.
 
-The saved JSON can be exported and imported on another machine. Because the current Render deployment is a static site, browser saves cannot publish themselves into the global online catalog yet. The next production step is a database-backed mapping service, for example Supabase or Firebase, where authenticated users can publish a mapping, moderation can approve it, and every user selecting that track receives the approved centerline automatically.
+The saved JSON can be exported and imported on another machine. The real-time multiplayer service can coordinate active rooms, but published global track mappings still need a database-backed mapping service, for example Supabase or Firebase, where authenticated users can publish a mapping, moderation can approve it, and every user selecting that track receives the approved centerline automatically.
 
 ## Render Deployment
 
-`render.yaml` is included for a Render Static Site deployment.
+`render.yaml` is included for a Render Web Service deployment. The Node server serves the built app from `dist/` and hosts the real-time multiplayer WebSocket endpoint at `/multiplayer`.
 
 Render environment variables:
 
 ```text
 VITE_GOOGLE_MAPS_API_KEY
 VITE_WATTBIKE_BRIDGE_URL
+VITE_TRACKLAB_MULTIPLAYER_URL
 ```
 
-Render can host the web platform and show Google imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured. Render cannot directly read a USB ANT+ dongle on your local PC. For real bikes, the PC still needs to run the local bridge, and the hosted app needs a reachable WebSocket bridge URL. Local development defaults to:
+`VITE_TRACKLAB_MULTIPLAYER_URL` is optional when the app and multiplayer server are served from the same Render host. Leave it empty for:
+
+```text
+wss://tracklab-bmx.onrender.com/multiplayer
+```
+
+Render can host the web platform, show Google imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured, and coordinate online rooms/challenges. Render cannot directly read a USB ANT+ dongle on your local PC. For real bikes, the PC still needs to run the local bridge, and the hosted app needs a reachable WebSocket bridge URL. Local development defaults to:
 
 ```text
 VITE_WATTBIKE_BRIDGE_URL=ws://127.0.0.1:8787
 ```
+
+### Multiplayer
+
+The first production multiplayer layer is WebSocket-based and supports:
+
+- Guest rider identity saved in the browser.
+- Private rooms with copyable invite links using `?room=ROOM-CODE`.
+- Online availability for riders who want challenges.
+- Challenge request/accept/decline flow.
+- Room chat and shared room track selection.
+- Random track selection from established mapped/estimated tracks.
+
+This live layer keeps active rooms in memory on the Render service. Durable cross-device accounts, saved bike names, published mappings, friend lists, and permanent leaderboards should be backed by a database/auth provider in the next phase.
 
 ## Design Assets
 

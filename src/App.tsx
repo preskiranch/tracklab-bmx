@@ -64,6 +64,7 @@ import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore'
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
+import { useMultiplayer } from './hooks/useMultiplayer';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import { useZoneAudioCues } from './hooks/useZoneAudioCues';
 import type {
@@ -443,6 +444,7 @@ export default function App() {
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
   const initialUrlTrackSyncedRef = useRef(false);
   const bridgeUserDataLoadedRef = useRef(false);
+  const roomTrackApplyRef = useRef<string | null>(null);
   const [initialTrack] = useState(readInitialTrack);
   const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
@@ -485,7 +487,6 @@ export default function App() {
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
-  const [accountsEnabled, setAccountsEnabled] = useState(false);
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
   const [chatDraft, setChatDraft] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -503,6 +504,12 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('room')) {
+      setPlayMode('multiplayer');
+    }
   }, []);
 
   useEffect(() => {
@@ -626,6 +633,11 @@ export default function App() {
     },
     [demoMode, demoPlayers, sessionPlayers],
   );
+  const multiplayer = useMultiplayer({
+    enabled: playMode === 'multiplayer',
+    track: effectiveTrack,
+    bikeCount: activePlayers.length,
+  });
   const livePlayerCount = useMemo(
     () => activePlayers.filter((player) => {
       if (player.deviceId == null) {
@@ -671,6 +683,42 @@ export default function App() {
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const canCancelRace = startGateStatus.active || raceState === 'racing';
   const shellFullscreenActive = raceViewFullscreen || mappingFullscreen;
+
+  useEffect(() => {
+    if (playMode !== 'multiplayer' || !multiplayer.currentRoom?.track.id) {
+      return;
+    }
+
+    const roomTrackId = multiplayer.currentRoom.track.id;
+    if (roomTrackId === selectedTrackId) {
+      return;
+    }
+
+    const roomTrack = catalogTracks.find((track) => track.id === roomTrackId);
+    if (!roomTrack) {
+      return;
+    }
+
+    roomTrackApplyRef.current = roomTrackId;
+    setSelectedCountry(roomTrack.country);
+    setSelectedState(roomTrack.state);
+    setSelectedTrackId(roomTrack.id);
+  }, [catalogTracks, multiplayer.currentRoom?.track.id, playMode, selectedTrackId]);
+
+  useEffect(() => {
+    const roomId = multiplayer.currentRoom?.id;
+    const roomTrackId = multiplayer.currentRoom?.track.id;
+    if (playMode !== 'multiplayer' || !roomId || !roomTrackId || effectiveTrack.id === roomTrackId) {
+      return;
+    }
+
+    if (roomTrackApplyRef.current === roomTrackId) {
+      roomTrackApplyRef.current = null;
+      return;
+    }
+
+    void multiplayer.syncTrack(effectiveTrack);
+  }, [effectiveTrack, multiplayer.currentRoom?.id, multiplayer.currentRoom?.track.id, multiplayer.syncTrack, playMode]);
 
   useEffect(() => {
     if (demoMode && raceState === 'finished') {
@@ -1539,9 +1587,43 @@ export default function App() {
     resetRace();
   };
 
+  const shareMultiplayerInvite = useCallback(() => {
+    if (!multiplayer.inviteUrl) {
+      return;
+    }
+
+    void navigator.clipboard?.writeText(multiplayer.inviteUrl).catch(() => {
+      window.prompt('Copy this TrackLab room invite link:', multiplayer.inviteUrl);
+    });
+  }, [multiplayer.inviteUrl]);
+
+  const chooseRandomRoomTrack = useCallback(() => {
+    const candidates = catalogTracks.filter((track) => (
+      track.routeStatus === 'verified'
+      || track.routeStatus === 'estimated'
+      || track.routeStatus === 'user-mapped'
+    ));
+    const pool = candidates.length > 0 ? candidates : catalogTracks;
+    const nextTrack = pool[Math.floor(Math.random() * pool.length)];
+    if (!nextTrack) {
+      return;
+    }
+
+    setSelectedCountry(nextTrack.country);
+    setSelectedState(nextTrack.state);
+    setSelectedTrackId(nextTrack.id);
+    void multiplayer.syncTrack(nextTrack);
+  }, [catalogTracks, multiplayer.syncTrack]);
+
   const sendChatMessage = () => {
     const text = chatDraft.trim();
     if (!text) {
+      return;
+    }
+
+    if (playMode === 'multiplayer' && multiplayer.currentRoom) {
+      multiplayer.sendRoomChat(text);
+      setChatDraft('');
       return;
     }
 
@@ -2002,17 +2084,34 @@ export default function App() {
 
               <MultiplayerPanel
                 playMode={playMode}
-                accountsEnabled={accountsEnabled}
-                roomCode={`${effectiveTrack.countryCode}-${effectiveTrack.id.slice(0, 4).toUpperCase()}-${activePlayers.length || 1}24`}
+                connection={multiplayer.connection}
+                status={multiplayer.status}
+                riderName={multiplayer.profile.name}
+                riderAvailable={multiplayer.profile.available}
+                currentUserId={multiplayer.clientId}
+                currentRoom={multiplayer.currentRoom}
+                rooms={multiplayer.rooms}
+                onlineRiders={multiplayer.onlineRiders}
+                incomingChallenges={multiplayer.incomingChallenges}
+                inviteUrl={multiplayer.inviteUrl}
                 track={effectiveTrack}
                 players={activePlayers}
                 maxPlayers={maxPlayers}
                 riders={riders}
                 samplesByDevice={samplesByDevice}
                 chatMessages={chatMessages}
+                roomMessages={multiplayer.roomMessages}
                 chatDraft={chatDraft}
                 onPlayModeChange={setPlayMode}
-                onAccountsEnabledChange={setAccountsEnabled}
+                onRiderNameChange={(name) => multiplayer.setProfile({ name })}
+                onRiderAvailableChange={(available) => multiplayer.setProfile({ available })}
+                onCreatePrivateRoom={multiplayer.createPrivateRoom}
+                onLeaveRoom={multiplayer.leaveRoom}
+                onShareInvite={shareMultiplayerInvite}
+                onRandomTrack={chooseRandomRoomTrack}
+                onChallengeRider={multiplayer.challengeRider}
+                onAcceptChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, true)}
+                onDeclineChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, false)}
                 onChatDraftChange={setChatDraft}
                 onChatSend={sendChatMessage}
               />

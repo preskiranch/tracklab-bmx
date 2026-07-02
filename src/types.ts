@@ -90,6 +90,48 @@ export type BikeProfile = {
   updatedAt: number;
 };
 
+export type MultiplayerTrackSummary = {
+  id: string;
+  name: string;
+  country: string;
+  state: string;
+};
+
+export type MultiplayerRider = {
+  id: string;
+  name: string;
+  available: boolean;
+  bikeCount: number;
+  track: MultiplayerTrackSummary;
+  roomId: string | null;
+  lastSeen: number;
+};
+
+export type MultiplayerRoom = {
+  id: string;
+  hostId: string | null;
+  private: boolean;
+  track: MultiplayerTrackSummary;
+  createdAt: number;
+  members: MultiplayerRider[];
+  memberCount: number;
+};
+
+export type MultiplayerRoomMessage = {
+  id: string;
+  author: string;
+  text: string;
+  at: string;
+};
+
+export type MultiplayerChallenge = {
+  id: string;
+  fromId: string;
+  toId: string;
+  track: MultiplayerTrackSummary;
+  createdAt: number;
+};
+
 export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
 
 export type RaceState = 'ready' | 'racing' | 'finished';

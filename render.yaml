@@ -1,11 +1,13 @@
 services:
   - type: web
     name: tracklab-bmx
-    runtime: static
+    runtime: node
     buildCommand: npm ci && npm run build
-    staticPublishPath: ./dist
+    startCommand: npm start
     envVars:
       - key: VITE_GOOGLE_MAPS_API_KEY
         sync: false
       - key: VITE_WATTBIKE_BRIDGE_URL
+        sync: false
+      - key: VITE_TRACKLAB_MULTIPLAYER_URL
         sync: false

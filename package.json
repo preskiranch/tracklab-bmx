@@ -11,6 +11,8 @@
     "bridge": "node bridge/server.mjs",
     "bridge:ant": "WATTBIKE_INPUT=ant node bridge/server.mjs",
     "bridge:sim": "WATTBIKE_INPUT=sim node bridge/server.mjs",
+    "start": "node cloud/server.mjs",
+    "cloud": "npm run build && node cloud/server.mjs",
     "ant:capture": "node scripts/capture-ant-wattbike.mjs",
     "ble:inspect": "node bridge/ble-inspector.mjs",
     "assets:clean": "node scripts/clean-sprite-alpha.mjs",

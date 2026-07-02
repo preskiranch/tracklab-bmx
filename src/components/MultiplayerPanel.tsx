@@ -1,6 +1,28 @@
 import type { FormEvent } from 'react';
-import { Copy, Link, MessageSquare, RadioTower, Send, UserPlus, Users } from 'lucide-react';
-import type { BikeSample, PlayMode, PlayerSlot, RiderState, TrackRecord } from '../types';
+import {
+  Check,
+  Copy,
+  Link,
+  LogOut,
+  MessageSquare,
+  RadioTower,
+  Send,
+  Shuffle,
+  UserPlus,
+  Users,
+  X,
+} from 'lucide-react';
+import type {
+  BikeSample,
+  MultiplayerChallenge,
+  MultiplayerRider,
+  MultiplayerRoom,
+  MultiplayerRoomMessage,
+  PlayMode,
+  PlayerSlot,
+  RiderState,
+  TrackRecord,
+} from '../types';
 
 export type ChatMessage = {
   id: number;
@@ -11,17 +33,37 @@ export type ChatMessage = {
 
 type MultiplayerPanelProps = {
   playMode: PlayMode;
-  accountsEnabled: boolean;
-  roomCode: string;
+  connection: string;
+  status: string;
+  riderName: string;
+  riderAvailable: boolean;
+  currentUserId: string | null;
+  currentRoom: MultiplayerRoom | null;
+  rooms: MultiplayerRoom[];
+  onlineRiders: MultiplayerRider[];
+  incomingChallenges: Array<{
+    challenge: MultiplayerChallenge;
+    from: MultiplayerRider;
+  }>;
+  inviteUrl: string;
   track: TrackRecord;
   players: PlayerSlot[];
   maxPlayers: number;
   riders: RiderState[];
   samplesByDevice: Map<number, BikeSample>;
   chatMessages: ChatMessage[];
+  roomMessages: MultiplayerRoomMessage[];
   chatDraft: string;
   onPlayModeChange: (mode: PlayMode) => void;
-  onAccountsEnabledChange: (enabled: boolean) => void;
+  onRiderNameChange: (name: string) => void;
+  onRiderAvailableChange: (available: boolean) => void;
+  onCreatePrivateRoom: () => void;
+  onLeaveRoom: () => void;
+  onShareInvite: () => void;
+  onRandomTrack: () => void;
+  onChallengeRider: (riderId: string) => void;
+  onAcceptChallenge: (challengeId: string) => void;
+  onDeclineChallenge: (challengeId: string) => void;
   onChatDraftChange: (value: string) => void;
   onChatSend: () => void;
 };
@@ -32,17 +74,34 @@ function sampleForPlayer(player: PlayerSlot, samplesByDevice: Map<number, BikeSa
 
 export function MultiplayerPanel({
   playMode,
-  accountsEnabled,
-  roomCode,
+  connection,
+  status,
+  riderName,
+  riderAvailable,
+  currentUserId,
+  currentRoom,
+  rooms,
+  onlineRiders,
+  incomingChallenges,
+  inviteUrl,
   track,
   players,
   maxPlayers,
   riders,
   samplesByDevice,
   chatMessages,
+  roomMessages,
   chatDraft,
   onPlayModeChange,
-  onAccountsEnabledChange,
+  onRiderNameChange,
+  onRiderAvailableChange,
+  onCreatePrivateRoom,
+  onLeaveRoom,
+  onShareInvite,
+  onRandomTrack,
+  onChallengeRider,
+  onAcceptChallenge,
+  onDeclineChallenge,
   onChatDraftChange,
   onChatSend,
 }: MultiplayerPanelProps) {
@@ -50,6 +109,18 @@ export function MultiplayerPanel({
     event.preventDefault();
     onChatSend();
   };
+  const multiplayerOnline = playMode === 'multiplayer' && connection === 'open';
+  const availableRiders = onlineRiders
+    .filter((rider) => rider.id !== currentUserId && rider.available)
+    .slice(0, 8);
+  const displayedMessages = playMode === 'multiplayer' && currentRoom
+    ? roomMessages.map((message) => ({
+      id: message.id,
+      author: message.author,
+      text: message.text,
+      at: new Date(message.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+    }))
+    : chatMessages;
 
   return (
     <aside className="multiplayer-panel">
@@ -79,28 +150,61 @@ export function MultiplayerPanel({
           </button>
         </div>
 
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={accountsEnabled}
-            onChange={(event) => onAccountsEnabledChange(event.target.checked)}
-          />
-          <span>Accounts optional</span>
-        </label>
+        <div className={`multiplayer-status ${multiplayerOnline ? 'online' : ''}`}>
+          <RadioTower size={15} />
+          <span>{playMode === 'multiplayer' ? status : 'Local-only session. Switch to Multiplayer to go online.'}</span>
+        </div>
+
+        {playMode === 'multiplayer' && (
+          <div className="profile-card">
+            <label className="text-field compact">
+              <span>Rider name</span>
+              <input
+                type="text"
+                value={riderName}
+                onChange={(event) => onRiderNameChange(event.target.value)}
+              />
+            </label>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={riderAvailable}
+                onChange={(event) => onRiderAvailableChange(event.target.checked)}
+              />
+              <span>Available for challenges</span>
+            </label>
+          </div>
+        )}
 
         <div className="room-card">
           <div>
             <span>Private room</span>
-            <strong>{roomCode}</strong>
+            <strong>{currentRoom?.id ?? 'No room'}</strong>
           </div>
-          <button className="square-button" type="button" aria-label="Copy room code">
+          <button
+            className="square-button"
+            type="button"
+            aria-label="Copy room invite"
+            disabled={!currentRoom || !inviteUrl}
+            onClick={onShareInvite}
+          >
             <Copy size={16} />
           </button>
         </div>
 
         <div className="room-actions">
-          <button type="button"><Link size={14} /> Share link</button>
-          <button type="button"><UserPlus size={14} /> Invite</button>
+          <button type="button" disabled={!multiplayerOnline} onClick={onCreatePrivateRoom}>
+            <UserPlus size={14} /> Create room
+          </button>
+          <button type="button" disabled={!currentRoom || !inviteUrl} onClick={onShareInvite}>
+            <Link size={14} /> Share link
+          </button>
+          <button type="button" disabled={!currentRoom} onClick={onRandomTrack}>
+            <Shuffle size={14} /> Random track
+          </button>
+          <button type="button" disabled={!currentRoom} onClick={onLeaveRoom}>
+            <LogOut size={14} /> Leave
+          </button>
         </div>
 
         <div className="selected-track-note">
@@ -108,6 +212,61 @@ export function MultiplayerPanel({
           <span>{playMode === 'local' ? 'Local session' : 'Room track'}: {track.name}</span>
         </div>
       </section>
+
+      {playMode === 'multiplayer' && incomingChallenges.length > 0 && (
+        <section className="panel-section challenge-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Incoming</span>
+              <h3>Challenge request</h3>
+            </div>
+          </div>
+          {incomingChallenges.map(({ challenge, from }) => (
+            <div className="challenge-card" key={challenge.id}>
+              <div>
+                <strong>{from.name}</strong>
+                <span>{challenge.track.name}</span>
+              </div>
+              <button type="button" onClick={() => onAcceptChallenge(challenge.id)}><Check size={14} /> Accept</button>
+              <button type="button" onClick={() => onDeclineChallenge(challenge.id)}><X size={14} /> Decline</button>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {playMode === 'multiplayer' && (
+        <section className="panel-section online-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Online</span>
+              <h3>{availableRiders.length} riders available</h3>
+            </div>
+            <Users size={18} />
+          </div>
+
+          <div className="online-rider-list">
+            {availableRiders.length === 0 && <div className="empty-compact">No available riders yet.</div>}
+            {availableRiders.map((rider) => (
+              <div className="online-rider-row" key={rider.id}>
+                <div>
+                  <strong>{rider.name}</strong>
+                  <span>{rider.bikeCount} bike{rider.bikeCount === 1 ? '' : 's'} / {rider.track.name}</span>
+                </div>
+                <button type="button" onClick={() => onChallengeRider(rider.id)}>Challenge</button>
+              </div>
+            ))}
+          </div>
+
+          {rooms.length > 0 && (
+            <div className="open-room-list">
+              <span>Live private rooms</span>
+              {rooms.slice(0, 4).map((room) => (
+                <small key={room.id}>{room.id} / {room.memberCount} riders / {room.track.name}</small>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="panel-section roster-section">
         <div className="section-heading">
@@ -146,7 +305,7 @@ export function MultiplayerPanel({
         </div>
 
         <div className="chat-log">
-          {chatMessages.map((message) => (
+          {displayedMessages.map((message) => (
             <div className="chat-message" key={message.id}>
               <div>
                 <strong>{message.author}</strong>
