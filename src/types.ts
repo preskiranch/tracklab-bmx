@@ -154,6 +154,7 @@ export type MultiplayerRaceRider = {
 };
 
 export type MultiplayerRaceState = {
+  sessionId: string;
   clientId: string;
   riderName: string;
   roomId: string;

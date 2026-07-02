@@ -31,6 +31,7 @@
     "ant-plus-next": "^0.4.0",
     "concurrently": "^9.2.1",
     "lucide-react": "^0.562.0",
+    "pg": "^8.22.0",
     "pngjs": "^7.0.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

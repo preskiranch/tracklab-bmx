@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import * as persistence from './persistence.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(__dirname, '..');
@@ -14,6 +15,7 @@ const websocketPath = '/multiplayer';
 const clients = new Map();
 const rooms = new Map();
 const challenges = new Map();
+const persistedRaceResultKeys = new Set();
 
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -39,6 +41,11 @@ function randomId(prefix, length = 8) {
 function sanitizeText(value, fallback, maxLength = 80) {
   const text = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
   return (text || fallback).slice(0, maxLength);
+}
+
+function sanitizeGuestKey(value, fallback) {
+  const text = sanitizeText(value, fallback, 160);
+  return text.replace(/[^a-zA-Z0-9:._-]/g, '').slice(0, 160) || fallback;
 }
 
 function sanitizeTrack(value) {
@@ -104,6 +111,7 @@ function sanitizeRaceState(value, client, room) {
     : [];
 
   return {
+    sessionId: sanitizeText(value.sessionId, `${room.id}:${client.guestKey}:${value.trackId ?? room.track.id}`, 160),
     clientId: client.id,
     riderName: client.name,
     roomId: room.id,
@@ -186,6 +194,7 @@ function leaveRoom(client, reason = 'left') {
   const room = rooms.get(client.roomId);
   const oldRoomId = client.roomId;
   client.roomId = null;
+  void persistence.saveRoomLeave(oldRoomId, client);
 
   if (!room) {
     send(client, { type: 'room-left', roomId: oldRoomId, reason });
@@ -218,6 +227,7 @@ function joinRoom(client, room) {
   room.members.add(client.id);
   client.roomId = room.id;
   client.track = room.track;
+  void persistence.saveRoomJoin(room, client);
   broadcastRoom(room.id, roomState(room));
   broadcastLobby();
 }
@@ -245,6 +255,8 @@ function createRoom(host, track, privateRoom = true) {
   };
 
   rooms.set(id, room);
+  void persistence.saveRoom(room, host);
+  void persistence.saveRoomMessage(room.id, null, room.messages[0]);
   joinRoom(host, room);
   return room;
 }
@@ -259,6 +271,7 @@ function sendChallenge(fromClient, targetClient, track, statusPrefix = 'Challeng
   };
 
   challenges.set(challenge.id, challenge);
+  void persistence.saveChallenge(challenge, fromClient, targetClient);
   send(targetClient, {
     type: 'challenge-incoming',
     challenge,
@@ -267,7 +280,31 @@ function sendChallenge(fromClient, targetClient, track, statusPrefix = 'Challeng
   send(fromClient, { type: 'challenge-status', message: `${statusPrefix} to ${targetClient.name}.` });
 }
 
-function handleClientMessage(client, rawMessage) {
+async function findRoom(roomId) {
+  const activeRoom = rooms.get(roomId);
+  if (activeRoom) {
+    return activeRoom;
+  }
+
+  const savedRoom = await persistence.loadRoom(roomId);
+  if (!savedRoom) {
+    return null;
+  }
+
+  savedRoom.track = sanitizeTrack(savedRoom.track);
+  savedRoom.messages = savedRoom.messages.length > 0
+    ? savedRoom.messages
+    : [{
+      id: randomId('MSG', 10),
+      author: 'TrackLab',
+      text: 'Private room reopened.',
+      at: new Date().toISOString(),
+    }];
+  rooms.set(savedRoom.id, savedRoom);
+  return savedRoom;
+}
+
+async function handleClientMessage(client, rawMessage) {
   let message = null;
   try {
     message = JSON.parse(rawMessage.toString());
@@ -281,16 +318,19 @@ function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'hello' || message.type === 'presence') {
+    client.guestKey = sanitizeGuestKey(message.guestKey, client.guestKey);
     client.name = sanitizeText(message.name, client.name, 64);
     client.available = Boolean(message.available);
     client.bikeCount = Math.max(0, Math.min(8, Number(message.bikeCount) || 0));
     client.track = sanitizeTrack(message.track ?? client.track);
     client.lastSeen = Date.now();
+    void persistence.upsertProfile(client);
 
     if (message.type === 'hello') {
       send(client, {
         type: 'welcome',
         clientId: client.id,
+        persistence: persistence.persistenceEnabled(),
         riders: [...clients.values()].map(publicRider),
         rooms: [...rooms.values()].map(publicRoom),
       });
@@ -307,7 +347,7 @@ function handleClientMessage(client, rawMessage) {
 
   if (message.type === 'join-room') {
     const roomId = sanitizeText(message.roomId, '', 32).toUpperCase();
-    const room = rooms.get(roomId);
+    const room = await findRoom(roomId);
     if (!room) {
       send(client, { type: 'room-error', message: `Room ${roomId || 'unknown'} is not available.` });
       return;
@@ -340,6 +380,7 @@ function handleClientMessage(client, rawMessage) {
         member.track = room.track;
       }
     });
+    void persistence.updateRoomTrack(room);
     broadcastRoom(room.id, roomState(room));
     broadcastLobby();
     return;
@@ -367,6 +408,7 @@ function handleClientMessage(client, rawMessage) {
     }
 
     room.messages = [...room.messages, chatMessage].slice(-40);
+    void persistence.saveRoomMessage(room.id, client, chatMessage);
     broadcastRoom(room.id, { type: 'room-chat', message: chatMessage, messages: room.messages });
     return;
   }
@@ -387,6 +429,13 @@ function handleClientMessage(client, rawMessage) {
     }
 
     room.raceStates.set(client.id, raceState);
+    if (raceState.raceState === 'finished') {
+      const resultKey = `${raceState.sessionId}:${client.guestKey}:${raceState.summary.map((summary) => `${summary.playerId}:${summary.finishTimeMs ?? 'open'}`).join('|')}`;
+      if (!persistedRaceResultKeys.has(resultKey)) {
+        persistedRaceResultKeys.add(resultKey);
+        void persistence.saveRaceResults(room, client, raceState);
+      }
+    }
     broadcastRoom(room.id, { type: 'race-sync', state: raceState });
     return;
   }
@@ -435,11 +484,13 @@ function handleClientMessage(client, rawMessage) {
     if (!message.accepted) {
       send(challenger, { type: 'challenge-status', message: `${client.name} declined the challenge.` });
       send(client, { type: 'challenge-status', message: 'Challenge declined.' });
+      void persistence.updateChallenge(challenge.id, 'declined');
       return;
     }
 
     const room = createRoom(challenger, challenge.track, true);
     joinRoom(client, room);
+    void persistence.updateChallenge(challenge.id, 'accepted', room.id);
     send(challenger, { type: 'challenge-status', message: `${client.name} accepted. Room ${room.id} is ready.` });
     send(client, { type: 'challenge-status', message: `Joined ${challenger.name}'s room.` });
   }
@@ -453,8 +504,23 @@ async function serveStatic(request, response) {
       ok: true,
       clients: clients.size,
       rooms: rooms.size,
+      persistence: persistence.persistenceEnabled(),
       websocketPath,
     }));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/multiplayer/leaderboards') {
+    const trackId = sanitizeText(requestUrl.searchParams.get('trackId'), '', 140);
+    if (!trackId) {
+      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'trackId is required' }));
+      return;
+    }
+
+    const leaderboards = await persistence.loadLeaderboards(trackId, 10);
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+    response.end(JSON.stringify({ trackId, persistence: persistence.persistenceEnabled(), leaderboards }));
     return;
   }
 
@@ -499,6 +565,7 @@ const wss = new WebSocketServer({ noServer: true });
 wss.on('connection', (socket) => {
   const client = {
     id: randomId('RIDER', 10),
+    guestKey: randomId('GUEST', 16),
     socket,
     name: 'TrackLab Rider',
     available: false,
@@ -516,9 +583,15 @@ wss.on('connection', (socket) => {
   });
   broadcastLobby();
 
-  socket.on('message', (message) => handleClientMessage(client, message));
+  socket.on('message', (message) => {
+    void handleClientMessage(client, message).catch((error) => {
+      console.warn('[cloud] multiplayer message failed:', error instanceof Error ? error.message : error);
+      send(client, { type: 'error', message: 'Multiplayer server could not process that action.' });
+    });
+  });
   socket.on('close', () => {
     leaveRoom(client, 'disconnected');
+    void persistence.setProfileOffline(client);
     clients.delete(client.id);
     broadcastLobby();
   });
@@ -536,6 +609,8 @@ server.on('upgrade', (request, socket, head) => {
   });
 });
 
-server.listen(port, () => {
-  console.log(`[cloud] TrackLab BMX web + multiplayer listening on :${port}`);
+void persistence.initPersistence().finally(() => {
+  server.listen(port, () => {
+    console.log(`[cloud] TrackLab BMX web + multiplayer listening on :${port}`);
+  });
 });

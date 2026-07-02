@@ -126,6 +126,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
   const sendPresence = useCallback((nextProfile = profile) => {
     return send({
       type: 'presence',
+      guestKey: nextProfile.guestKey,
       name: nextProfile.name,
       available: nextProfile.available,
       bikeCount,
@@ -180,6 +181,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
         setStatus('Multiplayer online.');
         socket.send(JSON.stringify({
           type: 'hello',
+          guestKey: latestProfile.guestKey,
           name: latestProfile.name,
           available: latestProfile.available,
           bikeCount: latestBikeCountRef.current,

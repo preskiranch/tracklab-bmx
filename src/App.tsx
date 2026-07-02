@@ -72,6 +72,7 @@ import type {
   BikeProfile,
   DistanceUnit,
   IntervalMode,
+  LeaderboardEntry,
   LeaderboardMetric,
   MappingEditMode,
   MetricKey,
@@ -492,6 +493,7 @@ export default function App() {
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
+  const [publicLeaderboards, setPublicLeaderboards] = useState<Record<LeaderboardMetric, LeaderboardEntry[]> | null>(null);
   const [chatDraft, setChatDraft] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: 1, author: 'Coach', text: 'Gate cadence looked strong through the first straight.', at: '10:24 AM' },
@@ -582,9 +584,55 @@ export default function App() {
   );
   const selectedTrackMapping = storedMappings[selectedTrack.id];
   const effectiveTrack = useMemo(
-    () => (selectedTrackMapping ? applyUserTrackMapping(selectedTrack, selectedTrackMapping) : selectedTrack),
-    [selectedTrack, selectedTrackMapping],
+    () => {
+      const mappedTrack = selectedTrackMapping ? applyUserTrackMapping(selectedTrack, selectedTrackMapping) : selectedTrack;
+      if (!publicLeaderboards) {
+        return mappedTrack;
+      }
+
+      return {
+        ...mappedTrack,
+        leaderboards: {
+          rpm: publicLeaderboards.rpm.length > 0 ? publicLeaderboards.rpm : mappedTrack.leaderboards.rpm,
+          speed: publicLeaderboards.speed.length > 0 ? publicLeaderboards.speed : mappedTrack.leaderboards.speed,
+          watts: publicLeaderboards.watts.length > 0 ? publicLeaderboards.watts : mappedTrack.leaderboards.watts,
+        },
+      };
+    },
+    [publicLeaderboards, selectedTrack, selectedTrackMapping],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    setPublicLeaderboards(null);
+
+    fetch(`/api/multiplayer/leaderboards?trackId=${encodeURIComponent(selectedTrack.id)}`)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Leaderboard request returned ${response.status}`);
+        }
+        return response.json() as Promise<{ leaderboards?: Record<LeaderboardMetric, LeaderboardEntry[]> }>;
+      })
+      .then((payload) => {
+        if (cancelled || !payload.leaderboards) {
+          return;
+        }
+        setPublicLeaderboards({
+          rpm: Array.isArray(payload.leaderboards.rpm) ? payload.leaderboards.rpm : [],
+          speed: Array.isArray(payload.leaderboards.speed) ? payload.leaderboards.speed : [],
+          watts: Array.isArray(payload.leaderboards.watts) ? payload.leaderboards.watts : [],
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPublicLeaderboards(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTrack.id]);
   const draftZonePoints = useMemo(
     () => draftZoneMeters
       .map((meter) => pointAtRouteMeter(draftPoints, meter))
@@ -731,6 +779,7 @@ export default function App() {
     }
 
     latestRaceSyncRef.current = {
+      sessionId: raceCapture?.sessionId ?? `${multiplayer.currentRoom.id}:${effectiveTrack.id}:manual`,
       trackId: effectiveTrack.id,
       raceState,
       riders: activePlayers
@@ -765,7 +814,7 @@ export default function App() {
         .filter((rider): rider is OutgoingMultiplayerRaceState['riders'][number] => rider != null),
       summary: raceSummary,
     };
-  }, [activePlayers, effectiveTrack.id, multiplayer.currentRoom, playMode, raceState, raceSummary, riders, samplesByDevice]);
+  }, [activePlayers, effectiveTrack.id, multiplayer.currentRoom, playMode, raceCapture?.sessionId, raceState, raceSummary, riders, samplesByDevice]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
