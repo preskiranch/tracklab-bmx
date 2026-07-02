@@ -169,7 +169,7 @@ export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
 
 export type RaceState = 'ready' | 'racing' | 'finished';
 
-export type AppMode = 'race' | 'monitor';
+export type AppMode = 'race' | 'monitor' | 'diagnostics';
 
 export type RiderPhase = 'pedaling' | 'airborne' | 'landing';
 

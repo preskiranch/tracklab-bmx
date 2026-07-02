@@ -1374,6 +1374,14 @@ input:focus {
   font-size: 11px;
 }
 
+.custom-route-filter {
+  margin: 2px 0 4px;
+}
+
+.custom-route-filter input {
+  min-height: 32px;
+}
+
 .custom-route-row {
   padding: 4px;
   border: 1px solid #dfe7ee;
@@ -2239,6 +2247,39 @@ input:focus {
   background: #ffffff;
 }
 
+.race-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.race-summary-stats div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e1e8ed;
+  border-radius: 7px;
+  background: #f8fafb;
+}
+
+.race-summary-stats span,
+.race-summary-stats small {
+  color: #627282;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.race-summary-stats strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .race-summary-table-wrap {
   overflow: auto;
 }
@@ -2440,6 +2481,350 @@ input:focus {
   margin-left: auto;
 }
 
+.diagnostics-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.diagnostics-hero,
+.diagnostics-section,
+.diagnostic-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 28px rgba(25, 39, 52, 0.06);
+}
+
+.diagnostics-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 132px;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(241, 250, 236, 0.96), rgba(255, 255, 255, 0.96)),
+    #ffffff;
+}
+
+.diagnostics-hero p {
+  margin-top: 6px;
+  color: #526271;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.readiness-ring {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 112px;
+  height: 112px;
+  border: 10px solid #f3c1bd;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #111827;
+}
+
+.readiness-ring.ready {
+  border-color: #91dc78;
+}
+
+.readiness-ring strong {
+  font-size: 22px;
+  font-weight: 950;
+}
+
+.readiness-ring span {
+  color: #5d6d7b;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.diagnostic-card {
+  display: grid;
+  gap: 8px;
+  min-height: 138px;
+  padding: 12px;
+  border-left: 4px solid #94a3b8;
+}
+
+.diagnostic-card.ready {
+  border-left-color: #55c91f;
+}
+
+.diagnostic-card.warning {
+  border-left-color: #f5b824;
+}
+
+.diagnostic-card.blocked {
+  border-left-color: #e84b3d;
+}
+
+.diagnostic-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.diagnostic-card-head span {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: #eef3f6;
+  color: #111827;
+}
+
+.diagnostic-card.ready .diagnostic-card-head span {
+  background: #eefbe9;
+  color: #227a20;
+}
+
+.diagnostic-card.warning .diagnostic-card-head span {
+  background: #fff8e8;
+  color: #9a6500;
+}
+
+.diagnostic-card.blocked .diagnostic-card-head span {
+  background: #fff0f0;
+  color: #b3261f;
+}
+
+.diagnostic-card strong {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.diagnostic-card small,
+.diagnostic-card em {
+  color: #5e6e7c;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.diagnostic-card em {
+  align-self: end;
+  color: #334352;
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.diagnostics-columns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.diagnostics-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.diagnostic-stat-list {
+  display: grid;
+  gap: 7px;
+}
+
+.diagnostic-stat-list.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.diagnostic-stat-list span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 8px 9px;
+  border: 1px solid #e2e9ef;
+  border-radius: 7px;
+  background: #f8fafb;
+  color: #536270;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.diagnostic-stat-list strong {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.diagnostic-note {
+  padding: 9px 10px;
+  border: 1px solid #dbe6ed;
+  border-radius: 7px;
+  background: #f7fbff;
+  color: #3e5366;
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.4;
+}
+
+.diagnostic-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.diagnostic-actions.stacked {
+  grid-template-columns: 1fr;
+}
+
+.diagnostic-actions button,
+.profile-key-card button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.diagnostic-actions button:hover,
+.profile-key-card button:hover {
+  border-color: var(--line-strong);
+  background: #f7f9fb;
+}
+
+.diagnostic-minor {
+  display: grid;
+  gap: 4px;
+  color: #60717f;
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.diagnostic-track-card {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  border: 1px solid #e2e9ef;
+  border-radius: 7px;
+  background: #fbfcfd;
+}
+
+.diagnostic-track-card strong {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.diagnostic-track-card span {
+  color: #5d6d7c;
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.diagnostic-track-card div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.diagnostic-track-card small {
+  min-height: 24px;
+  padding: 5px 7px;
+  border-radius: 999px;
+  background: #eef3f6;
+  color: #354554;
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.profile-key-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #e2e9ef;
+  border-radius: 7px;
+  background: #f8fafb;
+}
+
+.profile-key-card span {
+  grid-column: 1 / -1;
+  color: #60717f;
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.profile-key-card strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #111827;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-key-card button {
+  min-height: 32px;
+}
+
+.diagnostic-bike-list {
+  display: grid;
+  gap: 7px;
+}
+
+.diagnostic-bike-list span,
+.diagnostic-bike-list em {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+  padding: 7px 8px;
+  border: 1px solid #e2e9ef;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #253342;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.diagnostic-bike-list i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--player-color);
+}
+
+.diagnostic-bike-list small {
+  color: #64717e;
+  font-size: 11px;
+  font-weight: 850;
+}
+
 .monitor-panel {
   padding: 14px;
 }
@@ -2624,6 +3009,14 @@ input:focus {
     grid-template-columns: 1fr;
   }
 
+  .diagnostic-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .diagnostics-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .control-panel,
   .multiplayer-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2649,7 +3042,9 @@ input:focus {
   .platform-topbar,
   .track-selectors,
   .analytics-grid,
-  .monitor-grid {
+  .monitor-grid,
+  .diagnostic-grid,
+  .diagnostics-columns {
     grid-template-columns: 1fr;
   }
 
@@ -2670,7 +3065,8 @@ input:focus {
 
   .earth-header,
   .analytics-header,
-  .monitor-header {
+  .monitor-header,
+  .diagnostics-hero {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -2678,6 +3074,7 @@ input:focus {
   .control-panel,
   .multiplayer-panel,
   .rider-strip,
+  .race-summary-stats,
   .monitor-primary,
   .monitor-secondary {
     grid-template-columns: 1fr;

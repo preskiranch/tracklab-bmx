@@ -16,6 +16,7 @@ import {
   Users,
 } from 'lucide-react';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
+import { DiagnosticsPanel, type CloudUserDataStatus } from './components/DiagnosticsPanel';
 import { EarthTrackView } from './components/EarthTrackView';
 import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
 import { MonitorView } from './components/MonitorView';
@@ -55,6 +56,7 @@ import {
 } from './lib/trackMapping';
 import {
   fetchLocationPredictions,
+  hasGoogleMapsApiKey,
   resetPlaceAutocompleteSession,
   resolveLocationText,
   resolvePlacePrediction,
@@ -502,6 +504,8 @@ export default function App() {
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
+  const [cloudUserDataStatus, setCloudUserDataStatus] = useState<CloudUserDataStatus>('loading');
+  const [cloudUserDataMessage, setCloudUserDataMessage] = useState('Loading cloud profile data.');
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
   const [publicLeaderboards, setPublicLeaderboards] = useState<Record<LeaderboardMetric, LeaderboardEntry[]> | null>(null);
   const [chatDraft, setChatDraft] = useState('');
@@ -1073,12 +1077,16 @@ export default function App() {
 
   useEffect(() => {
     if (!cloudProfileKey) {
+      setCloudUserDataStatus('offline');
+      setCloudUserDataMessage('No profile key is available for cloud sync.');
       return;
     }
 
     let cancelled = false;
     cloudUserDataLoadedKeyRef.current = null;
     cloudUserDataAvailableRef.current = false;
+    setCloudUserDataStatus('loading');
+    setCloudUserDataMessage('Loading cloud profile data.');
 
     readCloudUserData(cloudProfileKey)
       .then((data) => {
@@ -1099,11 +1107,15 @@ export default function App() {
         setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
         cloudUserDataAvailableRef.current = true;
         cloudUserDataLoadedKeyRef.current = cloudProfileKey;
+        setCloudUserDataStatus('online');
+        setCloudUserDataMessage('Bike names, custom routes, and track maps are syncing to this profile.');
       })
       .catch((error: Error) => {
         console.warn(`Could not load TrackLab cloud user data: ${error.message}`);
         cloudUserDataAvailableRef.current = false;
         cloudUserDataLoadedKeyRef.current = cloudProfileKey;
+        setCloudUserDataStatus('offline');
+        setCloudUserDataMessage(`Cloud profile unavailable. Local browser storage is still active. ${error.message}`);
       });
 
     return () => {
@@ -1115,9 +1127,16 @@ export default function App() {
     writeStoredBikeProfiles(bikeProfiles);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
       if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-        void patchCloudUserData(cloudProfileKey, { bikeProfiles }).catch((error: Error) => {
-          console.warn(`Could not save bike profiles to TrackLab cloud: ${error.message}`);
-        });
+        void patchCloudUserData(cloudProfileKey, { bikeProfiles })
+          .then(() => {
+            setCloudUserDataStatus('online');
+            setCloudUserDataMessage('Bike profiles saved to this cloud profile.');
+          })
+          .catch((error: Error) => {
+            setCloudUserDataStatus('offline');
+            setCloudUserDataMessage(`Could not save bike profiles to cloud. ${error.message}`);
+            console.warn(`Could not save bike profiles to TrackLab cloud: ${error.message}`);
+          });
       }
       return;
     }
@@ -1126,9 +1145,16 @@ export default function App() {
       console.warn(`Could not save bike profiles to TrackLab bridge: ${error.message}`);
     });
     if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-      void patchCloudUserData(cloudProfileKey, { bikeProfiles }).catch((error: Error) => {
-        console.warn(`Could not save bike profiles to TrackLab cloud: ${error.message}`);
-      });
+      void patchCloudUserData(cloudProfileKey, { bikeProfiles })
+        .then(() => {
+          setCloudUserDataStatus('online');
+          setCloudUserDataMessage('Bike profiles saved to this cloud profile.');
+        })
+        .catch((error: Error) => {
+          setCloudUserDataStatus('offline');
+          setCloudUserDataMessage(`Could not save bike profiles to cloud. ${error.message}`);
+          console.warn(`Could not save bike profiles to TrackLab cloud: ${error.message}`);
+        });
     }
   }, [bikeProfiles, bridge.connection, cloudProfileKey]);
 
@@ -1136,9 +1162,16 @@ export default function App() {
     writeStoredCustomRoutes(customRoutes);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
       if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-        void patchCloudUserData(cloudProfileKey, { customRoutes }).catch((error: Error) => {
-          console.warn(`Could not save custom routes to TrackLab cloud: ${error.message}`);
-        });
+        void patchCloudUserData(cloudProfileKey, { customRoutes })
+          .then(() => {
+            setCloudUserDataStatus('online');
+            setCloudUserDataMessage('Custom routes saved to this cloud profile.');
+          })
+          .catch((error: Error) => {
+            setCloudUserDataStatus('offline');
+            setCloudUserDataMessage(`Could not save custom routes to cloud. ${error.message}`);
+            console.warn(`Could not save custom routes to TrackLab cloud: ${error.message}`);
+          });
       }
       return;
     }
@@ -1147,9 +1180,16 @@ export default function App() {
       console.warn(`Could not save custom routes to TrackLab bridge: ${error.message}`);
     });
     if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-      void patchCloudUserData(cloudProfileKey, { customRoutes }).catch((error: Error) => {
-        console.warn(`Could not save custom routes to TrackLab cloud: ${error.message}`);
-      });
+      void patchCloudUserData(cloudProfileKey, { customRoutes })
+        .then(() => {
+          setCloudUserDataStatus('online');
+          setCloudUserDataMessage('Custom routes saved to this cloud profile.');
+        })
+        .catch((error: Error) => {
+          setCloudUserDataStatus('offline');
+          setCloudUserDataMessage(`Could not save custom routes to cloud. ${error.message}`);
+          console.warn(`Could not save custom routes to TrackLab cloud: ${error.message}`);
+        });
     }
   }, [bridge.connection, cloudProfileKey, customRoutes]);
 
@@ -1157,9 +1197,16 @@ export default function App() {
     writeStoredTrackMappings(storedMappings);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
       if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-        void patchCloudUserData(cloudProfileKey, { trackMappings: storedMappings }).catch((error: Error) => {
-          console.warn(`Could not save track mappings to TrackLab cloud: ${error.message}`);
-        });
+        void patchCloudUserData(cloudProfileKey, { trackMappings: storedMappings })
+          .then(() => {
+            setCloudUserDataStatus('online');
+            setCloudUserDataMessage('Track mappings saved to this cloud profile.');
+          })
+          .catch((error: Error) => {
+            setCloudUserDataStatus('offline');
+            setCloudUserDataMessage(`Could not save track maps to cloud. ${error.message}`);
+            console.warn(`Could not save track mappings to TrackLab cloud: ${error.message}`);
+          });
       }
       return;
     }
@@ -1168,9 +1215,16 @@ export default function App() {
       console.warn(`Could not save track mappings to TrackLab bridge: ${error.message}`);
     });
     if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-      void patchCloudUserData(cloudProfileKey, { trackMappings: storedMappings }).catch((error: Error) => {
-        console.warn(`Could not save track mappings to TrackLab cloud: ${error.message}`);
-      });
+      void patchCloudUserData(cloudProfileKey, { trackMappings: storedMappings })
+        .then(() => {
+          setCloudUserDataStatus('online');
+          setCloudUserDataMessage('Track mappings saved to this cloud profile.');
+        })
+        .catch((error: Error) => {
+          setCloudUserDataStatus('offline');
+          setCloudUserDataMessage(`Could not save track maps to cloud. ${error.message}`);
+          console.warn(`Could not save track mappings to TrackLab cloud: ${error.message}`);
+        });
     }
   }, [bridge.connection, cloudProfileKey, storedMappings]);
 
@@ -1915,6 +1969,22 @@ export default function App() {
     resetRace();
   };
 
+  const prepareNoBikeDemoTest = useCallback(() => {
+    clearStartGateSequence();
+    setDemoMode(true);
+    setDemoBikeCount(Math.min(maxPlayers, Math.max(4, demoBikeCount)));
+    setDemoRaceSeed(Date.now());
+    setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
+    resetRace();
+    setAppMode('race');
+  }, [clearStartGateSequence, demoBikeCount, resetRace]);
+
+  const enableMultiplayerTest = useCallback(() => {
+    setPlayMode('multiplayer');
+    setAppMode('diagnostics');
+  }, []);
+
   const handleReset = () => {
     const sessionId = raceCapture?.sessionId ?? `reset-${Date.now()}`;
     appendRaceCaptureEvent('race-reset', 'Race reset');
@@ -2262,6 +2332,10 @@ export default function App() {
             <Gauge size={17} />
             Monitor
           </button>
+          <button className={appMode === 'diagnostics' ? 'selected' : ''} type="button" onClick={() => setAppMode('diagnostics')}>
+            <Settings size={17} />
+            Preflight
+          </button>
           <button type="button">
             <Route size={17} />
             Tracks
@@ -2273,10 +2347,6 @@ export default function App() {
           <button type="button">
             <Users size={17} />
             Riders
-          </button>
-          <button type="button">
-            <Settings size={17} />
-            Settings
           </button>
         </nav>
 
@@ -2344,6 +2414,56 @@ export default function App() {
             players={activePlayers}
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
+          />
+        ) : appMode === 'diagnostics' ? (
+          <DiagnosticsPanel
+            bridgeConnection={bridge.connection}
+            bridgeMode={bridge.mode}
+            bridgeSourceState={bridge.sourceState}
+            bridgeStatus={bridge.status}
+            bridgeError={bridge.error}
+            bridgeControlStatus={bridge.controlStatus}
+            bridgeBusy={bridgeBusy}
+            bridgeRunning={bridgeRunning}
+            bluetoothSupported={bluetooth.supported}
+            bluetoothStatus={bluetooth.status}
+            bluetoothConnectedCount={bluetooth.connectedCount}
+            googleMapsConfigured={hasGoogleMapsApiKey()}
+            cloudStatus={cloudUserDataStatus}
+            cloudMessage={cloudUserDataMessage}
+            profileKey={cloudProfileKey}
+            playMode={playMode}
+            multiplayerConnection={multiplayer.connection}
+            multiplayerStatus={multiplayer.status}
+            currentRoomId={multiplayer.currentRoom?.id ?? null}
+            inviteUrl={multiplayer.inviteUrl}
+            onlineRiderCount={multiplayer.onlineRiders.length}
+            track={effectiveTrack}
+            hasSavedMapping={Boolean(selectedTrackMapping)}
+            customRouteCount={customRoutes.length}
+            catalogTrackCount={catalogTracks.length}
+            players={activePlayers}
+            samplesByDevice={samplesByDevice}
+            bikeProfiles={bikeProfiles}
+            maxPlayers={maxPlayers}
+            demoMode={demoMode}
+            demoBikeCount={demoBikeCount}
+            demoVariableCount={demo.variableCount}
+            distanceUnit={distanceUnit}
+            raceCapture={raceCapture}
+            onStartBridge={() => {
+              void bridge.startLocalBridge();
+            }}
+            onStopBridge={() => {
+              void bridge.stopLocalBridge();
+            }}
+            onEnableDemoTest={prepareNoBikeDemoTest}
+            onEnableMultiplayer={enableMultiplayerTest}
+            onCreatePrivateRoom={multiplayer.createPrivateRoom}
+            onCopyInvite={shareMultiplayerInvite}
+            onCopyProfileKey={copyMultiplayerProfileKey}
+            onOpenRace={() => setAppMode('race')}
+            onOpenMonitor={() => setAppMode('monitor')}
           />
         ) : (
           <>

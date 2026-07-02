@@ -184,6 +184,7 @@ export function SessionControlPanel({
   onReset,
 }: SessionControlPanelProps) {
   const [pendingCustomRouteDeleteId, setPendingCustomRouteDeleteId] = useState<string | null>(null);
+  const [customRouteFilter, setCustomRouteFilter] = useState('');
   const hasMappedRoute = track.routeStatus === 'user-mapped';
   const canStart = !startGateActive && raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
   const canCancel = startGateActive || raceState === 'racing';
@@ -192,6 +193,20 @@ export function SessionControlPanel({
   const canUndoMapping = mappingEditMode === 'zones' ? draftZoneCount > 1 : draftPointCount > 0;
   const availableZones = hasMappedRoute ? track.zones : [];
   const visibleTrackDistance = draftPointCount > 1 ? draftLengthMeters : hasMappedRoute ? track.lengthMeters : null;
+  const filteredCustomRoutes = customRoutes.filter((customRoute) => {
+    const filter = customRouteFilter.trim().toLowerCase();
+    if (!filter) {
+      return true;
+    }
+
+    return [
+      customRoute.name,
+      customRoute.address,
+      customRoute.city,
+      customRoute.state,
+      customRoute.country,
+    ].some((value) => value?.toLowerCase().includes(filter));
+  });
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -277,8 +292,17 @@ export function SessionControlPanel({
               <span>Saved locations</span>
               <small>{customRoutes.length}</small>
             </div>
+            <label className="text-field compact custom-route-filter">
+              <span>Find</span>
+              <input
+                type="text"
+                value={customRouteFilter}
+                placeholder="Name or city"
+                onChange={(event) => setCustomRouteFilter(event.target.value)}
+              />
+            </label>
 
-            {customRoutes.map((customRoute) => {
+            {filteredCustomRoutes.map((customRoute) => {
               const isSelected = customRoute.id === selectedTrackId;
               const isPendingDelete = customRoute.id === pendingCustomRouteDeleteId;
               const routeLocation = customRoute.address ?? `${customRoute.latitude?.toFixed(5)}, ${customRoute.longitude?.toFixed(5)}`;
@@ -324,6 +348,7 @@ export function SessionControlPanel({
                 </div>
               );
             })}
+            {filteredCustomRoutes.length === 0 && <span className="empty-inline">No saved locations match</span>}
           </div>
         )}
       </section>

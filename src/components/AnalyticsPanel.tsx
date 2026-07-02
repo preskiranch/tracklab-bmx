@@ -136,6 +136,31 @@ function formatNullableSpeed(speedKph: number | null, speedUnit: SpeedUnit) {
   return `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
 }
 
+function bestSummaryValue(
+  raceSummary: RaceSummaryEntry[],
+  pickValue: (summary: RaceSummaryEntry) => number | null,
+) {
+  return raceSummary.reduce<number | null>((best, summary) => {
+    const value = pickValue(summary);
+    if (value == null || !Number.isFinite(value)) {
+      return best;
+    }
+
+    return best == null ? value : Math.max(best, value);
+  }, null);
+}
+
+function bestReactionTime(raceSummary: RaceSummaryEntry[], reactionTimesByPlayer: ReactionTimesByPlayer) {
+  return raceSummary.reduce<number | null>((best, summary) => {
+    const value = reactionTimesByPlayer[summary.playerId];
+    if (value == null || !Number.isFinite(value)) {
+      return best;
+    }
+
+    return best == null ? value : Math.min(best, value);
+  }, null);
+}
+
 export function AnalyticsPanel({
   track,
   players,
@@ -162,6 +187,11 @@ export function AnalyticsPanel({
   const showCadenceSummary = selectedMetrics.includes('cadence');
   const showPowerSummary = selectedMetrics.includes('power');
   const showReactionSummary = selectedMetrics.includes('reaction');
+  const winner = raceSummary[0];
+  const bestSpeed = bestSummaryValue(raceSummary, (summary) => summary.topSpeedKph);
+  const bestCadence = bestSummaryValue(raceSummary, (summary) => summary.topCadence);
+  const bestWatts = bestSummaryValue(raceSummary, (summary) => summary.topWatts);
+  const bestReaction = bestReactionTime(raceSummary, reactionTimesByPlayer);
 
   return (
     <section className="analytics-panel">
@@ -212,6 +242,34 @@ export function AnalyticsPanel({
               <h3>Final rider results</h3>
             </div>
             <Trophy size={18} />
+          </div>
+
+          <div className="race-summary-stats">
+            <div>
+              <span>Winner</span>
+              <strong>{winner?.riderName ?? '--'}</strong>
+              <small>{winner ? formatFinishTime(winner.finishTimeMs) : 'No finish'}</small>
+            </div>
+            <div>
+              <span>Fastest</span>
+              <strong>{formatNullableSpeed(bestSpeed, speedUnit)}</strong>
+              <small>top speed</small>
+            </div>
+            <div>
+              <span>Cadence</span>
+              <strong>{formatNullableMetric(bestCadence, 'RPM')}</strong>
+              <small>peak</small>
+            </div>
+            <div>
+              <span>Power</span>
+              <strong>{formatNullableMetric(bestWatts, 'W')}</strong>
+              <small>peak</small>
+            </div>
+            <div>
+              <span>Reaction</span>
+              <strong>{formatReactionTime(bestReaction)}</strong>
+              <small>best RT</small>
+            </div>
           </div>
 
           <div className="race-summary-table-wrap">
