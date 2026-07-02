@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { defaultPlayerSlots, maxPlayers } from '../data';
+import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 import type { BikeSample, PlayerSlot } from '../types';
 
 export const demoDeviceIds = [91001, 91002, 91003, 91004, 91005, 91006, 91007, 91008] as const;
@@ -177,7 +178,11 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
   }
 
   const startEnvelope = Math.exp(-time / (3.9 + variables.endurance * 2.2));
-  const rollout = clamp(1 - Math.exp(-time / (4.1 + variables.accelerationCurve * 2.4)), 0, 1);
+  const rollout = clamp(
+    1 - Math.exp(-time / (2.9 + variables.accelerationCurve * 2.3 + (1 - variables.launchSnap) * 0.9)),
+    0,
+    1,
+  );
   const fatigue = clamp(
     time / (36 + variables.endurance * 34)
       * (0.42 + variables.fatigueRate * 0.78 + variables.thermalFade * 0.22),
@@ -191,6 +196,9 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
   const finishKick = clamp((time - (25 + variables.finishAwareness * 8)) / 8, 0, 1);
   const firstStraight = Math.exp(-Math.pow((time - (4.2 + variables.gateReaction * 1.4)) / 2.8, 2));
   const secondStraight = Math.exp(-Math.pow((time - (14 + variables.trackRead * 4)) / 4.6, 2));
+  const fatigueLull = Math.exp(-Math.pow((time - (17 + variables.midRaceLull * 6)) / (2.4 + variables.gripFatigue * 2.4), 2))
+    * variables.midRaceLull
+    * (0.35 + variables.fatigueRate * 0.65);
   const mistakeEnvelope = Math.exp(-Math.pow((time - profile.mistakeTime) / profile.mistakeDuration, 2))
     * variables.mistakeChance
     * profile.mistakeSeverity;
@@ -253,50 +261,49 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     Math.sin(time * (5.4 + variables.cadenceNoise * 2.8) + phase)
     + Math.sin(time * (8.6 + variables.wattNoise * 4.5) + phase * 2.2) * 0.5
   ) / 1.5;
-  const cadenceDrop = mistakeEnvelope * (12 + variables.cadenceDropOnLanding * 18);
+  const cadenceDrop = mistakeEnvelope * (18 + variables.cadenceDropOnLanding * 28)
+    + fatigueLull * (28 + variables.thermalFade * 30 + variables.gripFatigue * 18);
   const cadence = Math.round(clamp(
     rollout * (
-      42
-      + variables.cadenceFloor * 14
-      + effort * (35 + variables.maxCadence * 32)
-      + variables.standingTransition * startEnvelope * 12
-      - variables.seatedTransition * finishKick * 5
+      96
+      + variables.cadenceFloor * 24
+      + effort * (78 + variables.maxCadence * 54)
+      + firstStraight * (12 + variables.firstStraightBurst * 24)
+      + secondStraight * (8 + variables.secondStraightBurst * 20)
+      + finishKick * variables.finalStraightKick * 22
+      + variables.standingTransition * startEnvelope * 22
+      - variables.seatedTransition * finishKick * 8
       - cadenceDrop
-      + noise * (2 + variables.cadenceNoise * 7)
+      + noise * (3 + variables.cadenceNoise * 9)
       - variables.pedalStrokeAsymmetry * 2
     ),
     0,
-    134,
+    186,
   ));
   const watts = Math.round(clamp(
     rollout * (
-      68
-      + variables.powerBase * 105
-      + effort * (215 + variables.sprintPower * 315)
-      + variables.torque * 75
+      92
+      + variables.powerBase * 115
+      + effort * (255 + variables.sprintPower * 350)
+      + variables.torque * 90
+      + cadence * (0.45 + variables.crankSmoothness * 0.35)
       + variables.launchSnap * startEnvelope * 150
       + variables.crowdPressure * burstWave * 42
       - variables.gripFatigue * fatigue * 86
-      - mistakeEnvelope * 160
+      - fatigueLull * 120
+      - mistakeEnvelope * 180
       + noise * (8 + variables.wattNoise * 34)
     ),
     0,
-    920,
+    1180,
   ));
-  const topSpeedKph = 32.2 + variables.firstStraightBurst * 6.2 + variables.finalStraightKick * 5.2 + skill * 3.6 + drivetrain * 2.8;
   const speedKph = Number(clamp(
-    rollout * (
-      topSpeedKph
-      + rhythmWave * 2.1
-      + burstWave * 2.3
-      + finishKick * variables.finalStraightKick * 2.6
-    )
-      + variables.wheelSpeedNoise * noise * 1.6
-      - variables.rollingResistance * rollout * 1.7
-      - variables.windDrag * rollout * 1.8
-      - mistakeEnvelope * 5.8,
+    bmxSpeedKphFromCadence(cadence)
+      + variables.wheelSpeedNoise * noise * 0.7
+      - fatigueLull * 1.2
+      - mistakeEnvelope * 1.4,
     0,
-    48.6,
+    53,
   ).toFixed(1));
   const signal = clamp(
     0.78
