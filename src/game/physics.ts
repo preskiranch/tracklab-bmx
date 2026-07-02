@@ -64,7 +64,7 @@ export function stepRiders(
     const wattsAverage = rider.wattsAverage * 0.94 + watts * 0.06;
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
-    const hasDriveSignal = watts > 10 && cadence > 18;
+    const hasDriveSignal = cadence > 0;
     const rolloutVelocity = hasDriveSignal ? bmxVelocityMpsFromCadence(cadence) : null;
     const velocity = rolloutVelocity == null
       ? Math.max(0, rider.velocity - (rollingFrictionMps2 + rider.velocity * rider.velocity * airDragPerMeter) * dt)
