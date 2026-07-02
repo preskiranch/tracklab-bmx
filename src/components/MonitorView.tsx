@@ -1,4 +1,5 @@
 import { Activity, Bike, Gauge, RadioTower, Signal, Zap } from 'lucide-react';
+import { liveBikeTimeoutMs } from '../data';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type { BikeSample, PlayerSlot, SpeedUnit } from '../types';
 
@@ -15,6 +16,31 @@ function formatAge(sample: BikeSample | undefined) {
 
   const seconds = Math.max(0, Math.round((Date.now() - sample.at) / 1000));
   return seconds <= 1 ? 'Live now' : `${seconds}s ago`;
+}
+
+function metricIsFresh(sample: BikeSample | undefined, metricAt: number | undefined) {
+  if (!sample) {
+    return false;
+  }
+
+  return Date.now() - (metricAt ?? sample.at) <= liveBikeTimeoutMs;
+}
+
+function monitorMetrics(sample: BikeSample | undefined) {
+  const wattsFresh = metricIsFresh(sample, sample?.wattsAt);
+  const cadenceFresh = metricIsFresh(sample, sample?.cadenceAt);
+  const speedFresh = metricIsFresh(sample, sample?.speedAt);
+  const watts = wattsFresh ? sample?.watts ?? 0 : 0;
+  const cadence = cadenceFresh ? sample?.cadence ?? 0 : 0;
+  const rawSpeedKph = speedFresh ? sample?.speedKph ?? 0 : 0;
+  const idleNoise = watts <= 10 && cadence <= 15 && rawSpeedKph <= 5;
+
+  return {
+    live: metricIsFresh(sample, sample?.at),
+    watts: idleNoise ? 0 : watts,
+    cadence: idleNoise ? 0 : cadence,
+    speedKph: idleNoise ? 0 : rawSpeedKph,
+  };
 }
 
 export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorViewProps) {
@@ -40,10 +66,11 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
         <div className="monitor-grid">
           {players.map((player) => {
             const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
+            const metrics = monitorMetrics(sample);
 
             return (
               <section
-                className="monitor-card"
+                className={`monitor-card ${metrics.live ? 'live' : 'idle'}`}
                 style={{ '--player-color': player.accent } as React.CSSProperties}
                 key={player.id}
               >
@@ -57,19 +84,19 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
                   </div>
                   <span className="monitor-live">
                     <Signal size={15} />
-                    {sample ? `${Math.round(sample.signal * 100)}%` : 'Waiting'}
+                    {metrics.live && sample ? `${Math.round(sample.signal * 100)}%` : 'Idle'}
                   </span>
                 </div>
 
                 <div className="monitor-primary">
                   <div>
                     <Zap size={24} />
-                    <span>{sample?.watts ?? 0}</span>
+                    <span>{metrics.watts}</span>
                     <small>watts</small>
                   </div>
                   <div>
                     <Activity size={24} />
-                    <span>{sample?.cadence ?? '--'}</span>
+                    <span>{metrics.cadence}</span>
                     <small>rpm</small>
                   </div>
                 </div>
@@ -77,7 +104,7 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
                 <div className="monitor-secondary">
                   <div>
                     <Gauge size={18} />
-                    <span>{formatSpeedFromKph(sample?.speedKph, speedUnit)}</span>
+                    <span>{formatSpeedFromKph(metrics.speedKph, speedUnit)}</span>
                     <small>{speedUnitLabel(speedUnit)}</small>
                   </div>
                   <div>

@@ -6,6 +6,8 @@ const defaultMaxEstimatedSpeedKph = 55;
 const defaultPowerSpeedGain = 2.1;
 const defaultCadenceSpeedGain = 0.12;
 const defaultBaseDriveKph = 4;
+const defaultMinDriveWatts = 10;
+const defaultMinDriveCadence = 18;
 
 const profileDefinitions = {
   fitness: {
@@ -121,12 +123,14 @@ function estimateSpeedKphFromDrive(rawMetrics, previousSample, now) {
   const powerGain = finiteNumber(process.env.WATTBIKE_ANT_POWER_SPEED_GAIN) ?? defaultPowerSpeedGain;
   const cadenceGain = finiteNumber(process.env.WATTBIKE_ANT_CADENCE_SPEED_GAIN) ?? defaultCadenceSpeedGain;
   const baseDriveKph = finiteNumber(process.env.WATTBIKE_ANT_BASE_DRIVE_KPH) ?? defaultBaseDriveKph;
+  const minDriveWatts = finiteNumber(process.env.WATTBIKE_ANT_MIN_DRIVE_WATTS) ?? defaultMinDriveWatts;
+  const minDriveCadence = finiteNumber(process.env.WATTBIKE_ANT_MIN_DRIVE_CADENCE) ?? defaultMinDriveCadence;
   const previousKph = finiteNumber(previousSample?.speedKph) ?? 0;
   const previousAt = finiteNumber(previousSample?.speedAt ?? previousSample?.at) ?? now;
   const dt = clamp((now - previousAt) / 1000, 0.08, 1.4);
-  const watts = finiteNumber(rawMetrics.watts ?? previousSample?.watts) ?? 0;
-  const cadence = finiteNumber(rawMetrics.cadence ?? previousSample?.cadence) ?? 0;
-  const hasDriveSignal = watts > 8 || cadence > 8;
+  const watts = finiteNumber(rawMetrics.watts) ?? 0;
+  const cadence = finiteNumber(rawMetrics.cadence) ?? 0;
+  const hasDriveSignal = watts > minDriveWatts || cadence > minDriveCadence;
 
   if (!hasDriveSignal) {
     const decelKph = (3.2 + previousKph * 0.28) * dt;

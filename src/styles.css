@@ -2168,6 +2168,14 @@ input:focus {
   background: #ffffff;
 }
 
+.monitor-card.idle {
+  border-left-color: #94a3b8;
+}
+
+.monitor-card.idle .monitor-live {
+  color: #6b7280;
+}
+
 .monitor-card-head {
   gap: 10px;
 }

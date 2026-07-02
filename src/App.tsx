@@ -410,7 +410,7 @@ const idleStartGateStatus: StartGateStatus = {
 const startTreeLabels = ['RED', 'YELLOW 1', 'YELLOW 2', 'GREEN'] as const;
 
 function isReactionBikeSample(sample: { cadence: number | null; speedKph: number | null; watts: number }) {
-  return (sample.cadence ?? 0) > 0 || (sample.speedKph ?? 0) > 0.1 || sample.watts > 5;
+  return (sample.cadence ?? 0) > 18 || (sample.speedKph ?? 0) > 2 || sample.watts > 10;
 }
 
 function isGoogleLocationPermissionError(message: string) {

@@ -65,7 +65,7 @@ export function stepRiders(
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
     const cadenceLift = Math.min(1.4, cadence / 95);
-    const hasDriveSignal = watts > 8 || cadence > 4;
+    const hasDriveSignal = watts > 10 || cadence > 18;
     const hasSpeedSignal = (sampledSpeed ?? 0) > 0.8;
     const speedFromPower = hasDriveSignal
       ? 1.2 + Math.sqrt(Math.max(0, watts)) * 0.27 + cadenceLift * 0.65 + boost * 2.8
