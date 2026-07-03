@@ -120,6 +120,14 @@ function formatFinishTime(milliseconds: number | null) {
   return `${(milliseconds / 1000).toFixed(2)}s`;
 }
 
+function formatSplitTime(milliseconds: number | null) {
+  if (milliseconds == null) {
+    return '--';
+  }
+
+  return `${(milliseconds / 1000).toFixed(3)}s`;
+}
+
 function formatNullableMetric(value: number | null, unit: string) {
   if (value == null || !Number.isFinite(value)) {
     return '--';
@@ -161,6 +169,17 @@ function bestReactionTime(raceSummary: RaceSummaryEntry[], reactionTimesByPlayer
   }, null);
 }
 
+function bestSplitTime(raceSummary: RaceSummaryEntry[]) {
+  return raceSummary.reduce<number | null>((best, summary) => {
+    const value = summary.thirtyFootTimeMs;
+    if (value == null || !Number.isFinite(value)) {
+      return best;
+    }
+
+    return best == null ? value : Math.min(best, value);
+  }, null);
+}
+
 export function AnalyticsPanel({
   track,
   players,
@@ -192,6 +211,7 @@ export function AnalyticsPanel({
   const bestCadence = bestSummaryValue(raceSummary, (summary) => summary.topCadence);
   const bestWatts = bestSummaryValue(raceSummary, (summary) => summary.topWatts);
   const bestReaction = bestReactionTime(raceSummary, reactionTimesByPlayer);
+  const bestThirtyFoot = bestSplitTime(raceSummary);
 
   return (
     <section className="analytics-panel">
@@ -270,6 +290,11 @@ export function AnalyticsPanel({
               <strong>{formatReactionTime(bestReaction)}</strong>
               <small>best RT</small>
             </div>
+            <div>
+              <span>30 ft</span>
+              <strong>{formatSplitTime(bestThirtyFoot)}</strong>
+              <small>best split</small>
+            </div>
           </div>
 
           <div className="race-summary-table-wrap">
@@ -279,6 +304,7 @@ export function AnalyticsPanel({
                   <th>Place</th>
                   <th>Rider</th>
                   <th>Finish</th>
+                  <th>30 ft</th>
                   {showReactionSummary && <th>Reaction</th>}
                   {showSpeedSummary && <th>Top speed</th>}
                   {showSpeedSummary && <th>Avg speed</th>}
@@ -310,6 +336,7 @@ export function AnalyticsPanel({
                       </div>
                     </td>
                     <td>{formatFinishTime(summary.finishTimeMs)}</td>
+                    <td>{formatSplitTime(summary.thirtyFootTimeMs)}</td>
                     {showReactionSummary && <td>{formatReactionTime(reactionTimesByPlayer[summary.playerId])}</td>}
                     {showSpeedSummary && <td>{formatNullableSpeed(summary.topSpeedKph, speedUnit)}</td>}
                     {showSpeedSummary && <td>{formatNullableSpeed(summary.averageSpeedKph, speedUnit)}</td>}

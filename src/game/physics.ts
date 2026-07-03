@@ -13,8 +13,11 @@ const freewheelEngagementToleranceMps = 0.05;
 const effectiveRiderBikeMassKg = 86;
 const drivetrainEfficiency = 0.88;
 const minimumDriveAccelerationMps2 = 0.55;
-const maxDriveAccelerationMps2 = 7.5;
-const lowSpeedLaunchBonusMps2 = 2.2;
+const maxDriveAccelerationMps2 = 9.8;
+const lowSpeedLaunchBonusMps2 = 3.2;
+const gateLaunchWindowMs = 1650;
+const gateLaunchBonusMps2 = 1.6;
+const thirtyFootSplitMeters = 30 * 0.3048;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -34,7 +37,13 @@ function coastVelocityMps(velocityMps: number, dt: number) {
   return Math.max(0, velocityMps - drag * dt);
 }
 
-function driveAccelerationMps2(watts: number, velocityMps: number, targetVelocityMps: number, boost: number) {
+function driveAccelerationMps2(
+  watts: number,
+  velocityMps: number,
+  targetVelocityMps: number,
+  boost: number,
+  gateLaunch: number,
+) {
   const speedForPower = Math.max(1.2, velocityMps);
   const powerAcceleration = watts > 0
     ? watts * drivetrainEfficiency / (effectiveRiderBikeMassKg * speedForPower)
@@ -45,10 +54,30 @@ function driveAccelerationMps2(watts: number, velocityMps: number, targetVelocit
     : 0;
 
   return clamp(
-    Math.max(powerAcceleration + launchBonus + boost * 0.45, cadenceAcceleration),
+    Math.max(
+      powerAcceleration + launchBonus + gateLaunch * gateLaunchBonusMps2 + boost * 0.45,
+      cadenceAcceleration,
+    ),
     minimumDriveAccelerationMps2,
     maxDriveAccelerationMps2,
   );
+}
+
+function interpolateSplitTimeMs(
+  previousDistance: number,
+  distance: number,
+  splitMeters: number,
+  frameSeconds: number,
+  elapsedMs: number,
+) {
+  if (distance <= previousDistance) {
+    return Math.max(0, Math.round(elapsedMs));
+  }
+
+  const frameMs = frameSeconds * 1000;
+  const frameStartMs = Math.max(0, elapsedMs - frameMs);
+  const crossingRatio = clamp((splitMeters - previousDistance) / (distance - previousDistance), 0, 1);
+  return Math.round(frameStartMs + crossingRatio * frameMs);
 }
 
 export function createInitialRiders(players: PlayerSlot[]): RiderState[] {
@@ -66,6 +95,7 @@ export function createInitialRiders(players: PlayerSlot[]): RiderState[] {
     lastWatts: 0,
     wattsAverage: 160,
     rank: player.id,
+    thirtyFootTimeMs: null,
     finishedAt: null,
   }));
 }
@@ -86,6 +116,7 @@ export function stepRiders(
     const player = players.find((slot) => slot.id === rider.playerId);
     const sample = player?.deviceId == null ? null : samplesByDevice.get(player.deviceId);
     const nowMs = Date.now();
+    const elapsedMs = nowMs - raceStartedAt;
     const watts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt) ? sample?.watts ?? 0 : 0;
     const cadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
 
@@ -95,12 +126,23 @@ export function stepRiders(
     const coastVelocity = coastVelocityMps(rider.velocity, dt);
     const cadenceVelocity = cadence > 0 ? bmxVelocityMpsFromCadence(cadence) : null;
     const driveEngaged = cadenceVelocity != null && cadenceVelocity > coastVelocity + freewheelEngagementToleranceMps;
+    const gateLaunch = driveEngaged
+      ? clamp(1 - elapsedMs / gateLaunchWindowMs, 0, 1)
+      : 0;
     const velocity = driveEngaged
-      ? Math.min(cadenceVelocity, coastVelocity + driveAccelerationMps2(watts, coastVelocity, cadenceVelocity, boost) * dt)
+      ? Math.min(
+        cadenceVelocity,
+        coastVelocity + driveAccelerationMps2(watts, coastVelocity, cadenceVelocity, boost, gateLaunch) * dt,
+      )
       : coastVelocity;
     const settledVelocity = velocity < stopVelocityMps && !driveEngaged ? 0 : velocity;
     const previousDistance = rider.distance;
     const distance = Math.min(raceLengthMeters, previousDistance + settledVelocity * dt);
+    const thirtyFootTimeMs = rider.thirtyFootTimeMs == null
+      && previousDistance < thirtyFootSplitMeters
+      && distance >= thirtyFootSplitMeters
+      ? interpolateSplitTimeMs(previousDistance, distance, thirtyFootSplitMeters, dt, elapsedMs)
+      : rider.thirtyFootTimeMs;
     const cadenceRps = Math.max(0.1, cadence / 60);
     const pedalPhase = (rider.pedalPhase + cadenceRps * dt) % 1;
 
@@ -151,7 +193,7 @@ export function stepRiders(
       pitch = surfaceAngleDeg(distance) + (cadence > 0 ? Math.sin(pedalPhase * Math.PI * 2) * 1.1 : 0);
     }
 
-    const finishedAt = distance >= raceLengthMeters ? Date.now() - raceStartedAt : null;
+    const finishedAt = distance >= raceLengthMeters ? elapsedMs : null;
 
     return {
       ...rider,
@@ -166,6 +208,7 @@ export function stepRiders(
       phase,
       lastWatts: watts,
       wattsAverage,
+      thirtyFootTimeMs,
       finishedAt,
     };
   });

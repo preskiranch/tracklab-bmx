@@ -440,6 +440,7 @@ function csvValue(value: unknown) {
 
 function raceCaptureToCsv(capture: RaceCapture) {
   const headers = [
+    'recordType',
     'sessionId',
     'track',
     'playerId',
@@ -462,9 +463,18 @@ function raceCaptureToCsv(capture: RaceCapture) {
     'riderVelocityMps',
     'riderPhase',
     'rank',
+    'finishTimeMs',
+    'thirtyFootTimeMs',
+    'topSpeedKph',
+    'averageSpeedKph',
+    'topCadence',
+    'averageCadence',
+    'topWatts',
+    'averageWatts',
   ];
 
   const rows = capture.samples.map((sample) => [
+    'sample',
     capture.sessionId,
     capture.track.name,
     sample.playerId,
@@ -487,9 +497,51 @@ function raceCaptureToCsv(capture: RaceCapture) {
     sample.riderVelocityMps,
     sample.riderPhase,
     sample.rank,
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
   ]);
 
-  return [headers, ...rows].map((row) => row.map(csvValue).join(',')).join('\n');
+  const summaryRows = capture.summary.map((summary) => [
+    'summary',
+    capture.sessionId,
+    capture.track.name,
+    summary.playerId,
+    summary.riderName,
+    '',
+    summary.deviceLabel,
+    capture.source,
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    summary.distanceMeters,
+    '',
+    '',
+    summary.rank,
+    summary.finishTimeMs,
+    summary.thirtyFootTimeMs,
+    summary.topSpeedKph,
+    summary.averageSpeedKph,
+    summary.topCadence,
+    summary.averageCadence,
+    summary.topWatts,
+    summary.averageWatts,
+  ]);
+
+  return [headers, ...rows, ...summaryRows].map((row) => row.map(csvValue).join(',')).join('\n');
 }
 
 function formatClock() {
@@ -867,7 +919,6 @@ export default function App() {
     });
   }, [activePlayers, raceState, riders, startGateStatus.active]);
   const canCancelRace = startGateStatus.active || raceState === 'racing';
-  const shellFullscreenActive = raceViewFullscreen || mappingFullscreen;
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom?.track.id) {
@@ -1063,11 +1114,7 @@ export default function App() {
     });
   }, []);
 
-  const releaseRaceFullscreen = useCallback(() => {
-    if (document.fullscreenElement === raceShellRef.current) {
-      void document.exitFullscreen?.().catch(() => undefined);
-    }
-  }, []);
+  const releaseRaceFullscreen = useCallback(() => undefined, []);
 
   const sendRoomReadyState = useCallback((sessionId: string) => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
@@ -1082,19 +1129,6 @@ export default function App() {
       summary: [],
     });
   }, [effectiveTrack.id, multiplayer.currentRoom, multiplayer.sendRaceState, playMode]);
-
-  useEffect(() => {
-    if (shellFullscreenActive) {
-      if (!document.fullscreenElement && raceShellRef.current) {
-        void raceShellRef.current.requestFullscreen?.().catch(() => undefined);
-      }
-      return;
-    }
-
-    if (document.fullscreenElement === raceShellRef.current) {
-      void document.exitFullscreen?.().catch(() => undefined);
-    }
-  }, [shellFullscreenActive]);
 
   useEffect(() => {
     if (reactionStartAt == null || activePlayers.length === 0) {
@@ -2277,9 +2311,6 @@ export default function App() {
     }
 
     primeAudioCues();
-    if (!document.fullscreenElement) {
-      void raceShellRef.current?.requestFullscreen?.().catch(() => undefined);
-    }
 
     if (startCadenceMode === 'uci') {
       const randomDelayMs = 100 + Math.round(Math.random() * 2600);

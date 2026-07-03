@@ -2291,7 +2291,7 @@ input:focus {
 
 .race-summary-stats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  grid-template-columns: repeat(6, minmax(108px, 1fr));
   gap: 8px;
 }
 

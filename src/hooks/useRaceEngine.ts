@@ -108,6 +108,7 @@ function buildRaceSummary(
         deviceLabel: stats?.deviceLabel ?? 'No device',
         rank: rider.rank,
         finishTimeMs: rider.finishedAt,
+        thirtyFootTimeMs: rider.thirtyFootTimeMs,
         distanceMeters: Math.min(raceLengthMeters, rider.distance),
         sampleCount: stats?.sampleCount ?? 0,
         topSpeedKph: stats && stats.speedSamples > 0 ? stats.topSpeedKph : null,

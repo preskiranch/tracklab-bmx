@@ -187,6 +187,7 @@ export type RiderState = {
   lastWatts: number;
   wattsAverage: number;
   rank: number;
+  thirtyFootTimeMs: number | null;
   finishedAt: number | null;
 };
 
@@ -198,6 +199,7 @@ export type RaceSummaryEntry = {
   deviceLabel: string;
   rank: number;
   finishTimeMs: number | null;
+  thirtyFootTimeMs: number | null;
   distanceMeters: number;
   sampleCount: number;
   topSpeedKph: number | null;
