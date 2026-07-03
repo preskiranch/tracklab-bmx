@@ -672,7 +672,7 @@ export default function App() {
   const [customRoutePredictions, setCustomRoutePredictions] = useState<PlacePredictionOption[]>([]);
   const [customRoutePredictionStatus, setCustomRoutePredictionStatus] = useState<string | null>(null);
   const [selectedCustomRoutePrediction, setSelectedCustomRoutePrediction] = useState<PlacePredictionOption | null>(null);
-  const [startCadenceMode, setStartCadenceMode] = useState<StartCadenceMode>('countdown');
+  const [startCadenceMode, setStartCadenceMode] = useState<StartCadenceMode>('uci');
   const [countdownSeconds, setCountdownSeconds] = useState(3);
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
