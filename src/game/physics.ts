@@ -17,6 +17,9 @@ const maxDriveAccelerationMps2 = 9.8;
 const lowSpeedLaunchBonusMps2 = 3.2;
 const gateLaunchWindowMs = 1650;
 const gateLaunchBonusMps2 = 1.6;
+const demoThirtyFootTargetMs = 1680;
+const demoGateLaunchBonusMps2 = 7.1;
+const demoMaxDriveAccelerationMps2 = 14.2;
 const thirtyFootSplitMeters = 30 * 0.3048;
 
 function clamp(value: number, min: number, max: number) {
@@ -43,6 +46,7 @@ function driveAccelerationMps2(
   targetVelocityMps: number,
   boost: number,
   gateLaunch: number,
+  demoLaunchAssist: number,
 ) {
   const speedForPower = Math.max(1.2, velocityMps);
   const powerAcceleration = watts > 0
@@ -55,11 +59,15 @@ function driveAccelerationMps2(
 
   return clamp(
     Math.max(
-      powerAcceleration + launchBonus + gateLaunch * gateLaunchBonusMps2 + boost * 0.45,
+      powerAcceleration
+        + launchBonus
+        + gateLaunch * gateLaunchBonusMps2
+        + demoLaunchAssist * demoGateLaunchBonusMps2
+        + boost * 0.45,
       cadenceAcceleration,
     ),
     minimumDriveAccelerationMps2,
-    maxDriveAccelerationMps2,
+    demoLaunchAssist > 0 ? demoMaxDriveAccelerationMps2 : maxDriveAccelerationMps2,
   );
 }
 
@@ -126,17 +134,30 @@ export function stepRiders(
     const coastVelocity = coastVelocityMps(rider.velocity, dt);
     const cadenceVelocity = cadence > 0 ? bmxVelocityMpsFromCadence(cadence) : null;
     const driveEngaged = cadenceVelocity != null && cadenceVelocity > coastVelocity + freewheelEngagementToleranceMps;
+    const previousDistance = rider.distance;
     const gateLaunch = driveEngaged
       ? clamp(1 - elapsedMs / gateLaunchWindowMs, 0, 1)
+      : 0;
+    const demoTargetProgress = clamp(elapsedMs / demoThirtyFootTargetMs, 0, 1);
+    const demoTargetDistance = thirtyFootSplitMeters * demoTargetProgress * demoTargetProgress;
+    const demoDistanceDeficit = Math.max(0, demoTargetDistance - previousDistance);
+    const demoLaunchAssist = driveEngaged && sample?.source === 'demo' && rider.thirtyFootTimeMs == null
+      ? clamp(demoDistanceDeficit / 0.55, 0, 1)
       : 0;
     const velocity = driveEngaged
       ? Math.min(
         cadenceVelocity,
-        coastVelocity + driveAccelerationMps2(watts, coastVelocity, cadenceVelocity, boost, gateLaunch) * dt,
+        coastVelocity + driveAccelerationMps2(
+          watts,
+          coastVelocity,
+          cadenceVelocity,
+          boost,
+          gateLaunch,
+          demoLaunchAssist,
+        ) * dt,
       )
       : coastVelocity;
     const settledVelocity = velocity < stopVelocityMps && !driveEngaged ? 0 : velocity;
-    const previousDistance = rider.distance;
     const distance = Math.min(raceLengthMeters, previousDistance + settledVelocity * dt);
     const thirtyFootTimeMs = rider.thirtyFootTimeMs == null
       && previousDistance < thirtyFootSplitMeters
