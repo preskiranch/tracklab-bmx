@@ -256,7 +256,13 @@ export function EarthTrackView({
           </span>
           {mappingMode && (
             <span>
-              {mappingEditMode === 'navigate' ? 'Move map' : mappingEditMode === 'draw' ? 'Draw path' : 'Add zones'}
+              {mappingEditMode === 'navigate'
+                ? 'Move map'
+                : mappingEditMode === 'draw'
+                  ? 'Draw path'
+                  : mappingEditMode === 'zones'
+                    ? 'Add zones'
+                    : 'Split'}
             </span>
           )}
           <span>{activeZones.length} active zone{activeZones.length === 1 ? '' : 's'}</span>

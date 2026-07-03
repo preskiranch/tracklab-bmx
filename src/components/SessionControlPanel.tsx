@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import {
   Activity,
   Bike,
@@ -209,10 +209,19 @@ export function SessionControlPanel({
 }: SessionControlPanelProps) {
   const [pendingCustomRouteDeleteId, setPendingCustomRouteDeleteId] = useState<string | null>(null);
   const [customRouteFilter, setCustomRouteFilter] = useState('');
+  const [mappingToolsCollapsed, setMappingToolsCollapsed] = useState(false);
   const hasMappedRoute = track.routeStatus === 'user-mapped';
   const canStart = !startGateActive && raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
   const canCancel = startGateActive || raceState === 'racing';
   const canSaveMapping = draftPointCount >= 2;
+  const activeMappingToolLabel = mappingEditMode === 'navigate'
+    ? 'Move map'
+    : mappingEditMode === 'draw'
+      ? 'Draw path'
+      : mappingEditMode === 'zones'
+        ? 'Add zones'
+        : 'Split';
+  const shouldCollapseMappingTools = mappingFullscreen && mappingMode;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones'
     ? draftZoneCount > 1
@@ -243,9 +252,32 @@ export function SessionControlPanel({
 
     event.target.value = '';
   };
+  const collapseMappingToolsIfNeeded = () => {
+    if (shouldCollapseMappingTools) {
+      setMappingToolsCollapsed(true);
+    }
+  };
+  const handleMappingEditModeChange = (mode: MappingEditMode) => {
+    onMappingEditModeChange(mode);
+    collapseMappingToolsIfNeeded();
+  };
+  const handleMappingSplitStart = () => {
+    onMappingSplitStart(draftSplitBuilder?.activeBranch ?? 'a');
+    collapseMappingToolsIfNeeded();
+  };
+  const handleMappingSplitBranchChange = (branch: TrackSplitBranch['id']) => {
+    onMappingSplitBranchChange(branch);
+    collapseMappingToolsIfNeeded();
+  };
+
+  useEffect(() => {
+    if (!shouldCollapseMappingTools) {
+      setMappingToolsCollapsed(false);
+    }
+  }, [shouldCollapseMappingTools]);
 
   return (
-    <aside className="control-panel">
+    <aside className={mappingToolsCollapsed ? 'control-panel mapping-tools-collapsed' : 'control-panel'}>
       <section className="panel-section custom-route-section" id="custom-route-section">
         <div className="section-heading">
           <div>
@@ -381,200 +413,217 @@ export function SessionControlPanel({
         )}
       </section>
 
-      <section className="panel-section mapping-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Track Mapping</span>
-            <h3>Trace route</h3>
-          </div>
-          <MapPinned size={18} />
-        </div>
-
-        <div className="segmented-control compact" aria-label="Mapping mode">
+      <section className={mappingToolsCollapsed ? 'panel-section mapping-section collapsed' : 'panel-section mapping-section'}>
+        {mappingToolsCollapsed ? (
           <button
-            className={!mappingMode ? 'selected' : ''}
+            className="mapping-tools-toggle-button"
             type="button"
-            onClick={() => onMappingModeChange(false)}
+            onClick={() => setMappingToolsCollapsed(false)}
+            aria-label="Open track mapping tools"
           >
-            View
+            <SlidersHorizontal size={17} />
+            <span>
+              <strong>{activeMappingToolLabel}</strong>
+              <small>Open tools</small>
+            </span>
           </button>
-          <button
-            className={mappingMode ? 'selected' : ''}
-            type="button"
-            onClick={() => onMappingModeChange(true)}
-          >
-            Edit map
-          </button>
-        </div>
-
-        {mappingMode && (
-          <div className="segmented-control compact four-way" aria-label="Track tools">
-            <button
-              className={mappingEditMode === 'navigate' ? 'selected' : ''}
-              type="button"
-              onClick={() => onMappingEditModeChange('navigate')}
-            >
-              Move map
-            </button>
-            <button
-              className={mappingEditMode === 'draw' ? 'selected' : ''}
-              type="button"
-              onClick={() => onMappingEditModeChange('draw')}
-            >
-              Draw path
-            </button>
-            <button
-              className={mappingEditMode === 'zones' ? 'selected' : ''}
-              type="button"
-              onClick={() => onMappingEditModeChange('zones')}
-            >
-              Add zones
-            </button>
-            <button
-              className={mappingEditMode === 'split' ? 'selected' : ''}
-              type="button"
-              onClick={() => onMappingSplitStart(draftSplitBuilder?.activeBranch ?? 'a')}
-            >
-              Split
-            </button>
-          </div>
-        )}
-
-        <div className="mapping-status-row four">
-          <span>{draftPointCount} route pt{draftPointCount === 1 ? '' : 's'}</span>
-          <span>{draftZoneCount} sprint zone{draftZoneCount === 1 ? '' : 's'}</span>
-          <span>{visibleTrackDistance == null ? 'No distance' : formatDistanceMeters(visibleTrackDistance, distanceUnit)}</span>
-          <span>{hasSavedMapping ? 'Saved locally' : 'No saved map'}</span>
-        </div>
-
-        <div className="segmented-control compact" aria-label="Distance unit">
-          <button
-            className={distanceUnit === 'ft' ? 'selected' : ''}
-            type="button"
-            onClick={() => onDistanceUnitChange('ft')}
-          >
-            Feet
-          </button>
-          <button
-            className={distanceUnit === 'm' ? 'selected' : ''}
-            type="button"
-            onClick={() => onDistanceUnitChange('m')}
-          >
-            Meters
-          </button>
-        </div>
-
-        {mappingMode && (
+        ) : (
           <>
-            {mappingEditMode === 'split' && (
-              <div className="split-tool-card">
-                <div className="split-tool-header">
-                  <div>
-                    <span className="eyebrow">Track Tools</span>
-                    <strong>{draftSplitBuilder ? `Split ${draftSplitBuilder.index} / Merge ${draftSplitBuilder.index}` : 'Split straight'}</strong>
-                  </div>
-                  <Route size={17} />
-                </div>
-                <p>{draftSplitBuilderStatus}</p>
-                <div className="segmented-control compact" aria-label="Split branch">
-                  <button
-                    className={(draftSplitBuilder?.activeBranch ?? 'a') === 'a' ? 'selected' : ''}
-                    type="button"
-                    onClick={() => onMappingSplitBranchChange('a')}
-                  >
-                    Branch A
-                  </button>
-                  <button
-                    className={draftSplitBuilder?.activeBranch === 'b' ? 'selected' : ''}
-                    type="button"
-                    onClick={() => onMappingSplitBranchChange('b')}
-                    disabled={!draftSplitBuilder?.mergePoint}
-                  >
-                    Branch B
-                  </button>
-                </div>
-                <div className="mapping-actions split-actions">
-                  <button type="button" onClick={onMappingSplitSave} disabled={!canSaveDraftSplit}>
-                    <Save size={15} />
-                    Add split
-                  </button>
-                  <button type="button" onClick={onMappingSplitCancel} disabled={!draftSplitBuilder}>
-                    <X size={15} />
-                    Cancel split
-                  </button>
-                </div>
-                {draftSplitSections.length > 0 && (
-                  <div className="split-list" aria-label="Saved split straights">
-                    {draftSplitSections.map((section) => (
-                      <div className="split-row" key={section.id}>
-                        <div>
-                          <strong>{section.name}</strong>
-                          <span>{section.branches.map((branch) => `${branch.id.toUpperCase()} ${formatDistanceMeters(branch.lengthMeters, distanceUnit)}`).join(' / ')}</span>
-                        </div>
-                        <button type="button" onClick={() => onMappingSplitRemove(section.id)} aria-label={`Remove ${section.name}`}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+            <div className="section-heading">
+              <div>
+                <span className="eyebrow">Track Mapping</span>
+                <h3>Trace route</h3>
               </div>
-            )}
+              <MapPinned size={18} />
+            </div>
 
-            <label className="number-field">
-              <span>Rest gap</span>
-              <input
-                type="number"
-                min="0"
-                max="30"
-                step="0.5"
-                value={mappingRestSeconds}
-                onChange={(event) => onMappingRestSecondsChange(Number(event.target.value))}
-              />
-              <small>sec</small>
-            </label>
-
-            <div className="mapping-actions">
-              <button type="button" onClick={onMappingUndoPoint} disabled={!canUndoMapping}>
-                <Undo2 size={15} />
-                {undoLabel}
+            <div className="segmented-control compact" aria-label="Mapping mode">
+              <button
+                className={!mappingMode ? 'selected' : ''}
+                type="button"
+                onClick={() => onMappingModeChange(false)}
+              >
+                View
               </button>
-              <button type="button" onClick={onMappingClearDraft} disabled={draftPointCount === 0}>
-                <Trash2 size={15} />
-                Clear
-              </button>
-              <button type="button" onClick={onMappingSave} disabled={!canSaveMapping}>
-                <Save size={15} />
-                Save
+              <button
+                className={mappingMode ? 'selected' : ''}
+                type="button"
+                onClick={() => onMappingModeChange(true)}
+              >
+                Edit map
               </button>
             </div>
 
-            <button
-              className="mapping-fullscreen-button"
-              type="button"
-              onClick={() => onMappingFullscreenChange(!mappingFullscreen)}
-            >
-              {mappingFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-              {mappingFullscreen ? 'Exit full screen' : 'Full screen edit'}
-            </button>
+            {mappingMode && (
+              <div className="segmented-control compact four-way" aria-label="Track tools">
+                <button
+                  className={mappingEditMode === 'navigate' ? 'selected' : ''}
+                  type="button"
+                  onClick={() => handleMappingEditModeChange('navigate')}
+                >
+                  Move map
+                </button>
+                <button
+                  className={mappingEditMode === 'draw' ? 'selected' : ''}
+                  type="button"
+                  onClick={() => handleMappingEditModeChange('draw')}
+                >
+                  Draw path
+                </button>
+                <button
+                  className={mappingEditMode === 'zones' ? 'selected' : ''}
+                  type="button"
+                  onClick={() => handleMappingEditModeChange('zones')}
+                >
+                  Add zones
+                </button>
+                <button
+                  className={mappingEditMode === 'split' ? 'selected' : ''}
+                  type="button"
+                  onClick={handleMappingSplitStart}
+                >
+                  Split
+                </button>
+              </div>
+            )}
+
+            <div className="mapping-status-row four">
+              <span>{draftPointCount} route pt{draftPointCount === 1 ? '' : 's'}</span>
+              <span>{draftZoneCount} sprint zone{draftZoneCount === 1 ? '' : 's'}</span>
+              <span>{visibleTrackDistance == null ? 'No distance' : formatDistanceMeters(visibleTrackDistance, distanceUnit)}</span>
+              <span>{hasSavedMapping ? 'Saved locally' : 'No saved map'}</span>
+            </div>
+
+            <div className="segmented-control compact" aria-label="Distance unit">
+              <button
+                className={distanceUnit === 'ft' ? 'selected' : ''}
+                type="button"
+                onClick={() => onDistanceUnitChange('ft')}
+              >
+                Feet
+              </button>
+              <button
+                className={distanceUnit === 'm' ? 'selected' : ''}
+                type="button"
+                onClick={() => onDistanceUnitChange('m')}
+              >
+                Meters
+              </button>
+            </div>
+
+            {mappingMode && (
+              <>
+                {mappingEditMode === 'split' && (
+                  <div className="split-tool-card">
+                    <div className="split-tool-header">
+                      <div>
+                        <span className="eyebrow">Track Tools</span>
+                        <strong>{draftSplitBuilder ? `Split ${draftSplitBuilder.index} / Merge ${draftSplitBuilder.index}` : 'Split straight'}</strong>
+                      </div>
+                      <Route size={17} />
+                    </div>
+                    <p>{draftSplitBuilderStatus}</p>
+                    <div className="segmented-control compact" aria-label="Split branch">
+                      <button
+                        className={(draftSplitBuilder?.activeBranch ?? 'a') === 'a' ? 'selected' : ''}
+                        type="button"
+                        onClick={() => handleMappingSplitBranchChange('a')}
+                      >
+                        Branch A
+                      </button>
+                      <button
+                        className={draftSplitBuilder?.activeBranch === 'b' ? 'selected' : ''}
+                        type="button"
+                        onClick={() => handleMappingSplitBranchChange('b')}
+                        disabled={!draftSplitBuilder?.mergePoint}
+                      >
+                        Branch B
+                      </button>
+                    </div>
+                    <div className="mapping-actions split-actions">
+                      <button type="button" onClick={onMappingSplitSave} disabled={!canSaveDraftSplit}>
+                        <Save size={15} />
+                        Add split
+                      </button>
+                      <button type="button" onClick={onMappingSplitCancel} disabled={!draftSplitBuilder}>
+                        <X size={15} />
+                        Cancel split
+                      </button>
+                    </div>
+                    {draftSplitSections.length > 0 && (
+                      <div className="split-list" aria-label="Saved split straights">
+                        {draftSplitSections.map((section) => (
+                          <div className="split-row" key={section.id}>
+                            <div>
+                              <strong>{section.name}</strong>
+                              <span>{section.branches.map((branch) => `${branch.id.toUpperCase()} ${formatDistanceMeters(branch.lengthMeters, distanceUnit)}`).join(' / ')}</span>
+                            </div>
+                            <button type="button" onClick={() => onMappingSplitRemove(section.id)} aria-label={`Remove ${section.name}`}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <label className="number-field">
+                  <span>Rest gap</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="30"
+                    step="0.5"
+                    value={mappingRestSeconds}
+                    onChange={(event) => onMappingRestSecondsChange(Number(event.target.value))}
+                  />
+                  <small>sec</small>
+                </label>
+
+                <div className="mapping-actions">
+                  <button type="button" onClick={onMappingUndoPoint} disabled={!canUndoMapping}>
+                    <Undo2 size={15} />
+                    {undoLabel}
+                  </button>
+                  <button type="button" onClick={onMappingClearDraft} disabled={draftPointCount === 0}>
+                    <Trash2 size={15} />
+                    Clear
+                  </button>
+                  <button type="button" onClick={onMappingSave} disabled={!canSaveMapping}>
+                    <Save size={15} />
+                    Save
+                  </button>
+                </div>
+
+                <button
+                  className="mapping-fullscreen-button"
+                  type="button"
+                  onClick={() => onMappingFullscreenChange(!mappingFullscreen)}
+                >
+                  {mappingFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                  {mappingFullscreen ? 'Exit full screen' : 'Full screen edit'}
+                </button>
+              </>
+            )}
+
+            <div className="mapping-actions">
+              <button type="button" onClick={onMappingExport} disabled={!hasSavedMapping}>
+                <Download size={15} />
+                Export
+              </button>
+              <label className="file-button">
+                <Upload size={15} />
+                Import
+                <input type="file" accept="application/json" onChange={handleImportChange} />
+              </label>
+              <button type="button" onClick={onMappingRemove} disabled={!hasSavedMapping}>
+                <Trash2 size={15} />
+                Remove
+              </button>
+            </div>
           </>
         )}
-
-        <div className="mapping-actions">
-          <button type="button" onClick={onMappingExport} disabled={!hasSavedMapping}>
-            <Download size={15} />
-            Export
-          </button>
-          <label className="file-button">
-            <Upload size={15} />
-            Import
-            <input type="file" accept="application/json" onChange={handleImportChange} />
-          </label>
-          <button type="button" onClick={onMappingRemove} disabled={!hasSavedMapping}>
-            <Trash2 size={15} />
-            Remove
-          </button>
-        </div>
       </section>
 
       <section className="panel-section">

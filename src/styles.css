@@ -238,6 +238,15 @@ input:focus {
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
 }
 
+.map-fullscreen .control-panel.mapping-tools-collapsed {
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .map-fullscreen .control-panel .panel-section:not(.mapping-section) {
   display: none;
 }
@@ -246,6 +255,13 @@ input:focus {
   border-bottom: 0;
   background: rgba(251, 252, 247, 0.96);
   backdrop-filter: blur(12px);
+}
+
+.map-fullscreen .mapping-section.collapsed {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .map-fullscreen .map-camera-pad {
@@ -1289,6 +1305,53 @@ input:focus {
   font-size: 12px;
   font-weight: 850;
   text-align: center;
+}
+
+.mapping-tools-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 154px;
+  min-height: 48px;
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.94);
+  color: #ffffff;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+}
+
+.mapping-tools-toggle-button svg {
+  flex: 0 0 auto;
+}
+
+.mapping-tools-toggle-button span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  text-align: left;
+}
+
+.mapping-tools-toggle-button strong,
+.mapping-tools-toggle-button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapping-tools-toggle-button strong {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.mapping-tools-toggle-button small {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.mapping-tools-toggle-button:hover {
+  background: rgba(31, 41, 55, 0.96);
 }
 
 .number-field {
