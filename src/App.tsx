@@ -29,6 +29,7 @@ import {
   customRoutesStorageKey,
   defaultPlayerSlots,
   distanceUnitStorageKey,
+  earthCameraStorageKey,
   liveBikeTimeoutMs,
   maxPlayers,
   raceCaptureStorageKey,
@@ -77,6 +78,7 @@ import type {
   AppMode,
   BikeProfile,
   DistanceUnit,
+  EarthCamera,
   IntervalMode,
   LeaderboardEntry,
   LeaderboardMetric,
@@ -126,6 +128,96 @@ function readStoredCustomRoutes(): TrackRecord[] {
 
 function writeStoredCustomRoutes(routes: TrackRecord[]) {
   window.localStorage.setItem(customRoutesStorageKey, JSON.stringify(routes));
+}
+
+const defaultEarthCamera = {
+  angle: 45,
+  heading: 0,
+} as const;
+
+function normalizeEarthAngle(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(67, Math.round(numeric))) : defaultEarthCamera.angle;
+}
+
+function normalizeEarthHeading(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? ((Math.round(numeric) % 360) + 360) % 360 : defaultEarthCamera.heading;
+}
+
+function normalizeEarthZoom(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(2, Math.min(22, Number(numeric.toFixed(2)))) : undefined;
+}
+
+function normalizeEarthCenter(value: unknown): TrackPoint | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const point = value as Partial<TrackPoint>;
+  const lat = Number(point.lat);
+  const lng = Number(point.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return undefined;
+  }
+
+  return {
+    lat: Number(lat.toFixed(7)),
+    lng: Number(lng.toFixed(7)),
+  };
+}
+
+function normalizeEarthCamera(value: Partial<EarthCamera> | unknown): EarthCamera {
+  const camera = value && typeof value === 'object' ? value as Partial<EarthCamera> : {};
+  const center = normalizeEarthCenter(camera.center);
+  const zoom = normalizeEarthZoom(camera.zoom);
+
+  return {
+    angle: normalizeEarthAngle(camera.angle),
+    heading: normalizeEarthHeading(camera.heading),
+    ...(center ? { center } : {}),
+    ...(zoom !== undefined ? { zoom } : {}),
+    updatedAt: Number.isFinite(camera.updatedAt) ? Number(camera.updatedAt) : Date.now(),
+  };
+}
+
+function earthCamerasMatch(left: EarthCamera | undefined, right: EarthCamera) {
+  const leftHasCenter = Boolean(left?.center);
+  const rightHasCenter = Boolean(right.center);
+  const leftHasZoom = typeof left?.zoom === 'number';
+  const rightHasZoom = typeof right.zoom === 'number';
+
+  return Boolean(left)
+    && left?.angle === right.angle
+    && left.heading === right.heading
+    && leftHasZoom === rightHasZoom
+    && Math.abs((left.zoom ?? -1) - (right.zoom ?? -1)) < 0.01
+    && leftHasCenter === rightHasCenter
+    && Math.abs((left.center?.lat ?? 0) - (right.center?.lat ?? 0)) < 0.0000001
+    && Math.abs((left.center?.lng ?? 0) - (right.center?.lng ?? 0)) < 0.0000001;
+}
+
+function readStoredEarthCameras(): Record<string, EarthCamera> {
+  try {
+    const stored = window.localStorage.getItem(earthCameraStorageKey);
+    if (!stored) {
+      return {};
+    }
+
+    const parsed = JSON.parse(stored) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .filter(([trackId]) => trackId.trim().length > 0)
+        .map(([trackId, camera]) => [trackId, normalizeEarthCamera(camera)]),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredEarthCameras(cameras: Record<string, EarthCamera>) {
+  window.localStorage.setItem(earthCameraStorageKey, JSON.stringify(cameras));
 }
 
 function slugify(value: string) {
@@ -483,6 +575,7 @@ export default function App() {
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
   const [demoRaceStartedAt, setDemoRaceStartedAt] = useState<number | null>(null);
   const [demoSignalsStopped, setDemoSignalsStopped] = useState(false);
+  const [earthCamerasByTrack, setEarthCamerasByTrack] = useState<Record<string, EarthCamera>>(readStoredEarthCameras);
   const [appMode, setAppMode] = useState<AppMode>('race');
   const [speedUnit, setSpeedUnit] = useState<SpeedUnit>(readStoredSpeedUnit);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>(readStoredDistanceUnit);
@@ -494,8 +587,10 @@ export default function App() {
   const [intervalMode, setIntervalMode] = useState<IntervalMode>('auto');
   const [manualZoneIds, setManualZoneIds] = useState<string[]>(['z2', 'z4']);
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
-  const [earthAngle, setEarthAngle] = useState(45);
-  const [earthHeading, setEarthHeading] = useState(0);
+  const [earthAngle, setEarthAngle] = useState(() => earthCamerasByTrack[initialTrack.id]?.angle ?? defaultEarthCamera.angle);
+  const [earthHeading, setEarthHeading] = useState(() => earthCamerasByTrack[initialTrack.id]?.heading ?? defaultEarthCamera.heading);
+  const [earthCenter, setEarthCenter] = useState<TrackPoint | null>(() => earthCamerasByTrack[initialTrack.id]?.center ?? null);
+  const [earthZoom, setEarthZoom] = useState<number | null>(() => earthCamerasByTrack[initialTrack.id]?.zoom ?? null);
   const [customRouteName, setCustomRouteName] = useState('');
   const [customRouteLocation, setCustomRouteLocation] = useState('');
   const [customRouteStatus, setCustomRouteStatus] = useState<string | null>(null);
@@ -602,6 +697,13 @@ export default function App() {
     [availableTracks, catalogTracks, selectedTrackId],
   );
   const selectedTrackMapping = storedMappings[selectedTrack.id];
+  useEffect(() => {
+    const savedCamera = earthCamerasByTrack[selectedTrack.id];
+    setEarthAngle(savedCamera?.angle ?? defaultEarthCamera.angle);
+    setEarthHeading(savedCamera?.heading ?? defaultEarthCamera.heading);
+    setEarthCenter(savedCamera?.center ?? null);
+    setEarthZoom(savedCamera?.zoom ?? null);
+  }, [earthCamerasByTrack, selectedTrack.id]);
   const effectiveTrack = useMemo(
     () => {
       const mappedTrack = selectedTrackMapping ? applyUserTrackMapping(selectedTrack, selectedTrackMapping) : selectedTrack;
@@ -1586,6 +1688,16 @@ export default function App() {
       writeStoredTrackMappings(next);
       return next;
     });
+    setEarthCamerasByTrack((current) => {
+      if (!current[trackId]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[trackId];
+      writeStoredEarthCameras(next);
+      return next;
+    });
 
     if (selectedTrackId === trackId) {
       const fallbackTrack = baseCatalogTracks[0] ?? defaultTrack;
@@ -1852,17 +1964,59 @@ export default function App() {
     });
   };
 
-  const handleEarthCameraChange = useCallback((camera: { angle?: number; heading?: number }) => {
-    if (typeof camera.angle === 'number' && Number.isFinite(camera.angle)) {
-      const nextAngle = Math.max(0, Math.min(67, Math.round(camera.angle)));
-      setEarthAngle((current) => (current === nextAngle ? current : nextAngle));
-    }
+  const handleEarthCameraChange = useCallback((camera: Partial<EarthCamera>) => {
+    const nextCamera = normalizeEarthCamera({
+      angle: camera.angle ?? earthAngle,
+      heading: camera.heading ?? earthHeading,
+      center: camera.center ?? earthCenter ?? undefined,
+      zoom: camera.zoom ?? earthZoom ?? undefined,
+      updatedAt: Date.now(),
+    });
 
-    if (typeof camera.heading === 'number' && Number.isFinite(camera.heading)) {
-      const nextHeading = ((Math.round(camera.heading) % 360) + 360) % 360;
-      setEarthHeading((current) => (current === nextHeading ? current : nextHeading));
-    }
-  }, []);
+    setEarthAngle((current) => (current === nextCamera.angle ? current : nextCamera.angle));
+    setEarthHeading((current) => (current === nextCamera.heading ? current : nextCamera.heading));
+    setEarthCenter((current) => {
+      const nextCenter = nextCamera.center ?? null;
+      if (
+        current
+        && nextCenter
+        && Math.abs(current.lat - nextCenter.lat) < 0.0000001
+        && Math.abs(current.lng - nextCenter.lng) < 0.0000001
+      ) {
+        return current;
+      }
+
+      return nextCenter;
+    });
+    setEarthZoom((current) => (
+      current != null
+      && nextCamera.zoom != null
+      && Math.abs(current - nextCamera.zoom) < 0.01
+        ? current
+        : nextCamera.zoom ?? null
+    ));
+
+    setEarthCamerasByTrack((current) => {
+      if (earthCamerasMatch(current[selectedTrack.id], nextCamera)) {
+        return current;
+      }
+
+      const next = {
+        ...current,
+        [selectedTrack.id]: nextCamera,
+      };
+      writeStoredEarthCameras(next);
+      return next;
+    });
+  }, [earthAngle, earthCenter, earthHeading, earthZoom, selectedTrack.id]);
+
+  const handleEarthAngleChange = useCallback((angle: number) => {
+    handleEarthCameraChange({ angle });
+  }, [handleEarthCameraChange]);
+
+  const handleEarthHeadingChange = useCallback((heading: number) => {
+    handleEarthCameraChange({ heading });
+  }, [handleEarthCameraChange]);
 
   const clearStartGateSequence = useCallback(() => {
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -2572,6 +2726,8 @@ export default function App() {
                 reactionTimesByPlayer={reactionTimesByPlayer}
                 earthAngle={earthAngle}
                 earthHeading={earthHeading}
+                earthCenter={earthCenter}
+                earthZoom={earthZoom}
                 activeZones={activeZones}
                 canCancelRace={canCancelRace}
                 mappingMode={mappingMode}
@@ -2581,8 +2737,8 @@ export default function App() {
                 draftZoneMeters={draftZoneMeters}
                 draftZonePoints={draftZonePoints}
                 onEarthCameraChange={handleEarthCameraChange}
-                onEarthAngleChange={setEarthAngle}
-                onEarthHeadingChange={setEarthHeading}
+                onEarthAngleChange={handleEarthAngleChange}
+                onEarthHeadingChange={handleEarthHeadingChange}
                 onCancelRace={handleCancel}
                 onMappingFullscreenChange={handleMappingFullscreenChange}
                 onMappingPathPointAdd={handleMappingPathPointAdd}
@@ -2637,8 +2793,8 @@ export default function App() {
                 onMetricToggle={toggleMetric}
                 onSpeedUnitChange={setSpeedUnit}
                 onDistanceUnitChange={setDistanceUnit}
-                onEarthAngleChange={setEarthAngle}
-                onEarthHeadingChange={setEarthHeading}
+                onEarthAngleChange={handleEarthAngleChange}
+                onEarthHeadingChange={handleEarthHeadingChange}
                 onCustomRouteNameChange={setCustomRouteName}
                 onCustomRouteLocationChange={handleCustomRouteLocationChange}
                 onCustomRoutePredictionSelect={handleCustomRoutePredictionSelect}

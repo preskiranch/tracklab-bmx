@@ -21,3 +21,4 @@ export const speedUnitStorageKey = 'wattbike-bmx-speed-unit-v1';
 export const distanceUnitStorageKey = 'wattbike-bmx-distance-unit-v1';
 export const raceCaptureStorageKey = 'tracklab-bmx-last-race-capture-v1';
 export const customRoutesStorageKey = 'tracklab-bmx-custom-routes-v1';
+export const earthCameraStorageKey = 'tracklab-bmx-earth-camera-v1';

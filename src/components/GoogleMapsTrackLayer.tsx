@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type {
   BikeSample,
   DistanceUnit,
+  EarthCamera,
   MappingEditMode,
   MultiplayerRaceState,
   PlayerId,
@@ -44,12 +45,14 @@ type GoogleMapsTrackLayerProps = {
   raceState: RaceState;
   earthAngle: number;
   earthHeading: number;
+  earthCenter: TrackPoint | null;
+  earthZoom: number | null;
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
   draftPoints?: TrackPoint[];
   draftZoneMeters?: number[];
   draftZonePoints?: TrackPoint[];
-  onEarthCameraChange?: (camera: { angle?: number; heading?: number }) => void;
+  onEarthCameraChange?: (camera: Partial<EarthCamera>) => void;
   onMappingPathPointAdd?: (point: TrackPoint) => void;
   onMappingPathPointMove?: (index: number, point: TrackPoint) => void;
   onMappingPathPointRemove?: (index: number) => void;
@@ -100,10 +103,24 @@ function headingDifference(a: number, b: number) {
   return Math.min(delta, 360 - delta);
 }
 
-function applyCamera(map: GoogleMap, angle: number, heading: number) {
+function pointClose(a: TrackPoint | undefined, b: TrackPoint | null | undefined) {
+  if (!b) {
+    return true;
+  }
+
+  if (!a) {
+    return false;
+  }
+
+  return distanceBetweenTrackPoints(a, b) < 0.5;
+}
+
+function applyCamera(map: GoogleMap, cameraView: Partial<EarthCamera>) {
   const camera = {
-    heading: normalizeHeading(heading),
-    tilt: clampTilt(angle),
+    ...(cameraView.center ? { center: cameraView.center } : {}),
+    ...(typeof cameraView.zoom === 'number' ? { zoom: cameraView.zoom } : {}),
+    heading: normalizeHeading(cameraView.heading ?? 0),
+    tilt: clampTilt(cameraView.angle ?? 0),
   };
 
   if (map.moveCamera) {
@@ -113,6 +130,12 @@ function applyCamera(map: GoogleMap, angle: number, heading: number) {
 
   map.setTilt(camera.tilt);
   map.setHeading(camera.heading);
+  if (cameraView.center && map.setCenter) {
+    map.setCenter(cameraView.center);
+  }
+  if (typeof cameraView.zoom === 'number' && map.setZoom) {
+    map.setZoom(cameraView.zoom);
+  }
 }
 
 function distanceLabelIcon(text: string, color = '#111827') {
@@ -320,6 +343,8 @@ export function GoogleMapsTrackLayer({
   raceState,
   earthAngle,
   earthHeading,
+  earthCenter,
+  earthZoom,
   mappingMode = false,
   mappingEditMode = 'draw',
   draftPoints = [],
@@ -348,7 +373,12 @@ export function GoogleMapsTrackLayer({
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
   const markerRefs = useRef<Map<number, RiderMapMarker>>(new Map());
   const remoteMarkerRefs = useRef<Map<string, RiderMapMarker>>(new Map());
-  const cameraRef = useRef({ angle: earthAngle, heading: earthHeading });
+  const cameraRef = useRef<Partial<EarthCamera>>({
+    angle: earthAngle,
+    heading: earthHeading,
+    ...(earthCenter ? { center: earthCenter } : {}),
+    ...(earthZoom != null ? { zoom: earthZoom } : {}),
+  });
   const suppressCameraSyncRef = useRef(false);
   const lastFitKeyRef = useRef('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -364,7 +394,7 @@ export function GoogleMapsTrackLayer({
         }
 
         googleRef.current = google;
-        const center = trackCenter(track);
+        const center = earthCenter ?? trackCenter(track);
         const map = new google.maps.Map(containerRef.current, {
           cameraControl: true,
           center,
@@ -386,7 +416,7 @@ export function GoogleMapsTrackLayer({
           tiltInteractionEnabled: true,
           tilt: earthAngle,
           zoomControl: true,
-          zoom: 19,
+          zoom: earthZoom ?? 19,
         });
         mapRef.current = map;
         setStatus('ready');
@@ -430,20 +460,30 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    cameraRef.current = { angle: earthAngle, heading: earthHeading };
+    const nextCamera = {
+      angle: earthAngle,
+      heading: earthHeading,
+      ...(earthCenter ? { center: earthCenter } : {}),
+      ...(earthZoom != null ? { zoom: earthZoom } : {}),
+    };
+    cameraRef.current = nextCamera;
     const currentTilt = map.getTilt?.();
     const currentHeading = map.getHeading?.();
+    const currentCenter = map.getCenter?.()?.toJSON();
+    const currentZoom = map.getZoom?.();
     if (
       typeof currentTilt === 'number'
       && typeof currentHeading === 'number'
       && Math.abs(currentTilt - earthAngle) < 0.75
       && headingDifference(currentHeading, earthHeading) < 0.75
+      && pointClose(currentCenter, earthCenter)
+      && (earthZoom == null || (typeof currentZoom === 'number' && Math.abs(currentZoom - earthZoom) < 0.05))
     ) {
       return;
     }
 
-    applyCamera(map, earthAngle, earthHeading);
-  }, [earthAngle, earthHeading]);
+    applyCamera(map, nextCamera);
+  }, [earthAngle, earthCenter, earthHeading, earthZoom]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -459,6 +499,9 @@ export function GoogleMapsTrackLayer({
       const nextCamera = {
         angle: Math.round(map.getTilt?.() ?? earthAngle),
         heading: normalizeHeading(Math.round(map.getHeading?.() ?? earthHeading)),
+        center: map.getCenter?.()?.toJSON(),
+        zoom: map.getZoom?.(),
+        updatedAt: Date.now(),
       };
       cameraRef.current = nextCamera;
       onEarthCameraChange(nextCamera);
@@ -467,6 +510,8 @@ export function GoogleMapsTrackLayer({
     const listeners = [
       map.addListener('tilt_changed', syncCamera),
       map.addListener('heading_changed', syncCamera),
+      map.addListener('zoom_changed', syncCamera),
+      map.addListener('idle', syncCamera),
     ];
 
     return () => listeners.forEach((listener) => listener.remove());
@@ -489,17 +534,26 @@ export function GoogleMapsTrackLayer({
 
     const fitKey = `${track.id}:${track.routeStatus ?? 'locator'}:${track.centerline?.length ?? 0}`;
     if (lastFitKeyRef.current !== fitKey) {
-      const bounds = new google.maps.LatLngBounds();
-      trackBoundsPoints(track).forEach((point) => bounds.extend(point));
       suppressCameraSyncRef.current = true;
-      map.fitBounds(bounds, 58);
-      const restoreCamera = () => {
-        applyCamera(map, cameraRef.current.angle, cameraRef.current.heading);
-      };
-      restoreCamera();
-      window.requestAnimationFrame(restoreCamera);
-      window.setTimeout(() => {
+      const hasSavedView = Boolean(cameraRef.current.center && typeof cameraRef.current.zoom === 'number');
+      if (hasSavedView) {
+        applyCamera(map, cameraRef.current);
+        window.requestAnimationFrame(() => applyCamera(map, cameraRef.current));
+      } else {
+        const bounds = new google.maps.LatLngBounds();
+        trackBoundsPoints(track).forEach((point) => bounds.extend(point));
+        map.fitBounds(bounds, 58);
+        const restoreCamera = () => {
+          applyCamera(map, {
+            angle: cameraRef.current.angle,
+            heading: cameraRef.current.heading,
+          });
+        };
         restoreCamera();
+        window.requestAnimationFrame(restoreCamera);
+      }
+      window.setTimeout(() => {
+        applyCamera(map, cameraRef.current);
         suppressCameraSyncRef.current = false;
       }, 220);
       lastFitKeyRef.current = fitKey;
@@ -616,7 +670,7 @@ export function GoogleMapsTrackLayer({
       map.fitBounds(bounds, 16);
 
       const restoreCamera = () => {
-        applyCamera(map, cameraRef.current.angle, cameraRef.current.heading);
+        applyCamera(map, cameraRef.current);
       };
       restoreCamera();
       window.requestAnimationFrame(restoreCamera);

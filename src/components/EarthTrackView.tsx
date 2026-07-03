@@ -21,6 +21,7 @@ import { formatDistanceMeters, formatReactionTime } from '../units';
 import type {
   BikeSample,
   DistanceUnit,
+  EarthCamera,
   MappingEditMode,
   MultiplayerRaceState,
   PlayerSlot,
@@ -48,6 +49,8 @@ type EarthTrackViewProps = {
   reactionTimesByPlayer: ReactionTimesByPlayer;
   earthAngle: number;
   earthHeading: number;
+  earthCenter: TrackPoint | null;
+  earthZoom: number | null;
   activeZones: TrackZone[];
   canCancelRace: boolean;
   mappingMode: boolean;
@@ -56,7 +59,7 @@ type EarthTrackViewProps = {
   draftPoints: TrackPoint[];
   draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
-  onEarthCameraChange: (camera: { angle?: number; heading?: number }) => void;
+  onEarthCameraChange: (camera: Partial<EarthCamera>) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
   onCancelRace: () => void;
@@ -114,6 +117,8 @@ export function EarthTrackView({
   reactionTimesByPlayer,
   earthAngle,
   earthHeading,
+  earthCenter,
+  earthZoom,
   activeZones,
   canCancelRace,
   mappingMode,
@@ -177,6 +182,8 @@ export function EarthTrackView({
             raceState={raceState}
             earthAngle={earthAngle}
             earthHeading={earthHeading}
+            earthCenter={earthCenter}
+            earthZoom={earthZoom}
             activeZones={activeZones}
             mappingMode={mappingMode}
             mappingEditMode={mappingEditMode}

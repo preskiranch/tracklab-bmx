@@ -12,10 +12,13 @@ type GoogleMap = {
   getCenter?: () => { toJSON: () => LatLngLiteral };
   getHeading?: () => number | undefined;
   getTilt?: () => number | undefined;
+  getZoom?: () => number | undefined;
   moveCamera?: (cameraOptions: Record<string, unknown>) => void;
+  setCenter?: (position: LatLngLiteral) => void;
   setHeading: (heading: number) => void;
   setOptions: (options: Record<string, unknown>) => void;
   setTilt: (tilt: number) => void;
+  setZoom?: (zoom: number) => void;
 };
 
 type GoogleMapClickEvent = {

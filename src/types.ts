@@ -275,6 +275,14 @@ export type TrackPoint = {
   lng: number;
 };
 
+export type EarthCamera = {
+  angle: number;
+  heading: number;
+  center?: TrackPoint;
+  zoom?: number;
+  updatedAt: number;
+};
+
 export type TrackZone = {
   id: string;
   name: string;
