@@ -1,0 +1,19 @@
+{
+  "name": "TrackLab BMX",
+  "short_name": "TrackLab",
+  "description": "Wattbike BMX racing and training platform.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#05080c",
+  "theme_color": "#05080c",
+  "icons": [
+    {
+      "src": "/tracklab-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

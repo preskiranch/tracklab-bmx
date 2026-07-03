@@ -101,6 +101,52 @@ const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elit
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 
+type FullscreenDocument = Document & {
+  webkitExitFullscreen?: () => Promise<void> | void;
+  webkitFullscreenElement?: Element | null;
+};
+
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+function requestBrowserFullscreen() {
+  const fullscreenDocument = document as FullscreenDocument;
+  if (document.fullscreenElement || fullscreenDocument.webkitFullscreenElement) {
+    return;
+  }
+
+  const root = document.documentElement as FullscreenElement;
+  const requestFullscreen = root.requestFullscreen ?? root.webkitRequestFullscreen;
+  if (!requestFullscreen) {
+    return;
+  }
+
+  try {
+    Promise.resolve(requestFullscreen.call(root)).catch(() => undefined);
+  } catch {
+    // Some mobile browsers expose the API but still refuse non-video fullscreen.
+  }
+}
+
+function releaseBrowserFullscreen() {
+  const fullscreenDocument = document as FullscreenDocument;
+  if (!document.fullscreenElement && !fullscreenDocument.webkitFullscreenElement) {
+    return;
+  }
+
+  const exitFullscreen = document.exitFullscreen ?? fullscreenDocument.webkitExitFullscreen;
+  if (!exitFullscreen) {
+    return;
+  }
+
+  try {
+    Promise.resolve(exitFullscreen.call(document)).catch(() => undefined);
+  } catch {
+    // Ignore browser-level fullscreen refusal so race reset/cancel can continue.
+  }
+}
+
 function readInitialTrack() {
   try {
     const requestedTrackId = new URLSearchParams(window.location.search).get('track');
@@ -1114,7 +1160,19 @@ export default function App() {
     });
   }, []);
 
-  const releaseRaceFullscreen = useCallback(() => undefined, []);
+  const requestRaceFullscreen = useCallback(() => {
+    requestBrowserFullscreen();
+  }, []);
+
+  const releaseRaceFullscreen = useCallback(() => {
+    releaseBrowserFullscreen();
+  }, []);
+
+  useEffect(() => {
+    if (raceState === 'finished') {
+      releaseRaceFullscreen();
+    }
+  }, [raceState, releaseRaceFullscreen]);
 
   const sendRoomReadyState = useCallback((sessionId: string) => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
@@ -2300,6 +2358,7 @@ export default function App() {
       return;
     }
 
+    requestRaceFullscreen();
     clearStartGateSequence();
     falseStartHandledRef.current = false;
     startGateArmedAtRef.current = Date.now();

@@ -98,6 +98,9 @@ input:focus {
   display: block;
   width: 100vw;
   min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: #05080c;
 }
@@ -111,6 +114,7 @@ input:focus {
 
 .race-fullscreen .platform-main {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 0;
 }
 
@@ -120,6 +124,7 @@ input:focus {
 
 .race-fullscreen .earth-panel {
   min-height: 100vh;
+  min-height: 100dvh;
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -133,7 +138,9 @@ input:focus {
 
 .race-fullscreen .earth-stage {
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  min-height: 100dvh;
   border: 0;
 }
 
@@ -156,6 +163,14 @@ input:focus {
   font-size: 13px;
   font-weight: 900;
   backdrop-filter: blur(12px);
+}
+
+.race-fullscreen .race-cancel-overlay,
+.map-fullscreen .race-cancel-overlay {
+  position: fixed;
+  top: max(14px, calc(env(safe-area-inset-top, 0px) + 14px));
+  left: max(14px, calc(env(safe-area-inset-left, 0px) + 14px));
+  z-index: 2147483000;
 }
 
 .race-cancel-overlay:hover {
@@ -902,20 +917,26 @@ input:focus {
 
 .start-tree-light {
   position: absolute;
-  top: 24px;
+  top: 72px;
   left: 50%;
-  z-index: 12;
+  z-index: 10030;
   display: grid;
-  gap: 10px;
-  width: 74px;
-  padding: 12px 10px;
+  gap: 7px;
+  width: clamp(46px, 5vw, 58px);
+  padding: 10px 8px;
   border: 2px solid rgba(255, 255, 255, 0.82);
   border-radius: 9px;
   background: linear-gradient(180deg, rgba(8, 10, 13, 0.96), rgba(18, 22, 29, 0.94));
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
   pointer-events: none;
-  transform: translateX(-50%) scale(3);
+  transform: translateX(-50%) scale(clamp(1.55, 1.15vw + 1.1, 1.85));
   transform-origin: top center;
+}
+
+.race-fullscreen .start-tree-light {
+  position: fixed;
+  top: max(72px, calc(env(safe-area-inset-top, 0px) + 72px));
+  z-index: 2147482500;
 }
 
 .tree-lamp {
@@ -952,6 +973,16 @@ input:focus {
     radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.78), transparent 20%),
     radial-gradient(circle, #65f06c 0 36%, #18a044 56%, #0e5f2a 74%);
   box-shadow: 0 0 24px rgba(77, 238, 94, 0.95);
+}
+
+@media (max-height: 720px) {
+  .race-fullscreen .start-tree-light {
+    top: max(54px, calc(env(safe-area-inset-top, 0px) + 54px));
+    width: 44px;
+    gap: 6px;
+    padding: 8px 7px;
+    transform: translateX(-50%) scale(1.35);
+  }
 }
 
 .map-camera-pad {
