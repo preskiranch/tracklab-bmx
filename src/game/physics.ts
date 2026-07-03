@@ -125,7 +125,9 @@ export function stepRiders(
     const sample = player?.deviceId == null ? null : samplesByDevice.get(player.deviceId);
     const nowMs = Date.now();
     const elapsedMs = nowMs - raceStartedAt;
-    const watts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt) ? sample?.watts ?? 0 : 0;
+    const watts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
+      ? sample?.physicsWatts ?? sample?.watts ?? 0
+      : 0;
     const cadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
 
     const wattsAverage = rider.wattsAverage * 0.94 + watts * 0.06;

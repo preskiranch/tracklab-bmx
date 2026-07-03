@@ -97,6 +97,7 @@ type DemoBikesOptions = {
 };
 
 const demoThirtyFootTargetSeconds = 1.68;
+const demoLevelOneThirtyFootWatts = 1300;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -331,7 +332,7 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
   ));
   const resistanceLevel = 1;
   const tableWatts = wattbikeProAirHighWattsFromCadence(cadence, resistanceLevel);
-  const watts = Math.round(clamp(
+  const physicsWatts = Math.round(clamp(
     tableWatts * clamp(
       0.94
         + variables.torque * 0.08
@@ -345,6 +346,23 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     ),
     0,
     2500,
+  ));
+  const thirtyFootPowerWindow = Math.exp(-Math.pow((time - demoThirtyFootTargetSeconds) / 1.15, 2));
+  const demoPowerScale = clamp(
+    1.12
+      + thirtyFootPowerWindow * 0.42
+      + variables.torque * 0.09
+      + variables.launchSnap * 0.08
+      + variables.startGateLoad * 0.05
+      - fatigueLull * 0.1
+      - mistakeEnvelope * 0.12,
+    1.12,
+    1.78,
+  );
+  const watts = Math.round(clamp(
+    physicsWatts * demoPowerScale,
+    0,
+    demoLevelOneThirtyFootWatts * 1.18,
   ));
   const speedKph = Number(clamp(
     bmxSpeedKphFromCadence(cadence)
@@ -376,6 +394,7 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     wattsAt: at,
     cadenceAt: at,
     speedAt: at,
+    physicsWatts,
     demoActiveMs: Math.round(time * 1000),
     demoReactionDelayMs: Math.round(reactionDelaySeconds * 1000),
     signal,

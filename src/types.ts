@@ -22,6 +22,7 @@ export type BikeSample = {
   cadenceAt?: number;
   speedAt?: number;
   speedSource?: 'measured' | 'estimated';
+  physicsWatts?: number;
   demoActiveMs?: number;
   demoReactionDelayMs?: number;
   signal: number;
