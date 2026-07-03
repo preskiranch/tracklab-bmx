@@ -98,6 +98,8 @@ import type {
 } from './types';
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
+const uciRandomDelayMinMs = 100;
+const uciRandomDelayMaxMs = 2700;
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 
@@ -122,6 +124,29 @@ function releaseBrowserFullscreen() {
   } catch {
     // Ignore browser-level fullscreen refusal so race reset/cancel can continue.
   }
+}
+
+function randomIntegerInclusive(minimum: number, maximum: number) {
+  const min = Math.ceil(minimum);
+  const max = Math.floor(maximum);
+  if (max <= min) {
+    return min;
+  }
+
+  const range = max - min + 1;
+  const cryptoApi = window.crypto;
+  if (cryptoApi?.getRandomValues) {
+    const maxUnbiased = Math.floor(0x100000000 / range) * range;
+    const value = new Uint32Array(1);
+
+    do {
+      cryptoApi.getRandomValues(value);
+    } while (value[0] >= maxUnbiased);
+
+    return min + (value[0] % range);
+  }
+
+  return min + Math.floor(Math.random() * range);
 }
 
 function readInitialTrack() {
@@ -2408,7 +2433,7 @@ export default function App() {
         return;
       }
 
-      const randomDelayMs = 100 + Math.round(Math.random() * 2600);
+      const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
       const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
       const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
         const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
@@ -2435,7 +2460,7 @@ export default function App() {
         setStartGateStatus({
           active: true,
           label: 'RANDOM DELAY',
-          detail: `${(randomDelayMs / 1000).toFixed(2)}s to gate tones`,
+          detail: 'Watch the gate',
           lightIndex: null,
         });
       });
