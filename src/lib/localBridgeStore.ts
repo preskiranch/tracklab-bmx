@@ -23,7 +23,7 @@ function bridgeHttpUrl(path: string) {
 export async function readBridgeUserData() {
   const response = await fetch(bridgeHttpUrl('/api/user-data'));
   if (!response.ok) {
-    throw new Error(`Local bridge user data returned ${response.status}`);
+    throw new Error(`Advanced Connector user data returned ${response.status}`);
   }
 
   return response.json() as Promise<BridgeUserData>;
@@ -37,7 +37,7 @@ export async function patchBridgeUserData(patch: Partial<Omit<BridgeUserData, 'v
   });
 
   if (!response.ok) {
-    throw new Error(`Local bridge user data save returned ${response.status}`);
+    throw new Error(`Advanced Connector user data save returned ${response.status}`);
   }
 
   return response.json() as Promise<BridgeUserData>;

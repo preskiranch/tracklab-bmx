@@ -502,7 +502,7 @@ export function SessionControlPanel({
             type="button"
             onClick={() => onDemoModeChange(false)}
           >
-            Wattbike
+            Live Bikes
           </button>
           <button
             className={demoMode ? 'selected' : ''}

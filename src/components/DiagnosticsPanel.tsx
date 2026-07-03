@@ -217,7 +217,7 @@ export function DiagnosticsPanel({
     },
     {
       id: 'bridge',
-      title: 'Local bridge',
+      title: 'Advanced Connector',
       detail: demoMode ? 'Bypassed for demo' : `${bridgeMode.toString().toUpperCase()} / ${bridgeSourceState}`,
       severity: demoMode || bridgeConnection === 'open' ? 'ready' : 'warning',
       icon: RadioTower,
@@ -299,7 +299,7 @@ export function DiagnosticsPanel({
           <div className="diagnostic-actions">
             <button type="button" onClick={bridgeRunning ? onStopBridge : onStartBridge} disabled={demoMode || bridgeBusy || bridgeConnection !== 'open'}>
               {bridgeRunning ? <StopCircle size={16} /> : <PlayCircle size={16} />}
-              {bridgeRunning ? 'Stop bridge' : 'Start bridge'}
+              {bridgeRunning ? 'Stop connector' : 'Start connector'}
             </button>
             <button type="button" onClick={onOpenMonitor}>
               <Gauge size={16} />

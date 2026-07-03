@@ -40,7 +40,7 @@ export function PairingRail({
   bluetoothDeviceCount = 0,
   title = 'Bike Pairing',
   subtitle,
-  emptyMessage = 'Pedal a Wattbike for a few seconds so the ANT+ bridge can detect it.',
+  emptyMessage = 'Pedal a Wattbike for a few seconds so the Advanced Connector can detect it.',
   deviceLabel = 'ANT device',
   readOnly = false,
   maxPlayers = 8,

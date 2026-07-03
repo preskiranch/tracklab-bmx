@@ -77,9 +77,23 @@ watts, cadence, and speed samples in the terminal. Use `--profile power`,
 
 ## Connecting And Remembering Bikes
 
+### Website-first connection requirement
+
+The public product target is launcherless for most riders: a rider should be
+able to open the TrackLab BMX website, press a browser Bluetooth pairing
+button, choose their Wattbike, and ride without installing a local launcher.
+The app should remember the rider's bike profile and saved track data through
+their account/cloud profile where available, with browser storage as a local
+fallback.
+
+ANT+ dongles are the exception. A normal hosted website cannot reliably open a
+USB ANT+ stick across browsers, so ANT+ users still need the TrackLab Bike
+Connector on the computer with the dongle. The app should present this as an
+advanced ANT+ / USB option, not as the default path for public users.
+
 1. Plug the ANT+ USB dongle into the computer that is near the Wattbikes.
 2. Start the local app/helper with `npm run dev`.
-3. In the app sidebar, press **Start Local Bridge**.
+3. In the app sidebar, choose **Advanced Connector** and press **Start Connector**.
 4. Put each Wattbike monitor in Just Ride and pedal for a few seconds.
 5. The sidebar indicator changes to Scanning while the bridge is looking for
    bikes, then the bike status turns live when a Wattbike signal is received.

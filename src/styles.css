@@ -366,6 +366,48 @@ input:focus {
   margin-top: 10px;
 }
 
+.connection-source-switch {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.connection-source-switch button,
+.bluetooth-connect-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 35px;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #465568;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.connection-source-switch button.selected {
+  border-color: #101827;
+  background: #101827;
+  color: #ffffff;
+  box-shadow: 0 7px 16px rgba(16, 24, 39, 0.12);
+}
+
+.bluetooth-connect-button {
+  width: 100%;
+  margin-top: 9px;
+  border-color: #a9d98b;
+  background: linear-gradient(135deg, #8ee837, #4dd4b2);
+  color: #101827;
+}
+
+.bluetooth-connect-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .bridge-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

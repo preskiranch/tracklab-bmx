@@ -39,7 +39,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [mode, setMode] = useState<BridgeSnapshot['mode']>('unknown');
   const [sourceState, setSourceState] = useState<BridgeSnapshot['sourceState']>('unknown');
-  const [status, setStatus] = useState('Connecting to local Wattbike bridge.');
+  const [status, setStatus] = useState('Connecting to TrackLab Bike Connector.');
   const [error, setError] = useState<string | null>(null);
   const [controlStatus, setControlStatus] = useState<string | null>(null);
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
@@ -106,7 +106,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
       socket.addEventListener('error', () => {
         setConnection('error');
         setSourceState('unknown');
-        setError(`Could not reach the Wattbike bridge on ${bridgeUrl}.`);
+        setError(`Could not reach TrackLab Bike Connector on ${bridgeUrl}.`);
       });
     };
 
@@ -133,7 +133,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
         setStatus(payload.message);
       }
       if (!response.ok) {
-        setError(payload.message ?? `Local bridge ${action} failed.`);
+        setError(payload.message ?? `Advanced Connector ${action} failed.`);
         return false;
       }
       setError(null);
@@ -141,7 +141,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
     } catch (commandError) {
       const message = commandError instanceof Error ? commandError.message : String(commandError);
       setConnection('error');
-      setError(`Could not ${action} the local bridge on ${bridgeHttpUrl(`/api/bridge/${action}`)}. ${message}`);
+      setError(`Could not ${action} TrackLab Bike Connector on ${bridgeHttpUrl(`/api/bridge/${action}`)}. ${message}`);
       return false;
     }
   }, []);
@@ -152,7 +152,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
   const sendControlCommand = useCallback((action: BikeControlAction) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setControlStatus('Wattbike bridge is not connected, so bike control command was not sent.');
+      setControlStatus('Advanced Connector is not connected, so bike control command was not sent.');
       return false;
     }
 
@@ -162,7 +162,7 @@ export function useWattbikeBridge(): BridgeSnapshot {
       at: Date.now(),
     };
     socket.send(JSON.stringify(command));
-    setControlStatus(`Sent ${action.replace('-', ' ')} command to Wattbike bridge.`);
+    setControlStatus(`Sent ${action.replace('-', ' ')} command to Advanced Connector.`);
     return true;
   }, []);
 

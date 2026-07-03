@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   Bike,
+  Bluetooth,
   Database,
   Gauge,
   Globe2,
@@ -13,6 +14,7 @@ import {
   Route,
   Settings,
   StopCircle,
+  Usb,
   Users,
 } from 'lucide-react';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
@@ -94,6 +96,8 @@ import type {
 } from './types';
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
+
+type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 
 function readInitialTrack() {
   try {
@@ -473,6 +477,7 @@ export default function App() {
   const [draftZoneMeters, setDraftZoneMeters] = useState<number[]>([]);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
+  const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>('bluetooth');
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
@@ -1951,13 +1956,28 @@ export default function App() {
     startGateStatus.active,
   ]);
 
-  const handleDemoModeChange = (enabled: boolean) => {
+  const handleDemoModeChange = (enabled: boolean, nextSource: BikeConnectionSource = enabled ? 'demo' : 'bluetooth') => {
     clearStartGateSequence();
+    setBikeConnectionSource(nextSource);
     setDemoMode(enabled);
     setDemoRaceSeed(Date.now());
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     resetRace();
+  };
+
+  const handleBikeConnectionSourceChange = (source: BikeConnectionSource) => {
+    if (source === 'demo') {
+      handleDemoModeChange(true, 'demo');
+      return;
+    }
+
+    if (demoMode) {
+      handleDemoModeChange(false, source);
+      return;
+    }
+
+    setBikeConnectionSource(source);
   };
 
   const handleDemoBikeCountChange = (count: number) => {
@@ -2195,7 +2215,15 @@ export default function App() {
 
   const connectionLabel = (() => {
     if (demoMode) {
-      return 'DEMO race source online';
+      return 'Demo race source online';
+    }
+
+    if (bikeConnectionSource === 'bluetooth') {
+      if (!bluetooth.supported) {
+        return 'Bluetooth Direct unavailable';
+      }
+
+      return bluetooth.connectedCount > 0 ? 'Bluetooth Direct online' : 'Bluetooth Direct ready';
     }
 
     if (bluetooth.connectedCount > 0 && bridge.connection === 'open') {
@@ -2207,28 +2235,38 @@ export default function App() {
     }
 
     if (bridge.connection !== 'open') {
-      return 'Local bridge offline';
+      return 'Advanced Connector offline';
     }
 
     if (bridge.sourceState === 'idle') {
-      return 'Local helper online';
+      return 'Advanced Connector ready';
     }
 
     if (bridge.sourceState === 'starting') {
-      return 'Starting ANT+ bridge';
+      return 'Starting Advanced Connector';
     }
 
     if (bridge.sourceState === 'error') {
-      return 'ANT+ bridge error';
+      return 'Advanced Connector error';
     }
 
     return activePlayers.length > 0
       ? `${livePlayerCount}/${activePlayers.length} bike${activePlayers.length === 1 ? '' : 's'} live`
-      : `${bridge.mode.toString().toUpperCase()} bridge scanning`;
+      : `${bridge.mode.toString().toUpperCase()} connector scanning`;
   })();
   const connectionStatus = (() => {
     if (demoMode) {
       return `Simulating ${demoBikeCount} bike${demoBikeCount === 1 ? '' : 's'} with ${demo.variableCount} race variables.`;
+    }
+
+    if (bikeConnectionSource === 'bluetooth') {
+      if (!bluetooth.supported) {
+        return 'This browser does not support direct Bluetooth pairing. Use Chrome or Edge, or switch to Advanced Connector for ANT+/USB.';
+      }
+
+      return bluetooth.connectedCount > 0
+        ? bluetooth.status
+        : 'Press Connect Wattbike, choose the bike from the browser Bluetooth prompt, then pedal to confirm live data.';
     }
 
     const bridgeControlStatus = bridge.controlStatus ? ` ${bridge.controlStatus}` : '';
@@ -2241,21 +2279,27 @@ export default function App() {
   })();
   const bridgeBusy = bridge.sourceState === 'starting' || bridge.sourceState === 'stopping';
   const bridgeRunning = bridge.sourceState === 'running';
-  const bridgeButtonDisabled = demoMode || bridge.connection !== 'open' || bridgeBusy;
+  const bridgeButtonDisabled = demoMode || bikeConnectionSource !== 'advanced' || bridge.connection !== 'open' || bridgeBusy;
   const bridgeButtonLabel = bridgeBusy
-    ? bridge.sourceState === 'stopping' ? 'Stopping Bridge' : 'Starting Bridge'
-    : bridgeRunning ? 'Stop Bridge' : 'Start Local Bridge';
+    ? bridge.sourceState === 'stopping' ? 'Stopping Connector' : 'Starting Connector'
+    : bridgeRunning ? 'Stop Connector' : 'Start Connector';
   const bridgePrompt = (() => {
     if (demoMode) {
       return 'Demo mode is generating bike data.';
     }
 
+    if (bikeConnectionSource === 'bluetooth') {
+      return bluetooth.supported
+        ? 'No connector needed. Browser Bluetooth feeds the same BMX gear logic, race engine, monitor, and summaries.'
+        : 'Direct Bluetooth is blocked in this browser. Switch to Advanced Connector or use a supported desktop browser.';
+    }
+
     if (bridge.connection !== 'open') {
-      return 'Start the TrackLab local helper first, then reload this page.';
+      return 'Install or open TrackLab Bike Connector on this computer, then reload this page.';
     }
 
     if (bridge.sourceState === 'idle') {
-      return 'Press Start Local Bridge, then put each Wattbike in Just Ride at resistance level 1.';
+      return 'Press Start Connector, then put each Wattbike in Just Ride at resistance level 1.';
     }
 
     if (bridge.sourceState === 'running' && activePlayers.length === 0) {
@@ -2270,14 +2314,20 @@ export default function App() {
   })();
   const connectionState = demoMode || bluetooth.connectedCount > 0 || activePlayers.length > 0
     ? 'open'
-    : bridge.connection === 'open' && (bridge.sourceState === 'running' || bridge.sourceState === 'starting')
+    : bikeConnectionSource === 'bluetooth'
+      ? bluetooth.supported ? 'idle' : 'error'
+      : bridge.connection === 'open' && (bridge.sourceState === 'running' || bridge.sourceState === 'starting')
       ? 'connecting'
       : bridge.connection;
-  const showBluetoothPairing = !demoMode && bridge.mode !== 'ant';
-  const pairingEmptyMessage = bridge.mode === 'ant'
-    ? 'Put each Wattbike in Just Ride at resistance level 1 and pedal for a few seconds so the ANT+ bridge can detect it.'
-    : 'Pedal a Wattbike for bridge discovery, or use Bluetooth pairing for BLE bikes.';
-  const pairingDeviceLabel = bridge.mode === 'ant' ? 'ANT+ device' : 'Bike device';
+  const showBluetoothPairing = !demoMode && bikeConnectionSource === 'bluetooth';
+  const pairingEmptyMessage = demoMode
+    ? 'Choose demo riders to generate live race samples.'
+    : bikeConnectionSource === 'advanced'
+      ? 'Start Advanced Connector, put each Wattbike in Just Ride at resistance level 1, then pedal for ANT+/USB discovery.'
+      : bluetooth.supported
+        ? 'Press Connect Wattbike to pair Bluetooth bikes. Riders appear only after live bike data is detected.'
+        : 'Direct Bluetooth is unavailable in this browser. Use Advanced Connector for ANT+/USB or open the site in a supported browser.';
+  const pairingDeviceLabel = bikeConnectionSource === 'advanced' ? 'ANT+ / USB device' : 'Bluetooth bike';
 
   return (
     <div
@@ -2304,22 +2354,61 @@ export default function App() {
             </div>
           </div>
           <p>{connectionStatus}</p>
-          <div className="bridge-controls">
+          <div className="connection-source-switch" aria-label="Connection method">
             <button
-              className={bridgeRunning ? 'bridge-control-button stop' : 'bridge-control-button start'}
+              className={bikeConnectionSource === 'bluetooth' && !demoMode ? 'selected' : ''}
               type="button"
-              onClick={() => {
-                void (bridgeRunning ? bridge.stopLocalBridge() : bridge.startLocalBridge());
-              }}
-              disabled={bridgeButtonDisabled}
+              onClick={() => handleBikeConnectionSourceChange('bluetooth')}
             >
-              {bridgeRunning ? <StopCircle size={16} /> : <PlayCircle size={16} />}
-              <span>{bridgeButtonLabel}</span>
+              <Bluetooth size={15} />
+              <span>Bluetooth Direct</span>
             </button>
-            <span className={`bridge-live-pill ${activePlayers.length > 0 ? 'live' : bridgeRunning ? 'waiting' : ''}`}>
-              {activePlayers.length > 0 ? 'Bike connected' : bridgeRunning ? 'Scanning' : 'Idle'}
-            </span>
+            <button
+              className={bikeConnectionSource === 'advanced' && !demoMode ? 'selected' : ''}
+              type="button"
+              onClick={() => handleBikeConnectionSourceChange('advanced')}
+            >
+              <Usb size={15} />
+              <span>Advanced Connector</span>
+            </button>
+            <button
+              className={demoMode ? 'selected' : ''}
+              type="button"
+              onClick={() => handleBikeConnectionSourceChange('demo')}
+            >
+              <Bike size={15} />
+              <span>Demo</span>
+            </button>
           </div>
+          {bikeConnectionSource === 'bluetooth' && !demoMode && (
+            <button
+              className="bluetooth-connect-button"
+              type="button"
+              onClick={bluetooth.connectBike}
+              disabled={!bluetooth.supported}
+            >
+              <Bluetooth size={16} />
+              <span>{bluetooth.connectedCount > 0 ? 'Connect Another Wattbike' : 'Connect Wattbike'}</span>
+            </button>
+          )}
+          {bikeConnectionSource === 'advanced' && !demoMode && (
+            <div className="bridge-controls">
+              <button
+                className={bridgeRunning ? 'bridge-control-button stop' : 'bridge-control-button start'}
+                type="button"
+                onClick={() => {
+                  void (bridgeRunning ? bridge.stopLocalBridge() : bridge.startLocalBridge());
+                }}
+                disabled={bridgeButtonDisabled}
+              >
+                {bridgeRunning ? <StopCircle size={16} /> : <PlayCircle size={16} />}
+                <span>{bridgeButtonLabel}</span>
+              </button>
+              <span className={`bridge-live-pill ${activePlayers.length > 0 ? 'live' : bridgeRunning ? 'waiting' : ''}`}>
+                {activePlayers.length > 0 ? 'Bike connected' : bridgeRunning ? 'Scanning' : 'Idle'}
+              </span>
+            </div>
+          )}
           <div className="bridge-prompt">{bridgePrompt}</div>
         </section>
 
@@ -2360,9 +2449,9 @@ export default function App() {
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}
           bluetoothDeviceCount={bluetooth.connectedCount}
-          title={demoMode ? 'Demo Riders' : 'Bike Pairing'}
+          title={demoMode ? 'Demo Riders' : 'Detected Bikes'}
           subtitle={demoMode ? `${demoBikeCount} simulated / max ${maxPlayers}` : undefined}
-          emptyMessage={demoMode ? 'Choose demo riders to generate live race samples.' : pairingEmptyMessage}
+          emptyMessage={pairingEmptyMessage}
           deviceLabel={demoMode ? 'Demo device' : pairingDeviceLabel}
           readOnly={demoMode}
           maxPlayers={maxPlayers}
