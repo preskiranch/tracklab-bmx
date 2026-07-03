@@ -8,6 +8,13 @@ let activeStartGateAudio: HTMLAudioElement | null = null;
 export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
 export const uciVoiceWatchGateOffsetMs = 5300;
 
+type UciVoiceStartSource = 'audio' | 'fallback';
+
+export type UciVoiceStartResult = {
+  startedAt: number;
+  source: UciVoiceStartSource;
+};
+
 function getAudioContext() {
   if (audioContext) {
     return audioContext;
@@ -38,6 +45,28 @@ function resumeAudioContext() {
   }
 
   return context;
+}
+
+function cancelPendingStartGateAudio(audio: HTMLAudioElement) {
+  audio.muted = true;
+  audio.pause();
+
+  try {
+    audio.currentTime = 0;
+  } catch {
+    // The audio may not have metadata yet.
+  }
+
+  try {
+    audio.removeAttribute('src');
+    audio.load();
+  } catch {
+    // Ignore browsers that refuse to unload a pending media request.
+  }
+
+  if (activeStartGateAudio === audio) {
+    activeStartGateAudio = null;
+  }
 }
 
 export function primeAudioCues() {
@@ -133,7 +162,7 @@ export function stopStartGateAudio() {
   window.speechSynthesis?.cancel();
 }
 
-export function playUciRandomStartVoice() {
+export function playUciRandomStartVoice(timeoutMs = 8000): Promise<UciVoiceStartResult> {
   stopStartGateAudio();
   resumeAudioContext();
 
@@ -143,10 +172,45 @@ export function playUciRandomStartVoice() {
   audio.volume = 1;
   audio.currentTime = 0;
 
-  void audio.play().catch(() => {
-    playStartGateTone('tick');
-    speakStartGatePhrase('OK riders, random start. Riders ready. Watch the gate.');
-  });
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeoutId: number | null = null;
 
-  return audio;
+    const cleanup = () => {
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+      audio.removeEventListener('playing', handleAudioStarted);
+    };
+
+    const finish = (source: UciVoiceStartSource) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      resolve({ startedAt: Date.now(), source });
+    };
+
+    const startFallback = () => {
+      cancelPendingStartGateAudio(audio);
+      playStartGateTone('tick');
+      speakStartGatePhrase('OK riders, random start. Riders ready. Watch the gate.');
+      finish('fallback');
+    };
+
+    function handleAudioStarted() {
+      finish('audio');
+    }
+
+    audio.addEventListener('playing', handleAudioStarted, { once: true });
+    timeoutId = window.setTimeout(startFallback, timeoutMs);
+
+    void audio.play()
+      .then(() => {
+        finish('audio');
+      })
+      .catch(startFallback);
+  });
 }

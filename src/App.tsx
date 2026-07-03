@@ -624,6 +624,7 @@ export default function App() {
   const bluetooth = useBluetoothBikes();
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
+  const startGateSequenceIdRef = useRef(0);
   const startGateArmedAtRef = useRef<number | null>(null);
   const falseStartHandledRef = useRef(false);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
@@ -2084,6 +2085,7 @@ export default function App() {
   }, [handleEarthCameraChange]);
 
   const clearStartGateSequence = useCallback(() => {
+    startGateSequenceIdRef.current += 1;
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     startGateTimeoutsRef.current = [];
     startGateArmedAtRef.current = null;
@@ -2095,8 +2097,14 @@ export default function App() {
 
   useEffect(() => () => clearStartGateSequence(), [clearStartGateSequence]);
 
-  const scheduleStartGateStep = useCallback((delayMs: number, action: () => void) => {
-    const timeoutId = window.setTimeout(action, delayMs);
+  const scheduleStartGateStep = useCallback((delayMs: number, action: () => void, sequenceId = startGateSequenceIdRef.current) => {
+    const timeoutId = window.setTimeout(() => {
+      if (sequenceId !== startGateSequenceIdRef.current) {
+        return;
+      }
+
+      action();
+    }, delayMs);
     startGateTimeoutsRef.current.push(timeoutId);
   }, []);
 
@@ -2326,12 +2334,13 @@ export default function App() {
     setChatDraft('');
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     if (effectiveTrack.routeStatus !== 'user-mapped' || startGateStatus.active || raceState === 'racing') {
       return;
     }
 
     clearStartGateSequence();
+    const sequenceId = startGateSequenceIdRef.current;
     falseStartHandledRef.current = false;
     startGateArmedAtRef.current = Date.now();
     setMappingFullscreen(false);
@@ -2344,18 +2353,33 @@ export default function App() {
     primeAudioCues();
 
     if (startCadenceMode === 'uci') {
+      setStartGateStatus({
+        active: true,
+        label: 'UCI CADENCE',
+        detail: 'Starting random cadence audio',
+        lightIndex: null,
+      });
+
+      const voiceStart = await playUciRandomStartVoice();
+      if (sequenceId !== startGateSequenceIdRef.current) {
+        return;
+      }
+
       const randomDelayMs = 100 + Math.round(Math.random() * 2600);
       const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
+      const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
+        const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
+        scheduleStartGateStep(Math.max(0, voiceOffsetMs - elapsedSinceVoiceStartMs), action, sequenceId);
+      };
 
       setStartGateStatus({
         active: true,
         label: 'OK RIDERS',
-        detail: 'UCI random start voice',
+        detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback random start voice',
         lightIndex: null,
       });
-      playUciRandomStartVoice();
 
-      scheduleStartGateStep(3300, () => {
+      scheduleVoiceStep(3300, () => {
         setStartGateStatus({
           active: true,
           label: 'RIDERS READY',
@@ -2364,7 +2388,7 @@ export default function App() {
         });
       });
 
-      scheduleStartGateStep(uciVoiceWatchGateOffsetMs, () => {
+      scheduleVoiceStep(uciVoiceWatchGateOffsetMs, () => {
         setStartGateStatus({
           active: true,
           label: 'RANDOM DELAY',
@@ -2374,7 +2398,7 @@ export default function App() {
       });
 
       [0, 120, 240].forEach((offsetMs, index) => {
-        scheduleStartGateStep(firstToneAtMs + offsetMs, () => {
+        scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
           if (index === 0) {
             armReactionTimer();
           }
@@ -2390,7 +2414,7 @@ export default function App() {
         });
       });
 
-      scheduleStartGateStep(firstToneAtMs + 360, () => {
+      scheduleVoiceStep(firstToneAtMs + 360, () => {
         playStartGateTone('uci-green');
         beginRaceAtGateDrop();
       });
