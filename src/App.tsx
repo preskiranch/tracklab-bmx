@@ -635,6 +635,7 @@ export default function App() {
   const roomTrackApplyRef = useRef<string | null>(null);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const [initialTrack] = useState(readInitialTrack);
+  const selectedTrackIdRef = useRef(initialTrack.id);
   const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
@@ -772,6 +773,9 @@ export default function App() {
     () => catalogTracks.find((track) => track.id === selectedTrackId) ?? availableTracks[0] ?? defaultTrack,
     [availableTracks, catalogTracks, selectedTrackId],
   );
+  useEffect(() => {
+    selectedTrackIdRef.current = selectedTrack.id;
+  }, [selectedTrack.id]);
   const selectedTrackMapping = storedMappings[selectedTrack.id];
   useEffect(() => {
     const savedCamera = earthCamerasByTrack[selectedTrack.id];
@@ -944,6 +948,32 @@ export default function App() {
   }, [activePlayers, raceState, riders, startGateStatus.active]);
   const canCancelRace = startGateStatus.active || raceState === 'racing';
 
+  const releaseRaceFullscreen = useCallback(() => {
+    releaseBrowserFullscreen();
+  }, []);
+
+  const clearStartGateSequence = useCallback(() => {
+    startGateSequenceIdRef.current += 1;
+    startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    startGateTimeoutsRef.current = [];
+    startGateArmedAtRef.current = null;
+    stopStartGateAudio();
+    setStartGateStatus(idleStartGateStatus);
+    setReactionStartAt(null);
+    setReactionTimesByPlayer({});
+  }, []);
+
+  const prepareForTrackSelection = useCallback((nextTrackId: string) => {
+    selectedTrackIdRef.current = nextTrackId;
+    clearStartGateSequence();
+    falseStartHandledRef.current = false;
+    setMappingFullscreen(false);
+    setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
+    resetRace();
+    releaseRaceFullscreen();
+  }, [clearStartGateSequence, releaseRaceFullscreen, resetRace]);
+
   useEffect(() => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom?.track.id) {
       return;
@@ -960,10 +990,11 @@ export default function App() {
     }
 
     roomTrackApplyRef.current = roomTrackId;
+    prepareForTrackSelection(roomTrack.id);
     setSelectedCountry(roomTrack.country);
     setSelectedState(roomTrack.state);
     setSelectedTrackId(roomTrack.id);
-  }, [catalogTracks, multiplayer.currentRoom?.track.id, playMode, selectedTrackId]);
+  }, [catalogTracks, multiplayer.currentRoom?.track.id, playMode, prepareForTrackSelection, selectedTrackId]);
 
   useEffect(() => {
     const roomId = multiplayer.currentRoom?.id;
@@ -1136,10 +1167,6 @@ export default function App() {
         ],
       };
     });
-  }, []);
-
-  const releaseRaceFullscreen = useCallback(() => {
-    releaseBrowserFullscreen();
   }, []);
 
   useEffect(() => {
@@ -1589,6 +1616,11 @@ export default function App() {
   const handleCountryChange = (country: string) => {
     const nextState = statesForCountry(country, catalogTracks)[0];
     const nextTrack = tracksForLocation(country, nextState, catalogTracks)[0];
+    if (!nextTrack) {
+      return;
+    }
+
+    prepareForTrackSelection(nextTrack.id);
     setSelectedCountry(country);
     setSelectedState(nextState);
     setSelectedTrackId(nextTrack.id);
@@ -1596,6 +1628,11 @@ export default function App() {
 
   const handleStateChange = (state: string) => {
     const nextTrack = tracksForLocation(selectedCountry, state, catalogTracks)[0];
+    if (!nextTrack) {
+      return;
+    }
+
+    prepareForTrackSelection(nextTrack.id);
     setSelectedState(state);
     setSelectedTrackId(nextTrack.id);
   };
@@ -1606,6 +1643,7 @@ export default function App() {
       return;
     }
 
+    prepareForTrackSelection(nextTrack.id);
     setSelectedCountry(nextTrack.country);
     setSelectedState(nextTrack.state);
     setSelectedTrackId(nextTrack.id);
@@ -1709,6 +1747,7 @@ export default function App() {
         writeStoredCustomRoutes(next);
         return next;
       });
+      prepareForTrackSelection(customRoute.id);
       setSelectedCountry(customRoute.country);
       setSelectedState(customRoute.state);
       setSelectedTrackId(customRoute.id);
@@ -1767,6 +1806,7 @@ export default function App() {
 
     if (selectedTrackId === trackId) {
       const fallbackTrack = baseCatalogTracks[0] ?? defaultTrack;
+      prepareForTrackSelection(fallbackTrack.id);
       setSelectedCountry(fallbackTrack.country);
       setSelectedState(fallbackTrack.state);
       setSelectedTrackId(fallbackTrack.id);
@@ -1925,6 +1965,7 @@ export default function App() {
 
         const importedTrack = catalogTracks.find((track) => track.id === mapping.trackId);
         if (importedTrack) {
+          prepareForTrackSelection(importedTrack.id);
           setSelectedCountry(importedTrack.country);
           setSelectedState(importedTrack.state);
           setSelectedTrackId(importedTrack.id);
@@ -2084,17 +2125,6 @@ export default function App() {
     handleEarthCameraChange({ heading });
   }, [handleEarthCameraChange]);
 
-  const clearStartGateSequence = useCallback(() => {
-    startGateSequenceIdRef.current += 1;
-    startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
-    startGateTimeoutsRef.current = [];
-    startGateArmedAtRef.current = null;
-    stopStartGateAudio();
-    setStartGateStatus(idleStartGateStatus);
-    setReactionStartAt(null);
-    setReactionTimesByPlayer({});
-  }, []);
-
   useEffect(() => () => clearStartGateSequence(), [clearStartGateSequence]);
 
   const scheduleStartGateStep = useCallback((delayMs: number, action: () => void, sequenceId = startGateSequenceIdRef.current) => {
@@ -2113,7 +2143,14 @@ export default function App() {
     setReactionTimesByPlayer({});
   }, []);
 
-  const beginRaceAtGateDrop = useCallback(() => {
+  const beginRaceAtGateDrop = useCallback((expectedTrackId?: string, sequenceId = startGateSequenceIdRef.current) => {
+    if (
+      (expectedTrackId && selectedTrackIdRef.current !== expectedTrackId)
+      || sequenceId !== startGateSequenceIdRef.current
+    ) {
+      return;
+    }
+
     const gateDropAt = Date.now();
     startGateArmedAtRef.current = null;
     if (demoMode) {
@@ -2309,11 +2346,12 @@ export default function App() {
       return;
     }
 
+    prepareForTrackSelection(nextTrack.id);
     setSelectedCountry(nextTrack.country);
     setSelectedState(nextTrack.state);
     setSelectedTrackId(nextTrack.id);
     void multiplayer.syncTrack(nextTrack);
-  }, [catalogTracks, multiplayer.syncTrack]);
+  }, [catalogTracks, multiplayer.syncTrack, prepareForTrackSelection]);
 
   const sendChatMessage = () => {
     const text = chatDraft.trim();
@@ -2339,6 +2377,11 @@ export default function App() {
       return;
     }
 
+    const startingTrackId = effectiveTrack.id;
+    if (selectedTrackIdRef.current !== startingTrackId) {
+      return;
+    }
+
     clearStartGateSequence();
     const sequenceId = startGateSequenceIdRef.current;
     falseStartHandledRef.current = false;
@@ -2361,7 +2404,7 @@ export default function App() {
       });
 
       const voiceStart = await playUciRandomStartVoice();
-      if (sequenceId !== startGateSequenceIdRef.current) {
+      if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
         return;
       }
 
@@ -2416,7 +2459,7 @@ export default function App() {
 
       scheduleVoiceStep(firstToneAtMs + 360, () => {
         playStartGateTone('uci-green');
-        beginRaceAtGateDrop();
+        beginRaceAtGateDrop(startingTrackId, sequenceId);
       });
       return;
     }
@@ -2449,8 +2492,8 @@ export default function App() {
 
     scheduleStartGateStep(safeCountdownSeconds * 1000, () => {
       playStartGateTone('gate');
-      beginRaceAtGateDrop();
-    });
+      beginRaceAtGateDrop(startingTrackId, sequenceId);
+    }, sequenceId);
   };
 
   const connectionLabel = (() => {
