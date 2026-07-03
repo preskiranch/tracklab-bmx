@@ -121,13 +121,19 @@ function pointClose(a: TrackPoint | undefined, b: TrackPoint | null | undefined)
   return distanceBetweenTrackPoints(a, b) < 0.5;
 }
 
-function branchWithMergePoint(points: TrackPoint[], mergePoint: TrackPoint) {
-  const lastPoint = points[points.length - 1];
-  if (!lastPoint || distanceBetweenTrackPoints(lastPoint, mergePoint) > 0.5) {
-    return [...points, mergePoint];
+function branchWithSplitAndMerge(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  const next = [...points];
+  const firstPoint = next[0];
+  if (!firstPoint || distanceBetweenTrackPoints(firstPoint, splitPoint) > 0.5) {
+    next.unshift(splitPoint);
   }
 
-  return points;
+  const lastPoint = next[next.length - 1];
+  if (!lastPoint || distanceBetweenTrackPoints(lastPoint, mergePoint) > 0.5) {
+    next.push(mergePoint);
+  }
+
+  return next;
 }
 
 function applyCamera(map: GoogleMap, cameraView: Partial<EarthCamera>) {
@@ -981,10 +987,12 @@ export function GoogleMapsTrackLayer({
       draftSplitSections.forEach((section) => renderDraftSplit(section));
 
       if (draftSplitBuilder?.splitPoint) {
-        const branchA = draftSplitBuilder.branchA;
-        const branchB = draftSplitBuilder.mergePoint
-          ? branchWithMergePoint(draftSplitBuilder.branchB, draftSplitBuilder.mergePoint)
-          : draftSplitBuilder.branchB;
+        const branchA = draftSplitBuilder.mergePoint && draftSplitBuilder.branchA.length > 0
+          ? branchWithSplitAndMerge(draftSplitBuilder.branchA, draftSplitBuilder.splitPoint, draftSplitBuilder.mergePoint)
+          : [];
+        const branchB = draftSplitBuilder.mergePoint && draftSplitBuilder.branchB.length > 0
+          ? branchWithSplitAndMerge(draftSplitBuilder.branchB, draftSplitBuilder.splitPoint, draftSplitBuilder.mergePoint)
+          : [];
         if (branchA.length > 1) {
           draftSplitLineRefs.current.push(new google.maps.Polyline({
             map,
@@ -1066,12 +1074,18 @@ export function GoogleMapsTrackLayer({
     mapListenerRefs.current = [];
     isDrawingRef.current = false;
     lastDrawPointRef.current = null;
-    const isDrawMode = mappingMode && (mappingEditMode === 'draw' || mappingEditMode === 'split');
+    const isSplitPlacementMode = mappingMode
+      && mappingEditMode === 'split'
+      && (!draftSplitBuilder?.splitPoint || !draftSplitBuilder?.mergePoint);
+    const isSplitBranchDrawMode = mappingMode
+      && mappingEditMode === 'split'
+      && Boolean(draftSplitBuilder?.splitPoint && draftSplitBuilder.mergePoint);
+    const isDrawMode = mappingMode && (mappingEditMode === 'draw' || isSplitBranchDrawMode);
     const isNavigateMode = !mappingMode || mappingEditMode === 'navigate';
     map.setOptions({
-      draggable: !isDrawMode,
+      draggable: !isDrawMode && !isSplitPlacementMode,
       draggableCursor: mappingMode && !isNavigateMode ? 'crosshair' : undefined,
-      gestureHandling: isDrawMode ? 'none' : 'greedy',
+      gestureHandling: 'greedy',
       headingInteractionEnabled: isNavigateMode,
       tiltInteractionEnabled: isNavigateMode,
     });
@@ -1124,10 +1138,13 @@ export function GoogleMapsTrackLayer({
           return;
         }
 
-        if (mappingEditMode === 'split') {
+        if (isSplitPlacementMode) {
+          return;
+        }
+
+        if (isSplitBranchDrawMode) {
           isDrawingRef.current = true;
           lastDrawPointRef.current = null;
-          addSplitPoint(point);
           return;
         }
 
@@ -1141,7 +1158,7 @@ export function GoogleMapsTrackLayer({
           return;
         }
 
-        if (mappingEditMode === 'split') {
+        if (isSplitBranchDrawMode) {
           addSplitPoint(point);
           return;
         }
@@ -1153,7 +1170,7 @@ export function GoogleMapsTrackLayer({
       map.addListener('mouseup', (event) => {
         const point = event?.latLng?.toJSON();
         if (point && isDrawingRef.current) {
-          if (mappingEditMode === 'split') {
+          if (isSplitBranchDrawMode) {
             addSplitPoint(point);
             onMappingSplitDrawEnd?.();
           } else if (mappingEditMode === 'draw') {
@@ -1168,6 +1185,10 @@ export function GoogleMapsTrackLayer({
         const point = event?.latLng?.toJSON();
         if (point && mappingEditMode === 'zones') {
           onMappingZonePointAdd?.(point);
+        }
+        if (point && isSplitPlacementMode) {
+          lastDrawPointRef.current = null;
+          addSplitPoint(point);
         }
       }),
     ];
@@ -1186,6 +1207,7 @@ export function GoogleMapsTrackLayer({
   }, [
     mappingEditMode,
     mappingMode,
+    draftSplitBuilder,
     onMappingPathPointAdd,
     onMappingSplitDrawEnd,
     onMappingSplitPointAdd,

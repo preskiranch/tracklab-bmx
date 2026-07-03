@@ -189,12 +189,24 @@ function branchWithEndpoints(points: TrackPoint[], splitPoint: TrackPoint, merge
   return next;
 }
 
+function branchInteriorPoints(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint | null) {
+  return points.filter((point) => {
+    if (distanceBetweenTrackPoints(point, splitPoint) <= 0.5) {
+      return false;
+    }
+
+    return !mergePoint || distanceBetweenTrackPoints(point, mergePoint) > 0.5;
+  });
+}
+
 function splitSectionFromDraft(draft: DraftTrackSplit): TrackSplitSection | null {
   if (!draft.splitPoint || !draft.mergePoint) {
     return null;
   }
 
-  if (draft.branchA.length < 2 || draft.branchB.length < 2) {
+  const branchAInterior = branchInteriorPoints(draft.branchA, draft.splitPoint, draft.mergePoint);
+  const branchBInterior = branchInteriorPoints(draft.branchB, draft.splitPoint, draft.mergePoint);
+  if (branchAInterior.length < 1 || branchBInterior.length < 1) {
     return null;
   }
 
@@ -951,19 +963,33 @@ export default function App() {
   );
   const draftSplitBuilderStatus = useMemo(() => {
     if (!draftSplitBuilder) {
-      return 'Select Split, then draw the first split straight.';
+      return 'Select Split, then tap where Split 1 starts.';
     }
 
     if (!draftSplitBuilder.splitPoint) {
       return `Tap the Split ${draftSplitBuilder.index} junction.`;
     }
 
-    if (!draftSplitBuilder.mergePoint || draftSplitBuilder.branchA.length < 2) {
-      return `Draw Branch A from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`;
+    if (!draftSplitBuilder.mergePoint) {
+      return `Tap the Merge ${draftSplitBuilder.index} junction.`;
     }
 
-    if (draftSplitBuilder.branchB.length < 2) {
-      return `Draw Branch B from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`;
+    const branchOneStarted = branchInteriorPoints(
+      draftSplitBuilder.branchA,
+      draftSplitBuilder.splitPoint,
+      draftSplitBuilder.mergePoint,
+    ).length > 0;
+    if (!branchOneStarted) {
+      return `Draw Branch 1 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`;
+    }
+
+    const branchTwoStarted = branchInteriorPoints(
+      draftSplitBuilder.branchB,
+      draftSplitBuilder.splitPoint,
+      draftSplitBuilder.mergePoint,
+    ).length > 0;
+    if (!branchTwoStarted) {
+      return `Draw Branch 2 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`;
     }
 
     return `${draftSplitBuilder.index === 1 ? 'Split 1 / Merge 1' : `Split ${draftSplitBuilder.index} / Merge ${draftSplitBuilder.index}`} is ready to add.`;
@@ -2060,12 +2086,19 @@ export default function App() {
           ...builder,
           splitPoint: point,
           activeBranch: 'a',
-          branchA: [point],
+        };
+      }
+
+      if (!builder.mergePoint) {
+        return {
+          ...builder,
+          mergePoint: point,
+          activeBranch: 'a',
         };
       }
 
       const branchKey = builder.activeBranch === 'a' ? 'branchA' : 'branchB';
-      const baseBranch = builder[branchKey].length > 0 ? builder[branchKey] : [builder.splitPoint];
+      const baseBranch = branchInteriorPoints(builder[branchKey], builder.splitPoint, builder.mergePoint);
       return {
         ...builder,
         [branchKey]: appendTrackPoint(baseBranch, point),
@@ -2079,26 +2112,31 @@ export default function App() {
         return current;
       }
 
+      if (!current.mergePoint) {
+        return current;
+      }
+
       if (current.activeBranch === 'a') {
-        if (current.branchA.length < 2) {
+        const branchAInterior = branchInteriorPoints(current.branchA, current.splitPoint, current.mergePoint);
+        if (branchAInterior.length < 1) {
           return current;
         }
 
-        const mergePoint = current.branchA[current.branchA.length - 1] ?? current.mergePoint;
         return {
           ...current,
-          mergePoint,
-          branchA: mergePoint ? branchWithEndpoints(current.branchA, current.splitPoint, mergePoint) : current.branchA,
+          activeBranch: 'b',
+          branchA: branchWithEndpoints(branchAInterior, current.splitPoint, current.mergePoint),
         };
       }
 
-      if (!current.mergePoint) {
+      const branchBInterior = branchInteriorPoints(current.branchB, current.splitPoint, current.mergePoint);
+      if (branchBInterior.length < 1) {
         return current;
       }
 
       return {
         ...current,
-        branchB: branchWithEndpoints(current.branchB, current.splitPoint, current.mergePoint),
+        branchB: branchWithEndpoints(branchBInterior, current.splitPoint, current.mergePoint),
       };
     });
   }, []);
@@ -2134,10 +2172,48 @@ export default function App() {
   const undoMappingPoint = () => {
     if (mappingEditMode === 'split') {
       if (draftSplitBuilder) {
+        if (!draftSplitBuilder.splitPoint) {
+          setDraftSplitBuilder(null);
+          return;
+        }
+
+        if (!draftSplitBuilder.mergePoint) {
+          setDraftSplitBuilder({
+            ...draftSplitBuilder,
+            splitPoint: null,
+          });
+          return;
+        }
+
         const branchKey = draftSplitBuilder.activeBranch === 'a' ? 'branchA' : 'branchB';
+        const branchPoints = draftSplitBuilder.splitPoint
+          ? branchInteriorPoints(
+            draftSplitBuilder[branchKey],
+            draftSplitBuilder.splitPoint,
+            draftSplitBuilder.mergePoint,
+          )
+          : draftSplitBuilder[branchKey];
+        if (branchPoints.length === 0) {
+          if (draftSplitBuilder.activeBranch === 'b') {
+            setDraftSplitBuilder({
+              ...draftSplitBuilder,
+              activeBranch: 'a',
+            });
+            return;
+          }
+
+          setDraftSplitBuilder({
+            ...draftSplitBuilder,
+            mergePoint: null,
+            branchA: [],
+            branchB: [],
+          });
+          return;
+        }
+
         setDraftSplitBuilder({
           ...draftSplitBuilder,
-          [branchKey]: draftSplitBuilder[branchKey].slice(0, -1),
+          [branchKey]: branchPoints.slice(0, -1),
         });
         return;
       }

@@ -222,6 +222,8 @@ export function SessionControlPanel({
         ? 'Add zones'
         : 'Split';
   const shouldCollapseMappingTools = mappingFullscreen && mappingMode;
+  const splitReadyForBranches = Boolean(draftSplitBuilder?.splitPoint && draftSplitBuilder.mergePoint);
+  const splitBranchOneReady = splitReadyForBranches && (draftSplitBuilder?.branchA.length ?? 0) > 0;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones'
     ? draftZoneCount > 1
@@ -528,16 +530,17 @@ export function SessionControlPanel({
                         className={(draftSplitBuilder?.activeBranch ?? 'a') === 'a' ? 'selected' : ''}
                         type="button"
                         onClick={() => handleMappingSplitBranchChange('a')}
+                        disabled={!splitReadyForBranches}
                       >
-                        Branch A
+                        Branch 1
                       </button>
                       <button
                         className={draftSplitBuilder?.activeBranch === 'b' ? 'selected' : ''}
                         type="button"
                         onClick={() => handleMappingSplitBranchChange('b')}
-                        disabled={!draftSplitBuilder?.mergePoint}
+                        disabled={!splitBranchOneReady}
                       >
-                        Branch B
+                        Branch 2
                       </button>
                     </div>
                     <div className="mapping-actions split-actions">
@@ -556,7 +559,7 @@ export function SessionControlPanel({
                           <div className="split-row" key={section.id}>
                             <div>
                               <strong>{section.name}</strong>
-                              <span>{section.branches.map((branch) => `${branch.id.toUpperCase()} ${formatDistanceMeters(branch.lengthMeters, distanceUnit)}`).join(' / ')}</span>
+                              <span>{section.branches.map((branch) => `${branch.id === 'a' ? '1' : '2'} ${formatDistanceMeters(branch.lengthMeters, distanceUnit)}`).join(' / ')}</span>
                             </div>
                             <button type="button" onClick={() => onMappingSplitRemove(section.id)} aria-label={`Remove ${section.name}`}>
                               <Trash2 size={14} />
