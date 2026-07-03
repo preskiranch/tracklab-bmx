@@ -106,29 +106,6 @@ type FullscreenDocument = Document & {
   webkitFullscreenElement?: Element | null;
 };
 
-type FullscreenElement = HTMLElement & {
-  webkitRequestFullscreen?: () => Promise<void> | void;
-};
-
-function requestBrowserFullscreen() {
-  const fullscreenDocument = document as FullscreenDocument;
-  if (document.fullscreenElement || fullscreenDocument.webkitFullscreenElement) {
-    return;
-  }
-
-  const root = document.documentElement as FullscreenElement;
-  const requestFullscreen = root.requestFullscreen ?? root.webkitRequestFullscreen;
-  if (!requestFullscreen) {
-    return;
-  }
-
-  try {
-    Promise.resolve(requestFullscreen.call(root)).catch(() => undefined);
-  } catch {
-    // Some mobile browsers expose the API but still refuse non-video fullscreen.
-  }
-}
-
 function releaseBrowserFullscreen() {
   const fullscreenDocument = document as FullscreenDocument;
   if (!document.fullscreenElement && !fullscreenDocument.webkitFullscreenElement) {
@@ -1158,10 +1135,6 @@ export default function App() {
         ],
       };
     });
-  }, []);
-
-  const requestRaceFullscreen = useCallback(() => {
-    requestBrowserFullscreen();
   }, []);
 
   const releaseRaceFullscreen = useCallback(() => {
@@ -2358,7 +2331,6 @@ export default function App() {
       return;
     }
 
-    requestRaceFullscreen();
     clearStartGateSequence();
     falseStartHandledRef.current = false;
     startGateArmedAtRef.current = Date.now();

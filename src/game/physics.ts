@@ -138,7 +138,10 @@ export function stepRiders(
     const gateLaunch = driveEngaged
       ? clamp(1 - elapsedMs / gateLaunchWindowMs, 0, 1)
       : 0;
-    const demoTargetProgress = clamp(elapsedMs / demoThirtyFootTargetMs, 0, 1);
+    const demoElapsedMs = sample?.source === 'demo' && sample.demoActiveMs != null
+      ? sample.demoActiveMs
+      : elapsedMs;
+    const demoTargetProgress = clamp(demoElapsedMs / demoThirtyFootTargetMs, 0, 1);
     const demoTargetDistance = thirtyFootSplitMeters * demoTargetProgress * demoTargetProgress;
     const demoDistanceDeficit = Math.max(0, demoTargetDistance - previousDistance);
     const demoLaunchAssist = driveEngaged && sample?.source === 'demo' && rider.thirtyFootTimeMs == null

@@ -173,10 +173,23 @@ function restingSample(profile: DemoProfile, signal: number): BikeSample {
 
 function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: boolean): BikeSample {
   const variables = profile.variables;
-  const time = Math.max(0, elapsedSeconds);
+  const rawElapsedSeconds = Math.max(0, elapsedSeconds);
   const phase = profile.phaseOffset;
+  const reactionDelaySeconds = clamp(
+    0.045
+      + variables.gateReaction * 0.26
+      + variables.nervousEnergy * 0.035
+      - variables.launchSnap * 0.045,
+    0.035,
+    0.38,
+  );
+  const time = racing ? Math.max(0, rawElapsedSeconds - reactionDelaySeconds) : rawElapsedSeconds;
   const baseSignal = clamp(0.78 + variables.consistency * 0.16 + Math.sin(time * 0.47 + phase) * 0.025, 0.62, 0.99);
   if (!racing) {
+    return restingSample(profile, baseSignal);
+  }
+
+  if (time <= 0) {
     return restingSample(profile, baseSignal);
   }
 
@@ -263,7 +276,7 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     + aggression * 0.13
     + recovery
     - fatigue
-    - variables.midRaceLull * Math.exp(-Math.pow((time - 19) / 5.8, 2)) * 0.22
+    - variables.midRaceLull * Math.exp(-Math.pow((time - 19) / 5.8, 2)) * 0.12
     - variables.cornerCaution * lineWave * 0.07
     - mistakeEnvelope;
   const effort = clamp(rawEffort, 0.14, 1.22);
@@ -271,12 +284,15 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     Math.sin(time * (5.4 + variables.cadenceNoise * 2.8) + phase)
     + Math.sin(time * (8.6 + variables.wattNoise * 4.5) + phase * 2.2) * 0.5
   ) / 1.5;
-  const cadenceDrop = mistakeEnvelope * (18 + variables.cadenceDropOnLanding * 28)
-    + fatigueLull * (28 + variables.thermalFade * 30 + variables.gripFatigue * 18);
+  const cadenceDrop = mistakeEnvelope * (10 + variables.cadenceDropOnLanding * 16)
+    + fatigueLull * (14 + variables.thermalFade * 14 + variables.gripFatigue * 10);
   const gateSnap = Math.exp(-Math.pow((time - 0.72) / (0.52 + variables.cadenceSmoothness * 0.18), 2));
-  const gateCadenceFloor = launchRise * (
+  const gateFloorWindow = time <= demoThirtyFootTargetSeconds
+    ? 1
+    : Math.exp(-(time - demoThirtyFootTargetSeconds) / 0.55);
+  const gateCadenceFloor = gateFloorWindow * launchRise * (
     122
-    + time * 28
+    + Math.min(time, demoThirtyFootTargetSeconds) * 28
     + variables.launchSnap * 10
     + variables.startGateLoad * 8
   );
@@ -295,8 +311,21 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     + noise * (3 + variables.cadenceNoise * 9)
     - variables.pedalStrokeAsymmetry * 2
   );
+  const lapPaceBlend = clamp((time - 7.0) / 4.2, 0, 1);
+  const lapPaceLimit = 136
+    + skill * 7
+    + drivetrain * 5
+    + aggression * 3
+    + variables.endurance * 6
+    + variables.anaerobicCapacity * 3
+    + secondStraight * (4 + variables.secondStraightBurst * 8)
+    + finishKick * (8 + variables.finalStraightKick * 12)
+    - fatigueLull * 7
+    - mistakeEnvelope * 8
+    + noise * 2;
+  const racePacedCadence = rawCadence * (1 - lapPaceBlend) + Math.min(rawCadence, lapPaceLimit) * lapPaceBlend;
   const cadence = Math.round(clamp(
-    Math.max(rawCadence, gateCadenceFloor),
+    Math.max(racePacedCadence, gateCadenceFloor),
     0,
     184,
   ));
@@ -347,6 +376,8 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     wattsAt: at,
     cadenceAt: at,
     speedAt: at,
+    demoActiveMs: Math.round(time * 1000),
+    demoReactionDelayMs: Math.round(reactionDelaySeconds * 1000),
     signal,
     battery: Math.round(clamp(92 - time * 0.012 - profile.index * 2 + drivetrain * 4, 76, 100)),
   };
