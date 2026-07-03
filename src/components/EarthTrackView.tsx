@@ -21,6 +21,7 @@ import { formatDistanceMeters, formatReactionTime } from '../units';
 import type {
   BikeSample,
   DistanceUnit,
+  DraftTrackSplit,
   EarthCamera,
   MappingEditMode,
   MultiplayerRaceState,
@@ -31,6 +32,7 @@ import type {
   SpeedUnit,
   TrackPoint,
   TrackRecord,
+  TrackSplitSection,
   TrackZone,
 } from '../types';
 
@@ -59,6 +61,8 @@ type EarthTrackViewProps = {
   draftPoints: TrackPoint[];
   draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
+  draftSplitSections: TrackSplitSection[];
+  draftSplitBuilder: DraftTrackSplit | null;
   onEarthCameraChange: (camera: Partial<EarthCamera>) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
@@ -70,6 +74,8 @@ type EarthTrackViewProps = {
   onMappingZonePointAdd: (point: TrackPoint) => void;
   onMappingZonePointMove: (index: number, point: TrackPoint) => void;
   onMappingZonePointRemove: (index: number) => void;
+  onMappingSplitPointAdd: (point: TrackPoint) => void;
+  onMappingSplitDrawEnd: () => void;
 };
 
 function formatElapsed(milliseconds: number | null) {
@@ -127,6 +133,8 @@ export function EarthTrackView({
   draftPoints,
   draftZoneMeters,
   draftZonePoints,
+  draftSplitSections,
+  draftSplitBuilder,
   onEarthCameraChange,
   onEarthAngleChange,
   onEarthHeadingChange,
@@ -138,6 +146,8 @@ export function EarthTrackView({
   onMappingZonePointAdd,
   onMappingZonePointMove,
   onMappingZonePointRemove,
+  onMappingSplitPointAdd,
+  onMappingSplitDrawEnd,
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const center = trackCenter(track);
@@ -190,6 +200,8 @@ export function EarthTrackView({
             draftPoints={draftPoints}
             draftZoneMeters={draftZoneMeters}
             draftZonePoints={draftZonePoints}
+            draftSplitSections={draftSplitSections}
+            draftSplitBuilder={draftSplitBuilder}
             onEarthCameraChange={onEarthCameraChange}
             onMappingPathPointAdd={onMappingPathPointAdd}
             onMappingPathPointMove={onMappingPathPointMove}
@@ -197,6 +209,8 @@ export function EarthTrackView({
             onMappingZonePointAdd={onMappingZonePointAdd}
             onMappingZonePointMove={onMappingZonePointMove}
             onMappingZonePointRemove={onMappingZonePointRemove}
+            onMappingSplitPointAdd={onMappingSplitPointAdd}
+            onMappingSplitDrawEnd={onMappingSplitDrawEnd}
           />
         ) : (
           <div className="google-key-required">
@@ -234,6 +248,8 @@ export function EarthTrackView({
           <span>
             {mappingMode
               ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`
+              : track.splitSections && track.splitSections.length > 0
+                ? `${track.splitSections.length} split${track.splitSections.length === 1 ? '' : 's'}`
               : track.routeStatus === 'user-mapped'
                 ? 'Saved ride line'
                 : 'No ride line'}

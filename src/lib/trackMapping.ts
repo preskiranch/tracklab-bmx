@@ -1,4 +1,4 @@
-import type { TrackPoint, TrackRecord, TrackZone, UserTrackMapping } from '../types';
+import type { TrackPoint, TrackRecord, TrackSplitSection, TrackZone, UserTrackMapping } from '../types';
 
 export const trackMappingStorageKey = 'tracklab:user-track-mappings:v1';
 
@@ -59,11 +59,41 @@ function normalizePoint(point: TrackPoint): TrackPoint {
   };
 }
 
+function normalizeSplitSection(section: TrackSplitSection): TrackSplitSection {
+  const splitPoint = normalizePoint(section.splitPoint);
+  const mergePoint = normalizePoint(section.mergePoint);
+  const index = Math.max(1, Math.round(section.index));
+  const normalizedBranches = section.branches
+    .filter((branch) => branch.id === 'a' || branch.id === 'b')
+    .slice(0, 2)
+    .map((branch) => {
+      const rawPoints = branch.points.length >= 2 ? branch.points : [splitPoint, mergePoint];
+      const points = rawPoints.map(normalizePoint);
+
+      return {
+        id: branch.id,
+        name: branch.name || `Split ${index} ${branch.id.toUpperCase()}`,
+        points,
+        lengthMeters: Math.round(Math.max(1, routeLengthMeters(points))),
+      };
+    });
+
+  return {
+    id: section.id || `split-${index}`,
+    name: section.name || `Split ${index} / Merge ${index}`,
+    index,
+    splitPoint,
+    mergePoint,
+    branches: normalizedBranches,
+  };
+}
+
 export function createUserTrackMapping(
   track: TrackRecord,
   points: TrackPoint[],
   restAfterSeconds: number,
   zoneBoundaryMeters: number[] = [],
+  splitSections: TrackSplitSection[] = [],
 ): UserTrackMapping {
   const centerline = points.map(normalizePoint);
   const distances = cumulativeMeters(centerline);
@@ -94,6 +124,7 @@ export function createUserTrackMapping(
     finishLine: centerline[centerline.length - 1],
     zoneBoundaryMeters: cleanBoundaries,
     zones,
+    splitSections: splitSections.map(normalizeSplitSection),
   };
 }
 
@@ -107,6 +138,7 @@ export function applyUserTrackMapping(track: TrackRecord, mapping: UserTrackMapp
     finishLine: mapping.finishLine,
     routeStatus: 'user-mapped',
     zones: mapping.zones,
+    splitSections: mapping.splitSections ?? [],
   };
 }
 
@@ -231,5 +263,10 @@ export function parseUserTrackMapping(value: string): UserTrackMapping {
     throw new Error('Mapping file is not a TrackLab BMX mapping.');
   }
 
-  return parsed as UserTrackMapping;
+  return {
+    ...parsed,
+    splitSections: Array.isArray(parsed.splitSections)
+      ? parsed.splitSections.map((section) => normalizeSplitSection(section))
+      : [],
+  } as UserTrackMapping;
 }

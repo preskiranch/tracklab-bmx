@@ -1322,6 +1322,114 @@ input:focus {
   text-align: center;
 }
 
+.split-tool-card {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fafb;
+}
+
+.split-tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.split-tool-header div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.split-tool-header strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split-tool-header svg {
+  flex: 0 0 auto;
+  color: #4a5866;
+}
+
+.split-tool-card p {
+  margin: 0;
+  color: #4a5866;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.split-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.split-list {
+  display: grid;
+  gap: 8px;
+}
+
+.split-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.split-row div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.split-row strong,
+.split-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split-row strong {
+  color: #111827;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.split-row span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.split-row button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #9f2f2f;
+}
+
+.split-row button:hover {
+  border-color: #f2b8b8;
+  background: #fff5f5;
+}
+
 .text-field {
   display: grid;
   gap: 6px;

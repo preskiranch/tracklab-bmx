@@ -11,6 +11,7 @@ import {
   Minimize2,
   Plus,
   RotateCcw,
+  Route,
   Save,
   SlidersHorizontal,
   Timer,
@@ -24,6 +25,7 @@ import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
 import type { PlacePredictionOption } from '../lib/googleMaps';
 import type {
   DistanceUnit,
+  DraftTrackSplit,
   IntervalMode,
   MappingEditMode,
   MetricKey,
@@ -32,6 +34,8 @@ import type {
   SpeedUnit,
   StartCadenceMode,
   TrackRecord,
+  TrackSplitBranch,
+  TrackSplitSection,
   TrackZone,
 } from '../types';
 
@@ -66,6 +70,10 @@ type SessionControlPanelProps = {
   draftPointCount: number;
   draftZoneCount: number;
   draftLengthMeters: number;
+  draftSplitSections: TrackSplitSection[];
+  draftSplitBuilder: DraftTrackSplit | null;
+  draftSplitBuilderStatus: string;
+  canSaveDraftSplit: boolean;
   hasSavedMapping: boolean;
   mappingRestSeconds: number;
   startCadenceMode: StartCadenceMode;
@@ -94,6 +102,11 @@ type SessionControlPanelProps = {
   onMappingModeChange: (enabled: boolean) => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
+  onMappingSplitStart: (branch?: TrackSplitBranch['id']) => void;
+  onMappingSplitBranchChange: (branch: TrackSplitBranch['id']) => void;
+  onMappingSplitSave: () => void;
+  onMappingSplitCancel: () => void;
+  onMappingSplitRemove: (splitId: string) => void;
   onMappingRestSecondsChange: (seconds: number) => void;
   onMappingUndoPoint: () => void;
   onMappingClearDraft: () => void;
@@ -145,6 +158,10 @@ export function SessionControlPanel({
   draftPointCount,
   draftZoneCount,
   draftLengthMeters,
+  draftSplitSections,
+  draftSplitBuilder,
+  draftSplitBuilderStatus,
+  canSaveDraftSplit,
   hasSavedMapping,
   mappingRestSeconds,
   startCadenceMode,
@@ -173,6 +190,11 @@ export function SessionControlPanel({
   onMappingModeChange,
   onMappingFullscreenChange,
   onMappingEditModeChange,
+  onMappingSplitStart,
+  onMappingSplitBranchChange,
+  onMappingSplitSave,
+  onMappingSplitCancel,
+  onMappingSplitRemove,
   onMappingRestSecondsChange,
   onMappingUndoPoint,
   onMappingClearDraft,
@@ -191,8 +213,12 @@ export function SessionControlPanel({
   const canStart = !startGateActive && raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
   const canCancel = startGateActive || raceState === 'racing';
   const canSaveMapping = draftPointCount >= 2;
-  const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : 'Undo path';
-  const canUndoMapping = mappingEditMode === 'zones' ? draftZoneCount > 1 : draftPointCount > 0;
+  const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
+  const canUndoMapping = mappingEditMode === 'zones'
+    ? draftZoneCount > 1
+    : mappingEditMode === 'split'
+      ? Boolean(draftSplitBuilder || draftSplitSections.length > 0)
+      : draftPointCount > 0;
   const availableZones = hasMappedRoute ? track.zones : [];
   const visibleTrackDistance = draftPointCount > 1 ? draftLengthMeters : hasMappedRoute ? track.lengthMeters : null;
   const filteredCustomRoutes = customRoutes.filter((customRoute) => {
@@ -382,7 +408,7 @@ export function SessionControlPanel({
         </div>
 
         {mappingMode && (
-          <div className="segmented-control compact three-way" aria-label="Mapping edit mode">
+          <div className="segmented-control compact four-way" aria-label="Track tools">
             <button
               className={mappingEditMode === 'navigate' ? 'selected' : ''}
               type="button"
@@ -403,6 +429,13 @@ export function SessionControlPanel({
               onClick={() => onMappingEditModeChange('zones')}
             >
               Add zones
+            </button>
+            <button
+              className={mappingEditMode === 'split' ? 'selected' : ''}
+              type="button"
+              onClick={() => onMappingSplitStart(draftSplitBuilder?.activeBranch ?? 'a')}
+            >
+              Split
             </button>
           </div>
         )}
@@ -433,6 +466,61 @@ export function SessionControlPanel({
 
         {mappingMode && (
           <>
+            {mappingEditMode === 'split' && (
+              <div className="split-tool-card">
+                <div className="split-tool-header">
+                  <div>
+                    <span className="eyebrow">Track Tools</span>
+                    <strong>{draftSplitBuilder ? `Split ${draftSplitBuilder.index} / Merge ${draftSplitBuilder.index}` : 'Split straight'}</strong>
+                  </div>
+                  <Route size={17} />
+                </div>
+                <p>{draftSplitBuilderStatus}</p>
+                <div className="segmented-control compact" aria-label="Split branch">
+                  <button
+                    className={(draftSplitBuilder?.activeBranch ?? 'a') === 'a' ? 'selected' : ''}
+                    type="button"
+                    onClick={() => onMappingSplitBranchChange('a')}
+                  >
+                    Branch A
+                  </button>
+                  <button
+                    className={draftSplitBuilder?.activeBranch === 'b' ? 'selected' : ''}
+                    type="button"
+                    onClick={() => onMappingSplitBranchChange('b')}
+                    disabled={!draftSplitBuilder?.mergePoint}
+                  >
+                    Branch B
+                  </button>
+                </div>
+                <div className="mapping-actions split-actions">
+                  <button type="button" onClick={onMappingSplitSave} disabled={!canSaveDraftSplit}>
+                    <Save size={15} />
+                    Add split
+                  </button>
+                  <button type="button" onClick={onMappingSplitCancel} disabled={!draftSplitBuilder}>
+                    <X size={15} />
+                    Cancel split
+                  </button>
+                </div>
+                {draftSplitSections.length > 0 && (
+                  <div className="split-list" aria-label="Saved split straights">
+                    {draftSplitSections.map((section) => (
+                      <div className="split-row" key={section.id}>
+                        <div>
+                          <strong>{section.name}</strong>
+                          <span>{section.branches.map((branch) => `${branch.id.toUpperCase()} ${formatDistanceMeters(branch.lengthMeters, distanceUnit)}`).join(' / ')}</span>
+                        </div>
+                        <button type="button" onClick={() => onMappingSplitRemove(section.id)} aria-label={`Remove ${section.name}`}>
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <label className="number-field">
               <span>Rest gap</span>
               <input

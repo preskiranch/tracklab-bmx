@@ -5,7 +5,7 @@ export type DistanceUnit = 'ft' | 'm';
 export type SessionMode = 'sprint' | 'interval';
 export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
-export type MappingEditMode = 'navigate' | 'draw' | 'zones';
+export type MappingEditMode = 'navigate' | 'draw' | 'zones' | 'split';
 export type StartCadenceMode = 'countdown' | 'uci';
 export type MetricKey = 'cadence' | 'speed' | 'power' | 'reaction';
 export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
@@ -297,6 +297,32 @@ export type TrackZone = {
   restAfterSeconds?: number;
 };
 
+export type TrackSplitBranch = {
+  id: 'a' | 'b';
+  name: string;
+  points: TrackPoint[];
+  lengthMeters: number;
+};
+
+export type TrackSplitSection = {
+  id: string;
+  name: string;
+  index: number;
+  splitPoint: TrackPoint;
+  mergePoint: TrackPoint;
+  branches: TrackSplitBranch[];
+};
+
+export type DraftTrackSplit = {
+  id: string;
+  index: number;
+  splitPoint: TrackPoint | null;
+  mergePoint: TrackPoint | null;
+  activeBranch: TrackSplitBranch['id'];
+  branchA: TrackPoint[];
+  branchB: TrackPoint[];
+};
+
 export type TrackRouteStatus = 'verified' | 'estimated' | 'locator-only' | 'user-mapped';
 
 export type UserTrackMapping = {
@@ -314,6 +340,7 @@ export type UserTrackMapping = {
   finishLine: TrackPoint;
   zoneBoundaryMeters?: number[];
   zones: TrackZone[];
+  splitSections?: TrackSplitSection[];
 };
 
 export type LeaderboardEntry = {
@@ -353,6 +380,7 @@ export type TrackRecord = {
   startGate?: TrackPoint;
   finishLine?: TrackPoint;
   routeStatus?: TrackRouteStatus;
+  splitSections?: TrackSplitSection[];
   zones: TrackZone[];
   leaderboards: Record<LeaderboardMetric, LeaderboardEntry[]>;
   sourceRecord?: Record<string, unknown>;

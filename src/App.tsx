@@ -78,6 +78,7 @@ import type {
   AppMode,
   BikeProfile,
   DistanceUnit,
+  DraftTrackSplit,
   EarthCamera,
   IntervalMode,
   LeaderboardEntry,
@@ -94,6 +95,8 @@ import type {
   StartCadenceMode,
   TrackPoint,
   TrackRecord,
+  TrackSplitBranch,
+  TrackSplitSection,
   UserTrackMapping,
 } from './types';
 
@@ -102,6 +105,7 @@ const uciRandomDelayMinMs = 100;
 const uciRandomDelayMaxMs = 2700;
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
+type SplitBranchId = TrackSplitBranch['id'];
 
 type FullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
@@ -147,6 +151,80 @@ function randomIntegerInclusive(minimum: number, maximum: number) {
   }
 
   return min + Math.floor(Math.random() * range);
+}
+
+function createDraftTrackSplit(index: number): DraftTrackSplit {
+  const createdAt = Date.now();
+  return {
+    id: `split-${index}-${createdAt.toString(36)}`,
+    index,
+    splitPoint: null,
+    mergePoint: null,
+    activeBranch: 'a',
+    branchA: [],
+    branchB: [],
+  };
+}
+
+function appendTrackPoint(points: TrackPoint[], point: TrackPoint, minDistanceMeters = 0.75) {
+  const previous = points[points.length - 1];
+  if (previous && distanceBetweenTrackPoints(previous, point) < minDistanceMeters) {
+    return points;
+  }
+
+  return [...points, point];
+}
+
+function branchWithEndpoints(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint | null) {
+  const next = [...points];
+
+  if (next.length === 0 || distanceBetweenTrackPoints(next[0], splitPoint) > 0.5) {
+    next.unshift(splitPoint);
+  }
+
+  if (mergePoint && distanceBetweenTrackPoints(next[next.length - 1], mergePoint) > 0.5) {
+    next.push(mergePoint);
+  }
+
+  return next;
+}
+
+function splitSectionFromDraft(draft: DraftTrackSplit): TrackSplitSection | null {
+  if (!draft.splitPoint || !draft.mergePoint) {
+    return null;
+  }
+
+  if (draft.branchA.length < 2 || draft.branchB.length < 2) {
+    return null;
+  }
+
+  const branchA = branchWithEndpoints(draft.branchA, draft.splitPoint, draft.mergePoint);
+  const branchB = branchWithEndpoints(draft.branchB, draft.splitPoint, draft.mergePoint);
+  if (branchA.length < 2 || branchB.length < 2) {
+    return null;
+  }
+
+  return {
+    id: draft.id,
+    index: draft.index,
+    name: `Split ${draft.index} / Merge ${draft.index}`,
+    splitPoint: draft.splitPoint,
+    mergePoint: draft.mergePoint,
+    branches: [
+      {
+        id: 'a',
+        name: `Split ${draft.index} A`,
+        points: branchA,
+        lengthMeters: Math.round(routeLengthMeters(branchA)),
+      },
+      {
+        id: 'b',
+        name: `Split ${draft.index} B`,
+        points: branchB,
+        lengthMeters: Math.round(routeLengthMeters(branchB)),
+      },
+    ],
+  };
 }
 
 function readInitialTrack() {
@@ -669,6 +747,8 @@ export default function App() {
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
   const [draftZoneMeters, setDraftZoneMeters] = useState<number[]>([]);
+  const [draftSplitSections, setDraftSplitSections] = useState<TrackSplitSection[]>([]);
+  const [draftSplitBuilder, setDraftSplitBuilder] = useState<DraftTrackSplit | null>(null);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
   const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>('bluetooth');
@@ -868,6 +948,29 @@ export default function App() {
   const draftLengthMeters = useMemo(
     () => (draftPoints.length > 1 ? routeLengthMeters(draftPoints) : 0),
     [draftPoints],
+  );
+  const draftSplitBuilderStatus = useMemo(() => {
+    if (!draftSplitBuilder) {
+      return 'Select Split, then draw the first split straight.';
+    }
+
+    if (!draftSplitBuilder.splitPoint) {
+      return `Tap the Split ${draftSplitBuilder.index} junction.`;
+    }
+
+    if (!draftSplitBuilder.mergePoint || draftSplitBuilder.branchA.length < 2) {
+      return `Draw Branch A from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`;
+    }
+
+    if (draftSplitBuilder.branchB.length < 2) {
+      return `Draw Branch B from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`;
+    }
+
+    return `${draftSplitBuilder.index === 1 ? 'Split 1 / Merge 1' : `Split ${draftSplitBuilder.index} / Merge ${draftSplitBuilder.index}`} is ready to add.`;
+  }, [draftSplitBuilder]);
+  const canSaveDraftSplit = useMemo(
+    () => Boolean(draftSplitBuilder && splitSectionFromDraft(draftSplitBuilder)),
+    [draftSplitBuilder],
   );
   const demoPlayers = useMemo(() => createDemoPlayers(demoBikeCount), [demoBikeCount]);
   const connectedBikeSamples = useMemo(() => {
@@ -1784,6 +1887,8 @@ export default function App() {
       setCustomRouteStatus('Custom route added. Trace the path and save it.');
       setDraftPoints([]);
       setDraftZoneMeters([]);
+      setDraftSplitSections([]);
+      setDraftSplitBuilder(null);
       setMappingRestSeconds(1);
       setMappingMode(true);
       setMappingEditMode('navigate');
@@ -1839,6 +1944,8 @@ export default function App() {
 
     setDraftPoints([]);
     setDraftZoneMeters([]);
+    setDraftSplitSections([]);
+    setDraftSplitBuilder(null);
     setMappingMode(false);
     setMappingFullscreen(false);
     setCustomRouteStatus(`Deleted ${customRoute.name}.`);
@@ -1851,6 +1958,8 @@ export default function App() {
     const mapping = storedMappings[selectedTrack.id];
     setDraftPoints(mapping?.centerline ?? []);
     setDraftZoneMeters(mapping ? zoneBoundariesFromMapping(mapping) : []);
+    setDraftSplitSections(mapping?.splitSections ?? []);
+    setDraftSplitBuilder(null);
     setMappingRestSeconds(mapping?.restAfterSeconds ?? 1);
     setMappingEditMode('navigate');
     setMappingMode(false);
@@ -1861,6 +1970,7 @@ export default function App() {
     if (enabled && draftPoints.length === 0 && selectedTrackMapping) {
       setDraftPoints(selectedTrackMapping.centerline);
       setDraftZoneMeters(zoneBoundariesFromMapping(selectedTrackMapping));
+      setDraftSplitSections(selectedTrackMapping.splitSections ?? []);
       setMappingRestSeconds(selectedTrackMapping.restAfterSeconds);
     }
 
@@ -1918,7 +2028,124 @@ export default function App() {
     });
   }, []);
 
+  const startOrUpdateSplitBuilder = useCallback((branch: SplitBranchId = 'a') => {
+    setDraftSplitBuilder((current) => {
+      if (current) {
+        return { ...current, activeBranch: branch };
+      }
+
+      return createDraftTrackSplit(draftSplitSections.length + 1);
+    });
+    setMappingMode(true);
+    setMappingEditMode('split');
+  }, [draftSplitSections.length]);
+
+  const handleSplitBranchChange = useCallback((branch: SplitBranchId) => {
+    setDraftSplitBuilder((current) => {
+      if (current) {
+        return { ...current, activeBranch: branch };
+      }
+
+      return { ...createDraftTrackSplit(draftSplitSections.length + 1), activeBranch: branch };
+    });
+    setMappingMode(true);
+    setMappingEditMode('split');
+  }, [draftSplitSections.length]);
+
+  const handleMappingSplitPointAdd = useCallback((point: TrackPoint) => {
+    setDraftSplitBuilder((current) => {
+      const builder = current ?? createDraftTrackSplit(draftSplitSections.length + 1);
+      if (!builder.splitPoint) {
+        return {
+          ...builder,
+          splitPoint: point,
+          activeBranch: 'a',
+          branchA: [point],
+        };
+      }
+
+      const branchKey = builder.activeBranch === 'a' ? 'branchA' : 'branchB';
+      const baseBranch = builder[branchKey].length > 0 ? builder[branchKey] : [builder.splitPoint];
+      return {
+        ...builder,
+        [branchKey]: appendTrackPoint(baseBranch, point),
+      };
+    });
+  }, [draftSplitSections.length]);
+
+  const handleMappingSplitDrawEnd = useCallback(() => {
+    setDraftSplitBuilder((current) => {
+      if (!current?.splitPoint) {
+        return current;
+      }
+
+      if (current.activeBranch === 'a') {
+        if (current.branchA.length < 2) {
+          return current;
+        }
+
+        const mergePoint = current.branchA[current.branchA.length - 1] ?? current.mergePoint;
+        return {
+          ...current,
+          mergePoint,
+          branchA: mergePoint ? branchWithEndpoints(current.branchA, current.splitPoint, mergePoint) : current.branchA,
+        };
+      }
+
+      if (!current.mergePoint) {
+        return current;
+      }
+
+      return {
+        ...current,
+        branchB: branchWithEndpoints(current.branchB, current.splitPoint, current.mergePoint),
+      };
+    });
+  }, []);
+
+  const saveDraftSplit = useCallback(() => {
+    const nextSplit = draftSplitBuilder ? splitSectionFromDraft(draftSplitBuilder) : null;
+    if (!nextSplit) {
+      return;
+    }
+
+    setDraftSplitSections((sections) => [...sections, nextSplit]);
+    setDraftSplitBuilder(null);
+  }, [draftSplitBuilder]);
+
+  const cancelDraftSplit = useCallback(() => {
+    setDraftSplitBuilder(null);
+  }, []);
+
+  const removeDraftSplitSection = useCallback((splitId: string) => {
+    setDraftSplitSections((current) => current
+      .filter((section) => section.id !== splitId)
+      .map((section, index) => ({
+        ...section,
+        index: index + 1,
+        name: `Split ${index + 1} / Merge ${index + 1}`,
+        branches: section.branches.map((branch) => ({
+          ...branch,
+          name: `Split ${index + 1} ${branch.id.toUpperCase()}`,
+        })),
+      })));
+  }, []);
+
   const undoMappingPoint = () => {
+    if (mappingEditMode === 'split') {
+      if (draftSplitBuilder) {
+        const branchKey = draftSplitBuilder.activeBranch === 'a' ? 'branchA' : 'branchB';
+        setDraftSplitBuilder({
+          ...draftSplitBuilder,
+          [branchKey]: draftSplitBuilder[branchKey].slice(0, -1),
+        });
+        return;
+      }
+
+      setDraftSplitSections((current) => current.slice(0, -1));
+      return;
+    }
+
     if (mappingEditMode === 'zones') {
       setDraftZoneMeters((current) => current.slice(0, -1));
       return;
@@ -1933,6 +2160,8 @@ export default function App() {
   const clearMappingDraft = () => {
     setDraftPoints([]);
     setDraftZoneMeters([]);
+    setDraftSplitSections([]);
+    setDraftSplitBuilder(null);
   };
 
   const updateMappingRestSeconds = (seconds: number) => {
@@ -1945,12 +2174,23 @@ export default function App() {
       return;
     }
 
-    const mapping = createUserTrackMapping(selectedTrack, draftPoints, mappingRestSeconds, draftZoneMeters);
+    const completedDraftSplit = draftSplitBuilder ? splitSectionFromDraft(draftSplitBuilder) : null;
+    const mapping = createUserTrackMapping(
+      selectedTrack,
+      draftPoints,
+      mappingRestSeconds,
+      draftZoneMeters,
+      completedDraftSplit ? [...draftSplitSections, completedDraftSplit] : draftSplitSections,
+    );
     setStoredMappings((current) => {
       const next = { ...current, [selectedTrack.id]: mapping };
       writeStoredTrackMappings(next);
       return next;
     });
+    if (completedDraftSplit) {
+      setDraftSplitSections((current) => [...current, completedDraftSplit]);
+      setDraftSplitBuilder(null);
+    }
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     resetRace();
@@ -1965,6 +2205,8 @@ export default function App() {
     });
     setDraftPoints([]);
     setDraftZoneMeters([]);
+    setDraftSplitSections([]);
+    setDraftSplitBuilder(null);
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     resetRace();
@@ -1998,6 +2240,8 @@ export default function App() {
 
         setDraftPoints(mapping.centerline);
         setDraftZoneMeters(zoneBoundariesFromMapping(mapping));
+        setDraftSplitSections(mapping.splitSections ?? []);
+        setDraftSplitBuilder(null);
         setMappingRestSeconds(mapping.restAfterSeconds);
         setMappingEditMode('navigate');
         setMappingMode(true);
@@ -2890,6 +3134,8 @@ export default function App() {
                 draftPoints={draftPoints}
                 draftZoneMeters={draftZoneMeters}
                 draftZonePoints={draftZonePoints}
+                draftSplitSections={draftSplitSections}
+                draftSplitBuilder={draftSplitBuilder}
                 onEarthCameraChange={handleEarthCameraChange}
                 onEarthAngleChange={handleEarthAngleChange}
                 onEarthHeadingChange={handleEarthHeadingChange}
@@ -2901,6 +3147,8 @@ export default function App() {
                 onMappingZonePointAdd={handleMappingZonePointAdd}
                 onMappingZonePointMove={handleMappingZonePointMove}
                 onMappingZonePointRemove={handleMappingZonePointRemove}
+                onMappingSplitPointAdd={handleMappingSplitPointAdd}
+                onMappingSplitDrawEnd={handleMappingSplitDrawEnd}
               />
 
               <SessionControlPanel
@@ -2934,6 +3182,10 @@ export default function App() {
                 draftPointCount={draftPoints.length}
                 draftZoneCount={draftPoints.length > 1 ? draftZoneMeters.length + 1 : 0}
                 draftLengthMeters={draftLengthMeters}
+                draftSplitSections={draftSplitSections}
+                draftSplitBuilder={draftSplitBuilder}
+                draftSplitBuilderStatus={draftSplitBuilderStatus}
+                canSaveDraftSplit={canSaveDraftSplit}
                 hasSavedMapping={Boolean(selectedTrackMapping)}
                 mappingRestSeconds={mappingRestSeconds}
                 startCadenceMode={startCadenceMode}
@@ -2962,6 +3214,11 @@ export default function App() {
                 onMappingModeChange={handleMappingModeChange}
                 onMappingFullscreenChange={handleMappingFullscreenChange}
                 onMappingEditModeChange={setMappingEditMode}
+                onMappingSplitStart={startOrUpdateSplitBuilder}
+                onMappingSplitBranchChange={handleSplitBranchChange}
+                onMappingSplitSave={saveDraftSplit}
+                onMappingSplitCancel={cancelDraftSplit}
+                onMappingSplitRemove={removeDraftSplitSection}
                 onMappingRestSecondsChange={updateMappingRestSeconds}
                 onMappingUndoPoint={undoMappingPoint}
                 onMappingClearDraft={clearMappingDraft}
