@@ -23,6 +23,7 @@ const contentTypes = new Map([
   ['.js', 'text/javascript; charset=utf-8'],
   ['.json', 'application/json; charset=utf-8'],
   ['.map', 'application/json; charset=utf-8'],
+  ['.webmanifest', 'application/manifest+json; charset=utf-8'],
   ['.mp3', 'audio/mpeg'],
   ['.png', 'image/png'],
   ['.svg', 'image/svg+xml'],
@@ -46,6 +47,51 @@ function sanitizeText(value, fallback, maxLength = 80) {
 function sanitizeGuestKey(value, fallback) {
   const text = sanitizeText(value, fallback, 160);
   return text.replace(/[^a-zA-Z0-9:._-]/g, '').slice(0, 160) || fallback;
+}
+
+function cookieValue(request, name) {
+  const cookieHeader = request.headers.cookie;
+  if (!cookieHeader) {
+    return '';
+  }
+
+  const cookies = cookieHeader.split(';');
+  for (const cookie of cookies) {
+    const [rawName, ...rawValue] = cookie.trim().split('=');
+    if (rawName === name) {
+      return decodeURIComponent(rawValue.join('=') || '');
+    }
+  }
+
+  return '';
+}
+
+function tracklabManifest(profileKey) {
+  const safeProfileKey = sanitizeGuestKey(profileKey, '');
+  const startUrl = safeProfileKey
+    ? `/?profileKey=${encodeURIComponent(safeProfileKey)}`
+    : '/';
+
+  return {
+    id: '/tracklab-bmx',
+    name: 'TrackLab BMX',
+    short_name: 'TrackLab',
+    description: 'Wattbike BMX racing and training platform.',
+    start_url: startUrl,
+    scope: '/',
+    display: 'fullscreen',
+    orientation: 'landscape',
+    background_color: '#05080c',
+    theme_color: '#05080c',
+    icons: [
+      {
+        src: '/tracklab-icon.svg',
+        sizes: 'any',
+        type: 'image/svg+xml',
+        purpose: 'any maskable',
+      },
+    ],
+  };
 }
 
 function sanitizeTrack(value) {
@@ -549,6 +595,16 @@ async function handleClientMessage(client, rawMessage) {
 
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  if (requestUrl.pathname === '/manifest.webmanifest') {
+    const profileKey = requestUrl.searchParams.get('profileKey') || cookieValue(request, 'tracklab_profile_key');
+    response.writeHead(200, {
+      'Content-Type': 'application/manifest+json; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    });
+    response.end(JSON.stringify(tracklabManifest(profileKey)));
+    return;
+  }
+
   if (requestUrl.pathname === '/api/user-data') {
     const profileKey = sanitizeGuestKey(requestUrl.searchParams.get('profileKey'), '');
     if (!profileKey) {

@@ -28,7 +28,9 @@ type IncomingChallenge = {
   from: MultiplayerRider;
 };
 
-const profileStorageKey = 'tracklab-bmx-multiplayer-profile-v1';
+export const profileStorageKey = 'tracklab-bmx-multiplayer-profile-v1';
+const profileCookieName = 'tracklab_profile_key';
+const profileQueryParamNames = ['profileKey', 'profile'];
 
 function createGuestKey() {
   return `guest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -38,31 +40,68 @@ function normalizeGuestKey(value: string, fallback: string) {
   return value.trim().replace(/[^a-zA-Z0-9:._-]/g, '').slice(0, 160) || fallback;
 }
 
+function profileKeyFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  for (const paramName of profileQueryParamNames) {
+    const value = params.get(paramName);
+    if (value) {
+      return normalizeGuestKey(value, '');
+    }
+  }
+
+  return '';
+}
+
+function writeProfileCookie(guestKey: string) {
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${profileCookieName}=${encodeURIComponent(guestKey)}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`;
+}
+
+function updateManifestProfile(guestKey: string) {
+  const manifest = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+  if (!manifest) {
+    return;
+  }
+
+  const params = new URLSearchParams({ profileKey: guestKey });
+  manifest.href = `/manifest.webmanifest?${params.toString()}`;
+}
+
 function randomRiderName() {
   return `TrackLab Rider ${Math.floor(1000 + Math.random() * 9000)}`;
 }
 
 function readProfile(): MultiplayerProfile {
+  const urlGuestKey = profileKeyFromUrl();
+
   try {
     const stored = window.localStorage.getItem(profileStorageKey);
     if (stored) {
       const parsed = JSON.parse(stored) as Partial<MultiplayerProfile>;
       const fallbackGuestKey = createGuestKey();
-      return {
-        guestKey: typeof parsed.guestKey === 'string' ? normalizeGuestKey(parsed.guestKey, fallbackGuestKey) : fallbackGuestKey,
+      const profile = {
+        guestKey: urlGuestKey || (typeof parsed.guestKey === 'string' ? normalizeGuestKey(parsed.guestKey, fallbackGuestKey) : fallbackGuestKey),
         name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim().slice(0, 64) : randomRiderName(),
         available: Boolean(parsed.available),
       };
+      writeProfile(profile);
+      writeProfileCookie(profile.guestKey);
+      updateManifestProfile(profile.guestKey);
+      return profile;
     }
   } catch {
     // Fall through to a new guest profile.
   }
 
-  return {
-    guestKey: createGuestKey(),
+  const profile = {
+    guestKey: urlGuestKey || createGuestKey(),
     name: randomRiderName(),
     available: false,
   };
+  writeProfile(profile);
+  writeProfileCookie(profile.guestKey);
+  updateManifestProfile(profile.guestKey);
+  return profile;
 }
 
 function writeProfile(profile: MultiplayerProfile) {
@@ -155,6 +194,8 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
 
   useEffect(() => {
     writeProfile(profile);
+    writeProfileCookie(profile.guestKey);
+    updateManifestProfile(profile.guestKey);
   }, [profile]);
 
   useEffect(() => {
