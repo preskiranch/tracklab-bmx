@@ -101,6 +101,7 @@ type SessionControlPanelProps = {
   onMappingRemove: () => void;
   onMappingExport: () => void;
   onMappingImport: (file: File) => void;
+  onPrimeAudio: () => void;
   onStart: () => void;
   onCancel: () => void;
   onReset: () => void;
@@ -179,6 +180,7 @@ export function SessionControlPanel({
   onMappingRemove,
   onMappingExport,
   onMappingImport,
+  onPrimeAudio,
   onStart,
   onCancel,
   onReset,
@@ -732,7 +734,13 @@ export function SessionControlPanel({
       </section>
 
       <section className="panel-section start-panel">
-        <button className="action-button primary" type="button" onClick={onStart} disabled={!canStart}>
+        <button
+          className="action-button primary"
+          type="button"
+          onPointerDown={onPrimeAudio}
+          onClick={onStart}
+          disabled={!canStart}
+        >
           <Flag size={18} />
           {!hasMappedRoute
             ? 'Map Track First'

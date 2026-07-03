@@ -2877,6 +2877,7 @@ export default function App() {
                 onMappingRemove={removeMapping}
                 onMappingExport={exportMapping}
                 onMappingImport={importMapping}
+                onPrimeAudio={primeAudioCues}
                 onStart={handleStart}
                 onCancel={handleCancel}
                 onReset={handleReset}

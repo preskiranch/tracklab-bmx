@@ -22,16 +22,45 @@ function getAudioContext() {
   return audioContext;
 }
 
-export function primeAudioCues() {
+function getStartGateAudio() {
+  if (!activeStartGateAudio) {
+    activeStartGateAudio = new Audio(uciRandomStartVoiceUrl);
+    activeStartGateAudio.preload = 'auto';
+  }
+
+  return activeStartGateAudio;
+}
+
+function resumeAudioContext() {
   const context = getAudioContext();
   if (context?.state === 'suspended') {
     void context.resume();
   }
 
-  if (!activeStartGateAudio) {
-    activeStartGateAudio = new Audio(uciRandomStartVoiceUrl);
-    activeStartGateAudio.preload = 'auto';
+  return context;
+}
+
+export function primeAudioCues() {
+  const context = resumeAudioContext();
+
+  if (context && context.state !== 'closed') {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const now = context.currentTime;
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(40, now);
+    gain.gain.setValueAtTime(0.00001, now);
+    gain.gain.exponentialRampToValueAtTime(0.00001, now + 0.025);
+
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.03);
   }
+
+  const audio = getStartGateAudio();
+  audio.load();
 }
 
 export function playZoneCue(kind: 'start' | 'stop') {
@@ -61,13 +90,9 @@ export function playZoneCue(kind: 'start' | 'stop') {
 }
 
 export function playStartGateTone(kind: 'tick' | 'gate' | 'uci-red' | 'uci-green') {
-  const context = getAudioContext();
+  const context = resumeAudioContext();
   if (!context) {
     return;
-  }
-
-  if (context.state === 'suspended') {
-    void context.resume();
   }
 
   const oscillator = context.createOscillator();
@@ -110,13 +135,16 @@ export function stopStartGateAudio() {
 
 export function playUciRandomStartVoice() {
   stopStartGateAudio();
-  const audio = activeStartGateAudio ?? new Audio(uciRandomStartVoiceUrl);
-  activeStartGateAudio = audio;
+  resumeAudioContext();
+
+  const audio = getStartGateAudio();
   audio.preload = 'auto';
+  audio.muted = false;
   audio.volume = 1;
   audio.currentTime = 0;
 
   void audio.play().catch(() => {
+    playStartGateTone('tick');
     speakStartGatePhrase('OK riders, random start. Riders ready. Watch the gate.');
   });
 
