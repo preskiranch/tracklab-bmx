@@ -108,6 +108,13 @@ const uciRandomDelayMaxMs = 2700;
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 type SplitBranchId = TrackSplitBranch['id'];
+type CustomRoutePreview = {
+  input: string;
+  label?: string;
+  point: TrackPoint;
+  route: TrackRecord;
+  camera: EarthCamera;
+};
 
 type FullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
@@ -432,6 +439,17 @@ function createCustomRouteRecord(name: string, locationLabel: string | undefined
       watts: [],
     },
   };
+}
+
+function createCustomRoutePreviewRecord(name: string, locationLabel: string | undefined, point: TrackPoint): TrackRecord {
+  return {
+    ...createCustomRouteRecord(name, locationLabel, point),
+    id: `custom-preview-${slugify(name)}-${Date.now().toString(36)}`,
+  };
+}
+
+function isCustomRoutePreviewId(trackId: string) {
+  return trackId.startsWith('custom-preview-');
 }
 
 function profileVisual(index: number) {
@@ -776,6 +794,8 @@ export default function App() {
   const cloudUserDataAvailableRef = useRef(false);
   const roomTrackApplyRef = useRef<string | null>(null);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
+  const customRoutePreviewRequestIdRef = useRef(0);
+  const customRoutePreviewTrackIdRef = useRef<string | null>(null);
   const [initialRequestedTrackId] = useState(readRequestedTrackId);
   const pendingInitialTrackIdRef = useRef(initialRequestedTrackId);
   const [initialUrlTrackPending, setInitialUrlTrackPending] = useState(initialRequestedTrackId !== null);
@@ -822,6 +842,7 @@ export default function App() {
   const [customRoutePredictions, setCustomRoutePredictions] = useState<PlacePredictionOption[]>([]);
   const [customRoutePredictionStatus, setCustomRoutePredictionStatus] = useState<string | null>(null);
   const [selectedCustomRoutePrediction, setSelectedCustomRoutePrediction] = useState<PlacePredictionOption | null>(null);
+  const [customRoutePreview, setCustomRoutePreview] = useState<CustomRoutePreview | null>(null);
   const [startCadenceMode, setStartCadenceMode] = useState<StartCadenceMode>('uci');
   const [countdownSeconds, setCountdownSeconds] = useState(3);
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
@@ -887,9 +908,16 @@ export default function App() {
     };
   }, []);
 
-  const catalogTracks = useMemo(
+  const persistentCatalogTracks = useMemo(
     () => [...baseCatalogTracks, ...customRoutes],
     [baseCatalogTracks, customRoutes],
+  );
+  const catalogTracks = useMemo(
+    () => {
+      const previewRoute = customRoutePreview?.route;
+      return previewRoute ? [...persistentCatalogTracks, previewRoute] : persistentCatalogTracks;
+    },
+    [customRoutePreview, persistentCatalogTracks],
   );
 
   useEffect(() => {
@@ -932,6 +960,10 @@ export default function App() {
 
   useEffect(() => {
     if (initialUrlTrackPending) {
+      return;
+    }
+
+    if (isCustomRoutePreviewId(selectedTrackId)) {
       return;
     }
 
@@ -992,6 +1024,10 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     setPublicLeaderboards(null);
+
+    if (isCustomRoutePreviewId(selectedTrack.id)) {
+      return undefined;
+    }
 
     fetch(`/api/multiplayer/leaderboards?trackId=${encodeURIComponent(selectedTrack.id)}`)
       .then((response) => {
@@ -1842,13 +1878,44 @@ export default function App() {
     });
   }, [connectedDeviceIds]);
 
+  const discardCustomRoutePreview = useCallback(() => {
+    customRoutePreviewRequestIdRef.current += 1;
+    const previewTrackId = customRoutePreviewTrackIdRef.current;
+    customRoutePreviewTrackIdRef.current = null;
+    setCustomRoutePreview(null);
+
+    if (previewTrackId) {
+      setStoredMappings((current) => {
+        if (!current[previewTrackId]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[previewTrackId];
+        writeStoredTrackMappings(next);
+        return next;
+      });
+      setEarthCamerasByTrack((current) => {
+        if (!current[previewTrackId]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[previewTrackId];
+        writeStoredEarthCameras(next);
+        return next;
+      });
+    }
+  }, []);
+
   const handleCountryChange = (country: string) => {
-    const nextState = statesForCountry(country, catalogTracks)[0];
-    const nextTrack = tracksForLocation(country, nextState, catalogTracks)[0];
+    const nextState = statesForCountry(country, persistentCatalogTracks)[0];
+    const nextTrack = tracksForLocation(country, nextState, persistentCatalogTracks)[0];
     if (!nextTrack) {
       return;
     }
 
+    discardCustomRoutePreview();
     prepareForTrackSelection(nextTrack.id);
     setSelectedCountry(country);
     setSelectedState(nextState);
@@ -1856,22 +1923,24 @@ export default function App() {
   };
 
   const handleStateChange = (state: string) => {
-    const nextTrack = tracksForLocation(selectedCountry, state, catalogTracks)[0];
+    const nextTrack = tracksForLocation(selectedCountry, state, persistentCatalogTracks)[0];
     if (!nextTrack) {
       return;
     }
 
+    discardCustomRoutePreview();
     prepareForTrackSelection(nextTrack.id);
     setSelectedState(state);
     setSelectedTrackId(nextTrack.id);
   };
 
   const handleTrackChange = (trackId: string) => {
-    const nextTrack = catalogTracks.find((track) => track.id === trackId);
+    const nextTrack = persistentCatalogTracks.find((track) => track.id === trackId);
     if (!nextTrack) {
       return;
     }
 
+    discardCustomRoutePreview();
     prepareForTrackSelection(nextTrack.id);
     setSelectedCountry(nextTrack.country);
     setSelectedState(nextTrack.state);
@@ -1889,6 +1958,7 @@ export default function App() {
   };
 
   const handleCustomRouteLocationChange = useCallback((value: string) => {
+    customRoutePreviewRequestIdRef.current += 1;
     setCustomRouteLocation(value);
     setCustomRouteStatus(null);
     setSelectedCustomRoutePrediction((current) => {
@@ -1901,16 +1971,68 @@ export default function App() {
   }, []);
 
   const handleCustomRoutePredictionSelect = useCallback((prediction: PlacePredictionOption) => {
+    const previewName = customRouteName.trim() || prediction.mainText;
+    const requestId = customRoutePreviewRequestIdRef.current + 1;
+    customRoutePreviewRequestIdRef.current = requestId;
+
     setSelectedCustomRoutePrediction(prediction);
     setCustomRouteLocation(prediction.label);
     setCustomRoutePredictions([]);
-    setCustomRoutePredictionStatus('Address selected. Add the custom route to center the map there.');
-    setCustomRouteStatus(null);
+    setCustomRoutePredictionStatus('Locating selected address...');
+    setCustomRouteStatus('Locating selected address...');
 
     if (!customRouteName.trim()) {
       setCustomRouteName(prediction.mainText);
     }
-  }, [customRouteName]);
+
+    resolvePlacePrediction(prediction)
+      .then((resolved) => {
+        if (customRoutePreviewRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        const previewRoute = createCustomRoutePreviewRecord(
+          previewName,
+          resolved.label ?? prediction.label,
+          resolved.point,
+        );
+        const previewCamera = normalizeEarthCamera({
+          angle: earthAngle,
+          heading: earthHeading,
+          center: trackCenter(previewRoute),
+          zoom: 19,
+          updatedAt: Date.now(),
+        });
+
+        customRoutePreviewTrackIdRef.current = previewRoute.id;
+        setCustomRoutePreview({
+          input: prediction.label,
+          label: resolved.label ?? prediction.label,
+          point: resolved.point,
+          route: previewRoute,
+          camera: previewCamera,
+        });
+        prepareForTrackSelection(previewRoute.id);
+        setSelectedCountry(previewRoute.country);
+        setSelectedState(previewRoute.state);
+        setSelectedTrackId(previewRoute.id);
+        setEarthAngle(previewCamera.angle);
+        setEarthHeading(previewCamera.heading);
+        setEarthCenter(previewCamera.center ?? null);
+        setEarthZoom(previewCamera.zoom ?? null);
+        setCustomRoutePredictionStatus('Address located on the map. Add the custom route to save it.');
+        setCustomRouteStatus('Previewing selected address. Add the custom route to save it.');
+      })
+      .catch((error) => {
+        if (customRoutePreviewRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        setCustomRoutePreview(null);
+        setCustomRoutePredictionStatus(null);
+        setCustomRouteStatus(`${formatRouteLocationError(error)} Try another suggestion or use coordinates.`);
+      });
+  }, [customRouteName, earthAngle, earthHeading, prepareForTrackSelection]);
 
   useEffect(() => {
     const input = customRouteLocation.trim();
@@ -1967,9 +2089,12 @@ export default function App() {
 
     setCustomRouteStatus('Finding location...');
     try {
-      const resolved = selectedCustomRoutePrediction && selectedCustomRoutePrediction.label === location
-        ? await resolvePlacePrediction(selectedCustomRoutePrediction)
-        : await resolveLocationText(location);
+      const matchingPreview = customRoutePreview?.input === location ? customRoutePreview : null;
+      const resolved = matchingPreview
+        ? { point: matchingPreview.point, label: matchingPreview.label ?? location }
+        : selectedCustomRoutePrediction && selectedCustomRoutePrediction.label === location
+          ? await resolvePlacePrediction(selectedCustomRoutePrediction)
+          : await resolveLocationText(location);
       const customRoute = createCustomRouteRecord(name, resolved.label ?? location, resolved.point);
       const customRouteCamera = normalizeEarthCamera({
         angle: earthAngle,
@@ -1988,9 +2113,29 @@ export default function App() {
           ...current,
           [customRoute.id]: customRouteCamera,
         };
+        const previewTrackId = customRoutePreviewTrackIdRef.current;
+        if (previewTrackId) {
+          delete next[previewTrackId];
+        }
         writeStoredEarthCameras(next);
         return next;
       });
+      const previewTrackId = customRoutePreviewTrackIdRef.current;
+      if (previewTrackId) {
+        setStoredMappings((current) => {
+          if (!current[previewTrackId]) {
+            return current;
+          }
+
+          const next = { ...current };
+          delete next[previewTrackId];
+          writeStoredTrackMappings(next);
+          return next;
+        });
+      }
+      customRoutePreviewRequestIdRef.current += 1;
+      customRoutePreviewTrackIdRef.current = null;
+      setCustomRoutePreview(null);
       prepareForTrackSelection(customRoute.id);
       setSelectedCountry(customRoute.country);
       setSelectedState(customRoute.state);
