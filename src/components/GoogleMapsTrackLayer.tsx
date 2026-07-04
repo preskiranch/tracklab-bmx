@@ -102,7 +102,7 @@ const riderFrontTireInset = 1;
 const riderGroundContactInset = 1;
 const riderStartSetbackMeters = 2.2;
 const riderStartSetbackBlendMeters = 5;
-const finishStripeWidthMeters = 24;
+const finishStripeWidthMeters = 9;
 const finishLabelOffsetMeters = 30;
 
 type RiderMapMarker = {
