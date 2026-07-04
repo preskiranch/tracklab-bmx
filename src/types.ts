@@ -330,6 +330,20 @@ export type DraftTrackSplit = {
 };
 
 export type TrackRouteStatus = 'verified' | 'estimated' | 'locator-only' | 'user-mapped';
+export type TrackRouteVariantId = 'amateur' | 'pro';
+
+export type TrackRouteVariant = {
+  id: TrackRouteVariantId;
+  name: string;
+  restAfterSeconds: number;
+  lengthMeters: number;
+  centerline: TrackPoint[];
+  startGate: TrackPoint;
+  finishLine: TrackPoint;
+  zoneBoundaryMeters?: number[];
+  zones: TrackZone[];
+  splitSections?: TrackSplitSection[];
+};
 
 export type UserTrackMapping = {
   version: 1;
@@ -347,6 +361,7 @@ export type UserTrackMapping = {
   zoneBoundaryMeters?: number[];
   zones: TrackZone[];
   splitSections?: TrackSplitSection[];
+  routeVariants?: TrackRouteVariant[];
 };
 
 export type LeaderboardEntry = {
@@ -387,6 +402,9 @@ export type TrackRecord = {
   finishLine?: TrackPoint;
   routeStatus?: TrackRouteStatus;
   splitSections?: TrackSplitSection[];
+  routeVariants?: TrackRouteVariant[];
+  activeRouteVariantId?: TrackRouteVariantId;
+  activeRouteVariantName?: string;
   zones: TrackZone[];
   leaderboards: Record<LeaderboardMetric, LeaderboardEntry[]>;
   sourceRecord?: Record<string, unknown>;

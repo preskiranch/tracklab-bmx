@@ -51,15 +51,17 @@ import {
   nearestRouteMeter,
   parseUserTrackMapping,
   pointAtRouteMeter,
+  draftRouteFromMapping,
   readStoredTrackMappings,
   routeLengthWithDefaultSplitBranches,
   routeLengthMeters,
+  routeVariantsFromMapping,
   routeWithDefaultSplitBranches,
   splitBranchLabels,
   splitDecisionPointsForRoute,
   writeStoredTrackMappings,
   type StoredTrackMappings,
-  zoneBoundariesFromMapping,
+  zoneBoundariesFromRouteVariant,
 } from './lib/trackMapping';
 import {
   fetchLocationPredictions,
@@ -101,6 +103,7 @@ import type {
   StartCadenceMode,
   TrackPoint,
   TrackRecord,
+  TrackRouteVariantId,
   TrackSplitBranch,
   TrackSplitSection,
   UserTrackMapping,
@@ -115,6 +118,7 @@ const customRouteInitialHeading = 0;
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 type SplitBranchId = TrackSplitBranch['id'];
+type RaceRouteVariantId = TrackRouteVariantId;
 type CustomRoutePreview = {
   input: string;
   label?: string;
@@ -897,6 +901,8 @@ export default function App() {
   const [manualZoneIds, setManualZoneIds] = useState<string[]>(['z2', 'z4']);
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
   const [branchChoicesByPlayer, setBranchChoicesByPlayer] = useState<Partial<Record<PlayerSlot['id'], SplitBranchId>>>({});
+  const [mappingRouteVariantId, setMappingRouteVariantId] = useState<RaceRouteVariantId>('amateur');
+  const [raceRouteVariantId, setRaceRouteVariantId] = useState<RaceRouteVariantId>('amateur');
   const [earthAngle, setEarthAngle] = useState(
     () => earthCamerasByTrack[initialTrack.id]?.angle
       ?? (initialTrack.countryCode === 'CUSTOM' ? customRouteInitialAngle : defaultEarthCamera.angle),
@@ -1063,6 +1069,27 @@ export default function App() {
     selectedTrackIdRef.current = selectedTrack.id;
   }, [selectedTrack.id]);
   const selectedTrackMapping = storedMappings[selectedTrack.id];
+  const selectedRouteVariants = useMemo(
+    () => (selectedTrackMapping ? routeVariantsFromMapping(selectedTrackMapping) : []),
+    [selectedTrackMapping],
+  );
+  const savedRouteVariantIds = useMemo(
+    () => selectedRouteVariants.map((variant) => variant.id),
+    [selectedRouteVariants],
+  );
+  const hasDualStartRoutes = useMemo(() => {
+    const amateurRoute = selectedRouteVariants.find((variant) => variant.id === 'amateur');
+    const proRoute = selectedRouteVariants.find((variant) => variant.id === 'pro');
+    return Boolean(
+      amateurRoute
+      && proRoute
+      && distanceBetweenTrackPoints(amateurRoute.startGate, proRoute.startGate) > 3,
+    );
+  }, [selectedRouteVariants]);
+  const activeMappingRoute = useMemo(
+    () => (selectedTrackMapping ? draftRouteFromMapping(selectedTrackMapping, mappingRouteVariantId) : null),
+    [mappingRouteVariantId, selectedTrackMapping],
+  );
   useEffect(() => {
     const savedCamera = earthCamerasByTrack[selectedTrack.id];
     const isCustomRoute = selectedTrack.countryCode === 'CUSTOM';
@@ -1081,7 +1108,9 @@ export default function App() {
   ]);
   const effectiveTrack = useMemo(
     () => {
-      const mappedTrack = selectedTrackMapping ? applyUserTrackMapping(selectedTrack, selectedTrackMapping) : selectedTrack;
+      const mappedTrack = selectedTrackMapping
+        ? applyUserTrackMapping(selectedTrack, selectedTrackMapping, hasDualStartRoutes ? raceRouteVariantId : undefined)
+        : selectedTrack;
       if (!publicLeaderboards) {
         return mappedTrack;
       }
@@ -1095,8 +1124,14 @@ export default function App() {
         },
       };
     },
-    [publicLeaderboards, selectedTrack, selectedTrackMapping],
+    [hasDualStartRoutes, publicLeaderboards, raceRouteVariantId, selectedTrack, selectedTrackMapping],
   );
+
+  useEffect(() => {
+    if (!hasDualStartRoutes && raceRouteVariantId !== 'amateur') {
+      setRaceRouteVariantId('amateur');
+    }
+  }, [hasDualStartRoutes, raceRouteVariantId, selectedTrack.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1946,7 +1981,7 @@ export default function App() {
     setDemoSignalsStopped(false);
     setReactionStartAt(null);
     setReactionTimesByPlayer({});
-  }, [effectiveTrack.id, mappedZones, resetRace]);
+  }, [effectiveTrack.activeRouteVariantId, effectiveTrack.id, mappedZones, resetRace]);
 
   const renamePlayer = useCallback((playerId: PlayerSlot['id'], name: string) => {
     const player = sessionPlayers.find((item) => item.id === playerId);
@@ -2353,23 +2388,27 @@ export default function App() {
   };
 
   useEffect(() => {
-    const mapping = storedMappings[selectedTrack.id];
-    setDraftPoints(mapping?.centerline ?? []);
-    setDraftZoneMeters(mapping ? zoneBoundariesFromMapping(mapping) : []);
-    setDraftSplitSections(mapping?.splitSections ?? []);
-    setDraftSplitBuilder(null);
-    setMappingRestSeconds(mapping?.restAfterSeconds ?? 1);
+    setMappingRouteVariantId('amateur');
+    setRaceRouteVariantId('amateur');
     setMappingEditMode('navigate');
     setMappingMode(false);
     setMappingFullscreen(false);
   }, [selectedTrack.id]);
 
+  useEffect(() => {
+    setDraftPoints(activeMappingRoute?.centerline ?? []);
+    setDraftZoneMeters(activeMappingRoute ? zoneBoundariesFromRouteVariant(activeMappingRoute) : []);
+    setDraftSplitSections(activeMappingRoute?.splitSections ?? []);
+    setDraftSplitBuilder(null);
+    setMappingRestSeconds(activeMappingRoute?.restAfterSeconds ?? 1);
+  }, [activeMappingRoute]);
+
   const handleMappingModeChange = (enabled: boolean) => {
-    if (enabled && draftPoints.length === 0 && selectedTrackMapping) {
-      setDraftPoints(selectedTrackMapping.centerline);
-      setDraftZoneMeters(zoneBoundariesFromMapping(selectedTrackMapping));
-      setDraftSplitSections(selectedTrackMapping.splitSections ?? []);
-      setMappingRestSeconds(selectedTrackMapping.restAfterSeconds);
+    if (enabled && draftPoints.length === 0 && activeMappingRoute) {
+      setDraftPoints(activeMappingRoute.centerline);
+      setDraftZoneMeters(zoneBoundariesFromRouteVariant(activeMappingRoute));
+      setDraftSplitSections(activeMappingRoute.splitSections ?? []);
+      setMappingRestSeconds(activeMappingRoute.restAfterSeconds);
     }
 
     if (enabled) {
@@ -2672,6 +2711,8 @@ export default function App() {
       mappingRestSeconds,
       draftZoneMeters,
       completedDraftSplit ? [...draftSplitSections, completedDraftSplit] : draftSplitSections,
+      mappingRouteVariantId,
+      selectedTrackMapping ? routeVariantsFromMapping(selectedTrackMapping) : [],
     );
     setStoredMappings((current) => {
       const next = { ...current, [selectedTrack.id]: mapping };
@@ -2682,6 +2723,7 @@ export default function App() {
       setDraftSplitSections((current) => [...current, completedDraftSplit]);
       setDraftSplitBuilder(null);
     }
+    setRaceRouteVariantId(mappingRouteVariantId);
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     resetRace();
@@ -2729,11 +2771,15 @@ export default function App() {
           setSelectedTrackId(importedTrack.id);
         }
 
-        setDraftPoints(mapping.centerline);
-        setDraftZoneMeters(zoneBoundariesFromMapping(mapping));
-        setDraftSplitSections(mapping.splitSections ?? []);
+        const importedRoutes = routeVariantsFromMapping(mapping);
+        const importedRoute = importedRoutes.find((route) => route.id === 'amateur') ?? importedRoutes[0];
+        setMappingRouteVariantId(importedRoute.id);
+        setRaceRouteVariantId(importedRoute.id);
+        setDraftPoints(importedRoute.centerline);
+        setDraftZoneMeters(zoneBoundariesFromRouteVariant(importedRoute));
+        setDraftSplitSections(importedRoute.splitSections ?? []);
         setDraftSplitBuilder(null);
-        setMappingRestSeconds(mapping.restAfterSeconds);
+        setMappingRestSeconds(importedRoute.restAfterSeconds);
         setMappingEditMode('navigate');
         setMappingMode(true);
         setDemoRaceStartedAt(null);
@@ -2835,6 +2881,20 @@ export default function App() {
       [playerId]: branch,
     }));
   }, []);
+
+  const handleMappingRouteVariantChange = useCallback((variantId: RaceRouteVariantId) => {
+    setMappingRouteVariantId(variantId);
+    setMappingEditMode('navigate');
+  }, []);
+
+  const handleRaceRouteVariantChange = useCallback((variantId: RaceRouteVariantId) => {
+    setRaceRouteVariantId(variantId);
+    resetRace();
+    setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
+    setReactionStartAt(null);
+    setReactionTimesByPlayer({});
+  }, [resetRace]);
 
   const handleEarthCameraChange = useCallback((camera: Partial<EarthCamera>) => {
     const nextCamera = normalizeEarthCamera({
@@ -3687,6 +3747,10 @@ export default function App() {
                 selectedTrackId={selectedTrack.id}
                 players={activePlayers}
                 branchChoicesByPlayer={activeBranchChoicesByPlayer}
+                mappingRouteVariantId={mappingRouteVariantId}
+                raceRouteVariantId={raceRouteVariantId}
+                savedRouteVariantIds={savedRouteVariantIds}
+                hasDualStartRoutes={hasDualStartRoutes}
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
                 maxPlayers={maxPlayers}
@@ -3725,6 +3789,8 @@ export default function App() {
                 onCustomRouteSelect={handleTrackChange}
                 onCustomRouteDelete={handleCustomRouteDelete}
                 onBranchChoiceChange={handleBranchChoiceChange}
+                onMappingRouteVariantChange={handleMappingRouteVariantChange}
+                onRaceRouteVariantChange={handleRaceRouteVariantChange}
                 onDemoModeChange={handleDemoModeChange}
                 onDemoBikeCountChange={handleDemoBikeCountChange}
                 onStartCadenceModeChange={setStartCadenceMode}

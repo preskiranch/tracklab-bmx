@@ -2,6 +2,8 @@ import type {
   SplitBranchChoice,
   TrackPoint,
   TrackRecord,
+  TrackRouteVariant,
+  TrackRouteVariantId,
   TrackSplitSection,
   TrackZone,
   UserTrackMapping,
@@ -13,6 +15,11 @@ export const splitBranchLabels: Record<SplitBranchChoice, string> = {
   b: 'Pro Set',
 };
 export const proSplitMinimumMph = 26;
+export const routeVariantLabels: Record<TrackRouteVariantId, string> = {
+  amateur: 'Amateur Track',
+  pro: 'Pro Track',
+};
+const routeVariantOrder: TrackRouteVariantId[] = ['amateur', 'pro'];
 
 export type SplitBranchSelection = Partial<Record<string, SplitBranchChoice>>;
 
@@ -289,13 +296,14 @@ function normalizeSplitSection(section: TrackSplitSection): TrackSplitSection {
   };
 }
 
-export function createUserTrackMapping(
+function createTrackRouteVariant(
   track: TrackRecord,
+  variantId: TrackRouteVariantId,
   points: TrackPoint[],
   restAfterSeconds: number,
   zoneBoundaryMeters: number[] = [],
   splitSections: TrackSplitSection[] = [],
-): UserTrackMapping {
+): TrackRouteVariant {
   const centerline = points.map(normalizePoint);
   const normalizedSplitSections = splitSections.map(normalizeSplitSection);
   const measurableRoute = routeWithDefaultSplitBranches(centerline, normalizedSplitSections);
@@ -313,13 +321,8 @@ export function createUserTrackMapping(
   }));
 
   return {
-    version: 1,
-    trackId: track.id,
-    trackName: track.name,
-    country: track.country,
-    state: track.state,
-    savedAt: new Date().toISOString(),
-    routeStatus: 'user-mapped',
+    id: variantId,
+    name: routeVariantLabels[variantId],
     restAfterSeconds,
     lengthMeters: Math.round(lengthMeters),
     centerline,
@@ -331,17 +334,150 @@ export function createUserTrackMapping(
   };
 }
 
-export function applyUserTrackMapping(track: TrackRecord, mapping: UserTrackMapping): TrackRecord {
+function routeVariantFromTopLevelMapping(
+  mapping: UserTrackMapping,
+  variantId: TrackRouteVariantId = 'amateur',
+): TrackRouteVariant {
   return {
-    ...track,
+    id: variantId,
+    name: routeVariantLabels[variantId],
+    restAfterSeconds: mapping.restAfterSeconds,
     lengthMeters: mapping.lengthMeters,
-    outline: mapping.centerline,
     centerline: mapping.centerline,
     startGate: mapping.startGate,
     finishLine: mapping.finishLine,
-    routeStatus: 'user-mapped',
+    zoneBoundaryMeters: mapping.zoneBoundaryMeters,
     zones: mapping.zones,
     splitSections: mapping.splitSections ?? [],
+  };
+}
+
+function normalizeRouteVariant(variant: TrackRouteVariant): TrackRouteVariant {
+  const variantId = variant.id === 'pro' ? 'pro' : 'amateur';
+  const centerline = variant.centerline.map(normalizePoint);
+  const splitSections = (variant.splitSections ?? []).map(normalizeSplitSection);
+  const measurableRoute = routeWithDefaultSplitBranches(centerline, splitSections);
+  const lengthMeters = Math.round(Math.max(1, routeLengthMeters(measurableRoute)));
+  const zoneBoundaryMeters = Array.isArray(variant.zoneBoundaryMeters)
+    ? sortedUniqueBoundaries(variant.zoneBoundaryMeters, lengthMeters)
+    : variant.zones.slice(0, -1).map((zone) => zone.endMeter);
+
+  return {
+    id: variantId,
+    name: variant.name || routeVariantLabels[variantId],
+    restAfterSeconds: Number.isFinite(variant.restAfterSeconds) ? variant.restAfterSeconds : 1,
+    lengthMeters,
+    centerline,
+    startGate: variant.startGate ? normalizePoint(variant.startGate) : centerline[0],
+    finishLine: variant.finishLine ? normalizePoint(variant.finishLine) : centerline[centerline.length - 1],
+    zoneBoundaryMeters,
+    zones: variant.zones,
+    splitSections,
+  };
+}
+
+export function routeVariantsFromMapping(mapping: UserTrackMapping) {
+  const rawVariants = Array.isArray(mapping.routeVariants) ? mapping.routeVariants : [];
+  const variants = rawVariants
+    .filter((variant) => (variant.id === 'amateur' || variant.id === 'pro') && variant.centerline?.length >= 2)
+    .map(normalizeRouteVariant);
+
+  if (variants.length > 0) {
+    return routeVariantOrder
+      .map((variantId) => variants.find((variant) => variant.id === variantId))
+      .filter((variant): variant is TrackRouteVariant => variant != null);
+  }
+
+  return [routeVariantFromTopLevelMapping(mapping, 'amateur')];
+}
+
+export function routeVariantFromMapping(mapping: UserTrackMapping, variantId: TrackRouteVariantId) {
+  return routeVariantsFromMapping(mapping).find((variant) => variant.id === variantId) ?? null;
+}
+
+export function draftRouteFromMapping(mapping: UserTrackMapping, variantId: TrackRouteVariantId) {
+  const variant = routeVariantFromMapping(mapping, variantId);
+  if (variant) {
+    return variant;
+  }
+
+  return Array.isArray(mapping.routeVariants) && mapping.routeVariants.length > 0
+    ? null
+    : routeVariantFromTopLevelMapping(mapping, variantId);
+}
+
+export function zoneBoundariesFromRouteVariant(variant: TrackRouteVariant) {
+  if (Array.isArray(variant.zoneBoundaryMeters)) {
+    return variant.zoneBoundaryMeters;
+  }
+
+  return variant.zones
+    .slice(0, -1)
+    .map((zone) => zone.endMeter)
+    .filter((meter) => meter > 0 && meter < variant.lengthMeters);
+}
+
+export function createUserTrackMapping(
+  track: TrackRecord,
+  points: TrackPoint[],
+  restAfterSeconds: number,
+  zoneBoundaryMeters: number[] = [],
+  splitSections: TrackSplitSection[] = [],
+  routeVariantId?: TrackRouteVariantId,
+  existingRouteVariants: TrackRouteVariant[] = [],
+): UserTrackMapping {
+  const primaryVariant = createTrackRouteVariant(track, routeVariantId ?? 'amateur', points, restAfterSeconds, zoneBoundaryMeters, splitSections);
+  const routeVariants = routeVariantId
+    ? routeVariantOrder
+      .map((variantId) => (
+        variantId === routeVariantId
+          ? primaryVariant
+          : existingRouteVariants.find((variant) => variant.id === variantId)
+      ))
+      .filter((variant): variant is TrackRouteVariant => variant != null)
+    : existingRouteVariants;
+
+  return {
+    version: 1,
+    trackId: track.id,
+    trackName: track.name,
+    country: track.country,
+    state: track.state,
+    savedAt: new Date().toISOString(),
+    routeStatus: 'user-mapped',
+    restAfterSeconds: primaryVariant.restAfterSeconds,
+    lengthMeters: primaryVariant.lengthMeters,
+    centerline: primaryVariant.centerline,
+    startGate: primaryVariant.startGate,
+    finishLine: primaryVariant.finishLine,
+    zoneBoundaryMeters: primaryVariant.zoneBoundaryMeters,
+    zones: primaryVariant.zones,
+    splitSections: primaryVariant.splitSections,
+    ...(routeVariants.length > 0 ? { routeVariants } : {}),
+  };
+}
+
+export function applyUserTrackMapping(
+  track: TrackRecord,
+  mapping: UserTrackMapping,
+  routeVariantId?: TrackRouteVariantId,
+): TrackRecord {
+  const routeVariant = routeVariantId ? routeVariantFromMapping(mapping, routeVariantId) : null;
+  const activeRoute = routeVariant ?? routeVariantFromTopLevelMapping(mapping);
+
+  return {
+    ...track,
+    lengthMeters: activeRoute.lengthMeters,
+    outline: activeRoute.centerline,
+    centerline: activeRoute.centerline,
+    startGate: activeRoute.startGate,
+    finishLine: activeRoute.finishLine,
+    routeStatus: 'user-mapped',
+    zones: activeRoute.zones,
+    splitSections: activeRoute.splitSections ?? [],
+    routeVariants: routeVariantsFromMapping(mapping),
+    activeRouteVariantId: activeRoute.id,
+    activeRouteVariantName: activeRoute.name,
   };
 }
 
@@ -471,5 +607,8 @@ export function parseUserTrackMapping(value: string): UserTrackMapping {
     splitSections: Array.isArray(parsed.splitSections)
       ? parsed.splitSections.map((section) => normalizeSplitSection(section))
       : [],
+    routeVariants: Array.isArray(parsed.routeVariants)
+      ? routeVariantsFromMapping(parsed as UserTrackMapping)
+      : undefined,
   } as UserTrackMapping;
 }

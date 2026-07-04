@@ -37,6 +37,7 @@ import type {
   PlayerSlot,
   TrackPoint,
   TrackRecord,
+  TrackRouteVariantId,
   TrackSplitBranch,
   TrackSplitSection,
   TrackZone,
@@ -97,6 +98,10 @@ type SessionControlPanelProps = {
   selectedTrackId: string;
   players: PlayerSlot[];
   branchChoicesByPlayer: Partial<Record<PlayerSlot['id'], TrackSplitBranch['id']>>;
+  mappingRouteVariantId: TrackRouteVariantId;
+  raceRouteVariantId: TrackRouteVariantId;
+  savedRouteVariantIds: TrackRouteVariantId[];
+  hasDualStartRoutes: boolean;
   raceState: RaceState;
   activeBikeCount: number;
   maxPlayers: number;
@@ -135,6 +140,8 @@ type SessionControlPanelProps = {
   onCustomRouteSelect: (trackId: string) => void;
   onCustomRouteDelete: (trackId: string) => void;
   onBranchChoiceChange: (playerId: PlayerSlot['id'], branch: TrackSplitBranch['id']) => void;
+  onMappingRouteVariantChange: (variantId: TrackRouteVariantId) => void;
+  onRaceRouteVariantChange: (variantId: TrackRouteVariantId) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoBikeCountChange: (count: number) => void;
   onStartCadenceModeChange: (mode: StartCadenceMode) => void;
@@ -188,6 +195,10 @@ export function SessionControlPanel({
   selectedTrackId,
   players,
   branchChoicesByPlayer,
+  mappingRouteVariantId,
+  raceRouteVariantId,
+  savedRouteVariantIds,
+  hasDualStartRoutes,
   raceState,
   activeBikeCount,
   maxPlayers,
@@ -226,6 +237,8 @@ export function SessionControlPanel({
   onCustomRouteSelect,
   onCustomRouteDelete,
   onBranchChoiceChange,
+  onMappingRouteVariantChange,
+  onRaceRouteVariantChange,
   onDemoModeChange,
   onDemoBikeCountChange,
   onStartCadenceModeChange,
@@ -301,6 +314,7 @@ export function SessionControlPanel({
   const splitBranchOneReady = Boolean(draftSplitBranchMetrics[0]?.ready);
   const canChooseSplitLine = raceState === 'ready' && !startGateActive;
   const hasRaceSplitChoices = players.length > 0 && (track.splitSections?.length ?? 0) > 0;
+  const canChooseRaceLayout = raceState === 'ready' && !startGateActive;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones'
     ? draftZoneCount > 1
@@ -534,6 +548,37 @@ export function SessionControlPanel({
             </div>
 
             {mappingMode && (
+              <div className="route-layout-card">
+                <div className="route-layout-heading">
+                  <span>Route layout</span>
+                  <small>Use for tracks with separate start gates</small>
+                </div>
+                <div className="segmented-control compact" aria-label="Mapping route layout">
+                  <button
+                    className={mappingRouteVariantId === 'amateur' ? 'selected' : ''}
+                    type="button"
+                    onClick={() => onMappingRouteVariantChange('amateur')}
+                  >
+                    <Flag size={14} />
+                    Amateur Track
+                  </button>
+                  <button
+                    className={mappingRouteVariantId === 'pro' ? 'selected' : ''}
+                    type="button"
+                    onClick={() => onMappingRouteVariantChange('pro')}
+                  >
+                    <Zap size={14} />
+                    Pro Track
+                  </button>
+                </div>
+                <div className="route-layout-saved-row">
+                  <span className={savedRouteVariantIds.includes('amateur') ? 'saved' : ''}>Amateur {savedRouteVariantIds.includes('amateur') ? 'saved' : 'not saved'}</span>
+                  <span className={savedRouteVariantIds.includes('pro') ? 'saved' : ''}>Pro {savedRouteVariantIds.includes('pro') ? 'saved' : 'not saved'}</span>
+                </div>
+              </div>
+            )}
+
+            {mappingMode && (
               <div className="segmented-control compact four-way" aria-label="Track tools">
                 <button
                   className={mappingEditMode === 'navigate' ? 'selected' : ''}
@@ -570,7 +615,7 @@ export function SessionControlPanel({
               <span>{draftPointCount} route pt{draftPointCount === 1 ? '' : 's'}</span>
               <span>{draftZoneCount} sprint zone{draftZoneCount === 1 ? '' : 's'}</span>
               <span>{visibleTrackDistance == null ? 'No distance' : formatDistanceMeters(visibleTrackDistance, distanceUnit)}</span>
-              <span>{hasSavedMapping ? 'Saved locally' : 'No saved map'}</span>
+              <span>{savedRouteVariantIds.includes(mappingRouteVariantId) ? 'Layout saved' : 'No layout saved'}</span>
             </div>
 
             {splitDrawHint && <p className="mapping-hint">{splitDrawHint}</p>}
@@ -895,6 +940,38 @@ export function SessionControlPanel({
             })}
           </div>
           <p className="split-choice-note">Pro Set opens at 26+ mph at the split; otherwise the rider stays on Amateur Line.</p>
+        </section>
+      )}
+
+      {hasDualStartRoutes && (
+        <section className="panel-section route-race-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Track Layout</span>
+              <h3>Race route</h3>
+            </div>
+            <MapPinned size={18} />
+          </div>
+          <div className="segmented-control" aria-label="Race route layout">
+            <button
+              className={raceRouteVariantId === 'amateur' ? 'selected' : ''}
+              type="button"
+              onClick={() => onRaceRouteVariantChange('amateur')}
+              disabled={!canChooseRaceLayout}
+            >
+              <Flag size={15} />
+              Amateur Track
+            </button>
+            <button
+              className={raceRouteVariantId === 'pro' ? 'selected' : ''}
+              type="button"
+              onClick={() => onRaceRouteVariantChange('pro')}
+              disabled={!canChooseRaceLayout}
+            >
+              <Zap size={15} />
+              Pro Track
+            </button>
+          </div>
         </section>
       )}
 
