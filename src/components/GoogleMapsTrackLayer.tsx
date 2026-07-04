@@ -894,7 +894,7 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    const hideRaceRoute = mappingMode || raceViewFullscreen || raceState === 'racing';
+    const hideRaceRoute = mappingMode || raceViewFullscreen || raceState === 'racing' || raceState === 'finished';
 
     if (!hideRaceRoute) {
       trackLineRefs.current = mappedTrackRouteSegments(track)
@@ -1009,8 +1009,9 @@ export function GoogleMapsTrackLayer({
       }));
     });
 
+    const showRaceFinish = !mappingMode || raceViewFullscreen || raceState === 'racing' || raceState === 'finished';
     const finishPosition = riderLatLng(track, track.lengthMeters);
-    const finishStripe = !mappingMode ? finishStripePath(savedRoute) : null;
+    const finishStripe = showRaceFinish ? finishStripePath(savedRoute) : null;
     if (finishStripe) {
       finishLineRefs.current = [
         new google.maps.Polyline({
@@ -1034,8 +1035,8 @@ export function GoogleMapsTrackLayer({
       ];
     }
 
-    const finishLabelPoint = !mappingMode ? finishLabelPosition(savedRoute) : null;
-    if (finishPosition && finishLabelPoint && !mappingMode) {
+    const finishLabelPoint = showRaceFinish ? finishLabelPosition(savedRoute) : null;
+    if (finishPosition && finishLabelPoint && showRaceFinish) {
       finishMarkerRef.current = new google.maps.Marker({
         icon: {
           anchor: new google.maps.Point(43, 18),
@@ -1110,15 +1111,15 @@ export function GoogleMapsTrackLayer({
     draftMarkerRefs.current = [];
     draftMarkerListenerRefs.current = [];
 
-    if (!mappingMode && draftPoints.length === 0) {
-      draftLineRefs.current = [];
+    const showMappingDraft = mappingMode && raceState === 'ready' && !raceViewFullscreen;
+    if (!showMappingDraft) {
       return;
     }
 
     const activeDraftRouteSplitSections = draftRouteSplitSections ?? draftSplitSections;
     const draftRoute = routeWithDefaultSplitBranches(draftPoints, activeDraftRouteSplitSections);
     const draftSharedSegments = splitSharedRouteSegments(draftPoints, activeDraftRouteSplitSections);
-    if (mappingMode && draftPoints.length > 1) {
+    if (showMappingDraft && draftPoints.length > 1) {
       draftLineRefs.current = draftSharedSegments
         .filter((segment) => segment.length > 1)
         .map((segment) => new google.maps.Polyline({
@@ -1132,7 +1133,7 @@ export function GoogleMapsTrackLayer({
     }
 
     const draftLengthMeters = routeLengthWithDefaultSplitBranches(draftPoints, activeDraftRouteSplitSections);
-    const draftDistanceMarkers = mappingMode && draftPoints.length > 1 ? [
+    const draftDistanceMarkers = showMappingDraft && draftPoints.length > 1 ? [
       new google.maps.Marker({
         icon: {
           anchor: new google.maps.Point(54, 34),
@@ -1147,7 +1148,7 @@ export function GoogleMapsTrackLayer({
       }),
     ] : [];
 
-    const draftZoneBreaks = mappingMode && draftPoints.length > 1
+    const draftZoneBreaks = showMappingDraft && draftPoints.length > 1
       ? [0, ...draftZoneMeters.filter((meter) => meter > 0 && meter < draftLengthMeters), draftLengthMeters]
       : [];
     const draftZoneDistanceMarkers = draftZoneBreaks.slice(1).map((endMeter, index) => {
@@ -1171,7 +1172,7 @@ export function GoogleMapsTrackLayer({
       });
     }).filter((marker): marker is GoogleMarker => marker != null);
 
-    const pathPointMarkers = mappingMode ? draftPoints.map((point, index) => {
+    const pathPointMarkers = showMappingDraft ? draftPoints.map((point, index) => {
       const isStart = index === 0;
       const isFinish = index === draftPoints.length - 1 && draftPoints.length > 1;
       const marker = new google.maps.Marker({
@@ -1215,7 +1216,7 @@ export function GoogleMapsTrackLayer({
       return marker;
     }) : [];
 
-    const zoneMarkers = mappingMode ? draftZonePoints.map((point, index) => {
+    const zoneMarkers = showMappingDraft ? draftZonePoints.map((point, index) => {
       const marker = new google.maps.Marker({
         draggable: Boolean(onMappingZonePointMove),
         icon: {
@@ -1318,7 +1319,7 @@ export function GoogleMapsTrackLayer({
       addDraftJunctionClick(mergeMarker, section.mergePoint);
     };
 
-    if (mappingMode) {
+    if (showMappingDraft) {
       draftSplitSections.forEach((section) => renderDraftSplit(section));
 
       if (draftSplitBuilder?.splitPoint) {
@@ -1409,6 +1410,8 @@ export function GoogleMapsTrackLayer({
     onMappingSplitPointAdd,
     onMappingZonePointMove,
     onMappingZonePointRemove,
+    raceState,
+    raceViewFullscreen,
     status,
   ]);
 
@@ -1429,18 +1432,19 @@ export function GoogleMapsTrackLayer({
     isDrawingRef.current = false;
     lastDrawPointRef.current = null;
     const previousTouchAction = container?.style.touchAction ?? '';
-    const isSplitPlacementMode = mappingMode
+    const mappingInputEnabled = mappingMode && raceState === 'ready' && !raceViewFullscreen;
+    const isSplitPlacementMode = mappingInputEnabled
       && mappingEditMode === 'split'
       && (!draftSplitBuilder?.splitPoint || !draftSplitBuilder?.mergePoint);
-    const isSplitBranchDrawMode = mappingMode
+    const isSplitBranchDrawMode = mappingInputEnabled
       && mappingEditMode === 'split'
       && Boolean(draftSplitBuilder?.splitPoint && draftSplitBuilder.mergePoint);
-    const isCurveDrawMode = mappingMode && mappingEditMode === 'curve';
-    const isDrawMode = mappingMode && (mappingEditMode === 'draw' || isCurveDrawMode || isSplitBranchDrawMode);
-    const isNavigateMode = !mappingMode || mappingEditMode === 'navigate';
+    const isCurveDrawMode = mappingInputEnabled && mappingEditMode === 'curve';
+    const isDrawMode = mappingInputEnabled && (mappingEditMode === 'draw' || isCurveDrawMode || isSplitBranchDrawMode);
+    const isNavigateMode = !mappingInputEnabled || mappingEditMode === 'navigate';
     map.setOptions({
       draggable: !isDrawMode && !isSplitPlacementMode,
-      draggableCursor: mappingMode && !isNavigateMode ? 'crosshair' : undefined,
+      draggableCursor: mappingInputEnabled && !isNavigateMode ? 'crosshair' : undefined,
       gestureHandling: isCurveDrawMode ? 'none' : 'greedy',
       headingInteractionEnabled: isNavigateMode,
       tiltInteractionEnabled: isNavigateMode,
@@ -1449,7 +1453,7 @@ export function GoogleMapsTrackLayer({
       container.style.touchAction = 'none';
     }
 
-    if (!mappingMode) {
+    if (!mappingInputEnabled) {
       return undefined;
     }
 
@@ -1716,6 +1720,8 @@ export function GoogleMapsTrackLayer({
     onMappingSplitDrawEnd,
     onMappingSplitPointAdd,
     onMappingZonePointAdd,
+    raceState,
+    raceViewFullscreen,
     status,
   ]);
 

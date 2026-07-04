@@ -161,6 +161,7 @@ export function EarthTrackView({
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'
     : 'Needs manual mapping';
+  const showMappingUi = mappingMode && raceState === 'ready' && !raceViewFullscreen;
 
   return (
     <section className="earth-panel">
@@ -253,7 +254,7 @@ export function EarthTrackView({
           <span>Heading {earthHeading} deg</span>
           <span>Satellite</span>
           <span>
-            {mappingMode
+            {showMappingUi
               ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`
               : track.splitSections && track.splitSections.length > 0
                 ? `${track.splitSections.length} split${track.splitSections.length === 1 ? '' : 's'}`
@@ -261,7 +262,7 @@ export function EarthTrackView({
                 ? 'Saved ride line'
                 : 'No ride line'}
           </span>
-          {mappingMode && (
+          {showMappingUi && (
             <span>
               {mappingEditMode === 'navigate'
                 ? 'Move map'
@@ -279,7 +280,7 @@ export function EarthTrackView({
           <StartTreeLight activeIndex={startGateLightIndex} />
         )}
 
-        {mappingMode && raceState !== 'racing' && (
+        {showMappingUi && (
           <div className="map-edit-toolbar" aria-label="Map edit view controls">
             <button
               type="button"
