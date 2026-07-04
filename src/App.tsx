@@ -1106,6 +1106,16 @@ export default function App() {
       draftSplitBuilder.splitPoint,
       draftSplitBuilder.mergePoint,
     ).length;
+    if (draftSplitBuilder.activeBranch === 'a') {
+      if (branchOneStarted < splitBranchMinInteriorPoints) {
+        return branchOneStarted === 0
+          ? `Draw Branch 1 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`
+          : `Keep drawing Branch 1 along the lane contour.`;
+      }
+
+      return `Branch 1 is ready. Keep adding points to fine tune it, or select Branch 2.`;
+    }
+
     if (branchOneStarted < splitBranchMinInteriorPoints) {
       return branchOneStarted === 0
         ? `Draw Branch 1 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`
@@ -2384,38 +2394,8 @@ export default function App() {
   }, [draftSplitSections.length]);
 
   const handleMappingSplitDrawEnd = useCallback(() => {
-    setDraftSplitBuilder((current) => {
-      if (!current?.splitPoint) {
-        return current;
-      }
-
-      if (!current.mergePoint) {
-        return current;
-      }
-
-      if (current.activeBranch === 'a') {
-        const branchAInterior = branchInteriorPoints(current.branchA, current.splitPoint, current.mergePoint);
-        if (branchAInterior.length < splitBranchMinInteriorPoints) {
-          return current;
-        }
-
-        return {
-          ...current,
-          activeBranch: 'b',
-          branchA: branchWithEndpoints(branchAInterior, current.splitPoint, current.mergePoint),
-        };
-      }
-
-      const branchBInterior = branchInteriorPoints(current.branchB, current.splitPoint, current.mergePoint);
-      if (branchBInterior.length < splitBranchMinInteriorPoints) {
-        return current;
-      }
-
-      return {
-        ...current,
-        branchB: branchWithEndpoints(branchBInterior, current.splitPoint, current.mergePoint),
-      };
-    });
+    // Ending a drag stroke should not finish the branch. Riders need to be able
+    // to add several strokes/points along a lane before switching branches.
   }, []);
 
   const saveDraftSplit = useCallback(() => {
