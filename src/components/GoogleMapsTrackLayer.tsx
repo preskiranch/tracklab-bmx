@@ -102,6 +102,8 @@ const riderFrontTireInset = 1;
 const riderGroundContactInset = 1;
 const riderStartSetbackMeters = 2.2;
 const riderStartSetbackBlendMeters = 5;
+const finishStripeWidthMeters = 24;
+const finishLabelOffsetMeters = 30;
 
 type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
@@ -175,6 +177,70 @@ function draftBranchPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoin
   }
 
   return branchWithSplitAndMerge(interiorPoints, splitPoint, mergePoint);
+}
+
+function pointAtBearingDistance(point: TrackPoint, bearingDegrees: number, distanceMeters: number): TrackPoint {
+  const radians = (bearingDegrees * Math.PI) / 180;
+  const northMeters = Math.cos(radians) * distanceMeters;
+  const eastMeters = Math.sin(radians) * distanceMeters;
+  const latScale = 111_320;
+  const lngScale = Math.cos(point.lat * (Math.PI / 180)) * latScale;
+
+  return {
+    lat: point.lat + (northMeters / latScale),
+    lng: point.lng + (eastMeters / Math.max(1, lngScale)),
+  };
+}
+
+function bearingBetweenPoints(start: TrackPoint, end: TrackPoint) {
+  const startLat = start.lat * (Math.PI / 180);
+  const endLat = end.lat * (Math.PI / 180);
+  const deltaLng = (end.lng - start.lng) * (Math.PI / 180);
+  const y = Math.sin(deltaLng) * Math.cos(endLat);
+  const x = Math.cos(startLat) * Math.sin(endLat)
+    - Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLng);
+
+  return ((Math.atan2(y, x) * (180 / Math.PI)) + 360) % 360;
+}
+
+function finishRouteTangent(route: TrackPoint[]) {
+  const finishPoint = route[route.length - 1];
+  if (!finishPoint) {
+    return null;
+  }
+
+  for (let index = route.length - 2; index >= 0; index -= 1) {
+    if (distanceBetweenTrackPoints(route[index], finishPoint) > 1) {
+      return bearingBetweenPoints(route[index], finishPoint);
+    }
+  }
+
+  return null;
+}
+
+function finishStripePath(route: TrackPoint[]) {
+  const finishPoint = route[route.length - 1];
+  const tangent = finishRouteTangent(route);
+  if (!finishPoint || tangent == null) {
+    return null;
+  }
+
+  const crossBearing = normalizeHeading(tangent + 90);
+  const halfWidth = finishStripeWidthMeters / 2;
+  return [
+    pointAtBearingDistance(finishPoint, crossBearing, -halfWidth),
+    pointAtBearingDistance(finishPoint, crossBearing, halfWidth),
+  ];
+}
+
+function finishLabelPosition(route: TrackPoint[]) {
+  const finishPoint = route[route.length - 1];
+  const tangent = finishRouteTangent(route);
+  if (!finishPoint || tangent == null) {
+    return finishPoint ?? null;
+  }
+
+  return pointAtBearingDistance(finishPoint, normalizeHeading(tangent + 90), finishLabelOffsetMeters);
 }
 
 function applyCamera(map: GoogleMap, cameraView: Partial<EarthCamera>) {
@@ -498,6 +564,7 @@ export function GoogleMapsTrackLayer({
   const distanceLabelRefs = useRef<GoogleMarker[]>([]);
   const splitLineRefs = useRef<GooglePolyline[]>([]);
   const splitMarkerRefs = useRef<GoogleMarker[]>([]);
+  const finishLineRefs = useRef<GooglePolyline[]>([]);
   const finishMarkerRef = useRef<GoogleMarker | null>(null);
   const draftLineRefs = useRef<GooglePolyline[]>([]);
   const draftSplitLineRefs = useRef<GooglePolyline[]>([]);
@@ -588,6 +655,7 @@ export function GoogleMapsTrackLayer({
       distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
       splitLineRefs.current.forEach((line) => line.setMap(null));
       splitMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      finishLineRefs.current.forEach((line) => line.setMap(null));
       finishMarkerRef.current?.setMap(null);
       draftLineRefs.current.forEach((line) => line.setMap(null));
       draftSplitLineRefs.current.forEach((line) => line.setMap(null));
@@ -601,6 +669,7 @@ export function GoogleMapsTrackLayer({
       distanceLabelRefs.current = [];
       splitLineRefs.current = [];
       splitMarkerRefs.current = [];
+      finishLineRefs.current = [];
       finishMarkerRef.current = null;
       draftLineRefs.current = [];
       draftSplitLineRefs.current = [];
@@ -705,12 +774,14 @@ export function GoogleMapsTrackLayer({
     distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
     splitLineRefs.current.forEach((line) => line.setMap(null));
     splitMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    finishLineRefs.current.forEach((line) => line.setMap(null));
     finishMarkerRef.current?.setMap(null);
     trackLineRefs.current = [];
     zoneLinesRef.current = [];
     distanceLabelRefs.current = [];
     splitLineRefs.current = [];
     splitMarkerRefs.current = [];
+    finishLineRefs.current = [];
     finishMarkerRef.current = null;
 
     const fitKey = `${track.id}:${track.routeStatus ?? 'locator'}:${track.centerline?.length ?? 0}:${track.splitSections?.length ?? 0}`;
@@ -863,7 +934,32 @@ export function GoogleMapsTrackLayer({
     });
 
     const finishPosition = riderLatLng(track, track.lengthMeters);
-    if (finishPosition && !mappingMode) {
+    const finishStripe = !mappingMode ? finishStripePath(savedRoute) : null;
+    if (finishStripe) {
+      finishLineRefs.current = [
+        new google.maps.Polyline({
+          clickable: false,
+          map,
+          path: finishStripe,
+          strokeColor: '#111827',
+          strokeOpacity: 0.96,
+          strokeWeight: 14,
+          zIndex: 900,
+        }),
+        new google.maps.Polyline({
+          clickable: false,
+          map,
+          path: finishStripe,
+          strokeColor: '#ffffff',
+          strokeOpacity: 0.98,
+          strokeWeight: 8,
+          zIndex: 901,
+        }),
+      ];
+    }
+
+    const finishLabelPoint = !mappingMode ? finishLabelPosition(savedRoute) : null;
+    if (finishPosition && finishLabelPoint && !mappingMode) {
       finishMarkerRef.current = new google.maps.Marker({
         icon: {
           anchor: new google.maps.Point(43, 18),
@@ -872,9 +968,9 @@ export function GoogleMapsTrackLayer({
         },
         map,
         optimized: false,
-        position: finishPosition,
+        position: finishLabelPoint,
         title: 'Finish line',
-        zIndex: 820,
+        zIndex: 920,
       });
     }
   }, [activeZones, distanceUnit, mappingMode, raceState, raceViewFullscreen, status, track]);
