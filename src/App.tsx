@@ -182,9 +182,11 @@ function createDraftTrackSplit(index: number): DraftTrackSplit {
 
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
-const mainRouteSplitSnapMeters = 12;
+const routePointDuplicateMeters = 0.75;
+const mainRouteSplitSnapMeters = 1;
+const mainRouteMergeResumeHoldMeters = 5;
 
-function appendTrackPoint(points: TrackPoint[], point: TrackPoint, minDistanceMeters = 0.75) {
+function appendTrackPoint(points: TrackPoint[], point: TrackPoint, minDistanceMeters = routePointDuplicateMeters) {
   const previous = points[points.length - 1];
   if (previous && distanceBetweenTrackPoints(previous, point) < minDistanceMeters) {
     return points;
@@ -2400,12 +2402,26 @@ export default function App() {
     setDraftPoints((current) => {
       const appendOrReplacePoint = (points: TrackPoint[], nextPoint: TrackPoint) => {
         const previous = points[points.length - 1];
-        if (previous && distanceBetweenTrackPoints(previous, nextPoint) < 0.75) {
+        if (previous && distanceBetweenTrackPoints(previous, nextPoint) < routePointDuplicateMeters) {
           return [...points.slice(0, -1), nextPoint];
         }
 
         return [...points, nextPoint];
       };
+
+      const previousPoint = current[current.length - 1];
+      const resumeMergeSection = previousPoint
+        ? draftRouteSplitSections.find((section) => (
+          distanceBetweenTrackPoints(previousPoint, section.mergePoint) <= routePointDuplicateMeters
+        ))
+        : null;
+
+      if (
+        resumeMergeSection
+        && distanceBetweenTrackPoints(point, resumeMergeSection.mergePoint) <= mainRouteMergeResumeHoldMeters
+      ) {
+        return appendOrReplacePoint(current, resumeMergeSection.mergePoint);
+      }
 
       let next = appendOrReplacePoint(current, snappedPoint.point);
       if (snappedPoint.junctionKind === 'split' && snappedPoint.splitSection) {
@@ -2414,7 +2430,7 @@ export default function App() {
 
       return next;
     });
-  }, [snapDraftPointToSplitJunction]);
+  }, [draftRouteSplitSections, snapDraftPointToSplitJunction]);
 
   const handleMappingPathPointMove = useCallback((index: number, point: TrackPoint) => {
     const snappedPoint = snapDraftPointToSplitJunction(point);
