@@ -106,6 +106,8 @@ const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elit
 const uciRandomDelayMinMs = 100;
 const uciRandomDelayMaxMs = 2700;
 const customRouteInitialZoom = 18;
+const customRouteInitialAngle = 0;
+const customRouteInitialHeading = 0;
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 type SplitBranchId = TrackSplitBranch['id'];
@@ -263,8 +265,8 @@ function readRequestedTrackId() {
   }
 }
 
-function findInitialTrack(requestedTrackId: string | null) {
-  return trackCatalog.find((track) => track.id === requestedTrackId) ?? defaultTrack;
+function findInitialTrack(requestedTrackId: string | null, customRoutes: TrackRecord[] = []) {
+  return [...trackCatalog, ...customRoutes].find((track) => track.id === requestedTrackId) ?? defaultTrack;
 }
 
 function readStoredCustomRoutes(): TrackRecord[] {
@@ -798,13 +800,14 @@ export default function App() {
   const customRoutePreviewRequestIdRef = useRef(0);
   const customRoutePreviewTrackIdRef = useRef<string | null>(null);
   const [initialRequestedTrackId] = useState(readRequestedTrackId);
+  const [initialCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
   const pendingInitialTrackIdRef = useRef(initialRequestedTrackId);
   const [initialUrlTrackPending, setInitialUrlTrackPending] = useState(initialRequestedTrackId !== null);
-  const [initialTrack] = useState(() => findInitialTrack(initialRequestedTrackId));
+  const [initialTrack] = useState(() => findInitialTrack(initialRequestedTrackId, initialCustomRoutes));
   const selectedTrackIdRef = useRef(initialTrack.id);
   const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [catalogDatabaseReady, setCatalogDatabaseReady] = useState(false);
-  const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
+  const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(initialCustomRoutes);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const [mappingMode, setMappingMode] = useState(false);
   const [mappingFullscreen, setMappingFullscreen] = useState(false);
@@ -833,10 +836,22 @@ export default function App() {
   const [intervalMode, setIntervalMode] = useState<IntervalMode>('auto');
   const [manualZoneIds, setManualZoneIds] = useState<string[]>(['z2', 'z4']);
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
-  const [earthAngle, setEarthAngle] = useState(() => earthCamerasByTrack[initialTrack.id]?.angle ?? defaultEarthCamera.angle);
-  const [earthHeading, setEarthHeading] = useState(() => earthCamerasByTrack[initialTrack.id]?.heading ?? defaultEarthCamera.heading);
-  const [earthCenter, setEarthCenter] = useState<TrackPoint | null>(() => earthCamerasByTrack[initialTrack.id]?.center ?? null);
-  const [earthZoom, setEarthZoom] = useState<number | null>(() => earthCamerasByTrack[initialTrack.id]?.zoom ?? null);
+  const [earthAngle, setEarthAngle] = useState(
+    () => earthCamerasByTrack[initialTrack.id]?.angle
+      ?? (initialTrack.countryCode === 'CUSTOM' ? customRouteInitialAngle : defaultEarthCamera.angle),
+  );
+  const [earthHeading, setEarthHeading] = useState(
+    () => earthCamerasByTrack[initialTrack.id]?.heading
+      ?? (initialTrack.countryCode === 'CUSTOM' ? customRouteInitialHeading : defaultEarthCamera.heading),
+  );
+  const [earthCenter, setEarthCenter] = useState<TrackPoint | null>(
+    () => earthCamerasByTrack[initialTrack.id]?.center
+      ?? (initialTrack.countryCode === 'CUSTOM' ? trackCenter(initialTrack) : null),
+  );
+  const [earthZoom, setEarthZoom] = useState<number | null>(
+    () => earthCamerasByTrack[initialTrack.id]?.zoom
+      ?? (initialTrack.countryCode === 'CUSTOM' ? customRouteInitialZoom : null),
+  );
   const [customRouteName, setCustomRouteName] = useState('');
   const [customRouteLocation, setCustomRouteLocation] = useState('');
   const [customRouteStatus, setCustomRouteStatus] = useState<string | null>(null);
@@ -992,8 +1007,8 @@ export default function App() {
     const isCustomRoute = selectedTrack.countryCode === 'CUSTOM';
     const fallbackCenter = isCustomRoute ? trackCenter(selectedTrack) : null;
     const fallbackZoom = isCustomRoute ? customRouteInitialZoom : null;
-    setEarthAngle(savedCamera?.angle ?? defaultEarthCamera.angle);
-    setEarthHeading(savedCamera?.heading ?? defaultEarthCamera.heading);
+    setEarthAngle(savedCamera?.angle ?? (isCustomRoute ? customRouteInitialAngle : defaultEarthCamera.angle));
+    setEarthHeading(savedCamera?.heading ?? (isCustomRoute ? customRouteInitialHeading : defaultEarthCamera.heading));
     setEarthCenter(savedCamera?.center ?? fallbackCenter);
     setEarthZoom(savedCamera?.zoom ?? fallbackZoom);
   }, [
@@ -1998,8 +2013,8 @@ export default function App() {
           resolved.point,
         );
         const previewCamera = normalizeEarthCamera({
-          angle: earthAngle,
-          heading: earthHeading,
+          angle: customRouteInitialAngle,
+          heading: customRouteInitialHeading,
           center: trackCenter(previewRoute),
           zoom: customRouteInitialZoom,
           updatedAt: Date.now(),
@@ -2033,7 +2048,7 @@ export default function App() {
         setCustomRoutePredictionStatus(null);
         setCustomRouteStatus(`${formatRouteLocationError(error)} Try another suggestion or use coordinates.`);
       });
-  }, [customRouteName, earthAngle, earthHeading, prepareForTrackSelection]);
+  }, [customRouteName, prepareForTrackSelection]);
 
   useEffect(() => {
     const input = customRouteLocation.trim();
@@ -2098,8 +2113,8 @@ export default function App() {
           : await resolveLocationText(location);
       const customRoute = createCustomRouteRecord(name, resolved.label ?? location, resolved.point);
       const customRouteCamera = normalizeEarthCamera({
-        angle: earthAngle,
-        heading: earthHeading,
+        angle: customRouteInitialAngle,
+        heading: customRouteInitialHeading,
         center: trackCenter(customRoute),
         zoom: customRouteInitialZoom,
         updatedAt: Date.now(),

@@ -209,6 +209,15 @@ function cameraForTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
   };
 }
 
+function refreshSatelliteTiles(google: GoogleMapsRuntime, map: GoogleMap, camera: Partial<EarthCamera>, track: TrackRecord) {
+  map.setOptions({ mapTypeId: 'satellite' });
+  google.maps.event?.trigger(map, 'resize');
+  applyCamera(map, cameraForTrack({
+    ...camera,
+    center: camera.center ?? trackCenter(track),
+  }, track));
+}
+
 function distanceLabelIcon(text: string, color = '#111827') {
   const width = Math.max(86, text.length * 8 + 22);
   const svg = `
@@ -597,6 +606,23 @@ export function GoogleMapsTrackLayer({
 
     applyCamera(map, nextCamera);
   }, [earthAngle, earthCenter, earthHeading, earthZoom, track]);
+
+  useEffect(() => {
+    const google = googleRef.current;
+    const map = mapRef.current;
+    if (!google || !map || status !== 'ready') {
+      return undefined;
+    }
+
+    const repaintCamera = cameraForTrack(cameraRef.current, track);
+    const repaintTimers = [0, 90, 260, 700, 1400].map((delayMs) => (
+      window.setTimeout(() => refreshSatelliteTiles(google, map, repaintCamera, track), delayMs)
+    ));
+
+    return () => {
+      repaintTimers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [status, track.id]);
 
   useEffect(() => {
     const map = mapRef.current;
