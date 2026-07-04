@@ -1186,6 +1186,15 @@ input:focus {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.segmented-control.five-way {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.segmented-control.five-way button {
+  gap: 4px;
+  font-size: 11px;
+}
+
 .segmented-control button {
   display: inline-flex;
   align-items: center;

@@ -17,6 +17,7 @@ type GoogleMap = {
   addListener: (eventName: string, handler: (event?: GoogleMapClickEvent) => void) => GoogleMapsEventListener;
   fitBounds: (bounds: GoogleLatLngBounds, padding?: number) => void;
   getCenter?: () => { toJSON: () => LatLngLiteral };
+  getDiv?: () => HTMLElement;
   getHeading?: () => number | undefined;
   getTilt?: () => number | undefined;
   getZoom?: () => number | undefined;
@@ -44,6 +45,7 @@ type GoogleLatLngBounds = {
 
 type GooglePolyline = {
   setMap: (map: GoogleMap | null) => void;
+  setPath?: (path: LatLngLiteral[]) => void;
 };
 
 type GoogleMarker = {
@@ -52,6 +54,18 @@ type GoogleMarker = {
   setMap: (map: GoogleMap | null) => void;
   setPosition: (position: LatLngLiteral) => void;
   setTitle?: (title: string) => void;
+};
+
+type GoogleMapCanvasProjection = {
+  fromContainerPixelToLatLng: (point: unknown) => { toJSON: () => LatLngLiteral } | null;
+};
+
+type GoogleOverlayView = {
+  draw: () => void;
+  getProjection: () => GoogleMapCanvasProjection | null;
+  onAdd: () => void;
+  onRemove: () => void;
+  setMap: (map: GoogleMap | null) => void;
 };
 
 type GoogleGeocoder = {
@@ -163,6 +177,7 @@ type GoogleMapsRuntime = {
     Geocoder?: new () => GoogleGeocoder;
     Map: GoogleMapConstructor;
     Marker: new (options: Record<string, unknown>) => GoogleMarker;
+    OverlayView?: new () => GoogleOverlayView;
     places?: GooglePlacesLibrary;
     Point: new (x: number, y: number) => unknown;
     Polyline: new (options: Record<string, unknown>) => GooglePolyline;
@@ -885,6 +900,7 @@ export type {
   GoogleMapsEventListener,
   GoogleMapsRuntime,
   GoogleMarker,
+  GoogleOverlayView,
   GooglePolyline,
   LatLngLiteral,
 };

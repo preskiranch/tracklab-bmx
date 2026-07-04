@@ -29,6 +29,7 @@ import {
   type GoogleMap,
   type GoogleMarker,
   type GoogleMapsEventListener,
+  type GoogleOverlayView,
   type GooglePolyline,
   type GoogleMapsRuntime,
   zonePolyline,
@@ -86,6 +87,9 @@ const routeVariantColors: Record<TrackRouteVariantId, string> = {
   pro: '#38bdf8',
 };
 const drawSampleMeters = 1.2;
+const curveRawSampleMeters = 0.65;
+const curveCommitSampleMeters = 2;
+const curveSmoothingIterations = 2;
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
 const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
@@ -177,6 +181,60 @@ function draftBranchPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoin
   }
 
   return branchWithSplitAndMerge(interiorPoints, splitPoint, mergePoint);
+}
+
+function samplePointsByDistance(points: TrackPoint[], minimumDistanceMeters: number) {
+  if (points.length <= 2) {
+    return points;
+  }
+
+  const sampled = [points[0]];
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = sampled[sampled.length - 1];
+    if (distanceBetweenTrackPoints(previous, points[index]) >= minimumDistanceMeters) {
+      sampled.push(points[index]);
+    }
+  }
+
+  const lastPoint = points[points.length - 1];
+  if (distanceBetweenTrackPoints(sampled[sampled.length - 1], lastPoint) > 0.25) {
+    sampled.push(lastPoint);
+  }
+
+  return sampled;
+}
+
+function smoothCurvePoints(points: TrackPoint[]) {
+  if (points.length < 3) {
+    return points;
+  }
+
+  let smoothed = points;
+  for (let iteration = 0; iteration < curveSmoothingIterations; iteration += 1) {
+    const next = [smoothed[0]];
+    for (let index = 0; index < smoothed.length - 1; index += 1) {
+      const start = smoothed[index];
+      const end = smoothed[index + 1];
+      next.push({
+        lat: (start.lat * 0.75) + (end.lat * 0.25),
+        lng: (start.lng * 0.75) + (end.lng * 0.25),
+      });
+      next.push({
+        lat: (start.lat * 0.25) + (end.lat * 0.75),
+        lng: (start.lng * 0.25) + (end.lng * 0.75),
+      });
+    }
+    next.push(smoothed[smoothed.length - 1]);
+    smoothed = next;
+  }
+
+  return smoothed;
+}
+
+function preparedCurveStroke(points: TrackPoint[]) {
+  const sampled = samplePointsByDistance(points, curveRawSampleMeters);
+  const smoothed = smoothCurvePoints(sampled);
+  return samplePointsByDistance(smoothed, curveCommitSampleMeters);
 }
 
 function pointAtBearingDistance(point: TrackPoint, bearingDegrees: number, distanceMeters: number): TrackPoint {
@@ -573,6 +631,10 @@ export function GoogleMapsTrackLayer({
   const mapListenerRefs = useRef<GoogleMapsEventListener[]>([]);
   const isDrawingRef = useRef(false);
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
+  const projectionOverlayRef = useRef<GoogleOverlayView | null>(null);
+  const curvePreviewLineRef = useRef<GooglePolyline | null>(null);
+  const curvePointerIdRef = useRef<number | null>(null);
+  const curveStrokePointsRef = useRef<TrackPoint[]>([]);
   const markerRefs = useRef<Map<number, RiderMapMarker>>(new Map());
   const remoteMarkerRefs = useRef<Map<string, RiderMapMarker>>(new Map());
   const cameraRef = useRef<Partial<EarthCamera>>({
@@ -639,6 +701,14 @@ export function GoogleMapsTrackLayer({
           zoom: initialCamera.zoom ?? 19,
         });
         mapRef.current = map;
+        if (google.maps.OverlayView) {
+          const projectionOverlay = new google.maps.OverlayView();
+          projectionOverlay.onAdd = () => undefined;
+          projectionOverlay.draw = () => undefined;
+          projectionOverlay.onRemove = () => undefined;
+          projectionOverlay.setMap(map);
+          projectionOverlayRef.current = projectionOverlay;
+        }
         setStatus('ready');
       })
       .catch((loadError: Error) => {
@@ -662,6 +732,8 @@ export function GoogleMapsTrackLayer({
       draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
       draftMarkerListenerRefs.current.forEach((listener) => listener.remove());
       mapListenerRefs.current.forEach((listener) => listener.remove());
+      curvePreviewLineRef.current?.setMap(null);
+      projectionOverlayRef.current?.setMap(null);
       markerRefs.current.forEach((marker) => marker.setMap(null));
       remoteMarkerRefs.current.forEach((marker) => marker.setMap(null));
       trackLineRefs.current = [];
@@ -676,6 +748,10 @@ export function GoogleMapsTrackLayer({
       draftMarkerRefs.current = [];
       draftMarkerListenerRefs.current = [];
       mapListenerRefs.current = [];
+      curvePreviewLineRef.current = null;
+      projectionOverlayRef.current = null;
+      curvePointerIdRef.current = null;
+      curveStrokePointsRef.current = [];
       markerRefs.current.clear();
       remoteMarkerRefs.current.clear();
       mapRef.current = null;
@@ -1337,30 +1413,41 @@ export function GoogleMapsTrackLayer({
   ]);
 
   useEffect(() => {
+    const google = googleRef.current;
     const map = mapRef.current;
+    const container = containerRef.current;
     if (!map || status !== 'ready') {
       return undefined;
     }
 
     mapListenerRefs.current.forEach((listener) => listener.remove());
     mapListenerRefs.current = [];
+    curvePreviewLineRef.current?.setMap(null);
+    curvePreviewLineRef.current = null;
+    curvePointerIdRef.current = null;
+    curveStrokePointsRef.current = [];
     isDrawingRef.current = false;
     lastDrawPointRef.current = null;
+    const previousTouchAction = container?.style.touchAction ?? '';
     const isSplitPlacementMode = mappingMode
       && mappingEditMode === 'split'
       && (!draftSplitBuilder?.splitPoint || !draftSplitBuilder?.mergePoint);
     const isSplitBranchDrawMode = mappingMode
       && mappingEditMode === 'split'
       && Boolean(draftSplitBuilder?.splitPoint && draftSplitBuilder.mergePoint);
-    const isDrawMode = mappingMode && (mappingEditMode === 'draw' || isSplitBranchDrawMode);
+    const isCurveDrawMode = mappingMode && mappingEditMode === 'curve';
+    const isDrawMode = mappingMode && (mappingEditMode === 'draw' || isCurveDrawMode || isSplitBranchDrawMode);
     const isNavigateMode = !mappingMode || mappingEditMode === 'navigate';
     map.setOptions({
       draggable: !isDrawMode && !isSplitPlacementMode,
       draggableCursor: mappingMode && !isNavigateMode ? 'crosshair' : undefined,
-      gestureHandling: 'greedy',
+      gestureHandling: isCurveDrawMode ? 'none' : 'greedy',
       headingInteractionEnabled: isNavigateMode,
       tiltInteractionEnabled: isNavigateMode,
     });
+    if (isCurveDrawMode && container) {
+      container.style.touchAction = 'none';
+    }
 
     if (!mappingMode) {
       return undefined;
@@ -1404,6 +1491,122 @@ export function GoogleMapsTrackLayer({
       lastDrawPointRef.current = null;
     };
 
+    const clearCurveStroke = () => {
+      curvePreviewLineRef.current?.setMap(null);
+      curvePreviewLineRef.current = null;
+      curvePointerIdRef.current = null;
+      curveStrokePointsRef.current = [];
+      isDrawingRef.current = false;
+      lastDrawPointRef.current = null;
+    };
+
+    const pointFromPointerEvent = (event: PointerEvent): TrackPoint | null => {
+      const projection = projectionOverlayRef.current?.getProjection();
+      if (!google || !container || !projection) {
+        return null;
+      }
+
+      const bounds = container.getBoundingClientRect();
+      const point = new google.maps.Point(event.clientX - bounds.left, event.clientY - bounds.top);
+      return projection.fromContainerPixelToLatLng(point)?.toJSON() ?? null;
+    };
+
+    const updateCurvePreview = () => {
+      if (!curvePreviewLineRef.current) {
+        return;
+      }
+
+      const rawPoints = curveStrokePointsRef.current;
+      const previewPoints = smoothCurvePoints(samplePointsByDistance(rawPoints, curveRawSampleMeters));
+      curvePreviewLineRef.current.setPath?.(previewPoints);
+    };
+
+    const addCurvePoint = (point: TrackPoint) => {
+      const previous = curveStrokePointsRef.current[curveStrokePointsRef.current.length - 1];
+      if (previous && distanceBetweenTrackPoints(previous, point) < curveRawSampleMeters) {
+        return;
+      }
+
+      curveStrokePointsRef.current = [...curveStrokePointsRef.current, point];
+      updateCurvePreview();
+    };
+
+    const startCurveStroke = (event: PointerEvent) => {
+      if (!isCurveDrawMode || !google || !container || !onMappingPathPointAdd) {
+        return;
+      }
+
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+
+      const point = pointFromPointerEvent(event);
+      if (!point) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      clearCurveStroke();
+      curvePointerIdRef.current = event.pointerId;
+      isDrawingRef.current = true;
+      curvePreviewLineRef.current = new google.maps.Polyline({
+        clickable: false,
+        map,
+        path: [point],
+        strokeColor: draftRouteColor,
+        strokeOpacity: 0.88,
+        strokeWeight: 7,
+        zIndex: 980,
+      });
+      container.setPointerCapture?.(event.pointerId);
+      addCurvePoint(point);
+    };
+
+    const moveCurveStroke = (event: PointerEvent) => {
+      if (!isCurveDrawMode || curvePointerIdRef.current !== event.pointerId) {
+        return;
+      }
+
+      const point = pointFromPointerEvent(event);
+      if (!point) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      addCurvePoint(point);
+    };
+
+    const finishCurveStroke = (event: PointerEvent) => {
+      if (!isCurveDrawMode || curvePointerIdRef.current !== event.pointerId) {
+        return;
+      }
+
+      const point = pointFromPointerEvent(event);
+      if (point) {
+        addCurvePoint(point);
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const strokePoints = preparedCurveStroke(curveStrokePointsRef.current);
+      strokePoints.forEach((strokePoint) => onMappingPathPointAdd?.(strokePoint));
+      try {
+        container?.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // Some browsers release touch/pencil capture before pointercancel reaches us.
+      }
+      clearCurveStroke();
+    };
+
+    if (isCurveDrawMode && container) {
+      container.addEventListener('pointerdown', startCurveStroke, { passive: false });
+      container.addEventListener('pointermove', moveCurveStroke, { passive: false });
+      window.addEventListener('pointerup', finishCurveStroke, { passive: false });
+      window.addEventListener('pointercancel', finishCurveStroke, { passive: false });
+    }
+
     window.addEventListener('mouseup', finishSplitBranchDrawing);
     window.addEventListener('touchend', finishSplitBranchDrawing);
 
@@ -1424,6 +1627,10 @@ export function GoogleMapsTrackLayer({
         }
 
         if (isSplitPlacementMode) {
+          return;
+        }
+
+        if (isCurveDrawMode) {
           return;
         }
 
@@ -1480,10 +1687,18 @@ export function GoogleMapsTrackLayer({
     ];
 
     return () => {
+      if (container) {
+        container.style.touchAction = previousTouchAction;
+        container.removeEventListener('pointerdown', startCurveStroke);
+        container.removeEventListener('pointermove', moveCurveStroke);
+      }
+      window.removeEventListener('pointerup', finishCurveStroke);
+      window.removeEventListener('pointercancel', finishCurveStroke);
       window.removeEventListener('mouseup', finishSplitBranchDrawing);
       window.removeEventListener('touchend', finishSplitBranchDrawing);
       mapListenerRefs.current.forEach((listener) => listener.remove());
       mapListenerRefs.current = [];
+      clearCurveStroke();
       map.setOptions({
         draggable: true,
         draggableCursor: undefined,
@@ -1493,6 +1708,7 @@ export function GoogleMapsTrackLayer({
       });
     };
   }, [
+    draftRouteColor,
     mappingEditMode,
     mappingMode,
     draftSplitBuilder,

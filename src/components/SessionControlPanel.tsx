@@ -274,9 +274,11 @@ export function SessionControlPanel({
     ? 'Move map'
     : mappingEditMode === 'draw'
       ? 'Draw path'
-      : mappingEditMode === 'zones'
-        ? 'Add zones'
-        : 'Split';
+      : mappingEditMode === 'curve'
+        ? 'Curve'
+        : mappingEditMode === 'zones'
+          ? 'Add zones'
+          : 'Split';
   const splitDrawHint = mappingMode && mappingEditMode === 'draw' && draftSplitSections.length > 0
     ? `Draw shared path: start to S1, then start again at M1 and continue to finish.`
     : null;
@@ -579,7 +581,7 @@ export function SessionControlPanel({
             )}
 
             {mappingMode && (
-              <div className="segmented-control compact four-way" aria-label="Track tools">
+              <div className="segmented-control compact five-way" aria-label="Track tools">
                 <button
                   className={mappingEditMode === 'navigate' ? 'selected' : ''}
                   type="button"
@@ -593,6 +595,13 @@ export function SessionControlPanel({
                   onClick={() => handleMappingEditModeChange('draw')}
                 >
                   Draw path
+                </button>
+                <button
+                  className={mappingEditMode === 'curve' ? 'selected' : ''}
+                  type="button"
+                  onClick={() => handleMappingEditModeChange('curve')}
+                >
+                  Curve
                 </button>
                 <button
                   className={mappingEditMode === 'zones' ? 'selected' : ''}
