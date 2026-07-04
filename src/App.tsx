@@ -244,13 +244,17 @@ function splitSectionFromDraft(draft: DraftTrackSplit): TrackSplitSection | null
   };
 }
 
-function readInitialTrack() {
+function readRequestedTrackId() {
   try {
-    const requestedTrackId = new URLSearchParams(window.location.search).get('track');
-    return trackCatalog.find((track) => track.id === requestedTrackId) ?? defaultTrack;
+    const requestedTrackId = new URLSearchParams(window.location.search).get('track')?.trim();
+    return requestedTrackId ? requestedTrackId : null;
   } catch {
-    return defaultTrack;
+    return null;
   }
+}
+
+function findInitialTrack(requestedTrackId: string | null) {
+  return trackCatalog.find((track) => track.id === requestedTrackId) ?? defaultTrack;
 }
 
 function readStoredCustomRoutes(): TrackRecord[] {
@@ -748,15 +752,18 @@ export default function App() {
   const startGateArmedAtRef = useRef<number | null>(null);
   const falseStartHandledRef = useRef(false);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
-  const initialUrlTrackSyncedRef = useRef(false);
   const bridgeUserDataLoadedRef = useRef(false);
   const cloudUserDataLoadedKeyRef = useRef<string | null>(null);
   const cloudUserDataAvailableRef = useRef(false);
   const roomTrackApplyRef = useRef<string | null>(null);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
-  const [initialTrack] = useState(readInitialTrack);
+  const [initialRequestedTrackId] = useState(readRequestedTrackId);
+  const pendingInitialTrackIdRef = useRef(initialRequestedTrackId);
+  const [initialUrlTrackPending, setInitialUrlTrackPending] = useState(initialRequestedTrackId !== null);
+  const [initialTrack] = useState(() => findInitialTrack(initialRequestedTrackId));
   const selectedTrackIdRef = useRef(initialTrack.id);
   const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
+  const [catalogDatabaseReady, setCatalogDatabaseReady] = useState(false);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const [mappingMode, setMappingMode] = useState(false);
@@ -842,12 +849,18 @@ export default function App() {
         return response.json() as Promise<{ tracks?: TrackRecord[] }>;
       })
       .then((database) => {
-        if (!cancelled && Array.isArray(database.tracks) && database.tracks.length > 0) {
-          setBaseCatalogTracks(database.tracks);
+        if (!cancelled) {
+          if (Array.isArray(database.tracks) && database.tracks.length > 0) {
+            setBaseCatalogTracks(database.tracks);
+          }
+          setCatalogDatabaseReady(true);
         }
       })
       .catch((error: Error) => {
         console.warn(`Using bundled seed catalog: ${error.message}`);
+        if (!cancelled) {
+          setCatalogDatabaseReady(true);
+        }
       });
 
     return () => {
@@ -861,29 +874,52 @@ export default function App() {
   );
 
   useEffect(() => {
-    const requestedTrackId = initialUrlTrackSyncedRef.current
-      ? null
-      : new URLSearchParams(window.location.search).get('track');
-    const requestedTrack = requestedTrackId ? catalogTracks.find((track) => track.id === requestedTrackId) : undefined;
+    const requestedTrackId = pendingInitialTrackIdRef.current;
+    if (requestedTrackId) {
+      const requestedTrack = catalogTracks.find((track) => track.id === requestedTrackId);
+      if (requestedTrack) {
+        pendingInitialTrackIdRef.current = null;
+        setInitialUrlTrackPending(false);
+
+        if (
+          requestedTrack.id !== selectedTrackId
+          || requestedTrack.country !== selectedCountry
+          || requestedTrack.state !== selectedState
+        ) {
+          setSelectedCountry(requestedTrack.country);
+          setSelectedState(requestedTrack.state);
+          setSelectedTrackId(requestedTrack.id);
+        }
+        return;
+      }
+
+      if (!catalogDatabaseReady) {
+        return;
+      }
+
+      pendingInitialTrackIdRef.current = null;
+      setInitialUrlTrackPending(false);
+    }
+
     const selectedTrackExists = catalogTracks.find((track) => track.id === selectedTrackId);
-    const nextTrack = requestedTrack
-      ?? selectedTrackExists
-      ?? catalogTracks[0]
-      ?? defaultTrack;
-    initialUrlTrackSyncedRef.current = true;
+    const nextTrack = selectedTrackExists ?? catalogTracks[0] ?? defaultTrack;
 
     if (nextTrack.id !== selectedTrackId || nextTrack.country !== selectedCountry || nextTrack.state !== selectedState) {
       setSelectedCountry(nextTrack.country);
       setSelectedState(nextTrack.state);
       setSelectedTrackId(nextTrack.id);
     }
-  }, [catalogTracks, selectedCountry, selectedState, selectedTrackId]);
+  }, [catalogDatabaseReady, catalogTracks, selectedCountry, selectedState, selectedTrackId]);
 
   useEffect(() => {
+    if (initialUrlTrackPending) {
+      return;
+    }
+
     const url = new URL(window.location.href);
     url.searchParams.set('track', selectedTrackId);
     window.history.replaceState(null, '', url);
-  }, [selectedTrackId]);
+  }, [initialUrlTrackPending, selectedTrackId]);
 
   const countries = useMemo(() => countriesForCatalog(catalogTracks), [catalogTracks]);
   const states = useMemo(() => statesForCountry(selectedCountry, catalogTracks), [catalogTracks, selectedCountry]);
@@ -1127,6 +1163,8 @@ export default function App() {
   }, []);
 
   const prepareForTrackSelection = useCallback((nextTrackId: string) => {
+    pendingInitialTrackIdRef.current = null;
+    setInitialUrlTrackPending(false);
     selectedTrackIdRef.current = nextTrackId;
     clearStartGateSequence();
     falseStartHandledRef.current = false;
