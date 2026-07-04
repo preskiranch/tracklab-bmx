@@ -32,6 +32,7 @@ import type {
   SpeedUnit,
   TrackPoint,
   TrackRecord,
+  TrackRouteVariantId,
   TrackSplitSection,
   TrackZone,
 } from '../types';
@@ -58,6 +59,7 @@ type EarthTrackViewProps = {
   mappingMode: boolean;
   mappingFullscreen: boolean;
   mappingEditMode: MappingEditMode;
+  mappingRouteVariantId: TrackRouteVariantId;
   draftPoints: TrackPoint[];
   draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
@@ -131,6 +133,7 @@ export function EarthTrackView({
   mappingMode,
   mappingFullscreen,
   mappingEditMode,
+  mappingRouteVariantId,
   draftPoints,
   draftZoneMeters,
   draftZonePoints,
@@ -199,6 +202,7 @@ export function EarthTrackView({
             activeZones={activeZones}
             mappingMode={mappingMode}
             mappingEditMode={mappingEditMode}
+            mappingRouteVariantId={mappingRouteVariantId}
             draftPoints={draftPoints}
             draftZoneMeters={draftZoneMeters}
             draftZonePoints={draftZonePoints}

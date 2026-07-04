@@ -13,6 +13,7 @@ import type {
   SpeedUnit,
   TrackPoint,
   TrackRecord,
+  TrackRouteVariantId,
   TrackSplitSection,
   TrackZone,
 } from '../types';
@@ -57,6 +58,7 @@ type GoogleMapsTrackLayerProps = {
   earthZoom: number | null;
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
+  mappingRouteVariantId?: TrackRouteVariantId;
   draftPoints?: TrackPoint[];
   draftZoneMeters?: number[];
   draftZonePoints?: TrackPoint[];
@@ -78,6 +80,10 @@ const zoneColors: Record<TrackZone['type'], string> = {
   pedal: '#4ade80',
   recovery: '#facc15',
   technical: '#38bdf8',
+};
+const routeVariantColors: Record<TrackRouteVariantId, string> = {
+  amateur: '#d8ff3e',
+  pro: '#38bdf8',
 };
 const drawSampleMeters = 1.2;
 const splitBranchMinInteriorPoints = 2;
@@ -467,6 +473,7 @@ export function GoogleMapsTrackLayer({
   earthZoom,
   mappingMode = false,
   mappingEditMode = 'draw',
+  mappingRouteVariantId = 'amateur',
   draftPoints = [],
   draftZoneMeters = [],
   draftZonePoints = [],
@@ -518,6 +525,7 @@ export function GoogleMapsTrackLayer({
   const lastFitKeyRef = useRef('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
+  const draftRouteColor = routeVariantColors[mappingRouteVariantId];
 
   useEffect(() => {
     let cancelled = false;
@@ -739,12 +747,13 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    const hideRaceRoute = raceViewFullscreen || raceState === 'racing';
+    const hideRaceRoute = mappingMode || raceViewFullscreen || raceState === 'racing';
 
     if (!hideRaceRoute) {
       trackLineRefs.current = mappedTrackRouteSegments(track)
         .filter((segment) => segment.length > 1)
         .map((segment) => new google.maps.Polyline({
+          clickable: false,
           map,
           path: segment,
           strokeColor: '#d8ff3e',
@@ -774,6 +783,7 @@ export function GoogleMapsTrackLayer({
         .map((zone) => ({ zone, path: zonePolyline(track, zone) }))
         .filter(({ path }) => path.length > 1)
         .map(({ zone, path }) => new google.maps.Polyline({
+          clickable: false,
           map,
           path,
           strokeColor: zoneColors[zone.type],
@@ -790,6 +800,7 @@ export function GoogleMapsTrackLayer({
           }
 
           splitLineRefs.current.push(new google.maps.Polyline({
+            clickable: false,
             map,
             path: branch.points,
             strokeColor: branch.id === 'a' ? '#ff2d55' : '#38bdf8',
@@ -852,7 +863,7 @@ export function GoogleMapsTrackLayer({
     });
 
     const finishPosition = riderLatLng(track, track.lengthMeters);
-    if (finishPosition) {
+    if (finishPosition && !mappingMode) {
       finishMarkerRef.current = new google.maps.Marker({
         icon: {
           anchor: new google.maps.Point(43, 18),
@@ -939,9 +950,10 @@ export function GoogleMapsTrackLayer({
       draftLineRefs.current = draftSharedSegments
         .filter((segment) => segment.length > 1)
         .map((segment) => new google.maps.Polyline({
+          clickable: false,
           map,
           path: segment,
-          strokeColor: '#d8ff3e',
+          strokeColor: draftRouteColor,
           strokeOpacity: 0.96,
           strokeWeight: 5,
         }));
@@ -953,7 +965,7 @@ export function GoogleMapsTrackLayer({
         icon: {
           anchor: new google.maps.Point(54, 34),
           scaledSize: new google.maps.Size(108, 26),
-          url: distanceLabelIcon(`Track ${formatDistanceMeters(draftLengthMeters, distanceUnit)}`),
+          url: distanceLabelIcon(`Track ${formatDistanceMeters(draftLengthMeters, distanceUnit)}`, draftRouteColor),
         },
         map,
         optimized: false,
@@ -993,7 +1005,7 @@ export function GoogleMapsTrackLayer({
       const marker = new google.maps.Marker({
         draggable: Boolean(onMappingPathPointMove),
         icon: {
-          fillColor: isStart || isFinish ? '#d8ff3e' : '#ffffff',
+          fillColor: isStart || isFinish ? draftRouteColor : '#ffffff',
           fillOpacity: 1,
           path: google.maps.SymbolPath.CIRCLE,
           scale: isStart || isFinish ? 11 : 8,
@@ -1094,6 +1106,7 @@ export function GoogleMapsTrackLayer({
         }
 
         draftSplitLineRefs.current.push(new google.maps.Polyline({
+          clickable: false,
           map,
           path: branch.points,
           strokeColor: branch.id === 'a' ? '#ff2d55' : '#38bdf8',
@@ -1145,6 +1158,7 @@ export function GoogleMapsTrackLayer({
           : [];
         if (branchA.length > 1) {
           draftSplitLineRefs.current.push(new google.maps.Polyline({
+            clickable: false,
             map,
             path: branchA,
             strokeColor: '#ff2d55',
@@ -1154,6 +1168,7 @@ export function GoogleMapsTrackLayer({
         }
         if (branchB.length > 1) {
           draftSplitLineRefs.current.push(new google.maps.Polyline({
+            clickable: false,
             map,
             path: branchB,
             strokeColor: '#38bdf8',
@@ -1207,6 +1222,7 @@ export function GoogleMapsTrackLayer({
     ];
   }, [
     distanceUnit,
+    draftRouteColor,
     draftPoints,
     draftRouteSplitSections,
     draftSplitBuilder,

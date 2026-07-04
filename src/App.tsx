@@ -3705,6 +3705,7 @@ export default function App() {
                 mappingMode={mappingMode}
                 mappingFullscreen={mappingFullscreen}
                 mappingEditMode={mappingEditMode}
+                mappingRouteVariantId={mappingRouteVariantId}
                 draftPoints={draftPoints}
                 draftZoneMeters={draftZoneMeters}
                 draftZonePoints={draftZonePoints}
