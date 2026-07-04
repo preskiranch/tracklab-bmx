@@ -94,6 +94,8 @@ const riderDrawHeight = 45;
 const riderDrawTop = -23;
 const riderFrontTireInset = 1;
 const riderGroundContactInset = 1;
+const riderStartSetbackMeters = 2.2;
+const riderStartSetbackBlendMeters = 5;
 
 type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
@@ -299,6 +301,20 @@ function uprightRiderOrientation(rotationDegrees: number) {
 
 function riderLeanBucket(rotationDegrees: number) {
   return Math.round(uprightRiderOrientation(rotationDegrees).leanDegrees / 2) * 2;
+}
+
+function visualRiderDistanceMeters(distanceMeters: number) {
+  if (distanceMeters <= 0) {
+    return -riderStartSetbackMeters;
+  }
+
+  if (distanceMeters >= riderStartSetbackBlendMeters) {
+    return distanceMeters;
+  }
+
+  const progress = Math.max(0, Math.min(1, distanceMeters / riderStartSetbackBlendMeters));
+  const smoothProgress = progress * progress * (3 - 2 * progress);
+  return distanceMeters - riderStartSetbackMeters * (1 - smoothProgress);
 }
 
 function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: number) {
@@ -1396,7 +1412,7 @@ export function GoogleMapsTrackLayer({
         return;
       }
 
-      const pose = riderRoutePose(track, rider.distance);
+      const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance));
       const speedKph = rider.velocity > 0 ? rider.velocity * 3.6 : null;
       const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const existing = markerRefs.current.get(player.id);
@@ -1436,7 +1452,7 @@ export function GoogleMapsTrackLayer({
       state.riders.forEach((rider) => {
         const markerKey = `${state.clientId}:${rider.id}`;
         activeRemoteKeys.add(markerKey);
-        const pose = riderRoutePose(track, rider.distance);
+        const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance));
         const existing = remoteMarkerRefs.current.get(markerKey);
 
         if (!pose) {

@@ -805,7 +805,22 @@ export function riderRoutePose(track: TrackRecord, distanceMeters: number) {
     return null;
   }
 
-  const target = Math.max(0, Math.min(track.lengthMeters, distanceMeters));
+  const target = Math.min(track.lengthMeters, distanceMeters);
+  if (target <= 0) {
+    const start = route[0];
+    const end = route[1];
+    const segmentDistance = distanceBetweenTrackPoints(start, end);
+    const progress = segmentDistance <= 0 ? 0 : target / segmentDistance;
+
+    return {
+      bearing: bearingBetweenTrackPoints(start, end),
+      position: {
+        lat: start.lat + (end.lat - start.lat) * progress,
+        lng: start.lng + (end.lng - start.lng) * progress,
+      },
+    };
+  }
+
   let traveled = 0;
 
   for (let index = 1; index < route.length; index += 1) {
