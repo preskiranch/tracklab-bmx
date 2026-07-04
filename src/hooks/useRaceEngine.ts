@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createInitialRiders, stepRiders } from '../game/physics';
+import { createInitialRiders, stepRiders, type BranchChoicesByPlayer } from '../game/physics';
+import type { SplitRouteDecisionPoint } from '../lib/trackMapping';
 import type { BikeSample, PlayerSlot, RaceState, RaceSummaryEntry, RiderState } from '../types';
 
 type RaceMetricAccumulator = {
@@ -126,9 +127,11 @@ export function useRaceEngine(
   players: PlayerSlot[],
   samplesByDevice: Map<number, BikeSample>,
   raceLengthMeters: number,
+  branchChoicesByPlayer: BranchChoicesByPlayer = {},
+  splitDecisionPoints: SplitRouteDecisionPoint[] = [],
 ) {
   const [raceState, setRaceState] = useState<RaceState>('ready');
-  const [riders, setRiders] = useState<RiderState[]>(() => createInitialRiders(players));
+  const [riders, setRiders] = useState<RiderState[]>(() => createInitialRiders(players, branchChoicesByPlayer));
   const [raceSummary, setRaceSummary] = useState<RaceSummaryEntry[]>([]);
   const raceStartedAtRef = useRef(0);
   const racePlayersRef = useRef(players);
@@ -138,6 +141,8 @@ export function useRaceEngine(
   const playersRef = useRef(players);
   const samplesRef = useRef(samplesByDevice);
   const raceLengthRef = useRef(raceLengthMeters);
+  const branchChoicesRef = useRef(branchChoicesByPlayer);
+  const splitDecisionPointsRef = useRef(splitDecisionPoints);
 
   useEffect(() => {
     playersRef.current = players;
@@ -151,6 +156,14 @@ export function useRaceEngine(
     raceLengthRef.current = raceLengthMeters;
   }, [raceLengthMeters]);
 
+  useEffect(() => {
+    branchChoicesRef.current = branchChoicesByPlayer;
+  }, [branchChoicesByPlayer]);
+
+  useEffect(() => {
+    splitDecisionPointsRef.current = splitDecisionPoints;
+  }, [splitDecisionPoints]);
+
   const resetRace = useCallback(() => {
     window.cancelAnimationFrame(frameRef.current);
     raceStartedAtRef.current = 0;
@@ -158,7 +171,7 @@ export function useRaceEngine(
     lastFrameRef.current = 0;
     setRaceState('ready');
     setRaceSummary([]);
-    setRiders(createInitialRiders(playersRef.current));
+    setRiders(createInitialRiders(playersRef.current, branchChoicesRef.current));
   }, []);
 
   const startRace = useCallback(() => {
@@ -166,7 +179,7 @@ export function useRaceEngine(
     racePlayersRef.current = racePlayers;
     raceStatsRef.current = new Map();
     setRaceSummary([]);
-    setRiders(createInitialRiders(racePlayers));
+    setRiders(createInitialRiders(racePlayers, branchChoicesRef.current));
     raceStartedAtRef.current = Date.now();
     lastFrameRef.current = performance.now();
     setRaceState('racing');
@@ -190,6 +203,8 @@ export function useRaceEngine(
           dt,
           raceStartedAtRef.current,
           raceLengthRef.current,
+          branchChoicesRef.current,
+          splitDecisionPointsRef.current,
         );
         if (next.every((rider) => rider.finishedAt !== null)) {
           setRaceState('finished');
@@ -206,9 +221,9 @@ export function useRaceEngine(
 
   useEffect(() => {
     if (raceState === 'ready') {
-      setRiders(createInitialRiders(players));
+      setRiders(createInitialRiders(players, branchChoicesByPlayer));
     }
-  }, [players, raceState]);
+  }, [branchChoicesByPlayer, players, raceState]);
 
   useEffect(() => {
     if (raceState !== 'racing' || raceStartedAtRef.current === 0) {

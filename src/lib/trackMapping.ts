@@ -1,6 +1,28 @@
-import type { TrackPoint, TrackRecord, TrackSplitSection, TrackZone, UserTrackMapping } from '../types';
+import type {
+  SplitBranchChoice,
+  TrackPoint,
+  TrackRecord,
+  TrackSplitSection,
+  TrackZone,
+  UserTrackMapping,
+} from '../types';
 
 export const trackMappingStorageKey = 'tracklab:user-track-mappings:v1';
+export const splitBranchLabels: Record<SplitBranchChoice, string> = {
+  a: 'Amateur Line',
+  b: 'Pro Set',
+};
+export const proSplitMinimumMph = 26;
+
+export type SplitBranchSelection = Partial<Record<string, SplitBranchChoice>>;
+
+export type SplitRouteDecisionPoint = {
+  id: string;
+  index: number;
+  splitMeter: number;
+  mergeMeterByBranch: Record<SplitBranchChoice, number>;
+  branchLengthByBranch: Record<SplitBranchChoice, number>;
+};
 
 export type StoredTrackMappings = Record<string, UserTrackMapping>;
 
@@ -41,6 +63,16 @@ function splitBridgeForPoints(start: TrackPoint, end: TrackPoint, splitSections:
     pointsMatch(start, section.splitPoint)
     && pointsMatch(end, section.mergePoint)
   ));
+}
+
+function splitBranchForSelection(
+  splitBridge: TrackSplitSection,
+  selections: SplitBranchSelection,
+) {
+  const selectedId = selections[splitBridge.id] ?? 'a';
+  return splitBridge.branches.find((branch) => branch.id === selectedId)
+    ?? splitBridge.branches.find((branch) => branch.id === 'a')
+    ?? splitBridge.branches[0];
 }
 
 function withoutRepeatedJunctions(points: TrackPoint[]) {
@@ -91,7 +123,11 @@ export function splitSharedRouteSegments(points: TrackPoint[], splitSections: Tr
   return segments;
 }
 
-export function routeWithDefaultSplitBranches(points: TrackPoint[], splitSections: TrackSplitSection[] = []) {
+export function routeWithSplitBranchSelections(
+  points: TrackPoint[],
+  splitSections: TrackSplitSection[] = [],
+  selections: SplitBranchSelection = {},
+) {
   if (points.length < 2 || splitSections.length === 0) {
     return points;
   }
@@ -104,9 +140,9 @@ export function routeWithDefaultSplitBranches(points: TrackPoint[], splitSection
     const splitBridge = splitBridgeForPoints(previous, point, splitSections);
 
     if (splitBridge) {
-      const defaultBranch = splitBridge.branches.find((branch) => branch.id === 'a') ?? splitBridge.branches[0];
-      const branchPoints = defaultBranch?.points.length >= 2
-        ? defaultBranch.points
+      const selectedBranch = splitBranchForSelection(splitBridge, selections);
+      const branchPoints = selectedBranch?.points.length >= 2
+        ? selectedBranch.points
         : [splitBridge.splitPoint, splitBridge.mergePoint];
 
       if (route.length > 0 && pointsMatch(route[route.length - 1], splitBridge.splitPoint)) {
@@ -125,8 +161,75 @@ export function routeWithDefaultSplitBranches(points: TrackPoint[], splitSection
   return withoutRepeatedJunctions(route);
 }
 
+export function routeWithDefaultSplitBranches(points: TrackPoint[], splitSections: TrackSplitSection[] = []) {
+  return routeWithSplitBranchSelections(points, splitSections);
+}
+
+export function routeLengthWithSplitBranchSelections(
+  points: TrackPoint[],
+  splitSections: TrackSplitSection[] = [],
+  selections: SplitBranchSelection = {},
+) {
+  return routeLengthMeters(routeWithSplitBranchSelections(points, splitSections, selections));
+}
+
 export function routeLengthWithDefaultSplitBranches(points: TrackPoint[], splitSections: TrackSplitSection[] = []) {
-  return routeLengthMeters(routeWithDefaultSplitBranches(points, splitSections));
+  return routeLengthWithSplitBranchSelections(points, splitSections);
+}
+
+export function splitDecisionPointsForRoute(
+  points: TrackPoint[],
+  splitSections: TrackSplitSection[] = [],
+): SplitRouteDecisionPoint[] {
+  if (points.length < 2 || splitSections.length === 0) {
+    return [];
+  }
+
+  const route: TrackPoint[] = [points[0]];
+  const decisions: SplitRouteDecisionPoint[] = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    const splitBridge = splitBridgeForPoints(previous, point, splitSections);
+
+    if (splitBridge) {
+      if (route.length > 0 && pointsMatch(route[route.length - 1], splitBridge.splitPoint)) {
+        route[route.length - 1] = splitBridge.splitPoint;
+      } else {
+        route.push(splitBridge.splitPoint);
+      }
+
+      const splitMeter = routeLengthMeters(withoutRepeatedJunctions(route));
+      const branchA = splitBridge.branches.find((branch) => branch.id === 'a');
+      const branchB = splitBridge.branches.find((branch) => branch.id === 'b');
+      const branchAPoints = (branchA?.points.length ?? 0) >= 2 ? branchA!.points : [splitBridge.splitPoint, splitBridge.mergePoint];
+      const branchBPoints = (branchB?.points.length ?? 0) >= 2 ? branchB!.points : [splitBridge.splitPoint, splitBridge.mergePoint];
+      const branchALength = routeLengthMeters(branchAPoints);
+      const branchBLength = routeLengthMeters(branchBPoints);
+
+      decisions.push({
+        id: splitBridge.id,
+        index: splitBridge.index,
+        splitMeter,
+        mergeMeterByBranch: {
+          a: splitMeter + branchALength,
+          b: splitMeter + branchBLength,
+        },
+        branchLengthByBranch: {
+          a: branchALength,
+          b: branchBLength,
+        },
+      });
+
+      branchAPoints.slice(1).forEach((branchPoint) => route.push(branchPoint));
+      continue;
+    }
+
+    route.push(point);
+  }
+
+  return decisions;
 }
 
 function cumulativeMeters(points: TrackPoint[]) {
@@ -170,7 +273,7 @@ function normalizeSplitSection(section: TrackSplitSection): TrackSplitSection {
 
       return {
         id: branch.id,
-        name: branch.name || `Split ${index} ${branch.id.toUpperCase()}`,
+        name: branch.name || splitBranchLabels[branch.id],
         points,
         lengthMeters: Math.round(Math.max(1, routeLengthMeters(points))),
       };

@@ -55,6 +55,8 @@ import {
   routeLengthWithDefaultSplitBranches,
   routeLengthMeters,
   routeWithDefaultSplitBranches,
+  splitBranchLabels,
+  splitDecisionPointsForRoute,
   writeStoredTrackMappings,
   type StoredTrackMappings,
   zoneBoundariesFromMapping,
@@ -269,13 +271,13 @@ function splitSectionFromDraft(draft: DraftTrackSplit): TrackSplitSection | null
     branches: [
       {
         id: 'a',
-        name: `Split ${draft.index} A`,
+        name: splitBranchLabels.a,
         points: branchA,
         lengthMeters: Math.round(routeLengthMeters(branchA)),
       },
       {
         id: 'b',
-        name: `Split ${draft.index} B`,
+        name: splitBranchLabels.b,
         points: branchB,
         lengthMeters: Math.round(routeLengthMeters(branchB)),
       },
@@ -300,13 +302,13 @@ function splitSectionPreviewFromDraft(draft: DraftTrackSplit): TrackSplitSection
     branches: [
       {
         id: 'a',
-        name: `Split ${draft.index} A`,
+        name: splitBranchLabels.a,
         points: branchA,
         lengthMeters: Math.round(routeLengthMeters(branchA)),
       },
       {
         id: 'b',
-        name: `Split ${draft.index} B`,
+        name: splitBranchLabels.b,
         points: branchB,
         lengthMeters: Math.round(routeLengthMeters(branchB)),
       },
@@ -894,6 +896,7 @@ export default function App() {
   const [intervalMode, setIntervalMode] = useState<IntervalMode>('auto');
   const [manualZoneIds, setManualZoneIds] = useState<string[]>(['z2', 'z4']);
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
+  const [branchChoicesByPlayer, setBranchChoicesByPlayer] = useState<Partial<Record<PlayerSlot['id'], SplitBranchId>>>({});
   const [earthAngle, setEarthAngle] = useState(
     () => earthCamerasByTrack[initialTrack.id]?.angle
       ?? (initialTrack.countryCode === 'CUSTOM' ? customRouteInitialAngle : defaultEarthCamera.angle),
@@ -1301,10 +1304,28 @@ export default function App() {
 
     return mappedZones.filter((zone) => manualZoneIds.includes(zone.id));
   }, [intervalMode, manualZoneIds, mappedZones, sessionMode]);
+  const splitDecisionPoints = useMemo(
+    () => (effectiveTrack.centerline
+      ? splitDecisionPointsForRoute(effectiveTrack.centerline, effectiveTrack.splitSections ?? [])
+      : []),
+    [effectiveTrack.centerline, effectiveTrack.splitSections],
+  );
+  const activeBranchChoicesByPlayer = useMemo(() => {
+    const seedOffset = Math.abs(Math.trunc(demoRaceSeed / 997)) % 2;
+    return activePlayers.reduce<Partial<Record<PlayerSlot['id'], SplitBranchId>>>((choices, player, index) => {
+      choices[player.id] = branchChoicesByPlayer[player.id]
+        ?? (demoMode && splitDecisionPoints.length > 0
+          ? ((index + seedOffset) % 2 === 0 ? 'a' : 'b')
+          : 'a');
+      return choices;
+    }, {});
+  }, [activePlayers, branchChoicesByPlayer, demoMode, demoRaceSeed, splitDecisionPoints.length]);
   const { raceState, riders, raceSummary, startRace, resetRace } = useRaceEngine(
     activePlayers,
     samplesByDevice,
     effectiveTrack.lengthMeters,
+    activeBranchChoicesByPlayer,
+    splitDecisionPoints,
   );
   useZoneAudioCues(raceState, riders, activeZones);
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
@@ -1314,11 +1335,11 @@ export default function App() {
     }
 
     const liveRidersByPlayer = new Map(riders.map((rider) => [rider.playerId, rider]));
-    return createInitialRiders(activePlayers).map((rider) => {
+    return createInitialRiders(activePlayers, activeBranchChoicesByPlayer).map((rider) => {
       const liveRider = liveRidersByPlayer.get(rider.playerId);
       return liveRider && liveRider.distance <= 1 && !liveRider.finishedAt ? liveRider : rider;
     });
-  }, [activePlayers, raceState, riders, startGateStatus.active]);
+  }, [activeBranchChoicesByPlayer, activePlayers, raceState, riders, startGateStatus.active]);
   const canCancelRace = startGateStatus.active || raceState === 'racing';
 
   const releaseRaceFullscreen = useCallback(() => {
@@ -1418,6 +1439,8 @@ export default function App() {
             phase: rider.phase,
             rank: rider.rank,
             finishedAt: rider.finishedAt,
+            selectedBranch: rider.selectedBranch,
+            actualBranches: rider.actualBranches,
             watts: sample?.watts ?? rider.lastWatts,
             cadence: sample?.cadence ?? null,
             speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
@@ -2556,7 +2579,7 @@ export default function App() {
         name: `Split ${index + 1} / Merge ${index + 1}`,
         branches: section.branches.map((branch) => ({
           ...branch,
-          name: `Split ${index + 1} ${branch.id.toUpperCase()}`,
+          name: splitBranchLabels[branch.id],
         })),
       })));
   }, []);
@@ -2805,6 +2828,13 @@ export default function App() {
       return [...current, metric];
     });
   };
+
+  const handleBranchChoiceChange = useCallback((playerId: PlayerSlot['id'], branch: SplitBranchId) => {
+    setBranchChoicesByPlayer((current) => ({
+      ...current,
+      [playerId]: branch,
+    }));
+  }, []);
 
   const handleEarthCameraChange = useCallback((camera: Partial<EarthCamera>) => {
     const nextCamera = normalizeEarthCamera({
@@ -3655,6 +3685,8 @@ export default function App() {
                 selectedCustomRoutePredictionId={selectedCustomRoutePrediction?.id ?? null}
                 customRoutes={customRoutes}
                 selectedTrackId={selectedTrack.id}
+                players={activePlayers}
+                branchChoicesByPlayer={activeBranchChoicesByPlayer}
                 raceState={raceState}
                 activeBikeCount={activePlayers.length}
                 maxPlayers={maxPlayers}
@@ -3692,6 +3724,7 @@ export default function App() {
                 onCustomRouteCreate={handleCustomRouteCreate}
                 onCustomRouteSelect={handleTrackChange}
                 onCustomRouteDelete={handleCustomRouteDelete}
+                onBranchChoiceChange={handleBranchChoiceChange}
                 onDemoModeChange={handleDemoModeChange}
                 onDemoBikeCountChange={handleDemoBikeCountChange}
                 onStartCadenceModeChange={setStartCadenceMode}

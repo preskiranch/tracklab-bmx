@@ -1,4 +1,5 @@
-import type { BikeSample, PlayerSlot, RiderState } from '../types';
+import { proSplitMinimumMph, type SplitRouteDecisionPoint } from '../lib/trackMapping';
+import type { BikeSample, PlayerSlot, RiderState, SplitBranchChoice } from '../types';
 import { bmxVelocityMpsFromCadence } from './bmxRollout';
 import { crossedTakeoff, surfaceAngleDeg } from './trackProfile';
 
@@ -21,6 +22,11 @@ const demoThirtyFootTargetMs = 1680;
 const demoGateLaunchBonusMps2 = 7.1;
 const demoMaxDriveAccelerationMps2 = 14.2;
 const thirtyFootSplitMeters = 30 * 0.3048;
+const metersPerSecondPerMph = 0.44704;
+const proSplitMinimumMps = proSplitMinimumMph * metersPerSecondPerMph;
+const proSplitPenaltyMps = 1 * metersPerSecondPerMph;
+
+export type BranchChoicesByPlayer = Partial<Record<PlayerSlot['id'], SplitBranchChoice>>;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -88,7 +94,10 @@ function interpolateSplitTimeMs(
   return Math.round(frameStartMs + crossingRatio * frameMs);
 }
 
-export function createInitialRiders(players: PlayerSlot[]): RiderState[] {
+export function createInitialRiders(
+  players: PlayerSlot[],
+  branchChoicesByPlayer: BranchChoicesByPlayer = {},
+): RiderState[] {
   return players.map((player) => ({
     playerId: player.id,
     distance: 0,
@@ -105,6 +114,9 @@ export function createInitialRiders(players: PlayerSlot[]): RiderState[] {
     rank: player.id,
     thirtyFootTimeMs: null,
     finishedAt: null,
+    selectedBranch: branchChoicesByPlayer[player.id] ?? 'a',
+    actualBranches: {},
+    proPenaltySections: {},
   }));
 }
 
@@ -115,6 +127,8 @@ export function stepRiders(
   dt: number,
   raceStartedAt: number,
   raceLengthMeters: number,
+  branchChoicesByPlayer: BranchChoicesByPlayer = {},
+  splitDecisionPoints: SplitRouteDecisionPoint[] = [],
 ): RiderState[] {
   const stepped = riders.map((rider) => {
     if (rider.finishedAt) {
@@ -162,7 +176,30 @@ export function stepRiders(
         ) * dt,
       )
       : coastVelocity;
-    const settledVelocity = velocity < stopVelocityMps && !driveEngaged ? 0 : velocity;
+    const baseSettledVelocity = velocity < stopVelocityMps && !driveEngaged ? 0 : velocity;
+    let settledVelocity = baseSettledVelocity;
+    let actualBranches = rider.actualBranches;
+    let proPenaltySections = rider.proPenaltySections;
+    const selectedBranch = branchChoicesByPlayer[rider.playerId] ?? rider.selectedBranch ?? 'a';
+    let predictedDistance = previousDistance + settledVelocity * dt;
+
+    splitDecisionPoints.forEach((split) => {
+      if (!actualBranches[split.id] && previousDistance < split.splitMeter && predictedDistance >= split.splitMeter) {
+        const actualBranch: SplitBranchChoice = selectedBranch === 'b' && settledVelocity >= proSplitMinimumMps ? 'b' : 'a';
+        actualBranches = { ...actualBranches, [split.id]: actualBranch };
+      }
+
+      const actualBranch = actualBranches[split.id];
+      const onProSet = actualBranch === 'b'
+        && previousDistance >= split.splitMeter
+        && previousDistance <= split.mergeMeterByBranch.b;
+      if (onProSet && !proPenaltySections[split.id] && settledVelocity > 0 && settledVelocity < proSplitMinimumMps) {
+        settledVelocity = Math.max(0, settledVelocity - proSplitPenaltyMps);
+        proPenaltySections = { ...proPenaltySections, [split.id]: true };
+        predictedDistance = previousDistance + settledVelocity * dt;
+      }
+    });
+
     const distance = Math.min(raceLengthMeters, previousDistance + settledVelocity * dt);
     const thirtyFootTimeMs = rider.thirtyFootTimeMs == null
       && previousDistance < thirtyFootSplitMeters
@@ -236,6 +273,9 @@ export function stepRiders(
       wattsAverage,
       thirtyFootTimeMs,
       finishedAt,
+      selectedBranch,
+      actualBranches,
+      proPenaltySections,
     };
   });
 

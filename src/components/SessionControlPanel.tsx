@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type CSSProperties } from 'react';
 import {
   Activity,
   Bike,
@@ -34,6 +34,7 @@ import type {
   SessionMode,
   SpeedUnit,
   StartCadenceMode,
+  PlayerSlot,
   TrackPoint,
   TrackRecord,
   TrackSplitBranch,
@@ -94,6 +95,8 @@ type SessionControlPanelProps = {
   selectedCustomRoutePredictionId: string | null;
   customRoutes: TrackRecord[];
   selectedTrackId: string;
+  players: PlayerSlot[];
+  branchChoicesByPlayer: Partial<Record<PlayerSlot['id'], TrackSplitBranch['id']>>;
   raceState: RaceState;
   activeBikeCount: number;
   maxPlayers: number;
@@ -131,6 +134,7 @@ type SessionControlPanelProps = {
   onCustomRouteCreate: () => void;
   onCustomRouteSelect: (trackId: string) => void;
   onCustomRouteDelete: (trackId: string) => void;
+  onBranchChoiceChange: (playerId: PlayerSlot['id'], branch: TrackSplitBranch['id']) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoBikeCountChange: (count: number) => void;
   onStartCadenceModeChange: (mode: StartCadenceMode) => void;
@@ -182,6 +186,8 @@ export function SessionControlPanel({
   selectedCustomRoutePredictionId,
   customRoutes,
   selectedTrackId,
+  players,
+  branchChoicesByPlayer,
   raceState,
   activeBikeCount,
   maxPlayers,
@@ -219,6 +225,7 @@ export function SessionControlPanel({
   onCustomRouteCreate,
   onCustomRouteSelect,
   onCustomRouteDelete,
+  onBranchChoiceChange,
   onDemoModeChange,
   onDemoBikeCountChange,
   onStartCadenceModeChange,
@@ -266,8 +273,8 @@ export function SessionControlPanel({
   const splitReadyForBranches = Boolean(draftSplitPoint && draftMergePoint);
   const draftSplitBranchMetrics = draftSplitBuilder && draftSplitPoint && draftMergePoint
     ? ([
-      ['a', 'Branch 1', draftSplitBuilder.branchA],
-      ['b', 'Branch 2', draftSplitBuilder.branchB],
+      ['a', 'Amateur Line', draftSplitBuilder.branchA],
+      ['b', 'Pro Set', draftSplitBuilder.branchB],
     ] as const).map((branch) => {
       const interiorPoints = splitBranchInteriorPoints(
         branch[2],
@@ -292,6 +299,8 @@ export function SessionControlPanel({
     })
     : [];
   const splitBranchOneReady = Boolean(draftSplitBranchMetrics[0]?.ready);
+  const canChooseSplitLine = raceState === 'ready' && !startGateActive;
+  const hasRaceSplitChoices = players.length > 0 && (track.splitSections?.length ?? 0) > 0;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones'
     ? draftZoneCount > 1
@@ -602,7 +611,7 @@ export function SessionControlPanel({
                         onClick={() => handleMappingSplitBranchChange('a')}
                         disabled={!splitReadyForBranches}
                       >
-                        Branch 1
+                        Amateur Line
                       </button>
                       <button
                         className={draftSplitBuilder?.activeBranch === 'b' ? 'selected' : ''}
@@ -610,7 +619,7 @@ export function SessionControlPanel({
                         onClick={() => handleMappingSplitBranchChange('b')}
                         disabled={!splitBranchOneReady}
                       >
-                        Branch 2
+                        Pro Set
                       </button>
                     </div>
                     {draftSplitBranchMetrics.length > 0 && (
@@ -648,7 +657,7 @@ export function SessionControlPanel({
                           <div className="split-row" key={section.id}>
                             <div>
                               <strong>{section.name}</strong>
-                              <span>{section.branches.map((branch) => `${branch.id === 'a' ? '1' : '2'} ${formatDistanceMeters(branch.lengthMeters, distanceUnit)}`).join(' / ')}</span>
+                              <span>{section.branches.map((branch) => `${branch.name} ${formatDistanceMeters(branch.lengthMeters, distanceUnit)}`).join(' / ')}</span>
                             </div>
                             <button type="button" onClick={() => onMappingSplitRemove(section.id)} aria-label={`Remove ${section.name}`}>
                               <Trash2 size={14} />
@@ -841,6 +850,53 @@ export function SessionControlPanel({
           )) : <span className="empty-inline">No mapped sprint zones</span>}
         </div>
       </section>
+
+      {hasRaceSplitChoices && (
+        <section className="panel-section split-choice-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Split Choice</span>
+              <h3>Race line</h3>
+            </div>
+            <Route size={18} />
+          </div>
+
+          <div className="split-choice-list">
+            {players.map((player) => {
+              const branchChoice = branchChoicesByPlayer[player.id] ?? 'a';
+              return (
+                <div className="split-choice-row" key={player.id}>
+                  <div className="split-choice-rider">
+                    <span className="player-chip" style={{ '--player-color': player.accent } as CSSProperties}>P{player.id}</span>
+                    <strong>{player.name}</strong>
+                  </div>
+                  <div className="segmented-control compact" aria-label={`${player.name} race line`}>
+                    <button
+                      className={branchChoice === 'a' ? 'selected' : ''}
+                      type="button"
+                      onClick={() => onBranchChoiceChange(player.id, 'a')}
+                      disabled={!canChooseSplitLine}
+                    >
+                      <Route size={14} />
+                      Amateur Line
+                    </button>
+                    <button
+                      className={branchChoice === 'b' ? 'selected' : ''}
+                      type="button"
+                      onClick={() => onBranchChoiceChange(player.id, 'b')}
+                      disabled={!canChooseSplitLine}
+                    >
+                      <Zap size={14} />
+                      Pro Set
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="split-choice-note">Pro Set opens at 26+ mph at the split; otherwise the rider stays on Amateur Line.</p>
+        </section>
+      )}
 
       <section className="panel-section">
         <div className="section-heading">

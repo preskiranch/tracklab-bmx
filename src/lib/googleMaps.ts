@@ -1,7 +1,10 @@
 import {
   distanceBetweenTrackPoints,
+  routeLengthMeters,
   routeWithDefaultSplitBranches,
+  routeWithSplitBranchSelections,
   splitSharedRouteSegments,
+  type SplitBranchSelection,
 } from './trackMapping';
 import type { TrackPoint, TrackRecord, TrackZone } from '../types';
 
@@ -695,6 +698,12 @@ export function mappedTrackRoute(track: TrackRecord) {
     : [];
 }
 
+export function mappedTrackRouteWithBranchSelections(track: TrackRecord, selections: SplitBranchSelection = {}) {
+  return hasUserMappedRoute(track) && track.centerline
+    ? routeWithSplitBranchSelections(track.centerline, track.splitSections ?? [], selections)
+    : [];
+}
+
 export function mappedTrackRouteSegments(track: TrackRecord) {
   return hasUserMappedRoute(track) && track.centerline
     ? splitSharedRouteSegments(track.centerline, track.splitSections ?? [])
@@ -799,13 +808,18 @@ export function riderLatLng(track: TrackRecord, distanceMeters: number) {
   return pointAtProgress(route, distanceMeters / track.lengthMeters);
 }
 
-export function riderRoutePose(track: TrackRecord, distanceMeters: number) {
-  const route = mappedTrackRoute(track);
+export function riderRoutePose(
+  track: TrackRecord,
+  distanceMeters: number,
+  splitBranchSelections: SplitBranchSelection = {},
+) {
+  const route = mappedTrackRouteWithBranchSelections(track, splitBranchSelections);
   if (route.length < 2) {
     return null;
   }
 
-  const target = Math.min(track.lengthMeters, distanceMeters);
+  const routeLength = routeLengthMeters(route);
+  const target = Math.min(routeLength, distanceMeters);
   if (target <= 0) {
     const start = route[0];
     const end = route[1];

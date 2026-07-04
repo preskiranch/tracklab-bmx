@@ -76,6 +76,7 @@ export type BridgeMessage = BridgeStatusMessage | BridgeErrorMessage | BikeSampl
 
 export type PlayerId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export type PlayerColorName = 'lime' | 'red' | 'blue' | 'yellow';
+export type SplitBranchChoice = 'a' | 'b';
 
 export type PlayerSlot = {
   id: PlayerId;
@@ -149,6 +150,8 @@ export type MultiplayerRaceRider = {
   phase: RiderPhase;
   rank: number;
   finishedAt: number | null;
+  selectedBranch: SplitBranchChoice;
+  actualBranches: Record<string, SplitBranchChoice>;
   watts: number;
   cadence: number | null;
   speedKph: number | null;
@@ -192,6 +195,9 @@ export type RiderState = {
   rank: number;
   thirtyFootTimeMs: number | null;
   finishedAt: number | null;
+  selectedBranch: SplitBranchChoice;
+  actualBranches: Record<string, SplitBranchChoice>;
+  proPenaltySections: Record<string, boolean>;
 };
 
 export type RaceSummaryEntry = {
@@ -298,7 +304,7 @@ export type TrackZone = {
 };
 
 export type TrackSplitBranch = {
-  id: 'a' | 'b';
+  id: SplitBranchChoice;
   name: string;
   points: TrackPoint[];
   lengthMeters: number;

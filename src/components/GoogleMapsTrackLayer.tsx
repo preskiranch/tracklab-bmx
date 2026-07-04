@@ -1412,7 +1412,7 @@ export function GoogleMapsTrackLayer({
         return;
       }
 
-      const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance));
+      const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance), rider.actualBranches);
       const speedKph = rider.velocity > 0 ? rider.velocity * 3.6 : null;
       const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const existing = markerRefs.current.get(player.id);
@@ -1452,7 +1452,7 @@ export function GoogleMapsTrackLayer({
       state.riders.forEach((rider) => {
         const markerKey = `${state.clientId}:${rider.id}`;
         activeRemoteKeys.add(markerKey);
-        const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance));
+        const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance), rider.actualBranches ?? {});
         const existing = remoteMarkerRefs.current.get(markerKey);
 
         if (!pose) {
