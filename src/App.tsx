@@ -63,6 +63,7 @@ import {
   resetPlaceAutocompleteSession,
   resolveLocationText,
   resolvePlacePrediction,
+  trackBoundsPoints,
   type PlacePredictionOption,
 } from './lib/googleMaps';
 import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
@@ -343,6 +344,23 @@ function earthCamerasMatch(left: EarthCamera | undefined, right: EarthCamera) {
     && leftHasCenter === rightHasCenter
     && Math.abs((left.center?.lat ?? 0) - (right.center?.lat ?? 0)) < 0.0000001
     && Math.abs((left.center?.lng ?? 0) - (right.center?.lng ?? 0)) < 0.0000001;
+}
+
+function cameraCenterBelongsToTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
+  if (!camera.center) {
+    return true;
+  }
+
+  const routePoints = trackBoundsPoints(track);
+  if (routePoints.length === 0) {
+    return true;
+  }
+
+  const nearestRoutePointMeters = Math.min(
+    ...routePoints.map((point) => distanceBetweenTrackPoints(camera.center!, point)),
+  );
+  const allowedOffsetMeters = Math.max(750, track.lengthMeters * 2.5);
+  return nearestRoutePointMeters <= allowedOffsetMeters;
 }
 
 function readStoredEarthCameras(): Record<string, EarthCamera> {
@@ -2471,11 +2489,23 @@ export default function App() {
       zoom: camera.zoom ?? earthZoom ?? undefined,
       updatedAt: Date.now(),
     });
+    const cameraIsOnSelectedTrack = cameraCenterBelongsToTrack(nextCamera, effectiveTrack);
+    const safeCamera = cameraIsOnSelectedTrack
+      ? nextCamera
+      : normalizeEarthCamera({
+        angle: nextCamera.angle,
+        heading: nextCamera.heading,
+        updatedAt: nextCamera.updatedAt,
+      });
 
-    setEarthAngle((current) => (current === nextCamera.angle ? current : nextCamera.angle));
-    setEarthHeading((current) => (current === nextCamera.heading ? current : nextCamera.heading));
+    setEarthAngle((current) => (current === safeCamera.angle ? current : safeCamera.angle));
+    setEarthHeading((current) => (current === safeCamera.heading ? current : safeCamera.heading));
     setEarthCenter((current) => {
-      const nextCenter = nextCamera.center ?? null;
+      if (!cameraIsOnSelectedTrack) {
+        return current;
+      }
+
+      const nextCenter = safeCamera.center ?? null;
       if (
         current
         && nextCenter
@@ -2488,26 +2518,32 @@ export default function App() {
       return nextCenter;
     });
     setEarthZoom((current) => (
-      current != null
-      && nextCamera.zoom != null
-      && Math.abs(current - nextCamera.zoom) < 0.01
+      !cameraIsOnSelectedTrack
         ? current
-        : nextCamera.zoom ?? null
+        : current != null
+          && safeCamera.zoom != null
+          && Math.abs(current - safeCamera.zoom) < 0.01
+          ? current
+          : safeCamera.zoom ?? null
     ));
 
     setEarthCamerasByTrack((current) => {
-      if (earthCamerasMatch(current[selectedTrack.id], nextCamera)) {
+      if (!cameraIsOnSelectedTrack) {
+        return current;
+      }
+
+      if (earthCamerasMatch(current[selectedTrack.id], safeCamera)) {
         return current;
       }
 
       const next = {
         ...current,
-        [selectedTrack.id]: nextCamera,
+        [selectedTrack.id]: safeCamera,
       };
       writeStoredEarthCameras(next);
       return next;
     });
-  }, [earthAngle, earthCenter, earthHeading, earthZoom, selectedTrack.id]);
+  }, [earthAngle, earthCenter, earthHeading, earthZoom, effectiveTrack, selectedTrack.id]);
 
   const handleEarthAngleChange = useCallback((angle: number) => {
     handleEarthCameraChange({ angle });

@@ -180,6 +180,34 @@ function applyCamera(map: GoogleMap, cameraView: Partial<EarthCamera>) {
   }
 }
 
+function cameraCenterBelongsToTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
+  if (!camera.center) {
+    return true;
+  }
+
+  const routePoints = trackBoundsPoints(track);
+  if (routePoints.length === 0) {
+    return true;
+  }
+
+  const nearestRoutePointMeters = Math.min(
+    ...routePoints.map((point) => distanceBetweenTrackPoints(camera.center!, point)),
+  );
+  const allowedOffsetMeters = Math.max(750, track.lengthMeters * 2.5);
+  return nearestRoutePointMeters <= allowedOffsetMeters;
+}
+
+function cameraForTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
+  if (cameraCenterBelongsToTrack(camera, track)) {
+    return camera;
+  }
+
+  return {
+    angle: camera.angle,
+    heading: camera.heading,
+  };
+}
+
 function distanceLabelIcon(text: string, color = '#111827') {
   const width = Math.max(86, text.length * 8 + 22);
   const svg = `
@@ -606,10 +634,11 @@ export function GoogleMapsTrackLayer({
     const fitKey = `${track.id}:${track.routeStatus ?? 'locator'}:${track.centerline?.length ?? 0}:${track.splitSections?.length ?? 0}`;
     if (lastFitKeyRef.current !== fitKey) {
       suppressCameraSyncRef.current = true;
-      const hasSavedView = Boolean(cameraRef.current.center && typeof cameraRef.current.zoom === 'number');
+      const savedTrackCamera = cameraForTrack(cameraRef.current, track);
+      const hasSavedView = Boolean(savedTrackCamera.center && typeof savedTrackCamera.zoom === 'number');
       if (hasSavedView) {
-        applyCamera(map, cameraRef.current);
-        window.requestAnimationFrame(() => applyCamera(map, cameraRef.current));
+        applyCamera(map, savedTrackCamera);
+        window.requestAnimationFrame(() => applyCamera(map, savedTrackCamera));
       } else {
         const bounds = new google.maps.LatLngBounds();
         trackBoundsPoints(track).forEach((point) => bounds.extend(point));
@@ -624,7 +653,7 @@ export function GoogleMapsTrackLayer({
         window.requestAnimationFrame(restoreCamera);
       }
       window.setTimeout(() => {
-        applyCamera(map, cameraRef.current);
+        applyCamera(map, cameraForTrack(cameraRef.current, track));
         suppressCameraSyncRef.current = false;
       }, 220);
       lastFitKeyRef.current = fitKey;
@@ -785,7 +814,7 @@ export function GoogleMapsTrackLayer({
       map.fitBounds(bounds, 16);
 
       const restoreCamera = () => {
-        applyCamera(map, cameraRef.current);
+        applyCamera(map, cameraForTrack(cameraRef.current, track));
       };
       restoreCamera();
       window.requestAnimationFrame(restoreCamera);
