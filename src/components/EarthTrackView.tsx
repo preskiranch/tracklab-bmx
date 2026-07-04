@@ -62,6 +62,7 @@ type EarthTrackViewProps = {
   draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
   draftSplitSections: TrackSplitSection[];
+  draftRouteSplitSections: TrackSplitSection[];
   draftSplitBuilder: DraftTrackSplit | null;
   onEarthCameraChange: (camera: Partial<EarthCamera>) => void;
   onEarthAngleChange: (angle: number) => void;
@@ -134,6 +135,7 @@ export function EarthTrackView({
   draftZoneMeters,
   draftZonePoints,
   draftSplitSections,
+  draftRouteSplitSections,
   draftSplitBuilder,
   onEarthCameraChange,
   onEarthAngleChange,
@@ -201,6 +203,7 @@ export function EarthTrackView({
             draftZoneMeters={draftZoneMeters}
             draftZonePoints={draftZonePoints}
             draftSplitSections={draftSplitSections}
+            draftRouteSplitSections={draftRouteSplitSections}
             draftSplitBuilder={draftSplitBuilder}
             onEarthCameraChange={onEarthCameraChange}
             onMappingPathPointAdd={onMappingPathPointAdd}

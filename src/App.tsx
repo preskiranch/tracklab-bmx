@@ -182,6 +182,7 @@ function createDraftTrackSplit(index: number): DraftTrackSplit {
 
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
+const mainRouteSplitSnapMeters = 12;
 
 function appendTrackPoint(points: TrackPoint[], point: TrackPoint, minDistanceMeters = 0.75) {
   const previous = points[points.length - 1];
@@ -256,6 +257,37 @@ function splitSectionFromDraft(draft: DraftTrackSplit): TrackSplitSection | null
   if (branchA.length < 2 || branchB.length < 2) {
     return null;
   }
+
+  return {
+    id: draft.id,
+    index: draft.index,
+    name: `Split ${draft.index} / Merge ${draft.index}`,
+    splitPoint: draft.splitPoint,
+    mergePoint: draft.mergePoint,
+    branches: [
+      {
+        id: 'a',
+        name: `Split ${draft.index} A`,
+        points: branchA,
+        lengthMeters: Math.round(routeLengthMeters(branchA)),
+      },
+      {
+        id: 'b',
+        name: `Split ${draft.index} B`,
+        points: branchB,
+        lengthMeters: Math.round(routeLengthMeters(branchB)),
+      },
+    ],
+  };
+}
+
+function splitSectionPreviewFromDraft(draft: DraftTrackSplit): TrackSplitSection | null {
+  if (!draft.splitPoint || !draft.mergePoint) {
+    return null;
+  }
+
+  const branchA = branchWithEndpoints(draft.branchA, draft.splitPoint, draft.mergePoint);
+  const branchB = branchWithEndpoints(draft.branchB, draft.splitPoint, draft.mergePoint);
 
   return {
     id: draft.id,
@@ -1096,9 +1128,13 @@ export default function App() {
       cancelled = true;
     };
   }, [selectedTrack.id]);
+  const draftRouteSplitSections = useMemo(() => {
+    const activeSplitPreview = draftSplitBuilder ? splitSectionPreviewFromDraft(draftSplitBuilder) : null;
+    return activeSplitPreview ? [...draftSplitSections, activeSplitPreview] : draftSplitSections;
+  }, [draftSplitBuilder, draftSplitSections]);
   const draftRidePoints = useMemo(
-    () => routeWithDefaultSplitBranches(draftPoints, draftSplitSections),
-    [draftPoints, draftSplitSections],
+    () => routeWithDefaultSplitBranches(draftPoints, draftRouteSplitSections),
+    [draftPoints, draftRouteSplitSections],
   );
   const draftZonePoints = useMemo(
     () => draftZoneMeters
@@ -1107,8 +1143,8 @@ export default function App() {
     [draftRidePoints, draftZoneMeters],
   );
   const draftLengthMeters = useMemo(
-    () => (draftPoints.length > 1 ? routeLengthWithDefaultSplitBranches(draftPoints, draftSplitSections) : 0),
-    [draftPoints, draftSplitSections],
+    () => (draftPoints.length > 1 ? routeLengthWithDefaultSplitBranches(draftPoints, draftRouteSplitSections) : 0),
+    [draftPoints, draftRouteSplitSections],
   );
   const draftSplitBuilderStatus = useMemo(() => {
     if (!draftSplitBuilder) {
@@ -2329,28 +2365,54 @@ export default function App() {
   };
 
   const snapDraftPointToSplitJunction = useCallback((point: TrackPoint) => {
-    for (const splitSection of draftSplitSections) {
-      if (distanceBetweenTrackPoints(point, splitSection.splitPoint) <= 6) {
-        return splitSection.splitPoint;
+    let closestJunction: TrackPoint | null = null;
+    let closestSplitSection: TrackSplitSection | null = null;
+    let closestJunctionKind: 'split' | 'merge' | null = null;
+    let closestDistance = mainRouteSplitSnapMeters;
+
+    for (const splitSection of draftRouteSplitSections) {
+      const splitDistance = distanceBetweenTrackPoints(point, splitSection.splitPoint);
+      if (splitDistance <= closestDistance) {
+        closestDistance = splitDistance;
+        closestJunction = splitSection.splitPoint;
+        closestSplitSection = splitSection;
+        closestJunctionKind = 'split';
       }
 
-      if (distanceBetweenTrackPoints(point, splitSection.mergePoint) <= 6) {
-        return splitSection.mergePoint;
+      const mergeDistance = distanceBetweenTrackPoints(point, splitSection.mergePoint);
+      if (mergeDistance <= closestDistance) {
+        closestDistance = mergeDistance;
+        closestJunction = splitSection.mergePoint;
+        closestSplitSection = splitSection;
+        closestJunctionKind = 'merge';
       }
     }
 
-    return point;
-  }, [draftSplitSections]);
+    return {
+      point: closestJunction ?? point,
+      splitSection: closestSplitSection,
+      junctionKind: closestJunctionKind,
+    };
+  }, [draftRouteSplitSections]);
 
   const handleMappingPathPointAdd = useCallback((point: TrackPoint) => {
     const snappedPoint = snapDraftPointToSplitJunction(point);
     setDraftPoints((current) => {
-      const previous = current[current.length - 1];
-      if (previous && distanceBetweenTrackPoints(previous, snappedPoint) < 0.75) {
-        return current;
+      const appendOrReplacePoint = (points: TrackPoint[], nextPoint: TrackPoint) => {
+        const previous = points[points.length - 1];
+        if (previous && distanceBetweenTrackPoints(previous, nextPoint) < 0.75) {
+          return [...points.slice(0, -1), nextPoint];
+        }
+
+        return [...points, nextPoint];
+      };
+
+      let next = appendOrReplacePoint(current, snappedPoint.point);
+      if (snappedPoint.junctionKind === 'split' && snappedPoint.splitSection) {
+        next = appendOrReplacePoint(next, snappedPoint.splitSection.mergePoint);
       }
 
-      return [...current, snappedPoint];
+      return next;
     });
   }, [snapDraftPointToSplitJunction]);
 
@@ -2361,12 +2423,12 @@ export default function App() {
         return current;
       }
 
-      const next = current.map((draftPoint, draftIndex) => (draftIndex === index ? snappedPoint : draftPoint));
-      const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftSplitSections) : 0;
+      const next = current.map((draftPoint, draftIndex) => (draftIndex === index ? snappedPoint.point : draftPoint));
+      const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftRouteSplitSections) : 0;
       setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter > 2 && meter < nextLength - 2));
       return next;
     });
-  }, [draftSplitSections, snapDraftPointToSplitJunction]);
+  }, [draftRouteSplitSections, snapDraftPointToSplitJunction]);
 
   const handleMappingPathPointRemove = useCallback((index: number) => {
     setDraftPoints((current) => {
@@ -2375,11 +2437,11 @@ export default function App() {
       }
 
       const next = current.filter((_, draftIndex) => draftIndex !== index);
-      const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftSplitSections) : 0;
+      const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftRouteSplitSections) : 0;
       setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter > 2 && meter < nextLength - 2));
       return next;
     });
-  }, [draftSplitSections]);
+  }, [draftRouteSplitSections]);
 
   const startOrUpdateSplitBuilder = useCallback((branch: SplitBranchId = 'a') => {
     setDraftSplitBuilder((current) => {
@@ -2542,7 +2604,7 @@ export default function App() {
     }
 
     const nextPoints = draftPoints.slice(0, -1);
-    const nextLength = nextPoints.length > 1 ? routeLengthWithDefaultSplitBranches(nextPoints, draftSplitSections) : 0;
+    const nextLength = nextPoints.length > 1 ? routeLengthWithDefaultSplitBranches(nextPoints, draftRouteSplitSections) : 0;
     setDraftPoints(nextPoints);
     setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter < nextLength - 1));
   };
@@ -3541,6 +3603,7 @@ export default function App() {
                 draftZoneMeters={draftZoneMeters}
                 draftZonePoints={draftZonePoints}
                 draftSplitSections={draftSplitSections}
+                draftRouteSplitSections={draftRouteSplitSections}
                 draftSplitBuilder={draftSplitBuilder}
                 onEarthCameraChange={handleEarthCameraChange}
                 onEarthAngleChange={handleEarthAngleChange}

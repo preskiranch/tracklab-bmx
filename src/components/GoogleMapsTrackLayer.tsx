@@ -61,6 +61,7 @@ type GoogleMapsTrackLayerProps = {
   draftZoneMeters?: number[];
   draftZonePoints?: TrackPoint[];
   draftSplitSections?: TrackSplitSection[];
+  draftRouteSplitSections?: TrackSplitSection[];
   draftSplitBuilder?: DraftTrackSplit | null;
   onEarthCameraChange?: (camera: Partial<EarthCamera>) => void;
   onMappingPathPointAdd?: (point: TrackPoint) => void;
@@ -454,6 +455,7 @@ export function GoogleMapsTrackLayer({
   draftZoneMeters = [],
   draftZonePoints = [],
   draftSplitSections = [],
+  draftRouteSplitSections,
   draftSplitBuilder = null,
   onEarthCameraChange,
   onMappingPathPointAdd,
@@ -914,8 +916,9 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    const draftRoute = routeWithDefaultSplitBranches(draftPoints, draftSplitSections);
-    const draftSharedSegments = splitSharedRouteSegments(draftPoints, draftSplitSections);
+    const activeDraftRouteSplitSections = draftRouteSplitSections ?? draftSplitSections;
+    const draftRoute = routeWithDefaultSplitBranches(draftPoints, activeDraftRouteSplitSections);
+    const draftSharedSegments = splitSharedRouteSegments(draftPoints, activeDraftRouteSplitSections);
     if (mappingMode && draftPoints.length > 1) {
       draftLineRefs.current = draftSharedSegments
         .filter((segment) => segment.length > 1)
@@ -928,7 +931,7 @@ export function GoogleMapsTrackLayer({
         }));
     }
 
-    const draftLengthMeters = routeLengthWithDefaultSplitBranches(draftPoints, draftSplitSections);
+    const draftLengthMeters = routeLengthWithDefaultSplitBranches(draftPoints, activeDraftRouteSplitSections);
     const draftDistanceMarkers = mappingMode && draftPoints.length > 1 ? [
       new google.maps.Marker({
         icon: {
@@ -1054,6 +1057,20 @@ export function GoogleMapsTrackLayer({
     }) : [];
 
     const splitMarkers: GoogleMarker[] = [];
+    const addDraftJunctionClick = (marker: GoogleMarker, point: TrackPoint, allowSplitTool = false) => {
+      if (mappingEditMode === 'draw' && onMappingPathPointAdd) {
+        draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
+          onMappingPathPointAdd(point);
+        }));
+        return;
+      }
+
+      if (allowSplitTool && mappingEditMode === 'split' && onMappingSplitPointAdd) {
+        draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
+          onMappingSplitPointAdd(point);
+        }));
+      }
+    };
     const renderDraftSplit = (section: TrackSplitSection, draft = false) => {
       section.branches.forEach((branch) => {
         if (branch.points.length < 2) {
@@ -1069,7 +1086,7 @@ export function GoogleMapsTrackLayer({
         }));
       });
 
-      splitMarkers.push(new google.maps.Marker({
+      const splitMarker = new google.maps.Marker({
         icon: {
           anchor: new google.maps.Point(21, 21),
           scaledSize: new google.maps.Size(42, 42),
@@ -1080,9 +1097,11 @@ export function GoogleMapsTrackLayer({
         position: section.splitPoint,
         title: `Split ${section.index}`,
         zIndex: 800 + section.index,
-      }));
+      });
+      splitMarkers.push(splitMarker);
+      addDraftJunctionClick(splitMarker, section.splitPoint);
 
-      splitMarkers.push(new google.maps.Marker({
+      const mergeMarker = new google.maps.Marker({
         icon: {
           anchor: new google.maps.Point(21, 21),
           scaledSize: new google.maps.Size(42, 42),
@@ -1093,7 +1112,9 @@ export function GoogleMapsTrackLayer({
         position: section.mergePoint,
         title: `Merge ${section.index}`,
         zIndex: 810 + section.index,
-      }));
+      });
+      splitMarkers.push(mergeMarker);
+      addDraftJunctionClick(mergeMarker, section.mergePoint);
     };
 
     if (mappingMode) {
@@ -1139,11 +1160,7 @@ export function GoogleMapsTrackLayer({
         }));
 
         const splitMarker = splitMarkers[splitMarkers.length - 1];
-        if (onMappingSplitPointAdd) {
-          draftMarkerListenerRefs.current.push(splitMarker.addListener('click', () => {
-            onMappingSplitPointAdd(draftSplitBuilder.splitPoint as TrackPoint);
-          }));
-        }
+        addDraftJunctionClick(splitMarker, draftSplitBuilder.splitPoint, true);
 
         if (draftSplitBuilder.mergePoint) {
           splitMarkers.push(new google.maps.Marker({
@@ -1160,11 +1177,7 @@ export function GoogleMapsTrackLayer({
           }));
 
           const mergeMarker = splitMarkers[splitMarkers.length - 1];
-          if (onMappingSplitPointAdd) {
-            draftMarkerListenerRefs.current.push(mergeMarker.addListener('click', () => {
-              onMappingSplitPointAdd(draftSplitBuilder.mergePoint as TrackPoint);
-            }));
-          }
+          addDraftJunctionClick(mergeMarker, draftSplitBuilder.mergePoint, true);
         }
       }
     }
@@ -1179,11 +1192,14 @@ export function GoogleMapsTrackLayer({
   }, [
     distanceUnit,
     draftPoints,
+    draftRouteSplitSections,
     draftSplitBuilder,
     draftSplitSections,
     draftZoneMeters,
     draftZonePoints,
+    mappingEditMode,
     mappingMode,
+    onMappingPathPointAdd,
     onMappingPathPointMove,
     onMappingPathPointRemove,
     onMappingSplitPointAdd,
