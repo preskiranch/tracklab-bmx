@@ -80,6 +80,7 @@ const zoneColors: Record<TrackZone['type'], string> = {
 };
 const drawSampleMeters = 1.2;
 const splitBranchMinInteriorPoints = 2;
+const splitBranchEndpointSnapMeters = 8;
 const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
   lime: '/assets/rider-lime.png',
   red: '/assets/rider-red.png',
@@ -150,13 +151,17 @@ function branchInteriorPoints(points: TrackPoint[], splitPoint: TrackPoint, merg
   ));
 }
 
+function branchTouchesMerge(points: TrackPoint[], mergePoint: TrackPoint) {
+  return points.some((point) => distanceBetweenTrackPoints(point, mergePoint) <= splitBranchEndpointSnapMeters);
+}
+
 function draftBranchPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
   const interiorPoints = branchInteriorPoints(points, splitPoint, mergePoint);
   if (interiorPoints.length === 0) {
     return [];
   }
 
-  if (interiorPoints.length < splitBranchMinInteriorPoints) {
+  if (interiorPoints.length < splitBranchMinInteriorPoints || !branchTouchesMerge(points, mergePoint)) {
     return [splitPoint, ...interiorPoints];
   }
 
@@ -1133,6 +1138,13 @@ export function GoogleMapsTrackLayer({
           zIndex: 880,
         }));
 
+        const splitMarker = splitMarkers[splitMarkers.length - 1];
+        if (onMappingSplitPointAdd) {
+          draftMarkerListenerRefs.current.push(splitMarker.addListener('click', () => {
+            onMappingSplitPointAdd(draftSplitBuilder.splitPoint as TrackPoint);
+          }));
+        }
+
         if (draftSplitBuilder.mergePoint) {
           splitMarkers.push(new google.maps.Marker({
             icon: {
@@ -1146,6 +1158,13 @@ export function GoogleMapsTrackLayer({
             title: `Merge ${draftSplitBuilder.index}`,
             zIndex: 881,
           }));
+
+          const mergeMarker = splitMarkers[splitMarkers.length - 1];
+          if (onMappingSplitPointAdd) {
+            draftMarkerListenerRefs.current.push(mergeMarker.addListener('click', () => {
+              onMappingSplitPointAdd(draftSplitBuilder.mergePoint as TrackPoint);
+            }));
+          }
         }
       }
     }
@@ -1167,6 +1186,7 @@ export function GoogleMapsTrackLayer({
     mappingMode,
     onMappingPathPointMove,
     onMappingPathPointRemove,
+    onMappingSplitPointAdd,
     onMappingZonePointMove,
     onMappingZonePointRemove,
     status,

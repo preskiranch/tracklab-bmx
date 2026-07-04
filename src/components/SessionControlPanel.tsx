@@ -42,6 +42,7 @@ import type {
 } from '../types';
 
 const splitBranchMinInteriorPoints = 2;
+const splitBranchEndpointSnapMeters = 8;
 
 function splitBranchInteriorPoints(
   points: DraftTrackSplit['branchA'],
@@ -63,6 +64,15 @@ function splitBranchInteriorPoints(
 
 function splitBranchPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
   return [splitPoint, ...points, mergePoint];
+}
+
+function splitBranchDraftPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  const interiorPoints = splitBranchInteriorPoints(points, splitPoint, mergePoint);
+  const reachedMerge = points.some((point) => (
+    distanceBetweenTrackPoints(point, mergePoint) <= splitBranchEndpointSnapMeters
+  ));
+
+  return reachedMerge ? splitBranchPath(interiorPoints, splitPoint, mergePoint) : [splitPoint, ...interiorPoints];
 }
 
 type SessionControlPanelProps = {
@@ -264,8 +274,11 @@ export function SessionControlPanel({
         draftSplitPoint,
         draftMergePoint,
       );
+      const reachedMerge = branch[2].some((point) => (
+        distanceBetweenTrackPoints(point, draftMergePoint) <= splitBranchEndpointSnapMeters
+      ));
       const distanceMeters = interiorPoints.length > 0
-        ? routeLengthMeters(splitBranchPath(interiorPoints, draftSplitPoint, draftMergePoint))
+        ? routeLengthMeters(splitBranchDraftPath(branch[2], draftSplitPoint, draftMergePoint))
         : 0;
 
       return {
@@ -273,7 +286,8 @@ export function SessionControlPanel({
         label: branch[1],
         distanceMeters,
         pointCount: interiorPoints.length,
-        ready: interiorPoints.length >= splitBranchMinInteriorPoints,
+        ready: interiorPoints.length >= splitBranchMinInteriorPoints && reachedMerge,
+        reachedMerge,
       };
     })
     : [];
@@ -610,7 +624,9 @@ export function SessionControlPanel({
                                 ? `${branch.pointCount} route points`
                                 : branch.pointCount === 0
                                   ? 'Draw along lane'
-                                  : 'Keep drawing'}
+                                  : branch.reachedMerge
+                                    ? 'Add more contour points'
+                                    : 'Keep drawing to merge'}
                             </small>
                           </div>
                         ))}

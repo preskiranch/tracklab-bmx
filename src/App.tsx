@@ -181,6 +181,7 @@ function createDraftTrackSplit(index: number): DraftTrackSplit {
 }
 
 const splitBranchMinInteriorPoints = 2;
+const splitBranchEndpointSnapMeters = 8;
 
 function appendTrackPoint(points: TrackPoint[], point: TrackPoint, minDistanceMeters = 0.75) {
   const previous = points[points.length - 1];
@@ -215,16 +216,37 @@ function branchInteriorPoints(points: TrackPoint[], splitPoint: TrackPoint, merg
   });
 }
 
+function branchTouchesMerge(points: TrackPoint[], mergePoint: TrackPoint | null) {
+  return Boolean(mergePoint && points.some((point) => (
+    distanceBetweenTrackPoints(point, mergePoint) <= splitBranchEndpointSnapMeters
+  )));
+}
+
+function branchIsComplete(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint | null) {
+  return branchInteriorPoints(points, splitPoint, mergePoint).length >= splitBranchMinInteriorPoints
+    && branchTouchesMerge(points, mergePoint);
+}
+
+function snapBranchEndpoint(point: TrackPoint, splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  if (distanceBetweenTrackPoints(point, splitPoint) <= splitBranchEndpointSnapMeters) {
+    return splitPoint;
+  }
+
+  if (distanceBetweenTrackPoints(point, mergePoint) <= splitBranchEndpointSnapMeters) {
+    return mergePoint;
+  }
+
+  return point;
+}
+
 function splitSectionFromDraft(draft: DraftTrackSplit): TrackSplitSection | null {
   if (!draft.splitPoint || !draft.mergePoint) {
     return null;
   }
 
-  const branchAInterior = branchInteriorPoints(draft.branchA, draft.splitPoint, draft.mergePoint);
-  const branchBInterior = branchInteriorPoints(draft.branchB, draft.splitPoint, draft.mergePoint);
   if (
-    branchAInterior.length < splitBranchMinInteriorPoints
-    || branchBInterior.length < splitBranchMinInteriorPoints
+    !branchIsComplete(draft.branchA, draft.splitPoint, draft.mergePoint)
+    || !branchIsComplete(draft.branchB, draft.splitPoint, draft.mergePoint)
   ) {
     return null;
   }
@@ -1106,6 +1128,11 @@ export default function App() {
       draftSplitBuilder.splitPoint,
       draftSplitBuilder.mergePoint,
     ).length;
+    const branchOneComplete = branchIsComplete(
+      draftSplitBuilder.branchA,
+      draftSplitBuilder.splitPoint,
+      draftSplitBuilder.mergePoint,
+    );
     if (draftSplitBuilder.activeBranch === 'a') {
       if (branchOneStarted < splitBranchMinInteriorPoints) {
         return branchOneStarted === 0
@@ -1113,13 +1140,17 @@ export default function App() {
           : `Keep drawing Branch 1 along the lane contour.`;
       }
 
-      return `Branch 1 is ready. Keep adding points to fine tune it, or select Branch 2.`;
+      if (!branchOneComplete) {
+        return `Keep drawing Branch 1 to Merge ${draftSplitBuilder.index}.`;
+      }
+
+      return `Branch 1 reached Merge ${draftSplitBuilder.index}. Select Branch 2 or keep fine tuning.`;
     }
 
-    if (branchOneStarted < splitBranchMinInteriorPoints) {
+    if (!branchOneComplete) {
       return branchOneStarted === 0
         ? `Draw Branch 1 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`
-        : `Keep drawing Branch 1 along the lane contour.`;
+        : `Finish Branch 1 at Merge ${draftSplitBuilder.index} before starting Branch 2.`;
     }
 
     const branchTwoStarted = branchInteriorPoints(
@@ -1127,10 +1158,19 @@ export default function App() {
       draftSplitBuilder.splitPoint,
       draftSplitBuilder.mergePoint,
     ).length;
+    const branchTwoComplete = branchIsComplete(
+      draftSplitBuilder.branchB,
+      draftSplitBuilder.splitPoint,
+      draftSplitBuilder.mergePoint,
+    );
     if (branchTwoStarted < splitBranchMinInteriorPoints) {
       return branchTwoStarted === 0
         ? `Draw Branch 2 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`
         : `Keep drawing Branch 2 along the lane contour.`;
+    }
+
+    if (!branchTwoComplete) {
+      return `Keep drawing Branch 2 to Merge ${draftSplitBuilder.index}.`;
     }
 
     return `${draftSplitBuilder.index === 1 ? 'Split 1 / Merge 1' : `Split ${draftSplitBuilder.index} / Merge ${draftSplitBuilder.index}`} is ready to add.`;
@@ -2355,6 +2395,15 @@ export default function App() {
 
   const handleSplitBranchChange = useCallback((branch: SplitBranchId) => {
     setDraftSplitBuilder((current) => {
+      if (
+        branch === 'b'
+        && current?.splitPoint
+        && current.mergePoint
+        && !branchIsComplete(current.branchA, current.splitPoint, current.mergePoint)
+      ) {
+        return current;
+      }
+
       if (current) {
         return { ...current, activeBranch: branch };
       }
@@ -2385,10 +2434,18 @@ export default function App() {
       }
 
       const branchKey = builder.activeBranch === 'a' ? 'branchA' : 'branchB';
+      const snappedPoint = snapBranchEndpoint(point, builder.splitPoint, builder.mergePoint);
+      if (
+        branchTouchesMerge(builder[branchKey], builder.mergePoint)
+        && distanceBetweenTrackPoints(snappedPoint, builder.mergePoint) > 0.5
+      ) {
+        return builder;
+      }
+
       const baseBranch = branchInteriorPoints(builder[branchKey], builder.splitPoint, builder.mergePoint);
       return {
         ...builder,
-        [branchKey]: appendTrackPoint(baseBranch, point),
+        [branchKey]: appendTrackPoint(baseBranch, snappedPoint),
       };
     });
   }, [draftSplitSections.length]);
