@@ -73,6 +73,7 @@ const zoneColors: Record<TrackZone['type'], string> = {
   technical: '#38bdf8',
 };
 const drawSampleMeters = 1.2;
+const splitBranchMinInteriorPoints = 2;
 const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
   lime: '/assets/rider-lime.png',
   red: '/assets/rider-red.png',
@@ -134,6 +135,26 @@ function branchWithSplitAndMerge(points: TrackPoint[], splitPoint: TrackPoint, m
   }
 
   return next;
+}
+
+function branchInteriorPoints(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  return points.filter((point) => (
+    distanceBetweenTrackPoints(point, splitPoint) > 0.5
+    && distanceBetweenTrackPoints(point, mergePoint) > 0.5
+  ));
+}
+
+function draftBranchPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  const interiorPoints = branchInteriorPoints(points, splitPoint, mergePoint);
+  if (interiorPoints.length === 0) {
+    return [];
+  }
+
+  if (interiorPoints.length < splitBranchMinInteriorPoints) {
+    return [splitPoint, ...interiorPoints];
+  }
+
+  return branchWithSplitAndMerge(interiorPoints, splitPoint, mergePoint);
 }
 
 function applyCamera(map: GoogleMap, cameraView: Partial<EarthCamera>) {
@@ -988,10 +1009,10 @@ export function GoogleMapsTrackLayer({
 
       if (draftSplitBuilder?.splitPoint) {
         const branchA = draftSplitBuilder.mergePoint && draftSplitBuilder.branchA.length > 0
-          ? branchWithSplitAndMerge(draftSplitBuilder.branchA, draftSplitBuilder.splitPoint, draftSplitBuilder.mergePoint)
+          ? draftBranchPath(draftSplitBuilder.branchA, draftSplitBuilder.splitPoint, draftSplitBuilder.mergePoint)
           : [];
         const branchB = draftSplitBuilder.mergePoint && draftSplitBuilder.branchB.length > 0
-          ? branchWithSplitAndMerge(draftSplitBuilder.branchB, draftSplitBuilder.splitPoint, draftSplitBuilder.mergePoint)
+          ? draftBranchPath(draftSplitBuilder.branchB, draftSplitBuilder.splitPoint, draftSplitBuilder.mergePoint)
           : [];
         if (branchA.length > 1) {
           draftSplitLineRefs.current.push(new google.maps.Polyline({
@@ -1122,6 +1143,19 @@ export function GoogleMapsTrackLayer({
       onMappingSplitPointAdd(point);
     };
 
+    const finishSplitBranchDrawing = () => {
+      if (!isDrawingRef.current || !isSplitBranchDrawMode) {
+        return;
+      }
+
+      onMappingSplitDrawEnd?.();
+      isDrawingRef.current = false;
+      lastDrawPointRef.current = null;
+    };
+
+    window.addEventListener('mouseup', finishSplitBranchDrawing);
+    window.addEventListener('touchend', finishSplitBranchDrawing);
+
     mapListenerRefs.current = [
       map.addListener('mousedown', (event) => {
         const point = event?.latLng?.toJSON();
@@ -1145,6 +1179,7 @@ export function GoogleMapsTrackLayer({
         if (isSplitBranchDrawMode) {
           isDrawingRef.current = true;
           lastDrawPointRef.current = null;
+          addSplitPoint(point);
           return;
         }
 
@@ -1172,7 +1207,7 @@ export function GoogleMapsTrackLayer({
         if (point && isDrawingRef.current) {
           if (isSplitBranchDrawMode) {
             addSplitPoint(point);
-            onMappingSplitDrawEnd?.();
+            finishSplitBranchDrawing();
           } else if (mappingEditMode === 'draw') {
             addDrawPoint(point);
           }
@@ -1194,6 +1229,8 @@ export function GoogleMapsTrackLayer({
     ];
 
     return () => {
+      window.removeEventListener('mouseup', finishSplitBranchDrawing);
+      window.removeEventListener('touchend', finishSplitBranchDrawing);
       mapListenerRefs.current.forEach((listener) => listener.remove());
       mapListenerRefs.current = [];
       map.setOptions({

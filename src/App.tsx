@@ -166,6 +166,8 @@ function createDraftTrackSplit(index: number): DraftTrackSplit {
   };
 }
 
+const splitBranchMinInteriorPoints = 2;
+
 function appendTrackPoint(points: TrackPoint[], point: TrackPoint, minDistanceMeters = 0.75) {
   const previous = points[points.length - 1];
   if (previous && distanceBetweenTrackPoints(previous, point) < minDistanceMeters) {
@@ -206,7 +208,10 @@ function splitSectionFromDraft(draft: DraftTrackSplit): TrackSplitSection | null
 
   const branchAInterior = branchInteriorPoints(draft.branchA, draft.splitPoint, draft.mergePoint);
   const branchBInterior = branchInteriorPoints(draft.branchB, draft.splitPoint, draft.mergePoint);
-  if (branchAInterior.length < 1 || branchBInterior.length < 1) {
+  if (
+    branchAInterior.length < splitBranchMinInteriorPoints
+    || branchBInterior.length < splitBranchMinInteriorPoints
+  ) {
     return null;
   }
 
@@ -978,18 +983,22 @@ export default function App() {
       draftSplitBuilder.branchA,
       draftSplitBuilder.splitPoint,
       draftSplitBuilder.mergePoint,
-    ).length > 0;
-    if (!branchOneStarted) {
-      return `Draw Branch 1 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`;
+    ).length;
+    if (branchOneStarted < splitBranchMinInteriorPoints) {
+      return branchOneStarted === 0
+        ? `Draw Branch 1 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`
+        : `Keep drawing Branch 1 along the lane contour.`;
     }
 
     const branchTwoStarted = branchInteriorPoints(
       draftSplitBuilder.branchB,
       draftSplitBuilder.splitPoint,
       draftSplitBuilder.mergePoint,
-    ).length > 0;
-    if (!branchTwoStarted) {
-      return `Draw Branch 2 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`;
+    ).length;
+    if (branchTwoStarted < splitBranchMinInteriorPoints) {
+      return branchTwoStarted === 0
+        ? `Draw Branch 2 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`
+        : `Keep drawing Branch 2 along the lane contour.`;
     }
 
     return `${draftSplitBuilder.index === 1 ? 'Split 1 / Merge 1' : `Split ${draftSplitBuilder.index} / Merge ${draftSplitBuilder.index}`} is ready to add.`;
@@ -2118,7 +2127,7 @@ export default function App() {
 
       if (current.activeBranch === 'a') {
         const branchAInterior = branchInteriorPoints(current.branchA, current.splitPoint, current.mergePoint);
-        if (branchAInterior.length < 1) {
+        if (branchAInterior.length < splitBranchMinInteriorPoints) {
           return current;
         }
 
@@ -2130,7 +2139,7 @@ export default function App() {
       }
 
       const branchBInterior = branchInteriorPoints(current.branchB, current.splitPoint, current.mergePoint);
-      if (branchBInterior.length < 1) {
+      if (branchBInterior.length < splitBranchMinInteriorPoints) {
         return current;
       }
 

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
 import type { PlacePredictionOption } from '../lib/googleMaps';
+import { distanceBetweenTrackPoints, routeLengthMeters } from '../lib/trackMapping';
 import type {
   DistanceUnit,
   DraftTrackSplit,
@@ -33,11 +34,36 @@ import type {
   SessionMode,
   SpeedUnit,
   StartCadenceMode,
+  TrackPoint,
   TrackRecord,
   TrackSplitBranch,
   TrackSplitSection,
   TrackZone,
 } from '../types';
+
+const splitBranchMinInteriorPoints = 2;
+
+function splitBranchInteriorPoints(
+  points: DraftTrackSplit['branchA'],
+  splitPoint: DraftTrackSplit['splitPoint'],
+  mergePoint: DraftTrackSplit['mergePoint'],
+) {
+  if (!splitPoint) {
+    return points;
+  }
+
+  return points.filter((point) => {
+    if (distanceBetweenTrackPoints(point, splitPoint) <= 0.5) {
+      return false;
+    }
+
+    return !mergePoint || distanceBetweenTrackPoints(point, mergePoint) > 0.5;
+  });
+}
+
+function splitBranchPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  return [splitPoint, ...points, mergePoint];
+}
 
 type SessionControlPanelProps = {
   track: TrackRecord;
@@ -222,8 +248,33 @@ export function SessionControlPanel({
         ? 'Add zones'
         : 'Split';
   const shouldCollapseMappingTools = mappingFullscreen && mappingMode;
-  const splitReadyForBranches = Boolean(draftSplitBuilder?.splitPoint && draftSplitBuilder.mergePoint);
-  const splitBranchOneReady = splitReadyForBranches && (draftSplitBuilder?.branchA.length ?? 0) > 0;
+  const draftSplitPoint = draftSplitBuilder?.splitPoint ?? null;
+  const draftMergePoint = draftSplitBuilder?.mergePoint ?? null;
+  const splitReadyForBranches = Boolean(draftSplitPoint && draftMergePoint);
+  const draftSplitBranchMetrics = draftSplitBuilder && draftSplitPoint && draftMergePoint
+    ? ([
+      ['a', 'Branch 1', draftSplitBuilder.branchA],
+      ['b', 'Branch 2', draftSplitBuilder.branchB],
+    ] as const).map((branch) => {
+      const interiorPoints = splitBranchInteriorPoints(
+        branch[2],
+        draftSplitPoint,
+        draftMergePoint,
+      );
+      const distanceMeters = interiorPoints.length > 0
+        ? routeLengthMeters(splitBranchPath(interiorPoints, draftSplitPoint, draftMergePoint))
+        : 0;
+
+      return {
+        id: branch[0],
+        label: branch[1],
+        distanceMeters,
+        pointCount: interiorPoints.length,
+        ready: interiorPoints.length >= splitBranchMinInteriorPoints,
+      };
+    })
+    : [];
+  const splitBranchOneReady = Boolean(draftSplitBranchMetrics[0]?.ready);
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones'
     ? draftZoneCount > 1
@@ -543,6 +594,23 @@ export function SessionControlPanel({
                         Branch 2
                       </button>
                     </div>
+                    {draftSplitBranchMetrics.length > 0 && (
+                      <div className="split-measurements" aria-label="Split branch measurements">
+                        {draftSplitBranchMetrics.map((branch) => (
+                          <div className={branch.ready ? 'ready' : ''} key={branch.id}>
+                            <strong>{branch.label}</strong>
+                            <span>{branch.pointCount > 0 ? formatDistanceMeters(branch.distanceMeters, distanceUnit) : 'Not drawn'}</span>
+                            <small>
+                              {branch.ready
+                                ? `${branch.pointCount} route points`
+                                : branch.pointCount === 0
+                                  ? 'Draw along lane'
+                                  : 'Keep drawing'}
+                            </small>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="mapping-actions split-actions">
                       <button type="button" onClick={onMappingSplitSave} disabled={!canSaveDraftSplit}>
                         <Save size={15} />
