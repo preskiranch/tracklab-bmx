@@ -105,6 +105,7 @@ import type {
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const uciRandomDelayMinMs = 100;
 const uciRandomDelayMaxMs = 2700;
+const customRouteInitialZoom = 18;
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 type SplitBranchId = TrackSplitBranch['id'];
@@ -990,7 +991,7 @@ export default function App() {
     const savedCamera = earthCamerasByTrack[selectedTrack.id];
     const isCustomRoute = selectedTrack.countryCode === 'CUSTOM';
     const fallbackCenter = isCustomRoute ? trackCenter(selectedTrack) : null;
-    const fallbackZoom = isCustomRoute ? 19 : null;
+    const fallbackZoom = isCustomRoute ? customRouteInitialZoom : null;
     setEarthAngle(savedCamera?.angle ?? defaultEarthCamera.angle);
     setEarthHeading(savedCamera?.heading ?? defaultEarthCamera.heading);
     setEarthCenter(savedCamera?.center ?? fallbackCenter);
@@ -2000,7 +2001,7 @@ export default function App() {
           angle: earthAngle,
           heading: earthHeading,
           center: trackCenter(previewRoute),
-          zoom: 19,
+          zoom: customRouteInitialZoom,
           updatedAt: Date.now(),
         });
 
@@ -2100,7 +2101,7 @@ export default function App() {
         angle: earthAngle,
         heading: earthHeading,
         center: trackCenter(customRoute),
-        zoom: 19,
+        zoom: customRouteInitialZoom,
         updatedAt: Date.now(),
       });
       setCustomRoutes((current) => {

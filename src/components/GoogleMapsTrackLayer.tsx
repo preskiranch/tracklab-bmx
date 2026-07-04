@@ -469,6 +469,13 @@ export function GoogleMapsTrackLayer({
     ...(earthCenter ? { center: earthCenter } : {}),
     ...(earthZoom != null ? { zoom: earthZoom } : {}),
   });
+  const initialMapViewRef = useRef({
+    track,
+    earthAngle,
+    earthHeading,
+    earthCenter,
+    earthZoom,
+  });
   const suppressCameraSyncRef = useRef(false);
   const lastFitKeyRef = useRef('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -487,13 +494,14 @@ export function GoogleMapsTrackLayer({
         }
 
         googleRef.current = google;
+        const initialMapView = initialMapViewRef.current;
         const initialCamera = cameraForTrack({
-          angle: earthAngle,
-          heading: earthHeading,
-          center: earthCenter ?? trackCenter(track),
-          ...(earthZoom != null ? { zoom: earthZoom } : {}),
-        }, track);
-        const center = initialCamera.center ?? trackCenter(track);
+          angle: initialMapView.earthAngle,
+          heading: initialMapView.earthHeading,
+          center: initialMapView.earthCenter ?? trackCenter(initialMapView.track),
+          ...(initialMapView.earthZoom != null ? { zoom: initialMapView.earthZoom } : {}),
+        }, initialMapView.track);
+        const center = initialCamera.center ?? trackCenter(initialMapView.track);
         const map = new google.maps.Map(containerRef.current, {
           cameraControl: true,
           center,
@@ -502,7 +510,7 @@ export function GoogleMapsTrackLayer({
           disableDefaultUI: false,
           fullscreenControl: false,
           gestureHandling: 'greedy',
-          heading: earthHeading,
+          heading: initialMapView.earthHeading,
           headingInteractionEnabled: true,
           isFractionalZoomEnabled: true,
           keyboardShortcuts: true,
@@ -513,7 +521,7 @@ export function GoogleMapsTrackLayer({
           scaleControl: true,
           streetViewControl: false,
           tiltInteractionEnabled: true,
-          tilt: initialCamera.angle ?? earthAngle,
+          tilt: initialCamera.angle ?? initialMapView.earthAngle,
           zoomControl: true,
           zoom: initialCamera.zoom ?? 19,
         });
@@ -557,7 +565,7 @@ export function GoogleMapsTrackLayer({
       remoteMarkerRefs.current.clear();
       mapRef.current = null;
     };
-  }, [track]);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
