@@ -205,6 +205,7 @@ function cameraForTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
   return {
     angle: camera.angle,
     heading: camera.heading,
+    center: trackCenter(track),
   };
 }
 
@@ -475,6 +476,9 @@ export function GoogleMapsTrackLayer({
 
   useEffect(() => {
     let cancelled = false;
+    setStatus('loading');
+    setError('');
+    lastFitKeyRef.current = '';
 
     loadGoogleMaps()
       .then((google) => {
@@ -483,7 +487,13 @@ export function GoogleMapsTrackLayer({
         }
 
         googleRef.current = google;
-        const center = earthCenter ?? trackCenter(track);
+        const initialCamera = cameraForTrack({
+          angle: earthAngle,
+          heading: earthHeading,
+          center: earthCenter ?? trackCenter(track),
+          ...(earthZoom != null ? { zoom: earthZoom } : {}),
+        }, track);
+        const center = initialCamera.center ?? trackCenter(track);
         const map = new google.maps.Map(containerRef.current, {
           cameraControl: true,
           center,
@@ -503,9 +513,9 @@ export function GoogleMapsTrackLayer({
           scaleControl: true,
           streetViewControl: false,
           tiltInteractionEnabled: true,
-          tilt: earthAngle,
+          tilt: initialCamera.angle ?? earthAngle,
           zoomControl: true,
-          zoom: earthZoom ?? 19,
+          zoom: initialCamera.zoom ?? 19,
         });
         mapRef.current = map;
         setStatus('ready');
@@ -555,12 +565,12 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    const nextCamera = {
+    const nextCamera = cameraForTrack({
       angle: earthAngle,
       heading: earthHeading,
       ...(earthCenter ? { center: earthCenter } : {}),
       ...(earthZoom != null ? { zoom: earthZoom } : {}),
-    };
+    }, track);
     cameraRef.current = nextCamera;
     const currentTilt = map.getTilt?.();
     const currentHeading = map.getHeading?.();
@@ -569,16 +579,16 @@ export function GoogleMapsTrackLayer({
     if (
       typeof currentTilt === 'number'
       && typeof currentHeading === 'number'
-      && Math.abs(currentTilt - earthAngle) < 0.75
-      && headingDifference(currentHeading, earthHeading) < 0.75
-      && pointClose(currentCenter, earthCenter)
-      && (earthZoom == null || (typeof currentZoom === 'number' && Math.abs(currentZoom - earthZoom) < 0.05))
+      && Math.abs(currentTilt - (nextCamera.angle ?? earthAngle)) < 0.75
+      && headingDifference(currentHeading, nextCamera.heading ?? earthHeading) < 0.75
+      && pointClose(currentCenter, nextCamera.center ?? null)
+      && (nextCamera.zoom == null || (typeof currentZoom === 'number' && Math.abs(currentZoom - nextCamera.zoom) < 0.05))
     ) {
       return;
     }
 
     applyCamera(map, nextCamera);
-  }, [earthAngle, earthCenter, earthHeading, earthZoom]);
+  }, [earthAngle, earthCenter, earthHeading, earthZoom, track]);
 
   useEffect(() => {
     const map = mapRef.current;

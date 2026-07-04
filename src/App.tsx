@@ -64,6 +64,7 @@ import {
   resolveLocationText,
   resolvePlacePrediction,
   trackBoundsPoints,
+  trackCenter,
   type PlacePredictionOption,
 } from './lib/googleMaps';
 import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
@@ -955,11 +956,20 @@ export default function App() {
   const selectedTrackMapping = storedMappings[selectedTrack.id];
   useEffect(() => {
     const savedCamera = earthCamerasByTrack[selectedTrack.id];
+    const isCustomRoute = selectedTrack.countryCode === 'CUSTOM';
+    const fallbackCenter = isCustomRoute ? trackCenter(selectedTrack) : null;
+    const fallbackZoom = isCustomRoute ? 19 : null;
     setEarthAngle(savedCamera?.angle ?? defaultEarthCamera.angle);
     setEarthHeading(savedCamera?.heading ?? defaultEarthCamera.heading);
-    setEarthCenter(savedCamera?.center ?? null);
-    setEarthZoom(savedCamera?.zoom ?? null);
-  }, [earthCamerasByTrack, selectedTrack.id]);
+    setEarthCenter(savedCamera?.center ?? fallbackCenter);
+    setEarthZoom(savedCamera?.zoom ?? fallbackZoom);
+  }, [
+    earthCamerasByTrack,
+    selectedTrack.countryCode,
+    selectedTrack.id,
+    selectedTrack.latitude,
+    selectedTrack.longitude,
+  ]);
   const effectiveTrack = useMemo(
     () => {
       const mappedTrack = selectedTrackMapping ? applyUserTrackMapping(selectedTrack, selectedTrackMapping) : selectedTrack;
@@ -1961,15 +1971,34 @@ export default function App() {
         ? await resolvePlacePrediction(selectedCustomRoutePrediction)
         : await resolveLocationText(location);
       const customRoute = createCustomRouteRecord(name, resolved.label ?? location, resolved.point);
+      const customRouteCamera = normalizeEarthCamera({
+        angle: earthAngle,
+        heading: earthHeading,
+        center: trackCenter(customRoute),
+        zoom: 19,
+        updatedAt: Date.now(),
+      });
       setCustomRoutes((current) => {
         const next = [...current, customRoute];
         writeStoredCustomRoutes(next);
+        return next;
+      });
+      setEarthCamerasByTrack((current) => {
+        const next = {
+          ...current,
+          [customRoute.id]: customRouteCamera,
+        };
+        writeStoredEarthCameras(next);
         return next;
       });
       prepareForTrackSelection(customRoute.id);
       setSelectedCountry(customRoute.country);
       setSelectedState(customRoute.state);
       setSelectedTrackId(customRoute.id);
+      setEarthAngle(customRouteCamera.angle);
+      setEarthHeading(customRouteCamera.heading);
+      setEarthCenter(customRouteCamera.center ?? null);
+      setEarthZoom(customRouteCamera.zoom ?? null);
       setCustomRouteName('');
       setCustomRouteLocation('');
       setCustomRoutePredictions([]);
