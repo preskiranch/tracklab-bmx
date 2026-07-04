@@ -753,7 +753,7 @@ export function GoogleMapsTrackLayer({
       }));
     }
 
-    if (!hideRaceRoute) {
+    if (!hideRaceRoute && !mappingMode) {
       zoneLinesRef.current = activeZones
         .map((zone) => ({ zone, path: zonePolyline(track, zone) }))
         .filter(({ path }) => path.length > 1)
@@ -811,7 +811,7 @@ export function GoogleMapsTrackLayer({
     }
 
     activeZones.forEach((zone, index) => {
-      if (hideRaceRoute) {
+      if (hideRaceRoute || mappingMode) {
         return;
       }
 
