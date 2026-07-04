@@ -1,4 +1,8 @@
-import { distanceBetweenTrackPoints } from './trackMapping';
+import {
+  distanceBetweenTrackPoints,
+  routeWithDefaultSplitBranches,
+  splitSharedRouteSegments,
+} from './trackMapping';
 import type { TrackPoint, TrackRecord, TrackZone } from '../types';
 
 type LatLngLiteral = {
@@ -686,7 +690,15 @@ export function hasUserMappedRoute(track: TrackRecord) {
 }
 
 export function mappedTrackRoute(track: TrackRecord) {
-  return hasUserMappedRoute(track) && track.centerline ? track.centerline : [];
+  return hasUserMappedRoute(track) && track.centerline
+    ? routeWithDefaultSplitBranches(track.centerline, track.splitSections ?? [])
+    : [];
+}
+
+export function mappedTrackRouteSegments(track: TrackRecord) {
+  return hasUserMappedRoute(track) && track.centerline
+    ? splitSharedRouteSegments(track.centerline, track.splitSections ?? [])
+    : [];
 }
 
 export function trackCenter(track: TrackRecord): LatLngLiteral {
@@ -696,13 +708,19 @@ export function trackCenter(track: TrackRecord): LatLngLiteral {
 }
 
 export function trackRoute(track: TrackRecord) {
-  return track.centerline && track.centerline.length > 1 ? track.centerline : track.outline;
+  const route = mappedTrackRoute(track);
+  return route.length > 1 ? route : track.outline;
 }
 
 export function trackBoundsPoints(track: TrackRecord) {
-  const route = mappedTrackRoute(track);
-  if (route.length > 0) {
-    return route;
+  const routeSegments = mappedTrackRouteSegments(track);
+  if (routeSegments.length > 0) {
+    return [
+      ...routeSegments.flat(),
+      ...(track.splitSections ?? []).flatMap((section) => (
+        section.branches.flatMap((branch) => branch.points)
+      )),
+    ];
   }
 
   const center = locatorPoint(track);

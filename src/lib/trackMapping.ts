@@ -5,6 +5,7 @@ export const trackMappingStorageKey = 'tracklab:user-track-mappings:v1';
 export type StoredTrackMappings = Record<string, UserTrackMapping>;
 
 const earthRadiusMeters = 6371008.8;
+const splitJunctionToleranceMeters = 4;
 
 function roundCoordinate(value: number) {
   return Number(value.toFixed(7));
@@ -29,6 +30,103 @@ export function routeLengthMeters(points: TrackPoint[]) {
   }
 
   return total;
+}
+
+function pointsMatch(a: TrackPoint, b: TrackPoint, toleranceMeters = splitJunctionToleranceMeters) {
+  return distanceBetweenTrackPoints(a, b) <= toleranceMeters;
+}
+
+function splitBridgeForPoints(start: TrackPoint, end: TrackPoint, splitSections: TrackSplitSection[]) {
+  return splitSections.find((section) => (
+    pointsMatch(start, section.splitPoint)
+    && pointsMatch(end, section.mergePoint)
+  ));
+}
+
+function withoutRepeatedJunctions(points: TrackPoint[]) {
+  return points.filter((point, index) => (
+    index === 0 || distanceBetweenTrackPoints(points[index - 1], point) > 0.25
+  ));
+}
+
+export function splitSharedRouteSegments(points: TrackPoint[], splitSections: TrackSplitSection[] = []) {
+  if (points.length < 2) {
+    return points.length === 1 ? [points] : [];
+  }
+
+  if (splitSections.length === 0) {
+    return [points];
+  }
+
+  const segments: TrackPoint[][] = [];
+  let currentSegment: TrackPoint[] = [points[0]];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    const splitBridge = splitBridgeForPoints(previous, point, splitSections);
+
+    if (splitBridge) {
+      if (!pointsMatch(currentSegment[currentSegment.length - 1], splitBridge.splitPoint, 0.25)) {
+        currentSegment.push(splitBridge.splitPoint);
+      }
+
+      const cleanedSegment = withoutRepeatedJunctions(currentSegment);
+      if (cleanedSegment.length > 1) {
+        segments.push(cleanedSegment);
+      }
+
+      currentSegment = [splitBridge.mergePoint];
+      continue;
+    }
+
+    currentSegment.push(point);
+  }
+
+  const cleanedSegment = withoutRepeatedJunctions(currentSegment);
+  if (cleanedSegment.length > 1) {
+    segments.push(cleanedSegment);
+  }
+
+  return segments;
+}
+
+export function routeWithDefaultSplitBranches(points: TrackPoint[], splitSections: TrackSplitSection[] = []) {
+  if (points.length < 2 || splitSections.length === 0) {
+    return points;
+  }
+
+  const route: TrackPoint[] = [points[0]];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    const splitBridge = splitBridgeForPoints(previous, point, splitSections);
+
+    if (splitBridge) {
+      const defaultBranch = splitBridge.branches.find((branch) => branch.id === 'a') ?? splitBridge.branches[0];
+      const branchPoints = defaultBranch?.points.length >= 2
+        ? defaultBranch.points
+        : [splitBridge.splitPoint, splitBridge.mergePoint];
+
+      if (route.length > 0 && pointsMatch(route[route.length - 1], splitBridge.splitPoint)) {
+        route[route.length - 1] = splitBridge.splitPoint;
+      } else {
+        route.push(splitBridge.splitPoint);
+      }
+
+      branchPoints.slice(1).forEach((branchPoint) => route.push(branchPoint));
+      continue;
+    }
+
+    route.push(point);
+  }
+
+  return withoutRepeatedJunctions(route);
+}
+
+export function routeLengthWithDefaultSplitBranches(points: TrackPoint[], splitSections: TrackSplitSection[] = []) {
+  return routeLengthMeters(routeWithDefaultSplitBranches(points, splitSections));
 }
 
 function cumulativeMeters(points: TrackPoint[]) {
@@ -96,7 +194,9 @@ export function createUserTrackMapping(
   splitSections: TrackSplitSection[] = [],
 ): UserTrackMapping {
   const centerline = points.map(normalizePoint);
-  const distances = cumulativeMeters(centerline);
+  const normalizedSplitSections = splitSections.map(normalizeSplitSection);
+  const measurableRoute = routeWithDefaultSplitBranches(centerline, normalizedSplitSections);
+  const distances = cumulativeMeters(measurableRoute);
   const lengthMeters = Math.max(1, distances[distances.length - 1] ?? track.lengthMeters);
   const cleanBoundaries = sortedUniqueBoundaries(zoneBoundaryMeters, lengthMeters);
   const zoneBreaks = [0, ...cleanBoundaries, Math.round(lengthMeters)];
@@ -124,7 +224,7 @@ export function createUserTrackMapping(
     finishLine: centerline[centerline.length - 1],
     zoneBoundaryMeters: cleanBoundaries,
     zones,
-    splitSections: splitSections.map(normalizeSplitSection),
+    splitSections: normalizedSplitSections,
   };
 }
 

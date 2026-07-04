@@ -1307,6 +1307,18 @@ input:focus {
   text-align: center;
 }
 
+.mapping-hint {
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid #b7d6ff;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: #24384f;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
 .mapping-tools-toggle-button {
   display: inline-flex;
   align-items: center;

@@ -247,6 +247,9 @@ export function SessionControlPanel({
       : mappingEditMode === 'zones'
         ? 'Add zones'
         : 'Split';
+  const splitDrawHint = mappingMode && mappingEditMode === 'draw' && draftSplitSections.length > 0
+    ? `Draw shared path: start to S1, then start again at M1 and continue to finish.`
+    : null;
   const shouldCollapseMappingTools = mappingFullscreen && mappingMode;
   const draftSplitPoint = draftSplitBuilder?.splitPoint ?? null;
   const draftMergePoint = draftSplitBuilder?.mergePoint ?? null;
@@ -546,6 +549,8 @@ export function SessionControlPanel({
               <span>{visibleTrackDistance == null ? 'No distance' : formatDistanceMeters(visibleTrackDistance, distanceUnit)}</span>
               <span>{hasSavedMapping ? 'Saved locally' : 'No saved map'}</span>
             </div>
+
+            {splitDrawHint && <p className="mapping-hint">{splitDrawHint}</p>}
 
             <div className="segmented-control compact" aria-label="Distance unit">
               <button

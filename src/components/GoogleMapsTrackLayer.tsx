@@ -20,7 +20,7 @@ import { formatDistanceMeters, formatSpeedFromKph, speedUnitLabel } from '../uni
 import {
   loadGoogleMaps,
   mappedTrackRoute,
-  pathLengthMeters,
+  mappedTrackRouteSegments,
   riderLatLng,
   riderRoutePose,
   trackBoundsPoints,
@@ -32,7 +32,13 @@ import {
   type GoogleMapsRuntime,
   zonePolyline,
 } from '../lib/googleMaps';
-import { distanceBetweenTrackPoints, pointAtRouteMeter } from '../lib/trackMapping';
+import {
+  distanceBetweenTrackPoints,
+  pointAtRouteMeter,
+  routeLengthWithDefaultSplitBranches,
+  routeWithDefaultSplitBranches,
+  splitSharedRouteSegments,
+} from '../lib/trackMapping';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -457,13 +463,13 @@ export function GoogleMapsTrackLayer({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
-  const trackLineRef = useRef<GooglePolyline | null>(null);
+  const trackLineRefs = useRef<GooglePolyline[]>([]);
   const zoneLinesRef = useRef<GooglePolyline[]>([]);
   const distanceLabelRefs = useRef<GoogleMarker[]>([]);
   const splitLineRefs = useRef<GooglePolyline[]>([]);
   const splitMarkerRefs = useRef<GoogleMarker[]>([]);
   const finishMarkerRef = useRef<GoogleMarker | null>(null);
-  const draftLineRef = useRef<GooglePolyline | null>(null);
+  const draftLineRefs = useRef<GooglePolyline[]>([]);
   const draftSplitLineRefs = useRef<GooglePolyline[]>([]);
   const draftMarkerRefs = useRef<GoogleMarker[]>([]);
   const draftMarkerListenerRefs = useRef<GoogleMapsEventListener[]>([]);
@@ -546,26 +552,26 @@ export function GoogleMapsTrackLayer({
 
     return () => {
       cancelled = true;
-      trackLineRef.current?.setMap(null);
+      trackLineRefs.current.forEach((line) => line.setMap(null));
       zoneLinesRef.current.forEach((line) => line.setMap(null));
       distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
       splitLineRefs.current.forEach((line) => line.setMap(null));
       splitMarkerRefs.current.forEach((marker) => marker.setMap(null));
       finishMarkerRef.current?.setMap(null);
-      draftLineRef.current?.setMap(null);
+      draftLineRefs.current.forEach((line) => line.setMap(null));
       draftSplitLineRefs.current.forEach((line) => line.setMap(null));
       draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
       draftMarkerListenerRefs.current.forEach((listener) => listener.remove());
       mapListenerRefs.current.forEach((listener) => listener.remove());
       markerRefs.current.forEach((marker) => marker.setMap(null));
       remoteMarkerRefs.current.forEach((marker) => marker.setMap(null));
-      trackLineRef.current = null;
+      trackLineRefs.current = [];
       zoneLinesRef.current = [];
       distanceLabelRefs.current = [];
       splitLineRefs.current = [];
       splitMarkerRefs.current = [];
       finishMarkerRef.current = null;
-      draftLineRef.current = null;
+      draftLineRefs.current = [];
       draftSplitLineRefs.current = [];
       draftMarkerRefs.current = [];
       draftMarkerListenerRefs.current = [];
@@ -663,12 +669,13 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    trackLineRef.current?.setMap(null);
+    trackLineRefs.current.forEach((line) => line.setMap(null));
     zoneLinesRef.current.forEach((line) => line.setMap(null));
     distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
     splitLineRefs.current.forEach((line) => line.setMap(null));
     splitMarkerRefs.current.forEach((marker) => marker.setMap(null));
     finishMarkerRef.current?.setMap(null);
+    trackLineRefs.current = [];
     zoneLinesRef.current = [];
     distanceLabelRefs.current = [];
     splitLineRefs.current = [];
@@ -705,20 +712,22 @@ export function GoogleMapsTrackLayer({
 
     const savedRoute = mappedTrackRoute(track);
     if (savedRoute.length < 2) {
-      trackLineRef.current = null;
+      trackLineRefs.current = [];
       return;
     }
 
     const hideRaceRoute = raceViewFullscreen || raceState === 'racing';
 
     if (!hideRaceRoute) {
-      trackLineRef.current = new google.maps.Polyline({
-        map,
-        path: savedRoute,
-        strokeColor: '#d8ff3e',
-        strokeOpacity: 0.88,
-        strokeWeight: 5,
-      });
+      trackLineRefs.current = mappedTrackRouteSegments(track)
+        .filter((segment) => segment.length > 1)
+        .map((segment) => new google.maps.Polyline({
+          map,
+          path: segment,
+          strokeColor: '#d8ff3e',
+          strokeOpacity: 0.88,
+          strokeWeight: 5,
+        }));
     }
 
     const routeMidpoint = riderLatLng(track, track.lengthMeters / 2);
@@ -727,7 +736,7 @@ export function GoogleMapsTrackLayer({
         icon: {
           anchor: new google.maps.Point(54, 34),
           scaledSize: new google.maps.Size(108, 26),
-          url: distanceLabelIcon(`Track ${formatDistanceMeters(pathLengthMeters(savedRoute, google), distanceUnit)}`),
+          url: distanceLabelIcon(`Track ${formatDistanceMeters(track.lengthMeters, distanceUnit)}`),
         },
         map,
         optimized: false,
@@ -886,30 +895,35 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    draftLineRef.current?.setMap(null);
+    draftLineRefs.current.forEach((line) => line.setMap(null));
     draftSplitLineRefs.current.forEach((line) => line.setMap(null));
     draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
     draftMarkerListenerRefs.current.forEach((listener) => listener.remove());
+    draftLineRefs.current = [];
     draftSplitLineRefs.current = [];
     draftMarkerRefs.current = [];
     draftMarkerListenerRefs.current = [];
 
     if (!mappingMode && draftPoints.length === 0) {
-      draftLineRef.current = null;
+      draftLineRefs.current = [];
       return;
     }
 
+    const draftRoute = routeWithDefaultSplitBranches(draftPoints, draftSplitSections);
+    const draftSharedSegments = splitSharedRouteSegments(draftPoints, draftSplitSections);
     if (mappingMode && draftPoints.length > 1) {
-      draftLineRef.current = new google.maps.Polyline({
-        map,
-        path: draftPoints,
-        strokeColor: '#d8ff3e',
-        strokeOpacity: 0.96,
-        strokeWeight: 5,
-      });
+      draftLineRefs.current = draftSharedSegments
+        .filter((segment) => segment.length > 1)
+        .map((segment) => new google.maps.Polyline({
+          map,
+          path: segment,
+          strokeColor: '#d8ff3e',
+          strokeOpacity: 0.96,
+          strokeWeight: 5,
+        }));
     }
 
-    const draftLengthMeters = pathLengthMeters(draftPoints, google);
+    const draftLengthMeters = routeLengthWithDefaultSplitBranches(draftPoints, draftSplitSections);
     const draftDistanceMarkers = mappingMode && draftPoints.length > 1 ? [
       new google.maps.Marker({
         icon: {
@@ -919,7 +933,7 @@ export function GoogleMapsTrackLayer({
         },
         map,
         optimized: false,
-        position: pointAtRouteMeter(draftPoints, draftLengthMeters / 2) ?? draftPoints[Math.floor(draftPoints.length / 2)],
+        position: pointAtRouteMeter(draftRoute, draftLengthMeters / 2) ?? draftPoints[Math.floor(draftPoints.length / 2)],
         title: `Draft track distance ${formatDistanceMeters(draftLengthMeters, distanceUnit)}`,
         zIndex: 540,
       }),
@@ -930,7 +944,7 @@ export function GoogleMapsTrackLayer({
       : [];
     const draftZoneDistanceMarkers = draftZoneBreaks.slice(1).map((endMeter, index) => {
       const startMeter = draftZoneBreaks[index];
-      const midpoint = pointAtRouteMeter(draftPoints, startMeter + (endMeter - startMeter) / 2);
+      const midpoint = pointAtRouteMeter(draftRoute, startMeter + (endMeter - startMeter) / 2);
       if (!midpoint) {
         return null;
       }

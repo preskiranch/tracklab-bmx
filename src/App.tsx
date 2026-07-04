@@ -52,7 +52,9 @@ import {
   parseUserTrackMapping,
   pointAtRouteMeter,
   readStoredTrackMappings,
+  routeLengthWithDefaultSplitBranches,
   routeLengthMeters,
+  routeWithDefaultSplitBranches,
   writeStoredTrackMappings,
   type StoredTrackMappings,
   zoneBoundariesFromMapping,
@@ -1072,15 +1074,19 @@ export default function App() {
       cancelled = true;
     };
   }, [selectedTrack.id]);
+  const draftRidePoints = useMemo(
+    () => routeWithDefaultSplitBranches(draftPoints, draftSplitSections),
+    [draftPoints, draftSplitSections],
+  );
   const draftZonePoints = useMemo(
     () => draftZoneMeters
-      .map((meter) => pointAtRouteMeter(draftPoints, meter))
+      .map((meter) => pointAtRouteMeter(draftRidePoints, meter))
       .filter((point): point is TrackPoint => point != null),
-    [draftPoints, draftZoneMeters],
+    [draftRidePoints, draftZoneMeters],
   );
   const draftLengthMeters = useMemo(
-    () => (draftPoints.length > 1 ? routeLengthMeters(draftPoints) : 0),
-    [draftPoints],
+    () => (draftPoints.length > 1 ? routeLengthWithDefaultSplitBranches(draftPoints, draftSplitSections) : 0),
+    [draftPoints, draftSplitSections],
   );
   const draftSplitBuilderStatus = useMemo(() => {
     if (!draftSplitBuilder) {
@@ -2272,29 +2278,45 @@ export default function App() {
     setMappingFullscreen(enabled);
   };
 
+  const snapDraftPointToSplitJunction = useCallback((point: TrackPoint) => {
+    for (const splitSection of draftSplitSections) {
+      if (distanceBetweenTrackPoints(point, splitSection.splitPoint) <= 6) {
+        return splitSection.splitPoint;
+      }
+
+      if (distanceBetweenTrackPoints(point, splitSection.mergePoint) <= 6) {
+        return splitSection.mergePoint;
+      }
+    }
+
+    return point;
+  }, [draftSplitSections]);
+
   const handleMappingPathPointAdd = useCallback((point: TrackPoint) => {
+    const snappedPoint = snapDraftPointToSplitJunction(point);
     setDraftPoints((current) => {
       const previous = current[current.length - 1];
-      if (previous && distanceBetweenTrackPoints(previous, point) < 0.75) {
+      if (previous && distanceBetweenTrackPoints(previous, snappedPoint) < 0.75) {
         return current;
       }
 
-      return [...current, point];
+      return [...current, snappedPoint];
     });
-  }, []);
+  }, [snapDraftPointToSplitJunction]);
 
   const handleMappingPathPointMove = useCallback((index: number, point: TrackPoint) => {
+    const snappedPoint = snapDraftPointToSplitJunction(point);
     setDraftPoints((current) => {
       if (index < 0 || index >= current.length) {
         return current;
       }
 
-      const next = current.map((draftPoint, draftIndex) => (draftIndex === index ? point : draftPoint));
-      const nextLength = next.length > 1 ? routeLengthMeters(next) : 0;
+      const next = current.map((draftPoint, draftIndex) => (draftIndex === index ? snappedPoint : draftPoint));
+      const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftSplitSections) : 0;
       setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter > 2 && meter < nextLength - 2));
       return next;
     });
-  }, []);
+  }, [draftSplitSections, snapDraftPointToSplitJunction]);
 
   const handleMappingPathPointRemove = useCallback((index: number) => {
     setDraftPoints((current) => {
@@ -2303,11 +2325,11 @@ export default function App() {
       }
 
       const next = current.filter((_, draftIndex) => draftIndex !== index);
-      const nextLength = next.length > 1 ? routeLengthMeters(next) : 0;
+      const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftSplitSections) : 0;
       setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter > 2 && meter < nextLength - 2));
       return next;
     });
-  }, []);
+  }, [draftSplitSections]);
 
   const startOrUpdateSplitBuilder = useCallback((branch: SplitBranchId = 'a') => {
     setDraftSplitBuilder((current) => {
@@ -2483,7 +2505,7 @@ export default function App() {
     }
 
     const nextPoints = draftPoints.slice(0, -1);
-    const nextLength = nextPoints.length > 1 ? routeLengthMeters(nextPoints) : 0;
+    const nextLength = nextPoints.length > 1 ? routeLengthWithDefaultSplitBranches(nextPoints, draftSplitSections) : 0;
     setDraftPoints(nextPoints);
     setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter < nextLength - 1));
   };
@@ -2612,30 +2634,28 @@ export default function App() {
 
   const handleMappingZonePointAdd = useCallback((point: TrackPoint) => {
     setDraftZoneMeters((current) => {
-      if (draftPoints.length < 2) {
+      if (draftRidePoints.length < 2) {
         return current;
       }
 
-      const routeLength = draftPoints.reduce((total, draftPoint, index) => (
-        index === 0 ? total : total + distanceBetweenTrackPoints(draftPoints[index - 1], draftPoint)
-      ), 0);
-      const meter = Math.round(nearestRouteMeter(draftPoints, point));
+      const routeLength = routeLengthMeters(draftRidePoints);
+      const meter = Math.round(nearestRouteMeter(draftRidePoints, point));
       if (meter <= 2 || meter >= routeLength - 2 || current.some((boundary) => Math.abs(boundary - meter) < 3)) {
         return current;
       }
 
       return [...current, meter].sort((a, b) => a - b);
     });
-  }, [draftPoints]);
+  }, [draftRidePoints]);
 
   const handleMappingZonePointMove = useCallback((index: number, point: TrackPoint) => {
     setDraftZoneMeters((current) => {
-      if (draftPoints.length < 2 || index < 0 || index >= current.length) {
+      if (draftRidePoints.length < 2 || index < 0 || index >= current.length) {
         return current;
       }
 
-      const routeLength = routeLengthMeters(draftPoints);
-      const meter = Math.round(nearestRouteMeter(draftPoints, point));
+      const routeLength = routeLengthMeters(draftRidePoints);
+      const meter = Math.round(nearestRouteMeter(draftRidePoints, point));
       if (meter <= 2 || meter >= routeLength - 2) {
         return current;
       }
@@ -2647,7 +2667,7 @@ export default function App() {
         ))
         .sort((a, b) => a - b);
     });
-  }, [draftPoints]);
+  }, [draftRidePoints]);
 
   const handleMappingZonePointRemove = useCallback((index: number) => {
     setDraftZoneMeters((current) => current.filter((_, zoneIndex) => zoneIndex !== index));
