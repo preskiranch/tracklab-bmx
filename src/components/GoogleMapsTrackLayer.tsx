@@ -79,9 +79,10 @@ type GoogleMapsTrackLayerProps = {
 
 const zoneColors: Record<TrackZone['type'], string> = {
   pedal: '#4ade80',
-  recovery: '#facc15',
+  recovery: '#f97316',
   technical: '#38bdf8',
 };
+const noPedalZoneColor = '#f97316';
 const routeVariantColors: Record<TrackRouteVariantId, string> = {
   amateur: '#d8ff3e',
   pro: '#38bdf8',
@@ -372,6 +373,61 @@ function distanceLabelIcon(text: string, color = '#111827') {
   `;
 
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function offsetTrackPoint(point: TrackPoint, bearingDegrees: number, meters: number): TrackPoint {
+  const earthRadiusMeters = 6371008.8;
+  const angularDistance = meters / earthRadiusMeters;
+  const bearing = bearingDegrees * (Math.PI / 180);
+  const lat1 = point.lat * (Math.PI / 180);
+  const lng1 = point.lng * (Math.PI / 180);
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angularDistance)
+    + Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearing),
+  );
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat1),
+    Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2),
+  );
+
+  return {
+    lat: lat2 * (180 / Math.PI),
+    lng: lng2 * (180 / Math.PI),
+  };
+}
+
+function bearingDegreesBetween(start: TrackPoint, end: TrackPoint) {
+  const startLat = start.lat * (Math.PI / 180);
+  const endLat = end.lat * (Math.PI / 180);
+  const deltaLng = (end.lng - start.lng) * (Math.PI / 180);
+  const y = Math.sin(deltaLng) * Math.cos(endLat);
+  const x = Math.cos(startLat) * Math.sin(endLat)
+    - Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLng);
+
+  return ((Math.atan2(y, x) * (180 / Math.PI)) + 360) % 360;
+}
+
+function routePathBetweenMeters(route: TrackPoint[], startMeter: number, endMeter: number) {
+  if (route.length < 2 || endMeter <= startMeter) {
+    return [];
+  }
+
+  return Array.from({ length: 24 }, (_, index) => {
+    const progress = index / 23;
+    const meter = startMeter + (endMeter - startMeter) * progress;
+    return pointAtRouteMeter(route, meter);
+  }).filter((point): point is TrackPoint => point != null);
+}
+
+function offsetRouteLabelPosition(route: TrackPoint[], startMeter: number, endMeter: number) {
+  const start = pointAtRouteMeter(route, startMeter);
+  const end = pointAtRouteMeter(route, endMeter);
+  const midpoint = pointAtRouteMeter(route, startMeter + (endMeter - startMeter) / 2);
+  if (!start || !end || !midpoint) {
+    return null;
+  }
+
+  return offsetTrackPoint(midpoint, bearingDegreesBetween(start, end) + 90, 10);
 }
 
 function splitJunctionIcon(text: string, color = '#ff2d55') {
@@ -925,8 +981,9 @@ export function GoogleMapsTrackLayer({
       }));
     }
 
-    if (!hideRaceRoute && !mappingMode) {
-      zoneLinesRef.current = activeZones
+    const noPedalZones = activeZones.filter((zone) => zone.type !== 'pedal');
+    if (!mappingMode) {
+      zoneLinesRef.current = noPedalZones
         .map((zone) => ({ zone, path: zonePolyline(track, zone) }))
         .filter(({ path }) => path.length > 1)
         .map(({ zone, path }) => new google.maps.Polyline({
@@ -934,8 +991,9 @@ export function GoogleMapsTrackLayer({
           map,
           path,
           strokeColor: zoneColors[zone.type],
-          strokeOpacity: 0.92,
-          strokeWeight: 6,
+          strokeOpacity: raceState === 'racing' ? 0.72 : 0.82,
+          strokeWeight: raceState === 'racing' ? 7 : 8,
+          zIndex: raceState === 'racing' ? 430 : 515,
         }));
     }
 
@@ -984,12 +1042,13 @@ export function GoogleMapsTrackLayer({
       });
     }
 
-    activeZones.forEach((zone, index) => {
-      if (hideRaceRoute || mappingMode) {
+    noPedalZones.forEach((zone, index) => {
+      if (mappingMode) {
         return;
       }
 
-      const position = riderLatLng(track, zone.startMeter + (zone.endMeter - zone.startMeter) / 2);
+      const route = mappedTrackRoute(track);
+      const position = offsetRouteLabelPosition(route, zone.startMeter, zone.endMeter);
       if (!position) {
         return;
       }
@@ -997,15 +1056,15 @@ export function GoogleMapsTrackLayer({
       const distance = Math.max(0, zone.endMeter - zone.startMeter);
       distanceLabelRefs.current.push(new google.maps.Marker({
         icon: {
-          anchor: new google.maps.Point(43, -4),
+          anchor: new google.maps.Point(43, 13),
           scaledSize: new google.maps.Size(86, 26),
-          url: distanceLabelIcon(`Z${index + 1} ${formatDistanceMeters(distance, distanceUnit)}`, zoneColors[zone.type]),
+          url: distanceLabelIcon(`NO PEDAL ${index + 1}`, zoneColors[zone.type]),
         },
         map,
         optimized: false,
         position,
-        title: `${zone.name} ${formatDistanceMeters(distance, distanceUnit)}`,
-        zIndex: 520,
+        title: `${zone.name} ${formatDistanceMeters(distance, distanceUnit)} / pedaling disabled`,
+        zIndex: raceState === 'racing' ? 531 : 520,
       }));
     });
 
@@ -1148,26 +1207,46 @@ export function GoogleMapsTrackLayer({
       }),
     ] : [];
 
-    const draftZoneBreaks = showMappingDraft && draftPoints.length > 1
-      ? [0, ...draftZoneMeters.filter((meter) => meter > 0 && meter < draftLengthMeters), draftLengthMeters]
+    const cleanDraftZonePins = showMappingDraft && draftPoints.length > 1
+      ? draftZoneMeters
+        .filter((meter) => meter > 0 && meter < draftLengthMeters)
+        .sort((a, b) => a - b)
       : [];
-    const draftZoneDistanceMarkers = draftZoneBreaks.slice(1).map((endMeter, index) => {
-      const startMeter = draftZoneBreaks[index];
-      const midpoint = pointAtRouteMeter(draftRoute, startMeter + (endMeter - startMeter) / 2);
-      if (!midpoint) {
+    const draftNoPedalSpans = Array.from({ length: Math.floor(cleanDraftZonePins.length / 2) }, (_, index) => ({
+      startMeter: cleanDraftZonePins[index * 2],
+      endMeter: cleanDraftZonePins[index * 2 + 1],
+    })).filter((span) => span.endMeter - span.startMeter >= 3);
+
+    const draftNoPedalLines = draftNoPedalSpans
+      .map((span) => routePathBetweenMeters(draftRoute, span.startMeter, span.endMeter))
+      .filter((path) => path.length > 1)
+      .map((path) => new google.maps.Polyline({
+        clickable: false,
+        map,
+        path,
+        strokeColor: noPedalZoneColor,
+        strokeOpacity: 0.72,
+        strokeWeight: 8,
+        zIndex: 552,
+      }));
+    draftLineRefs.current = [...draftLineRefs.current, ...draftNoPedalLines];
+
+    const draftZoneDistanceMarkers = draftNoPedalSpans.map((span, index) => {
+      const labelPosition = offsetRouteLabelPosition(draftRoute, span.startMeter, span.endMeter);
+      if (!labelPosition) {
         return null;
       }
 
       return new google.maps.Marker({
         icon: {
-          anchor: new google.maps.Point(43, -4),
+          anchor: new google.maps.Point(43, 13),
           scaledSize: new google.maps.Size(86, 26),
-          url: distanceLabelIcon(`Z${index + 1} ${formatDistanceMeters(endMeter - startMeter, distanceUnit)}`, '#38bdf8'),
+          url: distanceLabelIcon(`NO PEDAL ${index + 1}`, noPedalZoneColor),
         },
         map,
         optimized: false,
-        position: midpoint,
-        title: `Draft zone ${index + 1} ${formatDistanceMeters(endMeter - startMeter, distanceUnit)}`,
+        position: labelPosition,
+        title: `No-pedal area ${index + 1} ${formatDistanceMeters(span.endMeter - span.startMeter, distanceUnit)}`,
         zIndex: 545,
       });
     }).filter((marker): marker is GoogleMarker => marker != null);
@@ -1217,13 +1296,15 @@ export function GoogleMapsTrackLayer({
     }) : [];
 
     const zoneMarkers = showMappingDraft ? draftZonePoints.map((point, index) => {
+      const zoneNumber = Math.floor(index / 2) + 1;
+      const isStartPin = index % 2 === 0;
       const marker = new google.maps.Marker({
         draggable: Boolean(onMappingZonePointMove),
         icon: {
-          fillColor: '#38bdf8',
+          fillColor: noPedalZoneColor,
           fillOpacity: 1,
           path: google.maps.SymbolPath.CIRCLE,
-          scale: 10,
+          scale: 8,
           strokeColor: '#111827',
           strokeWeight: 2,
         },
@@ -1231,12 +1312,12 @@ export function GoogleMapsTrackLayer({
           color: '#111827',
           fontSize: '11px',
           fontWeight: '900',
-          text: String(index + 1),
+          text: `${isStartPin ? 'S' : 'E'}${zoneNumber}`,
         },
         map,
         optimized: true,
         position: point,
-        title: `Mapping pin ${index + 1}`,
+        title: `${isStartPin ? 'Start' : 'End'} no-pedal area ${zoneNumber}`,
       });
 
       if (onMappingZonePointMove) {
@@ -1626,7 +1707,6 @@ export function GoogleMapsTrackLayer({
         }
 
         if (mappingEditMode === 'zones') {
-          onMappingZonePointAdd?.(point);
           return;
         }
 

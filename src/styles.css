@@ -1434,6 +1434,12 @@ input:focus {
   line-height: 1.35;
 }
 
+.mapping-hint.no-pedal {
+  border-color: #f2c08a;
+  background: #fff7ed;
+  color: #713f12;
+}
+
 .zone-type-editor {
   display: grid;
   gap: 9px;
@@ -1466,8 +1472,13 @@ input:focus {
 }
 
 .zone-type-button.recovery {
-  border-color: #f1c85f;
-  background: #fff5d8;
+  border-color: #f5b16e;
+  background: #fff7ed;
+}
+
+.zone-type-button.pending {
+  border-color: #cbd5e1;
+  background: #f8fafc;
 }
 
 .zone-type-button strong {
@@ -2036,8 +2047,8 @@ input:focus {
 }
 
 .zone-chip.recovery {
-  background: #fff5d8;
-  color: #805900;
+  background: #fff7ed;
+  color: #9a3412;
 }
 
 .start-gate-status {

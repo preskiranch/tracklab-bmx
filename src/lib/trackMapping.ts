@@ -267,44 +267,41 @@ function normalizePoint(point: TrackPoint): TrackPoint {
   };
 }
 
-function normalizeZoneType(type: TrackZone['type'] | undefined): TrackZone['type'] {
-  return type === 'recovery' || type === 'technical' ? type : 'pedal';
+function isNoPedalZone(zone: TrackZone) {
+  return zone.type === 'recovery' || zone.type === 'technical';
 }
 
-function defaultZoneName(type: TrackZone['type'], index: number) {
-  if (type === 'recovery') {
-    return `Coast ${index + 1}`;
-  }
-
-  if (type === 'technical') {
-    return `Technical ${index + 1}`;
-  }
-
-  return `Pedal ${index + 1}`;
+function defaultNoPedalZoneName(index: number) {
+  return `No Pedal ${index + 1}`;
 }
 
 export function createTrackZones(
   lengthMeters: number,
   zoneBoundaryMeters: number[] = [],
-  zoneTypes: TrackZone['type'][] = [],
-  restAfterSeconds = 1,
+  _zoneTypes: TrackZone['type'][] = [],
+  _restAfterSeconds = 1,
 ): TrackZone[] {
   const cleanBoundaries = sortedUniqueBoundaries(zoneBoundaryMeters, lengthMeters);
-  const zoneBreaks = [0, ...cleanBoundaries, Math.round(lengthMeters)];
+  const zones: TrackZone[] = [];
 
-  return zoneBreaks.slice(1).map((boundary, index) => {
-    const type = normalizeZoneType(zoneTypes[index]);
-    const isLastZone = index === zoneBreaks.length - 2;
+  for (let index = 0; index < cleanBoundaries.length - 1; index += 2) {
+    const startMeter = cleanBoundaries[index];
+    const endMeter = cleanBoundaries[index + 1];
+    if (endMeter - startMeter < 3) {
+      continue;
+    }
 
-    return {
-      id: `user-zone-${index + 1}`,
-      name: defaultZoneName(type, index),
-      startMeter: zoneBreaks[index],
-      endMeter: Math.max(zoneBreaks[index] + 1, boundary),
-      type,
-      restAfterSeconds: type === 'pedal' && !isLastZone ? restAfterSeconds : 0,
-    };
-  });
+    zones.push({
+      id: `no-pedal-zone-${zones.length + 1}`,
+      name: defaultNoPedalZoneName(zones.length),
+      startMeter,
+      endMeter,
+      type: 'recovery',
+      restAfterSeconds: 0,
+    });
+  }
+
+  return zones;
 }
 
 function normalizeSplitSection(section: TrackSplitSection): TrackSplitSection {
@@ -393,8 +390,9 @@ function normalizeRouteVariant(variant: TrackRouteVariant): TrackRouteVariant {
   const lengthMeters = Math.round(Math.max(1, routeLengthMeters(measurableRoute)));
   const zoneBoundaryMeters = Array.isArray(variant.zoneBoundaryMeters)
     ? sortedUniqueBoundaries(variant.zoneBoundaryMeters, lengthMeters)
-    : variant.zones.slice(0, -1).map((zone) => zone.endMeter);
-  const zoneTypes = variant.zones.map((zone) => normalizeZoneType(zone.type));
+    : variant.zones
+      .filter(isNoPedalZone)
+      .flatMap((zone) => [zone.startMeter, zone.endMeter]);
   const restAfterSeconds = Number.isFinite(variant.restAfterSeconds) ? variant.restAfterSeconds : 1;
 
   return {
@@ -406,7 +404,7 @@ function normalizeRouteVariant(variant: TrackRouteVariant): TrackRouteVariant {
     startGate: variant.startGate ? normalizePoint(variant.startGate) : centerline[0],
     finishLine: variant.finishLine ? normalizePoint(variant.finishLine) : centerline[centerline.length - 1],
     zoneBoundaryMeters,
-    zones: createTrackZones(lengthMeters, zoneBoundaryMeters, zoneTypes, restAfterSeconds),
+    zones: createTrackZones(lengthMeters, zoneBoundaryMeters, [], restAfterSeconds),
     splitSections,
   };
 }
@@ -447,17 +445,9 @@ export function zoneBoundariesFromRouteVariant(variant: TrackRouteVariant) {
   }
 
   return variant.zones
-    .slice(0, -1)
-    .map((zone) => zone.endMeter)
+    .filter(isNoPedalZone)
+    .flatMap((zone) => [zone.startMeter, zone.endMeter])
     .filter((meter) => meter > 0 && meter < variant.lengthMeters);
-}
-
-export function zoneTypesFromRouteVariant(variant: TrackRouteVariant) {
-  const zoneCount = zoneBoundariesFromRouteVariant(variant).length + 1;
-
-  return Array.from({ length: zoneCount }, (_, index) => (
-    normalizeZoneType(variant.zones[index]?.type)
-  ));
 }
 
 export function createUserTrackMapping(

@@ -401,7 +401,7 @@ export function AnalyticsPanel({
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={Math.max(2, players.length + 2)}>No mapped sprint zones</td>
+                  <td colSpan={Math.max(2, players.length + 2)}>No mapped no-pedal zones</td>
                 </tr>
               )}
             </tbody>
