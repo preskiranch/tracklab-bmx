@@ -72,7 +72,7 @@ function zoneTypeLabel(zone: TrackZone) {
     return 'Technical';
   }
 
-  return 'Pedal';
+  return 'Pedal Zone';
 }
 
 function metricValue(
@@ -401,7 +401,7 @@ export function AnalyticsPanel({
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={Math.max(2, players.length + 2)}>No mapped no-pedal zones</td>
+                  <td colSpan={Math.max(2, players.length + 2)}>No mapped pedal zones</td>
                 </tr>
               )}
             </tbody>

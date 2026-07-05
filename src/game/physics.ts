@@ -50,7 +50,11 @@ function zoneAtDistance(zones: TrackZone[], distanceMeters: number) {
   return zones.find((zone) => distanceMeters >= zone.startMeter && distanceMeters < zone.endMeter);
 }
 
-function zoneAllowsDrive(zone: TrackZone | undefined) {
+function zoneAllowsDrive(zone: TrackZone | undefined, pedalZonesConfigured: boolean) {
+  if (pedalZonesConfigured) {
+    return zone?.type === 'pedal';
+  }
+
   return !zone || zone.type === 'pedal';
 }
 
@@ -139,6 +143,7 @@ export function stepRiders(
   splitDecisionPoints: SplitRouteDecisionPoint[] = [],
   trackZones: TrackZone[] = [],
 ): RiderState[] {
+  const pedalZonesConfigured = trackZones.some((zone) => zone.type === 'pedal');
   const stepped = riders.map((rider) => {
     if (rider.finishedAt) {
       return rider;
@@ -153,7 +158,7 @@ export function stepRiders(
       : 0;
     const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
     const activeZone = zoneAtDistance(trackZones, rider.distance);
-    const driveAllowed = zoneAllowsDrive(activeZone);
+    const driveAllowed = zoneAllowsDrive(activeZone, pedalZonesConfigured);
     const watts = driveAllowed ? rawWatts : 0;
     const cadence = driveAllowed ? rawCadence : 0;
 

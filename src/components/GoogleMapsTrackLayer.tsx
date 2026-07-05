@@ -82,7 +82,7 @@ const zoneColors: Record<TrackZone['type'], string> = {
   recovery: '#f97316',
   technical: '#38bdf8',
 };
-const noPedalZoneColor = '#f97316';
+const pedalZoneColor = '#4ade80';
 const routeVariantColors: Record<TrackRouteVariantId, string> = {
   amateur: '#d8ff3e',
   pro: '#38bdf8',
@@ -981,9 +981,9 @@ export function GoogleMapsTrackLayer({
       }));
     }
 
-    const noPedalZones = activeZones.filter((zone) => zone.type !== 'pedal');
+    const pedalZones = activeZones.filter((zone) => zone.type === 'pedal');
     if (!mappingMode) {
-      zoneLinesRef.current = noPedalZones
+      zoneLinesRef.current = pedalZones
         .map((zone) => ({ zone, path: zonePolyline(track, zone) }))
         .filter(({ path }) => path.length > 1)
         .map(({ zone, path }) => new google.maps.Polyline({
@@ -1042,7 +1042,7 @@ export function GoogleMapsTrackLayer({
       });
     }
 
-    noPedalZones.forEach((zone, index) => {
+    pedalZones.forEach((zone, index) => {
       if (mappingMode) {
         return;
       }
@@ -1058,12 +1058,12 @@ export function GoogleMapsTrackLayer({
         icon: {
           anchor: new google.maps.Point(43, 13),
           scaledSize: new google.maps.Size(86, 26),
-          url: distanceLabelIcon(`NO PEDAL ${index + 1}`, zoneColors[zone.type]),
+          url: distanceLabelIcon(`PEDAL ${index + 1}`, zoneColors[zone.type]),
         },
         map,
         optimized: false,
         position,
-        title: `${zone.name} ${formatDistanceMeters(distance, distanceUnit)} / pedaling disabled`,
+        title: `${zone.name} ${formatDistanceMeters(distance, distanceUnit)} / performance tracked`,
         zIndex: raceState === 'racing' ? 531 : 520,
       }));
     });
@@ -1212,26 +1212,26 @@ export function GoogleMapsTrackLayer({
         .filter((meter) => meter > 0 && meter < draftLengthMeters)
         .sort((a, b) => a - b)
       : [];
-    const draftNoPedalSpans = Array.from({ length: Math.floor(cleanDraftZonePins.length / 2) }, (_, index) => ({
+    const draftPedalSpans = Array.from({ length: Math.floor(cleanDraftZonePins.length / 2) }, (_, index) => ({
       startMeter: cleanDraftZonePins[index * 2],
       endMeter: cleanDraftZonePins[index * 2 + 1],
     })).filter((span) => span.endMeter - span.startMeter >= 3);
 
-    const draftNoPedalLines = draftNoPedalSpans
+    const draftPedalLines = draftPedalSpans
       .map((span) => routePathBetweenMeters(draftRoute, span.startMeter, span.endMeter))
       .filter((path) => path.length > 1)
       .map((path) => new google.maps.Polyline({
         clickable: false,
         map,
         path,
-        strokeColor: noPedalZoneColor,
+        strokeColor: pedalZoneColor,
         strokeOpacity: 0.72,
         strokeWeight: 8,
         zIndex: 552,
       }));
-    draftLineRefs.current = [...draftLineRefs.current, ...draftNoPedalLines];
+    draftLineRefs.current = [...draftLineRefs.current, ...draftPedalLines];
 
-    const draftZoneDistanceMarkers = draftNoPedalSpans.map((span, index) => {
+    const draftZoneDistanceMarkers = draftPedalSpans.map((span, index) => {
       const labelPosition = offsetRouteLabelPosition(draftRoute, span.startMeter, span.endMeter);
       if (!labelPosition) {
         return null;
@@ -1241,12 +1241,12 @@ export function GoogleMapsTrackLayer({
         icon: {
           anchor: new google.maps.Point(43, 13),
           scaledSize: new google.maps.Size(86, 26),
-          url: distanceLabelIcon(`NO PEDAL ${index + 1}`, noPedalZoneColor),
+          url: distanceLabelIcon(`PEDAL ${index + 1}`, pedalZoneColor),
         },
         map,
         optimized: false,
         position: labelPosition,
-        title: `No-pedal area ${index + 1} ${formatDistanceMeters(span.endMeter - span.startMeter, distanceUnit)}`,
+        title: `Pedal zone ${index + 1} ${formatDistanceMeters(span.endMeter - span.startMeter, distanceUnit)}`,
         zIndex: 545,
       });
     }).filter((marker): marker is GoogleMarker => marker != null);
@@ -1301,7 +1301,7 @@ export function GoogleMapsTrackLayer({
       const marker = new google.maps.Marker({
         draggable: Boolean(onMappingZonePointMove),
         icon: {
-          fillColor: noPedalZoneColor,
+          fillColor: pedalZoneColor,
           fillOpacity: 1,
           path: google.maps.SymbolPath.CIRCLE,
           scale: 8,
@@ -1317,7 +1317,7 @@ export function GoogleMapsTrackLayer({
         map,
         optimized: true,
         position: point,
-        title: `${isStartPin ? 'Start' : 'End'} no-pedal area ${zoneNumber}`,
+        title: `${isStartPin ? 'Start' : 'End'} pedal zone ${zoneNumber}`,
       });
 
       if (onMappingZonePointMove) {

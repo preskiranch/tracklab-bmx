@@ -267,12 +267,12 @@ function normalizePoint(point: TrackPoint): TrackPoint {
   };
 }
 
-function isNoPedalZone(zone: TrackZone) {
-  return zone.type === 'recovery' || zone.type === 'technical';
+function isTrackZone(zone: TrackZone) {
+  return zone.type === 'pedal' || zone.type === 'recovery' || zone.type === 'technical';
 }
 
-function defaultNoPedalZoneName(index: number) {
-  return `No Pedal ${index + 1}`;
+function defaultPedalZoneName(index: number) {
+  return `Pedal Zone ${index + 1}`;
 }
 
 export function createTrackZones(
@@ -292,12 +292,12 @@ export function createTrackZones(
     }
 
     zones.push({
-      id: `no-pedal-zone-${zones.length + 1}`,
-      name: defaultNoPedalZoneName(zones.length),
+      id: `pedal-zone-${zones.length + 1}`,
+      name: defaultPedalZoneName(zones.length),
       startMeter,
       endMeter,
-      type: 'recovery',
-      restAfterSeconds: 0,
+      type: 'pedal',
+      restAfterSeconds: _restAfterSeconds,
     });
   }
 
@@ -368,6 +368,12 @@ function routeVariantFromTopLevelMapping(
   mapping: UserTrackMapping,
   variantId: TrackRouteVariantId = 'amateur',
 ): TrackRouteVariant {
+  const zoneBoundaryMeters = Array.isArray(mapping.zoneBoundaryMeters)
+    ? sortedUniqueBoundaries(mapping.zoneBoundaryMeters, mapping.lengthMeters)
+    : mapping.zones
+      .filter(isTrackZone)
+      .flatMap((zone) => [zone.startMeter, zone.endMeter]);
+
   return {
     id: variantId,
     name: routeVariantLabels[variantId],
@@ -376,8 +382,8 @@ function routeVariantFromTopLevelMapping(
     centerline: mapping.centerline,
     startGate: mapping.startGate,
     finishLine: mapping.finishLine,
-    zoneBoundaryMeters: mapping.zoneBoundaryMeters,
-    zones: mapping.zones,
+    zoneBoundaryMeters,
+    zones: createTrackZones(mapping.lengthMeters, zoneBoundaryMeters, [], mapping.restAfterSeconds),
     splitSections: mapping.splitSections ?? [],
   };
 }
@@ -391,7 +397,7 @@ function normalizeRouteVariant(variant: TrackRouteVariant): TrackRouteVariant {
   const zoneBoundaryMeters = Array.isArray(variant.zoneBoundaryMeters)
     ? sortedUniqueBoundaries(variant.zoneBoundaryMeters, lengthMeters)
     : variant.zones
-      .filter(isNoPedalZone)
+      .filter(isTrackZone)
       .flatMap((zone) => [zone.startMeter, zone.endMeter]);
   const restAfterSeconds = Number.isFinite(variant.restAfterSeconds) ? variant.restAfterSeconds : 1;
 
@@ -445,7 +451,7 @@ export function zoneBoundariesFromRouteVariant(variant: TrackRouteVariant) {
   }
 
   return variant.zones
-    .filter(isNoPedalZone)
+    .filter(isTrackZone)
     .flatMap((zone) => [zone.startMeter, zone.endMeter])
     .filter((meter) => meter > 0 && meter < variant.lengthMeters);
 }
@@ -547,8 +553,8 @@ export function zoneBoundariesFromMapping(mapping: UserTrackMapping) {
   }
 
   return mapping.zones
-    .slice(0, -1)
-    .map((zone) => zone.endMeter)
+    .filter(isTrackZone)
+    .flatMap((zone) => [zone.startMeter, zone.endMeter])
     .filter((meter) => meter > 0 && meter < mapping.lengthMeters);
 }
 

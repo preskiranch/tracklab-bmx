@@ -1434,10 +1434,10 @@ input:focus {
   line-height: 1.35;
 }
 
-.mapping-hint.no-pedal {
-  border-color: #f2c08a;
-  background: #fff7ed;
-  color: #713f12;
+.mapping-hint.pedal-zone {
+  border-color: #9edc86;
+  background: #f0faea;
+  color: #226212;
 }
 
 .zone-type-editor {

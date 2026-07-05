@@ -281,7 +281,7 @@ export function SessionControlPanel({
       : mappingEditMode === 'curve'
         ? 'Curve'
         : mappingEditMode === 'zones'
-          ? 'No Pedal'
+          ? 'Pedal Zones'
           : 'Split';
   const splitDrawHint = mappingMode && mappingEditMode === 'draw' && draftSplitSections.length > 0
     ? `Draw shared path: start to S1, then start again at M1 and continue to finish.`
@@ -321,7 +321,7 @@ export function SessionControlPanel({
   const canChooseSplitLine = raceState !== 'racing' && !startGateActive;
   const hasRaceSplitChoices = players.length > 0 && (track.splitSections?.length ?? 0) > 0;
   const canChooseRaceLayout = raceState !== 'racing' && !startGateActive;
-  const undoLabel = mappingEditMode === 'zones' ? 'Undo no-pedal pin' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
+  const undoLabel = mappingEditMode === 'zones' ? 'Undo pedal pin' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones'
     ? draftZonePinCount > 0
     : mappingEditMode === 'split'
@@ -612,7 +612,7 @@ export function SessionControlPanel({
                   type="button"
                   onClick={() => handleMappingEditModeChange('zones')}
                 >
-                  No Pedal
+                  Pedal Zones
                 </button>
                 <button
                   className={mappingEditMode === 'split' ? 'selected' : ''}
@@ -626,15 +626,15 @@ export function SessionControlPanel({
 
             <div className="mapping-status-row four">
               <span>{draftPointCount} route pt{draftPointCount === 1 ? '' : 's'}</span>
-              <span>{draftZoneCount} no-pedal zone{draftZoneCount === 1 ? '' : 's'}</span>
+              <span>{draftZoneCount} pedal zone{draftZoneCount === 1 ? '' : 's'}</span>
               <span>{visibleTrackDistance == null ? 'No distance' : formatDistanceMeters(visibleTrackDistance, distanceUnit)}</span>
               <span>{savedRouteVariantIds.includes(mappingRouteVariantId) ? 'Layout saved' : 'No layout saved'}</span>
             </div>
 
             {splitDrawHint && <p className="mapping-hint">{splitDrawHint}</p>}
             {mappingMode && mappingEditMode === 'zones' && (
-              <p className="mapping-hint no-pedal">
-                Tap the start and end of each no-pedal area. Everything else on the route stays pedal-enabled.
+              <p className="mapping-hint pedal-zone">
+                Tap the start and end of each pedaling zone. Unmarked sections become coasting or obstacle sections.
               </p>
             )}
 
@@ -656,24 +656,24 @@ export function SessionControlPanel({
             </div>
 
             {mappingMode && (draftZones.length > 0 || draftZonePinCount % 2 === 1) && (
-              <div className="zone-type-editor" aria-label="No-pedal zone editor">
+              <div className="zone-type-editor" aria-label="Pedaling zone editor">
                 <div className="route-layout-heading">
-                  <span>No-pedal areas</span>
-                  <small>Two pins create one disallowed pedaling section</small>
+                  <span>Pedal zones</span>
+                  <small>Two pins create one tracked pedaling section</small>
                 </div>
                 <div className="zone-type-grid">
                   {draftZones.map((zone) => (
-                    <div className="zone-type-button recovery" key={zone.id}>
+                    <div className="zone-type-button pedal" key={zone.id}>
                       <strong>{zone.name}</strong>
                       <span>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</span>
-                      <small>Pedaling disabled</small>
+                      <small>Performance tracked</small>
                     </div>
                   ))}
                   {draftZonePinCount % 2 === 1 && (
                     <div className="zone-type-button pending">
                       <strong>Set end pin</strong>
                       <span>One point selected</span>
-                      <small>Tap the end of this no-pedal area</small>
+                      <small>Tap the end of this pedal zone</small>
                     </div>
                   )}
                 </div>
@@ -900,7 +900,7 @@ export function SessionControlPanel({
                 type="button"
                 onClick={() => onIntervalModeChange('auto')}
               >
-                All no-pedal
+                All pedal zones
               </button>
               <button
                 className={intervalMode === 'manual' ? 'selected' : ''}
@@ -921,10 +921,10 @@ export function SessionControlPanel({
                     key={zone.id}
                   >
                     <span>{zone.name}</span>
-                    <small>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)} / Pedaling disabled</small>
+                    <small>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)} / Performance tracked</small>
                   </button>
                 ))}
-                {availableZones.length === 0 && <span className="empty-inline">No mapped no-pedal zones</span>}
+                {availableZones.length === 0 && <span className="empty-inline">No mapped pedal zones</span>}
               </div>
             )}
           </>
@@ -935,7 +935,7 @@ export function SessionControlPanel({
             <span className={`zone-chip ${zone.type}`} key={zone.id}>
               {zone.name}
             </span>
-          )) : <span className="empty-inline">No mapped no-pedal zones</span>}
+          )) : <span className="empty-inline">No mapped pedal zones</span>}
         </div>
       </section>
 

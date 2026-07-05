@@ -269,11 +269,11 @@ export function EarthTrackView({
                 : mappingEditMode === 'draw'
                   ? 'Draw path'
                   : mappingEditMode === 'zones'
-                    ? 'No Pedal'
+                    ? 'Pedal Zones'
                     : 'Split'}
             </span>
           )}
-          <span>{activeZones.length} no-pedal zone{activeZones.length === 1 ? '' : 's'}</span>
+          <span>{activeZones.length} pedal zone{activeZones.length === 1 ? '' : 's'}</span>
         </div>
 
         {raceViewFullscreen && startGateActive && (

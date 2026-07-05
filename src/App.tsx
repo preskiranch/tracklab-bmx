@@ -1368,7 +1368,7 @@ export default function App() {
     effectiveTrack.lengthMeters,
     activeBranchChoicesByPlayer,
     splitDecisionPoints,
-    mappedZones,
+    activeZones,
   );
   useZoneAudioCues(raceState, riders, activeZones);
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
