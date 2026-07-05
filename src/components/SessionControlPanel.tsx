@@ -113,6 +113,7 @@ type SessionControlPanelProps = {
   mappingEditMode: MappingEditMode;
   draftPointCount: number;
   draftZoneCount: number;
+  draftZones: TrackZone[];
   draftLengthMeters: number;
   draftSplitSections: TrackSplitSection[];
   draftSplitBuilder: DraftTrackSplit | null;
@@ -155,6 +156,7 @@ type SessionControlPanelProps = {
   onMappingSplitCancel: () => void;
   onMappingSplitRemove: (splitId: string) => void;
   onMappingRestSecondsChange: (seconds: number) => void;
+  onDraftZoneTypeToggle: (zoneIndex: number) => void;
   onMappingUndoPoint: () => void;
   onMappingClearDraft: () => void;
   onMappingSave: () => void;
@@ -210,6 +212,7 @@ export function SessionControlPanel({
   mappingEditMode,
   draftPointCount,
   draftZoneCount,
+  draftZones,
   draftLengthMeters,
   draftSplitSections,
   draftSplitBuilder,
@@ -252,6 +255,7 @@ export function SessionControlPanel({
   onMappingSplitCancel,
   onMappingSplitRemove,
   onMappingRestSecondsChange,
+  onDraftZoneTypeToggle,
   onMappingUndoPoint,
   onMappingClearDraft,
   onMappingSave,
@@ -277,7 +281,7 @@ export function SessionControlPanel({
       : mappingEditMode === 'curve'
         ? 'Curve'
         : mappingEditMode === 'zones'
-          ? 'Add zones'
+          ? 'Zones'
           : 'Split';
   const splitDrawHint = mappingMode && mappingEditMode === 'draw' && draftSplitSections.length > 0
     ? `Draw shared path: start to S1, then start again at M1 and continue to finish.`
@@ -608,7 +612,7 @@ export function SessionControlPanel({
                   type="button"
                   onClick={() => handleMappingEditModeChange('zones')}
                 >
-                  Add zones
+                  Zones
                 </button>
                 <button
                   className={mappingEditMode === 'split' ? 'selected' : ''}
@@ -622,7 +626,7 @@ export function SessionControlPanel({
 
             <div className="mapping-status-row four">
               <span>{draftPointCount} route pt{draftPointCount === 1 ? '' : 's'}</span>
-              <span>{draftZoneCount} sprint zone{draftZoneCount === 1 ? '' : 's'}</span>
+              <span>{draftZoneCount} track zone{draftZoneCount === 1 ? '' : 's'}</span>
               <span>{visibleTrackDistance == null ? 'No distance' : formatDistanceMeters(visibleTrackDistance, distanceUnit)}</span>
               <span>{savedRouteVariantIds.includes(mappingRouteVariantId) ? 'Layout saved' : 'No layout saved'}</span>
             </div>
@@ -645,6 +649,33 @@ export function SessionControlPanel({
                 Meters
               </button>
             </div>
+
+            {mappingMode && draftZones.length > 0 && (
+              <div className="zone-type-editor" aria-label="Pedal and coast zone editor">
+                <div className="route-layout-heading">
+                  <span>Pedal areas</span>
+                  <small>Tap a zone to switch between pedaling and coasting</small>
+                </div>
+                <div className="zone-type-grid">
+                  {draftZones.map((zone, index) => {
+                    const isCoast = zone.type === 'recovery';
+
+                    return (
+                      <button
+                        className={`zone-type-button ${isCoast ? 'recovery' : 'pedal'}`}
+                        type="button"
+                        onClick={() => onDraftZoneTypeToggle(index)}
+                        key={zone.id}
+                      >
+                        <strong>{zone.name}</strong>
+                        <span>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</span>
+                        <small>{isCoast ? 'Coast only' : 'Pedal allowed'}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {mappingMode && (
               <>
@@ -881,16 +912,16 @@ export function SessionControlPanel({
               <div className="zone-picker">
                 {availableZones.map((zone) => (
                   <button
-                    className={manualZoneIds.includes(zone.id) ? 'selected' : ''}
+                    className={`${manualZoneIds.includes(zone.id) ? 'selected' : ''} ${zone.type}`}
                     type="button"
                     onClick={() => onManualZoneToggle(zone.id)}
                     key={zone.id}
                   >
                     <span>{zone.name}</span>
-                    <small>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</small>
+                    <small>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)} / {zone.type === 'recovery' ? 'Coast' : 'Pedal'}</small>
                   </button>
                 ))}
-                {availableZones.length === 0 && <span className="empty-inline">No mapped sprint zones</span>}
+                {availableZones.length === 0 && <span className="empty-inline">No mapped zones</span>}
               </div>
             )}
           </>
@@ -901,7 +932,7 @@ export function SessionControlPanel({
             <span className={`zone-chip ${zone.type}`} key={zone.id}>
               {zone.name}
             </span>
-          )) : <span className="empty-inline">No mapped sprint zones</span>}
+          )) : <span className="empty-inline">No mapped zones</span>}
         </div>
       </section>
 

@@ -1,5 +1,5 @@
 import { proSplitMinimumMph, type SplitRouteDecisionPoint } from '../lib/trackMapping';
-import type { BikeSample, PlayerSlot, RiderState, SplitBranchChoice } from '../types';
+import type { BikeSample, PlayerSlot, RiderState, SplitBranchChoice, TrackZone } from '../types';
 import { bmxVelocityMpsFromCadence } from './bmxRollout';
 import { crossedTakeoff, surfaceAngleDeg } from './trackProfile';
 
@@ -44,6 +44,14 @@ function metricIsUsable(sample: BikeSample | null | undefined, metricAt: number 
 function coastVelocityMps(velocityMps: number, dt: number) {
   const drag = rollingFrictionMps2 + velocityMps * velocityMps * airDragPerMeter;
   return Math.max(0, velocityMps - drag * dt);
+}
+
+function zoneAtDistance(zones: TrackZone[], distanceMeters: number) {
+  return zones.find((zone) => distanceMeters >= zone.startMeter && distanceMeters < zone.endMeter);
+}
+
+function zoneAllowsDrive(zone: TrackZone | undefined) {
+  return !zone || zone.type === 'pedal';
 }
 
 function driveAccelerationMps2(
@@ -129,6 +137,7 @@ export function stepRiders(
   raceLengthMeters: number,
   branchChoicesByPlayer: BranchChoicesByPlayer = {},
   splitDecisionPoints: SplitRouteDecisionPoint[] = [],
+  trackZones: TrackZone[] = [],
 ): RiderState[] {
   const stepped = riders.map((rider) => {
     if (rider.finishedAt) {
@@ -139,10 +148,14 @@ export function stepRiders(
     const sample = player?.deviceId == null ? null : samplesByDevice.get(player.deviceId);
     const nowMs = Date.now();
     const elapsedMs = nowMs - raceStartedAt;
-    const watts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
+    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
       ? sample?.physicsWatts ?? sample?.watts ?? 0
       : 0;
-    const cadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
+    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
+    const activeZone = zoneAtDistance(trackZones, rider.distance);
+    const driveAllowed = zoneAllowsDrive(activeZone);
+    const watts = driveAllowed ? rawWatts : 0;
+    const cadence = driveAllowed ? rawCadence : 0;
 
     const wattsAverage = rider.wattsAverage * 0.94 + watts * 0.06;
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
@@ -217,8 +230,8 @@ export function stepRiders(
 
     const takeoff = crossedTakeoff(previousDistance, distance);
 
-    if (phase !== 'airborne' && takeoff && settledVelocity > 2.2 && cadence > 18) {
-      const cadenceLaunch = clamp(cadence / 110, 0.35, 1.25);
+    if (phase !== 'airborne' && takeoff && settledVelocity > 2.2 && (cadence > 18 || !driveAllowed)) {
+      const cadenceLaunch = driveAllowed ? clamp(cadence / 110, 0.35, 1.25) : 0.55;
       const speedLaunch = clamp(settledVelocity / 12, 0.45, 1.3);
       verticalVelocity = (145 + speedLaunch * 56 + cadenceLaunch * 32 + boost * 34) * takeoff.lift;
       pitch = -10 - boost * 8;

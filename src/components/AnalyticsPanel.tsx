@@ -63,6 +63,18 @@ function zoneMultiplier(zone: TrackZone) {
   return 0.78;
 }
 
+function zoneTypeLabel(zone: TrackZone) {
+  if (zone.type === 'recovery') {
+    return 'Coast';
+  }
+
+  if (zone.type === 'technical') {
+    return 'Technical';
+  }
+
+  return 'Pedal';
+}
+
 function metricValue(
   metric: MetricKey,
   zone: TrackZone,
@@ -368,7 +380,7 @@ export function AnalyticsPanel({
                 <tr key={zone.id}>
                   <td>
                     <strong>{zone.name}</strong>
-                    <span>{zone.type}</span>
+                    <span>{zoneTypeLabel(zone)}</span>
                   </td>
                   <td>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</td>
                   {players.map((player) => {

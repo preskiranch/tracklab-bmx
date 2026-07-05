@@ -9,9 +9,13 @@ export function useZoneAudioCues(
 ) {
   const previousDistanceRef = useRef(0);
   const timeoutsRef = useRef<number[]>([]);
-  const zoneSignature = useMemo(
-    () => activeZones.map((zone) => `${zone.id}:${zone.endMeter}:${zone.restAfterSeconds ?? 0}`).join('|'),
+  const pedalZones = useMemo(
+    () => activeZones.filter((zone) => zone.type === 'pedal'),
     [activeZones],
+  );
+  const zoneSignature = useMemo(
+    () => pedalZones.map((zone) => `${zone.id}:${zone.endMeter}:${zone.restAfterSeconds ?? 0}`).join('|'),
+    [pedalZones],
   );
 
   useEffect(() => {
@@ -26,7 +30,7 @@ export function useZoneAudioCues(
   }, [raceState, zoneSignature]);
 
   useEffect(() => {
-    if (raceState !== 'racing' || riders.length === 0 || activeZones.length === 0) {
+    if (raceState !== 'racing' || riders.length === 0 || pedalZones.length === 0) {
       return;
     }
 
@@ -39,7 +43,7 @@ export function useZoneAudioCues(
       return;
     }
 
-    activeZones.forEach((zone) => {
+    pedalZones.forEach((zone) => {
       const crossedZoneEnd = previousDistance < zone.endMeter && currentDistance >= zone.endMeter;
       if (!crossedZoneEnd) {
         return;
@@ -55,5 +59,5 @@ export function useZoneAudioCues(
     });
 
     previousDistanceRef.current = currentDistance;
-  }, [activeZones, raceState, riders]);
+  }, [pedalZones, raceState, riders]);
 }

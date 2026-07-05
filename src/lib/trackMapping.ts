@@ -267,6 +267,46 @@ function normalizePoint(point: TrackPoint): TrackPoint {
   };
 }
 
+function normalizeZoneType(type: TrackZone['type'] | undefined): TrackZone['type'] {
+  return type === 'recovery' || type === 'technical' ? type : 'pedal';
+}
+
+function defaultZoneName(type: TrackZone['type'], index: number) {
+  if (type === 'recovery') {
+    return `Coast ${index + 1}`;
+  }
+
+  if (type === 'technical') {
+    return `Technical ${index + 1}`;
+  }
+
+  return `Pedal ${index + 1}`;
+}
+
+export function createTrackZones(
+  lengthMeters: number,
+  zoneBoundaryMeters: number[] = [],
+  zoneTypes: TrackZone['type'][] = [],
+  restAfterSeconds = 1,
+): TrackZone[] {
+  const cleanBoundaries = sortedUniqueBoundaries(zoneBoundaryMeters, lengthMeters);
+  const zoneBreaks = [0, ...cleanBoundaries, Math.round(lengthMeters)];
+
+  return zoneBreaks.slice(1).map((boundary, index) => {
+    const type = normalizeZoneType(zoneTypes[index]);
+    const isLastZone = index === zoneBreaks.length - 2;
+
+    return {
+      id: `user-zone-${index + 1}`,
+      name: defaultZoneName(type, index),
+      startMeter: zoneBreaks[index],
+      endMeter: Math.max(zoneBreaks[index] + 1, boundary),
+      type,
+      restAfterSeconds: type === 'pedal' && !isLastZone ? restAfterSeconds : 0,
+    };
+  });
+}
+
 function normalizeSplitSection(section: TrackSplitSection): TrackSplitSection {
   const splitPoint = normalizePoint(section.splitPoint);
   const mergePoint = normalizePoint(section.mergePoint);
@@ -303,6 +343,7 @@ function createTrackRouteVariant(
   restAfterSeconds: number,
   zoneBoundaryMeters: number[] = [],
   splitSections: TrackSplitSection[] = [],
+  zoneTypes: TrackZone['type'][] = [],
 ): TrackRouteVariant {
   const centerline = points.map(normalizePoint);
   const normalizedSplitSections = splitSections.map(normalizeSplitSection);
@@ -310,15 +351,7 @@ function createTrackRouteVariant(
   const distances = cumulativeMeters(measurableRoute);
   const lengthMeters = Math.max(1, distances[distances.length - 1] ?? track.lengthMeters);
   const cleanBoundaries = sortedUniqueBoundaries(zoneBoundaryMeters, lengthMeters);
-  const zoneBreaks = [0, ...cleanBoundaries, Math.round(lengthMeters)];
-  const zones: TrackZone[] = zoneBreaks.slice(1).map((boundary, index) => ({
-    id: `user-zone-${index + 1}`,
-    name: `Sprint ${index + 1}`,
-    startMeter: zoneBreaks[index],
-    endMeter: Math.max(zoneBreaks[index] + 1, boundary),
-    type: 'pedal',
-    restAfterSeconds: index === zoneBreaks.length - 2 ? 0 : restAfterSeconds,
-  }));
+  const zones = createTrackZones(lengthMeters, cleanBoundaries, zoneTypes, restAfterSeconds);
 
   return {
     id: variantId,
@@ -361,17 +394,19 @@ function normalizeRouteVariant(variant: TrackRouteVariant): TrackRouteVariant {
   const zoneBoundaryMeters = Array.isArray(variant.zoneBoundaryMeters)
     ? sortedUniqueBoundaries(variant.zoneBoundaryMeters, lengthMeters)
     : variant.zones.slice(0, -1).map((zone) => zone.endMeter);
+  const zoneTypes = variant.zones.map((zone) => normalizeZoneType(zone.type));
+  const restAfterSeconds = Number.isFinite(variant.restAfterSeconds) ? variant.restAfterSeconds : 1;
 
   return {
     id: variantId,
     name: variant.name || routeVariantLabels[variantId],
-    restAfterSeconds: Number.isFinite(variant.restAfterSeconds) ? variant.restAfterSeconds : 1,
+    restAfterSeconds,
     lengthMeters,
     centerline,
     startGate: variant.startGate ? normalizePoint(variant.startGate) : centerline[0],
     finishLine: variant.finishLine ? normalizePoint(variant.finishLine) : centerline[centerline.length - 1],
     zoneBoundaryMeters,
-    zones: variant.zones,
+    zones: createTrackZones(lengthMeters, zoneBoundaryMeters, zoneTypes, restAfterSeconds),
     splitSections,
   };
 }
@@ -417,6 +452,14 @@ export function zoneBoundariesFromRouteVariant(variant: TrackRouteVariant) {
     .filter((meter) => meter > 0 && meter < variant.lengthMeters);
 }
 
+export function zoneTypesFromRouteVariant(variant: TrackRouteVariant) {
+  const zoneCount = zoneBoundariesFromRouteVariant(variant).length + 1;
+
+  return Array.from({ length: zoneCount }, (_, index) => (
+    normalizeZoneType(variant.zones[index]?.type)
+  ));
+}
+
 export function createUserTrackMapping(
   track: TrackRecord,
   points: TrackPoint[],
@@ -425,8 +468,17 @@ export function createUserTrackMapping(
   splitSections: TrackSplitSection[] = [],
   routeVariantId?: TrackRouteVariantId,
   existingRouteVariants: TrackRouteVariant[] = [],
+  zoneTypes: TrackZone['type'][] = [],
 ): UserTrackMapping {
-  const primaryVariant = createTrackRouteVariant(track, routeVariantId ?? 'amateur', points, restAfterSeconds, zoneBoundaryMeters, splitSections);
+  const primaryVariant = createTrackRouteVariant(
+    track,
+    routeVariantId ?? 'amateur',
+    points,
+    restAfterSeconds,
+    zoneBoundaryMeters,
+    splitSections,
+    zoneTypes,
+  );
   const routeVariants = routeVariantId
     ? routeVariantOrder
       .map((variantId) => (
