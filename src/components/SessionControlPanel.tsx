@@ -314,9 +314,9 @@ export function SessionControlPanel({
     })
     : [];
   const splitBranchOneReady = Boolean(draftSplitBranchMetrics[0]?.ready);
-  const canChooseSplitLine = raceState === 'ready' && !startGateActive;
+  const canChooseSplitLine = raceState !== 'racing' && !startGateActive;
   const hasRaceSplitChoices = players.length > 0 && (track.splitSections?.length ?? 0) > 0;
-  const canChooseRaceLayout = raceState === 'ready' && !startGateActive;
+  const canChooseRaceLayout = raceState !== 'racing' && !startGateActive;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo zone' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const canUndoMapping = mappingEditMode === 'zones'
     ? draftZoneCount > 1
