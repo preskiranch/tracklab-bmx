@@ -107,6 +107,17 @@ const riderFrontTireInset = 1;
 const riderGroundContactInset = 1;
 const riderStartSetbackMeters = 2.2;
 const riderStartSetbackBlendMeters = 5;
+const riderLaneSpacingMeters = 2;
+const riderLaneMaxSpreadMeters = 10.5;
+const remoteRiderLaneOffsetBaseMeters = 5.8;
+const remoteRiderLaneSpacingMeters = 1.4;
+const savedRouteStrokeWeight = 6;
+const mappingRouteHaloStrokeWeight = 25;
+const mappingRouteCoreStrokeWeight = 7;
+const mappingPedalZoneStrokeWeight = 14;
+const mappingSplitBranchStrokeWeight = 11;
+const racePedalZoneStrokeWeight = 10;
+const defaultPedalZoneStrokeWeight = 11;
 const finishStripeWidthMeters = 9;
 const finishLabelOffsetMeters = 30;
 
@@ -394,6 +405,38 @@ function offsetTrackPoint(point: TrackPoint, bearingDegrees: number, meters: num
     lat: lat2 * (180 / Math.PI),
     lng: lng2 * (180 / Math.PI),
   };
+}
+
+function riderLaneOffsetsByPlayer(players: PlayerSlot[]) {
+  const sortedPlayers = [...players].sort((a, b) => a.id - b.id);
+  const offsetByPlayer = new Map<PlayerId, number>();
+  if (sortedPlayers.length <= 1) {
+    sortedPlayers.forEach((player) => offsetByPlayer.set(player.id, 0));
+    return offsetByPlayer;
+  }
+
+  const spacing = Math.min(riderLaneSpacingMeters, riderLaneMaxSpreadMeters / (sortedPlayers.length - 1));
+  const midpoint = (sortedPlayers.length - 1) / 2;
+  sortedPlayers.forEach((player, index) => {
+    offsetByPlayer.set(player.id, (index - midpoint) * spacing);
+  });
+
+  return offsetByPlayer;
+}
+
+function remoteRiderLaneOffset(remoteIndex: number) {
+  const side = remoteIndex % 2 === 0 ? 1 : -1;
+  const band = Math.floor(remoteIndex / 2);
+  return side * (remoteRiderLaneOffsetBaseMeters + band * remoteRiderLaneSpacingMeters);
+}
+
+function offsetRiderMapPosition(position: TrackPoint, bearingDegrees: number, lateralMeters: number) {
+  if (Math.abs(lateralMeters) < 0.05) {
+    return position;
+  }
+
+  const sideBearing = normalizeHeading(bearingDegrees + (lateralMeters > 0 ? 90 : -90));
+  return offsetTrackPoint(position, sideBearing, Math.abs(lateralMeters));
 }
 
 function bearingDegreesBetween(start: TrackPoint, end: TrackPoint) {
@@ -961,7 +1004,7 @@ export function GoogleMapsTrackLayer({
           path: segment,
           strokeColor: '#d8ff3e',
           strokeOpacity: 0.88,
-          strokeWeight: 5,
+          strokeWeight: savedRouteStrokeWeight,
         }));
     }
 
@@ -992,7 +1035,7 @@ export function GoogleMapsTrackLayer({
           path,
           strokeColor: zoneColors[zone.type],
           strokeOpacity: raceState === 'racing' ? 0.72 : 0.82,
-          strokeWeight: raceState === 'racing' ? 7 : 8,
+          strokeWeight: raceState === 'racing' ? racePedalZoneStrokeWeight : defaultPedalZoneStrokeWeight,
           zIndex: raceState === 'racing' ? 430 : 515,
         }));
     }
@@ -1181,14 +1224,26 @@ export function GoogleMapsTrackLayer({
     if (showMappingDraft && draftPoints.length > 1) {
       draftLineRefs.current = draftSharedSegments
         .filter((segment) => segment.length > 1)
-        .map((segment) => new google.maps.Polyline({
-          clickable: false,
-          map,
-          path: segment,
-          strokeColor: draftRouteColor,
-          strokeOpacity: 0.96,
-          strokeWeight: 5,
-        }));
+        .flatMap((segment) => [
+          new google.maps.Polyline({
+            clickable: false,
+            map,
+            path: segment,
+            strokeColor: draftRouteColor,
+            strokeOpacity: 0.22,
+            strokeWeight: mappingRouteHaloStrokeWeight,
+            zIndex: 530,
+          }),
+          new google.maps.Polyline({
+            clickable: false,
+            map,
+            path: segment,
+            strokeColor: draftRouteColor,
+            strokeOpacity: 0.96,
+            strokeWeight: mappingRouteCoreStrokeWeight,
+            zIndex: 531,
+          }),
+        ]);
     }
 
     const draftLengthMeters = routeLengthWithDefaultSplitBranches(draftPoints, activeDraftRouteSplitSections);
@@ -1226,7 +1281,7 @@ export function GoogleMapsTrackLayer({
         path,
         strokeColor: pedalZoneColor,
         strokeOpacity: 0.72,
-        strokeWeight: 8,
+        strokeWeight: mappingPedalZoneStrokeWeight,
         zIndex: 552,
       }));
     draftLineRefs.current = [...draftLineRefs.current, ...draftPedalLines];
@@ -1365,7 +1420,7 @@ export function GoogleMapsTrackLayer({
           path: branch.points,
           strokeColor: branch.id === 'a' ? '#ff2d55' : '#38bdf8',
           strokeOpacity: draft ? 0.96 : 0.82,
-          strokeWeight: draft ? 7 : 5,
+          strokeWeight: draft ? mappingSplitBranchStrokeWeight : savedRouteStrokeWeight,
         }));
       });
 
@@ -1417,7 +1472,7 @@ export function GoogleMapsTrackLayer({
             path: branchA,
             strokeColor: '#ff2d55',
             strokeOpacity: 0.98,
-            strokeWeight: 7,
+            strokeWeight: mappingSplitBranchStrokeWeight,
           }));
         }
         if (branchB.length > 1) {
@@ -1427,7 +1482,7 @@ export function GoogleMapsTrackLayer({
             path: branchB,
             strokeColor: '#38bdf8',
             strokeOpacity: 0.98,
-            strokeWeight: 7,
+            strokeWeight: mappingSplitBranchStrokeWeight,
           }));
         }
 
@@ -1641,7 +1696,7 @@ export function GoogleMapsTrackLayer({
         path: [point],
         strokeColor: draftRouteColor,
         strokeOpacity: 0.88,
-        strokeWeight: 7,
+        strokeWeight: mappingRouteCoreStrokeWeight,
         zIndex: 980,
       });
       container.setPointerCapture?.(event.pointerId);
@@ -1820,6 +1875,8 @@ export function GoogleMapsTrackLayer({
       }
     });
 
+    const laneOffsetsByPlayer = riderLaneOffsetsByPlayer(players);
+
     riders.forEach((rider) => {
       const player = players.find((slot) => slot.id === rider.playerId);
       if (!player) {
@@ -1839,15 +1896,20 @@ export function GoogleMapsTrackLayer({
 
       const rotation = riderScreenRotation(pose.bearing, earthHeading);
       const title = `${player.name} / ${label}`;
+      const position = offsetRiderMapPosition(
+        pose.position,
+        pose.bearing,
+        laneOffsetsByPlayer.get(player.id) ?? 0,
+      );
 
       if (existing) {
-        existing.setPosition(pose.position);
+        existing.setPosition(position);
         existing.setRotation(rotation);
         existing.setTitle(title);
         return;
       }
 
-      const marker = createRiderMapMarker(google, map, player, pose.position, rotation, title);
+      const marker = createRiderMapMarker(google, map, player, position, rotation, title);
       markerRefs.current.set(player.id, marker);
     });
   }, [earthHeading, players, riders, samplesByDevice, speedUnit, status, track]);
@@ -1887,9 +1949,14 @@ export function GoogleMapsTrackLayer({
         const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
         const rotation = riderScreenRotation(pose.bearing, earthHeading);
         const title = `${rider.name} / ${label} / remote`;
+        const position = offsetRiderMapPosition(
+          pose.position,
+          pose.bearing,
+          remoteRiderLaneOffset(remoteIndex),
+        );
 
         if (existing) {
-          existing.setPosition(pose.position);
+          existing.setPosition(position);
           existing.setRotation(rotation);
           existing.setTitle(title);
         } else {
@@ -1897,7 +1964,7 @@ export function GoogleMapsTrackLayer({
             google,
             map,
             remotePlayer,
-            pose.position,
+            position,
             rotation,
             title,
             labelText,
