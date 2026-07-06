@@ -20,6 +20,7 @@ import {
 import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { DiagnosticsPanel, type CloudUserDataStatus } from './components/DiagnosticsPanel';
 import { EarthTrackView } from './components/EarthTrackView';
+import { MembershipLanding } from './components/MembershipLanding';
 import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
 import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
@@ -76,6 +77,13 @@ import {
 } from './lib/googleMaps';
 import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
 import { patchCloudUserData, readCloudUserData } from './lib/cloudUserData';
+import {
+  benchmarkDemoTrackId,
+  createMembership,
+  readStoredMembership,
+  writeStoredMembership,
+  type MembershipState,
+} from './lib/membership';
 import { createInitialRiders } from './game/physics';
 import { useRaceEngine } from './hooks/useRaceEngine';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
@@ -118,6 +126,7 @@ const customRouteInitialAngle = 0;
 const customRouteInitialHeading = 0;
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
+type CheckoutStatus = 'idle' | 'loading' | 'error';
 type SplitBranchId = TrackSplitBranch['id'];
 type RaceRouteVariantId = TrackRouteVariantId;
 type CustomRoutePreview = {
@@ -864,6 +873,10 @@ export default function App() {
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const customRoutePreviewRequestIdRef = useRef(0);
   const customRoutePreviewTrackIdRef = useRef<string | null>(null);
+  const initialMembershipRef = useRef<MembershipState | null>(null);
+  if (initialMembershipRef.current === null) {
+    initialMembershipRef.current = readStoredMembership();
+  }
   const [initialRequestedTrackId] = useState(readRequestedTrackId);
   const [initialCustomRoutes] = useState<TrackRecord[]>(readStoredCustomRoutes);
   const pendingInitialTrackIdRef = useRef(initialRequestedTrackId);
@@ -891,6 +904,11 @@ export default function App() {
   const [demoSignalsStopped, setDemoSignalsStopped] = useState(false);
   const [earthCamerasByTrack, setEarthCamerasByTrack] = useState<Record<string, EarthCamera>>(readStoredEarthCameras);
   const [appMode, setAppMode] = useState<AppMode>('race');
+  const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
+  const [showMembershipLanding, setShowMembershipLanding] = useState(() => initialMembershipRef.current?.tier === 'visitor');
+  const [checkoutBikeSeats, setCheckoutBikeSeats] = useState(() => Math.max(1, Math.min(maxPlayers, initialMembershipRef.current?.bikeSeats ?? 1)));
+  const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>('idle');
+  const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
   const [speedUnit, setSpeedUnit] = useState<SpeedUnit>(readStoredSpeedUnit);
   const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>(readStoredDistanceUnit);
   const [now, setNow] = useState(Date.now());
@@ -955,6 +973,10 @@ export default function App() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    writeStoredMembership(membership);
+  }, [membership]);
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('room')) {
@@ -3082,6 +3104,13 @@ export default function App() {
   };
 
   const handleBikeConnectionSourceChange = (source: BikeConnectionSource) => {
+    if (source !== 'demo' && membership.tier !== 'racer') {
+      setCheckoutMessage('Racer membership is required to connect live Wattbikes.');
+      setCheckoutStatus('idle');
+      setShowMembershipLanding(true);
+      return;
+    }
+
     if (source === 'demo') {
       handleDemoModeChange(true, 'demo');
       return;
@@ -3103,6 +3132,74 @@ export default function App() {
     setDemoSignalsStopped(false);
     resetRace();
   };
+
+  const openFreeSpectatorAccess = useCallback(() => {
+    const nextMembership = createMembership('spectator', 1);
+    setMembership(nextMembership);
+    setCheckoutMessage(null);
+    setCheckoutStatus('idle');
+    setShowMembershipLanding(false);
+    setPlayMode('multiplayer');
+    setAppMode('race');
+  }, []);
+
+  const startBenchmarkDemo = useCallback(() => {
+    const nextMembership = membership.tier === 'visitor' ? createMembership('spectator', 1) : membership;
+    setMembership(nextMembership);
+    setCheckoutMessage(null);
+    setCheckoutStatus('idle');
+    setShowMembershipLanding(false);
+    setPlayMode('multiplayer');
+    handleTrackChange(benchmarkDemoTrackId);
+    handleDemoBikeCountChange(Math.min(4, maxPlayers));
+    handleDemoModeChange(true, 'demo');
+    setAppMode('race');
+  }, [membership]);
+
+  const openRaceDashboard = useCallback(() => {
+    if (membership.tier === 'visitor') {
+      setMembership(createMembership('spectator', 1));
+    }
+    setCheckoutMessage(null);
+    setCheckoutStatus('idle');
+    setShowMembershipLanding(false);
+    setAppMode('race');
+  }, [membership.tier]);
+
+  const handleCheckoutBikeSeatsChange = useCallback((bikeSeats: number) => {
+    setCheckoutBikeSeats(Math.max(1, Math.min(maxPlayers, Math.round(bikeSeats))));
+    setCheckoutMessage(null);
+    setCheckoutStatus('idle');
+  }, []);
+
+  const startSquareCheckout = useCallback(async () => {
+    setCheckoutStatus('loading');
+    setCheckoutMessage(null);
+
+    try {
+      const response = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bikeSeats: checkoutBikeSeats,
+          profileKey: cloudProfileKey,
+        }),
+      });
+      const payload = await response.json() as { checkoutUrl?: string; error?: string };
+      if (!response.ok || !payload.checkoutUrl) {
+        throw new Error(payload.error ?? `Checkout request returned ${response.status}`);
+      }
+
+      window.location.assign(payload.checkoutUrl);
+    } catch (error) {
+      setCheckoutStatus('error');
+      setCheckoutMessage(
+        error instanceof Error
+          ? error.message
+          : 'Square checkout is not available right now.',
+      );
+    }
+  }, [checkoutBikeSeats, cloudProfileKey]);
 
   const prepareNoBikeDemoTest = useCallback(() => {
     clearStartGateSequence();
@@ -3413,7 +3510,13 @@ export default function App() {
   })();
   const bridgeBusy = bridge.sourceState === 'starting' || bridge.sourceState === 'stopping';
   const bridgeRunning = bridge.sourceState === 'running';
-  const bridgeButtonDisabled = demoMode || bikeConnectionSource !== 'advanced' || bridge.connection !== 'open' || bridgeBusy;
+  const liveBikeAccessLocked = membership.tier !== 'racer';
+  const showLiveBikeUpgrade = () => {
+    setCheckoutMessage('Upgrade to Racer to connect live Wattbikes.');
+    setCheckoutStatus('idle');
+    setShowMembershipLanding(true);
+  };
+  const bridgeButtonDisabled = liveBikeAccessLocked || demoMode || bikeConnectionSource !== 'advanced' || bridge.connection !== 'open' || bridgeBusy;
   const bridgeButtonLabel = bridgeBusy
     ? bridge.sourceState === 'stopping' ? 'Stopping Connector' : 'Starting Connector'
     : bridgeRunning ? 'Stop Connector' : 'Start Connector';
@@ -3462,6 +3565,29 @@ export default function App() {
         ? 'Press Connect Wattbike to pair Bluetooth bikes. Riders appear only after live bike data is detected.'
         : 'Direct Bluetooth is unavailable in this browser. Use Advanced Connector for ANT+/USB or open the site in a supported browser.';
   const pairingDeviceLabel = bikeConnectionSource === 'advanced' ? 'ANT+ / USB device' : 'Bluetooth bike';
+  const membershipLabel = membership.tier === 'racer'
+    ? `Racer / ${membership.bikeSeats} bike${membership.bikeSeats === 1 ? '' : 's'}`
+    : membership.tier === 'spectator'
+      ? 'Free spectator'
+      : 'Visitor';
+
+  if (showMembershipLanding) {
+    return (
+      <MembershipLanding
+        membership={membership}
+        bikeSeats={checkoutBikeSeats}
+        checkoutStatus={checkoutStatus}
+        checkoutMessage={checkoutMessage}
+        onlineRiderCount={multiplayer.onlineRiders.length}
+        liveRoomCount={multiplayer.rooms.length}
+        onJoinFree={openFreeSpectatorAccess}
+        onEnterApp={openRaceDashboard}
+        onStartDemo={startBenchmarkDemo}
+        onBikeSeatsChange={handleCheckoutBikeSeatsChange}
+        onCheckout={startSquareCheckout}
+      />
+    );
+  }
 
   return (
     <div
@@ -3518,11 +3644,11 @@ export default function App() {
             <button
               className="bluetooth-connect-button"
               type="button"
-              onClick={bluetooth.connectBike}
+              onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : bluetooth.connectBike}
               disabled={!bluetooth.supported}
             >
               <Bluetooth size={16} />
-              <span>{bluetooth.connectedCount > 0 ? 'Connect Another Wattbike' : 'Connect Wattbike'}</span>
+              <span>{liveBikeAccessLocked ? 'Upgrade to Connect' : bluetooth.connectedCount > 0 ? 'Connect Another Wattbike' : 'Connect Wattbike'}</span>
             </button>
           )}
           {bikeConnectionSource === 'advanced' && !demoMode && (
@@ -3547,6 +3673,10 @@ export default function App() {
         </section>
 
         <nav className="side-nav" aria-label="Primary">
+          <button type="button" onClick={() => setShowMembershipLanding(true)}>
+            <Globe2 size={17} />
+            Community
+          </button>
           <button className={appMode === 'race' ? 'selected' : ''} type="button" onClick={() => setAppMode('race')}>
             <Activity size={17} />
             Dashboard
@@ -3573,13 +3703,22 @@ export default function App() {
           </button>
         </nav>
 
+        <section className="membership-mini-card">
+          <span className="eyebrow">Membership</span>
+          <strong>{membershipLabel}</strong>
+          <p>{membership.tier === 'racer' ? 'Live Wattbike racing unlocked.' : 'Demo and live viewing access.'}</p>
+          <button type="button" onClick={() => setShowMembershipLanding(true)}>
+            {membership.tier === 'racer' ? 'Manage Access' : 'Upgrade'}
+          </button>
+        </section>
+
         <PairingRail
           players={pairingPlayers}
           samplesByDevice={samplesByDevice}
           onAssign={demoMode ? () => undefined : assignDevice}
           onAutoAssign={demoMode ? () => undefined : autoAssign}
           onRename={demoMode ? undefined : renamePlayer}
-          onBluetoothConnect={showBluetoothPairing ? bluetooth.connectBike : undefined}
+          onBluetoothConnect={showBluetoothPairing && !liveBikeAccessLocked ? bluetooth.connectBike : undefined}
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}
           bluetoothDeviceCount={bluetooth.connectedCount}

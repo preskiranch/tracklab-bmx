@@ -108,6 +108,49 @@ Bluetooth. To stay connected, leave the local bridge running and keep the
 Wattbike monitor awake. If a monitor goes idle, start pedaling again and the
 same remembered device ID will be matched when it broadcasts.
 
+## Membership And Square Billing
+
+TrackLab now opens with a membership page before the race dashboard. Free
+spectator membership can view live rooms and run demo mode on the benchmark
+track. Racer membership unlocks live Wattbike connection, private race rooms,
+challenges, and race analytics.
+
+Racer pricing is:
+
+- 1 Wattbike: `$9.99/month`
+- 2 Wattbikes: `$14.98/month`
+- 3 Wattbikes: `$19.97/month`
+- 4 Wattbikes: `$24.96/month`
+
+Square Checkout is server-side only. The browser posts the selected bike count
+to `/api/billing/checkout`, the Render server creates a Square hosted checkout
+link, and the browser redirects to Square. Do not put Square access tokens in
+Vite/frontend environment variables.
+
+Square setup:
+
+1. In Square, create four monthly subscription plan variations for the Racer
+   product at the prices above.
+2. Copy each subscription plan variation ID.
+3. Add these Render environment variables:
+
+```text
+SQUARE_ENVIRONMENT=production
+SQUARE_VERSION=2025-10-16
+SQUARE_ACCESS_TOKEN=...
+SQUARE_LOCATION_ID=...
+SQUARE_RACER_PLAN_VARIATION_1_BIKE=...
+SQUARE_RACER_PLAN_VARIATION_2_BIKES=...
+SQUARE_RACER_PLAN_VARIATION_3_BIKES=...
+SQUARE_RACER_PLAN_VARIATION_4_BIKES=...
+```
+
+Use `SQUARE_ENVIRONMENT=sandbox` and Square sandbox plan variation IDs while
+testing. The current benchmark activates the local Racer entitlement after a
+successful Square redirect. The production enforcement step is to add Square
+webhooks and a real account table so subscription status is verified on every
+login/device.
+
 ## Wattbike Monitor Control
 
 The race UI now sends three monitor-control commands to the local bridge:

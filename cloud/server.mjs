@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
+import { createRacerSubscriptionCheckout, racerMonthlyCents, squareCheckoutConfigStatus } from './squareBilling.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(__dirname, '..');
@@ -16,6 +17,7 @@ const clients = new Map();
 const rooms = new Map();
 const challenges = new Map();
 const persistedRaceResultKeys = new Set();
+const maxRaceBikeCount = 4;
 
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -179,14 +181,14 @@ function sanitizeRaceState(value, client, room) {
   }
 
   const riders = Array.isArray(value.riders)
-    ? value.riders.slice(0, 8).map((rider, index) => {
+    ? value.riders.slice(0, maxRaceBikeCount).map((rider, index) => {
       const colorName = ['lime', 'red', 'blue', 'yellow'].includes(rider?.colorName)
         ? rider.colorName
         : ['lime', 'red', 'blue', 'yellow'][index % 4];
 
       return {
         id: sanitizeText(rider?.id, `${client.id}:${index + 1}`, 120),
-        playerId: Math.max(1, Math.min(8, Math.round(finiteNumber(rider?.playerId, index + 1)))),
+        playerId: Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(rider?.playerId, index + 1)))),
         name: sanitizeText(rider?.name, `${client.name} ${index + 1}`, 64),
         colorName,
         accent: sanitizeText(rider?.accent, '#7ade36', 24),
@@ -418,7 +420,7 @@ async function handleClientMessage(client, rawMessage) {
     client.guestKey = sanitizeGuestKey(message.guestKey, client.guestKey);
     client.name = sanitizeText(message.name, client.name, 64);
     client.available = Boolean(message.available);
-    client.bikeCount = Math.max(0, Math.min(8, Number(message.bikeCount) || 0));
+    client.bikeCount = Math.max(0, Math.min(maxRaceBikeCount, Number(message.bikeCount) || 0));
     client.track = sanitizeTrack(message.track ?? client.track);
     client.lastSeen = Date.now();
     void persistence.upsertProfile(client);
@@ -633,6 +635,38 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/billing/config') {
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+    response.end(JSON.stringify(squareCheckoutConfigStatus()));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/billing/checkout') {
+    if (request.method !== 'POST') {
+      response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'Method not allowed' }));
+      return;
+    }
+
+    try {
+      const payload = await readJsonBody(request, 32_000);
+      const bikeSeats = Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(payload.bikeSeats, 1))));
+      const profileKey = sanitizeGuestKey(payload.profileKey, '');
+      const originHeader = request.headers.origin || `http://${request.headers.host}`;
+      const checkout = await createRacerSubscriptionCheckout({ bikeSeats, profileKey, origin: originHeader });
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+      response.end(JSON.stringify(checkout));
+    } catch (error) {
+      const statusCode = Number(error?.statusCode) || 500;
+      response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+      response.end(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        config: statusCode === 503 ? squareCheckoutConfigStatus() : undefined,
+      }));
+    }
+    return;
+  }
+
   if (requestUrl.pathname === '/api/multiplayer/health') {
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({
@@ -641,6 +675,11 @@ async function serveStatic(request, response) {
       rooms: rooms.size,
       persistence: persistence.persistenceEnabled(),
       websocketPath,
+      billing: {
+        configured: squareCheckoutConfigStatus().configured,
+        oneBikeMonthlyCents: racerMonthlyCents(1),
+        fourBikeMonthlyCents: racerMonthlyCents(maxRaceBikeCount),
+      },
     }));
     return;
   }
