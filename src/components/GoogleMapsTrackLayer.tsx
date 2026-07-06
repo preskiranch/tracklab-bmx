@@ -406,6 +406,20 @@ function distanceLabelIcon(text: string, color = '#111827') {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
+function pedalZoneNumberIcon(zoneNumber: number) {
+  const text = String(zoneNumber);
+  const fontSize = text.length > 1 ? 11 : 13;
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+      <circle cx="15" cy="15" r="13" fill="${pedalZoneColor}" fill-opacity="0.96" stroke="#ffffff" stroke-width="2"/>
+      <circle cx="15" cy="15" r="13" fill="none" stroke="#111827" stroke-opacity="0.32" stroke-width="1"/>
+      <text x="15" y="19" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${fontSize}" font-weight="900" fill="#111827">${text}</text>
+    </svg>
+  `;
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
 function offsetTrackPoint(point: TrackPoint, bearingDegrees: number, meters: number): TrackPoint {
   const earthRadiusMeters = 6371008.8;
   const angularDistance = meters / earthRadiusMeters;
@@ -1150,9 +1164,9 @@ export function GoogleMapsTrackLayer({
       const distance = Math.max(0, zone.endMeter - zone.startMeter);
       distanceLabelRefs.current.push(new google.maps.Marker({
         icon: {
-          anchor: new google.maps.Point(43, 13),
-          scaledSize: new google.maps.Size(86, 26),
-          url: distanceLabelIcon(`PEDAL ${index + 1}`, zoneColors[zone.type]),
+          anchor: new google.maps.Point(15, 15),
+          scaledSize: new google.maps.Size(30, 30),
+          url: pedalZoneNumberIcon(index + 1),
         },
         map,
         optimized: false,
@@ -1370,9 +1384,9 @@ export function GoogleMapsTrackLayer({
 
       return new google.maps.Marker({
         icon: {
-          anchor: new google.maps.Point(43, 13),
-          scaledSize: new google.maps.Size(86, 26),
-          url: distanceLabelIcon(`PEDAL ${index + 1}`, pedalZoneColor),
+          anchor: new google.maps.Point(15, 15),
+          scaledSize: new google.maps.Size(30, 30),
+          url: pedalZoneNumberIcon(index + 1),
         },
         map,
         optimized: false,
