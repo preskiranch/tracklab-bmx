@@ -4,7 +4,7 @@ import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 import { wattbikeProAirHighWattsFromCadence } from '../game/wattbikePowerTable';
 import type { BikeSample, PlayerSlot } from '../types';
 
-export const demoDeviceIds = [91001, 91002, 91003, 91004, 91005, 91006, 91007, 91008] as const;
+export const demoDeviceIds = [91001, 91002, 91003, 91004] as const;
 
 export const demoRaceVariableNames = [
   'launchSnap',

@@ -107,10 +107,10 @@ const riderFrontTireInset = 1;
 const riderGroundContactInset = 1;
 const riderStartSetbackMeters = 2.2;
 const riderStartSetbackBlendMeters = 5;
-const riderLaneSpacingMeters = 1.25;
-const riderLaneMaxSpreadMeters = 6.5;
-const remoteRiderLaneOffsetBaseMeters = 3.8;
-const remoteRiderLaneSpacingMeters = 0.9;
+const riderLaneSpacingMeters = 1.1;
+const riderLaneMaxSpreadMeters = 4.4;
+const remoteRiderLaneOffsetBaseMeters = 3.2;
+const remoteRiderLaneSpacingMeters = 0.7;
 const savedRouteStrokeWeight = 6;
 const mappingRouteHaloStrokeWeight = 25;
 const mappingRouteCoreStrokeWeight = 7;
@@ -1938,7 +1938,7 @@ export function GoogleMapsTrackLayer({
         }
 
         const remotePlayer: PlayerSlot = {
-          id: ((remoteIndex % 8) + 1) as PlayerId,
+          id: ((remoteIndex % 4) + 1) as PlayerId,
           name: rider.name,
           colorName: rider.colorName,
           accent: rider.accent,

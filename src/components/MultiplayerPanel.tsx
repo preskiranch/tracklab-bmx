@@ -140,7 +140,7 @@ export function MultiplayerPanel({
   const multiplayerOnline = playMode === 'multiplayer' && connection === 'open';
   const availableRiders = onlineRiders
     .filter((rider) => rider.id !== currentUserId && rider.available)
-    .slice(0, 8);
+    .slice(0, maxPlayers);
   const displayedMessages = playMode === 'multiplayer' && currentRoom
     ? roomMessages.map((message) => ({
       id: message.id,
@@ -151,7 +151,7 @@ export function MultiplayerPanel({
     : chatMessages;
   const remoteTelemetryRows = remoteRaceStates
     .flatMap((state) => state.riders.map((rider) => ({ state, rider })))
-    .slice(0, 8);
+    .slice(0, maxPlayers);
 
   return (
     <aside className="multiplayer-panel">

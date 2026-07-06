@@ -74,7 +74,7 @@ export type BikeSampleMessage = BikeSample & {
 
 export type BridgeMessage = BridgeStatusMessage | BridgeErrorMessage | BikeSampleMessage | BikeControlResultMessage;
 
-export type PlayerId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type PlayerId = 1 | 2 | 3 | 4;
 export type PlayerColorName = 'lime' | 'red' | 'blue' | 'yellow';
 export type SplitBranchChoice = 'a' | 'b';
 

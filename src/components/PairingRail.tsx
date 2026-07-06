@@ -43,7 +43,7 @@ export function PairingRail({
   emptyMessage = 'Pedal a Wattbike for a few seconds so the Advanced Connector can detect it.',
   deviceLabel = 'ANT device',
   readOnly = false,
-  maxPlayers = 8,
+  maxPlayers = 4,
 }: PairingRailProps) {
   const detectedDevices = [...samplesByDevice.values()].sort((a, b) => a.deviceId - b.deviceId);
 
