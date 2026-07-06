@@ -129,10 +129,18 @@ Vite/frontend environment variables.
 
 Square setup:
 
-1. In Square, create four monthly subscription plan variations for the Racer
-   product at the prices above.
-2. Copy each subscription plan variation ID.
-3. Add these Render environment variables:
+1. Create or copy a Square access token. Use sandbox first if you want a test
+   checkout, then production when the account is ready to charge customers.
+2. Run the TrackLab setup helper. It creates/reuses the Racer subscription plan
+   and the four monthly plan variations, then prints the exact Render variables:
+
+```bash
+SQUARE_ACCESS_TOKEN=... npm run billing:square:setup -- --production --write-env-local
+```
+
+Use `--sandbox` instead of `--production` for Square sandbox testing.
+
+3. Add these server-only Render environment variables:
 
 ```text
 SQUARE_ENVIRONMENT=production
@@ -143,6 +151,13 @@ SQUARE_RACER_PLAN_VARIATION_1_BIKE=...
 SQUARE_RACER_PLAN_VARIATION_2_BIKES=...
 SQUARE_RACER_PLAN_VARIATION_3_BIKES=...
 SQUARE_RACER_PLAN_VARIATION_4_BIKES=...
+```
+
+If you have a Render API key, the helper can sync the values from `.env.local`
+to the TrackLab Render service and trigger a deploy:
+
+```bash
+RENDER_API_KEY=... npm run billing:square:sync-render -- --deploy
 ```
 
 Use `SQUARE_ENVIRONMENT=sandbox` and Square sandbox plan variation IDs while

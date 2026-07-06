@@ -13,3 +13,19 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: SQUARE_ENVIRONMENT
+        sync: false
+      - key: SQUARE_VERSION
+        sync: false
+      - key: SQUARE_ACCESS_TOKEN
+        sync: false
+      - key: SQUARE_LOCATION_ID
+        sync: false
+      - key: SQUARE_RACER_PLAN_VARIATION_1_BIKE
+        sync: false
+      - key: SQUARE_RACER_PLAN_VARIATION_2_BIKES
+        sync: false
+      - key: SQUARE_RACER_PLAN_VARIATION_3_BIKES
+        sync: false
+      - key: SQUARE_RACER_PLAN_VARIATION_4_BIKES
+        sync: false

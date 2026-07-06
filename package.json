@@ -23,6 +23,8 @@
     "tracks:import:osm": "node scripts/import-osm-bmx-tracks.mjs",
     "tracks:import:official": "npm run tracks:import:usabmx && npm run tracks:import:ffc && npm run tracks:import:bmxnz",
     "tracks:build": "node scripts/build-track-database.mjs",
+    "billing:square:setup": "node scripts/setup-square-billing.mjs",
+    "billing:square:sync-render": "node scripts/sync-render-square-env.mjs",
     "build": "npm run tracks:build && tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
