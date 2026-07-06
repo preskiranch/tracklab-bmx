@@ -1215,7 +1215,7 @@ export function GoogleMapsTrackLayer({
     draftMarkerRefs.current = [];
     draftMarkerListenerRefs.current = [];
 
-    const showMappingDraft = mappingMode && raceState === 'ready' && !raceViewFullscreen;
+    const showMappingDraft = mappingMode && !raceViewFullscreen;
     if (!showMappingDraft) {
       return;
     }
@@ -1570,7 +1570,7 @@ export function GoogleMapsTrackLayer({
     isDrawingRef.current = false;
     lastDrawPointRef.current = null;
     const previousTouchAction = container?.style.touchAction ?? '';
-    const mappingInputEnabled = mappingMode && raceState === 'ready' && !raceViewFullscreen;
+    const mappingInputEnabled = mappingMode && !raceViewFullscreen;
     const isSplitPlacementMode = mappingInputEnabled
       && mappingEditMode === 'split'
       && (!draftSplitBuilder?.splitPoint || !draftSplitBuilder?.mergePoint);
@@ -1869,7 +1869,7 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
-    const activePlayerIds = new Set(players.map((player) => player.id));
+    const activePlayerIds = new Set(riders.map((rider) => rider.playerId));
     markerRefs.current.forEach((marker, playerId) => {
       if (!activePlayerIds.has(playerId as PlayerSlot['id'])) {
         marker.setMap(null);

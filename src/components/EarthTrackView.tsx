@@ -161,7 +161,9 @@ export function EarthTrackView({
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'
     : 'Needs manual mapping';
-  const showMappingUi = mappingMode && raceState === 'ready' && !raceViewFullscreen;
+  const showMappingUi = mappingMode && !raceViewFullscreen;
+  const mapRiders = mappingMode ? [] : riders;
+  const mapRemoteRaceStates = mappingMode ? [] : remoteRaceStates;
 
   return (
     <section className="earth-panel">
@@ -188,8 +190,8 @@ export function EarthTrackView({
         {googleMapsConfigured ? (
           <GoogleMapsTrackLayer
             track={track}
-            riders={riders}
-            remoteRaceStates={remoteRaceStates}
+            riders={mapRiders}
+            remoteRaceStates={mapRemoteRaceStates}
             players={players}
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
@@ -339,44 +341,46 @@ export function EarthTrackView({
 
       </div>
 
-      <div className="rider-strip">
-        {players.length === 0 ? (
-          <div className="empty-compact">No live bikes detected. Start pedaling or run the simulator bridge.</div>
-        ) : riders.map((rider) => {
-          const player = players.find((slot) => slot.id === rider.playerId);
-          const sample = player?.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
-          const reactionTime = player ? reactionTimesByPlayer[player.id] : null;
+      {!mappingMode && (
+        <div className="rider-strip">
+          {players.length === 0 ? (
+            <div className="empty-compact">No live bikes detected. Start pedaling or run the simulator bridge.</div>
+          ) : riders.map((rider) => {
+            const player = players.find((slot) => slot.id === rider.playerId);
+            const sample = player?.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
+            const reactionTime = player ? reactionTimesByPlayer[player.id] : null;
 
-          return (
-            <div className="rider-stat" style={{ '--player-color': player?.accent ?? '#111827' } as CSSProperties} key={rider.playerId}>
-              <span className="player-chip">P{rider.playerId}</span>
+            return (
+              <div className="rider-stat" style={{ '--player-color': player?.accent ?? '#111827' } as CSSProperties} key={rider.playerId}>
+                <span className="player-chip">P{rider.playerId}</span>
+                <div>
+                  <strong>{player?.name ?? `Player ${rider.playerId}`}</strong>
+                  <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank} / RT {formatReactionTime(reactionTime)}</span>
+                </div>
+                <div className="rider-stat-live">
+                  <Signal size={14} />
+                  <span>{sample ? `${Math.round(sample.signal * 100)}%` : 'Waiting'}</span>
+                </div>
+                <strong>{formatElapsed(rider.finishedAt)}</strong>
+              </div>
+            );
+          })}
+          {remoteRaceStates.flatMap((state) => state.riders.map((rider) => (
+            <div className="rider-stat remote" style={{ '--player-color': rider.accent } as CSSProperties} key={`${state.clientId}-${rider.id}`}>
+              <span className="player-chip">R</span>
               <div>
-                <strong>{player?.name ?? `Player ${rider.playerId}`}</strong>
-                <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank} / RT {formatReactionTime(reactionTime)}</span>
+                <strong>{rider.name}</strong>
+                <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank} / {state.raceState}</span>
               </div>
               <div className="rider-stat-live">
                 <Signal size={14} />
-                <span>{sample ? `${Math.round(sample.signal * 100)}%` : 'Waiting'}</span>
+                <span>{rider.sampleAt ? `${Math.round(rider.signal * 100)}%` : 'Remote'}</span>
               </div>
               <strong>{formatElapsed(rider.finishedAt)}</strong>
             </div>
-          );
-        })}
-        {remoteRaceStates.flatMap((state) => state.riders.map((rider) => (
-          <div className="rider-stat remote" style={{ '--player-color': rider.accent } as CSSProperties} key={`${state.clientId}-${rider.id}`}>
-            <span className="player-chip">R</span>
-            <div>
-              <strong>{rider.name}</strong>
-              <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank} / {state.raceState}</span>
-            </div>
-            <div className="rider-stat-live">
-              <Signal size={14} />
-              <span>{rider.sampleAt ? `${Math.round(rider.signal * 100)}%` : 'Remote'}</span>
-            </div>
-            <strong>{formatElapsed(rider.finishedAt)}</strong>
-          </div>
-        )))}
-      </div>
+          )))}
+        </div>
+      )}
     </section>
   );
 }

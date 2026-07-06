@@ -2442,6 +2442,12 @@ export default function App() {
     }
 
     if (enabled) {
+      clearStartGateSequence();
+      falseStartHandledRef.current = false;
+      setDemoRaceStartedAt(null);
+      setDemoSignalsStopped(true);
+      resetRace();
+      releaseRaceFullscreen();
       setMappingEditMode('navigate');
     } else {
       setMappingFullscreen(false);
@@ -3334,6 +3340,7 @@ export default function App() {
     const sequenceId = startGateSequenceIdRef.current;
     falseStartHandledRef.current = false;
     startGateArmedAtRef.current = Date.now();
+    setMappingMode(false);
     setMappingFullscreen(false);
     setDemoSignalsStopped(false);
     createRaceCapture();
