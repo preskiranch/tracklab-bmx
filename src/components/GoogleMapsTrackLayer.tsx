@@ -118,6 +118,8 @@ const mappingPedalZoneStrokeWeight = 14;
 const mappingSplitBranchStrokeWeight = 11;
 const racePedalZoneStrokeWeight = 10;
 const defaultPedalZoneStrokeWeight = 11;
+const finishStripeCoreStrokeWeight = mappingRouteCoreStrokeWeight / 2;
+const finishStripeHaloStrokeWeight = finishStripeCoreStrokeWeight + 2;
 const finishStripeWidthMeters = 9;
 const finishLabelOffsetMeters = 30;
 
@@ -1122,7 +1124,7 @@ export function GoogleMapsTrackLayer({
           path: finishStripe,
           strokeColor: '#111827',
           strokeOpacity: 0.96,
-          strokeWeight: 14,
+          strokeWeight: finishStripeHaloStrokeWeight,
           zIndex: 900,
         }),
         new google.maps.Polyline({
@@ -1131,7 +1133,7 @@ export function GoogleMapsTrackLayer({
           path: finishStripe,
           strokeColor: '#ffffff',
           strokeOpacity: 0.98,
-          strokeWeight: 8,
+          strokeWeight: finishStripeCoreStrokeWeight,
           zIndex: 901,
         }),
       ];
