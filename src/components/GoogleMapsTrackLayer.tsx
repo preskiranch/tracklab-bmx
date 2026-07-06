@@ -275,39 +275,57 @@ function bearingBetweenPoints(start: TrackPoint, end: TrackPoint) {
   return ((Math.atan2(y, x) * (180 / Math.PI)) + 360) % 360;
 }
 
-function finishRouteTangent(route: TrackPoint[]) {
-  const finishPoint = route[route.length - 1];
-  if (!finishPoint) {
+function routeEndpointTangent(route: TrackPoint[], endpoint: 'start' | 'finish') {
+  const endpointIndex = endpoint === 'start' ? 0 : route.length - 1;
+  const endpointPoint = route[endpointIndex];
+  if (!endpointPoint) {
+    return null;
+  }
+
+  if (endpoint === 'start') {
+    for (let index = 1; index < route.length; index += 1) {
+      if (distanceBetweenTrackPoints(endpointPoint, route[index]) > 1) {
+        return bearingBetweenPoints(endpointPoint, route[index]);
+      }
+    }
     return null;
   }
 
   for (let index = route.length - 2; index >= 0; index -= 1) {
-    if (distanceBetweenTrackPoints(route[index], finishPoint) > 1) {
-      return bearingBetweenPoints(route[index], finishPoint);
+    if (distanceBetweenTrackPoints(route[index], endpointPoint) > 1) {
+      return bearingBetweenPoints(route[index], endpointPoint);
     }
   }
 
   return null;
 }
 
-function finishStripePath(route: TrackPoint[]) {
-  const finishPoint = route[route.length - 1];
-  const tangent = finishRouteTangent(route);
-  if (!finishPoint || tangent == null) {
+function endpointStripePath(route: TrackPoint[], endpoint: 'start' | 'finish') {
+  const endpointPoint = endpoint === 'start' ? route[0] : route[route.length - 1];
+  const tangent = routeEndpointTangent(route, endpoint);
+  if (!endpointPoint || tangent == null) {
     return null;
   }
 
   const crossBearing = normalizeHeading(tangent + 90);
   const halfWidth = finishStripeWidthMeters / 2;
   return [
-    pointAtBearingDistance(finishPoint, crossBearing, -halfWidth),
-    pointAtBearingDistance(finishPoint, crossBearing, halfWidth),
+    pointAtBearingDistance(endpointPoint, crossBearing, -halfWidth),
+    pointAtBearingDistance(endpointPoint, crossBearing, halfWidth),
   ];
+}
+
+function startStripePath(route: TrackPoint[]) {
+  return endpointStripePath(route, 'start');
+}
+
+function finishStripePath(route: TrackPoint[]) {
+  return endpointStripePath(route, 'finish');
 }
 
 function finishLabelPosition(route: TrackPoint[]) {
   const finishPoint = route[route.length - 1];
-  const tangent = finishRouteTangent(route);
+  const tangent = routeEndpointTangent(route, 'finish');
   if (!finishPoint || tangent == null) {
     return finishPoint ?? null;
   }
@@ -723,6 +741,7 @@ export function GoogleMapsTrackLayer({
   const distanceLabelRefs = useRef<GoogleMarker[]>([]);
   const splitLineRefs = useRef<GooglePolyline[]>([]);
   const splitMarkerRefs = useRef<GoogleMarker[]>([]);
+  const startLineRefs = useRef<GooglePolyline[]>([]);
   const finishLineRefs = useRef<GooglePolyline[]>([]);
   const finishMarkerRef = useRef<GoogleMarker | null>(null);
   const draftLineRefs = useRef<GooglePolyline[]>([]);
@@ -827,6 +846,7 @@ export function GoogleMapsTrackLayer({
       distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
       splitLineRefs.current.forEach((line) => line.setMap(null));
       splitMarkerRefs.current.forEach((marker) => marker.setMap(null));
+      startLineRefs.current.forEach((line) => line.setMap(null));
       finishLineRefs.current.forEach((line) => line.setMap(null));
       finishMarkerRef.current?.setMap(null);
       draftLineRefs.current.forEach((line) => line.setMap(null));
@@ -843,6 +863,7 @@ export function GoogleMapsTrackLayer({
       distanceLabelRefs.current = [];
       splitLineRefs.current = [];
       splitMarkerRefs.current = [];
+      startLineRefs.current = [];
       finishLineRefs.current = [];
       finishMarkerRef.current = null;
       draftLineRefs.current = [];
@@ -952,6 +973,7 @@ export function GoogleMapsTrackLayer({
     distanceLabelRefs.current.forEach((marker) => marker.setMap(null));
     splitLineRefs.current.forEach((line) => line.setMap(null));
     splitMarkerRefs.current.forEach((marker) => marker.setMap(null));
+    startLineRefs.current.forEach((line) => line.setMap(null));
     finishLineRefs.current.forEach((line) => line.setMap(null));
     finishMarkerRef.current?.setMap(null);
     trackLineRefs.current = [];
@@ -959,6 +981,7 @@ export function GoogleMapsTrackLayer({
     distanceLabelRefs.current = [];
     splitLineRefs.current = [];
     splitMarkerRefs.current = [];
+    startLineRefs.current = [];
     finishLineRefs.current = [];
     finishMarkerRef.current = null;
 
@@ -997,6 +1020,7 @@ export function GoogleMapsTrackLayer({
     }
 
     const hideRaceRoute = mappingMode || raceViewFullscreen || raceState === 'racing' || raceState === 'finished';
+    const showRaceStart = !mappingMode && !raceViewFullscreen && raceState !== 'racing';
 
     if (!hideRaceRoute) {
       trackLineRefs.current = mappedTrackRouteSegments(track)
@@ -1009,6 +1033,30 @@ export function GoogleMapsTrackLayer({
           strokeOpacity: 0.88,
           strokeWeight: savedRouteStrokeWeight,
         }));
+    }
+
+    const startStripe = showRaceStart ? startStripePath(savedRoute) : null;
+    if (startStripe) {
+      startLineRefs.current = [
+        new google.maps.Polyline({
+          clickable: false,
+          map,
+          path: startStripe,
+          strokeColor: '#111827',
+          strokeOpacity: 0.96,
+          strokeWeight: finishStripeHaloStrokeWeight,
+          zIndex: 900,
+        }),
+        new google.maps.Polyline({
+          clickable: false,
+          map,
+          path: startStripe,
+          strokeColor: '#d8ff3e',
+          strokeOpacity: 0.98,
+          strokeWeight: finishStripeCoreStrokeWeight,
+          zIndex: 901,
+        }),
+      ];
     }
 
     const routeMidpoint = riderLatLng(track, track.lengthMeters / 2);
@@ -1249,6 +1297,31 @@ export function GoogleMapsTrackLayer({
         ]);
     }
 
+    const draftStartStripe = showMappingDraft && draftRoute.length > 1 ? startStripePath(draftRoute) : null;
+    if (draftStartStripe) {
+      draftLineRefs.current = [
+        ...draftLineRefs.current,
+        new google.maps.Polyline({
+          clickable: false,
+          map,
+          path: draftStartStripe,
+          strokeColor: '#111827',
+          strokeOpacity: 0.96,
+          strokeWeight: finishStripeHaloStrokeWeight,
+          zIndex: 900,
+        }),
+        new google.maps.Polyline({
+          clickable: false,
+          map,
+          path: draftStartStripe,
+          strokeColor: draftRouteColor,
+          strokeOpacity: 0.98,
+          strokeWeight: finishStripeCoreStrokeWeight,
+          zIndex: 901,
+        }),
+      ];
+    }
+
     const draftLengthMeters = routeLengthWithDefaultSplitBranches(draftPoints, activeDraftRouteSplitSections);
     const draftDistanceMarkers = showMappingDraft && draftPoints.length > 1 ? [
       new google.maps.Marker({
@@ -1320,29 +1393,30 @@ export function GoogleMapsTrackLayer({
     const pathPointMarkers = showMappingDraft ? draftPoints.map((point, index) => {
       const isStart = index === 0;
       const isFinish = index === draftPoints.length - 1 && draftPoints.length > 1;
+      const pointLabel = isStart ? null : {
+        color: '#111827',
+        fontSize: '11px',
+        fontWeight: '900',
+        text: isFinish ? 'F' : String(index + 1),
+      };
       const marker = new google.maps.Marker({
         clickable: true,
         cursor: canMovePathPoints ? 'grab' : canUseRoutePointAsZoneBoundary ? 'pointer' : undefined,
         draggable: canMovePathPoints,
         icon: {
           fillColor: isStart || isFinish ? draftRouteColor : '#ffffff',
-          fillOpacity: 1,
+          fillOpacity: isStart ? 0.82 : 1,
           path: google.maps.SymbolPath.CIRCLE,
-          scale: isStart || isFinish ? 14 : 8,
+          scale: isStart ? 6 : isFinish ? 14 : 8,
           strokeColor: '#111827',
-          strokeWeight: isStart || isFinish ? 3 : 2,
+          strokeWeight: isStart ? 2 : isFinish ? 3 : 2,
         },
-        label: {
-          color: '#111827',
-          fontSize: '11px',
-          fontWeight: '900',
-          text: isStart ? 'S' : isFinish ? 'F' : String(index + 1),
-        },
+        ...(pointLabel ? { label: pointLabel } : {}),
         map,
-        optimized: !(isStart || isFinish),
+        optimized: !(isFinish),
         position: point,
-        title: isStart ? 'Mapping start' : isFinish ? 'Mapping finish' : `Mapping point ${index + 1}`,
-        zIndex: isStart || isFinish ? 950 + index : 620 + index,
+        title: isStart ? 'Drag mapping start line' : isFinish ? 'Mapping finish' : `Mapping point ${index + 1}`,
+        zIndex: isStart ? 902 : isFinish ? 950 + index : 620 + index,
       });
 
       draftMarkerListenerRefs.current.push(marker.addListener('mousedown', suppressNextMapEditEvent));
@@ -1384,9 +1458,9 @@ export function GoogleMapsTrackLayer({
           fillColor: pedalZoneColor,
           fillOpacity: 1,
           path: google.maps.SymbolPath.CIRCLE,
-          scale: 8,
+          scale: isStartPin ? 9 : 8,
           strokeColor: '#111827',
-          strokeWeight: 2,
+          strokeWeight: isStartPin ? 3 : 2,
         },
         label: {
           color: '#111827',
@@ -1395,9 +1469,10 @@ export function GoogleMapsTrackLayer({
           text: `${isStartPin ? 'S' : 'E'}${zoneNumber}`,
         },
         map,
-        optimized: true,
+        optimized: false,
         position: point,
         title: `${isStartPin ? 'Start' : 'End'} pedal zone ${zoneNumber}`,
+        zIndex: 1040 + index,
       });
 
       draftMarkerListenerRefs.current.push(marker.addListener('mousedown', suppressNextMapEditEvent));
