@@ -2539,7 +2539,7 @@ export default function App() {
 
       const next = current.map((draftPoint, draftIndex) => (draftIndex === index ? snappedPoint.point : draftPoint));
       const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftRouteSplitSections) : 0;
-      setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter > 2 && meter < nextLength - 2));
+      setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter >= 0 && meter <= nextLength));
       return next;
     });
   }, [draftRouteSplitSections, snapDraftPointToSplitJunction]);
@@ -2552,7 +2552,7 @@ export default function App() {
 
       const next = current.filter((_, draftIndex) => draftIndex !== index);
       const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftRouteSplitSections) : 0;
-      setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter > 2 && meter < nextLength - 2));
+      setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter >= 0 && meter <= nextLength));
       return next;
     });
   }, [draftRouteSplitSections]);
@@ -2720,7 +2720,7 @@ export default function App() {
     const nextPoints = draftPoints.slice(0, -1);
     const nextLength = nextPoints.length > 1 ? routeLengthWithDefaultSplitBranches(nextPoints, draftRouteSplitSections) : 0;
     setDraftPoints(nextPoints);
-    setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter < nextLength - 1));
+    setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter >= 0 && meter <= nextLength));
   };
 
   const clearMappingDraft = () => {
@@ -2859,8 +2859,8 @@ export default function App() {
       }
 
       const routeLength = routeLengthMeters(draftRidePoints);
-      const meter = Math.round(nearestRouteMeter(draftRidePoints, point));
-      if (meter <= 2 || meter >= routeLength - 2 || current.some((boundary) => Math.abs(boundary - meter) < 3)) {
+      const meter = Math.max(0, Math.min(routeLength, Math.round(nearestRouteMeter(draftRidePoints, point))));
+      if (current.some((boundary) => Math.abs(boundary - meter) < 3)) {
         return current;
       }
 
@@ -2875,10 +2875,7 @@ export default function App() {
       }
 
       const routeLength = routeLengthMeters(draftRidePoints);
-      const meter = Math.round(nearestRouteMeter(draftRidePoints, point));
-      if (meter <= 2 || meter >= routeLength - 2) {
-        return current;
-      }
+      const meter = Math.max(0, Math.min(routeLength, Math.round(nearestRouteMeter(draftRidePoints, point))));
 
       return current
         .map((boundary, boundaryIndex) => (boundaryIndex === index ? meter : boundary))

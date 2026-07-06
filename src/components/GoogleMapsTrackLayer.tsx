@@ -1266,7 +1266,7 @@ export function GoogleMapsTrackLayer({
 
     const cleanDraftZonePins = showMappingDraft && draftPoints.length > 1
       ? draftZoneMeters
-        .filter((meter) => meter > 0 && meter < draftLengthMeters)
+        .filter((meter) => meter >= 0 && meter <= draftLengthMeters)
         .sort((a, b) => a - b)
       : [];
     const draftPedalSpans = Array.from({ length: Math.floor(cleanDraftZonePins.length / 2) }, (_, index) => ({
@@ -1308,18 +1308,23 @@ export function GoogleMapsTrackLayer({
       });
     }).filter((marker): marker is GoogleMarker => marker != null);
 
+    const canMovePathPoints = Boolean(onMappingPathPointMove)
+      && (mappingEditMode === 'draw' || mappingEditMode === 'curve');
+    const canUseRoutePointAsZoneBoundary = mappingEditMode === 'zones' && Boolean(onMappingZonePointAdd);
     const pathPointMarkers = showMappingDraft ? draftPoints.map((point, index) => {
       const isStart = index === 0;
       const isFinish = index === draftPoints.length - 1 && draftPoints.length > 1;
       const marker = new google.maps.Marker({
-        draggable: Boolean(onMappingPathPointMove),
+        clickable: true,
+        cursor: canMovePathPoints ? 'grab' : canUseRoutePointAsZoneBoundary ? 'pointer' : undefined,
+        draggable: canMovePathPoints,
         icon: {
           fillColor: isStart || isFinish ? draftRouteColor : '#ffffff',
           fillOpacity: 1,
           path: google.maps.SymbolPath.CIRCLE,
-          scale: isStart || isFinish ? 11 : 8,
+          scale: isStart || isFinish ? 14 : 8,
           strokeColor: '#111827',
-          strokeWeight: 2,
+          strokeWeight: isStart || isFinish ? 3 : 2,
         },
         label: {
           color: '#111827',
@@ -1328,13 +1333,17 @@ export function GoogleMapsTrackLayer({
           text: isStart ? 'S' : isFinish ? 'F' : String(index + 1),
         },
         map,
-        optimized: true,
+        optimized: !(isStart || isFinish),
         position: point,
         title: isStart ? 'Mapping start' : isFinish ? 'Mapping finish' : `Mapping point ${index + 1}`,
-        zIndex: 620 + index,
+        zIndex: isStart || isFinish ? 950 + index : 620 + index,
       });
 
-      if (onMappingPathPointMove) {
+      if (canMovePathPoints && onMappingPathPointMove) {
+        draftMarkerListenerRefs.current.push(marker.addListener('dragstart', () => {
+          isDrawingRef.current = false;
+          lastDrawPointRef.current = null;
+        }));
         draftMarkerListenerRefs.current.push(marker.addListener('dragend', (event) => {
           const nextPoint = event?.latLng?.toJSON();
           if (nextPoint) {
@@ -1343,7 +1352,13 @@ export function GoogleMapsTrackLayer({
         }));
       }
 
-      if (onMappingPathPointRemove) {
+      if (canUseRoutePointAsZoneBoundary && onMappingZonePointAdd) {
+        draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
+          onMappingZonePointAdd(point);
+        }));
+      }
+
+      if (canMovePathPoints && onMappingPathPointRemove) {
         const removePoint = () => onMappingPathPointRemove(index);
         draftMarkerListenerRefs.current.push(marker.addListener('dblclick', removePoint));
         draftMarkerListenerRefs.current.push(marker.addListener('rightclick', removePoint));
@@ -1546,6 +1561,7 @@ export function GoogleMapsTrackLayer({
     onMappingPathPointMove,
     onMappingPathPointRemove,
     onMappingSplitPointAdd,
+    onMappingZonePointAdd,
     onMappingZonePointMove,
     onMappingZonePointRemove,
     raceState,

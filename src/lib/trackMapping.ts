@@ -253,8 +253,8 @@ function cumulativeMeters(points: TrackPoint[]) {
 
 function sortedUniqueBoundaries(boundaries: number[], totalMeters: number) {
   const rounded = boundaries
-    .map((boundary) => Math.round(boundary))
-    .filter((boundary) => boundary > 1 && boundary < totalMeters - 1)
+    .map((boundary) => Math.max(0, Math.min(Math.round(totalMeters), Math.round(boundary))))
+    .filter((boundary) => boundary >= 0 && boundary <= totalMeters)
     .sort((a, b) => a - b);
 
   return rounded.filter((boundary, index) => index === 0 || Math.abs(boundary - rounded[index - 1]) >= 3);
@@ -453,7 +453,7 @@ export function zoneBoundariesFromRouteVariant(variant: TrackRouteVariant) {
   return variant.zones
     .filter(isTrackZone)
     .flatMap((zone) => [zone.startMeter, zone.endMeter])
-    .filter((meter) => meter > 0 && meter < variant.lengthMeters);
+    .filter((meter) => meter >= 0 && meter <= variant.lengthMeters);
 }
 
 export function createUserTrackMapping(
@@ -555,7 +555,7 @@ export function zoneBoundariesFromMapping(mapping: UserTrackMapping) {
   return mapping.zones
     .filter(isTrackZone)
     .flatMap((zone) => [zone.startMeter, zone.endMeter])
-    .filter((meter) => meter > 0 && meter < mapping.lengthMeters);
+    .filter((meter) => meter >= 0 && meter <= mapping.lengthMeters);
 }
 
 export function pointAtRouteMeter(points: TrackPoint[], meter: number): TrackPoint | null {
