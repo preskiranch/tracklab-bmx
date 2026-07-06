@@ -10,6 +10,7 @@ import {
   Maximize2,
   Minimize2,
   Plus,
+  Redo2,
   RotateCcw,
   Route,
   Save,
@@ -157,7 +158,10 @@ type SessionControlPanelProps = {
   onMappingSplitCancel: () => void;
   onMappingSplitRemove: (splitId: string) => void;
   onMappingRestSecondsChange: (seconds: number) => void;
+  canUndoMapping: boolean;
+  canRedoMapping: boolean;
   onMappingUndoPoint: () => void;
+  onMappingRedoPoint: () => void;
   onMappingClearDraft: () => void;
   onMappingSave: () => void;
   onMappingRemove: () => void;
@@ -256,7 +260,10 @@ export function SessionControlPanel({
   onMappingSplitCancel,
   onMappingSplitRemove,
   onMappingRestSecondsChange,
+  canUndoMapping,
+  canRedoMapping,
   onMappingUndoPoint,
+  onMappingRedoPoint,
   onMappingClearDraft,
   onMappingSave,
   onMappingRemove,
@@ -322,11 +329,7 @@ export function SessionControlPanel({
   const hasRaceSplitChoices = players.length > 0 && (track.splitSections?.length ?? 0) > 0;
   const canChooseRaceLayout = raceState !== 'racing' && !startGateActive;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo pedal pin' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
-  const canUndoMapping = mappingEditMode === 'zones'
-    ? draftZonePinCount > 0
-    : mappingEditMode === 'split'
-      ? Boolean(draftSplitBuilder || draftSplitSections.length > 0)
-      : draftPointCount > 0;
+  const redoLabel = mappingEditMode === 'zones' ? 'Redo pedal pin' : mappingEditMode === 'split' ? 'Redo split' : 'Redo path';
   const availableZones = hasMappedRoute ? track.zones : [];
   const visibleTrackDistance = draftPointCount > 1 ? draftLengthMeters : hasMappedRoute ? track.lengthMeters : null;
   const filteredCustomRoutes = customRoutes.filter((customRoute) => {
@@ -774,6 +777,10 @@ export function SessionControlPanel({
                   <button type="button" onClick={onMappingUndoPoint} disabled={!canUndoMapping}>
                     <Undo2 size={15} />
                     {undoLabel}
+                  </button>
+                  <button type="button" onClick={onMappingRedoPoint} disabled={!canRedoMapping}>
+                    <Redo2 size={15} />
+                    {redoLabel}
                   </button>
                   <button type="button" onClick={onMappingClearDraft} disabled={draftPointCount === 0}>
                     <Trash2 size={15} />
