@@ -392,8 +392,8 @@ function writeStoredCustomRoutes(routes: TrackRecord[]) {
 }
 
 const defaultEarthCamera = {
-  angle: 45,
-  heading: 0,
+  angle: 56,
+  heading: 120,
 } as const;
 
 function normalizeEarthAngle(value: unknown) {
