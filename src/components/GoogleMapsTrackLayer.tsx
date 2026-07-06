@@ -732,6 +732,7 @@ export function GoogleMapsTrackLayer({
   const mapListenerRefs = useRef<GoogleMapsEventListener[]>([]);
   const isDrawingRef = useRef(false);
   const lastDrawPointRef = useRef<TrackPoint | null>(null);
+  const suppressNextMapEditEventRef = useRef(false);
   const projectionOverlayRef = useRef<GoogleOverlayView | null>(null);
   const curvePreviewLineRef = useRef<GooglePolyline | null>(null);
   const curvePointerIdRef = useRef<number | null>(null);
@@ -1311,6 +1312,11 @@ export function GoogleMapsTrackLayer({
     const canMovePathPoints = Boolean(onMappingPathPointMove)
       && (mappingEditMode === 'draw' || mappingEditMode === 'curve');
     const canUseRoutePointAsZoneBoundary = mappingEditMode === 'zones' && Boolean(onMappingZonePointAdd);
+    const suppressNextMapEditEvent = () => {
+      suppressNextMapEditEventRef.current = true;
+      isDrawingRef.current = false;
+      lastDrawPointRef.current = null;
+    };
     const pathPointMarkers = showMappingDraft ? draftPoints.map((point, index) => {
       const isStart = index === 0;
       const isFinish = index === draftPoints.length - 1 && draftPoints.length > 1;
@@ -1339,10 +1345,11 @@ export function GoogleMapsTrackLayer({
         zIndex: isStart || isFinish ? 950 + index : 620 + index,
       });
 
+      draftMarkerListenerRefs.current.push(marker.addListener('mousedown', suppressNextMapEditEvent));
+
       if (canMovePathPoints && onMappingPathPointMove) {
         draftMarkerListenerRefs.current.push(marker.addListener('dragstart', () => {
-          isDrawingRef.current = false;
-          lastDrawPointRef.current = null;
+          suppressNextMapEditEvent();
         }));
         draftMarkerListenerRefs.current.push(marker.addListener('dragend', (event) => {
           const nextPoint = event?.latLng?.toJSON();
@@ -1354,6 +1361,7 @@ export function GoogleMapsTrackLayer({
 
       if (canUseRoutePointAsZoneBoundary && onMappingZonePointAdd) {
         draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
+          suppressNextMapEditEvent();
           onMappingZonePointAdd(point);
         }));
       }
@@ -1392,7 +1400,10 @@ export function GoogleMapsTrackLayer({
         title: `${isStartPin ? 'Start' : 'End'} pedal zone ${zoneNumber}`,
       });
 
+      draftMarkerListenerRefs.current.push(marker.addListener('mousedown', suppressNextMapEditEvent));
+
       if (onMappingZonePointMove) {
+        draftMarkerListenerRefs.current.push(marker.addListener('dragstart', suppressNextMapEditEvent));
         draftMarkerListenerRefs.current.push(marker.addListener('dragend', (event) => {
           const nextPoint = event?.latLng?.toJSON();
           if (nextPoint) {
@@ -1585,6 +1596,7 @@ export function GoogleMapsTrackLayer({
     curveStrokePointsRef.current = [];
     isDrawingRef.current = false;
     lastDrawPointRef.current = null;
+    suppressNextMapEditEventRef.current = false;
     const previousTouchAction = container?.style.touchAction ?? '';
     const mappingInputEnabled = mappingMode && !raceViewFullscreen;
     const isSplitPlacementMode = mappingInputEnabled
@@ -1765,11 +1777,26 @@ export function GoogleMapsTrackLayer({
       window.addEventListener('pointercancel', finishCurveStroke, { passive: false });
     }
 
+    const consumeSuppressedMapEditEvent = () => {
+      if (!suppressNextMapEditEventRef.current) {
+        return false;
+      }
+
+      suppressNextMapEditEventRef.current = false;
+      isDrawingRef.current = false;
+      lastDrawPointRef.current = null;
+      return true;
+    };
+
     window.addEventListener('mouseup', finishSplitBranchDrawing);
     window.addEventListener('touchend', finishSplitBranchDrawing);
 
     mapListenerRefs.current = [
       map.addListener('mousedown', (event) => {
+        if (consumeSuppressedMapEditEvent()) {
+          return;
+        }
+
         const point = event?.latLng?.toJSON();
         if (!point) {
           return;
@@ -1832,6 +1859,10 @@ export function GoogleMapsTrackLayer({
         lastDrawPointRef.current = null;
       }),
       map.addListener('click', (event) => {
+        if (consumeSuppressedMapEditEvent()) {
+          return;
+        }
+
         const point = event?.latLng?.toJSON();
         if (point && mappingEditMode === 'zones') {
           onMappingZonePointAdd?.(point);
@@ -1855,6 +1886,7 @@ export function GoogleMapsTrackLayer({
       window.removeEventListener('touchend', finishSplitBranchDrawing);
       mapListenerRefs.current.forEach((listener) => listener.remove());
       mapListenerRefs.current = [];
+      suppressNextMapEditEventRef.current = false;
       clearCurveStroke();
       map.setOptions({
         draggable: true,

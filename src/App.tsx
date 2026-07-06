@@ -201,6 +201,8 @@ const splitBranchEndpointSnapMeters = 8;
 const routePointDuplicateMeters = 0.75;
 const mainRouteSplitSnapMeters = 1;
 const mainRouteMergeResumeHoldMeters = 5;
+const zoneBoundaryDuplicateMeters = 3;
+const zoneEndpointSnapMeters = 8;
 
 function appendTrackPoint(points: TrackPoint[], point: TrackPoint, minDistanceMeters = routePointDuplicateMeters) {
   const previous = points[points.length - 1];
@@ -256,6 +258,32 @@ function snapBranchEndpoint(point: TrackPoint, splitPoint: TrackPoint, mergePoin
   }
 
   return point;
+}
+
+function mappingZoneMeterFromPoint(route: TrackPoint[], point: TrackPoint) {
+  if (route.length < 2) {
+    return null;
+  }
+
+  const routeLength = routeLengthMeters(route);
+  const rawMeter = nearestRouteMeter(route, point);
+  const startPoint = route[0];
+  const finishPoint = route[route.length - 1];
+  if (
+    rawMeter <= zoneEndpointSnapMeters
+    || distanceBetweenTrackPoints(point, startPoint) <= zoneEndpointSnapMeters
+  ) {
+    return 0;
+  }
+
+  if (
+    routeLength - rawMeter <= zoneEndpointSnapMeters
+    || distanceBetweenTrackPoints(point, finishPoint) <= zoneEndpointSnapMeters
+  ) {
+    return routeLength;
+  }
+
+  return Math.max(0, Math.min(routeLength, Math.round(rawMeter)));
 }
 
 function splitSectionFromDraft(draft: DraftTrackSplit): TrackSplitSection | null {
@@ -2858,10 +2886,23 @@ export default function App() {
         return current;
       }
 
-      const routeLength = routeLengthMeters(draftRidePoints);
-      const meter = Math.max(0, Math.min(routeLength, Math.round(nearestRouteMeter(draftRidePoints, point))));
-      if (current.some((boundary) => Math.abs(boundary - meter) < 3)) {
+      const meter = mappingZoneMeterFromPoint(draftRidePoints, point);
+      if (meter == null) {
         return current;
+      }
+
+      const existingBoundaryIndex = current.findIndex((boundary) => (
+        Math.abs(boundary - meter) < zoneBoundaryDuplicateMeters
+      ));
+      if (existingBoundaryIndex >= 0) {
+        const exactEndpoint = meter === 0 || meter === routeLengthMeters(draftRidePoints);
+        if (!exactEndpoint) {
+          return current;
+        }
+
+        return current
+          .map((boundary, boundaryIndex) => (boundaryIndex === existingBoundaryIndex ? meter : boundary))
+          .sort((a, b) => a - b);
       }
 
       return [...current, meter].sort((a, b) => a - b);
@@ -2874,13 +2915,15 @@ export default function App() {
         return current;
       }
 
-      const routeLength = routeLengthMeters(draftRidePoints);
-      const meter = Math.max(0, Math.min(routeLength, Math.round(nearestRouteMeter(draftRidePoints, point))));
+      const meter = mappingZoneMeterFromPoint(draftRidePoints, point);
+      if (meter == null) {
+        return current;
+      }
 
       return current
         .map((boundary, boundaryIndex) => (boundaryIndex === index ? meter : boundary))
         .filter((boundary, boundaryIndex, boundaries) => (
-          boundaryIndex === boundaries.findIndex((candidate) => Math.abs(candidate - boundary) < 3)
+          boundaryIndex === boundaries.findIndex((candidate) => Math.abs(candidate - boundary) < zoneBoundaryDuplicateMeters)
         ))
         .sort((a, b) => a - b);
     });
