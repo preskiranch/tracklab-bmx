@@ -135,12 +135,14 @@ export async function initPersistence() {
         guest_key TEXT NOT NULL,
         display_name TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'racer',
+        seat_count INTEGER NOT NULL DEFAULT 1,
         joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         left_at TIMESTAMPTZ,
         PRIMARY KEY (room_id, guest_key)
       )
     `);
       await pool.query(`ALTER TABLE ${schema}.room_members ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'racer'`);
+      await pool.query(`ALTER TABLE ${schema}.room_members ADD COLUMN IF NOT EXISTS seat_count INTEGER NOT NULL DEFAULT 1`);
       await pool.query(`
       CREATE TABLE IF NOT EXISTS ${schema}.room_messages (
         id TEXT PRIMARY KEY,
@@ -460,16 +462,18 @@ export async function updateRoomTrack(room) {
   );
 }
 
-export async function saveRoomJoin(room, client, role = 'racer') {
+export async function saveRoomJoin(room, client, role = 'racer', seatCount = 1) {
+  const safeSeatCount = Math.max(0, Math.min(4, Math.round(Number(seatCount) || 0)));
   return query(
-    `INSERT INTO ${schema}.room_members (room_id, guest_key, display_name, role, joined_at, left_at)
-     VALUES ($1, $2, $3, $4, now(), null)
+    `INSERT INTO ${schema}.room_members (room_id, guest_key, display_name, role, seat_count, joined_at, left_at)
+     VALUES ($1, $2, $3, $4, $5, now(), null)
      ON CONFLICT (room_id, guest_key) DO UPDATE SET
        display_name = EXCLUDED.display_name,
        role = EXCLUDED.role,
+       seat_count = EXCLUDED.seat_count,
        joined_at = now(),
        left_at = null`,
-    [room.id, client.guestKey, client.name, role],
+    [room.id, client.guestKey, client.name, role, safeSeatCount],
   );
 }
 

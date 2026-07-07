@@ -3031,7 +3031,7 @@ input:focus {
   background: #f4fbef;
 }
 
-.match-builder-card div {
+.match-builder-copy {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -3050,6 +3050,39 @@ input:focus {
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.studio-seat-selector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.studio-seat-selector b {
+  color: #48613f;
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.studio-seat-selector button {
+  min-width: 28px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid #c7e7b4;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #1f3d1c;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.studio-seat-selector button.active {
+  border-color: #111827;
+  background: #111827;
+  color: #ffffff;
 }
 
 .selected-mini-button {

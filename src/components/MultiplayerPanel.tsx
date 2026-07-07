@@ -80,7 +80,7 @@ type MultiplayerPanelProps = {
   onRiderNameChange: (name: string) => void;
   onRiderAvailableChange: (available: boolean) => void;
   onCreatePrivateRoom: () => void;
-  onCreateMatch: (targetIds: string[]) => void;
+  onCreateMatch: (targetIds: string[], localSeatCount: number) => void;
   onRespondToMatchInvite: (inviteId: string, accepted: boolean) => void;
   onJoinRoom: (roomId: string) => void;
   onLeaveRoom: () => void;
@@ -174,8 +174,11 @@ export function MultiplayerPanel({
 }: MultiplayerPanelProps) {
   const [profileKeyDraft, setProfileKeyDraft] = useState(profileKey);
   const [selectedRiderIds, setSelectedRiderIds] = useState<string[]>([]);
+  const [localSeatCount, setLocalSeatCount] = useState(1);
   const [groupNameDraft, setGroupNameDraft] = useState('');
   const [activeGroupId, setActiveGroupId] = useState('');
+  const localBikeCapacity = Math.max(1, Math.min(maxPlayers, players.length || 1));
+  const localSeatOptions = Array.from({ length: localBikeCapacity }, (_, index) => index + 1);
 
   useEffect(() => {
     setProfileKeyDraft(profileKey);
@@ -184,6 +187,14 @@ export function MultiplayerPanel({
   useEffect(() => {
     setSelectedRiderIds((current) => current.filter((riderId) => onlineRiders.some((rider) => rider.id === riderId)));
   }, [onlineRiders]);
+
+  useEffect(() => {
+    setLocalSeatCount((current) => Math.max(1, Math.min(localBikeCapacity, current)));
+  }, [localBikeCapacity]);
+
+  useEffect(() => {
+    setSelectedRiderIds((current) => current.slice(0, Math.max(0, maxPlayers - localSeatCount)));
+  }, [localSeatCount, maxPlayers]);
 
   useEffect(() => {
     if (!activeGroupId && social.groups[0]) {
@@ -213,7 +224,7 @@ export function MultiplayerPanel({
       if (current.includes(riderId)) {
         return current.filter((id) => id !== riderId);
       }
-      return current.length >= maxPlayers - 1 ? current : [...current, riderId];
+      return current.length + localSeatCount >= maxPlayers ? current : [...current, riderId];
     });
   };
 
@@ -221,7 +232,7 @@ export function MultiplayerPanel({
     if (selectedRiderIds.length === 0) {
       return;
     }
-    onCreateMatch(selectedRiderIds);
+    onCreateMatch(selectedRiderIds, localSeatCount);
   };
 
   const handleCreateGroup = () => {
@@ -243,6 +254,9 @@ export function MultiplayerPanel({
   ]);
   const selectedGroup = social.groups.find((group) => group.id === activeGroupId) ?? social.groups[0] ?? null;
   const selectedRiders = availableRiders.filter((rider) => selectedRiderIds.includes(rider.id));
+  const totalMatchSeats = localSeatCount + selectedRiders.length;
+  const matchOverCapacity = totalMatchSeats > maxPlayers;
+  const matchSeatSummary = `${localSeatCount} studio bike${localSeatCount === 1 ? '' : 's'}${selectedRiders.length === 0 ? '' : ` + ${selectedRiders.map((rider) => rider.name).join(', ')}`}`;
   const displayedMessages = playMode === 'multiplayer' && currentRoom
     ? roomMessages.map((message) => ({
       id: message.id,
@@ -556,14 +570,27 @@ export function MultiplayerPanel({
           </div>
 
           <div className="match-builder-card">
-            <div>
-              <strong>{selectedRiders.length + 1} / {maxPlayers} racers</strong>
-              <span>{selectedRiders.length === 0 ? 'Select racers for a match' : selectedRiders.map((rider) => rider.name).join(', ')}</span>
+            <div className="match-builder-copy">
+              <strong>{totalMatchSeats} / {maxPlayers} racer seats</strong>
+              <span>{selectedRiders.length === 0 ? 'Choose your studio seats, then select racers' : matchSeatSummary}</span>
+              <div className="studio-seat-selector" aria-label="Studio bike seats">
+                <b>Studio seats</b>
+                {localSeatOptions.map((seatCount) => (
+                  <button
+                    key={seatCount}
+                    type="button"
+                    className={seatCount === localSeatCount ? 'active' : ''}
+                    onClick={() => setLocalSeatCount(seatCount)}
+                  >
+                    {seatCount}
+                  </button>
+                ))}
+              </div>
             </div>
             <button
               className="primary-inline-button"
               type="button"
-              disabled={!multiplayerOnline || selectedRiderIds.length === 0}
+              disabled={!multiplayerOnline || selectedRiderIds.length === 0 || matchOverCapacity}
               onClick={handleCreateMatch}
             >
               <UserPlus size={15} /> Create Match
@@ -581,6 +608,7 @@ export function MultiplayerPanel({
                 <button
                   type="button"
                   className={selectedRiderIds.includes(rider.id) ? 'selected-mini-button' : ''}
+                  disabled={!selectedRiderIds.includes(rider.id) && totalMatchSeats >= maxPlayers}
                   onClick={() => toggleSelectedRider(rider.id)}
                 >
                   {selectedRiderIds.includes(rider.id) ? 'Selected' : 'Select'}
@@ -688,7 +716,7 @@ export function MultiplayerPanel({
                   disabled={!multiplayerOnline || currentRoom?.id === room.id}
                   onClick={() => onJoinRoom(room.id)}
                 >
-                  {room.id} / {room.private ? 'private' : 'public'} / {room.racerCount ?? room.memberCount} racers / {room.track.name}
+                  {room.id} / {room.private ? 'private' : 'public'} / {room.racerSeatCount ?? room.racerCount ?? room.memberCount} racer seats / {room.track.name}
                 </button>
               ))}
             </div>

@@ -1752,6 +1752,23 @@ export default function App() {
     voiceSignals: multiplayer.voiceSignals,
     sendVoiceSignal: multiplayer.sendVoiceSignal,
   });
+  const localRaceSeatLimit = useMemo(() => {
+    if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
+      return activePlayers.length;
+    }
+
+    const roomMember = multiplayer.currentRoom.members.find((member) => member.id === multiplayer.clientId);
+    if (roomMember?.roomRole === 'spectator') {
+      return 0;
+    }
+
+    const assignedSeatCount = roomMember?.racerSeatCount ?? activePlayers.length;
+    return Math.max(0, Math.min(activePlayers.length, assignedSeatCount));
+  }, [activePlayers.length, multiplayer.clientId, multiplayer.currentRoom, playMode]);
+  const racePlayers = useMemo(
+    () => activePlayers.slice(0, localRaceSeatLimit),
+    [activePlayers, localRaceSeatLimit],
+  );
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
@@ -1874,14 +1891,14 @@ export default function App() {
   );
   const activeBranchChoicesByPlayer = useMemo(() => {
     const seedOffset = Math.abs(Math.trunc(demoRaceSeed / 997)) % 2;
-    return activePlayers.reduce<Partial<Record<PlayerSlot['id'], SplitBranchId>>>((choices, player, index) => {
+    return racePlayers.reduce<Partial<Record<PlayerSlot['id'], SplitBranchId>>>((choices, player, index) => {
       choices[player.id] = branchChoicesByPlayer[player.id]
         ?? (demoMode && splitDecisionPoints.length > 0
           ? ((index + seedOffset) % 2 === 0 ? 'a' : 'b')
           : 'a');
       return choices;
     }, {});
-  }, [activePlayers, branchChoicesByPlayer, demoMode, demoRaceSeed, splitDecisionPoints.length]);
+  }, [branchChoicesByPlayer, demoMode, demoRaceSeed, racePlayers, splitDecisionPoints.length]);
   useEffect(() => {
     const roomFlow = multiplayer.currentRoom?.flow;
     const clientId = multiplayer.clientId;
@@ -1893,7 +1910,7 @@ export default function App() {
     setBranchChoicesByPlayer((current) => {
       let changed = false;
       const next = { ...current };
-      activePlayers.forEach((player) => {
+      racePlayers.forEach((player) => {
         if (next[player.id] !== roomChoice) {
           next[player.id] = roomChoice;
           changed = true;
@@ -1901,9 +1918,9 @@ export default function App() {
       });
       return changed ? next : current;
     });
-  }, [activePlayers, multiplayer.clientId, multiplayer.currentRoom?.flow, playMode]);
+  }, [multiplayer.clientId, multiplayer.currentRoom?.flow, playMode, racePlayers]);
   const { raceState, riders, raceSummary, startRace, resetRace } = useRaceEngine(
-    activePlayers,
+    racePlayers,
     samplesByDevice,
     effectiveTrack.lengthMeters,
     activeBranchChoicesByPlayer,
@@ -1917,11 +1934,11 @@ export default function App() {
     }
 
     const liveRidersByPlayer = new Map(riders.map((rider) => [rider.playerId, rider]));
-    return createInitialRiders(activePlayers, activeBranchChoicesByPlayer).map((rider) => {
+    return createInitialRiders(racePlayers, activeBranchChoicesByPlayer).map((rider) => {
       const liveRider = liveRidersByPlayer.get(rider.playerId);
       return liveRider && liveRider.distance <= 1 && !liveRider.finishedAt ? liveRider : rider;
     });
-  }, [activeBranchChoicesByPlayer, activePlayers, raceState, riders, startGateStatus.active]);
+  }, [activeBranchChoicesByPlayer, racePlayers, raceState, riders, startGateStatus.active]);
   const canCancelRace = startGateStatus.active || raceState === 'racing';
 
   const releaseRaceFullscreen = useCallback(() => {
@@ -1999,7 +2016,7 @@ export default function App() {
       sessionId: raceCapture?.sessionId ?? `${multiplayer.currentRoom.id}:${effectiveTrack.id}:manual`,
       trackId: effectiveTrack.id,
       raceState,
-      riders: activePlayers
+      riders: racePlayers
         .map((player) => {
           const rider = riders.find((item) => item.playerId === player.id);
           if (!rider) {
@@ -2033,7 +2050,7 @@ export default function App() {
         .filter((rider): rider is OutgoingMultiplayerRaceState['riders'][number] => rider != null),
       summary: raceSummary,
     };
-  }, [activePlayers, effectiveTrack.id, multiplayer.currentRoom, playMode, raceCapture?.sessionId, raceState, raceSummary, riders, samplesByDevice]);
+  }, [effectiveTrack.id, multiplayer.currentRoom, playMode, raceCapture?.sessionId, racePlayers, raceState, raceSummary, riders, samplesByDevice]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
@@ -2094,7 +2111,7 @@ export default function App() {
       },
       sessionMode,
       selectedMetrics,
-      players: activePlayers.map((player) => ({
+      players: racePlayers.map((player) => ({
         id: player.id,
         name: player.name,
         deviceId: player.deviceId,
@@ -2113,7 +2130,7 @@ export default function App() {
     };
 
     setRaceCapture(capture);
-  }, [activePlayers, activeZones, demoMode, effectiveTrack, selectedMetrics, sessionMode]);
+  }, [activeZones, demoMode, effectiveTrack, racePlayers, selectedMetrics, sessionMode]);
 
   const appendRaceCaptureEvent = useCallback((type: RaceCapture['events'][number]['type'], label: string, at = Date.now()) => {
     setRaceCapture((current) => {
@@ -2170,7 +2187,7 @@ export default function App() {
   }, [effectiveTrack.id, multiplayer.currentRoom, multiplayer.sendRaceState, playMode]);
 
   useEffect(() => {
-    if (reactionStartAt == null || activePlayers.length === 0) {
+    if (reactionStartAt == null || racePlayers.length === 0) {
       return;
     }
 
@@ -2178,7 +2195,7 @@ export default function App() {
       let changed = false;
       const next: ReactionTimesByPlayer = { ...current };
 
-      activePlayers.forEach((player) => {
+      racePlayers.forEach((player) => {
         if (player.deviceId == null || next[player.id] != null) {
           return;
         }
@@ -2194,7 +2211,7 @@ export default function App() {
 
       return changed ? next : current;
     });
-  }, [activePlayers, reactionStartAt, samplesByDevice]);
+  }, [racePlayers, reactionStartAt, samplesByDevice]);
 
   useEffect(() => {
     if (demoMode || connectedDeviceIds.length === 0) {
@@ -2452,7 +2469,7 @@ export default function App() {
     }
 
     const captureStartedAt = raceCapture.startedAt ?? raceCapture.createdAt;
-    const capturedSamples = activePlayers.flatMap((player) => {
+    const capturedSamples = racePlayers.flatMap((player) => {
       if (player.deviceId == null) {
         return [];
       }
@@ -2508,7 +2525,7 @@ export default function App() {
         samples: [...current.samples, ...capturedSamples],
       };
     });
-  }, [activePlayers, raceCapture, riders, samplesByDevice]);
+  }, [raceCapture, racePlayers, riders, samplesByDevice]);
 
   useEffect(() => {
     if (!raceCapture || raceState !== 'finished' || raceSummary.length === 0 || raceCapture.status === 'finished') {
@@ -3650,7 +3667,7 @@ export default function App() {
       return;
     }
 
-    const falseStartPlayer = activePlayers.find((player) => {
+    const falseStartPlayer = racePlayers.find((player) => {
       if (player.deviceId == null) {
         return false;
       }
@@ -3673,11 +3690,11 @@ export default function App() {
     resetRace();
     releaseRaceFullscreen();
   }, [
-    activePlayers,
     appendRaceCaptureEvent,
     bridge,
     clearStartGateSequence,
     demoMode,
+    racePlayers,
     raceCapture?.sessionId,
     raceState,
     releaseRaceFullscreen,
@@ -4040,13 +4057,13 @@ export default function App() {
   const handleRoomRouteChoice = useCallback((choice: SplitBranchId) => {
     setBranchChoicesByPlayer((current) => {
       const next = { ...current };
-      activePlayers.forEach((player) => {
+      racePlayers.forEach((player) => {
         next[player.id] = choice;
       });
       return next;
     });
     multiplayer.chooseRoomRoute(choice);
-  }, [activePlayers, multiplayer]);
+  }, [multiplayer, racePlayers]);
 
   const sendChatMessage = () => {
     const text = chatDraft.trim();
@@ -4629,7 +4646,7 @@ export default function App() {
                 track={effectiveTrack}
                 riders={stagedRiders}
                 remoteRaceStates={remoteRaceStates}
-                players={activePlayers}
+                players={racePlayers}
                 samplesByDevice={samplesByDevice}
                 speedUnit={speedUnit}
                 distanceUnit={distanceUnit}
@@ -4689,7 +4706,7 @@ export default function App() {
                 selectedCustomRoutePredictionId={selectedCustomRoutePrediction?.id ?? null}
                 customRoutes={customRoutes}
                 selectedTrackId={selectedTrack.id}
-                players={activePlayers}
+                players={racePlayers}
                 branchChoicesByPlayer={activeBranchChoicesByPlayer}
                 mappingRouteVariantId={mappingRouteVariantId}
                 mappingZoneBranchChoice={mappingZoneBranchChoice}
@@ -4697,7 +4714,7 @@ export default function App() {
                 savedRouteVariantIds={savedRouteVariantIds}
                 hasDualStartRoutes={hasDualStartRoutes}
                 raceState={raceState}
-                activeBikeCount={activePlayers.length}
+                activeBikeCount={racePlayers.length}
                 maxPlayers={maxPlayers}
                 demoMode={demoMode}
                 demoBikeCount={demoBikeCount}
@@ -4771,7 +4788,7 @@ export default function App() {
             <div className="lower-grid">
               <AnalyticsPanel
                 track={effectiveTrack}
-                players={activePlayers}
+                players={racePlayers}
                 riders={riders}
                 raceSummary={raceSummary}
                 samplesByDevice={samplesByDevice}

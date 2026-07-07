@@ -417,9 +417,9 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     return send({ type: 'create-room', private: false, track: currentTrack });
   }, [currentTrack, send]);
 
-  const createMatch = useCallback((targetIds: string[]) => {
+  const createMatch = useCallback((targetIds: string[], localSeatCount = 1) => {
     setStatus('Sending match invites.');
-    return send({ type: 'create-match', targetIds, track: currentTrack });
+    return send({ type: 'create-match', targetIds, localSeatCount, track: currentTrack });
   }, [currentTrack, send]);
 
   const respondToMatchInvite = useCallback((inviteId: string, accepted: boolean) => {

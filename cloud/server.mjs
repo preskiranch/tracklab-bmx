@@ -661,8 +661,9 @@ function sanitizeRaceState(value, client, room) {
     return null;
   }
 
+  const allowedRiderCount = roomRacerSeatCountForMember(room, client.id);
   const riders = Array.isArray(value.riders)
-    ? value.riders.slice(0, maxRaceBikeCount).map((rider, index) => {
+    ? value.riders.slice(0, allowedRiderCount).map((rider, index) => {
       const colorName = ['lime', 'red', 'blue', 'yellow'].includes(rider?.colorName)
         ? rider.colorName
         : ['lime', 'red', 'blue', 'yellow'][index % 4];
@@ -699,7 +700,7 @@ function sanitizeRaceState(value, client, room) {
     raceState: ['ready', 'racing', 'finished'].includes(value.raceState) ? value.raceState : 'ready',
     at: Date.now(),
     riders,
-    summary: Array.isArray(value.summary) ? value.summary.slice(0, 16) : [],
+    summary: Array.isArray(value.summary) ? value.summary.slice(0, allowedRiderCount) : [],
   };
 }
 
@@ -750,17 +751,43 @@ function sanitizeClientIdList(value, limit = maxRaceBikeCount - 1) {
   return [...new Set(value.map((item) => sanitizeText(item, '', 80)).filter(Boolean))].slice(0, limit);
 }
 
+function sanitizeSeatCount(value, fallback = 1) {
+  const numeric = Math.round(Number(value));
+  const seatCount = Number.isFinite(numeric) ? numeric : fallback;
+  return Math.max(1, Math.min(maxRaceBikeCount, seatCount));
+}
+
 function sanitizeGroupName(value) {
   return sanitizeText(value, 'TrackLab Team', 48);
 }
 
-function publicRider(client, role = client?.roomRole ?? null) {
+function roomRacerSeatCountForMember(room, clientId) {
+  if (!room?.racers?.has(clientId)) {
+    return 0;
+  }
+
+  const assignedCount = Number(room.racerSeatCounts?.get(clientId));
+  return Number.isFinite(assignedCount)
+    ? Math.max(1, Math.min(maxRaceBikeCount, Math.round(assignedCount)))
+    : 1;
+}
+
+function roomRacerSeatCount(room) {
+  if (!room?.racers) {
+    return 0;
+  }
+
+  return [...room.racers].reduce((total, clientId) => total + roomRacerSeatCountForMember(room, clientId), 0);
+}
+
+function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = client?.racerSeatCount ?? 0) {
   return {
     id: client.id,
     name: client.name,
     available: client.available,
     membershipTier: client.membershipTier,
     bikeCount: client.bikeCount,
+    racerSeatCount: role === 'racer' ? Math.max(1, Math.min(maxRaceBikeCount, Math.round(Number(racerSeatCount) || 1))) : 0,
     track: client.track,
     roomId: client.roomId,
     roomRole: role,
@@ -776,6 +803,7 @@ function publicMatchInvite(invite) {
     fromName: invite.fromName,
     track: invite.track,
     targetIds: invite.targetIds,
+    hostSeatCount: invite.hostSeatCount,
     createdAt: invite.createdAt,
   };
 }
@@ -826,7 +854,7 @@ function publicRoom(room) {
         return null;
       }
       const role = room.racers?.has(clientId) ? 'racer' : 'spectator';
-      return publicRider(client, role);
+      return publicRider(client, role, roomRacerSeatCountForMember(room, clientId));
     })
     .filter(Boolean)
     .map((rider) => rider);
@@ -841,6 +869,8 @@ function publicRoom(room) {
     members,
     memberCount: members.length,
     racerCount: room.racers?.size ?? members.length,
+    racerSeatCount: roomRacerSeatCount(room),
+    racerSeatCapacity: maxRaceBikeCount,
     spectatorCount: room.spectators?.size ?? 0,
   };
 }
@@ -1063,7 +1093,9 @@ function leaveRoom(client, reason = 'left') {
   room.raceStates.delete(client.id);
   room.racers?.delete(client.id);
   room.spectators?.delete(client.id);
+  room.racerSeatCounts?.delete(client.id);
   client.roomRole = null;
+  client.racerSeatCount = 0;
   if (room.hostId === client.id) {
     room.hostId = [...room.members][0] ?? null;
   }
@@ -1081,7 +1113,7 @@ function leaveRoom(client, reason = 'left') {
   broadcastLobby();
 }
 
-function joinRoom(client, room, preferredRole = 'racer') {
+function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1) {
   if (client.roomId && client.roomId !== room.id) {
     leaveRoom(client, 'joined-another-room');
   }
@@ -1092,9 +1124,13 @@ function joinRoom(client, room, preferredRole = 'racer') {
   if (!room.spectators) {
     room.spectators = new Set();
   }
+  if (!room.racerSeatCounts) {
+    room.racerSeatCounts = new Map();
+  }
 
-  const alreadyInRoom = room.members.has(client.id);
-  if (!alreadyInRoom && preferredRole === 'racer' && room.racers.size >= maxRaceBikeCount) {
+  const existingSeatCount = room.racerSeatCounts.get(client.id) ?? 0;
+  const availableSeatCount = Math.max(0, maxRaceBikeCount - (roomRacerSeatCount(room) - existingSeatCount));
+  if (preferredRole === 'racer' && availableSeatCount <= 0) {
     preferredRole = 'spectator';
   }
 
@@ -1102,19 +1138,24 @@ function joinRoom(client, room, preferredRole = 'racer') {
   if (preferredRole === 'spectator') {
     room.racers.delete(client.id);
     room.spectators.add(client.id);
+    room.racerSeatCounts.delete(client.id);
+    client.racerSeatCount = 0;
   } else {
     room.spectators.delete(client.id);
     room.racers.add(client.id);
+    const assignedSeatCount = Math.max(1, Math.min(availableSeatCount, sanitizeSeatCount(requestedSeatCount)));
+    room.racerSeatCounts.set(client.id, assignedSeatCount);
+    client.racerSeatCount = assignedSeatCount;
   }
   client.roomId = room.id;
   client.roomRole = preferredRole;
   client.track = room.track;
-  void persistence.saveRoomJoin(room, client, preferredRole);
+  void persistence.saveRoomJoin(room, client, preferredRole, client.racerSeatCount);
   broadcastRoom(room.id, roomState(room));
   broadcastLobby();
 }
 
-function createRoom(host, track, privateRoom = true) {
+function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
   let id = randomId('ROOM', 6);
   while (rooms.has(id)) {
     id = randomId('ROOM', 6);
@@ -1130,6 +1171,7 @@ function createRoom(host, track, privateRoom = true) {
     members: new Set(),
     racers: new Set(),
     spectators: new Set(),
+    racerSeatCounts: new Map(),
     raceStates: new Map(),
     messages: [{
       id: randomId('MSG', 10),
@@ -1142,7 +1184,7 @@ function createRoom(host, track, privateRoom = true) {
   rooms.set(id, room);
   void persistence.saveRoom(room, host);
   void persistence.saveRoomMessage(room.id, null, room.messages[0]);
-  joinRoom(host, room);
+  joinRoom(host, room, 'racer', hostSeatCount);
   return room;
 }
 
@@ -1173,25 +1215,30 @@ function sendMatchInvite(fromClient, targetClient, invite) {
   });
 }
 
-function createSelectedMatchRoom(host, targetIds, track) {
+function createSelectedMatchRoom(host, targetIds, track, localSeatCount = 1) {
+  const hostSeatCount = sanitizeSeatCount(localSeatCount);
+  const remainingSeatCount = Math.max(0, maxRaceBikeCount - hostSeatCount);
   const targets = targetIds
     .map((targetId) => clients.get(targetId))
     .filter((target) => target && target.id !== host.id && target.socket.readyState === target.socket.OPEN)
-    .slice(0, maxRaceBikeCount - 1);
+    .slice(0, remainingSeatCount);
 
   if (targets.length === 0) {
-    send(host, { type: 'challenge-status', message: 'Select at least one online racer for the match.' });
+    send(host, { type: 'challenge-status', message: remainingSeatCount === 0
+      ? 'Choose fewer studio seats to add online racers.'
+      : 'Select at least one online racer for the match.' });
     return null;
   }
 
-  const room = createRoom(host, track, true);
-  addRoomSystemMessage(room, `${host.name} opened a selected match.`);
+  const room = createRoom(host, track, true, hostSeatCount);
+  addRoomSystemMessage(room, `${host.name} opened a selected match with ${hostSeatCount} studio seat${hostSeatCount === 1 ? '' : 's'}.`);
   const invite = {
     id: randomId('MATCH', 10),
     roomId: room.id,
     fromId: host.id,
     fromName: host.name,
     targetIds: targets.map((target) => target.id),
+    hostSeatCount,
     track: sanitizeTrack(track ?? host.track),
     createdAt: Date.now(),
   };
@@ -1284,6 +1331,7 @@ async function findRoom(roomId) {
   savedRoom.flow = defaultRoomFlow();
   savedRoom.racers = savedRoom.racers ?? new Set();
   savedRoom.spectators = savedRoom.spectators ?? new Set();
+  savedRoom.racerSeatCounts = savedRoom.racerSeatCounts ?? new Map();
   savedRoom.messages = savedRoom.messages.length > 0
     ? savedRoom.messages
     : [{
@@ -1593,7 +1641,7 @@ async function handleClientMessage(client, rawMessage) {
 
   if (message.type === 'create-match') {
     const targetIds = sanitizeClientIdList(message.targetIds);
-    createSelectedMatchRoom(client, targetIds, message.track);
+    createSelectedMatchRoom(client, targetIds, message.track, message.localSeatCount);
     return;
   }
 
@@ -1619,8 +1667,8 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    const beforeRole = room.racers?.size >= maxRaceBikeCount ? 'spectator' : 'racer';
-    joinRoom(client, room, beforeRole);
+    const beforeRole = roomRacerSeatCount(room) >= maxRaceBikeCount ? 'spectator' : 'racer';
+    joinRoom(client, room, beforeRole, 1);
     send(client, { type: 'challenge-status', message: beforeRole === 'racer' ? `Joined match ${room.id}.` : `Joined ${room.id} as a spectator.` });
     const host = clients.get(invite.fromId);
     if (host) {

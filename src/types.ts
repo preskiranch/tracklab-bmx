@@ -126,6 +126,7 @@ export type MultiplayerRider = {
   available: boolean;
   membershipTier?: 'visitor' | 'spectator' | 'racer';
   bikeCount: number;
+  racerSeatCount?: number;
   track: MultiplayerTrackSummary;
   roomId: string | null;
   roomRole?: 'racer' | 'spectator' | null;
@@ -142,6 +143,8 @@ export type MultiplayerRoom = {
   members: MultiplayerRider[];
   memberCount: number;
   racerCount?: number;
+  racerSeatCount?: number;
+  racerSeatCapacity?: number;
   spectatorCount?: number;
 };
 
@@ -166,6 +169,7 @@ export type MultiplayerMatchInvite = {
   fromId: string;
   fromName: string;
   targetIds: string[];
+  hostSeatCount?: number;
   track: MultiplayerTrackSummary;
   createdAt: number;
 };
