@@ -4799,6 +4799,8 @@ export default function App() {
                 rooms={multiplayer.rooms}
                 onlineRiders={multiplayer.onlineRiders}
                 incomingChallenges={multiplayer.incomingChallenges}
+                incomingMatchInvites={multiplayer.incomingMatchInvites}
+                social={multiplayer.social}
                 inviteUrl={multiplayer.inviteUrl}
                 track={effectiveTrack}
                 players={activePlayers}
@@ -4815,7 +4817,8 @@ export default function App() {
                 onRiderNameChange={(name) => multiplayer.setProfile({ name })}
                 onRiderAvailableChange={(available) => multiplayer.setProfile({ available })}
                 onCreatePrivateRoom={multiplayer.createPrivateRoom}
-                onCreatePublicRoom={multiplayer.createPublicRoom}
+                onCreateMatch={multiplayer.createMatch}
+                onRespondToMatchInvite={multiplayer.respondToMatchInvite}
                 onJoinRoom={multiplayer.joinRoom}
                 onLeaveRoom={multiplayer.leaveRoom}
                 onShareInvite={shareMultiplayerInvite}
@@ -4828,6 +4831,11 @@ export default function App() {
                 onChallengeRider={multiplayer.challengeRider}
                 onAcceptChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, true)}
                 onDeclineChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, false)}
+                onSendFriendRequest={multiplayer.sendFriendRequest}
+                onRespondToFriendRequest={multiplayer.respondToFriendRequest}
+                onCreateGroup={multiplayer.createGroup}
+                onInviteToGroup={multiplayer.inviteToGroup}
+                onRespondToGroupInvite={multiplayer.respondToGroupInvite}
                 onChatDraftChange={setChatDraft}
                 onChatSend={sendChatMessage}
                 trackVoteCandidates={multiplayerVoteCandidates}

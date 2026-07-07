@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Mic,
   MicOff,
+  Plus,
   RadioTower,
   Send,
   Shuffle,
@@ -20,10 +21,13 @@ import {
 import type {
   BikeSample,
   MultiplayerChallenge,
+  MultiplayerGroup,
+  MultiplayerMatchInvite,
   MultiplayerRaceState,
   MultiplayerRider,
   MultiplayerRoom,
   MultiplayerRoomMessage,
+  MultiplayerSocialState,
   MultiplayerTrackVoteCandidate,
   PlayMode,
   PlayerSlot,
@@ -54,6 +58,11 @@ type MultiplayerPanelProps = {
     challenge: MultiplayerChallenge;
     from: MultiplayerRider;
   }>;
+  incomingMatchInvites: Array<{
+    invite: MultiplayerMatchInvite;
+    from: MultiplayerRider;
+  }>;
+  social: MultiplayerSocialState;
   inviteUrl: string;
   track: TrackRecord;
   trackVoteCandidates: MultiplayerTrackVoteCandidate[];
@@ -71,7 +80,8 @@ type MultiplayerPanelProps = {
   onRiderNameChange: (name: string) => void;
   onRiderAvailableChange: (available: boolean) => void;
   onCreatePrivateRoom: () => void;
-  onCreatePublicRoom: () => void;
+  onCreateMatch: (targetIds: string[]) => void;
+  onRespondToMatchInvite: (inviteId: string, accepted: boolean) => void;
   onJoinRoom: (roomId: string) => void;
   onLeaveRoom: () => void;
   onShareInvite: () => void;
@@ -84,6 +94,11 @@ type MultiplayerPanelProps = {
   onChallengeRider: (riderId: string) => void;
   onAcceptChallenge: (challengeId: string) => void;
   onDeclineChallenge: (challengeId: string) => void;
+  onSendFriendRequest: (riderId: string) => void;
+  onRespondToFriendRequest: (requestId: string, accepted: boolean) => void;
+  onCreateGroup: (name: string) => void;
+  onInviteToGroup: (groupId: string, riderId: string) => void;
+  onRespondToGroupInvite: (inviteId: string, accepted: boolean) => void;
   onChatDraftChange: (value: string) => void;
   onChatSend: () => void;
   voiceEnabled: boolean;
@@ -110,6 +125,8 @@ export function MultiplayerPanel({
   rooms,
   onlineRiders,
   incomingChallenges,
+  incomingMatchInvites,
+  social,
   inviteUrl,
   track,
   trackVoteCandidates,
@@ -127,7 +144,8 @@ export function MultiplayerPanel({
   onRiderNameChange,
   onRiderAvailableChange,
   onCreatePrivateRoom,
-  onCreatePublicRoom,
+  onCreateMatch,
+  onRespondToMatchInvite,
   onJoinRoom,
   onLeaveRoom,
   onShareInvite,
@@ -140,6 +158,11 @@ export function MultiplayerPanel({
   onChallengeRider,
   onAcceptChallenge,
   onDeclineChallenge,
+  onSendFriendRequest,
+  onRespondToFriendRequest,
+  onCreateGroup,
+  onInviteToGroup,
+  onRespondToGroupInvite,
   onChatDraftChange,
   onChatSend,
   voiceEnabled,
@@ -150,10 +173,26 @@ export function MultiplayerPanel({
   onVoiceStop,
 }: MultiplayerPanelProps) {
   const [profileKeyDraft, setProfileKeyDraft] = useState(profileKey);
+  const [selectedRiderIds, setSelectedRiderIds] = useState<string[]>([]);
+  const [groupNameDraft, setGroupNameDraft] = useState('');
+  const [activeGroupId, setActiveGroupId] = useState('');
 
   useEffect(() => {
     setProfileKeyDraft(profileKey);
   }, [profileKey]);
+
+  useEffect(() => {
+    setSelectedRiderIds((current) => current.filter((riderId) => onlineRiders.some((rider) => rider.id === riderId)));
+  }, [onlineRiders]);
+
+  useEffect(() => {
+    if (!activeGroupId && social.groups[0]) {
+      setActiveGroupId(social.groups[0].id);
+    }
+    if (activeGroupId && !social.groups.some((group) => group.id === activeGroupId)) {
+      setActiveGroupId(social.groups[0]?.id ?? '');
+    }
+  }, [activeGroupId, social.groups]);
 
   const commitProfileKey = () => {
     const nextKey = profileKeyDraft.trim();
@@ -168,10 +207,42 @@ export function MultiplayerPanel({
     event.preventDefault();
     onChatSend();
   };
+
+  const toggleSelectedRider = (riderId: string) => {
+    setSelectedRiderIds((current) => {
+      if (current.includes(riderId)) {
+        return current.filter((id) => id !== riderId);
+      }
+      return current.length >= maxPlayers - 1 ? current : [...current, riderId];
+    });
+  };
+
+  const handleCreateMatch = () => {
+    if (selectedRiderIds.length === 0) {
+      return;
+    }
+    onCreateMatch(selectedRiderIds);
+  };
+
+  const handleCreateGroup = () => {
+    const name = groupNameDraft.trim();
+    if (!name) {
+      return;
+    }
+    onCreateGroup(name);
+    setGroupNameDraft('');
+  };
   const multiplayerOnline = playMode === 'multiplayer' && connection === 'open';
   const availableRiders = onlineRiders
     .filter((rider) => rider.id !== currentUserId && rider.available)
-    .slice(0, maxPlayers);
+    .slice(0, 20);
+  const friendRiderIds = new Set(social.friends.map((friend) => friend.riderId).filter(Boolean));
+  const pendingFriendNames = new Set([
+    ...social.incomingFriendRequests.map((request) => request.fromName),
+    ...social.outgoingFriendRequests.map((request) => request.toName),
+  ]);
+  const selectedGroup = social.groups.find((group) => group.id === activeGroupId) ?? social.groups[0] ?? null;
+  const selectedRiders = availableRiders.filter((rider) => selectedRiderIds.includes(rider.id));
   const displayedMessages = playMode === 'multiplayer' && currentRoom
     ? roomMessages.map((message) => ({
       id: message.id,
@@ -293,9 +364,6 @@ export function MultiplayerPanel({
         <div className="room-actions">
           <button type="button" disabled={!multiplayerOnline} onClick={onCreatePrivateRoom}>
             <UserPlus size={14} /> Private room
-          </button>
-          <button type="button" disabled={!multiplayerOnline} onClick={onCreatePublicRoom}>
-            <Users size={14} /> Public lobby
           </button>
           <button type="button" disabled={!multiplayerOnline} onClick={onQuickMatch}>
             <Users size={14} /> Quick match
@@ -435,6 +503,27 @@ export function MultiplayerPanel({
         </section>
       )}
 
+      {playMode === 'multiplayer' && incomingMatchInvites.length > 0 && (
+        <section className="panel-section challenge-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Match Invite</span>
+              <h3>{incomingMatchInvites.length} pending</h3>
+            </div>
+          </div>
+          {incomingMatchInvites.map(({ invite, from }) => (
+            <div className="challenge-card" key={invite.id}>
+              <div>
+                <strong>{from.name}</strong>
+                <span>{invite.track.name}</span>
+              </div>
+              <button type="button" onClick={() => onRespondToMatchInvite(invite.id, true)}><Check size={14} /> Accept</button>
+              <button type="button" onClick={() => onRespondToMatchInvite(invite.id, false)}><X size={14} /> Decline</button>
+            </div>
+          ))}
+        </section>
+      )}
+
       {playMode === 'multiplayer' && incomingChallenges.length > 0 && (
         <section className="panel-section challenge-section">
           <div className="section-heading">
@@ -457,13 +546,28 @@ export function MultiplayerPanel({
       )}
 
       {playMode === 'multiplayer' && (
-        <section className="panel-section online-section">
+        <section className="panel-section online-section community-section">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Online</span>
-              <h3>{availableRiders.length} riders available</h3>
+              <span className="eyebrow">Community</span>
+              <h3>{availableRiders.length} available</h3>
             </div>
             <Users size={18} />
+          </div>
+
+          <div className="match-builder-card">
+            <div>
+              <strong>{selectedRiders.length + 1} / {maxPlayers} racers</strong>
+              <span>{selectedRiders.length === 0 ? 'Select racers for a match' : selectedRiders.map((rider) => rider.name).join(', ')}</span>
+            </div>
+            <button
+              className="primary-inline-button"
+              type="button"
+              disabled={!multiplayerOnline || selectedRiderIds.length === 0}
+              onClick={handleCreateMatch}
+            >
+              <UserPlus size={15} /> Create Match
+            </button>
           </div>
 
           <div className="online-rider-list">
@@ -474,14 +578,108 @@ export function MultiplayerPanel({
                   <strong>{rider.name}</strong>
                   <span>{rider.bikeCount} bike{rider.bikeCount === 1 ? '' : 's'} / {rider.track.name}</span>
                 </div>
-                <button type="button" onClick={() => onChallengeRider(rider.id)}>Challenge</button>
+                <button
+                  type="button"
+                  className={selectedRiderIds.includes(rider.id) ? 'selected-mini-button' : ''}
+                  onClick={() => toggleSelectedRider(rider.id)}
+                >
+                  {selectedRiderIds.includes(rider.id) ? 'Selected' : 'Select'}
+                </button>
+                <button type="button" onClick={() => onChallengeRider(rider.id)}>1v1</button>
+                <button
+                  type="button"
+                  disabled={friendRiderIds.has(rider.id) || pendingFriendNames.has(rider.name)}
+                  onClick={() => onSendFriendRequest(rider.id)}
+                >
+                  Friend
+                </button>
+                {selectedGroup && (
+                  <button type="button" onClick={() => onInviteToGroup(selectedGroup.id, rider.id)}>
+                    Group
+                  </button>
+                )}
               </div>
             ))}
           </div>
 
+          {(social.incomingFriendRequests.length > 0 || social.incomingGroupInvites.length > 0) && (
+            <div className="social-request-list">
+              {social.incomingFriendRequests.map((request) => (
+                <div className="social-request-row" key={request.id}>
+                  <div>
+                    <strong>{request.fromName}</strong>
+                    <span>Friend request</span>
+                  </div>
+                  <button type="button" onClick={() => onRespondToFriendRequest(request.id, true)}><Check size={14} /></button>
+                  <button type="button" onClick={() => onRespondToFriendRequest(request.id, false)}><X size={14} /></button>
+                </div>
+              ))}
+              {social.incomingGroupInvites.map((invite) => (
+                <div className="social-request-row" key={invite.id}>
+                  <div>
+                    <strong>{invite.groupName}</strong>
+                    <span>{invite.fromName}</span>
+                  </div>
+                  <button type="button" onClick={() => onRespondToGroupInvite(invite.id, true)}><Check size={14} /></button>
+                  <button type="button" onClick={() => onRespondToGroupInvite(invite.id, false)}><X size={14} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="friends-groups-grid">
+            <div className="social-list-card">
+              <span className="eyebrow">Friends</span>
+              {social.friends.length === 0 && <div className="empty-compact">No friends yet.</div>}
+              {social.friends.slice(0, 8).map((friend) => (
+                <div className="social-mini-row" key={friend.guestKey}>
+                  <div>
+                    <strong>{friend.name}</strong>
+                    <span>{friend.online ? (friend.available ? 'Available' : 'Online') : 'Offline'}</span>
+                  </div>
+                  {friend.riderId && (
+                    <button type="button" onClick={() => toggleSelectedRider(friend.riderId ?? '')}>Select</button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="social-list-card">
+              <span className="eyebrow">Groups</span>
+              <div className="group-create-row">
+                <input
+                  type="text"
+                  value={groupNameDraft}
+                  placeholder="Group name"
+                  onChange={(event) => setGroupNameDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      handleCreateGroup();
+                    }
+                  }}
+                />
+                <button type="button" disabled={!groupNameDraft.trim()} onClick={handleCreateGroup}>
+                  <Plus size={14} />
+                </button>
+              </div>
+              {social.groups.length === 0 && <div className="empty-compact">No groups yet.</div>}
+              {social.groups.slice(0, 5).map((group: MultiplayerGroup) => (
+                <button
+                  className={`group-row ${selectedGroup?.id === group.id ? 'selected' : ''}`}
+                  type="button"
+                  key={group.id}
+                  onClick={() => setActiveGroupId(group.id)}
+                >
+                  <strong>{group.name}</strong>
+                  <span>{group.members.length} member{group.members.length === 1 ? '' : 's'}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {rooms.length > 0 && (
             <div className="open-room-list">
-              <span>Live private rooms</span>
+              <span>Live rooms</span>
               {rooms.slice(0, 4).map((room) => (
                 <button
                   className="open-room-link"
@@ -490,7 +688,7 @@ export function MultiplayerPanel({
                   disabled={!multiplayerOnline || currentRoom?.id === room.id}
                   onClick={() => onJoinRoom(room.id)}
                 >
-                  {room.id} / {room.private ? 'private' : 'public'} / {room.memberCount} riders / {room.track.name}
+                  {room.id} / {room.private ? 'private' : 'public'} / {room.racerCount ?? room.memberCount} racers / {room.track.name}
                 </button>
               ))}
             </div>

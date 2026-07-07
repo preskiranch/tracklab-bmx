@@ -134,11 +134,13 @@ export async function initPersistence() {
         room_id TEXT NOT NULL REFERENCES ${schema}.rooms(id) ON DELETE CASCADE,
         guest_key TEXT NOT NULL,
         display_name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'racer',
         joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         left_at TIMESTAMPTZ,
         PRIMARY KEY (room_id, guest_key)
       )
     `);
+      await pool.query(`ALTER TABLE ${schema}.room_members ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'racer'`);
       await pool.query(`
       CREATE TABLE IF NOT EXISTS ${schema}.room_messages (
         id TEXT PRIMARY KEY,
@@ -159,6 +161,61 @@ export async function initPersistence() {
         track JSONB NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         room_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        responded_at TIMESTAMPTZ
+      )
+    `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.friend_requests (
+        id TEXT PRIMARY KEY,
+        from_guest_key TEXT NOT NULL,
+        from_name TEXT NOT NULL,
+        to_guest_key TEXT NOT NULL,
+        to_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        responded_at TIMESTAMPTZ
+      )
+    `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.friendships (
+        guest_key_a TEXT NOT NULL,
+        guest_key_b TEXT NOT NULL,
+        display_name_a TEXT NOT NULL,
+        display_name_b TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (guest_key_a, guest_key_b)
+      )
+    `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.groups (
+        id TEXT PRIMARY KEY,
+        owner_guest_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.group_members (
+        group_id TEXT NOT NULL REFERENCES ${schema}.groups(id) ON DELETE CASCADE,
+        guest_key TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        left_at TIMESTAMPTZ,
+        PRIMARY KEY (group_id, guest_key)
+      )
+    `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.group_invites (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL REFERENCES ${schema}.groups(id) ON DELETE CASCADE,
+        from_guest_key TEXT NOT NULL,
+        from_name TEXT NOT NULL,
+        to_guest_key TEXT NOT NULL,
+        to_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         responded_at TIMESTAMPTZ
       )
@@ -218,6 +275,10 @@ export async function initPersistence() {
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_email ON ${schema}.auth_users (email)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_token ON ${schema}.auth_sessions (token_hash)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_expires ON ${schema}.auth_sessions (expires_at)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friend_requests_to ON ${schema}.friend_requests (to_guest_key, status, created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friend_requests_from ON ${schema}.friend_requests (from_guest_key, status, created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_members_guest ON ${schema}.group_members (guest_key, left_at)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_invites_to ON ${schema}.group_invites (to_guest_key, status, created_at DESC)`);
       console.log('[cloud] TrackLab persistence ready.');
       return true;
     } catch (error) {
@@ -399,15 +460,16 @@ export async function updateRoomTrack(room) {
   );
 }
 
-export async function saveRoomJoin(room, client) {
+export async function saveRoomJoin(room, client, role = 'racer') {
   return query(
-    `INSERT INTO ${schema}.room_members (room_id, guest_key, display_name, joined_at, left_at)
-     VALUES ($1, $2, $3, now(), null)
+    `INSERT INTO ${schema}.room_members (room_id, guest_key, display_name, role, joined_at, left_at)
+     VALUES ($1, $2, $3, $4, now(), null)
      ON CONFLICT (room_id, guest_key) DO UPDATE SET
        display_name = EXCLUDED.display_name,
+       role = EXCLUDED.role,
        joined_at = now(),
        left_at = null`,
-    [room.id, client.guestKey, client.name],
+    [room.id, client.guestKey, client.name, role],
   );
 }
 
@@ -556,6 +618,287 @@ export async function saveChallenge(challenge, fromClient, targetClient) {
      ON CONFLICT (id) DO NOTHING`,
     [challenge.id, fromClient.guestKey, fromClient.name, targetClient.guestKey, targetClient.name, json(challenge.track)],
   );
+}
+
+function sortFriendKeys(a, b) {
+  return String(a) < String(b) ? [a, b] : [b, a];
+}
+
+export async function areFriends(guestKeyA, guestKeyB) {
+  const [keyA, keyB] = sortFriendKeys(guestKeyA, guestKeyB);
+  const result = await query(
+    `SELECT 1 FROM ${schema}.friendships WHERE guest_key_a = $1 AND guest_key_b = $2 LIMIT 1`,
+    [keyA, keyB],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function createFriendRequest(request, fromClient, targetClient) {
+  if (await areFriends(fromClient.guestKey, targetClient.guestKey)) {
+    return null;
+  }
+
+  const existing = await query(
+    `SELECT id FROM ${schema}.friend_requests
+     WHERE status = 'pending'
+       AND ((from_guest_key = $1 AND to_guest_key = $2) OR (from_guest_key = $2 AND to_guest_key = $1))
+     LIMIT 1`,
+    [fromClient.guestKey, targetClient.guestKey],
+  );
+  if (existing?.rows?.[0]) {
+    return null;
+  }
+
+  await query(
+    `INSERT INTO ${schema}.friend_requests (id, from_guest_key, from_name, to_guest_key, to_name, status)
+     VALUES ($1, $2, $3, $4, $5, 'pending')`,
+    [request.id, fromClient.guestKey, fromClient.name, targetClient.guestKey, targetClient.name],
+  );
+  return request;
+}
+
+export async function respondToFriendRequest(requestId, client, accepted) {
+  const result = await query(
+    `UPDATE ${schema}.friend_requests
+     SET status = $3, responded_at = now()
+     WHERE id = $1 AND to_guest_key = $2 AND status = 'pending'
+     RETURNING *`,
+    [requestId, client.guestKey, accepted ? 'accepted' : 'declined'],
+  );
+  const request = result?.rows?.[0];
+  if (!request) {
+    return null;
+  }
+
+  if (accepted) {
+    const [keyA, keyB] = sortFriendKeys(request.from_guest_key, request.to_guest_key);
+    const nameA = keyA === request.from_guest_key ? request.from_name : request.to_name;
+    const nameB = keyB === request.from_guest_key ? request.from_name : request.to_name;
+    await query(
+      `INSERT INTO ${schema}.friendships (guest_key_a, guest_key_b, display_name_a, display_name_b)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (guest_key_a, guest_key_b) DO UPDATE SET
+         display_name_a = EXCLUDED.display_name_a,
+         display_name_b = EXCLUDED.display_name_b`,
+      [keyA, keyB, nameA, nameB],
+    );
+  }
+
+  return {
+    id: request.id,
+    fromGuestKey: request.from_guest_key,
+    fromName: request.from_name,
+    toGuestKey: request.to_guest_key,
+    toName: request.to_name,
+    accepted,
+  };
+}
+
+export async function createGroup(group, ownerClient) {
+  await query(
+    `INSERT INTO ${schema}.groups (id, owner_guest_key, name)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (id) DO NOTHING`,
+    [group.id, ownerClient.guestKey, group.name],
+  );
+  await query(
+    `INSERT INTO ${schema}.group_members (group_id, guest_key, display_name, role, joined_at, left_at)
+     VALUES ($1, $2, $3, 'owner', now(), null)
+     ON CONFLICT (group_id, guest_key) DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       role = 'owner',
+       left_at = null`,
+    [group.id, ownerClient.guestKey, ownerClient.name],
+  );
+  return group;
+}
+
+export async function isGroupMember(groupId, guestKey) {
+  const result = await query(
+    `SELECT 1 FROM ${schema}.group_members WHERE group_id = $1 AND guest_key = $2 AND left_at IS NULL LIMIT 1`,
+    [groupId, guestKey],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function createGroupInvite(invite, fromClient, targetClient) {
+  if (!(await isGroupMember(invite.groupId, fromClient.guestKey))) {
+    return null;
+  }
+
+  if (await isGroupMember(invite.groupId, targetClient.guestKey)) {
+    return null;
+  }
+
+  const existing = await query(
+    `SELECT id FROM ${schema}.group_invites
+     WHERE group_id = $1 AND to_guest_key = $2 AND status = 'pending'
+     LIMIT 1`,
+    [invite.groupId, targetClient.guestKey],
+  );
+  if (existing?.rows?.[0]) {
+    return null;
+  }
+
+  await query(
+    `INSERT INTO ${schema}.group_invites (id, group_id, from_guest_key, from_name, to_guest_key, to_name, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'pending')`,
+    [invite.id, invite.groupId, fromClient.guestKey, fromClient.name, targetClient.guestKey, targetClient.name],
+  );
+  return invite;
+}
+
+export async function respondToGroupInvite(inviteId, client, accepted) {
+  const result = await query(
+    `UPDATE ${schema}.group_invites
+     SET status = $3, responded_at = now()
+     WHERE id = $1 AND to_guest_key = $2 AND status = 'pending'
+     RETURNING *`,
+    [inviteId, client.guestKey, accepted ? 'accepted' : 'declined'],
+  );
+  const invite = result?.rows?.[0];
+  if (!invite) {
+    return null;
+  }
+
+  if (accepted) {
+    await query(
+      `INSERT INTO ${schema}.group_members (group_id, guest_key, display_name, role, joined_at, left_at)
+       VALUES ($1, $2, $3, 'member', now(), null)
+       ON CONFLICT (group_id, guest_key) DO UPDATE SET
+         display_name = EXCLUDED.display_name,
+         role = CASE WHEN ${schema}.group_members.role = 'owner' THEN 'owner' ELSE 'member' END,
+         left_at = null`,
+      [invite.group_id, client.guestKey, client.name],
+    );
+  }
+
+  return {
+    id: invite.id,
+    groupId: invite.group_id,
+    fromGuestKey: invite.from_guest_key,
+    toGuestKey: invite.to_guest_key,
+    accepted,
+  };
+}
+
+export async function loadSocialState(guestKey) {
+  if (!guestKey) {
+    return {
+      friends: [],
+      incomingFriendRequests: [],
+      outgoingFriendRequests: [],
+      groups: [],
+      incomingGroupInvites: [],
+    };
+  }
+
+  const [friends, incomingFriendRequests, outgoingFriendRequests, groups, groupMembers, incomingGroupInvites] = await Promise.all([
+    query(
+      `SELECT guest_key_a, guest_key_b, display_name_a, display_name_b, created_at
+       FROM ${schema}.friendships
+       WHERE guest_key_a = $1 OR guest_key_b = $1
+       ORDER BY created_at DESC`,
+      [guestKey],
+    ),
+    query(
+      `SELECT id, from_guest_key, from_name, to_guest_key, to_name, created_at
+       FROM ${schema}.friend_requests
+       WHERE to_guest_key = $1 AND status = 'pending'
+       ORDER BY created_at DESC
+       LIMIT 25`,
+      [guestKey],
+    ),
+    query(
+      `SELECT id, from_guest_key, from_name, to_guest_key, to_name, created_at
+       FROM ${schema}.friend_requests
+       WHERE from_guest_key = $1 AND status = 'pending'
+       ORDER BY created_at DESC
+       LIMIT 25`,
+      [guestKey],
+    ),
+    query(
+      `SELECT group_table.id, group_table.name, group_table.owner_guest_key, member.role, group_table.created_at
+       FROM ${schema}.groups AS group_table
+       JOIN ${schema}.group_members AS member ON member.group_id = group_table.id
+       WHERE member.guest_key = $1 AND member.left_at IS NULL
+       ORDER BY group_table.created_at DESC
+       LIMIT 25`,
+      [guestKey],
+    ),
+    query(
+      `SELECT group_id, guest_key, display_name, role
+       FROM ${schema}.group_members
+       WHERE left_at IS NULL
+       ORDER BY joined_at ASC`,
+    ),
+    query(
+      `SELECT invite.id, invite.group_id, invite.from_guest_key, invite.from_name, invite.to_guest_key, invite.to_name,
+              group_table.name AS group_name, invite.created_at
+       FROM ${schema}.group_invites AS invite
+       JOIN ${schema}.groups AS group_table ON group_table.id = invite.group_id
+       WHERE invite.to_guest_key = $1 AND invite.status = 'pending'
+       ORDER BY invite.created_at DESC
+       LIMIT 25`,
+      [guestKey],
+    ),
+  ]);
+
+  const membersByGroup = new Map();
+  (groupMembers?.rows ?? []).forEach((row) => {
+    const list = membersByGroup.get(row.group_id) ?? [];
+    list.push({
+      guestKey: row.guest_key,
+      name: row.display_name,
+      role: row.role,
+    });
+    membersByGroup.set(row.group_id, list);
+  });
+
+  return {
+    friends: (friends?.rows ?? []).map((row) => {
+      const friendIsA = row.guest_key_a !== guestKey;
+      return {
+        guestKey: friendIsA ? row.guest_key_a : row.guest_key_b,
+        name: friendIsA ? row.display_name_a : row.display_name_b,
+        createdAt: new Date(row.created_at).toISOString(),
+      };
+    }),
+    incomingFriendRequests: (incomingFriendRequests?.rows ?? []).map((row) => ({
+      id: row.id,
+      fromGuestKey: row.from_guest_key,
+      fromName: row.from_name,
+      toGuestKey: row.to_guest_key,
+      toName: row.to_name,
+      createdAt: new Date(row.created_at).toISOString(),
+    })),
+    outgoingFriendRequests: (outgoingFriendRequests?.rows ?? []).map((row) => ({
+      id: row.id,
+      fromGuestKey: row.from_guest_key,
+      fromName: row.from_name,
+      toGuestKey: row.to_guest_key,
+      toName: row.to_name,
+      createdAt: new Date(row.created_at).toISOString(),
+    })),
+    groups: (groups?.rows ?? []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      ownerGuestKey: row.owner_guest_key,
+      role: row.role,
+      members: membersByGroup.get(row.id) ?? [],
+      createdAt: new Date(row.created_at).toISOString(),
+    })),
+    incomingGroupInvites: (incomingGroupInvites?.rows ?? []).map((row) => ({
+      id: row.id,
+      groupId: row.group_id,
+      groupName: row.group_name,
+      fromGuestKey: row.from_guest_key,
+      fromName: row.from_name,
+      toGuestKey: row.to_guest_key,
+      toName: row.to_name,
+      createdAt: new Date(row.created_at).toISOString(),
+    })),
+  };
 }
 
 export async function updateChallenge(challengeId, status, roomId = null) {

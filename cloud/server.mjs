@@ -18,6 +18,7 @@ const websocketPath = '/multiplayer';
 const clients = new Map();
 const rooms = new Map();
 const challenges = new Map();
+const matchInvites = new Map();
 const persistedRaceResultKeys = new Set();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
@@ -741,7 +742,19 @@ function sanitizeVoiceSignal(value) {
   return null;
 }
 
-function publicRider(client) {
+function sanitizeClientIdList(value, limit = maxRaceBikeCount - 1) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(value.map((item) => sanitizeText(item, '', 80)).filter(Boolean))].slice(0, limit);
+}
+
+function sanitizeGroupName(value) {
+  return sanitizeText(value, 'TrackLab Team', 48);
+}
+
+function publicRider(client, role = client?.roomRole ?? null) {
   return {
     id: client.id,
     name: client.name,
@@ -750,7 +763,48 @@ function publicRider(client) {
     bikeCount: client.bikeCount,
     track: client.track,
     roomId: client.roomId,
+    roomRole: role,
     lastSeen: client.lastSeen,
+  };
+}
+
+function publicMatchInvite(invite) {
+  return {
+    id: invite.id,
+    roomId: invite.roomId,
+    fromId: invite.fromId,
+    fromName: invite.fromName,
+    track: invite.track,
+    targetIds: invite.targetIds,
+    createdAt: invite.createdAt,
+  };
+}
+
+function hydrateSocialPresence(socialState) {
+  const onlineByGuestKey = new Map([...clients.values()].map((client) => [client.guestKey, client]));
+  return {
+    ...socialState,
+    friends: socialState.friends.map((friend) => {
+      const onlineClient = onlineByGuestKey.get(friend.guestKey);
+      return {
+        ...friend,
+        online: Boolean(onlineClient),
+        riderId: onlineClient?.id ?? null,
+        available: Boolean(onlineClient?.available),
+      };
+    }),
+    groups: socialState.groups.map((group) => ({
+      ...group,
+      members: group.members.map((member) => {
+        const onlineClient = onlineByGuestKey.get(member.guestKey);
+        return {
+          ...member,
+          online: Boolean(onlineClient),
+          riderId: onlineClient?.id ?? null,
+          available: Boolean(onlineClient?.available),
+        };
+      }),
+    })),
   };
 }
 
@@ -766,9 +820,16 @@ function publicRoomFlow(room) {
 
 function publicRoom(room) {
   const members = [...room.members]
-    .map((clientId) => clients.get(clientId))
+    .map((clientId) => {
+      const client = clients.get(clientId);
+      if (!client) {
+        return null;
+      }
+      const role = room.racers?.has(clientId) ? 'racer' : 'spectator';
+      return publicRider(client, role);
+    })
     .filter(Boolean)
-    .map(publicRider);
+    .map((rider) => rider);
 
   return {
     id: room.id,
@@ -779,6 +840,8 @@ function publicRoom(room) {
     createdAt: room.createdAt,
     members,
     memberCount: members.length,
+    racerCount: room.racers?.size ?? members.length,
+    spectatorCount: room.spectators?.size ?? 0,
   };
 }
 
@@ -805,6 +868,35 @@ function broadcastRoom(roomId, payload) {
   }
 
   room.members.forEach((clientId) => send(clients.get(clientId), payload));
+}
+
+async function socialStateForClient(client) {
+  const socialState = await persistence.loadSocialState(client.guestKey);
+  return hydrateSocialPresence(socialState);
+}
+
+async function sendSocialState(client) {
+  if (!client) {
+    return;
+  }
+
+  const socialState = await socialStateForClient(client);
+  send(client, { type: 'social-state', social: socialState });
+}
+
+function refreshSocialForGuestKeys(guestKeys) {
+  const targets = new Set(guestKeys.filter(Boolean));
+  clients.forEach((client) => {
+    if (targets.has(client.guestKey)) {
+      void sendSocialState(client);
+    }
+  });
+}
+
+function refreshAllSocialPresence() {
+  clients.forEach((client) => {
+    void sendSocialState(client);
+  });
 }
 
 function clearRoomTimers(roomId) {
@@ -969,6 +1061,9 @@ function leaveRoom(client, reason = 'left') {
 
   room.members.delete(client.id);
   room.raceStates.delete(client.id);
+  room.racers?.delete(client.id);
+  room.spectators?.delete(client.id);
+  client.roomRole = null;
   if (room.hostId === client.id) {
     room.hostId = [...room.members][0] ?? null;
   }
@@ -986,15 +1081,35 @@ function leaveRoom(client, reason = 'left') {
   broadcastLobby();
 }
 
-function joinRoom(client, room) {
+function joinRoom(client, room, preferredRole = 'racer') {
   if (client.roomId && client.roomId !== room.id) {
     leaveRoom(client, 'joined-another-room');
   }
 
+  if (!room.racers) {
+    room.racers = new Set();
+  }
+  if (!room.spectators) {
+    room.spectators = new Set();
+  }
+
+  const alreadyInRoom = room.members.has(client.id);
+  if (!alreadyInRoom && preferredRole === 'racer' && room.racers.size >= maxRaceBikeCount) {
+    preferredRole = 'spectator';
+  }
+
   room.members.add(client.id);
+  if (preferredRole === 'spectator') {
+    room.racers.delete(client.id);
+    room.spectators.add(client.id);
+  } else {
+    room.spectators.delete(client.id);
+    room.racers.add(client.id);
+  }
   client.roomId = room.id;
+  client.roomRole = preferredRole;
   client.track = room.track;
-  void persistence.saveRoomJoin(room, client);
+  void persistence.saveRoomJoin(room, client, preferredRole);
   broadcastRoom(room.id, roomState(room));
   broadcastLobby();
 }
@@ -1013,6 +1128,8 @@ function createRoom(host, track, privateRoom = true) {
     flow: defaultRoomFlow(),
     createdAt: Date.now(),
     members: new Set(),
+    racers: new Set(),
+    spectators: new Set(),
     raceStates: new Map(),
     messages: [{
       id: randomId('MSG', 10),
@@ -1048,6 +1165,110 @@ function sendChallenge(fromClient, targetClient, track, statusPrefix = 'Challeng
   send(fromClient, { type: 'challenge-status', message: `${statusPrefix} to ${targetClient.name}.` });
 }
 
+function sendMatchInvite(fromClient, targetClient, invite) {
+  send(targetClient, {
+    type: 'match-invite',
+    invite: publicMatchInvite(invite),
+    from: publicRider(fromClient),
+  });
+}
+
+function createSelectedMatchRoom(host, targetIds, track) {
+  const targets = targetIds
+    .map((targetId) => clients.get(targetId))
+    .filter((target) => target && target.id !== host.id && target.socket.readyState === target.socket.OPEN)
+    .slice(0, maxRaceBikeCount - 1);
+
+  if (targets.length === 0) {
+    send(host, { type: 'challenge-status', message: 'Select at least one online racer for the match.' });
+    return null;
+  }
+
+  const room = createRoom(host, track, true);
+  addRoomSystemMessage(room, `${host.name} opened a selected match.`);
+  const invite = {
+    id: randomId('MATCH', 10),
+    roomId: room.id,
+    fromId: host.id,
+    fromName: host.name,
+    targetIds: targets.map((target) => target.id),
+    track: sanitizeTrack(track ?? host.track),
+    createdAt: Date.now(),
+  };
+  matchInvites.set(invite.id, invite);
+  targets.forEach((target) => sendMatchInvite(host, target, invite));
+  send(host, { type: 'challenge-status', message: `Match invite sent to ${targets.length} racer${targets.length === 1 ? '' : 's'}.` });
+  broadcastRoom(room.id, roomState(room));
+  broadcastLobby();
+  return room;
+}
+
+async function sendFriendRequest(fromClient, targetClient) {
+  const request = {
+    id: randomId('FRIEND', 10),
+    fromId: fromClient.id,
+    toId: targetClient.id,
+    createdAt: Date.now(),
+  };
+  const saved = await persistence.createFriendRequest(request, fromClient, targetClient);
+  if (!saved) {
+    send(fromClient, { type: 'challenge-status', message: 'Friend request already exists or this rider is already your friend.' });
+    return;
+  }
+
+  send(fromClient, { type: 'challenge-status', message: `Friend request sent to ${targetClient.name}.` });
+  send(targetClient, { type: 'challenge-status', message: `${fromClient.name} sent a friend request.` });
+  refreshSocialForGuestKeys([fromClient.guestKey, targetClient.guestKey]);
+}
+
+async function respondToFriendRequest(client, requestId, accepted) {
+  const response = await persistence.respondToFriendRequest(requestId, client, accepted);
+  if (!response) {
+    send(client, { type: 'challenge-status', message: 'Friend request is no longer available.' });
+    return;
+  }
+
+  send(client, { type: 'challenge-status', message: accepted ? 'Friend added.' : 'Friend request declined.' });
+  refreshSocialForGuestKeys([response.fromGuestKey, response.toGuestKey]);
+}
+
+async function createSocialGroup(client, name) {
+  const group = {
+    id: randomId('GROUP', 10),
+    name: sanitizeGroupName(name),
+  };
+  await persistence.createGroup(group, client);
+  send(client, { type: 'challenge-status', message: `${group.name} created.` });
+  refreshSocialForGuestKeys([client.guestKey]);
+}
+
+async function inviteGroupMember(fromClient, targetClient, groupId) {
+  const invite = {
+    id: randomId('GINV', 10),
+    groupId: sanitizeText(groupId, '', 40),
+  };
+  const saved = await persistence.createGroupInvite(invite, fromClient, targetClient);
+  if (!saved) {
+    send(fromClient, { type: 'challenge-status', message: 'Group invite could not be sent.' });
+    return;
+  }
+
+  send(fromClient, { type: 'challenge-status', message: `Group invite sent to ${targetClient.name}.` });
+  send(targetClient, { type: 'challenge-status', message: `${fromClient.name} sent a group invite.` });
+  refreshSocialForGuestKeys([fromClient.guestKey, targetClient.guestKey]);
+}
+
+async function respondToGroupInvite(client, inviteId, accepted) {
+  const response = await persistence.respondToGroupInvite(inviteId, client, accepted);
+  if (!response) {
+    send(client, { type: 'challenge-status', message: 'Group invite is no longer available.' });
+    return;
+  }
+
+  send(client, { type: 'challenge-status', message: accepted ? 'Group joined.' : 'Group invite declined.' });
+  refreshSocialForGuestKeys([response.fromGuestKey, response.toGuestKey]);
+}
+
 async function findRoom(roomId) {
   const activeRoom = rooms.get(roomId);
   if (activeRoom) {
@@ -1061,6 +1282,8 @@ async function findRoom(roomId) {
 
   savedRoom.track = sanitizeTrack(savedRoom.track);
   savedRoom.flow = defaultRoomFlow();
+  savedRoom.racers = savedRoom.racers ?? new Set();
+  savedRoom.spectators = savedRoom.spectators ?? new Set();
   savedRoom.messages = savedRoom.messages.length > 0
     ? savedRoom.messages
     : [{
@@ -1105,9 +1328,11 @@ async function handleClientMessage(client, rawMessage) {
         riders: [...clients.values()].map(publicRider),
         rooms: [...rooms.values()].map(publicRoom),
       });
+      void sendSocialState(client);
     }
 
     broadcastLobby();
+    refreshAllSocialPresence();
     return;
   }
 
@@ -1212,7 +1437,8 @@ async function handleClientMessage(client, rawMessage) {
         [client.id]: trackId,
       },
     };
-    const everyoneVoted = [...room.members].every((memberId) => Boolean(room.flow.votes?.[memberId]));
+    const votingMemberIds = room.racers?.size ? [...room.racers] : [...room.members];
+    const everyoneVoted = votingMemberIds.every((memberId) => Boolean(room.flow.votes?.[memberId]));
     if (everyoneVoted) {
       resolveTrackVote(room);
       return;
@@ -1302,6 +1528,10 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
+    if (room.racers?.size && !room.racers.has(client.id)) {
+      return;
+    }
+
     const raceState = sanitizeRaceState(message.state, client, room);
     if (!raceState) {
       return;
@@ -1358,6 +1588,81 @@ async function handleClientMessage(client, rawMessage) {
         send(clients.get(memberId), payload);
       }
     });
+    return;
+  }
+
+  if (message.type === 'create-match') {
+    const targetIds = sanitizeClientIdList(message.targetIds);
+    createSelectedMatchRoom(client, targetIds, message.track);
+    return;
+  }
+
+  if (message.type === 'match-response') {
+    const invite = matchInvites.get(sanitizeText(message.inviteId, '', 40));
+    if (!invite || !invite.targetIds.includes(client.id)) {
+      send(client, { type: 'challenge-status', message: 'Match invite is no longer available.' });
+      return;
+    }
+
+    if (!message.accepted) {
+      send(client, { type: 'challenge-status', message: 'Match invite declined.' });
+      const host = clients.get(invite.fromId);
+      if (host) {
+        send(host, { type: 'challenge-status', message: `${client.name} declined the match invite.` });
+      }
+      return;
+    }
+
+    const room = rooms.get(invite.roomId) ?? await findRoom(invite.roomId);
+    if (!room) {
+      send(client, { type: 'challenge-status', message: 'Match room is no longer open.' });
+      return;
+    }
+
+    const beforeRole = room.racers?.size >= maxRaceBikeCount ? 'spectator' : 'racer';
+    joinRoom(client, room, beforeRole);
+    send(client, { type: 'challenge-status', message: beforeRole === 'racer' ? `Joined match ${room.id}.` : `Joined ${room.id} as a spectator.` });
+    const host = clients.get(invite.fromId);
+    if (host) {
+      send(host, { type: 'challenge-status', message: `${client.name} joined the match.` });
+    }
+    return;
+  }
+
+  if (message.type === 'friend-request') {
+    const target = clients.get(sanitizeText(message.targetId, '', 80));
+    if (!target || target.id === client.id) {
+      send(client, { type: 'challenge-status', message: 'That rider is not online.' });
+      return;
+    }
+
+    await sendFriendRequest(client, target);
+    return;
+  }
+
+  if (message.type === 'friend-response') {
+    await respondToFriendRequest(client, sanitizeText(message.requestId, '', 40), Boolean(message.accepted));
+    return;
+  }
+
+  if (message.type === 'group-create') {
+    await createSocialGroup(client, message.name);
+    return;
+  }
+
+  if (message.type === 'group-invite') {
+    const target = clients.get(sanitizeText(message.targetId, '', 80));
+    if (!target || target.id === client.id) {
+      send(client, { type: 'challenge-status', message: 'That rider is not online.' });
+      return;
+    }
+
+    await inviteGroupMember(client, target, message.groupId);
+    return;
+  }
+
+  if (message.type === 'group-invite-response') {
+    await respondToGroupInvite(client, sanitizeText(message.inviteId, '', 40), Boolean(message.accepted));
     return;
   }
 
@@ -1712,6 +2017,7 @@ wss.on('connection', (socket) => {
     bikeCount: 0,
     track: sanitizeTrack(null),
     roomId: null,
+    roomRole: null,
     lastSeen: Date.now(),
   };
 
@@ -1734,6 +2040,7 @@ wss.on('connection', (socket) => {
     void persistence.setProfileOffline(client);
     clients.delete(client.id);
     broadcastLobby();
+    refreshAllSocialPresence();
   });
 });
 

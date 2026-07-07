@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   MultiplayerChallenge,
+  MultiplayerMatchInvite,
   MultiplayerRaceState,
   MultiplayerRider,
   MultiplayerRoom,
   MultiplayerRoomMessage,
+  MultiplayerSocialState,
   MultiplayerTrackSummary,
   MultiplayerTrackVoteCandidate,
   MultiplayerVoiceSignal,
@@ -32,6 +34,19 @@ type UseMultiplayerOptions = {
 type IncomingChallenge = {
   challenge: MultiplayerChallenge;
   from: MultiplayerRider;
+};
+
+type IncomingMatchInvite = {
+  invite: MultiplayerMatchInvite;
+  from: MultiplayerRider;
+};
+
+const emptySocialState: MultiplayerSocialState = {
+  friends: [],
+  incomingFriendRequests: [],
+  outgoingFriendRequests: [],
+  groups: [],
+  incomingGroupInvites: [],
 };
 
 export const profileStorageKey = 'tracklab-bmx-multiplayer-profile-v1';
@@ -166,6 +181,8 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
   const [roomRaceStates, setRoomRaceStates] = useState<MultiplayerRaceState[]>([]);
   const [voiceSignals, setVoiceSignals] = useState<MultiplayerVoiceSignal[]>([]);
   const [incomingChallenges, setIncomingChallenges] = useState<IncomingChallenge[]>([]);
+  const [incomingMatchInvites, setIncomingMatchInvites] = useState<IncomingMatchInvite[]>([]);
+  const [social, setSocial] = useState<MultiplayerSocialState>(emptySocialState);
   const [status, setStatus] = useState('Multiplayer offline.');
 
   const currentTrack = useMemo(() => trackSummary(track), [track.country, track.id, track.name, track.state]);
@@ -284,6 +301,16 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           setRooms(Array.isArray(message.rooms) ? message.rooms : []);
         }
 
+        if (message.type === 'social-state' && message.social) {
+          setSocial({
+            friends: Array.isArray(message.social.friends) ? message.social.friends : [],
+            incomingFriendRequests: Array.isArray(message.social.incomingFriendRequests) ? message.social.incomingFriendRequests : [],
+            outgoingFriendRequests: Array.isArray(message.social.outgoingFriendRequests) ? message.social.outgoingFriendRequests : [],
+            groups: Array.isArray(message.social.groups) ? message.social.groups : [],
+            incomingGroupInvites: Array.isArray(message.social.incomingGroupInvites) ? message.social.incomingGroupInvites : [],
+          });
+        }
+
         if (message.type === 'room-state') {
           setCurrentRoom(message.room ?? null);
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
@@ -335,6 +362,14 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           ].slice(-4));
           setStatus(`${message.from?.name ?? 'A rider'} sent a challenge.`);
         }
+
+        if (message.type === 'match-invite') {
+          setIncomingMatchInvites((current) => [
+            ...current.filter((item) => item.invite.id !== message.invite?.id),
+            { invite: message.invite, from: message.from },
+          ].slice(-6));
+          setStatus(`${message.from?.name ?? 'A rider'} invited you to a match.`);
+        }
       });
 
       socket.addEventListener('close', () => {
@@ -342,6 +377,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
         setStatus('Multiplayer disconnected. Reconnecting...');
         socketRef.current = null;
         setCurrentRoom(null);
+        setIncomingMatchInvites([]);
         if (!cancelled) {
           reconnectTimerRef.current = window.setTimeout(connect, 1400);
         }
@@ -380,6 +416,16 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     setStatus('Opening public lobby.');
     return send({ type: 'create-room', private: false, track: currentTrack });
   }, [currentTrack, send]);
+
+  const createMatch = useCallback((targetIds: string[]) => {
+    setStatus('Sending match invites.');
+    return send({ type: 'create-match', targetIds, track: currentTrack });
+  }, [currentTrack, send]);
+
+  const respondToMatchInvite = useCallback((inviteId: string, accepted: boolean) => {
+    setIncomingMatchInvites((current) => current.filter((item) => item.invite.id !== inviteId));
+    return send({ type: 'match-response', inviteId, accepted });
+  }, [send]);
 
   const joinRoom = useCallback((roomId: string) => {
     setStatus(`Joining ${roomId}.`);
@@ -443,6 +489,29 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     return send({ type: 'challenge', targetId, track: currentTrack });
   }, [currentTrack, send]);
 
+  const sendFriendRequest = useCallback((targetId: string) => {
+    setStatus('Sending friend request.');
+    return send({ type: 'friend-request', targetId });
+  }, [send]);
+
+  const respondToFriendRequest = useCallback((requestId: string, accepted: boolean) => {
+    return send({ type: 'friend-response', requestId, accepted });
+  }, [send]);
+
+  const createGroup = useCallback((name: string) => {
+    setStatus('Creating group.');
+    return send({ type: 'group-create', name });
+  }, [send]);
+
+  const inviteToGroup = useCallback((groupId: string, targetId: string) => {
+    setStatus('Sending group invite.');
+    return send({ type: 'group-invite', groupId, targetId });
+  }, [send]);
+
+  const respondToGroupInvite = useCallback((inviteId: string, accepted: boolean) => {
+    return send({ type: 'group-invite-response', inviteId, accepted });
+  }, [send]);
+
   const quickMatch = useCallback(() => {
     setStatus('Looking for an available rider.');
     return send({ type: 'quick-match', track: currentTrack });
@@ -468,11 +537,15 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     chooseRoomRoute,
     clientId,
     connection,
+    createGroup,
+    createMatch,
     createPrivateRoom,
     createPublicRoom,
     currentRoom,
     incomingChallenges,
+    incomingMatchInvites,
     inviteUrl,
+    inviteToGroup,
     joinRoom,
     leaveRoom,
     onlineRiders,
@@ -492,5 +565,10 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     syncTrack,
     resetRoomFlow,
     voiceSignals,
+    respondToFriendRequest,
+    respondToGroupInvite,
+    respondToMatchInvite,
+    sendFriendRequest,
+    social,
   };
 }

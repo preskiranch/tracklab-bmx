@@ -128,6 +128,7 @@ export type MultiplayerRider = {
   bikeCount: number;
   track: MultiplayerTrackSummary;
   roomId: string | null;
+  roomRole?: 'racer' | 'spectator' | null;
   lastSeen: number;
 };
 
@@ -140,6 +141,8 @@ export type MultiplayerRoom = {
   createdAt: number;
   members: MultiplayerRider[];
   memberCount: number;
+  racerCount?: number;
+  spectatorCount?: number;
 };
 
 export type MultiplayerRoomMessage = {
@@ -155,6 +158,71 @@ export type MultiplayerChallenge = {
   toId: string;
   track: MultiplayerTrackSummary;
   createdAt: number;
+};
+
+export type MultiplayerMatchInvite = {
+  id: string;
+  roomId: string;
+  fromId: string;
+  fromName: string;
+  targetIds: string[];
+  track: MultiplayerTrackSummary;
+  createdAt: number;
+};
+
+export type MultiplayerFriend = {
+  guestKey: string;
+  name: string;
+  online: boolean;
+  riderId: string | null;
+  available: boolean;
+  createdAt: string;
+};
+
+export type MultiplayerFriendRequest = {
+  id: string;
+  fromGuestKey: string;
+  fromName: string;
+  toGuestKey: string;
+  toName: string;
+  createdAt: string;
+};
+
+export type MultiplayerGroupMember = {
+  guestKey: string;
+  name: string;
+  role: 'owner' | 'member';
+  online: boolean;
+  riderId: string | null;
+  available: boolean;
+};
+
+export type MultiplayerGroup = {
+  id: string;
+  name: string;
+  ownerGuestKey: string;
+  role: 'owner' | 'member';
+  members: MultiplayerGroupMember[];
+  createdAt: string;
+};
+
+export type MultiplayerGroupInvite = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  fromGuestKey: string;
+  fromName: string;
+  toGuestKey: string;
+  toName: string;
+  createdAt: string;
+};
+
+export type MultiplayerSocialState = {
+  friends: MultiplayerFriend[];
+  incomingFriendRequests: MultiplayerFriendRequest[];
+  outgoingFriendRequests: MultiplayerFriendRequest[];
+  groups: MultiplayerGroup[];
+  incomingGroupInvites: MultiplayerGroupInvite[];
 };
 
 export type MultiplayerRaceRider = {
