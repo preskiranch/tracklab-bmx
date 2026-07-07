@@ -47,8 +47,11 @@ import {
 } from './lib/audioCues';
 import {
   applyUserTrackMapping,
+  createTrackZonesForBoundarySets,
+  createZoneBoundarySet,
   createTrackZones,
   createUserTrackMapping,
+  defaultZoneBoundarySetId,
   distanceBetweenTrackPoints,
   nearestRouteMeter,
   parseUserTrackMapping,
@@ -59,10 +62,14 @@ import {
   routeLengthMeters,
   routeVariantsFromMapping,
   routeWithDefaultSplitBranches,
+  routeWithSplitBranchSelections,
   splitBranchLabels,
+  splitBranchSelectionsForChoice,
   splitDecisionPointsForRoute,
   writeStoredTrackMappings,
   type StoredTrackMappings,
+  zoneBoundarySetIdForSelections,
+  zoneBoundarySetsFromRouteVariant,
   zoneBoundariesFromRouteVariant,
 } from './lib/trackMapping';
 import {
@@ -124,6 +131,8 @@ import type {
   TrackPoint,
   TrackRecord,
   TrackRouteVariantId,
+  TrackZoneBoundarySet,
+  TrackZoneBranchSelections,
   TrackSplitBranch,
   TrackSplitSection,
   UserTrackMapping,
@@ -220,7 +229,7 @@ const maxMappingHistoryEntries = 120;
 type MappingDraftSnapshot = {
   scope: MappingHistoryScope;
   draftPoints: TrackPoint[];
-  draftZoneMeters: number[];
+  draftZoneBoundarySets: TrackZoneBoundarySet[];
   draftSplitSections: TrackSplitSection[];
   draftSplitBuilder: DraftTrackSplit | null;
 };
@@ -257,6 +266,44 @@ function cloneTrackSplitSections(sections: TrackSplitSection[]) {
       points: cloneTrackPoints(branch.points),
     })),
   }));
+}
+
+function cloneZoneBranchSelections(selections?: TrackZoneBranchSelections): TrackZoneBranchSelections | undefined {
+  return selections ? { ...selections } : undefined;
+}
+
+function cloneTrackZoneBoundarySets(boundarySets: TrackZoneBoundarySet[]) {
+  return boundarySets.map((set) => ({
+    ...set,
+    branchSelections: cloneZoneBranchSelections(set.branchSelections),
+    boundaryMeters: [...set.boundaryMeters],
+  }));
+}
+
+function zoneBoundarySetsMatch(left: TrackZoneBoundarySet[], right: TrackZoneBoundarySet[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((leftSet, index) => {
+    const rightSet = right[index];
+    return Boolean(rightSet)
+      && leftSet.id === rightSet.id
+      && numbersMatch(leftSet.boundaryMeters, rightSet.boundaryMeters)
+      && zoneBoundarySetIdForSelections(leftSet.branchSelections) === zoneBoundarySetIdForSelections(rightSet.branchSelections);
+  });
+}
+
+function sortTrackZoneBoundarySets(boundarySets: TrackZoneBoundarySet[]) {
+  return [...boundarySets].sort((left, right) => {
+    if (left.id === defaultZoneBoundarySetId) {
+      return -1;
+    }
+    if (right.id === defaultZoneBoundarySetId) {
+      return 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
 }
 
 function numbersMatch(left: number[], right: number[]) {
@@ -1034,14 +1081,15 @@ export default function App() {
   const [mappingFullscreen, setMappingFullscreen] = useState(false);
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
-  const [draftZoneMeters, setDraftZoneMeters] = useState<number[]>([]);
+  const [draftZoneBoundarySets, setDraftZoneBoundarySets] = useState<TrackZoneBoundarySet[]>([]);
+  const [mappingZoneBranchChoice, setMappingZoneBranchChoice] = useState<SplitBranchId>('a');
   const [draftSplitSections, setDraftSplitSections] = useState<TrackSplitSection[]>([]);
   const [draftSplitBuilder, setDraftSplitBuilder] = useState<DraftTrackSplit | null>(null);
   const mappingUndoStackRef = useRef<MappingDraftSnapshot[]>([]);
   const mappingRedoStackRef = useRef<MappingDraftSnapshot[]>([]);
   const draftMappingStateRef = useRef({
     draftPoints: [] as TrackPoint[],
-    draftZoneMeters: [] as number[],
+    draftZoneBoundarySets: [] as TrackZoneBoundarySet[],
     draftSplitSections: [] as TrackSplitSection[],
     draftSplitBuilder: null as DraftTrackSplit | null,
   });
@@ -1232,11 +1280,11 @@ export default function App() {
   useEffect(() => {
     draftMappingStateRef.current = {
       draftPoints,
-      draftZoneMeters,
+      draftZoneBoundarySets,
       draftSplitSections,
       draftSplitBuilder,
     };
-  }, [draftPoints, draftZoneMeters, draftSplitSections, draftSplitBuilder]);
+  }, [draftPoints, draftZoneBoundarySets, draftSplitSections, draftSplitBuilder]);
 
   const bumpMappingHistoryVersion = useCallback(() => {
     setMappingHistoryVersion((version) => version + 1);
@@ -1247,7 +1295,7 @@ export default function App() {
     return {
       scope,
       draftPoints: cloneTrackPoints(current.draftPoints),
-      draftZoneMeters: [...current.draftZoneMeters],
+      draftZoneBoundarySets: cloneTrackZoneBoundarySets(current.draftZoneBoundarySets),
       draftSplitSections: cloneTrackSplitSections(current.draftSplitSections),
       draftSplitBuilder: cloneDraftSplitBuilder(current.draftSplitBuilder),
     };
@@ -1255,18 +1303,18 @@ export default function App() {
 
   const applyMappingSnapshot = useCallback((snapshot: MappingDraftSnapshot) => {
     const nextDraftPoints = cloneTrackPoints(snapshot.draftPoints);
-    const nextDraftZoneMeters = [...snapshot.draftZoneMeters];
+    const nextDraftZoneBoundarySets = cloneTrackZoneBoundarySets(snapshot.draftZoneBoundarySets);
     const nextDraftSplitSections = cloneTrackSplitSections(snapshot.draftSplitSections);
     const nextDraftSplitBuilder = cloneDraftSplitBuilder(snapshot.draftSplitBuilder);
 
     draftMappingStateRef.current = {
       draftPoints: nextDraftPoints,
-      draftZoneMeters: nextDraftZoneMeters,
+      draftZoneBoundarySets: nextDraftZoneBoundarySets,
       draftSplitSections: nextDraftSplitSections,
       draftSplitBuilder: nextDraftSplitBuilder,
     };
     setDraftPoints(nextDraftPoints);
-    setDraftZoneMeters(nextDraftZoneMeters);
+    setDraftZoneBoundarySets(nextDraftZoneBoundarySets);
     setDraftSplitSections(nextDraftSplitSections);
     setDraftSplitBuilder(nextDraftSplitBuilder);
   }, []);
@@ -1467,26 +1515,85 @@ export default function App() {
     const activeSplitPreview = draftSplitBuilder ? splitSectionPreviewFromDraft(draftSplitBuilder) : null;
     return activeSplitPreview ? [...draftSplitSections, activeSplitPreview] : draftSplitSections;
   }, [draftSplitBuilder, draftSplitSections]);
+  const draftZoneBranchSelections = useMemo(
+    () => (draftRouteSplitSections.length > 0
+      ? splitBranchSelectionsForChoice(draftRouteSplitSections, mappingZoneBranchChoice)
+      : undefined),
+    [draftRouteSplitSections, mappingZoneBranchChoice],
+  );
+  const draftZoneBoundarySetId = useMemo(
+    () => zoneBoundarySetIdForSelections(draftZoneBranchSelections),
+    [draftZoneBranchSelections],
+  );
   const draftRidePoints = useMemo(
     () => routeWithDefaultSplitBranches(draftPoints, draftRouteSplitSections),
     [draftPoints, draftRouteSplitSections],
   );
+  const draftZoneRidePoints = useMemo(
+    () => routeWithSplitBranchSelections(draftPoints, draftRouteSplitSections, draftZoneBranchSelections),
+    [draftPoints, draftRouteSplitSections, draftZoneBranchSelections],
+  );
+  const draftZoneMeters = useMemo(
+    () => draftZoneBoundarySets.find((set) => set.id === draftZoneBoundarySetId)?.boundaryMeters ?? [],
+    [draftZoneBoundarySetId, draftZoneBoundarySets],
+  );
   const draftZonePoints = useMemo(
     () => draftZoneMeters
-      .map((meter) => pointAtRouteMeter(draftRidePoints, meter))
+      .map((meter) => pointAtRouteMeter(draftZoneRidePoints, meter))
       .filter((point): point is TrackPoint => point != null),
-    [draftRidePoints, draftZoneMeters],
+    [draftZoneMeters, draftZoneRidePoints],
   );
   const draftLengthMeters = useMemo(
     () => (draftPoints.length > 1 ? routeLengthWithDefaultSplitBranches(draftPoints, draftRouteSplitSections) : 0),
     [draftPoints, draftRouteSplitSections],
   );
-  const draftZones = useMemo(
-    () => (draftLengthMeters > 0
-      ? createTrackZones(draftLengthMeters, draftZoneMeters, [], mappingRestSeconds)
-      : []),
-    [draftLengthMeters, draftZoneMeters, mappingRestSeconds],
+  const draftZoneRouteLengthMeters = useMemo(
+    () => (draftZoneRidePoints.length > 1 ? routeLengthMeters(draftZoneRidePoints) : 0),
+    [draftZoneRidePoints],
   );
+  const draftZones = useMemo(
+    () => (draftZoneRouteLengthMeters > 0
+      ? createTrackZones(draftZoneRouteLengthMeters, draftZoneMeters, [], mappingRestSeconds, draftZoneBranchSelections)
+      : []),
+    [draftZoneBranchSelections, draftZoneMeters, draftZoneRouteLengthMeters, mappingRestSeconds],
+  );
+  const allDraftZones = useMemo(
+    () => (draftPoints.length > 1
+      ? createTrackZonesForBoundarySets(draftPoints, draftRouteSplitSections, draftZoneBoundarySets, mappingRestSeconds)
+      : []),
+    [draftPoints, draftRouteSplitSections, draftZoneBoundarySets, mappingRestSeconds],
+  );
+  const normalizeDraftZoneBoundarySetsForRoute = useCallback((
+    points: TrackPoint[],
+    splitSections: TrackSplitSection[],
+    boundarySets: TrackZoneBoundarySet[],
+  ) => sortTrackZoneBoundarySets(boundarySets
+    .map((set) => {
+      const route = routeWithSplitBranchSelections(points, splitSections, set.branchSelections);
+      return createZoneBoundarySet(
+        set.branchSelections,
+        set.boundaryMeters,
+        splitSections,
+        routeLengthMeters(route),
+      );
+    })
+    .filter((set) => set.boundaryMeters.length > 0 || set.id === defaultZoneBoundarySetId)), []);
+  const updateCurrentDraftZoneMeters = useCallback((nextMeters: number[]) => {
+    const nextSet = createZoneBoundarySet(
+      draftZoneBranchSelections,
+      nextMeters,
+      draftRouteSplitSections,
+      draftZoneRouteLengthMeters,
+    );
+
+    setDraftZoneBoundarySets((current) => {
+      const next = sortTrackZoneBoundarySets([
+        ...current.filter((set) => set.id !== nextSet.id),
+        ...(nextSet.boundaryMeters.length > 0 || nextSet.id === defaultZoneBoundarySetId ? [nextSet] : []),
+      ]);
+      return zoneBoundarySetsMatch(current, next) ? current : next;
+    });
+  }, [draftRouteSplitSections, draftZoneBranchSelections, draftZoneRouteLengthMeters]);
   const mappingHistoryScope = historyScopeForEditMode(mappingEditMode);
   const canUndoMapping = useMemo(
     () => scopedHistoryIndex(mappingUndoStackRef.current, mappingHistoryScope) >= 0,
@@ -2729,7 +2836,7 @@ export default function App() {
       setSelectedCustomRoutePrediction(null);
       setCustomRouteStatus('Custom route added. Trace the path and save it.');
       setDraftPoints([]);
-      setDraftZoneMeters([]);
+      setDraftZoneBoundarySets([]);
       setDraftSplitSections([]);
       setDraftSplitBuilder(null);
       clearMappingHistory();
@@ -2787,7 +2894,7 @@ export default function App() {
     }
 
     setDraftPoints([]);
-    setDraftZoneMeters([]);
+    setDraftZoneBoundarySets([]);
     setDraftSplitSections([]);
     setDraftSplitBuilder(null);
     clearMappingHistory();
@@ -2810,7 +2917,7 @@ export default function App() {
 
   useEffect(() => {
     setDraftPoints(activeMappingRoute?.centerline ?? []);
-    setDraftZoneMeters(activeMappingRoute ? zoneBoundariesFromRouteVariant(activeMappingRoute) : []);
+    setDraftZoneBoundarySets(activeMappingRoute ? zoneBoundarySetsFromRouteVariant(activeMappingRoute) : []);
     setDraftSplitSections(activeMappingRoute?.splitSections ?? []);
     setDraftSplitBuilder(null);
     setMappingRestSeconds(activeMappingRoute?.restAfterSeconds ?? 1);
@@ -2820,7 +2927,7 @@ export default function App() {
   const handleMappingModeChange = (enabled: boolean) => {
     if (enabled && draftPoints.length === 0 && activeMappingRoute) {
       setDraftPoints(activeMappingRoute.centerline);
-      setDraftZoneMeters(zoneBoundariesFromRouteVariant(activeMappingRoute));
+      setDraftZoneBoundarySets(zoneBoundarySetsFromRouteVariant(activeMappingRoute));
       setDraftSplitSections(activeMappingRoute.splitSections ?? []);
       setMappingRestSeconds(activeMappingRoute.restAfterSeconds);
     }
@@ -2928,11 +3035,10 @@ export default function App() {
       }
 
       const next = current.map((draftPoint, draftIndex) => (draftIndex === index ? snappedPoint.point : draftPoint));
-      const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftRouteSplitSections) : 0;
-      setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter >= 0 && meter <= nextLength));
+      setDraftZoneBoundarySets((currentZones) => normalizeDraftZoneBoundarySetsForRoute(next, draftRouteSplitSections, currentZones));
       return next;
     });
-  }, [draftPoints.length, draftRouteSplitSections, rememberMappingEdit, snapDraftPointToSplitJunction]);
+  }, [draftPoints.length, draftRouteSplitSections, normalizeDraftZoneBoundarySetsForRoute, rememberMappingEdit, snapDraftPointToSplitJunction]);
 
   const handleMappingPathPointRemove = useCallback((index: number) => {
     if (index < 0 || index >= draftPoints.length) {
@@ -2946,11 +3052,10 @@ export default function App() {
       }
 
       const next = current.filter((_, draftIndex) => draftIndex !== index);
-      const nextLength = next.length > 1 ? routeLengthWithDefaultSplitBranches(next, draftRouteSplitSections) : 0;
-      setDraftZoneMeters((currentZones) => currentZones.filter((meter) => meter >= 0 && meter <= nextLength));
+      setDraftZoneBoundarySets((currentZones) => normalizeDraftZoneBoundarySetsForRoute(next, draftRouteSplitSections, currentZones));
       return next;
     });
-  }, [draftPoints.length, draftRouteSplitSections, rememberMappingEdit]);
+  }, [draftPoints.length, draftRouteSplitSections, normalizeDraftZoneBoundarySetsForRoute, rememberMappingEdit]);
 
   const startOrUpdateSplitBuilder = useCallback((branch: SplitBranchId = 'a') => {
     if (!draftSplitBuilder) {
@@ -3111,7 +3216,7 @@ export default function App() {
 
   const clearMappingDraft = () => {
     setDraftPoints([]);
-    setDraftZoneMeters([]);
+    setDraftZoneBoundarySets([]);
     setDraftSplitSections([]);
     setDraftSplitBuilder(null);
     clearMappingHistory();
@@ -3128,14 +3233,29 @@ export default function App() {
     }
 
     const completedDraftSplit = draftSplitBuilder ? splitSectionFromDraft(draftSplitBuilder) : null;
+    const nextSplitSections = completedDraftSplit ? [...draftSplitSections, completedDraftSplit] : draftSplitSections;
+    const normalizedZoneBoundarySets = normalizeDraftZoneBoundarySetsForRoute(
+      draftPoints,
+      nextSplitSections,
+      draftZoneBoundarySets,
+    );
+    const defaultZoneSelections = nextSplitSections.length > 0
+      ? splitBranchSelectionsForChoice(nextSplitSections, 'a')
+      : undefined;
+    const defaultZoneSetId = zoneBoundarySetIdForSelections(defaultZoneSelections);
+    const defaultZoneMeters = normalizedZoneBoundarySets.find((set) => set.id === defaultZoneSetId)?.boundaryMeters
+      ?? normalizedZoneBoundarySets.find((set) => set.id === defaultZoneBoundarySetId)?.boundaryMeters
+      ?? [];
     const mapping = createUserTrackMapping(
       selectedTrack,
       draftPoints,
       mappingRestSeconds,
-      draftZoneMeters,
-      completedDraftSplit ? [...draftSplitSections, completedDraftSplit] : draftSplitSections,
+      defaultZoneMeters,
+      nextSplitSections,
       mappingRouteVariantId,
       selectedTrackMapping ? routeVariantsFromMapping(selectedTrackMapping) : [],
+      [],
+      normalizedZoneBoundarySets,
     );
     setStoredMappings((current) => {
       const next = { ...current, [selectedTrack.id]: mapping };
@@ -3161,7 +3281,7 @@ export default function App() {
       return next;
     });
     setDraftPoints([]);
-    setDraftZoneMeters([]);
+    setDraftZoneBoundarySets([]);
     setDraftSplitSections([]);
     setDraftSplitBuilder(null);
     clearMappingHistory();
@@ -3200,7 +3320,7 @@ export default function App() {
         setMappingRouteVariantId(importedRoute.id);
         setRaceRouteVariantId(importedRoute.id);
         setDraftPoints(importedRoute.centerline);
-        setDraftZoneMeters(zoneBoundariesFromRouteVariant(importedRoute));
+        setDraftZoneBoundarySets(zoneBoundarySetsFromRouteVariant(importedRoute));
         setDraftSplitSections(importedRoute.splitSections ?? []);
         setDraftSplitBuilder(null);
         clearMappingHistory();
@@ -3242,11 +3362,11 @@ export default function App() {
   };
 
   const handleMappingZonePointAdd = useCallback((point: TrackPoint) => {
-    if (draftRidePoints.length < 2) {
+    if (draftZoneRidePoints.length < 2) {
       return;
     }
 
-    const meter = mappingZoneMeterFromPoint(draftRidePoints, point);
+    const meter = mappingZoneMeterFromPoint(draftZoneRidePoints, point);
     if (meter == null) {
       return;
     }
@@ -3273,15 +3393,15 @@ export default function App() {
     }
 
     rememberMappingEdit('zones');
-    setDraftZoneMeters(nextZoneMeters);
-  }, [draftRidePoints, draftZoneMeters, rememberMappingEdit]);
+    updateCurrentDraftZoneMeters(nextZoneMeters);
+  }, [draftZoneMeters, draftZoneRidePoints, rememberMappingEdit, updateCurrentDraftZoneMeters]);
 
   const handleMappingZonePointMove = useCallback((index: number, point: TrackPoint) => {
-    if (draftRidePoints.length < 2 || index < 0 || index >= draftZoneMeters.length) {
+    if (draftZoneRidePoints.length < 2 || index < 0 || index >= draftZoneMeters.length) {
       return;
     }
 
-    const meter = mappingZoneMeterFromPoint(draftRidePoints, point);
+    const meter = mappingZoneMeterFromPoint(draftZoneRidePoints, point);
     if (meter == null) {
       return;
     }
@@ -3297,8 +3417,8 @@ export default function App() {
     }
 
     rememberMappingEdit('zones');
-    setDraftZoneMeters(nextZoneMeters);
-  }, [draftRidePoints, draftZoneMeters, rememberMappingEdit]);
+    updateCurrentDraftZoneMeters(nextZoneMeters);
+  }, [draftZoneMeters, draftZoneRidePoints, rememberMappingEdit, updateCurrentDraftZoneMeters]);
 
   const handleMappingZonePointRemove = useCallback((index: number) => {
     if (index < 0 || index >= draftZoneMeters.length) {
@@ -3306,8 +3426,8 @@ export default function App() {
     }
 
     rememberMappingEdit('zones');
-    setDraftZoneMeters((current) => current.filter((_, zoneIndex) => zoneIndex !== index));
-  }, [draftZoneMeters.length, rememberMappingEdit]);
+    updateCurrentDraftZoneMeters(draftZoneMeters.filter((_, zoneIndex) => zoneIndex !== index));
+  }, [draftZoneMeters, rememberMappingEdit, updateCurrentDraftZoneMeters]);
 
   const toggleManualZone = (zoneId: string) => {
     setManualZoneIds((current) => (
@@ -4421,6 +4541,7 @@ export default function App() {
                 mappingEditMode={mappingEditMode}
                 mappingRouteVariantId={mappingRouteVariantId}
                 draftPoints={draftPoints}
+                draftZoneRoutePoints={draftZoneRidePoints}
                 draftZoneMeters={draftZoneMeters}
                 draftZonePoints={draftZonePoints}
                 draftSplitSections={draftSplitSections}
@@ -4463,6 +4584,7 @@ export default function App() {
                 players={activePlayers}
                 branchChoicesByPlayer={activeBranchChoicesByPlayer}
                 mappingRouteVariantId={mappingRouteVariantId}
+                mappingZoneBranchChoice={mappingZoneBranchChoice}
                 raceRouteVariantId={raceRouteVariantId}
                 savedRouteVariantIds={savedRouteVariantIds}
                 hasDualStartRoutes={hasDualStartRoutes}
@@ -4477,7 +4599,7 @@ export default function App() {
                 mappingEditMode={mappingEditMode}
                 draftPointCount={draftPoints.length}
                 draftZonePinCount={draftZoneMeters.length}
-                draftZoneCount={draftZones.length}
+                draftZoneCount={allDraftZones.length}
                 draftZones={draftZones}
                 draftLengthMeters={draftLengthMeters}
                 draftSplitSections={draftSplitSections}
@@ -4507,6 +4629,7 @@ export default function App() {
                 onCustomRouteDelete={handleCustomRouteDelete}
                 onBranchChoiceChange={handleBranchChoiceChange}
                 onMappingRouteVariantChange={handleMappingRouteVariantChange}
+                onMappingZoneBranchChange={setMappingZoneBranchChoice}
                 onRaceRouteVariantChange={handleRaceRouteVariantChange}
                 onDemoModeChange={handleDemoModeChange}
                 onDemoBikeCountChange={handleDemoBikeCountChange}

@@ -5,11 +5,14 @@ import type {
   TrackRouteVariant,
   TrackRouteVariantId,
   TrackSplitSection,
+  TrackZoneBoundarySet,
+  TrackZoneBranchSelections,
   TrackZone,
   UserTrackMapping,
 } from '../types';
 
 export const trackMappingStorageKey = 'tracklab:user-track-mappings:v1';
+export const defaultZoneBoundarySetId = 'default';
 export const splitBranchLabels: Record<SplitBranchChoice, string> = {
   a: 'Amateur Line',
   b: 'Pro Set',
@@ -260,6 +263,86 @@ function sortedUniqueBoundaries(boundaries: number[], totalMeters: number) {
   return rounded.filter((boundary, index) => index === 0 || Math.abs(boundary - rounded[index - 1]) >= 3);
 }
 
+function normalizeZoneBranchSelections(selections?: TrackZoneBranchSelections): TrackZoneBranchSelections | undefined {
+  const entries = Object.entries(selections ?? {})
+    .filter((entry): entry is [string, SplitBranchChoice] => (
+      Boolean(entry[0]) && (entry[1] === 'a' || entry[1] === 'b')
+    ))
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+export function zoneBranchSelectionKey(selections?: TrackZoneBranchSelections) {
+  return Object.entries(normalizeZoneBranchSelections(selections) ?? {})
+    .map(([splitId, branch]) => `${splitId}:${branch}`)
+    .join('|');
+}
+
+export function zoneBoundarySetIdForSelections(selections?: TrackZoneBranchSelections) {
+  const key = zoneBranchSelectionKey(selections);
+  return key ? `branch:${key}` : defaultZoneBoundarySetId;
+}
+
+function zoneBoundarySetNameForSelections(
+  splitSections: TrackSplitSection[],
+  selections?: TrackZoneBranchSelections,
+) {
+  const normalized = normalizeZoneBranchSelections(selections);
+  const selectedBranches = Object.values(normalized ?? {}) as SplitBranchChoice[];
+  if (selectedBranches.length === 0) {
+    return splitSections.length > 0 ? splitBranchLabels.a : 'Main Route';
+  }
+
+  if (selectedBranches.every((branch) => branch === 'b')) {
+    return splitBranchLabels.b;
+  }
+
+  if (selectedBranches.every((branch) => branch === 'a')) {
+    return splitBranchLabels.a;
+  }
+
+  return selectedBranches
+    .map((branch, index) => `S${index + 1} ${splitBranchLabels[branch]}`)
+    .join(' / ');
+}
+
+export function splitBranchSelectionsForChoice(
+  splitSections: TrackSplitSection[],
+  branch: SplitBranchChoice,
+): TrackZoneBranchSelections {
+  return Object.fromEntries(splitSections.map((section) => [section.id, branch]));
+}
+
+export function createZoneBoundarySet(
+  branchSelections: TrackZoneBranchSelections | undefined,
+  boundaryMeters: number[] = [],
+  splitSections: TrackSplitSection[] = [],
+  lengthMeters = 0,
+): TrackZoneBoundarySet {
+  const normalizedBranchSelections = normalizeZoneBranchSelections(branchSelections);
+  return {
+    id: zoneBoundarySetIdForSelections(normalizedBranchSelections),
+    name: zoneBoundarySetNameForSelections(splitSections, normalizedBranchSelections),
+    ...(normalizedBranchSelections ? { branchSelections: normalizedBranchSelections } : {}),
+    boundaryMeters: sortedUniqueBoundaries(boundaryMeters, Math.max(0, lengthMeters)),
+  };
+}
+
+export function zoneMatchesBranchSelections(
+  zone: TrackZone,
+  actualBranches: Record<string, SplitBranchChoice> = {},
+  selectedBranch: SplitBranchChoice = 'a',
+) {
+  const selections = normalizeZoneBranchSelections(zone.branchSelections);
+  const entries = Object.entries(selections ?? {});
+  if (entries.length === 0) {
+    return true;
+  }
+
+  return entries.every(([splitId, branch]) => (actualBranches[splitId] ?? selectedBranch) === branch);
+}
+
 function normalizePoint(point: TrackPoint): TrackPoint {
   return {
     lat: roundCoordinate(point.lat),
@@ -280,9 +363,13 @@ export function createTrackZones(
   zoneBoundaryMeters: number[] = [],
   _zoneTypes: TrackZone['type'][] = [],
   _restAfterSeconds = 1,
+  branchSelections?: TrackZoneBranchSelections,
+  zoneIdPrefix = 'pedal-zone',
+  zoneNameOffset = 0,
 ): TrackZone[] {
   const cleanBoundaries = sortedUniqueBoundaries(zoneBoundaryMeters, lengthMeters);
   const zones: TrackZone[] = [];
+  const normalizedBranchSelections = normalizeZoneBranchSelections(branchSelections);
 
   for (let index = 0; index < cleanBoundaries.length - 1; index += 2) {
     const startMeter = cleanBoundaries[index];
@@ -292,16 +379,87 @@ export function createTrackZones(
     }
 
     zones.push({
-      id: `pedal-zone-${zones.length + 1}`,
-      name: defaultPedalZoneName(zones.length),
+      id: `${zoneIdPrefix}-${zones.length + 1}`,
+      name: defaultPedalZoneName(zoneNameOffset + zones.length),
       startMeter,
       endMeter,
       type: 'pedal',
       restAfterSeconds: _restAfterSeconds,
+      ...(normalizedBranchSelections ? { branchSelections: normalizedBranchSelections } : {}),
     });
   }
 
   return zones;
+}
+
+function normalizeZoneBoundarySets(
+  centerline: TrackPoint[],
+  splitSections: TrackSplitSection[],
+  boundarySets: TrackZoneBoundarySet[] = [],
+  fallbackBoundaryMeters: number[] = [],
+) {
+  const fallbackSelections = splitSections.length > 0
+    ? splitBranchSelectionsForChoice(splitSections, 'a')
+    : undefined;
+  const rawSets = boundarySets.length > 0
+    ? boundarySets
+    : [{
+      id: zoneBoundarySetIdForSelections(fallbackSelections),
+      name: zoneBoundarySetNameForSelections(splitSections, fallbackSelections),
+      ...(fallbackSelections ? { branchSelections: fallbackSelections } : {}),
+      boundaryMeters: fallbackBoundaryMeters,
+    }];
+
+  const normalized = rawSets.map((set) => {
+    const branchSelections = normalizeZoneBranchSelections(set.branchSelections);
+    const route = routeWithSplitBranchSelections(centerline, splitSections, branchSelections);
+    const lengthMeters = routeLengthMeters(route);
+    return createZoneBoundarySet(
+      branchSelections,
+      Array.isArray(set.boundaryMeters) ? set.boundaryMeters : [],
+      splitSections,
+      lengthMeters,
+    );
+  });
+  const uniqueById = new Map<string, TrackZoneBoundarySet>();
+  normalized.forEach((set) => {
+    uniqueById.set(set.id, set);
+  });
+
+  return Array.from(uniqueById.values()).sort((left, right) => {
+    if (left.id === defaultZoneBoundarySetId) {
+      return -1;
+    }
+    if (right.id === defaultZoneBoundarySetId) {
+      return 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
+}
+
+export function createTrackZonesForBoundarySets(
+  centerline: TrackPoint[],
+  splitSections: TrackSplitSection[] = [],
+  boundarySets: TrackZoneBoundarySet[] = [],
+  restAfterSeconds = 1,
+) {
+  const normalizedSets = normalizeZoneBoundarySets(centerline, splitSections, boundarySets);
+  let zoneOffset = 0;
+
+  return normalizedSets.flatMap((set) => {
+    const route = routeWithSplitBranchSelections(centerline, splitSections, set.branchSelections);
+    const zones = createTrackZones(
+      routeLengthMeters(route),
+      set.boundaryMeters,
+      [],
+      restAfterSeconds,
+      set.branchSelections,
+      set.id.replace(/[^a-z0-9-]+/gi, '-'),
+      zoneOffset,
+    );
+    zoneOffset += zones.length;
+    return zones;
+  });
 }
 
 function normalizeSplitSection(section: TrackSplitSection): TrackSplitSection {
@@ -341,14 +499,24 @@ function createTrackRouteVariant(
   zoneBoundaryMeters: number[] = [],
   splitSections: TrackSplitSection[] = [],
   zoneTypes: TrackZone['type'][] = [],
+  zoneBoundarySets: TrackZoneBoundarySet[] = [],
 ): TrackRouteVariant {
   const centerline = points.map(normalizePoint);
   const normalizedSplitSections = splitSections.map(normalizeSplitSection);
   const measurableRoute = routeWithDefaultSplitBranches(centerline, normalizedSplitSections);
   const distances = cumulativeMeters(measurableRoute);
   const lengthMeters = Math.max(1, distances[distances.length - 1] ?? track.lengthMeters);
-  const cleanBoundaries = sortedUniqueBoundaries(zoneBoundaryMeters, lengthMeters);
-  const zones = createTrackZones(lengthMeters, cleanBoundaries, zoneTypes, restAfterSeconds);
+  const normalizedZoneBoundarySets = normalizeZoneBoundarySets(
+    centerline,
+    normalizedSplitSections,
+    zoneBoundarySets,
+    zoneBoundaryMeters,
+  );
+  const primaryBoundarySet = normalizedZoneBoundarySets[0];
+  const cleanBoundaries = primaryBoundarySet?.boundaryMeters ?? sortedUniqueBoundaries(zoneBoundaryMeters, lengthMeters);
+  const zones = normalizedZoneBoundarySets.length > 0
+    ? createTrackZonesForBoundarySets(centerline, normalizedSplitSections, normalizedZoneBoundarySets, restAfterSeconds)
+    : createTrackZones(lengthMeters, cleanBoundaries, zoneTypes, restAfterSeconds);
 
   return {
     id: variantId,
@@ -359,6 +527,7 @@ function createTrackRouteVariant(
     startGate: centerline[0],
     finishLine: centerline[centerline.length - 1],
     zoneBoundaryMeters: cleanBoundaries,
+    zoneBoundarySets: normalizedZoneBoundarySets,
     zones,
     splitSections: normalizedSplitSections,
   };
@@ -368,11 +537,18 @@ function routeVariantFromTopLevelMapping(
   mapping: UserTrackMapping,
   variantId: TrackRouteVariantId = 'amateur',
 ): TrackRouteVariant {
+  const splitSections = mapping.splitSections ?? [];
   const zoneBoundaryMeters = Array.isArray(mapping.zoneBoundaryMeters)
     ? sortedUniqueBoundaries(mapping.zoneBoundaryMeters, mapping.lengthMeters)
     : mapping.zones
       .filter(isTrackZone)
       .flatMap((zone) => [zone.startMeter, zone.endMeter]);
+  const zoneBoundarySets = normalizeZoneBoundarySets(
+    mapping.centerline,
+    splitSections,
+    Array.isArray(mapping.zoneBoundarySets) ? mapping.zoneBoundarySets : [],
+    zoneBoundaryMeters,
+  );
 
   return {
     id: variantId,
@@ -382,9 +558,10 @@ function routeVariantFromTopLevelMapping(
     centerline: mapping.centerline,
     startGate: mapping.startGate,
     finishLine: mapping.finishLine,
-    zoneBoundaryMeters,
-    zones: createTrackZones(mapping.lengthMeters, zoneBoundaryMeters, [], mapping.restAfterSeconds),
-    splitSections: mapping.splitSections ?? [],
+    zoneBoundaryMeters: zoneBoundarySets[0]?.boundaryMeters ?? zoneBoundaryMeters,
+    zoneBoundarySets,
+    zones: createTrackZonesForBoundarySets(mapping.centerline, splitSections, zoneBoundarySets, mapping.restAfterSeconds),
+    splitSections,
   };
 }
 
@@ -400,6 +577,12 @@ function normalizeRouteVariant(variant: TrackRouteVariant): TrackRouteVariant {
       .filter(isTrackZone)
       .flatMap((zone) => [zone.startMeter, zone.endMeter]);
   const restAfterSeconds = Number.isFinite(variant.restAfterSeconds) ? variant.restAfterSeconds : 1;
+  const zoneBoundarySets = normalizeZoneBoundarySets(
+    centerline,
+    splitSections,
+    Array.isArray(variant.zoneBoundarySets) ? variant.zoneBoundarySets : [],
+    zoneBoundaryMeters,
+  );
 
   return {
     id: variantId,
@@ -409,8 +592,9 @@ function normalizeRouteVariant(variant: TrackRouteVariant): TrackRouteVariant {
     centerline,
     startGate: variant.startGate ? normalizePoint(variant.startGate) : centerline[0],
     finishLine: variant.finishLine ? normalizePoint(variant.finishLine) : centerline[centerline.length - 1],
-    zoneBoundaryMeters,
-    zones: createTrackZones(lengthMeters, zoneBoundaryMeters, [], restAfterSeconds),
+    zoneBoundaryMeters: zoneBoundarySets[0]?.boundaryMeters ?? zoneBoundaryMeters,
+    zoneBoundarySets,
+    zones: createTrackZonesForBoundarySets(centerline, splitSections, zoneBoundarySets, restAfterSeconds),
     splitSections,
   };
 }
@@ -445,7 +629,31 @@ export function draftRouteFromMapping(mapping: UserTrackMapping, variantId: Trac
     : routeVariantFromTopLevelMapping(mapping, variantId);
 }
 
-export function zoneBoundariesFromRouteVariant(variant: TrackRouteVariant) {
+export function zoneBoundarySetsFromRouteVariant(variant: TrackRouteVariant) {
+  return normalizeZoneBoundarySets(
+    variant.centerline,
+    variant.splitSections ?? [],
+    Array.isArray(variant.zoneBoundarySets) ? variant.zoneBoundarySets : [],
+    Array.isArray(variant.zoneBoundaryMeters)
+      ? variant.zoneBoundaryMeters
+      : variant.zones
+        .filter(isTrackZone)
+        .flatMap((zone) => [zone.startMeter, zone.endMeter]),
+  );
+}
+
+export function zoneBoundariesFromRouteVariant(
+  variant: TrackRouteVariant,
+  branchSelections?: TrackZoneBranchSelections,
+) {
+  const setId = zoneBoundarySetIdForSelections(
+    branchSelections ?? (variant.splitSections?.length ? splitBranchSelectionsForChoice(variant.splitSections, 'a') : undefined),
+  );
+  const boundarySet = zoneBoundarySetsFromRouteVariant(variant).find((set) => set.id === setId);
+  if (boundarySet) {
+    return boundarySet.boundaryMeters;
+  }
+
   if (Array.isArray(variant.zoneBoundaryMeters)) {
     return variant.zoneBoundaryMeters;
   }
@@ -465,6 +673,7 @@ export function createUserTrackMapping(
   routeVariantId?: TrackRouteVariantId,
   existingRouteVariants: TrackRouteVariant[] = [],
   zoneTypes: TrackZone['type'][] = [],
+  zoneBoundarySets: TrackZoneBoundarySet[] = [],
 ): UserTrackMapping {
   const primaryVariant = createTrackRouteVariant(
     track,
@@ -474,6 +683,7 @@ export function createUserTrackMapping(
     zoneBoundaryMeters,
     splitSections,
     zoneTypes,
+    zoneBoundarySets,
   );
   const routeVariants = routeVariantId
     ? routeVariantOrder
@@ -499,6 +709,7 @@ export function createUserTrackMapping(
     startGate: primaryVariant.startGate,
     finishLine: primaryVariant.finishLine,
     zoneBoundaryMeters: primaryVariant.zoneBoundaryMeters,
+    zoneBoundarySets: primaryVariant.zoneBoundarySets,
     zones: primaryVariant.zones,
     splitSections: primaryVariant.splitSections,
     ...(routeVariants.length > 0 ? { routeVariants } : {}),

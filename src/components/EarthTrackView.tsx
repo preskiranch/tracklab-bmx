@@ -61,6 +61,7 @@ type EarthTrackViewProps = {
   mappingEditMode: MappingEditMode;
   mappingRouteVariantId: TrackRouteVariantId;
   draftPoints: TrackPoint[];
+  draftZoneRoutePoints: TrackPoint[];
   draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
   draftSplitSections: TrackSplitSection[];
@@ -135,6 +136,7 @@ export function EarthTrackView({
   mappingEditMode,
   mappingRouteVariantId,
   draftPoints,
+  draftZoneRoutePoints,
   draftZoneMeters,
   draftZonePoints,
   draftSplitSections,
@@ -207,6 +209,7 @@ export function EarthTrackView({
             mappingEditMode={mappingEditMode}
             mappingRouteVariantId={mappingRouteVariantId}
             draftPoints={draftPoints}
+            draftZoneRoutePoints={draftZoneRoutePoints}
             draftZoneMeters={draftZoneMeters}
             draftZonePoints={draftZonePoints}
             draftSplitSections={draftSplitSections}

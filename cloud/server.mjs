@@ -313,7 +313,25 @@ function sanitizeTrackPoints(value, maxPoints = 1500) {
     .filter(Boolean);
 }
 
-function sanitizeZone(value, index, lengthMeters, restAfterSeconds) {
+function sanitizeZoneBranchSelections(value, splitSections = []) {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const knownSplitIds = new Set(splitSections.map((section) => section.id));
+  const entries = Object.entries(value)
+    .filter(([splitId, branch]) => (
+      typeof splitId === 'string'
+      && splitId
+      && (knownSplitIds.size === 0 || knownSplitIds.has(splitId))
+      && (branch === 'a' || branch === 'b')
+    ))
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function sanitizeZone(value, index, lengthMeters, restAfterSeconds, splitSections = []) {
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -325,6 +343,7 @@ function sanitizeZone(value, index, lengthMeters, restAfterSeconds) {
   }
 
   const zoneType = ['pedal', 'recovery', 'technical'].includes(value.type) ? value.type : 'pedal';
+  const branchSelections = sanitizeZoneBranchSelections(value.branchSelections, splitSections);
   return {
     id: sanitizeText(value.id, `pedal-zone-${index + 1}`, 80),
     name: sanitizeText(value.name, `Pedal Zone ${index + 1}`, 80),
@@ -332,6 +351,33 @@ function sanitizeZone(value, index, lengthMeters, restAfterSeconds) {
     endMeter: Number(endMeter.toFixed(2)),
     type: zoneType,
     restAfterSeconds: Math.max(0, Math.min(30, finiteNumber(value.restAfterSeconds, restAfterSeconds))),
+    ...(branchSelections ? { branchSelections } : {}),
+  };
+}
+
+function sanitizeZoneBoundarySet(value, index, lengthMeters, splitSections = []) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const branchSelections = sanitizeZoneBranchSelections(value.branchSelections, splitSections);
+  const maxBoundaryMeters = Math.max(10000, lengthMeters);
+  const boundaryMeters = Array.isArray(value.boundaryMeters)
+    ? value.boundaryMeters
+      .slice(0, 500)
+      .map((meter) => Math.max(0, Math.min(maxBoundaryMeters, finiteNumber(meter, 0))))
+      .sort((a, b) => a - b)
+    : [];
+
+  if (boundaryMeters.length === 0 && branchSelections) {
+    return null;
+  }
+
+  return {
+    id: sanitizeText(value.id, branchSelections ? `branch-zone-set-${index + 1}` : 'default', 120),
+    name: sanitizeText(value.name, branchSelections?.[Object.keys(branchSelections)[0]] === 'b' ? 'Pro Set' : 'Amateur Line', 120),
+    ...(branchSelections ? { branchSelections } : {}),
+    boundaryMeters: boundaryMeters.map((meter) => Number(meter.toFixed(2))),
   };
 }
 
@@ -399,6 +445,7 @@ function sanitizeRouteVariant(value, fallbackId = 'amateur') {
   const id = value.id === 'pro' ? 'pro' : fallbackId === 'pro' ? 'pro' : 'amateur';
   const lengthMeters = Math.max(1, finiteNumber(value.lengthMeters, 1));
   const restAfterSeconds = Math.max(0, Math.min(30, finiteNumber(value.restAfterSeconds, 1)));
+  const splitSections = sanitizeSplitSections(value.splitSections);
   const zoneBoundaryMeters = Array.isArray(value.zoneBoundaryMeters)
     ? value.zoneBoundaryMeters
       .slice(0, 500)
@@ -418,10 +465,16 @@ function sanitizeRouteVariant(value, fallbackId = 'amateur') {
     zones: Array.isArray(value.zones)
       ? value.zones
         .slice(0, 250)
-        .map((zone, index) => sanitizeZone(zone, index, lengthMeters, restAfterSeconds))
+        .map((zone, index) => sanitizeZone(zone, index, lengthMeters, restAfterSeconds, splitSections))
         .filter(Boolean)
       : [],
-    splitSections: sanitizeSplitSections(value.splitSections),
+    zoneBoundarySets: Array.isArray(value.zoneBoundarySets)
+      ? value.zoneBoundarySets
+        .slice(0, 24)
+        .map((set, index) => sanitizeZoneBoundarySet(set, index, lengthMeters, splitSections))
+        .filter(Boolean)
+      : [],
+    splitSections,
   };
 }
 
@@ -445,6 +498,7 @@ function sanitizePublicTrackMapping(value) {
   const primaryRoute = topLevelRoute ?? routeVariants[0];
   const lengthMeters = Math.max(1, finiteNumber(value.lengthMeters, primaryRoute.lengthMeters));
   const restAfterSeconds = Math.max(0, Math.min(30, finiteNumber(value.restAfterSeconds, primaryRoute.restAfterSeconds)));
+  const splitSections = sanitizeSplitSections(value.splitSections ?? primaryRoute.splitSections);
   const mapping = {
     version: 1,
     trackId: sanitizeText(value.trackId, '', 140),
@@ -467,10 +521,16 @@ function sanitizePublicTrackMapping(value) {
     zones: Array.isArray(value.zones)
       ? value.zones
         .slice(0, 250)
-        .map((zone, index) => sanitizeZone(zone, index, lengthMeters, restAfterSeconds))
+        .map((zone, index) => sanitizeZone(zone, index, lengthMeters, restAfterSeconds, splitSections))
         .filter(Boolean)
       : primaryRoute.zones,
-    splitSections: sanitizeSplitSections(value.splitSections ?? primaryRoute.splitSections),
+    zoneBoundarySets: Array.isArray(value.zoneBoundarySets)
+      ? value.zoneBoundarySets
+        .slice(0, 24)
+        .map((set, index) => sanitizeZoneBoundarySet(set, index, lengthMeters, splitSections))
+        .filter(Boolean)
+      : primaryRoute.zoneBoundarySets,
+    splitSections,
   };
 
   if (!mapping.trackId || mapping.centerline.length < 2) {

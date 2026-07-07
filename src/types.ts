@@ -77,6 +77,7 @@ export type BridgeMessage = BridgeStatusMessage | BridgeErrorMessage | BikeSampl
 export type PlayerId = 1 | 2 | 3 | 4;
 export type PlayerColorName = 'lime' | 'red' | 'blue' | 'yellow';
 export type SplitBranchChoice = 'a' | 'b';
+export type TrackZoneBranchSelections = Partial<Record<string, SplitBranchChoice>>;
 
 export type PlayerSlot = {
   id: PlayerId;
@@ -302,6 +303,14 @@ export type TrackZone = {
   endMeter: number;
   type: 'pedal' | 'recovery' | 'technical';
   restAfterSeconds?: number;
+  branchSelections?: TrackZoneBranchSelections;
+};
+
+export type TrackZoneBoundarySet = {
+  id: string;
+  name: string;
+  branchSelections?: TrackZoneBranchSelections;
+  boundaryMeters: number[];
 };
 
 export type TrackSplitBranch = {
@@ -342,6 +351,7 @@ export type TrackRouteVariant = {
   startGate: TrackPoint;
   finishLine: TrackPoint;
   zoneBoundaryMeters?: number[];
+  zoneBoundarySets?: TrackZoneBoundarySet[];
   zones: TrackZone[];
   splitSections?: TrackSplitSection[];
 };
@@ -360,6 +370,7 @@ export type UserTrackMapping = {
   startGate: TrackPoint;
   finishLine: TrackPoint;
   zoneBoundaryMeters?: number[];
+  zoneBoundarySets?: TrackZoneBoundarySet[];
   zones: TrackZone[];
   splitSections?: TrackSplitSection[];
   routeVariants?: TrackRouteVariant[];

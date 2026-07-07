@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { playZoneCue } from '../lib/audioCues';
+import { zoneMatchesBranchSelections } from '../lib/trackMapping';
 import type { RaceState, RiderState, TrackZone } from '../types';
 
 export function useZoneAudioCues(
@@ -43,7 +44,11 @@ export function useZoneAudioCues(
       return;
     }
 
-    pedalZones.forEach((zone) => {
+    const riderPedalZones = pedalZones.filter((zone) => (
+      zoneMatchesBranchSelections(zone, cueRider.actualBranches, cueRider.selectedBranch)
+    ));
+
+    riderPedalZones.forEach((zone) => {
       const crossedZoneEnd = previousDistance < zone.endMeter && currentDistance >= zone.endMeter;
       if (!crossedZoneEnd) {
         return;

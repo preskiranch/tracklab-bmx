@@ -1,4 +1,4 @@
-import { proSplitMinimumMph, type SplitRouteDecisionPoint } from '../lib/trackMapping';
+import { proSplitMinimumMph, type SplitRouteDecisionPoint, zoneMatchesBranchSelections } from '../lib/trackMapping';
 import type { BikeSample, PlayerSlot, RiderState, SplitBranchChoice, TrackZone } from '../types';
 import { bmxVelocityMpsFromCadence } from './bmxRollout';
 import { crossedTakeoff, surfaceAngleDeg } from './trackProfile';
@@ -46,8 +46,21 @@ function coastVelocityMps(velocityMps: number, dt: number) {
   return Math.max(0, velocityMps - drag * dt);
 }
 
-function zoneAtDistance(zones: TrackZone[], distanceMeters: number) {
-  return zones.find((zone) => distanceMeters >= zone.startMeter && distanceMeters < zone.endMeter);
+function zoneAtDistance(
+  zones: TrackZone[],
+  distanceMeters: number,
+  actualBranches: Record<string, SplitBranchChoice>,
+  selectedBranch: SplitBranchChoice,
+) {
+  const matchingZones = zones.filter((zone) => (
+    distanceMeters >= zone.startMeter
+    && distanceMeters < zone.endMeter
+    && zoneMatchesBranchSelections(zone, actualBranches, selectedBranch)
+  ));
+
+  return matchingZones.sort((left, right) => (
+    Object.keys(right.branchSelections ?? {}).length - Object.keys(left.branchSelections ?? {}).length
+  ))[0];
 }
 
 function zoneAllowsDrive(zone: TrackZone | undefined, pedalZonesConfigured: boolean) {
@@ -153,11 +166,14 @@ export function stepRiders(
     const sample = player?.deviceId == null ? null : samplesByDevice.get(player.deviceId);
     const nowMs = Date.now();
     const elapsedMs = nowMs - raceStartedAt;
+    const selectedBranch = branchChoicesByPlayer[rider.playerId] ?? rider.selectedBranch ?? 'a';
+    let actualBranches = rider.actualBranches;
+    let proPenaltySections = rider.proPenaltySections;
     const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
       ? sample?.physicsWatts ?? sample?.watts ?? 0
       : 0;
     const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
-    const activeZone = zoneAtDistance(trackZones, rider.distance);
+    const activeZone = zoneAtDistance(trackZones, rider.distance, actualBranches, selectedBranch);
     const driveAllowed = zoneAllowsDrive(activeZone, pedalZonesConfigured);
     const watts = driveAllowed ? rawWatts : 0;
     const cadence = driveAllowed ? rawCadence : 0;
@@ -196,9 +212,6 @@ export function stepRiders(
       : coastVelocity;
     const baseSettledVelocity = velocity < stopVelocityMps && !driveEngaged ? 0 : velocity;
     let settledVelocity = baseSettledVelocity;
-    let actualBranches = rider.actualBranches;
-    let proPenaltySections = rider.proPenaltySections;
-    const selectedBranch = branchChoicesByPlayer[rider.playerId] ?? rider.selectedBranch ?? 'a';
     let predictedDistance = previousDistance + settledVelocity * dt;
 
     splitDecisionPoints.forEach((split) => {

@@ -21,6 +21,7 @@ import { formatDistanceMeters, formatSpeedFromKph, speedUnitLabel } from '../uni
 import {
   loadGoogleMaps,
   mappedTrackRoute,
+  mappedTrackRouteWithBranchSelections,
   mappedTrackRouteSegments,
   riderLatLng,
   riderRoutePose,
@@ -37,6 +38,7 @@ import {
 import {
   distanceBetweenTrackPoints,
   pointAtRouteMeter,
+  routeLengthMeters,
   routeLengthWithDefaultSplitBranches,
   routeWithDefaultSplitBranches,
   splitSharedRouteSegments,
@@ -61,6 +63,7 @@ type GoogleMapsTrackLayerProps = {
   mappingEditMode?: MappingEditMode;
   mappingRouteVariantId?: TrackRouteVariantId;
   draftPoints?: TrackPoint[];
+  draftZoneRoutePoints?: TrackPoint[];
   draftZoneMeters?: number[];
   draftZonePoints?: TrackPoint[];
   draftSplitSections?: TrackSplitSection[];
@@ -732,6 +735,7 @@ export function GoogleMapsTrackLayer({
   mappingEditMode = 'draw',
   mappingRouteVariantId = 'amateur',
   draftPoints = [],
+  draftZoneRoutePoints = [],
   draftZoneMeters = [],
   draftZonePoints = [],
   draftSplitSections = [],
@@ -1155,7 +1159,7 @@ export function GoogleMapsTrackLayer({
         return;
       }
 
-      const route = mappedTrackRoute(track);
+      const route = mappedTrackRouteWithBranchSelections(track, zone.branchSelections);
       const position = offsetRouteLabelPosition(route, zone.startMeter, zone.endMeter);
       if (!position) {
         return;
@@ -1352,9 +1356,11 @@ export function GoogleMapsTrackLayer({
       }),
     ] : [];
 
-    const cleanDraftZonePins = showMappingDraft && draftPoints.length > 1
+    const activeDraftZoneRoute = draftZoneRoutePoints.length > 1 ? draftZoneRoutePoints : draftRoute;
+    const activeDraftZoneLengthMeters = routeLengthMeters(activeDraftZoneRoute);
+    const cleanDraftZonePins = showMappingDraft && activeDraftZoneRoute.length > 1
       ? draftZoneMeters
-        .filter((meter) => meter >= 0 && meter <= draftLengthMeters)
+        .filter((meter) => meter >= 0 && meter <= activeDraftZoneLengthMeters)
         .sort((a, b) => a - b)
       : [];
     const draftPedalSpans = Array.from({ length: Math.floor(cleanDraftZonePins.length / 2) }, (_, index) => ({
@@ -1363,7 +1369,7 @@ export function GoogleMapsTrackLayer({
     })).filter((span) => span.endMeter - span.startMeter >= 3);
 
     const draftPedalLines = draftPedalSpans
-      .map((span) => routePathBetweenMeters(draftRoute, span.startMeter, span.endMeter))
+      .map((span) => routePathBetweenMeters(activeDraftZoneRoute, span.startMeter, span.endMeter))
       .filter((path) => path.length > 1)
       .map((path) => new google.maps.Polyline({
         clickable: false,
@@ -1377,7 +1383,7 @@ export function GoogleMapsTrackLayer({
     draftLineRefs.current = [...draftLineRefs.current, ...draftPedalLines];
 
     const draftZoneDistanceMarkers = draftPedalSpans.map((span, index) => {
-      const labelPosition = offsetRouteLabelPosition(draftRoute, span.startMeter, span.endMeter);
+      const labelPosition = offsetRouteLabelPosition(activeDraftZoneRoute, span.startMeter, span.endMeter);
       if (!labelPosition) {
         return null;
       }
@@ -1655,6 +1661,7 @@ export function GoogleMapsTrackLayer({
     draftSplitSections,
     draftZoneMeters,
     draftZonePoints,
+    draftZoneRoutePoints,
     mappingEditMode,
     mappingMode,
     onMappingPathPointAdd,

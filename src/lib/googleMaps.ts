@@ -1,5 +1,6 @@
 import {
   distanceBetweenTrackPoints,
+  pointAtRouteMeter,
   routeLengthMeters,
   routeWithDefaultSplitBranches,
   routeWithSplitBranchSelections,
@@ -802,7 +803,7 @@ function bearingBetweenTrackPoints(start: TrackPoint, end: TrackPoint) {
 }
 
 export function zonePolyline(track: TrackRecord, zone: TrackZone) {
-  const route = mappedTrackRoute(track);
+  const route = mappedTrackRouteWithBranchSelections(track, zone.branchSelections);
   if (route.length < 2) {
     return [];
   }
@@ -810,7 +811,7 @@ export function zonePolyline(track: TrackRecord, zone: TrackZone) {
   return Array.from({ length: 24 }, (_, index) => {
     const t = index / 23;
     const meter = zone.startMeter + (zone.endMeter - zone.startMeter) * t;
-    return pointAtProgress(route, meter / track.lengthMeters);
+    return pointAtRouteMeter(route, meter) ?? pointAtProgress(route, meter / track.lengthMeters);
   });
 }
 

@@ -100,6 +100,7 @@ type SessionControlPanelProps = {
   players: PlayerSlot[];
   branchChoicesByPlayer: Partial<Record<PlayerSlot['id'], TrackSplitBranch['id']>>;
   mappingRouteVariantId: TrackRouteVariantId;
+  mappingZoneBranchChoice: TrackSplitBranch['id'];
   raceRouteVariantId: TrackRouteVariantId;
   savedRouteVariantIds: TrackRouteVariantId[];
   hasDualStartRoutes: boolean;
@@ -144,6 +145,7 @@ type SessionControlPanelProps = {
   onCustomRouteDelete: (trackId: string) => void;
   onBranchChoiceChange: (playerId: PlayerSlot['id'], branch: TrackSplitBranch['id']) => void;
   onMappingRouteVariantChange: (variantId: TrackRouteVariantId) => void;
+  onMappingZoneBranchChange: (branch: TrackSplitBranch['id']) => void;
   onRaceRouteVariantChange: (variantId: TrackRouteVariantId) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoBikeCountChange: (count: number) => void;
@@ -202,6 +204,7 @@ export function SessionControlPanel({
   players,
   branchChoicesByPlayer,
   mappingRouteVariantId,
+  mappingZoneBranchChoice,
   raceRouteVariantId,
   savedRouteVariantIds,
   hasDualStartRoutes,
@@ -246,6 +249,7 @@ export function SessionControlPanel({
   onCustomRouteDelete,
   onBranchChoiceChange,
   onMappingRouteVariantChange,
+  onMappingZoneBranchChange,
   onRaceRouteVariantChange,
   onDemoModeChange,
   onDemoBikeCountChange,
@@ -636,9 +640,35 @@ export function SessionControlPanel({
 
             {splitDrawHint && <p className="mapping-hint">{splitDrawHint}</p>}
             {mappingMode && mappingEditMode === 'zones' && (
-              <p className="mapping-hint pedal-zone">
-                Tap the start and end of each pedaling zone. Unmarked sections become coasting or obstacle sections.
-              </p>
+              <>
+                <p className="mapping-hint pedal-zone">
+                  Tap the start and end of each pedaling zone. Unmarked sections become coasting or obstacle sections.
+                </p>
+                {draftSplitSections.length > 0 && (
+                  <div className="zone-route-card">
+                    <div className="route-layout-heading">
+                      <span>Zone route</span>
+                      <small>Choose which split line these pedal zones belong to</small>
+                    </div>
+                    <div className="segmented-control compact" aria-label="Pedal zone route">
+                      <button
+                        className={mappingZoneBranchChoice === 'a' ? 'selected' : ''}
+                        type="button"
+                        onClick={() => onMappingZoneBranchChange('a')}
+                      >
+                        Amateur Line
+                      </button>
+                      <button
+                        className={mappingZoneBranchChoice === 'b' ? 'selected' : ''}
+                        type="button"
+                        onClick={() => onMappingZoneBranchChange('b')}
+                      >
+                        Pro Set
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             <div className="segmented-control compact" aria-label="Distance unit">
@@ -661,7 +691,7 @@ export function SessionControlPanel({
             {mappingMode && (draftZones.length > 0 || draftZonePinCount % 2 === 1) && (
               <div className="zone-type-editor" aria-label="Pedaling zone editor">
                 <div className="route-layout-heading">
-                  <span>Pedal zones</span>
+                  <span>{draftSplitSections.length > 0 ? `${mappingZoneBranchChoice === 'b' ? 'Pro Set' : 'Amateur Line'} pedal zones` : 'Pedal zones'}</span>
                   <small>Two pins create one tracked pedaling section</small>
                 </div>
                 <div className="zone-type-grid">
