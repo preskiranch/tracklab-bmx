@@ -40,6 +40,12 @@ type BluetoothServer = {
   getPrimaryService: (uuid: string) => Promise<BluetoothService>;
 };
 
+type BluetoothDeviceFilter = {
+  name?: string;
+  namePrefix?: string;
+  services?: string[];
+};
+
 type BluetoothDeviceLike = EventTarget & {
   gatt?: {
     connect: () => Promise<BluetoothServer>;
@@ -50,7 +56,8 @@ type BluetoothDeviceLike = EventTarget & {
 
 type BluetoothApi = {
   requestDevice: (options: {
-    acceptAllDevices: boolean;
+    acceptAllDevices?: boolean;
+    filters?: BluetoothDeviceFilter[];
     optionalServices: string[];
   }) => Promise<BluetoothDeviceLike>;
 };
@@ -67,7 +74,16 @@ const bluetoothServices = {
   cyclingPower: '00001818-0000-1000-8000-00805f9b34fb',
   cyclingSpeedCadence: '00001816-0000-1000-8000-00805f9b34fb',
   fitnessMachine: '00001826-0000-1000-8000-00805f9b34fb',
+  wattbike: 'f7461223-d7c1-11e4-9ab1-0002a5d5c51b',
 };
+
+const bluetoothFilters: BluetoothDeviceFilter[] = [
+  { namePrefix: 'Wattbike' },
+  { namePrefix: 'WattbikePM' },
+  { services: [bluetoothServices.cyclingPower] },
+  { services: [bluetoothServices.cyclingSpeedCadence] },
+  { services: [bluetoothServices.fitnessMachine] },
+];
 
 const bluetoothCharacteristics = {
   batteryLevel: '00002a19-0000-1000-8000-00805f9b34fb',
@@ -346,7 +362,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
 
     try {
       const device = await bluetooth.requestDevice({
-        acceptAllDevices: true,
+        filters: bluetoothFilters,
         optionalServices: Object.values(bluetoothServices),
       });
       const server = await device.gatt?.connect();
@@ -443,7 +459,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
           ? error
           : connectedCount > 0
             ? `${connectedCount} Bluetooth bike${connectedCount === 1 ? '' : 's'} connected.`
-            : 'Use Bluetooth pairing to connect Wattbikes that broadcast BLE.';
+            : 'Use Bluetooth pairing to connect Wattbikes. On Model B, turn Settings > Remote > Bluetooth On, then enter Just Ride and pedal.';
 
     return {
       connectBike,
