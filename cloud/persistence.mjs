@@ -416,6 +416,20 @@ export async function updateAuthUserMembership(userId, membershipTier, bikeSeats
   return authUserFromRow(result?.rows?.[0]);
 }
 
+export async function updateAuthUserAdminAccess(userId, bikeSeats) {
+  const result = await query(
+    `UPDATE ${schema}.auth_users
+     SET membership_tier = 'racer',
+       bike_seats = $2,
+       admin = true,
+       updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [userId, bikeSeats],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
 export async function createAuthSession(session) {
   await query(
     `INSERT INTO ${schema}.auth_sessions (id, user_id, token_hash, expires_at)

@@ -1992,7 +1992,10 @@ async function serveStatic(request, response) {
       return;
     }
 
-    const loggedInUser = await persistence.touchAuthUserLogin(user.id) ?? user;
+    const entitledUser = isAdminEmail(user.email)
+      ? await persistence.updateAuthUserAdminAccess(user.id, maxRaceBikeCount) ?? user
+      : user;
+    const loggedInUser = await persistence.touchAuthUserLogin(entitledUser.id) ?? entitledUser;
     await createSignedInResponse(request, response, loggedInUser);
     return;
   }
