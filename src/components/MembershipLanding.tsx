@@ -164,14 +164,21 @@ export function MembershipLanding({
           )}
           {profileError && <p className="checkout-message error">{profileError}</p>}
           {!profileComplete && (
-            <button
-              className="text-button"
-              type="button"
-              onClick={() => onAuthModeChange(creatingAccount ? 'login' : 'register')}
-              disabled={authLoading}
-            >
-              {creatingAccount ? 'Already have an account? Sign in' : 'Need an account? Create one free'}
-            </button>
+            <>
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => onAuthModeChange(creatingAccount ? 'login' : 'register')}
+                disabled={authLoading}
+              >
+                {creatingAccount ? 'Already have an account? Sign in' : 'Need an account? Create one free'}
+              </button>
+              <p className="profile-gate-note">
+                {creatingAccount
+                  ? 'Use your main email here. The owner account unlocks admin racer access automatically.'
+                  : 'First time on this deployment? Create the free account before signing in.'}
+              </p>
+            </>
           )}
         </form>
       </section>

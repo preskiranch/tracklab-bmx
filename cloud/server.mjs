@@ -1980,8 +1980,15 @@ async function serveStatic(request, response) {
     }
 
     const user = await persistence.findAuthUserByEmail(account.email);
-    if (!user || !(await verifyPassword(account.password, user.passwordHash))) {
-      writeJson(response, 401, { error: 'Email or password is incorrect.' });
+    if (!user) {
+      writeJson(response, 404, {
+        error: 'No TrackLab account exists for this email yet. Choose "Create one free" to create the account first.',
+      });
+      return;
+    }
+
+    if (!(await verifyPassword(account.password, user.passwordHash))) {
+      writeJson(response, 401, { error: 'Password is incorrect for this TrackLab account.' });
       return;
     }
 

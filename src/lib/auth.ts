@@ -54,7 +54,17 @@ async function authFetch(path: string, options: RequestInit = {}) {
   });
   const payload = await response.json().catch(() => ({})) as AuthResponse;
   if (!response.ok) {
-    throw new Error(payload.error ?? `Authentication returned ${response.status}`);
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+
+    if (response.status === 404) {
+      throw new Error(
+        'TrackLab could not find the auth service or this account. Refresh the page, then use "Create one free" if this is your first login.',
+      );
+    }
+
+    throw new Error(`Authentication returned ${response.status}. Refresh the page and try again.`);
   }
 
   return normalizeAuthUser(payload.user);
