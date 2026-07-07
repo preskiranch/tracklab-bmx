@@ -109,6 +109,11 @@ data when available. The default `npm run bridge` auto mode tries BLE and ANT+
 so most users can launch one helper and let the app pick up whichever bike
 signal is available.
 
+Tablet note: iPad and iPhone browsers, including Chrome and Safari, do not
+expose Web Bluetooth to websites. Use the Mac/PC Advanced Connector near the
+Wattbikes for live riding, or use an Android tablet/browser that exposes Web
+Bluetooth.
+
 ## Connecting And Remembering Bikes
 
 ### Website-first connection requirement

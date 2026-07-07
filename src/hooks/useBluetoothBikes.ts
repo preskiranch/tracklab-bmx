@@ -69,6 +69,7 @@ type BluetoothNavigator = Navigator & {
 type PartialBikeSample = Partial<Pick<BikeSample, 'battery' | 'cadence' | 'speedKph' | 'watts'>>;
 
 const bluetoothBaseDeviceId = 71000;
+const unsupportedTabletBluetoothMessage = 'Direct Bluetooth is not available in this tablet browser. iPad and iPhone Chrome/Safari cannot pair with Wattbikes from a website; use Advanced Connector on the Mac/PC near the bikes, or use Android Chrome if Web Bluetooth is available.';
 const bluetoothServices = {
   battery: '0000180f-0000-1000-8000-00805f9b34fb',
   cyclingPower: '00001818-0000-1000-8000-00805f9b34fb',
@@ -102,6 +103,19 @@ function readUint24(view: DataView, offset: number) {
 
 function positiveDelta(current: number, previous: number, max: number) {
   return current >= previous ? current - previous : current + max - previous;
+}
+
+function isAppleMobileBrowser() {
+  const userAgent = navigator.userAgent || '';
+  const platform = navigator.platform || '';
+  return /iPad|iPhone|iPod/.test(userAgent)
+    || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function unsupportedBluetoothMessage() {
+  return isAppleMobileBrowser()
+    ? unsupportedTabletBluetoothMessage
+    : 'This browser does not support direct Bluetooth bike pairing. Use a desktop Chrome/Edge browser, Android Chrome with Web Bluetooth, or Advanced Connector on the Mac/PC near the bikes.';
 }
 
 function parseIndoorBikeData(view: DataView): PartialBikeSample {
@@ -353,7 +367,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
     const bluetooth = (navigator as BluetoothNavigator).bluetooth;
     if (!bluetooth) {
       setConnection('unsupported');
-      setError('This browser does not support direct Bluetooth bike pairing.');
+      setError(unsupportedBluetoothMessage());
       return;
     }
 
@@ -452,7 +466,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   return useMemo(() => {
     const connectedCount = devices.filter((device) => device.connected).length;
     const status = !supported
-      ? 'Bluetooth bike pairing is not supported in this browser.'
+      ? unsupportedBluetoothMessage()
       : connection === 'connecting'
         ? 'Choose a Wattbike from the Bluetooth pairing prompt.'
         : error

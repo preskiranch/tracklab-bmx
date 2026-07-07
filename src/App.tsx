@@ -4538,7 +4538,7 @@ export default function App() {
 
     if (bikeConnectionSource === 'bluetooth') {
       if (!bluetooth.supported) {
-        return 'This browser does not support direct Bluetooth pairing. Use Chrome or Edge, or switch to Advanced Connector for Bluetooth/ANT+/USB.';
+        return bluetooth.status;
       }
 
       return bluetooth.connectedCount > 0
@@ -4574,7 +4574,7 @@ export default function App() {
     if (bikeConnectionSource === 'bluetooth') {
       return bluetooth.supported
         ? 'No connector needed. Browser Bluetooth feeds the same BMX gear logic, race engine, monitor, and summaries.'
-        : 'Direct Bluetooth is blocked in this browser. Switch to Advanced Connector or use a supported desktop browser.';
+        : bluetooth.status;
     }
 
     if (bridge.connection !== 'open') {
@@ -4609,7 +4609,7 @@ export default function App() {
       ? 'Start Advanced Connector, put each Wattbike in Just Ride at resistance level 1, then pedal for Bluetooth/ANT+/USB discovery.'
       : bluetooth.supported
         ? 'Press Connect Wattbike to pair Bluetooth bikes. Riders appear only after live bike data is detected.'
-        : 'Direct Bluetooth is unavailable in this browser. Use Advanced Connector for Bluetooth/ANT+/USB or open the site in a supported browser.';
+        : bluetooth.status;
   const pairingDeviceLabel = bikeConnectionSource === 'advanced' ? 'Bike connector device' : 'Bluetooth bike';
   const membershipLabel = membership.tier === 'racer'
     ? `Racer / ${membership.bikeSeats} bike${membership.bikeSeats === 1 ? '' : 's'}`
