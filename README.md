@@ -28,6 +28,20 @@ mode only when no ANT+ dongle is available:
 npm run dev:sim
 ```
 
+## Visual Browser Checks
+
+Playwright is wired for repeatable browser automation and screenshots:
+
+```sh
+npm run test:e2e:install
+npm run test:e2e
+```
+
+The smoke test starts the production server, opens TrackLab in Chromium,
+creates a mocked free spectator profile, verifies the dashboard renders, checks
+for relevant browser errors, and saves failure traces/screenshots under
+`test-results/`.
+
 ## ANT+ Mode
 
 After the ANT+ USB dongle is plugged in:

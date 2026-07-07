@@ -4,3 +4,5 @@ captures/
 .npm-cache/
 .env.local
 *.tsbuildinfo
+playwright-report/
+test-results/
