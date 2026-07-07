@@ -77,6 +77,7 @@ import {
 } from './lib/googleMaps';
 import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
 import { patchCloudUserData, readCloudUserData } from './lib/cloudUserData';
+import { publishPublicTrackMappings, readPublicTrackMappings } from './lib/publicTrackMappings';
 import {
   benchmarkDemoTrackId,
   createMembership,
@@ -955,6 +956,33 @@ function formatRouteLocationError(error: unknown) {
   return message;
 }
 
+function shouldPublishPublicTrackMapping(mapping: UserTrackMapping) {
+  return mapping.routeStatus === 'user-mapped'
+    && !mapping.trackId.startsWith('custom-')
+    && !mapping.trackId.startsWith('custom-preview-')
+    && mapping.country !== 'Custom Routes';
+}
+
+function publishablePublicTrackMappings(mappings: StoredTrackMappings) {
+  return Object.fromEntries(
+    Object.entries(mappings).filter(([, mapping]) => shouldPublishPublicTrackMapping(mapping)),
+  );
+}
+
+function publicTrackMappingsSignature(mappings: StoredTrackMappings) {
+  return Object.values(mappings)
+    .sort((a, b) => a.trackId.localeCompare(b.trackId))
+    .map((mapping) => [
+      mapping.trackId,
+      mapping.savedAt,
+      mapping.lengthMeters,
+      mapping.centerline.length,
+      mapping.zones.length,
+      mapping.routeVariants?.map((variant) => `${variant.id}:${variant.lengthMeters}:${variant.centerline.length}:${variant.zones.length}`).join(',') ?? '',
+    ].join(':'))
+    .join('|');
+}
+
 export default function App() {
   const bridge = useWattbikeBridge();
   const bluetooth = useBluetoothBikes();
@@ -967,6 +995,7 @@ export default function App() {
   const bridgeUserDataLoadedRef = useRef(false);
   const cloudUserDataLoadedKeyRef = useRef<string | null>(null);
   const cloudUserDataAvailableRef = useRef(false);
+  const lastPublicMappingsPublishSignatureRef = useRef('');
   const roomTrackApplyRef = useRef<string | null>(null);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const customRoutePreviewRequestIdRef = useRef(0);
@@ -985,6 +1014,8 @@ export default function App() {
   const [catalogDatabaseReady, setCatalogDatabaseReady] = useState(false);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(initialCustomRoutes);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
+  const [publicTrackMappings, setPublicTrackMappings] = useState<StoredTrackMappings>({});
+  const [publicTrackMappingsLoaded, setPublicTrackMappingsLoaded] = useState(false);
   const [mappingMode, setMappingMode] = useState(false);
   const [mappingFullscreen, setMappingFullscreen] = useState(false);
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
@@ -1113,6 +1144,30 @@ export default function App() {
         console.warn(`Using bundled seed catalog: ${error.message}`);
         if (!cancelled) {
           setCatalogDatabaseReady(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    readPublicTrackMappings()
+      .then((mappings) => {
+        if (cancelled) {
+          return;
+        }
+
+        setPublicTrackMappings(mappings);
+        setPublicTrackMappingsLoaded(true);
+      })
+      .catch((error: Error) => {
+        console.warn(`Could not load public track mappings: ${error.message}`);
+        if (!cancelled) {
+          setPublicTrackMappingsLoaded(true);
         }
       });
 
@@ -1255,7 +1310,7 @@ export default function App() {
   useEffect(() => {
     selectedTrackIdRef.current = selectedTrack.id;
   }, [selectedTrack.id]);
-  const selectedTrackMapping = storedMappings[selectedTrack.id];
+  const selectedTrackMapping = storedMappings[selectedTrack.id] ?? publicTrackMappings[selectedTrack.id];
   const selectedRouteVariants = useMemo(
     () => (selectedTrackMapping ? routeVariantsFromMapping(selectedTrackMapping) : []),
     [selectedTrackMapping],
@@ -2063,6 +2118,28 @@ export default function App() {
         });
     }
   }, [bridge.connection, cloudProfileKey, storedMappings]);
+
+  useEffect(() => {
+    if (!publicTrackMappingsLoaded) {
+      return;
+    }
+
+    const publishableMappings = publishablePublicTrackMappings(storedMappings);
+    const signature = publicTrackMappingsSignature(publishableMappings);
+    if (!signature || signature === lastPublicMappingsPublishSignatureRef.current) {
+      return;
+    }
+
+    lastPublicMappingsPublishSignatureRef.current = signature;
+    void publishPublicTrackMappings(publishableMappings, cloudProfileKey)
+      .then((mappings) => {
+        setPublicTrackMappings(mappings);
+      })
+      .catch((error: Error) => {
+        lastPublicMappingsPublishSignatureRef.current = '';
+        console.warn(`Could not publish public track mappings: ${error.message}`);
+      });
+  }, [cloudProfileKey, publicTrackMappingsLoaded, storedMappings]);
 
   useEffect(() => {
     window.localStorage.setItem(speedUnitStorageKey, speedUnit);
@@ -2964,9 +3041,8 @@ export default function App() {
   };
 
   const exportMapping = () => {
-    const mapping = storedMappings[selectedTrack.id];
-    if (mapping) {
-      downloadTrackMapping(mapping);
+    if (selectedTrackMapping) {
+      downloadTrackMapping(selectedTrackMapping);
     }
   };
 

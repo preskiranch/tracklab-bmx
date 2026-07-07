@@ -17,6 +17,7 @@ let pool = databaseUrl
   : null;
 
 let readyPromise = null;
+const publicTrackMappingsFallback = new Map();
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -159,12 +160,25 @@ export async function initPersistence() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.public_track_mappings (
+        track_id TEXT PRIMARY KEY,
+        track_name TEXT NOT NULL,
+        country TEXT NOT NULL,
+        state TEXT NOT NULL,
+        mapping JSONB NOT NULL,
+        published_by TEXT,
+        published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_rooms_created ON ${schema}.rooms (created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_track ON ${schema}.race_results (track_id, created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_speed ON ${schema}.race_results (track_id, top_speed_kph DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rpm ON ${schema}.race_results (track_id, top_cadence DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_watts ON ${schema}.race_results (track_id, top_watts DESC NULLS LAST)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_public_mappings_updated ON ${schema}.public_track_mappings (updated_at DESC)`);
       console.log('[cloud] TrackLab persistence ready.');
       return true;
     } catch (error) {
@@ -322,6 +336,52 @@ export async function saveUserData(guestKey, patch) {
   );
 
   return next;
+}
+
+export async function loadPublicTrackMappings() {
+  const result = await query(
+    `SELECT track_id, mapping FROM ${schema}.public_track_mappings ORDER BY updated_at DESC`,
+  );
+
+  if (!result) {
+    return Object.fromEntries(publicTrackMappingsFallback.entries());
+  }
+
+  return Object.fromEntries(
+    (result.rows ?? []).map((row) => [row.track_id, fromJson(row.mapping, null)]).filter((entry) => entry[1]),
+  );
+}
+
+export async function savePublicTrackMappings(mappings, publishedBy = null) {
+  const entries = Object.entries(mappings ?? {}).filter(([, mapping]) => mapping?.trackId);
+  if (entries.length === 0) {
+    return loadPublicTrackMappings();
+  }
+
+  for (const [trackId, mapping] of entries) {
+    publicTrackMappingsFallback.set(trackId, mapping);
+    await query(
+      `INSERT INTO ${schema}.public_track_mappings (track_id, track_name, country, state, mapping, published_by, updated_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
+       ON CONFLICT (track_id) DO UPDATE SET
+         track_name = EXCLUDED.track_name,
+         country = EXCLUDED.country,
+         state = EXCLUDED.state,
+         mapping = EXCLUDED.mapping,
+         published_by = EXCLUDED.published_by,
+         updated_at = now()`,
+      [
+        trackId,
+        mapping.trackName,
+        mapping.country,
+        mapping.state,
+        json(mapping),
+        publishedBy,
+      ],
+    );
+  }
+
+  return loadPublicTrackMappings();
 }
 
 export async function saveChallenge(challenge, fromClient, targetClient) {

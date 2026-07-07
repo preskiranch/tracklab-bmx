@@ -132,6 +132,226 @@ function sanitizeUserDataPatch(value) {
   return patch;
 }
 
+function sanitizeTrackPoint(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const lat = finiteNumber(value.lat, Number.NaN);
+  const lng = finiteNumber(value.lng, Number.NaN);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return null;
+  }
+
+  return {
+    lat: Number(lat.toFixed(7)),
+    lng: Number(lng.toFixed(7)),
+  };
+}
+
+function sanitizeTrackPoints(value, maxPoints = 1500) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .slice(0, maxPoints)
+    .map(sanitizeTrackPoint)
+    .filter(Boolean);
+}
+
+function sanitizeZone(value, index, lengthMeters, restAfterSeconds) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const startMeter = Math.max(0, Math.min(lengthMeters, finiteNumber(value.startMeter, 0)));
+  const endMeter = Math.max(0, Math.min(lengthMeters, finiteNumber(value.endMeter, 0)));
+  if (endMeter - startMeter < 1) {
+    return null;
+  }
+
+  const zoneType = ['pedal', 'recovery', 'technical'].includes(value.type) ? value.type : 'pedal';
+  return {
+    id: sanitizeText(value.id, `pedal-zone-${index + 1}`, 80),
+    name: sanitizeText(value.name, `Pedal Zone ${index + 1}`, 80),
+    startMeter: Number(startMeter.toFixed(2)),
+    endMeter: Number(endMeter.toFixed(2)),
+    type: zoneType,
+    restAfterSeconds: Math.max(0, Math.min(30, finiteNumber(value.restAfterSeconds, restAfterSeconds))),
+  };
+}
+
+function sanitizeSplitSections(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.slice(0, 12).map((section, sectionIndex) => {
+    if (!section || typeof section !== 'object') {
+      return null;
+    }
+
+    const splitPoint = sanitizeTrackPoint(section.splitPoint);
+    const mergePoint = sanitizeTrackPoint(section.mergePoint);
+    if (!splitPoint || !mergePoint) {
+      return null;
+    }
+
+    const branches = Array.isArray(section.branches)
+      ? section.branches
+        .filter((branch) => branch?.id === 'a' || branch?.id === 'b')
+        .slice(0, 2)
+        .map((branch) => {
+          const points = sanitizeTrackPoints(branch.points, 400);
+          if (points.length < 2) {
+            return null;
+          }
+
+          return {
+            id: branch.id,
+            name: sanitizeText(branch.name, branch.id === 'b' ? 'Pro Set' : 'Amateur Line', 80),
+            points,
+            lengthMeters: Math.max(1, finiteNumber(branch.lengthMeters, 1)),
+          };
+        })
+        .filter(Boolean)
+      : [];
+
+    if (branches.length === 0) {
+      return null;
+    }
+
+    return {
+      id: sanitizeText(section.id, `split-${sectionIndex + 1}`, 80),
+      name: sanitizeText(section.name, `Split ${sectionIndex + 1} / Merge ${sectionIndex + 1}`, 80),
+      index: Math.max(1, Math.round(finiteNumber(section.index, sectionIndex + 1))),
+      splitPoint,
+      mergePoint,
+      branches,
+    };
+  }).filter(Boolean);
+}
+
+function sanitizeRouteVariant(value, fallbackId = 'amateur') {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const centerline = sanitizeTrackPoints(value.centerline);
+  if (centerline.length < 2) {
+    return null;
+  }
+
+  const id = value.id === 'pro' ? 'pro' : fallbackId === 'pro' ? 'pro' : 'amateur';
+  const lengthMeters = Math.max(1, finiteNumber(value.lengthMeters, 1));
+  const restAfterSeconds = Math.max(0, Math.min(30, finiteNumber(value.restAfterSeconds, 1)));
+  const zoneBoundaryMeters = Array.isArray(value.zoneBoundaryMeters)
+    ? value.zoneBoundaryMeters
+      .slice(0, 500)
+      .map((meter) => Math.max(0, Math.min(lengthMeters, finiteNumber(meter, 0))))
+      .sort((a, b) => a - b)
+    : [];
+
+  return {
+    id,
+    name: sanitizeText(value.name, id === 'pro' ? 'Pro Track' : 'Amateur Track', 80),
+    restAfterSeconds,
+    lengthMeters,
+    centerline,
+    startGate: sanitizeTrackPoint(value.startGate) ?? centerline[0],
+    finishLine: sanitizeTrackPoint(value.finishLine) ?? centerline[centerline.length - 1],
+    zoneBoundaryMeters,
+    zones: Array.isArray(value.zones)
+      ? value.zones
+        .slice(0, 250)
+        .map((zone, index) => sanitizeZone(zone, index, lengthMeters, restAfterSeconds))
+        .filter(Boolean)
+      : [],
+    splitSections: sanitizeSplitSections(value.splitSections),
+  };
+}
+
+function sanitizePublicTrackMapping(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const routeVariants = Array.isArray(value.routeVariants)
+    ? value.routeVariants
+      .slice(0, 2)
+      .map((variant, index) => sanitizeRouteVariant(variant, index === 1 ? 'pro' : 'amateur'))
+      .filter(Boolean)
+    : [];
+  const topLevelRoute = sanitizeRouteVariant(value);
+
+  if (!topLevelRoute && routeVariants.length === 0) {
+    return null;
+  }
+
+  const primaryRoute = topLevelRoute ?? routeVariants[0];
+  const lengthMeters = Math.max(1, finiteNumber(value.lengthMeters, primaryRoute.lengthMeters));
+  const restAfterSeconds = Math.max(0, Math.min(30, finiteNumber(value.restAfterSeconds, primaryRoute.restAfterSeconds)));
+  const mapping = {
+    version: 1,
+    trackId: sanitizeText(value.trackId, '', 140),
+    trackName: sanitizeText(value.trackName, 'Mapped BMX track', 140),
+    country: sanitizeText(value.country, 'Unknown', 80),
+    state: sanitizeText(value.state, 'Unknown', 80),
+    savedAt: sanitizeText(value.savedAt, new Date().toISOString(), 40),
+    routeStatus: 'user-mapped',
+    restAfterSeconds,
+    lengthMeters,
+    centerline: primaryRoute.centerline,
+    startGate: primaryRoute.startGate,
+    finishLine: primaryRoute.finishLine,
+    zoneBoundaryMeters: Array.isArray(value.zoneBoundaryMeters)
+      ? value.zoneBoundaryMeters
+        .slice(0, 500)
+        .map((meter) => Math.max(0, Math.min(lengthMeters, finiteNumber(meter, 0))))
+        .sort((a, b) => a - b)
+      : primaryRoute.zoneBoundaryMeters,
+    zones: Array.isArray(value.zones)
+      ? value.zones
+        .slice(0, 250)
+        .map((zone, index) => sanitizeZone(zone, index, lengthMeters, restAfterSeconds))
+        .filter(Boolean)
+      : primaryRoute.zones,
+    splitSections: sanitizeSplitSections(value.splitSections ?? primaryRoute.splitSections),
+  };
+
+  if (!mapping.trackId || mapping.centerline.length < 2) {
+    return null;
+  }
+
+  if (routeVariants.length > 0) {
+    mapping.routeVariants = routeVariants;
+  }
+
+  return mapping;
+}
+
+function sanitizePublicTrackMappingsPayload(value) {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const rawMappings = value.mapping
+    ? { [value.mapping.trackId ?? 'mapping']: value.mapping }
+    : value.trackMappings;
+  if (!rawMappings || typeof rawMappings !== 'object' || Array.isArray(rawMappings)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.values(rawMappings)
+      .slice(0, 100)
+      .map(sanitizePublicTrackMapping)
+      .filter(Boolean)
+      .map((mapping) => [mapping.trackId, mapping]),
+  );
+}
+
 function readJsonBody(request, maxBytes = 1_000_000) {
   return new Promise((resolve, reject) => {
     let totalBytes = 0;
@@ -604,6 +824,38 @@ async function serveStatic(request, response) {
       'Cache-Control': 'no-cache',
     });
     response.end(JSON.stringify(tracklabManifest(profileKey)));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/public-track-mappings') {
+    if (request.method === 'GET') {
+      const trackMappings = await persistence.loadPublicTrackMappings();
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+      response.end(JSON.stringify({
+        trackMappings,
+        count: Object.keys(trackMappings).length,
+        persistence: persistence.persistenceEnabled(),
+      }));
+      return;
+    }
+
+    if (request.method === 'PATCH' || request.method === 'POST') {
+      const payload = await readJsonBody(request, 5_000_000);
+      const trackMappings = sanitizePublicTrackMappingsPayload(payload);
+      const publishedBy = sanitizeGuestKey(payload.profileKey ?? requestUrl.searchParams.get('profileKey'), 'public');
+      const savedMappings = await persistence.savePublicTrackMappings(trackMappings, publishedBy);
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+      response.end(JSON.stringify({
+        trackMappings: savedMappings,
+        count: Object.keys(savedMappings).length,
+        savedCount: Object.keys(trackMappings).length,
+        persistence: persistence.persistenceEnabled(),
+      }));
+      return;
+    }
+
+    response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ error: 'Method not allowed' }));
     return;
   }
 
