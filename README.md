@@ -21,10 +21,13 @@ The local bridge listens on:
 ws://127.0.0.1:8787
 ```
 
-`npm run dev` starts the local bridge in ANT+ mode by default. Use simulator
-mode only when no ANT+ dongle is available:
+`npm run dev` starts the local connector in auto mode by default, which tries
+Bluetooth Low Energy and ANT+. Use a dedicated mode only when you want to force
+one input path:
 
 ```sh
+npm run dev:ble
+npm run dev:ant
 npm run dev:sim
 ```
 
@@ -89,6 +92,23 @@ watts, cadence, and speed samples in the terminal. Use `--profile power`,
 `--profile fitness`, `--profile speed-cadence`, `--profile cadence`, or
 `--profile speed` to force a specific ANT+ profile; default is `auto`.
 
+## Bluetooth Connector Mode
+
+Chrome Web Bluetooth can fail to list Wattbikes even when the monitor is
+broadcasting correctly. The local connector can bypass that browser picker and
+read BLE directly from the computer:
+
+```sh
+npm run bridge:ble
+```
+
+On each Model B monitor, turn **Settings > Remote > Bluetooth On**, enter
+**Just Ride**, and pedal for a few seconds. The connector reads standard BLE
+Cycling Power (`1818`), Cycling Speed and Cadence (`1816`), and Fitness Machine
+data when available. The default `npm run bridge` auto mode tries BLE and ANT+
+so most users can launch one helper and let the app pick up whichever bike
+signal is available.
+
 ## Connecting And Remembering Bikes
 
 ### Website-first connection requirement
@@ -100,10 +120,11 @@ The app should remember the rider's bike profile and saved track data through
 their account/cloud profile where available, with browser storage as a local
 fallback.
 
-ANT+ dongles are the exception. A normal hosted website cannot reliably open a
-USB ANT+ stick across browsers, so ANT+ users still need the TrackLab Bike
-Connector on the computer with the dongle. The app should present this as an
-advanced ANT+ / USB option, not as the default path for public users.
+ANT+ dongles are the exception. Chrome Web Bluetooth can also miss some
+Wattbike advertisements even when native BLE can see them. In either case,
+users should run the TrackLab Bike Connector on the computer near the bikes.
+The connector can use Bluetooth, ANT+, or USB-control paths while the website
+still receives one unified live bike feed.
 
 1. Plug the ANT+ USB dongle into the computer that is near the Wattbikes.
 2. Start the local app/helper with `npm run dev`.

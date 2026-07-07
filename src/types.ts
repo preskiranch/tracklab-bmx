@@ -1,4 +1,4 @@
-export type BridgeMode = 'sim' | 'ant' | 'demo' | 'bluetooth' | 'usb';
+export type BridgeMode = 'auto' | 'sim' | 'ant' | 'demo' | 'bluetooth' | 'usb';
 export type BridgeSourceState = 'idle' | 'starting' | 'running' | 'stopping' | 'error';
 export type SpeedUnit = 'kph' | 'mph';
 export type DistanceUnit = 'ft' | 'm';

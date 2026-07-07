@@ -4538,7 +4538,7 @@ export default function App() {
 
     if (bikeConnectionSource === 'bluetooth') {
       if (!bluetooth.supported) {
-        return 'This browser does not support direct Bluetooth pairing. Use Chrome or Edge, or switch to Advanced Connector for ANT+/USB.';
+        return 'This browser does not support direct Bluetooth pairing. Use Chrome or Edge, or switch to Advanced Connector for Bluetooth/ANT+/USB.';
       }
 
       return bluetooth.connectedCount > 0
@@ -4606,11 +4606,11 @@ export default function App() {
   const pairingEmptyMessage = demoMode
     ? 'Choose demo riders to generate live race samples.'
     : bikeConnectionSource === 'advanced'
-      ? 'Start Advanced Connector, put each Wattbike in Just Ride at resistance level 1, then pedal for ANT+/USB discovery.'
+      ? 'Start Advanced Connector, put each Wattbike in Just Ride at resistance level 1, then pedal for Bluetooth/ANT+/USB discovery.'
       : bluetooth.supported
         ? 'Press Connect Wattbike to pair Bluetooth bikes. Riders appear only after live bike data is detected.'
-        : 'Direct Bluetooth is unavailable in this browser. Use Advanced Connector for ANT+/USB or open the site in a supported browser.';
-  const pairingDeviceLabel = bikeConnectionSource === 'advanced' ? 'ANT+ / USB device' : 'Bluetooth bike';
+        : 'Direct Bluetooth is unavailable in this browser. Use Advanced Connector for Bluetooth/ANT+/USB or open the site in a supported browser.';
+  const pairingDeviceLabel = bikeConnectionSource === 'advanced' ? 'Bike connector device' : 'Bluetooth bike';
   const membershipLabel = membership.tier === 'racer'
     ? `Racer / ${membership.bikeSeats} bike${membership.bikeSeats === 1 ? '' : 's'}`
     : membership.tier === 'spectator'

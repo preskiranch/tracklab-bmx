@@ -5,10 +5,12 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { createSimulatorSource } from './simulator-source.mjs';
 import { createAntSource } from './ant-source.mjs';
+import { createBleSource } from './ble-source.mjs';
+import { createHybridSource } from './hybrid-source.mjs';
 import { createWattbikeControl } from './wattbike-control.mjs';
 
 const port = Number(process.env.WATTBIKE_BRIDGE_PORT ?? 8787);
-const inputMode = process.env.WATTBIKE_INPUT === 'sim' ? 'sim' : 'ant';
+const inputMode = normalizeInputMode(process.env.WATTBIKE_INPUT);
 const autoStart = process.env.WATTBIKE_BRIDGE_AUTOSTART === '1';
 const userDataDirectory = path.join(os.homedir(), 'Library', 'Application Support', 'TrackLab BMX');
 const userDataPath = path.join(userDataDirectory, 'user-data.json');
@@ -22,28 +24,69 @@ let sourceState = 'idle';
 let sourceError = null;
 let controlStatusMessage = null;
 
+function normalizeInputMode(value) {
+  const normalized = String(value ?? 'auto').trim().toLowerCase();
+  if (normalized === 'sim') {
+    return 'sim';
+  }
+  if (normalized === 'ble' || normalized === 'bluetooth') {
+    return 'bluetooth';
+  }
+  if (normalized === 'ant') {
+    return 'ant';
+  }
+  return 'auto';
+}
+
 function createSource() {
-  return inputMode === 'ant' ? createAntSource() : createSimulatorSource();
+  if (inputMode === 'sim') {
+    return createSimulatorSource();
+  }
+  if (inputMode === 'bluetooth') {
+    return createBleSource();
+  }
+  if (inputMode === 'ant') {
+    return createAntSource();
+  }
+  return createHybridSource();
 }
 
 function bridgeMessage() {
   if (sourceState === 'running') {
-    return inputMode === 'ant'
-      ? 'ANT bridge scanning. Put each Wattbike in Just Ride and pedal for a few seconds.'
-      : 'Simulator bridge running.';
+    if (inputMode === 'ant') {
+      return 'ANT bridge scanning. Put each Wattbike in Just Ride and pedal for a few seconds.';
+    }
+    if (inputMode === 'bluetooth') {
+      return 'Bluetooth bridge scanning. Turn Model B Remote Bluetooth On, enter Just Ride, then pedal.';
+    }
+    if (inputMode === 'auto') {
+      return 'Auto connector scanning with Bluetooth and ANT+. Put each Wattbike in Just Ride and pedal.';
+    }
+    return 'Simulator bridge running.';
   }
 
   if (sourceState === 'starting') {
-    return inputMode === 'ant' ? 'Starting ANT bridge.' : 'Starting simulator bridge.';
+    if (inputMode === 'ant') {
+      return 'Starting ANT bridge.';
+    }
+    if (inputMode === 'bluetooth') {
+      return 'Starting Bluetooth bridge.';
+    }
+    if (inputMode === 'auto') {
+      return 'Starting auto connector.';
+    }
+    return 'Starting simulator bridge.';
   }
 
   if (sourceState === 'error') {
     return sourceError ?? 'Bridge failed to start.';
   }
 
-  return inputMode === 'ant'
-    ? 'Local helper online. Press Start Local Bridge, then put each Wattbike in Just Ride.'
-    : 'Local helper online. Press Start Local Bridge to run the simulator.';
+  if (inputMode === 'sim') {
+    return 'Local helper online. Press Start Local Bridge to run the simulator.';
+  }
+
+  return 'Local helper online. Press Start Connector, then put each Wattbike in Just Ride.';
 }
 
 function statusPayload(extra = {}) {
