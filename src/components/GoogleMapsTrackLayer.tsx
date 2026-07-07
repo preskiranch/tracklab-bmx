@@ -1154,8 +1154,9 @@ export function GoogleMapsTrackLayer({
       });
     }
 
+    const showPedalZoneReviewNumbers = !mappingMode && raceState === 'finished';
     pedalZones.forEach((zone, index) => {
-      if (mappingMode) {
+      if (!showPedalZoneReviewNumbers) {
         return;
       }
 
@@ -1176,7 +1177,7 @@ export function GoogleMapsTrackLayer({
         optimized: false,
         position,
         title: `${zone.name} ${formatDistanceMeters(distance, distanceUnit)} / performance tracked`,
-        zIndex: raceState === 'racing' ? 531 : 520,
+        zIndex: 520,
       }));
     });
 

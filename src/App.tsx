@@ -108,7 +108,6 @@ import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
 import { useMultiplayer } from './hooks/useMultiplayer';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
-import { useZoneAudioCues } from './hooks/useZoneAudioCues';
 import type {
   AppMode,
   BikeProfile,
@@ -1857,7 +1856,6 @@ export default function App() {
     splitDecisionPoints,
     activeZones,
   );
-  useZoneAudioCues(raceState, riders, activeZones);
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const stagedRiders = useMemo(() => {
     if (!startGateStatus.active || raceState === 'racing') {
