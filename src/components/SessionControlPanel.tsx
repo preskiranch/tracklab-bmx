@@ -28,6 +28,7 @@ import { distanceBetweenTrackPoints, routeLengthMeters } from '../lib/trackMappi
 import type {
   DistanceUnit,
   DraftTrackSplit,
+  GhostLap,
   IntervalMode,
   MappingEditMode,
   MetricKey,
@@ -129,6 +130,8 @@ type SessionControlPanelProps = {
   startGateActive: boolean;
   startGateLabel: string;
   startGateDetail: string;
+  ghostLaps: GhostLap[];
+  selectedGhostIds: string[];
   onSessionModeChange: (mode: SessionMode) => void;
   onIntervalModeChange: (mode: IntervalMode) => void;
   onManualZoneToggle: (zoneId: string) => void;
@@ -169,6 +172,8 @@ type SessionControlPanelProps = {
   onMappingRemove: () => void;
   onMappingExport: () => void;
   onMappingImport: (file: File) => void;
+  onGhostToggle: (ghostId: string) => void;
+  onGhostClear: () => void;
   onPrimeAudio: () => void;
   onStart: () => void;
   onCancel: () => void;
@@ -181,6 +186,18 @@ const metricOptions: Array<{ key: MetricKey; label: string; icon: typeof Activit
   { key: 'power', label: 'Power', icon: Zap },
   { key: 'reaction', label: 'Reaction', icon: Timer },
 ];
+
+function formatGhostRaceTime(milliseconds: number) {
+  return `${(Math.max(0, milliseconds) / 1000).toFixed(2)}s`;
+}
+
+function ghostSourceLabel(source: GhostLap['source']) {
+  if (source === 'friend') {
+    return 'Friend best';
+  }
+
+  return source === 'top' ? 'Top rider' : 'Personal best';
+}
 
 export function SessionControlPanel({
   track,
@@ -233,6 +250,8 @@ export function SessionControlPanel({
   startGateActive,
   startGateLabel,
   startGateDetail,
+  ghostLaps,
+  selectedGhostIds,
   onSessionModeChange,
   onIntervalModeChange,
   onManualZoneToggle,
@@ -273,6 +292,8 @@ export function SessionControlPanel({
   onMappingRemove,
   onMappingExport,
   onMappingImport,
+  onGhostToggle,
+  onGhostClear,
   onPrimeAudio,
   onStart,
   onCancel,
@@ -350,6 +371,15 @@ export function SessionControlPanel({
       customRoute.country,
     ].some((value) => value?.toLowerCase().includes(filter));
   });
+  const personalGhosts = ghostLaps.filter((ghost) => ghost.source === 'personal').slice(0, 4);
+  const friendGhosts = ghostLaps.filter((ghost) => ghost.source === 'friend').slice(0, 4);
+  const topGhosts = ghostLaps.filter((ghost) => ghost.source === 'top').slice(0, 6);
+  const selectedGhostCount = selectedGhostIds.filter((ghostId) => ghostLaps.some((ghost) => ghost.id === ghostId)).length;
+  const ghostGroups = [
+    { id: 'personal', label: 'Personal', ghosts: personalGhosts },
+    { id: 'friend', label: 'Friends', ghosts: friendGhosts },
+    { id: 'top', label: 'Top', ghosts: topGhosts },
+  ].filter((group) => group.ghosts.length > 0);
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -1054,6 +1084,50 @@ export function SessionControlPanel({
           </div>
         </section>
       )}
+
+      <section className="panel-section ghost-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Ghost Racers</span>
+            <h3>Saved best laps</h3>
+          </div>
+          <Bike size={18} />
+        </div>
+
+        {ghostGroups.length === 0 ? (
+          <span className="empty-inline">Set a personal best on this track to create a ghost.</span>
+        ) : (
+          <>
+            <div className="ghost-summary-row">
+              <span>{selectedGhostCount} selected</span>
+              <button type="button" onClick={onGhostClear} disabled={selectedGhostCount === 0}>
+                Clear
+              </button>
+            </div>
+            <div className="ghost-picker">
+              {ghostGroups.map((group) => (
+                <div className="ghost-group" key={group.id}>
+                  <span>{group.label}</span>
+                  {group.ghosts.map((ghost) => {
+                    const selected = selectedGhostIds.includes(ghost.id);
+                    return (
+                      <button
+                        className={selected ? 'selected' : ''}
+                        type="button"
+                        onClick={() => onGhostToggle(ghost.id)}
+                        key={ghost.id}
+                      >
+                        <strong>{ghost.riderName}</strong>
+                        <small>{ghostSourceLabel(ghost.source)} / {formatGhostRaceTime(ghost.finishTimeMs)} / 30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
 
       <section className="panel-section">
         <div className="section-heading">

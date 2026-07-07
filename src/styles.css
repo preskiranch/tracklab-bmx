@@ -1524,6 +1524,12 @@ input:focus {
   background: #fbfcfd;
 }
 
+.rider-stat.ghost {
+  border-style: dashed;
+  border-left: 3px solid var(--player-color);
+  background: #f5f7f9;
+}
+
 .rider-stat div {
   display: grid;
   gap: 2px;
@@ -1705,6 +1711,85 @@ input:focus {
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
+}
+
+.ghost-section {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafb 100%);
+}
+
+.ghost-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.ghost-summary-row button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ghost-summary-row button:disabled {
+  color: #9ca3af;
+}
+
+.ghost-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.ghost-group {
+  display: grid;
+  gap: 6px;
+}
+
+.ghost-group > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ghost-group button {
+  display: grid;
+  gap: 3px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  text-align: left;
+}
+
+.ghost-group button.selected {
+  border-color: #83cb68;
+  background: #f0faea;
+  box-shadow: inset 3px 0 0 #4ade80;
+}
+
+.ghost-group strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghost-group small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
 }
 
 .route-layout-card {

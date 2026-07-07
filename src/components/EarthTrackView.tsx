@@ -23,6 +23,7 @@ import type {
   DistanceUnit,
   DraftTrackSplit,
   EarthCamera,
+  GhostPlaybackRider,
   MappingEditMode,
   MultiplayerRaceState,
   PlayerSlot,
@@ -40,6 +41,7 @@ import type {
 type EarthTrackViewProps = {
   track: TrackRecord;
   riders: RiderState[];
+  ghostRiders: GhostPlaybackRider[];
   remoteRaceStates: MultiplayerRaceState[];
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
@@ -115,6 +117,7 @@ function StartTreeLight({ activeIndex }: { activeIndex: 0 | 1 | 2 | 3 | null }) 
 export function EarthTrackView({
   track,
   riders,
+  ghostRiders,
   remoteRaceStates,
   players,
   samplesByDevice,
@@ -165,6 +168,7 @@ export function EarthTrackView({
     : 'Needs manual mapping';
   const showMappingUi = mappingMode && !raceViewFullscreen;
   const mapRiders = mappingMode ? [] : riders;
+  const mapGhostRiders = mappingMode ? [] : ghostRiders;
   const mapRemoteRaceStates = mappingMode ? [] : remoteRaceStates;
 
   return (
@@ -193,6 +197,7 @@ export function EarthTrackView({
           <GoogleMapsTrackLayer
             track={track}
             riders={mapRiders}
+            ghostRiders={mapGhostRiders}
             remoteRaceStates={mapRemoteRaceStates}
             players={players}
             samplesByDevice={samplesByDevice}
@@ -382,6 +387,20 @@ export function EarthTrackView({
               <strong>{formatElapsed(rider.finishedAt)}</strong>
             </div>
           )))}
+          {ghostRiders.map((rider, index) => (
+            <div className="rider-stat ghost" style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
+              <span className="player-chip">G{index + 1}</span>
+              <div>
+                <strong>{rider.name}</strong>
+                <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / ghost</span>
+              </div>
+              <div className="rider-stat-live">
+                <Signal size={14} />
+                <span>Replay</span>
+              </div>
+              <strong>{formatElapsed(rider.finishedAt)}</strong>
+            </div>
+          ))}
         </div>
       )}
     </section>

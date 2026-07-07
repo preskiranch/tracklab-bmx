@@ -267,6 +267,27 @@ export async function initPersistence() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.ghost_laps (
+        id TEXT PRIMARY KEY,
+        owner_key TEXT NOT NULL,
+        owner_name TEXT NOT NULL,
+        rider_name TEXT NOT NULL,
+        track_id TEXT NOT NULL,
+        track_name TEXT NOT NULL,
+        route_variant_id TEXT,
+        route_key TEXT NOT NULL DEFAULT 'default',
+        finish_time_ms INTEGER NOT NULL,
+        thirty_foot_time_ms INTEGER,
+        color_name TEXT NOT NULL DEFAULT 'lime',
+        accent TEXT NOT NULL DEFAULT '#7ade36',
+        summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+        points JSONB NOT NULL DEFAULT '[]'::jsonb,
+        saved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (owner_key, rider_name, track_id, route_key)
+      )
+    `);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_rooms_created ON ${schema}.rooms (created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_track ON ${schema}.race_results (track_id, created_at DESC)`);
@@ -274,6 +295,8 @@ export async function initPersistence() {
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rpm ON ${schema}.race_results (track_id, top_cadence DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_watts ON ${schema}.race_results (track_id, top_watts DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_public_mappings_updated ON ${schema}.public_track_mappings (updated_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_ghost_laps_track ON ${schema}.ghost_laps (track_id, route_key, finish_time_ms ASC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_ghost_laps_owner ON ${schema}.ghost_laps (owner_key, updated_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_email ON ${schema}.auth_users (email)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_token ON ${schema}.auth_sessions (token_hash)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_expires ON ${schema}.auth_sessions (expires_at)`);
@@ -998,4 +1021,98 @@ export async function loadLeaderboards(trackId, limit = 10) {
     speed: boards.speed.slice(0, limit),
     watts: boards.watts.slice(0, limit),
   };
+}
+
+function routeKey(routeVariantId) {
+  return routeVariantId === 'amateur' || routeVariantId === 'pro' ? routeVariantId : 'default';
+}
+
+function ghostFromRow(row, source = 'top') {
+  return {
+    version: 1,
+    id: row.id,
+    trackId: row.track_id,
+    trackName: row.track_name,
+    ...(row.route_variant_id ? { routeVariantId: row.route_variant_id } : {}),
+    riderName: row.rider_name,
+    ownerKey: row.owner_key,
+    ownerName: row.owner_name,
+    colorName: row.color_name,
+    accent: row.accent,
+    source,
+    finishTimeMs: Number(row.finish_time_ms),
+    thirtyFootTimeMs: row.thirty_foot_time_ms == null ? null : Number(row.thirty_foot_time_ms),
+    savedAt: new Date(row.saved_at).getTime(),
+    summary: fromJson(row.summary, {}),
+    points: fromJson(row.points, []),
+  };
+}
+
+export async function saveGhostLap(ghost) {
+  if (!ghost?.id || !ghost.trackId || !ghost.ownerKey || !ghost.riderName || !Number.isFinite(Number(ghost.finishTimeMs))) {
+    return null;
+  }
+
+  const safeRouteKey = routeKey(ghost.routeVariantId);
+  return query(
+    `INSERT INTO ${schema}.ghost_laps (
+      id, owner_key, owner_name, rider_name, track_id, track_name, route_variant_id, route_key,
+      finish_time_ms, thirty_foot_time_ms, color_name, accent, summary, points, saved_at, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, to_timestamp($15 / 1000.0), now())
+    ON CONFLICT (owner_key, rider_name, track_id, route_key) DO UPDATE SET
+      id = EXCLUDED.id,
+      owner_name = EXCLUDED.owner_name,
+      track_name = EXCLUDED.track_name,
+      route_variant_id = EXCLUDED.route_variant_id,
+      finish_time_ms = EXCLUDED.finish_time_ms,
+      thirty_foot_time_ms = EXCLUDED.thirty_foot_time_ms,
+      color_name = EXCLUDED.color_name,
+      accent = EXCLUDED.accent,
+      summary = EXCLUDED.summary,
+      points = EXCLUDED.points,
+      saved_at = EXCLUDED.saved_at,
+      updated_at = now()
+    WHERE EXCLUDED.finish_time_ms < ${schema}.ghost_laps.finish_time_ms
+       OR (EXCLUDED.finish_time_ms = ${schema}.ghost_laps.finish_time_ms AND EXCLUDED.saved_at > ${schema}.ghost_laps.saved_at)
+    RETURNING *`,
+    [
+      ghost.id,
+      ghost.ownerKey,
+      ghost.ownerName,
+      ghost.riderName,
+      ghost.trackId,
+      ghost.trackName,
+      ghost.routeVariantId ?? null,
+      safeRouteKey,
+      Math.round(Number(ghost.finishTimeMs)),
+      ghost.thirtyFootTimeMs == null ? null : Math.round(Number(ghost.thirtyFootTimeMs)),
+      ghost.colorName,
+      ghost.accent,
+      json(ghost.summary),
+      json(ghost.points),
+      Math.round(Number(ghost.savedAt) || Date.now()),
+    ],
+  );
+}
+
+export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], limit = 30) {
+  const result = await query(
+    `SELECT *
+     FROM ${schema}.ghost_laps
+     WHERE track_id = $1
+     ORDER BY finish_time_ms ASC, saved_at DESC
+     LIMIT $2`,
+    [trackId, Math.max(1, Math.min(60, Math.round(Number(limit) || 30)))],
+  );
+
+  const friends = new Set(friendKeys);
+  return (result?.rows ?? []).map((row) => {
+    const source = row.owner_key === profileKey
+      ? 'personal'
+      : friends.has(row.owner_key)
+        ? 'friend'
+        : 'top';
+    return ghostFromRow(row, source);
+  });
 }

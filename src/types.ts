@@ -402,6 +402,51 @@ export type RaceCapture = {
   summary: RaceSummaryEntry[];
 };
 
+export type GhostLapSource = 'personal' | 'friend' | 'top';
+
+export type GhostLapPoint = {
+  elapsedMs: number;
+  distanceMeters: number;
+  velocityMps: number;
+  phase: RiderPhase;
+  pitch: number;
+  rank: number;
+  actualBranches: Record<string, SplitBranchChoice>;
+};
+
+export type GhostLap = {
+  version: 1;
+  id: string;
+  trackId: string;
+  trackName: string;
+  routeVariantId?: TrackRouteVariantId;
+  riderName: string;
+  ownerKey: string;
+  ownerName: string;
+  colorName: PlayerSlot['colorName'];
+  accent: string;
+  source: GhostLapSource;
+  finishTimeMs: number;
+  thirtyFootTimeMs: number | null;
+  savedAt: number;
+  summary: RaceSummaryEntry;
+  points: GhostLapPoint[];
+};
+
+export type GhostPlaybackRider = {
+  id: string;
+  name: string;
+  colorName: PlayerSlot['colorName'];
+  accent: string;
+  distance: number;
+  velocity: number;
+  phase: RiderPhase;
+  pitch: number;
+  rank: number;
+  finishedAt: number | null;
+  actualBranches: Record<string, SplitBranchChoice>;
+};
+
 export type TrackPoint = {
   lat: number;
   lng: number;

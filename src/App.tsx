@@ -84,6 +84,16 @@ import {
 } from './lib/googleMaps';
 import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
 import { patchCloudUserData, readCloudUserData } from './lib/cloudUserData';
+import {
+  buildGhostLapFromRace,
+  ghostsForTrackRoute,
+  loadGhostLapsFromCloud,
+  mergeGhostLaps,
+  playbackGhostLap,
+  readStoredGhostLaps,
+  syncGhostLapToCloud,
+  writeStoredGhostLaps,
+} from './lib/ghosts';
 import { publishPublicTrackMappings, readPublicTrackMappings } from './lib/publicTrackMappings';
 import {
   claimBillingReturn,
@@ -115,6 +125,7 @@ import type {
   DistanceUnit,
   DraftTrackSplit,
   EarthCamera,
+  GhostLapPoint,
   IntervalMode,
   LeaderboardEntry,
   LeaderboardMetric,
@@ -1054,6 +1065,11 @@ export default function App() {
   const startGateArmedAtRef = useRef<number | null>(null);
   const falseStartHandledRef = useRef(false);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
+  const activeRaceSessionIdRef = useRef<string | null>(null);
+  const ghostRaceStartedAtRef = useRef<number | null>(null);
+  const ghostTraceRef = useRef<Map<PlayerSlot['id'], GhostLapPoint[]>>(new Map());
+  const ghostTraceLastSampleAtRef = useRef<Map<PlayerSlot['id'], number>>(new Map());
+  const ghostSavedSessionIdsRef = useRef<Set<string>>(new Set());
   const bridgeUserDataLoadedRef = useRef(false);
   const cloudUserDataLoadedKeyRef = useRef<string | null>(null);
   const cloudUserDataAvailableRef = useRef(false);
@@ -1161,6 +1177,9 @@ export default function App() {
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
+  const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
+  const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
+  const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [cloudUserDataStatus, setCloudUserDataStatus] = useState<CloudUserDataStatus>('loading');
   const [cloudUserDataMessage, setCloudUserDataMessage] = useState('Loading cloud profile data.');
@@ -1774,6 +1793,25 @@ export default function App() {
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
   const adminProfileActive = Boolean(authUser?.admin);
+  const ghostRouteVariantId = effectiveTrack.activeRouteVariantId ?? (hasDualStartRoutes ? raceRouteVariantId : undefined);
+  const availableGhostLaps = useMemo(
+    () => ghostsForTrackRoute(ghostLaps, effectiveTrack.id, ghostRouteVariantId),
+    [effectiveTrack.id, ghostLaps, ghostRouteVariantId],
+  );
+  const selectedGhostLaps = useMemo(
+    () => availableGhostLaps.filter((ghost) => selectedGhostIds.includes(ghost.id)),
+    [availableGhostLaps, selectedGhostIds],
+  );
+  const selectedGhostRiders = useMemo(
+    () => selectedGhostLaps
+      .map((ghost, index) => playbackGhostLap(ghost, ghostPlaybackMs, index))
+      .filter((ghost): ghost is NonNullable<typeof ghost> => ghost != null),
+    [ghostPlaybackMs, selectedGhostLaps],
+  );
+  const friendGhostKeySignature = useMemo(
+    () => multiplayer.social.friends.map((friend) => friend.guestKey).sort().join(','),
+    [multiplayer.social.friends],
+  );
 
   useEffect(() => {
     if (authStatus !== 'loading' && !accountProfileComplete) {
@@ -2112,6 +2150,10 @@ export default function App() {
     const createdAt = Date.now();
     const sessionId = `tlb-${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
     capturedSampleKeysRef.current = new Set();
+    activeRaceSessionIdRef.current = sessionId;
+    ghostRaceStartedAtRef.current = null;
+    ghostTraceRef.current = new Map();
+    ghostTraceLastSampleAtRef.current = new Map();
 
     const capture: RaceCapture = {
       version: 1,
@@ -2483,6 +2525,74 @@ export default function App() {
   }, [raceCapture]);
 
   useEffect(() => {
+    writeStoredGhostLaps(ghostLaps);
+  }, [ghostLaps]);
+
+  useEffect(() => {
+    const availableIds = new Set(availableGhostLaps.map((ghost) => ghost.id));
+    setSelectedGhostIds((current) => current.filter((ghostId) => availableIds.has(ghostId)));
+  }, [availableGhostLaps]);
+
+  useEffect(() => {
+    if (!cloudProfileKey || isCustomRoutePreviewId(selectedTrack.id)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const friendKeys = friendGhostKeySignature
+      ? friendGhostKeySignature.split(',').filter(Boolean)
+      : [];
+
+    loadGhostLapsFromCloud(selectedTrack.id, cloudProfileKey, friendKeys)
+      .then((cloudGhosts) => {
+        if (cancelled || cloudGhosts.length === 0) {
+          return;
+        }
+
+        setGhostLaps((current) => mergeGhostLaps(current, cloudGhosts));
+      })
+      .catch((error: Error) => {
+        console.warn(`Could not load TrackLab ghosts: ${error.message}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudProfileKey, friendGhostKeySignature, selectedTrack.id]);
+
+  useEffect(() => {
+    if (startGateStatus.active && raceState !== 'racing') {
+      setGhostPlaybackMs(0);
+      return undefined;
+    }
+
+    if (raceState === 'ready') {
+      setGhostPlaybackMs(0);
+      return undefined;
+    }
+
+    if (raceState === 'finished') {
+      const maxFinishMs = selectedGhostLaps.reduce((maxMs, ghost) => Math.max(maxMs, ghost.finishTimeMs), 0);
+      setGhostPlaybackMs(maxFinishMs);
+      return undefined;
+    }
+
+    if (raceState !== 'racing') {
+      return undefined;
+    }
+
+    let frameId = 0;
+    const tick = () => {
+      const startedAt = ghostRaceStartedAtRef.current ?? raceCapture?.startedAt ?? Date.now();
+      setGhostPlaybackMs(Math.max(0, Date.now() - startedAt));
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    tick();
+    return () => window.cancelAnimationFrame(frameId);
+  }, [raceCapture?.startedAt, raceState, selectedGhostLaps, startGateStatus.active]);
+
+  useEffect(() => {
     if (!raceCapture || (raceCapture.status !== 'armed' && raceCapture.status !== 'racing')) {
       return;
     }
@@ -2547,6 +2657,42 @@ export default function App() {
   }, [raceCapture, racePlayers, riders, samplesByDevice]);
 
   useEffect(() => {
+    if (raceState !== 'racing') {
+      return;
+    }
+
+    const startedAt = ghostRaceStartedAtRef.current ?? raceCapture?.startedAt;
+    if (!startedAt) {
+      return;
+    }
+
+    const sampleAt = Date.now();
+    riders.forEach((rider) => {
+      const lastSampleAt = ghostTraceLastSampleAtRef.current.get(rider.playerId) ?? 0;
+      if (sampleAt - lastSampleAt < 90 && rider.finishedAt == null) {
+        return;
+      }
+
+      const points = ghostTraceRef.current.get(rider.playerId) ?? [];
+      points.push({
+        elapsedMs: Math.max(0, Math.round(sampleAt - startedAt)),
+        distanceMeters: Number(Math.max(0, rider.distance).toFixed(2)),
+        velocityMps: Number(Math.max(0, rider.velocity).toFixed(2)),
+        phase: rider.phase,
+        pitch: Number(rider.pitch.toFixed(3)),
+        rank: rider.rank,
+        actualBranches: { ...rider.actualBranches },
+      });
+      if (points.length > 900) {
+        points.splice(0, points.length - 900);
+      }
+
+      ghostTraceRef.current.set(rider.playerId, points);
+      ghostTraceLastSampleAtRef.current.set(rider.playerId, sampleAt);
+    });
+  }, [raceCapture?.startedAt, raceState, riders]);
+
+  useEffect(() => {
     if (!raceCapture || raceState !== 'finished' || raceSummary.length === 0 || raceCapture.status === 'finished') {
       return;
     }
@@ -2575,6 +2721,75 @@ export default function App() {
       };
     });
   }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer]);
+
+  useEffect(() => {
+    if (raceState !== 'finished' || raceSummary.length === 0) {
+      return;
+    }
+
+    const sessionId = activeRaceSessionIdRef.current ?? raceCapture?.sessionId;
+    if (!sessionId || ghostSavedSessionIdsRef.current.has(sessionId)) {
+      return;
+    }
+
+    const ownerKey = cloudProfileKey || 'local';
+    const ownerName = authUser?.name ?? multiplayer.profile.name ?? 'TrackLab rider';
+    const savedAt = Date.now();
+    const nextGhosts = raceSummary
+      .map((summary) => {
+        const player = racePlayers.find((slot) => slot.id === summary.playerId);
+        const rider = riders.find((item) => item.playerId === summary.playerId);
+        const tracePoints = [...(ghostTraceRef.current.get(summary.playerId) ?? [])];
+        if (rider && summary.finishTimeMs != null) {
+          tracePoints.push({
+            elapsedMs: summary.finishTimeMs,
+            distanceMeters: Number(Math.max(summary.distanceMeters, rider.distance).toFixed(2)),
+            velocityMps: 0,
+            phase: rider.phase,
+            pitch: Number(rider.pitch.toFixed(3)),
+            rank: summary.rank,
+            actualBranches: { ...rider.actualBranches },
+          });
+        }
+
+        return buildGhostLapFromRace({
+          summary,
+          points: tracePoints,
+          trackId: effectiveTrack.id,
+          trackName: effectiveTrack.name,
+          routeVariantId: ghostRouteVariantId,
+          ownerKey,
+          ownerName,
+          player,
+          savedAt,
+        });
+      })
+      .filter((ghost): ghost is NonNullable<typeof ghost> => ghost != null);
+
+    if (nextGhosts.length === 0) {
+      return;
+    }
+
+    ghostSavedSessionIdsRef.current.add(sessionId);
+    setGhostLaps((current) => mergeGhostLaps(current, nextGhosts));
+    nextGhosts.forEach((ghost) => {
+      void syncGhostLapToCloud(ghost, ownerKey).catch((error: Error) => {
+        console.warn(`Could not sync TrackLab ghost: ${error.message}`);
+      });
+    });
+  }, [
+    authUser?.name,
+    cloudProfileKey,
+    effectiveTrack.id,
+    effectiveTrack.name,
+    ghostRouteVariantId,
+    multiplayer.profile.name,
+    raceCapture?.sessionId,
+    racePlayers,
+    raceState,
+    raceSummary,
+    riders,
+  ]);
 
   useEffect(() => {
     setManualZoneIds((current) => {
@@ -3656,6 +3871,9 @@ export default function App() {
 
     const gateDropAt = Date.now();
     startGateArmedAtRef.current = null;
+    ghostRaceStartedAtRef.current = gateDropAt;
+    ghostTraceRef.current = new Map();
+    ghostTraceLastSampleAtRef.current = new Map();
     if (demoMode) {
       setDemoRaceSeed((seed) => seed + 104729);
       setDemoRaceStartedAt(gateDropAt);
@@ -4102,6 +4320,20 @@ export default function App() {
     ].slice(-6));
     setChatDraft('');
   };
+
+  const toggleGhostLap = useCallback((ghostId: string) => {
+    setSelectedGhostIds((current) => {
+      if (current.includes(ghostId)) {
+        return current.filter((id) => id !== ghostId);
+      }
+
+      return [...current, ghostId].slice(-maxPlayers);
+    });
+  }, []);
+
+  const clearSelectedGhosts = useCallback(() => {
+    setSelectedGhostIds([]);
+  }, []);
 
   const handleStart = async () => {
     if (effectiveTrack.routeStatus !== 'user-mapped' || startGateStatus.active || raceState === 'racing') {
@@ -4677,6 +4909,7 @@ export default function App() {
               <EarthTrackView
                 track={effectiveTrack}
                 riders={stagedRiders}
+                ghostRiders={selectedGhostRiders}
                 remoteRaceStates={remoteRaceStates}
                 players={racePlayers}
                 samplesByDevice={samplesByDevice}
@@ -4770,6 +5003,8 @@ export default function App() {
                 startGateActive={startGateStatus.active}
                 startGateLabel={startGateStatus.label}
                 startGateDetail={startGateStatus.detail}
+                ghostLaps={availableGhostLaps}
+                selectedGhostIds={selectedGhostIds}
                 onSessionModeChange={setSessionMode}
                 onIntervalModeChange={setIntervalMode}
                 onManualZoneToggle={toggleManualZone}
@@ -4810,6 +5045,8 @@ export default function App() {
                 onMappingRemove={removeMapping}
                 onMappingExport={exportMapping}
                 onMappingImport={importMapping}
+                onGhostToggle={toggleGhostLap}
+                onGhostClear={clearSelectedGhosts}
                 onPrimeAudio={primeAudioCues}
                 onStart={handleStart}
                 onCancel={handleCancel}

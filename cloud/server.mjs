@@ -615,6 +615,77 @@ function sanitizePublicTrackMappingsPayload(value) {
   );
 }
 
+function sanitizeGhostPoint(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const elapsedMs = Math.max(0, Math.round(finiteNumber(value.elapsedMs, Number.NaN)));
+  const distanceMeters = Math.max(0, finiteNumber(value.distanceMeters, Number.NaN));
+  if (!Number.isFinite(elapsedMs) || !Number.isFinite(distanceMeters)) {
+    return null;
+  }
+
+  const actualBranches = value.actualBranches && typeof value.actualBranches === 'object'
+    ? Object.fromEntries(Object.entries(value.actualBranches).filter(([, branch]) => branch === 'a' || branch === 'b'))
+    : {};
+
+  return {
+    elapsedMs,
+    distanceMeters: Number(distanceMeters.toFixed(2)),
+    velocityMps: Number(Math.max(0, finiteNumber(value.velocityMps, 0)).toFixed(2)),
+    phase: value.phase === 'airborne' || value.phase === 'landing' ? value.phase : 'pedaling',
+    pitch: Number(finiteNumber(value.pitch, 0).toFixed(3)),
+    rank: Math.max(1, Math.min(64, Math.round(finiteNumber(value.rank, 1)))),
+    actualBranches,
+  };
+}
+
+function sanitizeGhostLapPayload(value, profileKey) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const trackId = sanitizeText(value.trackId, '', 140);
+  const ownerKey = sanitizeGuestKey(value.ownerKey ?? profileKey, profileKey);
+  const riderName = sanitizeText(value.riderName, '', 80);
+  const finishTimeMs = Math.round(finiteNumber(value.finishTimeMs, Number.NaN));
+  const points = Array.isArray(value.points)
+    ? value.points.slice(0, 900).map(sanitizeGhostPoint).filter(Boolean).sort((left, right) => left.elapsedMs - right.elapsedMs)
+    : [];
+
+  if (!trackId || !ownerKey || !riderName || !Number.isFinite(finishTimeMs) || finishTimeMs <= 0 || points.length < 2) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    id: sanitizeText(value.id, `ghost-${randomUUID()}`, 180).replace(/[^a-zA-Z0-9:._-]/g, '-'),
+    trackId,
+    trackName: sanitizeText(value.trackName, 'Unknown track', 140),
+    ...(value.routeVariantId === 'amateur' || value.routeVariantId === 'pro' ? { routeVariantId: value.routeVariantId } : {}),
+    riderName,
+    ownerKey,
+    ownerName: sanitizeText(value.ownerName, 'TrackLab rider', 80),
+    colorName: ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime',
+    accent: sanitizeText(value.accent, '#7ade36', 32),
+    source: 'personal',
+    finishTimeMs,
+    thirtyFootTimeMs: value.thirtyFootTimeMs == null ? null : Math.max(0, Math.round(finiteNumber(value.thirtyFootTimeMs, 0))),
+    savedAt: Math.max(0, Math.round(finiteNumber(value.savedAt, Date.now()))),
+    summary: value.summary && typeof value.summary === 'object' ? value.summary : {},
+    points,
+  };
+}
+
+function parseFriendKeys(value) {
+  return String(value || '')
+    .split(',')
+    .map((key) => sanitizeGuestKey(key, ''))
+    .filter(Boolean)
+    .slice(0, 100);
+}
+
 function readJsonBody(request, maxBytes = 1_000_000) {
   return new Promise((resolve, reject) => {
     let totalBytes = 0;
@@ -2048,6 +2119,51 @@ async function serveStatic(request, response) {
         config: statusCode === 503 ? squareCheckoutConfigStatus() : undefined,
       });
     }
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/ghosts') {
+    if (request.method === 'GET') {
+      const trackId = sanitizeText(requestUrl.searchParams.get('trackId'), '', 140);
+      const profileKey = sanitizeGuestKey(requestUrl.searchParams.get('profileKey'), '');
+      const friendKeys = parseFriendKeys(requestUrl.searchParams.get('friendKeys'));
+      if (!trackId) {
+        writeJson(response, 400, { error: 'trackId is required' });
+        return;
+      }
+
+      const ghosts = await persistence.loadGhostLaps(trackId, profileKey, friendKeys, 40);
+      writeJson(response, 200, {
+        trackId,
+        persistence: persistence.persistenceEnabled(),
+        ghosts,
+      });
+      return;
+    }
+
+    if (request.method === 'POST') {
+      const payload = await readJsonBody(request, 1_000_000);
+      const profileKey = sanitizeGuestKey(payload.profileKey, '');
+      const ghost = sanitizeGhostLapPayload(payload.ghost, profileKey);
+      if (!profileKey || !ghost) {
+        writeJson(response, 400, { error: 'A valid profileKey and ghost lap are required.' });
+        return;
+      }
+
+      if (ghost.ownerKey !== profileKey) {
+        writeJson(response, 403, { error: 'Ghost owner must match the syncing profile.' });
+        return;
+      }
+
+      await persistence.saveGhostLap(ghost);
+      writeJson(response, 200, {
+        ok: true,
+        persistence: persistence.persistenceEnabled(),
+      });
+      return;
+    }
+
+    writeJson(response, 405, { error: 'Method not allowed' });
     return;
   }
 

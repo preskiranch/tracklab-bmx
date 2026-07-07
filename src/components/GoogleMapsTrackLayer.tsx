@@ -4,6 +4,7 @@ import type {
   DistanceUnit,
   DraftTrackSplit,
   EarthCamera,
+  GhostPlaybackRider,
   MappingEditMode,
   MultiplayerRaceState,
   PlayerId,
@@ -48,6 +49,7 @@ type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
   activeZones: TrackZone[];
   riders: RiderState[];
+  ghostRiders?: GhostPlaybackRider[];
   remoteRaceStates?: MultiplayerRaceState[];
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
@@ -720,6 +722,7 @@ export function GoogleMapsTrackLayer({
   track,
   activeZones,
   riders,
+  ghostRiders = [],
   remoteRaceStates = [],
   players,
   samplesByDevice,
@@ -775,6 +778,7 @@ export function GoogleMapsTrackLayer({
   const curvePointerIdRef = useRef<number | null>(null);
   const curveStrokePointsRef = useRef<TrackPoint[]>([]);
   const markerRefs = useRef<Map<number, RiderMapMarker>>(new Map());
+  const ghostMarkerRefs = useRef<Map<string, RiderMapMarker>>(new Map());
   const remoteMarkerRefs = useRef<Map<string, RiderMapMarker>>(new Map());
   const cameraRef = useRef<Partial<EarthCamera>>({
     angle: earthAngle,
@@ -875,6 +879,7 @@ export function GoogleMapsTrackLayer({
       curvePreviewLineRef.current?.setMap(null);
       projectionOverlayRef.current?.setMap(null);
       markerRefs.current.forEach((marker) => marker.setMap(null));
+      ghostMarkerRefs.current.forEach((marker) => marker.setMap(null));
       remoteMarkerRefs.current.forEach((marker) => marker.setMap(null));
       trackLineRefs.current = [];
       zoneLinesRef.current = [];
@@ -894,6 +899,7 @@ export function GoogleMapsTrackLayer({
       curvePointerIdRef.current = null;
       curveStrokePointsRef.current = [];
       markerRefs.current.clear();
+      ghostMarkerRefs.current.clear();
       remoteMarkerRefs.current.clear();
       mapRef.current = null;
     };
@@ -2060,6 +2066,69 @@ export function GoogleMapsTrackLayer({
       markerRefs.current.set(player.id, marker);
     });
   }, [earthHeading, players, riders, samplesByDevice, speedUnit, status, track]);
+
+  useEffect(() => {
+    const google = googleRef.current;
+    const map = mapRef.current;
+    if (!google || !map || status !== 'ready') {
+      return;
+    }
+
+    const activeGhostIds = new Set(ghostRiders.map((rider) => rider.id));
+    ghostMarkerRefs.current.forEach((marker, ghostId) => {
+      if (!activeGhostIds.has(ghostId)) {
+        marker.setMap(null);
+        ghostMarkerRefs.current.delete(ghostId);
+      }
+    });
+
+    ghostRiders.forEach((rider, index) => {
+      const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance), rider.actualBranches);
+      const existing = ghostMarkerRefs.current.get(rider.id);
+
+      if (!pose) {
+        existing?.setMap(null);
+        ghostMarkerRefs.current.delete(rider.id);
+        return;
+      }
+
+      const ghostPlayer: PlayerSlot = {
+        id: ((index % 4) + 1) as PlayerId,
+        name: rider.name,
+        colorName: rider.colorName,
+        accent: rider.accent,
+        deviceId: null,
+      };
+      const speedKph = rider.velocity > 0 ? rider.velocity * 3.6 : null;
+      const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+      const rotation = riderScreenRotation(pose.bearing, earthHeading);
+      const title = `${rider.name} / ${label} / ghost`;
+      const position = offsetRiderMapPosition(
+        pose.position,
+        pose.bearing,
+        remoteRiderLaneOffset(index + 1) * 0.45,
+      );
+
+      if (existing) {
+        existing.setPosition(position);
+        existing.setRotation(rotation);
+        existing.setTitle(title);
+        return;
+      }
+
+      const marker = createRiderMapMarker(
+        google,
+        map,
+        ghostPlayer,
+        position,
+        rotation,
+        title,
+        `G${index + 1}`,
+        820 + index,
+      );
+      ghostMarkerRefs.current.set(rider.id, marker);
+    });
+  }, [earthHeading, ghostRiders, speedUnit, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;
