@@ -1060,6 +1060,7 @@ export default function App() {
   const lastPublicMappingsPublishSignatureRef = useRef('');
   const roomTrackApplyRef = useRef<string | null>(null);
   const lastRoomRaceTokenRef = useRef<string | null>(null);
+  const roomRaceStartTimeoutRef = useRef<number | null>(null);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const customRoutePreviewRequestIdRef = useRef(0);
   const customRoutePreviewTrackIdRef = useRef<string | null>(null);
@@ -1954,6 +1955,24 @@ export default function App() {
     setStartGateStatus(idleStartGateStatus);
     setReactionStartAt(null);
     setReactionTimesByPlayer({});
+  }, []);
+
+  useEffect(() => {
+    if (multiplayer.currentRoom?.flow.phase === 'race') {
+      return;
+    }
+
+    if (roomRaceStartTimeoutRef.current != null) {
+      window.clearTimeout(roomRaceStartTimeoutRef.current);
+      roomRaceStartTimeoutRef.current = null;
+    }
+  }, [multiplayer.currentRoom?.flow.phase]);
+
+  useEffect(() => () => {
+    if (roomRaceStartTimeoutRef.current != null) {
+      window.clearTimeout(roomRaceStartTimeoutRef.current);
+      roomRaceStartTimeoutRef.current = null;
+    }
   }, []);
 
   const prepareForTrackSelection = useCallback((nextTrackId: string) => {
@@ -4223,8 +4242,21 @@ export default function App() {
     }
 
     lastRoomRaceTokenRef.current = raceToken;
-    void handleStart();
-  }, [effectiveTrack.id, multiplayer.currentRoom?.flow, playMode]);
+    if (roomRaceStartTimeoutRef.current != null) {
+      window.clearTimeout(roomRaceStartTimeoutRef.current);
+      roomRaceStartTimeoutRef.current = null;
+    }
+
+    const serverRaceStartAt = Number(roomFlow.raceStartAt);
+    const localRaceStartAt = Number.isFinite(serverRaceStartAt)
+      ? serverRaceStartAt - multiplayer.latency.clockOffsetMs
+      : Date.now();
+    const delayMs = Math.max(0, localRaceStartAt - Date.now());
+    roomRaceStartTimeoutRef.current = window.setTimeout(() => {
+      roomRaceStartTimeoutRef.current = null;
+      void handleStart();
+    }, delayMs);
+  }, [effectiveTrack.id, multiplayer.currentRoom?.flow, multiplayer.latency.clockOffsetMs, playMode]);
 
   const connectionLabel = (() => {
     if (demoMode) {
@@ -4827,6 +4859,7 @@ export default function App() {
                 chatMessages={chatMessages}
                 roomMessages={multiplayer.roomMessages}
                 remoteRaceStates={remoteRaceStates}
+                latency={multiplayer.latency}
                 chatDraft={chatDraft}
                 onPlayModeChange={setPlayMode}
                 onProfileKeyChange={(profileKey) => multiplayer.setProfile({ guestKey: profileKey })}

@@ -23,6 +23,8 @@ const persistedRaceResultKeys = new Set();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const maxRaceBikeCount = 4;
+const latencyGoodMs = 90;
+const latencyOkMs = 180;
 const adminAccountEmail = 'preskiranch@gmail.com';
 const authCookieName = 'tracklab_session';
 const authSessionMaxAgeSeconds = 60 * 60 * 24 * 30;
@@ -651,6 +653,23 @@ function finiteNumber(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function latencyQualityForMs(value) {
+  const latencyMs = Number(value);
+  if (!Number.isFinite(latencyMs) || latencyMs <= 0) {
+    return 'unknown';
+  }
+
+  if (latencyMs <= latencyGoodMs) {
+    return 'good';
+  }
+
+  if (latencyMs <= latencyOkMs) {
+    return 'ok';
+  }
+
+  return 'poor';
+}
+
 function nullableFiniteNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -780,6 +799,24 @@ function roomRacerSeatCount(room) {
   return [...room.racers].reduce((total, clientId) => total + roomRacerSeatCountForMember(room, clientId), 0);
 }
 
+function roomLatencySummary(room) {
+  const racerIds = room?.racers?.size ? [...room.racers] : [...(room?.members ?? [])];
+  const latencyValues = racerIds
+    .map((clientId) => clients.get(clientId)?.latencyMs)
+    .filter((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+    .map((value) => Math.round(Number(value)));
+
+  if (latencyValues.length === 0) {
+    return { maxLatencyMs: null, latencyQuality: 'unknown' };
+  }
+
+  const maxLatencyMs = Math.max(...latencyValues);
+  return {
+    maxLatencyMs,
+    latencyQuality: latencyQualityForMs(maxLatencyMs),
+  };
+}
+
 function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = client?.racerSeatCount ?? 0) {
   return {
     id: client.id,
@@ -788,6 +825,8 @@ function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = c
     membershipTier: client.membershipTier,
     bikeCount: client.bikeCount,
     racerSeatCount: role === 'racer' ? Math.max(1, Math.min(maxRaceBikeCount, Math.round(Number(racerSeatCount) || 1))) : 0,
+    latencyMs: Number.isFinite(Number(client.latencyMs)) ? Math.round(Number(client.latencyMs)) : null,
+    latencyQuality: latencyQualityForMs(client.latencyMs),
     track: client.track,
     roomId: client.roomId,
     roomRole: role,
@@ -847,6 +886,7 @@ function publicRoomFlow(room) {
 }
 
 function publicRoom(room) {
+  const latencySummary = roomLatencySummary(room);
   const members = [...room.members]
     .map((clientId) => {
       const client = clients.get(clientId);
@@ -871,6 +911,8 @@ function publicRoom(room) {
     racerCount: room.racers?.size ?? members.length,
     racerSeatCount: roomRacerSeatCount(room),
     racerSeatCapacity: maxRaceBikeCount,
+    maxLatencyMs: latencySummary.maxLatencyMs,
+    latencyQuality: latencySummary.latencyQuality,
     spectatorCount: room.spectators?.size ?? 0,
   };
 }
@@ -976,6 +1018,7 @@ function applyRoomTrack(room, track) {
 
 function beginRoomRace(room, source = 'route selection') {
   clearRoomTimers(room.id);
+  const latencySummary = roomLatencySummary(room);
   room.flow = {
     ...publicRoomFlow(room),
     phase: 'race',
@@ -984,6 +1027,9 @@ function beginRoomRace(room, source = 'route selection') {
     raceStartAt: Date.now() + 800,
   };
   addRoomSystemMessage(room, `Race starting from ${source}.`);
+  if (latencySummary.latencyQuality === 'poor' && latencySummary.maxLatencyMs != null) {
+    addRoomSystemMessage(room, `Latency warning: highest racer ping is ${latencySummary.maxLatencyMs} ms. Results will still save, but the race may feel delayed.`);
+  }
   broadcastRoom(room.id, roomState(room));
   broadcastLobby();
 }
@@ -1045,13 +1091,10 @@ function resolveTrackVote(room) {
   } else {
     room.flow = {
       ...publicRoomFlow(room),
-      phase: 'race',
       selectedTrackId: winner.id,
-      deadlineAt: null,
-      raceToken: randomId('RACE', 10),
-      raceStartAt: Date.now() + 800,
     };
-    addRoomSystemMessage(room, `${winner.name} won the vote. Race starting.`);
+    beginRoomRace(room, `${winner.name} track vote`);
+    return;
   }
 
   broadcastRoom(room.id, roomState(room));
@@ -1354,6 +1397,30 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (!message || typeof message !== 'object') {
+    return;
+  }
+
+  if (message.type === 'ping') {
+    send(client, {
+      type: 'pong',
+      id: sanitizeText(message.id, randomId('PING', 8), 80),
+      clientSentAt: finiteNumber(message.clientSentAt, 0),
+      serverNow: Date.now(),
+    });
+    return;
+  }
+
+  if (message.type === 'latency') {
+    const latencyMs = Math.max(0, Math.min(3000, Math.round(finiteNumber(message.rttMs, 0))));
+    const clockOffsetMs = Math.max(-10_000, Math.min(10_000, Math.round(finiteNumber(message.clockOffsetMs, 0))));
+    client.latencyMs = latencyMs > 0 ? latencyMs : null;
+    client.clockOffsetMs = clockOffsetMs;
+    client.lastLatencyAt = Date.now();
+
+    if (client.roomId && rooms.has(client.roomId)) {
+      broadcastRoom(client.roomId, roomState(rooms.get(client.roomId)));
+    }
+    broadcastLobby();
     return;
   }
 
@@ -2066,6 +2133,9 @@ wss.on('connection', (socket) => {
     track: sanitizeTrack(null),
     roomId: null,
     roomRole: null,
+    latencyMs: null,
+    clockOffsetMs: 0,
+    lastLatencyAt: null,
     lastSeen: Date.now(),
   };
 

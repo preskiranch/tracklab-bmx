@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   MultiplayerChallenge,
+  MultiplayerLatencySnapshot,
   MultiplayerMatchInvite,
   MultiplayerRaceState,
   MultiplayerRider,
@@ -47,6 +48,13 @@ const emptySocialState: MultiplayerSocialState = {
   outgoingFriendRequests: [],
   groups: [],
   incomingGroupInvites: [],
+};
+
+const initialLatency: MultiplayerLatencySnapshot = {
+  rttMs: null,
+  clockOffsetMs: 0,
+  quality: 'unknown',
+  measuredAt: null,
 };
 
 export const profileStorageKey = 'tracklab-bmx-multiplayer-profile-v1';
@@ -164,9 +172,27 @@ function formatRoomMessages(messages: MultiplayerRoomMessage[]) {
   return messages.slice(-40);
 }
 
+function latencyQualityForMs(value: number | null): MultiplayerLatencySnapshot['quality'] {
+  if (value == null || value <= 0) {
+    return 'unknown';
+  }
+
+  if (value <= 90) {
+    return 'good';
+  }
+
+  if (value <= 180) {
+    return 'ok';
+  }
+
+  return 'poor';
+}
+
 export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOptions) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const pingTimerRef = useRef<number | null>(null);
+  const pendingPingRef = useRef<Map<string, number>>(new Map());
   const pendingInviteRoomRef = useRef<string | null>(null);
   const latestProfileRef = useRef<MultiplayerProfile | null>(null);
   const latestBikeCountRef = useRef(bikeCount);
@@ -184,6 +210,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
   const [incomingMatchInvites, setIncomingMatchInvites] = useState<IncomingMatchInvite[]>([]);
   const [social, setSocial] = useState<MultiplayerSocialState>(emptySocialState);
   const [status, setStatus] = useState('Multiplayer offline.');
+  const [latency, setLatency] = useState<MultiplayerLatencySnapshot>(initialLatency);
 
   const currentTrack = useMemo(() => trackSummary(track), [track.country, track.id, track.name, track.state]);
 
@@ -200,6 +227,19 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     }
 
     socket.send(JSON.stringify(payload));
+    return true;
+  }, []);
+
+  const sendLatencyPing = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    const id = `ping-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const clientSentAt = Date.now();
+    pendingPingRef.current.set(id, clientSentAt);
+    socket.send(JSON.stringify({ type: 'ping', id, clientSentAt }));
     return true;
   }, []);
 
@@ -276,6 +316,11 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           bikeCount: latestBikeCountRef.current,
           track: latestTrackRef.current ?? currentTrack,
         }));
+        sendLatencyPing();
+        if (pingTimerRef.current != null) {
+          window.clearInterval(pingTimerRef.current);
+        }
+        pingTimerRef.current = window.setInterval(sendLatencyPing, 4000);
       });
 
       socket.addEventListener('message', (event) => {
@@ -336,8 +381,35 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
         }
 
+        if (message.type === 'pong') {
+          const pingId = typeof message.id === 'string' ? message.id : '';
+          const clientSentAt = pendingPingRef.current.get(pingId) ?? Number(message.clientSentAt);
+          pendingPingRef.current.delete(pingId);
+          const receivedAt = Date.now();
+          const rttMs = Math.max(0, Math.round(receivedAt - clientSentAt));
+          const serverNow = Number(message.serverNow);
+          if (Number.isFinite(clientSentAt) && Number.isFinite(serverNow) && rttMs < 5000) {
+            const clockOffsetMs = Math.round((serverNow + (rttMs / 2)) - receivedAt);
+            const snapshot = {
+              rttMs,
+              clockOffsetMs,
+              quality: latencyQualityForMs(rttMs),
+              measuredAt: receivedAt,
+            };
+            setLatency(snapshot);
+            socket.send(JSON.stringify({
+              type: 'latency',
+              rttMs: snapshot.rttMs,
+              clockOffsetMs: snapshot.clockOffsetMs,
+            }));
+          }
+        }
+
         if (message.type === 'race-sync' && message.state) {
-          const nextState = message.state as MultiplayerRaceState;
+          const nextState = {
+            ...(message.state as MultiplayerRaceState),
+            receivedAt: Date.now(),
+          };
           setRoomRaceStates((current) => [
             ...current.filter((state) => state.clientId !== nextState.clientId),
             nextState,
@@ -378,6 +450,12 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
         socketRef.current = null;
         setCurrentRoom(null);
         setIncomingMatchInvites([]);
+        setLatency(initialLatency);
+        pendingPingRef.current.clear();
+        if (pingTimerRef.current != null) {
+          window.clearInterval(pingTimerRef.current);
+          pingTimerRef.current = null;
+        }
         if (!cancelled) {
           reconnectTimerRef.current = window.setTimeout(connect, 1400);
         }
@@ -396,10 +474,15 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
       if (reconnectTimerRef.current != null) {
         window.clearTimeout(reconnectTimerRef.current);
       }
+      if (pingTimerRef.current != null) {
+        window.clearInterval(pingTimerRef.current);
+        pingTimerRef.current = null;
+      }
+      pendingPingRef.current.clear();
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [enabled]);
+  }, [enabled, sendLatencyPing]);
 
   useEffect(() => {
     if (enabled && connection === 'open') {
@@ -547,6 +630,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     inviteUrl,
     inviteToGroup,
     joinRoom,
+    latency,
     leaveRoom,
     onlineRiders,
     profile,

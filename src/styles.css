@@ -2815,6 +2815,53 @@ input:focus {
   color: #166534;
 }
 
+.latency-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8fafb;
+  color: #3e5366;
+}
+
+.latency-card div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.latency-card strong {
+  color: #111827;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.latency-card span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.latency-card.good {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.latency-card.ok {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.latency-card.poor {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
 .profile-card {
   display: grid;
   gap: 10px;

@@ -2075,7 +2075,15 @@ export function GoogleMapsTrackLayer({
       state.riders.forEach((rider) => {
         const markerKey = `${state.clientId}:${rider.id}`;
         activeRemoteKeys.add(markerKey);
-        const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance), rider.actualBranches ?? {});
+        const elapsedSinceReceivedMs = Math.max(0, Date.now() - (state.receivedAt ?? state.at));
+        const projectedDistance = rider.finishedAt == null && state.raceState === 'racing'
+          ? rider.distance + (rider.velocity * Math.min(0.35, elapsedSinceReceivedMs / 1000))
+          : rider.distance;
+        const pose = riderRoutePose(
+          track,
+          visualRiderDistanceMeters(Math.min(track.lengthMeters, projectedDistance)),
+          rider.actualBranches ?? {},
+        );
         const existing = remoteMarkerRefs.current.get(markerKey);
 
         if (!pose) {

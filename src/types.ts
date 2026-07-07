@@ -108,6 +108,14 @@ export type MultiplayerTrackVoteCandidate = MultiplayerTrackSummary & {
 };
 
 export type MultiplayerRoomPhase = 'lobby' | 'voting' | 'route-select' | 'race';
+export type MultiplayerLatencyQuality = 'unknown' | 'good' | 'ok' | 'poor';
+
+export type MultiplayerLatencySnapshot = {
+  rttMs: number | null;
+  clockOffsetMs: number;
+  quality: MultiplayerLatencyQuality;
+  measuredAt: number | null;
+};
 
 export type MultiplayerRoomFlow = {
   phase: MultiplayerRoomPhase;
@@ -127,6 +135,8 @@ export type MultiplayerRider = {
   membershipTier?: 'visitor' | 'spectator' | 'racer';
   bikeCount: number;
   racerSeatCount?: number;
+  latencyMs?: number | null;
+  latencyQuality?: MultiplayerLatencyQuality;
   track: MultiplayerTrackSummary;
   roomId: string | null;
   roomRole?: 'racer' | 'spectator' | null;
@@ -145,6 +155,8 @@ export type MultiplayerRoom = {
   racerCount?: number;
   racerSeatCount?: number;
   racerSeatCapacity?: number;
+  maxLatencyMs?: number | null;
+  latencyQuality?: MultiplayerLatencyQuality;
   spectatorCount?: number;
 };
 
@@ -260,6 +272,7 @@ export type MultiplayerRaceState = {
   trackId: string;
   raceState: RaceState;
   at: number;
+  receivedAt?: number;
   riders: MultiplayerRaceRider[];
   summary: RaceSummaryEntry[];
 };

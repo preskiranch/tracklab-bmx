@@ -22,6 +22,7 @@ import type {
   BikeSample,
   MultiplayerChallenge,
   MultiplayerGroup,
+  MultiplayerLatencySnapshot,
   MultiplayerMatchInvite,
   MultiplayerRaceState,
   MultiplayerRider,
@@ -73,6 +74,7 @@ type MultiplayerPanelProps = {
   chatMessages: ChatMessage[];
   roomMessages: MultiplayerRoomMessage[];
   remoteRaceStates: MultiplayerRaceState[];
+  latency: MultiplayerLatencySnapshot;
   chatDraft: string;
   onPlayModeChange: (mode: PlayMode) => void;
   onProfileKeyChange: (profileKey: string) => void;
@@ -113,6 +115,23 @@ function sampleForPlayer(player: PlayerSlot, samplesByDevice: Map<number, BikeSa
   return player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
 }
 
+function latencyLabel(latencyMs: number | null | undefined) {
+  return latencyMs == null || !Number.isFinite(latencyMs) ? 'Ping pending' : `${Math.round(latencyMs)} ms`;
+}
+
+function latencyQualityLabel(quality: string | null | undefined) {
+  if (quality === 'good') {
+    return 'Good';
+  }
+  if (quality === 'ok') {
+    return 'Playable';
+  }
+  if (quality === 'poor') {
+    return 'High latency';
+  }
+  return 'Checking';
+}
+
 export function MultiplayerPanel({
   playMode,
   connection,
@@ -137,6 +156,7 @@ export function MultiplayerPanel({
   chatMessages,
   roomMessages,
   remoteRaceStates,
+  latency,
   chatDraft,
   onPlayModeChange,
   onProfileKeyChange,
@@ -279,6 +299,11 @@ export function MultiplayerPanel({
   const routeSelectSeconds = roomFlow?.phase === 'route-select' && roomFlow.deadlineAt
     ? Math.max(0, Math.ceil((roomFlow.deadlineAt - Date.now()) / 1000))
     : 0;
+  const localLatencyLabel = latencyLabel(latency.rttMs);
+  const localLatencyQualityLabel = latencyQualityLabel(latency.quality);
+  const roomLatencyLabel = latencyLabel(currentRoom?.maxLatencyMs);
+  const roomLatencyQualityLabel = latencyQualityLabel(currentRoom?.latencyQuality);
+  const latencyCardQuality = currentRoom?.latencyQuality ?? latency.quality;
 
   return (
     <aside className="multiplayer-panel">
@@ -312,6 +337,16 @@ export function MultiplayerPanel({
           <RadioTower size={15} />
           <span>{playMode === 'multiplayer' ? status : 'Local-only session. Switch to Multiplayer to go online.'}</span>
         </div>
+
+        {playMode === 'multiplayer' && (
+          <div className={`latency-card ${latencyCardQuality}`}>
+            <RadioTower size={14} />
+            <div>
+              <strong>{currentRoom ? `${roomLatencyQualityLabel} room` : `${localLatencyQualityLabel} connection`}</strong>
+              <span>{currentRoom ? `Server ${localLatencyLabel} / room max ${roomLatencyLabel}` : `Server ${localLatencyLabel}`}</span>
+            </div>
+          </div>
+        )}
 
         {playMode === 'multiplayer' && (
           <div className="profile-card">
@@ -486,7 +521,9 @@ export function MultiplayerPanel({
             <div className="route-vote-card">
               <div>
                 <Trophy size={16} />
-                <span>Race launch sent. Full-screen gate starts on each racer device.</span>
+                <span>{currentRoom.latencyQuality === 'poor'
+                  ? 'Race launch sent. High latency warning active.'
+                  : 'Race launch sent. Full-screen gate starts on each racer device.'}</span>
               </div>
             </div>
           )}
@@ -603,7 +640,7 @@ export function MultiplayerPanel({
               <div className="online-rider-row" key={rider.id}>
                 <div>
                   <strong>{rider.name}</strong>
-                  <span>{rider.bikeCount} bike{rider.bikeCount === 1 ? '' : 's'} / {rider.track.name}</span>
+                  <span>{rider.bikeCount} bike{rider.bikeCount === 1 ? '' : 's'} / {latencyLabel(rider.latencyMs)} / {rider.track.name}</span>
                 </div>
                 <button
                   type="button"
@@ -716,7 +753,7 @@ export function MultiplayerPanel({
                   disabled={!multiplayerOnline || currentRoom?.id === room.id}
                   onClick={() => onJoinRoom(room.id)}
                 >
-                  {room.id} / {room.private ? 'private' : 'public'} / {room.racerSeatCount ?? room.racerCount ?? room.memberCount} racer seats / {room.track.name}
+                  {room.id} / {room.private ? 'private' : 'public'} / {room.racerSeatCount ?? room.racerCount ?? room.memberCount} racer seats / {latencyQualityLabel(room.latencyQuality)} {latencyLabel(room.maxLatencyMs)} / {room.track.name}
                 </button>
               ))}
             </div>
