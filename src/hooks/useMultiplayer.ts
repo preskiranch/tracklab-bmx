@@ -6,6 +6,10 @@ import type {
   MultiplayerRoom,
   MultiplayerRoomMessage,
   MultiplayerTrackSummary,
+  MultiplayerTrackVoteCandidate,
+  MultiplayerVoiceSignal,
+  MultiplayerVoiceSignalPayload,
+  SplitBranchChoice,
   TrackRecord,
 } from '../types';
 
@@ -160,6 +164,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
   const [currentRoom, setCurrentRoom] = useState<MultiplayerRoom | null>(null);
   const [roomMessages, setRoomMessages] = useState<MultiplayerRoomMessage[]>([]);
   const [roomRaceStates, setRoomRaceStates] = useState<MultiplayerRaceState[]>([]);
+  const [voiceSignals, setVoiceSignals] = useState<MultiplayerVoiceSignal[]>([]);
   const [incomingChallenges, setIncomingChallenges] = useState<IncomingChallenge[]>([]);
   const [status, setStatus] = useState('Multiplayer offline.');
 
@@ -294,6 +299,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           setCurrentRoom(null);
           setRoomMessages([]);
           setRoomRaceStates([]);
+          setVoiceSignals([]);
           const url = new URL(window.location.href);
           url.searchParams.delete('room');
           window.history.replaceState(null, '', url);
@@ -309,6 +315,13 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
             ...current.filter((state) => state.clientId !== nextState.clientId),
             nextState,
           ].slice(-32));
+        }
+
+        if (message.type === 'voice-signal' && message.signal) {
+          setVoiceSignals((current) => [
+            ...current,
+            message.signal as MultiplayerVoiceSignal,
+          ].slice(-80));
         }
 
         if (message.type === 'room-error' || message.type === 'challenge-status' || message.type === 'error') {
@@ -360,7 +373,12 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
 
   const createPrivateRoom = useCallback(() => {
     setStatus('Opening private room.');
-    return send({ type: 'create-room', track: currentTrack });
+    return send({ type: 'create-room', private: true, track: currentTrack });
+  }, [currentTrack, send]);
+
+  const createPublicRoom = useCallback(() => {
+    setStatus('Opening public lobby.');
+    return send({ type: 'create-room', private: false, track: currentTrack });
   }, [currentTrack, send]);
 
   const joinRoom = useCallback((roomId: string) => {
@@ -382,6 +400,28 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
 
   const sendRoomChat = useCallback((text: string) => {
     return send({ type: 'room-chat', text });
+  }, [send]);
+
+  const startTrackVote = useCallback((candidates: MultiplayerTrackVoteCandidate[]) => {
+    setStatus('Starting track vote.');
+    return send({ type: 'room-vote-start', candidates });
+  }, [send]);
+
+  const submitTrackVote = useCallback((trackId: string) => {
+    setStatus('Submitting track vote.');
+    return send({ type: 'room-vote', trackId });
+  }, [send]);
+
+  const chooseRoomRoute = useCallback((choice: SplitBranchChoice) => {
+    return send({ type: 'room-route-choice', choice });
+  }, [send]);
+
+  const resetRoomFlow = useCallback(() => {
+    return send({ type: 'room-reset-lobby' });
+  }, [send]);
+
+  const sendVoiceSignal = useCallback((targetId: string | null, signal: MultiplayerVoiceSignalPayload) => {
+    return send({ type: 'voice-signal', targetId, signal });
   }, [send]);
 
   const sendRaceState = useCallback((state: Omit<MultiplayerRaceState, 'clientId' | 'riderName' | 'roomId' | 'at'>) => {
@@ -425,9 +465,11 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
 
   return {
     challengeRider,
+    chooseRoomRoute,
     clientId,
     connection,
     createPrivateRoom,
+    createPublicRoom,
     currentRoom,
     incomingChallenges,
     inviteUrl,
@@ -442,8 +484,13 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     rooms,
     sendRaceState,
     sendRoomChat,
+    sendVoiceSignal,
     setProfile,
+    startTrackVote,
     status,
+    submitTrackVote,
     syncTrack,
+    resetRoomFlow,
+    voiceSignals,
   };
 }

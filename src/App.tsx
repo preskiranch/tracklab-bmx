@@ -107,6 +107,7 @@ import { useRaceEngine } from './hooks/useRaceEngine';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
 import { useMultiplayer } from './hooks/useMultiplayer';
+import { useRoomVoiceChat } from './hooks/useRoomVoiceChat';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import type {
   AppMode,
@@ -120,6 +121,7 @@ import type {
   MappingEditMode,
   MetricKey,
   MultiplayerRaceState,
+  MultiplayerTrackVoteCandidate,
   PlayerSlot,
   PlayMode,
   RaceCapture,
@@ -1057,6 +1059,7 @@ export default function App() {
   const cloudUserDataAvailableRef = useRef(false);
   const lastPublicMappingsPublishSignatureRef = useRef('');
   const roomTrackApplyRef = useRef<string | null>(null);
+  const lastRoomRaceTokenRef = useRef<string | null>(null);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const customRoutePreviewRequestIdRef = useRef(0);
   const customRoutePreviewTrackIdRef = useRef<string | null>(null);
@@ -1468,6 +1471,31 @@ export default function App() {
     },
     [hasDualStartRoutes, publicLeaderboards, raceRouteVariantId, selectedTrack, selectedTrackMapping],
   );
+  const multiplayerVoteCandidates = useMemo<MultiplayerTrackVoteCandidate[]>(() => {
+    return catalogTracks.flatMap((track) => {
+      const mapping = storedMappings[track.id] ?? publicTrackMappings[track.id];
+      if (!mapping || mapping.centerline.length < 2) {
+        return [];
+      }
+
+      const routeVariants = mapping.routeVariants ?? [];
+      const zoneCount = mapping.zones.length
+        + routeVariants.reduce((count, variant) => count + variant.zones.length, 0);
+      if (zoneCount === 0) {
+        return [];
+      }
+
+      return [{
+        id: track.id,
+        name: mapping.trackName || track.name,
+        country: track.country,
+        state: track.state,
+        hasPedalZones: true,
+        hasSplits: (mapping.splitSections?.length ?? 0) > 0
+          || routeVariants.some((variant) => (variant.splitSections?.length ?? 0) > 0),
+      }];
+    });
+  }, [catalogTracks, publicTrackMappings, storedMappings]);
 
   useEffect(() => {
     if (!hasDualStartRoutes && raceRouteVariantId !== 'amateur') {
@@ -1718,6 +1746,12 @@ export default function App() {
     track: effectiveTrack,
     bikeCount: activePlayers.length,
   });
+  const roomVoice = useRoomVoiceChat({
+    currentRoom: multiplayer.currentRoom,
+    currentUserId: multiplayer.clientId,
+    voiceSignals: multiplayer.voiceSignals,
+    sendVoiceSignal: multiplayer.sendVoiceSignal,
+  });
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
@@ -1848,6 +1882,26 @@ export default function App() {
       return choices;
     }, {});
   }, [activePlayers, branchChoicesByPlayer, demoMode, demoRaceSeed, splitDecisionPoints.length]);
+  useEffect(() => {
+    const roomFlow = multiplayer.currentRoom?.flow;
+    const clientId = multiplayer.clientId;
+    if (playMode !== 'multiplayer' || roomFlow?.phase !== 'route-select' || !clientId) {
+      return;
+    }
+
+    const roomChoice = roomFlow.routeChoices[clientId] ?? 'a';
+    setBranchChoicesByPlayer((current) => {
+      let changed = false;
+      const next = { ...current };
+      activePlayers.forEach((player) => {
+        if (next[player.id] !== roomChoice) {
+          next[player.id] = roomChoice;
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, [activePlayers, multiplayer.clientId, multiplayer.currentRoom?.flow, playMode]);
   const { raceState, riders, raceSummary, startRace, resetRace } = useRaceEngine(
     activePlayers,
     samplesByDevice,
@@ -3955,6 +4009,45 @@ export default function App() {
     void multiplayer.syncTrack(nextTrack);
   }, [catalogTracks, multiplayer.syncTrack, prepareForTrackSelection]);
 
+  const startRoomTrackVote = useCallback(() => {
+    if (!multiplayer.currentRoom) {
+      return;
+    }
+
+    const pool = [...multiplayerVoteCandidates];
+    for (let index = pool.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
+    }
+
+    const candidates = pool.slice(0, 3);
+    if (candidates.length < 3) {
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: Date.now(),
+          author: 'TrackLab',
+          text: 'Track voting needs at least three mapped tracks with pedaling zones.',
+          at: formatClock(),
+        },
+      ].slice(-6));
+      return;
+    }
+
+    multiplayer.startTrackVote(candidates);
+  }, [multiplayer, multiplayerVoteCandidates]);
+
+  const handleRoomRouteChoice = useCallback((choice: SplitBranchId) => {
+    setBranchChoicesByPlayer((current) => {
+      const next = { ...current };
+      activePlayers.forEach((player) => {
+        next[player.id] = choice;
+      });
+      return next;
+    });
+    multiplayer.chooseRoomRoute(choice);
+  }, [activePlayers, multiplayer]);
+
   const sendChatMessage = () => {
     const text = chatDraft.trim();
     if (!text) {
@@ -4098,6 +4191,23 @@ export default function App() {
       beginRaceAtGateDrop(startingTrackId, sequenceId);
     }, sequenceId);
   };
+
+  useEffect(() => {
+    const roomFlow = multiplayer.currentRoom?.flow;
+    const raceToken = roomFlow?.raceToken;
+    if (
+      playMode !== 'multiplayer'
+      || roomFlow?.phase !== 'race'
+      || !raceToken
+      || lastRoomRaceTokenRef.current === raceToken
+      || (roomFlow.selectedTrackId && roomFlow.selectedTrackId !== effectiveTrack.id)
+    ) {
+      return;
+    }
+
+    lastRoomRaceTokenRef.current = raceToken;
+    void handleStart();
+  }, [effectiveTrack.id, multiplayer.currentRoom?.flow, playMode]);
 
   const connectionLabel = (() => {
     if (demoMode) {
@@ -4705,16 +4815,28 @@ export default function App() {
                 onRiderNameChange={(name) => multiplayer.setProfile({ name })}
                 onRiderAvailableChange={(available) => multiplayer.setProfile({ available })}
                 onCreatePrivateRoom={multiplayer.createPrivateRoom}
+                onCreatePublicRoom={multiplayer.createPublicRoom}
                 onJoinRoom={multiplayer.joinRoom}
                 onLeaveRoom={multiplayer.leaveRoom}
                 onShareInvite={shareMultiplayerInvite}
                 onRandomTrack={chooseRandomRoomTrack}
+                onStartTrackVote={startRoomTrackVote}
+                onVoteTrack={multiplayer.submitTrackVote}
+                onRoomRouteChoice={handleRoomRouteChoice}
+                onResetRoomFlow={multiplayer.resetRoomFlow}
                 onQuickMatch={multiplayer.quickMatch}
                 onChallengeRider={multiplayer.challengeRider}
                 onAcceptChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, true)}
                 onDeclineChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, false)}
                 onChatDraftChange={setChatDraft}
                 onChatSend={sendChatMessage}
+                trackVoteCandidates={multiplayerVoteCandidates}
+                voiceEnabled={roomVoice.enabled}
+                voiceSupported={roomVoice.supported}
+                voiceStatus={roomVoice.status}
+                voiceRemoteCount={roomVoice.remoteCount}
+                onVoiceStart={roomVoice.start}
+                onVoiceStop={roomVoice.stop}
               />
             </div>
           </>

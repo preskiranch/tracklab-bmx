@@ -5,12 +5,17 @@ import {
   Link,
   LogOut,
   MessageSquare,
+  Mic,
+  MicOff,
   RadioTower,
   Send,
   Shuffle,
+  Trophy,
   UserPlus,
   Users,
+  Vote,
   X,
+  Zap,
 } from 'lucide-react';
 import type {
   BikeSample,
@@ -19,9 +24,11 @@ import type {
   MultiplayerRider,
   MultiplayerRoom,
   MultiplayerRoomMessage,
+  MultiplayerTrackVoteCandidate,
   PlayMode,
   PlayerSlot,
   RiderState,
+  SplitBranchChoice,
   TrackRecord,
 } from '../types';
 
@@ -49,6 +56,7 @@ type MultiplayerPanelProps = {
   }>;
   inviteUrl: string;
   track: TrackRecord;
+  trackVoteCandidates: MultiplayerTrackVoteCandidate[];
   players: PlayerSlot[];
   maxPlayers: number;
   riders: RiderState[];
@@ -63,16 +71,27 @@ type MultiplayerPanelProps = {
   onRiderNameChange: (name: string) => void;
   onRiderAvailableChange: (available: boolean) => void;
   onCreatePrivateRoom: () => void;
+  onCreatePublicRoom: () => void;
   onJoinRoom: (roomId: string) => void;
   onLeaveRoom: () => void;
   onShareInvite: () => void;
   onRandomTrack: () => void;
+  onStartTrackVote: () => void;
+  onVoteTrack: (trackId: string) => void;
+  onRoomRouteChoice: (choice: SplitBranchChoice) => void;
+  onResetRoomFlow: () => void;
   onQuickMatch: () => void;
   onChallengeRider: (riderId: string) => void;
   onAcceptChallenge: (challengeId: string) => void;
   onDeclineChallenge: (challengeId: string) => void;
   onChatDraftChange: (value: string) => void;
   onChatSend: () => void;
+  voiceEnabled: boolean;
+  voiceSupported: boolean;
+  voiceStatus: string;
+  voiceRemoteCount: number;
+  onVoiceStart: () => void;
+  onVoiceStop: () => void;
 };
 
 function sampleForPlayer(player: PlayerSlot, samplesByDevice: Map<number, BikeSample>) {
@@ -93,6 +112,7 @@ export function MultiplayerPanel({
   incomingChallenges,
   inviteUrl,
   track,
+  trackVoteCandidates,
   players,
   maxPlayers,
   riders,
@@ -107,16 +127,27 @@ export function MultiplayerPanel({
   onRiderNameChange,
   onRiderAvailableChange,
   onCreatePrivateRoom,
+  onCreatePublicRoom,
   onJoinRoom,
   onLeaveRoom,
   onShareInvite,
   onRandomTrack,
+  onStartTrackVote,
+  onVoteTrack,
+  onRoomRouteChoice,
+  onResetRoomFlow,
   onQuickMatch,
   onChallengeRider,
   onAcceptChallenge,
   onDeclineChallenge,
   onChatDraftChange,
   onChatSend,
+  voiceEnabled,
+  voiceSupported,
+  voiceStatus,
+  voiceRemoteCount,
+  onVoiceStart,
+  onVoiceStop,
 }: MultiplayerPanelProps) {
   const [profileKeyDraft, setProfileKeyDraft] = useState(profileKey);
 
@@ -152,6 +183,17 @@ export function MultiplayerPanel({
   const remoteTelemetryRows = remoteRaceStates
     .flatMap((state) => state.riders.map((rider) => ({ state, rider })))
     .slice(0, maxPlayers);
+  const roomFlow = currentRoom?.flow;
+  const isHost = Boolean(currentRoom && currentRoom.hostId === currentUserId);
+  const voteCounts = new Map<string, number>();
+  Object.values(roomFlow?.votes ?? {}).forEach((trackId) => {
+    voteCounts.set(trackId, (voteCounts.get(trackId) ?? 0) + 1);
+  });
+  const currentVote = currentUserId ? roomFlow?.votes[currentUserId] : undefined;
+  const currentRouteChoice = currentUserId ? roomFlow?.routeChoices[currentUserId] : undefined;
+  const routeSelectSeconds = roomFlow?.phase === 'route-select' && roomFlow.deadlineAt
+    ? Math.max(0, Math.ceil((roomFlow.deadlineAt - Date.now()) / 1000))
+    : 0;
 
   return (
     <aside className="multiplayer-panel">
@@ -234,7 +276,7 @@ export function MultiplayerPanel({
 
         <div className="room-card">
           <div>
-            <span>Private room</span>
+            <span>{currentRoom?.private === false ? 'Public lobby' : 'Private room'}</span>
             <strong>{currentRoom?.id ?? 'No room'}</strong>
           </div>
           <button
@@ -250,7 +292,10 @@ export function MultiplayerPanel({
 
         <div className="room-actions">
           <button type="button" disabled={!multiplayerOnline} onClick={onCreatePrivateRoom}>
-            <UserPlus size={14} /> Create room
+            <UserPlus size={14} /> Private room
+          </button>
+          <button type="button" disabled={!multiplayerOnline} onClick={onCreatePublicRoom}>
+            <Users size={14} /> Public lobby
           </button>
           <button type="button" disabled={!multiplayerOnline} onClick={onQuickMatch}>
             <Users size={14} /> Quick match
@@ -260,6 +305,9 @@ export function MultiplayerPanel({
           </button>
           <button type="button" disabled={!currentRoom} onClick={onRandomTrack}>
             <Shuffle size={14} /> Random track
+          </button>
+          <button type="button" disabled={!currentRoom || !isHost} onClick={onResetRoomFlow}>
+            <X size={14} /> Reset lobby
           </button>
           <button type="button" disabled={!currentRoom} onClick={onLeaveRoom}>
             <LogOut size={14} /> Leave
@@ -271,6 +319,121 @@ export function MultiplayerPanel({
           <span>{playMode === 'local' ? 'Local session' : 'Room track'}: {track.name}</span>
         </div>
       </section>
+
+      {playMode === 'multiplayer' && currentRoom && (
+        <section className="panel-section lobby-flow-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Online Lobby</span>
+              <h3>{roomFlow?.phase === 'voting'
+                ? 'Track vote'
+                : roomFlow?.phase === 'route-select'
+                  ? 'Route choice'
+                  : roomFlow?.phase === 'race'
+                    ? 'Race launch'
+                    : 'Race setup'}</h3>
+            </div>
+            <Vote size={18} />
+          </div>
+
+          {(!roomFlow || roomFlow.phase === 'lobby') && (
+            <>
+              <button
+                className="primary-inline-button"
+                type="button"
+                disabled={!isHost || trackVoteCandidates.length < 3}
+                onClick={onStartTrackVote}
+              >
+                <Shuffle size={15} /> Vote on 3 mapped tracks
+              </button>
+              <p className="diagnostic-note">
+                {trackVoteCandidates.length >= 3
+                  ? `${trackVoteCandidates.length} mapped tracks with pedaling zones are eligible.`
+                  : 'Map and save at least three tracks with pedaling zones before voting.'}
+              </p>
+            </>
+          )}
+
+          {roomFlow?.phase === 'voting' && (
+            <div className="vote-candidate-list">
+              {roomFlow.candidates.map((candidate) => (
+                <button
+                  className={`vote-candidate ${currentVote === candidate.id ? 'selected' : ''}`}
+                  key={candidate.id}
+                  type="button"
+                  onClick={() => onVoteTrack(candidate.id)}
+                >
+                  <span>
+                    <strong>{candidate.name}</strong>
+                    <small>{candidate.state}, {candidate.country}{candidate.hasSplits ? ' / split straight' : ''}</small>
+                  </span>
+                  <b>{voteCounts.get(candidate.id) ?? 0}</b>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {roomFlow?.phase === 'route-select' && (
+            <div className="route-vote-card">
+              <div>
+                <Trophy size={16} />
+                <span>{routeSelectSeconds}s to choose a split line</span>
+              </div>
+              <div className="segmented-control compact">
+                <button
+                  className={(currentRouteChoice ?? 'a') === 'a' ? 'selected' : ''}
+                  type="button"
+                  onClick={() => onRoomRouteChoice('a')}
+                >
+                  Amateur Line
+                </button>
+                <button
+                  className={currentRouteChoice === 'b' ? 'selected' : ''}
+                  type="button"
+                  onClick={() => onRoomRouteChoice('b')}
+                >
+                  <Zap size={14} />
+                  Pro Set
+                </button>
+              </div>
+              <p className="diagnostic-note">No choice defaults to Amateur Line. Pro Set still requires 26+ mph at the split.</p>
+            </div>
+          )}
+
+          {roomFlow?.phase === 'race' && (
+            <div className="route-vote-card">
+              <div>
+                <Trophy size={16} />
+                <span>Race launch sent. Full-screen gate starts on each racer device.</span>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {playMode === 'multiplayer' && currentRoom && (
+        <section className="panel-section voice-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Voice</span>
+              <h3>Live audio chat</h3>
+            </div>
+            {voiceEnabled ? <Mic size={18} /> : <MicOff size={18} />}
+          </div>
+
+          <div className="voice-card">
+            <button
+              type="button"
+              disabled={!voiceSupported}
+              onClick={voiceEnabled ? onVoiceStop : onVoiceStart}
+            >
+              {voiceEnabled ? <MicOff size={15} /> : <Mic size={15} />}
+              {voiceEnabled ? 'Mute voice' : 'Enable voice'}
+            </button>
+            <span>{voiceStatus} {voiceEnabled ? `/ ${voiceRemoteCount} connected` : ''}</span>
+          </div>
+        </section>
+      )}
 
       {playMode === 'multiplayer' && incomingChallenges.length > 0 && (
         <section className="panel-section challenge-section">
@@ -327,7 +490,7 @@ export function MultiplayerPanel({
                   disabled={!multiplayerOnline || currentRoom?.id === room.id}
                   onClick={() => onJoinRoom(room.id)}
                 >
-                  {room.id} / {room.memberCount} riders / {room.track.name}
+                  {room.id} / {room.private ? 'private' : 'public'} / {room.memberCount} riders / {room.track.name}
                 </button>
               ))}
             </div>

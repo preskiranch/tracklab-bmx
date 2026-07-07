@@ -19,6 +19,8 @@ const clients = new Map();
 const rooms = new Map();
 const challenges = new Map();
 const persistedRaceResultKeys = new Set();
+const voteTimers = new Map();
+const routeSelectTimers = new Map();
 const maxRaceBikeCount = 4;
 const adminAccountEmail = 'preskiranch@gmail.com';
 const authCookieName = 'tracklab_session';
@@ -64,6 +66,19 @@ function sanitizeEmail(value) {
 
 function sanitizeMembershipTier(value) {
   return value === 'spectator' || value === 'racer' ? value : 'visitor';
+}
+
+function defaultRoomFlow() {
+  return {
+    phase: 'lobby',
+    candidates: [],
+    votes: {},
+    routeChoices: {},
+    deadlineAt: null,
+    selectedTrackId: null,
+    raceToken: null,
+    raceStartAt: null,
+  };
 }
 
 function isAdminEmail(email) {
@@ -265,6 +280,38 @@ function sanitizeTrack(value) {
     country: sanitizeText(value.country, 'Unknown', 80),
     state: sanitizeText(value.state, 'Unknown', 80),
   };
+}
+
+function sanitizeTrackVoteCandidate(value) {
+  const track = sanitizeTrack(value);
+  return {
+    ...track,
+    hasPedalZones: Boolean(value?.hasPedalZones),
+    hasSplits: Boolean(value?.hasSplits),
+  };
+}
+
+function sanitizeTrackVoteCandidates(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set();
+  return value
+    .map(sanitizeTrackVoteCandidate)
+    .filter((candidate) => {
+      if (!candidate.id || candidate.id === 'unknown-track' || !candidate.hasPedalZones || seen.has(candidate.id)) {
+        return false;
+      }
+
+      seen.add(candidate.id);
+      return true;
+    })
+    .slice(0, 3);
+}
+
+function sanitizeBranchChoice(value) {
+  return value === 'b' ? 'b' : 'a';
 }
 
 function sanitizeUserDataPatch(value) {
@@ -655,6 +702,45 @@ function sanitizeRaceState(value, client, room) {
   };
 }
 
+function sanitizeVoiceSignal(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const type = sanitizeText(value.type, '', 24);
+  if (type === 'ready' || type === 'leave') {
+    return { type };
+  }
+
+  if ((type === 'offer' || type === 'answer') && value.description && typeof value.description === 'object') {
+    return {
+      type,
+      description: {
+        type,
+        sdp: sanitizeText(value.description.sdp, '', 120_000),
+      },
+    };
+  }
+
+  if (type === 'candidate' && value.candidate && typeof value.candidate === 'object') {
+    return {
+      type,
+      candidate: {
+        candidate: sanitizeText(value.candidate.candidate, '', 16_000),
+        sdpMid: typeof value.candidate.sdpMid === 'string' ? sanitizeText(value.candidate.sdpMid, '', 120) : null,
+        sdpMLineIndex: Number.isFinite(Number(value.candidate.sdpMLineIndex))
+          ? Math.max(0, Math.min(32, Math.round(Number(value.candidate.sdpMLineIndex))))
+          : null,
+        usernameFragment: typeof value.candidate.usernameFragment === 'string'
+          ? sanitizeText(value.candidate.usernameFragment, '', 240)
+          : undefined,
+      },
+    };
+  }
+
+  return null;
+}
+
 function publicRider(client) {
   return {
     id: client.id,
@@ -665,6 +751,16 @@ function publicRider(client) {
     track: client.track,
     roomId: client.roomId,
     lastSeen: client.lastSeen,
+  };
+}
+
+function publicRoomFlow(room) {
+  return {
+    ...defaultRoomFlow(),
+    ...(room.flow ?? {}),
+    candidates: Array.isArray(room.flow?.candidates) ? room.flow.candidates : [],
+    votes: room.flow?.votes && typeof room.flow.votes === 'object' ? room.flow.votes : {},
+    routeChoices: room.flow?.routeChoices && typeof room.flow.routeChoices === 'object' ? room.flow.routeChoices : {},
   };
 }
 
@@ -679,6 +775,7 @@ function publicRoom(room) {
     hostId: room.hostId,
     private: room.private,
     track: room.track,
+    flow: publicRoomFlow(room),
     createdAt: room.createdAt,
     members,
     memberCount: members.length,
@@ -710,6 +807,20 @@ function broadcastRoom(roomId, payload) {
   room.members.forEach((clientId) => send(clients.get(clientId), payload));
 }
 
+function clearRoomTimers(roomId) {
+  const voteTimer = voteTimers.get(roomId);
+  if (voteTimer) {
+    clearTimeout(voteTimer);
+    voteTimers.delete(roomId);
+  }
+
+  const routeTimer = routeSelectTimers.get(roomId);
+  if (routeTimer) {
+    clearTimeout(routeTimer);
+    routeSelectTimers.delete(roomId);
+  }
+}
+
 function roomState(room) {
   return {
     type: 'room-state',
@@ -717,6 +828,128 @@ function roomState(room) {
     messages: room.messages,
     raceStates: [...room.raceStates.values()],
   };
+}
+
+function addRoomSystemMessage(room, text) {
+  const message = {
+    id: randomId('MSG', 10),
+    author: 'TrackLab',
+    text,
+    at: new Date().toISOString(),
+  };
+  room.messages = [...room.messages, message].slice(-40);
+  void persistence.saveRoomMessage(room.id, null, message);
+}
+
+function applyRoomTrack(room, track) {
+  room.track = sanitizeTrack(track);
+  room.members.forEach((clientId) => {
+    const member = clients.get(clientId);
+    if (member) {
+      member.track = room.track;
+    }
+  });
+  void persistence.updateRoomTrack(room);
+}
+
+function beginRoomRace(room, source = 'route selection') {
+  clearRoomTimers(room.id);
+  room.flow = {
+    ...publicRoomFlow(room),
+    phase: 'race',
+    deadlineAt: null,
+    raceToken: randomId('RACE', 10),
+    raceStartAt: Date.now() + 800,
+  };
+  addRoomSystemMessage(room, `Race starting from ${source}.`);
+  broadcastRoom(room.id, roomState(room));
+  broadcastLobby();
+}
+
+function scheduleRoomRaceStart(room, delayMs) {
+  const existing = routeSelectTimers.get(room.id);
+  if (existing) {
+    clearTimeout(existing);
+  }
+
+  const timer = setTimeout(() => {
+    const activeRoom = rooms.get(room.id);
+    if (!activeRoom || activeRoom.flow?.phase !== 'route-select') {
+      return;
+    }
+    beginRoomRace(activeRoom, 'locked route choices');
+  }, Math.max(0, delayMs));
+  routeSelectTimers.set(room.id, timer);
+}
+
+function resolveTrackVote(room) {
+  if (!room || room.flow?.phase !== 'voting') {
+    return;
+  }
+
+  const candidates = sanitizeTrackVoteCandidates(room.flow.candidates);
+  if (candidates.length === 0) {
+    room.flow = defaultRoomFlow();
+    addRoomSystemMessage(room, 'Track vote cancelled because no mapped tracks were available.');
+    broadcastRoom(room.id, roomState(room));
+    return;
+  }
+
+  const counts = new Map(candidates.map((candidate) => [candidate.id, 0]));
+  Object.values(room.flow.votes ?? {}).forEach((trackId) => {
+    if (counts.has(trackId)) {
+      counts.set(trackId, (counts.get(trackId) ?? 0) + 1);
+    }
+  });
+
+  const highest = Math.max(...counts.values());
+  const tied = candidates.filter((candidate) => (counts.get(candidate.id) ?? 0) === highest);
+  const winner = tied[Math.floor(Math.random() * tied.length)] ?? candidates[0];
+  applyRoomTrack(room, winner);
+
+  if (winner.hasSplits) {
+    const deadlineAt = Date.now() + 10_000;
+    room.flow = {
+      ...publicRoomFlow(room),
+      phase: 'route-select',
+      selectedTrackId: winner.id,
+      deadlineAt,
+      routeChoices: {},
+      raceToken: null,
+      raceStartAt: null,
+    };
+    addRoomSystemMessage(room, `${winner.name} won the vote. Choose Amateur Line or Pro Set.`);
+    scheduleRoomRaceStart(room, deadlineAt - Date.now());
+  } else {
+    room.flow = {
+      ...publicRoomFlow(room),
+      phase: 'race',
+      selectedTrackId: winner.id,
+      deadlineAt: null,
+      raceToken: randomId('RACE', 10),
+      raceStartAt: Date.now() + 800,
+    };
+    addRoomSystemMessage(room, `${winner.name} won the vote. Race starting.`);
+  }
+
+  broadcastRoom(room.id, roomState(room));
+  broadcastLobby();
+}
+
+function scheduleTrackVoteResolution(room, delayMs) {
+  const existing = voteTimers.get(room.id);
+  if (existing) {
+    clearTimeout(existing);
+  }
+
+  const timer = setTimeout(() => {
+    const activeRoom = rooms.get(room.id);
+    if (!activeRoom || activeRoom.flow?.phase !== 'voting') {
+      return;
+    }
+    resolveTrackVote(activeRoom);
+  }, Math.max(0, delayMs));
+  voteTimers.set(room.id, timer);
 }
 
 function leaveRoom(client, reason = 'left') {
@@ -743,6 +976,7 @@ function leaveRoom(client, reason = 'left') {
   send(client, { type: 'room-left', roomId: oldRoomId, reason });
 
   if (room.members.size === 0) {
+    clearRoomTimers(room.id);
     rooms.delete(room.id);
     broadcastLobby();
     return;
@@ -776,13 +1010,14 @@ function createRoom(host, track, privateRoom = true) {
     hostId: host.id,
     private: privateRoom,
     track: sanitizeTrack(track ?? host.track),
+    flow: defaultRoomFlow(),
     createdAt: Date.now(),
     members: new Set(),
     raceStates: new Map(),
     messages: [{
       id: randomId('MSG', 10),
       author: 'TrackLab',
-      text: 'Private room opened.',
+      text: privateRoom ? 'Private room opened.' : 'Public lobby opened.',
       at: new Date().toISOString(),
     }],
   };
@@ -825,6 +1060,7 @@ async function findRoom(roomId) {
   }
 
   savedRoom.track = sanitizeTrack(savedRoom.track);
+  savedRoom.flow = defaultRoomFlow();
   savedRoom.messages = savedRoom.messages.length > 0
     ? savedRoom.messages
     : [{
@@ -876,7 +1112,7 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'create-room') {
-    createRoom(client, message.track, true);
+    createRoom(client, message.track, message.private !== false);
     return;
   }
 
@@ -908,16 +1144,124 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    room.track = sanitizeTrack(message.track);
-    room.members.forEach((clientId) => {
-      const member = clients.get(clientId);
-      if (member) {
-        member.track = room.track;
-      }
-    });
-    void persistence.updateRoomTrack(room);
+    clearRoomTimers(room.id);
+    applyRoomTrack(room, message.track);
+    room.flow = defaultRoomFlow();
     broadcastRoom(room.id, roomState(room));
     broadcastLobby();
+    return;
+  }
+
+  if (message.type === 'room-vote-start') {
+    if (!client.roomId) {
+      return;
+    }
+
+    const room = rooms.get(client.roomId);
+    if (!room) {
+      return;
+    }
+
+    if (room.hostId && room.hostId !== client.id) {
+      send(client, { type: 'room-error', message: 'Only the room host can start track voting.' });
+      return;
+    }
+
+    const candidates = sanitizeTrackVoteCandidates(message.candidates);
+    if (candidates.length < 3) {
+      send(client, { type: 'room-error', message: 'Track voting needs three mapped tracks with pedaling zones.' });
+      return;
+    }
+
+    clearRoomTimers(room.id);
+    room.flow = {
+      ...defaultRoomFlow(),
+      phase: 'voting',
+      candidates,
+      votes: {},
+      deadlineAt: Date.now() + 20_000,
+    };
+    addRoomSystemMessage(room, 'Track vote opened. Pick one of the three mapped tracks.');
+    scheduleTrackVoteResolution(room, 20_000);
+    broadcastRoom(room.id, roomState(room));
+    broadcastLobby();
+    return;
+  }
+
+  if (message.type === 'room-vote') {
+    if (!client.roomId) {
+      return;
+    }
+
+    const room = rooms.get(client.roomId);
+    if (!room || room.flow?.phase !== 'voting') {
+      return;
+    }
+
+    const trackId = sanitizeText(message.trackId, '', 120);
+    const candidate = room.flow.candidates.find((item) => item.id === trackId);
+    if (!candidate) {
+      send(client, { type: 'room-error', message: 'That track is not in this vote.' });
+      return;
+    }
+
+    room.flow = {
+      ...publicRoomFlow(room),
+      votes: {
+        ...(room.flow.votes ?? {}),
+        [client.id]: trackId,
+      },
+    };
+    const everyoneVoted = [...room.members].every((memberId) => Boolean(room.flow.votes?.[memberId]));
+    if (everyoneVoted) {
+      resolveTrackVote(room);
+      return;
+    }
+
+    broadcastRoom(room.id, roomState(room));
+    return;
+  }
+
+  if (message.type === 'room-route-choice') {
+    if (!client.roomId) {
+      return;
+    }
+
+    const room = rooms.get(client.roomId);
+    if (!room || room.flow?.phase !== 'route-select') {
+      return;
+    }
+
+    room.flow = {
+      ...publicRoomFlow(room),
+      routeChoices: {
+        ...(room.flow.routeChoices ?? {}),
+        [client.id]: sanitizeBranchChoice(message.choice),
+      },
+    };
+    broadcastRoom(room.id, roomState(room));
+    return;
+  }
+
+  if (message.type === 'room-reset-lobby') {
+    if (!client.roomId) {
+      return;
+    }
+
+    const room = rooms.get(client.roomId);
+    if (!room) {
+      return;
+    }
+
+    if (room.hostId && room.hostId !== client.id) {
+      send(client, { type: 'room-error', message: 'Only the room host can reset the lobby.' });
+      return;
+    }
+
+    clearRoomTimers(room.id);
+    room.flow = defaultRoomFlow();
+    addRoomSystemMessage(room, 'Lobby reset.');
+    broadcastRoom(room.id, roomState(room));
     return;
   }
 
@@ -972,6 +1316,48 @@ async function handleClientMessage(client, rawMessage) {
       }
     }
     broadcastRoom(room.id, { type: 'race-sync', state: raceState });
+    return;
+  }
+
+  if (message.type === 'voice-signal') {
+    if (!client.roomId) {
+      return;
+    }
+
+    const room = rooms.get(client.roomId);
+    if (!room) {
+      return;
+    }
+
+    const signal = sanitizeVoiceSignal(message.signal);
+    if (!signal) {
+      return;
+    }
+
+    const targetId = sanitizeText(message.targetId, '', 80);
+    const payload = {
+      type: 'voice-signal',
+      signal: {
+        id: randomId('VOICE', 12),
+        fromId: client.id,
+        targetId: targetId || null,
+        signal,
+        at: Date.now(),
+      },
+    };
+
+    if (targetId) {
+      if (room.members.has(targetId)) {
+        send(clients.get(targetId), payload);
+      }
+      return;
+    }
+
+    room.members.forEach((memberId) => {
+      if (memberId !== client.id) {
+        send(clients.get(memberId), payload);
+      }
+    });
     return;
   }
 

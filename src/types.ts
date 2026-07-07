@@ -102,6 +102,24 @@ export type MultiplayerTrackSummary = {
   state: string;
 };
 
+export type MultiplayerTrackVoteCandidate = MultiplayerTrackSummary & {
+  hasPedalZones: boolean;
+  hasSplits: boolean;
+};
+
+export type MultiplayerRoomPhase = 'lobby' | 'voting' | 'route-select' | 'race';
+
+export type MultiplayerRoomFlow = {
+  phase: MultiplayerRoomPhase;
+  candidates: MultiplayerTrackVoteCandidate[];
+  votes: Record<string, string>;
+  routeChoices: Record<string, SplitBranchChoice>;
+  deadlineAt: number | null;
+  selectedTrackId: string | null;
+  raceToken: string | null;
+  raceStartAt: number | null;
+};
+
 export type MultiplayerRider = {
   id: string;
   name: string;
@@ -118,6 +136,7 @@ export type MultiplayerRoom = {
   hostId: string | null;
   private: boolean;
   track: MultiplayerTrackSummary;
+  flow: MultiplayerRoomFlow;
   createdAt: number;
   members: MultiplayerRider[];
   memberCount: number;
@@ -171,6 +190,21 @@ export type MultiplayerRaceState = {
   at: number;
   riders: MultiplayerRaceRider[];
   summary: RaceSummaryEntry[];
+};
+
+export type MultiplayerVoiceSignalPayload =
+  | { type: 'ready' }
+  | { type: 'leave' }
+  | { type: 'offer'; description: RTCSessionDescriptionInit }
+  | { type: 'answer'; description: RTCSessionDescriptionInit }
+  | { type: 'candidate'; candidate: RTCIceCandidateInit };
+
+export type MultiplayerVoiceSignal = {
+  id: string;
+  fromId: string;
+  targetId: string | null;
+  signal: MultiplayerVoiceSignalPayload;
+  at: number;
 };
 
 export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
