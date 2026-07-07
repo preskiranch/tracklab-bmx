@@ -1,7 +1,9 @@
 import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
@@ -18,6 +20,10 @@ const rooms = new Map();
 const challenges = new Map();
 const persistedRaceResultKeys = new Set();
 const maxRaceBikeCount = 4;
+const adminAccountEmail = 'preskiranch@gmail.com';
+const authCookieName = 'tracklab_session';
+const authSessionMaxAgeSeconds = 60 * 60 * 24 * 30;
+const scryptAsync = promisify(scryptCallback);
 
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -58,6 +64,144 @@ function sanitizeEmail(value) {
 
 function sanitizeMembershipTier(value) {
   return value === 'spectator' || value === 'racer' ? value : 'visitor';
+}
+
+function isAdminEmail(email) {
+  return sanitizeEmail(email) === adminAccountEmail;
+}
+
+function clampBikeSeats(value) {
+  return Math.max(1, Math.min(maxRaceBikeCount, Math.round(Number(value) || 1)));
+}
+
+function membershipForAccount(user) {
+  if (isAdminEmail(user?.email)) {
+    return { tier: 'racer', bikeSeats: maxRaceBikeCount };
+  }
+
+  const tier = user?.membershipTier === 'racer' ? 'racer' : 'spectator';
+  return {
+    tier,
+    bikeSeats: tier === 'racer' ? clampBikeSeats(user?.bikeSeats) : 1,
+  };
+}
+
+function publicAuthUser(user) {
+  if (!user) {
+    return null;
+  }
+
+  const membership = membershipForAccount(user);
+  return {
+    id: user.id,
+    profileKey: `user:${user.id}`,
+    email: user.email,
+    name: user.displayName,
+    admin: isAdminEmail(user.email),
+    membership,
+  };
+}
+
+function sessionCookieOptions(request, maxAgeSeconds = authSessionMaxAgeSeconds) {
+  const forwardedProto = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const isSecure = forwardedProto === 'https' || request.headers.host?.includes('onrender.com');
+  const secure = isSecure ? '; Secure' : '';
+  return `Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
+function setAuthCookie(response, request, token) {
+  response.setHeader('Set-Cookie', `${authCookieName}=${encodeURIComponent(token)}; ${sessionCookieOptions(request)}`);
+}
+
+function clearAuthCookie(response, request) {
+  response.setHeader('Set-Cookie', `${authCookieName}=; ${sessionCookieOptions(request, 0)}`);
+}
+
+function tokenHash(token) {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function createSessionToken() {
+  return randomBytes(32).toString('base64url');
+}
+
+async function hashPassword(password) {
+  const salt = randomBytes(16).toString('base64url');
+  const key = await scryptAsync(password, salt, 64);
+  return `scrypt:${salt}:${Buffer.from(key).toString('base64url')}`;
+}
+
+async function verifyPassword(password, passwordHash) {
+  const [algorithm, salt, expected] = String(passwordHash || '').split(':');
+  if (algorithm !== 'scrypt' || !salt || !expected) {
+    return false;
+  }
+
+  const expectedKey = Buffer.from(expected, 'base64url');
+  const actualKey = Buffer.from(await scryptAsync(password, salt, expectedKey.length));
+  return actualKey.length === expectedKey.length && timingSafeEqual(actualKey, expectedKey);
+}
+
+function sanitizePassword(value) {
+  return typeof value === 'string' ? value : '';
+}
+
+function validateAccountPayload(payload, { requireName }) {
+  const email = sanitizeEmail(payload?.email);
+  const password = sanitizePassword(payload?.password);
+  const name = sanitizeText(payload?.name, '', 64);
+
+  if (!email) {
+    return { error: 'Enter a valid email address.' };
+  }
+
+  if (password.length < 8) {
+    return { error: 'Password must be at least 8 characters.' };
+  }
+
+  if (requireName && !name) {
+    return { error: 'Enter your name or studio name.' };
+  }
+
+  return { email, password, name };
+}
+
+async function createSignedInResponse(request, response, user, statusCode = 200) {
+  const token = createSessionToken();
+  const expiresAt = new Date(Date.now() + authSessionMaxAgeSeconds * 1000).toISOString();
+  await persistence.createAuthSession({
+    id: randomUUID(),
+    userId: user.id,
+    tokenHash: tokenHash(token),
+    expiresAt,
+  });
+  setAuthCookie(response, request, token);
+  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+  response.end(JSON.stringify({ user: publicAuthUser(user) }));
+}
+
+async function currentAuthSession(request) {
+  const token = cookieValue(request, authCookieName);
+  if (!token) {
+    return null;
+  }
+
+  const session = await persistence.findAuthSession(tokenHash(token));
+  if (!session?.user) {
+    return null;
+  }
+
+  void persistence.touchAuthSession(tokenHash(token));
+  return { ...session, token };
+}
+
+function writeJson(response, statusCode, payload, headers = {}) {
+  response.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    ...headers,
+  });
+  response.end(JSON.stringify(payload));
 }
 
 function cookieValue(request, name) {
@@ -839,6 +983,112 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/auth/me') {
+    const session = await currentAuthSession(request);
+    writeJson(response, 200, { user: publicAuthUser(session?.user ?? null) });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/auth/register') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const payload = await readJsonBody(request, 32_000);
+    const account = validateAccountPayload(payload, { requireName: true });
+    if (account.error) {
+      writeJson(response, 400, { error: account.error });
+      return;
+    }
+
+    const existing = await persistence.findAuthUserByEmail(account.email);
+    if (existing) {
+      writeJson(response, 409, { error: 'An account already exists for this email. Sign in instead.' });
+      return;
+    }
+
+    const isAdmin = isAdminEmail(account.email);
+    const passwordHash = await hashPassword(account.password);
+    const createdUser = await persistence.createAuthUser({
+      id: randomUUID(),
+      email: account.email,
+      displayName: account.name,
+      passwordHash,
+      membershipTier: isAdmin ? 'racer' : 'spectator',
+      bikeSeats: isAdmin ? maxRaceBikeCount : 1,
+      admin: isAdmin,
+    });
+
+    if (!createdUser) {
+      writeJson(response, 500, { error: 'Could not create the account.' });
+      return;
+    }
+
+    await createSignedInResponse(request, response, createdUser, 201);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/auth/login') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const payload = await readJsonBody(request, 32_000);
+    const account = validateAccountPayload(payload, { requireName: false });
+    if (account.error) {
+      writeJson(response, 400, { error: account.error });
+      return;
+    }
+
+    const user = await persistence.findAuthUserByEmail(account.email);
+    if (!user || !(await verifyPassword(account.password, user.passwordHash))) {
+      writeJson(response, 401, { error: 'Email or password is incorrect.' });
+      return;
+    }
+
+    const loggedInUser = await persistence.touchAuthUserLogin(user.id) ?? user;
+    await createSignedInResponse(request, response, loggedInUser);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/auth/logout') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const token = cookieValue(request, authCookieName);
+    if (token) {
+      await persistence.deleteAuthSession(tokenHash(token));
+    }
+    clearAuthCookie(response, request);
+    writeJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/auth/billing-return') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const session = await currentAuthSession(request);
+    if (!session?.user) {
+      writeJson(response, 401, { error: 'Sign in before applying billing status.' });
+      return;
+    }
+
+    const payload = await readJsonBody(request, 32_000);
+    const bikeSeats = clampBikeSeats(payload.bikeSeats);
+    const nextUser = isAdminEmail(session.user.email)
+      ? session.user
+      : await persistence.updateAuthUserMembership(session.user.id, 'racer', bikeSeats);
+    writeJson(response, 200, { user: publicAuthUser(nextUser ?? session.user) });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/public-track-mappings') {
     if (request.method === 'GET') {
       const trackMappings = await persistence.loadPublicTrackMappings();
@@ -913,20 +1163,24 @@ async function serveStatic(request, response) {
     }
 
     try {
+      const session = await currentAuthSession(request);
+      if (!session?.user) {
+        writeJson(response, 401, { error: 'Sign in before upgrading to Racer.' });
+        return;
+      }
+
       const payload = await readJsonBody(request, 32_000);
       const bikeSeats = Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(payload.bikeSeats, 1))));
-      const profileKey = sanitizeGuestKey(payload.profileKey, '');
+      const profileKey = `user:${session.user.id}`;
       const originHeader = request.headers.origin || `http://${request.headers.host}`;
       const checkout = await createRacerSubscriptionCheckout({ bikeSeats, profileKey, origin: originHeader });
-      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-      response.end(JSON.stringify(checkout));
+      writeJson(response, 200, checkout);
     } catch (error) {
       const statusCode = Number(error?.statusCode) || 500;
-      response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-      response.end(JSON.stringify({
+      writeJson(response, statusCode, {
         error: error instanceof Error ? error.message : String(error),
         config: statusCode === 503 ? squareCheckoutConfigStatus() : undefined,
-      }));
+      });
     }
     return;
   }

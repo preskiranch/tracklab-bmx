@@ -1,4 +1,5 @@
-import { Activity, Bike, CreditCard, Globe2, Lock, Play, Radio, Users } from 'lucide-react';
+import { Activity, Bike, CreditCard, Globe2, Lock, LogIn, Play, Radio, Users } from 'lucide-react';
+import type { AuthMode } from '../lib/auth';
 import {
   additionalBikeMonthlyCents,
   formatUsd,
@@ -15,16 +16,22 @@ type MembershipLandingProps = {
   bikeSeats: number;
   checkoutStatus: CheckoutStatus;
   checkoutMessage: string | null;
+  authMode: AuthMode;
+  authLoading: boolean;
   profileName: string;
   profileEmail: string;
+  profilePassword: string;
   profileComplete: boolean;
   profileError: string | null;
   isAdminProfile: boolean;
   onlineRiderCount: number;
   liveRoomCount: number;
+  onAuthModeChange: (mode: AuthMode) => void;
   onProfileNameChange: (name: string) => void;
   onProfileEmailChange: (email: string) => void;
+  onProfilePasswordChange: (password: string) => void;
   onProfileSubmit: () => void;
+  onSignOut: () => void;
   onJoinFree: () => void;
   onEnterApp: () => void;
   onStartDemo: () => void;
@@ -37,16 +44,22 @@ export function MembershipLanding({
   bikeSeats,
   checkoutStatus,
   checkoutMessage,
+  authMode,
+  authLoading,
   profileName,
   profileEmail,
+  profilePassword,
   profileComplete,
   profileError,
   isAdminProfile,
   onlineRiderCount,
   liveRoomCount,
+  onAuthModeChange,
   onProfileNameChange,
   onProfileEmailChange,
+  onProfilePasswordChange,
   onProfileSubmit,
+  onSignOut,
   onJoinFree,
   onEnterApp,
   onStartDemo,
@@ -55,6 +68,7 @@ export function MembershipLanding({
 }: MembershipLandingProps) {
   const monthlyCents = racerMonthlyCents(bikeSeats);
   const isMember = membership.tier !== 'visitor';
+  const creatingAccount = authMode === 'register';
 
   return (
     <main className="membership-page">
@@ -68,18 +82,25 @@ export function MembershipLanding({
             <p>Wattbike racing and training network</p>
           </div>
         </div>
-        <button className="secondary-button" type="button" onClick={onEnterApp} disabled={!profileComplete}>
-          Open App
-        </button>
+        <div className="membership-nav-actions">
+          {profileComplete && (
+            <button className="secondary-button" type="button" onClick={onSignOut}>
+              Sign Out
+            </button>
+          )}
+          <button className="secondary-button" type="button" onClick={onEnterApp} disabled={!profileComplete}>
+            Open App
+          </button>
+        </div>
       </header>
 
       <section className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
         <div>
-          <span className="eyebrow">Profile required</span>
-          <h2>{profileComplete ? 'Profile ready' : 'Create your free TrackLab profile'}</h2>
+          <span className="eyebrow">Login required</span>
+          <h2>{profileComplete ? 'Account ready' : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
           <p>
-            Every spectator and racer needs a profile before entering TrackLab, joining rooms, watching races,
-            or upgrading to connect Wattbikes.
+            Every spectator and racer signs in before entering TrackLab. Free accounts can watch and run demo mode;
+            racer accounts can connect Wattbikes and join private rooms.
           </p>
         </div>
         <form
@@ -89,34 +110,69 @@ export function MembershipLanding({
             onProfileSubmit();
           }}
         >
-          <label>
-            <span>Name</span>
-            <input
-              autoComplete="name"
-              onChange={(event) => onProfileNameChange(event.target.value)}
-              placeholder="Rider or studio name"
-              type="text"
-              value={profileName}
-            />
-          </label>
-          <label>
-            <span>Email</span>
-            <input
-              autoComplete="email"
-              inputMode="email"
-              onChange={(event) => onProfileEmailChange(event.target.value)}
-              placeholder="you@example.com"
-              type="email"
-              value={profileEmail}
-            />
-          </label>
-          <button className="primary-button" type="submit">
-            {profileComplete ? 'Save Profile' : 'Create Profile'}
-          </button>
+          {profileComplete ? (
+            <div className="account-ready-panel">
+              <strong>{profileName}</strong>
+              <span>{profileEmail}</span>
+            </div>
+          ) : creatingAccount && (
+            <label>
+              <span>Name</span>
+              <input
+                autoComplete="name"
+                disabled={authLoading}
+                onChange={(event) => onProfileNameChange(event.target.value)}
+                placeholder="Rider or studio name"
+                type="text"
+                value={profileName}
+              />
+            </label>
+          )}
+          {!profileComplete && (
+            <>
+              <label>
+                <span>Email</span>
+                <input
+                  autoComplete="email"
+                  disabled={authLoading}
+                  inputMode="email"
+                  onChange={(event) => onProfileEmailChange(event.target.value)}
+                  placeholder="you@example.com"
+                  type="email"
+                  value={profileEmail}
+                />
+              </label>
+              <label>
+                <span>Password</span>
+                <input
+                  autoComplete={creatingAccount ? 'new-password' : 'current-password'}
+                  disabled={authLoading}
+                  onChange={(event) => onProfilePasswordChange(event.target.value)}
+                  placeholder="8 characters minimum"
+                  type="password"
+                  value={profilePassword}
+                />
+              </label>
+              <button className="primary-button" type="submit" disabled={authLoading}>
+                <LogIn size={17} />
+                {authLoading ? 'Working...' : creatingAccount ? 'Create Account' : 'Sign In'}
+              </button>
+            </>
+          )}
           {isAdminProfile && (
-            <p className="profile-gate-note">Administrator racer access is active for this profile.</p>
+            <p className="profile-gate-note">Administrator racer access is active for this account.</p>
           )}
           {profileError && <p className="checkout-message error">{profileError}</p>}
+          {!profileComplete && (
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => onAuthModeChange(creatingAccount ? 'login' : 'register')}
+              disabled={authLoading}
+            >
+              {creatingAccount ? 'Already have an account? Sign in' : 'Need an account? Create one free'}
+            </button>
+          )}
         </form>
       </section>
 
@@ -134,7 +190,7 @@ export function MembershipLanding({
           <div className="membership-cta-row">
             <button className="primary-button" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>
               <Users size={17} />
-              {profileComplete ? 'Join Free' : 'Create Free Profile'}
+              {profileComplete ? 'Join Free' : creatingAccount ? 'Create Free Account' : 'Sign In'}
             </button>
             <button className="secondary-button" type="button" onClick={onStartDemo} disabled={!profileComplete}>
               <Play size={17} />
@@ -203,7 +259,7 @@ export function MembershipLanding({
           </div>
           <button className="primary-button full-width" type="button" onClick={onCheckout} disabled={!profileComplete || checkoutStatus === 'loading'}>
             <CreditCard size={17} />
-            {!profileComplete ? 'Create Profile First' : checkoutStatus === 'loading' ? 'Opening Square...' : 'Upgrade with Square'}
+            {!profileComplete ? 'Sign In First' : checkoutStatus === 'loading' ? 'Opening Square...' : 'Upgrade with Square'}
           </button>
           {checkoutMessage && (
             <p className={`checkout-message ${checkoutStatus === 'error' ? 'error' : ''}`}>

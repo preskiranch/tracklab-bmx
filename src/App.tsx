@@ -79,9 +79,17 @@ import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore'
 import { patchCloudUserData, readCloudUserData } from './lib/cloudUserData';
 import { publishPublicTrackMappings, readPublicTrackMappings } from './lib/publicTrackMappings';
 import {
+  claimBillingReturn,
+  loginAuthUser,
+  logoutAuthUser,
+  readCurrentAuthUser,
+  registerAuthUser,
+  type AuthMode,
+  type AuthUser,
+} from './lib/auth';
+import {
   benchmarkDemoTrackId,
   createMembership,
-  isAdminAccountEmail,
   normalizeAccountEmail,
   readStoredMembership,
   writeStoredMembership,
@@ -1053,6 +1061,10 @@ export default function App() {
   const [checkoutBikeSeats, setCheckoutBikeSeats] = useState(() => Math.max(1, Math.min(maxPlayers, initialMembershipRef.current?.bikeSeats ?? 1)));
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>('idle');
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authStatus, setAuthStatus] = useState<'loading' | 'signed-out' | 'signed-in'>('loading');
+  const [authMode, setAuthMode] = useState<AuthMode>('register');
+  const [authPasswordDraft, setAuthPasswordDraft] = useState('');
   const [profileNameDraft, setProfileNameDraft] = useState('');
   const [profileEmailDraft, setProfileEmailDraft] = useState('');
   const [profileFormError, setProfileFormError] = useState<string | null>(null);
@@ -1119,6 +1131,38 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAuthStatus('loading');
+
+    readCurrentAuthUser()
+      .then((user) => {
+        if (cancelled) {
+          return;
+        }
+
+        setAuthUser(user);
+        setAuthStatus(user ? 'signed-in' : 'signed-out');
+        if (user) {
+          setProfileNameDraft(user.name);
+          setProfileEmailDraft(user.email);
+          setMembership(user.membership);
+          setCheckoutBikeSeats(user.membership.bikeSeats);
+        }
+      })
+      .catch((error: Error) => {
+        console.warn(`Could not restore TrackLab login: ${error.message}`);
+        if (!cancelled) {
+          setAuthUser(null);
+          setAuthStatus('signed-out');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1568,42 +1612,83 @@ export default function App() {
     track: effectiveTrack,
     bikeCount: activePlayers.length,
   });
-  const cloudProfileKey = multiplayer.profile.guestKey;
-  const accountEmail = normalizeAccountEmail(multiplayer.profile.email);
-  const accountProfileComplete = Boolean(multiplayer.profile.name.trim() && isValidAccountEmail(accountEmail));
-  const adminProfileActive = accountProfileComplete && isAdminAccountEmail(accountEmail);
+  const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
+  const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
+  const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
+  const adminProfileActive = Boolean(authUser?.admin);
 
   useEffect(() => {
-    setProfileNameDraft((current) => current || multiplayer.profile.name);
-    setProfileEmailDraft((current) => current || multiplayer.profile.email);
-  }, [multiplayer.profile.email, multiplayer.profile.name]);
-
-  useEffect(() => {
-    if (!accountProfileComplete) {
+    if (authStatus !== 'loading' && !accountProfileComplete) {
       setShowMembershipLanding(true);
     }
-  }, [accountProfileComplete]);
+  }, [accountProfileComplete, authStatus]);
 
   useEffect(() => {
-    const profileMembershipTier = adminProfileActive ? 'racer' : membership.tier;
-
-    if (multiplayer.profile.membershipTier === profileMembershipTier) {
+    if (!authUser) {
       return;
     }
 
-    multiplayer.setProfile({ membershipTier: profileMembershipTier });
-  }, [adminProfileActive, membership.tier, multiplayer.profile.membershipTier, multiplayer.setProfile]);
+    if (
+      membership.tier !== authUser.membership.tier
+      || membership.bikeSeats !== authUser.membership.bikeSeats
+    ) {
+      setMembership(authUser.membership);
+      setCheckoutBikeSeats(authUser.membership.bikeSeats);
+    }
+
+    if (
+      multiplayer.profile.guestKey !== authUser.profileKey
+      || multiplayer.profile.name !== authUser.name
+      || multiplayer.profile.email !== authUser.email
+      || multiplayer.profile.membershipTier !== authUser.membership.tier
+    ) {
+      multiplayer.setProfile({
+        guestKey: authUser.profileKey,
+        name: authUser.name,
+        email: authUser.email,
+        membershipTier: authUser.membership.tier,
+      });
+    }
+  }, [
+    authUser,
+    membership.bikeSeats,
+    membership.tier,
+    multiplayer.profile.email,
+    multiplayer.profile.guestKey,
+    multiplayer.profile.membershipTier,
+    multiplayer.profile.name,
+    multiplayer.setProfile,
+  ]);
 
   useEffect(() => {
-    if (!adminProfileActive) {
+    if (!authUser) {
       return;
     }
 
-    if (membership.tier !== 'racer' || membership.bikeSeats !== maxPlayers) {
-      setMembership(createMembership('racer', maxPlayers));
-      setCheckoutBikeSeats(maxPlayers);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('billing') !== 'success' || params.get('tier') !== 'racer') {
+      return;
     }
-  }, [adminProfileActive, membership.bikeSeats, membership.tier]);
+
+    const bikeSeats = Math.max(1, Math.min(maxPlayers, Number(params.get('bikes') ?? 1)));
+    const cleanUrl = new URL(window.location.href);
+    ['billing', 'tier', 'bikes', 'checkoutId', 'profileKey'].forEach((key) => cleanUrl.searchParams.delete(key));
+    window.history.replaceState(null, '', cleanUrl);
+
+    claimBillingReturn(bikeSeats)
+      .then((user) => {
+        if (!user) {
+          return;
+        }
+        setAuthUser(user);
+        setMembership(user.membership);
+        setCheckoutBikeSeats(user.membership.bikeSeats);
+        setCheckoutMessage('Racer access activated.');
+      })
+      .catch((error: Error) => {
+        setCheckoutMessage(`Square checkout returned, but Racer access could not be saved. ${error.message}`);
+      });
+  }, [authUser?.id]);
 
   const livePlayerCount = useMemo(
     () => activePlayers.filter((player) => {
@@ -3442,7 +3527,7 @@ export default function App() {
 
   const handleBikeConnectionSourceChange = (source: BikeConnectionSource) => {
     if (!accountProfileComplete) {
-      setProfileFormError('Create your free profile before connecting Wattbikes.');
+      setProfileFormError('Create an account or sign in before connecting Wattbikes.');
       setCheckoutMessage(null);
       setShowMembershipLanding(true);
       return;
@@ -3477,7 +3562,7 @@ export default function App() {
     resetRace();
   };
 
-  const requireAccountProfile = useCallback((message = 'Create your free profile before entering TrackLab.') => {
+  const requireAccountProfile = useCallback((message = 'Create an account or sign in before entering TrackLab.') => {
     if (accountProfileComplete) {
       return true;
     }
@@ -3488,11 +3573,11 @@ export default function App() {
     return false;
   }, [accountProfileComplete]);
 
-  const saveRequiredProfile = useCallback(() => {
+  const saveRequiredProfile = useCallback(async () => {
     const name = profileNameDraft.trim().replace(/\s+/g, ' ').slice(0, 64);
     const email = normalizeAccountEmail(profileEmailDraft);
 
-    if (!name) {
+    if (authMode === 'register' && !name) {
       setProfileFormError('Enter your name or studio name.');
       return false;
     }
@@ -3502,30 +3587,68 @@ export default function App() {
       return false;
     }
 
-    const isAdminProfile = isAdminAccountEmail(email);
-    const nextMembership = isAdminProfile
-      ? createMembership('racer', maxPlayers)
-      : membership.tier === 'visitor'
-        ? createMembership('spectator', 1)
-        : membership;
+    if (authPasswordDraft.length < 8) {
+      setProfileFormError('Password must be at least 8 characters.');
+      return false;
+    }
 
-    multiplayer.setProfile({
-      name,
-      email,
-      membershipTier: nextMembership.tier,
-    });
-    setMembership(nextMembership);
-    setCheckoutBikeSeats(nextMembership.bikeSeats);
-    setProfileNameDraft(name);
-    setProfileEmailDraft(email);
+    setAuthStatus('loading');
     setProfileFormError(null);
-    setCheckoutStatus('idle');
-    setCheckoutMessage(isAdminProfile ? 'Administrator racer access unlocked.' : null);
-    setShowMembershipLanding(false);
-    setPlayMode('multiplayer');
-    setAppMode('race');
-    return true;
-  }, [membership, multiplayer, profileEmailDraft, profileNameDraft]);
+    setCheckoutMessage(null);
+
+    try {
+      const user = authMode === 'register'
+        ? await registerAuthUser(name, email, authPasswordDraft)
+        : await loginAuthUser(email, authPasswordDraft);
+
+      if (!user) {
+        throw new Error('TrackLab did not return an account.');
+      }
+
+      setAuthUser(user);
+      setAuthStatus('signed-in');
+      setMembership(user.membership);
+      setCheckoutBikeSeats(user.membership.bikeSeats);
+      setProfileNameDraft(user.name);
+      setProfileEmailDraft(user.email);
+      setAuthPasswordDraft('');
+      setCheckoutStatus('idle');
+      setCheckoutMessage(user.admin ? 'Administrator racer access unlocked.' : null);
+      setShowMembershipLanding(false);
+      setPlayMode('multiplayer');
+      setAppMode('race');
+      return true;
+    } catch (error) {
+      setAuthUser(null);
+      setAuthStatus('signed-out');
+      setProfileFormError(error instanceof Error ? error.message : 'Could not sign in.');
+      return false;
+    }
+  }, [authMode, authPasswordDraft, profileEmailDraft, profileNameDraft]);
+
+  const handleSignOut = useCallback(async () => {
+    clearStartGateSequence();
+    setCheckoutMessage(null);
+    setProfileFormError(null);
+    setAuthPasswordDraft('');
+    setAuthStatus('loading');
+
+    try {
+      await logoutAuthUser();
+    } catch (error) {
+      console.warn(`Could not clear TrackLab session: ${error instanceof Error ? error.message : error}`);
+    }
+
+    const visitorMembership = createMembership('visitor');
+    setAuthUser(null);
+    setAuthStatus('signed-out');
+    setMembership(visitorMembership);
+    setCheckoutBikeSeats(1);
+    setPlayMode('local');
+    setBikeConnectionSource('bluetooth');
+    setDemoMode(false);
+    setShowMembershipLanding(true);
+  }, [clearStartGateSequence]);
 
   const openFreeSpectatorAccess = useCallback(() => {
     if (!requireAccountProfile()) {
@@ -3545,7 +3668,7 @@ export default function App() {
   }, [adminProfileActive, multiplayer, requireAccountProfile]);
 
   const startBenchmarkDemo = useCallback(() => {
-    if (!requireAccountProfile('Create your free profile before starting demo mode.')) {
+    if (!requireAccountProfile('Create an account or sign in before starting demo mode.')) {
       return;
     }
 
@@ -3585,7 +3708,7 @@ export default function App() {
   }, []);
 
   const startSquareCheckout = useCallback(async () => {
-    if (!requireAccountProfile('Create your profile before upgrading to Racer.')) {
+    if (!requireAccountProfile('Create an account or sign in before upgrading to Racer.')) {
       return;
     }
 
@@ -3596,10 +3719,7 @@ export default function App() {
       const response = await fetch('/api/billing/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bikeSeats: checkoutBikeSeats,
-          profileKey: cloudProfileKey,
-        }),
+        body: JSON.stringify({ bikeSeats: checkoutBikeSeats }),
       });
       const payload = await response.json() as { checkoutUrl?: string; error?: string };
       if (!response.ok || !payload.checkoutUrl) {
@@ -3615,7 +3735,7 @@ export default function App() {
           : 'Square checkout is not available right now.',
       );
     }
-  }, [checkoutBikeSeats, cloudProfileKey, requireAccountProfile]);
+  }, [checkoutBikeSeats, requireAccountProfile]);
 
   const prepareNoBikeDemoTest = useCallback(() => {
     clearStartGateSequence();
@@ -3995,13 +4115,20 @@ export default function App() {
         bikeSeats={checkoutBikeSeats}
         checkoutStatus={checkoutStatus}
         checkoutMessage={checkoutMessage}
+        authMode={authMode}
+        authLoading={authStatus === 'loading'}
         profileName={profileNameDraft}
         profileEmail={profileEmailDraft}
+        profilePassword={authPasswordDraft}
         profileComplete={accountProfileComplete}
         profileError={profileFormError}
-        isAdminProfile={adminProfileActive || isAdminAccountEmail(profileEmailDraft)}
+        isAdminProfile={adminProfileActive}
         onlineRiderCount={multiplayer.onlineRiders.length}
         liveRoomCount={multiplayer.rooms.length}
+        onAuthModeChange={(mode) => {
+          setAuthMode(mode);
+          setProfileFormError(null);
+        }}
         onProfileNameChange={(name) => {
           setProfileNameDraft(name);
           setProfileFormError(null);
@@ -4010,7 +4137,12 @@ export default function App() {
           setProfileEmailDraft(email);
           setProfileFormError(null);
         }}
+        onProfilePasswordChange={(password) => {
+          setAuthPasswordDraft(password);
+          setProfileFormError(null);
+        }}
         onProfileSubmit={saveRequiredProfile}
+        onSignOut={handleSignOut}
         onJoinFree={openFreeSpectatorAccess}
         onEnterApp={openRaceDashboard}
         onStartDemo={startBenchmarkDemo}
@@ -4138,9 +4270,12 @@ export default function App() {
           <span className="eyebrow">Membership</span>
           <strong>{membershipLabel}</strong>
           <p>{membership.tier === 'racer' ? 'Live Wattbike racing unlocked.' : 'Demo and live viewing access.'}</p>
-          <small>{multiplayer.profile.name} / {multiplayer.profile.email}</small>
+          <small>{authUser ? `${authUser.name} / ${authUser.email}` : 'Signed out'}</small>
           <button type="button" onClick={() => setShowMembershipLanding(true)}>
             {membership.tier === 'racer' ? 'Manage Access' : 'Upgrade'}
+          </button>
+          <button type="button" onClick={handleSignOut}>
+            Sign Out
           </button>
         </section>
 

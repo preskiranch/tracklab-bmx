@@ -87,6 +87,38 @@ export async function initPersistence() {
       await pool.query(`ALTER TABLE ${schema}.profiles ADD COLUMN IF NOT EXISTS email TEXT`);
       await pool.query(`ALTER TABLE ${schema}.profiles ADD COLUMN IF NOT EXISTS membership_tier TEXT NOT NULL DEFAULT 'visitor'`);
       await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.auth_users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        display_name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        membership_tier TEXT NOT NULL DEFAULT 'spectator',
+        bike_seats INTEGER NOT NULL DEFAULT 1,
+        admin BOOLEAN NOT NULL DEFAULT false,
+        square_customer_id TEXT,
+        square_subscription_id TEXT,
+        last_login TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS membership_tier TEXT NOT NULL DEFAULT 'spectator'`);
+      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS bike_seats INTEGER NOT NULL DEFAULT 1`);
+      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS admin BOOLEAN NOT NULL DEFAULT false`);
+      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS square_customer_id TEXT`);
+      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS square_subscription_id TEXT`);
+      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ`);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.auth_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+        token_hash TEXT UNIQUE NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+      await pool.query(`
       CREATE TABLE IF NOT EXISTS ${schema}.rooms (
         id TEXT PRIMARY KEY,
         host_guest_key TEXT,
@@ -183,6 +215,9 @@ export async function initPersistence() {
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rpm ON ${schema}.race_results (track_id, top_cadence DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_watts ON ${schema}.race_results (track_id, top_watts DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_public_mappings_updated ON ${schema}.public_track_mappings (updated_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_email ON ${schema}.auth_users (email)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_token ON ${schema}.auth_sessions (token_hash)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_expires ON ${schema}.auth_sessions (expires_at)`);
       console.log('[cloud] TrackLab persistence ready.');
       return true;
     } catch (error) {
@@ -218,6 +253,130 @@ export async function setProfileOffline(client) {
   return query(
     `UPDATE ${schema}.profiles SET available = false, last_seen = now(), updated_at = now() WHERE guest_key = $1`,
     [client.guestKey],
+  );
+}
+
+function authUserFromRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    passwordHash: row.password_hash,
+    membershipTier: row.membership_tier,
+    bikeSeats: Number(row.bike_seats) || 1,
+    admin: Boolean(row.admin),
+    squareCustomerId: row.square_customer_id ?? '',
+    squareSubscriptionId: row.square_subscription_id ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastLogin: row.last_login,
+  };
+}
+
+export async function findAuthUserByEmail(email) {
+  const result = await query(
+    `SELECT * FROM ${schema}.auth_users WHERE email = $1 LIMIT 1`,
+    [email],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
+export async function findAuthUserById(id) {
+  const result = await query(
+    `SELECT * FROM ${schema}.auth_users WHERE id = $1 LIMIT 1`,
+    [id],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
+export async function createAuthUser(user) {
+  const result = await query(
+    `INSERT INTO ${schema}.auth_users (id, email, display_name, password_hash, membership_tier, bike_seats, admin, last_login)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+     RETURNING *`,
+    [
+      user.id,
+      user.email,
+      user.displayName,
+      user.passwordHash,
+      user.membershipTier,
+      user.bikeSeats,
+      Boolean(user.admin),
+    ],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
+export async function touchAuthUserLogin(userId) {
+  const result = await query(
+    `UPDATE ${schema}.auth_users SET last_login = now(), updated_at = now() WHERE id = $1 RETURNING *`,
+    [userId],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
+export async function updateAuthUserMembership(userId, membershipTier, bikeSeats) {
+  const result = await query(
+    `UPDATE ${schema}.auth_users
+     SET membership_tier = $2, bike_seats = $3, updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [userId, membershipTier, bikeSeats],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
+export async function createAuthSession(session) {
+  await query(
+    `INSERT INTO ${schema}.auth_sessions (id, user_id, token_hash, expires_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (token_hash) DO UPDATE SET
+       user_id = EXCLUDED.user_id,
+       expires_at = EXCLUDED.expires_at,
+       last_seen = now()`,
+    [session.id, session.userId, session.tokenHash, session.expiresAt],
+  );
+}
+
+export async function findAuthSession(tokenHash) {
+  const result = await query(
+    `SELECT
+       session.id AS session_id,
+       session.expires_at,
+       users.*
+     FROM ${schema}.auth_sessions AS session
+     JOIN ${schema}.auth_users AS users ON users.id = session.user_id
+     WHERE session.token_hash = $1 AND session.expires_at > now()
+     LIMIT 1`,
+    [tokenHash],
+  );
+  const row = result?.rows?.[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    sessionId: row.session_id,
+    expiresAt: row.expires_at,
+    user: authUserFromRow(row),
+  };
+}
+
+export async function touchAuthSession(tokenHash) {
+  await query(
+    `UPDATE ${schema}.auth_sessions SET last_seen = now() WHERE token_hash = $1 AND expires_at > now()`,
+    [tokenHash],
+  );
+}
+
+export async function deleteAuthSession(tokenHash) {
+  await query(
+    `DELETE FROM ${schema}.auth_sessions WHERE token_hash = $1`,
+    [tokenHash],
   );
 }
 
