@@ -11,9 +11,18 @@ export const benchmarkDemoTrackId = 'north-bay-bmx-napa-valley';
 export const includedBikeMonthlyCents = 999;
 export const additionalBikeMonthlyCents = 499;
 export const maxBillingBikeSeats = 4;
+export const adminAccountEmail = 'preskiranch@gmail.com';
 
 function clampBikeSeats(value: number) {
   return Math.max(1, Math.min(maxBillingBikeSeats, Math.round(value)));
+}
+
+export function normalizeAccountEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+export function isAdminAccountEmail(email: string) {
+  return normalizeAccountEmail(email) === adminAccountEmail;
 }
 
 export function racerMonthlyCents(bikeSeats: number) {

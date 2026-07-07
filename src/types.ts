@@ -105,6 +105,7 @@ export type MultiplayerRider = {
   id: string;
   name: string;
   available: boolean;
+  membershipTier?: 'visitor' | 'spectator' | 'racer';
   bikeCount: number;
   track: MultiplayerTrackSummary;
   roomId: string | null;

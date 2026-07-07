@@ -15,8 +15,16 @@ type MembershipLandingProps = {
   bikeSeats: number;
   checkoutStatus: CheckoutStatus;
   checkoutMessage: string | null;
+  profileName: string;
+  profileEmail: string;
+  profileComplete: boolean;
+  profileError: string | null;
+  isAdminProfile: boolean;
   onlineRiderCount: number;
   liveRoomCount: number;
+  onProfileNameChange: (name: string) => void;
+  onProfileEmailChange: (email: string) => void;
+  onProfileSubmit: () => void;
   onJoinFree: () => void;
   onEnterApp: () => void;
   onStartDemo: () => void;
@@ -29,8 +37,16 @@ export function MembershipLanding({
   bikeSeats,
   checkoutStatus,
   checkoutMessage,
+  profileName,
+  profileEmail,
+  profileComplete,
+  profileError,
+  isAdminProfile,
   onlineRiderCount,
   liveRoomCount,
+  onProfileNameChange,
+  onProfileEmailChange,
+  onProfileSubmit,
   onJoinFree,
   onEnterApp,
   onStartDemo,
@@ -52,10 +68,57 @@ export function MembershipLanding({
             <p>Wattbike racing and training network</p>
           </div>
         </div>
-        <button className="secondary-button" type="button" onClick={onEnterApp}>
+        <button className="secondary-button" type="button" onClick={onEnterApp} disabled={!profileComplete}>
           Open App
         </button>
       </header>
+
+      <section className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
+        <div>
+          <span className="eyebrow">Profile required</span>
+          <h2>{profileComplete ? 'Profile ready' : 'Create your free TrackLab profile'}</h2>
+          <p>
+            Every spectator and racer needs a profile before entering TrackLab, joining rooms, watching races,
+            or upgrading to connect Wattbikes.
+          </p>
+        </div>
+        <form
+          className="profile-gate-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onProfileSubmit();
+          }}
+        >
+          <label>
+            <span>Name</span>
+            <input
+              autoComplete="name"
+              onChange={(event) => onProfileNameChange(event.target.value)}
+              placeholder="Rider or studio name"
+              type="text"
+              value={profileName}
+            />
+          </label>
+          <label>
+            <span>Email</span>
+            <input
+              autoComplete="email"
+              inputMode="email"
+              onChange={(event) => onProfileEmailChange(event.target.value)}
+              placeholder="you@example.com"
+              type="email"
+              value={profileEmail}
+            />
+          </label>
+          <button className="primary-button" type="submit">
+            {profileComplete ? 'Save Profile' : 'Create Profile'}
+          </button>
+          {isAdminProfile && (
+            <p className="profile-gate-note">Administrator racer access is active for this profile.</p>
+          )}
+          {profileError && <p className="checkout-message error">{profileError}</p>}
+        </form>
+      </section>
 
       <section className="membership-hero">
         <div className="membership-hero-copy">
@@ -69,11 +132,11 @@ export function MembershipLanding({
             create private rooms, join challenges, and save performance data.
           </p>
           <div className="membership-cta-row">
-            <button className="primary-button" type="button" onClick={onJoinFree}>
+            <button className="primary-button" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>
               <Users size={17} />
-              Join Free
+              {profileComplete ? 'Join Free' : 'Create Free Profile'}
             </button>
-            <button className="secondary-button" type="button" onClick={onStartDemo}>
+            <button className="secondary-button" type="button" onClick={onStartDemo} disabled={!profileComplete}>
               <Play size={17} />
               Demo Race
             </button>
@@ -111,7 +174,7 @@ export function MembershipLanding({
             <li>Benchmark demo races</li>
             <li>Community profile</li>
           </ul>
-          <button className="secondary-button full-width" type="button" onClick={onJoinFree}>
+          <button className="secondary-button full-width" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>
             {isMember ? 'Use Free Access' : 'Create Free Membership'}
           </button>
         </article>
@@ -138,9 +201,9 @@ export function MembershipLanding({
               </button>
             ))}
           </div>
-          <button className="primary-button full-width" type="button" onClick={onCheckout} disabled={checkoutStatus === 'loading'}>
+          <button className="primary-button full-width" type="button" onClick={onCheckout} disabled={!profileComplete || checkoutStatus === 'loading'}>
             <CreditCard size={17} />
-            {checkoutStatus === 'loading' ? 'Opening Square...' : 'Upgrade with Square'}
+            {!profileComplete ? 'Create Profile First' : checkoutStatus === 'loading' ? 'Opening Square...' : 'Upgrade with Square'}
           </button>
           {checkoutMessage && (
             <p className={`checkout-message ${checkoutStatus === 'error' ? 'error' : ''}`}>
@@ -163,7 +226,7 @@ export function MembershipLanding({
             <li>Random online challenges</li>
             <li>Post-race analytics</li>
           </ul>
-          <button className="secondary-button full-width" type="button" onClick={onEnterApp}>
+          <button className="secondary-button full-width" type="button" onClick={onEnterApp} disabled={!profileComplete}>
             <Lock size={16} />
             Open Dashboard
           </button>

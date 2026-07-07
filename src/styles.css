@@ -146,14 +146,102 @@ input:focus {
   background: #f8fafb;
 }
 
+.primary-button:disabled,
+.secondary-button:disabled,
+.membership-mini-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .full-width {
   width: 100%;
 }
 
 .membership-hero,
-.membership-grid {
+.membership-grid,
+.profile-gate {
   width: min(1180px, 100%);
   margin: 0 auto;
+}
+
+.profile-gate {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(360px, 1.08fr);
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 28px rgba(25, 39, 52, 0.06);
+}
+
+.profile-gate.complete {
+  border-color: rgba(101, 214, 54, 0.44);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(243, 253, 238, 0.92));
+}
+
+.profile-gate h2 {
+  margin-top: 5px;
+  font-size: 24px;
+  line-height: 1.12;
+}
+
+.profile-gate p {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.profile-gate-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.profile-gate-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.profile-gate-form label span {
+  color: #516171;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.profile-gate-form input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.profile-gate-form input:focus {
+  border-color: #2388e8;
+  outline: 3px solid rgba(35, 136, 232, 0.16);
+}
+
+.profile-gate-note {
+  grid-column: 1 / -1;
+  margin: -2px 0 0;
+  color: #256318 !important;
+  font-weight: 850;
+}
+
+.profile-gate-form .checkout-message {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .membership-hero {
@@ -364,6 +452,15 @@ input:focus {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.membership-mini-card small {
+  overflow: hidden;
+  color: #566675;
+  font-size: 11px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .membership-mini-card button {
@@ -3831,6 +3928,11 @@ input:focus {
   .membership-cta-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .profile-gate,
+  .profile-gate-form {
+    grid-template-columns: 1fr;
   }
 
   .membership-hero-copy {

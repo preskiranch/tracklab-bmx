@@ -14,7 +14,9 @@ type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 type MultiplayerProfile = {
   guestKey: string;
   name: string;
+  email: string;
   available: boolean;
+  membershipTier: 'visitor' | 'spectator' | 'racer';
 };
 
 type UseMultiplayerOptions = {
@@ -38,6 +40,14 @@ function createGuestKey() {
 
 function normalizeGuestKey(value: string, fallback: string) {
   return value.trim().replace(/[^a-zA-Z0-9:._-]/g, '').slice(0, 160) || fallback;
+}
+
+function normalizeProfileEmail(value: unknown) {
+  return typeof value === 'string' ? value.trim().toLowerCase().slice(0, 160) : '';
+}
+
+function normalizeMembershipTier(value: unknown): MultiplayerProfile['membershipTier'] {
+  return value === 'spectator' || value === 'racer' ? value : 'visitor';
 }
 
 function profileKeyFromUrl() {
@@ -82,7 +92,9 @@ function readProfile(): MultiplayerProfile {
       const profile = {
         guestKey: urlGuestKey || (typeof parsed.guestKey === 'string' ? normalizeGuestKey(parsed.guestKey, fallbackGuestKey) : fallbackGuestKey),
         name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim().slice(0, 64) : randomRiderName(),
+        email: normalizeProfileEmail(parsed.email),
         available: Boolean(parsed.available),
+        membershipTier: normalizeMembershipTier(parsed.membershipTier),
       };
       writeProfile(profile);
       writeProfileCookie(profile.guestKey);
@@ -96,7 +108,9 @@ function readProfile(): MultiplayerProfile {
   const profile = {
     guestKey: urlGuestKey || createGuestKey(),
     name: randomRiderName(),
+    email: '',
     available: false,
+    membershipTier: 'visitor' as const,
   };
   writeProfile(profile);
   writeProfileCookie(profile.guestKey);
@@ -172,19 +186,23 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
       type: 'presence',
       guestKey: nextProfile.guestKey,
       name: nextProfile.name,
+      email: nextProfile.email,
       available: nextProfile.available,
+      membershipTier: nextProfile.membershipTier,
       bikeCount,
       track: currentTrack,
     });
   }, [bikeCount, currentTrack, profile, send]);
 
-  const setProfile = useCallback((patch: Partial<Pick<MultiplayerProfile, 'guestKey' | 'name' | 'available'>>) => {
+  const setProfile = useCallback((patch: Partial<Pick<MultiplayerProfile, 'guestKey' | 'name' | 'email' | 'available' | 'membershipTier'>>) => {
     setProfileState((current) => {
       const next = {
         ...current,
         ...patch,
         guestKey: patch.guestKey != null ? normalizeGuestKey(patch.guestKey, current.guestKey) : current.guestKey,
         name: patch.name != null ? patch.name.trim().slice(0, 64) || current.name : current.name,
+        email: patch.email != null ? normalizeProfileEmail(patch.email) : current.email,
+        membershipTier: patch.membershipTier != null ? normalizeMembershipTier(patch.membershipTier) : current.membershipTier,
       };
       writeProfile(next);
       void sendPresence(next);
@@ -230,7 +248,9 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           type: 'hello',
           guestKey: latestProfile.guestKey,
           name: latestProfile.name,
+          email: latestProfile.email,
           available: latestProfile.available,
+          membershipTier: latestProfile.membershipTier,
           bikeCount: latestBikeCountRef.current,
           track: latestTrackRef.current ?? currentTrack,
         }));

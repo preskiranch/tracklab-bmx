@@ -74,6 +74,8 @@ export async function initPersistence() {
       CREATE TABLE IF NOT EXISTS ${schema}.profiles (
         guest_key TEXT PRIMARY KEY,
         display_name TEXT NOT NULL,
+        email TEXT,
+        membership_tier TEXT NOT NULL DEFAULT 'visitor',
         available BOOLEAN NOT NULL DEFAULT false,
         bike_count INTEGER NOT NULL DEFAULT 0,
         current_track JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -82,6 +84,8 @@ export async function initPersistence() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+      await pool.query(`ALTER TABLE ${schema}.profiles ADD COLUMN IF NOT EXISTS email TEXT`);
+      await pool.query(`ALTER TABLE ${schema}.profiles ADD COLUMN IF NOT EXISTS membership_tier TEXT NOT NULL DEFAULT 'visitor'`);
       await pool.query(`
       CREATE TABLE IF NOT EXISTS ${schema}.rooms (
         id TEXT PRIMARY KEY,
@@ -195,16 +199,18 @@ export async function initPersistence() {
 
 export async function upsertProfile(client) {
   return query(
-    `INSERT INTO ${schema}.profiles (guest_key, display_name, available, bike_count, current_track, last_seen, updated_at)
-     VALUES ($1, $2, $3, $4, $5::jsonb, now(), now())
+    `INSERT INTO ${schema}.profiles (guest_key, display_name, email, membership_tier, available, bike_count, current_track, last_seen, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, now(), now())
      ON CONFLICT (guest_key) DO UPDATE SET
        display_name = EXCLUDED.display_name,
+       email = EXCLUDED.email,
+       membership_tier = EXCLUDED.membership_tier,
        available = EXCLUDED.available,
        bike_count = EXCLUDED.bike_count,
        current_track = EXCLUDED.current_track,
        last_seen = now(),
        updated_at = now()`,
-    [client.guestKey, client.name, client.available, client.bikeCount, json(client.track)],
+    [client.guestKey, client.name, client.email || null, client.membershipTier, client.available, client.bikeCount, json(client.track)],
   );
 }
 

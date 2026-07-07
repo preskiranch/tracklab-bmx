@@ -51,6 +51,15 @@ function sanitizeGuestKey(value, fallback) {
   return text.replace(/[^a-zA-Z0-9:._-]/g, '').slice(0, 160) || fallback;
 }
 
+function sanitizeEmail(value) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) ? text.slice(0, 160) : '';
+}
+
+function sanitizeMembershipTier(value) {
+  return value === 'spectator' || value === 'racer' ? value : 'visitor';
+}
+
 function cookieValue(request, name) {
   const cookieHeader = request.headers.cookie;
   if (!cookieHeader) {
@@ -447,6 +456,7 @@ function publicRider(client) {
     id: client.id,
     name: client.name,
     available: client.available,
+    membershipTier: client.membershipTier,
     bikeCount: client.bikeCount,
     track: client.track,
     roomId: client.roomId,
@@ -639,6 +649,8 @@ async function handleClientMessage(client, rawMessage) {
   if (message.type === 'hello' || message.type === 'presence') {
     client.guestKey = sanitizeGuestKey(message.guestKey, client.guestKey);
     client.name = sanitizeText(message.name, client.name, 64);
+    client.email = sanitizeEmail(message.email);
+    client.membershipTier = sanitizeMembershipTier(message.membershipTier);
     client.available = Boolean(message.available);
     client.bikeCount = Math.max(0, Math.min(maxRaceBikeCount, Number(message.bikeCount) || 0));
     client.track = sanitizeTrack(message.track ?? client.track);
@@ -994,6 +1006,8 @@ wss.on('connection', (socket) => {
     guestKey: randomId('GUEST', 16),
     socket,
     name: 'TrackLab Rider',
+    email: '',
+    membershipTier: 'visitor',
     available: false,
     bikeCount: 0,
     track: sanitizeTrack(null),
