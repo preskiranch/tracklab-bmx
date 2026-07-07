@@ -7,7 +7,7 @@ ENV_FILE="$APP_DIR/.env.local"
 clear
 echo "Starting TrackLab BMX..."
 echo
-echo "This starts the local TrackLab app and the ANT+ bridge."
+echo "This starts the local TrackLab app and the Bluetooth/ANT+ bike connector."
 echo "Use this launcher for Wattbike riding and racing."
 echo
 
@@ -78,9 +78,9 @@ fi
 echo "The app will open at: $APP_URL"
 echo
 echo "Use it like this:"
-echo "1. Press Start Local Bridge in TrackLab."
+echo "1. Press Start Connector in TrackLab."
 echo "2. Put each Wattbike in Just Ride."
-echo "3. Pedal each bike for a few seconds so the ANT+ bridge can detect it."
+echo "3. Pedal each bike for a few seconds so the connector can detect it."
 echo
 echo "Leave this Terminal window open while using TrackLab."
 echo "Run Stop TrackLab BMX when you are finished."
