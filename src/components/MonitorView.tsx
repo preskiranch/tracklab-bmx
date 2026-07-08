@@ -87,16 +87,9 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
   const activeSprintsRef = useRef<Map<number, MonitorSprintDraft>>(new Map());
   const [sprintResults, setSprintResults] = useState<Record<number, MonitorSprintResult>>({});
   const [now, setNow] = useState(Date.now());
-  const livePlayers = useMemo(
-    () => players.filter((player) => {
-      if (player.deviceId == null) {
-        return false;
-      }
-
-      const sample = samplesByDevice.get(player.deviceId);
-      return metricIsFresh(sample, sample?.at, now);
-    }),
-    [now, players, samplesByDevice],
+  const connectedPlayers = useMemo(
+    () => players.filter((player) => player.deviceId != null),
+    [players],
   );
 
   useEffect(() => {
@@ -105,12 +98,12 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
   }, []);
 
   useEffect(() => {
-    const connectedDevices = new Set(livePlayers
+    const connectedDevices = new Set(connectedPlayers
       .map((player) => player.deviceId)
       .filter((deviceId): deviceId is number => deviceId != null));
     const updates = new Map<number, MonitorSprintResult | null>();
 
-    livePlayers.forEach((player) => {
+    connectedPlayers.forEach((player) => {
       if (player.deviceId == null) {
         return;
       }
@@ -193,7 +186,7 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
 
       return changed ? next : current;
     });
-  }, [now, livePlayers, samplesByDevice]);
+  }, [connectedPlayers, now, samplesByDevice]);
 
   return (
     <main className="monitor-panel">
@@ -204,21 +197,22 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
         </div>
         <div className="monitor-count">
           <Bike size={18} />
-          <span>{livePlayers.length} connected</span>
+          <span>{connectedPlayers.length} connected</span>
         </div>
       </div>
 
-      {livePlayers.length === 0 ? (
+      {connectedPlayers.length === 0 ? (
         <div className="monitor-empty">
           <RadioTower size={22} />
-          <span>No live bikes detected yet.</span>
+          <span>No connected bikes detected yet.</span>
         </div>
       ) : (
         <div className="monitor-grid">
-          {livePlayers.map((player) => {
+          {connectedPlayers.map((player) => {
             const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
             const metrics = monitorMetrics(sample, now);
             const sprintResult = player.deviceId == null ? undefined : sprintResults[player.deviceId];
+            const deviceLabel = player.deviceLabel ?? sample?.label ?? 'Wattbike monitor';
 
             return (
               <section
@@ -232,7 +226,8 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
                   </span>
                   <div>
                     <h3>{player.name}</h3>
-                    <p>{player.deviceId ? `Device ${player.deviceId}` : 'Unassigned'}</p>
+                    <p className="monitor-bike-id">{player.deviceId ? `Monitor ID ${player.deviceId}` : 'Unassigned'}</p>
+                    <small>{deviceLabel}</small>
                   </div>
                   <span className="monitor-live">
                     <Signal size={15} />

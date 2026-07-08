@@ -122,6 +122,8 @@ import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import type {
   AppMode,
   BikeProfile,
+  BikeSample,
+  ConnectedBikeDevice,
   DistanceUnit,
   DraftTrackSplit,
   EarthCamera,
@@ -156,6 +158,7 @@ const uciRandomDelayMaxMs = 2700;
 const customRouteInitialZoom = 18;
 const customRouteInitialAngle = 0;
 const customRouteInitialHeading = 0;
+const connectedBikeDeviceTimeoutMs = 15000;
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 type CheckoutStatus = 'idle' | 'loading' | 'error';
@@ -729,6 +732,62 @@ function isPlayerColorName(value: unknown): value is PlayerSlot['colorName'] {
 
 function defaultBikeName(deviceId: number) {
   return `Bike ${deviceId}`;
+}
+
+function connectedDeviceFromSample(sample: BikeSample): ConnectedBikeDevice {
+  return {
+    at: sample.at,
+    connected: true,
+    deviceId: sample.deviceId,
+    label: sample.label,
+    signal: sample.signal,
+    source: sample.source,
+  };
+}
+
+function isSupplementalBikeDevice(device: ConnectedBikeDevice) {
+  const label = device.label.toLowerCase();
+  const isSpeedOrCadence = /speed\/cadence|speed cadence|\bcadence\b|\bspeed\b/.test(label);
+  const isPrimaryPower = /wattbike|bicycle power|cycling power|fitness|power meter|powermeter/.test(label);
+  return isSpeedOrCadence && !isPrimaryPower;
+}
+
+function isConnectedBikeDevice(device: ConnectedBikeDevice, now: number) {
+  if (!device.connected) {
+    return false;
+  }
+
+  if (device.source === 'bluetooth' || device.source === 'usb' || device.at == null) {
+    return true;
+  }
+
+  return now - device.at <= connectedBikeDeviceTimeoutMs;
+}
+
+function raceBikeDevices(devices: ConnectedBikeDevice[], now: number) {
+  const connectedById = new Map<number, ConnectedBikeDevice>();
+  devices.forEach((device) => {
+    const deviceId = Number(device.deviceId);
+    if (!Number.isFinite(deviceId) || deviceId <= 0 || !isConnectedBikeDevice(device, now)) {
+      return;
+    }
+
+    const normalizedDevice = {
+      ...device,
+      deviceId: Math.round(deviceId),
+      label: device.label || `Wattbike ${Math.round(deviceId)}`,
+    };
+    const previous = connectedById.get(normalizedDevice.deviceId);
+    if (!previous || (normalizedDevice.at ?? 0) >= (previous.at ?? 0)) {
+      connectedById.set(normalizedDevice.deviceId, normalizedDevice);
+    }
+  });
+
+  const connectedDevices = [...connectedById.values()];
+  const primaryDevices = connectedDevices.filter((device) => !isSupplementalBikeDevice(device));
+  return (primaryDevices.length > 0 ? primaryDevices : connectedDevices)
+    .sort((a, b) => a.deviceId - b.deviceId)
+    .slice(0, maxPlayers);
 }
 
 function createBikeProfile(deviceId: number, index: number, name = defaultBikeName(deviceId)): BikeProfile {
@@ -1751,13 +1810,27 @@ export default function App() {
     return next;
   }, [bluetooth.samplesByDevice, bridge.samplesByDevice]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
+  const connectedBikeDevices = useMemo(() => {
+    const devices: ConnectedBikeDevice[] = [
+      ...bridge.devices,
+      ...bluetooth.devices,
+    ];
+
+    connectedBikeSamples.forEach((sample) => {
+      if (now - sample.at <= connectedBikeDeviceTimeoutMs) {
+        devices.push(connectedDeviceFromSample(sample));
+      }
+    });
+
+    return raceBikeDevices(devices, now);
+  }, [bluetooth.devices, bridge.devices, connectedBikeSamples, now]);
+  const connectedBikeDeviceById = useMemo(
+    () => new Map(connectedBikeDevices.map((device) => [device.deviceId, device])),
+    [connectedBikeDevices],
+  );
   const connectedDeviceIds = useMemo(
-    () => [...connectedBikeSamples.entries()]
-      .filter(([, sample]) => now - sample.at < liveBikeTimeoutMs)
-      .map(([deviceId]) => deviceId)
-      .sort((a, b) => a - b)
-      .slice(0, maxPlayers),
-    [connectedBikeSamples, now],
+    () => connectedBikeDevices.map((device) => device.deviceId),
+    [connectedBikeDevices],
   );
   const profileByDevice = useMemo(
     () => new Map(bikeProfiles.map((profile) => [profile.deviceId, profile])),
@@ -1767,6 +1840,8 @@ export default function App() {
     () => connectedDeviceIds.map((deviceId, index) => {
       const visual = profileVisual(index);
       const profile = profileByDevice.get(deviceId);
+      const connectedDevice = connectedBikeDeviceById.get(deviceId);
+      const sample = connectedBikeSamples.get(deviceId);
 
       return {
         id: visual.id,
@@ -1774,9 +1849,11 @@ export default function App() {
         colorName: profile?.colorName ?? visual.colorName,
         accent: profile?.accent ?? visual.accent,
         deviceId,
+        deviceLabel: connectedDevice?.label ?? sample?.label,
+        deviceSource: connectedDevice?.source ?? sample?.source,
       };
     }),
-    [connectedDeviceIds, profileByDevice],
+    [connectedBikeDeviceById, connectedBikeSamples, connectedDeviceIds, profileByDevice],
   );
   const activePlayers = useMemo(
     () => {
@@ -4579,9 +4656,13 @@ export default function App() {
       return 'Advanced Connector error';
     }
 
-    return activePlayers.length > 0
-      ? `${livePlayerCount}/${activePlayers.length} bike${activePlayers.length === 1 ? '' : 's'} live`
-      : `${bridge.mode.toString().toUpperCase()} connector scanning`;
+    if (activePlayers.length > 0) {
+      return livePlayerCount > 0
+        ? `${livePlayerCount}/${activePlayers.length} bike${activePlayers.length === 1 ? '' : 's'} live`
+        : `${activePlayers.length} bike${activePlayers.length === 1 ? '' : 's'} connected`;
+    }
+
+    return `${bridge.mode.toString().toUpperCase()} connector scanning`;
   })();
   const connectionStatus = (() => {
     if (demoMode) {
@@ -4646,7 +4727,7 @@ export default function App() {
     }
 
     if (activePlayers.length > 0) {
-      return 'Bike signal live. Saved bike IDs will be remembered after refresh.';
+      return 'Bike connected. Pedal to verify live watts, cadence, speed, and race movement.';
     }
 
     return bridge.status;
@@ -4664,7 +4745,7 @@ export default function App() {
     : bikeConnectionSource === 'advanced'
       ? 'Start Advanced Connector, put each Wattbike in Just Ride at resistance level 1, then pedal for Bluetooth/ANT+/USB discovery.'
       : bluetooth.supported
-        ? 'Press Connect Wattbike to pair Bluetooth bikes. Riders appear only after live bike data is detected.'
+        ? 'Press Connect Wattbike to pair Bluetooth bikes. Riders appear only after a bike is connected.'
         : bluetooth.status;
   const pairingDeviceLabel = bikeConnectionSource === 'advanced' ? 'Bike connector device' : 'Bluetooth bike';
   const membershipLabel = membership.tier === 'racer'
@@ -4672,8 +4753,8 @@ export default function App() {
     : membership.tier === 'spectator'
       ? 'Free spectator'
       : 'Visitor';
-  const connectedBikeDisplayCount = demoMode ? demoBikeCount : livePlayerCount;
-  const workflowConnectionReady = demoMode || livePlayerCount > 0;
+  const connectedBikeDisplayCount = demoMode ? demoBikeCount : activePlayers.length;
+  const workflowConnectionReady = demoMode || activePlayers.length > 0;
   const workflowMapReady = effectiveTrack.routeStatus === 'user-mapped';
   const workflowRaceReady = workflowConnectionReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
   const workflowSteps = [
@@ -4681,8 +4762,8 @@ export default function App() {
       label: 'Connect',
       detail: demoMode
         ? `${demoBikeCount} demo rider${demoBikeCount === 1 ? '' : 's'}`
-        : livePlayerCount > 0
-          ? `${livePlayerCount} live bike${livePlayerCount === 1 ? '' : 's'}`
+        : activePlayers.length > 0
+          ? `${activePlayers.length} connected bike${activePlayers.length === 1 ? '' : 's'}`
           : bikeConnectionSource === 'advanced'
             ? 'Open Connector'
             : 'Pair bike',
@@ -4954,6 +5035,7 @@ export default function App() {
         <PairingRail
           players={pairingPlayers}
           samplesByDevice={samplesByDevice}
+          devices={demoMode ? undefined : connectedBikeDevices}
           onAssign={demoMode ? () => undefined : assignDevice}
           onAutoAssign={demoMode ? () => undefined : autoAssign}
           onRename={demoMode ? undefined : renamePlayer}
@@ -4961,7 +5043,7 @@ export default function App() {
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}
           bluetoothDeviceCount={bluetooth.connectedCount}
-          title={demoMode ? 'Demo Riders' : 'Detected Bikes'}
+          title={demoMode ? 'Demo Riders' : 'Connected Bikes'}
           subtitle={demoMode ? `${demoBikeCount} simulated / max ${maxPlayers}` : undefined}
           emptyMessage={pairingEmptyMessage}
           deviceLabel={demoMode ? 'Demo device' : pairingDeviceLabel}

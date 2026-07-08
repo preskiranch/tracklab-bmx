@@ -102,20 +102,30 @@ function bridgeMessage() {
 }
 
 function statusPayload(extra = {}) {
+  const sampledConnectedDevices = [...latestBikeSamples.values()].map((bike) => ({
+    at: bike.at,
+    connected: sourceState === 'running',
+    deviceId: bike.deviceId,
+    label: bike.label,
+    signal: bike.signal,
+    source: bike.source,
+  }));
+  const extraConnectedDevices = Array.isArray(extra.connectedDevices)
+    ? extra.connectedDevices
+    : Array.isArray(extra.devices)
+      ? extra.devices
+      : [];
+  const connectedDevices = sampledConnectedDevices.length > 0 ? sampledConnectedDevices : extraConnectedDevices;
+
   return {
     type: 'bridge-status',
     mode: inputMode,
     at: Date.now(),
     sourceState,
     message: bridgeMessage(),
-    connectedDevices: [...latestBikeSamples.values()].map((bike) => ({
-      deviceId: bike.deviceId,
-      label: bike.label,
-      source: bike.source,
-      signal: bike.signal,
-      at: bike.at,
-    })),
     ...extra,
+    connectedDevices,
+    devices: connectedDevices,
   };
 }
 

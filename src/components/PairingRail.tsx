@@ -1,10 +1,11 @@
 import type { CSSProperties } from 'react';
 import { Bluetooth, Link, Link2Off, RadioTower, Signal, Usb } from 'lucide-react';
-import type { BikeSample, PlayerSlot } from '../types';
+import type { BikeSample, ConnectedBikeDevice, PlayerSlot } from '../types';
 
 type PairingRailProps = {
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
+  devices?: ConnectedBikeDevice[];
   onAssign: (playerId: PlayerSlot['id'], deviceId: number | null) => void;
   onAutoAssign: () => void;
   onRename?: (playerId: PlayerSlot['id'], name: string) => void;
@@ -20,8 +21,23 @@ type PairingRailProps = {
   maxPlayers?: number;
 };
 
-function signalLabel(sample: BikeSample | undefined) {
+function sampleDevice(sample: BikeSample): ConnectedBikeDevice {
+  return {
+    at: sample.at,
+    connected: true,
+    deviceId: sample.deviceId,
+    label: sample.label,
+    signal: sample.signal,
+    source: sample.source,
+  };
+}
+
+function signalLabel(sample: BikeSample | undefined, device: ConnectedBikeDevice | undefined) {
   if (!sample || Date.now() - sample.at > 2400) {
+    if (device?.connected) {
+      return device.signal != null ? `${Math.round(device.signal * 100)}%` : 'Connected';
+    }
+
     return 'Waiting';
   }
 
@@ -31,6 +47,7 @@ function signalLabel(sample: BikeSample | undefined) {
 export function PairingRail({
   players,
   samplesByDevice,
+  devices,
   onAssign,
   onAutoAssign,
   onRename,
@@ -45,7 +62,9 @@ export function PairingRail({
   readOnly = false,
   maxPlayers = 4,
 }: PairingRailProps) {
-  const detectedDevices = [...samplesByDevice.values()].sort((a, b) => a.deviceId - b.deviceId);
+  const detectedDevices = (devices ?? [...samplesByDevice.values()].map(sampleDevice))
+    .sort((a, b) => a.deviceId - b.deviceId);
+  const deviceById = new Map(detectedDevices.map((device) => [device.deviceId, device]));
 
   return (
     <aside className="pairing-rail" aria-label="Bike pairing">
@@ -96,7 +115,8 @@ export function PairingRail({
 
         {players.map((player) => {
           const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
-          const online = Boolean(sample && Date.now() - sample.at < 2400);
+          const device = player.deviceId == null ? undefined : deviceById.get(player.deviceId);
+          const online = Boolean(device?.connected || (sample && Date.now() - sample.at < 2400));
 
           return (
             <section className={`pair-card ${online ? 'online' : ''}`} key={player.id}>
@@ -115,7 +135,7 @@ export function PairingRail({
                       aria-label={`Name for player ${player.id}`}
                     />
                   )}
-                  <p>{player.deviceId ? `Device ${player.deviceId}` : 'No bike assigned'}</p>
+                  <p>{player.deviceId ? `Monitor ID ${player.deviceId}` : 'No bike assigned'}</p>
                 </div>
                 {!readOnly && (
                   <button
@@ -136,7 +156,7 @@ export function PairingRail({
               </label>
               {readOnly ? (
                 <div className="device-static-value" id={`player-${player.id}-device`}>
-                  {sample ? `${sample.label} / ${sample.deviceId}` : 'Waiting for demo feed'}
+                  {sample ? `${sample.label} / ID ${sample.deviceId}` : 'Waiting for demo feed'}
                 </div>
               ) : (
                 <select
@@ -147,7 +167,7 @@ export function PairingRail({
                   <option value="">Unassigned</option>
                   {detectedDevices.map((device) => (
                     <option key={device.deviceId} value={device.deviceId}>
-                      {device.label} / {device.deviceId}
+                      {device.label} / ID {device.deviceId}
                     </option>
                   ))}
                 </select>
@@ -156,7 +176,7 @@ export function PairingRail({
               <div className="pair-stats">
                 <span>
                   <Signal size={14} />
-                  {signalLabel(sample)}
+                  {signalLabel(sample, device)}
                 </span>
                 <span>
                   <RadioTower size={14} />

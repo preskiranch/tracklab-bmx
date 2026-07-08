@@ -4376,6 +4376,27 @@ input:focus {
   min-width: 0;
 }
 
+.monitor-card-head h3,
+.monitor-card-head p,
+.monitor-card-head small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monitor-bike-id {
+  color: #111827;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.monitor-card-head small {
+  display: block;
+  color: #667484;
+  font-size: 11px;
+  font-weight: 750;
+}
+
 .monitor-live {
   gap: 5px;
   margin-left: auto;

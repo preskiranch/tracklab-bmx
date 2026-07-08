@@ -29,6 +29,15 @@ export type BikeSample = {
   battery?: number;
 };
 
+export type ConnectedBikeDevice = {
+  deviceId: number;
+  label: string;
+  connected: boolean;
+  source?: BridgeMode;
+  signal?: number;
+  at?: number;
+};
+
 export type BridgeStatusMessage = {
   type: 'bridge-status';
   mode: BridgeMode;
@@ -36,12 +45,8 @@ export type BridgeStatusMessage = {
   at?: number;
   connectedAt?: number;
   message: string;
-  devices?: Array<{
-    deviceId: number;
-    label: string;
-    connected: boolean;
-    signal: number;
-  }>;
+  connectedDevices?: ConnectedBikeDevice[];
+  devices?: ConnectedBikeDevice[];
 };
 
 export type BikeControlAction = 'race-arm' | 'race-start' | 'race-reset';
@@ -85,6 +90,8 @@ export type PlayerSlot = {
   colorName: PlayerColorName;
   accent: string;
   deviceId: number | null;
+  deviceLabel?: string;
+  deviceSource?: BridgeMode;
 };
 
 export type BikeProfile = {

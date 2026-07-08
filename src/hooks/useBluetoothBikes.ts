@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { BikeSample } from '../types';
+import type { BikeSample, ConnectedBikeDevice } from '../types';
 
 type BluetoothConnectionState = 'unsupported' | 'idle' | 'connecting' | 'open' | 'error';
 
-type BluetoothBikeDevice = {
-  deviceId: number;
-  label: string;
-  connected: boolean;
-};
+type BluetoothBikeDevice = ConnectedBikeDevice;
 
 type BluetoothBikeSnapshot = {
   connectBike: () => Promise<void>;
@@ -116,6 +112,17 @@ function unsupportedBluetoothMessage() {
   return isAppleMobileBrowser()
     ? unsupportedTabletBluetoothMessage
     : 'This browser does not support direct Bluetooth bike pairing. Use a desktop Chrome/Edge browser, Android Chrome with Web Bluetooth, or Advanced Connector on the Mac/PC near the bikes.';
+}
+
+function wattbikeMonitorIdFromName(name: string | undefined) {
+  const digits = name?.match(/(\d{4,})/g)?.at(-1);
+  if (!digits) {
+    return null;
+  }
+
+  const monitorDigits = digits.length > 5 ? digits.slice(-5) : digits;
+  const deviceId = Number(monitorDigits);
+  return Number.isFinite(deviceId) && deviceId > 0 ? Math.round(deviceId) : null;
 }
 
 function parseIndoorBikeData(view: DataView): PartialBikeSample {
@@ -326,13 +333,21 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   const setDeviceConnected = useCallback((deviceId: number, label: string, connected: boolean) => {
     setDevices((current) => {
       const existing = current.find((device) => device.deviceId === deviceId);
+      const nextDevice: BluetoothBikeDevice = {
+        at: connected ? Date.now() : existing?.at,
+        connected,
+        deviceId,
+        label,
+        signal: connected ? 1 : 0,
+        source: 'bluetooth',
+      };
       if (existing) {
         return current.map((device) => (
-          device.deviceId === deviceId ? { ...device, connected, label } : device
+          device.deviceId === deviceId ? nextDevice : device
         ));
       }
 
-      return [...current, { connected, deviceId, label }].slice(-4);
+      return [...current, nextDevice].slice(-4);
     });
   }, []);
 
@@ -386,11 +401,11 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
 
       let numericId = deviceIdsRef.current.get(device.id);
       if (!numericId) {
-        numericId = bluetoothBaseDeviceId + deviceIdsRef.current.size + 1;
+        numericId = wattbikeMonitorIdFromName(device.name) ?? bluetoothBaseDeviceId + deviceIdsRef.current.size + 1;
         deviceIdsRef.current.set(device.id, numericId);
       }
 
-      const label = device.name?.trim() || `Bluetooth Bike ${numericId - bluetoothBaseDeviceId}`;
+      const label = device.name?.trim() || `Bluetooth Wattbike ${numericId}`;
       setDeviceConnected(numericId, label, server.connected);
 
       const disconnectHandler = () => {
