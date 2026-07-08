@@ -1752,8 +1752,12 @@ export default function App() {
   }, [bluetooth.samplesByDevice, bridge.samplesByDevice]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
   const connectedDeviceIds = useMemo(
-    () => [...connectedBikeSamples.keys()].sort((a, b) => a - b).slice(0, maxPlayers),
-    [connectedBikeSamples],
+    () => [...connectedBikeSamples.entries()]
+      .filter(([, sample]) => now - sample.at < liveBikeTimeoutMs)
+      .map(([deviceId]) => deviceId)
+      .sort((a, b) => a - b)
+      .slice(0, maxPlayers),
+    [connectedBikeSamples, now],
   );
   const profileByDevice = useMemo(
     () => new Map(bikeProfiles.map((profile) => [profile.deviceId, profile])),
@@ -4668,6 +4672,7 @@ export default function App() {
     : membership.tier === 'spectator'
       ? 'Free spectator'
       : 'Visitor';
+  const connectedBikeDisplayCount = demoMode ? demoBikeCount : livePlayerCount;
   const workflowConnectionReady = demoMode || livePlayerCount > 0;
   const workflowMapReady = effectiveTrack.routeStatus === 'user-mapped';
   const workflowRaceReady = workflowConnectionReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
@@ -4678,8 +4683,6 @@ export default function App() {
         ? `${demoBikeCount} demo rider${demoBikeCount === 1 ? '' : 's'}`
         : livePlayerCount > 0
           ? `${livePlayerCount} live bike${livePlayerCount === 1 ? '' : 's'}`
-          : activePlayers.length > 0
-            ? `${activePlayers.length} remembered bike${activePlayers.length === 1 ? '' : 's'}`
           : bikeConnectionSource === 'advanced'
             ? 'Open Connector'
             : 'Pair bike',
@@ -4791,7 +4794,7 @@ export default function App() {
             <span className={`connection-dot ${connectionState}`} />
             <div>
               <strong>{connectionLabel}</strong>
-              <span>{activePlayers.length} / {maxPlayers} bikes connected</span>
+              <span>{connectedBikeDisplayCount} / {maxPlayers} bikes connected</span>
             </div>
           </div>
           <p>{connectionStatus}</p>

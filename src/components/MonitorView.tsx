@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Bike, Gauge, RadioTower, Signal, Zap } from 'lucide-react';
 import { liveBikeTimeoutMs } from '../data';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
@@ -87,6 +87,17 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
   const activeSprintsRef = useRef<Map<number, MonitorSprintDraft>>(new Map());
   const [sprintResults, setSprintResults] = useState<Record<number, MonitorSprintResult>>({});
   const [now, setNow] = useState(Date.now());
+  const livePlayers = useMemo(
+    () => players.filter((player) => {
+      if (player.deviceId == null) {
+        return false;
+      }
+
+      const sample = samplesByDevice.get(player.deviceId);
+      return metricIsFresh(sample, sample?.at, now);
+    }),
+    [now, players, samplesByDevice],
+  );
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 500);
@@ -94,12 +105,12 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
   }, []);
 
   useEffect(() => {
-    const connectedDevices = new Set(players
+    const connectedDevices = new Set(livePlayers
       .map((player) => player.deviceId)
       .filter((deviceId): deviceId is number => deviceId != null));
     const updates = new Map<number, MonitorSprintResult | null>();
 
-    players.forEach((player) => {
+    livePlayers.forEach((player) => {
       if (player.deviceId == null) {
         return;
       }
@@ -182,7 +193,7 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
 
       return changed ? next : current;
     });
-  }, [now, players, samplesByDevice]);
+  }, [now, livePlayers, samplesByDevice]);
 
   return (
     <main className="monitor-panel">
@@ -193,18 +204,18 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
         </div>
         <div className="monitor-count">
           <Bike size={18} />
-          <span>{players.length} connected</span>
+          <span>{livePlayers.length} connected</span>
         </div>
       </div>
 
-      {players.length === 0 ? (
+      {livePlayers.length === 0 ? (
         <div className="monitor-empty">
           <RadioTower size={22} />
           <span>No live bikes detected yet.</span>
         </div>
       ) : (
         <div className="monitor-grid">
-          {players.map((player) => {
+          {livePlayers.map((player) => {
             const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
             const metrics = monitorMetrics(sample, now);
             const sprintResult = player.deviceId == null ? undefined : sprintResults[player.deviceId];
