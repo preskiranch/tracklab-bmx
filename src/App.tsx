@@ -175,6 +175,28 @@ type FullscreenDocument = Document & {
   webkitFullscreenElement?: Element | null;
 };
 
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+function requestBrowserFullscreen(element: HTMLElement | null) {
+  if (!element || document.fullscreenElement || (document as FullscreenDocument).webkitFullscreenElement) {
+    return;
+  }
+
+  const fullscreenElement = element as FullscreenElement;
+  const requestFullscreen = fullscreenElement.requestFullscreen ?? fullscreenElement.webkitRequestFullscreen;
+  if (!requestFullscreen) {
+    return;
+  }
+
+  try {
+    Promise.resolve(requestFullscreen.call(fullscreenElement)).catch(() => undefined);
+  } catch {
+    // Browsers can reject fullscreen outside a direct user gesture; CSS race view still takes over.
+  }
+}
+
 function releaseBrowserFullscreen() {
   const fullscreenDocument = document as FullscreenDocument;
   if (!document.fullscreenElement && !fullscreenDocument.webkitFullscreenElement) {
@@ -4375,6 +4397,7 @@ export default function App() {
     setMappingFullscreen(false);
     setDemoSignalsStopped(false);
     createRaceCapture();
+    requestBrowserFullscreen(raceShellRef.current);
     if (!demoMode) {
       bridge.sendControlCommand('race-arm');
     }

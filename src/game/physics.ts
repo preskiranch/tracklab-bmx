@@ -7,6 +7,7 @@ const gravityPx = 430;
 const groundRecoveryPerSecond = 4.2;
 const maxAirPx = 34;
 const liveMetricWindowMs = 1800;
+const liveMetricStartGraceMs = 350;
 const rollingFrictionMps2 = 0.42;
 const airDragPerMeter = 0.0038;
 const stopVelocityMps = 0.04;
@@ -38,7 +39,25 @@ function metricIsUsable(sample: BikeSample | null | undefined, metricAt: number 
   }
 
   const recordedAt = metricAt ?? sample.at;
-  return recordedAt >= raceStartedAt && nowMs - recordedAt <= liveMetricWindowMs;
+  return recordedAt >= raceStartedAt - liveMetricStartGraceMs && nowMs - recordedAt <= liveMetricWindowMs;
+}
+
+function sampleIsUsableForDrive(sample: BikeSample | null | undefined, nowMs: number, raceStartedAt: number) {
+  return Boolean(
+    sample
+      && sample.at >= raceStartedAt - liveMetricStartGraceMs
+      && nowMs - sample.at <= liveMetricWindowMs,
+  );
+}
+
+function wattsFallbackVelocityMps(watts: number, currentVelocityMps: number) {
+  if (watts <= 0) {
+    return null;
+  }
+
+  // Wattbike BLE/ANT packets do not always include cadence every frame. Use power only as
+  // a short-term movement fallback so live riders do not freeze between cadence packets.
+  return clamp(Math.sqrt(watts) * 0.32, currentVelocityMps + 0.65, 13.4);
 }
 
 function coastVelocityMps(velocityMps: number, dt: number) {
@@ -74,8 +93,32 @@ function riderRouteHasPedalZones(
   ));
 }
 
-function zoneAllowsDrive(zone: TrackZone | undefined, pedalZonesConfigured: boolean) {
+function firstPedalZoneStartMeter(
+  zones: TrackZone[],
+  actualBranches: Record<string, SplitBranchChoice>,
+  selectedBranch: SplitBranchChoice,
+) {
+  const starts = zones
+    .filter((zone) => (
+      zone.type === 'pedal'
+      && zoneMatchesBranchSelections(zone, actualBranches, selectedBranch)
+    ))
+    .map((zone) => zone.startMeter);
+
+  return starts.length > 0 ? Math.min(...starts) : null;
+}
+
+function zoneAllowsDrive(
+  zone: TrackZone | undefined,
+  pedalZonesConfigured: boolean,
+  distanceMeters: number,
+  firstPedalStartMeter: number | null,
+) {
   if (pedalZonesConfigured) {
+    if (!zone && firstPedalStartMeter != null && distanceMeters < firstPedalStartMeter) {
+      return true;
+    }
+
     return zone?.type === 'pedal';
   }
 
@@ -179,13 +222,20 @@ export function stepRiders(
     const selectedBranch = branchChoicesByPlayer[rider.playerId] ?? rider.selectedBranch ?? 'a';
     let actualBranches = rider.actualBranches;
     let proPenaltySections = rider.proPenaltySections;
-    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
+    const driveSampleUsable = sampleIsUsableForDrive(sample, nowMs, raceStartedAt);
+    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt) || (driveSampleUsable && (sample?.watts ?? 0) > 0)
       ? sample?.physicsWatts ?? sample?.watts ?? 0
       : 0;
-    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) ? sample?.cadence ?? 0 : 0;
+    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) || (driveSampleUsable && (sample?.cadence ?? 0) > 0)
+      ? sample?.cadence ?? 0
+      : 0;
+    const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, raceStartedAt) || (driveSampleUsable && (sample?.speedKph ?? 0) > 0)
+      ? sample?.speedKph ?? 0
+      : 0;
     const activeZone = zoneAtDistance(trackZones, rider.distance, actualBranches, selectedBranch);
     const pedalZonesConfigured = riderRouteHasPedalZones(trackZones, actualBranches, selectedBranch);
-    const driveAllowed = zoneAllowsDrive(activeZone, pedalZonesConfigured);
+    const firstPedalStartMeter = firstPedalZoneStartMeter(trackZones, actualBranches, selectedBranch);
+    const driveAllowed = zoneAllowsDrive(activeZone, pedalZonesConfigured, rider.distance, firstPedalStartMeter);
     const watts = driveAllowed ? rawWatts : 0;
     const cadence = driveAllowed ? rawCadence : 0;
 
@@ -194,7 +244,10 @@ export function stepRiders(
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
     const coastVelocity = coastVelocityMps(rider.velocity, dt);
     const cadenceVelocity = cadence > 0 ? bmxVelocityMpsFromCadence(cadence) : null;
-    const driveEngaged = cadenceVelocity != null && cadenceVelocity > coastVelocity + freewheelEngagementToleranceMps;
+    const speedVelocity = rawSpeedKph > 0 ? rawSpeedKph / 3.6 : null;
+    const powerVelocity = wattsFallbackVelocityMps(watts, coastVelocity);
+    const targetDriveVelocity = cadenceVelocity ?? speedVelocity ?? powerVelocity;
+    const driveEngaged = targetDriveVelocity != null && targetDriveVelocity > coastVelocity + freewheelEngagementToleranceMps;
     const previousDistance = rider.distance;
     const gateLaunch = driveEngaged
       ? clamp(1 - elapsedMs / gateLaunchWindowMs, 0, 1)
@@ -210,11 +263,11 @@ export function stepRiders(
       : 0;
     const velocity = driveEngaged
       ? Math.min(
-        cadenceVelocity,
+        targetDriveVelocity,
         coastVelocity + driveAccelerationMps2(
           watts,
           coastVelocity,
-          cadenceVelocity,
+          targetDriveVelocity,
           boost,
           gateLaunch,
           demoLaunchAssist,
