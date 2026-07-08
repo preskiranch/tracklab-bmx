@@ -738,6 +738,7 @@ function connectedDeviceFromSample(sample: BikeSample): ConnectedBikeDevice {
   return {
     at: sample.at,
     connected: true,
+    connectionOrigin: 'bridge-sample',
     deviceId: sample.deviceId,
     label: sample.label,
     signal: sample.signal,
@@ -757,11 +758,19 @@ function isConnectedBikeDevice(device: ConnectedBikeDevice, now: number) {
     return false;
   }
 
-  if (device.source === 'bluetooth' || device.source === 'usb' || device.at == null) {
+  if (device.connectionOrigin === 'direct-bluetooth') {
     return true;
   }
 
-  return now - device.at <= connectedBikeDeviceTimeoutMs;
+  if (device.connectionOrigin === 'bridge-status' && device.source === 'bluetooth') {
+    return true;
+  }
+
+  if (device.source === 'usb') {
+    return true;
+  }
+
+  return Number.isFinite(device.at) && now - Number(device.at) <= connectedBikeDeviceTimeoutMs;
 }
 
 function raceBikeDevices(devices: ConnectedBikeDevice[], now: number) {

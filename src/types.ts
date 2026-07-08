@@ -36,6 +36,7 @@ export type ConnectedBikeDevice = {
   source?: BridgeMode;
   signal?: number;
   at?: number;
+  connectionOrigin?: 'bridge-status' | 'bridge-sample' | 'direct-bluetooth';
 };
 
 export type BridgeStatusMessage = {

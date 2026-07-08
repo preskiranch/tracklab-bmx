@@ -351,10 +351,12 @@ export function createBleSource(options = {}) {
     return [...knownDevices.values()]
       .sort((a, b) => a.deviceId - b.deviceId)
       .map((device) => ({
+        at: device.at,
         deviceId: device.deviceId,
         label: device.label,
         connected: device.connected,
         signal: device.signal,
+        source: 'bluetooth',
       }));
   }
 
@@ -372,6 +374,7 @@ export function createBleSource(options = {}) {
     const label = peripheralLabel(peripheral);
     const signal = signalFromRssi(peripheral.rssi);
     knownDevices.set(deviceId, {
+      at: Date.now(),
       deviceId,
       label,
       connected,
@@ -449,6 +452,7 @@ export function createBleSource(options = {}) {
       const device = rememberDevice(peripheral, true);
       const { characteristics } = await peripheral.discoverAllServicesAndCharacteristicsAsync();
       const subscriptions = [];
+      let metricSubscriptions = 0;
 
       for (const characteristic of characteristics) {
         const uuid = normalizeUuid(characteristic.uuid);
@@ -499,7 +503,20 @@ export function createBleSource(options = {}) {
         const subscribed = await subscribeCharacteristic(peripheral, characteristic, onData);
         if (subscribed) {
           subscriptions.push({ characteristic, onData });
+          if (uuid !== characteristicUuids.batteryLevel) {
+            metricSubscriptions += 1;
+          }
         }
+      }
+
+      if (metricSubscriptions === 0) {
+        for (const subscription of subscriptions) {
+          subscription.characteristic.removeListener('data', subscription.onData);
+        }
+        await peripheral.disconnectAsync().catch(() => undefined);
+        rememberDevice(peripheral, false);
+        emitStatus(`Bluetooth connected to ${device.label}, but no Wattbike power, cadence, or speed feed was available. Check Remote > Bluetooth and Just Ride mode.`);
+        return;
       }
 
       connectedByPeripheral.set(peripheral.id, { peripheral, subscriptions });

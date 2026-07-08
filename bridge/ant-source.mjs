@@ -356,10 +356,12 @@ export function createAntSource(options = {}) {
           emitStatus(`ANT+ ${definition.label} data detected. Staying on this profile for live racing.`, {
             lockedProfile,
             devices: [...lastSamplesByDevice.values()].map((bike) => ({
+              at: bike.at,
               deviceId: bike.deviceId,
               label: bike.label,
               connected: true,
               signal: bike.signal,
+              source: 'ant',
             })),
           });
         }

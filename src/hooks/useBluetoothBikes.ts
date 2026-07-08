@@ -336,6 +336,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       const nextDevice: BluetoothBikeDevice = {
         at: connected ? Date.now() : existing?.at,
         connected,
+        connectionOrigin: 'direct-bluetooth',
         deviceId,
         label,
         signal: connected ? 1 : 0,

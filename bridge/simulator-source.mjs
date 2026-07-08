@@ -21,10 +21,12 @@ export function createSimulatorSource() {
       at: Date.now(),
       message: 'Simulator source active with eight virtual Wattbikes.',
       devices: players.map((bike) => ({
+        at: Date.now(),
         deviceId: bike.deviceId,
         label: bike.name,
         connected: true,
         signal: 0.92,
+        source: 'sim',
       })),
     });
 

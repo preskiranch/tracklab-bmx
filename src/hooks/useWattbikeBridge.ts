@@ -44,6 +44,7 @@ function normalizeConnectedDevices(
     devicesById.set(deviceId, {
       at: Number.isFinite(rawDevice.at) ? Number(rawDevice.at) : undefined,
       connected: rawDevice.connected ?? sourceState === 'running',
+      connectionOrigin: 'bridge-status',
       deviceId: Math.round(deviceId),
       label: String(rawDevice.label || `Wattbike ${Math.round(deviceId)}`),
       signal: Number.isFinite(rawDevice.signal) ? Number(rawDevice.signal) : undefined,
@@ -58,6 +59,7 @@ function connectedDeviceFromSample(sample: BikeSample): ConnectedBikeDevice {
   return {
     at: sample.at,
     connected: true,
+    connectionOrigin: 'bridge-sample',
     deviceId: sample.deviceId,
     label: sample.label,
     signal: sample.signal,

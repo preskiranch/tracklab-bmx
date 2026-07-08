@@ -25,6 +25,9 @@ let sourceError = null;
 let controlStatusMessage = null;
 const seenBikeDevices = new Set();
 const latestBikeSamples = new Map();
+const sourceConnectedDevices = new Map();
+
+const connectedDeviceSampleTimeoutMs = Number(process.env.WATTBIKE_CONNECTED_DEVICE_TIMEOUT_MS ?? 15000);
 
 function logBridge(message, extra = null) {
   const suffix = extra ? ` ${JSON.stringify(extra)}` : '';
@@ -101,21 +104,88 @@ function bridgeMessage() {
   return 'Local helper online. Press Start Connector, then put each Wattbike in Just Ride.';
 }
 
-function statusPayload(extra = {}) {
-  const sampledConnectedDevices = [...latestBikeSamples.values()].map((bike) => ({
+function connectedDeviceFromSample(bike) {
+  return {
     at: bike.at,
-    connected: sourceState === 'running',
+    connected: true,
     deviceId: bike.deviceId,
     label: bike.label,
     signal: bike.signal,
     source: bike.source,
-  }));
-  const extraConnectedDevices = Array.isArray(extra.connectedDevices)
-    ? extra.connectedDevices
-    : Array.isArray(extra.devices)
-      ? extra.devices
-      : [];
-  const connectedDevices = sampledConnectedDevices.length > 0 ? sampledConnectedDevices : extraConnectedDevices;
+  };
+}
+
+function normalizeConnectedDevice(rawDevice) {
+  const deviceId = Number(rawDevice?.deviceId);
+  if (!Number.isFinite(deviceId) || deviceId <= 0) {
+    return null;
+  }
+
+  return {
+    at: Number.isFinite(rawDevice.at) ? Number(rawDevice.at) : undefined,
+    connected: rawDevice.connected !== false,
+    deviceId: Math.round(deviceId),
+    label: String(rawDevice.label || `Wattbike ${Math.round(deviceId)}`),
+    signal: Number.isFinite(rawDevice.signal) ? Number(rawDevice.signal) : undefined,
+    source: rawDevice.source,
+  };
+}
+
+function mergeConnectedDevice(device, devicesById) {
+  const normalizedDevice = normalizeConnectedDevice(device);
+  if (!normalizedDevice?.connected) {
+    if (normalizedDevice) {
+      devicesById.delete(normalizedDevice.deviceId);
+    }
+    return;
+  }
+
+  const previous = devicesById.get(normalizedDevice.deviceId);
+  if (!previous || (normalizedDevice.at ?? 0) >= (previous.at ?? 0)) {
+    devicesById.set(normalizedDevice.deviceId, normalizedDevice);
+  }
+}
+
+function rememberSourceDevices(rawDevices) {
+  for (const rawDevice of rawDevices ?? []) {
+    const normalizedDevice = normalizeConnectedDevice(rawDevice);
+    if (!normalizedDevice) {
+      continue;
+    }
+
+    if (normalizedDevice.connected) {
+      sourceConnectedDevices.set(normalizedDevice.deviceId, normalizedDevice);
+    } else {
+      sourceConnectedDevices.delete(normalizedDevice.deviceId);
+    }
+  }
+}
+
+function currentConnectedDevices() {
+  const now = Date.now();
+  const devicesById = new Map();
+
+  for (const device of sourceConnectedDevices.values()) {
+    if (device.source === 'ant' && Number.isFinite(device.at) && now - device.at > connectedDeviceSampleTimeoutMs) {
+      sourceConnectedDevices.delete(device.deviceId);
+      continue;
+    }
+    mergeConnectedDevice(device, devicesById);
+  }
+
+  for (const [deviceId, bike] of latestBikeSamples) {
+    if (!Number.isFinite(bike.at) || now - bike.at > connectedDeviceSampleTimeoutMs) {
+      latestBikeSamples.delete(deviceId);
+      continue;
+    }
+    mergeConnectedDevice(connectedDeviceFromSample(bike), devicesById);
+  }
+
+  return [...devicesById.values()].sort((a, b) => a.deviceId - b.deviceId);
+}
+
+function statusPayload(extra = {}) {
+  const connectedDevices = sourceState === 'running' ? currentConnectedDevices() : [];
 
   return {
     type: 'bridge-status',
@@ -214,6 +284,12 @@ async function startSource() {
   const nextSource = createSource();
   nextSource.on('status', (status) => {
     const message = status?.message ? String(status.message) : 'Source status update.';
+    const statusDevices = Array.isArray(status?.connectedDevices)
+      ? status.connectedDevices
+      : Array.isArray(status?.devices)
+        ? status.devices
+        : [];
+    rememberSourceDevices(statusDevices);
     logBridge(message);
     broadcast(statusPayload(status));
   });
@@ -284,6 +360,7 @@ async function stopSource() {
     sourceState = 'idle';
     seenBikeDevices.clear();
     latestBikeSamples.clear();
+    sourceConnectedDevices.clear();
     logBridge('Source stopped.');
     broadcast(statusPayload());
   }
@@ -359,7 +436,12 @@ async function handleHttpRequest(request, response) {
 wss.on('connection', (socket) => {
   clients.add(socket);
   socket.send(JSON.stringify(statusPayload({ connectedAt: Date.now() })));
+  const now = Date.now();
   for (const bike of latestBikeSamples.values()) {
+    if (!Number.isFinite(bike.at) || now - bike.at > connectedDeviceSampleTimeoutMs) {
+      latestBikeSamples.delete(bike.deviceId);
+      continue;
+    }
     socket.send(JSON.stringify({ type: 'bike-sample', ...bike }));
   }
 
