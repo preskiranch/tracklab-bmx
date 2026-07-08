@@ -24,6 +24,7 @@ let sourceState = 'idle';
 let sourceError = null;
 let controlStatusMessage = null;
 const seenBikeDevices = new Set();
+const latestBikeSamples = new Map();
 
 function logBridge(message, extra = null) {
   const suffix = extra ? ` ${JSON.stringify(extra)}` : '';
@@ -107,6 +108,13 @@ function statusPayload(extra = {}) {
     at: Date.now(),
     sourceState,
     message: bridgeMessage(),
+    connectedDevices: [...latestBikeSamples.values()].map((bike) => ({
+      deviceId: bike.deviceId,
+      label: bike.label,
+      source: bike.source,
+      signal: bike.signal,
+      at: bike.at,
+    })),
     ...extra,
   };
 }
@@ -201,6 +209,7 @@ async function startSource() {
   });
   nextSource.on('bike', (bike) => {
     const deviceKey = `${bike.source ?? 'unknown'}:${bike.deviceId}`;
+    latestBikeSamples.set(bike.deviceId, bike);
     if (!seenBikeDevices.has(deviceKey)) {
       seenBikeDevices.add(deviceKey);
       logBridge(`Detected ${bike.source ?? 'bike'} device ${bike.deviceId}.`, {
@@ -264,6 +273,7 @@ async function stopSource() {
     source = null;
     sourceState = 'idle';
     seenBikeDevices.clear();
+    latestBikeSamples.clear();
     logBridge('Source stopped.');
     broadcast(statusPayload());
   }
@@ -339,6 +349,9 @@ async function handleHttpRequest(request, response) {
 wss.on('connection', (socket) => {
   clients.add(socket);
   socket.send(JSON.stringify(statusPayload({ connectedAt: Date.now() })));
+  for (const bike of latestBikeSamples.values()) {
+    socket.send(JSON.stringify({ type: 'bike-sample', ...bike }));
+  }
 
   socket.on('message', async (data) => {
     let parsed = null;

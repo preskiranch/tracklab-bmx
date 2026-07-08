@@ -1115,7 +1115,7 @@ export default function App() {
   const [mappingHistoryVersion, setMappingHistoryVersion] = useState(0);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
-  const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>('bluetooth');
+  const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>('advanced');
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
@@ -2298,6 +2298,27 @@ export default function App() {
       return changed ? dedupeBikeProfiles(next) : current;
     });
   }, [connectedDeviceIds, demoMode]);
+
+  useEffect(() => {
+    if (
+      demoMode
+      || bikeConnectionSource !== 'advanced'
+      || membership.tier !== 'racer'
+      || bridge.connection !== 'open'
+      || bridge.sourceState !== 'idle'
+    ) {
+      return;
+    }
+
+    void bridge.startLocalBridge();
+  }, [
+    bikeConnectionSource,
+    bridge.connection,
+    bridge.sourceState,
+    bridge.startLocalBridge,
+    demoMode,
+    membership.tier,
+  ]);
 
   useEffect(() => {
     if (bridge.connection !== 'open' || bridgeUserDataLoadedRef.current) {

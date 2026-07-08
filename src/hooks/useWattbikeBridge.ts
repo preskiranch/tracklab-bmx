@@ -8,6 +8,7 @@ import type {
   BridgeSourceState,
   BridgeStatusMessage,
 } from '../types';
+import { bridgeHttpUrlFromWebSocket, getBridgeWebSocketUrls } from '../lib/localBridgeUrls';
 
 type ConnectionState = 'connecting' | 'open' | 'closed' | 'error';
 
@@ -24,16 +25,7 @@ type BridgeSnapshot = {
   sendControlCommand: (action: BikeControlAction) => boolean;
 };
 
-const bridgeUrl = import.meta.env.VITE_WATTBIKE_BRIDGE_URL?.trim() || 'ws://127.0.0.1:8787';
-
-function bridgeHttpUrl(path: string) {
-  const url = new URL(bridgeUrl);
-  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
-  url.pathname = path;
-  url.search = '';
-  url.hash = '';
-  return url.toString();
-}
+const bridgeUrls = getBridgeWebSocketUrls();
 
 export function useWattbikeBridge(): BridgeSnapshot {
   const [connection, setConnection] = useState<ConnectionState>('connecting');
@@ -43,22 +35,28 @@ export function useWattbikeBridge(): BridgeSnapshot {
   const [error, setError] = useState<string | null>(null);
   const [controlStatus, setControlStatus] = useState<string | null>(null);
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
+  const [activeBridgeUrl, setActiveBridgeUrl] = useState(bridgeUrls[0]);
   const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let reconnectTimer = 0;
 
-    const connect = () => {
+    const connect = (attemptIndex = 0) => {
       if (cancelled) {
         return;
       }
 
+      const bridgeUrl = bridgeUrls[attemptIndex % bridgeUrls.length];
       setConnection('connecting');
+      setActiveBridgeUrl(bridgeUrl);
       const socket = new WebSocket(bridgeUrl);
       socketRef.current = socket;
+      let opened = false;
 
       socket.addEventListener('open', () => {
+        opened = true;
+        setActiveBridgeUrl(bridgeUrl);
         setConnection('open');
         setError(null);
       });
@@ -99,14 +97,15 @@ export function useWattbikeBridge(): BridgeSnapshot {
         setConnection('closed');
         socketRef.current = null;
         if (!cancelled) {
-          reconnectTimer = window.setTimeout(connect, 1200);
+          const nextAttemptIndex = opened ? attemptIndex : attemptIndex + 1;
+          reconnectTimer = window.setTimeout(() => connect(nextAttemptIndex), opened ? 1200 : 350);
         }
       });
 
       socket.addEventListener('error', () => {
         setConnection('error');
         setSourceState('unknown');
-        setError(`Could not reach TrackLab Bike Connector on ${bridgeUrl}.`);
+        setError(`Could not reach TrackLab Bike Connector on ${bridgeUrls.join(' or ')}.`);
       });
     };
 
@@ -120,31 +119,39 @@ export function useWattbikeBridge(): BridgeSnapshot {
   }, []);
 
   const sendBridgeApiCommand = useCallback(async (action: 'start' | 'stop') => {
-    try {
-      const response = await fetch(bridgeHttpUrl(`/api/bridge/${action}`), { method: 'POST' });
-      const payload = await response.json() as Partial<BridgeStatusMessage> & { message?: string };
-      if (payload.mode) {
-        setMode(payload.mode);
+    const urls = [...new Set([activeBridgeUrl, ...bridgeUrls])];
+    let lastMessage = '';
+
+    for (const bridgeUrl of urls) {
+      try {
+        const response = await fetch(bridgeHttpUrlFromWebSocket(bridgeUrl, `/api/bridge/${action}`), { method: 'POST' });
+        const payload = await response.json() as Partial<BridgeStatusMessage> & { message?: string };
+        if (payload.mode) {
+          setMode(payload.mode);
+        }
+        if (payload.sourceState) {
+          setSourceState(payload.sourceState);
+        }
+        if (payload.message) {
+          setStatus(payload.message);
+          lastMessage = payload.message;
+        }
+        if (!response.ok) {
+          setError(payload.message ?? `Advanced Connector ${action} failed.`);
+          return false;
+        }
+        setActiveBridgeUrl(bridgeUrl);
+        setError(null);
+        return true;
+      } catch (commandError) {
+        lastMessage = commandError instanceof Error ? commandError.message : String(commandError);
       }
-      if (payload.sourceState) {
-        setSourceState(payload.sourceState);
-      }
-      if (payload.message) {
-        setStatus(payload.message);
-      }
-      if (!response.ok) {
-        setError(payload.message ?? `Advanced Connector ${action} failed.`);
-        return false;
-      }
-      setError(null);
-      return true;
-    } catch (commandError) {
-      const message = commandError instanceof Error ? commandError.message : String(commandError);
-      setConnection('error');
-      setError(`Could not ${action} TrackLab Bike Connector on ${bridgeHttpUrl(`/api/bridge/${action}`)}. ${message}`);
-      return false;
     }
-  }, []);
+
+    setConnection('error');
+    setError(`Could not ${action} TrackLab Bike Connector on ${urls.join(' or ')}. ${lastMessage}`);
+    return false;
+  }, [activeBridgeUrl]);
 
   const startLocalBridge = useCallback(() => sendBridgeApiCommand('start'), [sendBridgeApiCommand]);
   const stopLocalBridge = useCallback(() => sendBridgeApiCommand('stop'), [sendBridgeApiCommand]);

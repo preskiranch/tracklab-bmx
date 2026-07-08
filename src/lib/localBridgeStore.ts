@@ -1,5 +1,6 @@
 import type { BikeProfile, TrackRecord } from '../types';
 import type { StoredTrackMappings } from './trackMapping';
+import { fetchBridgeEndpoint } from './localBridgeUrls';
 
 export type BridgeUserData = {
   version: 1;
@@ -9,19 +10,8 @@ export type BridgeUserData = {
   bikeProfiles: BikeProfile[];
 };
 
-const bridgeUrl = import.meta.env.VITE_WATTBIKE_BRIDGE_URL?.trim() || 'ws://127.0.0.1:8787';
-
-function bridgeHttpUrl(path: string) {
-  const url = new URL(bridgeUrl);
-  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
-  url.pathname = path;
-  url.search = '';
-  url.hash = '';
-  return url.toString();
-}
-
 export async function readBridgeUserData() {
-  const response = await fetch(bridgeHttpUrl('/api/user-data'));
+  const response = await fetchBridgeEndpoint('/api/user-data');
   if (!response.ok) {
     throw new Error(`Advanced Connector user data returned ${response.status}`);
   }
@@ -30,7 +20,7 @@ export async function readBridgeUserData() {
 }
 
 export async function patchBridgeUserData(patch: Partial<Omit<BridgeUserData, 'version' | 'updatedAt'>>) {
-  const response = await fetch(bridgeHttpUrl('/api/user-data'), {
+  const response = await fetchBridgeEndpoint('/api/user-data', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
