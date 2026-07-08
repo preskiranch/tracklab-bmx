@@ -1116,6 +1116,7 @@ export default function App() {
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
   const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>('bluetooth');
+  const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
@@ -4566,6 +4567,10 @@ export default function App() {
   const bridgeButtonLabel = bridgeBusy
     ? bridge.sourceState === 'stopping' ? 'Stopping Connector' : 'Starting Connector'
     : bridgeRunning ? 'Stop Connector' : 'Start Connector';
+  const openMacConnector = () => {
+    setConnectorLaunchMessage('Opening TrackLab Bike Connector. If macOS asks, allow it, leave the Terminal window open, then return here.');
+    window.location.assign('tracklab-bmx://start');
+  };
   const bridgePrompt = (() => {
     if (demoMode) {
       return 'Demo mode is generating bike data.';
@@ -4578,7 +4583,7 @@ export default function App() {
     }
 
     if (bridge.connection !== 'open') {
-      return 'Install or open TrackLab Bike Connector on this computer, then reload this page.';
+      return connectorLaunchMessage ?? 'Open TrackLab Bike Connector on this computer. macOS opens a Terminal window that must stay running while you ride.';
     }
 
     if (bridge.sourceState === 'idle') {
@@ -4725,17 +4730,29 @@ export default function App() {
           )}
           {bikeConnectionSource === 'advanced' && !demoMode && (
             <div className="bridge-controls">
-              <button
-                className={bridgeRunning ? 'bridge-control-button stop' : 'bridge-control-button start'}
-                type="button"
-                onClick={() => {
-                  void (bridgeRunning ? bridge.stopLocalBridge() : bridge.startLocalBridge());
-                }}
-                disabled={bridgeButtonDisabled}
-              >
-                {bridgeRunning ? <StopCircle size={16} /> : <PlayCircle size={16} />}
-                <span>{bridgeButtonLabel}</span>
-              </button>
+              {bridge.connection !== 'open' ? (
+                <button
+                  className="bridge-control-button start"
+                  type="button"
+                  onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : openMacConnector}
+                  disabled={demoMode}
+                >
+                  <Usb size={16} />
+                  <span>{liveBikeAccessLocked ? 'Upgrade to Connect' : 'Open Mac Connector'}</span>
+                </button>
+              ) : (
+                <button
+                  className={bridgeRunning ? 'bridge-control-button stop' : 'bridge-control-button start'}
+                  type="button"
+                  onClick={() => {
+                    void (bridgeRunning ? bridge.stopLocalBridge() : bridge.startLocalBridge());
+                  }}
+                  disabled={bridgeButtonDisabled}
+                >
+                  {bridgeRunning ? <StopCircle size={16} /> : <PlayCircle size={16} />}
+                  <span>{bridgeButtonLabel}</span>
+                </button>
+              )}
               <span className={`bridge-live-pill ${activePlayers.length > 0 ? 'live' : bridgeRunning ? 'waiting' : ''}`}>
                 {activePlayers.length > 0 ? 'Bike connected' : bridgeRunning ? 'Scanning' : 'Idle'}
               </span>

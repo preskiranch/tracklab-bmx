@@ -74,3 +74,34 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   expect(pageErrors).toEqual([]);
   expect(consoleErrors).toEqual([]);
 });
+
+test('advanced connector prompts racer accounts to open the Mac connector', async ({ page }) => {
+  const authUser = {
+    id: 'connector-racer',
+    profileKey: 'user:connector-racer',
+    email: 'connector-racer@tracklab.test',
+    name: 'Connector Rider',
+    admin: false,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 1,
+      updatedAt: Date.now(),
+    },
+  };
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ user: authUser }),
+    });
+  });
+
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await expect(page.getByRole('button', { name: /Custom Location/i })).toBeVisible();
+  await page.getByRole('button', { name: 'Advanced Connector' }).click();
+
+  await expect(page.getByRole('button', { name: 'Open Mac Connector' })).toBeVisible();
+  await expect(page.getByText(/Open TrackLab Bike Connector on this computer/i)).toBeVisible();
+});
