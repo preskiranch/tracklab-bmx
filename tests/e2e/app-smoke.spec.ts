@@ -5,7 +5,7 @@ const ignoredConsoleFragments = [
   "This page can't load Google Maps correctly",
   'Attempted to load a Vector Map, but failed. Falling back to Raster.',
   'Failed to load resource',
-  'ws://127.0.0.1:8787',
+  'ws://127.0.0.1:',
 ];
 
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {
@@ -103,5 +103,5 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
   await page.getByRole('button', { name: 'Advanced Connector' }).click();
 
   await expect(page.getByRole('button', { name: 'Open Mac Connector' })).toBeVisible();
-  await expect(page.getByText(/Open TrackLab Bike Connector on this computer/i)).toBeVisible();
+  await expect(page.getByText(/runs locally in the background/i)).toBeVisible();
 });

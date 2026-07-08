@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 10101);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`;
+const bridgeUrl = process.env.PLAYWRIGHT_BRIDGE_URL ?? 'ws://127.0.0.1:19787';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -22,7 +23,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
     : {
-      command: `PORT=${port} npm run cloud`,
+      command: `PORT=${port} VITE_WATTBIKE_BRIDGE_URL=${bridgeUrl} npm run cloud`,
       url: baseURL,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

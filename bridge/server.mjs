@@ -23,6 +23,17 @@ let source = null;
 let sourceState = 'idle';
 let sourceError = null;
 let controlStatusMessage = null;
+const seenBikeDevices = new Set();
+
+function logBridge(message, extra = null) {
+  const suffix = extra ? ` ${JSON.stringify(extra)}` : '';
+  console.log(`[bridge] ${message}${suffix}`);
+}
+
+function warnBridge(message, error = null) {
+  const suffix = error ? ` ${error instanceof Error ? error.message : String(error)}` : '';
+  console.warn(`[bridge] ${message}${suffix}`);
+}
 
 function normalizeInputMode(value) {
   const normalized = String(value ?? 'auto').trim().toLowerCase();
@@ -183,11 +194,29 @@ async function startSource() {
   broadcast(statusPayload());
 
   const nextSource = createSource();
-  nextSource.on('status', (status) => broadcast(statusPayload(status)));
-  nextSource.on('bike', (bike) => broadcast({ type: 'bike-sample', ...bike }));
+  nextSource.on('status', (status) => {
+    const message = status?.message ? String(status.message) : 'Source status update.';
+    logBridge(message);
+    broadcast(statusPayload(status));
+  });
+  nextSource.on('bike', (bike) => {
+    const deviceKey = `${bike.source ?? 'unknown'}:${bike.deviceId}`;
+    if (!seenBikeDevices.has(deviceKey)) {
+      seenBikeDevices.add(deviceKey);
+      logBridge(`Detected ${bike.source ?? 'bike'} device ${bike.deviceId}.`, {
+        label: bike.label,
+        watts: bike.watts,
+        cadence: bike.cadence,
+        speedKph: bike.speedKph,
+        antProfile: bike.antProfile,
+      });
+    }
+    broadcast({ type: 'bike-sample', ...bike });
+  });
   nextSource.on('error', (error) => {
     sourceState = 'error';
     sourceError = error instanceof Error ? error.message : String(error);
+    warnBridge('Source error:', error);
     broadcast({
       type: 'bridge-error',
       mode: inputMode,
@@ -201,12 +230,14 @@ async function startSource() {
     await nextSource.start();
     source = nextSource;
     sourceState = 'running';
+    logBridge(`${inputMode.toString().toUpperCase()} source is running.`);
     broadcast(statusPayload());
     return statusPayload();
   } catch (error) {
     sourceState = 'error';
     sourceError = error instanceof Error ? error.message : String(error);
     await nextSource.stop?.().catch(() => undefined);
+    warnBridge('Source failed to start:', error);
     broadcast({
       type: 'bridge-error',
       mode: inputMode,
@@ -232,6 +263,8 @@ async function stopSource() {
   } finally {
     source = null;
     sourceState = 'idle';
+    seenBikeDevices.clear();
+    logBridge('Source stopped.');
     broadcast(statusPayload());
   }
 
@@ -360,8 +393,8 @@ try {
   const controlStatus = await wattbikeControl.status();
   controlStatusMessage = controlStatus.message;
   server.listen(port, '127.0.0.1');
-  console.log(`[bridge] TrackLab local helper listening on http://127.0.0.1:${port} (${inputMode})`);
-  console.log(`[bridge] ${controlStatus.message}`);
+  logBridge(`TrackLab local helper listening on http://127.0.0.1:${port} (${inputMode})`);
+  logBridge(controlStatus.message);
   if (autoStart) {
     await startSource();
   }

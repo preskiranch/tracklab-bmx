@@ -4568,7 +4568,7 @@ export default function App() {
     ? bridge.sourceState === 'stopping' ? 'Stopping Connector' : 'Starting Connector'
     : bridgeRunning ? 'Stop Connector' : 'Start Connector';
   const openMacConnector = () => {
-    setConnectorLaunchMessage('Opening TrackLab Bike Connector. If macOS asks, allow it, leave the Terminal window open, then return here.');
+    setConnectorLaunchMessage('Opening TrackLab Bike Connector. If macOS asks, allow it, then return here while the connector starts.');
     window.location.assign('tracklab-bmx://start');
   };
   const bridgePrompt = (() => {
@@ -4583,7 +4583,7 @@ export default function App() {
     }
 
     if (bridge.connection !== 'open') {
-      return connectorLaunchMessage ?? 'Open TrackLab Bike Connector on this computer. macOS opens a Terminal window that must stay running while you ride.';
+      return connectorLaunchMessage ?? 'Open TrackLab Bike Connector on this computer. It runs locally in the background while you ride.';
     }
 
     if (bridge.sourceState === 'idle') {
