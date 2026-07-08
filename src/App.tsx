@@ -4668,6 +4668,63 @@ export default function App() {
     : membership.tier === 'spectator'
       ? 'Free spectator'
       : 'Visitor';
+  const workflowConnectionReady = demoMode || livePlayerCount > 0;
+  const workflowMapReady = effectiveTrack.routeStatus === 'user-mapped';
+  const workflowRaceReady = workflowConnectionReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
+  const workflowSteps = [
+    {
+      label: 'Connect',
+      detail: demoMode
+        ? `${demoBikeCount} demo rider${demoBikeCount === 1 ? '' : 's'}`
+        : livePlayerCount > 0
+          ? `${livePlayerCount} live bike${livePlayerCount === 1 ? '' : 's'}`
+          : activePlayers.length > 0
+            ? `${activePlayers.length} remembered bike${activePlayers.length === 1 ? '' : 's'}`
+          : bikeConnectionSource === 'advanced'
+            ? 'Open Connector'
+            : 'Pair bike',
+      state: workflowConnectionReady ? 'complete' : 'next',
+      onClick: () => {
+        setAppMode('race');
+      },
+    },
+    {
+      label: 'Pick Track',
+      detail: selectedTrack.name,
+      state: 'complete',
+      onClick: () => {
+        setAppMode('race');
+      },
+    },
+    {
+      label: 'Map Zones',
+      detail: workflowMapReady
+        ? `${effectiveTrack.zones.length} pedal zone${effectiveTrack.zones.length === 1 ? '' : 's'}`
+        : 'Needs layout',
+      state: workflowMapReady ? 'complete' : 'next',
+      onClick: () => {
+        setAppMode('race');
+        handleMappingModeChange(true);
+        setMappingEditMode(workflowMapReady ? 'zones' : 'draw');
+      },
+    },
+    {
+      label: 'Race',
+      detail: workflowRaceReady
+        ? 'Ready'
+        : !workflowMapReady
+          ? 'Map first'
+          : !workflowConnectionReady
+            ? 'Connect bike'
+            : raceState === 'racing'
+              ? 'In progress'
+              : 'Ready soon',
+      state: workflowRaceReady ? 'next' : raceState === 'racing' ? 'complete' : 'idle',
+      onClick: () => {
+        setAppMode('race');
+      },
+    },
+  ];
 
   if (showMembershipLanding || !accountProfileComplete) {
     return (
@@ -4745,15 +4802,16 @@ export default function App() {
               onClick={() => handleBikeConnectionSourceChange('bluetooth')}
             >
               <Bluetooth size={15} />
-              <span>Bluetooth Direct</span>
+              <span>Bluetooth</span>
             </button>
             <button
               className={bikeConnectionSource === 'advanced' && !demoMode ? 'selected' : ''}
               type="button"
+              aria-label="Advanced Connector"
               onClick={() => handleBikeConnectionSourceChange('advanced')}
             >
               <Usb size={15} />
-              <span>Advanced Connector</span>
+              <span>Connector</span>
             </button>
             <button
               className={demoMode ? 'selected' : ''}
@@ -4781,11 +4839,12 @@ export default function App() {
                 <button
                   className="bridge-control-button start"
                   type="button"
+                  aria-label={liveBikeAccessLocked ? 'Upgrade to Connect' : 'Open Mac Connector'}
                   onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : openMacConnector}
                   disabled={demoMode}
                 >
                   <Usb size={16} />
-                  <span>{liveBikeAccessLocked ? 'Upgrade to Connect' : 'Open Mac Connector'}</span>
+                  <span>{liveBikeAccessLocked ? 'Upgrade to Connect' : 'Open Connector'}</span>
                 </button>
               ) : (
                 <button
@@ -4808,32 +4867,69 @@ export default function App() {
           <div className="bridge-prompt">{bridgePrompt}</div>
         </section>
 
+        <section className="sidebar-workflow" aria-label="Race setup workflow">
+          <div className="workflow-heading">
+            <span>Start Here</span>
+            <small>Normal session order</small>
+          </div>
+          <div className="workflow-list">
+            {workflowSteps.map((step, index) => (
+              <button className={`workflow-step ${step.state}`} type="button" onClick={step.onClick} key={step.label}>
+                <span className="workflow-index">{index + 1}</span>
+                <span className="workflow-copy">
+                  <strong>{step.label}</strong>
+                  <small>{step.detail}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
         <nav className="side-nav" aria-label="Primary">
+          <span className="nav-section-title">Workspace</span>
           <button type="button" onClick={() => setShowMembershipLanding(true)}>
             <Globe2 size={17} />
             Community
           </button>
           <button className={appMode === 'race' ? 'selected' : ''} type="button" onClick={() => setAppMode('race')}>
             <Activity size={17} />
-            Dashboard
+            Race Dashboard
           </button>
           <button className={appMode === 'monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('monitor')}>
             <Gauge size={17} />
-            Monitor
+            Live Monitor
           </button>
           <button className={appMode === 'diagnostics' ? 'selected' : ''} type="button" onClick={() => setAppMode('diagnostics')}>
             <Settings size={17} />
-            Preflight
+            Bike Check
           </button>
-          <button type="button">
+          <button
+            className={mappingMode ? 'selected' : ''}
+            type="button"
+            onClick={() => {
+              setAppMode('race');
+              handleMappingModeChange(true);
+            }}
+          >
             <Route size={17} />
-            Tracks
+            Tracks & Maps
           </button>
-          <button type="button">
+          <button
+            type="button"
+            onClick={() => {
+              setAppMode('race');
+              window.setTimeout(() => document.querySelector('.analytics-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+            }}
+          >
             <BarChart3 size={17} />
-            Analytics
+            Results
           </button>
-          <button type="button">
+          <button
+            type="button"
+            onClick={() => {
+              window.setTimeout(() => document.querySelector('.pairing-rail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+            }}
+          >
             <Users size={17} />
             Riders
           </button>

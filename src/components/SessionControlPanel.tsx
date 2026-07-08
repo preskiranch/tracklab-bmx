@@ -418,7 +418,7 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Custom Route</span>
-            <h3>Create ride</h3>
+            <h3>Create location</h3>
           </div>
           <MapPinned size={18} />
         </div>
@@ -568,7 +568,7 @@ export function SessionControlPanel({
             <div className="section-heading">
               <div>
                 <span className="eyebrow">Track Mapping</span>
-                <h3>Trace route</h3>
+                <h3>Track map</h3>
               </div>
               <MapPinned size={18} />
             </div>
@@ -886,7 +886,7 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Input Mode</span>
-            <h3>Bike source</h3>
+            <h3>Rider source</h3>
           </div>
           <Bike size={18} />
         </div>
@@ -907,6 +907,11 @@ export function SessionControlPanel({
             Demo
           </button>
         </div>
+        <p className="panel-helper">
+          {demoMode
+            ? 'Demo generates race data for testing maps, zones, ghosts, and summaries.'
+            : 'Live Bikes uses connected Wattbikes for the same race engine and BMX rollout logic.'}
+        </p>
 
         {demoMode && (
           <>
@@ -935,7 +940,7 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Session Setup</span>
-            <h3>Training mode</h3>
+            <h3>Race type</h3>
           </div>
           <Timer size={18} />
         </div>
@@ -947,7 +952,7 @@ export function SessionControlPanel({
             onClick={() => onSessionModeChange('sprint')}
           >
             <Flag size={15} />
-            Sprint
+            Full Track
           </button>
           <button
             className={sessionMode === 'interval' ? 'selected' : ''}
@@ -1089,13 +1094,13 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Ghost Racers</span>
-            <h3>Saved best laps</h3>
+            <h3>Saved laps</h3>
           </div>
           <Bike size={18} />
         </div>
 
         {ghostGroups.length === 0 ? (
-          <span className="empty-inline">Set a personal best on this track to create a ghost.</span>
+          <span className="empty-inline">Finish a race on this track to save a ghost lap.</span>
         ) : (
           <>
             <div className="ghost-summary-row">
@@ -1133,7 +1138,7 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Start Gate</span>
-            <h3>Cadence</h3>
+            <h3>Gate start</h3>
           </div>
           <Timer size={18} />
         </div>
@@ -1182,7 +1187,7 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">Before Race</span>
-            <h3>Post-race metrics</h3>
+            <h3>Results metrics</h3>
           </div>
           <SlidersHorizontal size={18} />
         </div>
@@ -1204,7 +1209,7 @@ export function SessionControlPanel({
         <div className="section-heading">
           <div>
             <span className="eyebrow">View</span>
-            <h3>Earth camera</h3>
+            <h3>Camera</h3>
           </div>
           <span className="angle-value">{earthAngle} deg / {earthHeading} deg</span>
         </div>
@@ -1259,16 +1264,16 @@ export function SessionControlPanel({
         >
           <Flag size={18} />
           {!hasMappedRoute
-            ? 'Map Track First'
+            ? 'Map Route First'
             : activeBikeCount === 0
-              ? (demoMode ? 'Choose Riders' : 'No Bikes Connected')
+              ? (demoMode ? 'Choose Demo Riders' : 'Connect Bikes First')
               : startGateActive
                 ? startGateLabel || 'Gate Sequence'
               : raceState === 'finished'
                 ? 'Race Again'
-                : raceState === 'racing'
-                  ? 'Racing'
-                  : demoMode ? 'Start Demo Race' : 'Start Session'}
+              : raceState === 'racing'
+                ? 'Racing'
+                : demoMode ? 'Start Demo Race' : 'Start Live Race'}
         </button>
         {canCancel && (
           <button className="action-button danger" type="button" onClick={onCancel}>
