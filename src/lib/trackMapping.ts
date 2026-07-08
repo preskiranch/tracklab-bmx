@@ -38,6 +38,7 @@ export type StoredTrackMappings = Record<string, UserTrackMapping>;
 
 const earthRadiusMeters = 6371008.8;
 const splitJunctionToleranceMeters = 4;
+const zoneBoundaryEndpointSnapMeters = 8;
 
 function roundCoordinate(value: number) {
   return Number(value.toFixed(7));
@@ -255,9 +256,21 @@ function cumulativeMeters(points: TrackPoint[]) {
 }
 
 function sortedUniqueBoundaries(boundaries: number[], totalMeters: number) {
+  const roundedTotalMeters = Math.max(0, Math.round(totalMeters));
   const rounded = boundaries
-    .map((boundary) => Math.max(0, Math.min(Math.round(totalMeters), Math.round(boundary))))
-    .filter((boundary) => boundary >= 0 && boundary <= totalMeters)
+    .map((boundary) => Math.max(0, Math.min(roundedTotalMeters, Math.round(boundary))))
+    .map((boundary) => {
+      if (boundary <= zoneBoundaryEndpointSnapMeters) {
+        return 0;
+      }
+
+      if (roundedTotalMeters - boundary <= zoneBoundaryEndpointSnapMeters) {
+        return roundedTotalMeters;
+      }
+
+      return boundary;
+    })
+    .filter((boundary) => boundary >= 0 && boundary <= roundedTotalMeters)
     .sort((a, b) => a - b);
 
   return rounded.filter((boundary, index) => index === 0 || Math.abs(boundary - rounded[index - 1]) >= 3);

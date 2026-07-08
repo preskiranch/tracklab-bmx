@@ -3722,8 +3722,10 @@ export default function App() {
       Math.abs(boundary - meter) < zoneBoundaryDuplicateMeters
     ));
     let nextZoneMeters = draftZoneMeters;
-    if (existingBoundaryIndex >= 0) {
-      const exactEndpoint = meter === 0 || meter === routeLengthMeters(draftRidePoints);
+    if (draftZoneMeters.length === 0 && meter > zoneBoundaryDuplicateMeters) {
+      nextZoneMeters = [0, meter].sort((a, b) => a - b);
+    } else if (existingBoundaryIndex >= 0) {
+      const exactEndpoint = meter === 0 || meter === draftZoneRouteLengthMeters;
       if (!exactEndpoint) {
         return;
       }
@@ -3741,17 +3743,18 @@ export default function App() {
 
     rememberMappingEdit('zones');
     updateCurrentDraftZoneMeters(nextZoneMeters);
-  }, [draftZoneMeters, draftZoneRidePoints, rememberMappingEdit, updateCurrentDraftZoneMeters]);
+  }, [draftZoneMeters, draftZoneRidePoints, draftZoneRouteLengthMeters, rememberMappingEdit, updateCurrentDraftZoneMeters]);
 
   const handleMappingZonePointMove = useCallback((index: number, point: TrackPoint) => {
     if (draftZoneRidePoints.length < 2 || index < 0 || index >= draftZoneMeters.length) {
       return;
     }
 
-    const meter = mappingZoneMeterFromPoint(draftZoneRidePoints, point);
-    if (meter == null) {
+    const mappedMeter = mappingZoneMeterFromPoint(draftZoneRidePoints, point);
+    if (mappedMeter == null) {
       return;
     }
+    const meter = index === 0 ? 0 : mappedMeter;
 
     const nextZoneMeters = draftZoneMeters
       .map((boundary, boundaryIndex) => (boundaryIndex === index ? meter : boundary))
