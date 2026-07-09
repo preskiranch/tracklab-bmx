@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -24,6 +24,7 @@ import { MembershipLanding } from './components/MembershipLanding';
 import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
 import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
+import { RaceReviewPanel } from './components/RaceReviewPanel';
 import { SessionControlPanel } from './components/SessionControlPanel';
 import {
   bikeConnectionSourceStorageKey,
@@ -1270,10 +1271,6 @@ function isReactionBikeSample(sample: { cadence: number | null; speedKph: number
   return (sample.cadence ?? 0) > 0 || (sample.speedKph ?? 0) > 0 || sample.watts > 0;
 }
 
-function isFalseStartBikeSample(sample: { cadence: number | null; speedKph: number | null; watts: number }) {
-  return (sample.cadence ?? 0) >= 12 || (sample.speedKph ?? 0) >= 2 || sample.watts >= 35;
-}
-
 function isGoogleLocationPermissionError(message: string) {
   return /REQUEST_DENIED|blocked|not allowed|not authorized|places\.googleapis\.com|Geocoding Service/i.test(message);
 }
@@ -1333,8 +1330,6 @@ export default function App() {
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
   const startGateSequenceIdRef = useRef(0);
-  const startGateArmedAtRef = useRef<number | null>(null);
-  const falseStartHandledRef = useRef(false);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
   const activeRaceSessionIdRef = useRef<string | null>(null);
   const ghostRaceStartedAtRef = useRef<number | null>(null);
@@ -1348,10 +1343,12 @@ export default function App() {
   const roomTrackApplyRef = useRef<string | null>(null);
   const lastRoomRaceTokenRef = useRef<string | null>(null);
   const roomRaceStartTimeoutRef = useRef<number | null>(null);
+  const liveRaceEntryTouchedRef = useRef(false);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const customRoutePreviewRequestIdRef = useRef(0);
   const customRoutePreviewTrackIdRef = useRef<string | null>(null);
   const initialMembershipRef = useRef<MembershipState | null>(null);
+  const raceReviewSessionRef = useRef<string | null>(null);
   if (initialMembershipRef.current === null) {
     initialMembershipRef.current = readStoredMembership();
   }
@@ -1418,6 +1415,7 @@ export default function App() {
   const [manualZoneIds, setManualZoneIds] = useState<string[]>(['z2', 'z4']);
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
   const [branchChoicesByPlayer, setBranchChoicesByPlayer] = useState<Partial<Record<PlayerSlot['id'], SplitBranchId>>>({});
+  const [liveRaceReadyDeviceIds, setLiveRaceReadyDeviceIds] = useState<number[]>([]);
   const [mappingRouteVariantId, setMappingRouteVariantId] = useState<RaceRouteVariantId>('amateur');
   const [raceRouteVariantId, setRaceRouteVariantId] = useState<RaceRouteVariantId>('amateur');
   const [earthAngle, setEarthAngle] = useState(
@@ -1449,6 +1447,9 @@ export default function App() {
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
+  const [raceReviewVisible, setRaceReviewVisible] = useState(false);
+  const [raceReviewRemainingSeconds, setRaceReviewRemainingSeconds] = useState(15);
+  const [raceReviewPaused, setRaceReviewPaused] = useState(false);
   const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
   const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
@@ -2148,10 +2149,18 @@ export default function App() {
     },
     [demoMode, demoPlayers, sessionPlayers],
   );
+  const enteredRacePlayers = useMemo(() => {
+    if (demoMode) {
+      return activePlayers;
+    }
+
+    const readyDeviceIds = new Set(liveRaceReadyDeviceIds);
+    return activePlayers.filter((player) => player.deviceId != null && readyDeviceIds.has(player.deviceId));
+  }, [activePlayers, demoMode, liveRaceReadyDeviceIds]);
   const multiplayer = useMultiplayer({
     enabled: playMode === 'multiplayer',
     track: effectiveTrack,
-    bikeCount: activePlayers.length,
+    bikeCount: demoMode ? activePlayers.length : enteredRacePlayers.length,
   });
   const roomVoice = useRoomVoiceChat({
     currentRoom: multiplayer.currentRoom,
@@ -2160,8 +2169,9 @@ export default function App() {
     sendVoiceSignal: multiplayer.sendVoiceSignal,
   });
   const localRaceSeatLimit = useMemo(() => {
+    const raceCandidateCount = demoMode ? activePlayers.length : enteredRacePlayers.length;
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
-      return activePlayers.length;
+      return raceCandidateCount;
     }
 
     const roomMember = multiplayer.currentRoom.members.find((member) => member.id === multiplayer.clientId);
@@ -2169,12 +2179,12 @@ export default function App() {
       return 0;
     }
 
-    const assignedSeatCount = roomMember?.racerSeatCount ?? activePlayers.length;
-    return Math.max(0, Math.min(activePlayers.length, assignedSeatCount));
-  }, [activePlayers.length, multiplayer.clientId, multiplayer.currentRoom, playMode]);
+    const assignedSeatCount = roomMember?.racerSeatCount ?? raceCandidateCount;
+    return Math.max(0, Math.min(raceCandidateCount, assignedSeatCount));
+  }, [activePlayers.length, demoMode, enteredRacePlayers.length, multiplayer.clientId, multiplayer.currentRoom, playMode]);
   const racePlayers = useMemo(
-    () => activePlayers.slice(0, localRaceSeatLimit),
-    [activePlayers, localRaceSeatLimit],
+    () => enteredRacePlayers.slice(0, localRaceSeatLimit),
+    [enteredRacePlayers, localRaceSeatLimit],
   );
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
@@ -2375,7 +2385,6 @@ export default function App() {
     startGateSequenceIdRef.current += 1;
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     startGateTimeoutsRef.current = [];
-    startGateArmedAtRef.current = null;
     stopStartGateAudio();
     setStartGateStatus(idleStartGateStatus);
     setReactionStartAt(null);
@@ -2405,8 +2414,9 @@ export default function App() {
     setInitialUrlTrackPending(false);
     selectedTrackIdRef.current = nextTrackId;
     clearStartGateSequence();
-    falseStartHandledRef.current = false;
     setMappingFullscreen(false);
+    setRaceReviewVisible(false);
+    setRaceReviewPaused(false);
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     resetRace();
@@ -2682,6 +2692,34 @@ export default function App() {
       });
 
       return changed ? dedupeBikeProfiles(next) : current;
+    });
+  }, [connectedDeviceIds, demoMode]);
+
+  useEffect(() => {
+    setLiveRaceReadyDeviceIds((current) => {
+      if (demoMode) {
+        liveRaceEntryTouchedRef.current = false;
+        return current.length === 0 ? current : [];
+      }
+
+      if (connectedDeviceIds.length === 0) {
+        liveRaceEntryTouchedRef.current = false;
+        return current.length === 0 ? current : [];
+      }
+
+      const connectedIds = new Set(connectedDeviceIds);
+      const pruned = current.filter((deviceId) => connectedIds.has(deviceId));
+      if (connectedDeviceIds.length > 1 && !liveRaceEntryTouchedRef.current) {
+        return pruned.length === 0 ? current : [];
+      }
+
+      if (pruned.length === 0 && connectedDeviceIds.length === 1) {
+        return [connectedDeviceIds[0]];
+      }
+
+      const unchanged = pruned.length === current.length
+        && pruned.every((deviceId, index) => deviceId === current[index]);
+      return unchanged ? current : pruned;
     });
   }, [connectedDeviceIds, demoMode]);
 
@@ -3144,6 +3182,60 @@ export default function App() {
     });
   }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer]);
 
+  const hideRaceReview = useCallback(() => {
+    setRaceReviewVisible(false);
+    setRaceReviewPaused(false);
+  }, []);
+
+  const extendRaceReview = useCallback(() => {
+    setRaceReviewRemainingSeconds((seconds) => seconds + 15);
+  }, []);
+
+  const toggleRaceReviewPaused = useCallback(() => {
+    setRaceReviewPaused((paused) => !paused);
+  }, []);
+
+  useEffect(() => {
+    if (raceState !== 'finished') {
+      raceReviewSessionRef.current = null;
+      hideRaceReview();
+      return;
+    }
+
+    if (raceSummary.length === 0) {
+      return;
+    }
+
+    const reviewSessionId = raceCapture?.sessionId
+      ?? `${effectiveTrack.id}:${raceSummary.map((summary) => `${summary.playerId}-${summary.finishTimeMs ?? 'dnf'}`).join('|')}`;
+    if (raceReviewSessionRef.current === reviewSessionId) {
+      return;
+    }
+
+    raceReviewSessionRef.current = reviewSessionId;
+    setAppMode('race');
+    setRaceReviewRemainingSeconds(15);
+    setRaceReviewPaused(false);
+    setRaceReviewVisible(true);
+  }, [effectiveTrack.id, hideRaceReview, raceCapture?.sessionId, raceState, raceSummary]);
+
+  useEffect(() => {
+    if (!raceReviewVisible || raceReviewPaused) {
+      return undefined;
+    }
+
+    if (raceReviewRemainingSeconds <= 0) {
+      hideRaceReview();
+      return undefined;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setRaceReviewRemainingSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+
+    return () => window.clearTimeout(timerId);
+  }, [hideRaceReview, raceReviewPaused, raceReviewRemainingSeconds, raceReviewVisible]);
+
   useEffect(() => {
     if (raceState !== 'finished' || raceSummary.length === 0) {
       return;
@@ -3218,12 +3310,17 @@ export default function App() {
       const valid = current.filter((zoneId) => mappedZones.some((zone) => zone.id === zoneId));
       return valid.length > 0 ? valid : mappedZones.slice(0, 2).map((zone) => zone.id);
     });
+
+    if (startGateStatus.active || raceState === 'racing') {
+      return;
+    }
+
     resetRace();
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     setReactionStartAt(null);
     setReactionTimesByPlayer({});
-  }, [effectiveTrack.activeRouteVariantId, effectiveTrack.id, mappedZones, resetRace]);
+  }, [effectiveTrack.activeRouteVariantId, effectiveTrack.id, mappedZones, raceState, resetRace, startGateStatus.active]);
 
   const renamePlayer = useCallback((playerId: PlayerSlot['id'], name: string) => {
     const player = sessionPlayers.find((item) => item.id === playerId);
@@ -3663,7 +3760,6 @@ export default function App() {
 
     if (enabled) {
       clearStartGateSequence();
-      falseStartHandledRef.current = false;
       setDemoRaceStartedAt(null);
       setDemoSignalsStopped(true);
       resetRace();
@@ -4186,6 +4282,37 @@ export default function App() {
     }));
   }, []);
 
+  const toggleLiveRaceEntry = useCallback((deviceId: number) => {
+    if (startGateStatus.active || raceState === 'racing') {
+      return;
+    }
+
+    liveRaceEntryTouchedRef.current = true;
+    setLiveRaceReadyDeviceIds((current) => (
+      current.includes(deviceId)
+        ? current.filter((id) => id !== deviceId)
+        : [...current, deviceId].slice(0, maxPlayers)
+    ));
+  }, [raceState, startGateStatus.active]);
+
+  const enterAllLiveRaceBikes = useCallback(() => {
+    if (startGateStatus.active || raceState === 'racing') {
+      return;
+    }
+
+    liveRaceEntryTouchedRef.current = true;
+    setLiveRaceReadyDeviceIds(connectedDeviceIds.slice(0, maxPlayers));
+  }, [connectedDeviceIds, raceState, startGateStatus.active]);
+
+  const clearLiveRaceEntries = useCallback(() => {
+    if (startGateStatus.active || raceState === 'racing') {
+      return;
+    }
+
+    liveRaceEntryTouchedRef.current = true;
+    setLiveRaceReadyDeviceIds([]);
+  }, [raceState, startGateStatus.active]);
+
   const handleMappingRouteVariantChange = useCallback((variantId: RaceRouteVariantId) => {
     setMappingRouteVariantId(variantId);
     setMappingEditMode('navigate');
@@ -4287,7 +4414,6 @@ export default function App() {
 
   const armReactionTimer = useCallback(() => {
     const armedAt = Date.now();
-    startGateArmedAtRef.current = armedAt;
     setReactionStartAt(armedAt);
     setReactionTimesByPlayer({});
   }, []);
@@ -4301,7 +4427,6 @@ export default function App() {
     }
 
     const gateDropAt = Date.now();
-    startGateArmedAtRef.current = null;
     ghostRaceStartedAtRef.current = gateDropAt;
     ghostTraceRef.current = new Map();
     ghostTraceLastSampleAtRef.current = new Map();
@@ -4324,53 +4449,6 @@ export default function App() {
     startRace();
     scheduleStartGateStep(420, () => setStartGateStatus(idleStartGateStatus));
   }, [appendRaceCaptureEvent, bridge, demoMode, scheduleStartGateStep, startRace]);
-
-  useEffect(() => {
-    if (!startGateStatus.active || raceState === 'racing' || demoMode || falseStartHandledRef.current) {
-      return;
-    }
-
-    const gateArmedAt = startGateArmedAtRef.current;
-    if (gateArmedAt == null) {
-      return;
-    }
-
-    const falseStartPlayer = racePlayers.find((player) => {
-      if (player.deviceId == null) {
-        return false;
-      }
-
-      const sample = samplesByDevice.get(player.deviceId);
-      return Boolean(sample && sample.at >= gateArmedAt + 120 && isFalseStartBikeSample(sample));
-    });
-
-    if (!falseStartPlayer) {
-      return;
-    }
-
-    falseStartHandledRef.current = true;
-    const sessionId = raceCapture?.sessionId ?? `false-start-${Date.now()}`;
-    appendRaceCaptureEvent('race-cancel', `False start: ${falseStartPlayer.name}`);
-    clearStartGateSequence();
-    setMappingFullscreen(false);
-    bridge.sendControlCommand('race-reset');
-    sendRoomReadyState(sessionId);
-    resetRace();
-    releaseRaceFullscreen();
-  }, [
-    appendRaceCaptureEvent,
-    bridge,
-    clearStartGateSequence,
-    demoMode,
-    racePlayers,
-    raceCapture?.sessionId,
-    raceState,
-    releaseRaceFullscreen,
-    resetRace,
-    samplesByDevice,
-    sendRoomReadyState,
-    startGateStatus.active,
-  ]);
 
   const handleDemoModeChange = (enabled: boolean, nextSource: BikeConnectionSource = enabled ? 'demo' : 'bluetooth') => {
     clearStartGateSequence();
@@ -4614,8 +4692,8 @@ export default function App() {
     const sessionId = raceCapture?.sessionId ?? `reset-${Date.now()}`;
     appendRaceCaptureEvent('race-reset', 'Race reset');
     clearStartGateSequence();
-    falseStartHandledRef.current = false;
     setMappingFullscreen(false);
+    hideRaceReview();
     if (!demoMode) {
       bridge.sendControlCommand('race-reset');
     }
@@ -4638,8 +4716,8 @@ export default function App() {
       : 'Race cancelled before gate drop';
     appendRaceCaptureEvent('race-cancel', label);
     clearStartGateSequence();
-    falseStartHandledRef.current = false;
     setMappingFullscreen(false);
+    hideRaceReview();
 
     if (!demoMode) {
       bridge.sendControlCommand('race-reset');
@@ -4767,7 +4845,12 @@ export default function App() {
   }, []);
 
   const handleStart = async () => {
-    if (effectiveTrack.routeStatus !== 'user-mapped' || startGateStatus.active || raceState === 'racing') {
+    if (
+      effectiveTrack.routeStatus !== 'user-mapped'
+      || racePlayers.length === 0
+      || startGateStatus.active
+      || raceState === 'racing'
+    ) {
       return;
     }
 
@@ -4778,10 +4861,9 @@ export default function App() {
 
     clearStartGateSequence();
     const sequenceId = startGateSequenceIdRef.current;
-    falseStartHandledRef.current = false;
-    startGateArmedAtRef.current = null;
     setMappingMode(false);
     setMappingFullscreen(false);
+    hideRaceReview();
     setDemoSignalsStopped(false);
     createRaceCapture();
     requestBrowserFullscreen(raceShellRef.current);
@@ -5058,8 +5140,12 @@ export default function App() {
       : 'Visitor';
   const connectedBikeDisplayCount = demoMode ? demoBikeCount : activePlayers.length;
   const workflowConnectionReady = demoMode || activePlayers.length > 0;
+  const workflowRaceEntryReady = demoMode || racePlayers.length > 0;
   const workflowMapReady = effectiveTrack.routeStatus === 'user-mapped';
-  const workflowRaceReady = workflowConnectionReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
+  const workflowRaceReady = workflowConnectionReady && workflowRaceEntryReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
+  const hasStartHereSplitChoices = racePlayers.length > 0 && (effectiveTrack.splitSections?.length ?? 0) > 0;
+  const canChooseStartHereSplitLine = raceState !== 'racing' && !startGateStatus.active;
+  const canEditLiveRaceEntry = !demoMode && raceState !== 'racing' && !startGateStatus.active;
   const workflowSteps = [
     {
       label: 'Connect',
@@ -5107,6 +5193,8 @@ export default function App() {
           ? 'Map first'
           : !workflowConnectionReady
             ? 'Connect bike'
+            : !workflowRaceEntryReady
+              ? 'Choose racer'
             : raceState === 'racing'
               ? 'In progress'
               : 'Ready soon',
@@ -5168,7 +5256,7 @@ export default function App() {
 
   return (
     <div
-      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}`}
+      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${raceReviewVisible ? ' race-review-mode' : ''}`}
       ref={raceShellRef}
     >
       <aside className="sidebar">
@@ -5285,6 +5373,110 @@ export default function App() {
               </button>
             ))}
           </div>
+          {!demoMode && activePlayers.length > 0 && (
+            <div className="workflow-race-entry" aria-label="Live race entry">
+              <div className="workflow-race-entry-heading">
+                <span>Race Entry</span>
+                <small>{racePlayers.length} entered / {activePlayers.length} connected</small>
+              </div>
+              <div className="workflow-race-entry-list">
+                {activePlayers.map((player) => {
+                  const deviceId = player.deviceId;
+                  const entered = deviceId != null && liveRaceReadyDeviceIds.includes(deviceId);
+
+                  return (
+                    <button
+                      className={`race-entry-row ${entered ? 'entered' : ''}`}
+                      type="button"
+                      key={deviceId ?? player.id}
+                      onClick={() => {
+                        if (deviceId != null) {
+                          toggleLiveRaceEntry(deviceId);
+                        }
+                      }}
+                      disabled={!canEditLiveRaceEntry || deviceId == null}
+                      aria-pressed={entered}
+                      aria-label={`${entered ? 'Remove' : 'Enter'} ${player.name} ${entered ? 'from' : 'in'} live race`}
+                    >
+                      <span
+                        className="player-chip"
+                        style={{ '--player-color': player.accent } as CSSProperties}
+                      >
+                        P{player.id}
+                      </span>
+                      <span className="race-entry-copy">
+                        <strong>{player.name}</strong>
+                        <small>{deviceId != null ? `Monitor ID ${deviceId}` : 'No monitor ID'}</small>
+                      </span>
+                      <span className={`race-entry-status ${entered ? 'entered' : ''}`}>
+                        {entered ? 'Entered' : 'Standby'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="race-entry-actions">
+                <button
+                  type="button"
+                  onClick={enterAllLiveRaceBikes}
+                  disabled={!canEditLiveRaceEntry || connectedDeviceIds.length === 0}
+                >
+                  Enter all
+                </button>
+                <button
+                  type="button"
+                  onClick={clearLiveRaceEntries}
+                  disabled={!canEditLiveRaceEntry || liveRaceReadyDeviceIds.length === 0}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+          {hasStartHereSplitChoices && (
+            <div className="workflow-split-choice" aria-label="Start Here rider race line choices">
+              <div className="workflow-split-choice-heading">
+                <span>Race Line</span>
+                <small>Pro Set needs 26+ mph at split</small>
+              </div>
+              <div className="workflow-split-choice-list">
+                {racePlayers.map((player) => {
+                  const branchChoice = activeBranchChoicesByPlayer[player.id] ?? 'a';
+                  return (
+                    <div className="workflow-split-choice-row" key={player.id}>
+                      <div className="workflow-split-choice-rider">
+                        <span
+                          className="player-chip"
+                          style={{ '--player-color': player.accent } as CSSProperties}
+                        >
+                          P{player.id}
+                        </span>
+                        <strong>{player.name}</strong>
+                      </div>
+                      <div className="workflow-split-choice-buttons" aria-label={`${player.name} split line`}>
+                        <button
+                          className={branchChoice === 'a' ? 'selected' : ''}
+                          type="button"
+                          onClick={() => handleBranchChoiceChange(player.id, 'a')}
+                          disabled={!canChooseStartHereSplitLine}
+                        >
+                          Amateur
+                        </button>
+                        <button
+                          className={branchChoice === 'b' ? 'selected' : ''}
+                          type="button"
+                          onClick={() => handleBranchChoiceChange(player.id, 'b')}
+                          disabled={!canChooseStartHereSplitLine}
+                        >
+                          Pro Set
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </section>
 
         <nav className="side-nav" aria-label="Primary">
@@ -5410,7 +5602,74 @@ export default function App() {
           </div>
         </header>
 
-        {appMode === 'monitor' ? (
+        {raceReviewVisible ? (
+          <section className="race-review-screen">
+            <div className="race-review-map">
+              <EarthTrackView
+                track={effectiveTrack}
+                riders={stagedRiders}
+                ghostRiders={selectedGhostRiders}
+                remoteRaceStates={remoteRaceStates}
+                players={racePlayers}
+                samplesByDevice={samplesByDevice}
+                speedUnit={speedUnit}
+                distanceUnit={distanceUnit}
+                raceState={raceState}
+                raceViewFullscreen={false}
+                startGateActive={false}
+                startGateLightIndex={null}
+                reactionTimesByPlayer={reactionTimesByPlayer}
+                earthAngle={earthAngle}
+                earthHeading={earthHeading}
+                earthCenter={earthCenter}
+                earthZoom={earthZoom}
+                activeZones={activeZones}
+                canCancelRace={false}
+                mappingMode={false}
+                mappingFullscreen={false}
+                mappingEditMode={mappingEditMode}
+                mappingRouteVariantId={mappingRouteVariantId}
+                draftPoints={draftPoints}
+                draftZoneRoutePoints={draftZoneRidePoints}
+                draftZoneMeters={draftZoneMeters}
+                draftZonePoints={draftZonePoints}
+                draftReferenceZones={draftReferenceZones}
+                draftSplitSections={draftSplitSections}
+                draftRouteSplitSections={draftRouteSplitSections}
+                draftSplitBuilder={draftSplitBuilder}
+                onEarthCameraChange={handleEarthCameraChange}
+                onEarthAngleChange={handleEarthAngleChange}
+                onEarthHeadingChange={handleEarthHeadingChange}
+                onCancelRace={handleCancel}
+                onMappingFullscreenChange={handleMappingFullscreenChange}
+                onMappingPathPointAdd={handleMappingPathPointAdd}
+                onMappingPathPointMove={handleMappingPathPointMove}
+                onMappingPathPointRemove={handleMappingPathPointRemove}
+                onMappingZonePointAdd={handleMappingZonePointAdd}
+                onMappingZonePointMove={handleMappingZonePointMove}
+                onMappingZonePointRemove={handleMappingZonePointRemove}
+                onMappingSplitPointAdd={handleMappingSplitPointAdd}
+                onMappingSplitDrawEnd={handleMappingSplitDrawEnd}
+              />
+            </div>
+
+            <RaceReviewPanel
+              track={effectiveTrack}
+              players={racePlayers}
+              raceSummary={raceSummary}
+              raceCapture={raceCapture}
+              activeZones={activeZones}
+              reactionTimesByPlayer={reactionTimesByPlayer}
+              speedUnit={speedUnit}
+              distanceUnit={distanceUnit}
+              remainingSeconds={raceReviewRemainingSeconds}
+              paused={raceReviewPaused}
+              onExtend={extendRaceReview}
+              onPauseToggle={toggleRaceReviewPaused}
+              onReturnToDashboard={hideRaceReview}
+            />
+          </section>
+        ) : appMode === 'monitor' ? (
           <MonitorView
             players={activePlayers}
             samplesByDevice={samplesByDevice}

@@ -571,6 +571,273 @@ input:focus {
   border: 0;
 }
 
+.platform-shell.race-review-mode {
+  display: block;
+  min-height: 100vh;
+  background: #eef3f5;
+}
+
+.race-review-mode .sidebar,
+.race-review-mode .platform-topbar {
+  display: none;
+}
+
+.race-review-mode .platform-main {
+  width: 100%;
+  min-height: 100vh;
+  padding: 0;
+  overflow: hidden;
+}
+
+.race-review-screen {
+  display: grid;
+  grid-template-rows: minmax(330px, 52vh) minmax(0, 1fr);
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: #eef3f5;
+}
+
+.race-review-map {
+  min-height: 0;
+  border-bottom: 1px solid #cfd9df;
+  background: #111827;
+}
+
+.race-review-map .earth-panel {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: #111827;
+  box-shadow: none;
+}
+
+.race-review-map .earth-header,
+.race-review-map .rider-strip,
+.race-review-map .google-map-caption {
+  display: none;
+}
+
+.race-review-map .earth-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+}
+
+.race-review-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  background: #f7fafb;
+}
+
+.race-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.race-review-header h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.race-review-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.race-review-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.race-review-timer,
+.race-review-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.race-review-timer {
+  background: #f2f7ef;
+  color: #17330d;
+}
+
+.race-review-timer span {
+  color: #5d6b57;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.race-review-controls button.primary {
+  border-color: #111827;
+  background: #111827;
+  color: #ffffff;
+}
+
+.race-review-results {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(210px, 1fr));
+  gap: 10px;
+  padding: 12px 18px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.race-review-rider-card {
+  display: grid;
+  gap: 10px;
+  min-width: 210px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.race-review-rider-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.race-review-rider-heading > div {
+  display: grid;
+  min-width: 0;
+}
+
+.race-review-rider-heading strong,
+.race-review-rider-heading small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-review-rider-heading small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.race-review-rider-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.race-review-rider-metrics span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #e4ebef;
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+.race-review-rider-metrics strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-review-rider-metrics small {
+  color: #607080;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.race-review-zone-table-wrap {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 18px 18px;
+}
+
+.race-review-zone-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: separate;
+  border-spacing: 0 8px;
+}
+
+.race-review-zone-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px;
+  background: #f7fafb;
+  color: #526170;
+  font-size: 10px;
+  font-weight: 950;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.race-review-zone-table th:first-child,
+.race-review-zone-table th:nth-child(2) {
+  width: 150px;
+}
+
+.race-review-zone-table th .player-chip {
+  margin-right: 6px;
+}
+
+.race-review-zone-table td {
+  padding: 10px;
+  border-top: 1px solid #dce5eb;
+  border-bottom: 1px solid #dce5eb;
+  background: #ffffff;
+  color: #1e2934;
+  font-size: 12px;
+  vertical-align: top;
+}
+
+.race-review-zone-table td:first-child {
+  border-left: 1px solid #dce5eb;
+  border-radius: 7px 0 0 7px;
+}
+
+.race-review-zone-table td:last-child {
+  border-right: 1px solid #dce5eb;
+  border-radius: 0 7px 7px 0;
+}
+
+.race-review-zone-table td strong,
+.race-review-zone-table td small {
+  display: block;
+}
+
+.race-review-zone-table td small,
+.race-review-zone-table .muted {
+  color: var(--muted);
+}
+
 .race-cancel-overlay {
   position: absolute;
   top: 16px;
@@ -1096,6 +1363,236 @@ input:focus {
   color: #62717f;
   font-size: 11px;
   font-weight: 780;
+}
+
+.workflow-race-entry {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #dfead7;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.workflow-race-entry-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-race-entry-heading span {
+  color: #17330d;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workflow-race-entry-heading small {
+  overflow: hidden;
+  color: #5f6f5a;
+  font-size: 10px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-race-entry-list {
+  display: grid;
+  gap: 6px;
+}
+
+.race-entry-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 6px 7px;
+  border: 1px solid #dbe4ec;
+  border-radius: 7px;
+  background: #ffffff;
+  text-align: left;
+}
+
+.race-entry-row:hover {
+  border-color: #bfe5b2;
+  background: #f8fdf5;
+}
+
+.race-entry-row.entered {
+  border-color: #98d67a;
+  background: #f0faea;
+  box-shadow: inset 3px 0 0 #63df29;
+}
+
+.race-entry-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.race-entry-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.race-entry-copy strong,
+.race-entry-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-entry-copy strong {
+  color: #17212b;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.race-entry-copy small {
+  color: #62717f;
+  font-size: 10px;
+  font-weight: 780;
+}
+
+.race-entry-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: #536270;
+  font-size: 9px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.race-entry-status.entered {
+  background: #101827;
+  color: #ffffff;
+}
+
+.race-entry-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.race-entry-actions button {
+  min-height: 28px;
+  border: 1px solid #dbe4ec;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #344152;
+  font-size: 10px;
+  font-weight: 920;
+}
+
+.race-entry-actions button:hover {
+  border-color: #bfe5b2;
+  background: #f8fdf5;
+}
+
+.race-entry-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.workflow-split-choice {
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.workflow-split-choice-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-split-choice-heading span {
+  color: #17330d;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workflow-split-choice-heading small {
+  overflow: hidden;
+  color: #5f6f5a;
+  font-size: 10px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-split-choice-list {
+  display: grid;
+  gap: 6px;
+}
+
+.workflow-split-choice-row {
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid #dfead7;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.workflow-split-choice-rider {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.workflow-split-choice-rider strong {
+  overflow: hidden;
+  color: #17212b;
+  font-size: 11px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-split-choice-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.workflow-split-choice-buttons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 6px;
+  border: 1px solid #dbe4ec;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #344152;
+  font-size: 10px;
+  font-weight: 920;
+}
+
+.workflow-split-choice-buttons button.selected {
+  border-color: #101827;
+  background: #101827;
+  color: #ffffff;
+}
+
+.workflow-split-choice-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .side-nav {

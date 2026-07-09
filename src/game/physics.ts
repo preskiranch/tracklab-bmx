@@ -7,6 +7,7 @@ const gravityPx = 430;
 const groundRecoveryPerSecond = 4.2;
 const maxAirPx = 34;
 const liveMetricWindowMs = 1800;
+const liveRaceStartSampleGraceMs = 300;
 const rollingFrictionMps2 = 0.42;
 const airDragPerMeter = 0.0038;
 const stopVelocityMps = 0.04;
@@ -41,7 +42,7 @@ function metricIsUsable(sample: BikeSample | null | undefined, metricAt: number 
   }
 
   const recordedAt = metricAt ?? sample.at;
-  return recordedAt >= raceStartedAt && nowMs - recordedAt <= liveMetricWindowMs;
+  return recordedAt >= raceStartedAt - liveRaceStartSampleGraceMs && nowMs - recordedAt <= liveMetricWindowMs;
 }
 
 function wattsFallbackVelocityMps(watts: number, currentVelocityMps: number) {

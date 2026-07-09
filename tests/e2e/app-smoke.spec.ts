@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { WebSocket, WebSocketServer } from 'ws';
 
 const ignoredConsoleFragments = [
   'Google Maps JavaScript API',
@@ -7,6 +8,157 @@ const ignoredConsoleFragments = [
   'Failed to load resource',
   'ws://127.0.0.1:',
 ];
+
+const mockPedalZoneMapping = {
+  version: 1,
+  trackId: 'black-mountain-bmx',
+  trackName: 'Black Mountain BMX',
+  country: 'United States',
+  state: 'Arizona',
+  savedAt: '2026-07-09T00:00:00.000Z',
+  routeStatus: 'user-mapped',
+  restAfterSeconds: 1,
+  lengthMeters: 120,
+  centerline: [
+    { lat: 33.7125, lng: -112.0667 },
+    { lat: 33.7125, lng: -112.0659 },
+    { lat: 33.7120, lng: -112.0659 },
+    { lat: 33.7120, lng: -112.0667 },
+  ],
+  startGate: { lat: 33.7125, lng: -112.0667 },
+  finishLine: { lat: 33.7120, lng: -112.0667 },
+  zoneBoundaryMeters: [0, 30, 60, 90],
+  zoneBoundarySets: [
+    {
+      id: 'default-pedal-zones',
+      name: 'Default pedal zones',
+      boundaryMeters: [0, 30, 60, 90],
+    },
+  ],
+  zones: [
+    {
+      id: 'pedal-zone-1',
+      name: 'Pedal Zone 1',
+      startMeter: 0,
+      endMeter: 30,
+      type: 'pedal',
+      restAfterSeconds: 1,
+    },
+    {
+      id: 'pedal-zone-2',
+      name: 'Pedal Zone 2',
+      startMeter: 60,
+      endMeter: 90,
+      type: 'pedal',
+      restAfterSeconds: 1,
+    },
+  ],
+  splitSections: [],
+};
+
+const mockNoPedalZoneMapping = {
+  ...mockPedalZoneMapping,
+  savedAt: '2026-07-09T00:05:00.000Z',
+  zoneBoundaryMeters: [],
+  zoneBoundarySets: [],
+  zones: [],
+};
+
+type MockBikeSampleOverrides = Partial<{
+  at: number;
+  source: string;
+  deviceId: number;
+  label: string;
+  watts: number;
+  cadence: number | null;
+  speedKph: number | null;
+  wattsAt: number;
+  cadenceAt: number;
+  speedAt: number;
+  signal: number;
+  battery: number;
+}>;
+
+function mockBikeSample(overrides: MockBikeSampleOverrides = {}) {
+  const at = overrides.at ?? Date.now();
+  const deviceId = overrides.deviceId ?? 58701;
+  return {
+    type: 'bike-sample',
+    at,
+    source: overrides.source ?? 'bluetooth',
+    deviceId,
+    label: overrides.label ?? `WattbikePM250${deviceId}`,
+    watts: overrides.watts ?? 40,
+    cadence: overrides.cadence ?? 16,
+    speedKph: overrides.speedKph ?? 1.5,
+    wattsAt: overrides.wattsAt ?? at,
+    cadenceAt: overrides.cadenceAt ?? at,
+    speedAt: overrides.speedAt ?? at,
+    speedSource: 'measured',
+    signal: overrides.signal ?? 92,
+    battery: overrides.battery ?? 87,
+  };
+}
+
+async function createMockBikeBridge(deviceIds = [58701]) {
+  const bridgeUrl = new URL(process.env.PLAYWRIGHT_BRIDGE_URL ?? 'ws://127.0.0.1:19787');
+  const port = Number(bridgeUrl.port);
+  const clients = new Set<WebSocket>();
+  const server = await new Promise<WebSocketServer>((resolve, reject) => {
+    const wss = new WebSocketServer({ host: bridgeUrl.hostname, port });
+    wss.once('listening', () => resolve(wss));
+    wss.once('error', reject);
+  });
+
+  const broadcast = (message: unknown) => {
+    const payload = JSON.stringify(message);
+    clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
+  };
+
+  server.on('connection', (socket) => {
+    clients.add(socket);
+    socket.send(JSON.stringify({
+      type: 'bridge-status',
+      mode: 'bluetooth',
+      sourceState: 'running',
+      message: 'Mock TrackLab connector running.',
+      connectedDevices: deviceIds.map((deviceId, index) => ({
+        deviceId,
+        label: `WattbikePM250${deviceId}`,
+        connected: true,
+        source: 'bluetooth',
+        signal: 92 - index,
+        at: Date.now(),
+      })),
+    }));
+    socket.on('message', (data) => {
+      const command = JSON.parse(String(data)) as { type?: string; action?: string };
+      if (command.type === 'bike-control') {
+        socket.send(JSON.stringify({
+          type: 'bike-control-result',
+          action: command.action,
+          ok: true,
+          at: Date.now(),
+          message: `Mock ${command.action} accepted.`,
+          controlledCount: deviceIds.length,
+        }));
+      }
+    });
+    socket.on('close', () => clients.delete(socket));
+  });
+
+  return {
+    broadcast,
+    close: async () => {
+      clients.forEach((client) => client.close());
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
 
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
@@ -139,4 +291,198 @@ test('start here race action enters fullscreen race view', async ({ page }) => {
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   await expect(page.locator('.start-tree-light')).toBeVisible();
   await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
+});
+
+test('live race with mapped pedal zones stays active through UCI gate cadence', async ({ page }, testInfo) => {
+  const bridge = await createMockBikeBridge();
+  const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample()), 120);
+  const authUser = {
+    id: 'pedal-zone-live-racer',
+    profileKey: 'user:pedal-zone-live-racer',
+    email: 'pedal-zone-live@tracklab.test',
+    name: 'Pedal Zone Live Rider',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 1,
+      updatedAt: Date.now(),
+    },
+  };
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/public-track-mappings', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {
+            'black-mountain-bmx': mockPedalZoneMapping,
+          },
+          count: 1,
+        }),
+      });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {},
+          customRoutes: [],
+          bikeProfiles: [],
+        }),
+      });
+    });
+    await page.route('**/api/ghosts*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ghosts: [] }),
+      });
+    });
+    await page.route('**/api/multiplayer/leaderboards*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+      });
+    });
+
+    await page.goto('/?track=black-mountain-bmx');
+    await page.getByRole('button', { name: 'Open App' }).click();
+
+    await expect(page.getByRole('button', { name: /Custom Location/i })).toBeVisible();
+    await expect(page.getByText(/1 connected bike/i).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/2 pedal zones/i).first()).toBeVisible({ timeout: 15_000 });
+
+    const startAction = page.locator('.workflow-step.primary-action');
+    await expect(startAction).toContainText('Start Live Race');
+    await startAction.click();
+
+    await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+    await expect(page.locator('.start-tree-light')).toBeVisible();
+    await page.waitForTimeout(8_500);
+
+    await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+    await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
+    await expect(page.getByText(/False start/i)).toHaveCount(0);
+    await page.screenshot({
+      fullPage: false,
+      path: testInfo.outputPath('mapped-pedal-zone-live-race.png'),
+    });
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
+});
+
+test('two-bike live race stays fullscreen through UCI cadence with no pedal zones', async ({ page }, testInfo) => {
+  const bridge = await createMockBikeBridge([58701, 58702]);
+  const sampleTimer = setInterval(() => {
+    bridge.broadcast(mockBikeSample({
+      deviceId: 58701,
+      watts: 260,
+      cadence: 72,
+      speedKph: 18,
+      signal: 93,
+    }));
+    bridge.broadcast(mockBikeSample({
+      deviceId: 58702,
+      watts: 220,
+      cadence: 68,
+      speedKph: 16,
+      signal: 91,
+    }));
+  }, 120);
+  const authUser = {
+    id: 'two-bike-live-racer',
+    profileKey: 'user:two-bike-live-racer',
+    email: 'two-bike-live@tracklab.test',
+    name: 'Two Bike Live Rider',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 2,
+      updatedAt: Date.now(),
+    },
+  };
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/public-track-mappings', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {
+            'black-mountain-bmx': mockNoPedalZoneMapping,
+          },
+          count: 1,
+        }),
+      });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {},
+          customRoutes: [],
+          bikeProfiles: [],
+        }),
+      });
+    });
+    await page.route('**/api/ghosts*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ghosts: [] }),
+      });
+    });
+    await page.route('**/api/multiplayer/leaderboards*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+      });
+    });
+
+    await page.goto('/?track=black-mountain-bmx');
+    await page.getByRole('button', { name: 'Open App' }).click();
+
+    await expect(page.getByRole('button', { name: /Custom Location/i })).toBeVisible();
+    await expect(page.getByText(/2 connected bikes/i).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/0 entered \/ 2 connected/i)).toBeVisible();
+
+    await expect(page.locator('.workflow-step').filter({ hasText: 'Race' })).toContainText('Choose racer');
+    await page.getByRole('button', { name: /Enter Bike 58701 in live race/i }).click();
+    await expect(page.getByText(/1 entered \/ 2 connected/i)).toBeVisible();
+
+    const startAction = page.locator('.workflow-step.primary-action');
+    await expect(startAction).toContainText('Start Live Race');
+    await startAction.click();
+
+    await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+    await expect(page.locator('.start-tree-light')).toBeVisible();
+    await page.waitForTimeout(8_500);
+
+    await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+    await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
+    await page.screenshot({
+      fullPage: false,
+      path: testInfo.outputPath('two-bike-live-race-no-pedal-zones.png'),
+    });
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
 });
