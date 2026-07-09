@@ -51,6 +51,7 @@ type BluetoothDeviceLike = EventTarget & {
 };
 
 type BluetoothApi = {
+  getDevices?: () => Promise<BluetoothDeviceLike[]>;
   requestDevice: (options: {
     acceptAllDevices?: boolean;
     filters?: BluetoothDeviceFilter[];
@@ -123,6 +124,22 @@ function wattbikeMonitorIdFromName(name: string | undefined) {
   const monitorDigits = digits.length > 5 ? digits.slice(-5) : digits;
   const deviceId = Number(monitorDigits);
   return Number.isFinite(deviceId) && deviceId > 0 ? Math.round(deviceId) : null;
+}
+
+function isLikelyWattbikeBluetoothDevice(device: BluetoothDeviceLike) {
+  const label = device.name?.trim().toLowerCase() ?? '';
+  return !label || label.includes('wattbike') || label.includes('wattbikepm');
+}
+
+function isBluetoothChooserCancel(error: unknown) {
+  const name = typeof error === 'object' && error && 'name' in error
+    ? String((error as { name?: unknown }).name ?? '')
+    : '';
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return name === 'NotFoundError'
+    || message.includes('cancel')
+    || message.includes('no device selected')
+    || message.includes('user cancelled');
 }
 
 function parseIndoorBikeData(view: DataView): PartialBikeSample {
@@ -322,6 +339,8 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
   const deviceIdsRef = useRef<Map<string, number>>(new Map());
   const crankCacheRef = useRef<Map<number, { eventTime: number; revolutions: number }>>(new Map());
+  const connectedBrowserDeviceIdsRef = useRef<Set<string>>(new Set());
+  const reconnectInFlightRef = useRef(false);
   const listenerCleanupRef = useRef<(() => void)[]>([]);
   const supported = Boolean((navigator as BluetoothNavigator).bluetooth);
 
@@ -379,39 +398,32 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
     });
   }, []);
 
-  const connectBike = useCallback(async () => {
-    const bluetooth = (navigator as BluetoothNavigator).bluetooth;
-    if (!bluetooth) {
-      setConnection('unsupported');
-      setError(unsupportedBluetoothMessage());
-      return;
+  const connectBluetoothDevice = useCallback(async (device: BluetoothDeviceLike) => {
+    if (connectedBrowserDeviceIdsRef.current.has(device.id)) {
+      return false;
     }
 
-    setConnection('connecting');
-    setError(null);
+    let numericId = deviceIdsRef.current.get(device.id);
+    if (!numericId) {
+      numericId = wattbikeMonitorIdFromName(device.name) ?? bluetoothBaseDeviceId + deviceIdsRef.current.size + 1;
+      deviceIdsRef.current.set(device.id, numericId);
+    }
+
+    const label = device.name?.trim() || `Bluetooth Wattbike ${numericId}`;
 
     try {
-      const device = await bluetooth.requestDevice({
-        filters: bluetoothFilters,
-        optionalServices: Object.values(bluetoothServices),
-      });
       const server = await device.gatt?.connect();
       if (!server) {
         throw new Error('Bluetooth device did not expose a GATT server.');
       }
 
-      let numericId = deviceIdsRef.current.get(device.id);
-      if (!numericId) {
-        numericId = wattbikeMonitorIdFromName(device.name) ?? bluetoothBaseDeviceId + deviceIdsRef.current.size + 1;
-        deviceIdsRef.current.set(device.id, numericId);
-      }
-
-      const label = device.name?.trim() || `Bluetooth Wattbike ${numericId}`;
+      connectedBrowserDeviceIdsRef.current.add(device.id);
       setDeviceConnected(numericId, label, server.connected);
 
       const disconnectHandler = () => {
+        connectedBrowserDeviceIdsRef.current.delete(device.id);
         setDeviceConnected(numericId, label, false);
-        setConnection('idle');
+        setConnection((current) => (current === 'open' ? 'idle' : current));
       };
       device.addEventListener('gattserverdisconnected', disconnectHandler);
       listenerCleanupRef.current.push(() => device.removeEventListener('gattserverdisconnected', disconnectHandler));
@@ -471,25 +483,121 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
         throw new Error('No FTMS, Cycling Power, or Cycling Speed/Cadence service was found on that Bluetooth device.');
       }
 
-      setConnection('open');
+      return true;
     } catch (connectError) {
-      const message = connectError instanceof Error ? connectError.message : 'Bluetooth pairing was cancelled or failed.';
-      setConnection('error');
-      setError(message);
+      connectedBrowserDeviceIdsRef.current.delete(device.id);
+      setDeviceConnected(numericId, label, false);
+      throw connectError;
     }
   }, [commitSample, setDeviceConnected]);
+
+  const reconnectSavedBikes = useCallback(async () => {
+    const bluetooth = (navigator as BluetoothNavigator).bluetooth;
+    if (!bluetooth?.getDevices || reconnectInFlightRef.current) {
+      return;
+    }
+
+    reconnectInFlightRef.current = true;
+    try {
+      const grantedDevices = await bluetooth.getDevices();
+      const savedBikeDevices = grantedDevices.filter(isLikelyWattbikeBluetoothDevice);
+      if (savedBikeDevices.length === 0) {
+        return;
+      }
+
+      setConnection((current) => (current === 'open' ? current : 'connecting'));
+      setError(null);
+
+      let connected = 0;
+      for (const device of savedBikeDevices) {
+        try {
+          const didConnect = await connectBluetoothDevice(device);
+          connected += didConnect ? 1 : 0;
+        } catch {
+          // Saved bikes may be off, asleep, or not in Just Ride yet. Keep scanning quietly.
+        }
+      }
+
+      setConnection((current) => (connected > 0 || current === 'open' ? 'open' : 'idle'));
+    } catch (reconnectError) {
+      if (!isBluetoothChooserCancel(reconnectError)) {
+        setError(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect saved Bluetooth bikes.');
+      }
+      setConnection((current) => (current === 'open' ? 'open' : 'idle'));
+    } finally {
+      reconnectInFlightRef.current = false;
+    }
+  }, [connectBluetoothDevice]);
+
+  useEffect(() => {
+    if (!supported) {
+      return;
+    }
+
+    let cancelled = false;
+    const reconnect = () => {
+      if (!cancelled) {
+        void reconnectSavedBikes();
+      }
+    };
+
+    reconnect();
+    const timer = window.setInterval(reconnect, 5000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        reconnect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [reconnectSavedBikes, supported]);
+
+  const connectBike = useCallback(async () => {
+    const bluetooth = (navigator as BluetoothNavigator).bluetooth;
+    if (!bluetooth) {
+      setConnection('unsupported');
+      setError(unsupportedBluetoothMessage());
+      return;
+    }
+
+    setConnection('connecting');
+    setError(null);
+
+    try {
+      const device = await bluetooth.requestDevice({
+        filters: bluetoothFilters,
+        optionalServices: Object.values(bluetoothServices),
+      });
+      await connectBluetoothDevice(device);
+      setConnection('open');
+    } catch (connectError) {
+      if (isBluetoothChooserCancel(connectError)) {
+        setConnection('idle');
+        setError('Bluetooth pairing was cancelled. Click Connect Wattbike when the bike is ready, choose the Wattbike, then pedal in Just Ride.');
+        return;
+      }
+
+      setConnection('error');
+      setError(connectError instanceof Error ? connectError.message : 'Bluetooth pairing failed.');
+    }
+  }, [connectBluetoothDevice]);
 
   return useMemo(() => {
     const connectedCount = devices.filter((device) => device.connected).length;
     const status = !supported
       ? unsupportedBluetoothMessage()
       : connection === 'connecting'
-        ? 'Choose a Wattbike from the Bluetooth pairing prompt.'
+        ? 'Reconnecting saved Wattbikes, or choose a Wattbike from the Bluetooth pairing prompt.'
         : error
           ? error
           : connectedCount > 0
             ? `${connectedCount} Bluetooth bike${connectedCount === 1 ? '' : 's'} connected.`
-            : 'Use Bluetooth pairing to connect Wattbikes. On Model B, turn Settings > Remote > Bluetooth On, then enter Just Ride and pedal.';
+            : 'Bluetooth is ready. Saved bikes reconnect automatically; click Connect Wattbike only for first-time pairing.';
 
     return {
       connectBike,

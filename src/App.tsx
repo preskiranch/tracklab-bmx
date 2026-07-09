@@ -26,6 +26,7 @@ import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { SessionControlPanel } from './components/SessionControlPanel';
 import {
+  bikeConnectionSourceStorageKey,
   bikeProfilesStorageKey,
   customRoutesStorageKey,
   defaultPlayerSlots,
@@ -172,6 +173,14 @@ type CustomRoutePreview = {
   route: TrackRecord;
   camera: EarthCamera;
 };
+
+function isBikeConnectionSource(value: unknown): value is BikeConnectionSource {
+  return value === 'bluetooth' || value === 'advanced' || value === 'demo';
+}
+
+function browserSupportsBluetoothDirect() {
+  return Boolean((navigator as Navigator & { bluetooth?: unknown }).bluetooth);
+}
 
 type FullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
@@ -907,6 +916,19 @@ function writeStoredBikeProfiles(profiles: BikeProfile[]) {
   window.localStorage.setItem(bikeProfilesStorageKey, JSON.stringify(dedupeBikeProfiles(profiles)));
 }
 
+function readStoredBikeConnectionSource(): BikeConnectionSource {
+  try {
+    const stored = window.localStorage.getItem(bikeConnectionSourceStorageKey);
+    if (isBikeConnectionSource(stored) && stored !== 'demo') {
+      return stored;
+    }
+  } catch {
+    // Ignore blocked storage and fall back to the best available live path.
+  }
+
+  return browserSupportsBluetoothDirect() ? 'bluetooth' : 'advanced';
+}
+
 function readStoredSpeedUnit(): SpeedUnit {
   return window.localStorage.getItem(speedUnitStorageKey) === 'mph' ? 'mph' : 'kph';
 }
@@ -1220,7 +1242,7 @@ export default function App() {
   const [mappingHistoryVersion, setMappingHistoryVersion] = useState(0);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
-  const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>('advanced');
+  const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>(readStoredBikeConnectionSource);
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
@@ -2425,6 +2447,20 @@ export default function App() {
       return changed ? dedupeBikeProfiles(next) : current;
     });
   }, [connectedDeviceIds, demoMode]);
+
+  useEffect(() => {
+    if (bikeConnectionSource === 'demo') {
+      return;
+    }
+
+    window.localStorage.setItem(bikeConnectionSourceStorageKey, bikeConnectionSource);
+  }, [bikeConnectionSource]);
+
+  useEffect(() => {
+    if (!demoMode && bluetooth.connectedCount > 0 && bikeConnectionSource !== 'bluetooth') {
+      setBikeConnectionSource('bluetooth');
+    }
+  }, [bikeConnectionSource, bluetooth.connectedCount, demoMode]);
 
   useEffect(() => {
     if (
