@@ -1544,6 +1544,14 @@ export function GoogleMapsTrackLayer({
 
     const splitMarkers: GoogleMarker[] = [];
     const addDraftJunctionClick = (marker: GoogleMarker, point: TrackPoint, allowSplitTool = false) => {
+      if (mappingEditMode === 'zones' && onMappingZonePointAdd) {
+        draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
+          suppressNextMapEditEvent();
+          onMappingZonePointAdd(point);
+        }));
+        return;
+      }
+
       if (mappingEditMode === 'draw' && onMappingPathPointAdd) {
         draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
           onMappingPathPointAdd(point);
