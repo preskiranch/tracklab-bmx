@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Bluetooth, Link, Link2Off, RadioTower, Signal, Usb } from 'lucide-react';
 import type { BikeSample, ConnectedBikeDevice, PlayerSlot } from '../types';
 
@@ -62,9 +62,41 @@ export function PairingRail({
   readOnly = false,
   maxPlayers = 4,
 }: PairingRailProps) {
+  const [nameDrafts, setNameDrafts] = useState<Partial<Record<PlayerSlot['id'], string>>>({});
+  const [editingPlayerId, setEditingPlayerId] = useState<PlayerSlot['id'] | null>(null);
   const detectedDevices = (devices ?? [...samplesByDevice.values()].map(sampleDevice))
     .sort((a, b) => a.deviceId - b.deviceId);
   const deviceById = new Map(detectedDevices.map((device) => [device.deviceId, device]));
+
+  useEffect(() => {
+    setNameDrafts((current) => {
+      const next: Partial<Record<PlayerSlot['id'], string>> = {};
+      let changed = Object.keys(current).length !== players.length;
+
+      players.forEach((player) => {
+        const currentDraft = current[player.id];
+        const nextDraft = editingPlayerId === player.id && currentDraft != null
+          ? currentDraft
+          : player.name;
+
+        next[player.id] = nextDraft;
+        if (currentDraft !== nextDraft) {
+          changed = true;
+        }
+      });
+
+      return changed ? next : current;
+    });
+  }, [editingPlayerId, players]);
+
+  const updateNameDraft = (playerId: PlayerSlot['id'], name: string) => {
+    setNameDrafts((current) => ({ ...current, [playerId]: name }));
+  };
+
+  const commitNameDraft = (player: PlayerSlot, name: string) => {
+    setEditingPlayerId(null);
+    onRename?.(player.id, name);
+  };
 
   return (
     <aside className="pairing-rail" aria-label="Bike pairing">
@@ -130,8 +162,18 @@ export function PairingRail({
                   ) : (
                     <input
                       className="player-name-input"
-                      value={player.name}
-                      onChange={(event) => onRename(player.id, event.target.value)}
+                      value={nameDrafts[player.id] ?? player.name}
+                      onFocus={() => {
+                        setEditingPlayerId(player.id);
+                        updateNameDraft(player.id, nameDrafts[player.id] ?? player.name);
+                      }}
+                      onChange={(event) => updateNameDraft(player.id, event.target.value)}
+                      onBlur={(event) => commitNameDraft(player, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.currentTarget.blur();
+                        }
+                      }}
                       aria-label={`Name for player ${player.id}`}
                     />
                   )}
