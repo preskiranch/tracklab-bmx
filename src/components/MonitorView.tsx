@@ -23,7 +23,9 @@ type MonitorSprintDraft = {
   lastActiveAt: number;
   peakWatts: number;
   peakCadence: number;
-  rpmAtPowerPeak: number;
+  cadenceTotal: number;
+  cadenceSampleCount: number;
+  averageCadence: number;
   sampleCount: number;
 };
 
@@ -115,16 +117,19 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
 
       if (active) {
         const sampleAt = sample?.at ?? now;
-        const previousPeakWatts = existing?.peakWatts ?? 0;
-        const powerPeakChanged = metrics.watts >= previousPeakWatts;
-        const peakWatts = Math.max(previousPeakWatts, metrics.watts);
+        const cadenceValue = Math.max(0, metrics.cadence);
+        const hasCadenceSample = cadenceValue > 0;
+        const cadenceTotal = (existing?.cadenceTotal ?? 0) + (hasCadenceSample ? cadenceValue : 0);
+        const cadenceSampleCount = (existing?.cadenceSampleCount ?? 0) + (hasCadenceSample ? 1 : 0);
         const nextDraft: MonitorSprintDraft = {
           deviceId: player.deviceId,
           startedAt: existing?.startedAt ?? sampleAt,
           lastActiveAt: sampleAt,
-          peakWatts,
+          peakWatts: Math.max(existing?.peakWatts ?? 0, metrics.watts),
           peakCadence: Math.max(existing?.peakCadence ?? 0, metrics.cadence),
-          rpmAtPowerPeak: powerPeakChanged ? metrics.cadence : existing?.rpmAtPowerPeak ?? metrics.cadence,
+          cadenceTotal,
+          cadenceSampleCount,
+          averageCadence: cadenceSampleCount > 0 ? Math.round(cadenceTotal / cadenceSampleCount) : 0,
           sampleCount: (existing?.sampleCount ?? 0) + 1,
         };
         activeSprintsRef.current.set(player.deviceId, nextDraft);
@@ -176,7 +181,7 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
           || currentResult.status !== result.status
           || currentResult.peakWatts !== result.peakWatts
           || currentResult.peakCadence !== result.peakCadence
-          || currentResult.rpmAtPowerPeak !== result.rpmAtPowerPeak
+          || currentResult.averageCadence !== result.averageCadence
           || currentResult.endedAt !== result.endedAt
         ) {
           next[deviceId] = result;
@@ -278,8 +283,8 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
                           <small>Cadence pk</small>
                         </div>
                         <div>
-                          <span>{sprintResult.rpmAtPowerPeak}</span>
-                          <small>RPM @ peak</small>
+                          <span>{sprintResult.averageCadence}</span>
+                          <small>Cadence avg</small>
                         </div>
                       </div>
                     </>
