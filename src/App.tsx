@@ -734,6 +734,14 @@ function defaultBikeName(deviceId: number) {
   return `Bike ${deviceId}`;
 }
 
+function normalizeBikeName(value: unknown) {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 64) : '';
+}
+
+function isDefaultBikeProfileName(profile: Pick<BikeProfile, 'deviceId' | 'name'>) {
+  return normalizeBikeName(profile.name).toLowerCase() === defaultBikeName(profile.deviceId).toLowerCase();
+}
+
 function connectedDeviceFromSample(sample: BikeSample): ConnectedBikeDevice {
   return {
     at: sample.at,
@@ -803,7 +811,7 @@ function createBikeProfile(deviceId: number, index: number, name = defaultBikeNa
   const visual = profileVisual(index);
   return {
     deviceId,
-    name,
+    name: normalizeBikeName(name) || defaultBikeName(deviceId),
     colorName: visual.colorName,
     accent: visual.accent,
     updatedAt: Date.now(),
@@ -822,9 +830,7 @@ function normalizeBikeProfile(value: unknown, index: number): BikeProfile | null
   }
 
   const visual = profileVisual(index);
-  const name = typeof profile.name === 'string' && profile.name.trim()
-    ? profile.name.trim().slice(0, 64)
-    : defaultBikeName(deviceId);
+  const name = normalizeBikeName(profile.name) || defaultBikeName(deviceId);
 
   return {
     deviceId,
@@ -844,7 +850,16 @@ function dedupeBikeProfiles(profiles: BikeProfile[]) {
     }
 
     const current = byDevice.get(normalized.deviceId);
-    if (!current || normalized.updatedAt >= current.updatedAt) {
+    if (!current) {
+      byDevice.set(normalized.deviceId, normalized);
+      return;
+    }
+
+    const currentHasCustomName = !isDefaultBikeProfileName(current);
+    const nextHasCustomName = !isDefaultBikeProfileName(normalized);
+    if (currentHasCustomName !== nextHasCustomName) {
+      byDevice.set(normalized.deviceId, nextHasCustomName ? normalized : current);
+    } else if (normalized.updatedAt >= current.updatedAt) {
       byDevice.set(normalized.deviceId, normalized);
     }
   });
@@ -2944,7 +2959,11 @@ export default function App() {
     }
 
     const deviceId = player.deviceId;
-    const safeName = name.trim().slice(0, 64) || defaultBikeName(deviceId);
+    const safeName = normalizeBikeName(name);
+    if (!safeName) {
+      return;
+    }
+
     setBikeProfiles((current) => {
       const next = current.map((profile) => (
         profile.deviceId === deviceId

@@ -44,6 +44,10 @@ function signalLabel(sample: BikeSample | undefined, device: ConnectedBikeDevice
   return `${Math.round(sample.signal * 100)}%`;
 }
 
+function normalizeDraftName(name: string) {
+  return name.trim().replace(/\s+/g, ' ').slice(0, 64);
+}
+
 export function PairingRail({
   players,
   samplesByDevice,
@@ -94,8 +98,15 @@ export function PairingRail({
   };
 
   const commitNameDraft = (player: PlayerSlot, name: string) => {
+    const safeName = normalizeDraftName(name);
     setEditingPlayerId(null);
-    onRename?.(player.id, name);
+    if (!safeName) {
+      updateNameDraft(player.id, player.name);
+      return;
+    }
+
+    updateNameDraft(player.id, safeName);
+    onRename?.(player.id, safeName);
   };
 
   return (
