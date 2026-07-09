@@ -7,11 +7,13 @@ const gravityPx = 430;
 const groundRecoveryPerSecond = 4.2;
 const maxAirPx = 34;
 const liveMetricWindowMs = 1800;
-const liveMetricStartGraceMs = 350;
 const rollingFrictionMps2 = 0.42;
 const airDragPerMeter = 0.0038;
 const stopVelocityMps = 0.04;
 const freewheelEngagementToleranceMps = 0.05;
+const minimumRaceDriveWatts = 10;
+const minimumRaceDriveCadenceRpm = 15;
+const maxBmxRaceVelocityMps = 13.4;
 const effectiveRiderBikeMassKg = 86;
 const drivetrainEfficiency = 0.88;
 const minimumDriveAccelerationMps2 = 0.55;
@@ -39,15 +41,7 @@ function metricIsUsable(sample: BikeSample | null | undefined, metricAt: number 
   }
 
   const recordedAt = metricAt ?? sample.at;
-  return recordedAt >= raceStartedAt - liveMetricStartGraceMs && nowMs - recordedAt <= liveMetricWindowMs;
-}
-
-function sampleIsUsableForDrive(sample: BikeSample | null | undefined, nowMs: number, raceStartedAt: number) {
-  return Boolean(
-    sample
-      && sample.at >= raceStartedAt - liveMetricStartGraceMs
-      && nowMs - sample.at <= liveMetricWindowMs,
-  );
+  return recordedAt >= raceStartedAt && nowMs - recordedAt <= liveMetricWindowMs;
 }
 
 function wattsFallbackVelocityMps(watts: number, currentVelocityMps: number) {
@@ -57,7 +51,7 @@ function wattsFallbackVelocityMps(watts: number, currentVelocityMps: number) {
 
   // Wattbike BLE/ANT packets do not always include cadence every frame. Use power only as
   // a short-term movement fallback so live riders do not freeze between cadence packets.
-  return clamp(Math.sqrt(watts) * 0.32, currentVelocityMps + 0.65, 13.4);
+  return clamp(Math.sqrt(watts) * 0.32, currentVelocityMps + 0.65, maxBmxRaceVelocityMps);
 }
 
 function coastVelocityMps(velocityMps: number, dt: number) {
@@ -222,31 +216,33 @@ export function stepRiders(
     const selectedBranch = branchChoicesByPlayer[rider.playerId] ?? rider.selectedBranch ?? 'a';
     let actualBranches = rider.actualBranches;
     let proPenaltySections = rider.proPenaltySections;
-    const driveSampleUsable = sampleIsUsableForDrive(sample, nowMs, raceStartedAt);
-    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt) || (driveSampleUsable && (sample?.watts ?? 0) > 0)
+    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
       ? sample?.physicsWatts ?? sample?.watts ?? 0
       : 0;
-    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt) || (driveSampleUsable && (sample?.cadence ?? 0) > 0)
+    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt)
       ? sample?.cadence ?? 0
       : 0;
-    const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, raceStartedAt) || (driveSampleUsable && (sample?.speedKph ?? 0) > 0)
+    const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, raceStartedAt)
       ? sample?.speedKph ?? 0
       : 0;
     const activeZone = zoneAtDistance(trackZones, rider.distance, actualBranches, selectedBranch);
     const pedalZonesConfigured = riderRouteHasPedalZones(trackZones, actualBranches, selectedBranch);
     const firstPedalStartMeter = firstPedalZoneStartMeter(trackZones, actualBranches, selectedBranch);
     const driveAllowed = zoneAllowsDrive(activeZone, pedalZonesConfigured, rider.distance, firstPedalStartMeter);
-    const watts = driveAllowed ? rawWatts : 0;
-    const cadence = driveAllowed ? rawCadence : 0;
+    const hasPedalingDrive = rawWatts > minimumRaceDriveWatts || rawCadence > minimumRaceDriveCadenceRpm;
+    const watts = driveAllowed && hasPedalingDrive ? rawWatts : 0;
+    const cadence = driveAllowed && hasPedalingDrive ? rawCadence : 0;
 
     const wattsAverage = rider.wattsAverage * 0.94 + watts * 0.06;
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
     const coastVelocity = coastVelocityMps(rider.velocity, dt);
-    const cadenceVelocity = cadence > 0 ? bmxVelocityMpsFromCadence(cadence) : null;
-    const speedVelocity = rawSpeedKph > 0 ? rawSpeedKph / 3.6 : null;
+    const cadenceVelocity = cadence > 0 ? Math.min(bmxVelocityMpsFromCadence(cadence), maxBmxRaceVelocityMps) : null;
     const powerVelocity = wattsFallbackVelocityMps(watts, coastVelocity);
-    const targetDriveVelocity = cadenceVelocity ?? speedVelocity ?? powerVelocity;
+    const speedVelocity = hasPedalingDrive && rawSpeedKph > 0
+      ? Math.min(rawSpeedKph / 3.6, maxBmxRaceVelocityMps)
+      : null;
+    const targetDriveVelocity = cadenceVelocity ?? powerVelocity ?? speedVelocity;
     const driveEngaged = targetDriveVelocity != null && targetDriveVelocity > coastVelocity + freewheelEngagementToleranceMps;
     const previousDistance = rider.distance;
     const gateLaunch = driveEngaged
