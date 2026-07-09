@@ -3,6 +3,7 @@
 APP_DIR="/Users/rinzellhicks/Documents/Playground/wattbike-bmx-race"
 APP_URL="${TRACKLAB_APP_URL:-https://tracklab-bmx.onrender.com}"
 BRIDGE_STATUS_URL="http://127.0.0.1:8787/api/bridge/status"
+CONNECTOR_TERMINAL_SCRIPT="$APP_DIR/scripts/tracklab-start-local.zsh"
 CURRENT_USER="$(id -un 2>/dev/null || echo rinzellhicks)"
 USER_HOME="$(/usr/bin/dscl . -read "/Users/$CURRENT_USER" NFSHomeDirectory 2>/dev/null | /usr/bin/awk '{print $2}')"
 if [ -z "$USER_HOME" ] || [ "$USER_HOME" = "/" ]; then
@@ -56,13 +57,12 @@ if [ ! -d "node_modules" ]; then
 fi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting connector bridge." >> "$LOG_FILE"
-nohup env \
-  WATTBIKE_INPUT="${WATTBIKE_INPUT:-auto}" \
-  WATTBIKE_BRIDGE_AUTOSTART="${WATTBIKE_BRIDGE_AUTOSTART:-1}" \
-  npm run bridge >> "$LOG_FILE" 2>&1 < /dev/null &
-BRIDGE_PID=$!
-echo "$BRIDGE_PID" > "$PID_FILE"
-disown "$BRIDGE_PID" 2>/dev/null || true
+/usr/bin/osascript <<APPLESCRIPT >> "$LOG_FILE" 2>&1
+tell application "Terminal"
+  activate
+  do script "export TRACKLAB_APP_URL='${APP_URL}'; zsh '${CONNECTOR_TERMINAL_SCRIPT}'"
+end tell
+APPLESCRIPT
 
 for _ in {1..40}; do
   if /usr/bin/curl -fsS "$BRIDGE_STATUS_URL" >/dev/null 2>&1; then
