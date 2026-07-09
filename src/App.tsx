@@ -146,6 +146,7 @@ import type {
   TrackPoint,
   TrackRecord,
   TrackRouteVariantId,
+  TrackZone,
   TrackZoneBoundarySet,
   TrackZoneBranchSelections,
   TrackSplitBranch,
@@ -354,6 +355,149 @@ function sortTrackZoneBoundarySets(boundarySets: TrackZoneBoundarySet[]) {
 
 function numbersMatch(left: number[], right: number[]) {
   return left.length === right.length && left.every((value, index) => Math.abs(value - right[index]) < 0.001);
+}
+
+function boundaryIntervals(boundaries: number[]) {
+  const sorted = [...boundaries].sort((a, b) => a - b);
+  const intervals: Array<[number, number]> = [];
+
+  for (let index = 0; index < sorted.length - 1; index += 2) {
+    const start = sorted[index];
+    const end = sorted[index + 1];
+    if (end - start >= 3) {
+      intervals.push([start, end]);
+    }
+  }
+
+  return intervals;
+}
+
+function boundariesFromIntervals(intervals: Array<[number, number]>) {
+  return intervals
+    .filter(([start, end]) => end - start >= 3)
+    .flatMap(([start, end]) => [Math.round(start), Math.round(end)])
+    .sort((a, b) => a - b);
+}
+
+function splitBranchPoints(section: TrackSplitSection, branch: SplitBranchId) {
+  return section.branches.find((candidate) => candidate.id === branch)?.points ?? [
+    section.splitPoint,
+    section.mergePoint,
+  ];
+}
+
+function selectedProZoneSection(
+  splitSections: TrackSplitSection[],
+  selections?: TrackZoneBranchSelections,
+) {
+  return splitSections.find((section) => selections?.[section.id] === 'b') ?? null;
+}
+
+function routeMeterForPoint(route: TrackPoint[], point: TrackPoint) {
+  return route.length > 1 ? nearestRouteMeter(route, point) : 0;
+}
+
+function proBranchZoneRange(
+  route: TrackPoint[],
+  section: TrackSplitSection | null,
+) {
+  if (!section || route.length < 2) {
+    return null;
+  }
+
+  const branchPoints = splitBranchPoints(section, 'b');
+  const start = routeMeterForPoint(route, section.splitPoint);
+  const length = routeLengthMeters(branchPoints);
+  return {
+    start,
+    end: start + length,
+    length,
+    points: branchPoints,
+    section,
+  };
+}
+
+function sharedIntervalsForProSet(
+  points: TrackPoint[],
+  splitSections: TrackSplitSection[],
+  proSelections: TrackZoneBranchSelections | undefined,
+  sharedBoundaries: number[],
+) {
+  const section = selectedProZoneSection(splitSections, proSelections);
+  if (!section || sharedBoundaries.length < 2) {
+    return [];
+  }
+
+  const sharedSelections = splitBranchSelectionsForChoice(splitSections, 'a');
+  const sharedRoute = routeWithSplitBranchSelections(points, splitSections, sharedSelections);
+  const proRoute = routeWithSplitBranchSelections(points, splitSections, proSelections);
+  const sharedBranchPoints = splitBranchPoints(section, 'a');
+  const proBranchPoints = splitBranchPoints(section, 'b');
+  const sharedSplitStart = routeMeterForPoint(sharedRoute, section.splitPoint);
+  const sharedSplitEnd = sharedSplitStart + routeLengthMeters(sharedBranchPoints);
+  const proSplitStart = routeMeterForPoint(proRoute, section.splitPoint);
+  const proSplitEnd = proSplitStart + routeLengthMeters(proBranchPoints);
+  const beforeDelta = proSplitStart - sharedSplitStart;
+  const afterDelta = proSplitEnd - sharedSplitEnd;
+
+  return boundaryIntervals(sharedBoundaries).flatMap(([start, end]) => {
+    const pieces: Array<[number, number]> = [];
+    const beforeEnd = Math.min(end, sharedSplitStart);
+    if (beforeEnd - start >= 3) {
+      pieces.push([start + beforeDelta, beforeEnd + beforeDelta]);
+    }
+
+    const afterStart = Math.max(start, sharedSplitEnd);
+    if (end - afterStart >= 3) {
+      pieces.push([afterStart + afterDelta, end + afterDelta]);
+    }
+
+    return pieces;
+  });
+}
+
+function mergeProBoundarySetsWithSharedZones(
+  points: TrackPoint[],
+  splitSections: TrackSplitSection[],
+  boundarySets: TrackZoneBoundarySet[],
+) {
+  if (points.length < 2 || splitSections.length === 0 || boundarySets.length === 0) {
+    return boundarySets;
+  }
+
+  const sharedSelections = splitBranchSelectionsForChoice(splitSections, 'a');
+  const sharedSetId = zoneBoundarySetIdForSelections(sharedSelections);
+  const sharedSet = boundarySets.find((set) => set.id === sharedSetId)
+    ?? boundarySets.find((set) => set.id === defaultZoneBoundarySetId);
+
+  if (!sharedSet || sharedSet.boundaryMeters.length < 2) {
+    return boundarySets;
+  }
+
+  return boundarySets.map((set) => {
+    const section = selectedProZoneSection(splitSections, set.branchSelections);
+    if (!section) {
+      return set;
+    }
+
+    const proRoute = routeWithSplitBranchSelections(points, splitSections, set.branchSelections);
+    const range = proBranchZoneRange(proRoute, section);
+    if (!range) {
+      return set;
+    }
+
+    const proIntervals = boundaryIntervals(set.boundaryMeters).flatMap(([start, end]) => {
+      const clippedStart = Math.max(start, range.start);
+      const clippedEnd = Math.min(end, range.end);
+      return clippedEnd - clippedStart >= 3 ? [[clippedStart, clippedEnd] as [number, number]] : [];
+    });
+    const sharedIntervals = sharedIntervalsForProSet(points, splitSections, set.branchSelections, sharedSet.boundaryMeters);
+
+    return {
+      ...set,
+      boundaryMeters: boundariesFromIntervals([...sharedIntervals, ...proIntervals]),
+    };
+  });
 }
 
 function scopedHistoryIndex(stack: MappingDraftSnapshot[], scope: MappingHistoryScope) {
@@ -1696,6 +1840,20 @@ export default function App() {
       : undefined),
     [draftRouteSplitSections, mappingZoneBranchChoice],
   );
+  const draftZoneStorageRoutePoints = useMemo(
+    () => routeWithSplitBranchSelections(draftPoints, draftRouteSplitSections, draftZoneBranchSelections),
+    [draftPoints, draftRouteSplitSections, draftZoneBranchSelections],
+  );
+  const draftZoneProSection = useMemo(
+    () => (mappingZoneBranchChoice === 'b'
+      ? selectedProZoneSection(draftRouteSplitSections, draftZoneBranchSelections)
+      : null),
+    [draftRouteSplitSections, draftZoneBranchSelections, mappingZoneBranchChoice],
+  );
+  const draftZoneProRange = useMemo(
+    () => proBranchZoneRange(draftZoneStorageRoutePoints, draftZoneProSection),
+    [draftZoneProSection, draftZoneStorageRoutePoints],
+  );
   const draftZoneBoundarySetId = useMemo(
     () => zoneBoundarySetIdForSelections(draftZoneBranchSelections),
     [draftZoneBranchSelections],
@@ -1705,12 +1863,24 @@ export default function App() {
     [draftPoints, draftRouteSplitSections],
   );
   const draftZoneRidePoints = useMemo(
-    () => routeWithSplitBranchSelections(draftPoints, draftRouteSplitSections, draftZoneBranchSelections),
-    [draftPoints, draftRouteSplitSections, draftZoneBranchSelections],
+    () => (draftZoneProRange ? draftZoneProRange.points : draftZoneStorageRoutePoints),
+    [draftZoneProRange, draftZoneStorageRoutePoints],
   );
-  const draftZoneMeters = useMemo(
+  const draftZoneStorageMeters = useMemo(
     () => draftZoneBoundarySets.find((set) => set.id === draftZoneBoundarySetId)?.boundaryMeters ?? [],
     [draftZoneBoundarySetId, draftZoneBoundarySets],
+  );
+  const draftZoneMeters = useMemo(
+    () => {
+      if (!draftZoneProRange) {
+        return draftZoneStorageMeters;
+      }
+
+      return draftZoneStorageMeters
+        .filter((meter) => meter >= draftZoneProRange.start - 0.5 && meter <= draftZoneProRange.end + 0.5)
+        .map((meter) => Math.max(0, Math.min(draftZoneProRange.length, Math.round(meter - draftZoneProRange.start))));
+    },
+    [draftZoneProRange, draftZoneStorageMeters],
   );
   const draftZonePoints = useMemo(
     () => draftZoneMeters
@@ -1726,12 +1896,63 @@ export default function App() {
     () => (draftZoneRidePoints.length > 1 ? routeLengthMeters(draftZoneRidePoints) : 0),
     [draftZoneRidePoints],
   );
+  const draftZoneStorageLengthMeters = useMemo(
+    () => (draftZoneStorageRoutePoints.length > 1 ? routeLengthMeters(draftZoneStorageRoutePoints) : draftZoneRouteLengthMeters),
+    [draftZoneRouteLengthMeters, draftZoneStorageRoutePoints],
+  );
   const draftZones = useMemo(
     () => (draftZoneRouteLengthMeters > 0
       ? createTrackZones(draftZoneRouteLengthMeters, draftZoneMeters, [], mappingRestSeconds, draftZoneBranchSelections)
       : []),
     [draftZoneBranchSelections, draftZoneMeters, draftZoneRouteLengthMeters, mappingRestSeconds],
   );
+  const draftReferenceZones = useMemo<TrackZone[]>(() => {
+    if (!draftZoneProRange || !draftZoneProSection || draftRouteSplitSections.length === 0) {
+      return [];
+    }
+
+    const sharedSelections = splitBranchSelectionsForChoice(draftRouteSplitSections, 'a');
+    const sharedSetId = zoneBoundarySetIdForSelections(sharedSelections);
+    const sharedSet = draftZoneBoundarySets.find((set) => set.id === sharedSetId)
+      ?? draftZoneBoundarySets.find((set) => set.id === defaultZoneBoundarySetId);
+    if (!sharedSet || sharedSet.boundaryMeters.length < 2) {
+      return [];
+    }
+
+    const sharedRoute = routeWithSplitBranchSelections(draftPoints, draftRouteSplitSections, sharedSelections);
+    const sharedSplitStart = routeMeterForPoint(sharedRoute, draftZoneProSection.splitPoint);
+    const sharedSplitEnd = sharedSplitStart + routeLengthMeters(splitBranchPoints(draftZoneProSection, 'a'));
+    const sharedIntervals: Array<[number, number]> = boundaryIntervals(sharedSet.boundaryMeters).flatMap(([start, end]) => {
+      const pieces: Array<[number, number]> = [];
+      const beforeEnd = Math.min(end, sharedSplitStart);
+      if (beforeEnd - start >= 3) {
+        pieces.push([start, beforeEnd]);
+      }
+
+      const afterStart = Math.max(start, sharedSplitEnd);
+      if (end - afterStart >= 3) {
+        pieces.push([afterStart, end]);
+      }
+
+      return pieces;
+    });
+
+    return createTrackZones(
+      routeLengthMeters(sharedRoute),
+      boundariesFromIntervals(sharedIntervals),
+      [],
+      mappingRestSeconds,
+      sharedSelections,
+      'shared-pedal-zone',
+    );
+  }, [
+    draftPoints,
+    draftRouteSplitSections,
+    draftZoneBoundarySets,
+    draftZoneProRange,
+    draftZoneProSection,
+    mappingRestSeconds,
+  ]);
   const allDraftZones = useMemo(
     () => (draftPoints.length > 1
       ? createTrackZonesForBoundarySets(draftPoints, draftRouteSplitSections, draftZoneBoundarySets, mappingRestSeconds)
@@ -1742,8 +1963,9 @@ export default function App() {
     points: TrackPoint[],
     splitSections: TrackSplitSection[],
     boundarySets: TrackZoneBoundarySet[],
-  ) => sortTrackZoneBoundarySets(boundarySets
-    .map((set) => {
+  ) => {
+    const mergedBoundarySets = mergeProBoundarySetsWithSharedZones(points, splitSections, boundarySets);
+    return sortTrackZoneBoundarySets(mergedBoundarySets.map((set) => {
       const route = routeWithSplitBranchSelections(points, splitSections, set.branchSelections);
       return createZoneBoundarySet(
         set.branchSelections,
@@ -1752,23 +1974,38 @@ export default function App() {
         routeLengthMeters(route),
       );
     })
-    .filter((set) => set.boundaryMeters.length > 0 || set.id === defaultZoneBoundarySetId)), []);
+      .filter((set) => set.boundaryMeters.length > 0 || set.id === defaultZoneBoundarySetId));
+  }, []);
   const updateCurrentDraftZoneMeters = useCallback((nextMeters: number[]) => {
+    const storageMeters = draftZoneProRange
+      ? nextMeters.map((meter) => draftZoneProRange.start + meter)
+      : nextMeters;
     const nextSet = createZoneBoundarySet(
       draftZoneBranchSelections,
-      nextMeters,
+      storageMeters,
       draftRouteSplitSections,
-      draftZoneRouteLengthMeters,
+      draftZoneStorageLengthMeters,
     );
 
     setDraftZoneBoundarySets((current) => {
-      const next = sortTrackZoneBoundarySets([
+      const nextRaw = [
         ...current.filter((set) => set.id !== nextSet.id),
         ...(nextSet.boundaryMeters.length > 0 || nextSet.id === defaultZoneBoundarySetId ? [nextSet] : []),
-      ]);
+      ];
+      const next = sortTrackZoneBoundarySets(mergeProBoundarySetsWithSharedZones(
+        draftPoints,
+        draftRouteSplitSections,
+        nextRaw,
+      ));
       return zoneBoundarySetsMatch(current, next) ? current : next;
     });
-  }, [draftRouteSplitSections, draftZoneBranchSelections, draftZoneRouteLengthMeters]);
+  }, [
+    draftPoints,
+    draftRouteSplitSections,
+    draftZoneBranchSelections,
+    draftZoneProRange,
+    draftZoneStorageLengthMeters,
+  ]);
   const mappingHistoryScope = historyScopeForEditMode(mappingEditMode);
   const canUndoMapping = useMemo(
     () => scopedHistoryIndex(mappingUndoStackRef.current, mappingHistoryScope) >= 0,
@@ -5260,6 +5497,7 @@ export default function App() {
                 draftZoneRoutePoints={draftZoneRidePoints}
                 draftZoneMeters={draftZoneMeters}
                 draftZonePoints={draftZonePoints}
+                draftReferenceZones={draftReferenceZones}
                 draftSplitSections={draftSplitSections}
                 draftRouteSplitSections={draftRouteSplitSections}
                 draftSplitBuilder={draftSplitBuilder}

@@ -66,6 +66,7 @@ type EarthTrackViewProps = {
   draftZoneRoutePoints: TrackPoint[];
   draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
+  draftReferenceZones: TrackZone[];
   draftSplitSections: TrackSplitSection[];
   draftRouteSplitSections: TrackSplitSection[];
   draftSplitBuilder: DraftTrackSplit | null;
@@ -142,6 +143,7 @@ export function EarthTrackView({
   draftZoneRoutePoints,
   draftZoneMeters,
   draftZonePoints,
+  draftReferenceZones,
   draftSplitSections,
   draftRouteSplitSections,
   draftSplitBuilder,
@@ -217,6 +219,7 @@ export function EarthTrackView({
             draftZoneRoutePoints={draftZoneRoutePoints}
             draftZoneMeters={draftZoneMeters}
             draftZonePoints={draftZonePoints}
+            draftReferenceZones={draftReferenceZones}
             draftSplitSections={draftSplitSections}
             draftRouteSplitSections={draftRouteSplitSections}
             draftSplitBuilder={draftSplitBuilder}

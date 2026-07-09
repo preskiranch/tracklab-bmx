@@ -672,13 +672,17 @@ export function SessionControlPanel({
             {mappingMode && mappingEditMode === 'zones' && (
               <>
                 <p className="mapping-hint pedal-zone">
-                  Tap the start and end of each pedaling zone. Unmarked sections become coasting or obstacle sections.
+                  {draftSplitSections.length > 0 && mappingZoneBranchChoice === 'b'
+                    ? 'Map only the Pro Set between the split and merge. Shared Amateur Line zones are used before the split and after the merge.'
+                    : 'Tap the start and end of each pedaling zone. Unmarked sections become coasting or obstacle sections.'}
                 </p>
                 {draftSplitSections.length > 0 && (
                   <div className="zone-route-card">
                     <div className="route-layout-heading">
                       <span>Zone route</span>
-                      <small>Choose which split line these pedal zones belong to</small>
+                      <small>{mappingZoneBranchChoice === 'b'
+                        ? 'Pro Set zones are branch-only overrides'
+                        : 'Amateur Line zones are the shared baseline'}</small>
                     </div>
                     <div className="segmented-control compact" aria-label="Pedal zone route">
                       <button
@@ -722,7 +726,9 @@ export function SessionControlPanel({
               <div className="zone-type-editor" aria-label="Pedaling zone editor">
                 <div className="route-layout-heading">
                   <span>{draftSplitSections.length > 0 ? `${mappingZoneBranchChoice === 'b' ? 'Pro Set' : 'Amateur Line'} pedal zones` : 'Pedal zones'}</span>
-                  <small>Two pins create one tracked pedaling section</small>
+                  <small>{mappingZoneBranchChoice === 'b'
+                    ? 'Shown as distance from split to merge'
+                    : 'Two pins create one tracked pedaling section'}</small>
                 </div>
                 <div className="zone-type-grid">
                   {draftZones.map((zone) => (

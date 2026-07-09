@@ -42,6 +42,7 @@ import {
   routeLengthMeters,
   routeLengthWithDefaultSplitBranches,
   routeWithDefaultSplitBranches,
+  routeWithSplitBranchSelections,
   splitSharedRouteSegments,
 } from '../lib/trackMapping';
 
@@ -68,6 +69,7 @@ type GoogleMapsTrackLayerProps = {
   draftZoneRoutePoints?: TrackPoint[];
   draftZoneMeters?: number[];
   draftZonePoints?: TrackPoint[];
+  draftReferenceZones?: TrackZone[];
   draftSplitSections?: TrackSplitSection[];
   draftRouteSplitSections?: TrackSplitSection[];
   draftSplitBuilder?: DraftTrackSplit | null;
@@ -741,6 +743,7 @@ export function GoogleMapsTrackLayer({
   draftZoneRoutePoints = [],
   draftZoneMeters = [],
   draftZonePoints = [],
+  draftReferenceZones = [],
   draftSplitSections = [],
   draftRouteSplitSections,
   draftSplitBuilder = null,
@@ -1365,6 +1368,22 @@ export function GoogleMapsTrackLayer({
 
     const activeDraftZoneRoute = draftZoneRoutePoints.length > 1 ? draftZoneRoutePoints : draftRoute;
     const activeDraftZoneLengthMeters = routeLengthMeters(activeDraftZoneRoute);
+    const draftReferencePedalLines = draftReferenceZones
+      .filter((zone) => zone.type === 'pedal')
+      .map((zone) => {
+        const route = routeWithSplitBranchSelections(draftPoints, activeDraftRouteSplitSections, zone.branchSelections);
+        return routePathBetweenMeters(route, zone.startMeter, zone.endMeter);
+      })
+      .filter((path) => path.length > 1)
+      .map((path) => new google.maps.Polyline({
+        clickable: false,
+        map,
+        path,
+        strokeColor: pedalZoneColor,
+        strokeOpacity: 0.34,
+        strokeWeight: mappingPedalZoneStrokeWeight,
+        zIndex: 548,
+      }));
     const cleanDraftZonePins = showMappingDraft && activeDraftZoneRoute.length > 1
       ? draftZoneMeters
         .filter((meter) => meter >= 0 && meter <= activeDraftZoneLengthMeters)
@@ -1387,7 +1406,7 @@ export function GoogleMapsTrackLayer({
         strokeWeight: mappingPedalZoneStrokeWeight,
         zIndex: 552,
       }));
-    draftLineRefs.current = [...draftLineRefs.current, ...draftPedalLines];
+    draftLineRefs.current = [...draftLineRefs.current, ...draftReferencePedalLines, ...draftPedalLines];
 
     const draftZoneDistanceMarkers = draftPedalSpans.map((span, index) => {
       const labelPosition = offsetRouteLabelPosition(activeDraftZoneRoute, span.startMeter, span.endMeter);
@@ -1668,6 +1687,7 @@ export function GoogleMapsTrackLayer({
     draftSplitSections,
     draftZoneMeters,
     draftZonePoints,
+    draftReferenceZones,
     draftZoneRoutePoints,
     mappingEditMode,
     mappingMode,
