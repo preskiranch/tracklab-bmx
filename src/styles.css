@@ -1029,6 +1029,27 @@ input:focus {
   box-shadow: inset 3px 0 0 #5bc83e;
 }
 
+.workflow-step.primary-action {
+  border-color: #55c91f;
+  background: #63df29;
+  box-shadow: 0 8px 18px rgba(68, 196, 33, 0.2);
+}
+
+.workflow-step.primary-action:hover {
+  border-color: #44b914;
+  background: #58d821;
+}
+
+.workflow-step.primary-action .workflow-index {
+  background: #101827;
+  color: #ffffff;
+}
+
+.workflow-step.primary-action .workflow-copy strong,
+.workflow-step.primary-action .workflow-copy small {
+  color: #101418;
+}
+
 .workflow-index {
   display: inline-flex;
   align-items: center;

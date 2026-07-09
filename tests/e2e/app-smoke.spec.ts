@@ -105,3 +105,38 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
   await expect(page.getByRole('button', { name: 'Open Mac Connector' })).toBeVisible();
   await expect(page.getByText(/runs locally in the background/i)).toBeVisible();
 });
+
+test('start here race action enters fullscreen race view', async ({ page }) => {
+  const authUser = {
+    id: 'quick-start-racer',
+    profileKey: 'user:quick-start-racer',
+    email: 'quick-start@tracklab.test',
+    name: 'Quick Start Rider',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: Date.now(),
+    },
+  };
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ user: authUser }),
+    });
+  });
+
+  await page.goto('/?track=air-time-bmx');
+
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+
+  const startAction = page.locator('.workflow-step.primary-action');
+  await expect(startAction).toContainText('Start Demo Race');
+  await startAction.click();
+
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+  await expect(page.locator('.start-tree-light')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
+});

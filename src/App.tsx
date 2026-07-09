@@ -3994,7 +3994,9 @@ export default function App() {
   }, []);
 
   const armReactionTimer = useCallback(() => {
-    setReactionStartAt(Date.now());
+    const armedAt = Date.now();
+    startGateArmedAtRef.current = armedAt;
+    setReactionStartAt(armedAt);
     setReactionTimesByPlayer({});
   }, []);
 
@@ -4485,7 +4487,7 @@ export default function App() {
     clearStartGateSequence();
     const sequenceId = startGateSequenceIdRef.current;
     falseStartHandledRef.current = false;
-    startGateArmedAtRef.current = Date.now();
+    startGateArmedAtRef.current = null;
     setMappingMode(false);
     setMappingFullscreen(false);
     setDemoSignalsStopped(false);
@@ -4802,7 +4804,11 @@ export default function App() {
       },
     },
     {
-      label: 'Race',
+      label: workflowRaceReady
+        ? raceState === 'finished'
+          ? 'Race Again'
+          : demoMode ? 'Start Demo Race' : 'Start Live Race'
+        : 'Race',
       detail: workflowRaceReady
         ? 'Ready'
         : !workflowMapReady
@@ -4813,8 +4819,13 @@ export default function App() {
               ? 'In progress'
               : 'Ready soon',
       state: workflowRaceReady ? 'next' : raceState === 'racing' ? 'complete' : 'idle',
+      primaryAction: workflowRaceReady,
+      onPointerDown: workflowRaceReady ? primeAudioCues : undefined,
       onClick: () => {
         setAppMode('race');
+        if (workflowRaceReady) {
+          void handleStart();
+        }
       },
     },
   ];
@@ -4967,7 +4978,13 @@ export default function App() {
           </div>
           <div className="workflow-list">
             {workflowSteps.map((step, index) => (
-              <button className={`workflow-step ${step.state}`} type="button" onClick={step.onClick} key={step.label}>
+              <button
+                className={`workflow-step ${step.state}${step.primaryAction ? ' primary-action' : ''}`}
+                type="button"
+                onPointerDown={step.onPointerDown}
+                onClick={step.onClick}
+                key={`${index}-${step.label}`}
+              >
                 <span className="workflow-index">{index + 1}</span>
                 <span className="workflow-copy">
                   <strong>{step.label}</strong>
