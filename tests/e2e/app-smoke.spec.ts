@@ -7,6 +7,7 @@ const ignoredConsoleFragments = [
   'Attempted to load a Vector Map, but failed. Falling back to Raster.',
   'Failed to load resource',
   'ws://127.0.0.1:',
+  'ws://localhost:',
 ];
 
 const mockPedalZoneMapping = {
@@ -225,6 +226,61 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
 
   expect(pageErrors).toEqual([]);
   expect(consoleErrors).toEqual([]);
+});
+
+test('track map save waits for account sync and shared publication', async ({ page }) => {
+  const authUser = {
+    id: 'mapping-admin',
+    profileKey: 'user:mapping-admin',
+    email: 'mapping-admin@tracklab.test',
+    name: 'Mapping Admin',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: Date.now(),
+    },
+  };
+  let savedMapping: typeof mockPedalZoneMapping | null = null;
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ user: authUser }),
+    });
+  });
+  await page.route('**/api/user-data?profileKey=*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { [mockPedalZoneMapping.trackId]: mockPedalZoneMapping },
+        customRoutes: [],
+        bikeProfiles: [],
+      }),
+    });
+  });
+  await page.route('**/api/user-data/track-mapping', async (route) => {
+    const payload = route.request().postDataJSON() as { mapping: typeof mockPedalZoneMapping };
+    savedMapping = payload.mapping;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mapping: payload.mapping,
+        published: true,
+        publicMapping: payload.mapping,
+      }),
+    });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await page.getByRole('button', { name: 'Edit map' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+
+  await expect(page.getByText('Saved and published across browsers.')).toBeVisible();
+  expect(savedMapping?.trackId).toBe('black-mountain-bmx');
+  expect(savedMapping?.zones[0]).toMatchObject({ startMeter: 0, endMeter: 30 });
+  expect(savedMapping?.zones).toHaveLength(2);
 });
 
 test('advanced connector prompts racer accounts to open the Mac connector', async ({ page }) => {

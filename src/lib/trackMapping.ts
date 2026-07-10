@@ -40,6 +40,36 @@ const earthRadiusMeters = 6371008.8;
 const splitJunctionToleranceMeters = 4;
 const zoneBoundaryEndpointSnapMeters = 8;
 
+function mappingSavedAtMs(mapping: UserTrackMapping | null | undefined) {
+  const savedAt = Date.parse(mapping?.savedAt ?? '');
+  return Number.isFinite(savedAt) ? savedAt : 0;
+}
+
+export function newestTrackMapping(
+  preferred: UserTrackMapping | null | undefined,
+  candidate: UserTrackMapping | null | undefined,
+) {
+  if (!preferred) {
+    return candidate;
+  }
+  if (!candidate) {
+    return preferred;
+  }
+
+  return mappingSavedAtMs(candidate) > mappingSavedAtMs(preferred) ? candidate : preferred;
+}
+
+export function mergeTrackMappingsBySavedAt(
+  current: StoredTrackMappings,
+  incoming: StoredTrackMappings,
+) {
+  const merged = { ...current };
+  Object.entries(incoming).forEach(([trackId, mapping]) => {
+    merged[trackId] = newestTrackMapping(merged[trackId], mapping) ?? mapping;
+  });
+  return merged;
+}
+
 function roundCoordinate(value: number) {
   return Number(value.toFixed(7));
 }

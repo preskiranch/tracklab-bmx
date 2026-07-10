@@ -10,6 +10,7 @@ function normalizePublicTrackMappings(value: PublicTrackMappingsPayload | null |
 
 export async function readPublicTrackMappings(): Promise<StoredTrackMappings> {
   const response = await fetch('/api/public-track-mappings', {
+    cache: 'no-store',
     headers: { Accept: 'application/json' },
   });
 
