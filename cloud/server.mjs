@@ -68,6 +68,14 @@ const contentTypes = new Map([
   ['.webp', 'image/webp'],
 ]);
 
+class HttpRequestError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.name = 'HttpRequestError';
+    this.statusCode = statusCode;
+  }
+}
+
 function randomId(prefix, length = 8) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let value = '';
@@ -767,12 +775,26 @@ function readJsonBody(request, maxBytes = 1_000_000) {
   return new Promise((resolve, reject) => {
     let totalBytes = 0;
     const chunks = [];
+    let rejected = false;
+
+    const declaredBytes = Number(request.headers['content-length']);
+    if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+      rejected = true;
+      request.resume();
+      reject(new HttpRequestError(413, 'Request body is too large.'));
+      return;
+    }
 
     request.on('data', (chunk) => {
+      if (rejected) {
+        return;
+      }
       totalBytes += chunk.length;
       if (totalBytes > maxBytes) {
-        reject(new Error('Request body is too large.'));
-        request.destroy();
+        rejected = true;
+        chunks.length = 0;
+        request.resume();
+        reject(new HttpRequestError(413, 'Request body is too large.'));
         return;
       }
 
@@ -780,6 +802,9 @@ function readJsonBody(request, maxBytes = 1_000_000) {
     });
 
     request.on('end', () => {
+      if (rejected) {
+        return;
+      }
       if (chunks.length === 0) {
         resolve({});
         return;
@@ -788,7 +813,7 @@ function readJsonBody(request, maxBytes = 1_000_000) {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
       } catch {
-        reject(new Error('Request body must be valid JSON.'));
+        reject(new HttpRequestError(400, 'Request body must be valid JSON.'));
       }
     });
 
@@ -2526,6 +2551,18 @@ const server = createServer((request, response) => {
   }
 
   void serveStatic(request, response).catch((error) => {
+    const statusCode = Number(error?.statusCode);
+    if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500) {
+      if (!response.headersSent) {
+        writeJson(response, statusCode, {
+          error: error instanceof Error ? error.message : 'Invalid request.',
+        });
+      } else {
+        response.destroy();
+      }
+      return;
+    }
+
     const requestId = randomUUID();
     console.error(`[cloud] request ${requestId} failed:`, error instanceof Error ? error.message : error);
     if (!response.headersSent) {

@@ -140,4 +140,20 @@ describe('cloud API trust boundaries', () => {
     expect(tracks.status).toBe(200);
     expect(tracks.headers.get('cache-control')).toBe('no-cache');
   });
+
+  it('returns actionable client errors for malformed and oversized JSON', async () => {
+    const malformed = await api('/api/auth/login', {
+      method: 'POST',
+      body: '{not-json',
+    });
+    expect(malformed.status).toBe(400);
+    await expect(malformed.json()).resolves.toMatchObject({ error: 'Request body must be valid JSON.' });
+
+    const oversized = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'rider@tracklab.test', password: 'x'.repeat(33_000) }),
+    });
+    expect(oversized.status).toBe(413);
+    await expect(oversized.json()).resolves.toMatchObject({ error: 'Request body is too large.' });
+  });
 });
