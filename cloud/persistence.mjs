@@ -45,7 +45,7 @@ function fromJson(value, fallback) {
 }
 
 function cloneJson(value, fallback) {
-  return fromJson(json(value), fallback);
+  return fromJson(json(value ?? fallback), fallback);
 }
 
 function authEmailKey(email) {
