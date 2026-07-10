@@ -214,6 +214,12 @@ export function useRaceEngine(
           trackZonesRef.current,
         );
         if (next.every((rider) => rider.finishedAt !== null)) {
+          setRaceSummary(buildRaceSummary(
+            racePlayersRef.current,
+            next,
+            raceStatsRef.current,
+            raceLengthRef.current,
+          ));
           setRaceState('finished');
         }
         return next;
@@ -247,7 +253,7 @@ export function useRaceEngine(
   }, [raceState, riders, samplesByDevice]);
 
   useEffect(() => {
-    if (raceState !== 'finished') {
+    if (raceState !== 'finished' || raceSummary.length > 0) {
       return;
     }
 
@@ -257,7 +263,7 @@ export function useRaceEngine(
       raceStatsRef.current,
       raceLengthRef.current,
     ));
-  }, [raceState, riders]);
+  }, [raceState, raceSummary.length, riders]);
 
   return {
     raceState,

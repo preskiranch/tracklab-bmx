@@ -908,6 +908,10 @@ function connectedDeviceFromSample(sample: BikeSample): ConnectedBikeDevice {
   };
 }
 
+function isLiveBikeSample(sample: BikeSample | undefined, now: number) {
+  return Boolean(sample && now - sample.at <= liveBikeTimeoutMs);
+}
+
 function isSupplementalBikeDevice(device: ConnectedBikeDevice) {
   const label = device.label.toLowerCase();
   const isSpeedOrCadence = /speed\/cadence|speed cadence|\bcadence\b|\bspeed\b/.test(label);
@@ -1417,6 +1421,7 @@ export default function App() {
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
   const [branchChoicesByPlayer, setBranchChoicesByPlayer] = useState<Partial<Record<PlayerSlot['id'], SplitBranchId>>>({});
   const [liveRaceReadyDeviceIds, setLiveRaceReadyDeviceIds] = useState<number[]>([]);
+  const [lockedRacePlayers, setLockedRacePlayers] = useState<PlayerSlot[] | null>(null);
   const [mappingRouteVariantId, setMappingRouteVariantId] = useState<RaceRouteVariantId>('amateur');
   const [raceRouteVariantId, setRaceRouteVariantId] = useState<RaceRouteVariantId>('amateur');
   const [earthAngle, setEarthAngle] = useState(
@@ -2105,6 +2110,15 @@ export default function App() {
     return next;
   }, [bluetooth.samplesByDevice, bridge.samplesByDevice]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
+  const liveBikeDeviceIds = useMemo(() => {
+    const deviceIds = new Set<number>();
+    connectedBikeSamples.forEach((sample, deviceId) => {
+      if (isLiveBikeSample(sample, now)) {
+        deviceIds.add(deviceId);
+      }
+    });
+    return deviceIds;
+  }, [connectedBikeSamples, now]);
   const connectedBikeDevices = useMemo(() => {
     const devices: ConnectedBikeDevice[] = [
       ...bridge.devices,
@@ -2117,8 +2131,9 @@ export default function App() {
       }
     });
 
-    return raceBikeDevices(devices, now);
-  }, [bluetooth.devices, bridge.devices, connectedBikeSamples, now]);
+    return raceBikeDevices(devices, now)
+      .filter((device) => liveBikeDeviceIds.has(device.deviceId));
+  }, [bluetooth.devices, bridge.devices, connectedBikeSamples, liveBikeDeviceIds, now]);
   const connectedBikeDeviceById = useMemo(
     () => new Map(connectedBikeDevices.map((device) => [device.deviceId, device])),
     [connectedBikeDevices],
@@ -2180,7 +2195,7 @@ export default function App() {
     sendVoiceSignal: multiplayer.sendVoiceSignal,
   });
   const localRaceSeatLimit = useMemo(() => {
-    const raceCandidateCount = demoMode ? activePlayers.length : enteredRacePlayers.length;
+    const raceCandidateCount = lockedRacePlayers?.length ?? (demoMode ? activePlayers.length : enteredRacePlayers.length);
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
       return raceCandidateCount;
     }
@@ -2192,10 +2207,11 @@ export default function App() {
 
     const assignedSeatCount = roomMember?.racerSeatCount ?? raceCandidateCount;
     return Math.max(0, Math.min(raceCandidateCount, assignedSeatCount));
-  }, [activePlayers.length, demoMode, enteredRacePlayers.length, multiplayer.clientId, multiplayer.currentRoom, playMode]);
+  }, [activePlayers.length, demoMode, enteredRacePlayers.length, lockedRacePlayers?.length, multiplayer.clientId, multiplayer.currentRoom, playMode]);
+  const raceCandidatePlayers = lockedRacePlayers ?? enteredRacePlayers;
   const racePlayers = useMemo(
-    () => enteredRacePlayers.slice(0, localRaceSeatLimit),
-    [enteredRacePlayers, localRaceSeatLimit],
+    () => raceCandidatePlayers.slice(0, localRaceSeatLimit),
+    [localRaceSeatLimit, raceCandidatePlayers],
   );
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
@@ -2300,8 +2316,7 @@ export default function App() {
         return false;
       }
 
-      const sample = samplesByDevice.get(player.deviceId);
-      return Boolean(sample && now - sample.at < liveBikeTimeoutMs);
+      return isLiveBikeSample(samplesByDevice.get(player.deviceId), now);
     }).length,
     [activePlayers, now, samplesByDevice],
   );
@@ -2369,7 +2384,7 @@ export default function App() {
   const { raceState, riders, raceSummary, startRace, resetRace } = useRaceEngine(
     racePlayers,
     samplesByDevice,
-    effectiveTrack.lengthMeters,
+    effectiveRouteLengthMeters,
     activeBranchChoicesByPlayer,
     splitDecisionPoints,
     activeZones,
@@ -2430,6 +2445,7 @@ export default function App() {
     setRaceReviewPaused(false);
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
+    setLockedRacePlayers(null);
     resetRace();
     releaseRaceFullscreen();
   }, [clearStartGateSequence, releaseRaceFullscreen, resetRace]);
@@ -3000,7 +3016,7 @@ export default function App() {
   }, [raceCapture]);
 
   useEffect(() => {
-    (window as typeof window & { __tracklabLiveDebug?: unknown }).__tracklabLiveDebug = {
+    const liveDebug = {
       at: Date.now(),
       selectedTrackId: selectedTrack.id,
       effectiveTrackId: effectiveTrack.id,
@@ -3021,6 +3037,7 @@ export default function App() {
           deviceId: player.deviceId,
           sampleAt: sample?.at ?? null,
           sampleAgeMs: sample ? nowMs - sample.at : null,
+          sampleSource: sample?.source ?? null,
           watts: sample?.watts ?? null,
           cadence: sample?.cadence ?? null,
           speedKph: sample?.speedKph ?? null,
@@ -3043,6 +3060,10 @@ export default function App() {
         }
         : null,
     };
+
+    (window as typeof window & { __tracklabLiveDebug?: unknown }).__tracklabLiveDebug = liveDebug;
+    window.localStorage.setItem('tracklab-live-debug', JSON.stringify(liveDebug));
+    document.documentElement.setAttribute('data-tracklab-live-debug', JSON.stringify(liveDebug));
   }, [
     effectiveRouteLengthMeters,
     effectiveTrack.id,
@@ -4433,6 +4454,7 @@ export default function App() {
     }
 
     liveRaceEntryTouchedRef.current = true;
+    setLockedRacePlayers(null);
     setLiveRaceReadyDeviceIds((current) => (
       current.includes(deviceId)
         ? current.filter((id) => id !== deviceId)
@@ -4446,6 +4468,7 @@ export default function App() {
     }
 
     liveRaceEntryTouchedRef.current = true;
+    setLockedRacePlayers(null);
     setLiveRaceReadyDeviceIds(connectedDeviceIds.slice(0, maxPlayers));
   }, [connectedDeviceIds, raceState, startGateStatus.active]);
 
@@ -4455,6 +4478,7 @@ export default function App() {
     }
 
     liveRaceEntryTouchedRef.current = true;
+    setLockedRacePlayers(null);
     setLiveRaceReadyDeviceIds([]);
   }, [raceState, startGateStatus.active]);
 
@@ -4597,6 +4621,7 @@ export default function App() {
 
   const handleDemoModeChange = (enabled: boolean, nextSource: BikeConnectionSource = enabled ? 'demo' : 'bluetooth') => {
     clearStartGateSequence();
+    setLockedRacePlayers(null);
     setBikeConnectionSource(nextSource);
     setDemoMode(enabled);
     setDemoRaceSeed(Date.now());
@@ -4630,11 +4655,13 @@ export default function App() {
       return;
     }
 
+    setLockedRacePlayers(null);
     setBikeConnectionSource(source);
   };
 
   const handleDemoBikeCountChange = (count: number) => {
     clearStartGateSequence();
+    setLockedRacePlayers(null);
     setDemoBikeCount(Math.max(1, Math.min(maxPlayers, Math.round(count))));
     setDemoRaceSeed(Date.now() + count);
     setDemoRaceStartedAt(null);
@@ -4837,6 +4864,7 @@ export default function App() {
     const sessionId = raceCapture?.sessionId ?? `reset-${Date.now()}`;
     appendRaceCaptureEvent('race-reset', 'Race reset');
     clearStartGateSequence();
+    setLockedRacePlayers(null);
     setMappingFullscreen(false);
     hideRaceReview();
     if (!demoMode) {
@@ -4861,6 +4889,7 @@ export default function App() {
       : 'Race cancelled before gate drop';
     appendRaceCaptureEvent('race-cancel', label);
     clearStartGateSequence();
+    setLockedRacePlayers(null);
     setMappingFullscreen(false);
     hideRaceReview();
 
@@ -4990,9 +5019,10 @@ export default function App() {
   }, []);
 
   const handleStart = async () => {
+    const startingRacePlayers = racePlayers;
     if (
       effectiveTrack.routeStatus !== 'user-mapped'
-      || racePlayers.length === 0
+      || startingRacePlayers.length === 0
       || startGateStatus.active
       || raceState === 'racing'
     ) {
@@ -5004,6 +5034,7 @@ export default function App() {
       return;
     }
 
+    setLockedRacePlayers(startingRacePlayers);
     clearStartGateSequence();
     const sequenceId = startGateSequenceIdRef.current;
     setMappingMode(false);
@@ -5159,14 +5190,14 @@ export default function App() {
         return 'Bluetooth Direct unavailable';
       }
 
-      return bluetooth.connectedCount > 0 ? 'Bluetooth Direct online' : 'Bluetooth Direct ready';
+      return activePlayers.length > 0 ? 'Bluetooth Direct online' : 'Bluetooth Direct ready';
     }
 
-    if (bluetooth.connectedCount > 0 && bridge.connection === 'open') {
+    if (activePlayers.some((player) => player.deviceSource === 'bluetooth') && bridge.connection === 'open') {
       return 'ANT+ / Bluetooth inputs online';
     }
 
-    if (bluetooth.connectedCount > 0) {
+    if (activePlayers.some((player) => player.deviceSource === 'bluetooth')) {
       return 'Bluetooth bikes online';
     }
 
@@ -5204,14 +5235,14 @@ export default function App() {
         return bluetooth.status;
       }
 
-      return bluetooth.connectedCount > 0
-        ? bluetooth.status
+      return activePlayers.length > 0
+        ? `${activePlayers.length} live Bluetooth bike${activePlayers.length === 1 ? '' : 's'} connected.`
         : 'Press Connect Wattbike, choose the bike from the browser Bluetooth prompt, then pedal to confirm live data.';
     }
 
     const bridgeControlStatus = bridge.controlStatus ? ` ${bridge.controlStatus}` : '';
 
-    if (bluetooth.connectedCount > 0) {
+    if (activePlayers.some((player) => player.deviceSource === 'bluetooth')) {
       return `${bluetooth.status} ${bridge.connection === 'open' ? bridge.status : bridge.error ?? bridge.status}${bridgeControlStatus}`;
     }
 
@@ -5262,7 +5293,7 @@ export default function App() {
 
     return bridge.status;
   })();
-  const connectionState = demoMode || bluetooth.connectedCount > 0 || activePlayers.length > 0
+  const connectionState = demoMode || activePlayers.length > 0
     ? 'open'
     : bikeConnectionSource === 'bluetooth'
       ? bluetooth.supported ? 'idle' : 'error'

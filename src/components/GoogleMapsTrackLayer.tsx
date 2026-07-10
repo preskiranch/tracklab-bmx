@@ -128,7 +128,7 @@ const defaultPedalZoneStrokeWeight = 11;
 const finishStripeCoreStrokeWeight = mappingRouteCoreStrokeWeight / 2;
 const finishStripeHaloStrokeWeight = finishStripeCoreStrokeWeight + 2;
 const finishStripeWidthMeters = 9;
-const finishLabelOffsetMeters = 30;
+const finishLabelOffsetMeters = 8;
 
 type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
@@ -1191,7 +1191,6 @@ export function GoogleMapsTrackLayer({
     });
 
     const showRaceFinish = !mappingMode || raceViewFullscreen || raceState === 'racing' || raceState === 'finished';
-    const finishPosition = riderLatLng(track, track.lengthMeters);
     const finishStripe = showRaceFinish ? finishStripePath(savedRoute) : null;
     if (finishStripe) {
       finishLineRefs.current = [
@@ -1217,7 +1216,7 @@ export function GoogleMapsTrackLayer({
     }
 
     const finishLabelPoint = showRaceFinish ? finishLabelPosition(savedRoute) : null;
-    if (finishPosition && finishLabelPoint && showRaceFinish) {
+    if (finishLabelPoint && showRaceFinish) {
       finishMarkerRef.current = new google.maps.Marker({
         icon: {
           anchor: new google.maps.Point(43, 18),

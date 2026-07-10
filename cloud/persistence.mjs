@@ -18,6 +18,9 @@ let pool = databaseUrl
 
 let readyPromise = null;
 const publicTrackMappingsFallback = new Map();
+const memoryAuthUsersById = new Map();
+const memoryAuthUserIdByEmail = new Map();
+const memoryAuthSessionsByToken = new Map();
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -35,6 +38,18 @@ function fromJson(value, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function authEmailKey(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function cloneAuthUser(user) {
+  return user ? { ...user } : null;
+}
+
+function cloneAuthSession(session) {
+  return session ? { ...session } : null;
 }
 
 export function persistenceEnabled() {
@@ -364,6 +379,11 @@ function authUserFromRow(row) {
 }
 
 export async function findAuthUserByEmail(email) {
+  if (!pool) {
+    const id = memoryAuthUserIdByEmail.get(authEmailKey(email));
+    return cloneAuthUser(id ? memoryAuthUsersById.get(id) : null);
+  }
+
   const result = await query(
     `SELECT * FROM ${schema}.auth_users WHERE email = $1 LIMIT 1`,
     [email],
@@ -372,6 +392,10 @@ export async function findAuthUserByEmail(email) {
 }
 
 export async function findAuthUserById(id) {
+  if (!pool) {
+    return cloneAuthUser(memoryAuthUsersById.get(id));
+  }
+
   const result = await query(
     `SELECT * FROM ${schema}.auth_users WHERE id = $1 LIMIT 1`,
     [id],
@@ -380,6 +404,27 @@ export async function findAuthUserById(id) {
 }
 
 export async function createAuthUser(user) {
+  if (!pool) {
+    const now = new Date().toISOString();
+    const memoryUser = {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      passwordHash: user.passwordHash,
+      membershipTier: user.membershipTier,
+      bikeSeats: Number(user.bikeSeats) || 1,
+      admin: Boolean(user.admin),
+      squareCustomerId: '',
+      squareSubscriptionId: '',
+      createdAt: now,
+      updatedAt: now,
+      lastLogin: now,
+    };
+    memoryAuthUsersById.set(memoryUser.id, memoryUser);
+    memoryAuthUserIdByEmail.set(authEmailKey(memoryUser.email), memoryUser.id);
+    return cloneAuthUser(memoryUser);
+  }
+
   const result = await query(
     `INSERT INTO ${schema}.auth_users (id, email, display_name, password_hash, membership_tier, bike_seats, admin, last_login)
      VALUES ($1, $2, $3, $4, $5, $6, $7, now())
@@ -398,6 +443,17 @@ export async function createAuthUser(user) {
 }
 
 export async function touchAuthUserLogin(userId) {
+  if (!pool) {
+    const memoryUser = memoryAuthUsersById.get(userId);
+    if (!memoryUser) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    memoryUser.lastLogin = now;
+    memoryUser.updatedAt = now;
+    return cloneAuthUser(memoryUser);
+  }
+
   const result = await query(
     `UPDATE ${schema}.auth_users SET last_login = now(), updated_at = now() WHERE id = $1 RETURNING *`,
     [userId],
@@ -406,6 +462,17 @@ export async function touchAuthUserLogin(userId) {
 }
 
 export async function updateAuthUserMembership(userId, membershipTier, bikeSeats) {
+  if (!pool) {
+    const memoryUser = memoryAuthUsersById.get(userId);
+    if (!memoryUser) {
+      return null;
+    }
+    memoryUser.membershipTier = membershipTier;
+    memoryUser.bikeSeats = Number(bikeSeats) || 1;
+    memoryUser.updatedAt = new Date().toISOString();
+    return cloneAuthUser(memoryUser);
+  }
+
   const result = await query(
     `UPDATE ${schema}.auth_users
      SET membership_tier = $2, bike_seats = $3, updated_at = now()
@@ -417,6 +484,18 @@ export async function updateAuthUserMembership(userId, membershipTier, bikeSeats
 }
 
 export async function updateAuthUserAdminAccess(userId, bikeSeats) {
+  if (!pool) {
+    const memoryUser = memoryAuthUsersById.get(userId);
+    if (!memoryUser) {
+      return null;
+    }
+    memoryUser.membershipTier = 'racer';
+    memoryUser.bikeSeats = Number(bikeSeats) || 1;
+    memoryUser.admin = true;
+    memoryUser.updatedAt = new Date().toISOString();
+    return cloneAuthUser(memoryUser);
+  }
+
   const result = await query(
     `UPDATE ${schema}.auth_users
      SET membership_tier = 'racer',
@@ -431,6 +510,18 @@ export async function updateAuthUserAdminAccess(userId, bikeSeats) {
 }
 
 export async function createAuthSession(session) {
+  if (!pool) {
+    memoryAuthSessionsByToken.set(session.tokenHash, {
+      id: session.id,
+      userId: session.userId,
+      tokenHash: session.tokenHash,
+      expiresAt: session.expiresAt,
+      createdAt: new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
+    });
+    return;
+  }
+
   await query(
     `INSERT INTO ${schema}.auth_sessions (id, user_id, token_hash, expires_at)
      VALUES ($1, $2, $3, $4)
@@ -443,6 +534,27 @@ export async function createAuthSession(session) {
 }
 
 export async function findAuthSession(tokenHash) {
+  if (!pool) {
+    const session = cloneAuthSession(memoryAuthSessionsByToken.get(tokenHash));
+    if (!session || Date.parse(session.expiresAt) <= Date.now()) {
+      if (session) {
+        memoryAuthSessionsByToken.delete(tokenHash);
+      }
+      return null;
+    }
+
+    const user = cloneAuthUser(memoryAuthUsersById.get(session.userId));
+    if (!user) {
+      return null;
+    }
+
+    return {
+      sessionId: session.id,
+      expiresAt: session.expiresAt,
+      user,
+    };
+  }
+
   const result = await query(
     `SELECT
        session.id AS session_id,
@@ -467,6 +579,14 @@ export async function findAuthSession(tokenHash) {
 }
 
 export async function touchAuthSession(tokenHash) {
+  if (!pool) {
+    const session = memoryAuthSessionsByToken.get(tokenHash);
+    if (session && Date.parse(session.expiresAt) > Date.now()) {
+      session.lastSeen = new Date().toISOString();
+    }
+    return;
+  }
+
   await query(
     `UPDATE ${schema}.auth_sessions SET last_seen = now() WHERE token_hash = $1 AND expires_at > now()`,
     [tokenHash],
@@ -474,6 +594,11 @@ export async function touchAuthSession(tokenHash) {
 }
 
 export async function deleteAuthSession(tokenHash) {
+  if (!pool) {
+    memoryAuthSessionsByToken.delete(tokenHash);
+    return;
+  }
+
   await query(
     `DELETE FROM ${schema}.auth_sessions WHERE token_hash = $1`,
     [tokenHash],

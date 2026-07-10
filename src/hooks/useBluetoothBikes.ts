@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  cleanBikeCadenceRpm,
+  cleanBikeSpeedKph,
+  cleanBikeWatts,
+  maxReasonableBikeCadenceRpm,
+  sanitizeBikeMetricPatch,
+  type BikeMetricPatch,
+} from '../lib/bikeSampleSanity';
+import { liveBikeTimeoutMs } from '../data';
 import type { BikeSample, ConnectedBikeDevice } from '../types';
 
 type BluetoothConnectionState = 'unsupported' | 'idle' | 'connecting' | 'open' | 'error';
@@ -63,7 +72,7 @@ type BluetoothNavigator = Navigator & {
   bluetooth?: BluetoothApi;
 };
 
-type PartialBikeSample = Partial<Pick<BikeSample, 'battery' | 'cadence' | 'speedKph' | 'watts'>>;
+type PartialBikeSample = BikeMetricPatch;
 
 const bluetoothBaseDeviceId = 71000;
 const unsupportedTabletBluetoothMessage = 'Direct Bluetooth is not available in this tablet browser. iPad and iPhone Chrome/Safari cannot pair with Wattbikes from a website; use Advanced Connector on the Mac/PC near the bikes, or use Android Chrome if Web Bluetooth is available.';
@@ -152,7 +161,7 @@ function parseIndoorBikeData(view: DataView): PartialBikeSample {
   const sample: PartialBikeSample = {};
 
   if ((flags & 0x01) === 0 && hasBytes(view, offset, 2)) {
-    sample.speedKph = Number((view.getUint16(offset, true) / 100).toFixed(2));
+    sample.speedKph = cleanBikeSpeedKph(view.getUint16(offset, true) / 100) ?? undefined;
     offset += 2;
   }
 
@@ -161,7 +170,7 @@ function parseIndoorBikeData(view: DataView): PartialBikeSample {
   }
 
   if ((flags & 0x04) !== 0 && hasBytes(view, offset, 2)) {
-    sample.cadence = Math.round(view.getUint16(offset, true) / 2);
+    sample.cadence = cleanBikeCadenceRpm(view.getUint16(offset, true) / 2) ?? undefined;
     offset += 2;
   }
 
@@ -179,7 +188,7 @@ function parseIndoorBikeData(view: DataView): PartialBikeSample {
   }
 
   if ((flags & 0x40) !== 0 && hasBytes(view, offset, 2)) {
-    sample.watts = Math.max(0, view.getInt16(offset, true));
+    sample.watts = cleanBikeWatts(view.getInt16(offset, true)) ?? undefined;
     offset += 2;
   }
 
@@ -229,7 +238,8 @@ function cadenceFromCrankDeltas(
     return null;
   }
 
-  return Math.round((revolutionDelta / (timeDeltaTicks / 1024)) * 60);
+  const cadence = Math.round((revolutionDelta / (timeDeltaTicks / 1024)) * 60);
+  return cadence > maxReasonableBikeCadenceRpm ? null : cadence;
 }
 
 function parseCyclingPowerMeasurement(
@@ -243,9 +253,11 @@ function parseCyclingPowerMeasurement(
 
   const flags = view.getUint16(0, true);
   let offset = 2;
-  const sample: PartialBikeSample = {
-    watts: Math.max(0, view.getInt16(offset, true)),
-  };
+  const sample: PartialBikeSample = {};
+  const watts = cleanBikeWatts(view.getInt16(offset, true));
+  if (watts != null) {
+    sample.watts = watts;
+  }
   offset += 2;
 
   if ((flags & 0x01) !== 0) {
@@ -337,16 +349,27 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   const [devices, setDevices] = useState<BluetoothBikeDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
+  const [now, setNow] = useState(Date.now());
   const deviceIdsRef = useRef<Map<string, number>>(new Map());
   const crankCacheRef = useRef<Map<number, { eventTime: number; revolutions: number }>>(new Map());
   const connectedBrowserDeviceIdsRef = useRef<Set<string>>(new Set());
   const reconnectInFlightRef = useRef(false);
   const listenerCleanupRef = useRef<(() => void)[]>([]);
+  const samplesByDeviceRef = useRef<Map<number, BikeSample>>(new Map());
   const supported = Boolean((navigator as BluetoothNavigator).bluetooth);
 
   useEffect(() => () => {
     listenerCleanupRef.current.forEach((cleanup) => cleanup());
     listenerCleanupRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    samplesByDeviceRef.current = samplesByDevice;
+  }, [samplesByDevice]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const setDeviceConnected = useCallback((deviceId: number, label: string, connected: boolean) => {
@@ -375,23 +398,25 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
     setSamplesByDevice((current) => {
       const previous = current.get(deviceId);
       const receivedAt = Date.now();
-      const hasCadence = partial.cadence !== undefined;
-      const hasSpeed = partial.speedKph !== undefined;
-      const hasWatts = partial.watts !== undefined;
+      const cleanedPartial = sanitizeBikeMetricPatch(partial);
+      const hasCadence = cleanedPartial.cadence !== undefined;
+      const hasSpeed = cleanedPartial.speedKph !== undefined;
+      const hasWatts = cleanedPartial.watts !== undefined;
+      const hasBattery = cleanedPartial.battery !== undefined;
       const hasMotionValue = hasCadence || hasSpeed || hasWatts;
       const next = new Map(current);
       next.set(deviceId, {
         at: hasMotionValue ? receivedAt : previous?.at ?? receivedAt,
-        battery: partial.battery ?? previous?.battery,
-        cadence: hasCadence ? partial.cadence ?? null : previous?.cadence ?? null,
+        battery: hasBattery ? cleanedPartial.battery : previous?.battery,
+        cadence: hasCadence ? cleanedPartial.cadence ?? null : previous?.cadence ?? null,
         cadenceAt: hasCadence ? receivedAt : previous?.cadenceAt,
         deviceId,
         label,
         signal: 1,
         source: 'bluetooth',
-        speedKph: hasSpeed ? partial.speedKph ?? null : previous?.speedKph ?? null,
+        speedKph: hasSpeed ? cleanedPartial.speedKph ?? null : previous?.speedKph ?? null,
         speedAt: hasSpeed ? receivedAt : previous?.speedAt,
-        watts: hasWatts ? partial.watts ?? 0 : previous?.watts ?? 0,
+        watts: hasWatts ? cleanedPartial.watts ?? 0 : previous?.watts ?? 0,
         wattsAt: hasWatts ? receivedAt : previous?.wattsAt,
       });
       return next;
@@ -399,11 +424,16 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   }, []);
 
   const connectBluetoothDevice = useCallback(async (device: BluetoothDeviceLike) => {
+    let numericId = deviceIdsRef.current.get(device.id);
     if (connectedBrowserDeviceIdsRef.current.has(device.id)) {
-      return false;
+      const sample = numericId == null ? undefined : samplesByDeviceRef.current.get(numericId);
+      if (sample && Date.now() - sample.at <= liveBikeTimeoutMs) {
+        return false;
+      }
+
+      connectedBrowserDeviceIdsRef.current.delete(device.id);
     }
 
-    let numericId = deviceIdsRef.current.get(device.id);
     if (!numericId) {
       numericId = wattbikeMonitorIdFromName(device.name) ?? bluetoothBaseDeviceId + deviceIdsRef.current.size + 1;
       deviceIdsRef.current.set(device.id, numericId);
@@ -588,7 +618,9 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   }, [connectBluetoothDevice]);
 
   return useMemo(() => {
-    const connectedCount = devices.filter((device) => device.connected).length;
+    const connectedCount = [...samplesByDevice.values()]
+      .filter((sample) => now - sample.at <= liveBikeTimeoutMs)
+      .length;
     const status = !supported
       ? unsupportedBluetoothMessage()
       : connection === 'connecting'
@@ -596,8 +628,10 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
         : error
           ? error
           : connectedCount > 0
-            ? `${connectedCount} Bluetooth bike${connectedCount === 1 ? '' : 's'} connected.`
-            : 'Bluetooth is ready. Saved bikes reconnect automatically; click Connect Wattbike only for first-time pairing.';
+            ? `${connectedCount} Bluetooth bike${connectedCount === 1 ? '' : 's'} live.`
+            : connection === 'open'
+              ? 'Bluetooth is paired but no live Wattbike data is arriving. Put the bike in Just Ride and pedal, or reconnect it.'
+              : 'Bluetooth is ready. Saved bikes reconnect automatically; click Connect Wattbike only for first-time pairing.';
 
     return {
       connectBike,
@@ -609,5 +643,5 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       status,
       supported,
     };
-  }, [connectBike, connection, devices, error, samplesByDevice, supported]);
+  }, [connectBike, connection, devices, error, now, samplesByDevice, supported]);
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { sanitizeBikeSample } from '../lib/bikeSampleSanity';
 import type {
   BikeControlAction,
   BikeControlCommand,
@@ -125,7 +126,10 @@ export function useWattbikeBridge(): BridgeSnapshot {
         }
 
         if (parsed.type === 'bike-sample') {
-          const sample = parsed as BikeSample;
+          const sample = sanitizeBikeSample(parsed as BikeSample);
+          if (!sample) {
+            return;
+          }
           setMode(sample.source);
           setDevices((current) => {
             const next = new Map(current.map((device) => [device.deviceId, device]));

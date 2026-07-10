@@ -1,4 +1,5 @@
 import { proSplitMinimumMph, type SplitRouteDecisionPoint, zoneMatchesBranchSelections } from '../lib/trackMapping';
+import { cleanBikeCadenceRpm, cleanBikeSpeedKph, cleanBikeWatts } from '../lib/bikeSampleSanity';
 import type { BikeSample, PlayerSlot, RiderDriveSource, RiderState, SplitBranchChoice, TrackZone } from '../types';
 import { bmxVelocityMpsFromCadence } from './bmxRollout';
 import { crossedTakeoff, surfaceAngleDeg } from './trackProfile';
@@ -29,6 +30,7 @@ const thirtyFootSplitMeters = 30 * 0.3048;
 const metersPerSecondPerMph = 0.44704;
 const proSplitMinimumMps = proSplitMinimumMph * metersPerSecondPerMph;
 const proSplitPenaltyMps = 1 * metersPerSecondPerMph;
+const finishToleranceMeters = 0.75;
 
 export type BranchChoicesByPlayer = Partial<Record<PlayerSlot['id'], SplitBranchChoice>>;
 
@@ -223,13 +225,13 @@ export function stepRiders(
     let actualBranches = rider.actualBranches;
     let proPenaltySections = rider.proPenaltySections;
     const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
-      ? sample?.physicsWatts ?? sample?.watts ?? 0
+      ? cleanBikeWatts(sample?.physicsWatts ?? sample?.watts ?? 0) ?? 0
       : 0;
     const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt)
-      ? sample?.cadence ?? 0
+      ? cleanBikeCadenceRpm(sample?.cadence ?? 0) ?? 0
       : 0;
     const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, raceStartedAt)
-      ? sample?.speedKph ?? 0
+      ? cleanBikeSpeedKph(sample?.speedKph ?? 0) ?? 0
       : 0;
     const activeZone = zoneAtDistance(trackZones, rider.distance, actualBranches, selectedBranch);
     const pedalZonesConfigured = riderRouteHasPedalZones(trackZones, actualBranches, selectedBranch);
@@ -306,7 +308,12 @@ export function stepRiders(
       }
     });
 
-    const distance = Math.min(raceLengthMeters, previousDistance + settledVelocity * dt);
+    const nextDistance = previousDistance + settledVelocity * dt;
+    const crossedFinish = previousDistance < raceLengthMeters
+      && nextDistance >= raceLengthMeters - finishToleranceMeters;
+    const distance = crossedFinish || nextDistance >= raceLengthMeters
+      ? raceLengthMeters
+      : Math.min(raceLengthMeters, nextDistance);
     const thirtyFootTimeMs = rider.thirtyFootTimeMs == null
       && previousDistance < thirtyFootSplitMeters
       && distance >= thirtyFootSplitMeters
@@ -362,7 +369,11 @@ export function stepRiders(
       pitch = surfaceAngleDeg(distance) + (cadence > 0 ? Math.sin(pedalPhase * Math.PI * 2) * 1.1 : 0);
     }
 
-    const finishedAt = distance >= raceLengthMeters ? elapsedMs : null;
+    const finishedAt = crossedFinish
+      ? interpolateSplitTimeMs(previousDistance, Math.max(nextDistance, raceLengthMeters), raceLengthMeters, dt, elapsedMs)
+      : distance >= raceLengthMeters
+        ? elapsedMs
+        : null;
 
     return {
       ...rider,
