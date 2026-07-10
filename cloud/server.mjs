@@ -33,7 +33,7 @@ const clients = new Map();
 const rooms = new Map();
 const challenges = new Map();
 const matchInvites = new Map();
-const persistedRaceResultKeys = new Set();
+const persistedRaceResultKeys = new Map();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const maxRaceBikeCount = 4;
@@ -44,6 +44,7 @@ const authCookieName = 'tracklab_session';
 const authSessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 const authSessionTouchIntervalMs = 5 * 60 * 1000;
 const billingCheckoutMaxAgeMs = 60 * 60 * 1000;
+const transientStateMaxAgeMs = 6 * 60 * 60 * 1000;
 const scryptAsync = promisify(scryptCallback);
 const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -74,6 +75,36 @@ function randomId(prefix, length = 8) {
     value += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
   return `${prefix}-${value}`;
+}
+
+function rememberRaceResultKey(key, now = Date.now()) {
+  if (persistedRaceResultKeys.has(key)) {
+    return false;
+  }
+
+  persistedRaceResultKeys.set(key, now);
+  return true;
+}
+
+function pruneTransientState(now = Date.now()) {
+  for (const [key, savedAt] of persistedRaceResultKeys.entries()) {
+    if (savedAt <= now - transientStateMaxAgeMs) {
+      persistedRaceResultKeys.delete(key);
+    }
+  }
+
+  for (const [id, challenge] of challenges.entries()) {
+    if (challenge.createdAt <= now - (15 * 60 * 1000)) {
+      challenges.delete(id);
+      void persistence.updateChallenge(id, 'expired');
+    }
+  }
+
+  for (const [id, invite] of matchInvites.entries()) {
+    if (invite.createdAt <= now - (15 * 60 * 1000)) {
+      matchInvites.delete(id);
+    }
+  }
 }
 
 function sanitizeText(value, fallback, maxLength = 80) {
@@ -1848,8 +1879,7 @@ async function handleClientMessage(client, rawMessage) {
     room.raceStates.set(client.id, raceState);
     if (raceState.raceState === 'finished') {
       const resultKey = `${raceState.sessionId}:${client.guestKey}:${raceState.summary.map((summary) => `${summary.playerId}:${summary.finishTimeMs ?? 'open'}`).join('|')}`;
-      if (!persistedRaceResultKeys.has(resultKey)) {
-        persistedRaceResultKeys.add(resultKey);
+      if (rememberRaceResultKey(resultKey)) {
         void persistence.saveRaceResults(room, client, raceState);
       }
     }
@@ -2261,6 +2291,10 @@ async function serveStatic(request, response) {
     if (request.method === 'PATCH' || request.method === 'POST') {
       const patch = sanitizeUserDataPatch(await readJsonBody(request));
       const userData = await persistence.saveUserData(profileKey, patch);
+      if (!userData) {
+        writeJson(response, 503, { error: 'Cloud profile storage is temporarily unavailable.' });
+        return;
+      }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
       response.end(JSON.stringify(userData));
       return;
@@ -2601,6 +2635,12 @@ const websocketHeartbeat = setInterval(() => {
   });
 }, 30_000);
 websocketHeartbeat.unref();
+
+const persistenceMaintenance = setInterval(() => {
+  pruneTransientState();
+  void persistence.pruneExpiredData();
+}, 15 * 60 * 1000);
+persistenceMaintenance.unref();
 
 server.listen(port, () => {
   console.log(`[cloud] TrackLab BMX web + multiplayer listening on :${port}`);
