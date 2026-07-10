@@ -113,4 +113,20 @@ describe('local connector persistence', () => {
       trackMappings: { 'track-one': { trackId: 'track-one' } },
     });
   });
+
+  it('classifies malformed and oversized profile requests', async () => {
+    const malformed = await connectorRequest('/api/user-data', {
+      method: 'PATCH',
+      body: '{not-json',
+    });
+    expect(malformed.status).toBe(400);
+    await expect(malformed.json()).resolves.toMatchObject({ message: 'Request body must be valid JSON.' });
+
+    const oversized = await connectorRequest('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({ value: 'x'.repeat(2_000_001) }),
+    });
+    expect(oversized.status).toBe(413);
+    await expect(oversized.json()).resolves.toMatchObject({ message: 'Request body is too large.' });
+  });
 });

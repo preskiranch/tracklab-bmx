@@ -15,7 +15,25 @@ const inputMode = normalizeInputMode(process.env.WATTBIKE_INPUT);
 const autoStart = process.env.WATTBIKE_BRIDGE_AUTOSTART === '1';
 const userDataDirectory = path.join(os.homedir(), 'Library', 'Application Support', 'TrackLab BMX');
 const userDataPath = path.join(userDataDirectory, 'user-data.json');
-const server = createServer(handleHttpRequest);
+const server = createServer((request, response) => {
+  void handleHttpRequest(request, response).catch((error) => {
+    const statusCode = Number(error?.statusCode);
+    const clientError = Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500;
+    if (!clientError) {
+      warnBridge('HTTP request failed:', error);
+    }
+    if (!response.headersSent) {
+      writeJson(request, response, clientError ? statusCode : 500, {
+        type: clientError ? 'invalid-request' : 'connector-error',
+        message: clientError && error instanceof Error
+          ? error.message
+          : 'TrackLab Bike Connector could not complete the request.',
+      });
+    } else {
+      response.destroy();
+    }
+  });
+});
 const wss = new WebSocketServer({
   server,
   maxPayload: 64 * 1024,
@@ -36,6 +54,14 @@ const sourceConnectedDevices = new Map();
 let userDataMutationQueue = Promise.resolve();
 
 const connectedDeviceSampleTimeoutMs = Number(process.env.WATTBIKE_CONNECTED_DEVICE_TIMEOUT_MS ?? 15000);
+
+class BridgeRequestError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.name = 'BridgeRequestError';
+    this.statusCode = statusCode;
+  }
+}
 
 function logBridge(message, extra = null) {
   const suffix = extra ? ` ${JSON.stringify(extra)}` : '';
@@ -305,18 +331,31 @@ function patchUserData(patch) {
 }
 
 async function readRequestJson(request, maxBytes = 2_000_000) {
+  const declaredBytes = Number(request.headers['content-length']);
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+    request.resume();
+    throw new BridgeRequestError(413, 'Request body is too large.');
+  }
+
   const chunks = [];
   let totalBytes = 0;
   for await (const chunk of request) {
     totalBytes += chunk.length;
     if (totalBytes > maxBytes) {
-      throw new Error('Request body is too large.');
+      throw new BridgeRequestError(413, 'Request body is too large.');
     }
     chunks.push(chunk);
   }
 
   const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) {
+    return {};
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new BridgeRequestError(400, 'Request body must be valid JSON.');
+  }
 }
 
 async function startSource() {
@@ -457,16 +496,9 @@ async function handleHttpRequest(request, response) {
   }
 
   if (request.method === 'PATCH' && url.pathname === '/api/user-data') {
-    try {
-      const patch = await readRequestJson(request);
-      const next = await patchUserData(patch);
-      writeJson(request, response, 200, next);
-    } catch (error) {
-      writeJson(request, response, 400, {
-        type: 'user-data-error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const patch = await readRequestJson(request);
+    const next = await patchUserData(patch);
+    writeJson(request, response, 200, next);
     return;
   }
 
@@ -575,3 +607,7 @@ async function shutdown(signal) {
 
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
+
+server.requestTimeout = 15_000;
+server.headersTimeout = 10_000;
+server.keepAliveTimeout = 5_000;
