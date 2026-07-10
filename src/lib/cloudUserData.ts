@@ -1,5 +1,6 @@
 import type { BikeProfile, TrackRecord } from '../types';
 import type { StoredTrackMappings } from './trackMapping';
+import { createPatchBatcher } from './patchBatcher';
 
 export type CloudUserData = {
   trackMappings: StoredTrackMappings;
@@ -57,6 +58,24 @@ export async function patchCloudUserData(profileKey: string, patch: CloudUserDat
 
   const payload = await response.json() as Partial<CloudUserData>;
   return normalizeCloudUserData(payload);
+}
+
+const cloudPatchBatchers = new Map<string, ReturnType<typeof createPatchBatcher<CloudUserDataPatch, CloudUserData>>>();
+
+export function queueCloudUserDataPatch(profileKey: string, patch: CloudUserDataPatch) {
+  let batcher = cloudPatchBatchers.get(profileKey);
+  if (!batcher) {
+    batcher = createPatchBatcher((nextPatch) => patchCloudUserData(profileKey, nextPatch));
+    cloudPatchBatchers.set(profileKey, batcher);
+  }
+  const queued = batcher.enqueue(patch);
+  const releaseIdleBatcher = () => {
+    if (!batcher?.hasPending() && cloudPatchBatchers.get(profileKey) === batcher) {
+      cloudPatchBatchers.delete(profileKey);
+    }
+  };
+  void queued.then(releaseIdleBatcher, releaseIdleBatcher);
+  return queued;
 }
 
 export function createEmptyCloudUserData(): CloudUserData {
