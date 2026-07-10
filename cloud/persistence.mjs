@@ -4,6 +4,7 @@ const { Pool } = pg;
 
 const schema = 'tracklab';
 const databaseUrl = process.env.DATABASE_URL?.trim();
+const databaseConfigured = Boolean(databaseUrl);
 let pool = databaseUrl
   ? new Pool({
     connectionString: databaseUrl,
@@ -17,10 +18,13 @@ let pool = databaseUrl
   : null;
 
 let readyPromise = null;
+let persistenceReady = false;
 const publicTrackMappingsFallback = new Map();
+const memoryUserDataByGuestKey = new Map();
 const memoryAuthUsersById = new Map();
 const memoryAuthUserIdByEmail = new Map();
 const memoryAuthSessionsByToken = new Map();
+const memoryBillingCheckoutsByState = new Map();
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -40,6 +44,10 @@ function fromJson(value, fallback) {
   }
 }
 
+function cloneJson(value, fallback) {
+  return fromJson(json(value ?? fallback), fallback);
+}
+
 function authEmailKey(email) {
   return String(email || '').trim().toLowerCase();
 }
@@ -54,6 +62,14 @@ function cloneAuthSession(session) {
 
 export function persistenceEnabled() {
   return Boolean(pool);
+}
+
+export function persistenceStatus() {
+  return {
+    mode: databaseConfigured ? 'postgres' : 'memory',
+    configured: databaseConfigured,
+    ready: databaseConfigured ? Boolean(pool) && persistenceReady : true,
+  };
 }
 
 export async function query(text, params = []) {
@@ -131,6 +147,19 @@ export async function initPersistence() {
         expires_at TIMESTAMPTZ NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.billing_checkouts (
+        state_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+        order_id TEXT UNIQUE NOT NULL,
+        payment_link_id TEXT,
+        bike_seats INTEGER NOT NULL,
+        expected_amount_cents INTEGER NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        claimed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
       await pool.query(`
@@ -305,27 +334,37 @@ export async function initPersistence() {
     `);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_rooms_created ON ${schema}.rooms (created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_room_messages_room_created ON ${schema}.room_messages (room_id, created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_challenges_to_status ON ${schema}.challenges (to_guest_key, status, created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_track ON ${schema}.race_results (track_id, created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_speed ON ${schema}.race_results (track_id, top_speed_kph DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rpm ON ${schema}.race_results (track_id, top_cadence DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_watts ON ${schema}.race_results (track_id, top_watts DESC NULLS LAST)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rider_rpm ON ${schema}.race_results (track_id, guest_key, rider_name, top_cadence DESC NULLS LAST)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rider_speed ON ${schema}.race_results (track_id, guest_key, rider_name, top_speed_kph DESC NULLS LAST)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rider_watts ON ${schema}.race_results (track_id, guest_key, rider_name, top_watts DESC NULLS LAST)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_public_mappings_updated ON ${schema}.public_track_mappings (updated_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_ghost_laps_track ON ${schema}.ghost_laps (track_id, route_key, finish_time_ms ASC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_ghost_laps_owner ON ${schema}.ghost_laps (owner_key, updated_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_email ON ${schema}.auth_users (email)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_token ON ${schema}.auth_sessions (token_hash)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_expires ON ${schema}.auth_sessions (expires_at)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_billing_checkouts_user ON ${schema}.billing_checkouts (user_id, created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_billing_checkouts_expires ON ${schema}.billing_checkouts (expires_at) WHERE claimed_at IS NULL`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friend_requests_to ON ${schema}.friend_requests (to_guest_key, status, created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friend_requests_from ON ${schema}.friend_requests (from_guest_key, status, created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friendships_guest_b ON ${schema}.friendships (guest_key_b, created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_members_guest ON ${schema}.group_members (guest_key, left_at)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_invites_to ON ${schema}.group_invites (to_guest_key, status, created_at DESC)`);
       console.log('[cloud] TrackLab persistence ready.');
+      persistenceReady = true;
       return true;
     } catch (error) {
       console.warn('[cloud] TrackLab persistence disabled:', error instanceof Error ? error.message : error);
       await pool?.end().catch(() => {});
       pool = null;
       readyPromise = null;
+      persistenceReady = false;
       return false;
     }
   })();
@@ -551,6 +590,7 @@ export async function findAuthSession(tokenHash) {
     return {
       sessionId: session.id,
       expiresAt: session.expiresAt,
+      lastSeen: session.lastSeen,
       user,
     };
   }
@@ -559,6 +599,7 @@ export async function findAuthSession(tokenHash) {
     `SELECT
        session.id AS session_id,
        session.expires_at,
+       session.last_seen,
        users.*
      FROM ${schema}.auth_sessions AS session
      JOIN ${schema}.auth_users AS users ON users.id = session.user_id
@@ -574,6 +615,7 @@ export async function findAuthSession(tokenHash) {
   return {
     sessionId: row.session_id,
     expiresAt: row.expires_at,
+    lastSeen: row.last_seen,
     user: authUserFromRow(row),
   };
 }
@@ -603,6 +645,99 @@ export async function deleteAuthSession(tokenHash) {
     `DELETE FROM ${schema}.auth_sessions WHERE token_hash = $1`,
     [tokenHash],
   );
+}
+
+export async function saveBillingCheckout(checkout) {
+  const record = {
+    stateHash: checkout.stateHash,
+    userId: checkout.userId,
+    orderId: checkout.orderId,
+    paymentLinkId: checkout.paymentLinkId || '',
+    bikeSeats: Math.max(1, Math.min(4, Math.round(Number(checkout.bikeSeats) || 1))),
+    expectedAmountCents: Math.max(0, Math.round(Number(checkout.expectedAmountCents) || 0)),
+    expiresAt: checkout.expiresAt,
+    claimedAt: null,
+    createdAt: new Date().toISOString(),
+  };
+
+  if (!pool) {
+    memoryBillingCheckoutsByState.set(record.stateHash, record);
+    return { ...record };
+  }
+
+  const result = await query(
+    `INSERT INTO ${schema}.billing_checkouts (
+       state_hash, user_id, order_id, payment_link_id, bike_seats, expected_amount_cents, expires_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (state_hash) DO NOTHING
+     RETURNING *`,
+    [
+      record.stateHash,
+      record.userId,
+      record.orderId,
+      record.paymentLinkId || null,
+      record.bikeSeats,
+      record.expectedAmountCents,
+      record.expiresAt,
+    ],
+  );
+  return billingCheckoutFromRow(result?.rows?.[0]);
+}
+
+function billingCheckoutFromRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    stateHash: row.state_hash,
+    userId: row.user_id,
+    orderId: row.order_id,
+    paymentLinkId: row.payment_link_id ?? '',
+    bikeSeats: Number(row.bike_seats) || 1,
+    expectedAmountCents: Number(row.expected_amount_cents) || 0,
+    expiresAt: row.expires_at,
+    claimedAt: row.claimed_at,
+    createdAt: row.created_at,
+  };
+}
+
+export async function findBillingCheckout(stateHash, userId) {
+  if (!pool) {
+    const record = memoryBillingCheckoutsByState.get(stateHash);
+    if (!record || record.userId !== userId) {
+      return null;
+    }
+    return { ...record };
+  }
+
+  const result = await query(
+    `SELECT * FROM ${schema}.billing_checkouts
+     WHERE state_hash = $1 AND user_id = $2
+     LIMIT 1`,
+    [stateHash, userId],
+  );
+  return billingCheckoutFromRow(result?.rows?.[0]);
+}
+
+export async function markBillingCheckoutClaimed(stateHash, userId) {
+  if (!pool) {
+    const record = memoryBillingCheckoutsByState.get(stateHash);
+    if (!record || record.userId !== userId) {
+      return null;
+    }
+    record.claimedAt = new Date().toISOString();
+    return { ...record };
+  }
+
+  const result = await query(
+    `UPDATE ${schema}.billing_checkouts
+     SET claimed_at = COALESCE(claimed_at, now())
+     WHERE state_hash = $1 AND user_id = $2
+     RETURNING *`,
+    [stateHash, userId],
+  );
+  return billingCheckoutFromRow(result?.rows?.[0]);
 }
 
 export async function saveRoom(room, host) {
@@ -643,6 +778,13 @@ export async function saveRoomLeave(roomId, client) {
   return query(
     `UPDATE ${schema}.room_members SET left_at = now() WHERE room_id = $1 AND guest_key = $2`,
     [roomId, client.guestKey],
+  );
+}
+
+export async function closeRoom(roomId) {
+  return query(
+    `UPDATE ${schema}.rooms SET closed_at = now() WHERE id = $1 AND closed_at IS NULL`,
+    [roomId],
   );
 }
 
@@ -690,6 +832,14 @@ export async function loadRoom(roomId) {
 }
 
 export async function loadUserData(guestKey) {
+  if (!pool) {
+    return cloneJson(memoryUserDataByGuestKey.get(guestKey), {
+      trackMappings: {},
+      customRoutes: [],
+      bikeProfiles: [],
+    });
+  }
+
   const result = await query(
     `SELECT track_mappings, custom_routes, bike_profiles FROM ${schema}.user_data WHERE guest_key = $1`,
     [guestKey],
@@ -704,31 +854,55 @@ export async function loadUserData(guestKey) {
 }
 
 export async function saveUserData(guestKey, patch) {
-  const current = await loadUserData(guestKey);
-  const next = {
-    trackMappings: patch.trackMappings && typeof patch.trackMappings === 'object'
-      ? patch.trackMappings
-      : current.trackMappings,
-    customRoutes: Array.isArray(patch.customRoutes)
-      ? patch.customRoutes
-      : current.customRoutes,
-    bikeProfiles: Array.isArray(patch.bikeProfiles)
-      ? patch.bikeProfiles
-      : current.bikeProfiles,
-  };
+  const trackMappings = patch.trackMappings && typeof patch.trackMappings === 'object'
+    ? patch.trackMappings
+    : null;
+  const customRoutes = Array.isArray(patch.customRoutes) ? patch.customRoutes : null;
+  const bikeProfiles = Array.isArray(patch.bikeProfiles) ? patch.bikeProfiles : null;
 
-  await query(
+  if (!pool) {
+    const current = await loadUserData(guestKey);
+    const next = {
+      trackMappings: trackMappings ?? current.trackMappings,
+      customRoutes: customRoutes ?? current.customRoutes,
+      bikeProfiles: bikeProfiles ?? current.bikeProfiles,
+    };
+    memoryUserDataByGuestKey.set(guestKey, cloneJson(next, next));
+    return cloneJson(next, next);
+  }
+
+  const result = await query(
     `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, updated_at)
-     VALUES ($1, $2::jsonb, $3::jsonb, $4::jsonb, now())
+     VALUES (
+       $1,
+       COALESCE($2::jsonb, '{}'::jsonb),
+       COALESCE($3::jsonb, '[]'::jsonb),
+       COALESCE($4::jsonb, '[]'::jsonb),
+       now()
+     )
      ON CONFLICT (guest_key) DO UPDATE SET
-       track_mappings = EXCLUDED.track_mappings,
-       custom_routes = EXCLUDED.custom_routes,
-       bike_profiles = EXCLUDED.bike_profiles,
-       updated_at = now()`,
-    [guestKey, json(next.trackMappings), json(next.customRoutes), json(next.bikeProfiles)],
+       track_mappings = COALESCE($2::jsonb, ${schema}.user_data.track_mappings),
+       custom_routes = COALESCE($3::jsonb, ${schema}.user_data.custom_routes),
+       bike_profiles = COALESCE($4::jsonb, ${schema}.user_data.bike_profiles),
+       updated_at = now()
+     RETURNING track_mappings, custom_routes, bike_profiles`,
+    [
+      guestKey,
+      trackMappings == null ? null : json(trackMappings),
+      customRoutes == null ? null : json(customRoutes),
+      bikeProfiles == null ? null : json(bikeProfiles),
+    ],
   );
+  const row = result?.rows?.[0];
+  if (!row) {
+    return null;
+  }
 
-  return next;
+  return {
+    trackMappings: fromJson(row.track_mappings, {}),
+    customRoutes: fromJson(row.custom_routes, []),
+    bikeProfiles: fromJson(row.bike_profiles, []),
+  };
 }
 
 export async function loadPublicTrackMappings() {
@@ -751,28 +925,27 @@ export async function savePublicTrackMappings(mappings, publishedBy = null) {
     return loadPublicTrackMappings();
   }
 
-  for (const [trackId, mapping] of entries) {
+  const values = [];
+  const placeholders = [];
+  entries.forEach(([trackId, mapping], index) => {
     publicTrackMappingsFallback.set(trackId, mapping);
-    await query(
-      `INSERT INTO ${schema}.public_track_mappings (track_id, track_name, country, state, mapping, published_by, updated_at)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
-       ON CONFLICT (track_id) DO UPDATE SET
-         track_name = EXCLUDED.track_name,
-         country = EXCLUDED.country,
-         state = EXCLUDED.state,
-         mapping = EXCLUDED.mapping,
-         published_by = EXCLUDED.published_by,
-         updated_at = now()`,
-      [
-        trackId,
-        mapping.trackName,
-        mapping.country,
-        mapping.state,
-        json(mapping),
-        publishedBy,
-      ],
-    );
-  }
+    const base = index * 6;
+    values.push(trackId, mapping.trackName, mapping.country, mapping.state, json(mapping), publishedBy);
+    placeholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}::jsonb, $${base + 6}, now())`);
+  });
+
+  await query(
+    `INSERT INTO ${schema}.public_track_mappings (track_id, track_name, country, state, mapping, published_by, updated_at)
+     VALUES ${placeholders.join(', ')}
+     ON CONFLICT (track_id) DO UPDATE SET
+       track_name = EXCLUDED.track_name,
+       country = EXCLUDED.country,
+       state = EXCLUDED.state,
+       mapping = EXCLUDED.mapping,
+       published_by = EXCLUDED.published_by,
+       updated_at = now()`,
+    values,
+  );
 
   return loadPublicTrackMappings();
 }
@@ -797,6 +970,23 @@ export async function areFriends(guestKeyA, guestKeyB) {
     [keyA, keyB],
   );
   return Boolean(result?.rows?.[0]);
+}
+
+export async function loadFriendKeys(guestKey) {
+  if (!guestKey) {
+    return [];
+  }
+
+  const result = await query(
+    `SELECT guest_key_a, guest_key_b
+     FROM ${schema}.friendships
+     WHERE guest_key_a = $1 OR guest_key_b = $1
+     LIMIT 250`,
+    [guestKey],
+  );
+  return (result?.rows ?? []).map((row) => (
+    row.guest_key_a === guestKey ? row.guest_key_b : row.guest_key_a
+  ));
 }
 
 export async function createFriendRequest(request, fromClient, targetClient) {
@@ -996,7 +1186,13 @@ export async function loadSocialState(guestKey) {
       `SELECT group_id, guest_key, display_name, role
        FROM ${schema}.group_members
        WHERE left_at IS NULL
+         AND group_id IN (
+           SELECT group_id
+           FROM ${schema}.group_members
+           WHERE guest_key = $1 AND left_at IS NULL
+         )
        ORDER BY joined_at ASC`,
+      [guestKey],
     ),
     query(
       `SELECT invite.id, invite.group_id, invite.from_guest_key, invite.from_name, invite.to_guest_key, invite.to_name,
@@ -1081,9 +1277,9 @@ export async function saveRaceResults(room, client, raceState) {
 
   const values = [];
   const placeholders = [];
-  raceState.summary.slice(0, 8).forEach((summary, index) => {
+  raceState.summary.slice(0, 4).forEach((summary, index) => {
     const base = index * 17;
-    const dedupeKey = `${room.id}:${client.guestKey}:${raceState.trackId}:${summary.playerId}:${summary.finishTimeMs ?? 'open'}:${Math.round(raceState.at / 1000)}`;
+    const dedupeKey = `${raceState.sessionId}:${client.guestKey}:${summary.playerId}`;
     values.push(
       dedupeKey,
       room.id,
@@ -1125,20 +1321,36 @@ export async function saveRaceResults(room, client, raceState) {
 }
 
 export async function loadLeaderboards(trackId, limit = 10) {
+  const safeLimit = Math.max(1, Math.min(50, Math.round(Number(limit) || 10)));
   const result = await query(
-    `WITH latest AS (
-       SELECT DISTINCT ON (track_id, guest_key, rider_name)
-         track_id, rider_name, top_cadence, top_speed_kph, top_watts, created_at
+    `WITH cadence_bests AS (
+       SELECT DISTINCT ON (guest_key, rider_name)
+         rider_name, top_cadence AS value, created_at
        FROM ${schema}.race_results
-       WHERE track_id = $1
-       ORDER BY track_id, guest_key, rider_name, created_at DESC
+       WHERE track_id = $1 AND top_cadence IS NOT NULL
+       ORDER BY guest_key, rider_name, top_cadence DESC, created_at DESC
+     ), speed_bests AS (
+       SELECT DISTINCT ON (guest_key, rider_name)
+         rider_name, top_speed_kph AS value, created_at
+       FROM ${schema}.race_results
+       WHERE track_id = $1 AND top_speed_kph IS NOT NULL
+       ORDER BY guest_key, rider_name, top_speed_kph DESC, created_at DESC
+     ), watt_bests AS (
+       SELECT DISTINCT ON (guest_key, rider_name)
+         rider_name, top_watts AS value, created_at
+       FROM ${schema}.race_results
+       WHERE track_id = $1 AND top_watts IS NOT NULL
+       ORDER BY guest_key, rider_name, top_watts DESC, created_at DESC
      )
-     SELECT 'rpm' AS metric, rider_name, top_cadence AS value, created_at FROM latest WHERE top_cadence IS NOT NULL
+     SELECT 'rpm' AS metric, rider_name, value, created_at
+     FROM (SELECT * FROM cadence_bests ORDER BY value DESC LIMIT $2) AS cadence_leaders
      UNION ALL
-     SELECT 'speed' AS metric, rider_name, top_speed_kph AS value, created_at FROM latest WHERE top_speed_kph IS NOT NULL
+     SELECT 'speed' AS metric, rider_name, value, created_at
+     FROM (SELECT * FROM speed_bests ORDER BY value DESC LIMIT $2) AS speed_leaders
      UNION ALL
-     SELECT 'watts' AS metric, rider_name, top_watts AS value, created_at FROM latest WHERE top_watts IS NOT NULL`,
-    [trackId],
+     SELECT 'watts' AS metric, rider_name, value, created_at
+     FROM (SELECT * FROM watt_bests ORDER BY value DESC LIMIT $2) AS watt_leaders`,
+    [trackId, safeLimit],
   );
 
   const boards = { rpm: [], speed: [], watts: [] };
@@ -1156,10 +1368,68 @@ export async function loadLeaderboards(trackId, limit = 10) {
   boards.watts.sort((a, b) => b.value - a.value);
 
   return {
-    rpm: boards.rpm.slice(0, limit),
-    speed: boards.speed.slice(0, limit),
-    watts: boards.watts.slice(0, limit),
+    rpm: boards.rpm.slice(0, safeLimit),
+    speed: boards.speed.slice(0, safeLimit),
+    watts: boards.watts.slice(0, safeLimit),
   };
+}
+
+export async function pruneExpiredData(now = Date.now()) {
+  const cutoff = new Date(now);
+  let removedSessions = 0;
+  let removedBillingCheckouts = 0;
+
+  for (const [tokenHash, session] of memoryAuthSessionsByToken.entries()) {
+    if (Date.parse(session.expiresAt) <= cutoff.getTime()) {
+      memoryAuthSessionsByToken.delete(tokenHash);
+      removedSessions += 1;
+    }
+  }
+
+  for (const [stateHash, checkout] of memoryBillingCheckoutsByState.entries()) {
+    const claimedAt = checkout.claimedAt ? Date.parse(checkout.claimedAt) : null;
+    const expired = Date.parse(checkout.expiresAt) <= cutoff.getTime();
+    const claimedLongAgo = claimedAt != null && claimedAt <= cutoff.getTime() - (7 * 24 * 60 * 60 * 1000);
+    if (expired || claimedLongAgo) {
+      memoryBillingCheckoutsByState.delete(stateHash);
+      removedBillingCheckouts += 1;
+    }
+  }
+
+  if (!pool) {
+    return { removedSessions, removedBillingCheckouts };
+  }
+
+  const [sessions, checkouts] = await Promise.all([
+    query(
+      `DELETE FROM ${schema}.auth_sessions
+       WHERE expires_at <= $1
+       RETURNING id`,
+      [cutoff],
+    ),
+    query(
+      `DELETE FROM ${schema}.billing_checkouts
+       WHERE expires_at <= $1
+          OR (claimed_at IS NOT NULL AND claimed_at <= $1 - interval '7 days')
+       RETURNING state_hash`,
+      [cutoff],
+    ),
+  ]);
+
+  return {
+    removedSessions: removedSessions + (sessions?.rowCount ?? 0),
+    removedBillingCheckouts: removedBillingCheckouts + (checkouts?.rowCount ?? 0),
+  };
+}
+
+export async function closePersistence() {
+  const activePool = pool;
+  pool = null;
+  readyPromise = null;
+  persistenceReady = false;
+  if (activePool) {
+    await activePool.end();
+  }
 }
 
 function routeKey(routeVariantId) {

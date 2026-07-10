@@ -1,6 +1,7 @@
 import type { BikeProfile, TrackRecord } from '../types';
 import type { StoredTrackMappings } from './trackMapping';
 import { fetchBridgeEndpoint } from './localBridgeUrls';
+import { createPatchBatcher } from './patchBatcher';
 
 export type BridgeUserData = {
   version: 1;
@@ -31,4 +32,10 @@ export async function patchBridgeUserData(patch: Partial<Omit<BridgeUserData, 'v
   }
 
   return response.json() as Promise<BridgeUserData>;
+}
+
+const bridgePatchBatcher = createPatchBatcher(patchBridgeUserData);
+
+export function queueBridgeUserDataPatch(patch: Partial<Omit<BridgeUserData, 'version' | 'updatedAt'>>) {
+  return bridgePatchBatcher.enqueue(patch);
 }

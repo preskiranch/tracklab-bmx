@@ -84,8 +84,8 @@ import {
   trackCenter,
   type PlacePredictionOption,
 } from './lib/googleMaps';
-import { patchBridgeUserData, readBridgeUserData } from './lib/localBridgeStore';
-import { patchCloudUserData, readCloudUserData } from './lib/cloudUserData';
+import { queueBridgeUserDataPatch, readBridgeUserData } from './lib/localBridgeStore';
+import { queueCloudUserDataPatch, readCloudUserData } from './lib/cloudUserData';
 import {
   buildGhostLapFromRace,
   ghostsForTrackRoute,
@@ -2290,12 +2290,19 @@ export default function App() {
       return;
     }
 
-    const bikeSeats = Math.max(1, Math.min(maxPlayers, Number(params.get('bikes') ?? 1)));
+    const billingState = params.get('billingState') ?? '';
     const cleanUrl = new URL(window.location.href);
-    ['billing', 'tier', 'bikes', 'checkoutId', 'profileKey'].forEach((key) => cleanUrl.searchParams.delete(key));
+    ['billing', 'tier', 'bikes', 'billingState', 'checkoutId', 'orderId', 'referenceId', 'transactionId', 'profileKey']
+      .forEach((key) => cleanUrl.searchParams.delete(key));
     window.history.replaceState(null, '', cleanUrl);
 
-    claimBillingReturn(bikeSeats)
+    if (!billingState) {
+      setCheckoutStatus('error');
+      setCheckoutMessage('Square returned without a TrackLab verification code. Racer access was not changed.');
+      return;
+    }
+
+    claimBillingReturn(billingState)
       .then((user) => {
         if (!user) {
           return;
@@ -2875,7 +2882,7 @@ export default function App() {
     writeStoredBikeProfiles(bikeProfiles);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
       if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-        void patchCloudUserData(cloudProfileKey, { bikeProfiles })
+        void queueCloudUserDataPatch(cloudProfileKey, { bikeProfiles })
           .then(() => {
             setCloudUserDataStatus('online');
             setCloudUserDataMessage('Bike profiles saved to this cloud profile.');
@@ -2889,11 +2896,11 @@ export default function App() {
       return;
     }
 
-    void patchBridgeUserData({ bikeProfiles }).catch((error: Error) => {
+    void queueBridgeUserDataPatch({ bikeProfiles }).catch((error: Error) => {
       console.warn(`Could not save bike profiles to TrackLab bridge: ${error.message}`);
     });
     if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-      void patchCloudUserData(cloudProfileKey, { bikeProfiles })
+      void queueCloudUserDataPatch(cloudProfileKey, { bikeProfiles })
         .then(() => {
           setCloudUserDataStatus('online');
           setCloudUserDataMessage('Bike profiles saved to this cloud profile.');
@@ -2910,7 +2917,7 @@ export default function App() {
     writeStoredCustomRoutes(customRoutes);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
       if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-        void patchCloudUserData(cloudProfileKey, { customRoutes })
+        void queueCloudUserDataPatch(cloudProfileKey, { customRoutes })
           .then(() => {
             setCloudUserDataStatus('online');
             setCloudUserDataMessage('Custom routes saved to this cloud profile.');
@@ -2924,11 +2931,11 @@ export default function App() {
       return;
     }
 
-    void patchBridgeUserData({ customRoutes }).catch((error: Error) => {
+    void queueBridgeUserDataPatch({ customRoutes }).catch((error: Error) => {
       console.warn(`Could not save custom routes to TrackLab bridge: ${error.message}`);
     });
     if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-      void patchCloudUserData(cloudProfileKey, { customRoutes })
+      void queueCloudUserDataPatch(cloudProfileKey, { customRoutes })
         .then(() => {
           setCloudUserDataStatus('online');
           setCloudUserDataMessage('Custom routes saved to this cloud profile.');
@@ -2945,7 +2952,7 @@ export default function App() {
     writeStoredTrackMappings(storedMappings);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
       if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-        void patchCloudUserData(cloudProfileKey, { trackMappings: storedMappings })
+        void queueCloudUserDataPatch(cloudProfileKey, { trackMappings: storedMappings })
           .then(() => {
             setCloudUserDataStatus('online');
             setCloudUserDataMessage('Track mappings saved to this cloud profile.');
@@ -2959,11 +2966,11 @@ export default function App() {
       return;
     }
 
-    void patchBridgeUserData({ trackMappings: storedMappings }).catch((error: Error) => {
+    void queueBridgeUserDataPatch({ trackMappings: storedMappings }).catch((error: Error) => {
       console.warn(`Could not save track mappings to TrackLab bridge: ${error.message}`);
     });
     if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-      void patchCloudUserData(cloudProfileKey, { trackMappings: storedMappings })
+      void queueCloudUserDataPatch(cloudProfileKey, { trackMappings: storedMappings })
         .then(() => {
           setCloudUserDataStatus('online');
           setCloudUserDataMessage('Track mappings saved to this cloud profile.');

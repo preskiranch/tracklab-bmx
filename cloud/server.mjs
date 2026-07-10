@@ -7,7 +7,21 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
-import { createRacerSubscriptionCheckout, racerMonthlyCents, squareCheckoutConfigStatus } from './squareBilling.mjs';
+import {
+  createRacerSubscriptionCheckout,
+  racerMonthlyCents,
+  squareCheckoutConfigStatus,
+  verifyRacerSubscriptionOrder,
+} from './squareBilling.mjs';
+import {
+  applySecurityHeaders,
+  createRateLimiter,
+  mutationOriginAllowed,
+  pathIsInside,
+  publicRequestOrigin,
+  requestClientIp,
+  staticCacheControl,
+} from './httpSecurity.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(__dirname, '..');
@@ -19,16 +33,27 @@ const clients = new Map();
 const rooms = new Map();
 const challenges = new Map();
 const matchInvites = new Map();
-const persistedRaceResultKeys = new Set();
+const persistedRaceResultKeys = new Map();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const maxRaceBikeCount = 4;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
-const adminAccountEmail = 'preskiranch@gmail.com';
+const defaultAdminAccountEmail = 'preskiranch@gmail.com';
 const authCookieName = 'tracklab_session';
 const authSessionMaxAgeSeconds = 60 * 60 * 24 * 30;
+const authSessionTouchIntervalMs = 5 * 60 * 1000;
+const billingCheckoutMaxAgeMs = 60 * 60 * 1000;
+const transientStateMaxAgeMs = 6 * 60 * 60 * 1000;
 const scryptAsync = promisify(scryptCallback);
+const authRateLimiter = createRateLimiter();
+const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const adminAccountEmails = new Set(
+  String(process.env.TRACKLAB_ADMIN_EMAILS || defaultAdminAccountEmail)
+    .split(',')
+    .map((email) => sanitizeEmail(email))
+    .filter(Boolean),
+);
 
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -43,6 +68,14 @@ const contentTypes = new Map([
   ['.webp', 'image/webp'],
 ]);
 
+class HttpRequestError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.name = 'HttpRequestError';
+    this.statusCode = statusCode;
+  }
+}
+
 function randomId(prefix, length = 8) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let value = '';
@@ -50,6 +83,36 @@ function randomId(prefix, length = 8) {
     value += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
   return `${prefix}-${value}`;
+}
+
+function rememberRaceResultKey(key, now = Date.now()) {
+  if (persistedRaceResultKeys.has(key)) {
+    return false;
+  }
+
+  persistedRaceResultKeys.set(key, now);
+  return true;
+}
+
+function pruneTransientState(now = Date.now()) {
+  for (const [key, savedAt] of persistedRaceResultKeys.entries()) {
+    if (savedAt <= now - transientStateMaxAgeMs) {
+      persistedRaceResultKeys.delete(key);
+    }
+  }
+
+  for (const [id, challenge] of challenges.entries()) {
+    if (challenge.createdAt <= now - (15 * 60 * 1000)) {
+      challenges.delete(id);
+      void persistence.updateChallenge(id, 'expired');
+    }
+  }
+
+  for (const [id, invite] of matchInvites.entries()) {
+    if (invite.createdAt <= now - (15 * 60 * 1000)) {
+      matchInvites.delete(id);
+    }
+  }
 }
 
 function sanitizeText(value, fallback, maxLength = 80) {
@@ -67,10 +130,6 @@ function sanitizeEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) ? text.slice(0, 160) : '';
 }
 
-function sanitizeMembershipTier(value) {
-  return value === 'spectator' || value === 'racer' ? value : 'visitor';
-}
-
 function defaultRoomFlow() {
   return {
     phase: 'lobby',
@@ -85,7 +144,7 @@ function defaultRoomFlow() {
 }
 
 function isAdminEmail(email) {
-  return sanitizeEmail(email) === adminAccountEmail;
+  return adminAccountEmails.has(sanitizeEmail(email));
 }
 
 function clampBikeSeats(value) {
@@ -177,6 +236,10 @@ function validateAccountPayload(payload, { requireName }) {
     return { error: 'Password must be at least 8 characters.' };
   }
 
+  if (password.length > 128) {
+    return { error: 'Password must be 128 characters or fewer.' };
+  }
+
   if (requireName && !name) {
     return { error: 'Enter your name or studio name.' };
   }
@@ -209,8 +272,38 @@ async function currentAuthSession(request) {
     return null;
   }
 
-  void persistence.touchAuthSession(tokenHash(token));
+  const lastSeenAt = Date.parse(session.lastSeen ?? '');
+  if (!Number.isFinite(lastSeenAt) || Date.now() - lastSeenAt >= authSessionTouchIntervalMs) {
+    void persistence.touchAuthSession(tokenHash(token));
+  }
   return { ...session, token };
+}
+
+async function requireAuthSession(request, response) {
+  const session = await currentAuthSession(request);
+  if (!session?.user) {
+    writeJson(response, 401, { error: 'Sign in to continue.' });
+    return null;
+  }
+
+  return session;
+}
+
+function authProfileKey(user) {
+  return `user:${user.id}`;
+}
+
+function enforceRateLimit(request, response, limiter, limit, scope) {
+  const result = limiter.check(`${scope}:${requestClientIp(request)}`, limit);
+  response.setHeader('RateLimit-Limit', String(result.limit));
+  response.setHeader('RateLimit-Remaining', String(result.remaining));
+  if (result.allowed) {
+    return true;
+  }
+
+  response.setHeader('Retry-After', String(result.retryAfterSeconds));
+  writeJson(response, 429, { error: 'Too many requests. Wait a few minutes and try again.' });
+  return false;
 }
 
 function writeJson(response, statusCode, payload, headers = {}) {
@@ -678,24 +771,30 @@ function sanitizeGhostLapPayload(value, profileKey) {
   };
 }
 
-function parseFriendKeys(value) {
-  return String(value || '')
-    .split(',')
-    .map((key) => sanitizeGuestKey(key, ''))
-    .filter(Boolean)
-    .slice(0, 100);
-}
-
 function readJsonBody(request, maxBytes = 1_000_000) {
   return new Promise((resolve, reject) => {
     let totalBytes = 0;
     const chunks = [];
+    let rejected = false;
+
+    const declaredBytes = Number(request.headers['content-length']);
+    if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+      rejected = true;
+      request.resume();
+      reject(new HttpRequestError(413, 'Request body is too large.'));
+      return;
+    }
 
     request.on('data', (chunk) => {
+      if (rejected) {
+        return;
+      }
       totalBytes += chunk.length;
       if (totalBytes > maxBytes) {
-        reject(new Error('Request body is too large.'));
-        request.destroy();
+        rejected = true;
+        chunks.length = 0;
+        request.resume();
+        reject(new HttpRequestError(413, 'Request body is too large.'));
         return;
       }
 
@@ -703,6 +802,9 @@ function readJsonBody(request, maxBytes = 1_000_000) {
     });
 
     request.on('end', () => {
+      if (rejected) {
+        return;
+      }
       if (chunks.length === 0) {
         resolve({});
         return;
@@ -711,7 +813,7 @@ function readJsonBody(request, maxBytes = 1_000_000) {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
       } catch {
-        reject(new Error('Request body must be valid JSON.'));
+        reject(new HttpRequestError(400, 'Request body must be valid JSON.'));
       }
     });
 
@@ -744,6 +846,37 @@ function latencyQualityForMs(value) {
 function nullableFiniteNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function sanitizeRaceSummaryEntry(value, index) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const playerId = Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(value.playerId, index + 1))));
+  const nullableMetric = (metric, max) => {
+    const number = nullableFiniteNumber(metric);
+    return number == null ? null : Math.max(0, Math.min(max, number));
+  };
+
+  return {
+    playerId,
+    riderName: sanitizeText(value.riderName, `Rider ${playerId}`, 64),
+    colorName: ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime',
+    accent: sanitizeText(value.accent, '#7ade36', 24),
+    deviceLabel: sanitizeText(value.deviceLabel, 'Wattbike', 120),
+    rank: Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(value.rank, playerId)))),
+    finishTimeMs: nullableMetric(value.finishTimeMs, 24 * 60 * 60 * 1000),
+    thirtyFootTimeMs: nullableMetric(value.thirtyFootTimeMs, 60 * 1000),
+    distanceMeters: Math.max(0, Math.min(100_000, finiteNumber(value.distanceMeters, 0))),
+    sampleCount: Math.max(0, Math.min(1_000_000, Math.round(finiteNumber(value.sampleCount, 0)))),
+    topSpeedKph: nullableMetric(value.topSpeedKph, 160),
+    averageSpeedKph: nullableMetric(value.averageSpeedKph, 160),
+    topCadence: nullableMetric(value.topCadence, 300),
+    averageCadence: nullableMetric(value.averageCadence, 300),
+    topWatts: nullableMetric(value.topWatts, 5000),
+    averageWatts: nullableMetric(value.averageWatts, 5000),
+  };
 }
 
 function sanitizeRaceState(value, client, room) {
@@ -790,7 +923,12 @@ function sanitizeRaceState(value, client, room) {
     raceState: ['ready', 'racing', 'finished'].includes(value.raceState) ? value.raceState : 'ready',
     at: Date.now(),
     riders,
-    summary: Array.isArray(value.summary) ? value.summary.slice(0, allowedRiderCount) : [],
+    summary: Array.isArray(value.summary)
+      ? value.summary
+        .slice(0, allowedRiderCount)
+        .map(sanitizeRaceSummaryEntry)
+        .filter(Boolean)
+      : [],
   };
 }
 
@@ -905,6 +1043,19 @@ function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = c
   };
 }
 
+function clientHasRacerAccess(client) {
+  return client?.membershipTier === 'racer';
+}
+
+function requireRacerClient(client, message = 'Racer access is required for that action.') {
+  if (clientHasRacerAccess(client)) {
+    return true;
+  }
+
+  send(client, { type: 'room-error', message });
+  return false;
+}
+
 function publicMatchInvite(invite) {
   return {
     id: invite.id,
@@ -994,14 +1145,19 @@ function send(client, payload) {
   }
 }
 
-function broadcastLobby() {
-  const payload = {
-    type: 'lobby-state',
-    riders: [...clients.values()].map(publicRider),
-    rooms: [...rooms.values()].map(publicRoom),
-  };
+function visibleRoomsForClient(client) {
+  return [...rooms.values()]
+    .filter((room) => !room.private || room.members.has(client.id))
+    .map(publicRoom);
+}
 
-  clients.forEach((client) => send(client, payload));
+function broadcastLobby() {
+  const riders = [...clients.values()].map(publicRider);
+  clients.forEach((client) => send(client, {
+    type: 'lobby-state',
+    riders,
+    rooms: visibleRoomsForClient(client),
+  }));
 }
 
 function broadcastRoom(roomId, payload) {
@@ -1036,10 +1192,10 @@ function refreshSocialForGuestKeys(guestKeys) {
   });
 }
 
-function refreshAllSocialPresence() {
-  clients.forEach((client) => {
-    void sendSocialState(client);
-  });
+async function refreshClientAndFriendPresence(client) {
+  const socialState = await socialStateForClient(client);
+  send(client, { type: 'social-state', social: socialState });
+  refreshSocialForGuestKeys(socialState.friends.map((friend) => friend.guestKey));
 }
 
 function clearRoomTimers(roomId) {
@@ -1219,6 +1375,7 @@ function leaveRoom(client, reason = 'left') {
   if (room.members.size === 0) {
     clearRoomTimers(room.id);
     rooms.delete(room.id);
+    void persistence.closeRoom(room.id);
     broadcastLobby();
     return;
   }
@@ -1240,6 +1397,14 @@ function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1)
   }
   if (!room.racerSeatCounts) {
     room.racerSeatCounts = new Map();
+  }
+
+  if (!room.hostId && (room.members.size === 0 || room.hostGuestKey === client.guestKey)) {
+    room.hostId = client.id;
+  }
+
+  if (!clientHasRacerAccess(client)) {
+    preferredRole = 'spectator';
   }
 
   const existingSeatCount = room.racerSeatCounts.get(client.id) ?? 0;
@@ -1334,7 +1499,10 @@ function createSelectedMatchRoom(host, targetIds, track, localSeatCount = 1) {
   const remainingSeatCount = Math.max(0, maxRaceBikeCount - hostSeatCount);
   const targets = targetIds
     .map((targetId) => clients.get(targetId))
-    .filter((target) => target && target.id !== host.id && target.socket.readyState === target.socket.OPEN)
+    .filter((target) => target
+      && target.id !== host.id
+      && clientHasRacerAccess(target)
+      && target.socket.readyState === target.socket.OPEN)
     .slice(0, remainingSeatCount);
 
   if (targets.length === 0) {
@@ -1491,15 +1659,10 @@ async function handleClientMessage(client, rawMessage) {
     if (client.roomId && rooms.has(client.roomId)) {
       broadcastRoom(client.roomId, roomState(rooms.get(client.roomId)));
     }
-    broadcastLobby();
     return;
   }
 
   if (message.type === 'hello' || message.type === 'presence') {
-    client.guestKey = sanitizeGuestKey(message.guestKey, client.guestKey);
-    client.name = sanitizeText(message.name, client.name, 64);
-    client.email = sanitizeEmail(message.email);
-    client.membershipTier = sanitizeMembershipTier(message.membershipTier);
     client.available = Boolean(message.available);
     client.bikeCount = Math.max(0, Math.min(maxRaceBikeCount, Number(message.bikeCount) || 0));
     client.track = sanitizeTrack(message.track ?? client.track);
@@ -1512,17 +1675,19 @@ async function handleClientMessage(client, rawMessage) {
         clientId: client.id,
         persistence: persistence.persistenceEnabled(),
         riders: [...clients.values()].map(publicRider),
-        rooms: [...rooms.values()].map(publicRoom),
+        rooms: visibleRoomsForClient(client),
       });
-      void sendSocialState(client);
     }
 
     broadcastLobby();
-    refreshAllSocialPresence();
+    void refreshClientAndFriendPresence(client);
     return;
   }
 
   if (message.type === 'create-room') {
+    if (!requireRacerClient(client)) {
+      return;
+    }
     createRoom(client, message.track, message.private !== false);
     return;
   }
@@ -1535,7 +1700,7 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    joinRoom(client, room);
+    joinRoom(client, room, clientHasRacerAccess(client) ? 'racer' : 'spectator');
     return;
   }
 
@@ -1552,6 +1717,11 @@ async function handleClientMessage(client, rawMessage) {
 
     const room = rooms.get(client.roomId);
     if (!room) {
+      return;
+    }
+
+    if (room.hostId !== client.id) {
+      send(client, { type: 'room-error', message: 'Only the room host can change the track.' });
       return;
     }
 
@@ -1644,6 +1814,10 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
+    if (!room.racers?.has(client.id)) {
+      return;
+    }
+
     room.flow = {
       ...publicRoomFlow(room),
       routeChoices: {
@@ -1718,6 +1892,10 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
+    if (!requireRacerClient(client)) {
+      return;
+    }
+
     const raceState = sanitizeRaceState(message.state, client, room);
     if (!raceState) {
       return;
@@ -1726,8 +1904,7 @@ async function handleClientMessage(client, rawMessage) {
     room.raceStates.set(client.id, raceState);
     if (raceState.raceState === 'finished') {
       const resultKey = `${raceState.sessionId}:${client.guestKey}:${raceState.summary.map((summary) => `${summary.playerId}:${summary.finishTimeMs ?? 'open'}`).join('|')}`;
-      if (!persistedRaceResultKeys.has(resultKey)) {
-        persistedRaceResultKeys.add(resultKey);
+      if (rememberRaceResultKey(resultKey)) {
         void persistence.saveRaceResults(room, client, raceState);
       }
     }
@@ -1778,6 +1955,9 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'create-match') {
+    if (!requireRacerClient(client)) {
+      return;
+    }
     const targetIds = sanitizeClientIdList(message.targetIds);
     createSelectedMatchRoom(client, targetIds, message.track, message.localSeatCount);
     return;
@@ -1853,8 +2033,11 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'challenge') {
+    if (!requireRacerClient(client)) {
+      return;
+    }
     const target = clients.get(sanitizeText(message.targetId, '', 80));
-    if (!target || target.id === client.id) {
+    if (!target || target.id === client.id || !clientHasRacerAccess(target)) {
       send(client, { type: 'challenge-status', message: 'That rider is not online.' });
       return;
     }
@@ -1864,9 +2047,13 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'quick-match') {
+    if (!requireRacerClient(client)) {
+      return;
+    }
     const candidates = [...clients.values()]
       .filter((candidate) => candidate.id !== client.id)
       .filter((candidate) => candidate.available)
+      .filter(clientHasRacerAccess)
       .filter((candidate) => candidate.socket.readyState === candidate.socket.OPEN);
 
     if (candidates.length === 0) {
@@ -1910,6 +2097,29 @@ async function handleClientMessage(client, rawMessage) {
 
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  if (requestUrl.pathname === '/api/health') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const storage = persistence.persistenceStatus();
+    const body = JSON.stringify({
+      status: storage.ready ? 'ok' : 'unavailable',
+      service: 'tracklab-bmx',
+      storage,
+      uptimeSeconds: Math.round(process.uptime()),
+      version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
+    });
+    response.writeHead(storage.ready ? 200 : 503, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+
   if (requestUrl.pathname === '/manifest.webmanifest') {
     const profileKey = requestUrl.searchParams.get('profileKey') || cookieValue(request, 'tracklab_profile_key');
     response.writeHead(200, {
@@ -1929,6 +2139,10 @@ async function serveStatic(request, response) {
   if (requestUrl.pathname === '/api/auth/register') {
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    if (!enforceRateLimit(request, response, authRateLimiter, 5, 'auth-register')) {
       return;
     }
 
@@ -1972,6 +2186,10 @@ async function serveStatic(request, response) {
       return;
     }
 
+    if (!enforceRateLimit(request, response, authRateLimiter, 10, 'auth-login')) {
+      return;
+    }
+
     const payload = await readJsonBody(request, 32_000);
     const account = validateAccountPayload(payload, { requireName: false });
     if (account.error) {
@@ -1981,14 +2199,13 @@ async function serveStatic(request, response) {
 
     const user = await persistence.findAuthUserByEmail(account.email);
     if (!user) {
-      writeJson(response, 404, {
-        error: 'No TrackLab account exists for this email yet. Choose "Create one free" to create the account first.',
-      });
+      await hashPassword(account.password);
+      writeJson(response, 401, { error: 'Email or password is incorrect.' });
       return;
     }
 
     if (!(await verifyPassword(account.password, user.passwordHash))) {
-      writeJson(response, 401, { error: 'Password is incorrect for this TrackLab account.' });
+      writeJson(response, 401, { error: 'Email or password is incorrect.' });
       return;
     }
 
@@ -2021,17 +2238,42 @@ async function serveStatic(request, response) {
       return;
     }
 
-    const session = await currentAuthSession(request);
-    if (!session?.user) {
-      writeJson(response, 401, { error: 'Sign in before applying billing status.' });
+    const session = await requireAuthSession(request, response);
+    if (!session) {
       return;
     }
 
     const payload = await readJsonBody(request, 32_000);
-    const bikeSeats = clampBikeSeats(payload.bikeSeats);
+    const state = sanitizeGuestKey(payload.billingState, '');
+    if (!state) {
+      writeJson(response, 400, { error: 'Square checkout verification is missing.' });
+      return;
+    }
+
+    const checkout = await persistence.findBillingCheckout(tokenHash(state), session.user.id);
+    if (!checkout || Date.parse(checkout.expiresAt) <= Date.now()) {
+      writeJson(response, 400, { error: 'This Square checkout could not be verified or has expired.' });
+      return;
+    }
+
+    if (checkout.claimedAt) {
+      writeJson(response, 200, { user: publicAuthUser(session.user) });
+      return;
+    }
+
+    const verification = await verifyRacerSubscriptionOrder({
+      orderId: checkout.orderId,
+      expectedAmountCents: checkout.expectedAmountCents,
+    });
+    if (!verification.valid) {
+      writeJson(response, 409, { error: 'Square has not confirmed a completed subscription payment yet.' });
+      return;
+    }
+
     const nextUser = isAdminEmail(session.user.email)
       ? session.user
-      : await persistence.updateAuthUserMembership(session.user.id, 'racer', bikeSeats);
+      : await persistence.updateAuthUserMembership(session.user.id, 'racer', checkout.bikeSeats);
+    await persistence.markBillingCheckoutClaimed(checkout.stateHash, session.user.id);
     writeJson(response, 200, { user: publicAuthUser(nextUser ?? session.user) });
     return;
   }
@@ -2049,9 +2291,21 @@ async function serveStatic(request, response) {
     }
 
     if (request.method === 'PATCH' || request.method === 'POST') {
+      const session = await requireAuthSession(request, response);
+      if (!session) {
+        return;
+      }
+
+      const allowRacerPublishing = process.env.TRACKLAB_ALLOW_RACER_MAP_PUBLISH === '1';
+      const membership = membershipForAccount(session.user);
+      if (!isAdminEmail(session.user.email) && !(allowRacerPublishing && membership.tier === 'racer')) {
+        writeJson(response, 403, { error: 'Only approved TrackLab publishers can update shared track maps.' });
+        return;
+      }
+
       const payload = await readJsonBody(request, 5_000_000);
       const trackMappings = sanitizePublicTrackMappingsPayload(payload);
-      const publishedBy = sanitizeGuestKey(payload.profileKey ?? requestUrl.searchParams.get('profileKey'), 'public');
+      const publishedBy = authProfileKey(session.user);
       const savedMappings = await persistence.savePublicTrackMappings(trackMappings, publishedBy);
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
       response.end(JSON.stringify({
@@ -2069,12 +2323,11 @@ async function serveStatic(request, response) {
   }
 
   if (requestUrl.pathname === '/api/user-data') {
-    const profileKey = sanitizeGuestKey(requestUrl.searchParams.get('profileKey'), '');
-    if (!profileKey) {
-      response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ error: 'profileKey is required' }));
+    const session = await requireAuthSession(request, response);
+    if (!session) {
       return;
     }
+    const profileKey = authProfileKey(session.user);
 
     if (request.method === 'GET') {
       const userData = await persistence.loadUserData(profileKey);
@@ -2086,6 +2339,10 @@ async function serveStatic(request, response) {
     if (request.method === 'PATCH' || request.method === 'POST') {
       const patch = sanitizeUserDataPatch(await readJsonBody(request));
       const userData = await persistence.saveUserData(profileKey, patch);
+      if (!userData) {
+        writeJson(response, 503, { error: 'Cloud profile storage is temporarily unavailable.' });
+        return;
+      }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
       response.end(JSON.stringify(userData));
       return;
@@ -2110,18 +2367,46 @@ async function serveStatic(request, response) {
     }
 
     try {
-      const session = await currentAuthSession(request);
-      if (!session?.user) {
-        writeJson(response, 401, { error: 'Sign in before upgrading to Racer.' });
+      const session = await requireAuthSession(request, response);
+      if (!session) {
+        return;
+      }
+
+      if (!enforceRateLimit(request, response, billingRateLimiter, 12, 'billing-checkout')) {
         return;
       }
 
       const payload = await readJsonBody(request, 32_000);
       const bikeSeats = Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(payload.bikeSeats, 1))));
-      const profileKey = `user:${session.user.id}`;
-      const originHeader = request.headers.origin || `http://${request.headers.host}`;
-      const checkout = await createRacerSubscriptionCheckout({ bikeSeats, profileKey, origin: originHeader });
-      writeJson(response, 200, checkout);
+      const returnState = createSessionToken();
+      const origin = publicRequestOrigin(request);
+      if (!origin) {
+        writeJson(response, 400, { error: 'Could not determine the TrackLab return address.' });
+        return;
+      }
+
+      const checkout = await createRacerSubscriptionCheckout({ bikeSeats, origin, returnState });
+      const expiresAt = new Date(Date.now() + billingCheckoutMaxAgeMs).toISOString();
+      const saved = await persistence.saveBillingCheckout({
+        stateHash: tokenHash(returnState),
+        userId: session.user.id,
+        orderId: checkout.orderId,
+        paymentLinkId: checkout.paymentLinkId,
+        bikeSeats,
+        expectedAmountCents: checkout.monthlyCents,
+        expiresAt,
+      });
+      if (!saved) {
+        writeJson(response, 503, { error: 'Could not securely record this Square checkout.' });
+        return;
+      }
+
+      writeJson(response, 200, {
+        checkoutUrl: checkout.checkoutUrl,
+        bikeSeats: checkout.bikeSeats,
+        monthlyCents: checkout.monthlyCents,
+        environment: checkout.environment,
+      });
     } catch (error) {
       const statusCode = Number(error?.statusCode) || 500;
       writeJson(response, statusCode, {
@@ -2135,13 +2420,14 @@ async function serveStatic(request, response) {
   if (requestUrl.pathname === '/api/ghosts') {
     if (request.method === 'GET') {
       const trackId = sanitizeText(requestUrl.searchParams.get('trackId'), '', 140);
-      const profileKey = sanitizeGuestKey(requestUrl.searchParams.get('profileKey'), '');
-      const friendKeys = parseFriendKeys(requestUrl.searchParams.get('friendKeys'));
       if (!trackId) {
         writeJson(response, 400, { error: 'trackId is required' });
         return;
       }
 
+      const session = await currentAuthSession(request);
+      const profileKey = session?.user ? authProfileKey(session.user) : '';
+      const friendKeys = profileKey ? await persistence.loadFriendKeys(profileKey) : [];
       const ghosts = await persistence.loadGhostLaps(trackId, profileKey, friendKeys, 40);
       writeJson(response, 200, {
         trackId,
@@ -2152,20 +2438,25 @@ async function serveStatic(request, response) {
     }
 
     if (request.method === 'POST') {
+      const session = await requireAuthSession(request, response);
+      if (!session) {
+        return;
+      }
+
+      if (membershipForAccount(session.user).tier !== 'racer') {
+        writeJson(response, 403, { error: 'Racer access is required to save a ghost lap.' });
+        return;
+      }
+
       const payload = await readJsonBody(request, 1_000_000);
-      const profileKey = sanitizeGuestKey(payload.profileKey, '');
+      const profileKey = authProfileKey(session.user);
       const ghost = sanitizeGhostLapPayload(payload.ghost, profileKey);
       if (!profileKey || !ghost) {
         writeJson(response, 400, { error: 'A valid profileKey and ghost lap are required.' });
         return;
       }
 
-      if (ghost.ownerKey !== profileKey) {
-        writeJson(response, 403, { error: 'Ghost owner must match the syncing profile.' });
-        return;
-      }
-
-      await persistence.saveGhostLap(ghost);
+      await persistence.saveGhostLap({ ...ghost, ownerKey: profileKey, ownerName: session.user.displayName });
       writeJson(response, 200, {
         ok: true,
         persistence: persistence.persistenceEnabled(),
@@ -2208,26 +2499,77 @@ async function serveStatic(request, response) {
     return;
   }
 
-  const decodedPath = decodeURIComponent(requestUrl.pathname);
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(requestUrl.pathname);
+  } catch {
+    writeJson(response, 400, { error: 'Invalid request path.' });
+    return;
+  }
   const safePath = decodedPath === '/' ? '/index.html' : decodedPath;
   const filePath = path.resolve(distDirectory, `.${safePath}`);
-  const withinDist = filePath.startsWith(distDirectory);
+  const withinDist = pathIsInside(distDirectory, filePath, path);
   const fallbackPath = path.join(distDirectory, 'index.html');
   const targetPath = withinDist ? filePath : fallbackPath;
 
   try {
-    const fileStat = await stat(targetPath);
+    const acceptedEncodings = String(request.headers['accept-encoding'] || '').toLowerCase();
+    const compressible = /\.(?:css|html|js|json|mjs|svg|webmanifest)$/.test(targetPath);
+    let servedPath = targetPath;
+    let contentEncoding = null;
+    if (compressible && acceptedEncodings.includes('br')) {
+      const candidate = `${targetPath}.br`;
+      if ((await stat(candidate).catch(() => null))?.isFile()) {
+        servedPath = candidate;
+        contentEncoding = 'br';
+      }
+    }
+    if (compressible && !contentEncoding && acceptedEncodings.includes('gzip')) {
+      const candidate = `${targetPath}.gz`;
+      if ((await stat(candidate).catch(() => null))?.isFile()) {
+        servedPath = candidate;
+        contentEncoding = 'gzip';
+      }
+    }
+
+    const fileStat = await stat(servedPath);
     if (!fileStat.isFile()) {
       throw new Error('Not a file');
     }
 
     const extension = path.extname(targetPath);
-    response.writeHead(200, {
+    const etag = `W/\"${fileStat.size.toString(16)}-${Math.round(fileStat.mtimeMs).toString(16)}\"`;
+    const headers = {
       'Content-Type': contentTypes.get(extension) ?? 'application/octet-stream',
-      'Cache-Control': extension === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+      'Cache-Control': staticCacheControl(safePath),
+      'Content-Length': fileStat.size,
+      'Last-Modified': fileStat.mtime.toUTCString(),
+      ETag: etag,
+      ...(compressible ? { Vary: 'Accept-Encoding' } : {}),
+      ...(contentEncoding ? { 'Content-Encoding': contentEncoding } : {}),
+    };
+    if (request.headers['if-none-match'] === etag) {
+      response.writeHead(304, headers);
+      response.end();
+      return;
+    }
+
+    response.writeHead(200, {
+      ...headers,
     });
-    createReadStream(targetPath).pipe(response);
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
+    createReadStream(servedPath).pipe(response);
   } catch {
+    const acceptsHtml = String(request.headers.accept || '').includes('text/html');
+    const looksLikeAsset = path.extname(safePath) !== '';
+    if (looksLikeAsset || !acceptsHtml) {
+      writeJson(response, 404, { error: 'Not found' }, { 'Cache-Control': 'no-cache' });
+      return;
+    }
+
     const indexHtml = await readFile(fallbackPath);
     response.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
@@ -2238,22 +2580,60 @@ async function serveStatic(request, response) {
 }
 
 const server = createServer((request, response) => {
+  applySecurityHeaders(request, response);
+  const isApiMutation = String(request.url || '').startsWith('/api/')
+    && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method || 'GET');
+  if (isApiMutation && !mutationOriginAllowed(request)) {
+    writeJson(response, 403, { error: 'Cross-site request blocked.' });
+    return;
+  }
+
   void serveStatic(request, response).catch((error) => {
-    response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-    response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+    const statusCode = Number(error?.statusCode);
+    if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500) {
+      if (!response.headersSent) {
+        writeJson(response, statusCode, {
+          error: error instanceof Error ? error.message : 'Invalid request.',
+        });
+      } else {
+        response.destroy();
+      }
+      return;
+    }
+
+    const requestId = randomUUID();
+    console.error(`[cloud] request ${requestId} failed:`, error instanceof Error ? error.message : error);
+    if (!response.headersSent) {
+      writeJson(response, 500, { error: 'TrackLab could not complete this request.', requestId });
+    } else {
+      response.destroy();
+    }
   });
 });
 
-const wss = new WebSocketServer({ noServer: true });
+server.requestTimeout = 30_000;
+server.headersTimeout = 35_000;
+server.keepAliveTimeout = 5_000;
 
-wss.on('connection', (socket) => {
+const wss = new WebSocketServer({
+  noServer: true,
+  maxPayload: 256 * 1024,
+});
+
+wss.on('connection', (socket, request) => {
+  const authUser = request.tracklabAuthSession?.user;
+  if (!authUser) {
+    socket.close(1008, 'Authentication required');
+    return;
+  }
+
   const client = {
     id: randomId('RIDER', 10),
-    guestKey: randomId('GUEST', 16),
+    guestKey: authProfileKey(authUser),
     socket,
-    name: 'TrackLab Rider',
-    email: '',
-    membershipTier: 'visitor',
+    name: sanitizeText(authUser.displayName, 'TrackLab Rider', 64),
+    email: sanitizeEmail(authUser.email),
+    membershipTier: membershipForAccount(authUser).tier,
     available: false,
     bikeCount: 0,
     track: sanitizeTrack(null),
@@ -2263,42 +2643,138 @@ wss.on('connection', (socket) => {
     clockOffsetMs: 0,
     lastLatencyAt: null,
     lastSeen: Date.now(),
+    messageWindowStartedAt: Date.now(),
+    messageCount: 0,
+    messageRateViolations: 0,
   };
 
   clients.set(client.id, client);
+  socket.isAlive = true;
+  socket.on('pong', () => {
+    socket.isAlive = true;
+  });
   send(client, {
     type: 'connected',
     clientId: client.id,
     websocketPath,
   });
-  broadcastLobby();
 
   socket.on('message', (message) => {
+    const now = Date.now();
+    if (now - client.messageWindowStartedAt >= 10_000) {
+      client.messageWindowStartedAt = now;
+      client.messageCount = 0;
+    }
+    client.messageCount += 1;
+    if (client.messageCount > 160) {
+      client.messageRateViolations += 1;
+      if (client.messageRateViolations >= 3) {
+        socket.close(1008, 'Message rate exceeded');
+      }
+      return;
+    }
+
     void handleClientMessage(client, message).catch((error) => {
       console.warn('[cloud] multiplayer message failed:', error instanceof Error ? error.message : error);
       send(client, { type: 'error', message: 'Multiplayer server could not process that action.' });
     });
   });
   socket.on('close', () => {
+    const friendRefresh = socialStateForClient(client)
+      .then((social) => social.friends.map((friend) => friend.guestKey))
+      .catch(() => []);
     leaveRoom(client, 'disconnected');
     void persistence.setProfileOffline(client);
     clients.delete(client.id);
     broadcastLobby();
-    refreshAllSocialPresence();
+    void friendRefresh.then(refreshSocialForGuestKeys);
   });
 });
 
 server.on('upgrade', (request, socket, head) => {
-  const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
-  if (requestUrl.pathname !== websocketPath) {
+  let requestUrl;
+  try {
+    requestUrl = new URL(request.url ?? '/', `http://${request.headers.host || 'localhost'}`);
+  } catch {
     socket.destroy();
     return;
   }
 
-  wss.handleUpgrade(request, socket, head, (ws) => {
-    wss.emit('connection', ws, request);
-  });
+  if (requestUrl.pathname !== websocketPath || !mutationOriginAllowed(request)) {
+    socket.destroy();
+    return;
+  }
+
+  void currentAuthSession(request)
+    .then((session) => {
+      if (!session?.user) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      request.tracklabAuthSession = session;
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    })
+    .catch(() => socket.destroy());
 });
+
+const websocketHeartbeat = setInterval(() => {
+  wss.clients.forEach((socket) => {
+    if (socket.isAlive === false) {
+      socket.terminate();
+      return;
+    }
+
+    socket.isAlive = false;
+    socket.ping();
+  });
+}, 30_000);
+websocketHeartbeat.unref();
+
+const persistenceMaintenance = setInterval(() => {
+  pruneTransientState();
+  void persistence.pruneExpiredData();
+}, 15 * 60 * 1000);
+persistenceMaintenance.unref();
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`[cloud] ${signal} received; closing TrackLab services.`);
+
+  clearInterval(websocketHeartbeat);
+  clearInterval(persistenceMaintenance);
+  voteTimers.forEach(clearTimeout);
+  routeSelectTimers.forEach(clearTimeout);
+  voteTimers.clear();
+  routeSelectTimers.clear();
+
+  wss.clients.forEach((socket) => socket.close(1001, 'Server shutting down'));
+  const forceExit = setTimeout(() => {
+    console.error('[cloud] Graceful shutdown timed out.');
+    process.exit(1);
+  }, 10_000);
+  forceExit.unref();
+
+  await Promise.allSettled([
+    new Promise((resolve) => server.close(resolve)),
+    new Promise((resolve) => wss.close(resolve)),
+  ]);
+  await persistence.closePersistence().catch((error) => {
+    console.warn('[cloud] Persistence shutdown failed:', error instanceof Error ? error.message : error);
+  });
+  clearTimeout(forceExit);
+  process.exitCode = 0;
+}
+
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));
 
 server.listen(port, () => {
   console.log(`[cloud] TrackLab BMX web + multiplayer listening on :${port}`);

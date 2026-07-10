@@ -1,5 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib';
 import ts from 'typescript';
 
 const repoRoot = new URL('..', import.meta.url);
@@ -7,6 +9,10 @@ const importsDir = new URL('../data/imports/', import.meta.url);
 const providersPath = new URL('../data/providers.json', import.meta.url);
 const seedCatalogPath = new URL('../src/data/trackCatalog.ts', import.meta.url);
 const outputPath = new URL('../public/data/track-database.json', import.meta.url);
+const brotliOutputPath = new URL('../public/data/track-database.json.br', import.meta.url);
+const gzipOutputPath = new URL('../public/data/track-database.json.gz', import.meta.url);
+const brotliCompressAsync = promisify(brotliCompress);
+const gzipAsync = promisify(gzip);
 
 function slug(value) {
   return String(value)
@@ -200,7 +206,22 @@ const database = {
 };
 
 await mkdir(new URL('../public/data/', import.meta.url), { recursive: true });
-await writeFile(outputPath, `${JSON.stringify(database, null, 2)}\n`);
+const serializedDatabase = `${JSON.stringify(database, null, 2)}\n`;
+const databaseBytes = Buffer.from(serializedDatabase);
+const [brotliBytes, gzipBytes] = await Promise.all([
+  brotliCompressAsync(databaseBytes, {
+    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
+  }),
+  gzipAsync(databaseBytes, { level: 9 }),
+]);
+await Promise.all([
+  writeFile(outputPath, databaseBytes),
+  writeFile(brotliOutputPath, brotliBytes),
+  writeFile(gzipOutputPath, gzipBytes),
+]);
 
 const relativeOutput = path.relative(repoRoot.pathname, outputPath.pathname);
-console.log(`Built ${relativeOutput} with ${database.trackCount} tracks from ${database.providerCount} providers.`);
+console.log(
+  `Built ${relativeOutput} with ${database.trackCount} tracks from ${database.providerCount} providers `
+  + `(${databaseBytes.length} raw / ${brotliBytes.length} br / ${gzipBytes.length} gzip bytes).`,
+);

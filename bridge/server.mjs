@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
@@ -8,14 +8,39 @@ import { createAntSource } from './ant-source.mjs';
 import { createBleSource } from './ble-source.mjs';
 import { createHybridSource } from './hybrid-source.mjs';
 import { createWattbikeControl } from './wattbike-control.mjs';
+import { bridgeCorsOrigin, bridgeOriginAllowed } from './originPolicy.mjs';
 
 const port = Number(process.env.WATTBIKE_BRIDGE_PORT ?? 8787);
 const inputMode = normalizeInputMode(process.env.WATTBIKE_INPUT);
 const autoStart = process.env.WATTBIKE_BRIDGE_AUTOSTART === '1';
 const userDataDirectory = path.join(os.homedir(), 'Library', 'Application Support', 'TrackLab BMX');
 const userDataPath = path.join(userDataDirectory, 'user-data.json');
-const server = createServer(handleHttpRequest);
-const wss = new WebSocketServer({ server });
+const server = createServer((request, response) => {
+  void handleHttpRequest(request, response).catch((error) => {
+    const statusCode = Number(error?.statusCode);
+    const clientError = Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500;
+    if (!clientError) {
+      warnBridge('HTTP request failed:', error);
+    }
+    if (!response.headersSent) {
+      writeJson(request, response, clientError ? statusCode : 500, {
+        type: clientError ? 'invalid-request' : 'connector-error',
+        message: clientError && error instanceof Error
+          ? error.message
+          : 'TrackLab Bike Connector could not complete the request.',
+      });
+    } else {
+      response.destroy();
+    }
+  });
+});
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 64 * 1024,
+  verifyClient: ({ origin }, done) => {
+    done(bridgeOriginAllowed(origin), 403, 'TrackLab connector origin is not allowed');
+  },
+});
 const clients = new Set();
 
 const wattbikeControl = createWattbikeControl();
@@ -26,8 +51,17 @@ let controlStatusMessage = null;
 const seenBikeDevices = new Set();
 const latestBikeSamples = new Map();
 const sourceConnectedDevices = new Map();
+let userDataMutationQueue = Promise.resolve();
 
 const connectedDeviceSampleTimeoutMs = Number(process.env.WATTBIKE_CONNECTED_DEVICE_TIMEOUT_MS ?? 15000);
+
+class BridgeRequestError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.name = 'BridgeRequestError';
+    this.statusCode = statusCode;
+  }
+}
 
 function logBridge(message, extra = null) {
   const suffix = extra ? ` ${JSON.stringify(extra)}` : '';
@@ -208,12 +242,16 @@ function broadcast(payload) {
   }
 }
 
-function writeJson(response, statusCode, payload) {
+function writeJson(request, response, statusCode, payload) {
+  const allowedOrigin = bridgeCorsOrigin(request.headers.origin);
   response.writeHead(statusCode, {
-    'Access-Control-Allow-Origin': '*',
+    ...(allowedOrigin ? { 'Access-Control-Allow-Origin': allowedOrigin } : {}),
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'no-store',
     'Content-Type': 'application/json',
+    'Vary': 'Origin',
+    'X-Content-Type-Options': 'nosniff',
   });
   response.end(JSON.stringify(payload));
 }
@@ -258,18 +296,66 @@ async function writeUserData(data) {
     updatedAt: Date.now(),
   });
   await mkdir(userDataDirectory, { recursive: true });
-  await writeFile(userDataPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+  const temporaryPath = `${userDataPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(normalized, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await rename(temporaryPath, userDataPath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
   return normalized;
 }
 
-async function readRequestJson(request) {
+function patchUserData(patch) {
+  const mutation = userDataMutationQueue.then(async () => {
+    const current = await readUserData();
+    return writeUserData({
+      ...current,
+      trackMappings: patch.trackMappings && typeof patch.trackMappings === 'object'
+        ? patch.trackMappings
+        : current.trackMappings,
+      customRoutes: Array.isArray(patch.customRoutes)
+        ? patch.customRoutes
+        : current.customRoutes,
+      bikeProfiles: Array.isArray(patch.bikeProfiles)
+        ? patch.bikeProfiles
+        : current.bikeProfiles,
+    });
+  });
+  userDataMutationQueue = mutation.then(() => undefined, () => undefined);
+  return mutation;
+}
+
+async function readRequestJson(request, maxBytes = 2_000_000) {
+  const declaredBytes = Number(request.headers['content-length']);
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+    request.resume();
+    throw new BridgeRequestError(413, 'Request body is too large.');
+  }
+
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
+    totalBytes += chunk.length;
+    if (totalBytes > maxBytes) {
+      throw new BridgeRequestError(413, 'Request body is too large.');
+    }
     chunks.push(chunk);
   }
 
   const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) {
+    return {};
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new BridgeRequestError(400, 'Request body must be valid JSON.');
+  }
 }
 
 async function startSource() {
@@ -369,15 +455,23 @@ async function stopSource() {
 }
 
 async function handleHttpRequest(request, response) {
+  if (!bridgeOriginAllowed(request.headers.origin)) {
+    writeJson(request, response, 403, {
+      type: 'origin-not-allowed',
+      message: 'This website is not allowed to access the TrackLab Bike Connector.',
+    });
+    return;
+  }
+
   if (request.method === 'OPTIONS') {
-    writeJson(response, 204, {});
+    writeJson(request, response, 204, {});
     return;
   }
 
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? `127.0.0.1:${port}`}`);
 
   if (request.method === 'GET' && url.pathname === '/api/bridge/status') {
-    writeJson(response, 200, {
+    writeJson(request, response, 200, {
       ...statusPayload(),
       controlStatus: controlStatusMessage,
     });
@@ -386,48 +480,29 @@ async function handleHttpRequest(request, response) {
 
   if (request.method === 'POST' && url.pathname === '/api/bridge/start') {
     const payload = await startSource();
-    writeJson(response, sourceState === 'error' ? 500 : 200, payload);
+    writeJson(request, response, sourceState === 'error' ? 500 : 200, payload);
     return;
   }
 
   if (request.method === 'POST' && url.pathname === '/api/bridge/stop') {
     const payload = await stopSource();
-    writeJson(response, 200, payload);
+    writeJson(request, response, 200, payload);
     return;
   }
 
   if (request.method === 'GET' && url.pathname === '/api/user-data') {
-    writeJson(response, 200, await readUserData());
+    writeJson(request, response, 200, await readUserData());
     return;
   }
 
   if (request.method === 'PATCH' && url.pathname === '/api/user-data') {
-    try {
-      const patch = await readRequestJson(request);
-      const current = await readUserData();
-      const next = await writeUserData({
-        ...current,
-        trackMappings: patch.trackMappings && typeof patch.trackMappings === 'object'
-          ? patch.trackMappings
-          : current.trackMappings,
-        customRoutes: Array.isArray(patch.customRoutes)
-          ? patch.customRoutes
-          : current.customRoutes,
-        bikeProfiles: Array.isArray(patch.bikeProfiles)
-          ? patch.bikeProfiles
-          : current.bikeProfiles,
-      });
-      writeJson(response, 200, next);
-    } catch (error) {
-      writeJson(response, 400, {
-        type: 'user-data-error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const patch = await readRequestJson(request);
+    const next = await patchUserData(patch);
+    writeJson(request, response, 200, next);
     return;
   }
 
-  writeJson(response, 404, {
+  writeJson(request, response, 404, {
     type: 'not-found',
     message: 'Unknown TrackLab local bridge endpoint.',
   });
@@ -514,8 +589,25 @@ try {
   });
 }
 
-process.on('SIGINT', async () => {
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  logBridge(`${signal} received; closing local connector.`);
   await stopSource();
-  wss.close();
-  server.close(() => process.exit(0));
-});
+  await userDataMutationQueue;
+  wss.clients.forEach((socket) => socket.close(1001, 'Connector shutting down'));
+  await Promise.allSettled([
+    new Promise((resolve) => wss.close(resolve)),
+    new Promise((resolve) => server.close(resolve)),
+  ]);
+}
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+
+server.requestTimeout = 15_000;
+server.headersTimeout = 10_000;
+server.keepAliveTimeout = 5_000;
