@@ -2513,17 +2513,55 @@ async function serveStatic(request, response) {
   const targetPath = withinDist ? filePath : fallbackPath;
 
   try {
-    const fileStat = await stat(targetPath);
+    const acceptedEncodings = String(request.headers['accept-encoding'] || '').toLowerCase();
+    const compressible = /\.(?:css|html|js|json|mjs|svg|webmanifest)$/.test(targetPath);
+    let servedPath = targetPath;
+    let contentEncoding = null;
+    if (compressible && acceptedEncodings.includes('br')) {
+      const candidate = `${targetPath}.br`;
+      if ((await stat(candidate).catch(() => null))?.isFile()) {
+        servedPath = candidate;
+        contentEncoding = 'br';
+      }
+    }
+    if (compressible && !contentEncoding && acceptedEncodings.includes('gzip')) {
+      const candidate = `${targetPath}.gz`;
+      if ((await stat(candidate).catch(() => null))?.isFile()) {
+        servedPath = candidate;
+        contentEncoding = 'gzip';
+      }
+    }
+
+    const fileStat = await stat(servedPath);
     if (!fileStat.isFile()) {
       throw new Error('Not a file');
     }
 
     const extension = path.extname(targetPath);
-    response.writeHead(200, {
+    const etag = `W/\"${fileStat.size.toString(16)}-${Math.round(fileStat.mtimeMs).toString(16)}\"`;
+    const headers = {
       'Content-Type': contentTypes.get(extension) ?? 'application/octet-stream',
       'Cache-Control': staticCacheControl(safePath),
+      'Content-Length': fileStat.size,
+      'Last-Modified': fileStat.mtime.toUTCString(),
+      ETag: etag,
+      ...(compressible ? { Vary: 'Accept-Encoding' } : {}),
+      ...(contentEncoding ? { 'Content-Encoding': contentEncoding } : {}),
+    };
+    if (request.headers['if-none-match'] === etag) {
+      response.writeHead(304, headers);
+      response.end();
+      return;
+    }
+
+    response.writeHead(200, {
+      ...headers,
     });
-    createReadStream(targetPath).pipe(response);
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
+    createReadStream(servedPath).pipe(response);
   } catch {
     const acceptsHtml = String(request.headers.accept || '').includes('text/html');
     const looksLikeAsset = path.extname(safePath) !== '';

@@ -129,16 +129,16 @@ describe('cloud API trust boundaries', () => {
     expect(billing.status).toBe(400);
   });
 
-  it('rejects cross-site mutations and does not cache mutable track data immutably', async () => {
+  it('rejects cross-site mutations and does not cache mutable manifests immutably', async () => {
     const crossSite = await fetch(`${baseUrl}/api/auth/logout`, {
       method: 'POST',
       headers: { Origin: 'https://attacker.example', 'Sec-Fetch-Site': 'cross-site' },
     });
     expect(crossSite.status).toBe(403);
 
-    const tracks = await fetch(`${baseUrl}/data/track-database.json`);
-    expect(tracks.status).toBe(200);
-    expect(tracks.headers.get('cache-control')).toBe('no-cache');
+    const manifest = await fetch(`${baseUrl}/manifest.webmanifest`);
+    expect(manifest.status).toBe(200);
+    expect(manifest.headers.get('cache-control')).toBe('no-cache');
   });
 
   it('returns actionable client errors for malformed and oversized JSON', async () => {

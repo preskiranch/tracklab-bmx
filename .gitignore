@@ -6,3 +6,5 @@ captures/
 *.tsbuildinfo
 playwright-report/
 test-results/
+public/data/*.json.br
+public/data/*.json.gz
