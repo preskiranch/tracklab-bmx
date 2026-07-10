@@ -307,6 +307,7 @@ export type RaceState = 'ready' | 'racing' | 'finished';
 export type AppMode = 'race' | 'monitor' | 'diagnostics';
 
 export type RiderPhase = 'pedaling' | 'airborne' | 'landing';
+export type RiderDriveSource = 'cadence' | 'power' | 'speed' | 'coast' | 'blocked';
 
 export type RiderState = {
   playerId: PlayerSlot['id'];
@@ -320,6 +321,11 @@ export type RiderState = {
   landingCompression: number;
   phase: RiderPhase;
   lastWatts: number;
+  lastRawWatts: number;
+  lastRawCadence: number;
+  lastRawSpeedKph: number;
+  driveAllowed: boolean;
+  driveSource: RiderDriveSource;
   wattsAverage: number;
   rank: number;
   thirtyFootTimeMs: number | null;
@@ -370,7 +376,37 @@ export type RaceCaptureSample = {
   riderDistanceMeters: number | null;
   riderVelocityMps: number | null;
   riderPhase: RiderPhase | null;
+  riderDriveSource?: RiderDriveSource | null;
+  rawWatts?: number | null;
+  rawCadence?: number | null;
+  rawSpeedKph?: number | null;
+  sampleAgeMs?: number | null;
   rank: number | null;
+};
+
+export type RaceCaptureFrame = {
+  at: number;
+  elapsedMs: number;
+  raceState: RaceState;
+  trackId: string;
+  trackLengthMeters: number;
+  routeLengthMeters: number;
+  riders: Array<{
+    playerId: PlayerSlot['id'];
+    riderName: string;
+    deviceId: number | null;
+    distanceMeters: number;
+    velocityMps: number;
+    driveSource: RiderDriveSource;
+    driveAllowed: boolean;
+    rawWatts: number;
+    rawCadence: number;
+    rawSpeedKph: number;
+    sampleAgeMs: number | null;
+    wattsAgeMs: number | null;
+    cadenceAgeMs: number | null;
+    speedAgeMs: number | null;
+  }>;
 };
 
 export type RaceCaptureEvent = {
@@ -394,6 +430,7 @@ export type RaceCapture = {
     country: string;
     state: string;
     lengthMeters: number;
+    routeLengthMeters?: number;
   };
   sessionMode: SessionMode;
   selectedMetrics: MetricKey[];
@@ -406,6 +443,7 @@ export type RaceCapture = {
   zones: TrackZone[];
   events: RaceCaptureEvent[];
   samples: RaceCaptureSample[];
+  frames?: RaceCaptureFrame[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
   summary: RaceSummaryEntry[];
 };

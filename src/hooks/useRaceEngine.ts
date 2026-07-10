@@ -180,13 +180,13 @@ export function useRaceEngine(
     setRiders(createInitialRiders(playersRef.current, branchChoicesRef.current));
   }, []);
 
-  const startRace = useCallback(() => {
+  const startRace = useCallback((startedAt = Date.now()) => {
     const racePlayers = playersRef.current;
     racePlayersRef.current = racePlayers;
     raceStatsRef.current = new Map();
     setRaceSummary([]);
     setRiders(createInitialRiders(racePlayers, branchChoicesRef.current));
-    raceStartedAtRef.current = Date.now();
+    raceStartedAtRef.current = startedAt;
     lastFrameRef.current = performance.now();
     setRaceState('racing');
   }, []);

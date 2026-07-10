@@ -1,5 +1,5 @@
 import { proSplitMinimumMph, type SplitRouteDecisionPoint, zoneMatchesBranchSelections } from '../lib/trackMapping';
-import type { BikeSample, PlayerSlot, RiderState, SplitBranchChoice, TrackZone } from '../types';
+import type { BikeSample, PlayerSlot, RiderDriveSource, RiderState, SplitBranchChoice, TrackZone } from '../types';
 import { bmxVelocityMpsFromCadence } from './bmxRollout';
 import { crossedTakeoff, surfaceAngleDeg } from './trackProfile';
 
@@ -7,7 +7,7 @@ const gravityPx = 430;
 const groundRecoveryPerSecond = 4.2;
 const maxAirPx = 34;
 const liveMetricWindowMs = 1800;
-const liveRaceStartSampleGraceMs = 300;
+const liveRaceStartSampleGraceMs = 0;
 const rollingFrictionMps2 = 0.42;
 const airDragPerMeter = 0.0038;
 const stopVelocityMps = 0.04;
@@ -50,9 +50,9 @@ function wattsFallbackVelocityMps(watts: number, currentVelocityMps: number) {
     return null;
   }
 
-  // Wattbike BLE/ANT packets do not always include cadence every frame. Use power only as
-  // a short-term movement fallback so live riders do not freeze between cadence packets.
-  return clamp(Math.sqrt(watts) * 0.32, currentVelocityMps + 0.65, maxBmxRaceVelocityMps);
+  // Wattbike BLE/ANT packets do not always include cadence every frame. Use power as
+  // a target-speed fallback, but never ratchet the target above what the wattage supports.
+  return clamp(Math.sqrt(watts) * 0.32, 0, maxBmxRaceVelocityMps);
 }
 
 function coastVelocityMps(velocityMps: number, dt: number) {
@@ -184,6 +184,11 @@ export function createInitialRiders(
     landingCompression: 0,
     phase: 'pedaling',
     lastWatts: 0,
+    lastRawWatts: 0,
+    lastRawCadence: 0,
+    lastRawSpeedKph: 0,
+    driveAllowed: true,
+    driveSource: 'coast',
     wattsAverage: 160,
     rank: player.id,
     thirtyFootTimeMs: null,
@@ -245,6 +250,15 @@ export function stepRiders(
       : null;
     const targetDriveVelocity = cadenceVelocity ?? powerVelocity ?? speedVelocity;
     const driveEngaged = targetDriveVelocity != null && targetDriveVelocity > coastVelocity + freewheelEngagementToleranceMps;
+    const driveSource: RiderDriveSource = !driveAllowed
+      ? 'blocked'
+      : driveEngaged
+        ? cadenceVelocity != null
+          ? 'cadence'
+          : powerVelocity != null
+            ? 'power'
+            : 'speed'
+        : 'coast';
     const previousDistance = rider.distance;
     const gateLaunch = driveEngaged
       ? clamp(1 - elapsedMs / gateLaunchWindowMs, 0, 1)
@@ -362,6 +376,11 @@ export function stepRiders(
       landingCompression,
       phase,
       lastWatts: watts,
+      lastRawWatts: rawWatts,
+      lastRawCadence: rawCadence,
+      lastRawSpeedKph: rawSpeedKph,
+      driveAllowed,
+      driveSource,
       wattsAverage,
       thirtyFootTimeMs,
       finishedAt,

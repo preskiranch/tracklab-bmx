@@ -1331,6 +1331,7 @@ export default function App() {
   const startGateTimeoutsRef = useRef<number[]>([]);
   const startGateSequenceIdRef = useRef(0);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
+  const lastRaceDebugFrameAtRef = useRef(0);
   const activeRaceSessionIdRef = useRef<string | null>(null);
   const ghostRaceStartedAtRef = useRef<number | null>(null);
   const ghostTraceRef = useRef<Map<PlayerSlot['id'], GhostLapPoint[]>>(new Map());
@@ -1764,6 +1765,16 @@ export default function App() {
     },
     [hasDualStartRoutes, publicLeaderboards, raceRouteVariantId, selectedTrack, selectedTrackMapping],
   );
+  const effectiveRouteLengthMeters = useMemo(() => {
+    if (!effectiveTrack.centerline || effectiveTrack.centerline.length < 2) {
+      return effectiveTrack.lengthMeters;
+    }
+
+    return Math.round(routeLengthWithDefaultSplitBranches(
+      effectiveTrack.centerline,
+      effectiveTrack.splitSections ?? [],
+    ));
+  }, [effectiveTrack.centerline, effectiveTrack.lengthMeters, effectiveTrack.splitSections]);
   const multiplayerVoteCandidates = useMemo<MultiplayerTrackVoteCandidate[]>(() => {
     return catalogTracks.flatMap((track) => {
       const mapping = storedMappings[track.id] ?? publicTrackMappings[track.id];
@@ -2547,6 +2558,7 @@ export default function App() {
     const createdAt = Date.now();
     const sessionId = `tlb-${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
     capturedSampleKeysRef.current = new Set();
+    lastRaceDebugFrameAtRef.current = 0;
     activeRaceSessionIdRef.current = sessionId;
     ghostRaceStartedAtRef.current = null;
     ghostTraceRef.current = new Map();
@@ -2566,6 +2578,7 @@ export default function App() {
         country: effectiveTrack.country,
         state: effectiveTrack.state,
         lengthMeters: effectiveTrack.lengthMeters,
+        routeLengthMeters: effectiveRouteLengthMeters,
       },
       sessionMode,
       selectedMetrics,
@@ -2583,12 +2596,13 @@ export default function App() {
         label: 'Race armed / countdown started',
       }],
       samples: [],
+      frames: [],
       reactionTimesByPlayer: {},
       summary: [],
     };
 
     setRaceCapture(capture);
-  }, [activeZones, demoMode, effectiveTrack, racePlayers, selectedMetrics, sessionMode]);
+  }, [activeZones, demoMode, effectiveRouteLengthMeters, effectiveTrack, racePlayers, selectedMetrics, sessionMode]);
 
   const appendRaceCaptureEvent = useCallback((type: RaceCapture['events'][number]['type'], label: string, at = Date.now()) => {
     setRaceCapture((current) => {
@@ -2982,7 +2996,66 @@ export default function App() {
     }
 
     window.localStorage.setItem(raceCaptureStorageKey, JSON.stringify(raceCapture));
+    (window as typeof window & { __tracklabLastRaceCapture?: RaceCapture | null }).__tracklabLastRaceCapture = raceCapture;
   }, [raceCapture]);
+
+  useEffect(() => {
+    (window as typeof window & { __tracklabLiveDebug?: unknown }).__tracklabLiveDebug = {
+      at: Date.now(),
+      selectedTrackId: selectedTrack.id,
+      effectiveTrackId: effectiveTrack.id,
+      effectiveTrackName: effectiveTrack.name,
+      raceState,
+      raceViewFullscreen,
+      trackLengthMeters: effectiveTrack.lengthMeters,
+      routeLengthMeters: effectiveRouteLengthMeters,
+      racePlayerCount: racePlayers.length,
+      players: racePlayers.map((player) => {
+        const rider = riders.find((item) => item.playerId === player.id);
+        const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
+        const nowMs = Date.now();
+
+        return {
+          playerId: player.id,
+          riderName: player.name,
+          deviceId: player.deviceId,
+          sampleAt: sample?.at ?? null,
+          sampleAgeMs: sample ? nowMs - sample.at : null,
+          watts: sample?.watts ?? null,
+          cadence: sample?.cadence ?? null,
+          speedKph: sample?.speedKph ?? null,
+          riderDistanceMeters: rider?.distance ?? null,
+          riderVelocityMps: rider?.velocity ?? null,
+          riderDriveSource: rider?.driveSource ?? null,
+          riderDriveAllowed: rider?.driveAllowed ?? null,
+          riderRawWatts: rider?.lastRawWatts ?? null,
+          riderRawCadence: rider?.lastRawCadence ?? null,
+          riderRawSpeedKph: rider?.lastRawSpeedKph ?? null,
+          finishedAt: rider?.finishedAt ?? null,
+        };
+      }),
+      capture: raceCapture
+        ? {
+          sessionId: raceCapture.sessionId,
+          status: raceCapture.status,
+          samples: raceCapture.samples.length,
+          frames: raceCapture.frames?.length ?? 0,
+        }
+        : null,
+    };
+  }, [
+    effectiveRouteLengthMeters,
+    effectiveTrack.id,
+    effectiveTrack.lengthMeters,
+    effectiveTrack.name,
+    raceCapture,
+    racePlayers,
+    raceState,
+    raceViewFullscreen,
+    riders,
+    samplesByDevice,
+    selectedTrack.id,
+  ]);
 
   useEffect(() => {
     writeStoredGhostLaps(ghostLaps);
@@ -3075,6 +3148,7 @@ export default function App() {
 
       capturedSampleKeysRef.current.add(sampleKey);
       const rider = riders.find((item) => item.playerId === player.id);
+      const capturedAt = Date.now();
 
       return [{
         at: sample.at,
@@ -3096,6 +3170,11 @@ export default function App() {
         riderDistanceMeters: rider ? Number(rider.distance.toFixed(2)) : null,
         riderVelocityMps: rider ? Number(rider.velocity.toFixed(2)) : null,
         riderPhase: rider?.phase ?? null,
+        riderDriveSource: rider?.driveSource ?? null,
+        rawWatts: rider?.lastRawWatts ?? null,
+        rawCadence: rider?.lastRawCadence ?? null,
+        rawSpeedKph: rider?.lastRawSpeedKph ?? null,
+        sampleAgeMs: capturedAt - sample.at,
         rank: rider?.rank ?? null,
       }];
     });
@@ -3115,6 +3194,72 @@ export default function App() {
       };
     });
   }, [raceCapture, racePlayers, riders, samplesByDevice]);
+
+  useEffect(() => {
+    if (!raceCapture || (raceCapture.status !== 'armed' && raceCapture.status !== 'racing')) {
+      return;
+    }
+
+    const capturedAt = Date.now();
+    if (capturedAt - lastRaceDebugFrameAtRef.current < 250) {
+      return;
+    }
+    lastRaceDebugFrameAtRef.current = capturedAt;
+
+    const captureStartedAt = raceCapture.startedAt ?? raceCapture.createdAt;
+    const frame = {
+      at: capturedAt,
+      elapsedMs: capturedAt - captureStartedAt,
+      raceState,
+      trackId: effectiveTrack.id,
+      trackLengthMeters: effectiveTrack.lengthMeters,
+      routeLengthMeters: effectiveRouteLengthMeters,
+      riders: racePlayers.map((player) => {
+        const rider = riders.find((item) => item.playerId === player.id);
+        const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
+
+        return {
+          playerId: player.id,
+          riderName: player.name,
+          deviceId: player.deviceId,
+          distanceMeters: Number((rider?.distance ?? 0).toFixed(2)),
+          velocityMps: Number((rider?.velocity ?? 0).toFixed(2)),
+          driveSource: rider?.driveSource ?? 'coast',
+          driveAllowed: rider?.driveAllowed ?? true,
+          rawWatts: rider?.lastRawWatts ?? 0,
+          rawCadence: rider?.lastRawCadence ?? 0,
+          rawSpeedKph: rider?.lastRawSpeedKph ?? 0,
+          sampleAgeMs: sample ? capturedAt - sample.at : null,
+          wattsAgeMs: sample?.wattsAt ? capturedAt - sample.wattsAt : null,
+          cadenceAgeMs: sample?.cadenceAt ? capturedAt - sample.cadenceAt : null,
+          speedAgeMs: sample?.speedAt ? capturedAt - sample.speedAt : null,
+        };
+      }),
+    };
+
+    setRaceCapture((current) => {
+      if (!current || current.sessionId !== raceCapture.sessionId) {
+        return current;
+      }
+
+      return {
+        ...current,
+        frames: [...(current.frames ?? []), frame].slice(-1200),
+      };
+    });
+  }, [
+    effectiveRouteLengthMeters,
+    effectiveTrack.id,
+    effectiveTrack.lengthMeters,
+    raceCapture?.createdAt,
+    raceCapture?.sessionId,
+    raceCapture?.startedAt,
+    raceCapture?.status,
+    racePlayers,
+    raceState,
+    riders,
+    samplesByDevice,
+  ]);
 
   useEffect(() => {
     if (raceState !== 'racing') {
@@ -4446,7 +4591,7 @@ export default function App() {
     }
 
     appendRaceCaptureEvent('race-start', 'Gate drop / race started', gateDropAt);
-    startRace();
+    startRace(gateDropAt);
     scheduleStartGateStep(420, () => setStartGateStatus(idleStartGateStatus));
   }, [appendRaceCaptureEvent, bridge, demoMode, scheduleStartGateStep, startRace]);
 

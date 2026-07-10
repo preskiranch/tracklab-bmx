@@ -821,7 +821,9 @@ export function riderLatLng(track: TrackRecord, distanceMeters: number) {
     return null;
   }
 
-  return pointAtProgress(route, distanceMeters / track.lengthMeters);
+  const routeLength = routeLengthMeters(route);
+  return pointAtRouteMeter(route, Math.min(routeLength, Math.max(0, distanceMeters)))
+    ?? pointAtProgress(route, distanceMeters / Math.max(1, track.lengthMeters));
 }
 
 export function riderRoutePose(
