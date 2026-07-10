@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
@@ -33,6 +33,7 @@ let controlStatusMessage = null;
 const seenBikeDevices = new Set();
 const latestBikeSamples = new Map();
 const sourceConnectedDevices = new Map();
+let userDataMutationQueue = Promise.resolve();
 
 const connectedDeviceSampleTimeoutMs = Number(process.env.WATTBIKE_CONNECTED_DEVICE_TIMEOUT_MS ?? 15000);
 
@@ -269,8 +270,38 @@ async function writeUserData(data) {
     updatedAt: Date.now(),
   });
   await mkdir(userDataDirectory, { recursive: true });
-  await writeFile(userDataPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+  const temporaryPath = `${userDataPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(normalized, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    await rename(temporaryPath, userDataPath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
   return normalized;
+}
+
+function patchUserData(patch) {
+  const mutation = userDataMutationQueue.then(async () => {
+    const current = await readUserData();
+    return writeUserData({
+      ...current,
+      trackMappings: patch.trackMappings && typeof patch.trackMappings === 'object'
+        ? patch.trackMappings
+        : current.trackMappings,
+      customRoutes: Array.isArray(patch.customRoutes)
+        ? patch.customRoutes
+        : current.customRoutes,
+      bikeProfiles: Array.isArray(patch.bikeProfiles)
+        ? patch.bikeProfiles
+        : current.bikeProfiles,
+    });
+  });
+  userDataMutationQueue = mutation.then(() => undefined, () => undefined);
+  return mutation;
 }
 
 async function readRequestJson(request, maxBytes = 2_000_000) {
@@ -428,19 +459,7 @@ async function handleHttpRequest(request, response) {
   if (request.method === 'PATCH' && url.pathname === '/api/user-data') {
     try {
       const patch = await readRequestJson(request);
-      const current = await readUserData();
-      const next = await writeUserData({
-        ...current,
-        trackMappings: patch.trackMappings && typeof patch.trackMappings === 'object'
-          ? patch.trackMappings
-          : current.trackMappings,
-        customRoutes: Array.isArray(patch.customRoutes)
-          ? patch.customRoutes
-          : current.customRoutes,
-        bikeProfiles: Array.isArray(patch.bikeProfiles)
-          ? patch.bikeProfiles
-          : current.bikeProfiles,
-      });
+      const next = await patchUserData(patch);
       writeJson(request, response, 200, next);
     } catch (error) {
       writeJson(request, response, 400, {
@@ -538,8 +557,21 @@ try {
   });
 }
 
-process.on('SIGINT', async () => {
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  logBridge(`${signal} received; closing local connector.`);
   await stopSource();
-  wss.close();
-  server.close(() => process.exit(0));
-});
+  await userDataMutationQueue;
+  wss.clients.forEach((socket) => socket.close(1001, 'Connector shutting down'));
+  await Promise.allSettled([
+    new Promise((resolve) => wss.close(resolve)),
+    new Promise((resolve) => server.close(resolve)),
+  ]);
+}
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
