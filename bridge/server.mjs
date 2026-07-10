@@ -8,6 +8,7 @@ import { createAntSource } from './ant-source.mjs';
 import { createBleSource } from './ble-source.mjs';
 import { createHybridSource } from './hybrid-source.mjs';
 import { createWattbikeControl } from './wattbike-control.mjs';
+import { bridgeCorsOrigin, bridgeOriginAllowed } from './originPolicy.mjs';
 
 const port = Number(process.env.WATTBIKE_BRIDGE_PORT ?? 8787);
 const inputMode = normalizeInputMode(process.env.WATTBIKE_INPUT);
@@ -15,7 +16,13 @@ const autoStart = process.env.WATTBIKE_BRIDGE_AUTOSTART === '1';
 const userDataDirectory = path.join(os.homedir(), 'Library', 'Application Support', 'TrackLab BMX');
 const userDataPath = path.join(userDataDirectory, 'user-data.json');
 const server = createServer(handleHttpRequest);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 64 * 1024,
+  verifyClient: ({ origin }, done) => {
+    done(bridgeOriginAllowed(origin), 403, 'TrackLab connector origin is not allowed');
+  },
+});
 const clients = new Set();
 
 const wattbikeControl = createWattbikeControl();
@@ -208,12 +215,16 @@ function broadcast(payload) {
   }
 }
 
-function writeJson(response, statusCode, payload) {
+function writeJson(request, response, statusCode, payload) {
+  const allowedOrigin = bridgeCorsOrigin(request.headers.origin);
   response.writeHead(statusCode, {
-    'Access-Control-Allow-Origin': '*',
+    ...(allowedOrigin ? { 'Access-Control-Allow-Origin': allowedOrigin } : {}),
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'no-store',
     'Content-Type': 'application/json',
+    'Vary': 'Origin',
+    'X-Content-Type-Options': 'nosniff',
   });
   response.end(JSON.stringify(payload));
 }
@@ -262,9 +273,14 @@ async function writeUserData(data) {
   return normalized;
 }
 
-async function readRequestJson(request) {
+async function readRequestJson(request, maxBytes = 2_000_000) {
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
+    totalBytes += chunk.length;
+    if (totalBytes > maxBytes) {
+      throw new Error('Request body is too large.');
+    }
     chunks.push(chunk);
   }
 
@@ -369,15 +385,23 @@ async function stopSource() {
 }
 
 async function handleHttpRequest(request, response) {
+  if (!bridgeOriginAllowed(request.headers.origin)) {
+    writeJson(request, response, 403, {
+      type: 'origin-not-allowed',
+      message: 'This website is not allowed to access the TrackLab Bike Connector.',
+    });
+    return;
+  }
+
   if (request.method === 'OPTIONS') {
-    writeJson(response, 204, {});
+    writeJson(request, response, 204, {});
     return;
   }
 
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? `127.0.0.1:${port}`}`);
 
   if (request.method === 'GET' && url.pathname === '/api/bridge/status') {
-    writeJson(response, 200, {
+    writeJson(request, response, 200, {
       ...statusPayload(),
       controlStatus: controlStatusMessage,
     });
@@ -386,18 +410,18 @@ async function handleHttpRequest(request, response) {
 
   if (request.method === 'POST' && url.pathname === '/api/bridge/start') {
     const payload = await startSource();
-    writeJson(response, sourceState === 'error' ? 500 : 200, payload);
+    writeJson(request, response, sourceState === 'error' ? 500 : 200, payload);
     return;
   }
 
   if (request.method === 'POST' && url.pathname === '/api/bridge/stop') {
     const payload = await stopSource();
-    writeJson(response, 200, payload);
+    writeJson(request, response, 200, payload);
     return;
   }
 
   if (request.method === 'GET' && url.pathname === '/api/user-data') {
-    writeJson(response, 200, await readUserData());
+    writeJson(request, response, 200, await readUserData());
     return;
   }
 
@@ -417,9 +441,9 @@ async function handleHttpRequest(request, response) {
           ? patch.bikeProfiles
           : current.bikeProfiles,
       });
-      writeJson(response, 200, next);
+      writeJson(request, response, 200, next);
     } catch (error) {
-      writeJson(response, 400, {
+      writeJson(request, response, 400, {
         type: 'user-data-error',
         message: error instanceof Error ? error.message : String(error),
       });
@@ -427,7 +451,7 @@ async function handleHttpRequest(request, response) {
     return;
   }
 
-  writeJson(response, 404, {
+  writeJson(request, response, 404, {
     type: 'not-found',
     message: 'Unknown TrackLab local bridge endpoint.',
   });
