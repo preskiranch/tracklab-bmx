@@ -4,6 +4,7 @@ const { Pool } = pg;
 
 const schema = 'tracklab';
 const databaseUrl = process.env.DATABASE_URL?.trim();
+const databaseConfigured = Boolean(databaseUrl);
 let pool = databaseUrl
   ? new Pool({
     connectionString: databaseUrl,
@@ -17,6 +18,7 @@ let pool = databaseUrl
   : null;
 
 let readyPromise = null;
+let persistenceReady = false;
 const publicTrackMappingsFallback = new Map();
 const memoryUserDataByGuestKey = new Map();
 const memoryAuthUsersById = new Map();
@@ -60,6 +62,14 @@ function cloneAuthSession(session) {
 
 export function persistenceEnabled() {
   return Boolean(pool);
+}
+
+export function persistenceStatus() {
+  return {
+    mode: databaseConfigured ? 'postgres' : 'memory',
+    configured: databaseConfigured,
+    ready: databaseConfigured ? Boolean(pool) && persistenceReady : true,
+  };
 }
 
 export async function query(text, params = []) {
@@ -347,12 +357,14 @@ export async function initPersistence() {
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_members_guest ON ${schema}.group_members (guest_key, left_at)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_invites_to ON ${schema}.group_invites (to_guest_key, status, created_at DESC)`);
       console.log('[cloud] TrackLab persistence ready.');
+      persistenceReady = true;
       return true;
     } catch (error) {
       console.warn('[cloud] TrackLab persistence disabled:', error instanceof Error ? error.message : error);
       await pool?.end().catch(() => {});
       pool = null;
       readyPromise = null;
+      persistenceReady = false;
       return false;
     }
   })();
@@ -1414,6 +1426,7 @@ export async function closePersistence() {
   const activePool = pool;
   pool = null;
   readyPromise = null;
+  persistenceReady = false;
   if (activePool) {
     await activePool.end();
   }

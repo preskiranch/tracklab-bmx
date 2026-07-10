@@ -2072,6 +2072,29 @@ async function handleClientMessage(client, rawMessage) {
 
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  if (requestUrl.pathname === '/api/health') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const storage = persistence.persistenceStatus();
+    const body = JSON.stringify({
+      status: storage.ready ? 'ok' : 'unavailable',
+      service: 'tracklab-bmx',
+      storage,
+      uptimeSeconds: Math.round(process.uptime()),
+      version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
+    });
+    response.writeHead(storage.ready ? 200 : 503, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+
   if (requestUrl.pathname === '/manifest.webmanifest') {
     const profileKey = requestUrl.searchParams.get('profileKey') || cookieValue(request, 'tracklab_profile_key');
     response.writeHead(200, {
@@ -2641,6 +2664,42 @@ const persistenceMaintenance = setInterval(() => {
   void persistence.pruneExpiredData();
 }, 15 * 60 * 1000);
 persistenceMaintenance.unref();
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`[cloud] ${signal} received; closing TrackLab services.`);
+
+  clearInterval(websocketHeartbeat);
+  clearInterval(persistenceMaintenance);
+  voteTimers.forEach(clearTimeout);
+  routeSelectTimers.forEach(clearTimeout);
+  voteTimers.clear();
+  routeSelectTimers.clear();
+
+  wss.clients.forEach((socket) => socket.close(1001, 'Server shutting down'));
+  const forceExit = setTimeout(() => {
+    console.error('[cloud] Graceful shutdown timed out.');
+    process.exit(1);
+  }, 10_000);
+  forceExit.unref();
+
+  await Promise.allSettled([
+    new Promise((resolve) => server.close(resolve)),
+    new Promise((resolve) => wss.close(resolve)),
+  ]);
+  await persistence.closePersistence().catch((error) => {
+    console.warn('[cloud] Persistence shutdown failed:', error instanceof Error ? error.message : error);
+  });
+  clearTimeout(forceExit);
+  process.exitCode = 0;
+}
+
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
+process.once('SIGINT', () => void shutdown('SIGINT'));
 
 server.listen(port, () => {
   console.log(`[cloud] TrackLab BMX web + multiplayer listening on :${port}`);
