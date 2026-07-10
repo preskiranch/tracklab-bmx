@@ -2290,12 +2290,19 @@ export default function App() {
       return;
     }
 
-    const bikeSeats = Math.max(1, Math.min(maxPlayers, Number(params.get('bikes') ?? 1)));
+    const billingState = params.get('billingState') ?? '';
     const cleanUrl = new URL(window.location.href);
-    ['billing', 'tier', 'bikes', 'checkoutId', 'profileKey'].forEach((key) => cleanUrl.searchParams.delete(key));
+    ['billing', 'tier', 'bikes', 'billingState', 'checkoutId', 'orderId', 'referenceId', 'transactionId', 'profileKey']
+      .forEach((key) => cleanUrl.searchParams.delete(key));
     window.history.replaceState(null, '', cleanUrl);
 
-    claimBillingReturn(bikeSeats)
+    if (!billingState) {
+      setCheckoutStatus('error');
+      setCheckoutMessage('Square returned without a TrackLab verification code. Racer access was not changed.');
+      return;
+    }
+
+    claimBillingReturn(billingState)
       .then((user) => {
         if (!user) {
           return;

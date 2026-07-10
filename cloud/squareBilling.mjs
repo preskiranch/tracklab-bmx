@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-const squareApiVersion = process.env.SQUARE_VERSION || '2025-10-16';
+const squareApiVersion = process.env.SQUARE_VERSION || '2026-05-20';
 const squareEnvironment = process.env.SQUARE_ENVIRONMENT === 'production' ? 'production' : 'sandbox';
 const squareApiBase = squareEnvironment === 'production'
   ? 'https://connect.squareup.com'
@@ -59,7 +59,31 @@ export function squareCheckoutConfigStatus() {
   };
 }
 
-export async function createRacerSubscriptionCheckout({ bikeSeats, profileKey, origin }) {
+async function squareFetch(path, options = {}) {
+  const response = await fetch(`${squareApiBase}${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${process.env.SQUARE_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json',
+      'Square-Version': squareApiVersion,
+      ...options.headers,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const squareMessage = Array.isArray(payload.errors)
+      ? payload.errors.map((error) => error.detail || error.code).filter(Boolean).join('; ')
+      : '';
+    const error = new Error(squareMessage || `Square request failed with HTTP ${response.status}`);
+    error.statusCode = 502;
+    error.squareResponse = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
+export async function createRacerSubscriptionCheckout({ bikeSeats, origin, returnState }) {
   const seats = clampBikeSeats(bikeSeats);
   const config = squareCheckoutConfigStatus();
   if (!config.configured) {
@@ -73,18 +97,12 @@ export async function createRacerSubscriptionCheckout({ bikeSeats, profileKey, o
   const redirectUrl = new URL(origin || 'http://localhost:10000');
   redirectUrl.searchParams.set('billing', 'success');
   redirectUrl.searchParams.set('tier', 'racer');
-  redirectUrl.searchParams.set('bikes', String(seats));
-  if (profileKey) {
-    redirectUrl.searchParams.set('profileKey', String(profileKey).slice(0, 160));
+  if (returnState) {
+    redirectUrl.searchParams.set('billingState', String(returnState).slice(0, 160));
   }
 
-  const response = await fetch(`${squareApiBase}/v2/online-checkout/payment-links`, {
+  const payload = await squareFetch('/v2/online-checkout/payment-links', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.SQUARE_ACCESS_TOKEN}`,
-      'Content-Type': 'application/json',
-      'Square-Version': squareApiVersion,
-    },
     body: JSON.stringify({
       idempotency_key: randomUUID(),
       quick_pay: {
@@ -102,20 +120,11 @@ export async function createRacerSubscriptionCheckout({ bikeSeats, profileKey, o
     }),
   });
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const squareMessage = Array.isArray(payload.errors)
-      ? payload.errors.map((error) => error.detail || error.code).filter(Boolean).join('; ')
-      : '';
-    const error = new Error(squareMessage || `Square checkout failed with HTTP ${response.status}`);
-    error.statusCode = 502;
-    error.squareResponse = payload;
-    throw error;
-  }
-
   const checkoutUrl = payload?.payment_link?.url;
-  if (typeof checkoutUrl !== 'string' || !checkoutUrl) {
-    const error = new Error('Square did not return a checkout URL.');
+  const orderId = payload?.payment_link?.order_id;
+  const paymentLinkId = payload?.payment_link?.id;
+  if (typeof checkoutUrl !== 'string' || !checkoutUrl || typeof orderId !== 'string' || !orderId) {
+    const error = new Error('Square did not return a complete checkout link.');
     error.statusCode = 502;
     error.squareResponse = payload;
     throw error;
@@ -126,5 +135,35 @@ export async function createRacerSubscriptionCheckout({ bikeSeats, profileKey, o
     bikeSeats: seats,
     monthlyCents,
     environment: squareEnvironment,
+    orderId,
+    paymentLinkId: typeof paymentLinkId === 'string' ? paymentLinkId : '',
+  };
+}
+
+export async function verifyRacerSubscriptionOrder({ orderId, expectedAmountCents }) {
+  const config = squareCheckoutConfigStatus();
+  if (!config.configured) {
+    const error = new Error(`Square billing is missing: ${config.missing.join(', ')}`);
+    error.statusCode = 503;
+    throw error;
+  }
+
+  const payload = await squareFetch(`/v2/orders/${encodeURIComponent(orderId)}`);
+  const order = payload?.order;
+  const amount = Number(order?.total_money?.amount);
+  const currency = order?.total_money?.currency;
+  const valid = order?.id === orderId
+    && order?.location_id === process.env.SQUARE_LOCATION_ID
+    && order?.state === 'COMPLETED'
+    && Number.isFinite(amount)
+    && amount === Number(expectedAmountCents)
+    && currency === 'USD';
+
+  return {
+    valid,
+    orderId: typeof order?.id === 'string' ? order.id : '',
+    state: typeof order?.state === 'string' ? order.state : 'UNKNOWN',
+    amountCents: Number.isFinite(amount) ? amount : null,
+    currency: typeof currency === 'string' ? currency : null,
   };
 }

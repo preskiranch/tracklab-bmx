@@ -21,6 +21,7 @@ const publicTrackMappingsFallback = new Map();
 const memoryAuthUsersById = new Map();
 const memoryAuthUserIdByEmail = new Map();
 const memoryAuthSessionsByToken = new Map();
+const memoryBillingCheckoutsByState = new Map();
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -131,6 +132,19 @@ export async function initPersistence() {
         expires_at TIMESTAMPTZ NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+      await pool.query(`
+      CREATE TABLE IF NOT EXISTS ${schema}.billing_checkouts (
+        state_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+        order_id TEXT UNIQUE NOT NULL,
+        payment_link_id TEXT,
+        bike_seats INTEGER NOT NULL,
+        expected_amount_cents INTEGER NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        claimed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
       await pool.query(`
@@ -315,6 +329,8 @@ export async function initPersistence() {
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_email ON ${schema}.auth_users (email)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_token ON ${schema}.auth_sessions (token_hash)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_expires ON ${schema}.auth_sessions (expires_at)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_billing_checkouts_user ON ${schema}.billing_checkouts (user_id, created_at DESC)`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_billing_checkouts_expires ON ${schema}.billing_checkouts (expires_at) WHERE claimed_at IS NULL`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friend_requests_to ON ${schema}.friend_requests (to_guest_key, status, created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friend_requests_from ON ${schema}.friend_requests (from_guest_key, status, created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_members_guest ON ${schema}.group_members (guest_key, left_at)`);
@@ -551,6 +567,7 @@ export async function findAuthSession(tokenHash) {
     return {
       sessionId: session.id,
       expiresAt: session.expiresAt,
+      lastSeen: session.lastSeen,
       user,
     };
   }
@@ -559,6 +576,7 @@ export async function findAuthSession(tokenHash) {
     `SELECT
        session.id AS session_id,
        session.expires_at,
+       session.last_seen,
        users.*
      FROM ${schema}.auth_sessions AS session
      JOIN ${schema}.auth_users AS users ON users.id = session.user_id
@@ -574,6 +592,7 @@ export async function findAuthSession(tokenHash) {
   return {
     sessionId: row.session_id,
     expiresAt: row.expires_at,
+    lastSeen: row.last_seen,
     user: authUserFromRow(row),
   };
 }
@@ -603,6 +622,99 @@ export async function deleteAuthSession(tokenHash) {
     `DELETE FROM ${schema}.auth_sessions WHERE token_hash = $1`,
     [tokenHash],
   );
+}
+
+export async function saveBillingCheckout(checkout) {
+  const record = {
+    stateHash: checkout.stateHash,
+    userId: checkout.userId,
+    orderId: checkout.orderId,
+    paymentLinkId: checkout.paymentLinkId || '',
+    bikeSeats: Math.max(1, Math.min(4, Math.round(Number(checkout.bikeSeats) || 1))),
+    expectedAmountCents: Math.max(0, Math.round(Number(checkout.expectedAmountCents) || 0)),
+    expiresAt: checkout.expiresAt,
+    claimedAt: null,
+    createdAt: new Date().toISOString(),
+  };
+
+  if (!pool) {
+    memoryBillingCheckoutsByState.set(record.stateHash, record);
+    return { ...record };
+  }
+
+  const result = await query(
+    `INSERT INTO ${schema}.billing_checkouts (
+       state_hash, user_id, order_id, payment_link_id, bike_seats, expected_amount_cents, expires_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (state_hash) DO NOTHING
+     RETURNING *`,
+    [
+      record.stateHash,
+      record.userId,
+      record.orderId,
+      record.paymentLinkId || null,
+      record.bikeSeats,
+      record.expectedAmountCents,
+      record.expiresAt,
+    ],
+  );
+  return billingCheckoutFromRow(result?.rows?.[0]);
+}
+
+function billingCheckoutFromRow(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    stateHash: row.state_hash,
+    userId: row.user_id,
+    orderId: row.order_id,
+    paymentLinkId: row.payment_link_id ?? '',
+    bikeSeats: Number(row.bike_seats) || 1,
+    expectedAmountCents: Number(row.expected_amount_cents) || 0,
+    expiresAt: row.expires_at,
+    claimedAt: row.claimed_at,
+    createdAt: row.created_at,
+  };
+}
+
+export async function findBillingCheckout(stateHash, userId) {
+  if (!pool) {
+    const record = memoryBillingCheckoutsByState.get(stateHash);
+    if (!record || record.userId !== userId) {
+      return null;
+    }
+    return { ...record };
+  }
+
+  const result = await query(
+    `SELECT * FROM ${schema}.billing_checkouts
+     WHERE state_hash = $1 AND user_id = $2
+     LIMIT 1`,
+    [stateHash, userId],
+  );
+  return billingCheckoutFromRow(result?.rows?.[0]);
+}
+
+export async function markBillingCheckoutClaimed(stateHash, userId) {
+  if (!pool) {
+    const record = memoryBillingCheckoutsByState.get(stateHash);
+    if (!record || record.userId !== userId) {
+      return null;
+    }
+    record.claimedAt = new Date().toISOString();
+    return { ...record };
+  }
+
+  const result = await query(
+    `UPDATE ${schema}.billing_checkouts
+     SET claimed_at = COALESCE(claimed_at, now())
+     WHERE state_hash = $1 AND user_id = $2
+     RETURNING *`,
+    [stateHash, userId],
+  );
+  return billingCheckoutFromRow(result?.rows?.[0]);
 }
 
 export async function saveRoom(room, host) {
@@ -643,6 +755,13 @@ export async function saveRoomLeave(roomId, client) {
   return query(
     `UPDATE ${schema}.room_members SET left_at = now() WHERE room_id = $1 AND guest_key = $2`,
     [roomId, client.guestKey],
+  );
+}
+
+export async function closeRoom(roomId) {
+  return query(
+    `UPDATE ${schema}.rooms SET closed_at = now() WHERE id = $1 AND closed_at IS NULL`,
+    [roomId],
   );
 }
 
@@ -797,6 +916,23 @@ export async function areFriends(guestKeyA, guestKeyB) {
     [keyA, keyB],
   );
   return Boolean(result?.rows?.[0]);
+}
+
+export async function loadFriendKeys(guestKey) {
+  if (!guestKey) {
+    return [];
+  }
+
+  const result = await query(
+    `SELECT guest_key_a, guest_key_b
+     FROM ${schema}.friendships
+     WHERE guest_key_a = $1 OR guest_key_b = $1
+     LIMIT 250`,
+    [guestKey],
+  );
+  return (result?.rows ?? []).map((row) => (
+    row.guest_key_a === guestKey ? row.guest_key_b : row.guest_key_a
+  ));
 }
 
 export async function createFriendRequest(request, fromClient, targetClient) {

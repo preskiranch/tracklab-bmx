@@ -92,9 +92,9 @@ export async function logoutAuthUser() {
   await authFetch('/api/auth/logout', { method: 'POST' });
 }
 
-export async function claimBillingReturn(bikeSeats: number) {
+export async function claimBillingReturn(billingState: string) {
   return authFetch('/api/auth/billing-return', {
     method: 'POST',
-    body: JSON.stringify({ bikeSeats }),
+    body: JSON.stringify({ billingState }),
   });
 }
