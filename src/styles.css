@@ -530,7 +530,8 @@ input:focus {
 .race-fullscreen .sidebar,
 .race-fullscreen .platform-topbar,
 .race-fullscreen .control-panel,
-.race-fullscreen .lower-grid {
+.race-fullscreen .analytics-panel,
+.race-fullscreen .dashboard-secondary-column {
   display: none;
 }
 
@@ -543,6 +544,12 @@ input:focus {
 }
 
 .race-fullscreen .dashboard-grid {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.race-fullscreen .dashboard-primary-column {
   display: block;
   width: 100%;
   height: 100%;
@@ -881,7 +888,8 @@ input:focus {
 
 .map-fullscreen .sidebar,
 .map-fullscreen .platform-topbar,
-.map-fullscreen .lower-grid,
+.map-fullscreen .analytics-panel,
+.map-fullscreen .multiplayer-panel,
 .map-fullscreen .earth-header,
 .map-fullscreen .rider-strip,
 .map-fullscreen .google-map-caption {
@@ -894,6 +902,11 @@ input:focus {
 }
 
 .map-fullscreen .dashboard-grid {
+  display: block;
+}
+
+.map-fullscreen .dashboard-primary-column,
+.map-fullscreen .dashboard-secondary-column {
   display: block;
 }
 
@@ -1715,12 +1728,12 @@ input:focus {
   align-items: start;
 }
 
-.lower-grid {
+.dashboard-primary-column,
+.dashboard-secondary-column {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  min-width: 0;
   gap: 14px;
-  align-items: start;
-  margin-top: 14px;
+  align-content: start;
 }
 
 .earth-panel {
@@ -5030,9 +5043,29 @@ input:focus {
     grid-template-columns: 246px minmax(0, 1fr);
   }
 
-  .dashboard-grid,
-  .lower-grid {
+  .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .dashboard-primary-column,
+  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .dashboard-secondary-column {
+    display: contents;
+  }
+
+  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .earth-panel {
+    order: 1;
+  }
+
+  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .control-panel {
+    order: 2;
+  }
+
+  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .analytics-panel {
+    order: 3;
+  }
+
+  .platform-shell:not(.race-fullscreen):not(.map-fullscreen) .multiplayer-panel {
+    order: 4;
   }
 
   .diagnostic-grid {
