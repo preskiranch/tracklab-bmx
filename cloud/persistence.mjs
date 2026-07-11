@@ -340,13 +340,19 @@ export async function initPersistence() {
         thirty_foot_time_ms INTEGER,
         color_name TEXT NOT NULL DEFAULT 'lime',
         accent TEXT NOT NULL DEFAULT '#7ade36',
+        lap_count INTEGER NOT NULL DEFAULT 1,
+        analytics_public BOOLEAN NOT NULL DEFAULT FALSE,
         summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+        zone_results JSONB NOT NULL DEFAULT '[]'::jsonb,
         points JSONB NOT NULL DEFAULT '[]'::jsonb,
         saved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         UNIQUE (owner_key, rider_name, track_id, route_key)
       )
     `);
+      await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS lap_count INTEGER NOT NULL DEFAULT 1`);
+      await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS analytics_public BOOLEAN NOT NULL DEFAULT FALSE`);
+      await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS zone_results JSONB NOT NULL DEFAULT '[]'::jsonb`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_rooms_created ON ${schema}.rooms (created_at DESC)`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_room_messages_room_created ON ${schema}.room_messages (room_id, created_at DESC)`);
@@ -1572,11 +1578,18 @@ export async function closePersistence() {
   }
 }
 
-function routeKey(routeVariantId) {
-  return routeVariantId === 'amateur' || routeVariantId === 'pro' ? routeVariantId : 'default';
+function safeLapCount(value) {
+  return Math.max(1, Math.min(20, Math.round(Number(value) || 1)));
 }
 
-function ghostFromRow(row, source = 'top') {
+function routeKey(routeVariantId, lapCount = 1) {
+  const variant = routeVariantId === 'amateur' || routeVariantId === 'pro' ? routeVariantId : 'default';
+  const laps = safeLapCount(lapCount);
+  return laps > 1 ? `${variant}:laps:${laps}` : variant;
+}
+
+function ghostFromRow(row, source = 'top', includeAnalytics = false) {
+  const medalRank = Number(row.medal_rank);
   return {
     version: 1,
     id: row.id,
@@ -1589,10 +1602,14 @@ function ghostFromRow(row, source = 'top') {
     colorName: row.color_name,
     accent: row.accent,
     source,
+    lapCount: safeLapCount(row.lap_count),
     finishTimeMs: Number(row.finish_time_ms),
     thirtyFootTimeMs: row.thirty_foot_time_ms == null ? null : Number(row.thirty_foot_time_ms),
     savedAt: new Date(row.saved_at).getTime(),
-    summary: fromJson(row.summary, {}),
+    analyticsPublic: Boolean(row.analytics_public),
+    medalRank: medalRank >= 1 && medalRank <= 3 ? medalRank : null,
+    summary: includeAnalytics ? fromJson(row.summary, null) : null,
+    zoneResults: includeAnalytics ? fromJson(row.zone_results, []) : [],
     points: fromJson(row.points, []),
   };
 }
@@ -1602,13 +1619,16 @@ export async function saveGhostLap(ghost) {
     return null;
   }
 
-  const safeRouteKey = routeKey(ghost.routeVariantId);
+  const lapCount = safeLapCount(ghost.lapCount);
+  const safeRouteKey = routeKey(ghost.routeVariantId, lapCount);
   return query(
     `INSERT INTO ${schema}.ghost_laps (
       id, owner_key, owner_name, rider_name, track_id, track_name, route_variant_id, route_key,
-      finish_time_ms, thirty_foot_time_ms, color_name, accent, summary, points, saved_at, updated_at
+      finish_time_ms, thirty_foot_time_ms, color_name, accent, lap_count, analytics_public,
+      summary, zone_results, points, saved_at, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, to_timestamp($15 / 1000.0), now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+      $15::jsonb, $16::jsonb, $17::jsonb, to_timestamp($18 / 1000.0), now())
     ON CONFLICT (owner_key, rider_name, track_id, route_key) DO UPDATE SET
       id = EXCLUDED.id,
       owner_name = EXCLUDED.owner_name,
@@ -1618,7 +1638,10 @@ export async function saveGhostLap(ghost) {
       thirty_foot_time_ms = EXCLUDED.thirty_foot_time_ms,
       color_name = EXCLUDED.color_name,
       accent = EXCLUDED.accent,
+      lap_count = EXCLUDED.lap_count,
+      analytics_public = EXCLUDED.analytics_public,
       summary = EXCLUDED.summary,
+      zone_results = EXCLUDED.zone_results,
       points = EXCLUDED.points,
       saved_at = EXCLUDED.saved_at,
       updated_at = now()
@@ -1638,7 +1661,10 @@ export async function saveGhostLap(ghost) {
       ghost.thirtyFootTimeMs == null ? null : Math.round(Number(ghost.thirtyFootTimeMs)),
       ghost.colorName,
       ghost.accent,
+      lapCount,
+      Boolean(ghost.analyticsPublic),
       json(ghost.summary),
+      json(ghost.zoneResults ?? []),
       json(ghost.points),
       Math.round(Number(ghost.savedAt) || Date.now()),
     ],
@@ -1647,9 +1673,13 @@ export async function saveGhostLap(ghost) {
 
 export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], limit = 30) {
   const result = await query(
-    `SELECT *
-     FROM ${schema}.ghost_laps
-     WHERE track_id = $1
+    `SELECT ranked.*
+     FROM (
+       SELECT ghost_laps.*,
+         DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
+       FROM ${schema}.ghost_laps AS ghost_laps
+       WHERE track_id = $1
+     ) AS ranked
      ORDER BY finish_time_ms ASC, saved_at DESC
      LIMIT $2`,
     [trackId, Math.max(1, Math.min(60, Math.round(Number(limit) || 30)))],
@@ -1662,6 +1692,7 @@ export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], l
       : friends.has(row.owner_key)
         ? 'friend'
         : 'top';
-    return ghostFromRow(row, source);
+    const includeAnalytics = row.owner_key === profileKey || Boolean(row.analytics_public);
+    return ghostFromRow(row, source, includeAnalytics);
   });
 }

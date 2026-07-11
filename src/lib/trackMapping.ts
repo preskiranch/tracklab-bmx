@@ -95,6 +95,33 @@ export function routeLengthMeters(points: TrackPoint[]) {
   return total;
 }
 
+export function routeIsClosedLoop(points: TrackPoint[], toleranceMeters = 8) {
+  return points.length >= 3
+    && distanceBetweenTrackPoints(points[0], points[points.length - 1]) <= toleranceMeters;
+}
+
+export function repeatTrackZonesForLaps(
+  zones: TrackZone[],
+  routeLength: number,
+  lapCount: number,
+) {
+  const safeLapCount = Math.max(1, Math.min(20, Math.round(lapCount)));
+  if (safeLapCount === 1 || routeLength <= 0) {
+    return zones;
+  }
+
+  return Array.from({ length: safeLapCount }, (_, lapIndex) => {
+    const offset = lapIndex * routeLength;
+    return zones.map((zone) => ({
+      ...zone,
+      id: `${zone.id}-lap-${lapIndex + 1}`,
+      name: `Lap ${lapIndex + 1} / ${zone.name}`,
+      startMeter: zone.startMeter + offset,
+      endMeter: zone.endMeter + offset,
+    }));
+  }).flat();
+}
+
 function pointsMatch(a: TrackPoint, b: TrackPoint, toleranceMeters = splitJunctionToleranceMeters) {
   return distanceBetweenTrackPoints(a, b) <= toleranceMeters;
 }

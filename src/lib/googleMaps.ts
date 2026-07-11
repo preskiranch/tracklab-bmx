@@ -2,6 +2,7 @@ import {
   distanceBetweenTrackPoints,
   pointAtRouteMeter,
   routeLengthMeters,
+  routeIsClosedLoop,
   routeWithDefaultSplitBranches,
   routeWithSplitBranchSelections,
   splitSharedRouteSegments,
@@ -822,7 +823,11 @@ export function riderLatLng(track: TrackRecord, distanceMeters: number) {
   }
 
   const routeLength = routeLengthMeters(route);
-  return pointAtRouteMeter(route, Math.min(routeLength, Math.max(0, distanceMeters)))
+  const safeDistance = Math.max(0, distanceMeters);
+  const targetDistance = routeIsClosedLoop(route) && routeLength > 0
+    ? safeDistance % routeLength
+    : Math.min(routeLength, safeDistance);
+  return pointAtRouteMeter(route, targetDistance)
     ?? pointAtProgress(route, distanceMeters / Math.max(1, track.lengthMeters));
 }
 
@@ -837,7 +842,10 @@ export function riderRoutePose(
   }
 
   const routeLength = routeLengthMeters(route);
-  const target = Math.min(routeLength, distanceMeters);
+  const safeDistance = Math.max(0, distanceMeters);
+  const target = routeIsClosedLoop(route) && routeLength > 0
+    ? safeDistance % routeLength
+    : Math.min(routeLength, safeDistance);
   if (target <= 0) {
     const start = route[0];
     const end = route[1];

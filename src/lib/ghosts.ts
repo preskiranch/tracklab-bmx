@@ -6,6 +6,7 @@ import type {
   GhostLapSource,
   PlayerSlot,
   RaceSummaryEntry,
+  RaceZoneResult,
   TrackRouteVariantId,
 } from '../types';
 
@@ -27,25 +28,43 @@ function safeSource(value: unknown): GhostLapSource {
   return value === 'friend' || value === 'top' ? value : 'personal';
 }
 
-function routeKey(routeVariantId?: TrackRouteVariantId) {
-  return routeVariantId ?? 'default';
+function safeLapCount(value: unknown) {
+  return Math.max(1, Math.min(20, Math.round(finiteNumber(value, 1))));
+}
+
+function routeKey(routeVariantId?: TrackRouteVariantId, lapCount = 1) {
+  const variant = routeVariantId ?? 'default';
+  return lapCount > 1 ? `${variant}:laps:${safeLapCount(lapCount)}` : variant;
 }
 
 function riderKey(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-export function ghostIdentityKey(ghost: Pick<GhostLap, 'trackId' | 'routeVariantId' | 'ownerKey' | 'riderName'>) {
+export function ghostIdentityKey(ghost: Pick<GhostLap, 'trackId' | 'routeVariantId' | 'lapCount' | 'ownerKey' | 'riderName'>) {
   return [
     ghost.trackId,
-    routeKey(ghost.routeVariantId),
+    routeKey(ghost.routeVariantId, ghost.lapCount),
     ghost.ownerKey,
     riderKey(ghost.riderName),
   ].join('|');
 }
 
-export function ghostRouteKey(trackId: string, routeVariantId?: TrackRouteVariantId) {
-  return `${trackId}|${routeKey(routeVariantId)}`;
+export function ghostRouteKey(trackId: string, routeVariantId?: TrackRouteVariantId, lapCount = 1) {
+  return `${trackId}|${routeKey(routeVariantId, lapCount)}`;
+}
+
+function sanitizeGhostZoneResults(value: unknown): RaceZoneResult[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.slice(0, 500).filter((zone): zone is RaceZoneResult => Boolean(
+    zone
+    && typeof zone === 'object'
+    && typeof (zone as RaceZoneResult).zoneId === 'string'
+    && Array.isArray((zone as RaceZoneResult).riders),
+  ));
 }
 
 function sanitizeGhostPoint(value: unknown): GhostLapPoint | null {
@@ -103,10 +122,14 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
     colorName: raw.colorName === 'red' || raw.colorName === 'blue' || raw.colorName === 'yellow' ? raw.colorName : 'lime',
     accent: safeText(raw.accent, defaultGhostAccent, 32),
     source: safeSource(raw.source),
+    lapCount: safeLapCount(raw.lapCount),
     finishTimeMs,
     thirtyFootTimeMs: raw.thirtyFootTimeMs == null ? null : Math.max(0, Math.round(finiteNumber(raw.thirtyFootTimeMs, 0))),
     savedAt: Math.max(0, Math.round(finiteNumber(raw.savedAt, Date.now()))),
-    summary: raw.summary as RaceSummaryEntry,
+    analyticsPublic: Boolean(raw.analyticsPublic),
+    medalRank: raw.medalRank === 1 || raw.medalRank === 2 || raw.medalRank === 3 ? raw.medalRank : null,
+    summary: raw.summary && typeof raw.summary === 'object' ? raw.summary as RaceSummaryEntry : null,
+    zoneResults: sanitizeGhostZoneResults(raw.zoneResults),
     points: points.sort((left, right) => left.elapsedMs - right.elapsedMs),
   };
 }
@@ -145,7 +168,7 @@ export function mergeGhostLaps(currentGhosts: GhostLap[], incomingGhosts: GhostL
       if (
         !existing
         || ghost.finishTimeMs < existing.finishTimeMs
-        || (ghost.finishTimeMs === existing.finishTimeMs && ghost.savedAt > existing.savedAt)
+        || (ghost.finishTimeMs === existing.finishTimeMs && ghost.savedAt >= existing.savedAt)
       ) {
         byIdentity.set(key, ghost);
       }
@@ -154,7 +177,7 @@ export function mergeGhostLaps(currentGhosts: GhostLap[], incomingGhosts: GhostL
   return [...byIdentity.values()]
     .sort((left, right) => (
       left.trackId.localeCompare(right.trackId)
-      || routeKey(left.routeVariantId).localeCompare(routeKey(right.routeVariantId))
+      || routeKey(left.routeVariantId, left.lapCount).localeCompare(routeKey(right.routeVariantId, right.lapCount))
       || left.finishTimeMs - right.finishTimeMs
       || right.savedAt - left.savedAt
     ))
@@ -167,6 +190,8 @@ export function buildGhostLapFromRace(options: {
   trackId: string;
   trackName: string;
   routeVariantId?: TrackRouteVariantId;
+  lapCount?: number;
+  zoneResults?: RaceZoneResult[];
   ownerKey: string;
   ownerName: string;
   player?: PlayerSlot;
@@ -182,12 +207,13 @@ export function buildGhostLapFromRace(options: {
   }
 
   const savedAt = options.savedAt ?? Date.now();
+  const lapCount = safeLapCount(options.lapCount);
   const ghost: GhostLap = {
     version: 1,
     id: [
       'ghost',
       options.trackId,
-      routeKey(options.routeVariantId),
+      routeKey(options.routeVariantId, lapCount),
       options.ownerKey,
       riderKey(options.summary.riderName),
     ].join('-').replace(/[^a-zA-Z0-9:._-]/g, '-'),
@@ -200,20 +226,29 @@ export function buildGhostLapFromRace(options: {
     colorName: options.player?.colorName ?? options.summary.colorName,
     accent: options.player?.accent ?? options.summary.accent,
     source: 'personal',
+    lapCount,
     finishTimeMs,
     thirtyFootTimeMs: options.summary.thirtyFootTimeMs,
     savedAt,
+    analyticsPublic: false,
+    medalRank: null,
     summary: options.summary,
+    zoneResults: options.zoneResults ?? [],
     points,
   };
 
   return sanitizeGhostLap(ghost);
 }
 
-export function ghostsForTrackRoute(ghosts: GhostLap[], trackId: string, routeVariantId?: TrackRouteVariantId) {
-  const activeRouteKey = ghostRouteKey(trackId, routeVariantId);
+export function ghostsForTrackRoute(
+  ghosts: GhostLap[],
+  trackId: string,
+  routeVariantId?: TrackRouteVariantId,
+  lapCount = 1,
+) {
+  const activeRouteKey = ghostRouteKey(trackId, routeVariantId, lapCount);
   return ghosts
-    .filter((ghost) => ghostRouteKey(ghost.trackId, ghost.routeVariantId) === activeRouteKey)
+    .filter((ghost) => ghostRouteKey(ghost.trackId, ghost.routeVariantId, ghost.lapCount) === activeRouteKey)
     .sort((left, right) => {
       const sourceOrder = { personal: 0, friend: 1, top: 2 } satisfies Record<GhostLapSource, number>;
       return sourceOrder[left.source] - sourceOrder[right.source] || left.finishTimeMs - right.finishTimeMs;

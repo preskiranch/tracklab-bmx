@@ -751,6 +751,51 @@ function sanitizeGhostPoint(value) {
   };
 }
 
+function nullableGhostMetric(value) {
+  if (value == null) {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function sanitizeGhostZoneResult(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const zoneId = sanitizeText(value.zoneId, '', 140);
+  if (!zoneId || !Array.isArray(value.riders)) {
+    return null;
+  }
+
+  return {
+    zoneId,
+    zoneName: sanitizeText(value.zoneName, 'Pedal zone', 140),
+    zoneType: ['pedal', 'recovery', 'technical'].includes(value.zoneType) ? value.zoneType : 'pedal',
+    startMeter: Math.max(0, finiteNumber(value.startMeter, 0)),
+    endMeter: Math.max(0, finiteNumber(value.endMeter, 0)),
+    riders: value.riders.slice(0, 8).flatMap((rider) => {
+      if (!rider || typeof rider !== 'object') {
+        return [];
+      }
+      return [{
+        playerId: Math.max(1, Math.min(8, Math.round(finiteNumber(rider.playerId, 1)))),
+        sampleCount: Math.max(0, Math.round(finiteNumber(rider.sampleCount, 0))),
+        entryElapsedMs: nullableGhostMetric(rider.entryElapsedMs),
+        exitElapsedMs: nullableGhostMetric(rider.exitElapsedMs),
+        durationMs: nullableGhostMetric(rider.durationMs),
+        topSpeedKph: nullableGhostMetric(rider.topSpeedKph),
+        averageSpeedKph: nullableGhostMetric(rider.averageSpeedKph),
+        topCadence: nullableGhostMetric(rider.topCadence),
+        averageCadence: nullableGhostMetric(rider.averageCadence),
+        topWatts: nullableGhostMetric(rider.topWatts),
+        averageWatts: nullableGhostMetric(rider.averageWatts),
+      }];
+    }),
+  };
+}
+
 function sanitizeGhostLapPayload(value, profileKey) {
   if (!value || typeof value !== 'object') {
     return null;
@@ -762,6 +807,10 @@ function sanitizeGhostLapPayload(value, profileKey) {
   const finishTimeMs = Math.round(finiteNumber(value.finishTimeMs, Number.NaN));
   const points = Array.isArray(value.points)
     ? value.points.slice(0, 900).map(sanitizeGhostPoint).filter(Boolean).sort((left, right) => left.elapsedMs - right.elapsedMs)
+    : [];
+  const lapCount = Math.max(1, Math.min(20, Math.round(finiteNumber(value.lapCount, 1))));
+  const zoneResults = Array.isArray(value.zoneResults)
+    ? value.zoneResults.slice(0, 500).map(sanitizeGhostZoneResult).filter(Boolean)
     : [];
 
   if (!trackId || !ownerKey || !riderName || !Number.isFinite(finishTimeMs) || finishTimeMs <= 0 || points.length < 2) {
@@ -780,10 +829,14 @@ function sanitizeGhostLapPayload(value, profileKey) {
     colorName: ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime',
     accent: sanitizeText(value.accent, '#7ade36', 32),
     source: 'personal',
+    lapCount,
     finishTimeMs,
     thirtyFootTimeMs: value.thirtyFootTimeMs == null ? null : Math.max(0, Math.round(finiteNumber(value.thirtyFootTimeMs, 0))),
     savedAt: Math.max(0, Math.round(finiteNumber(value.savedAt, Date.now()))),
+    analyticsPublic: Boolean(value.analyticsPublic),
+    medalRank: null,
     summary: value.summary && typeof value.summary === 'object' ? value.summary : {},
+    zoneResults,
     points,
   };
 }

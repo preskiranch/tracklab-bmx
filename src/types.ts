@@ -6,7 +6,6 @@ export type SessionMode = 'sprint' | 'interval';
 export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
 export type MappingEditMode = 'navigate' | 'draw' | 'curve' | 'zones' | 'split';
-export type StartCadenceMode = 'countdown' | 'uci';
 export type MetricKey = 'cadence' | 'speed' | 'power' | 'reaction';
 export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
 
@@ -496,10 +495,14 @@ export type GhostLap = {
   colorName: PlayerSlot['colorName'];
   accent: string;
   source: GhostLapSource;
+  lapCount: number;
   finishTimeMs: number;
   thirtyFootTimeMs: number | null;
   savedAt: number;
-  summary: RaceSummaryEntry;
+  analyticsPublic: boolean;
+  medalRank: 1 | 2 | 3 | null;
+  summary: RaceSummaryEntry | null;
+  zoneResults: RaceZoneResult[];
   points: GhostLapPoint[];
 };
 
