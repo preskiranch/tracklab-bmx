@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest';
+import { ghostsForTrackRoute, sanitizeGhostLap } from '../../src/lib/ghosts';
+
+function rawGhost(lapCount: number, riderName = 'Studio Rider') {
+  return {
+    version: 1,
+    id: `ghost-${lapCount}-${riderName}`,
+    trackId: 'lasalle-loop',
+    trackName: 'La Salle University',
+    riderName,
+    ownerKey: 'user:studio',
+    ownerName: 'Studio',
+    colorName: 'lime',
+    accent: '#7ade36',
+    source: 'personal',
+    lapCount,
+    finishTimeMs: lapCount * 20_000,
+    thirtyFootTimeMs: 1_800,
+    savedAt: 1_000,
+    analyticsPublic: false,
+    medalRank: lapCount === 1 ? 1 : 2,
+    summary: null,
+    zoneResults: [],
+    points: [
+      { elapsedMs: 0, distanceMeters: 0, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+      { elapsedMs: lapCount * 20_000, distanceMeters: lapCount * 300, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+    ],
+  };
+}
+
+describe('ghost lap categories and privacy metadata', () => {
+  it('keeps one-lap and multi-lap records in separate race selections', () => {
+    const oneLap = sanitizeGhostLap(rawGhost(1));
+    const threeLaps = sanitizeGhostLap(rawGhost(3, 'Three Lap Rider'));
+    expect(oneLap).not.toBeNull();
+    expect(threeLaps).not.toBeNull();
+
+    const ghosts = [oneLap!, threeLaps!];
+    expect(ghostsForTrackRoute(ghosts, 'lasalle-loop', undefined, 1).map((ghost) => ghost.id)).toEqual([oneLap!.id]);
+    expect(ghostsForTrackRoute(ghosts, 'lasalle-loop', undefined, 3).map((ghost) => ghost.id)).toEqual([threeLaps!.id]);
+  });
+
+  it('defaults legacy ghosts to one lap with private analytics and no medal', () => {
+    const legacy = rawGhost(1) as Record<string, unknown>;
+    delete legacy.lapCount;
+    delete legacy.analyticsPublic;
+    delete legacy.medalRank;
+
+    expect(sanitizeGhostLap(legacy)).toMatchObject({
+      lapCount: 1,
+      analyticsPublic: false,
+      medalRank: null,
+    });
+  });
+});
