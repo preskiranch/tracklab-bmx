@@ -6044,9 +6044,7 @@ export default function App() {
                 <AnalyticsPanel
                   track={effectiveTrack}
                   players={racePlayers}
-                  riders={riders}
                   raceSummary={raceSummary}
-                  samplesByDevice={samplesByDevice}
                   selectedMetrics={selectedMetrics}
                   reactionTimesByPlayer={reactionTimesByPlayer}
                   leaderboardMetric={leaderboardMetric}

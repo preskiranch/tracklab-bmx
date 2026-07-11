@@ -546,6 +546,37 @@ test('completed race shows a populated 20-second pedal-zone review', async ({ pa
     fullPage: false,
     path: testInfo.outputPath('post-race-pedal-zone-review-tablet.png'),
   });
+
+  await review.getByRole('button', { name: 'Dashboard' }).click();
+  const dashboardAnalysis = page.locator('.analytics-panel');
+  const zoneTableCard = dashboardAnalysis.locator('.zone-table-card');
+  await expect(zoneTableCard).toBeVisible();
+  await expect(zoneTableCard.locator('thead th')).toHaveCount(6);
+  await expect(zoneTableCard.getByText('Reaction', { exact: false })).toHaveCount(0);
+
+  const riderCells = zoneTableCard.locator('tbody tr').first().locator('.zone-rider-metrics');
+  await expect(riderCells).toHaveCount(4);
+  for (let index = 0; index < 4; index += 1) {
+    const riderCell = riderCells.nth(index);
+    for (const metric of ['Max cadence', 'Max speed', 'Max power']) {
+      const value = riderCell.locator('.table-metric').filter({ hasText: metric }).locator('strong');
+      await expect(value).not.toHaveText('--');
+    }
+  }
+
+  const zoneTableFits = await zoneTableCard.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
+  expect(zoneTableFits).toBe(true);
+  const zoneCardBounds = await zoneTableCard.boundingBox();
+  const leaderboardBounds = await dashboardAnalysis.locator('.leaderboard-card').boundingBox();
+  expect(zoneCardBounds).not.toBeNull();
+  expect(leaderboardBounds).not.toBeNull();
+  expect(leaderboardBounds!.y).toBeGreaterThan(zoneCardBounds!.y + zoneCardBounds!.height);
+
+  await zoneTableCard.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('post-race-dashboard-zone-peaks.png'),
+  });
 });
 
 test('live race with mapped pedal zones stays active through UCI gate cadence', async ({ page }, testInfo) => {

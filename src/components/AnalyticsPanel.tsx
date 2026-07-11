@@ -1,8 +1,8 @@
-import type { CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { Activity, Download, Gauge, ListFilter, Timer, Trophy, Zap } from 'lucide-react';
+import { buildRaceZoneResults, zoneRiderResult } from '../lib/raceReview';
 import { formatDistanceRangeMeters, formatReactionTime, formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
-  BikeSample,
   DistanceUnit,
   LeaderboardMetric,
   MetricKey,
@@ -10,7 +10,6 @@ import type {
   RaceCapture,
   RaceSummaryEntry,
   ReactionTimesByPlayer,
-  RiderState,
   SpeedUnit,
   TrackRecord,
   TrackZone,
@@ -19,9 +18,7 @@ import type {
 type AnalyticsPanelProps = {
   track: TrackRecord;
   players: PlayerSlot[];
-  riders: RiderState[];
   raceSummary: RaceSummaryEntry[];
-  samplesByDevice: Map<number, BikeSample>;
   selectedMetrics: MetricKey[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
   leaderboardMetric: LeaderboardMetric;
@@ -47,22 +44,6 @@ const leaderboardLabels: Record<LeaderboardMetric, string> = {
   watts: 'Most Watts',
 };
 
-function sampleForPlayer(player: PlayerSlot, samplesByDevice: Map<number, BikeSample>) {
-  return player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
-}
-
-function zoneMultiplier(zone: TrackZone) {
-  if (zone.type === 'pedal') {
-    return 1.04;
-  }
-
-  if (zone.type === 'technical') {
-    return 0.92;
-  }
-
-  return 0.78;
-}
-
 function zoneTypeLabel(zone: TrackZone) {
   if (zone.type === 'recovery') {
     return 'Coast';
@@ -73,39 +54,6 @@ function zoneTypeLabel(zone: TrackZone) {
   }
 
   return 'Pedal Zone';
-}
-
-function metricValue(
-  metric: MetricKey,
-  zone: TrackZone,
-  sample: BikeSample | undefined,
-  rider: RiderState | undefined,
-  speedUnit: SpeedUnit,
-  reactionTimeMs: number | null | undefined,
-) {
-  const multiplier = zoneMultiplier(zone);
-
-  if (metric === 'reaction') {
-    return formatReactionTime(reactionTimeMs);
-  }
-
-  if (metric === 'cadence') {
-    const value = Math.round((sample?.cadence ?? 0) * multiplier);
-    return value > 0 ? `${value} RPM` : '--';
-  }
-
-  if (metric === 'power') {
-    const value = Math.round((sample?.watts ?? rider?.lastWatts ?? 0) * multiplier);
-    return value > 0 ? `${value} W` : '--';
-  }
-
-  const raceSpeedKph = rider && rider.velocity > 0 ? rider.velocity * 3.6 : null;
-  if (raceSpeedKph == null) {
-    return '--';
-  }
-
-  const adjustedKph = raceSpeedKph * multiplier;
-  return `${formatSpeedFromKph(adjustedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
 }
 
 function leaderboardValue(value: number, metric: LeaderboardMetric, speedUnit: SpeedUnit) {
@@ -195,9 +143,7 @@ function bestSplitTime(raceSummary: RaceSummaryEntry[]) {
 export function AnalyticsPanel({
   track,
   players,
-  riders,
   raceSummary,
-  samplesByDevice,
   selectedMetrics,
   reactionTimesByPlayer,
   leaderboardMetric,
@@ -214,6 +160,15 @@ export function AnalyticsPanel({
     : track.routeStatus === 'user-mapped'
       ? track.zones
       : [];
+  const zoneResults = useMemo(() => {
+    if (!raceCapture || raceCapture.status !== 'finished') {
+      return [];
+    }
+
+    return raceCapture.zoneResults?.length
+      ? raceCapture.zoneResults
+      : buildRaceZoneResults(raceCapture);
+  }, [raceCapture]);
   const showSpeedSummary = selectedMetrics.includes('speed');
   const showCadenceSummary = selectedMetrics.includes('cadence');
   const showPowerSummary = selectedMetrics.includes('power');
@@ -234,7 +189,7 @@ export function AnalyticsPanel({
             Zone-based summary
           </div>
           <h2>Post-race analysis</h2>
-          <p>Zone averages and peak outputs by rider.</p>
+          <p>Peak cadence, speed, and power by zone and rider.</p>
         </div>
         <div className="metric-summary">
           {selectedMetrics.map((metric) => {
@@ -384,17 +339,22 @@ export function AnalyticsPanel({
                   </td>
                   <td>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</td>
                   {players.map((player) => {
-                    const sample = sampleForPlayer(player, samplesByDevice);
-                    const rider = riders.find((item) => item.playerId === player.id);
-                    const reactionTime = reactionTimesByPlayer[player.id];
+                    const stats = zoneRiderResult(zoneResults, zone.id, player.id);
 
                     return (
-                      <td key={player.id}>
-                        {selectedMetrics.map((metric) => (
-                          <span className="table-metric" key={metric}>
-                            {metricMeta[metric].label}: {metricValue(metric, zone, sample, rider, speedUnit, reactionTime)}
-                          </span>
-                        ))}
+                      <td className="zone-rider-metrics" key={player.id}>
+                        <span className="table-metric">
+                          <small>Max cadence</small>
+                          <strong>{formatNullableMetric(stats?.topCadence ?? null, 'RPM')}</strong>
+                        </span>
+                        <span className="table-metric">
+                          <small>Max speed</small>
+                          <strong>{formatNullableSpeed(stats?.topSpeedKph ?? null, speedUnit)}</strong>
+                        </span>
+                        <span className="table-metric">
+                          <small>Max power</small>
+                          <strong>{formatNullableMetric(stats?.topWatts ?? null, 'W')}</strong>
+                        </span>
                       </td>
                     );
                   })}
