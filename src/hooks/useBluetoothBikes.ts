@@ -47,6 +47,7 @@ type BluetoothService = {
 
 type BluetoothServer = {
   connected: boolean;
+  disconnect?: () => void;
   getPrimaryService: (uuid: string) => Promise<BluetoothService>;
 };
 
@@ -457,7 +458,6 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       }
 
       connectedBrowserDeviceIdsRef.current.add(device.id);
-      setDeviceConnected(numericId, label, server.connected);
 
       const disconnectHandler = () => {
         connectedBrowserDeviceIdsRef.current.delete(device.id);
@@ -519,9 +519,11 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       }
 
       if (subscriptions === 0) {
+        server.disconnect?.();
         throw new Error('No FTMS, Cycling Power, or Cycling Speed/Cadence service was found on that Bluetooth device.');
       }
 
+      setDeviceConnected(numericId, label, server.connected);
       return true;
     } catch (connectError) {
       connectedBrowserDeviceIdsRef.current.delete(device.id);
@@ -617,7 +619,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
     } catch (connectError) {
       if (isBluetoothChooserCancel(connectError)) {
         setConnection('idle');
-        setError('Bluetooth pairing was cancelled. Click Connect Wattbike when the bike is ready, choose the Wattbike, then pedal in Just Ride.');
+        setError('Bluetooth pairing was cancelled. Click Pair Wattbike when the bike is ready, choose the Wattbike, then pedal in Just Ride.');
         return;
       }
 
@@ -633,14 +635,14 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
     const status = !supported
       ? unsupportedBluetoothMessage()
       : connection === 'connecting'
-        ? 'Reconnecting saved Wattbikes, or choose a Wattbike from the Bluetooth pairing prompt.'
+        ? 'Pairing with the selected Wattbike and verifying its live data service.'
         : error
           ? error
           : connectedCount > 0
             ? `${connectedCount} Bluetooth bike${connectedCount === 1 ? '' : 's'} live.`
             : connection === 'open'
-              ? 'Bluetooth is paired but no live Wattbike data is arriving. Put the bike in Just Ride and pedal, or reconnect it.'
-              : 'Bluetooth is ready. Saved bikes reconnect automatically; click Connect Wattbike only for first-time pairing.';
+              ? 'Wattbike paired and connected. Put it in Just Ride and pedal to confirm live data.'
+              : 'Bluetooth is ready. Saved bikes reconnect automatically; click Pair Wattbike only for first-time pairing.';
 
     return {
       connectBike,
