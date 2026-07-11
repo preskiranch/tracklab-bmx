@@ -72,6 +72,86 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBe(20);
   });
 
+  it('holds the exact entry speed throughout a coasting section', () => {
+    const zones: TrackZone[] = [{
+      id: 'pedal-1',
+      name: 'Pedal 1',
+      startMeter: 0,
+      endMeter: 10,
+      type: 'pedal',
+    }];
+    const entryVelocityMps = 25 * 0.44704;
+    let rider = {
+      ...createInitialRiders([player])[0],
+      distance: 20,
+      velocity: entryVelocityMps,
+    };
+
+    for (let frame = 0; frame < 12; frame += 1) {
+      rider = stepRiders(
+        [rider],
+        [player],
+        new Map([[58701, sample(10_000 + frame * 100)]]),
+        0.1,
+        9_000,
+        400,
+        {},
+        [],
+        zones,
+        10_000 + frame * 100,
+      )[0];
+      expect(rider.driveAllowed).toBe(false);
+      expect(rider.driveSource).toBe('blocked');
+      expect(rider.velocity).toBeCloseTo(entryVelocityMps, 10);
+    }
+
+    expect(rider.distance).toBeCloseTo(20 + entryVelocityMps * 1.2, 8);
+  });
+
+  it('enters the next pedal zone without losing the held coasting speed', () => {
+    const zones: TrackZone[] = [
+      {
+        id: 'pedal-1',
+        name: 'Pedal 1',
+        startMeter: 0,
+        endMeter: 10,
+        type: 'pedal',
+      },
+      {
+        id: 'pedal-2',
+        name: 'Pedal 2',
+        startMeter: 30,
+        endMeter: 60,
+        type: 'pedal',
+      },
+    ];
+    const entryVelocityMps = 25 * 0.44704;
+    const blockedRider = {
+      ...createInitialRiders([player])[0],
+      distance: 30,
+      velocity: entryVelocityMps,
+      driveAllowed: false,
+      driveSource: 'blocked' as const,
+    };
+
+    const resumedRider = stepRiders(
+      [blockedRider],
+      [player],
+      new Map([[58701, sample(10_000)]]),
+      0.1,
+      9_000,
+      400,
+      {},
+      [],
+      zones,
+      10_000,
+    )[0];
+
+    expect(resumedRider.driveAllowed).toBe(true);
+    expect(resumedRider.driveSource).toBe('coast');
+    expect(resumedRider.velocity).toBeCloseTo(entryVelocityMps, 10);
+  });
+
   it('treats a zero-valued finish timestamp as finished', () => {
     const riders = createInitialRiders([player]);
     riders[0] = { ...riders[0], finishedAt: 0, distance: 400 };

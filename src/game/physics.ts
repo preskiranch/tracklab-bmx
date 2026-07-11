@@ -255,7 +255,13 @@ export function stepRiders(
     const wattsAverage = rider.wattsAverage * 0.94 + watts * 0.06;
     const sprintSpike = watts > Math.max(260, wattsAverage + 135);
     const boost = Math.max(0, Math.min(1, rider.boost + (sprintSpike ? 0.22 : -0.7 * dt)));
-    const coastVelocity = coastVelocityMps(rider.velocity, dt);
+    // A mapped gap between pedal zones represents an obstacle/coasting section.
+    // Preserve the exact entry momentum there, and for the first frame back in a
+    // pedal zone, so drive resumes from the exit speed without a transition dip.
+    const preserveZoneMomentum = !driveAllowed || !rider.driveAllowed;
+    const coastVelocity = preserveZoneMomentum
+      ? rider.velocity
+      : coastVelocityMps(rider.velocity, dt);
     const cadenceVelocity = cadence > 0 ? Math.min(bmxVelocityMpsFromCadence(cadence), maxBmxRaceVelocityMps) : null;
     const powerVelocity = wattsFallbackVelocityMps(watts, coastVelocity);
     const speedVelocity = hasPedalingDrive && rawSpeedKph > 0

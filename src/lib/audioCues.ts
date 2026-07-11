@@ -4,6 +4,8 @@ type AudioWindow = Window & typeof globalThis & {
 
 let audioContext: AudioContext | null = null;
 let activeStartGateAudio: HTMLAudioElement | null = null;
+let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
+let uciVoiceBufferPromise: Promise<AudioBuffer | null> | null = null;
 
 export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
 export const uciVoiceWatchGateOffsetMs = 5300;
@@ -36,6 +38,23 @@ function getStartGateAudio() {
   }
 
   return activeStartGateAudio;
+}
+
+function loadUciVoiceBuffer(context: AudioContext) {
+  if (!uciVoiceBufferPromise) {
+    uciVoiceBufferPromise = fetch(uciRandomStartVoiceUrl)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`UCI cadence audio returned ${response.status}`);
+        }
+
+        return response.arrayBuffer();
+      })
+      .then((buffer) => context.decodeAudioData(buffer))
+      .catch(() => null);
+  }
+
+  return uciVoiceBufferPromise;
 }
 
 function resumeAudioContext() {
@@ -86,6 +105,7 @@ export function primeAudioCues() {
     gain.connect(context.destination);
     oscillator.start(now);
     oscillator.stop(now + 0.03);
+    void loadUciVoiceBuffer(context);
   }
 
   const audio = getStartGateAudio();
@@ -154,6 +174,16 @@ export function speakStartGatePhrase(text: string) {
 }
 
 export function stopStartGateAudio() {
+  if (activeStartGateBufferSource) {
+    try {
+      activeStartGateBufferSource.stop();
+    } catch {
+      // The source may already have ended.
+    }
+    activeStartGateBufferSource.disconnect();
+    activeStartGateBufferSource = null;
+  }
+
   if (activeStartGateAudio) {
     activeStartGateAudio.pause();
     activeStartGateAudio.currentTime = 0;
@@ -162,9 +192,28 @@ export function stopStartGateAudio() {
   window.speechSynthesis?.cancel();
 }
 
-export function playUciRandomStartVoice(timeoutMs = 8000): Promise<UciVoiceStartResult> {
+export async function playUciRandomStartVoice(timeoutMs = 8000): Promise<UciVoiceStartResult> {
   stopStartGateAudio();
-  resumeAudioContext();
+  const context = resumeAudioContext();
+
+  if (context && context.state !== 'closed') {
+    const voiceBuffer = await loadUciVoiceBuffer(context);
+    if (voiceBuffer) {
+      const source = context.createBufferSource();
+      source.buffer = voiceBuffer;
+      source.connect(context.destination);
+      source.addEventListener('ended', () => {
+        if (activeStartGateBufferSource === source) {
+          activeStartGateBufferSource = null;
+        }
+        source.disconnect();
+      }, { once: true });
+      activeStartGateBufferSource = source;
+      const startedAt = Date.now();
+      source.start();
+      return { startedAt, source: 'audio' };
+    }
+  }
 
   const audio = getStartGateAudio();
   audio.preload = 'auto';

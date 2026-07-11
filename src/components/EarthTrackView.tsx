@@ -50,6 +50,9 @@ type EarthTrackViewProps = {
   raceState: RaceState;
   raceViewFullscreen: boolean;
   startGateActive: boolean;
+  startGatePhase: 'idle' | 'staging' | 'cadence' | 'go';
+  startGateLabel: string;
+  startGateDetail: string;
   startGateLightIndex: 0 | 1 | 2 | 3 | null;
   reactionTimesByPlayer: ReactionTimesByPlayer;
   earthAngle: number;
@@ -127,6 +130,9 @@ export function EarthTrackView({
   raceState,
   raceViewFullscreen,
   startGateActive,
+  startGatePhase,
+  startGateLabel,
+  startGateDetail,
   startGateLightIndex,
   reactionTimesByPlayer,
   earthAngle,
@@ -289,7 +295,14 @@ export function EarthTrackView({
           <span>{activeZones.length} pedal zone{activeZones.length === 1 ? '' : 's'}</span>
         </div>
 
-        {raceViewFullscreen && startGateActive && (
+        {raceViewFullscreen && startGateActive && startGatePhase === 'staging' && (
+          <div className="race-staging-countdown" role="status" aria-live="polite">
+            <strong>{startGateLabel}</strong>
+            <span>{startGateDetail}</span>
+          </div>
+        )}
+
+        {raceViewFullscreen && startGateActive && startGatePhase !== 'staging' && (
           <StartTreeLight activeIndex={startGateLightIndex} />
         )}
 
