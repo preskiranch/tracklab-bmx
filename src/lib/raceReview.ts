@@ -119,9 +119,12 @@ function dedupePoints(points: RaceMetricPoint[]) {
 }
 
 function pointsForPlayer(capture: RaceCapture, playerId: PlayerSlot['id']) {
+  const samplePoints = pointsFromSamples(capture, playerId);
   const framePoints = pointsFromFrames(capture, playerId);
   const summary = capture.summary.find((entry) => entry.playerId === playerId);
-  const points = dedupePoints(framePoints.length >= 2 ? framePoints : pointsFromSamples(capture, playerId))
+  // Bike packets carry the authoritative cadence and power readings. Frames are
+  // a fallback for devices that emit too few packets to cover a complete race.
+  const points = dedupePoints(samplePoints.length >= 2 ? samplePoints : framePoints)
     .filter((point) => summary?.finishTimeMs == null || point.elapsedMs <= summary.finishTimeMs);
   if (points.length === 0) {
     return points;

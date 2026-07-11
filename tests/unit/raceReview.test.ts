@@ -223,4 +223,62 @@ describe('post-race pedal-zone results', () => {
     expect(result?.averageCadence).toBe(55);
     expect(result?.topWatts).toBe(480);
   });
+
+  it('associates authoritative bike packets with the zone occupied at that moment', () => {
+    const capture = baseCapture();
+    capture.players = [capture.players[0]];
+    capture.summary = [{ ...capture.summary[0], finishTimeMs: 4_800 }];
+    capture.zones = [
+      { id: 'zone-1', name: 'Pedal Zone 1', startMeter: 0, endMeter: 18, type: 'pedal', restAfterSeconds: 0 },
+      { id: 'zone-2', name: 'Pedal Zone 2', startMeter: 22, endMeter: 38, type: 'pedal', restAfterSeconds: 0 },
+      { id: 'zone-3', name: 'Pedal Zone 3', startMeter: 42, endMeter: 60, type: 'pedal', restAfterSeconds: 0 },
+    ];
+    capture.frames = [0, 10, 20, 30, 40, 50, 60].map((distanceMeters, index) => frame(
+      1_000 + index * 800,
+      [{ playerId: 1, distanceMeters, speedKph: 29.3, cadence: 115, watts: 0 }],
+    ));
+    capture.samples = [
+      [0, 50, 125, 1_000],
+      [10, 45, 120, 900],
+      [20, 40, 112, 800],
+      [30, 35, 105, 700],
+      [40, 30, 100, 600],
+      [50, 25, 90, 500],
+      [60, 20, 80, 400],
+    ].map(([distanceMeters, speedKph, cadence, watts], index): RaceCaptureSample => ({
+      at: 1_000 + index * 800,
+      elapsedMs: index * 800,
+      playerId: 1,
+      riderName: 'Rider 1',
+      deviceId: 58_701,
+      deviceLabel: 'Bike 58701',
+      source: 'bluetooth',
+      watts,
+      cadence,
+      speedKph,
+      signal: 90,
+      riderDistanceMeters: distanceMeters,
+      riderVelocityMps: speedKph / 3.6,
+      riderPhase: 'pedaling',
+      rank: 1,
+    }));
+
+    const results = buildRaceZoneResults(capture);
+    const firstZone = zoneRiderResult(results, 'zone-1', 1);
+    const middleZone = zoneRiderResult(results, 'zone-2', 1);
+    const finalZone = zoneRiderResult(results, 'zone-3', 1);
+
+    expect(firstZone).toMatchObject({
+      topCadence: 125,
+      topSpeedKph: 50,
+      topWatts: 1_000,
+    });
+    expect(middleZone?.topCadence).toBeLessThan(firstZone?.topCadence ?? 0);
+    expect(finalZone?.topCadence).toBeLessThan(middleZone?.topCadence ?? 0);
+    expect(middleZone?.topSpeedKph).toBeLessThan(firstZone?.topSpeedKph ?? 0);
+    expect(finalZone?.topSpeedKph).toBeLessThan(middleZone?.topSpeedKph ?? 0);
+    expect(middleZone?.topWatts).toBeLessThan(firstZone?.topWatts ?? 0);
+    expect(finalZone?.topWatts).toBeLessThan(middleZone?.topWatts ?? 0);
+    expect(results.every((zone) => (zone.riders[0]?.topWatts ?? 0) > 0)).toBe(true);
+  });
 });
