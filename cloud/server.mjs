@@ -163,6 +163,19 @@ function membershipForAccount(user) {
   };
 }
 
+function canPublishSharedTrackMappings(user) {
+  const allowRacerPublishing = process.env.TRACKLAB_ALLOW_RACER_MAP_PUBLISH === '1';
+  const membership = membershipForAccount(user);
+  return isAdminEmail(user?.email) || (allowRacerPublishing && membership.tier === 'racer');
+}
+
+function shouldPublishSharedTrackMapping(mapping) {
+  return mapping?.routeStatus === 'user-mapped'
+    && !mapping.trackId.startsWith('custom-')
+    && !mapping.trackId.startsWith('custom-preview-')
+    && mapping.country !== 'Custom Routes';
+}
+
 function publicAuthUser(user) {
   if (!user) {
     return null;
@@ -642,13 +655,17 @@ function sanitizePublicTrackMapping(value) {
   const lengthMeters = Math.max(1, finiteNumber(value.lengthMeters, primaryRoute.lengthMeters));
   const restAfterSeconds = Math.max(0, Math.min(30, finiteNumber(value.restAfterSeconds, primaryRoute.restAfterSeconds)));
   const splitSections = sanitizeSplitSections(value.splitSections ?? primaryRoute.splitSections);
+  const savedAtMs = Date.parse(value.savedAt ?? '');
+  const savedAt = Number.isFinite(savedAtMs) && savedAtMs <= Date.now() + 5 * 60 * 1000
+    ? new Date(savedAtMs).toISOString()
+    : new Date().toISOString();
   const mapping = {
     version: 1,
     trackId: sanitizeText(value.trackId, '', 140),
     trackName: sanitizeText(value.trackName, 'Mapped BMX track', 140),
     country: sanitizeText(value.country, 'Unknown', 80),
     state: sanitizeText(value.state, 'Unknown', 80),
-    savedAt: sanitizeText(value.savedAt, new Date().toISOString(), 40),
+    savedAt,
     routeStatus: 'user-mapped',
     restAfterSeconds,
     lengthMeters,
@@ -2296,9 +2313,7 @@ async function serveStatic(request, response) {
         return;
       }
 
-      const allowRacerPublishing = process.env.TRACKLAB_ALLOW_RACER_MAP_PUBLISH === '1';
-      const membership = membershipForAccount(session.user);
-      if (!isAdminEmail(session.user.email) && !(allowRacerPublishing && membership.tier === 'racer')) {
+      if (!canPublishSharedTrackMappings(session.user)) {
         writeJson(response, 403, { error: 'Only approved TrackLab publishers can update shared track maps.' });
         return;
       }
@@ -2319,6 +2334,47 @@ async function serveStatic(request, response) {
 
     response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ error: 'Method not allowed' }));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/user-data/track-mapping') {
+    if (request.method !== 'POST' && request.method !== 'PATCH') {
+      response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'Method not allowed' }));
+      return;
+    }
+
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, 5_000_000);
+    const trackMappings = sanitizePublicTrackMappingsPayload(payload);
+    const mapping = Object.values(trackMappings)[0];
+    if (!mapping) {
+      writeJson(response, 400, { error: 'A valid track mapping is required.' });
+      return;
+    }
+
+    const profileKey = authProfileKey(session.user);
+    const publish = canPublishSharedTrackMappings(session.user)
+      && shouldPublishSharedTrackMapping(mapping);
+    const saved = await persistence.saveUserTrackMapping(profileKey, mapping, {
+      publish,
+      publishedBy: profileKey,
+    });
+    if (!saved?.mapping) {
+      writeJson(response, 503, { error: 'Track mapping storage is temporarily unavailable.' });
+      return;
+    }
+
+    writeJson(response, 200, {
+      mapping: saved.mapping,
+      published: Boolean(saved.publicMapping),
+      publicMapping: saved.publicMapping,
+      persistence: persistence.persistenceEnabled(),
+    });
     return;
   }
 

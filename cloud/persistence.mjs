@@ -48,6 +48,21 @@ function cloneJson(value, fallback) {
   return fromJson(json(value ?? fallback), fallback);
 }
 
+function newestMappingBySavedAt(preferred, candidate) {
+  if (!preferred) {
+    return candidate;
+  }
+  if (!candidate) {
+    return preferred;
+  }
+
+  const preferredAt = Date.parse(preferred.savedAt ?? '');
+  const candidateAt = Date.parse(candidate.savedAt ?? '');
+  return (Number.isFinite(candidateAt) ? candidateAt : 0) > (Number.isFinite(preferredAt) ? preferredAt : 0)
+    ? candidate
+    : preferred;
+}
+
 function authEmailKey(email) {
   return String(email || '').trim().toLowerCase();
 }
@@ -903,6 +918,131 @@ export async function saveUserData(guestKey, patch) {
     customRoutes: fromJson(row.custom_routes, []),
     bikeProfiles: fromJson(row.bike_profiles, []),
   };
+}
+
+export async function saveUserTrackMapping(
+  guestKey,
+  mapping,
+  { publish = false, publishedBy = null } = {},
+) {
+  if (!mapping?.trackId) {
+    return null;
+  }
+
+  if (!pool) {
+    const current = await loadUserData(guestKey);
+    const savedMapping = newestMappingBySavedAt(current.trackMappings[mapping.trackId], mapping);
+    const next = {
+      ...current,
+      trackMappings: {
+        ...current.trackMappings,
+        [mapping.trackId]: savedMapping,
+      },
+    };
+    memoryUserDataByGuestKey.set(guestKey, cloneJson(next, next));
+    let publicMapping = null;
+    if (publish) {
+      publicMapping = newestMappingBySavedAt(publicTrackMappingsFallback.get(mapping.trackId), savedMapping);
+      publicTrackMappingsFallback.set(mapping.trackId, cloneJson(publicMapping, publicMapping));
+    }
+    return {
+      mapping: cloneJson(savedMapping, savedMapping),
+      publicMapping: publish ? cloneJson(publicMapping, publicMapping) : null,
+    };
+  }
+
+  const ready = await initPersistence();
+  if (!ready || !pool) {
+    return null;
+  }
+
+  let client = null;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const userResult = await client.query(
+      `INSERT INTO ${schema}.user_data AS target (
+         guest_key,
+         track_mappings,
+         custom_routes,
+         bike_profiles,
+         updated_at
+       )
+       VALUES ($1, jsonb_build_object($2::text, $3::jsonb), '[]'::jsonb, '[]'::jsonb, now())
+       ON CONFLICT (guest_key) DO UPDATE SET
+         track_mappings = CASE
+           WHEN COALESCE(target.track_mappings -> $2::text ->> 'savedAt', '')
+             <= COALESCE($3::jsonb ->> 'savedAt', '')
+           THEN COALESCE(target.track_mappings, '{}'::jsonb) || EXCLUDED.track_mappings
+           ELSE target.track_mappings
+         END,
+         updated_at = now()
+       RETURNING track_mappings`,
+      [guestKey, mapping.trackId, json(mapping)],
+    );
+    const savedMappings = fromJson(userResult.rows?.[0]?.track_mappings, {});
+    const savedMapping = savedMappings[mapping.trackId];
+    if (!savedMapping) {
+      throw new Error('Track mapping was not returned after save.');
+    }
+
+    let publicMapping = null;
+    if (publish) {
+      const publicResult = await client.query(
+      `INSERT INTO ${schema}.public_track_mappings AS target (
+           track_id,
+           track_name,
+           country,
+           state,
+           mapping,
+           published_by,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
+         ON CONFLICT (track_id) DO UPDATE SET
+           track_name = EXCLUDED.track_name,
+           country = EXCLUDED.country,
+           state = EXCLUDED.state,
+           mapping = EXCLUDED.mapping,
+           published_by = EXCLUDED.published_by,
+           updated_at = now()
+         WHERE COALESCE(target.mapping ->> 'savedAt', '')
+           <= COALESCE(EXCLUDED.mapping ->> 'savedAt', '')
+         RETURNING mapping`,
+        [
+          savedMapping.trackId,
+          savedMapping.trackName,
+          savedMapping.country,
+          savedMapping.state,
+          json(savedMapping),
+          publishedBy,
+        ],
+      );
+      publicMapping = fromJson(publicResult.rows?.[0]?.mapping, null);
+      if (!publicMapping) {
+        const existingPublic = await client.query(
+          `SELECT mapping FROM ${schema}.public_track_mappings WHERE track_id = $1`,
+          [savedMapping.trackId],
+        );
+        publicMapping = fromJson(existingPublic.rows?.[0]?.mapping, savedMapping);
+      }
+    }
+
+    await client.query('COMMIT');
+    if (publish && publicMapping) {
+      publicTrackMappingsFallback.set(savedMapping.trackId, cloneJson(publicMapping, publicMapping));
+    }
+    return {
+      mapping: savedMapping,
+      publicMapping: publish ? publicMapping : null,
+    };
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => {});
+    console.warn('[cloud] atomic track mapping save failed:', error instanceof Error ? error.message : error);
+    return null;
+  } finally {
+    client?.release();
+  }
 }
 
 export async function loadPublicTrackMappings() {

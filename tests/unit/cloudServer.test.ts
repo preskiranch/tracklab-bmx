@@ -19,7 +19,7 @@ async function availablePort() {
 }
 
 async function waitForHealth() {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`${baseUrl}/api/health`);
@@ -46,6 +46,35 @@ function api(pathname: string, init: RequestInit = {}) {
   });
 }
 
+function trackMapping(trackId: string) {
+  const startGate = { lat: 38.244, lng: -122.283 };
+  const finishLine = { lat: 38.245, lng: -122.282 };
+  return {
+    version: 1,
+    trackId,
+    trackName: 'North Bay BMX - Napa Valley',
+    country: 'United States',
+    state: 'California',
+    savedAt: new Date().toISOString(),
+    routeStatus: 'user-mapped',
+    restAfterSeconds: 1,
+    lengthMeters: 320,
+    centerline: [startGate, finishLine],
+    startGate,
+    finishLine,
+    zoneBoundaryMeters: [0, 45],
+    zones: [{
+      id: 'pedal-zone-1',
+      name: 'Pedal Zone 1',
+      startMeter: 0,
+      endMeter: 45,
+      type: 'pedal',
+      restAfterSeconds: 1,
+    }],
+    splitSections: [],
+  };
+}
+
 beforeAll(async () => {
   const port = await availablePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -61,7 +90,7 @@ beforeAll(async () => {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   await waitForHealth();
-});
+}, 35_000);
 
 afterAll(async () => {
   if (!child || child.exitCode != null) {
@@ -91,6 +120,12 @@ describe('cloud API trust boundaries', () => {
   it('requires authentication for profile data', async () => {
     const response = await fetch(`${baseUrl}/api/user-data`);
     expect(response.status).toBe(401);
+
+    const mappingSave = await fetch(`${baseUrl}/api/user-data/track-mapping`, {
+      method: 'POST',
+      headers: { Origin: baseUrl },
+    });
+    expect(mappingSave.status).toBe(401);
   });
 
   it('keeps profile reads and writes bound to the authenticated account', async () => {
@@ -127,6 +162,60 @@ describe('cloud API trust boundaries', () => {
       body: JSON.stringify({ billingState: 'forged-checkout-state' }),
     });
     expect(billing.status).toBe(400);
+  });
+
+  it('saves one account mapping atomically and only publishes approved accounts', async () => {
+    const privateMapping = trackMapping('private-north-bay-map');
+    const privateSave = await api('/api/user-data/track-mapping', {
+      method: 'POST',
+      body: JSON.stringify({ mapping: privateMapping }),
+    });
+    expect(privateSave.status).toBe(200);
+    await expect(privateSave.json()).resolves.toMatchObject({
+      mapping: { trackId: privateMapping.trackId, zones: [{ startMeter: 0, endMeter: 45 }] },
+      published: false,
+      publicMapping: null,
+    });
+
+    const privateProfile = await api('/api/user-data');
+    await expect(privateProfile.json()).resolves.toMatchObject({
+      trackMappings: {
+        [privateMapping.trackId]: { trackId: privateMapping.trackId },
+      },
+    });
+    const publicBeforeAdmin = await api('/api/public-track-mappings');
+    const publicBeforePayload = await publicBeforeAdmin.json() as { trackMappings: Record<string, unknown> };
+    expect(publicBeforePayload.trackMappings[privateMapping.trackId]).toBeUndefined();
+
+    const adminRegistration = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'TrackLab Admin',
+        email: 'admin-only@tracklab.test',
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(adminRegistration.status).toBe(201);
+    cookie = String(adminRegistration.headers.get('set-cookie')).split(';')[0];
+
+    const sharedMapping = trackMapping('shared-north-bay-map');
+    const sharedSave = await api('/api/user-data/track-mapping', {
+      method: 'POST',
+      body: JSON.stringify({ mapping: sharedMapping }),
+    });
+    expect(sharedSave.status).toBe(200);
+    await expect(sharedSave.json()).resolves.toMatchObject({
+      mapping: { trackId: sharedMapping.trackId },
+      published: true,
+      publicMapping: { trackId: sharedMapping.trackId },
+    });
+
+    const publicAfterAdmin = await api('/api/public-track-mappings');
+    await expect(publicAfterAdmin.json()).resolves.toMatchObject({
+      trackMappings: {
+        [sharedMapping.trackId]: { trackId: sharedMapping.trackId },
+      },
+    });
   });
 
   it('rejects cross-site mutations and does not cache mutable manifests immutably', async () => {

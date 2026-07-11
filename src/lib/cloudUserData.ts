@@ -1,4 +1,4 @@
-import type { BikeProfile, TrackRecord } from '../types';
+import type { BikeProfile, TrackRecord, UserTrackMapping } from '../types';
 import type { StoredTrackMappings } from './trackMapping';
 import { createPatchBatcher } from './patchBatcher';
 
@@ -9,6 +9,12 @@ export type CloudUserData = {
 };
 
 export type CloudUserDataPatch = Partial<CloudUserData>;
+
+export type CloudTrackMappingSaveResult = {
+  mapping: UserTrackMapping;
+  published: boolean;
+  publicMapping: UserTrackMapping | null;
+};
 
 const emptyCloudUserData: CloudUserData = {
   trackMappings: {},
@@ -31,6 +37,7 @@ function normalizeCloudUserData(value: Partial<CloudUserData> | null | undefined
 
 export async function readCloudUserData(profileKey: string): Promise<CloudUserData> {
   const response = await fetch(userDataUrl(profileKey), {
+    cache: 'no-store',
     headers: { Accept: 'application/json' },
   });
 
@@ -58,6 +65,33 @@ export async function patchCloudUserData(profileKey: string, patch: CloudUserDat
 
   const payload = await response.json() as Partial<CloudUserData>;
   return normalizeCloudUserData(payload);
+}
+
+export async function saveCloudTrackMapping(mapping: UserTrackMapping): Promise<CloudTrackMappingSaveResult> {
+  const response = await fetch('/api/user-data/track-mapping', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ mapping }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(payload?.error || `Track map save returned ${response.status}`);
+  }
+
+  const payload = await response.json() as Partial<CloudTrackMappingSaveResult>;
+  if (!payload.mapping?.trackId) {
+    throw new Error('Track map save returned an invalid response.');
+  }
+
+  return {
+    mapping: payload.mapping,
+    published: Boolean(payload.published),
+    publicMapping: payload.publicMapping?.trackId ? payload.publicMapping : null,
+  };
 }
 
 const cloudPatchBatchers = new Map<string, ReturnType<typeof createPatchBatcher<CloudUserDataPatch, CloudUserData>>>();

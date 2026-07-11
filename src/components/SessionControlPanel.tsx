@@ -124,6 +124,8 @@ type SessionControlPanelProps = {
   draftSplitBuilderStatus: string;
   canSaveDraftSplit: boolean;
   hasSavedMapping: boolean;
+  mappingSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  mappingSaveMessage: string | null;
   mappingRestSeconds: number;
   startCadenceMode: StartCadenceMode;
   countdownSeconds: number;
@@ -244,6 +246,8 @@ export function SessionControlPanel({
   draftSplitBuilderStatus,
   canSaveDraftSplit,
   hasSavedMapping,
+  mappingSaveStatus,
+  mappingSaveMessage,
   mappingRestSeconds,
   startCadenceMode,
   countdownSeconds,
@@ -852,11 +856,21 @@ export function SessionControlPanel({
                     <Trash2 size={15} />
                     Clear
                   </button>
-                  <button type="button" onClick={onMappingSave} disabled={!canSaveMapping}>
+                  <button
+                    type="button"
+                    onClick={onMappingSave}
+                    disabled={!canSaveMapping || mappingSaveStatus === 'saving'}
+                  >
                     <Save size={15} />
-                    Save
+                    {mappingSaveStatus === 'saving' ? 'Saving' : 'Save'}
                   </button>
                 </div>
+
+                {mappingSaveMessage && (
+                  <p className="mapping-hint" role="status" aria-live="polite">
+                    {mappingSaveMessage}
+                  </p>
+                )}
 
                 <button
                   className="mapping-fullscreen-button"

@@ -55,7 +55,9 @@ import {
   createUserTrackMapping,
   defaultZoneBoundarySetId,
   distanceBetweenTrackPoints,
+  mergeTrackMappingsBySavedAt,
   nearestRouteMeter,
+  newestTrackMapping,
   parseUserTrackMapping,
   pointAtRouteMeter,
   draftRouteFromMapping,
@@ -85,7 +87,7 @@ import {
   type PlacePredictionOption,
 } from './lib/googleMaps';
 import { queueBridgeUserDataPatch, readBridgeUserData } from './lib/localBridgeStore';
-import { queueCloudUserDataPatch, readCloudUserData } from './lib/cloudUserData';
+import { queueCloudUserDataPatch, readCloudUserData, saveCloudTrackMapping } from './lib/cloudUserData';
 import {
   buildGhostLapFromRace,
   ghostsForTrackRoute,
@@ -96,7 +98,7 @@ import {
   syncGhostLapToCloud,
   writeStoredGhostLaps,
 } from './lib/ghosts';
-import { publishPublicTrackMappings, readPublicTrackMappings } from './lib/publicTrackMappings';
+import { readPublicTrackMappings } from './lib/publicTrackMappings';
 import {
   claimBillingReturn,
   loginAuthUser,
@@ -1297,35 +1299,8 @@ function formatRouteLocationError(error: unknown) {
   return message;
 }
 
-function shouldPublishPublicTrackMapping(mapping: UserTrackMapping) {
-  return mapping.routeStatus === 'user-mapped'
-    && !mapping.trackId.startsWith('custom-')
-    && !mapping.trackId.startsWith('custom-preview-')
-    && mapping.country !== 'Custom Routes';
-}
-
 function isValidAccountEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeAccountEmail(email));
-}
-
-function publishablePublicTrackMappings(mappings: StoredTrackMappings) {
-  return Object.fromEntries(
-    Object.entries(mappings).filter(([, mapping]) => shouldPublishPublicTrackMapping(mapping)),
-  );
-}
-
-function publicTrackMappingsSignature(mappings: StoredTrackMappings) {
-  return Object.values(mappings)
-    .sort((a, b) => a.trackId.localeCompare(b.trackId))
-    .map((mapping) => [
-      mapping.trackId,
-      mapping.savedAt,
-      mapping.lengthMeters,
-      mapping.centerline.length,
-      mapping.zones.length,
-      mapping.routeVariants?.map((variant) => `${variant.id}:${variant.lengthMeters}:${variant.centerline.length}:${variant.zones.length}`).join(',') ?? '',
-    ].join(':'))
-    .join('|');
 }
 
 export default function App() {
@@ -1344,7 +1319,7 @@ export default function App() {
   const bridgeUserDataLoadedRef = useRef(false);
   const cloudUserDataLoadedKeyRef = useRef<string | null>(null);
   const cloudUserDataAvailableRef = useRef(false);
-  const lastPublicMappingsPublishSignatureRef = useRef('');
+  const mappingBackfillProfileRef = useRef<string | null>(null);
   const roomTrackApplyRef = useRef<string | null>(null);
   const lastRoomRaceTokenRef = useRef<string | null>(null);
   const roomRaceStartTimeoutRef = useRef<number | null>(null);
@@ -1367,8 +1342,10 @@ export default function App() {
   const [catalogDatabaseReady, setCatalogDatabaseReady] = useState(false);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(initialCustomRoutes);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
+  const storedMappingsRef = useRef(storedMappings);
   const [publicTrackMappings, setPublicTrackMappings] = useState<StoredTrackMappings>({});
-  const [publicTrackMappingsLoaded, setPublicTrackMappingsLoaded] = useState(false);
+  const [mappingSaveStatus, setMappingSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [mappingSaveMessage, setMappingSaveMessage] = useState<string | null>(null);
   const [mappingMode, setMappingMode] = useState(false);
   const [mappingFullscreen, setMappingFullscreen] = useState(false);
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
@@ -1483,6 +1460,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    storedMappingsRef.current = storedMappings;
+  }, [storedMappings]);
+
+  useEffect(() => {
     let cancelled = false;
     setAuthStatus('loading');
 
@@ -1556,25 +1537,41 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let loading = false;
 
-    readPublicTrackMappings()
-      .then((mappings) => {
-        if (cancelled) {
-          return;
-        }
+    const refreshPublicMappings = () => {
+      if (loading || cancelled) {
+        return;
+      }
 
-        setPublicTrackMappings(mappings);
-        setPublicTrackMappingsLoaded(true);
-      })
-      .catch((error: Error) => {
-        console.warn(`Could not load public track mappings: ${error.message}`);
-        if (!cancelled) {
-          setPublicTrackMappingsLoaded(true);
-        }
-      });
+      loading = true;
+      void readPublicTrackMappings()
+        .then((mappings) => {
+          if (!cancelled) {
+            setPublicTrackMappings((current) => mergeTrackMappingsBySavedAt(current, mappings));
+          }
+        })
+        .catch((error: Error) => {
+          console.warn(`Could not load public track mappings: ${error.message}`);
+        })
+        .finally(() => {
+          loading = false;
+        });
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshPublicMappings();
+      }
+    };
+
+    refreshPublicMappings();
+    window.addEventListener('focus', refreshPublicMappings);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
 
     return () => {
       cancelled = true;
+      window.removeEventListener('focus', refreshPublicMappings);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, []);
 
@@ -1712,7 +1709,14 @@ export default function App() {
   useEffect(() => {
     selectedTrackIdRef.current = selectedTrack.id;
   }, [selectedTrack.id]);
-  const selectedTrackMapping = storedMappings[selectedTrack.id] ?? publicTrackMappings[selectedTrack.id];
+  useEffect(() => {
+    setMappingSaveStatus('idle');
+    setMappingSaveMessage(null);
+  }, [selectedTrack.id]);
+  const selectedTrackMapping = newestTrackMapping(
+    storedMappings[selectedTrack.id],
+    publicTrackMappings[selectedTrack.id],
+  );
   const selectedRouteVariants = useMemo(
     () => (selectedTrackMapping ? routeVariantsFromMapping(selectedTrackMapping) : []),
     [selectedTrackMapping],
@@ -1782,7 +1786,7 @@ export default function App() {
   }, [effectiveTrack.centerline, effectiveTrack.lengthMeters, effectiveTrack.splitSections]);
   const multiplayerVoteCandidates = useMemo<MultiplayerTrackVoteCandidate[]>(() => {
     return catalogTracks.flatMap((track) => {
-      const mapping = storedMappings[track.id] ?? publicTrackMappings[track.id];
+      const mapping = newestTrackMapping(storedMappings[track.id], publicTrackMappings[track.id]);
       if (!mapping || mapping.centerline.length < 2) {
         return [];
       }
@@ -2808,7 +2812,7 @@ export default function App() {
         }
 
         setStoredMappings((current) => {
-          const next = { ...current, ...data.trackMappings };
+          const next = mergeTrackMappingsBySavedAt(current, data.trackMappings);
           writeStoredTrackMappings(next);
           return next;
         });
@@ -2838,45 +2842,108 @@ export default function App() {
     }
 
     let cancelled = false;
+    let loading = false;
     cloudUserDataLoadedKeyRef.current = null;
     cloudUserDataAvailableRef.current = false;
     setCloudUserDataStatus('loading');
     setCloudUserDataMessage('Loading cloud profile data.');
 
-    readCloudUserData(cloudProfileKey)
-      .then((data) => {
-        if (cancelled) {
-          return;
-        }
+    const refreshCloudUserData = () => {
+      if (loading || cancelled) {
+        return;
+      }
 
-        setStoredMappings((current) => {
-          const next = { ...current, ...data.trackMappings };
-          writeStoredTrackMappings(next);
-          return next;
+      loading = true;
+      void readCloudUserData(cloudProfileKey)
+        .then((data) => {
+          if (cancelled) {
+            return;
+          }
+
+          setStoredMappings((current) => {
+            const next = mergeTrackMappingsBySavedAt(current, data.trackMappings);
+            writeStoredTrackMappings(next);
+            return next;
+          });
+          setCustomRoutes((current) => {
+            const next = mergeCustomRoutes(current, data.customRoutes);
+            writeStoredCustomRoutes(next);
+            return next;
+          });
+          setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
+          cloudUserDataAvailableRef.current = true;
+          cloudUserDataLoadedKeyRef.current = cloudProfileKey;
+          setCloudUserDataStatus('online');
+          setCloudUserDataMessage('Bike names, custom routes, and track maps are syncing to this profile.');
+
+          if (authUser && mappingBackfillProfileRef.current !== cloudProfileKey) {
+            mappingBackfillProfileRef.current = cloudProfileKey;
+            const unsyncedMappings = Object.values(storedMappingsRef.current).filter((localMapping) => {
+              const cloudMapping = data.trackMappings[localMapping.trackId];
+              return newestTrackMapping(cloudMapping, localMapping) === localMapping
+                && localMapping.savedAt !== cloudMapping?.savedAt;
+            });
+
+            if (unsyncedMappings.length > 0) {
+              void Promise.allSettled(unsyncedMappings.map(saveCloudTrackMapping)).then((results) => {
+                if (cancelled) {
+                  return;
+                }
+
+                const savedMappings: StoredTrackMappings = {};
+                const publishedMappings: StoredTrackMappings = {};
+                results.forEach((result) => {
+                  if (result.status !== 'fulfilled') {
+                    return;
+                  }
+                  savedMappings[result.value.mapping.trackId] = result.value.mapping;
+                  if (result.value.publicMapping) {
+                    publishedMappings[result.value.publicMapping.trackId] = result.value.publicMapping;
+                  }
+                });
+                if (Object.keys(savedMappings).length > 0) {
+                  setStoredMappings((current) => mergeTrackMappingsBySavedAt(current, savedMappings));
+                  setPublicTrackMappings((current) => mergeTrackMappingsBySavedAt(current, publishedMappings));
+                  setCloudUserDataMessage(
+                    `Recovered ${Object.keys(savedMappings).length} newer local track map${Object.keys(savedMappings).length === 1 ? '' : 's'} to this profile.`,
+                  );
+                }
+                if (results.every((result) => result.status === 'rejected')) {
+                  mappingBackfillProfileRef.current = null;
+                }
+              });
+            }
+          }
+        })
+        .catch((error: Error) => {
+          console.warn(`Could not load TrackLab cloud user data: ${error.message}`);
+          if (!cancelled) {
+            cloudUserDataAvailableRef.current = false;
+            cloudUserDataLoadedKeyRef.current = cloudProfileKey;
+            setCloudUserDataStatus('offline');
+            setCloudUserDataMessage(`Cloud profile unavailable. Local browser storage is still active. ${error.message}`);
+          }
+        })
+        .finally(() => {
+          loading = false;
         });
-        setCustomRoutes((current) => {
-          const next = mergeCustomRoutes(current, data.customRoutes);
-          writeStoredCustomRoutes(next);
-          return next;
-        });
-        setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
-        cloudUserDataAvailableRef.current = true;
-        cloudUserDataLoadedKeyRef.current = cloudProfileKey;
-        setCloudUserDataStatus('online');
-        setCloudUserDataMessage('Bike names, custom routes, and track maps are syncing to this profile.');
-      })
-      .catch((error: Error) => {
-        console.warn(`Could not load TrackLab cloud user data: ${error.message}`);
-        cloudUserDataAvailableRef.current = false;
-        cloudUserDataLoadedKeyRef.current = cloudProfileKey;
-        setCloudUserDataStatus('offline');
-        setCloudUserDataMessage(`Cloud profile unavailable. Local browser storage is still active. ${error.message}`);
-      });
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshCloudUserData();
+      }
+    };
+
+    refreshCloudUserData();
+    window.addEventListener('focus', refreshCloudUserData);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
 
     return () => {
       cancelled = true;
+      window.removeEventListener('focus', refreshCloudUserData);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [cloudProfileKey]);
+  }, [authUser, cloudProfileKey]);
 
   useEffect(() => {
     writeStoredBikeProfiles(bikeProfiles);
@@ -2951,59 +3018,13 @@ export default function App() {
   useEffect(() => {
     writeStoredTrackMappings(storedMappings);
     if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
-      if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-        void queueCloudUserDataPatch(cloudProfileKey, { trackMappings: storedMappings })
-          .then(() => {
-            setCloudUserDataStatus('online');
-            setCloudUserDataMessage('Track mappings saved to this cloud profile.');
-          })
-          .catch((error: Error) => {
-            setCloudUserDataStatus('offline');
-            setCloudUserDataMessage(`Could not save track maps to cloud. ${error.message}`);
-            console.warn(`Could not save track mappings to TrackLab cloud: ${error.message}`);
-          });
-      }
       return;
     }
 
     void queueBridgeUserDataPatch({ trackMappings: storedMappings }).catch((error: Error) => {
       console.warn(`Could not save track mappings to TrackLab bridge: ${error.message}`);
     });
-    if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
-      void queueCloudUserDataPatch(cloudProfileKey, { trackMappings: storedMappings })
-        .then(() => {
-          setCloudUserDataStatus('online');
-          setCloudUserDataMessage('Track mappings saved to this cloud profile.');
-        })
-        .catch((error: Error) => {
-          setCloudUserDataStatus('offline');
-          setCloudUserDataMessage(`Could not save track maps to cloud. ${error.message}`);
-          console.warn(`Could not save track mappings to TrackLab cloud: ${error.message}`);
-        });
-    }
-  }, [bridge.connection, cloudProfileKey, storedMappings]);
-
-  useEffect(() => {
-    if (!publicTrackMappingsLoaded) {
-      return;
-    }
-
-    const publishableMappings = publishablePublicTrackMappings(storedMappings);
-    const signature = publicTrackMappingsSignature(publishableMappings);
-    if (!signature || signature === lastPublicMappingsPublishSignatureRef.current) {
-      return;
-    }
-
-    lastPublicMappingsPublishSignatureRef.current = signature;
-    void publishPublicTrackMappings(publishableMappings, cloudProfileKey)
-      .then((mappings) => {
-        setPublicTrackMappings(mappings);
-      })
-      .catch((error: Error) => {
-        lastPublicMappingsPublishSignatureRef.current = '';
-        console.warn(`Could not publish public track mappings: ${error.message}`);
-      });
-  }, [cloudProfileKey, publicTrackMappingsLoaded, storedMappings]);
+  }, [bridge.connection, storedMappings]);
 
   useEffect(() => {
     window.localStorage.setItem(speedUnitStorageKey, speedUnit);
@@ -4225,6 +4246,51 @@ export default function App() {
     setMappingRestSeconds(safeSeconds);
   };
 
+  const persistTrackMapping = async (mapping: UserTrackMapping) => {
+    if (!authUser) {
+      setMappingSaveStatus('error');
+      setMappingSaveMessage('Saved on this device only. Sign in to sync this track map across browsers.');
+      return;
+    }
+
+    setMappingSaveStatus('saving');
+    setMappingSaveMessage('Saving this track map to your account.');
+    try {
+      const saved = await saveCloudTrackMapping(mapping);
+      setStoredMappings((current) => {
+        const next = {
+          ...current,
+          [saved.mapping.trackId]: saved.mapping,
+        };
+        writeStoredTrackMappings(next);
+        return next;
+      });
+      if (saved.publicMapping) {
+        setPublicTrackMappings((current) => ({
+          ...current,
+          [saved.publicMapping!.trackId]: saved.publicMapping!,
+        }));
+      }
+      cloudUserDataAvailableRef.current = true;
+      cloudUserDataLoadedKeyRef.current = cloudProfileKey;
+      setCloudUserDataStatus('online');
+      setCloudUserDataMessage(saved.published
+        ? 'Track map saved to your profile and published to the shared catalog.'
+        : 'Track map saved to your profile for use on every signed-in device.');
+      setMappingSaveStatus('saved');
+      setMappingSaveMessage(saved.published
+        ? 'Saved and published across browsers.'
+        : 'Saved to your account across browsers.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCloudUserDataStatus('offline');
+      setCloudUserDataMessage(`Could not save this track map to the cloud. ${message}`);
+      setMappingSaveStatus('error');
+      setMappingSaveMessage(`Cloud save failed. This browser still has a local copy. ${message}`);
+      console.warn(`Could not save track mapping to TrackLab cloud: ${message}`);
+    }
+  };
+
   const saveMapping = () => {
     if (draftPoints.length < 2) {
       return;
@@ -4260,6 +4326,7 @@ export default function App() {
       writeStoredTrackMappings(next);
       return next;
     });
+    void persistTrackMapping(mapping);
     if (completedDraftSplit) {
       setDraftSplitSections((current) => [...current, completedDraftSplit]);
       setDraftSplitBuilder(null);
@@ -4298,12 +4365,16 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const mapping = parseUserTrackMapping(String(reader.result ?? ''));
+        const mapping = {
+          ...parseUserTrackMapping(String(reader.result ?? '')),
+          savedAt: new Date().toISOString(),
+        };
         setStoredMappings((current) => {
           const next = { ...current, [mapping.trackId]: mapping };
           writeStoredTrackMappings(next);
           return next;
         });
+        void persistTrackMapping(mapping);
 
         const importedTrack = catalogTracks.find((track) => track.id === mapping.trackId);
         if (importedTrack) {
@@ -6003,6 +6074,8 @@ export default function App() {
                 draftSplitBuilderStatus={draftSplitBuilderStatus}
                 canSaveDraftSplit={canSaveDraftSplit}
                 hasSavedMapping={Boolean(selectedTrackMapping)}
+                mappingSaveStatus={mappingSaveStatus}
+                mappingSaveMessage={mappingSaveMessage}
                 mappingRestSeconds={mappingRestSeconds}
                 startCadenceMode={startCadenceMode}
                 countdownSeconds={countdownSeconds}
