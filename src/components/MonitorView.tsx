@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Bike, Gauge, RadioTower, Signal, Zap } from 'lucide-react';
 import { liveBikeTimeoutMs } from '../data';
+import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type { BikeSample, PlayerSlot, SpeedUnit } from '../types';
 
@@ -51,20 +52,19 @@ function metricIsFresh(sample: BikeSample | undefined, metricAt: number | undefi
   return now - (metricAt ?? sample.at) <= liveBikeTimeoutMs;
 }
 
-function monitorMetrics(sample: BikeSample | undefined, now = Date.now()): MonitorMetrics {
+export function monitorMetrics(sample: BikeSample | undefined, now = Date.now()): MonitorMetrics {
   const wattsFresh = metricIsFresh(sample, sample?.wattsAt, now);
   const cadenceFresh = metricIsFresh(sample, sample?.cadenceAt, now);
-  const speedFresh = metricIsFresh(sample, sample?.speedAt, now);
   const watts = wattsFresh ? sample?.watts ?? 0 : 0;
   const cadence = cadenceFresh ? sample?.cadence ?? 0 : 0;
-  const rawSpeedKph = speedFresh ? sample?.speedKph ?? 0 : 0;
-  const idleNoise = watts <= 10 && cadence <= 15 && rawSpeedKph <= 5;
+  const bmxSpeedKph = bmxSpeedKphFromCadence(cadence);
+  const idleNoise = watts <= 10 && cadence <= 15;
 
   return {
     live: metricIsFresh(sample, sample?.at),
     watts: idleNoise ? 0 : watts,
     cadence: idleNoise ? 0 : cadence,
-    speedKph: idleNoise ? 0 : rawSpeedKph,
+    speedKph: idleNoise ? 0 : bmxSpeedKph,
   };
 }
 
