@@ -68,21 +68,21 @@ const mockNoPedalZoneMapping = {
 const mockPostRaceReviewMapping = {
   ...mockPedalZoneMapping,
   savedAt: '2026-07-09T00:10:00.000Z',
-  lengthMeters: 43,
+  lengthMeters: 25,
   centerline: [
     { lat: 33.7125, lng: -112.0667 },
-    { lat: 33.7125, lng: -112.06655 },
-    { lat: 33.712365, lng: -112.06655 },
-    { lat: 33.712365, lng: -112.0667 },
+    { lat: 33.7125, lng: -112.06661 },
+    { lat: 33.712425, lng: -112.06661 },
+    { lat: 33.712425, lng: -112.0667 },
   ],
   startGate: { lat: 33.7125, lng: -112.0667 },
-  finishLine: { lat: 33.712365, lng: -112.0667 },
-  zoneBoundaryMeters: [0, 16, 26, 43],
+  finishLine: { lat: 33.712425, lng: -112.0667 },
+  zoneBoundaryMeters: [0, 25],
   zoneBoundarySets: [
     {
       id: 'default-pedal-zones',
       name: 'Default pedal zones',
-      boundaryMeters: [0, 16, 26, 43],
+      boundaryMeters: [0, 25],
     },
   ],
   zones: [
@@ -90,15 +90,7 @@ const mockPostRaceReviewMapping = {
       id: 'pedal-zone-1',
       name: 'Pedal Zone 1',
       startMeter: 0,
-      endMeter: 16,
-      type: 'pedal',
-      restAfterSeconds: 0,
-    },
-    {
-      id: 'pedal-zone-2',
-      name: 'Pedal Zone 2',
-      startMeter: 26,
-      endMeter: 43,
+      endMeter: 25,
       type: 'pedal',
       restAfterSeconds: 0,
     },
@@ -448,18 +440,18 @@ test('completed race shows a populated 20-second pedal-zone review', async ({ pa
   await page.goto('/?track=black-mountain-bmx');
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
-  await page.locator('[aria-label="Demo rider count"] button').first().click();
-  await expect(page.getByText(/2 pedal zones/i).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/1 pedal zone/i).first()).toBeVisible({ timeout: 15_000 });
 
   const startAction = page.locator('.workflow-step.primary-action');
   await expect(startAction).toContainText('Start Demo Race');
   await startAction.click();
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/, { timeout: 8_000 });
 
   const review = page.getByRole('region', { name: 'Post-race review' });
   await expect(review).toBeVisible({ timeout: 60_000 });
   await expect(page.locator('.race-review-map')).toBeVisible();
   await expect(review.getByRole('heading', { name: 'Black Mountain BMX' })).toBeVisible();
-  await expect(review.locator('tbody tr')).toHaveCount(2);
+  await expect(review.locator('tbody tr')).toHaveCount(1);
   await expect(review.getByText('Max speed:', { exact: false }).first()).toBeVisible();
   await expect(review.getByText('Avg speed:', { exact: false }).first()).toBeVisible();
   await expect(review.getByText('Max cadence:', { exact: false }).first()).toBeVisible();

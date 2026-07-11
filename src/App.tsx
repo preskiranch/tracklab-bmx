@@ -3516,7 +3516,7 @@ export default function App() {
       return valid.length > 0 ? valid : mappedZones.slice(0, 2).map((zone) => zone.id);
     });
 
-    if (startGateStatus.active || raceState === 'racing') {
+    if (startGateStatus.active || raceState !== 'ready') {
       return;
     }
 
