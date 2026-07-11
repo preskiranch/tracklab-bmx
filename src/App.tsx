@@ -100,6 +100,10 @@ import {
 } from './lib/ghosts';
 import { readPublicTrackMappings } from './lib/publicTrackMappings';
 import { buildRaceZoneResults, raceSummaryWithCapturedMetrics } from './lib/raceReview';
+import {
+  createRaceStagingSteps,
+  raceStagingDurationMs,
+} from './lib/raceStartSequence';
 import { distinctBikeDisplayName, reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
 import {
   claimBillingReturn,
@@ -1259,6 +1263,7 @@ function formatClock() {
 
 type StartGateStatus = {
   active: boolean;
+  phase: 'idle' | 'staging' | 'cadence' | 'go';
   label: string;
   detail: string;
   lightIndex: 0 | 1 | 2 | 3 | null;
@@ -1268,6 +1273,7 @@ type OutgoingMultiplayerRaceState = Omit<MultiplayerRaceState, 'clientId' | 'rid
 
 const idleStartGateStatus: StartGateStatus = {
   active: false,
+  phase: 'idle',
   label: '',
   detail: '',
   lightIndex: null,
@@ -4697,6 +4703,7 @@ export default function App() {
 
     setStartGateStatus({
       active: true,
+      phase: 'go',
       label: 'GO',
       detail: 'Gate open',
       lightIndex: 3,
@@ -5140,105 +5147,151 @@ export default function App() {
 
     primeAudioCues();
 
-    if (startCadenceMode === 'uci') {
-      setStartGateStatus({
-        active: true,
-        label: 'UCI CADENCE',
-        detail: 'Starting random cadence audio',
-        lightIndex: null,
-      });
-
-      const voiceStart = await playUciRandomStartVoice();
-      if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
+    const startConfiguredCadence = async () => {
+      if (
+        sequenceId !== startGateSequenceIdRef.current
+        || selectedTrackIdRef.current !== startingTrackId
+      ) {
         return;
       }
 
-      const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
-      const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
-      const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
-        const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
-        scheduleStartGateStep(Math.max(0, voiceOffsetMs - elapsedSinceVoiceStartMs), action, sequenceId);
-      };
+      if (startCadenceMode === 'uci') {
+        setStartGateStatus({
+          active: true,
+          phase: 'cadence',
+          label: 'UCI CADENCE',
+          detail: 'Starting random cadence audio',
+          lightIndex: null,
+        });
 
+        const voiceStart = await playUciRandomStartVoice();
+        if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
+          return;
+        }
+
+        const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
+        const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
+        const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
+          const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
+          scheduleStartGateStep(Math.max(0, voiceOffsetMs - elapsedSinceVoiceStartMs), action, sequenceId);
+        };
+
+        setStartGateStatus({
+          active: true,
+          phase: 'cadence',
+          label: 'OK RIDERS',
+          detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback random start voice',
+          lightIndex: null,
+        });
+
+        scheduleVoiceStep(3300, () => {
+          setStartGateStatus({
+            active: true,
+            phase: 'cadence',
+            label: 'RIDERS READY',
+            detail: 'Watch the gate',
+            lightIndex: null,
+          });
+        });
+
+        scheduleVoiceStep(uciVoiceWatchGateOffsetMs, () => {
+          setStartGateStatus({
+            active: true,
+            phase: 'cadence',
+            label: 'RANDOM DELAY',
+            detail: 'Watch the gate',
+            lightIndex: null,
+          });
+        });
+
+        [0, 120, 240].forEach((offsetMs, index) => {
+          scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
+            if (index === 0) {
+              armReactionTimer();
+            }
+
+            const lightIndex = index as 0 | 1 | 2;
+            setStartGateStatus({
+              active: true,
+              phase: 'cadence',
+              label: startTreeLabels[lightIndex],
+              detail: 'UCI cadence',
+              lightIndex,
+            });
+            playStartGateTone('uci-red');
+          });
+        });
+
+        scheduleVoiceStep(firstToneAtMs + 360, () => {
+          playStartGateTone('uci-green');
+          beginRaceAtGateDrop(startingTrackId, sequenceId);
+        });
+        return;
+      }
+
+      const safeCountdownSeconds = Math.max(3, Math.min(6, Math.round(countdownSeconds)));
       setStartGateStatus({
         active: true,
-        label: 'OK RIDERS',
-        detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback random start voice',
+        phase: 'cadence',
+        label: `Gate in ${safeCountdownSeconds}`,
+        detail: 'Standard countdown',
         lightIndex: null,
       });
 
-      scheduleVoiceStep(3300, () => {
-        setStartGateStatus({
-          active: true,
-          label: 'RIDERS READY',
-          detail: 'Watch the gate',
-          lightIndex: null,
-        });
-      });
-
-      scheduleVoiceStep(uciVoiceWatchGateOffsetMs, () => {
-        setStartGateStatus({
-          active: true,
-          label: 'RANDOM DELAY',
-          detail: 'Watch the gate',
-          lightIndex: null,
-        });
-      });
-
-      [0, 120, 240].forEach((offsetMs, index) => {
-        scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
-          if (index === 0) {
+      for (let secondsRemaining = safeCountdownSeconds; secondsRemaining >= 1; secondsRemaining -= 1) {
+        const delayMs = (safeCountdownSeconds - secondsRemaining) * 1000;
+        scheduleStartGateStep(delayMs, () => {
+          if (secondsRemaining === safeCountdownSeconds) {
             armReactionTimer();
           }
 
-          const lightIndex = index as 0 | 1 | 2;
+          const lightIndex = secondsRemaining <= 3 ? (3 - secondsRemaining) as 0 | 1 | 2 : null;
           setStartGateStatus({
             active: true,
-            label: startTreeLabels[lightIndex],
-            detail: 'UCI cadence',
+            phase: 'cadence',
+            label: lightIndex == null ? `Gate in ${secondsRemaining}` : startTreeLabels[lightIndex],
+            detail: lightIndex == null ? 'Standard countdown' : `Gate in ${secondsRemaining}`,
             lightIndex,
           });
-          playStartGateTone('uci-red');
+          playStartGateTone('tick');
         });
+      }
+
+      scheduleStartGateStep(safeCountdownSeconds * 1000, () => {
+        playStartGateTone('gate');
+        beginRaceAtGateDrop(startingTrackId, sequenceId);
+      }, sequenceId);
+    };
+
+    if (!demoMode) {
+      const stagingSteps = createRaceStagingSteps();
+      setStartGateStatus({
+        active: true,
+        phase: 'staging',
+        label: String(stagingSteps[0].secondsRemaining),
+        detail: 'Adjust the view, then return to your bike',
+        lightIndex: null,
       });
 
-      scheduleVoiceStep(firstToneAtMs + 360, () => {
-        playStartGateTone('uci-green');
-        beginRaceAtGateDrop(startingTrackId, sequenceId);
+      stagingSteps.slice(1).forEach(({ delayMs, secondsRemaining }) => {
+        scheduleStartGateStep(delayMs, () => {
+          setStartGateStatus({
+            active: true,
+            phase: 'staging',
+            label: String(secondsRemaining),
+            detail: 'Adjust the view, then return to your bike',
+            lightIndex: null,
+          });
+        }, sequenceId);
       });
+
+      scheduleStartGateStep(raceStagingDurationMs(), () => {
+        void startConfiguredCadence();
+      }, sequenceId);
       return;
     }
 
-    const safeCountdownSeconds = Math.max(3, Math.min(6, Math.round(countdownSeconds)));
-    setStartGateStatus({
-      active: true,
-      label: `Gate in ${safeCountdownSeconds}`,
-      detail: 'Standard countdown',
-      lightIndex: null,
-    });
-
-    for (let secondsRemaining = safeCountdownSeconds; secondsRemaining >= 1; secondsRemaining -= 1) {
-      const delayMs = (safeCountdownSeconds - secondsRemaining) * 1000;
-      scheduleStartGateStep(delayMs, () => {
-        if (secondsRemaining === safeCountdownSeconds) {
-          armReactionTimer();
-        }
-
-        const lightIndex = secondsRemaining <= 3 ? (3 - secondsRemaining) as 0 | 1 | 2 : null;
-        setStartGateStatus({
-          active: true,
-          label: lightIndex == null ? `Gate in ${secondsRemaining}` : startTreeLabels[lightIndex],
-          detail: lightIndex == null ? 'Standard countdown' : `Gate in ${secondsRemaining}`,
-          lightIndex,
-        });
-        playStartGateTone('tick');
-      });
-    }
-
-    scheduleStartGateStep(safeCountdownSeconds * 1000, () => {
-      playStartGateTone('gate');
-      beginRaceAtGateDrop(startingTrackId, sequenceId);
-    }, sequenceId);
+    await startConfiguredCadence();
   };
 
   useEffect(() => {
@@ -5885,6 +5938,9 @@ export default function App() {
                 raceState={raceState}
                 raceViewFullscreen={false}
                 startGateActive={false}
+                startGatePhase="idle"
+                startGateLabel=""
+                startGateDetail=""
                 startGateLightIndex={null}
                 reactionTimesByPlayer={reactionTimesByPlayer}
                 earthAngle={earthAngle}
@@ -6009,6 +6065,9 @@ export default function App() {
                   raceState={raceState}
                   raceViewFullscreen={raceViewFullscreen}
                   startGateActive={startGateStatus.active}
+                  startGatePhase={startGateStatus.phase}
+                  startGateLabel={startGateStatus.label}
+                  startGateDetail={startGateStatus.detail}
                   startGateLightIndex={startGateStatus.lightIndex}
                   reactionTimesByPlayer={reactionTimesByPlayer}
                   earthAngle={earthAngle}

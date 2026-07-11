@@ -651,16 +651,22 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await startAction.click();
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-    await expect(page.locator('.start-tree-light')).toBeVisible();
+    await expect(page.locator('.race-staging-countdown')).toBeVisible();
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText('15');
+    await expect(page.locator('.start-tree-light')).toHaveCount(0);
     await page.waitForTimeout(8_500);
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/[5-7]/);
     await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
     await expect(page.getByText(/False start/i)).toHaveCount(0);
     await page.screenshot({
       fullPage: false,
       path: testInfo.outputPath('mapped-pedal-zone-live-race.png'),
     });
+    await page.waitForTimeout(7_000);
+    await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
+    await expect(page.locator('.start-tree-light')).toBeVisible();
   } finally {
     clearInterval(sampleTimer);
     await bridge.close();
@@ -758,15 +764,21 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
     await startAction.click();
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-    await expect(page.locator('.start-tree-light')).toBeVisible();
+    await expect(page.locator('.race-staging-countdown')).toBeVisible();
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText('15');
+    await expect(page.locator('.start-tree-light')).toHaveCount(0);
     await page.waitForTimeout(8_500);
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/[5-7]/);
     await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
     await page.screenshot({
       fullPage: false,
       path: testInfo.outputPath('two-bike-live-race-no-pedal-zones.png'),
     });
+    await page.getByRole('button', { name: /Cancel Race/i }).click();
+    await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/);
+    await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
   } finally {
     clearInterval(sampleTimer);
     await bridge.close();
