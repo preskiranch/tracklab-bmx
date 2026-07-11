@@ -7,6 +7,11 @@ import {
   sanitizeBikeMetricPatch,
   type BikeMetricPatch,
 } from '../lib/bikeSampleSanity';
+import {
+  assignBluetoothBikeDeviceId,
+  parseBluetoothBikeIdentityAssignments,
+  serializeBluetoothBikeIdentityAssignments,
+} from '../lib/bluetoothBikeIdentity';
 import { liveBikeTimeoutMs } from '../data';
 import type { BikeSample, ConnectedBikeDevice } from '../types';
 
@@ -74,7 +79,7 @@ type BluetoothNavigator = Navigator & {
 
 type PartialBikeSample = BikeMetricPatch;
 
-const bluetoothBaseDeviceId = 71000;
+const bluetoothIdentityStorageKey = 'tracklab.bluetooth-bike-identities.v1';
 const unsupportedTabletBluetoothMessage = 'Direct Bluetooth is not available in this tablet browser. iPad and iPhone Chrome/Safari cannot pair with Wattbikes from a website; use Advanced Connector on the Mac/PC near the bikes, or use Android Chrome if Web Bluetooth is available.';
 const bluetoothServices = {
   battery: '0000180f-0000-1000-8000-00805f9b34fb',
@@ -124,20 +129,28 @@ function unsupportedBluetoothMessage() {
     : 'This browser does not support direct Bluetooth bike pairing. Use a desktop Chrome/Edge browser, Android Chrome with Web Bluetooth, or Advanced Connector on the Mac/PC near the bikes.';
 }
 
-function wattbikeMonitorIdFromName(name: string | undefined) {
-  const digits = name?.match(/(\d{4,})/g)?.at(-1);
-  if (!digits) {
-    return null;
-  }
-
-  const monitorDigits = digits.length > 5 ? digits.slice(-5) : digits;
-  const deviceId = Number(monitorDigits);
-  return Number.isFinite(deviceId) && deviceId > 0 ? Math.round(deviceId) : null;
-}
-
 function isLikelyWattbikeBluetoothDevice(device: BluetoothDeviceLike) {
   const label = device.name?.trim().toLowerCase() ?? '';
   return !label || label.includes('wattbike') || label.includes('wattbikepm');
+}
+
+function readStoredBluetoothBikeIdentities() {
+  try {
+    return parseBluetoothBikeIdentityAssignments(window.localStorage.getItem(bluetoothIdentityStorageKey));
+  } catch {
+    return new Map<string, number>();
+  }
+}
+
+function persistBluetoothBikeIdentities(assignments: Map<string, number>) {
+  try {
+    window.localStorage.setItem(
+      bluetoothIdentityStorageKey,
+      serializeBluetoothBikeIdentityAssignments(assignments),
+    );
+  } catch {
+    // Bluetooth remains usable when browser storage is unavailable.
+  }
 }
 
 function isBluetoothChooserCancel(error: unknown) {
@@ -350,7 +363,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   const [error, setError] = useState<string | null>(null);
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
   const [now, setNow] = useState(Date.now());
-  const deviceIdsRef = useRef<Map<string, number>>(new Map());
+  const deviceIdsRef = useRef<Map<string, number>>(readStoredBluetoothBikeIdentities());
   const crankCacheRef = useRef<Map<number, { eventTime: number; revolutions: number }>>(new Map());
   const connectedBrowserDeviceIdsRef = useRef<Set<string>>(new Set());
   const reconnectInFlightRef = useRef(false);
@@ -424,19 +437,15 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   }, []);
 
   const connectBluetoothDevice = useCallback(async (device: BluetoothDeviceLike) => {
-    let numericId = deviceIdsRef.current.get(device.id);
+    const numericId = assignBluetoothBikeDeviceId(device.id, device.name, deviceIdsRef.current);
+    persistBluetoothBikeIdentities(deviceIdsRef.current);
     if (connectedBrowserDeviceIdsRef.current.has(device.id)) {
-      const sample = numericId == null ? undefined : samplesByDeviceRef.current.get(numericId);
+      const sample = samplesByDeviceRef.current.get(numericId);
       if (sample && Date.now() - sample.at <= liveBikeTimeoutMs) {
         return false;
       }
 
       connectedBrowserDeviceIdsRef.current.delete(device.id);
-    }
-
-    if (!numericId) {
-      numericId = wattbikeMonitorIdFromName(device.name) ?? bluetoothBaseDeviceId + deviceIdsRef.current.size + 1;
-      deviceIdsRef.current.set(device.id, numericId);
     }
 
     const label = device.name?.trim() || `Bluetooth Wattbike ${numericId}`;
