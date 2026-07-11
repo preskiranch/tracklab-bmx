@@ -5369,7 +5369,15 @@ export default function App() {
         return 'Bluetooth Direct unavailable';
       }
 
-      return activePlayers.length > 0 ? 'Bluetooth Direct online' : 'Bluetooth Direct ready';
+      if (activePlayers.length > 0) {
+        return 'Bluetooth Direct online';
+      }
+
+      if (bluetooth.connection === 'connecting') {
+        return 'Bluetooth Direct pairing';
+      }
+
+      return bluetooth.connection === 'open' ? 'Bluetooth Direct paired' : 'Bluetooth Direct ready';
     }
 
     if (activePlayers.some((player) => player.deviceSource === 'bluetooth') && bridge.connection === 'open') {
@@ -5416,7 +5424,7 @@ export default function App() {
 
       return activePlayers.length > 0
         ? `${activePlayers.length} live Bluetooth bike${activePlayers.length === 1 ? '' : 's'} connected.`
-        : 'Press Connect Wattbike, choose the bike from the browser Bluetooth prompt, then pedal to confirm live data.';
+        : bluetooth.status;
     }
 
     const bridgeControlStatus = bridge.controlStatus ? ` ${bridge.controlStatus}` : '';
@@ -5475,7 +5483,9 @@ export default function App() {
   const connectionState = demoMode || activePlayers.length > 0
     ? 'open'
     : bikeConnectionSource === 'bluetooth'
-      ? bluetooth.supported ? 'idle' : 'error'
+      ? bluetooth.supported
+        ? bluetooth.connection === 'connecting' ? 'connecting' : 'idle'
+        : 'error'
       : bridge.connection === 'open' && (bridge.sourceState === 'running' || bridge.sourceState === 'starting')
       ? 'connecting'
       : bridge.connection;
@@ -5485,7 +5495,7 @@ export default function App() {
     : bikeConnectionSource === 'advanced'
       ? 'Start Advanced Connector, put each Wattbike in Just Ride at resistance level 1, then pedal for Bluetooth/ANT+/USB discovery.'
       : bluetooth.supported
-        ? 'Press Connect Wattbike to pair Bluetooth bikes. Riders appear only after a bike is connected.'
+        ? 'Press Pair Wattbike to authorize a bike. Riders appear only after TrackLab establishes the connection.'
         : bluetooth.status;
   const pairingDeviceLabel = bikeConnectionSource === 'advanced' ? 'Bike connector device' : 'Bluetooth bike';
   const membershipLabel = membership.tier === 'racer'
@@ -5681,10 +5691,18 @@ export default function App() {
               className="bluetooth-connect-button"
               type="button"
               onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : bluetooth.connectBike}
-              disabled={!bluetooth.supported}
+              disabled={!bluetooth.supported || bluetooth.connection === 'connecting'}
             >
               <Bluetooth size={16} />
-              <span>{liveBikeAccessLocked ? 'Upgrade to Connect' : bluetooth.connectedCount > 0 ? 'Connect Another Wattbike' : 'Connect Wattbike'}</span>
+              <span>
+                {liveBikeAccessLocked
+                  ? 'Upgrade to Connect'
+                  : bluetooth.connection === 'connecting'
+                    ? 'Pairing...'
+                    : bluetooth.connectedCount > 0
+                      ? 'Pair Another Wattbike'
+                      : 'Pair Wattbike'}
+              </span>
             </button>
           )}
           {bikeConnectionSource === 'advanced' && !demoMode && (

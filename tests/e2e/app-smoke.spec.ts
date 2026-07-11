@@ -275,6 +275,52 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   expect(consoleErrors).toEqual([]);
 });
 
+test('Bluetooth pairing stays pending until TrackLab verifies a bike connection', async ({ page }) => {
+  const authUser = {
+    id: 'bluetooth-pairing-racer',
+    profileKey: 'user:bluetooth-pairing-racer',
+    email: 'bluetooth-pairing@tracklab.test',
+    name: 'Bluetooth Pairing Rider',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+  };
+
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'bluetooth', {
+      configurable: true,
+      value: {
+        getDevices: async () => [],
+        requestDevice: () => new Promise(() => undefined),
+      },
+    });
+  });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/public-track-mappings', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ trackMappings: {}, count: 0 }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ trackMappings: {}, customRoutes: [], bikeProfiles: [] }),
+    });
+  });
+  await page.route('**/api/ghosts*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ghosts: [] }) });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  await page.getByRole('button', { name: 'Open App' }).click();
+
+  const pairButton = page.getByRole('button', { name: 'Pair Wattbike', exact: true });
+  await expect(pairButton).toBeVisible();
+  await pairButton.click();
+  await expect(page.getByRole('button', { name: 'Pairing...', exact: true })).toBeDisabled();
+  await expect(page.getByText('Pairing with the selected Wattbike and verifying its live data service.').first()).toBeVisible();
+  await expect(page.getByText(/connected \/ 0 detected/)).toBeVisible();
+});
+
 test('dashboard analysis follows the map without a blank grid row', async ({ page }, testInfo) => {
   const authUser = {
     id: 'dashboard-layout-racer',
