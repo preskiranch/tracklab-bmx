@@ -260,6 +260,68 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   expect(consoleErrors).toEqual([]);
 });
 
+test('dashboard analysis follows the map without a blank grid row', async ({ page }, testInfo) => {
+  const authUser = {
+    id: 'dashboard-layout-racer',
+    profileKey: 'user:dashboard-layout-racer',
+    email: 'dashboard-layout@tracklab.test',
+    name: 'Dashboard Layout Rider',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: Date.now(),
+    },
+  };
+
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ user: authUser }),
+    });
+  });
+
+  await page.goto('/?track=north-bay-bmx-napa-valley');
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await expect(page.locator('.earth-panel')).toBeVisible();
+  await expect(page.locator('.analytics-panel')).toBeVisible();
+
+  const mapBounds = await page.locator('.earth-panel').boundingBox();
+  const analysisBounds = await page.locator('.analytics-panel').boundingBox();
+  expect(mapBounds).not.toBeNull();
+  expect(analysisBounds).not.toBeNull();
+
+  const analysisGap = analysisBounds!.y - (mapBounds!.y + mapBounds!.height);
+  expect(analysisGap).toBeGreaterThanOrEqual(10);
+  expect(analysisGap).toBeLessThanOrEqual(18);
+
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('dashboard-analysis-directly-below-map.png'),
+  });
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const tabletMapBounds = await page.locator('.earth-panel').boundingBox();
+  const tabletControlBounds = await page.locator('.control-panel').boundingBox();
+  const tabletAnalysisBounds = await page.locator('.analytics-panel').boundingBox();
+  expect(tabletMapBounds).not.toBeNull();
+  expect(tabletControlBounds).not.toBeNull();
+  expect(tabletAnalysisBounds).not.toBeNull();
+
+  const tabletControlGap = tabletControlBounds!.y - (tabletMapBounds!.y + tabletMapBounds!.height);
+  const tabletAnalysisGap = tabletAnalysisBounds!.y - (tabletControlBounds!.y + tabletControlBounds!.height);
+  expect(tabletControlGap).toBeGreaterThanOrEqual(10);
+  expect(tabletControlGap).toBeLessThanOrEqual(18);
+  expect(tabletAnalysisGap).toBeGreaterThanOrEqual(10);
+  expect(tabletAnalysisGap).toBeLessThanOrEqual(18);
+
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('dashboard-analysis-tablet-order.png'),
+  });
+});
+
 test('track map save waits for account sync and shared publication', async ({ page }) => {
   const authUser = {
     id: 'mapping-admin',
