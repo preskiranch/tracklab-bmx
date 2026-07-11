@@ -354,6 +354,29 @@ export type RaceSummaryEntry = {
   averageWatts: number | null;
 };
 
+export type RaceZoneRiderResult = {
+  playerId: PlayerSlot['id'];
+  sampleCount: number;
+  entryElapsedMs: number | null;
+  exitElapsedMs: number | null;
+  durationMs: number | null;
+  topSpeedKph: number | null;
+  averageSpeedKph: number | null;
+  topCadence: number | null;
+  averageCadence: number | null;
+  topWatts: number | null;
+  averageWatts: number | null;
+};
+
+export type RaceZoneResult = {
+  zoneId: string;
+  zoneName: string;
+  zoneType: TrackZone['type'];
+  startMeter: number;
+  endMeter: number;
+  riders: RaceZoneRiderResult[];
+};
+
 export type RaceCaptureStatus = 'armed' | 'racing' | 'finished' | 'reset' | 'cancelled';
 
 export type RaceCaptureSample = {
@@ -446,6 +469,7 @@ export type RaceCapture = {
   frames?: RaceCaptureFrame[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
   summary: RaceSummaryEntry[];
+  zoneResults?: RaceZoneResult[];
 };
 
 export type GhostLapSource = 'personal' | 'friend' | 'top';
