@@ -100,6 +100,7 @@ import {
 } from './lib/ghosts';
 import { readPublicTrackMappings } from './lib/publicTrackMappings';
 import { buildRaceZoneResults, raceSummaryWithCapturedMetrics } from './lib/raceReview';
+import { distinctBikeDisplayName, reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
 import {
   claimBillingReturn,
   loginAuthUser,
@@ -2733,7 +2734,8 @@ export default function App() {
         changed = true;
       });
 
-      return changed ? dedupeBikeProfiles(next) : current;
+      const profiles = changed ? dedupeBikeProfiles(next) : current;
+      return reconcileClonedBikeProfileNames(profiles, connectedDeviceIds);
     });
   }, [connectedDeviceIds, demoMode]);
 
@@ -3565,7 +3567,7 @@ export default function App() {
         profile.deviceId === nextDeviceId
           ? {
             ...profile,
-            name: deviceId == null ? defaultBikeName(nextDeviceId) : player?.name ?? profile.name,
+            name: deviceId == null ? defaultBikeName(nextDeviceId) : profile.name,
             colorName: visual.colorName,
             accent: visual.accent,
             updatedAt: Date.now(),
@@ -3575,7 +3577,7 @@ export default function App() {
 
       return next.some((profile) => profile.deviceId === nextDeviceId)
         ? dedupeBikeProfiles(next)
-        : dedupeBikeProfiles([...next, createBikeProfile(nextDeviceId, playerId - 1, player?.name)]);
+        : dedupeBikeProfiles([...next, createBikeProfile(nextDeviceId, playerId - 1)]);
     });
   }, [sessionPlayers]);
 
@@ -5648,6 +5650,7 @@ export default function App() {
                 {activePlayers.map((player) => {
                   const deviceId = player.deviceId;
                   const entered = deviceId != null && liveRaceReadyDeviceIds.includes(deviceId);
+                  const displayName = distinctBikeDisplayName(player, activePlayers);
 
                   return (
                     <button
@@ -5661,7 +5664,7 @@ export default function App() {
                       }}
                       disabled={!canEditLiveRaceEntry || deviceId == null}
                       aria-pressed={entered}
-                      aria-label={`${entered ? 'Remove' : 'Enter'} ${player.name} ${entered ? 'from' : 'in'} live race`}
+                      aria-label={`${entered ? 'Remove' : 'Enter'} ${displayName} ${entered ? 'from' : 'in'} live race`}
                     >
                       <span
                         className="player-chip"
@@ -5670,7 +5673,7 @@ export default function App() {
                         P{player.id}
                       </span>
                       <span className="race-entry-copy">
-                        <strong>{player.name}</strong>
+                        <strong>{displayName}</strong>
                         <small>{deviceId != null ? `Monitor ID ${deviceId}` : 'No monitor ID'}</small>
                       </span>
                       <span className={`race-entry-status ${entered ? 'entered' : ''}`}>
