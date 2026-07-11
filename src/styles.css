@@ -591,7 +591,7 @@ input:focus {
 
 .race-review-screen {
   display: grid;
-  grid-template-rows: minmax(330px, 52vh) minmax(0, 1fr);
+  grid-template-rows: minmax(300px, 44vh) minmax(0, 1fr);
   width: 100%;
   height: 100vh;
   overflow: hidden;
@@ -5086,6 +5086,42 @@ input:focus {
   .rider-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .race-review-screen {
+    grid-template-rows: minmax(280px, 42vh) minmax(0, 1fr);
+  }
+
+  .race-review-header {
+    align-items: flex-start;
+    padding: 10px 12px;
+  }
+
+  .race-review-results {
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .race-review-rider-card {
+    gap: 6px;
+    min-width: 200px;
+    padding: 8px;
+  }
+
+  .race-review-rider-metrics {
+    gap: 4px;
+  }
+
+  .race-review-rider-metrics span {
+    padding: 5px;
+  }
+
+  .race-review-rider-metrics strong {
+    font-size: 11px;
+  }
+
+  .race-review-zone-table-wrap {
+    padding: 0 12px 12px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -5146,5 +5182,17 @@ input:focus {
 
   .start-panel {
     grid-template-columns: 1fr;
+  }
+
+  .race-review-screen {
+    grid-template-rows: minmax(240px, 38vh) minmax(0, 1fr);
+  }
+
+  .race-review-header {
+    flex-direction: column;
+  }
+
+  .race-review-controls {
+    justify-content: flex-start;
   }
 }

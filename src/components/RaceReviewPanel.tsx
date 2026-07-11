@@ -1,5 +1,6 @@
-import type { CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { Pause, Play, RotateCcw, Timer, Trophy } from 'lucide-react';
+import { buildRaceZoneResults, zoneRiderResult } from '../lib/raceReview';
 import {
   formatDistanceRangeMeters,
   formatReactionTime,
@@ -10,7 +11,6 @@ import type {
   DistanceUnit,
   PlayerSlot,
   RaceCapture,
-  RaceCaptureSample,
   RaceSummaryEntry,
   ReactionTimesByPlayer,
   SpeedUnit,
@@ -32,18 +32,6 @@ type RaceReviewPanelProps = {
   onExtend: () => void;
   onPauseToggle: () => void;
   onReturnToDashboard: () => void;
-};
-
-type ZoneRiderStats = {
-  sampleCount: number;
-  entryElapsedMs: number | null;
-  exitElapsedMs: number | null;
-  topSpeedKph: number | null;
-  averageSpeedKph: number | null;
-  topCadence: number | null;
-  averageCadence: number | null;
-  topWatts: number | null;
-  averageWatts: number | null;
 };
 
 function ordinal(rank: number) {
@@ -85,64 +73,12 @@ function formatNullableSpeed(speedKph: number | null, speedUnit: SpeedUnit) {
   return `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
 }
 
-function average(values: number[]) {
-  if (values.length === 0) {
-    return null;
-  }
-
-  return values.reduce((total, value) => total + value, 0) / values.length;
-}
-
-function max(values: number[]) {
-  if (values.length === 0) {
-    return null;
-  }
-
-  return Math.max(...values);
-}
-
-function samplesForZone(samples: RaceCaptureSample[], playerId: PlayerSlot['id'], zone: TrackZone) {
-  return samples
-    .filter((sample) => (
-      sample.playerId === playerId
-      && sample.riderDistanceMeters != null
-      && sample.riderDistanceMeters >= zone.startMeter
-      && sample.riderDistanceMeters <= zone.endMeter
-    ))
-    .sort((left, right) => left.elapsedMs - right.elapsedMs);
-}
-
-function zoneStatsForPlayer(samples: RaceCaptureSample[], playerId: PlayerSlot['id'], zone: TrackZone): ZoneRiderStats {
-  const zoneSamples = samplesForZone(samples, playerId, zone);
-  const speedValues = zoneSamples
-    .map((sample) => sample.speedKph)
-    .filter((value): value is number => value != null && Number.isFinite(value));
-  const cadenceValues = zoneSamples
-    .map((sample) => sample.cadence)
-    .filter((value): value is number => value != null && Number.isFinite(value));
-  const wattsValues = zoneSamples
-    .map((sample) => sample.watts)
-    .filter((value) => Number.isFinite(value));
-
-  return {
-    sampleCount: zoneSamples.length,
-    entryElapsedMs: zoneSamples[0]?.elapsedMs ?? null,
-    exitElapsedMs: zoneSamples.at(-1)?.elapsedMs ?? null,
-    topSpeedKph: max(speedValues),
-    averageSpeedKph: average(speedValues),
-    topCadence: max(cadenceValues),
-    averageCadence: average(cadenceValues),
-    topWatts: max(wattsValues),
-    averageWatts: average(wattsValues),
-  };
-}
-
-function formatZoneTime(stats: ZoneRiderStats) {
-  if (stats.entryElapsedMs == null || stats.exitElapsedMs == null) {
+function formatZoneTime(durationMs: number | null | undefined) {
+  if (durationMs == null) {
     return '--';
   }
 
-  return `${Math.max(0, (stats.exitElapsedMs - stats.entryElapsedMs) / 1000).toFixed(2)}s`;
+  return `${Math.max(0, durationMs / 1000).toFixed(2)}s`;
 }
 
 export function RaceReviewPanel({
@@ -165,17 +101,27 @@ export function RaceReviewPanel({
     : activeZones.length
       ? activeZones
       : track.zones;
-  const samples = raceCapture?.samples ?? [];
-  const summariesByPlayer = new Map(raceSummary.map((summary) => [summary.playerId, summary]));
-  const orderedPlayers = players.length > 0
-    ? players
-    : raceSummary.map((summary) => ({
+  const zoneResults = useMemo(() => {
+    if (!raceCapture) {
+      return [];
+    }
+
+    return raceCapture.zoneResults?.length
+      ? raceCapture.zoneResults
+      : buildRaceZoneResults(raceCapture);
+  }, [raceCapture]);
+  const reviewSummary = raceCapture?.status === 'finished' && raceCapture.summary.length > 0
+    ? raceCapture.summary
+    : raceSummary;
+  const orderedPlayers = reviewSummary.length > 0
+    ? reviewSummary.map((summary) => ({
       id: summary.playerId,
       name: summary.riderName,
       colorName: summary.colorName,
       accent: summary.accent,
       deviceId: null,
-    }));
+    }))
+    : players;
 
   return (
     <section className="race-review-panel" aria-label="Post-race review">
@@ -186,7 +132,7 @@ export function RaceReviewPanel({
             Post-race review
           </div>
           <h2>{track.name}</h2>
-          <p>Match the pedal-zone map above to each rider's zone-by-zone performance below.</p>
+          <p>Match the labeled pedal zones on the satellite map to each rider's performance below.</p>
         </div>
 
         <div className="race-review-controls">
@@ -197,7 +143,7 @@ export function RaceReviewPanel({
           </div>
           <button type="button" onClick={onExtend}>
             <RotateCcw size={15} />
-            +15 sec
+            +20 sec
           </button>
           <button type="button" onClick={onPauseToggle}>
             {paused ? <Play size={15} /> : <Pause size={15} />}
@@ -209,9 +155,9 @@ export function RaceReviewPanel({
         </div>
       </div>
 
-      {raceSummary.length > 0 && (
+      {reviewSummary.length > 0 && (
         <div className="race-review-results">
-          {raceSummary.map((summary) => (
+          {reviewSummary.map((summary) => (
             <div className="race-review-rider-card" key={summary.playerId}>
               <div className="race-review-rider-heading">
                 <span
@@ -231,7 +177,10 @@ export function RaceReviewPanel({
                 <span><strong>{formatSplitTime(summary.thirtyFootTimeMs)}</strong><small>30 ft</small></span>
                 <span><strong>{formatReactionTime(reactionTimesByPlayer[summary.playerId])}</strong><small>reaction</small></span>
                 <span><strong>{formatNullableSpeed(summary.topSpeedKph, speedUnit)}</strong><small>top speed</small></span>
+                <span><strong>{formatNullableSpeed(summary.averageSpeedKph, speedUnit)}</strong><small>avg speed</small></span>
+                <span><strong>{formatNullableMetric(summary.topCadence, 'RPM')}</strong><small>max cadence</small></span>
                 <span><strong>{formatNullableMetric(summary.averageCadence, 'RPM')}</strong><small>avg cadence</small></span>
+                <span><strong>{formatNullableMetric(summary.topWatts, 'W')}</strong><small>max watts</small></span>
                 <span><strong>{formatNullableMetric(summary.averageWatts, 'W')}</strong><small>avg watts</small></span>
               </div>
             </div>
@@ -267,18 +216,20 @@ export function RaceReviewPanel({
                 </td>
                 <td>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</td>
                 {orderedPlayers.map((player) => {
-                  const stats = zoneStatsForPlayer(samples, player.id, zone);
-                  const summary = summariesByPlayer.get(player.id);
+                  const stats = zoneRiderResult(zoneResults, zone.id, player.id);
 
                   return (
                     <td key={player.id}>
-                      <span className="table-metric">Time: {formatZoneTime(stats)}</span>
-                      <span className="table-metric">Top: {formatNullableSpeed(stats.topSpeedKph, speedUnit)}</span>
-                      <span className="table-metric">Avg cad: {formatNullableMetric(stats.averageCadence ?? summary?.averageCadence ?? null, 'RPM')}</span>
-                      <span className="table-metric">Peak cad: {formatNullableMetric(stats.topCadence ?? null, 'RPM')}</span>
-                      <span className="table-metric">Avg W: {formatNullableMetric(stats.averageWatts ?? summary?.averageWatts ?? null, 'W')}</span>
-                      <span className="table-metric">Peak W: {formatNullableMetric(stats.topWatts ?? null, 'W')}</span>
-                      <span className="table-metric muted">Samples: {stats.sampleCount}</span>
+                      <span className="table-metric">Zone time: {formatZoneTime(stats?.durationMs)}</span>
+                      <span className="table-metric">Max speed: {formatNullableSpeed(stats?.topSpeedKph ?? null, speedUnit)}</span>
+                      <span className="table-metric">Avg speed: {formatNullableSpeed(stats?.averageSpeedKph ?? null, speedUnit)}</span>
+                      <span className="table-metric">Max cadence: {formatNullableMetric(stats?.topCadence ?? null, 'RPM')}</span>
+                      <span className="table-metric">Avg cadence: {formatNullableMetric(stats?.averageCadence ?? null, 'RPM')}</span>
+                      <span className="table-metric">Max watts: {formatNullableMetric(stats?.topWatts ?? null, 'W')}</span>
+                      <span className="table-metric">Avg watts: {formatNullableMetric(stats?.averageWatts ?? null, 'W')}</span>
+                      <span className="table-metric muted">
+                        {stats?.sampleCount ? `${stats.sampleCount} analysis points` : 'No telemetry captured'}
+                      </span>
                     </td>
                   );
                 })}

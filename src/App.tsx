@@ -99,6 +99,7 @@ import {
   writeStoredGhostLaps,
 } from './lib/ghosts';
 import { readPublicTrackMappings } from './lib/publicTrackMappings';
+import { buildRaceZoneResults, raceSummaryWithCapturedMetrics } from './lib/raceReview';
 import {
   claimBillingReturn,
   loginAuthUser,
@@ -1431,7 +1432,7 @@ export default function App() {
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
   const [raceReviewVisible, setRaceReviewVisible] = useState(false);
-  const [raceReviewRemainingSeconds, setRaceReviewRemainingSeconds] = useState(15);
+  const [raceReviewRemainingSeconds, setRaceReviewRemainingSeconds] = useState(20);
   const [raceReviewPaused, setRaceReviewPaused] = useState(false);
   const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
@@ -3357,12 +3358,13 @@ export default function App() {
         return current;
       }
 
-      return {
+      const capturedSummary = raceSummaryWithCapturedMetrics(current, raceSummary);
+      const finalizedCapture: RaceCapture = {
         ...current,
         status: 'finished',
         endedAt: finishedAt,
         reactionTimesByPlayer,
-        summary: raceSummary,
+        summary: capturedSummary,
         events: [
           ...current.events,
           {
@@ -3373,6 +3375,11 @@ export default function App() {
           },
         ],
       };
+
+      return {
+        ...finalizedCapture,
+        zoneResults: buildRaceZoneResults(finalizedCapture),
+      };
     });
   }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer]);
 
@@ -3382,7 +3389,7 @@ export default function App() {
   }, []);
 
   const extendRaceReview = useCallback(() => {
-    setRaceReviewRemainingSeconds((seconds) => seconds + 15);
+    setRaceReviewRemainingSeconds((seconds) => seconds + 20);
   }, []);
 
   const toggleRaceReviewPaused = useCallback(() => {
@@ -3400,6 +3407,10 @@ export default function App() {
       return;
     }
 
+    if (raceCapture && (raceCapture.status !== 'finished' || raceCapture.summary.length === 0)) {
+      return;
+    }
+
     const reviewSessionId = raceCapture?.sessionId
       ?? `${effectiveTrack.id}:${raceSummary.map((summary) => `${summary.playerId}-${summary.finishTimeMs ?? 'dnf'}`).join('|')}`;
     if (raceReviewSessionRef.current === reviewSessionId) {
@@ -3408,10 +3419,10 @@ export default function App() {
 
     raceReviewSessionRef.current = reviewSessionId;
     setAppMode('race');
-    setRaceReviewRemainingSeconds(15);
+    setRaceReviewRemainingSeconds(20);
     setRaceReviewPaused(false);
     setRaceReviewVisible(true);
-  }, [effectiveTrack.id, hideRaceReview, raceCapture?.sessionId, raceState, raceSummary]);
+  }, [effectiveTrack.id, hideRaceReview, raceCapture, raceState, raceSummary]);
 
   useEffect(() => {
     if (!raceReviewVisible || raceReviewPaused) {
@@ -3505,7 +3516,7 @@ export default function App() {
       return valid.length > 0 ? valid : mappedZones.slice(0, 2).map((zone) => zone.id);
     });
 
-    if (startGateStatus.active || raceState === 'racing') {
+    if (startGateStatus.active || raceState !== 'ready') {
       return;
     }
 
