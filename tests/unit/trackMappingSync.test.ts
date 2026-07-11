@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { UserTrackMapping } from '../../src/types';
-import { mergeTrackMappingsBySavedAt, newestTrackMapping } from '../../src/lib/trackMapping';
+import type { TrackZone, UserTrackMapping } from '../../src/types';
+import {
+  mergeTrackMappingsBySavedAt,
+  newestTrackMapping,
+  repeatTrackZonesForLaps,
+  routeIsClosedLoop,
+} from '../../src/lib/trackMapping';
 
 function mapping(trackId: string, savedAt: string, zoneCount: number): UserTrackMapping {
   const startGate = { lat: 38.244, lng: -122.283 };
@@ -49,5 +54,36 @@ describe('cross-browser track mapping resolution', () => {
 
     expect(merged['north-bay']).toBe(current);
     expect(merged['oak-creek']).toBe(otherTrack);
+  });
+});
+
+describe('closed-loop route support', () => {
+  const start = { lat: 39.9999, lng: -75.1541 };
+  const route = [
+    start,
+    { lat: 40.0002, lng: -75.1538 },
+    { lat: 39.9998, lng: -75.1535 },
+  ];
+
+  it('recognizes an exact or nearby finish snapped to the start', () => {
+    expect(routeIsClosedLoop([...route, start])).toBe(true);
+    expect(routeIsClosedLoop([...route, { lat: 39.99991, lng: -75.15409 }])).toBe(true);
+    expect(routeIsClosedLoop(route)).toBe(false);
+  });
+
+  it('repeats pedal zones at the correct route offset for every lap', () => {
+    const zones: TrackZone[] = [{
+      id: 'pedal-1',
+      name: 'Pedal Zone 1',
+      startMeter: 0,
+      endMeter: 35,
+      type: 'pedal',
+    }];
+
+    expect(repeatTrackZonesForLaps(zones, 200, 3)).toEqual([
+      expect.objectContaining({ id: 'pedal-1-lap-1', name: 'Lap 1 / Pedal Zone 1', startMeter: 0, endMeter: 35 }),
+      expect.objectContaining({ id: 'pedal-1-lap-2', name: 'Lap 2 / Pedal Zone 1', startMeter: 200, endMeter: 235 }),
+      expect.objectContaining({ id: 'pedal-1-lap-3', name: 'Lap 3 / Pedal Zone 1', startMeter: 400, endMeter: 435 }),
+    ]);
   });
 });

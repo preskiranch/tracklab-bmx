@@ -97,6 +97,21 @@ const mockPostRaceReviewMapping = {
   ],
 };
 
+const mockLoopMapping = {
+  ...mockPedalZoneMapping,
+  savedAt: '2026-07-11T12:00:00.000Z',
+  lengthMeters: 220,
+  centerline: [
+    { lat: 33.7125, lng: -112.0667 },
+    { lat: 33.7125, lng: -112.0659 },
+    { lat: 33.7120, lng: -112.0659 },
+    { lat: 33.7120, lng: -112.0667 },
+    { lat: 33.7125, lng: -112.0667 },
+  ],
+  startGate: { lat: 33.7125, lng: -112.0667 },
+  finishLine: { lat: 33.7125, lng: -112.0667 },
+};
+
 type MockBikeSampleOverrides = Partial<{
   at: number;
   source: string;
@@ -441,6 +456,111 @@ test('start here race action enters fullscreen race view', async ({ page }) => {
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   await expect(page.locator('.start-tree-light')).toBeVisible();
   await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
+});
+
+test('loop races expose lap controls and privacy-safe ghost selection without a cadence card', async ({ page }, testInfo) => {
+  const authUser = {
+    id: 'loop-ghost-racer',
+    profileKey: 'user:loop-ghost-racer',
+    email: 'loop-ghost@tracklab.test',
+    name: 'Loop Ghost Rider',
+    admin: true,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+  };
+  const ghostPoints = [
+    { elapsedMs: 0, distanceMeters: 0, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+    { elapsedMs: 18_000, distanceMeters: 220, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+  ];
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/public-track-mappings', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ trackMappings: { 'black-mountain-bmx': mockLoopMapping }, count: 1 }),
+    });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ trackMappings: {}, customRoutes: [], bikeProfiles: [] }),
+    });
+  });
+  await page.route('**/api/ghosts*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ghosts: [
+          {
+            version: 1,
+            id: 'personal-loop-ghost',
+            trackId: 'black-mountain-bmx',
+            trackName: 'Black Mountain BMX',
+            routeVariantId: 'amateur',
+            riderName: 'Studio Bike One',
+            ownerKey: authUser.profileKey,
+            ownerName: authUser.name,
+            colorName: 'lime',
+            accent: '#7ade36',
+            source: 'personal',
+            lapCount: 1,
+            finishTimeMs: 18_500,
+            thirtyFootTimeMs: 1_800,
+            savedAt: Date.now(),
+            analyticsPublic: false,
+            medalRank: 2,
+            summary: null,
+            zoneResults: [],
+            points: ghostPoints,
+          },
+          {
+            version: 1,
+            id: 'world-loop-ghost',
+            trackId: 'black-mountain-bmx',
+            trackName: 'Black Mountain BMX',
+            routeVariantId: 'amateur',
+            riderName: 'World Leader',
+            ownerKey: 'user:world-leader',
+            ownerName: 'World Leader',
+            colorName: 'red',
+            accent: '#ff4d42',
+            source: 'top',
+            lapCount: 1,
+            finishTimeMs: 18_000,
+            thirtyFootTimeMs: 1_700,
+            savedAt: Date.now(),
+            analyticsPublic: false,
+            medalRank: 1,
+            summary: null,
+            zoneResults: [],
+            points: ghostPoints,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  await page.getByRole('button', { name: 'Open App' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Number of laps' })).toBeVisible();
+  await expect(page.locator('.lap-stepper input')).toHaveValue('1');
+  await expect(page.getByText('Personal / Studio')).toBeVisible();
+  await expect(page.getByText('Worldwide')).toBeVisible();
+  await expect(page.getByText('Gold')).toBeVisible();
+  await expect(page.getByText('Replay public / performance private')).toBeVisible();
+  await expect(page.getByText('Gate start', { exact: false })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Countdown', exact: true })).toHaveCount(0);
+  await page.locator('.loop-race-section').scrollIntoViewIfNeeded();
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('loop-laps-and-ghosts.png'),
+  });
+
+  await page.getByRole('button', { name: 'Increase lap count' }).click();
+  await expect(page.locator('.lap-stepper input')).toHaveValue('2');
+  await expect(page.getByText('Finish a race on this track to save a ghost lap.')).toBeVisible();
 });
 
 test('completed race shows a populated 20-second pedal-zone review', async ({ page }, testInfo) => {

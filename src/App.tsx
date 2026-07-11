@@ -62,6 +62,8 @@ import {
   pointAtRouteMeter,
   draftRouteFromMapping,
   readStoredTrackMappings,
+  repeatTrackZonesForLaps,
+  routeIsClosedLoop,
   routeLengthWithDefaultSplitBranches,
   routeLengthMeters,
   routeVariantsFromMapping,
@@ -151,7 +153,6 @@ import type {
   ReactionTimesByPlayer,
   SessionMode,
   SpeedUnit,
-  StartCadenceMode,
   TrackPoint,
   TrackRecord,
   TrackRouteVariantId,
@@ -278,6 +279,7 @@ const splitBranchEndpointSnapMeters = 8;
 const routePointDuplicateMeters = 0.75;
 const mainRouteSplitSnapMeters = 1;
 const mainRouteMergeResumeHoldMeters = 5;
+const loopRouteSnapMeters = 12;
 const zoneBoundaryDuplicateMeters = 3;
 const zoneEndpointSnapMeters = 8;
 const maxMappingHistoryEntries = 120;
@@ -1432,8 +1434,6 @@ export default function App() {
   const [customRoutePredictionStatus, setCustomRoutePredictionStatus] = useState<string | null>(null);
   const [selectedCustomRoutePrediction, setSelectedCustomRoutePrediction] = useState<PlacePredictionOption | null>(null);
   const [customRoutePreview, setCustomRoutePreview] = useState<CustomRoutePreview | null>(null);
-  const [startCadenceMode, setStartCadenceMode] = useState<StartCadenceMode>('uci');
-  const [countdownSeconds, setCountdownSeconds] = useState(3);
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
@@ -1444,6 +1444,7 @@ export default function App() {
   const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
   const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
+  const [lapCount, setLapCount] = useState(1);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [cloudUserDataStatus, setCloudUserDataStatus] = useState<CloudUserDataStatus>('loading');
   const [cloudUserDataMessage, setCloudUserDataMessage] = useState('Loading cloud profile data.');
@@ -1782,7 +1783,7 @@ export default function App() {
     },
     [hasDualStartRoutes, publicLeaderboards, raceRouteVariantId, selectedTrack, selectedTrackMapping],
   );
-  const effectiveRouteLengthMeters = useMemo(() => {
+  const baseRouteLengthMeters = useMemo(() => {
     if (!effectiveTrack.centerline || effectiveTrack.centerline.length < 2) {
       return effectiveTrack.lengthMeters;
     }
@@ -1792,6 +1793,15 @@ export default function App() {
       effectiveTrack.splitSections ?? [],
     ));
   }, [effectiveTrack.centerline, effectiveTrack.lengthMeters, effectiveTrack.splitSections]);
+  const isLoopTrack = useMemo(
+    () => routeIsClosedLoop(effectiveTrack.centerline ?? []),
+    [effectiveTrack.centerline],
+  );
+  const effectiveRouteLengthMeters = baseRouteLengthMeters * (isLoopTrack ? lapCount : 1);
+
+  useEffect(() => {
+    setLapCount(1);
+  }, [selectedTrack.id, raceRouteVariantId]);
   const multiplayerVoteCandidates = useMemo<MultiplayerTrackVoteCandidate[]>(() => {
     return catalogTracks.flatMap((track) => {
       const mapping = newestTrackMapping(storedMappings[track.id], publicTrackMappings[track.id]);
@@ -2231,8 +2241,13 @@ export default function App() {
   const adminProfileActive = Boolean(authUser?.admin);
   const ghostRouteVariantId = effectiveTrack.activeRouteVariantId ?? (hasDualStartRoutes ? raceRouteVariantId : undefined);
   const availableGhostLaps = useMemo(
-    () => ghostsForTrackRoute(ghostLaps, effectiveTrack.id, ghostRouteVariantId),
-    [effectiveTrack.id, ghostLaps, ghostRouteVariantId],
+    () => ghostsForTrackRoute(ghostLaps, effectiveTrack.id, ghostRouteVariantId, isLoopTrack ? lapCount : 1)
+      .filter((ghost) => (
+        ghost.ownerKey === cloudProfileKey
+        || ghost.source !== 'personal'
+        || ghost.analyticsPublic
+      )),
+    [cloudProfileKey, effectiveTrack.id, ghostLaps, ghostRouteVariantId, isLoopTrack, lapCount],
   );
   const selectedGhostLaps = useMemo(
     () => availableGhostLaps.filter((ghost) => selectedGhostIds.includes(ghost.id)),
@@ -2364,6 +2379,10 @@ export default function App() {
 
     return mappedZones.filter((zone) => manualZoneIds.includes(zone.id));
   }, [intervalMode, manualZoneIds, mappedZones, sessionMode]);
+  const raceZones = useMemo(
+    () => repeatTrackZonesForLaps(activeZones, baseRouteLengthMeters, isLoopTrack ? lapCount : 1),
+    [activeZones, baseRouteLengthMeters, isLoopTrack, lapCount],
+  );
   const splitDecisionPoints = useMemo(
     () => (effectiveTrack.centerline
       ? splitDecisionPointsForRoute(effectiveTrack.centerline, effectiveTrack.splitSections ?? [])
@@ -2406,7 +2425,7 @@ export default function App() {
     effectiveRouteLengthMeters,
     activeBranchChoicesByPlayer,
     splitDecisionPoints,
-    activeZones,
+    raceZones,
   );
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const stagedRiders = useMemo(() => {
@@ -2623,7 +2642,7 @@ export default function App() {
         deviceId: player.deviceId,
         colorName: player.colorName,
       })),
-      zones: activeZones,
+      zones: raceZones,
       events: [{
         at: createdAt,
         elapsedMs: 0,
@@ -2637,7 +2656,7 @@ export default function App() {
     };
 
     setRaceCapture(capture);
-  }, [activeZones, demoMode, effectiveRouteLengthMeters, effectiveTrack, racePlayers, selectedMetrics, sessionMode]);
+  }, [demoMode, effectiveRouteLengthMeters, effectiveTrack, racePlayers, raceZones, selectedMetrics, sessionMode]);
 
   const appendRaceCaptureEvent = useCallback((type: RaceCapture['events'][number]['type'], label: string, at = Date.now()) => {
     setRaceCapture((current) => {
@@ -3485,6 +3504,11 @@ export default function App() {
           trackId: effectiveTrack.id,
           trackName: effectiveTrack.name,
           routeVariantId: ghostRouteVariantId,
+          lapCount: isLoopTrack ? lapCount : 1,
+          zoneResults: (raceCapture?.zoneResults ?? []).map((zone) => ({
+            ...zone,
+            riders: zone.riders.filter((result) => result.playerId === summary.playerId),
+          })),
           ownerKey,
           ownerName,
           player,
@@ -3510,8 +3534,11 @@ export default function App() {
     effectiveTrack.id,
     effectiveTrack.name,
     ghostRouteVariantId,
+    isLoopTrack,
+    lapCount,
     multiplayer.profile.name,
     raceCapture?.sessionId,
+    raceCapture?.zoneResults,
     racePlayers,
     raceState,
     raceSummary,
@@ -4028,6 +4055,10 @@ export default function App() {
     const snappedPoint = snapDraftPointToSplitJunction(point);
     rememberMappingEdit('route');
     setDraftPoints((current) => {
+      if (routeIsClosedLoop(current)) {
+        return current;
+      }
+
       const appendOrReplacePoint = (points: TrackPoint[], nextPoint: TrackPoint) => {
         const previous = points[points.length - 1];
         if (previous && distanceBetweenTrackPoints(previous, nextPoint) < routePointDuplicateMeters) {
@@ -4051,6 +4082,13 @@ export default function App() {
         return appendOrReplacePoint(current, resumeMergeSection.mergePoint);
       }
 
+      if (
+        current.length >= 3
+        && distanceBetweenTrackPoints(point, current[0]) <= loopRouteSnapMeters
+      ) {
+        return appendOrReplacePoint(current, current[0]);
+      }
+
       let next = appendOrReplacePoint(current, snappedPoint.point);
       if (snappedPoint.junctionKind === 'split' && snappedPoint.splitSection) {
         next = appendOrReplacePoint(next, snappedPoint.splitSection.mergePoint);
@@ -4072,7 +4110,23 @@ export default function App() {
         return current;
       }
 
-      const next = current.map((draftPoint, draftIndex) => (draftIndex === index ? snappedPoint.point : draftPoint));
+      const wasClosedLoop = routeIsClosedLoop(current);
+      const isStartPoint = index === 0;
+      const isFinishPoint = index === current.length - 1;
+      const movedPoint = isFinishPoint
+        && current.length >= 3
+        && distanceBetweenTrackPoints(point, current[0]) <= loopRouteSnapMeters
+        ? current[0]
+        : snappedPoint.point;
+      const next = current.map((draftPoint, draftIndex) => {
+        if (draftIndex === index) {
+          return movedPoint;
+        }
+        if (wasClosedLoop && isStartPoint && draftIndex === current.length - 1) {
+          return movedPoint;
+        }
+        return draftPoint;
+      });
       setDraftZoneBoundarySets((currentZones) => normalizeDraftZoneBoundarySetsForRoute(next, draftRouteSplitSections, currentZones));
       return next;
     });
@@ -5116,6 +5170,23 @@ export default function App() {
     setSelectedGhostIds([]);
   }, []);
 
+  const handleGhostAnalyticsSharingChange = useCallback((ghostId: string, analyticsPublic: boolean) => {
+    const existing = ghostLaps.find((ghost) => ghost.id === ghostId && ghost.ownerKey === cloudProfileKey);
+    if (!existing) {
+      return;
+    }
+
+    const updatedGhost = {
+      ...existing,
+      analyticsPublic,
+      savedAt: Date.now(),
+    };
+    setGhostLaps((current) => current.map((ghost) => (ghost.id === ghostId ? updatedGhost : ghost)));
+    void syncGhostLapToCloud(updatedGhost, cloudProfileKey).catch((error: Error) => {
+      console.warn(`Could not update TrackLab ghost privacy: ${error.message}`);
+    });
+  }, [cloudProfileKey, ghostLaps]);
+
   const handleStart = async () => {
     const startingRacePlayers = racePlayers;
     if (
@@ -5155,112 +5226,76 @@ export default function App() {
         return;
       }
 
-      if (startCadenceMode === 'uci') {
-        setStartGateStatus({
-          active: true,
-          phase: 'cadence',
-          label: 'UCI CADENCE',
-          detail: 'Starting random cadence audio',
-          lightIndex: null,
-        });
-
-        const voiceStart = await playUciRandomStartVoice();
-        if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
-          return;
-        }
-
-        const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
-        const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
-        const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
-          const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
-          scheduleStartGateStep(Math.max(0, voiceOffsetMs - elapsedSinceVoiceStartMs), action, sequenceId);
-        };
-
-        setStartGateStatus({
-          active: true,
-          phase: 'cadence',
-          label: 'OK RIDERS',
-          detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback random start voice',
-          lightIndex: null,
-        });
-
-        scheduleVoiceStep(3300, () => {
-          setStartGateStatus({
-            active: true,
-            phase: 'cadence',
-            label: 'RIDERS READY',
-            detail: 'Watch the gate',
-            lightIndex: null,
-          });
-        });
-
-        scheduleVoiceStep(uciVoiceWatchGateOffsetMs, () => {
-          setStartGateStatus({
-            active: true,
-            phase: 'cadence',
-            label: 'RANDOM DELAY',
-            detail: 'Watch the gate',
-            lightIndex: null,
-          });
-        });
-
-        [0, 120, 240].forEach((offsetMs, index) => {
-          scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
-            if (index === 0) {
-              armReactionTimer();
-            }
-
-            const lightIndex = index as 0 | 1 | 2;
-            setStartGateStatus({
-              active: true,
-              phase: 'cadence',
-              label: startTreeLabels[lightIndex],
-              detail: 'UCI cadence',
-              lightIndex,
-            });
-            playStartGateTone('uci-red');
-          });
-        });
-
-        scheduleVoiceStep(firstToneAtMs + 360, () => {
-          playStartGateTone('uci-green');
-          beginRaceAtGateDrop(startingTrackId, sequenceId);
-        });
-        return;
-      }
-
-      const safeCountdownSeconds = Math.max(3, Math.min(6, Math.round(countdownSeconds)));
       setStartGateStatus({
         active: true,
         phase: 'cadence',
-        label: `Gate in ${safeCountdownSeconds}`,
-        detail: 'Standard countdown',
+        label: 'UCI CADENCE',
+        detail: 'Starting random cadence audio',
         lightIndex: null,
       });
 
-      for (let secondsRemaining = safeCountdownSeconds; secondsRemaining >= 1; secondsRemaining -= 1) {
-        const delayMs = (safeCountdownSeconds - secondsRemaining) * 1000;
-        scheduleStartGateStep(delayMs, () => {
-          if (secondsRemaining === safeCountdownSeconds) {
+      const voiceStart = await playUciRandomStartVoice();
+      if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
+        return;
+      }
+
+      const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
+      const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
+      const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
+        const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
+        scheduleStartGateStep(Math.max(0, voiceOffsetMs - elapsedSinceVoiceStartMs), action, sequenceId);
+      };
+
+      setStartGateStatus({
+        active: true,
+        phase: 'cadence',
+        label: 'OK RIDERS',
+        detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback random start voice',
+        lightIndex: null,
+      });
+
+      scheduleVoiceStep(3300, () => {
+        setStartGateStatus({
+          active: true,
+          phase: 'cadence',
+          label: 'RIDERS READY',
+          detail: 'Watch the gate',
+          lightIndex: null,
+        });
+      });
+
+      scheduleVoiceStep(uciVoiceWatchGateOffsetMs, () => {
+        setStartGateStatus({
+          active: true,
+          phase: 'cadence',
+          label: 'RANDOM DELAY',
+          detail: 'Watch the gate',
+          lightIndex: null,
+        });
+      });
+
+      [0, 120, 240].forEach((offsetMs, index) => {
+        scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
+          if (index === 0) {
             armReactionTimer();
           }
 
-          const lightIndex = secondsRemaining <= 3 ? (3 - secondsRemaining) as 0 | 1 | 2 : null;
+          const lightIndex = index as 0 | 1 | 2;
           setStartGateStatus({
             active: true,
             phase: 'cadence',
-            label: lightIndex == null ? `Gate in ${secondsRemaining}` : startTreeLabels[lightIndex],
-            detail: lightIndex == null ? 'Standard countdown' : `Gate in ${secondsRemaining}`,
+            label: startTreeLabels[lightIndex],
+            detail: 'UCI cadence',
             lightIndex,
           });
-          playStartGateTone('tick');
+          playStartGateTone('uci-red');
         });
-      }
+      });
 
-      scheduleStartGateStep(safeCountdownSeconds * 1000, () => {
-        playStartGateTone('gate');
+      scheduleVoiceStep(firstToneAtMs + 360, () => {
+        playStartGateTone('uci-green');
         beginRaceAtGateDrop(startingTrackId, sequenceId);
-      }, sequenceId);
+      });
     };
 
     if (!demoMode) {
@@ -5499,6 +5534,21 @@ export default function App() {
         setAppMode('race');
         handleMappingModeChange(true);
         setMappingEditMode(workflowMapReady ? 'zones' : 'draw');
+      },
+    },
+    {
+      label: 'Ghost',
+      detail: selectedGhostLaps.length > 0
+        ? `${selectedGhostLaps.length} selected`
+        : availableGhostLaps.length > 0
+          ? `${availableGhostLaps.length} available / optional`
+          : 'Saved after first finish',
+      state: selectedGhostLaps.length > 0 ? 'complete' : 'idle',
+      onClick: () => {
+        setAppMode('race');
+        window.setTimeout(() => {
+          document.querySelector('.ghost-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 0);
       },
     },
     {
@@ -6147,6 +6197,9 @@ export default function App() {
                   raceRouteVariantId={raceRouteVariantId}
                   savedRouteVariantIds={savedRouteVariantIds}
                   hasDualStartRoutes={hasDualStartRoutes}
+                  isLoopTrack={isLoopTrack}
+                  lapCount={lapCount}
+                  currentProfileKey={cloudProfileKey}
                   raceState={raceState}
                   activeBikeCount={racePlayers.length}
                   maxPlayers={maxPlayers}
@@ -6169,8 +6222,6 @@ export default function App() {
                   mappingSaveStatus={mappingSaveStatus}
                   mappingSaveMessage={mappingSaveMessage}
                   mappingRestSeconds={mappingRestSeconds}
-                  startCadenceMode={startCadenceMode}
-                  countdownSeconds={countdownSeconds}
                   startGateActive={startGateStatus.active}
                   startGateLabel={startGateStatus.label}
                   startGateDetail={startGateStatus.detail}
@@ -6194,10 +6245,9 @@ export default function App() {
                   onMappingRouteVariantChange={handleMappingRouteVariantChange}
                   onMappingZoneBranchChange={setMappingZoneBranchChoice}
                   onRaceRouteVariantChange={handleRaceRouteVariantChange}
+                  onLapCountChange={(count) => setLapCount(Math.max(1, Math.min(20, Math.round(count))))}
                   onDemoModeChange={handleDemoModeChange}
                   onDemoBikeCountChange={handleDemoBikeCountChange}
-                  onStartCadenceModeChange={setStartCadenceMode}
-                  onCountdownSecondsChange={(seconds) => setCountdownSeconds(Math.max(3, Math.min(6, Math.round(seconds))))}
                   onMappingModeChange={handleMappingModeChange}
                   onMappingFullscreenChange={handleMappingFullscreenChange}
                   onMappingEditModeChange={setMappingEditMode}
@@ -6218,6 +6268,7 @@ export default function App() {
                   onMappingImport={importMapping}
                   onGhostToggle={toggleGhostLap}
                   onGhostClear={clearSelectedGhosts}
+                  onGhostAnalyticsSharingChange={handleGhostAnalyticsSharingChange}
                   onPrimeAudio={primeAudioCues}
                   onStart={handleStart}
                   onCancel={handleCancel}

@@ -8,7 +8,9 @@ import {
   Gauge,
   MapPinned,
   Maximize2,
+  Medal,
   Minimize2,
+  Minus,
   Plus,
   Redo2,
   RotateCcw,
@@ -35,7 +37,6 @@ import type {
   RaceState,
   SessionMode,
   SpeedUnit,
-  StartCadenceMode,
   PlayerSlot,
   TrackPoint,
   TrackRecord,
@@ -105,6 +106,9 @@ type SessionControlPanelProps = {
   raceRouteVariantId: TrackRouteVariantId;
   savedRouteVariantIds: TrackRouteVariantId[];
   hasDualStartRoutes: boolean;
+  isLoopTrack: boolean;
+  lapCount: number;
+  currentProfileKey: string;
   raceState: RaceState;
   activeBikeCount: number;
   maxPlayers: number;
@@ -127,8 +131,6 @@ type SessionControlPanelProps = {
   mappingSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
   mappingSaveMessage: string | null;
   mappingRestSeconds: number;
-  startCadenceMode: StartCadenceMode;
-  countdownSeconds: number;
   startGateActive: boolean;
   startGateLabel: string;
   startGateDetail: string;
@@ -152,10 +154,9 @@ type SessionControlPanelProps = {
   onMappingRouteVariantChange: (variantId: TrackRouteVariantId) => void;
   onMappingZoneBranchChange: (branch: TrackSplitBranch['id']) => void;
   onRaceRouteVariantChange: (variantId: TrackRouteVariantId) => void;
+  onLapCountChange: (count: number) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoBikeCountChange: (count: number) => void;
-  onStartCadenceModeChange: (mode: StartCadenceMode) => void;
-  onCountdownSecondsChange: (seconds: number) => void;
   onMappingModeChange: (enabled: boolean) => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
@@ -176,6 +177,7 @@ type SessionControlPanelProps = {
   onMappingImport: (file: File) => void;
   onGhostToggle: (ghostId: string) => void;
   onGhostClear: () => void;
+  onGhostAnalyticsSharingChange: (ghostId: string, analyticsPublic: boolean) => void;
   onPrimeAudio: () => void;
   onStart: () => void;
   onCancel: () => void;
@@ -199,6 +201,10 @@ function ghostSourceLabel(source: GhostLap['source']) {
   }
 
   return source === 'top' ? 'Top rider' : 'Personal best';
+}
+
+function ghostMedalLabel(rank: GhostLap['medalRank']) {
+  return rank === 1 ? 'Gold' : rank === 2 ? 'Silver' : rank === 3 ? 'Bronze' : null;
 }
 
 export function SessionControlPanel({
@@ -227,6 +233,9 @@ export function SessionControlPanel({
   raceRouteVariantId,
   savedRouteVariantIds,
   hasDualStartRoutes,
+  isLoopTrack,
+  lapCount,
+  currentProfileKey,
   raceState,
   activeBikeCount,
   maxPlayers,
@@ -249,8 +258,6 @@ export function SessionControlPanel({
   mappingSaveStatus,
   mappingSaveMessage,
   mappingRestSeconds,
-  startCadenceMode,
-  countdownSeconds,
   startGateActive,
   startGateLabel,
   startGateDetail,
@@ -274,10 +281,9 @@ export function SessionControlPanel({
   onMappingRouteVariantChange,
   onMappingZoneBranchChange,
   onRaceRouteVariantChange,
+  onLapCountChange,
   onDemoModeChange,
   onDemoBikeCountChange,
-  onStartCadenceModeChange,
-  onCountdownSecondsChange,
   onMappingModeChange,
   onMappingFullscreenChange,
   onMappingEditModeChange,
@@ -298,6 +304,7 @@ export function SessionControlPanel({
   onMappingImport,
   onGhostToggle,
   onGhostClear,
+  onGhostAnalyticsSharingChange,
   onPrimeAudio,
   onStart,
   onCancel,
@@ -319,8 +326,10 @@ export function SessionControlPanel({
         : mappingEditMode === 'zones'
           ? 'Pedal Zones'
           : 'Split';
-  const splitDrawHint = mappingMode && mappingEditMode === 'draw' && draftSplitSections.length > 0
-    ? `Draw shared path: start to S1, then start again at M1 and continue to finish.`
+  const splitDrawHint = mappingMode && mappingEditMode === 'draw'
+    ? draftSplitSections.length > 0
+      ? 'Draw shared path: start to S1, then start again at M1 and continue to finish.'
+      : 'For a loop, finish by tapping or dragging the final point onto the start point.'
     : null;
   const shouldCollapseMappingTools = mappingFullscreen && mappingMode;
   const draftSplitPoint = draftSplitBuilder?.splitPoint ?? null;
@@ -380,9 +389,9 @@ export function SessionControlPanel({
   const topGhosts = ghostLaps.filter((ghost) => ghost.source === 'top').slice(0, 6);
   const selectedGhostCount = selectedGhostIds.filter((ghostId) => ghostLaps.some((ghost) => ghost.id === ghostId)).length;
   const ghostGroups = [
-    { id: 'personal', label: 'Personal', ghosts: personalGhosts },
+    { id: 'personal', label: 'Personal / Studio', ghosts: personalGhosts },
     { id: 'friend', label: 'Friends', ghosts: friendGhosts },
-    { id: 'top', label: 'Top', ghosts: topGhosts },
+    { id: 'top', label: 'Worldwide', ghosts: topGhosts },
   ].filter((group) => group.ghosts.length > 0);
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1110,6 +1119,50 @@ export function SessionControlPanel({
         </section>
       )}
 
+      {isLoopTrack && (
+        <section className="panel-section loop-race-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Loop Race</span>
+              <h3>Number of laps</h3>
+            </div>
+            <Route size={18} />
+          </div>
+          <div className="lap-stepper">
+            <button
+              type="button"
+              aria-label="Decrease lap count"
+              title="Decrease lap count"
+              onClick={() => onLapCountChange(Math.max(1, lapCount - 1))}
+              disabled={lapCount <= 1 || startGateActive || raceState === 'racing'}
+            >
+              <Minus size={17} />
+            </button>
+            <label>
+              <span>Laps</span>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={lapCount}
+                onChange={(event) => onLapCountChange(Math.max(1, Math.min(20, Math.round(Number(event.target.value) || 1))))}
+                disabled={startGateActive || raceState === 'racing'}
+              />
+            </label>
+            <button
+              type="button"
+              aria-label="Increase lap count"
+              title="Increase lap count"
+              onClick={() => onLapCountChange(Math.min(20, lapCount + 1))}
+              disabled={lapCount >= 20 || startGateActive || raceState === 'racing'}
+            >
+              <Plus size={17} />
+            </button>
+          </div>
+          <p className="loop-race-note">The finish is the start line. Pedal zones repeat on every lap.</p>
+        </section>
+      )}
+
       <section className="panel-section ghost-section">
         <div className="section-heading">
           <div>
@@ -1135,71 +1188,78 @@ export function SessionControlPanel({
                   <span>{group.label}</span>
                   {group.ghosts.map((ghost) => {
                     const selected = selectedGhostIds.includes(ghost.id);
+                    const ownsGhost = ghost.ownerKey === currentProfileKey;
+                    const medalLabel = ghostMedalLabel(ghost.medalRank);
+                    const riderZoneResults = ghost.zoneResults.flatMap((zone) => (
+                      zone.riders[0] ? [{ zone, rider: zone.riders[0] }] : []
+                    ));
                     return (
-                      <button
-                        className={selected ? 'selected' : ''}
-                        type="button"
-                        onClick={() => onGhostToggle(ghost.id)}
-                        key={ghost.id}
-                      >
-                        <strong>{ghost.riderName}</strong>
-                        <small>{ghostSourceLabel(ghost.source)} / {formatGhostRaceTime(ghost.finishTimeMs)} / 30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}</small>
-                      </button>
+                      <div className={`ghost-option ${selected ? 'selected' : ''}`} key={ghost.id}>
+                        <button
+                          className="ghost-select-button"
+                          type="button"
+                          onClick={() => onGhostToggle(ghost.id)}
+                          aria-pressed={selected}
+                        >
+                          <span className="ghost-name-row">
+                            <strong>{ghost.riderName}</strong>
+                            {medalLabel && (
+                              <span className={`ghost-medal rank-${ghost.medalRank}`} title={`${medalLabel} course record`}>
+                                <Medal size={16} />
+                                {medalLabel}
+                              </span>
+                            )}
+                          </span>
+                          <small>
+                            {ghostSourceLabel(ghost.source)} / {formatGhostRaceTime(ghost.finishTimeMs)}
+                            {ghost.lapCount > 1 ? ` / ${ghost.lapCount} laps` : ''}
+                            {' / '}30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}
+                          </small>
+                          <small>
+                            {ghost.analyticsPublic
+                              ? 'Replay and zone data public'
+                              : ownsGhost
+                                ? 'Replay public / your zone data private'
+                                : 'Replay public / performance private'}
+                          </small>
+                        </button>
+                        {ownsGhost && (
+                          <label className="ghost-share-toggle">
+                            <input
+                              type="checkbox"
+                              checked={ghost.analyticsPublic}
+                              onChange={(event) => onGhostAnalyticsSharingChange(ghost.id, event.target.checked)}
+                            />
+                            <span>Share zone data with other racers</span>
+                          </label>
+                        )}
+                        {(ghost.summary || riderZoneResults.length > 0) && (
+                          <details className="ghost-analytics">
+                            <summary>View performance</summary>
+                            {ghost.summary && (
+                              <div className="ghost-overall-metrics">
+                                <span>Cadence {ghost.summary.topCadence == null ? '--' : `${Math.round(ghost.summary.topCadence)} RPM`}</span>
+                                <span>Speed {ghost.summary.topSpeedKph == null ? '--' : `${(ghost.summary.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
+                                <span>Power {ghost.summary.topWatts == null ? '--' : `${Math.round(ghost.summary.topWatts)} W`}</span>
+                              </div>
+                            )}
+                            {riderZoneResults.map(({ zone, rider }) => (
+                              <div className="ghost-zone-row" key={zone.zoneId}>
+                                <strong>{zone.zoneName}</strong>
+                                <span>{rider.topCadence == null ? '--' : `${Math.round(rider.topCadence)} RPM`}</span>
+                                <span>{rider.topSpeedKph == null ? '--' : `${(rider.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
+                                <span>{rider.topWatts == null ? '--' : `${Math.round(rider.topWatts)} W`}</span>
+                              </div>
+                            ))}
+                          </details>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
               ))}
             </div>
           </>
-        )}
-      </section>
-
-      <section className="panel-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Start Gate</span>
-            <h3>Gate start</h3>
-          </div>
-          <Timer size={18} />
-        </div>
-
-        <div className="segmented-control compact" aria-label="Start cadence mode">
-          <button
-            className={startCadenceMode === 'countdown' ? 'selected' : ''}
-            type="button"
-            onClick={() => onStartCadenceModeChange('countdown')}
-          >
-            Countdown
-          </button>
-          <button
-            className={startCadenceMode === 'uci' ? 'selected' : ''}
-            type="button"
-            onClick={() => onStartCadenceModeChange('uci')}
-          >
-            UCI
-          </button>
-        </div>
-
-        {startCadenceMode === 'countdown' && (
-          <div className="segmented-control compact four-way" aria-label="Countdown seconds">
-            {[3, 4, 5, 6].map((seconds) => (
-              <button
-                className={countdownSeconds === seconds ? 'selected' : ''}
-                type="button"
-                onClick={() => onCountdownSecondsChange(seconds)}
-                key={seconds}
-              >
-                {seconds}s
-              </button>
-            ))}
-          </div>
-        )}
-
-        {startGateActive && (
-          <div className="start-gate-status">
-            <strong>{startGateLabel}</strong>
-            <span>{startGateDetail}</span>
-          </div>
         )}
       </section>
 
