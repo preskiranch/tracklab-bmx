@@ -77,12 +77,12 @@ const mockPostRaceReviewMapping = {
   ],
   startGate: { lat: 33.7125, lng: -112.0667 },
   finishLine: { lat: 33.712365, lng: -112.0667 },
-  zoneBoundaryMeters: [0, 14, 24, 40],
+  zoneBoundaryMeters: [0, 16, 26, 43],
   zoneBoundarySets: [
     {
       id: 'default-pedal-zones',
       name: 'Default pedal zones',
-      boundaryMeters: [0, 14, 24, 40],
+      boundaryMeters: [0, 16, 26, 43],
     },
   ],
   zones: [
@@ -90,15 +90,15 @@ const mockPostRaceReviewMapping = {
       id: 'pedal-zone-1',
       name: 'Pedal Zone 1',
       startMeter: 0,
-      endMeter: 14,
+      endMeter: 16,
       type: 'pedal',
       restAfterSeconds: 0,
     },
     {
       id: 'pedal-zone-2',
       name: 'Pedal Zone 2',
-      startMeter: 24,
-      endMeter: 40,
+      startMeter: 26,
+      endMeter: 43,
       type: 'pedal',
       restAfterSeconds: 0,
     },
@@ -448,6 +448,7 @@ test('completed race shows a populated 20-second pedal-zone review', async ({ pa
   await page.goto('/?track=black-mountain-bmx');
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
+  await page.locator('[aria-label="Demo rider count"] button').first().click();
   await expect(page.getByText(/2 pedal zones/i).first()).toBeVisible({ timeout: 15_000 });
 
   const startAction = page.locator('.workflow-step.primary-action');
