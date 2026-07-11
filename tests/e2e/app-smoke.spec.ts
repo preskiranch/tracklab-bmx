@@ -65,6 +65,46 @@ const mockNoPedalZoneMapping = {
   zones: [],
 };
 
+const mockPostRaceReviewMapping = {
+  ...mockPedalZoneMapping,
+  savedAt: '2026-07-09T00:10:00.000Z',
+  lengthMeters: 43,
+  centerline: [
+    { lat: 33.7125, lng: -112.0667 },
+    { lat: 33.7125, lng: -112.06655 },
+    { lat: 33.712365, lng: -112.06655 },
+    { lat: 33.712365, lng: -112.0667 },
+  ],
+  startGate: { lat: 33.7125, lng: -112.0667 },
+  finishLine: { lat: 33.712365, lng: -112.0667 },
+  zoneBoundaryMeters: [0, 14, 24, 40],
+  zoneBoundarySets: [
+    {
+      id: 'default-pedal-zones',
+      name: 'Default pedal zones',
+      boundaryMeters: [0, 14, 24, 40],
+    },
+  ],
+  zones: [
+    {
+      id: 'pedal-zone-1',
+      name: 'Pedal Zone 1',
+      startMeter: 0,
+      endMeter: 14,
+      type: 'pedal',
+      restAfterSeconds: 0,
+    },
+    {
+      id: 'pedal-zone-2',
+      name: 'Pedal Zone 2',
+      startMeter: 24,
+      endMeter: 40,
+      type: 'pedal',
+      restAfterSeconds: 0,
+    },
+  ],
+};
+
 type MockBikeSampleOverrides = Partial<{
   at: number;
   source: string;
@@ -376,7 +416,7 @@ test('completed race shows a populated 20-second pedal-zone review', async ({ pa
       contentType: 'application/json',
       body: JSON.stringify({
         trackMappings: {
-          'black-mountain-bmx': mockPedalZoneMapping,
+          'black-mountain-bmx': mockPostRaceReviewMapping,
         },
         count: 1,
       }),
