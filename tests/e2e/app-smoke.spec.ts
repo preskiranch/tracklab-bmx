@@ -772,3 +772,92 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
     await bridge.close();
   }
 });
+
+test('connected bike names remain bound to their monitor IDs after reload', async ({ page }) => {
+  const deviceIds = [43853, 58701];
+  const bridge = await createMockBikeBridge(deviceIds);
+  const sampleTimer = setInterval(() => {
+    deviceIds.forEach((deviceId, index) => {
+      bridge.broadcast(mockBikeSample({
+        deviceId,
+        watts: 180 + index * 20,
+        cadence: 64 + index * 4,
+        speedKph: 0,
+      }));
+    });
+  }, 120);
+  const authUser = {
+    id: 'bike-profile-racer',
+    profileKey: 'user:bike-profile-racer',
+    email: 'bike-profile@tracklab.test',
+    name: 'Bike Profile Rider',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: Date.now(),
+    },
+  };
+  let cloudBikeProfiles = deviceIds.map((deviceId, index) => ({
+    deviceId,
+    name: 'Bike 58701Watt',
+    colorName: index === 0 ? 'red' : 'yellow',
+    accent: index === 0 ? '#ff4d42' : '#ffd83d',
+    updatedAt: 100 + index,
+  }));
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      if (route.request().method() === 'PATCH') {
+        const patch = route.request().postDataJSON() as { bikeProfiles?: typeof cloudBikeProfiles };
+        if (Array.isArray(patch.bikeProfiles)) {
+          cloudBikeProfiles = patch.bikeProfiles;
+        }
+      }
+
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {},
+          customRoutes: [],
+          bikeProfiles: cloudBikeProfiles,
+        }),
+      });
+    });
+
+    await page.goto('/?track=black-mountain-bmx');
+    await page.getByRole('button', { name: 'Open App' }).click();
+
+    await expect(page.getByText(/2 connected bikes/i)).toBeVisible({ timeout: 15_000 });
+    const raceEntry = page.locator('.workflow-race-entry');
+    await expect(raceEntry.getByText('Bike 43853', { exact: true })).toBeVisible();
+    await expect(raceEntry.getByText('Bike 58701Watt', { exact: true })).toBeVisible();
+
+    await page.getByLabel('Name for player 1').fill('Gate Trainer');
+    await page.getByLabel('Name for player 2').fill('Rhythm Trainer');
+
+    await expect.poll(() => cloudBikeProfiles.find((profile) => profile.deviceId === 43853)?.name)
+      .toBe('Gate Trainer');
+    await expect.poll(() => cloudBikeProfiles.find((profile) => profile.deviceId === 58701)?.name)
+      .toBe('Rhythm Trainer');
+
+    await page.reload();
+    await expect(page.getByText(/2 connected bikes/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel('Name for player 1')).toHaveValue('Gate Trainer');
+    await expect(page.getByLabel('Name for player 2')).toHaveValue('Rhythm Trainer');
+    await expect(page.locator('.workflow-race-entry').getByText('Gate Trainer', { exact: true })).toBeVisible();
+    await expect(page.locator('.workflow-race-entry').getByText('Rhythm Trainer', { exact: true })).toBeVisible();
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
+});

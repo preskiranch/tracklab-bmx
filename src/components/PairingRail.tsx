@@ -178,7 +178,14 @@ export function PairingRail({
                         setEditingPlayerId(player.id);
                         updateNameDraft(player.id, nameDrafts[player.id] ?? player.name);
                       }}
-                      onChange={(event) => updateNameDraft(player.id, event.target.value)}
+                      onChange={(event) => {
+                        const nextName = event.target.value;
+                        updateNameDraft(player.id, nextName);
+                        const safeName = normalizeDraftName(nextName);
+                        if (safeName) {
+                          onRename?.(player.id, safeName);
+                        }
+                      }}
                       onBlur={(event) => commitNameDraft(player, event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
