@@ -818,7 +818,15 @@ function sanitizeGhostLapPayload(value, profileKey) {
       ? 'demo'
       : 'live';
 
-  if (!trackId || !ownerKey || !riderName || !Number.isFinite(finishTimeMs) || finishTimeMs <= 0 || points.length < 2) {
+  if (
+    raceSource !== 'live'
+    || !trackId
+    || !ownerKey
+    || !riderName
+    || !Number.isFinite(finishTimeMs)
+    || finishTimeMs <= 0
+    || points.length < 2
+  ) {
     return null;
   }
 

@@ -356,6 +356,7 @@ export async function initPersistence() {
       await pool.query(`UPDATE ${schema}.ghost_laps SET race_source = CASE WHEN rider_name ILIKE 'Demo Rider %' THEN 'demo' ELSE 'live' END WHERE race_source IS NULL`);
       await pool.query(`ALTER TABLE ${schema}.ghost_laps ALTER COLUMN race_source SET DEFAULT 'live'`);
       await pool.query(`ALTER TABLE ${schema}.ghost_laps ALTER COLUMN race_source SET NOT NULL`);
+      await pool.query(`DELETE FROM ${schema}.ghost_laps WHERE race_source = 'demo'`);
       await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS analytics_public BOOLEAN NOT NULL DEFAULT FALSE`);
       await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS zone_results JSONB NOT NULL DEFAULT '[]'::jsonb`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
@@ -1684,15 +1685,9 @@ export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], l
     `SELECT ranked.*
      FROM (
        SELECT ghost_laps.*,
-         CASE
-           WHEN race_source = 'demo' THEN NULL
-           ELSE DENSE_RANK() OVER (
-             PARTITION BY route_key
-             ORDER BY CASE WHEN race_source = 'demo' THEN 1 ELSE 0 END, finish_time_ms ASC
-           )
-         END AS medal_rank
+         DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
        FROM ${schema}.ghost_laps AS ghost_laps
-       WHERE track_id = $1
+       WHERE track_id = $1 AND race_source = 'live'
      ) AS ranked
      ORDER BY
        CASE
@@ -1707,16 +1702,13 @@ export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], l
   );
 
   const friends = new Set(friendKeys);
-  return (result?.rows ?? []).flatMap((row) => {
+  return (result?.rows ?? []).map((row) => {
     const source = row.owner_key === profileKey
       ? 'personal'
       : friends.has(row.owner_key)
         ? 'friend'
         : 'top';
-    if (row.race_source === 'demo' && source !== 'personal') {
-      return [];
-    }
     const includeAnalytics = row.owner_key === profileKey || Boolean(row.analytics_public);
-    return [ghostFromRow(row, source, includeAnalytics)];
+    return ghostFromRow(row, source, includeAnalytics);
   });
 }

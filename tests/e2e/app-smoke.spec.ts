@@ -644,7 +644,8 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(startHereLapCounter).toBeVisible();
   await expect(startHereLapCounter).toContainText('1 lap');
   await expect(page.getByText('My Ghosts')).toBeVisible();
-  await expect(page.getByText('Demo Ghosts')).toBeVisible();
+  await expect(page.getByText('Demo Ghosts')).toHaveCount(0);
+  await expect(page.getByText('Demo Rider 1')).toHaveCount(0);
   await expect(page.getByText('Studio Bike One')).toBeVisible();
   await expect(page.getByText('Worldwide')).toBeVisible();
   await expect(page.getByText('Gold')).toBeVisible();

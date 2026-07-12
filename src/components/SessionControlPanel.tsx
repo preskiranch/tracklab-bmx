@@ -206,7 +206,7 @@ function ghostSourceLabel(ghost: GhostLap) {
     return 'Top rider';
   }
 
-  return ghost.raceSource === 'demo' ? 'Demo best' : 'My best';
+  return 'My best';
 }
 
 function ghostMedalLabel(rank: GhostLap['medalRank']) {
@@ -391,7 +391,6 @@ export function SessionControlPanel({
     ].some((value) => value?.toLowerCase().includes(filter));
   });
   const personalGhosts = ghostLaps.filter((ghost) => ghost.source === 'personal' && ghost.raceSource === 'live');
-  const demoGhosts = ghostLaps.filter((ghost) => ghost.source === 'personal' && ghost.raceSource === 'demo').slice(0, 4);
   const friendGhosts = ghostLaps.filter((ghost) => ghost.source === 'friend').slice(0, 4);
   const topGhosts = ghostLaps.filter((ghost) => ghost.source === 'top').slice(0, 6);
   const selectedGhostCount = selectedGhostIds.filter((ghostId) => ghostLaps.some((ghost) => ghost.id === ghostId)).length;
@@ -403,7 +402,6 @@ export function SessionControlPanel({
       emptyMessage: 'Complete a live Wattbike race on this track to create your personal ghost.',
       alwaysVisible: true,
     },
-    { id: 'demo', label: 'Demo Ghosts', ghosts: demoGhosts },
     { id: 'friend', label: 'Friends', ghosts: friendGhosts },
     { id: 'top', label: 'Worldwide', ghosts: topGhosts },
   ].filter((group) => group.alwaysVisible || group.ghosts.length > 0);

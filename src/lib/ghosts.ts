@@ -159,14 +159,19 @@ export function readStoredGhostLaps() {
       return [];
     }
 
-    return parsed.map(sanitizeGhostLap).filter((ghost): ghost is GhostLap => ghost != null);
+    return parsed
+      .map(sanitizeGhostLap)
+      .filter((ghost): ghost is GhostLap => ghost?.raceSource === 'live');
   } catch {
     return [];
   }
 }
 
 export function writeStoredGhostLaps(ghosts: GhostLap[]) {
-  window.localStorage.setItem(ghostLapsStorageKey, JSON.stringify(ghosts.slice(0, maxStoredGhosts)));
+  window.localStorage.setItem(
+    ghostLapsStorageKey,
+    JSON.stringify(ghosts.filter((ghost) => ghost.raceSource === 'live').slice(0, maxStoredGhosts)),
+  );
 }
 
 export function mergeGhostLaps(currentGhosts: GhostLap[], incomingGhosts: GhostLap[]) {
@@ -174,7 +179,7 @@ export function mergeGhostLaps(currentGhosts: GhostLap[], incomingGhosts: GhostL
 
   [...currentGhosts, ...incomingGhosts]
     .map(sanitizeGhostLap)
-    .filter((ghost): ghost is GhostLap => ghost != null)
+    .filter((ghost): ghost is GhostLap => ghost?.raceSource === 'live')
     .forEach((ghost) => {
       const key = ghostIdentityKey(ghost);
       const existing = byIdentity.get(key);

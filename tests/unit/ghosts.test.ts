@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ghostsForTrackRoute, playbackGhostLap, sanitizeGhostLap } from '../../src/lib/ghosts';
+import { ghostsForTrackRoute, mergeGhostLaps, playbackGhostLap, sanitizeGhostLap } from '../../src/lib/ghosts';
 
 function rawGhost(lapCount: number, riderName = 'Studio Rider') {
   return {
@@ -64,6 +64,13 @@ describe('ghost lap categories and privacy metadata', () => {
 
     expect(sanitizeGhostLap(legacyDemo)?.raceSource).toBe('demo');
     expect(sanitizeGhostLap(legacyLive)?.raceSource).toBe('live');
+  });
+
+  it('does not retain demo laps in the selectable ghost collection', () => {
+    const demoGhost = rawGhost(1, 'Demo Rider 1');
+    demoGhost.raceSource = 'demo';
+
+    expect(mergeGhostLaps([], [demoGhost])).toEqual([]);
   });
 
   it('stages a selected ghost at rest on the start line before playback begins', () => {

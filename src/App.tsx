@@ -2256,10 +2256,11 @@ export default function App() {
   const availableGhostLaps = useMemo(
     () => ghostsForTrackRoute(ghostLaps, effectiveTrack.id, ghostRouteVariantId, isLoopTrack ? lapCount : 1)
       .filter((ghost) => (
-        ghost.ownerKey === cloudProfileKey
-        || (
-          ghost.raceSource === 'live'
-          && (ghost.source !== 'personal' || ghost.analyticsPublic)
+        ghost.raceSource === 'live'
+        && (
+          ghost.ownerKey === cloudProfileKey
+          || ghost.source !== 'personal'
+          || ghost.analyticsPublic
         )
       )),
     [cloudProfileKey, effectiveTrack.id, ghostLaps, ghostRouteVariantId, isLoopTrack, lapCount],
@@ -3488,6 +3489,7 @@ export default function App() {
       raceState !== 'finished'
       || !raceCapture
       || raceCapture.status !== 'finished'
+      || raceCapture.source !== 'live'
       || raceCapture.summary.length === 0
     ) {
       return;
@@ -3531,7 +3533,7 @@ export default function App() {
           })),
           ownerKey,
           ownerName,
-          raceSource: raceCapture.source,
+          raceSource: 'live',
           player,
           savedAt,
         });
