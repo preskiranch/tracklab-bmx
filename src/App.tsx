@@ -4981,6 +4981,17 @@ export default function App() {
     setAppMode('race');
   }, [membership.tier, multiplayer, requireAccountProfile]);
 
+  const openTrackLocator = useCallback(() => {
+    if (!requireAccountProfile()) {
+      return;
+    }
+
+    setShowMembershipLanding(true);
+    window.setTimeout(() => {
+      document.getElementById('track-locator')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, [requireAccountProfile]);
+
   const handleCheckoutBikeSeatsChange = useCallback((bikeSeats: number) => {
     setCheckoutBikeSeats(Math.max(1, Math.min(maxPlayers, Math.round(bikeSeats))));
     setCheckoutMessage(null);
@@ -5942,6 +5953,10 @@ export default function App() {
           <button type="button" onClick={() => setShowMembershipLanding(true)}>
             <Globe2 size={17} />
             Community
+          </button>
+          <button type="button" onClick={openTrackLocator}>
+            <MapPinned size={17} />
+            Track Locator
           </button>
           <button className={appMode === 'race' ? 'selected' : ''} type="button" onClick={() => setAppMode('race')}>
             <Activity size={17} />
