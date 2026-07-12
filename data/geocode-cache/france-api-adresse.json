@@ -467,7 +467,15 @@
     "distanceMeters": 116,
     "score": 0.9884
   },
-  "45.180199,6.336411": {},
+  "45.180199,6.336411": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Montrond, Albiez-Montrond, Savoie, Auvergne-Rhône-Alpes",
+    "city": "Albiez-Montrond",
+    "postcode": "",
+    "department": "Savoie",
+    "region": "Auvergne-Rhône-Alpes",
+    "type": "Locality"
+  },
   "45.899089,6.129541": {
     "label": "1 Esplanade de l'Hôtel de Ville 74000 Annecy",
     "city": "Annecy",
@@ -1080,7 +1088,15 @@
     "distanceMeters": 9,
     "score": 0.9991
   },
-  "50.709069,3.099696": {},
+  "50.709069,3.099696": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "KFC",
+    "city": "Bondues",
+    "postcode": "59910",
+    "department": "Nord",
+    "region": "Hauts-de-France",
+    "type": "POI"
+  },
   "51.013547,2.302577": {
     "label": "29 Place François Mitterrand 59760 Grande-Synthe",
     "city": "Grande-Synthe",
@@ -1693,7 +1709,15 @@
     "distanceMeters": 143,
     "score": 0.9857
   },
-  "48.446753,-4.396802": {},
+  "48.446753,-4.396802": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Guipavas Bmx",
+    "city": "Guipavas",
+    "postcode": "29490",
+    "department": "Finistère",
+    "region": "Bretagne",
+    "type": "POI"
+  },
   "48.372344,-4.640412": {
     "label": "24 Rue du Stade 29280 Locmaria-Plouzané",
     "city": "Locmaria-Plouzané",
@@ -1910,7 +1934,15 @@
     "distanceMeters": 148,
     "score": 0.9852
   },
-  "47.556497,-1.632019": {},
+  "47.556497,-1.632019": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Mocque Souris, 44170, Nozay, Loire-Atlantique, Pays de la Loire",
+    "city": "Nozay",
+    "postcode": "44170",
+    "department": "Loire-Atlantique",
+    "region": "Pays de la Loire",
+    "type": "StreetName"
+  },
   "47.355858,-1.917253": {
     "label": "13 la Dutais 44260 Savenay",
     "city": "Savenay",
@@ -1947,7 +1979,15 @@
     "distanceMeters": 51,
     "score": 0.9949
   },
-  "47.360779,-2.486667": {},
+  "47.360779,-2.486667": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "La Turballe, Loire-Atlantique, Pays de la Loire",
+    "city": "La Turballe",
+    "postcode": "",
+    "department": "Loire-Atlantique",
+    "region": "Pays de la Loire",
+    "type": "Locality"
+  },
   "47.040462,-0.885705": {
     "label": "3 Square de Liré 49300 Cholet",
     "city": "Cholet",
@@ -1960,7 +2000,15 @@
     "distanceMeters": 37,
     "score": 0.9963
   },
-  "47.227280,0.031398": {},
+  "47.227280,0.031398": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Turquant, Maine-et-Loire, Pays de la Loire",
+    "city": "Turquant",
+    "postcode": "",
+    "department": "Maine-et-Loire",
+    "region": "Pays de la Loire",
+    "type": "Locality"
+  },
   "48.078296,-0.642729": {
     "label": "Rue des Rochers 53210 Argentré",
     "city": "Argentré",
@@ -1997,7 +2045,15 @@
     "distanceMeters": 42,
     "score": 0.9958
   },
-  "47.953626,0.223811": {},
+  "47.953626,0.223811": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Léon Bollée Vélodrome",
+    "city": "Le Mans",
+    "postcode": "72100",
+    "department": "Sarthe",
+    "region": "Pays de la Loire",
+    "type": "POI"
+  },
   "48.120859,-0.025308": {
     "label": "19T Rue de Tennie 72240 Conlie",
     "city": "Conlie",
@@ -2010,7 +2066,15 @@
     "distanceMeters": 125,
     "score": 0.9875
   },
-  "46.736353,-1.589906": {},
+  "46.736353,-1.589906": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Rue de la Clairière, 85190, Aizenay, Vendée, Pays de la Loire",
+    "city": "Aizenay",
+    "postcode": "85190",
+    "department": "Vendée",
+    "region": "Pays de la Loire",
+    "type": "StreetName"
+  },
   "46.378030,-1.109783": {
     "label": "65bis Rue du huit mai 85450 Champagné-les-Marais",
     "city": "Champagné-les-Marais",
@@ -2395,7 +2459,15 @@
     "distanceMeters": 39,
     "score": 0.9961
   },
-  "45.953973,-1.273365": {},
+  "45.953973,-1.273365": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Le Marais Doux",
+    "city": "Saint-Pierre-d'Oléron",
+    "postcode": "17310",
+    "department": "Charente-Maritime",
+    "region": "Nouvelle-Aquitaine",
+    "type": "POI"
+  },
   "46.160721,1.866807": {
     "label": "5 Rue Paul Louis Grenier 23000 Guéret",
     "city": "Guéret",
@@ -2648,7 +2720,15 @@
     "distanceMeters": 38,
     "score": 0.9962
   },
-  "45.853472,1.294173": {},
+  "45.853472,1.294173": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Avenue Benoît Frachon, 87100, Limoges, Haute-Vienne, Nouvelle-Aquitaine",
+    "city": "Limoges",
+    "postcode": "87100",
+    "department": "Haute-Vienne",
+    "region": "Nouvelle-Aquitaine",
+    "type": "StreetName"
+  },
   "45.887160,0.901165": {
     "label": "2 Place Auguste Roche 87200 Saint-Junien",
     "city": "Saint-Junien",
@@ -2661,7 +2741,15 @@
     "distanceMeters": 4,
     "score": 0.9996
   },
-  "45.903785,1.407499": {},
+  "45.903785,1.407499": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Chauvan, 87480, Saint-Priest-Taurion, Haute-Vienne, Nouvelle-Aquitaine",
+    "city": "Saint-Priest-Taurion",
+    "postcode": "87480",
+    "department": "Haute-Vienne",
+    "region": "Nouvelle-Aquitaine",
+    "type": "StreetName"
+  },
   "43.739717,4.179260": {
     "label": "174 Grand'Rue 30670 Aigues-Vives",
     "city": "Aigues-Vives",
@@ -2686,7 +2774,15 @@
     "distanceMeters": 20,
     "score": 0.998
   },
-  "44.217975,2.618927": {},
+  "44.217975,2.618927": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "Les Planques",
+    "city": "Salmiech",
+    "postcode": "12120",
+    "department": "Aveyron",
+    "region": "Occitanie",
+    "type": "POI"
+  },
   "43.198341,0.124984": {
     "label": "12 Allée des Chênes 65690 Barbazan-Debat",
     "city": "Barbazan-Debat",
@@ -2723,7 +2819,15 @@
     "distanceMeters": 23,
     "score": 0.9977
   },
-  "43.440618,3.762211": {},
+  "43.440618,3.762211": {
+    "provider": "ArcGIS World Geocoding Service fallback",
+    "label": "D612, 34110, Frontignan, Hérault, Occitanie",
+    "city": "Frontignan",
+    "postcode": "34110",
+    "department": "Hérault",
+    "region": "Occitanie",
+    "type": "StreetName"
+  },
   "43.609001,4.013800": {
     "label": "345 Chemin de Bentenac 34130 Mauguio",
     "city": "Mauguio",

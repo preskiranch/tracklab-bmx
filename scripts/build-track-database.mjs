@@ -80,6 +80,9 @@ function normalizeTrack(track) {
   const geometry = fallbackGeometry(track);
   const outline = Array.isArray(track.outline) && track.outline.length > 0 ? track.outline : geometry.outline;
   const centerline = Array.isArray(track.centerline) && track.centerline.length > 1 ? track.centerline : geometry.centerline;
+  const locatorPoint = track.startGate ?? centerline[0] ?? outline[0];
+  const latitude = Number.isFinite(Number(track.latitude)) ? Number(track.latitude) : Number(locatorPoint?.lat);
+  const longitude = Number.isFinite(Number(track.longitude)) ? Number(track.longitude) : Number(locatorPoint?.lng);
 
   return {
     id,
@@ -91,13 +94,18 @@ function normalizeTrack(track) {
     source: track.source,
     sourceUrl: track.sourceUrl,
     sourceTrackId: track.sourceTrackId,
+    providerId: track.providerId,
+    sourceType: track.sourceType,
+    verificationStatus: track.verificationStatus,
+    addressStatus: track.addressStatus,
+    lastVerifiedAt: track.lastVerifiedAt,
     address: track.address,
     city: track.city,
     county: track.county,
     district: track.district,
     postalCode: track.postalCode,
-    latitude: Number.isFinite(Number(track.latitude)) ? Number(track.latitude) : undefined,
-    longitude: Number.isFinite(Number(track.longitude)) ? Number(track.longitude) : undefined,
+    latitude: Number.isFinite(latitude) ? latitude : undefined,
+    longitude: Number.isFinite(longitude) ? longitude : undefined,
     coordinateSource: track.coordinateSource,
     coordinateAccuracy: track.coordinateAccuracy,
     websiteUrl: track.websiteUrl,
@@ -119,6 +127,57 @@ function normalizeTrack(track) {
 
 function meaningfulGeometry(track) {
   return track.routeStatus && track.routeStatus !== 'locator-only';
+}
+
+const verificationRanks = {
+  unverified: 0,
+  supplemental: 1,
+  'reference-only': 2,
+  'federation-directory': 3,
+  'official-track-directory': 4,
+};
+
+const provenanceFields = [
+  'id',
+  'name',
+  'country',
+  'countryCode',
+  'state',
+  'region',
+  'source',
+  'sourceUrl',
+  'sourceTrackId',
+  'providerId',
+  'sourceType',
+  'verificationStatus',
+  'addressStatus',
+  'lastVerifiedAt',
+  'address',
+  'city',
+  'county',
+  'district',
+  'postalCode',
+  'latitude',
+  'longitude',
+  'coordinateSource',
+  'coordinateAccuracy',
+  'websiteUrl',
+  'facebookUrl',
+  'instagramUrl',
+  'sourceRecord',
+];
+
+function verificationRank(track) {
+  return verificationRanks[track.verificationStatus] ?? 0;
+}
+
+function provenanceQuality(track) {
+  return verificationRank(track) * 100
+    + (track.address ? 12 : 0)
+    + (Number.isFinite(Number(track.latitude)) && Number.isFinite(Number(track.longitude)) ? 8 : 0)
+    + (track.sourceTrackId ? 4 : 0)
+    + (track.lastVerifiedAt ? 2 : 0)
+    + (track.coordinateSource ? 1 : 0);
 }
 
 function mergeTrack(existing, incoming) {
@@ -146,7 +205,96 @@ function mergeTrack(existing, incoming) {
     merged.zones = existing.zones;
   }
 
+  const authoritative = provenanceQuality(incoming) > provenanceQuality(existing) ? incoming : existing;
+  provenanceFields.forEach((field) => {
+    if (authoritative[field] !== undefined) {
+      merged[field] = authoritative[field];
+    }
+  });
+
+  if (existingHasRoute !== incomingHasRoute) {
+    merged.id = existingHasRoute ? existing.id : incoming.id;
+  }
+
   return merged;
+}
+
+const genericFacilityWords = new Set([
+  'arena',
+  'bmx',
+  'centre',
+  'center',
+  'club',
+  'course',
+  'circuit',
+  'piste',
+  'pista',
+  'race',
+  'racing',
+  'stadium',
+  'track',
+]);
+
+function facilityTokens(name) {
+  return slug(name)
+    .split('-')
+    .filter((token) => token && !genericFacilityWords.has(token));
+}
+
+function namesIdentifySameFacility(left, right) {
+  const leftTokens = facilityTokens(left);
+  const rightTokens = facilityTokens(right);
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return false;
+  }
+  const leftSet = new Set(leftTokens);
+  const shared = rightTokens.filter((token) => leftSet.has(token)).length;
+  return shared / Math.min(leftTokens.length, rightTokens.length) >= 0.75;
+}
+
+function namesStronglyIdentifySameFacility(left, right) {
+  const leftTokens = facilityTokens(left).sort();
+  const rightTokens = facilityTokens(right).sort();
+  return leftTokens.length >= 2
+    && leftTokens.length === rightTokens.length
+    && leftTokens.every((token, index) => token === rightTokens[index]);
+}
+
+function distanceMeters(left, right) {
+  const latitude1 = Number(left.latitude) * Math.PI / 180;
+  const latitude2 = Number(right.latitude) * Math.PI / 180;
+  const deltaLatitude = latitude2 - latitude1;
+  const deltaLongitude = (Number(right.longitude) - Number(left.longitude)) * Math.PI / 180;
+  const a = Math.sin(deltaLatitude / 2) ** 2
+    + Math.cos(latitude1) * Math.cos(latitude2) * Math.sin(deltaLongitude / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function dedupeCatalogTracks(tracks) {
+  const reconciled = [];
+  const ordered = [...tracks].sort((left, right) => verificationRank(right) - verificationRank(left));
+  for (const track of ordered) {
+    const duplicateIndex = reconciled.findIndex((candidate) => {
+      if (candidate.countryCode !== track.countryCode) {
+        return false;
+      }
+      if (
+        String(candidate.state ?? '').toLowerCase() === String(track.state ?? '').toLowerCase()
+        && namesStronglyIdentifySameFacility(candidate.name, track.name)
+      ) {
+        return true;
+      }
+      const distance = distanceMeters(candidate, track);
+      return distance <= 30
+        || (distance <= 250 && namesIdentifySameFacility(candidate.name, track.name));
+    });
+    if (duplicateIndex < 0) {
+      reconciled.push(track);
+      continue;
+    }
+    reconciled[duplicateIndex] = mergeTrack(reconciled[duplicateIndex], track);
+  }
+  return reconciled;
 }
 
 async function loadSeedCatalog() {
@@ -168,7 +316,12 @@ async function loadImportedTracks() {
   const imports = await Promise.all(jsonFiles.map(async (file) => {
     const content = await readFile(new URL(file, importsDir), 'utf8');
     const parsed = JSON.parse(content);
-    return Array.isArray(parsed) ? parsed : parsed.tracks ?? [];
+    const tracks = Array.isArray(parsed) ? parsed : parsed.tracks ?? [];
+    return tracks.map((track) => ({
+      ...track,
+      providerId: track.providerId ?? parsed.providerId,
+      lastVerifiedAt: track.lastVerifiedAt ?? parsed.generatedAt,
+    }));
   }));
 
   return imports.flat();
@@ -180,17 +333,55 @@ const [providers, seedTracks, importedTracks] = await Promise.all([
   loadImportedTracks(),
 ]);
 
+const providersById = new Map(providers.map((provider) => [provider.id, provider]));
+const sourceProviderIds = new Map([
+  ['USA BMX', 'usabmx'],
+  ['USA BMX / BMX Canada', 'usabmx'],
+  ['Fédération Française de Cyclisme', 'ffc-bmx-racing'],
+  ['BMX New Zealand', 'bmxnz'],
+  ['AusCycling', 'auscycling'],
+  ['British Cycling', 'british-cycling'],
+  ['Cycling Canada', 'cycling-canada'],
+  ['UCI', 'uci'],
+  ['OpenStreetMap Overpass', 'openstreetmap-overpass'],
+]);
+
+function applyProviderMetadata(track) {
+  const providerId = track.providerId ?? sourceProviderIds.get(track.source);
+  const provider = providersById.get(providerId);
+  return {
+    ...track,
+    providerId,
+    sourceType: track.sourceType ?? provider?.sourceType,
+    verificationStatus: track.verificationStatus ?? provider?.verificationStatus ?? 'unverified',
+    addressStatus: track.addressStatus ?? (track.address
+      ? track.coordinateAccuracy?.startsWith('provider') ? 'provider-address' : 'reverse-geocoded'
+      : track.latitude && track.longitude ? 'coordinates-only' : 'unverified'),
+  };
+}
+
 const byId = new Map();
-[...importedTracks, ...seedTracks].map(normalizeTrack).forEach((track) => {
+[...importedTracks, ...seedTracks].map(applyProviderMetadata).map(normalizeTrack).forEach((track) => {
   const existing = byId.get(track.id);
   byId.set(track.id, existing ? mergeTrack(existing, track) : track);
 });
 
+const catalogTracks = dedupeCatalogTracks([...byId.values()]);
+
 const databaseBody = {
   providerCount: providers.length,
-  trackCount: byId.size,
+  trackCount: catalogTracks.length,
   providers,
-  tracks: [...byId.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  coverage: {
+    countries: new Set(catalogTracks.map((track) => track.country)).size,
+    officialRecords: catalogTracks.filter((track) => ['official-track-directory', 'federation-directory'].includes(track.verificationStatus)).length,
+    supplementalRecords: catalogTracks.filter((track) => track.verificationStatus === 'supplemental').length,
+    recordsByCountry: Object.fromEntries(catalogTracks.reduce((counts, track) => {
+      counts.set(track.country, (counts.get(track.country) ?? 0) + 1);
+      return counts;
+    }, new Map()).entries()),
+  },
+  tracks: catalogTracks.sort((a, b) => a.name.localeCompare(b.name)),
 };
 const existingDatabase = await readFile(outputPath, 'utf8').then(JSON.parse).catch(() => null);
 const existingBody = existingDatabase

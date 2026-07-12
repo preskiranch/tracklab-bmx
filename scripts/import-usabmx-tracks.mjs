@@ -147,6 +147,12 @@ const tracks = (payload.data ?? [])
   .sort((a, b) => a.country.localeCompare(b.country) || a.state.localeCompare(b.state) || a.name.localeCompare(b.name));
 
 await mkdir(new URL('../data/imports/', import.meta.url), { recursive: true });
-await writeFile(outputPath, `${JSON.stringify({ source: endpoint, count: tracks.length, tracks }, null, 2)}\n`);
+await writeFile(outputPath, `${JSON.stringify({
+  providerId: 'usabmx',
+  source: endpoint,
+  count: tracks.length,
+  generatedAt: new Date().toISOString(),
+  tracks,
+}, null, 2)}\n`);
 
 console.log(`Imported ${tracks.length} USA BMX/BMX Canada locator records into ${outputPath.pathname}`);

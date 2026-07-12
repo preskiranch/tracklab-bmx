@@ -1,6 +1,8 @@
 {
+  "providerId": "bmxnz",
   "source": "https://www.bmxnz.co.nz/clubs",
   "count": 31,
+  "generatedAt": "2026-07-12T06:40:09.475Z",
   "notes": "Official BMXNZ page text says 32 clubs; current visible club list contains 31 club records.",
   "tracks": [
     {
@@ -14,18 +16,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:6",
-      "address": "Merton Road Reserve, Howard Hunter Avenue, St Johns",
-      "city": "St Johns",
-      "coordinateAccuracy": "address-only",
+      "address": "Merton Reserve, 78 Merton Road, Saint Johns, Auckland 1072",
+      "city": "Auckland",
+      "postalCode": "1072",
+      "latitude": -36.878556,
+      "longitude": 174.849515,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "AUCKLAND",
-        "listedLine": "East City BMX Club, Merton Road Reserve, Howard Hunter Avenue, St Johns"
+        "listedLine": "East City BMX Club, Merton Road Reserve, Howard Hunter Avenue, St Johns",
+        "normalizedAddressSource": "https://www.aucklandcouncil.govt.nz/en/parks-recreation/find-park-beach/park-detail/130.html",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "East City BMX Club"
+        }
       }
     },
     {
@@ -39,18 +51,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:4",
-      "address": "Lloyd Elsmore Park, Bells Road, Pakuranga",
-      "city": "Pakuranga",
-      "coordinateAccuracy": "address-only",
+      "address": "2 Bells Road, Pakuranga Heights, Auckland 2010",
+      "city": "Auckland",
+      "postalCode": "2010",
+      "latitude": -36.903543025867215,
+      "longitude": 174.89565546885504,
+      "coordinateSource": "Mountain Raiders BMX official club map",
+      "coordinateAccuracy": "reviewed-track-location",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "AUCKLAND",
-        "listedLine": "Mountain Raiders BMX Club, Lloyd Elsmore Park, Bells Road, Pakuranga"
+        "listedLine": "Mountain Raiders BMX Club, Lloyd Elsmore Park, Bells Road, Pakuranga",
+        "normalizedAddressSource": "https://mtrbmx.co.nz/",
+        "coordinateEvidence": {
+          "source": "Mountain Raiders BMX official club map",
+          "url": "https://mtrbmx.co.nz/",
+          "matchedName": "Mountain Raiders BMX Club"
+        }
       }
     },
     {
@@ -64,18 +86,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:3",
-      "address": "Hooten Reserve, cnr Appian Way & Oteha Valley Road, Albany",
-      "city": "Albany",
-      "coordinateAccuracy": "address-only",
+      "address": "Hooton Reserve, corner of Appian Way and Oteha Valley Road, Albany, Auckland 0632",
+      "city": "Auckland",
+      "postalCode": "0632",
+      "latitude": -36.723131480032,
+      "longitude": 174.703806887709,
+      "coordinateSource": "Geocode of current North Harbour BMX official club address",
+      "coordinateAccuracy": "reviewed-track-location",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "AUCKLAND",
-        "listedLine": "North Harbour BMX Club, Hooten Reserve, cnr Appian Way & Oteha Valley Road, Albany"
+        "listedLine": "North Harbour BMX Club, Hooten Reserve, cnr Appian Way & Oteha Valley Road, Albany",
+        "normalizedAddressSource": "https://www.sporty.co.nz/nhbmx/Home",
+        "coordinateEvidence": {
+          "source": "Geocode of current North Harbour BMX official club address",
+          "url": "https://www.sporty.co.nz/nhbmx/Home",
+          "matchedName": "North Harbour BMX Club"
+        }
       }
     },
     {
@@ -84,19 +116,17 @@
       "country": "New Zealand",
       "countryCode": "NZ",
       "state": "Auckland",
-      "county": "Waikato District",
       "district": "AUCKLAND",
       "region": "Oceania",
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:5",
       "address": "Attewell Road, R D 3, Pukekohe",
-      "city": "Franklin",
-      "postalCode": "2678",
-      "latitude": -37.2308838,
-      "longitude": 174.8755486,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-road",
+      "city": "Pukekohe",
+      "latitude": -37.229935,
+      "longitude": 174.874256,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -106,15 +136,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "AUCKLAND",
         "listedLine": "Sunset Coast BMX Club, Attewell Road, R D 3, Pukekohe",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "Attewell Road, RD 3, Pukekohe, New Zealand",
-          "category": "highway",
-          "type": "tertiary",
-          "addresstype": "road",
-          "importance": 0.053381175707637105,
-          "osmType": "way",
-          "osmId": 467666291
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Sunset Coast Franklin BMX Club"
         }
       }
     },
@@ -131,16 +156,24 @@
       "sourceTrackId": "bmxnz-clubs:2",
       "address": "Te Rangi Hiroa Park, 103 Glen Road, Ranui",
       "city": "Ranui",
-      "coordinateAccuracy": "address-only",
+      "latitude": -36.854043,
+      "longitude": 174.598931,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "AUCKLAND",
-        "listedLine": "Waitakere BMX Club, Te Rangi Hiroa Park, 103 Glen Road, Ranui"
+        "listedLine": "Waitakere BMX Club, Te Rangi Hiroa Park, 103 Glen Road, Ranui",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Waitakere BMX Club"
+        }
       }
     },
     {
@@ -148,20 +181,18 @@
       "name": "Rotorua BMX Club",
       "country": "New Zealand",
       "countryCode": "NZ",
-      "state": "Bay of Plenty",
-      "county": "Rotorua Lakes District",
+      "state": "Bay Of Plenty",
       "district": "BAY OF PLENTY",
       "region": "Oceania",
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:14",
       "address": "Waipa State Mill Road, Rotorua",
-      "city": "Whakarewarewa",
-      "postalCode": "3010",
-      "latitude": -38.1764016,
-      "longitude": 176.2489425,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-road",
+      "city": "Rotorua",
+      "latitude": -38.147298,
+      "longitude": 176.260872,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -171,15 +202,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "BAY OF PLENTY",
         "listedLine": "Rotorua BMX Club, Waipa State Mill Road, Rotorua",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "Waipa State Mill Road, Rotorua, New Zealand",
-          "category": "highway",
-          "type": "unclassified",
-          "addresstype": "road",
-          "importance": 0.05338921873807886,
-          "osmType": "way",
-          "osmId": 285255967
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Rotorua BMX Club"
         }
       }
     },
@@ -188,20 +214,18 @@
       "name": "Tauranga BMX Club",
       "country": "New Zealand",
       "countryCode": "NZ",
-      "state": "Bay of Plenty",
-      "county": "Tauranga City",
+      "state": "Bay Of Plenty",
       "district": "BAY OF PLENTY",
       "region": "Oceania",
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:15",
       "address": "280 Cambridge Road, Bethlehem, Tauranga",
-      "city": "Bethlehem",
-      "postalCode": "3146",
-      "latitude": -37.7064087,
-      "longitude": 176.1225011,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-road",
+      "city": "Tauranga",
+      "latitude": -37.708507,
+      "longitude": 176.126654,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -211,15 +235,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "BAY OF PLENTY",
         "listedLine": "Tauranga BMX Club, 280 Cambridge Road, Bethlehem, Tauranga",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "280 Cambridge Road, Bethlehem, Tauranga, New Zealand",
-          "category": "highway",
-          "type": "secondary",
-          "addresstype": "road",
-          "importance": 0.053391382467383806,
-          "osmType": "way",
-          "osmId": 238957541
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Tauranga BMX Club"
         }
       }
     },
@@ -234,18 +253,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:24",
-      "address": "Kyle Park, Waterloo Road, Hornby",
-      "city": "Hornby",
-      "coordinateAccuracy": "address-only",
+      "address": "Kyle Park, 197 Waterloo Road, Hornby, Christchurch 8042",
+      "city": "Christchurch",
+      "postalCode": "8042",
+      "latitude": -43.540227,
+      "longitude": 172.521529,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "CANTERBURY",
-        "listedLine": "Christchurch City BMX Club, Kyle Park, Waterloo Road, Hornby"
+        "listedLine": "Christchurch City BMX Club, Kyle Park, Waterloo Road, Hornby",
+        "normalizedAddressSource": "https://www.cinch.org.nz/mobile/2875/entry/3062",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Christchurch City BMX Club"
+        }
       }
     },
     {
@@ -259,18 +288,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:26",
-      "address": "Bexley Reserve, Pages Road",
-      "city": "Pages Road",
-      "coordinateAccuracy": "address-only",
+      "address": "Bexley Park, 498 Pages Road, Bexley, Christchurch 8061",
+      "city": "Christchurch",
+      "postalCode": "8061",
+      "latitude": -43.519847,
+      "longitude": 172.718725,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "CANTERBURY",
-        "listedLine": "North Avon Christchurch BMX Club, Bexley Reserve, Pages Road"
+        "listedLine": "North Avon Christchurch BMX Club, Bexley Reserve, Pages Road",
+        "normalizedAddressSource": "https://www.sporty.co.nz/nacbmx",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "North Avon Christchurch BMX Club"
+        }
       }
     },
     {
@@ -284,18 +323,61 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:25",
-      "address": "Milton Road, Rangiora",
+      "address": "Ashley Picnic Ground, Millton Avenue, Rangiora, Canterbury 7400",
       "city": "Rangiora",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "7400",
+      "latitude": -43.283298,
+      "longitude": 172.58719,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "CANTERBURY",
-        "listedLine": "North Canterbury BMX Club, Milton Road, Rangiora"
+        "listedLine": "North Canterbury BMX Club, Milton Road, Rangiora",
+        "normalizedAddressSource": "https://www.sporty.co.nz/northcanterburybmx/home-1",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "North Canterbury BMX Club"
+        }
+      }
+    },
+    {
+      "id": "bmxnz-gisborne-bmx-club",
+      "name": "Gisborne BMX Club",
+      "country": "New Zealand",
+      "countryCode": "NZ",
+      "state": "East Coast",
+      "district": "EAST COAST",
+      "region": "Oceania",
+      "source": "BMX New Zealand",
+      "sourceUrl": "https://www.bmxnz.co.nz/clubs",
+      "sourceTrackId": "bmxnz-clubs:16",
+      "address": "Lytton Road, Gisborne",
+      "city": "Gisborne",
+      "latitude": -38.646774,
+      "longitude": 178.001347,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "BMXNZ",
+        "sourcePage": "https://www.bmxnz.co.nz/clubs",
+        "listedRegion": "EAST COAST",
+        "listedLine": "Gisborne BMX Club, Lytton Road, Gisborne",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Gisborne BMX Club"
+        }
       }
     },
     {
@@ -309,39 +391,13 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:17",
-      "address": "Ramons Drive, Havelock North",
+      "address": "33 Romanes Drive, Havelock North 4130",
       "city": "Havelock North",
-      "coordinateAccuracy": "address-only",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "estimated",
-      "sourceRecord": {
-        "provider": "BMXNZ",
-        "sourcePage": "https://www.bmxnz.co.nz/clubs",
-        "listedRegion": "EAST COAST",
-        "listedLine": "Hawkes Bay BMX Club, Ramons Drive, Havelock North"
-      }
-    },
-    {
-      "id": "bmxnz-gisborne-bmx-club",
-      "name": "Gisborne BMX Club",
-      "country": "New Zealand",
-      "countryCode": "NZ",
-      "state": "Gisborne",
-      "county": "Gisborne District",
-      "district": "EAST COAST",
-      "region": "Oceania",
-      "source": "BMX New Zealand",
-      "sourceUrl": "https://www.bmxnz.co.nz/clubs",
-      "sourceTrackId": "bmxnz-clubs:16",
-      "address": "Lytton Road, Gisborne",
-      "city": "Gisborne",
-      "postalCode": "4010",
-      "latitude": -38.6664043,
-      "longitude": 177.9932684,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-road",
+      "postalCode": "4130",
+      "latitude": -39.659578,
+      "longitude": 176.888568,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -350,55 +406,12 @@
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "EAST COAST",
-        "listedLine": "Gisborne BMX Club, Lytton Road, Gisborne",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "Lytton Road, Gisborne, New Zealand",
-          "category": "highway",
-          "type": "secondary",
-          "addresstype": "road",
-          "importance": 0.053389264515144544,
-          "osmType": "way",
-          "osmId": 96187645
-        }
-      }
-    },
-    {
-      "id": "bmxnz-nelson-bmx-club",
-      "name": "Nelson BMX club",
-      "country": "New Zealand",
-      "countryCode": "NZ",
-      "state": "Nelson",
-      "district": "UPPER SOUTH",
-      "region": "Oceania",
-      "source": "BMX New Zealand",
-      "sourceUrl": "https://www.bmxnz.co.nz/clubs",
-      "sourceTrackId": "bmxnz-clubs:23",
-      "address": "Beach Road, Tahunanui, Nelson",
-      "city": "Nelson City",
-      "postalCode": "7030",
-      "latitude": -41.2816345,
-      "longitude": 173.2479141,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-road",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "BMXNZ",
-        "sourcePage": "https://www.bmxnz.co.nz/clubs",
-        "listedRegion": "UPPER SOUTH",
-        "listedLine": "Nelson BMX club, Beach Road, Tahunanui, Nelson",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "Beach Road, Tahunanui, Nelson, New Zealand",
-          "category": "highway",
-          "type": "residential",
-          "addresstype": "road",
-          "importance": 0.05339404821850916,
-          "osmType": "way",
-          "osmId": 19437402
+        "listedLine": "Hawkes Bay BMX Club, Ramons Drive, Havelock North",
+        "normalizedAddressSource": "https://bmx.net.nz/clubs/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Hawkes Bay BMX Club"
         }
       }
     },
@@ -413,18 +426,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:1",
-      "address": "William Fraser Memorial Park, 200 Riverside Drive, Pakahaki",
-      "city": "Pakahaki",
-      "coordinateAccuracy": "address-only",
+      "address": "William Fraser Memorial Park, 200 Riverside Drive, Parahaki, Whangarei 0112",
+      "city": "Whangarei",
+      "postalCode": "0112",
+      "latitude": -35.733572,
+      "longitude": 174.341333,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "NORTHLAND",
-        "listedLine": "Whangarei BMX Club, William Fraser Memorial Park, 200 Riverside Drive, Pakahaki"
+        "listedLine": "Whangarei BMX Club, William Fraser Memorial Park, 200 Riverside Drive, Pakahaki",
+        "normalizedAddressSource": "https://bmx.net.nz/clubs/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Whangarei BMX Club"
+        }
       }
     },
     {
@@ -440,16 +463,24 @@
       "sourceTrackId": "bmxnz-clubs:27",
       "address": "Molyneux Park, Boundary Road, Alexandra",
       "city": "Alexandra",
-      "coordinateAccuracy": "address-only",
+      "latitude": -45.242903,
+      "longitude": 169.379729,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "OTAGO",
-        "listedLine": "Alexandra BMX Club, Molyneux Park, Boundary Road, Alexandra"
+        "listedLine": "Alexandra BMX Club, Molyneux Park, Boundary Road, Alexandra",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Alexandra BMX Club"
+        }
       }
     },
     {
@@ -463,18 +494,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:29",
-      "address": "Archill Street, Cromwell",
+      "address": "Achil Street, Cromwell 9310",
       "city": "Cromwell",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "9310",
+      "latitude": -45.042205,
+      "longitude": 169.208035,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "OTAGO",
-        "listedLine": "Cromwell BMX Club, Archill Street, Cromwell"
+        "listedLine": "Cromwell BMX Club, Archill Street, Cromwell",
+        "normalizedAddressSource": "https://bmx.net.nz/clubs/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Cromwell BMX Club"
+        }
       }
     },
     {
@@ -483,7 +524,6 @@
       "country": "New Zealand",
       "countryCode": "NZ",
       "state": "Otago",
-      "county": "Dunedin City",
       "district": "OTAGO",
       "region": "Oceania",
       "source": "BMX New Zealand",
@@ -491,11 +531,10 @@
       "sourceTrackId": "bmxnz-clubs:30",
       "address": "Forrester Park, Norwood Street, Dunedin",
       "city": "Dunedin",
-      "postalCode": "9022",
-      "latitude": -45.8366699,
-      "longitude": 170.5557778,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-leisure",
+      "latitude": -45.836936,
+      "longitude": 170.554896,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -505,15 +544,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "OTAGO",
         "listedLine": "Dunedin BMX Club, Forrester Park, Norwood Street, Dunedin",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "Forrester Park, Norwood Street, Dunedin, New Zealand",
-          "category": "leisure",
-          "type": "pitch",
-          "addresstype": "leisure",
-          "importance": 0.0000660692759593655,
-          "osmType": "way",
-          "osmId": 220969935
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Dunedin BMX Club"
         }
       }
     },
@@ -528,18 +562,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:28",
-      "address": "cnr Eddytone & Exmouth Street, Kaitangata",
+      "address": "Corner of Eddystone Street and Exmouth Street, Kaitangata 9210",
       "city": "Kaitangata",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "9210",
+      "latitude": -46.285764,
+      "longitude": 169.845908,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "OTAGO",
-        "listedLine": "Kaitangata BMX Club, cnr Eddytone & Exmouth Street, Kaitangata"
+        "listedLine": "Kaitangata BMX Club, cnr Eddytone & Exmouth Street, Kaitangata",
+        "normalizedAddressSource": "https://bmx.net.nz/clubs/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Kaitangata Black Gold BMX Club"
+        }
       }
     },
     {
@@ -553,18 +597,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:31",
-      "address": "Elizabeth Park, Lime Street, Invercargill",
+      "address": "Elizabeth Park, Lime Street, Invercargill 9812",
       "city": "Invercargill",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "9812",
+      "latitude": -46.4257,
+      "longitude": 168.382645,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "SOUTHLAND",
-        "listedLine": "Southland BMX Club, Elizabeth Park, Lime Street, Invercargill"
+        "listedLine": "Southland BMX Club, Elizabeth Park, Lime Street, Invercargill",
+        "normalizedAddressSource": "https://southlandnz.com/listing/elizabeth-park/108/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Southland BMX Club"
+        }
       }
     },
     {
@@ -573,19 +627,17 @@
       "country": "New Zealand",
       "countryCode": "NZ",
       "state": "Taranaki",
-      "county": "South Taranaki District",
       "district": "TARANAKI",
       "region": "Oceania",
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:19",
       "address": "High Road, Hawera",
-      "city": "Hāwera",
-      "postalCode": "4610",
-      "latitude": -39.5913171,
-      "longitude": 174.2925333,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-road",
+      "city": "Hawera",
+      "latitude": -39.591604,
+      "longitude": 174.293261,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -595,15 +647,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "TARANAKI",
         "listedLine": "Hawera BMX Club, High Road, Hawera",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "High Road, Hawera, New Zealand",
-          "category": "highway",
-          "type": "unclassified",
-          "addresstype": "road",
-          "importance": 0.053380292210269284,
-          "osmType": "way",
-          "osmId": 814841653
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Hawera BMX Club"
         }
       }
     },
@@ -613,19 +660,17 @@
       "country": "New Zealand",
       "countryCode": "NZ",
       "state": "Taranaki",
-      "county": "New Plymouth District",
       "district": "TARANAKI",
       "region": "Oceania",
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:18",
       "address": "St Andrews, Bell Block",
-      "city": "New Plymouth",
-      "postalCode": "4373",
-      "latitude": -39.0256603,
-      "longitude": 174.1407223,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-road",
+      "city": "Bell Block",
+      "latitude": -39.025218,
+      "longitude": 174.140553,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -635,15 +680,43 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "TARANAKI",
         "listedLine": "New Plymouth Sharks BMX Club, St Andrews, Bell Block",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "St Andrews, Bell Block, New Zealand",
-          "category": "highway",
-          "type": "unclassified",
-          "addresstype": "road",
-          "importance": 0.05339163576714729,
-          "osmType": "way",
-          "osmId": 84864996
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "New Plymouth BMX Club"
+        }
+      }
+    },
+    {
+      "id": "bmxnz-nelson-bmx-club",
+      "name": "Nelson BMX club",
+      "country": "New Zealand",
+      "countryCode": "NZ",
+      "state": "Upper South",
+      "district": "UPPER SOUTH",
+      "region": "Oceania",
+      "source": "BMX New Zealand",
+      "sourceUrl": "https://www.bmxnz.co.nz/clubs",
+      "sourceTrackId": "bmxnz-clubs:23",
+      "address": "Beach Road, Tahunanui, Nelson",
+      "city": "Nelson",
+      "latitude": -41.283176,
+      "longitude": 173.242378,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "BMXNZ",
+        "sourcePage": "https://www.bmxnz.co.nz/clubs",
+        "listedRegion": "UPPER SOUTH",
+        "listedLine": "Nelson BMX club, Beach Road, Tahunanui, Nelson",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Nelson BMX Club"
         }
       }
     },
@@ -653,7 +726,6 @@
       "country": "New Zealand",
       "countryCode": "NZ",
       "state": "Waikato",
-      "county": "Waipā District",
       "district": "WAIKATO",
       "region": "Oceania",
       "source": "BMX New Zealand",
@@ -661,11 +733,10 @@
       "sourceTrackId": "bmxnz-clubs:8",
       "address": "cnr Milton & Lamb Streets, Leamington, Cambridge",
       "city": "Cambridge",
-      "postalCode": "3432",
-      "latitude": -37.913622,
-      "longitude": 175.4629818,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-leisure",
+      "latitude": -37.916,
+      "longitude": 175.462132,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -675,15 +746,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WAIKATO",
         "listedLine": "Cambridge BMX Club, cnr Milton & Lamb Streets, Leamington, Cambridge",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "BMX track, Cambridge, New Zealand",
-          "category": "leisure",
-          "type": "track",
-          "addresstype": "leisure",
-          "importance": 0.000051544213015900166,
-          "osmType": "node",
-          "osmId": 6654477606
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Cambridge BMX Club"
         }
       }
     },
@@ -698,18 +764,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:11",
-      "address": "Minoque Park, Moore Street, Hamilton",
+      "address": "Minogue Park, Moore Street, Forest Lake, Hamilton 3200",
       "city": "Hamilton",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "3200",
+      "latitude": -37.775438,
+      "longitude": 175.253199,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WAIKATO",
-        "listedLine": "Hamilton BMX Club, Minoque Park, Moore Street, Hamilton"
+        "listedLine": "Hamilton BMX Club, Minoque Park, Moore Street, Hamilton",
+        "normalizedAddressSource": "https://bmx.net.nz/clubs/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Hamilton BMX Club"
+        }
       }
     },
     {
@@ -718,7 +794,6 @@
       "country": "New Zealand",
       "countryCode": "NZ",
       "state": "Waikato",
-      "county": "Hauraki District",
       "district": "WAIKATO",
       "region": "Oceania",
       "source": "BMX New Zealand",
@@ -726,11 +801,10 @@
       "sourceTrackId": "bmxnz-clubs:10",
       "address": "Taylor Avenue, Paeroa",
       "city": "Paeroa",
-      "postalCode": "3600",
-      "latitude": -37.3687694,
-      "longitude": 175.6666733,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-road",
+      "latitude": -37.371654,
+      "longitude": 175.666848,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -740,15 +814,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WAIKATO",
         "listedLine": "Paeroa BMX Club, Taylor Avenue, Paeroa",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "Taylor Avenue, Paeroa, New Zealand",
-          "category": "highway",
-          "type": "residential",
-          "addresstype": "road",
-          "importance": 0.0533768772411688,
-          "osmType": "way",
-          "osmId": 214791962
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Paeroa BMX Club"
         }
       }
     },
@@ -763,18 +832,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:9",
-      "address": "Crown Park, Taharepa Road, Taupo",
+      "address": "Crown Park, 115 Taharepa Road, Taupo 3330",
       "city": "Taupo",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "3330",
+      "latitude": -38.694822,
+      "longitude": 176.100047,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WAIKATO",
-        "listedLine": "Taupo BMX Club, Crown Park, Taharepa Road, Taupo"
+        "listedLine": "Taupo BMX Club, Crown Park, Taharepa Road, Taupo",
+        "normalizedAddressSource": "https://taupobmx.org.nz/welcome/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Taupo BMX Club"
+        }
       }
     },
     {
@@ -788,18 +867,27 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:12",
-      "address": "Boyd Park, Spur Street, Te Aroha",
+      "address": "Boyd Park, Spur Street, Te Aroha 3320",
       "city": "Te Aroha",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "3320",
+      "latitude": -37.547022,
+      "longitude": 175.7032845,
+      "coordinateSource": "OpenStreetMap BMX track geometry matched to BMXNZ address",
+      "coordinateAccuracy": "reviewed-track-location",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WAIKATO",
-        "listedLine": "Te Aroha BMX Club, Boyd Park, Spur Street, Te Aroha"
+        "listedLine": "Te Aroha BMX Club, Boyd Park, Spur Street, Te Aroha",
+        "normalizedAddressSource": "https://www.openstreetmap.org/way/1326373956",
+        "coordinateEvidence": {
+          "source": "OpenStreetMap BMX track geometry matched to BMXNZ address",
+          "url": "https://www.openstreetmap.org/way/1326373956"
+        }
       }
     },
     {
@@ -815,16 +903,24 @@
       "sourceTrackId": "bmxnz-clubs:7",
       "address": "Castleton Park, Park Road, Te Awamutu",
       "city": "Te Awamutu",
-      "coordinateAccuracy": "address-only",
+      "latitude": -38.014727,
+      "longitude": 175.337505,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WAIKATO",
-        "listedLine": "Te Awamutu BMX Club, Castleton Park, Park Road, Te Awamutu"
+        "listedLine": "Te Awamutu BMX Club, Castleton Park, Park Road, Te Awamutu",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Te Awamutu BMX Club"
+        }
       }
     },
     {
@@ -833,19 +929,17 @@
       "country": "New Zealand",
       "countryCode": "NZ",
       "state": "Waikato",
-      "county": "Waitomo District",
       "district": "WAIKATO",
       "region": "Oceania",
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:13",
       "address": "33 William Street, Te Kuiti",
-      "city": "Te Kūiti",
-      "postalCode": "3910",
-      "latitude": -38.332493,
-      "longitude": 175.1745121,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-place",
+      "city": "Te Kuiti",
+      "latitude": -38.332676,
+      "longitude": 175.17321,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -855,15 +949,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WAIKATO",
         "listedLine": "Te Kuiti BMX Club, 33 William Street, Te Kuiti",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "33 William Street, Te Kuiti, New Zealand",
-          "category": "place",
-          "type": "house",
-          "addresstype": "place",
-          "importance": 0.00004464103150983471,
-          "osmType": "node",
-          "osmId": 5623312261
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Te Kuiti BMX Club"
         }
       }
     },
@@ -873,7 +962,6 @@
       "country": "New Zealand",
       "countryCode": "NZ",
       "state": "Wellington",
-      "county": "Wellington City",
       "district": "WELLINGTON",
       "region": "Oceania",
       "source": "BMX New Zealand",
@@ -881,11 +969,10 @@
       "sourceTrackId": "bmxnz-clubs:22",
       "address": "Ian Galloway Park, Curtis Street, Karori, Wellington",
       "city": "Wellington",
-      "postalCode": "6012",
-      "latitude": -41.2787888,
-      "longitude": 174.7544752,
-      "coordinateSource": "Nominatim geocode from BMXNZ address",
-      "coordinateAccuracy": "geocoded-leisure",
+      "latitude": -41.279415,
+      "longitude": 174.754157,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
@@ -895,15 +982,10 @@
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WELLINGTON",
         "listedLine": "Capital BMX Club, Ian Galloway Park, Curtis Street, Karori, Wellington",
-        "geocode": {
-          "provider": "OpenStreetMap Nominatim",
-          "query": "BMX track, Wellington, New Zealand",
-          "category": "leisure",
-          "type": "track",
-          "addresstype": "leisure",
-          "importance": 0.0000712664988173803,
-          "osmType": "way",
-          "osmId": 406327309
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Capital BMX Club"
         }
       }
     },
@@ -918,18 +1000,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:21",
-      "address": "McLeod Park, 52 Mcleod Street, Upper Hutt",
+      "address": "McLeod Park, 52 McLeod Street, Upper Hutt 5018",
       "city": "Upper Hutt",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "5018",
+      "latitude": -41.116979,
+      "longitude": 175.055467,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WELLINGTON",
-        "listedLine": "Hutt Valley Thunderbolts BMX Club, McLeod Park, 52 Mcleod Street, Upper Hutt"
+        "listedLine": "Hutt Valley Thunderbolts BMX Club, McLeod Park, 52 Mcleod Street, Upper Hutt",
+        "normalizedAddressSource": "https://bmx.net.nz/clubs/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Hutt Valley Thunderbolts"
+        }
       }
     },
     {
@@ -943,18 +1035,28 @@
       "source": "BMX New Zealand",
       "sourceUrl": "https://www.bmxnz.co.nz/clubs",
       "sourceTrackId": "bmxnz-clubs:20",
-      "address": "Atiwa Park, cnr Donovan & Percival Roads, Paraparaumu",
+      "address": "Atiwa Park, corner of Donovan Road and Percival Road, Paraparaumu 5032",
       "city": "Paraparaumu",
-      "coordinateAccuracy": "address-only",
+      "postalCode": "5032",
+      "latitude": -40.883637,
+      "longitude": 174.99532,
+      "coordinateSource": "BMX.NET.NZ track coordinate directory",
+      "coordinateAccuracy": "track-center",
       "lengthMeters": 350,
       "elevationMeters": 0,
       "surface": "BMX Racing track",
-      "routeStatus": "estimated",
+      "routeStatus": "locator-only",
       "sourceRecord": {
         "provider": "BMXNZ",
         "sourcePage": "https://www.bmxnz.co.nz/clubs",
         "listedRegion": "WELLINGTON",
-        "listedLine": "Kapiti BMX Club, Atiwa Park, cnr Donovan & Percival Roads, Paraparaumu"
+        "listedLine": "Kapiti BMX Club, Atiwa Park, cnr Donovan & Percival Roads, Paraparaumu",
+        "normalizedAddressSource": "https://bmx.net.nz/clubs/",
+        "coordinateEvidence": {
+          "source": "BMX.NET.NZ coordinate directory",
+          "url": "https://bmx.net.nz/clubs/",
+          "matchedName": "Kapiti BMX Club"
+        }
       }
     }
   ]

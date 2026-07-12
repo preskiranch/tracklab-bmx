@@ -1,6 +1,8 @@
 {
+  "providerId": "usabmx",
   "source": "https://www.usabmx.com/api/backend/bmx-tracks",
-  "count": 282,
+  "count": 283,
+  "generatedAt": "2026-07-12T06:14:52.111Z",
   "tracks": [
     {
       "id": "abbotsford-bmx",
@@ -2771,6 +2773,34 @@
       }
     },
     {
+      "id": "port-st-lucie-bmx",
+      "name": "Port St Lucie BMX",
+      "country": "United States",
+      "countryCode": "US",
+      "state": "Florida",
+      "region": "North America",
+      "source": "USA BMX",
+      "sourceUrl": "https://www.usabmx.com/tracks/find-tracks",
+      "sourceTrackId": "2022",
+      "address": "13120 SW Tradition Pkwy, Port St Lucie, FL, 42987",
+      "city": "Port St Lucie",
+      "postalCode": "42987",
+      "latitude": 27.26501334206485,
+      "longitude": -80.45557277975834,
+      "coordinateSource": "USA BMX / BMX Canada locator endpoint",
+      "coordinateAccuracy": "provider-coordinate",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "Outdoor BMX race track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "USA BMX",
+        "endpoint": "https://www.usabmx.com/api/backend/bmx-tracks",
+        "id": 783,
+        "xrefTrackNumber": "2022"
+      }
+    },
+    {
       "id": "sarasota-bmx",
       "name": "Sarasota BMX",
       "country": "United States",
@@ -3387,34 +3417,6 @@
         "endpoint": "https://www.usabmx.com/api/backend/bmx-tracks",
         "id": 88,
         "xrefTrackNumber": "1178"
-      }
-    },
-    {
-      "id": "usa-bmx",
-      "name": "USA BMX",
-      "country": "United States",
-      "countryCode": "US",
-      "state": "Illinois",
-      "region": "North America",
-      "source": "USA BMX",
-      "sourceUrl": "https://www.usabmx.com/tracks/find-tracks",
-      "sourceTrackId": "9000",
-      "address": "Rockford, IL",
-      "city": "Rockford",
-      "postalCode": "",
-      "latitude": 33.35515777476755,
-      "longitude": -111.82618962409896,
-      "coordinateSource": "USA BMX / BMX Canada locator endpoint",
-      "coordinateAccuracy": "provider-coordinate",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "Outdoor BMX race track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "USA BMX",
-        "endpoint": "https://www.usabmx.com/api/backend/bmx-tracks",
-        "id": 715,
-        "xrefTrackNumber": "9000"
       }
     },
     {
@@ -6058,6 +6060,34 @@
         "endpoint": "https://www.usabmx.com/api/backend/bmx-tracks",
         "id": 490,
         "xrefTrackNumber": "1769"
+      }
+    },
+    {
+      "id": "usa-bmx",
+      "name": "USA BMX",
+      "country": "United States",
+      "countryCode": "US",
+      "state": "Ohio",
+      "region": "North America",
+      "source": "USA BMX",
+      "sourceUrl": "https://www.usabmx.com/tracks/find-tracks",
+      "sourceTrackId": "9000",
+      "address": "Akron, OH",
+      "city": "Akron",
+      "postalCode": "",
+      "latitude": 33.35515777476755,
+      "longitude": -111.82618962409896,
+      "coordinateSource": "USA BMX / BMX Canada locator endpoint",
+      "coordinateAccuracy": "provider-coordinate",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "Outdoor BMX race track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "USA BMX",
+        "endpoint": "https://www.usabmx.com/api/backend/bmx-tracks",
+        "id": 715,
+        "xrefTrackNumber": "9000"
       }
     },
     {
