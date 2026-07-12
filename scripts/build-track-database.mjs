@@ -11,6 +11,9 @@ const seedCatalogPath = new URL('../src/data/trackCatalog.ts', import.meta.url);
 const outputPath = new URL('../public/data/track-database.json', import.meta.url);
 const brotliOutputPath = new URL('../public/data/track-database.json.br', import.meta.url);
 const gzipOutputPath = new URL('../public/data/track-database.json.gz', import.meta.url);
+const locatorOutputPath = new URL('../public/data/track-locator.json', import.meta.url);
+const locatorBrotliOutputPath = new URL('../public/data/track-locator.json.br', import.meta.url);
+const locatorGzipOutputPath = new URL('../public/data/track-locator.json.gz', import.meta.url);
 const brotliCompressAsync = promisify(brotliCompress);
 const gzipAsync = promisify(gzip);
 
@@ -395,24 +398,63 @@ const database = {
   generatedAt,
   ...databaseBody,
 };
+const locatorFields = [
+  'id',
+  'name',
+  'country',
+  'countryCode',
+  'state',
+  'region',
+  'source',
+  'address',
+  'city',
+  'county',
+  'district',
+  'postalCode',
+  'latitude',
+  'longitude',
+  'websiteUrl',
+];
+const locatorDatabase = {
+  generatedAt,
+  trackCount: database.trackCount,
+  coverage: database.coverage,
+  tracks: database.tracks.map((track) => Object.fromEntries(
+    locatorFields
+      .filter((field) => track[field] !== undefined)
+      .map((field) => [field, track[field]]),
+  )),
+};
 
 await mkdir(new URL('../public/data/', import.meta.url), { recursive: true });
 const serializedDatabase = `${JSON.stringify(database, null, 2)}\n`;
 const databaseBytes = Buffer.from(serializedDatabase);
-const [brotliBytes, gzipBytes] = await Promise.all([
+const locatorBytes = Buffer.from(`${JSON.stringify(locatorDatabase)}\n`);
+const [brotliBytes, gzipBytes, locatorBrotliBytes, locatorGzipBytes] = await Promise.all([
   brotliCompressAsync(databaseBytes, {
     params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
   }),
   gzipAsync(databaseBytes, { level: 9 }),
+  brotliCompressAsync(locatorBytes, {
+    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
+  }),
+  gzipAsync(locatorBytes, { level: 9 }),
 ]);
 await Promise.all([
   writeFile(outputPath, databaseBytes),
   writeFile(brotliOutputPath, brotliBytes),
   writeFile(gzipOutputPath, gzipBytes),
+  writeFile(locatorOutputPath, locatorBytes),
+  writeFile(locatorBrotliOutputPath, locatorBrotliBytes),
+  writeFile(locatorGzipOutputPath, locatorGzipBytes),
 ]);
 
 const relativeOutput = path.relative(repoRoot.pathname, outputPath.pathname);
 console.log(
   `Built ${relativeOutput} with ${database.trackCount} tracks from ${database.providerCount} providers `
   + `(${databaseBytes.length} raw / ${brotliBytes.length} br / ${gzipBytes.length} gzip bytes).`,
+);
+console.log(
+  `Built public/data/track-locator.json for public search `
+  + `(${locatorBytes.length} raw / ${locatorBrotliBytes.length} br / ${locatorGzipBytes.length} gzip bytes).`,
 );

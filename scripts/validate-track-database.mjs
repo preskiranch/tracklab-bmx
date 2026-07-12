@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises';
 
 const databasePath = new URL('../public/data/track-database.json', import.meta.url);
+const locatorDatabasePath = new URL('../public/data/track-locator.json', import.meta.url);
 const database = JSON.parse(await readFile(databasePath, 'utf8'));
+const locatorDatabase = JSON.parse(await readFile(locatorDatabasePath, 'utf8'));
 const providers = new Map((database.providers ?? []).map((provider) => [provider.id, provider]));
 const tracks = database.tracks ?? [];
 const errors = [];
@@ -74,6 +76,29 @@ for (const track of tracks) {
 
 if (Number(database.trackCount) !== tracks.length) {
   errors.push(`trackCount is ${database.trackCount}, but tracks contains ${tracks.length} records`);
+}
+
+const locatorTracks = Array.isArray(locatorDatabase.tracks) ? locatorDatabase.tracks : [];
+if (Number(locatorDatabase.trackCount) !== tracks.length || locatorTracks.length !== tracks.length) {
+  errors.push(`public locator contains ${locatorTracks.length} of ${tracks.length} tracks`);
+}
+const locatorIds = new Set(locatorTracks.map((track) => track.id));
+for (const track of tracks) {
+  if (!locatorIds.has(track.id)) {
+    errors.push(`${track.id}: missing from public locator`);
+  }
+}
+for (const track of locatorTracks) {
+  const label = track.id || track.name || 'unknown locator track';
+  if (!String(track.name ?? '').trim() || !String(track.country ?? '').trim()) {
+    errors.push(`${label}: public locator is missing identifying fields`);
+  }
+  if (!Number.isFinite(Number(track.latitude)) || !Number.isFinite(Number(track.longitude))) {
+    errors.push(`${label}: public locator is missing coordinates`);
+  }
+  if (track.websiteUrl && !isHttpUrl(track.websiteUrl)) {
+    errors.push(`${label}: public locator has invalid websiteUrl`);
+  }
 }
 
 const summary = tracks.reduce((result, track) => {

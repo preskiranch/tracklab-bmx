@@ -6,6 +6,7 @@ import {
   trackGoogleEarthUrl,
 } from '../../src/lib/mapLinks';
 import { trackCenter } from '../../src/lib/googleMaps';
+import type { TrackLocatorRecord } from '../../src/types';
 
 const track = trackCatalog.find((item) => item.id === 'north-bay-bmx-napa-valley') ?? trackCatalog[0];
 const destination = `${trackCenter(track).lat},${trackCenter(track).lng}`;
@@ -31,5 +32,23 @@ describe('public track map links', () => {
 
   it('builds a Google Earth location link', () => {
     expect(decodeURIComponent(trackGoogleEarthUrl(track))).toContain(destination);
+  });
+
+  it('builds links from the compact public locator record', () => {
+    const center = trackCenter(track);
+    const locatorTrack: TrackLocatorRecord = {
+      id: track.id,
+      name: track.name,
+      country: track.country,
+      countryCode: track.countryCode,
+      state: track.state,
+      region: track.region,
+      source: track.source,
+      latitude: center.lat,
+      longitude: center.lng,
+    };
+    const url = new URL(trackGoogleDirectionsUrl(locatorTrack));
+
+    expect(url.searchParams.get('destination')).toBe(`${center.lat},${center.lng}`);
   });
 });

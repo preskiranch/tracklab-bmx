@@ -664,3 +664,21 @@ export type TrackRecord = {
   leaderboards: Record<LeaderboardMetric, LeaderboardEntry[]>;
   sourceRecord?: Record<string, unknown>;
 };
+
+export type TrackLocatorRecord = Pick<TrackRecord,
+  | 'id'
+  | 'name'
+  | 'country'
+  | 'countryCode'
+  | 'state'
+  | 'region'
+  | 'source'
+  | 'address'
+  | 'city'
+  | 'county'
+  | 'district'
+  | 'postalCode'
+  | 'latitude'
+  | 'longitude'
+  | 'websiteUrl'
+>;
