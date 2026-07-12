@@ -17,7 +17,8 @@ import {
   X,
 } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
-import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
+import { hasGoogleMapsApiKey } from '../lib/googleMaps';
+import { trackGoogleEarthUrl } from '../lib/mapLinks';
 import { formatDistanceMeters, formatReactionTime } from '../units';
 import type {
   BikeSample,
@@ -169,8 +170,7 @@ export function EarthTrackView({
   onMappingSplitDrawEnd,
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
-  const center = trackCenter(track);
-  const googleEarthUrl = `https://earth.google.com/web/search/${center.lat},${center.lng}`;
+  const googleEarthUrl = trackGoogleEarthUrl(track);
   const imageryLabel = 'Google Earth view';
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'

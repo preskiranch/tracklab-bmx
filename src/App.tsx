@@ -5632,6 +5632,8 @@ export default function App() {
         isAdminProfile={adminProfileActive}
         onlineRiderCount={multiplayer.onlineRiders.length}
         liveRoomCount={multiplayer.rooms.length}
+        catalogReady={catalogDatabaseReady}
+        tracks={baseCatalogTracks}
         onAuthModeChange={(mode) => {
           setAuthMode(mode);
           setProfileFormError(null);

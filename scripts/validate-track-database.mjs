@@ -48,6 +48,9 @@ for (const track of tracks) {
   if (!isHttpUrl(track.sourceUrl)) {
     errors.push(`${label}: invalid sourceUrl`);
   }
+  if (track.websiteUrl && !isHttpUrl(track.websiteUrl)) {
+    errors.push(`${label}: invalid websiteUrl`);
+  }
   if (track.providerId && !providers.has(track.providerId)) {
     errors.push(`${label}: unknown providerId ${track.providerId}`);
   }
