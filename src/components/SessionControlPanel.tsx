@@ -197,12 +197,16 @@ function formatGhostRaceTime(milliseconds: number) {
   return `${(Math.max(0, milliseconds) / 1000).toFixed(2)}s`;
 }
 
-function ghostSourceLabel(source: GhostLap['source']) {
-  if (source === 'friend') {
+function ghostSourceLabel(ghost: GhostLap) {
+  if (ghost.source === 'friend') {
     return 'Friend best';
   }
 
-  return source === 'top' ? 'Top rider' : 'Personal best';
+  if (ghost.source === 'top') {
+    return 'Top rider';
+  }
+
+  return ghost.raceSource === 'demo' ? 'Demo best' : 'My best';
 }
 
 function ghostMedalLabel(rank: GhostLap['medalRank']) {
@@ -386,15 +390,23 @@ export function SessionControlPanel({
       customRoute.country,
     ].some((value) => value?.toLowerCase().includes(filter));
   });
-  const personalGhosts = ghostLaps.filter((ghost) => ghost.source === 'personal').slice(0, 4);
+  const personalGhosts = ghostLaps.filter((ghost) => ghost.source === 'personal' && ghost.raceSource === 'live');
+  const demoGhosts = ghostLaps.filter((ghost) => ghost.source === 'personal' && ghost.raceSource === 'demo').slice(0, 4);
   const friendGhosts = ghostLaps.filter((ghost) => ghost.source === 'friend').slice(0, 4);
   const topGhosts = ghostLaps.filter((ghost) => ghost.source === 'top').slice(0, 6);
   const selectedGhostCount = selectedGhostIds.filter((ghostId) => ghostLaps.some((ghost) => ghost.id === ghostId)).length;
   const ghostGroups = [
-    { id: 'personal', label: 'Personal / Studio', ghosts: personalGhosts },
+    {
+      id: 'personal',
+      label: 'My Ghosts',
+      ghosts: personalGhosts,
+      emptyMessage: 'Complete a live Wattbike race on this track to create your personal ghost.',
+      alwaysVisible: true,
+    },
+    { id: 'demo', label: 'Demo Ghosts', ghosts: demoGhosts },
     { id: 'friend', label: 'Friends', ghosts: friendGhosts },
     { id: 'top', label: 'Worldwide', ghosts: topGhosts },
-  ].filter((group) => group.ghosts.length > 0);
+  ].filter((group) => group.alwaysVisible || group.ghosts.length > 0);
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -1174,99 +1186,95 @@ export function SessionControlPanel({
           <Bike size={18} />
         </div>
 
-        {ghostGroups.length === 0 ? (
-          <span className="empty-inline">Finish a race on this track to save a ghost lap.</span>
-        ) : (
-          <>
-            <div className="ghost-summary-row">
-              <span>{selectedGhostCount} selected</span>
-              <button type="button" onClick={onGhostClear} disabled={selectedGhostCount === 0}>
-                Clear
-              </button>
-            </div>
-            <div className="ghost-picker">
-              {ghostGroups.map((group) => (
-                <div className="ghost-group" key={group.id}>
-                  <span>{group.label}</span>
-                  {group.ghosts.map((ghost) => {
-                    const selected = selectedGhostIds.includes(ghost.id);
-                    const ownsGhost = ghost.ownerKey === currentProfileKey;
-                    const medalLabel = ghostMedalLabel(ghost.medalRank);
-                    const riderZoneResults = ghost.zoneResults.flatMap((zone) => (
-                      zone.riders[0] ? [{ zone, rider: zone.riders[0] }] : []
-                    ));
-                    return (
-                      <div className={`ghost-option ${selected ? 'selected' : ''}`} key={ghost.id}>
-                        <button
-                          className="ghost-select-button"
-                          type="button"
-                          onClick={() => onGhostToggle(ghost.id)}
-                          aria-pressed={selected}
-                        >
-                          <span className="ghost-name-row">
-                            <strong>{ghost.riderName}</strong>
-                            {medalLabel && (
-                              <span className={`ghost-medal rank-${ghost.medalRank}`} title={`${medalLabel} course record`}>
-                                <Medal size={16} />
-                                {medalLabel}
-                              </span>
-                            )}
+        <div className="ghost-summary-row">
+          <span>{selectedGhostCount} selected</span>
+          <button type="button" onClick={onGhostClear} disabled={selectedGhostCount === 0}>
+            Clear
+          </button>
+        </div>
+        <div className="ghost-picker">
+          {ghostGroups.map((group) => (
+            <div className="ghost-group" key={group.id}>
+              <span>{group.label}</span>
+              {group.ghosts.length === 0 ? (
+                <small className="ghost-group-empty">{group.emptyMessage}</small>
+              ) : group.ghosts.map((ghost) => {
+                const selected = selectedGhostIds.includes(ghost.id);
+                const ownsGhost = ghost.ownerKey === currentProfileKey;
+                const medalLabel = ghostMedalLabel(ghost.medalRank);
+                const riderZoneResults = ghost.zoneResults.flatMap((zone) => (
+                  zone.riders[0] ? [{ zone, rider: zone.riders[0] }] : []
+                ));
+                return (
+                  <div className={`ghost-option ${selected ? 'selected' : ''}`} key={ghost.id}>
+                    <button
+                      className="ghost-select-button"
+                      type="button"
+                      onClick={() => onGhostToggle(ghost.id)}
+                      aria-pressed={selected}
+                    >
+                      <span className="ghost-name-row">
+                        <strong>{ghost.riderName}</strong>
+                        {medalLabel && (
+                          <span className={`ghost-medal rank-${ghost.medalRank}`} title={`${medalLabel} course record`}>
+                            <Medal size={16} />
+                            {medalLabel}
                           </span>
-                          <small>
-                            {ghostSourceLabel(ghost.source)} / {formatGhostRaceTime(ghost.finishTimeMs)}
-                            {ghost.lapCount > 1 ? ` / ${ghost.lapCount} laps` : ''}
-                            {' / '}30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}
-                          </small>
-                          <small>
-                            {ghost.analyticsPublic
-                              ? 'Replay and zone data public'
-                              : ownsGhost
-                                ? 'Replay public / your zone data private'
-                                : 'Replay public / performance private'}
-                          </small>
-                          <span className={`ghost-race-selection ${selected ? 'selected' : ''}`}>
-                            {selected ? <CheckCircle2 size={16} /> : <Circle size={16} />}
-                            {selected ? 'Selected to race' : 'Select this ghost'}
-                          </span>
-                        </button>
-                        {ownsGhost && (
-                          <label className="ghost-share-toggle">
-                            <input
-                              type="checkbox"
-                              checked={ghost.analyticsPublic}
-                              onChange={(event) => onGhostAnalyticsSharingChange(ghost.id, event.target.checked)}
-                            />
-                            <span>Share zone data with other racers</span>
-                          </label>
                         )}
-                        {(ghost.summary || riderZoneResults.length > 0) && (
-                          <details className="ghost-analytics">
-                            <summary>View performance</summary>
-                            {ghost.summary && (
-                              <div className="ghost-overall-metrics">
-                                <span>Cadence {ghost.summary.topCadence == null ? '--' : `${Math.round(ghost.summary.topCadence)} RPM`}</span>
-                                <span>Speed {ghost.summary.topSpeedKph == null ? '--' : `${(ghost.summary.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
-                                <span>Power {ghost.summary.topWatts == null ? '--' : `${Math.round(ghost.summary.topWatts)} W`}</span>
-                              </div>
-                            )}
-                            {riderZoneResults.map(({ zone, rider }) => (
-                              <div className="ghost-zone-row" key={zone.zoneId}>
-                                <strong>{zone.zoneName}</strong>
-                                <span>{rider.topCadence == null ? '--' : `${Math.round(rider.topCadence)} RPM`}</span>
-                                <span>{rider.topSpeedKph == null ? '--' : `${(rider.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
-                                <span>{rider.topWatts == null ? '--' : `${Math.round(rider.topWatts)} W`}</span>
-                              </div>
-                            ))}
-                          </details>
+                      </span>
+                      <small>
+                        {ghostSourceLabel(ghost)} / {formatGhostRaceTime(ghost.finishTimeMs)}
+                        {ghost.lapCount > 1 ? ` / ${ghost.lapCount} laps` : ''}
+                        {' / '}30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}
+                      </small>
+                      <small>
+                        {ghost.analyticsPublic
+                          ? 'Replay and zone data public'
+                          : ownsGhost
+                            ? 'Replay public / your zone data private'
+                            : 'Replay public / performance private'}
+                      </small>
+                      <span className={`ghost-race-selection ${selected ? 'selected' : ''}`}>
+                        {selected ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                        {selected ? 'Selected to race' : 'Select this ghost'}
+                      </span>
+                    </button>
+                    {ownsGhost && (
+                      <label className="ghost-share-toggle">
+                        <input
+                          type="checkbox"
+                          checked={ghost.analyticsPublic}
+                          onChange={(event) => onGhostAnalyticsSharingChange(ghost.id, event.target.checked)}
+                        />
+                        <span>Share zone data with other racers</span>
+                      </label>
+                    )}
+                    {(ghost.summary || riderZoneResults.length > 0) && (
+                      <details className="ghost-analytics">
+                        <summary>View performance</summary>
+                        {ghost.summary && (
+                          <div className="ghost-overall-metrics">
+                            <span>Cadence {ghost.summary.topCadence == null ? '--' : `${Math.round(ghost.summary.topCadence)} RPM`}</span>
+                            <span>Speed {ghost.summary.topSpeedKph == null ? '--' : `${(ghost.summary.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
+                            <span>Power {ghost.summary.topWatts == null ? '--' : `${Math.round(ghost.summary.topWatts)} W`}</span>
+                          </div>
                         )}
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
+                        {riderZoneResults.map(({ zone, rider }) => (
+                          <div className="ghost-zone-row" key={zone.zoneId}>
+                            <strong>{zone.zoneName}</strong>
+                            <span>{rider.topCadence == null ? '--' : `${Math.round(rider.topCadence)} RPM`}</span>
+                            <span>{rider.topSpeedKph == null ? '--' : `${(rider.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
+                            <span>{rider.topWatts == null ? '--' : `${Math.round(rider.topWatts)} W`}</span>
+                          </div>
+                        ))}
+                      </details>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </>
-        )}
+          ))}
+        </div>
       </section>
 
       <section className="panel-section">

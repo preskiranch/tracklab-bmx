@@ -28,6 +28,16 @@ function safeSource(value: unknown): GhostLapSource {
   return value === 'friend' || value === 'top' ? value : 'personal';
 }
 
+function safeRaceSource(value: unknown, riderName: string): GhostLap['raceSource'] {
+  if (value === 'live' || value === 'demo') {
+    return value;
+  }
+
+  // Ghosts saved before race origin was persisted can still be separated
+  // without hiding a rider's real Wattbike laps behind demo results.
+  return /^demo rider\b/i.test(riderName.trim()) ? 'demo' : 'live';
+}
+
 function safeLapCount(value: unknown) {
   return Math.max(1, Math.min(20, Math.round(finiteNumber(value, 1))));
 }
@@ -110,18 +120,21 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
     return null;
   }
 
+  const riderName = safeText(raw.riderName, 'Rider', 80);
+
   return {
     version: 1,
     id: safeText(raw.id, `ghost-${Date.now()}`, 180),
     trackId: safeText(raw.trackId, 'unknown-track', 140),
     trackName: safeText(raw.trackName, 'Unknown track', 140),
     ...(raw.routeVariantId === 'amateur' || raw.routeVariantId === 'pro' ? { routeVariantId: raw.routeVariantId } : {}),
-    riderName: safeText(raw.riderName, 'Rider', 80),
+    riderName,
     ownerKey: safeText(raw.ownerKey, 'local', 180),
     ownerName: safeText(raw.ownerName, 'TrackLab rider', 80),
     colorName: raw.colorName === 'red' || raw.colorName === 'blue' || raw.colorName === 'yellow' ? raw.colorName : 'lime',
     accent: safeText(raw.accent, defaultGhostAccent, 32),
     source: safeSource(raw.source),
+    raceSource: safeRaceSource(raw.raceSource, riderName),
     lapCount: safeLapCount(raw.lapCount),
     finishTimeMs,
     thirtyFootTimeMs: raw.thirtyFootTimeMs == null ? null : Math.max(0, Math.round(finiteNumber(raw.thirtyFootTimeMs, 0))),
@@ -194,6 +207,7 @@ export function buildGhostLapFromRace(options: {
   zoneResults?: RaceZoneResult[];
   ownerKey: string;
   ownerName: string;
+  raceSource: GhostLap['raceSource'];
   player?: PlayerSlot;
   savedAt?: number;
 }): GhostLap | null {
@@ -226,6 +240,7 @@ export function buildGhostLapFromRace(options: {
     colorName: options.player?.colorName ?? options.summary.colorName,
     accent: options.player?.accent ?? options.summary.accent,
     source: 'personal',
+    raceSource: options.raceSource,
     lapCount,
     finishTimeMs,
     thirtyFootTimeMs: options.summary.thirtyFootTimeMs,

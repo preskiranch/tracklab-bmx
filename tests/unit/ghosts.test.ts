@@ -13,6 +13,7 @@ function rawGhost(lapCount: number, riderName = 'Studio Rider') {
     colorName: 'lime',
     accent: '#7ade36',
     source: 'personal',
+    raceSource: 'live',
     lapCount,
     finishTimeMs: lapCount * 20_000,
     thirtyFootTimeMs: 1_800,
@@ -45,12 +46,24 @@ describe('ghost lap categories and privacy metadata', () => {
     delete legacy.lapCount;
     delete legacy.analyticsPublic;
     delete legacy.medalRank;
+    delete legacy.raceSource;
 
     expect(sanitizeGhostLap(legacy)).toMatchObject({
       lapCount: 1,
       analyticsPublic: false,
       medalRank: null,
+      raceSource: 'live',
     });
+  });
+
+  it('separates legacy demo ghosts from personal live Wattbike ghosts', () => {
+    const legacyDemo = rawGhost(1, 'Demo Rider 2') as Record<string, unknown>;
+    const legacyLive = rawGhost(1, 'Wattbike Trainer') as Record<string, unknown>;
+    delete legacyDemo.raceSource;
+    delete legacyLive.raceSource;
+
+    expect(sanitizeGhostLap(legacyDemo)?.raceSource).toBe('demo');
+    expect(sanitizeGhostLap(legacyLive)?.raceSource).toBe('live');
   });
 
   it('stages a selected ghost at rest on the start line before playback begins', () => {

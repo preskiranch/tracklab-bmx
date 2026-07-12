@@ -495,6 +495,7 @@ export type GhostLap = {
   colorName: PlayerSlot['colorName'];
   accent: string;
   source: GhostLapSource;
+  raceSource: 'live' | 'demo';
   lapCount: number;
   finishTimeMs: number;
   thirtyFootTimeMs: number | null;

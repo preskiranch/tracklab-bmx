@@ -2257,8 +2257,10 @@ export default function App() {
     () => ghostsForTrackRoute(ghostLaps, effectiveTrack.id, ghostRouteVariantId, isLoopTrack ? lapCount : 1)
       .filter((ghost) => (
         ghost.ownerKey === cloudProfileKey
-        || ghost.source !== 'personal'
-        || ghost.analyticsPublic
+        || (
+          ghost.raceSource === 'live'
+          && (ghost.source !== 'personal' || ghost.analyticsPublic)
+        )
       )),
     [cloudProfileKey, effectiveTrack.id, ghostLaps, ghostRouteVariantId, isLoopTrack, lapCount],
   );
@@ -3482,11 +3484,16 @@ export default function App() {
   }, [hideRaceReview, raceReviewPaused, raceReviewRemainingSeconds, raceReviewVisible]);
 
   useEffect(() => {
-    if (raceState !== 'finished' || raceSummary.length === 0) {
+    if (
+      raceState !== 'finished'
+      || !raceCapture
+      || raceCapture.status !== 'finished'
+      || raceCapture.summary.length === 0
+    ) {
       return;
     }
 
-    const sessionId = activeRaceSessionIdRef.current ?? raceCapture?.sessionId;
+    const sessionId = activeRaceSessionIdRef.current ?? raceCapture.sessionId;
     if (!sessionId || ghostSavedSessionIdsRef.current.has(sessionId)) {
       return;
     }
@@ -3494,7 +3501,7 @@ export default function App() {
     const ownerKey = cloudProfileKey || 'local';
     const ownerName = authUser?.name ?? multiplayer.profile.name ?? 'TrackLab rider';
     const savedAt = Date.now();
-    const nextGhosts = raceSummary
+    const nextGhosts = raceCapture.summary
       .map((summary) => {
         const player = racePlayers.find((slot) => slot.id === summary.playerId);
         const rider = riders.find((item) => item.playerId === summary.playerId);
@@ -3524,6 +3531,7 @@ export default function App() {
           })),
           ownerKey,
           ownerName,
+          raceSource: raceCapture.source,
           player,
           savedAt,
         });
@@ -3550,11 +3558,9 @@ export default function App() {
     isLoopTrack,
     lapCount,
     multiplayer.profile.name,
-    raceCapture?.sessionId,
-    raceCapture?.zoneResults,
+    raceCapture,
     racePlayers,
     raceState,
-    raceSummary,
     riders,
   ]);
 

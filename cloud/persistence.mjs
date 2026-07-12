@@ -340,6 +340,7 @@ export async function initPersistence() {
         thirty_foot_time_ms INTEGER,
         color_name TEXT NOT NULL DEFAULT 'lime',
         accent TEXT NOT NULL DEFAULT '#7ade36',
+        race_source TEXT NOT NULL DEFAULT 'live',
         lap_count INTEGER NOT NULL DEFAULT 1,
         analytics_public BOOLEAN NOT NULL DEFAULT FALSE,
         summary JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -351,6 +352,10 @@ export async function initPersistence() {
       )
     `);
       await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS lap_count INTEGER NOT NULL DEFAULT 1`);
+      await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS race_source TEXT`);
+      await pool.query(`UPDATE ${schema}.ghost_laps SET race_source = CASE WHEN rider_name ILIKE 'Demo Rider %' THEN 'demo' ELSE 'live' END WHERE race_source IS NULL`);
+      await pool.query(`ALTER TABLE ${schema}.ghost_laps ALTER COLUMN race_source SET DEFAULT 'live'`);
+      await pool.query(`ALTER TABLE ${schema}.ghost_laps ALTER COLUMN race_source SET NOT NULL`);
       await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS analytics_public BOOLEAN NOT NULL DEFAULT FALSE`);
       await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS zone_results JSONB NOT NULL DEFAULT '[]'::jsonb`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
@@ -1602,6 +1607,7 @@ function ghostFromRow(row, source = 'top', includeAnalytics = false) {
     colorName: row.color_name,
     accent: row.accent,
     source,
+    ...(row.race_source === 'live' || row.race_source === 'demo' ? { raceSource: row.race_source } : {}),
     lapCount: safeLapCount(row.lap_count),
     finishTimeMs: Number(row.finish_time_ms),
     thirtyFootTimeMs: row.thirty_foot_time_ms == null ? null : Number(row.thirty_foot_time_ms),
@@ -1624,11 +1630,11 @@ export async function saveGhostLap(ghost) {
   return query(
     `INSERT INTO ${schema}.ghost_laps (
       id, owner_key, owner_name, rider_name, track_id, track_name, route_variant_id, route_key,
-      finish_time_ms, thirty_foot_time_ms, color_name, accent, lap_count, analytics_public,
+      finish_time_ms, thirty_foot_time_ms, color_name, accent, race_source, lap_count, analytics_public,
       summary, zone_results, points, saved_at, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-      $15::jsonb, $16::jsonb, $17::jsonb, to_timestamp($18 / 1000.0), now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+      $16::jsonb, $17::jsonb, $18::jsonb, to_timestamp($19 / 1000.0), now())
     ON CONFLICT (owner_key, rider_name, track_id, route_key) DO UPDATE SET
       id = EXCLUDED.id,
       owner_name = EXCLUDED.owner_name,
@@ -1638,6 +1644,7 @@ export async function saveGhostLap(ghost) {
       thirty_foot_time_ms = EXCLUDED.thirty_foot_time_ms,
       color_name = EXCLUDED.color_name,
       accent = EXCLUDED.accent,
+      race_source = EXCLUDED.race_source,
       lap_count = EXCLUDED.lap_count,
       analytics_public = EXCLUDED.analytics_public,
       summary = EXCLUDED.summary,
@@ -1661,6 +1668,7 @@ export async function saveGhostLap(ghost) {
       ghost.thirtyFootTimeMs == null ? null : Math.round(Number(ghost.thirtyFootTimeMs)),
       ghost.colorName,
       ghost.accent,
+      ghost.raceSource,
       lapCount,
       Boolean(ghost.analyticsPublic),
       json(ghost.summary),
@@ -1676,23 +1684,39 @@ export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], l
     `SELECT ranked.*
      FROM (
        SELECT ghost_laps.*,
-         DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
+         CASE
+           WHEN race_source = 'demo' THEN NULL
+           ELSE DENSE_RANK() OVER (
+             PARTITION BY route_key
+             ORDER BY CASE WHEN race_source = 'demo' THEN 1 ELSE 0 END, finish_time_ms ASC
+           )
+         END AS medal_rank
        FROM ${schema}.ghost_laps AS ghost_laps
        WHERE track_id = $1
      ) AS ranked
-     ORDER BY finish_time_ms ASC, saved_at DESC
-     LIMIT $2`,
-    [trackId, Math.max(1, Math.min(60, Math.round(Number(limit) || 30)))],
+     ORDER BY
+       CASE
+         WHEN owner_key = $2 THEN 0
+         WHEN owner_key = ANY($3::text[]) THEN 1
+         ELSE 2
+       END,
+       finish_time_ms ASC,
+       saved_at DESC
+     LIMIT $4`,
+    [trackId, profileKey, friendKeys, Math.max(1, Math.min(60, Math.round(Number(limit) || 30)))],
   );
 
   const friends = new Set(friendKeys);
-  return (result?.rows ?? []).map((row) => {
+  return (result?.rows ?? []).flatMap((row) => {
     const source = row.owner_key === profileKey
       ? 'personal'
       : friends.has(row.owner_key)
         ? 'friend'
         : 'top';
+    if (row.race_source === 'demo' && source !== 'personal') {
+      return [];
+    }
     const includeAnalytics = row.owner_key === profileKey || Boolean(row.analytics_public);
-    return ghostFromRow(row, source, includeAnalytics);
+    return [ghostFromRow(row, source, includeAnalytics)];
   });
 }
