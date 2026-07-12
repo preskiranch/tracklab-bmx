@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ghostsForTrackRoute, sanitizeGhostLap } from '../../src/lib/ghosts';
+import { ghostsForTrackRoute, playbackGhostLap, sanitizeGhostLap } from '../../src/lib/ghosts';
 
 function rawGhost(lapCount: number, riderName = 'Studio Rider') {
   return {
@@ -50,6 +50,23 @@ describe('ghost lap categories and privacy metadata', () => {
       lapCount: 1,
       analyticsPublic: false,
       medalRank: null,
+    });
+  });
+
+  it('stages a selected ghost at rest on the start line before playback begins', () => {
+    const savedGhost = rawGhost(1);
+    savedGhost.points[0].distanceMeters = 4.5;
+    savedGhost.points[0].velocityMps = 8;
+    const ghost = sanitizeGhostLap(savedGhost);
+    expect(ghost).not.toBeNull();
+
+    expect(playbackGhostLap(ghost!, 0, 0)).toMatchObject({
+      colorName: 'blue',
+      accent: '#22d3ee',
+      distance: 0,
+      velocity: 0,
+      phase: 'pedaling',
+      finishedAt: null,
     });
   });
 });

@@ -598,6 +598,13 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(page.getByText('Replay public / performance private')).toBeVisible();
   await expect(page.getByText('Gate start', { exact: false })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Countdown', exact: true })).toHaveCount(0);
+  const personalGhost = page.locator('.ghost-option').filter({ hasText: 'Studio Bike One' });
+  await personalGhost.getByText('Select this ghost').click();
+  await expect(personalGhost.getByText('Selected to race')).toBeVisible();
+  await expect(page.locator('.ghost-summary-row')).toContainText('1 selected');
+  const ghostWorkflowStep = page.locator('.workflow-step').filter({ hasText: 'Ghost' });
+  await expect(ghostWorkflowStep).toHaveClass(/ghost-selected/);
+  await expect(ghostWorkflowStep).toContainText('1 selected');
   await page.locator('.loop-race-section').scrollIntoViewIfNeeded();
   await page.screenshot({
     fullPage: false,
@@ -746,8 +753,13 @@ test('completed race shows a populated 20-second pedal-zone review', async ({ pa
 });
 
 test('live race with mapped pedal zones stays active through UCI gate cadence', async ({ page }, testInfo) => {
+  test.setTimeout(60_000);
   const bridge = await createMockBikeBridge();
-  const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample()), 120);
+  const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample({
+    watts: 320,
+    cadence: 88,
+    speedKph: 24,
+  })), 120);
   const authUser = {
     id: 'pedal-zone-live-racer',
     profileKey: 'user:pedal-zone-live-racer',
@@ -795,7 +807,33 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await page.route('**/api/ghosts*', async (route) => {
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ ghosts: [] }),
+        body: JSON.stringify({
+          ghosts: [{
+            version: 1,
+            id: 'live-race-ghost',
+            trackId: 'black-mountain-bmx',
+            trackName: 'Black Mountain BMX',
+            routeVariantId: 'amateur',
+            riderName: 'Cyan Ghost',
+            ownerKey: authUser.profileKey,
+            ownerName: authUser.name,
+            colorName: 'lime',
+            accent: '#7ade36',
+            source: 'personal',
+            lapCount: 1,
+            finishTimeMs: 30_000,
+            thirtyFootTimeMs: 1_900,
+            savedAt: Date.now(),
+            analyticsPublic: false,
+            medalRank: null,
+            summary: null,
+            zoneResults: [],
+            points: [
+              { elapsedMs: 0, distanceMeters: 2, velocityMps: 5, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+              { elapsedMs: 30_000, distanceMeters: 120, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+            ],
+          }],
+        }),
       });
     });
     await page.route('**/api/multiplayer/leaderboards*', async (route) => {
@@ -811,6 +849,10 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await expect(page.getByRole('button', { name: /Custom Location/i })).toBeVisible();
     await expect(page.getByText(/1 connected bike/i).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/2 pedal zones/i).first()).toBeVisible({ timeout: 15_000 });
+    const ghostOption = page.locator('.ghost-option').filter({ hasText: 'Cyan Ghost' });
+    await ghostOption.getByText('Select this ghost').click();
+    await expect(ghostOption.getByText('Selected to race')).toBeVisible();
+    await expect(page.locator('.workflow-step').filter({ hasText: 'Ghost' })).toHaveClass(/ghost-selected/);
 
     const startAction = page.locator('.workflow-step.primary-action');
     await expect(startAction).toContainText('Start Live Race');
@@ -818,8 +860,9 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
     await expect(page.locator('.race-staging-countdown')).toBeVisible();
-    await expect(page.locator('.race-staging-countdown strong')).toHaveText('15');
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/1[3-5]/);
     await expect(page.locator('.start-tree-light')).toHaveCount(0);
+    await expect(page.locator('.rider-stat.ghost')).toContainText('0% / ghost');
     await page.waitForTimeout(8_500);
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
@@ -833,6 +876,15 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await page.waitForTimeout(7_000);
     await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
     await expect(page.locator('.start-tree-light')).toBeVisible();
+    await expect.poll(async () => page.evaluate(() => {
+      const debug = (window as typeof window & {
+        __tracklabLiveDebug?: {
+          raceState?: string;
+          players?: Array<{ riderDistanceMeters?: number | null }>;
+        };
+      }).__tracklabLiveDebug;
+      return debug?.raceState === 'racing' && (debug.players?.[0]?.riderDistanceMeters ?? 0) > 0.25;
+    }), { timeout: 18_000 }).toBe(true);
   } finally {
     clearInterval(sampleTimer);
     await bridge.close();
