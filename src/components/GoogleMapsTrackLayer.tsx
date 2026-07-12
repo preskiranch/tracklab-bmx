@@ -626,11 +626,17 @@ function loadRiderImage(url: string) {
   return promise;
 }
 
-async function uprightRiderIconUrl(player: PlayerSlot, rotationDegrees: number) {
+type RiderMarkerAppearance = 'live' | 'ghost';
+
+async function uprightRiderIconUrl(
+  player: PlayerSlot,
+  rotationDegrees: number,
+  appearance: RiderMarkerAppearance = 'live',
+) {
   const imageUrl = riderIconByColor[player.colorName];
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
-  const cacheKey = `${player.colorName}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}`;
+  const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}`;
   const cached = riderIconCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -649,10 +655,17 @@ async function uprightRiderIconUrl(player: PlayerSlot, rotationDegrees: number) 
   context.translate(size / 2, size / 2);
   context.rotate((leanBucket * Math.PI) / 180);
   context.scale(orientation.mirrored ? -1 : 1, 1);
-  context.shadowColor = 'rgba(0, 0, 0, 0.35)';
-  context.shadowBlur = 8;
+  context.shadowColor = appearance === 'ghost' ? 'rgba(34, 211, 238, 0.85)' : 'rgba(0, 0, 0, 0.35)';
+  context.shadowBlur = appearance === 'ghost' ? 14 : 8;
   context.shadowOffsetY = 5;
   context.drawImage(image, -riderDrawWidth / 2, riderDrawTop, riderDrawWidth, riderDrawHeight);
+  if (appearance === 'ghost') {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.globalCompositeOperation = 'source-atop';
+    context.globalAlpha = 0.5;
+    context.fillStyle = player.accent;
+    context.fillRect(0, 0, size, size);
+  }
 
   const dataUrl = canvas.toDataURL('image/png');
   riderIconCache.set(cacheKey, dataUrl);
@@ -668,6 +681,7 @@ function createRiderMapMarker(
   title: string,
   labelText = `P${player.id}`,
   zIndex = 760 + player.id,
+  appearance: RiderMarkerAppearance = 'live',
 ): RiderMapMarker {
   let iconVersion = 0;
   const marker = new google.maps.Marker({
@@ -688,7 +702,7 @@ function createRiderMapMarker(
   const applyRotation = (nextRotation: number) => {
     iconVersion += 1;
     const version = iconVersion;
-    void uprightRiderIconUrl(player, nextRotation)
+    void uprightRiderIconUrl(player, nextRotation, appearance)
       .then((url) => {
         if (version !== iconVersion) {
           return;
@@ -2122,8 +2136,8 @@ export function GoogleMapsTrackLayer({
       const ghostPlayer: PlayerSlot = {
         id: ((index % 4) + 1) as PlayerId,
         name: rider.name,
-        colorName: rider.colorName,
-        accent: rider.accent,
+        colorName: 'blue',
+        accent: '#22d3ee',
         deviceId: null,
       };
       const speedKph = rider.velocity > 0 ? rider.velocity * 3.6 : null;
@@ -2152,6 +2166,7 @@ export function GoogleMapsTrackLayer({
         title,
         `G${index + 1}`,
         820 + index,
+        'ghost',
       );
       ghostMarkerRefs.current.set(rider.id, marker);
     });

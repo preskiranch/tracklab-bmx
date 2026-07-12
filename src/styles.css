@@ -1303,6 +1303,12 @@ input:focus {
   border-color: #cfe7c5;
 }
 
+.workflow-step.ghost-selected {
+  border-color: #55c91f;
+  background: #dcfbd0;
+  box-shadow: inset 3px 0 0 #55c91f;
+}
+
 .workflow-step.next {
   border-color: #8fd071;
   background: #f0faea;
@@ -1346,6 +1352,11 @@ input:focus {
 .workflow-step.complete .workflow-index {
   background: #ddf6d2;
   color: #245e14;
+}
+
+.workflow-step.ghost-selected .workflow-index {
+  background: #2f9e28;
+  color: #ffffff;
 }
 
 .workflow-step.next .workflow-index {
@@ -2572,6 +2583,21 @@ input:focus {
   color: var(--muted);
   font-size: 11px;
   font-weight: 750;
+}
+
+.ghost-race-selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin-top: 4px;
+  color: #405064;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.ghost-race-selection.selected {
+  color: #237a24;
 }
 
 .ghost-medal {

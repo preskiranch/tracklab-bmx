@@ -5553,7 +5553,7 @@ export default function App() {
         : availableGhostLaps.length > 0
           ? `${availableGhostLaps.length} available / optional`
           : 'Saved after first finish',
-      state: selectedGhostLaps.length > 0 ? 'complete' : 'idle',
+      state: selectedGhostLaps.length > 0 ? 'complete ghost-selected' : 'idle',
       onClick: () => {
         setAppMode('race');
         window.setTimeout(() => {

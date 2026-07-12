@@ -262,13 +262,31 @@ export function playbackGhostLap(ghost: GhostLap, elapsedMs: number, index: numb
   }
 
   const safeElapsedMs = Math.max(0, elapsedMs);
+  const playbackColorName = 'blue' as const;
+  const playbackAccent = '#22d3ee';
+  if (safeElapsedMs === 0) {
+    return {
+      id: ghost.id,
+      name: ghost.riderName,
+      colorName: playbackColorName,
+      accent: playbackAccent,
+      distance: 0,
+      velocity: 0,
+      phase: 'pedaling',
+      pitch: 0,
+      rank: index + 1,
+      finishedAt: null,
+      actualBranches: points[0].actualBranches,
+    };
+  }
+
   if (safeElapsedMs >= ghost.finishTimeMs) {
     const lastPoint = points[points.length - 1];
     return {
       id: ghost.id,
       name: ghost.riderName,
-      colorName: ghost.colorName,
-      accent: ghost.accent,
+      colorName: playbackColorName,
+      accent: playbackAccent,
       distance: lastPoint.distanceMeters,
       velocity: 0,
       phase: lastPoint.phase,
@@ -285,8 +303,8 @@ export function playbackGhostLap(ghost: GhostLap, elapsedMs: number, index: numb
     return {
       id: ghost.id,
       name: ghost.riderName,
-      colorName: ghost.colorName,
-      accent: ghost.accent,
+      colorName: playbackColorName,
+      accent: playbackAccent,
       distance: firstPoint.distanceMeters,
       velocity: firstPoint.velocityMps,
       phase: firstPoint.phase,
@@ -309,8 +327,8 @@ export function playbackGhostLap(ghost: GhostLap, elapsedMs: number, index: numb
   return {
     id: ghost.id,
     name: ghost.riderName,
-    colorName: ghost.colorName,
-    accent: ghost.accent,
+    colorName: playbackColorName,
+    accent: playbackAccent,
     distance,
     velocity,
     phase: after.phase,

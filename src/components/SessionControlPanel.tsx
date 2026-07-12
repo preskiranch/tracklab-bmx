@@ -2,6 +2,8 @@ import { useEffect, useState, type ChangeEvent, type CSSProperties } from 'react
 import {
   Activity,
   Bike,
+  CheckCircle2,
+  Circle,
   Compass,
   Download,
   Flag,
@@ -1222,6 +1224,10 @@ export function SessionControlPanel({
                                 ? 'Replay public / your zone data private'
                                 : 'Replay public / performance private'}
                           </small>
+                          <span className={`ghost-race-selection ${selected ? 'selected' : ''}`}>
+                            {selected ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                            {selected ? 'Selected to race' : 'Select this ghost'}
+                          </span>
                         </button>
                         {ownsGhost && (
                           <label className="ghost-share-toggle">

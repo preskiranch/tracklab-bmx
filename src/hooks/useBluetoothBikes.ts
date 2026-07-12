@@ -59,6 +59,7 @@ type BluetoothDeviceFilter = {
 
 type BluetoothDeviceLike = EventTarget & {
   gatt?: {
+    connected?: boolean;
     connect: () => Promise<BluetoothServer>;
   };
   id: string;
@@ -442,7 +443,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
     persistBluetoothBikeIdentities(deviceIdsRef.current);
     if (connectedBrowserDeviceIdsRef.current.has(device.id)) {
       const sample = samplesByDeviceRef.current.get(numericId);
-      if (sample && Date.now() - sample.at <= liveBikeTimeoutMs) {
+      if (device.gatt?.connected === true || (sample && Date.now() - sample.at <= liveBikeTimeoutMs)) {
         return false;
       }
 
