@@ -208,6 +208,46 @@ async function createMockBikeBridge(deviceIds = [58701]) {
   };
 }
 
+test('public landing page exposes the global track locator without an account', async ({ page }, testInfo) => {
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: null }) });
+  });
+
+  await page.goto('/?locator=north-bay-bmx-napa-valley');
+
+  const locator = page.locator('#track-locator');
+  await expect(locator).toBeVisible();
+  await expect(locator.getByRole('heading', { name: 'Find a BMX racing track' })).toBeVisible();
+  await expect(locator.getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
+  await expect(locator.getByRole('link', { name: 'Apple Maps' })).toHaveAttribute('href', /maps\.apple\.com/);
+  await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir/);
+  await expect(locator.getByRole('link', { name: 'Open Earth' })).toHaveAttribute('href', /earth\.google\.com/);
+  await expect(locator.getByText('Needs manual mapping')).toHaveCount(0);
+
+  await locator.getByLabel('Search tracks').fill('ADF Cycling Club');
+  const websiteTrack = locator.getByRole('button', { name: /ADF Cycling Club/ });
+  await expect(websiteTrack).toBeVisible();
+  await websiteTrack.click();
+  await expect(locator.getByRole('heading', { name: 'ADF Cycling Club' })).toBeVisible();
+  await expect(locator.getByRole('link', { name: 'Track Website' })).toHaveAttribute('href', 'https://www.adfcc.asn.au/');
+  await expect(page).toHaveURL(/locator=auscycling-adf-cycling-club/);
+
+  await page.screenshot({
+    fullPage: true,
+    path: testInfo.outputPath('public-track-locator.png'),
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await locator.scrollIntoViewIfNeeded();
+  await expect(locator.getByRole('link', { name: 'Track Website' })).toBeVisible();
+  await expect(locator.getByRole('link', { name: 'Apple Maps' })).toBeVisible();
+  await expect(locator.getByRole('link', { name: 'Google Maps' })).toBeVisible();
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('public-track-locator-mobile.png'),
+  });
+});
+
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];

@@ -1,4 +1,4 @@
-import { Activity, Bike, CreditCard, Globe2, Lock, LogIn, Play, Radio, Users } from 'lucide-react';
+import { Activity, Bike, CreditCard, Globe2, Lock, LogIn, MapPinned, Play, Radio, Users } from 'lucide-react';
 import type { AuthMode } from '../lib/auth';
 import {
   additionalBikeMonthlyCents,
@@ -8,6 +8,8 @@ import {
   racerMonthlyCents,
   type MembershipState,
 } from '../lib/membership';
+import type { TrackRecord } from '../types';
+import { PublicTrackLocator } from './PublicTrackLocator';
 
 type CheckoutStatus = 'idle' | 'loading' | 'error';
 
@@ -26,6 +28,8 @@ type MembershipLandingProps = {
   isAdminProfile: boolean;
   onlineRiderCount: number;
   liveRoomCount: number;
+  catalogReady: boolean;
+  tracks: TrackRecord[];
   onAuthModeChange: (mode: AuthMode) => void;
   onProfileNameChange: (name: string) => void;
   onProfileEmailChange: (email: string) => void;
@@ -54,6 +58,8 @@ export function MembershipLanding({
   isAdminProfile,
   onlineRiderCount,
   liveRoomCount,
+  catalogReady,
+  tracks,
   onAuthModeChange,
   onProfileNameChange,
   onProfileEmailChange,
@@ -83,6 +89,10 @@ export function MembershipLanding({
           </div>
         </div>
         <div className="membership-nav-actions">
+          <a className="secondary-button" href="#track-locator">
+            <MapPinned size={16} />
+            Find a Track
+          </a>
           {profileComplete && (
             <button className="secondary-button" type="button" onClick={onSignOut}>
               Sign Out
@@ -93,6 +103,47 @@ export function MembershipLanding({
           </button>
         </div>
       </header>
+
+      <section className="membership-hero">
+        <div className="membership-hero-copy">
+          <span className="membership-pill">
+            <Globe2 size={15} />
+            Social racing platform
+          </span>
+          <h2>BMX racers can watch, train, and race on real mapped tracks.</h2>
+          <p>
+            Free members can view live sessions and run demo races. Racer members connect Wattbikes,
+            create private rooms, join challenges, and save performance data.
+          </p>
+          <div className="membership-cta-row">
+            <button className="primary-button" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>
+              <Users size={17} />
+              {profileComplete ? 'Join Free' : creatingAccount ? 'Create Free Account' : 'Sign In'}
+            </button>
+            <button className="secondary-button" type="button" onClick={onStartDemo} disabled={!profileComplete}>
+              <Play size={17} />
+              Demo Race
+            </button>
+          </div>
+        </div>
+
+        <aside className="membership-status-card">
+          <div className="status-metric">
+            <span>{onlineRiderCount}</span>
+            <p>online riders</p>
+          </div>
+          <div className="status-metric">
+            <span>{liveRoomCount}</span>
+            <p>active rooms</p>
+          </div>
+          <div className="status-metric">
+            <span>{membership.tier === 'racer' ? `${membership.bikeSeats}` : 'Free'}</span>
+            <p>{membership.tier === 'racer' ? 'bike seats' : 'membership'}</p>
+          </div>
+        </aside>
+      </section>
+
+      <PublicTrackLocator catalogReady={catalogReady} tracks={tracks} />
 
       <section className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
         <div>
@@ -181,45 +232,6 @@ export function MembershipLanding({
             </>
           )}
         </form>
-      </section>
-
-      <section className="membership-hero">
-        <div className="membership-hero-copy">
-          <span className="membership-pill">
-            <Globe2 size={15} />
-            Social racing platform
-          </span>
-          <h2>BMX racers can watch, train, and race on real mapped tracks.</h2>
-          <p>
-            Free members can view live sessions and run demo races. Racer members connect Wattbikes,
-            create private rooms, join challenges, and save performance data.
-          </p>
-          <div className="membership-cta-row">
-            <button className="primary-button" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>
-              <Users size={17} />
-              {profileComplete ? 'Join Free' : creatingAccount ? 'Create Free Account' : 'Sign In'}
-            </button>
-            <button className="secondary-button" type="button" onClick={onStartDemo} disabled={!profileComplete}>
-              <Play size={17} />
-              Demo Race
-            </button>
-          </div>
-        </div>
-
-        <aside className="membership-status-card">
-          <div className="status-metric">
-            <span>{onlineRiderCount}</span>
-            <p>online riders</p>
-          </div>
-          <div className="status-metric">
-            <span>{liveRoomCount}</span>
-            <p>active rooms</p>
-          </div>
-          <div className="status-metric">
-            <span>{membership.tier === 'racer' ? `${membership.bikeSeats}` : 'Free'}</span>
-            <p>{membership.tier === 'racer' ? 'bike seats' : 'membership'}</p>
-          </div>
-        </aside>
       </section>
 
       <section className="membership-grid" aria-label="Membership options">
