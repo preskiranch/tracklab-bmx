@@ -8,6 +8,7 @@ import {
   Gauge,
   Globe2,
   MapPinned,
+  Minus,
   Plus,
   PlayCircle,
   Radio,
@@ -177,6 +178,18 @@ type CheckoutStatus = 'idle' | 'loading' | 'error';
 type SplitBranchId = TrackSplitBranch['id'];
 type RaceRouteVariantId = TrackRouteVariantId;
 type MappingHistoryScope = 'route' | 'zones' | 'split';
+type RaceWorkflowStep = {
+  kind: 'action';
+  label: string;
+  detail: string;
+  state: string;
+  primaryAction?: boolean;
+  onPointerDown?: () => void;
+  onClick: () => void;
+} | {
+  kind: 'laps';
+  state: string;
+};
 type CustomRoutePreview = {
   input: string;
   label?: string;
@@ -5187,7 +5200,7 @@ export default function App() {
     });
   }, [cloudProfileKey, ghostLaps]);
 
-  const handleStart = async () => {
+  const handleStart = () => {
     const startingRacePlayers = racePlayers;
     if (
       effectiveTrack.routeStatus !== 'user-mapped'
@@ -5298,35 +5311,30 @@ export default function App() {
       });
     };
 
-    if (!demoMode) {
-      const stagingSteps = createRaceStagingSteps();
-      setStartGateStatus({
-        active: true,
-        phase: 'staging',
-        label: String(stagingSteps[0].secondsRemaining),
-        detail: 'Adjust the view, then return to your bike',
-        lightIndex: null,
-      });
+    const stagingSteps = createRaceStagingSteps();
+    setStartGateStatus({
+      active: true,
+      phase: 'staging',
+      label: String(stagingSteps[0].secondsRemaining),
+      detail: 'Adjust the view, then return to your bike',
+      lightIndex: null,
+    });
 
-      stagingSteps.slice(1).forEach(({ delayMs, secondsRemaining }) => {
-        scheduleStartGateStep(delayMs, () => {
-          setStartGateStatus({
-            active: true,
-            phase: 'staging',
-            label: String(secondsRemaining),
-            detail: 'Adjust the view, then return to your bike',
-            lightIndex: null,
-          });
-        }, sequenceId);
-      });
-
-      scheduleStartGateStep(raceStagingDurationMs(), () => {
-        void startConfiguredCadence();
+    stagingSteps.slice(1).forEach(({ delayMs, secondsRemaining }) => {
+      scheduleStartGateStep(delayMs, () => {
+        setStartGateStatus({
+          active: true,
+          phase: 'staging',
+          label: String(secondsRemaining),
+          detail: 'Adjust the view, then return to your bike',
+          lightIndex: null,
+        });
       }, sequenceId);
-      return;
-    }
+    });
 
-    await startConfiguredCadence();
+    scheduleStartGateStep(raceStagingDurationMs(), () => {
+      void startConfiguredCadence();
+    }, sequenceId);
   };
 
   useEffect(() => {
@@ -5511,8 +5519,9 @@ export default function App() {
   const hasStartHereSplitChoices = racePlayers.length > 0 && (effectiveTrack.splitSections?.length ?? 0) > 0;
   const canChooseStartHereSplitLine = raceState !== 'racing' && !startGateStatus.active;
   const canEditLiveRaceEntry = !demoMode && raceState !== 'racing' && !startGateStatus.active;
-  const workflowSteps = [
+  const workflowSteps: RaceWorkflowStep[] = [
     {
+      kind: 'action',
       label: 'Connect',
       detail: demoMode
         ? `${demoBikeCount} demo rider${demoBikeCount === 1 ? '' : 's'}`
@@ -5527,6 +5536,7 @@ export default function App() {
       },
     },
     {
+      kind: 'action',
       label: 'Pick Track',
       detail: selectedTrack.name,
       state: 'complete',
@@ -5535,6 +5545,7 @@ export default function App() {
       },
     },
     {
+      kind: 'action',
       label: 'Map Zones',
       detail: workflowMapReady
         ? `${effectiveTrack.zones.length} pedal zone${effectiveTrack.zones.length === 1 ? '' : 's'}`
@@ -5546,7 +5557,12 @@ export default function App() {
         setMappingEditMode(workflowMapReady ? 'zones' : 'draw');
       },
     },
+    ...(isLoopTrack ? [{
+      kind: 'laps' as const,
+      state: 'complete',
+    }] : []),
     {
+      kind: 'action',
       label: 'Ghost',
       detail: selectedGhostLaps.length > 0
         ? `${selectedGhostLaps.length} selected`
@@ -5562,6 +5578,7 @@ export default function App() {
       },
     },
     {
+      kind: 'action',
       label: workflowRaceReady
         ? raceState === 'finished'
           ? 'Race Again'
@@ -5745,21 +5762,63 @@ export default function App() {
             <small>Normal session order</small>
           </div>
           <div className="workflow-list">
-            {workflowSteps.map((step, index) => (
-              <button
-                className={`workflow-step ${step.state}${step.primaryAction ? ' primary-action' : ''}`}
-                type="button"
-                onPointerDown={step.onPointerDown}
-                onClick={step.onClick}
-                key={`${index}-${step.label}`}
-              >
-                <span className="workflow-index">{index + 1}</span>
-                <span className="workflow-copy">
-                  <strong>{step.label}</strong>
-                  <small>{step.detail}</small>
-                </span>
-              </button>
-            ))}
+            {workflowSteps.map((step, index) => {
+              if (step.kind === 'laps') {
+                const lapControlsDisabled = startGateStatus.active || raceState === 'racing';
+                return (
+                  <div
+                    className={`workflow-step workflow-loop-laps ${step.state}`}
+                    role="group"
+                    aria-label="Loop race lap count"
+                    key={`${index}-laps`}
+                  >
+                    <span className="workflow-index">{index + 1}</span>
+                    <span className="workflow-copy">
+                      <strong>Number of laps</strong>
+                      <span className="workflow-lap-controls">
+                        <button
+                          type="button"
+                          aria-label="Decrease Start Here lap count"
+                          title="Decrease laps"
+                          onClick={() => setLapCount((current) => Math.max(1, current - 1))}
+                          disabled={lapCount <= 1 || lapControlsDisabled}
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span aria-live="polite">
+                          <b>{lapCount}</b> {lapCount === 1 ? 'lap' : 'laps'}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Increase Start Here lap count"
+                          title="Increase laps"
+                          onClick={() => setLapCount((current) => Math.min(20, current + 1))}
+                          disabled={lapCount >= 20 || lapControlsDisabled}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </span>
+                    </span>
+                  </div>
+                );
+              }
+
+              return (
+                <button
+                  className={`workflow-step ${step.state}${step.primaryAction ? ' primary-action' : ''}`}
+                  type="button"
+                  onPointerDown={step.onPointerDown}
+                  onClick={step.onClick}
+                  key={`${index}-${step.label}`}
+                >
+                  <span className="workflow-index">{index + 1}</span>
+                  <span className="workflow-copy">
+                    <strong>{step.label}</strong>
+                    <small>{step.detail}</small>
+                  </span>
+                </button>
+              );
+            })}
           </div>
           {!demoMode && activePlayers.length > 0 && (
             <div className="workflow-race-entry" aria-label="Live race entry">
