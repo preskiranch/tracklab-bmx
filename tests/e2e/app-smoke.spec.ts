@@ -315,6 +315,12 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByText(/Track Mapping|Trace route/i).first()).toBeVisible();
   await page.getByText('Loading Google imagery').waitFor({ state: 'hidden', timeout: 8_000 }).catch(() => undefined);
 
+  await page.getByRole('button', { name: 'Track Locator', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Find a BMX racing track' })).toBeVisible();
+  await expect(page.getByText('1,305 tracks', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open App', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Race Dashboard', exact: true })).toBeVisible();
+
   await page.screenshot({
     fullPage: false,
     path: testInfo.outputPath('tracklab-dashboard-smoke.png'),
