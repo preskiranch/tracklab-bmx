@@ -218,6 +218,11 @@ test('public landing page exposes the global track locator without an account', 
   const locator = page.locator('#track-locator');
   await expect(locator).toBeVisible();
   await expect(locator.getByRole('heading', { name: 'Find a BMX racing track' })).toBeVisible();
+  const locatorToolHeight = await locator.locator('.public-locator-layout').evaluate((element) => (
+    Math.round(element.getBoundingClientRect().height)
+  ));
+  expect(locatorToolHeight).toBeGreaterThanOrEqual(540);
+  expect(locatorToolHeight).toBeLessThanOrEqual(680);
   await expect(locator.getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Apple Maps' })).toHaveAttribute('href', /maps\.apple\.com/);
   await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir/);
