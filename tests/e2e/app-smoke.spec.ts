@@ -470,6 +470,7 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
 });
 
 test('start here race action enters fullscreen race view', async ({ page }) => {
+  test.setTimeout(45_000);
   const authUser = {
     id: 'quick-start-racer',
     profileKey: 'user:quick-start-racer',
@@ -489,6 +490,19 @@ test('start here race action enters fullscreen race view', async ({ page }) => {
       body: JSON.stringify({ user: authUser }),
     });
   });
+  await page.addInitScript(() => {
+    const prototype = window.AudioBufferSourceNode?.prototype;
+    if (!prototype) {
+      return;
+    }
+
+    const originalStart = prototype.start;
+    prototype.start = function (...args: Parameters<AudioBufferSourceNode['start']>) {
+      const audioWindow = window as typeof window & { __tracklabVoiceStartCount?: number };
+      audioWindow.__tracklabVoiceStartCount = (audioWindow.__tracklabVoiceStartCount ?? 0) + 1;
+      return Reflect.apply(originalStart, this, args);
+    };
+  });
 
   await page.goto('/?track=air-time-bmx');
 
@@ -500,7 +514,15 @@ test('start here race action enters fullscreen race view', async ({ page }) => {
   await startAction.click();
 
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+  await expect(page.locator('.race-staging-countdown')).toBeVisible();
+  await expect(page.locator('.race-staging-countdown strong')).toHaveText(/1[3-5]/);
+  await expect(page.locator('.start-tree-light')).toHaveCount(0);
+  await page.waitForTimeout(15_500);
+  await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
   await expect(page.locator('.start-tree-light')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabVoiceStartCount?: number }).__tracklabVoiceStartCount ?? 0
+  )), { timeout: 5_000 }).toBeGreaterThan(0);
   await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
 });
 
@@ -592,6 +614,9 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
 
   await expect(page.getByRole('heading', { name: 'Number of laps' })).toBeVisible();
   await expect(page.locator('.lap-stepper input')).toHaveValue('1');
+  const startHereLapCounter = page.getByRole('group', { name: 'Loop race lap count' });
+  await expect(startHereLapCounter).toBeVisible();
+  await expect(startHereLapCounter).toContainText('1 lap');
   await expect(page.getByText('Personal / Studio')).toBeVisible();
   await expect(page.getByText('Worldwide')).toBeVisible();
   await expect(page.getByText('Gold')).toBeVisible();
@@ -611,7 +636,8 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
     path: testInfo.outputPath('loop-laps-and-ghosts.png'),
   });
 
-  await page.getByRole('button', { name: 'Increase lap count' }).click();
+  await page.getByRole('button', { name: 'Increase Start Here lap count' }).click();
+  await expect(startHereLapCounter).toContainText('2 laps');
   await expect(page.locator('.lap-stepper input')).toHaveValue('2');
   await expect(page.getByText('Finish a race on this track to save a ghost lap.')).toBeVisible();
 });

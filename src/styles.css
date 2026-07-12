@@ -1389,6 +1389,52 @@ input:focus {
   font-weight: 780;
 }
 
+.workflow-loop-laps {
+  min-height: 62px;
+}
+
+.workflow-lap-controls {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.workflow-lap-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #cbd7c7;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17212b;
+}
+
+.workflow-lap-controls button:disabled {
+  color: #a7b0a3;
+  background: #f4f6f3;
+}
+
+.workflow-lap-controls > span {
+  overflow: hidden;
+  color: #405064;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-lap-controls b {
+  color: #17212b;
+  font-size: 13px;
+  font-weight: 950;
+}
+
 .workflow-race-entry {
   display: grid;
   gap: 8px;

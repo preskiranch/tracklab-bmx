@@ -6,6 +6,8 @@ let audioContext: AudioContext | null = null;
 let activeStartGateAudio: HTMLAudioElement | null = null;
 let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
 let uciVoiceBufferPromise: Promise<AudioBuffer | null> | null = null;
+let mediaElementPrimed = false;
+let mediaElementPrimePromise: Promise<void> | null = null;
 
 export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
 export const uciVoiceWatchGateOffsetMs = 5300;
@@ -85,6 +87,7 @@ function cancelPendingStartGateAudio(audio: HTMLAudioElement) {
 
   if (activeStartGateAudio === audio) {
     activeStartGateAudio = null;
+    mediaElementPrimed = false;
   }
 }
 
@@ -110,6 +113,22 @@ export function primeAudioCues() {
 
   const audio = getStartGateAudio();
   audio.load();
+  if (!mediaElementPrimed && !mediaElementPrimePromise) {
+    audio.muted = true;
+    mediaElementPrimePromise = audio.play()
+      .then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+        mediaElementPrimed = true;
+      })
+      .catch(() => {
+        // AudioContext remains the primary path when media-element priming is blocked.
+      })
+      .finally(() => {
+        audio.muted = false;
+        mediaElementPrimePromise = null;
+      });
+  }
 }
 
 export function playZoneCue(kind: 'start' | 'stop') {
@@ -194,9 +213,17 @@ export function stopStartGateAudio() {
 
 export async function playUciRandomStartVoice(timeoutMs = 8000): Promise<UciVoiceStartResult> {
   stopStartGateAudio();
-  const context = resumeAudioContext();
+  const context = getAudioContext();
 
-  if (context && context.state !== 'closed') {
+  if (context?.state === 'suspended') {
+    try {
+      await context.resume();
+    } catch {
+      // Fall back to the primed media element and speech synthesis below.
+    }
+  }
+
+  if (context?.state === 'running') {
     const voiceBuffer = await loadUciVoiceBuffer(context);
     if (voiceBuffer) {
       const source = context.createBufferSource();
