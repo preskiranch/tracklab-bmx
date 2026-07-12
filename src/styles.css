@@ -5406,6 +5406,26 @@ input:focus {
     min-height: 470px;
   }
 
+  .earth-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .earth-header > div {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .earth-header p {
+    overflow-wrap: anywhere;
+  }
+
+  .earth-meta {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+
   .rider-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

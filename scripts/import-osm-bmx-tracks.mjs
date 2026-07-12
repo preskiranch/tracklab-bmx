@@ -3,8 +3,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 const outputPath = new URL('../data/imports/openstreetmap-bmx-global.json', import.meta.url);
 const cachePath = new URL('../data/geocode-cache/openstreetmap-bmx-global.json', import.meta.url);
 const userAgent = 'TrackLabBMX/0.1 (global BMX locator import; https://github.com/preskiranch/tracklab-bmx)';
-const overpassEndpoint = 'https://overpass-api.de/api/interpreter';
+const overpassEndpoints = [
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+];
+const overpassEndpoint = overpassEndpoints[0];
 const nominatimEndpoint = 'https://nominatim.openstreetmap.org/reverse';
+const overpassCacheVersion = 3;
+const maxOverpassDepth = 5;
+const maxBboxArea = 50;
 
 const countryQueries = [
   { name: 'Aruba', countryCode: 'AW', region: 'Caribbean', bbox: [12.36, -70.08, 12.68, -69.83], acceptedCodes: ['aw', 'nl-aw', 'nl'] },
@@ -38,6 +45,17 @@ const countryQueries = [
   { name: 'Colombia', countryCode: 'CO', region: 'South America', bbox: [-4.3, -79.1, 13.5, -66.8], acceptedCodes: ['co'] },
   { name: 'Chile', countryCode: 'CL', region: 'South America', bbox: [-56.0, -76.0, -17.3, -66.3], acceptedCodes: ['cl'] },
   { name: 'Ecuador', countryCode: 'EC', region: 'South America', bbox: [-5.2, -81.2, 1.8, -75.0], acceptedCodes: ['ec'] },
+  { name: 'Peru', countryCode: 'PE', region: 'South America', bbox: [-18.5, -81.5, 0.2, -68.5], acceptedCodes: ['pe'] },
+  { name: 'Bolivia', countryCode: 'BO', region: 'South America', bbox: [-23.0, -69.7, -9.5, -57.4], acceptedCodes: ['bo'] },
+  { name: 'Venezuela', countryCode: 'VE', region: 'South America', bbox: [0.5, -73.5, 12.3, -59.7], acceptedCodes: ['ve'] },
+  { name: 'Uruguay', countryCode: 'UY', region: 'South America', bbox: [-35.2, -58.6, -30.0, -53.0], acceptedCodes: ['uy'] },
+  { name: 'Paraguay', countryCode: 'PY', region: 'South America', bbox: [-27.7, -62.7, -19.2, -54.2], acceptedCodes: ['py'] },
+  { name: 'Guatemala', countryCode: 'GT', region: 'Central America', bbox: [13.5, -92.5, 17.9, -88.0], acceptedCodes: ['gt'] },
+  { name: 'Costa Rica', countryCode: 'CR', region: 'Central America', bbox: [8.0, -86.0, 11.3, -82.5], acceptedCodes: ['cr'] },
+  { name: 'Panama', countryCode: 'PA', region: 'Central America', bbox: [7.0, -83.2, 9.8, -77.0], acceptedCodes: ['pa'] },
+  { name: 'Dominican Republic', countryCode: 'DO', region: 'Caribbean', bbox: [17.4, -72.0, 20.0, -68.2], acceptedCodes: ['do'] },
+  { name: 'Puerto Rico', countryCode: 'PR', region: 'Caribbean', bbox: [17.8, -67.4, 18.6, -65.2], acceptedCodes: ['pr'] },
+  { name: 'Curacao', countryCode: 'CW', region: 'Caribbean', bbox: [11.9, -69.3, 12.5, -68.7], acceptedCodes: ['cw'] },
   { name: 'Japan', countryCode: 'JP', region: 'Asia', bbox: [24.0, 122.0, 46.0, 146.0], acceptedCodes: ['jp'] },
   { name: 'China', countryCode: 'CN', region: 'Asia', bbox: [18.0, 73.0, 54.0, 135.0], acceptedCodes: ['cn', 'hk'], requireReverseFilter: true },
   { name: 'Singapore', countryCode: 'SG', region: 'Asia', bbox: [1.16, 103.57, 1.49, 104.10], acceptedCodes: ['sg'] },
@@ -46,15 +64,53 @@ const countryQueries = [
   { name: 'Thailand', countryCode: 'TH', region: 'Asia', bbox: [5.6, 97.3, 20.5, 105.7], acceptedCodes: ['th'] },
   { name: 'Philippines', countryCode: 'PH', region: 'Asia', bbox: [4.4, 116.8, 21.2, 127.0], acceptedCodes: ['ph'] },
   { name: 'India', countryCode: 'IN', region: 'Asia', bbox: [6.5, 68.0, 35.7, 97.4], acceptedCodes: ['in'] },
-  { name: 'Australia', countryCode: 'AU', region: 'Oceania', bbox: [-44.0, 112.0, -25.0, 129.5], acceptedCodes: ['au'] },
-  { name: 'Australia', countryCode: 'AU', region: 'Oceania', bbox: [-44.0, 129.0, -10.0, 154.0], acceptedCodes: ['au'] },
+  { name: 'South Korea', countryCode: 'KR', region: 'Asia', bbox: [33.0, 124.0, 39.0, 132.0], acceptedCodes: ['kr'] },
+  { name: 'Taiwan', countryCode: 'TW', region: 'Asia', bbox: [21.8, 119.2, 25.5, 122.1], acceptedCodes: ['tw'] },
+  { name: 'Kazakhstan', countryCode: 'KZ', region: 'Asia', bbox: [40.5, 46.5, 55.5, 87.5], acceptedCodes: ['kz'] },
   { name: 'South Africa', countryCode: 'ZA', region: 'Africa', bbox: [-35.0, 16.0, -22.0, 33.0], acceptedCodes: ['za'] },
   { name: 'Morocco', countryCode: 'MA', region: 'Africa', bbox: [27.5, -13.5, 36.1, -1.0], acceptedCodes: ['ma'] },
   { name: 'Egypt', countryCode: 'EG', region: 'Africa', bbox: [22.0, 24.6, 31.8, 36.9], acceptedCodes: ['eg'] },
   { name: 'United Arab Emirates', countryCode: 'AE', region: 'Middle East', bbox: [22.5, 51.4, 26.5, 56.5], acceptedCodes: ['ae'] },
+  { name: 'Israel', countryCode: 'IL', region: 'Middle East', bbox: [29.4, 34.2, 33.4, 35.9], acceptedCodes: ['il'] },
+  { name: 'Saudi Arabia', countryCode: 'SA', region: 'Middle East', bbox: [16.0, 34.5, 32.5, 55.7], acceptedCodes: ['sa'] },
+  { name: 'Qatar', countryCode: 'QA', region: 'Middle East', bbox: [24.4, 50.6, 26.2, 51.7], acceptedCodes: ['qa'] },
+  { name: 'Bahrain', countryCode: 'BH', region: 'Middle East', bbox: [25.5, 50.2, 26.4, 50.9], acceptedCodes: ['bh'] },
+  { name: 'Slovakia', countryCode: 'SK', region: 'Europe', bbox: [47.7, 16.8, 49.7, 22.7], acceptedCodes: ['sk'] },
+  { name: 'Slovenia', countryCode: 'SI', region: 'Europe', bbox: [45.3, 13.3, 46.9, 16.7], acceptedCodes: ['si'] },
+  { name: 'Croatia', countryCode: 'HR', region: 'Europe', bbox: [42.3, 13.4, 46.6, 19.5], acceptedCodes: ['hr'] },
+  { name: 'Serbia', countryCode: 'RS', region: 'Europe', bbox: [42.2, 18.8, 46.2, 23.1], acceptedCodes: ['rs'] },
+  { name: 'Romania', countryCode: 'RO', region: 'Europe', bbox: [43.5, 20.2, 48.3, 30.0], acceptedCodes: ['ro'] },
+  { name: 'Bulgaria', countryCode: 'BG', region: 'Europe', bbox: [41.2, 22.3, 44.3, 28.7], acceptedCodes: ['bg'] },
+  { name: 'Greece', countryCode: 'GR', region: 'Europe', bbox: [34.5, 19.3, 41.8, 29.7], acceptedCodes: ['gr'] },
+  { name: 'Turkey', countryCode: 'TR', region: 'Europe / Asia', bbox: [35.8, 25.6, 42.2, 44.9], acceptedCodes: ['tr'] },
+  { name: 'Ukraine', countryCode: 'UA', region: 'Europe', bbox: [44.0, 22.0, 52.5, 40.3], acceptedCodes: ['ua'] },
+  { name: 'Iceland', countryCode: 'IS', region: 'Europe', bbox: [63.2, -24.7, 66.7, -13.3], acceptedCodes: ['is'] },
+  { name: 'Luxembourg', countryCode: 'LU', region: 'Europe', bbox: [49.4, 5.7, 50.2, 6.6], acceptedCodes: ['lu'] },
+  { name: 'Kenya', countryCode: 'KE', region: 'Africa', bbox: [-4.8, 33.8, 5.3, 42.1], acceptedCodes: ['ke'] },
+  { name: 'Zimbabwe', countryCode: 'ZW', region: 'Africa', bbox: [-22.5, 25.2, -15.5, 33.1], acceptedCodes: ['zw'] },
+  { name: 'Namibia', countryCode: 'NA', region: 'Africa', bbox: [-29.0, 11.5, -16.8, 25.3], acceptedCodes: ['na'] },
+  { name: 'Botswana', countryCode: 'BW', region: 'Africa', bbox: [-27.0, 19.8, -17.7, 29.5], acceptedCodes: ['bw'] },
 ];
 
+const importQueries = [...countryQueries.reduce((queries, config) => {
+  const existing = queries.get(config.countryCode);
+  if (!existing) {
+    queries.set(config.countryCode, { ...config });
+    return queries;
+  }
+  existing.bbox = [
+    Math.min(existing.bbox[0], config.bbox[0]),
+    Math.min(existing.bbox[1], config.bbox[1]),
+    Math.max(existing.bbox[2], config.bbox[2]),
+    Math.max(existing.bbox[3], config.bbox[3]),
+  ];
+  existing.acceptedCodes = [...new Set([...existing.acceptedCodes, ...config.acceptedCodes])];
+  return queries;
+}, new Map()).values()];
+
 const reverseAll = process.env.OSM_REVERSE_GEOCODE === '1';
+let reverseCheckpointCount = 0;
+let overpassCheckpointCount = 0;
 
 const manualTracks = [
   {
@@ -67,6 +123,10 @@ const manualTracks = [
     source: '297 Sports Aruba / OpenStreetMap',
     sourceUrl: 'https://297sportsaruba.com/jaburibari-bmx-track-na-parke-curason-a-keda-una-beyesa/',
     sourceTrackId: 'osm-way/563399534',
+    providerId: 'openstreetmap-overpass',
+    sourceType: 'community-map',
+    verificationStatus: 'supplemental',
+    addressStatus: 'reverse-geocoded',
     address: 'Parke Curazon, Jaburibari, Paradera, Aruba',
     city: 'Paradera',
     district: 'Jaburibari',
@@ -94,6 +154,10 @@ const manualTracks = [
     source: 'OpenStreetMap / Mapcarta',
     sourceUrl: 'https://mapcarta.com/W620434279',
     sourceTrackId: 'osm-way/620434279',
+    providerId: 'openstreetmap-overpass',
+    sourceType: 'community-map',
+    verificationStatus: 'supplemental',
+    addressStatus: 'reverse-geocoded',
     address: 'Weg Sero Preto, Lago Heights, Aruba',
     city: 'Lago Heights',
     district: 'Sero Preto',
@@ -121,6 +185,10 @@ const manualTracks = [
     source: 'Hong Kong Facilities Portal / OpenStreetMap',
     sourceUrl: 'https://fpf.ccidahk.gov.hk/en/location/detail.php?id=1861',
     sourceTrackId: 'osm-way/138674604',
+    providerId: 'openstreetmap-overpass',
+    sourceType: 'community-map',
+    verificationStatus: 'supplemental',
+    addressStatus: 'provider-address',
     address: '91 Kwai Hei Street, Gin Drinkers Bay, Kwai Chung, Hong Kong',
     city: 'Hong Kong',
     district: 'Kwai Tsing',
@@ -206,11 +274,14 @@ function coordinateFor(element) {
 }
 
 function hasBmxSport(tags) {
-  return String(tags.sport ?? '')
+  const sports = String(tags.sport ?? '')
     .toLowerCase()
     .split(/[;,]/)
     .map((sport) => sport.trim())
-    .includes('bmx');
+    .filter(Boolean);
+  const cycling = String(tags.cycling ?? '').toLowerCase();
+  const bmx = String(tags.bmx ?? '').toLowerCase();
+  return sports.includes('bmx') || cycling === 'bmx' || bmx === 'race' || bmx === 'racing';
 }
 
 function looksTrackLike(tags) {
@@ -237,10 +308,21 @@ function isCandidate(element, config) {
   const tags = element.tags ?? {};
   const name = candidateName(element, config);
   const lowerName = name.toLowerCase();
+  const taggedName = String(tags.name ?? '').trim();
+  const override = recordOverrides[`${element.type}/${element.id}`];
   const hasBmxInName = lowerName.includes('bmx');
   const trackLike = looksTrackLike(tags);
+  const racingEvidence = /(race|racing|racer|club|supercross|bicross|rennbahn|rennstrecke|fietscross|crossbaan|crossers|bmx[- ]?(bahn|strecke|anlage|sportanlage|stadion|cross)|piste (de )?bmx|pista (de )?bmx|circuit (de )?bmx|national.*bmx|olympic.*bmx)/i.test(name)
+    || /^(race|racing)$/i.test(String(tags.bmx ?? ''));
 
   if (!(hasBmxSport(tags) || (hasBmxInName && trackLike))) {
+    return false;
+  }
+
+  // Unnamed ways usually represent individual lanes or segments inside one
+  // facility. Keep only named facilities unless an explicit racing tag or a
+  // reviewed override identifies the object as a track record.
+  if (!taggedName && !override && !racingEvidence) {
     return false;
   }
 
@@ -252,8 +334,14 @@ function isCandidate(element, config) {
     return false;
   }
 
-  if (/(pump|freestyle|skatepark|skate park|jump line)/i.test(name)
-    && !/(race|racing|track|pista|circuit|stadium|centre|center|course)/i.test(name)) {
+  const nonRacingTag = /pump|freestyle|skate|dirt_jump|jump|4x|four_cross/i.test([
+    tags.cycling,
+    tags.leisure,
+    tags.sport,
+    tags.bmx,
+  ].filter(Boolean).join(';'));
+  const nonRacingName = /(pump|freestyle|skate|dirt|jump|trails?|freeride|4x|four cross|skills?|wheel park|bike ?park|mountain ?bike|mtb|motocross|rampe)/i.test(name);
+  if (nonRacingTag || nonRacingName) {
     return false;
   }
 
@@ -261,50 +349,148 @@ function isCandidate(element, config) {
 }
 
 function overpassQuery(config) {
-  const bbox = config.bbox.join(',');
-  return `[out:json][timeout:80][bbox:${bbox}];
+  const scope = config.queryMode === 'area'
+    ? `area["ISO3166-1"="${config.countryCode}"][admin_level=2]->.searchArea;`
+    : '';
+  const selectorScope = config.queryMode === 'area'
+    ? '(area.searchArea)'
+    : '';
+  const bboxSetting = config.queryMode === 'area' ? '' : `[bbox:${config.bbox.join(',')}]`;
+  return `[out:json][timeout:45]${bboxSetting};
+${scope}
 (
-  way["sport"="bmx"];
-  node["sport"="bmx"];
-  way["leisure"="track"]["name"~"BMX|Bmx|bmx"];
-  node["leisure"="track"]["name"~"BMX|Bmx|bmx"];
-  way["leisure"="pitch"]["name"~"BMX|Bmx|bmx"];
-  node["leisure"="pitch"]["name"~"BMX|Bmx|bmx"];
-  way["leisure"="sports_centre"]["name"~"BMX|Bmx|bmx"];
-  node["leisure"="sports_centre"]["name"~"BMX|Bmx|bmx"];
-  way["leisure"="stadium"]["name"~"BMX|Bmx|bmx"];
-  node["leisure"="stadium"]["name"~"BMX|Bmx|bmx"];
+  nwr${selectorScope}["sport"="bmx"];
+  nwr${selectorScope}["cycling"="bmx"];
+  nwr${selectorScope}["bmx"~"^(race|racing)$",i];
+  nwr${selectorScope}["leisure"~"^(track|pitch|sports_centre|stadium)$"]["name"~"bmx",i];
 );
 out tags center;`;
 }
 
-async function fetchOverpass(config, cache) {
-  const cacheKey = `overpass:${config.countryCode}:${config.bbox.join(',')}`;
+function bboxArea(bbox) {
+  return Math.abs((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]));
+}
+
+function splitBbox(bbox) {
+  const [south, west, north, east] = bbox;
+  const middleLatitude = (south + north) / 2;
+  const middleLongitude = (west + east) / 2;
+  return [
+    [south, west, middleLatitude, middleLongitude],
+    [south, middleLongitude, middleLatitude, east],
+    [middleLatitude, west, north, middleLongitude],
+    [middleLatitude, middleLongitude, north, east],
+  ];
+}
+
+function dedupeElements(elements) {
+  return [...new Map(elements.map((element) => [`${element.type}/${element.id}`, element])).values()];
+}
+
+async function requestOverpass(config, cache) {
+  const scopeKey = config.queryMode === 'area' ? 'area' : config.bbox.join(',');
+  const cacheKey = `overpass:v${overpassCacheVersion}:${config.countryCode}:${scopeKey}`;
   if (cache[cacheKey]) {
     return cache[cacheKey];
   }
 
-  const response = await fetch(overpassEndpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'User-Agent': userAgent,
-    },
-    body: `data=${encodeURIComponent(overpassQuery(config))}`,
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    console.warn(`Overpass failed for ${config.name}: ${response.status} ${response.statusText}`);
-    return { elements: [], error: `${response.status} ${response.statusText}`, body: text.slice(0, 300) };
+  const failures = [];
+  for (const endpoint of overpassEndpoints) {
+    let response;
+    let text;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'User-Agent': userAgent,
+        },
+        body: `data=${encodeURIComponent(overpassQuery(config))}`,
+        signal: AbortSignal.timeout(55_000),
+      });
+      text = await response.text();
+    } catch (error) {
+      failures.push(`${endpoint}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    if (!response.ok) {
+      failures.push(`${endpoint}: ${response.status} ${response.statusText}`);
+      continue;
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      failures.push(`${endpoint}: invalid response ${text.slice(0, 100)}`);
+      continue;
+    }
+    if (payload.remark) {
+      failures.push(`${endpoint}: ${payload.remark}`);
+      continue;
+    }
+    cache[cacheKey] = {
+      endpoint,
+      timestamp: payload.osm3s?.timestamp_osm_base,
+      elements: payload.elements ?? [],
+    };
+    overpassCheckpointCount += 1;
+    if (overpassCheckpointCount % 10 === 0) {
+      await mkdir(new URL('../data/geocode-cache/', import.meta.url), { recursive: true });
+      await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
+    }
+    await sleep(600);
+    return cache[cacheKey];
   }
 
-  const payload = JSON.parse(text);
-  cache[cacheKey] = {
-    timestamp: payload.osm3s?.timestamp_osm_base,
-    elements: payload.elements ?? [],
+  const error = failures.join(' | ');
+  console.warn(`Overpass failed for ${config.name}: ${error}`);
+  return { elements: [], error };
+}
+
+async function fetchOverpass(config, cache, depth = 0) {
+  if (config.queryMode !== 'area' && depth < maxOverpassDepth && bboxArea(config.bbox) > maxBboxArea) {
+    const parts = [];
+    for (const bbox of splitBbox(config.bbox)) {
+      parts.push(await fetchOverpass({ ...config, bbox }, cache, depth + 1));
+    }
+    return {
+      elements: dedupeElements(parts.flatMap((part) => part.elements ?? [])),
+      errors: parts.flatMap((part) => part.errors ?? (part.error ? [part.error] : [])),
+    };
+  }
+
+  const result = await requestOverpass(config, cache);
+  if (!result.error || depth >= maxOverpassDepth || config.queryMode === 'area') {
+    return result;
+  }
+
+  console.warn(`Overpass subdivision for ${config.name}: ${result.error}`);
+  const parts = [];
+  for (const bbox of splitBbox(config.bbox)) {
+    parts.push(await fetchOverpass({ ...config, bbox }, cache, depth + 1));
+  }
+  return {
+    elements: dedupeElements(parts.flatMap((part) => part.elements ?? [])),
+    errors: parts.flatMap((part) => part.errors ?? (part.error ? [part.error] : [])),
   };
-  await sleep(600);
-  return cache[cacheKey];
+}
+
+async function fetchCountry(config, cache) {
+  const areaResult = await fetchOverpass({ ...config, queryMode: 'area' }, cache);
+  if (!areaResult.error) {
+    return areaResult;
+  }
+
+  console.warn(`ISO boundary query failed for ${config.name}; using bounded subdivisions.`);
+  const fallback = await fetchOverpass({ ...config, queryMode: 'bbox' }, cache);
+  if ((fallback.errors?.length ?? 0) === 0) {
+    cache[`overpass:v${overpassCacheVersion}:${config.countryCode}:area`] = {
+      endpoint: 'bounded-subdivision-fallback',
+      elements: fallback.elements ?? [],
+    };
+  }
+  return fallback;
 }
 
 function reverseKey(latitude, longitude) {
@@ -324,10 +510,12 @@ async function reverseGeocode(latitude, longitude, cache) {
   url.searchParams.set('lon', longitude);
 
   try {
-    const response = await fetch(url, { headers: { 'User-Agent': userAgent } });
+    const response = await fetch(url, {
+      headers: { 'User-Agent': userAgent },
+      signal: AbortSignal.timeout(15_000),
+    });
     if (!response.ok) {
       console.warn(`Nominatim reverse failed for ${latitude},${longitude}: ${response.status} ${response.statusText}`);
-      cache[key] = null;
       return null;
     }
 
@@ -351,11 +539,15 @@ async function reverseGeocode(latitude, longitude, cache) {
       countryCode: address.country_code,
       isoSubdivision: address['ISO3166-2-lvl3'] ?? address['ISO3166-2-lvl4'] ?? address['ISO3166-2-lvl6'],
     };
+    reverseCheckpointCount += 1;
+    if (reverseCheckpointCount % 10 === 0) {
+      await mkdir(new URL('../data/geocode-cache/', import.meta.url), { recursive: true });
+      await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
+    }
     await sleep(1100);
     return cache[key];
   } catch (error) {
     console.warn(`Nominatim reverse failed for ${latitude},${longitude}: ${error.message}`);
-    cache[key] = null;
     return null;
   }
 }
@@ -383,11 +575,10 @@ function normalizedReverseCountry(reverse, config) {
 
 function isAcceptedCountry(reverse, config) {
   if (!reverse) {
-    return true;
+    return !config.requireReverseFilter;
   }
   const normalized = normalizedReverseCountry(reverse, config);
-  return config.acceptedCodes.includes(normalized.acceptedCode)
-    || config.acceptedCodes.includes(String(normalized.countryCode).toLowerCase());
+  return config.acceptedCodes.includes(normalized.acceptedCode);
 }
 
 function tagAddress(tags, reverse) {
@@ -402,9 +593,13 @@ function tagAddress(tags, reverse) {
 }
 
 function fallbackAddress(tags, reverse, config, coords) {
+  const location = [tags['addr:city'], reverse?.city, reverse?.state, config.name]
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(', ');
   return tagAddress(tags, reverse)
-    ?? [tags['addr:city'], reverse?.city, reverse?.state, config.name].filter(Boolean).slice(0, 2).join(', ')
-    ?? `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
+    || location
+    || `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
 }
 
 function sourceUrlFor(element) {
@@ -436,6 +631,10 @@ function normalizedTrack(element, config, reverse) {
     source,
     sourceUrl: override.sourceUrl ?? sourceUrlFor(element),
     sourceTrackId: `${element.type}/${element.id}`,
+    providerId: 'openstreetmap-overpass',
+    sourceType: 'community-map',
+    verificationStatus: 'supplemental',
+    addressStatus: reverse?.displayName ? 'reverse-geocoded' : address ? 'unverified' : 'coordinates-only',
     address,
     city: titleCase(city),
     county: reverse?.county,
@@ -518,9 +717,9 @@ const cache = await readJson(cachePath, {});
 const tracks = [...manualTracks];
 const stats = [];
 
-for (const config of countryQueries) {
-  console.log(`Importing OSM BMX records for ${config.name} (${config.bbox.join(', ')})...`);
-  const overpass = await fetchOverpass(config, cache);
+for (const config of importQueries) {
+  console.log(`Importing OSM BMX records for ${config.name} (${config.countryCode})...`);
+  const overpass = await fetchCountry(config, cache);
   const candidates = [];
 
   for (const element of overpass.elements ?? []) {
@@ -541,6 +740,9 @@ for (const config of countryQueries) {
     }
     tracks.push(normalizedTrack(element, config, reverse));
     accepted += 1;
+    if (accepted % 20 === 0) {
+      console.log(`  ${config.name}: validated ${accepted}/${candidates.length} BMX candidates...`);
+    }
   }
 
   stats.push({
@@ -548,8 +750,10 @@ for (const config of countryQueries) {
     overpassElements: overpass.elements?.length ?? 0,
     candidates: candidates.length,
     accepted,
-    error: overpass.error,
+    errors: overpass.errors ?? (overpass.error ? [overpass.error] : []),
   });
+  await mkdir(new URL('../data/geocode-cache/', import.meta.url), { recursive: true });
+  await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
 }
 
 const deduped = dedupeTracks(tracks)
@@ -563,6 +767,7 @@ await mkdir(new URL('../data/geocode-cache/', import.meta.url), { recursive: tru
 await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
 await writeFile(outputPath, `${JSON.stringify({
   source: 'https://www.openstreetmap.org/',
+  providerId: 'openstreetmap-overpass',
   sourceLicense: 'Open Database License (ODbL)',
   count: deduped.length,
   generatedAt: new Date().toISOString(),

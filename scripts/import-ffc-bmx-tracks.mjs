@@ -77,7 +77,7 @@ async function readJson(pathUrl, fallback) {
 
 async function reverseGeocode(latitude, longitude, cache) {
   const key = `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
-  if (cache[key]) {
+  if (cache[key]?.label) {
     return cache[key];
   }
 
@@ -86,27 +86,54 @@ async function reverseGeocode(latitude, longitude, cache) {
   url.searchParams.set('lon', String(longitude));
   url.searchParams.set('limit', '1');
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`French address reverse geocode failed: ${response.status} ${response.statusText}`);
+  let result;
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (response.ok) {
+      const payload = await response.json();
+      const feature = payload.features?.[0];
+      const properties = feature?.properties ?? {};
+      const context = parseFrenchContext(properties.context);
+      if (properties.label) {
+        result = {
+          provider: 'Base Adresse Nationale API',
+          label: properties.label,
+          city: properties.city,
+          postcode: properties.postcode,
+          citycode: properties.citycode,
+          department: context.department,
+          departmentCode: context.departmentCode,
+          region: context.region,
+          type: properties.type,
+          distanceMeters: properties.distance,
+          score: properties.score,
+        };
+      }
+    }
+  } catch (error) {
+    console.warn(`French address reverse geocode failed for ${key}: ${error.message}`);
   }
 
-  const payload = await response.json();
-  const feature = payload.features?.[0];
-  const properties = feature?.properties ?? {};
-  const context = parseFrenchContext(properties.context);
-  const result = {
-    label: properties.label,
-    city: properties.city,
-    postcode: properties.postcode,
-    citycode: properties.citycode,
-    department: context.department,
-    departmentCode: context.departmentCode,
-    region: context.region,
-    type: properties.type,
-    distanceMeters: properties.distance,
-    score: properties.score,
-  };
+  if (!result) {
+    const fallbackUrl = new URL('https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode');
+    fallbackUrl.searchParams.set('location', `${longitude},${latitude}`);
+    fallbackUrl.searchParams.set('f', 'json');
+    const fallbackResponse = await fetch(fallbackUrl, { signal: AbortSignal.timeout(15_000) });
+    if (!fallbackResponse.ok) {
+      throw new Error(`Fallback French reverse geocode failed: ${fallbackResponse.status} ${fallbackResponse.statusText}`);
+    }
+    const payload = await fallbackResponse.json();
+    const address = payload.address ?? {};
+    result = {
+      provider: 'ArcGIS World Geocoding Service fallback',
+      label: address.Match_addr ?? address.LongLabel,
+      city: address.City,
+      postcode: address.Postal,
+      department: address.Subregion,
+      region: address.Region,
+      type: address.Addr_type,
+    };
+  }
 
   cache[key] = result;
   return result;
@@ -162,7 +189,7 @@ function normalizePlacemark(block, index, geocode) {
       classification,
       kmlCoordinate: coordinates.raw,
       addressEnrichment: {
-        provider: 'Base Adresse Nationale API',
+        provider: geocode.provider ?? 'Base Adresse Nationale API',
         type: geocode.type,
         distanceMeters: geocode.distanceMeters,
         score: geocode.score,
@@ -200,9 +227,11 @@ await mkdir(new URL('../data/imports/', import.meta.url), { recursive: true });
 await mkdir(new URL('../data/geocode-cache/', import.meta.url), { recursive: true });
 await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
 await writeFile(outputPath, `${JSON.stringify({
+  providerId: 'ffc-bmx-racing',
   source: ffcPageUrl,
   kml: kmlUrl,
   count: tracks.length,
+  generatedAt: new Date().toISOString(),
   notes: 'Official FFC page states 264 classified BMX Racing tracks; current KML export contains 266 placemarks.',
   tracks,
 }, null, 2)}\n`);

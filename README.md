@@ -349,10 +349,10 @@ For Render, add `VITE_GOOGLE_MAPS_API_KEY` as a static site environment variable
 
 ## Track Data Status
 
-The included catalog combines hand-seeded race routes with official locator imports. USA BMX/BMX Canada records can be refreshed from the public finder backend with:
+The included catalog combines hand-seeded race routes with official locator imports from USA BMX/BMX Canada, FFC, BMX New Zealand, and AusCycling. Refresh all supported official sources with:
 
 ```sh
-npm run tracks:import:usabmx
+npm run tracks:import:official
 ```
 
 Then rebuild the generated database:
@@ -367,9 +367,9 @@ That command writes:
 public/data/track-database.json
 ```
 
-USA BMX/BMX Canada imported rows include official names, addresses, states/provinces, countries, postal codes, and lat/lng. They are marked `routeStatus: "locator-only"` until a real `centerline`, `startGate`, and `finishLine` are verified. Hand-routed tracks are marked `estimated` or `verified`.
+Official imported rows include provider names, addresses, regions, postal codes, coordinates, source URLs, and verification metadata. They are marked `routeStatus: "locator-only"` until a real `centerline`, `startGate`, and `finishLine` are verified. Hand-routed tracks are marked `estimated` or `verified`.
 
-Approved UCI, British Cycling, AusCycling, Cycling Canada, or other federation exports can be added under `data/imports/` and merged into the generated database. Do not use Google imagery screenshots as data input.
+Countries without an exportable federation directory can be populated with address-checked OpenStreetMap BMX Racing candidates, clearly marked as supplemental. See [Global BMX Racing Track Data](docs/GLOBAL_TRACK_DATA.md) for source hierarchy, refresh commands, validation rules, and known federation limitations. Do not use Google imagery screenshots as data input.
 
 ## Manual Track Mapping
 

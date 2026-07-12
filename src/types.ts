@@ -630,6 +630,11 @@ export type TrackRecord = {
   source: string;
   sourceUrl: string;
   sourceTrackId?: string;
+  providerId?: string;
+  sourceType?: 'sanctioning-body-track-directory' | 'national-federation-track-directory' | 'national-federation-club-directory' | 'governing-body-reference' | 'community-map' | 'manual';
+  verificationStatus?: 'official-track-directory' | 'federation-directory' | 'reference-only' | 'supplemental' | 'unverified';
+  addressStatus?: 'provider-address' | 'provider-approximate' | 'reverse-geocoded' | 'coordinates-only' | 'unverified';
+  lastVerifiedAt?: string;
   address?: string;
   city?: string;
   county?: string;

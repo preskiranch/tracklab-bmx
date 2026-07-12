@@ -12,6 +12,7 @@ import {
   RotateCcw,
   RotateCw,
   Satellite,
+  ShieldCheck,
   Signal,
   X,
 } from 'lucide-react';
@@ -174,6 +175,15 @@ export function EarthTrackView({
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'
     : 'Needs manual mapping';
+  const verificationLabel = track.countryCode === 'CUSTOM'
+    ? 'Personal route'
+    : track.verificationStatus === 'official-track-directory'
+    ? 'Official track directory'
+    : track.verificationStatus === 'federation-directory'
+      ? 'Federation directory'
+      : track.verificationStatus === 'supplemental'
+        ? 'Supplemental locator'
+        : 'Source pending verification';
   const showMappingUi = mappingMode && !raceViewFullscreen;
   const mapRiders = mappingMode ? [] : riders;
   const mapGhostRiders = mappingMode ? [] : ghostRiders;
@@ -192,6 +202,7 @@ export function EarthTrackView({
         </div>
         <div className="earth-meta">
           <span><MapPinned size={15} /> {track.source}</span>
+          <span title="Catalog source confidence"><ShieldCheck size={15} /> {verificationLabel}</span>
           <span><MapIcon size={15} /> {track.elevationMeters} m elevation</span>
           <span><Flag size={15} /> {routeStatusLabel}</span>
           <a href={googleEarthUrl} target="_blank" rel="noreferrer">

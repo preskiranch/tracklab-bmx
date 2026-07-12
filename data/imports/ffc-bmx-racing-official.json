@@ -1,9 +1,51 @@
 {
+  "providerId": "ffc-bmx-racing",
   "source": "https://velo.ffc.fr/equipements-sportifs/",
   "kml": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
   "count": 266,
+  "generatedAt": "2026-07-12T06:47:11.659Z",
   "notes": "Official FFC page states 264 classified BMX Racing tracks; current KML export contains 266 placemarks.",
   "tracks": [
+    {
+      "id": "ffc-albiez-montrond-bmx-40",
+      "name": "Albiez-Montrond BMX",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Auvergne-Rhône-Alpes",
+      "county": "Savoie",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:40",
+      "address": "Montrond, Albiez-Montrond, Savoie, Auvergne-Rhône-Alpes",
+      "city": "Albiez-Montrond",
+      "postalCode": "",
+      "latitude": 45.1801989,
+      "longitude": 6.3364108,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 39,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "6.3364108,45.1801989,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "Locality"
+        }
+      }
+    },
     {
       "id": "ffc-ambert-bmx-26",
       "name": "Ambert BMX",
@@ -3015,6 +3057,46 @@
       }
     },
     {
+      "id": "ffc-guipavas-bmx-144",
+      "name": "Guipavas BMX",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Bretagne",
+      "county": "Finistère",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:144",
+      "address": "Guipavas Bmx",
+      "city": "Guipavas",
+      "postalCode": "29490",
+      "latitude": 48.4467533,
+      "longitude": -4.3968019,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 143,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "-4.3968019,48.4467533,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "POI"
+        }
+      }
+    },
+    {
       "id": "ffc-hennebont-bmx-153",
       "name": "Hennebont BMX",
       "country": "France",
@@ -5896,6 +5978,46 @@
       }
     },
     {
+      "id": "ffc-nord-bmx-club-92",
+      "name": "Nord BMX Club",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Hauts-de-France",
+      "county": "Nord",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:92",
+      "address": "KFC",
+      "city": "Bondues",
+      "postalCode": "59910",
+      "latitude": 50.709069,
+      "longitude": 3.0996959,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 91,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "3.0996959,50.709069,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "POI"
+        }
+      }
+    },
+    {
       "id": "ffc-roncq-bmx-98",
       "name": "Roncq BMX",
       "country": "France",
@@ -7745,6 +7867,46 @@
       }
     },
     {
+      "id": "ffc-bmx-club-limoges-230",
+      "name": "BMX CLUB LIMOGES",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Nouvelle-Aquitaine",
+      "county": "Haute-Vienne",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:230",
+      "address": "Avenue Benoît Frachon, 87100, Limoges, Haute-Vienne, Nouvelle-Aquitaine",
+      "city": "Limoges",
+      "postalCode": "87100",
+      "latitude": 45.8534717,
+      "longitude": 1.2941727,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 229,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "1.2941727,45.8534717,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "StreetName"
+        }
+      }
+    },
+    {
       "id": "ffc-bmx-club-saintais-205",
       "name": "BMX CLUB SAINTAIS",
       "country": "France",
@@ -8003,6 +8165,46 @@
       }
     },
     {
+      "id": "ffc-bmx-val-du-taurion-232",
+      "name": "BMX Val du Taurion",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Nouvelle-Aquitaine",
+      "county": "Haute-Vienne",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:232",
+      "address": "Chauvan, 87480, Saint-Priest-Taurion, Haute-Vienne, Nouvelle-Aquitaine",
+      "city": "Saint-Priest-Taurion",
+      "postalCode": "87480",
+      "latitude": 45.9037853,
+      "longitude": 1.4074992,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 231,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "1.4074992,45.9037853,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "StreetName"
+        }
+      }
+    },
+    {
       "id": "ffc-cavignac-bmx-219",
       "name": "Cavignac BMX",
       "country": "France",
@@ -8257,6 +8459,46 @@
           "type": "housenumber",
           "distanceMeters": 18,
           "score": 0.9982
+        }
+      }
+    },
+    {
+      "id": "ffc-ile-d-oleron-bmx-208",
+      "name": "Île d'Oléron BMX",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Nouvelle-Aquitaine",
+      "county": "Charente-Maritime",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:208",
+      "address": "Le Marais Doux",
+      "city": "Saint-Pierre-d'Oléron",
+      "postalCode": "17310",
+      "latitude": 45.953973,
+      "longitude": -1.2733651,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 207,
+        "styleUrl": "icon-1899-000000-nodesc",
+        "classification": {
+          "level": "Interchallenge",
+          "color": "black"
+        },
+        "kmlCoordinate": "-1.2733651,45.953973,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "POI"
         }
       }
     },
@@ -8734,6 +8976,46 @@
       }
     },
     {
+      "id": "ffc-aveyron-bmx-235",
+      "name": "Aveyron BMX",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Occitanie",
+      "county": "Aveyron",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:235",
+      "address": "Les Planques",
+      "city": "Salmiech",
+      "postalCode": "12120",
+      "latitude": 44.2179747,
+      "longitude": 2.6189273,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 234,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "2.6189273,44.2179747,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "POI"
+        }
+      }
+    },
+    {
       "id": "ffc-avignon-les-angles-bmx-63",
       "name": "Avignon Les Angles BMX",
       "country": "France",
@@ -8902,6 +9184,46 @@
           "type": "locality",
           "distanceMeters": 88,
           "score": 0.9912
+        }
+      }
+    },
+    {
+      "id": "ffc-bmx-frontignan-239",
+      "name": "BMX Frontignan",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Occitanie",
+      "county": "Hérault",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:239",
+      "address": "D612, 34110, Frontignan, Hérault, Occitanie",
+      "city": "Frontignan",
+      "postalCode": "34110",
+      "latitude": 43.4406182,
+      "longitude": 3.7622112,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 238,
+        "styleUrl": "icon-1899-FFD600-nodesc",
+        "classification": {
+          "level": "Niveau 1",
+          "color": "yellow"
+        },
+        "kmlCoordinate": "3.7622112,43.4406182,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "StreetName"
         }
       }
     },
@@ -9293,6 +9615,46 @@
       }
     },
     {
+      "id": "ffc-aizenay-bmx-club-175",
+      "name": "aizenay bmx club",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Pays de la Loire",
+      "county": "Vendée",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:175",
+      "address": "Rue de la Clairière, 85190, Aizenay, Vendée, Pays de la Loire",
+      "city": "Aizenay",
+      "postalCode": "85190",
+      "latitude": 46.7363533,
+      "longitude": -1.5899062,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 174,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "-1.5899062,46.7363533,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "StreetName"
+        }
+      }
+    },
+    {
       "id": "ffc-bmx-argentre-170",
       "name": "BMX Argentré",
       "country": "France",
@@ -9508,6 +9870,46 @@
       }
     },
     {
+      "id": "ffc-bmx-nozay-163",
+      "name": "BMX Nozay",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Pays de la Loire",
+      "county": "Loire-Atlantique",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:163",
+      "address": "Mocque Souris, 44170, Nozay, Loire-Atlantique, Pays de la Loire",
+      "city": "Nozay",
+      "postalCode": "44170",
+      "latitude": 47.5564965,
+      "longitude": -1.6320192,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 162,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "-1.6320192,47.5564965,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "StreetName"
+        }
+      }
+    },
+    {
       "id": "ffc-bmx-savenay-164",
       "name": "BMX Savenay",
       "country": "France",
@@ -9547,6 +9949,46 @@
           "type": "housenumber",
           "distanceMeters": 65,
           "score": 0.9935
+        }
+      }
+    },
+    {
+      "id": "ffc-bmx-turquant-169",
+      "name": "BMX Turquant",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Pays de la Loire",
+      "county": "Maine-et-Loire",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:169",
+      "address": "Turquant, Maine-et-Loire, Pays de la Loire",
+      "city": "Turquant",
+      "postalCode": "",
+      "latitude": 47.2272795,
+      "longitude": 0.0313979,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 168,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "0.0313979,47.2272795,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "Locality"
         }
       }
     },
@@ -9676,6 +10118,46 @@
           "type": "housenumber",
           "distanceMeters": 37,
           "score": 0.9963
+        }
+      }
+    },
+    {
+      "id": "ffc-le-mans-bmx-173",
+      "name": "Le Mans BMX",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Pays de la Loire",
+      "county": "Sarthe",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:173",
+      "address": "Léon Bollée Vélodrome",
+      "city": "Le Mans",
+      "postalCode": "72100",
+      "latitude": 47.9536257,
+      "longitude": 0.2238112,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 172,
+        "styleUrl": "icon-1899-7CB342-nodesc",
+        "classification": {
+          "level": "Niveau 3",
+          "color": "green"
+        },
+        "kmlCoordinate": "0.2238112,47.9536257,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "POI"
         }
       }
     },
@@ -9891,6 +10373,46 @@
           "type": "housenumber",
           "distanceMeters": 34,
           "score": 0.9966
+        }
+      }
+    },
+    {
+      "id": "ffc-presqu-ile-bmx-la-turballe-167",
+      "name": "PRESQU'ÎLE BMX La Turballe",
+      "country": "France",
+      "countryCode": "FR",
+      "state": "Pays de la Loire",
+      "county": "Loire-Atlantique",
+      "region": "Europe",
+      "source": "Fédération Française de Cyclisme",
+      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
+      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:167",
+      "address": "La Turballe, Loire-Atlantique, Pays de la Loire",
+      "city": "La Turballe",
+      "postalCode": "",
+      "latitude": 47.3607786,
+      "longitude": -2.4866672,
+      "coordinateSource": "FFC BMX Racing Google My Maps KML",
+      "coordinateAccuracy": "provider-map-marker",
+      "lengthMeters": 350,
+      "elevationMeters": 0,
+      "surface": "BMX Racing track",
+      "routeStatus": "locator-only",
+      "sourceRecord": {
+        "provider": "FFC",
+        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
+        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
+        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
+        "placemarkIndex": 166,
+        "styleUrl": "icon-1899-0288D1-nodesc",
+        "classification": {
+          "level": "Niveau 2",
+          "color": "blue"
+        },
+        "kmlCoordinate": "-2.4866672,47.3607786,0",
+        "addressEnrichment": {
+          "provider": "ArcGIS World Geocoding Service fallback",
+          "type": "Locality"
         }
       }
     },
@@ -10880,474 +11402,6 @@
           "type": "housenumber",
           "distanceMeters": 14,
           "score": 0.9986
-        }
-      }
-    },
-    {
-      "id": "ffc-aizenay-bmx-club-175",
-      "name": "aizenay bmx club",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:175",
-      "city": "aizenay club",
-      "latitude": 46.7363533,
-      "longitude": -1.5899062,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 174,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "-1.5899062,46.7363533,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-albiez-montrond-bmx-40",
-      "name": "Albiez-Montrond BMX",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:40",
-      "city": "Albiez-Montrond",
-      "latitude": 45.1801989,
-      "longitude": 6.3364108,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 39,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "6.3364108,45.1801989,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-aveyron-bmx-235",
-      "name": "Aveyron BMX",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:235",
-      "city": "Aveyron",
-      "latitude": 44.2179747,
-      "longitude": 2.6189273,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 234,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "2.6189273,44.2179747,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-bmx-club-limoges-230",
-      "name": "BMX CLUB LIMOGES",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:230",
-      "city": "CLUB LIMOGES",
-      "latitude": 45.8534717,
-      "longitude": 1.2941727,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 229,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "1.2941727,45.8534717,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-bmx-frontignan-239",
-      "name": "BMX Frontignan",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:239",
-      "city": "Frontignan",
-      "latitude": 43.4406182,
-      "longitude": 3.7622112,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 238,
-        "styleUrl": "icon-1899-FFD600-nodesc",
-        "classification": {
-          "level": "Niveau 1",
-          "color": "yellow"
-        },
-        "kmlCoordinate": "3.7622112,43.4406182,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-bmx-nozay-163",
-      "name": "BMX Nozay",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:163",
-      "city": "Nozay",
-      "latitude": 47.5564965,
-      "longitude": -1.6320192,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 162,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "-1.6320192,47.5564965,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-bmx-turquant-169",
-      "name": "BMX Turquant",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:169",
-      "city": "Turquant",
-      "latitude": 47.2272795,
-      "longitude": 0.0313979,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 168,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "0.0313979,47.2272795,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-bmx-val-du-taurion-232",
-      "name": "BMX Val du Taurion",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:232",
-      "city": "Val du Taurion",
-      "latitude": 45.9037853,
-      "longitude": 1.4074992,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 231,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "1.4074992,45.9037853,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-guipavas-bmx-144",
-      "name": "Guipavas BMX",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:144",
-      "city": "Guipavas",
-      "latitude": 48.4467533,
-      "longitude": -4.3968019,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 143,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "-4.3968019,48.4467533,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-ile-d-oleron-bmx-208",
-      "name": "Île d'Oléron BMX",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:208",
-      "city": "Île d'Oléron",
-      "latitude": 45.953973,
-      "longitude": -1.2733651,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 207,
-        "styleUrl": "icon-1899-000000-nodesc",
-        "classification": {
-          "level": "Interchallenge",
-          "color": "black"
-        },
-        "kmlCoordinate": "-1.2733651,45.953973,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-le-mans-bmx-173",
-      "name": "Le Mans BMX",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:173",
-      "city": "Le Mans",
-      "latitude": 47.9536257,
-      "longitude": 0.2238112,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 172,
-        "styleUrl": "icon-1899-7CB342-nodesc",
-        "classification": {
-          "level": "Niveau 3",
-          "color": "green"
-        },
-        "kmlCoordinate": "0.2238112,47.9536257,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-nord-bmx-club-92",
-      "name": "Nord BMX Club",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:92",
-      "city": "Nord Club",
-      "latitude": 50.709069,
-      "longitude": 3.0996959,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 91,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "3.0996959,50.709069,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
-        }
-      }
-    },
-    {
-      "id": "ffc-presqu-ile-bmx-la-turballe-167",
-      "name": "PRESQU'ÎLE BMX La Turballe",
-      "country": "France",
-      "countryCode": "FR",
-      "state": "Unspecified",
-      "region": "Europe",
-      "source": "Fédération Française de Cyclisme",
-      "sourceUrl": "https://velo.ffc.fr/equipements-sportifs/",
-      "sourceTrackId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc:167",
-      "city": "PRESQU'ÎLE La Turballe",
-      "latitude": 47.3607786,
-      "longitude": -2.4866672,
-      "coordinateSource": "FFC BMX Racing Google My Maps KML",
-      "coordinateAccuracy": "provider-map-marker",
-      "lengthMeters": 350,
-      "elevationMeters": 0,
-      "surface": "BMX Racing track",
-      "routeStatus": "locator-only",
-      "sourceRecord": {
-        "provider": "FFC",
-        "sourcePage": "https://velo.ffc.fr/equipements-sportifs/",
-        "kmlUrl": "https://www.google.com/maps/d/kml?mid=153KgH42LVTz7idX20eFbCBeBV-5NkLc&forcekml=1",
-        "myMapsId": "153KgH42LVTz7idX20eFbCBeBV-5NkLc",
-        "placemarkIndex": 166,
-        "styleUrl": "icon-1899-0288D1-nodesc",
-        "classification": {
-          "level": "Niveau 2",
-          "color": "blue"
-        },
-        "kmlCoordinate": "-2.4866672,47.3607786,0",
-        "addressEnrichment": {
-          "provider": "Base Adresse Nationale API"
         }
       }
     }
