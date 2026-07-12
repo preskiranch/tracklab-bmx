@@ -212,12 +212,16 @@ test('public landing page exposes the global track locator without an account', 
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: null }) });
   });
+  await page.route('**/data/track-database.json', async (route) => {
+    await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' });
+  });
 
   await page.goto('/?locator=north-bay-bmx-napa-valley');
 
   const locator = page.locator('#track-locator');
   await expect(locator).toBeVisible();
   await expect(locator.getByRole('heading', { name: 'Find a BMX racing track' })).toBeVisible();
+  await expect(locator.getByText('1,305 tracks', { exact: true })).toBeVisible();
   const locatorToolHeight = await locator.locator('.public-locator-layout').evaluate((element) => (
     Math.round(element.getBoundingClientRect().height)
   ));

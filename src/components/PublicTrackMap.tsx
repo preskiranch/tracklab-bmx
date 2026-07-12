@@ -3,16 +3,29 @@ import { Satellite } from 'lucide-react';
 import {
   hasGoogleMapsApiKey,
   loadGoogleMaps,
-  trackBoundsPoints,
-  trackCenter,
   type GoogleMap,
   type GoogleMarker,
+  type LatLngLiteral,
 } from '../lib/googleMaps';
-import type { TrackRecord } from '../types';
+import type { TrackLocatorRecord } from '../types';
 
 type PublicTrackMapProps = {
-  track: TrackRecord;
+  track: TrackLocatorRecord;
 };
+
+function locatorCenter(track: TrackLocatorRecord): LatLngLiteral {
+  const lat = Number(track.latitude);
+  const lng = Number(track.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : { lat: 0, lng: 0 };
+}
+
+function locatorBounds(center: LatLngLiteral) {
+  const offset = 0.0014;
+  return [
+    { lat: center.lat - offset, lng: center.lng - offset },
+    { lat: center.lat + offset, lng: center.lng + offset },
+  ];
+}
 
 export function PublicTrackMap({ track }: PublicTrackMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -37,7 +50,7 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
           return;
         }
 
-        const center = trackCenter(track);
+        const center = locatorCenter(track);
         const map = new google.maps.Map(containerRef.current, {
           cameraControl: true,
           center,
@@ -62,7 +75,7 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
           zoomControl: true,
         });
         const bounds = new google.maps.LatLngBounds();
-        trackBoundsPoints(track).forEach((point) => bounds.extend(point));
+        locatorBounds(center).forEach((point) => bounds.extend(point));
         map.fitBounds(bounds, 42);
         map.setHeading(0);
         map.setTilt(45);

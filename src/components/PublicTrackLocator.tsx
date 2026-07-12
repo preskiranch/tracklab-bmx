@@ -5,7 +5,7 @@ import {
   trackGoogleDirectionsUrl,
   trackGoogleEarthUrl,
 } from '../lib/mapLinks';
-import type { TrackRecord } from '../types';
+import type { TrackLocatorRecord, TrackRecord } from '../types';
 import { PublicTrackMap } from './PublicTrackMap';
 
 type PublicTrackLocatorProps = {
@@ -17,11 +17,11 @@ const allCountries = 'All countries';
 const allRegions = 'All states / regions';
 const maximumVisibleResults = 24;
 
-function trackLocation(track: TrackRecord) {
+function trackLocation(track: TrackLocatorRecord) {
   return [track.city, track.state, track.country].filter(Boolean).join(', ');
 }
 
-function trackSearchText(track: TrackRecord) {
+function trackSearchText(track: TrackLocatorRecord) {
   return [
     track.name,
     track.address,
@@ -43,14 +43,49 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
   const [country, setCountry] = useState(allCountries);
   const [region, setRegion] = useState(allRegions);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(initialLocatorTrackId);
+  const [publicTracks, setPublicTracks] = useState<TrackLocatorRecord[] | null>(null);
+  const [publicDirectoryFailed, setPublicDirectoryFailed] = useState(false);
+  const directoryTracks: TrackLocatorRecord[] = publicTracks ?? tracks;
+  const directoryReady = publicTracks !== null || (publicDirectoryFailed && catalogReady);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/data/track-locator.json', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Public track directory returned ${response.status}`);
+        }
+        return response.json() as Promise<{ tracks?: TrackLocatorRecord[] }>;
+      })
+      .then((directory) => {
+        if (cancelled) {
+          return;
+        }
+        if (!Array.isArray(directory.tracks) || directory.tracks.length === 0) {
+          throw new Error('Public track directory is empty');
+        }
+        setPublicTracks(directory.tracks);
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          console.warn(`Using the application track catalog for public search: ${error.message}`);
+          setPublicDirectoryFailed(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const sortedTracks = useMemo(
-    () => [...tracks].sort((left, right) => (
+    () => [...directoryTracks].sort((left, right) => (
       left.country.localeCompare(right.country)
       || left.state.localeCompare(right.state)
       || left.name.localeCompare(right.name)
     )),
-    [tracks],
+    [directoryTracks],
   );
   const countries = useMemo(
     () => [...new Set(sortedTracks.map((track) => track.country))],
@@ -76,24 +111,24 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
       : sortedTracks.find((track) => track.id === selectedTrackId) ?? sortedTracks[0] ?? null);
 
   useEffect(() => {
-    if (!catalogReady || !selectedTrack || selectedTrack.id === selectedTrackId) {
+    if (!directoryReady || !selectedTrack || selectedTrack.id === selectedTrackId) {
       return;
     }
 
     setSelectedTrackId(selectedTrack.id);
-  }, [catalogReady, selectedTrack, selectedTrackId]);
+  }, [directoryReady, selectedTrack, selectedTrackId]);
 
   useEffect(() => {
-    if (!catalogReady || !selectedTrack) {
+    if (!directoryReady || !selectedTrack) {
       return;
     }
 
     const url = new URL(window.location.href);
     url.searchParams.set('locator', selectedTrack.id);
     window.history.replaceState({}, '', url);
-  }, [catalogReady, selectedTrack]);
+  }, [directoryReady, selectedTrack]);
 
-  const selectTrack = (track: TrackRecord) => {
+  const selectTrack = (track: TrackLocatorRecord) => {
     setSelectedTrackId(track.id);
   };
 
@@ -111,7 +146,7 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
             <h2 id="public-track-locator-title">Find a BMX racing track</h2>
             <p>Search verified federation directories and community track records, then inspect the location or open driving directions.</p>
           </div>
-          <strong>{catalogReady ? `${tracks.length.toLocaleString()} tracks` : 'Loading directory'}</strong>
+          <strong>{directoryReady ? `${directoryTracks.length.toLocaleString()} tracks` : 'Loading directory'}</strong>
         </header>
 
         <div className="public-locator-layout">
@@ -162,7 +197,7 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                   <span><MapPin size={13} /> {trackLocation(track)}</span>
                 </button>
               ))}
-              {catalogReady && filteredTracks.length === 0 && (
+              {directoryReady && filteredTracks.length === 0 && (
                 <div className="public-track-empty">No tracks match those filters.</div>
               )}
             </div>
