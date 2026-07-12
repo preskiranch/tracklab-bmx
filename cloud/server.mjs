@@ -812,8 +812,21 @@ function sanitizeGhostLapPayload(value, profileKey) {
   const zoneResults = Array.isArray(value.zoneResults)
     ? value.zoneResults.slice(0, 500).map(sanitizeGhostZoneResult).filter(Boolean)
     : [];
+  const raceSource = value.raceSource === 'demo' || value.raceSource === 'live'
+    ? value.raceSource
+    : /^demo rider\b/i.test(riderName)
+      ? 'demo'
+      : 'live';
 
-  if (!trackId || !ownerKey || !riderName || !Number.isFinite(finishTimeMs) || finishTimeMs <= 0 || points.length < 2) {
+  if (
+    raceSource !== 'live'
+    || !trackId
+    || !ownerKey
+    || !riderName
+    || !Number.isFinite(finishTimeMs)
+    || finishTimeMs <= 0
+    || points.length < 2
+  ) {
     return null;
   }
 
@@ -829,6 +842,7 @@ function sanitizeGhostLapPayload(value, profileKey) {
     colorName: ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime',
     accent: sanitizeText(value.accent, '#7ade36', 32),
     source: 'personal',
+    raceSource,
     lapCount,
     finishTimeMs,
     thirtyFootTimeMs: value.thirtyFootTimeMs == null ? null : Math.max(0, Math.round(finiteNumber(value.thirtyFootTimeMs, 0))),

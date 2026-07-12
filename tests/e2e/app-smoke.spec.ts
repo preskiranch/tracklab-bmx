@@ -556,10 +556,34 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
     });
   });
   await page.route('**/api/ghosts*', async (route) => {
+    const demoGhosts = Array.from({ length: 4 }, (_, index) => ({
+      version: 1,
+      id: `demo-loop-ghost-${index + 1}`,
+      trackId: 'black-mountain-bmx',
+      trackName: 'Black Mountain BMX',
+      routeVariantId: 'amateur',
+      riderName: `Demo Rider ${index + 1}`,
+      ownerKey: authUser.profileKey,
+      ownerName: authUser.name,
+      colorName: 'lime',
+      accent: '#7ade36',
+      source: 'personal',
+      raceSource: 'demo',
+      lapCount: 1,
+      finishTimeMs: 14_000 + (index * 1_000),
+      thirtyFootTimeMs: 1_700,
+      savedAt: Date.now(),
+      analyticsPublic: false,
+      medalRank: null,
+      summary: null,
+      zoneResults: [],
+      points: ghostPoints,
+    }));
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         ghosts: [
+          ...demoGhosts,
           {
             version: 1,
             id: 'personal-loop-ghost',
@@ -572,6 +596,7 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
             colorName: 'lime',
             accent: '#7ade36',
             source: 'personal',
+            raceSource: 'live',
             lapCount: 1,
             finishTimeMs: 18_500,
             thirtyFootTimeMs: 1_800,
@@ -594,6 +619,7 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
             colorName: 'red',
             accent: '#ff4d42',
             source: 'top',
+            raceSource: 'live',
             lapCount: 1,
             finishTimeMs: 18_000,
             thirtyFootTimeMs: 1_700,
@@ -617,7 +643,10 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   const startHereLapCounter = page.getByRole('group', { name: 'Loop race lap count' });
   await expect(startHereLapCounter).toBeVisible();
   await expect(startHereLapCounter).toContainText('1 lap');
-  await expect(page.getByText('Personal / Studio')).toBeVisible();
+  await expect(page.getByText('My Ghosts')).toBeVisible();
+  await expect(page.getByText('Demo Ghosts')).toHaveCount(0);
+  await expect(page.getByText('Demo Rider 1')).toHaveCount(0);
+  await expect(page.getByText('Studio Bike One')).toBeVisible();
   await expect(page.getByText('Worldwide')).toBeVisible();
   await expect(page.getByText('Gold')).toBeVisible();
   await expect(page.getByText('Replay public / performance private')).toBeVisible();
@@ -639,7 +668,7 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await page.getByRole('button', { name: 'Increase Start Here lap count' }).click();
   await expect(startHereLapCounter).toContainText('2 laps');
   await expect(page.locator('.lap-stepper input')).toHaveValue('2');
-  await expect(page.getByText('Finish a race on this track to save a ghost lap.')).toBeVisible();
+  await expect(page.getByText('Complete a live Wattbike race on this track to create your personal ghost.')).toBeVisible();
 });
 
 test('completed race shows a populated 20-second pedal-zone review', async ({ page }, testInfo) => {
@@ -846,6 +875,7 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
             colorName: 'lime',
             accent: '#7ade36',
             source: 'personal',
+            raceSource: 'live',
             lapCount: 1,
             finishTimeMs: 30_000,
             thirtyFootTimeMs: 1_900,
