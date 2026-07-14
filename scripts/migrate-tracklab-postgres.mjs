@@ -1,9 +1,28 @@
 import pg from 'pg';
+import { runDatabaseMigrations } from '../cloud/migrations.mjs';
 
 const { Pool } = pg;
 
 const schema = 'tracklab';
-const tables = ['profiles', 'rooms', 'room_members', 'room_messages', 'challenges', 'race_results'];
+const tables = [
+  'profiles',
+  'auth_users',
+  'auth_sessions',
+  'billing_checkouts',
+  'rooms',
+  'room_members',
+  'room_messages',
+  'challenges',
+  'friend_requests',
+  'friendships',
+  'groups',
+  'group_members',
+  'group_invites',
+  'race_results',
+  'user_data',
+  'public_track_mappings',
+  'ghost_laps',
+];
 const sourceUrl = process.env.TRACKLAB_SOURCE_DATABASE_URL?.trim() || process.env.DATABASE_URL?.trim();
 const targetUrl = process.env.TRACKLAB_TARGET_DATABASE_URL?.trim();
 
@@ -25,96 +44,6 @@ function poolFor(connectionString) {
       ? { rejectUnauthorized: false }
       : undefined,
   });
-}
-
-async function createSchema(client) {
-  await client.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS ${schema}.profiles (
-      guest_key TEXT PRIMARY KEY,
-      display_name TEXT NOT NULL,
-      available BOOLEAN NOT NULL DEFAULT false,
-      bike_count INTEGER NOT NULL DEFAULT 0,
-      current_track JSONB NOT NULL DEFAULT '{}'::jsonb,
-      last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS ${schema}.rooms (
-      id TEXT PRIMARY KEY,
-      host_guest_key TEXT,
-      host_name TEXT,
-      private BOOLEAN NOT NULL DEFAULT true,
-      track JSONB NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      closed_at TIMESTAMPTZ
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS ${schema}.room_members (
-      room_id TEXT NOT NULL REFERENCES ${schema}.rooms(id) ON DELETE CASCADE,
-      guest_key TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      left_at TIMESTAMPTZ,
-      PRIMARY KEY (room_id, guest_key)
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS ${schema}.room_messages (
-      id TEXT PRIMARY KEY,
-      room_id TEXT NOT NULL REFERENCES ${schema}.rooms(id) ON DELETE CASCADE,
-      author_guest_key TEXT,
-      author_name TEXT NOT NULL,
-      body TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS ${schema}.challenges (
-      id TEXT PRIMARY KEY,
-      from_guest_key TEXT NOT NULL,
-      from_name TEXT NOT NULL,
-      to_guest_key TEXT NOT NULL,
-      to_name TEXT NOT NULL,
-      track JSONB NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      room_id TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      responded_at TIMESTAMPTZ
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS ${schema}.race_results (
-      id BIGSERIAL PRIMARY KEY,
-      dedupe_key TEXT UNIQUE NOT NULL,
-      room_id TEXT NOT NULL,
-      guest_key TEXT NOT NULL,
-      rider_name TEXT NOT NULL,
-      player_id INTEGER NOT NULL,
-      track_id TEXT NOT NULL,
-      track_name TEXT NOT NULL,
-      rank INTEGER NOT NULL,
-      finish_time_ms INTEGER,
-      distance_meters DOUBLE PRECISION NOT NULL DEFAULT 0,
-      top_speed_kph DOUBLE PRECISION,
-      average_speed_kph DOUBLE PRECISION,
-      top_cadence DOUBLE PRECISION,
-      average_cadence DOUBLE PRECISION,
-      top_watts DOUBLE PRECISION,
-      average_watts DOUBLE PRECISION,
-      summary JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
-  await client.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
-  await client.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_rooms_created ON ${schema}.rooms (created_at DESC)`);
-  await client.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_track ON ${schema}.race_results (track_id, created_at DESC)`);
-  await client.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_speed ON ${schema}.race_results (track_id, top_speed_kph DESC NULLS LAST)`);
-  await client.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rpm ON ${schema}.race_results (track_id, top_cadence DESC NULLS LAST)`);
-  await client.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_watts ON ${schema}.race_results (track_id, top_watts DESC NULLS LAST)`);
 }
 
 async function tableExists(client, table) {
@@ -145,17 +74,21 @@ function normalizeValue(value) {
 async function migrate() {
   const sourcePool = poolFor(sourceUrl);
   const targetPool = poolFor(targetUrl);
-  const sourceClient = await sourcePool.connect();
-  const targetClient = await targetPool.connect();
+  let sourceClient = null;
+  let targetClient = null;
+  let transactionOpen = false;
 
   try {
-    await createSchema(targetClient);
+    const schemaMigration = await runDatabaseMigrations(targetPool, { schema });
+    sourceClient = await sourcePool.connect();
+    targetClient = await targetPool.connect();
     await targetClient.query('BEGIN');
+    transactionOpen = true;
 
     const copied = [];
     for (const table of tables) {
       if (!(await tableExists(sourceClient, table))) {
-        copied.push({ table, copied: 0, skipped: true });
+        copied.push({ table, sourceRows: 0, inserted: 0, skipped: true });
         continue;
       }
 
@@ -163,24 +96,29 @@ async function migrate() {
       const quotedColumns = columns.map((column) => `"${column}"`).join(', ');
       const sourceRows = await sourceClient.query(`SELECT ${quotedColumns} FROM ${schema}.${table}`);
 
-      let count = 0;
+      let inserted = 0;
       for (const row of sourceRows.rows) {
         const values = columns.map((column) => normalizeValue(row[column]));
         const placeholders = values.map((_, index) => `$${index + 1}`).join(', ');
-        await targetClient.query(
-          `INSERT INTO ${schema}.${table} (${quotedColumns}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
+        const insertResult = await targetClient.query(
+          `INSERT INTO ${schema}.${table} (${quotedColumns}) VALUES (${placeholders}) ON CONFLICT DO NOTHING RETURNING 1`,
           values,
         );
-        count += 1;
+        inserted += insertResult.rowCount ?? 0;
       }
 
-      copied.push({ table, copied: count });
+      copied.push({ table, sourceRows: sourceRows.rowCount ?? sourceRows.rows.length, inserted });
     }
 
     await targetClient.query(
-      `SELECT setval(pg_get_serial_sequence('${schema}.race_results', 'id'), COALESCE((SELECT MAX(id) FROM ${schema}.race_results), 1), true)`,
+      `SELECT setval(
+        pg_get_serial_sequence('${schema}.race_results', 'id'),
+        COALESCE((SELECT MAX(id) FROM ${schema}.race_results), 1),
+        EXISTS (SELECT 1 FROM ${schema}.race_results)
+      )`,
     );
     await targetClient.query('COMMIT');
+    transactionOpen = false;
 
     const verify = [];
     for (const table of tables) {
@@ -188,13 +126,15 @@ async function migrate() {
       verify.push({ table, count: result.rows[0].count });
     }
 
-    console.log(JSON.stringify({ ok: true, copied, verify }, null, 2));
+    console.log(JSON.stringify({ ok: true, schemaMigration, copied, verify }, null, 2));
   } catch (error) {
-    await targetClient.query('ROLLBACK').catch(() => {});
+    if (transactionOpen) {
+      await targetClient?.query('ROLLBACK').catch(() => {});
+    }
     throw error;
   } finally {
-    sourceClient.release();
-    targetClient.release();
+    sourceClient?.release();
+    targetClient?.release();
     await sourcePool.end();
     await targetPool.end();
   }
