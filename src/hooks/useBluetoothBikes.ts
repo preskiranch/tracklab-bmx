@@ -12,6 +12,8 @@ import {
   parseBluetoothBikeIdentityAssignments,
   serializeBluetoothBikeIdentityAssignments,
 } from '../lib/bluetoothBikeIdentity';
+import { KeyedCleanupRegistry } from '../lib/keyedCleanupRegistry';
+import { removeBikeSample, upsertBoundedBikeSample } from '../lib/liveBikeRegistry';
 import { liveBikeTimeoutMs } from '../data';
 import type { BikeSample, ConnectedBikeDevice } from '../types';
 
@@ -39,6 +41,7 @@ type BluetoothValueEvent = Event & {
 type BluetoothCharacteristic = EventTarget & {
   readValue?: () => Promise<DataView>;
   startNotifications: () => Promise<BluetoothCharacteristic>;
+  stopNotifications?: () => Promise<BluetoothCharacteristic>;
 };
 
 type BluetoothService = {
@@ -368,14 +371,14 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   const deviceIdsRef = useRef<Map<string, number>>(readStoredBluetoothBikeIdentities());
   const crankCacheRef = useRef<Map<number, { eventTime: number; revolutions: number }>>(new Map());
   const connectedBrowserDeviceIdsRef = useRef<Set<string>>(new Set());
+  const connectingBrowserDeviceIdsRef = useRef<Set<string>>(new Set());
   const reconnectInFlightRef = useRef(false);
-  const listenerCleanupRef = useRef<(() => void)[]>([]);
+  const listenerCleanupRef = useRef(new KeyedCleanupRegistry<string>());
   const samplesByDeviceRef = useRef<Map<number, BikeSample>>(new Map());
   const supported = Boolean((navigator as BluetoothNavigator).bluetooth);
 
   useEffect(() => () => {
-    listenerCleanupRef.current.forEach((cleanup) => cleanup());
-    listenerCleanupRef.current = [];
+    listenerCleanupRef.current.clearAll();
   }, []);
 
   useEffect(() => {
@@ -389,6 +392,10 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
 
   const setDeviceConnected = useCallback((deviceId: number, label: string, connected: boolean) => {
     setDevices((current) => {
+      if (!connected) {
+        return current.filter((device) => device.deviceId !== deviceId);
+      }
+
       const existing = current.find((device) => device.deviceId === deviceId);
       const nextDevice: BluetoothBikeDevice = {
         at: connected ? Date.now() : existing?.at,
@@ -409,6 +416,15 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
     });
   }, []);
 
+  const disconnectBluetoothDevice = useCallback((browserDeviceId: string, deviceId: number, label: string) => {
+    connectedBrowserDeviceIdsRef.current.delete(browserDeviceId);
+    listenerCleanupRef.current.clear(browserDeviceId);
+    crankCacheRef.current.delete(deviceId);
+    setDeviceConnected(deviceId, label, false);
+    setSamplesByDevice((current) => removeBikeSample(current, deviceId));
+    setConnection(connectedBrowserDeviceIdsRef.current.size > 0 ? 'open' : 'idle');
+  }, [setDeviceConnected]);
+
   const commitSample = useCallback((deviceId: number, label: string, partial: PartialBikeSample) => {
     setSamplesByDevice((current) => {
       const previous = current.get(deviceId);
@@ -419,8 +435,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       const hasWatts = cleanedPartial.watts !== undefined;
       const hasBattery = cleanedPartial.battery !== undefined;
       const hasMotionValue = hasCadence || hasSpeed || hasWatts;
-      const next = new Map(current);
-      next.set(deviceId, {
+      const sample: BikeSample = {
         at: hasMotionValue ? receivedAt : previous?.at ?? receivedAt,
         battery: hasBattery ? cleanedPartial.battery : previous?.battery,
         cadence: hasCadence ? cleanedPartial.cadence ?? null : previous?.cadence ?? null,
@@ -433,8 +448,8 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
         speedAt: hasSpeed ? receivedAt : previous?.speedAt,
         watts: hasWatts ? cleanedPartial.watts ?? 0 : previous?.watts ?? 0,
         wattsAt: hasWatts ? receivedAt : previous?.wattsAt,
-      });
-      return next;
+      };
+      return upsertBoundedBikeSample(current, sample, 8);
     });
   }, []);
 
@@ -450,6 +465,13 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       connectedBrowserDeviceIdsRef.current.delete(device.id);
     }
 
+    if (connectingBrowserDeviceIdsRef.current.has(device.id)) {
+      return false;
+    }
+
+    connectingBrowserDeviceIdsRef.current.add(device.id);
+    listenerCleanupRef.current.clear(device.id);
+
     const label = device.name?.trim() || `Bluetooth Wattbike ${numericId}`;
 
     try {
@@ -461,12 +483,13 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       connectedBrowserDeviceIdsRef.current.add(device.id);
 
       const disconnectHandler = () => {
-        connectedBrowserDeviceIdsRef.current.delete(device.id);
-        setDeviceConnected(numericId, label, false);
-        setConnection((current) => (current === 'open' ? 'idle' : current));
+        disconnectBluetoothDevice(device.id, numericId, label);
       };
       device.addEventListener('gattserverdisconnected', disconnectHandler);
-      listenerCleanupRef.current.push(() => device.removeEventListener('gattserverdisconnected', disconnectHandler));
+      listenerCleanupRef.current.add(
+        device.id,
+        () => device.removeEventListener('gattserverdisconnected', disconnectHandler),
+      );
 
       let subscriptions = 0;
       const subscribe = async (
@@ -485,7 +508,10 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
           };
           await characteristic.startNotifications();
           characteristic.addEventListener('characteristicvaluechanged', listener);
-          listenerCleanupRef.current.push(() => characteristic.removeEventListener('characteristicvaluechanged', listener));
+          listenerCleanupRef.current.add(device.id, () => {
+            characteristic.removeEventListener('characteristicvaluechanged', listener);
+            void characteristic.stopNotifications?.().catch(() => undefined);
+          });
           subscriptions += 1;
         } catch {
           // Wattbike models vary; unsupported standard services are expected.
@@ -524,14 +550,19 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
         throw new Error('No FTMS, Cycling Power, or Cycling Speed/Cadence service was found on that Bluetooth device.');
       }
 
-      setDeviceConnected(numericId, label, server.connected);
+      if (!server.connected) {
+        throw new Error('Bluetooth bike disconnected before its live data service was ready.');
+      }
+
+      setDeviceConnected(numericId, label, true);
       return true;
     } catch (connectError) {
-      connectedBrowserDeviceIdsRef.current.delete(device.id);
-      setDeviceConnected(numericId, label, false);
+      disconnectBluetoothDevice(device.id, numericId, label);
       throw connectError;
+    } finally {
+      connectingBrowserDeviceIdsRef.current.delete(device.id);
     }
-  }, [commitSample, setDeviceConnected]);
+  }, [commitSample, disconnectBluetoothDevice, setDeviceConnected]);
 
   const reconnectSavedBikes = useCallback(async () => {
     const bluetooth = (navigator as BluetoothNavigator).bluetooth;
@@ -560,7 +591,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
         }
       }
 
-      setConnection((current) => (connected > 0 || current === 'open' ? 'open' : 'idle'));
+      setConnection(connected > 0 || connectedBrowserDeviceIdsRef.current.size > 0 ? 'open' : 'idle');
     } catch (reconnectError) {
       if (!isBluetoothChooserCancel(reconnectError)) {
         setError(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect saved Bluetooth bikes.');

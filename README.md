@@ -45,6 +45,30 @@ creates a mocked free spectator profile, verifies the dashboard renders, checks
 for relevant browser errors, and saves failure traces/screenshots under
 `test-results/`.
 
+## Production Verification
+
+Run the complete local release gate before deploying:
+
+```sh
+npm ci --include=dev
+npm run verify:release:full
+```
+
+After deploying, verify the hosted service and required PostgreSQL storage:
+
+```sh
+TRACKLAB_SMOKE_URL=https://tracklab-bmx.onrender.com \
+TRACKLAB_EXPECT_POSTGRES=1 \
+npm run smoke:deployment
+```
+
+Production operations are documented in:
+
+- [Release and rollback runbook](docs/operations/release-runbook.md)
+- [Database backup and recovery](docs/operations/database-recovery.md)
+- [Wattbike hardware acceptance](docs/operations/hardware-acceptance.md)
+- [Metrics, logs, and incident checks](docs/operations/observability.md)
+
 ## ANT+ Mode
 
 After the ANT+ USB dongle is plugged in:

@@ -1202,3 +1202,84 @@ test('connected bike names remain bound to their monitor IDs after reload', asyn
     await bridge.close();
   }
 });
+
+test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {
+  const bridge = await createMockBikeBridge([58701]);
+  const sampleTimer = setInterval(() => {
+    bridge.broadcast(mockBikeSample({
+      deviceId: 58701,
+      watts: 210,
+      cadence: 72,
+      speedKph: 0,
+    }));
+  }, 120);
+  const authUser = {
+    id: 'studio-roster-racer',
+    profileKey: 'user:studio-roster-racer',
+    email: 'studio-roster@tracklab.test',
+    name: 'Studio Coach',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: Date.now(),
+    },
+  };
+  let cloudStudioRiders: Array<{
+    id: string;
+    name: string;
+    createdAt: number;
+    updatedAt: number;
+    deletedAt?: number;
+  }> = [];
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      if (route.request().method() === 'PATCH') {
+        const patch = route.request().postDataJSON() as { studioRiders?: typeof cloudStudioRiders };
+        if (Array.isArray(patch.studioRiders)) {
+          cloudStudioRiders = patch.studioRiders;
+        }
+      }
+
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {},
+          customRoutes: [],
+          bikeProfiles: [],
+          studioRiders: cloudStudioRiders,
+        }),
+      });
+    });
+
+    await page.goto('/?track=black-mountain-bmx');
+    await page.getByRole('button', { name: 'Open App' }).click();
+    await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
+
+    await page.getByPlaceholder('Add student').fill('Jordan H');
+    await page.getByRole('button', { name: 'Add studio rider' }).click();
+    await expect.poll(() => cloudStudioRiders.find((rider) => !rider.deletedAt)?.name).toBe('Jordan H');
+
+    const studentSelect = page.getByLabel(/Student riding Bike 58701/i);
+    await studentSelect.selectOption({ label: 'Jordan H' });
+    await expect(studentSelect).toHaveValue(cloudStudioRiders[0].id);
+    await expect(page.getByText(/1 entered \/ 1 connected/i)).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('option', { name: 'Jordan H' })).toBeAttached();
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
+});

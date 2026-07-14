@@ -27,6 +27,7 @@ import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { RaceReviewPanel } from './components/RaceReviewPanel';
 import { SessionControlPanel } from './components/SessionControlPanel';
+import { StudioRaceEntry } from './components/StudioRaceEntry';
 import {
   bikeConnectionSourceStorageKey,
   bikeProfilesStorageKey,
@@ -38,6 +39,7 @@ import {
   maxPlayers,
   raceCaptureStorageKey,
   speedUnitStorageKey,
+  studioRidersStorageKey,
   storageKey,
 } from './data';
 import { countriesForCatalog, statesForCountry, trackCatalog, tracksForLocation } from './data/trackCatalog';
@@ -107,7 +109,21 @@ import {
   createRaceStagingSteps,
   raceStagingDurationMs,
 } from './lib/raceStartSequence';
-import { distinctBikeDisplayName, reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
+import { reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
+import {
+  bikeSampleIsLive,
+  connectedDeviceFromBikeSample,
+  selectRaceBikeDevices,
+} from './lib/liveBikeRegistry';
+import {
+  activeStudioRiders,
+  applyStudioRiderAssignments,
+  assignStudioRider,
+  createStudioRider,
+  mergeStudioRiders,
+  removeStudioRider,
+  renameStudioRider,
+} from './lib/studioRiders';
 import {
   claimBillingReturn,
   loginAuthUser,
@@ -135,7 +151,6 @@ import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import type {
   AppMode,
   BikeProfile,
-  BikeSample,
   ConnectedBikeDevice,
   DistanceUnit,
   DraftTrackSplit,
@@ -154,6 +169,8 @@ import type {
   ReactionTimesByPlayer,
   SessionMode,
   SpeedUnit,
+  StudioRider,
+  StudioRiderAssignments,
   TrackPoint,
   TrackRecord,
   TrackRouteVariantId,
@@ -919,75 +936,6 @@ function isDefaultBikeProfileName(profile: Pick<BikeProfile, 'deviceId' | 'name'
   return normalizeBikeName(profile.name).toLowerCase() === defaultBikeName(profile.deviceId).toLowerCase();
 }
 
-function connectedDeviceFromSample(sample: BikeSample): ConnectedBikeDevice {
-  return {
-    at: sample.at,
-    connected: true,
-    connectionOrigin: 'bridge-sample',
-    deviceId: sample.deviceId,
-    label: sample.label,
-    signal: sample.signal,
-    source: sample.source,
-  };
-}
-
-function isLiveBikeSample(sample: BikeSample | undefined, now: number) {
-  return Boolean(sample && now - sample.at <= liveBikeTimeoutMs);
-}
-
-function isSupplementalBikeDevice(device: ConnectedBikeDevice) {
-  const label = device.label.toLowerCase();
-  const isSpeedOrCadence = /speed\/cadence|speed cadence|\bcadence\b|\bspeed\b/.test(label);
-  const isPrimaryPower = /wattbike|bicycle power|cycling power|fitness|power meter|powermeter/.test(label);
-  return isSpeedOrCadence && !isPrimaryPower;
-}
-
-function isConnectedBikeDevice(device: ConnectedBikeDevice, now: number) {
-  if (!device.connected) {
-    return false;
-  }
-
-  if (device.connectionOrigin === 'direct-bluetooth') {
-    return true;
-  }
-
-  if (device.connectionOrigin === 'bridge-status' && device.source === 'bluetooth') {
-    return true;
-  }
-
-  if (device.source === 'usb') {
-    return true;
-  }
-
-  return Number.isFinite(device.at) && now - Number(device.at) <= connectedBikeDeviceTimeoutMs;
-}
-
-function raceBikeDevices(devices: ConnectedBikeDevice[], now: number) {
-  const connectedById = new Map<number, ConnectedBikeDevice>();
-  devices.forEach((device) => {
-    const deviceId = Number(device.deviceId);
-    if (!Number.isFinite(deviceId) || deviceId <= 0 || !isConnectedBikeDevice(device, now)) {
-      return;
-    }
-
-    const normalizedDevice = {
-      ...device,
-      deviceId: Math.round(deviceId),
-      label: device.label || `Wattbike ${Math.round(deviceId)}`,
-    };
-    const previous = connectedById.get(normalizedDevice.deviceId);
-    if (!previous || (normalizedDevice.at ?? 0) >= (previous.at ?? 0)) {
-      connectedById.set(normalizedDevice.deviceId, normalizedDevice);
-    }
-  });
-
-  const connectedDevices = [...connectedById.values()];
-  const primaryDevices = connectedDevices.filter((device) => !isSupplementalBikeDevice(device));
-  return (primaryDevices.length > 0 ? primaryDevices : connectedDevices)
-    .sort((a, b) => a.deviceId - b.deviceId)
-    .slice(0, maxPlayers);
-}
-
 function createBikeProfile(deviceId: number, index: number, name = defaultBikeName(deviceId)): BikeProfile {
   const visual = profileVisual(index);
   return {
@@ -1086,6 +1034,19 @@ function readStoredBikeProfiles(): BikeProfile[] {
 
 function writeStoredBikeProfiles(profiles: BikeProfile[]) {
   window.localStorage.setItem(bikeProfilesStorageKey, JSON.stringify(dedupeBikeProfiles(profiles)));
+}
+
+function readStoredStudioRiders(): StudioRider[] {
+  try {
+    const stored = window.localStorage.getItem(studioRidersStorageKey);
+    return stored ? mergeStudioRiders(JSON.parse(stored)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredStudioRiders(riders: StudioRider[]) {
+  window.localStorage.setItem(studioRidersStorageKey, JSON.stringify(mergeStudioRiders(riders)));
 }
 
 function readStoredBikeConnectionSource(): BikeConnectionSource {
@@ -1388,6 +1349,8 @@ export default function App() {
   const [mappingHistoryVersion, setMappingHistoryVersion] = useState(0);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
+  const [studioRiders, setStudioRiders] = useState<StudioRider[]>(readStoredStudioRiders);
+  const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
   const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>(readStoredBikeConnectionSource);
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
@@ -2148,7 +2111,7 @@ export default function App() {
   const liveBikeDeviceIds = useMemo(() => {
     const deviceIds = new Set<number>();
     connectedBikeSamples.forEach((sample, deviceId) => {
-      if (isLiveBikeSample(sample, now)) {
+      if (bikeSampleIsLive(sample, now, liveBikeTimeoutMs)) {
         deviceIds.add(deviceId);
       }
     });
@@ -2162,11 +2125,14 @@ export default function App() {
 
     connectedBikeSamples.forEach((sample) => {
       if (now - sample.at <= connectedBikeDeviceTimeoutMs) {
-        devices.push(connectedDeviceFromSample(sample));
+        devices.push(connectedDeviceFromBikeSample(sample));
       }
     });
 
-    return raceBikeDevices(devices, now)
+    return selectRaceBikeDevices(devices, now, {
+      deviceTimeoutMs: connectedBikeDeviceTimeoutMs,
+      maxDevices: maxPlayers,
+    })
       .filter((device) => liveBikeDeviceIds.has(device.deviceId));
   }, [bluetooth.devices, bridge.devices, connectedBikeSamples, liveBikeDeviceIds, now]);
   const connectedBikeDeviceById = useMemo(
@@ -2181,7 +2147,7 @@ export default function App() {
     () => new Map(bikeProfiles.map((profile) => [profile.deviceId, profile])),
     [bikeProfiles],
   );
-  const sessionPlayers = useMemo(
+  const sessionPlayers = useMemo<PlayerSlot[]>(
     () => connectedDeviceIds.map((deviceId, index) => {
       const visual = profileVisual(index);
       const profile = profileByDevice.get(deviceId);
@@ -2210,14 +2176,18 @@ export default function App() {
     },
     [demoMode, demoPlayers, sessionPlayers],
   );
+  const availableStudioRiders = useMemo(() => activeStudioRiders(studioRiders), [studioRiders]);
   const enteredRacePlayers = useMemo(() => {
     if (demoMode) {
       return activePlayers;
     }
 
     const readyDeviceIds = new Set(liveRaceReadyDeviceIds);
-    return activePlayers.filter((player) => player.deviceId != null && readyDeviceIds.has(player.deviceId));
-  }, [activePlayers, demoMode, liveRaceReadyDeviceIds]);
+    const enteredPlayers = activePlayers.filter(
+      (player) => player.deviceId != null && readyDeviceIds.has(player.deviceId),
+    );
+    return applyStudioRiderAssignments(enteredPlayers, studioRiders, studioRiderAssignments);
+  }, [activePlayers, demoMode, liveRaceReadyDeviceIds, studioRiderAssignments, studioRiders]);
   const multiplayer = useMultiplayer({
     enabled: playMode === 'multiplayer',
     track: effectiveTrack,
@@ -2366,7 +2336,7 @@ export default function App() {
         return false;
       }
 
-      return isLiveBikeSample(samplesByDevice.get(player.deviceId), now);
+      return bikeSampleIsLive(samplesByDevice.get(player.deviceId), now, liveBikeTimeoutMs);
     }).length,
     [activePlayers, now, samplesByDevice],
   );
@@ -2657,6 +2627,8 @@ export default function App() {
         name: player.name,
         deviceId: player.deviceId,
         colorName: player.colorName,
+        riderId: player.riderId,
+        bikeName: player.bikeName,
       })),
       zones: raceZones,
       events: [{
@@ -2866,6 +2838,7 @@ export default function App() {
           return next;
         });
         setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
+        setStudioRiders((current) => mergeStudioRiders(current, data.studioRiders));
         bridgeUserDataLoadedRef.current = true;
       })
       .catch((error: Error) => {
@@ -2915,10 +2888,11 @@ export default function App() {
             return next;
           });
           setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
+          setStudioRiders((current) => mergeStudioRiders(current, data.studioRiders));
           cloudUserDataAvailableRef.current = true;
           cloudUserDataLoadedKeyRef.current = cloudProfileKey;
           setCloudUserDataStatus('online');
-          setCloudUserDataMessage('Bike names, custom routes, and track maps are syncing to this profile.');
+          setCloudUserDataMessage('Bike names, studio riders, custom routes, and track maps are syncing to this profile.');
 
           if (authUser && mappingBackfillProfileRef.current !== cloudProfileKey) {
             mappingBackfillProfileRef.current = cloudProfileKey;
@@ -3023,6 +2997,41 @@ export default function App() {
         });
     }
   }, [bikeProfiles, bridge.connection, cloudProfileKey]);
+
+  useEffect(() => {
+    const normalizedRiders = mergeStudioRiders(studioRiders);
+    writeStoredStudioRiders(normalizedRiders);
+    if (bridge.connection === 'open' && bridgeUserDataLoadedRef.current) {
+      void queueBridgeUserDataPatch({ studioRiders: normalizedRiders }).catch((error: Error) => {
+        console.warn(`Could not save studio riders to TrackLab bridge: ${error.message}`);
+      });
+    }
+
+    if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+      void queueCloudUserDataPatch(cloudProfileKey, { studioRiders: normalizedRiders })
+        .then(() => {
+          setCloudUserDataStatus('online');
+          setCloudUserDataMessage('Studio rider roster saved to this cloud profile.');
+        })
+        .catch((error: Error) => {
+          setCloudUserDataStatus('offline');
+          setCloudUserDataMessage(`Could not save studio rider roster to cloud. ${error.message}`);
+          console.warn(`Could not save studio riders to TrackLab cloud: ${error.message}`);
+        });
+    }
+  }, [bridge.connection, cloudProfileKey, studioRiders]);
+
+  useEffect(() => {
+    const activeRiderIds = new Set(availableStudioRiders.map((rider) => rider.id));
+    setStudioRiderAssignments((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([, riderId]) => activeRiderIds.has(riderId)),
+      );
+      const unchanged = Object.keys(next).length === Object.keys(current).length
+        && Object.entries(next).every(([deviceId, riderId]) => current[Number(deviceId)] === riderId);
+      return unchanged ? current : next;
+    });
+  }, [availableStudioRiders]);
 
   useEffect(() => {
     writeStoredCustomRoutes(customRoutes);
@@ -4654,6 +4663,47 @@ export default function App() {
     setLiveRaceReadyDeviceIds([]);
   }, [raceState, startGateStatus.active]);
 
+  const handleStudioRiderAssignment = useCallback((deviceId: number, riderId: string | null) => {
+    if (startGateStatus.active || raceState === 'racing') {
+      return;
+    }
+
+    setLockedRacePlayers(null);
+    setStudioRiderAssignments((current) => assignStudioRider(current, deviceId, riderId));
+  }, [raceState, startGateStatus.active]);
+
+  const handleStudioRiderAdd = useCallback((name: string) => {
+    const rider = createStudioRider(name);
+    if (!rider) {
+      return false;
+    }
+
+    setStudioRiders((current) => mergeStudioRiders(current, [rider]));
+    return true;
+  }, []);
+
+  const handleStudioRiderRename = useCallback((riderId: string, name: string) => {
+    setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
+      rider.id === riderId ? renameStudioRider(rider, name) : rider
+    ))));
+  }, []);
+
+  const handleStudioRiderRemove = useCallback((riderId: string) => {
+    setLockedRacePlayers(null);
+    setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
+      rider.id === riderId ? removeStudioRider(rider) : rider
+    ))));
+    setStudioRiderAssignments((current) => {
+      const next = { ...current };
+      Object.entries(next).forEach(([deviceId, assignedRiderId]) => {
+        if (assignedRiderId === riderId) {
+          delete next[Number(deviceId)];
+        }
+      });
+      return next;
+    });
+  }, []);
+
   const handleMappingRouteVariantChange = useCallback((variantId: RaceRouteVariantId) => {
     setMappingRouteVariantId(variantId);
     setMappingEditMode('navigate');
@@ -5841,66 +5891,21 @@ export default function App() {
               );
             })}
           </div>
-          {!demoMode && activePlayers.length > 0 && (
-            <div className="workflow-race-entry" aria-label="Live race entry">
-              <div className="workflow-race-entry-heading">
-                <span>Race Entry</span>
-                <small>{racePlayers.length} entered / {activePlayers.length} connected</small>
-              </div>
-              <div className="workflow-race-entry-list">
-                {activePlayers.map((player) => {
-                  const deviceId = player.deviceId;
-                  const entered = deviceId != null && liveRaceReadyDeviceIds.includes(deviceId);
-                  const displayName = distinctBikeDisplayName(player, activePlayers);
-
-                  return (
-                    <button
-                      className={`race-entry-row ${entered ? 'entered' : ''}`}
-                      type="button"
-                      key={deviceId ?? player.id}
-                      onClick={() => {
-                        if (deviceId != null) {
-                          toggleLiveRaceEntry(deviceId);
-                        }
-                      }}
-                      disabled={!canEditLiveRaceEntry || deviceId == null}
-                      aria-pressed={entered}
-                      aria-label={`${entered ? 'Remove' : 'Enter'} ${displayName} ${entered ? 'from' : 'in'} live race`}
-                    >
-                      <span
-                        className="player-chip"
-                        style={{ '--player-color': player.accent } as CSSProperties}
-                      >
-                        P{player.id}
-                      </span>
-                      <span className="race-entry-copy">
-                        <strong>{displayName}</strong>
-                        <small>{deviceId != null ? `Monitor ID ${deviceId}` : 'No monitor ID'}</small>
-                      </span>
-                      <span className={`race-entry-status ${entered ? 'entered' : ''}`}>
-                        {entered ? 'Entered' : 'Standby'}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="race-entry-actions">
-                <button
-                  type="button"
-                  onClick={enterAllLiveRaceBikes}
-                  disabled={!canEditLiveRaceEntry || connectedDeviceIds.length === 0}
-                >
-                  Enter all
-                </button>
-                <button
-                  type="button"
-                  onClick={clearLiveRaceEntries}
-                  disabled={!canEditLiveRaceEntry || liveRaceReadyDeviceIds.length === 0}
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
+          {!demoMode && (
+            <StudioRaceEntry
+              players={activePlayers}
+              enteredDeviceIds={liveRaceReadyDeviceIds}
+              riders={availableStudioRiders}
+              assignments={studioRiderAssignments}
+              canEdit={canEditLiveRaceEntry}
+              onToggleEntry={toggleLiveRaceEntry}
+              onEnterAll={enterAllLiveRaceBikes}
+              onClearEntries={clearLiveRaceEntries}
+              onAssignRider={handleStudioRiderAssignment}
+              onAddRider={handleStudioRiderAdd}
+              onRenameRider={handleStudioRiderRename}
+              onRemoveRider={handleStudioRiderRemove}
+            />
           )}
           {hasStartHereSplitChoices && (
             <div className="workflow-split-choice" aria-label="Start Here rider race line choices">

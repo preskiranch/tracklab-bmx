@@ -16,8 +16,16 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: TRACKLAB_REQUIRE_DATABASE
+        value: "1"
       - key: TRACKLAB_ADMIN_EMAILS
         sync: false
+      - key: TRACKLAB_METRICS_TOKEN
+        sync: false
+      - key: TRACKLAB_LOG_HTTP
+        value: "0"
+      - key: TRACKLAB_SLOW_REQUEST_MS
+        value: "1000"
       - key: SQUARE_ENVIRONMENT
         sync: false
       - key: SQUARE_VERSION

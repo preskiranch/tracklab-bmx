@@ -7,6 +7,8 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
+import { cloudTelemetry } from './telemetry.mjs';
+import { instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 import {
   createRacerSubscriptionCheckout,
   racerMonthlyCents,
@@ -28,6 +30,7 @@ const rootDirectory = path.resolve(__dirname, '..');
 const distDirectory = path.join(rootDirectory, 'dist');
 const port = Number(process.env.PORT ?? 10000);
 const websocketPath = '/multiplayer';
+const databaseRequired = process.env.TRACKLAB_REQUIRE_DATABASE === '1';
 
 const clients = new Map();
 const rooms = new Map();
@@ -54,6 +57,25 @@ const adminAccountEmails = new Set(
     .map((email) => sanitizeEmail(email))
     .filter(Boolean),
 );
+
+function metricsTokenAllowed(request) {
+  const expectedToken = String(process.env.TRACKLAB_METRICS_TOKEN || '').trim();
+  if (!expectedToken) {
+    return false;
+  }
+
+  const authorization = String(request.headers.authorization || '');
+  const bearerToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
+  const headerToken = String(request.headers['x-tracklab-metrics-token'] || '').trim();
+  const providedToken = bearerToken || headerToken;
+  if (!providedToken) {
+    return false;
+  }
+
+  const expectedHash = Buffer.from(tokenHash(expectedToken));
+  const providedHash = Buffer.from(tokenHash(providedToken));
+  return expectedHash.length === providedHash.length && timingSafeEqual(expectedHash, providedHash);
+}
 
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -437,6 +459,35 @@ function sanitizeUserDataPatch(value) {
   }
   if (Array.isArray(value.bikeProfiles)) {
     patch.bikeProfiles = value.bikeProfiles.slice(0, 64);
+  }
+  if (Array.isArray(value.studioRiders)) {
+    const now = Date.now();
+    patch.studioRiders = value.studioRiders
+      .flatMap((candidate) => {
+        if (!candidate || typeof candidate !== 'object') {
+          return [];
+        }
+
+        const id = sanitizeText(candidate.id, '', 100);
+        const name = sanitizeText(candidate.name, '', 64);
+        if (!id || !name) {
+          return [];
+        }
+
+        const createdAt = Math.max(1, finiteNumber(candidate.createdAt, now));
+        const updatedAt = Math.max(createdAt, finiteNumber(candidate.updatedAt, createdAt));
+        const deletedAt = candidate.deletedAt == null
+          ? null
+          : Math.max(updatedAt, finiteNumber(candidate.deletedAt, updatedAt));
+        return [{
+          id,
+          name,
+          createdAt,
+          updatedAt: deletedAt ?? updatedAt,
+          ...(deletedAt == null ? {} : { deletedAt }),
+        }];
+      })
+      .slice(0, 250);
   }
   return patch;
 }
@@ -1226,6 +1277,7 @@ function publicRoom(room) {
 function send(client, payload) {
   if (client?.socket?.readyState === client.socket.OPEN) {
     client.socket.send(JSON.stringify(payload));
+    cloudTelemetry.increment('tracklab_websocket_messages_total', { direction: 'outbound' });
   }
 }
 
@@ -1337,6 +1389,15 @@ function beginRoomRace(room, source = 'route selection') {
     raceToken: randomId('RACE', 10),
     raceStartAt: Date.now() + 800,
   };
+  cloudTelemetry.increment('tracklab_multiplayer_races_started_total');
+  cloudTelemetry.info('multiplayer.race_started', {
+    roomId: room.id,
+    source,
+    racerCount: room.racers?.size ?? 0,
+    racerSeatCount: roomRacerSeatCount(room),
+    latencyQuality: latencySummary.latencyQuality,
+    maxLatencyMs: latencySummary.maxLatencyMs,
+  });
   addRoomSystemMessage(room, `Race starting from ${source}.`);
   if (latencySummary.latencyQuality === 'poor' && latencySummary.maxLatencyMs != null) {
     addRoomSystemMessage(room, `Latency warning: highest racer ping is ${latencySummary.maxLatencyMs} ms. Results will still save, but the race may feel delayed.`);
@@ -1459,6 +1520,8 @@ function leaveRoom(client, reason = 'left') {
   if (room.members.size === 0) {
     clearRoomTimers(room.id);
     rooms.delete(room.id);
+    cloudTelemetry.increment('tracklab_multiplayer_rooms_closed_total', { reason });
+    cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
     void persistence.closeRoom(room.id);
     broadcastLobby();
     return;
@@ -1514,6 +1577,7 @@ function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1)
   client.roomRole = preferredRole;
   client.track = room.track;
   void persistence.saveRoomJoin(room, client, preferredRole, client.racerSeatCount);
+  cloudTelemetry.increment('tracklab_multiplayer_room_joins_total', { role: preferredRole });
   broadcastRoom(room.id, roomState(room));
   broadcastLobby();
 }
@@ -1545,6 +1609,10 @@ function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
   };
 
   rooms.set(id, room);
+  cloudTelemetry.increment('tracklab_multiplayer_rooms_created_total', {
+    visibility: privateRoom ? 'private' : 'public',
+  });
+  cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
   void persistence.saveRoom(room, host);
   void persistence.saveRoomMessage(room.id, null, room.messages[0]);
   joinRoom(host, room, 'racer', hostSeatCount);
@@ -1989,6 +2057,13 @@ async function handleClientMessage(client, rawMessage) {
     if (raceState.raceState === 'finished') {
       const resultKey = `${raceState.sessionId}:${client.guestKey}:${raceState.summary.map((summary) => `${summary.playerId}:${summary.finishTimeMs ?? 'open'}`).join('|')}`;
       if (rememberRaceResultKey(resultKey)) {
+        cloudTelemetry.increment('tracklab_multiplayer_races_finished_total');
+        cloudTelemetry.info('multiplayer.race_finished', {
+          roomId: room.id,
+          sessionId: raceState.sessionId,
+          riderCount: raceState.summary.length,
+          sampleCount: raceState.sampleCount,
+        });
         void persistence.saveRaceResults(room, client, raceState);
       }
     }
@@ -2188,15 +2263,45 @@ async function serveStatic(request, response) {
     }
 
     const storage = persistence.persistenceStatus();
+    const storageReady = storage.ready && (!databaseRequired || storage.configured);
     const body = JSON.stringify({
-      status: storage.ready ? 'ok' : 'unavailable',
+      status: storageReady ? 'ok' : 'unavailable',
       service: 'tracklab-bmx',
       storage,
+      requirements: { database: databaseRequired },
       uptimeSeconds: Math.round(process.uptime()),
       version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
     });
-    response.writeHead(storage.ready ? 200 : 503, {
+    response.writeHead(storageReady ? 200 : 503, {
       'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/metrics') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const tokenAuthorized = metricsTokenAllowed(request);
+    const session = tokenAuthorized ? null : await currentAuthSession(request);
+    if (!tokenAuthorized && !isAdminEmail(session?.user?.email)) {
+      writeJson(response, 401, { error: 'Metrics authorization required.' }, {
+        'WWW-Authenticate': 'Bearer realm="TrackLab metrics"',
+      });
+      return;
+    }
+
+    cloudTelemetry.setGauge('tracklab_websocket_clients', clients.size);
+    cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
+    cloudTelemetry.setGauge('tracklab_persistence_ready', persistence.persistenceStatus().ready ? 1 : 0);
+    const body = cloudTelemetry.prometheus();
+    response.writeHead(200, {
+      'Content-Type': prometheusContentType,
       'Cache-Control': 'no-store',
       'Content-Length': Buffer.byteLength(body),
     });
@@ -2703,6 +2808,7 @@ async function serveStatic(request, response) {
 }
 
 const server = createServer((request, response) => {
+  const requestId = instrumentHttpRequest(request, response, cloudTelemetry, { service: 'cloud' });
   applySecurityHeaders(request, response);
   const isApiMutation = String(request.url || '').startsWith('/api/')
     && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method || 'GET');
@@ -2724,8 +2830,10 @@ const server = createServer((request, response) => {
       return;
     }
 
-    const requestId = randomUUID();
-    console.error(`[cloud] request ${requestId} failed:`, error instanceof Error ? error.message : error);
+    cloudTelemetry.increment('tracklab_http_request_errors_total', {
+      method: String(request.method || 'GET').toUpperCase(),
+    });
+    cloudTelemetry.error('http.unhandled_error', { requestId, error });
     if (!response.headersSent) {
       writeJson(response, 500, { error: 'TrackLab could not complete this request.', requestId });
     } else {
@@ -2772,6 +2880,13 @@ wss.on('connection', (socket, request) => {
   };
 
   clients.set(client.id, client);
+  cloudTelemetry.increment('tracklab_websocket_connections_total');
+  cloudTelemetry.setGauge('tracklab_websocket_clients', clients.size);
+  cloudTelemetry.info('websocket.connected', {
+    clientId: client.id,
+    membershipTier: client.membershipTier,
+    activeClients: clients.size,
+  });
   socket.isAlive = true;
   socket.on('pong', () => {
     socket.isAlive = true;
@@ -2789,26 +2904,40 @@ wss.on('connection', (socket, request) => {
       client.messageCount = 0;
     }
     client.messageCount += 1;
+    cloudTelemetry.increment('tracklab_websocket_messages_total', { direction: 'inbound' });
     if (client.messageCount > 160) {
       client.messageRateViolations += 1;
+      cloudTelemetry.increment('tracklab_websocket_rate_limits_total');
       if (client.messageRateViolations >= 3) {
+        cloudTelemetry.warn('websocket.rate_limit_disconnect', {
+          clientId: client.id,
+          violations: client.messageRateViolations,
+        });
         socket.close(1008, 'Message rate exceeded');
       }
       return;
     }
 
     void handleClientMessage(client, message).catch((error) => {
-      console.warn('[cloud] multiplayer message failed:', error instanceof Error ? error.message : error);
+      cloudTelemetry.increment('tracklab_websocket_message_errors_total');
+      cloudTelemetry.warn('websocket.message_failed', { clientId: client.id, error });
       send(client, { type: 'error', message: 'Multiplayer server could not process that action.' });
     });
   });
-  socket.on('close', () => {
+  socket.on('close', (code) => {
     const friendRefresh = socialStateForClient(client)
       .then((social) => social.friends.map((friend) => friend.guestKey))
       .catch(() => []);
     leaveRoom(client, 'disconnected');
     void persistence.setProfileOffline(client);
     clients.delete(client.id);
+    cloudTelemetry.increment('tracklab_websocket_disconnects_total', { code: String(code) });
+    cloudTelemetry.setGauge('tracklab_websocket_clients', clients.size);
+    cloudTelemetry.info('websocket.disconnected', {
+      clientId: client.id,
+      code,
+      activeClients: clients.size,
+    });
     broadcastLobby();
     void friendRefresh.then(refreshSocialForGuestKeys);
   });
@@ -2869,7 +2998,7 @@ async function shutdown(signal) {
     return;
   }
   shuttingDown = true;
-  console.log(`[cloud] ${signal} received; closing TrackLab services.`);
+  cloudTelemetry.info('service.shutdown_started', { signal });
 
   clearInterval(websocketHeartbeat);
   clearInterval(persistenceMaintenance);
@@ -2880,7 +3009,7 @@ async function shutdown(signal) {
 
   wss.clients.forEach((socket) => socket.close(1001, 'Server shutting down'));
   const forceExit = setTimeout(() => {
-    console.error('[cloud] Graceful shutdown timed out.');
+    cloudTelemetry.error('service.shutdown_timeout', { timeoutMs: 10_000 });
     process.exit(1);
   }, 10_000);
   forceExit.unref();
@@ -2890,7 +3019,7 @@ async function shutdown(signal) {
     new Promise((resolve) => wss.close(resolve)),
   ]);
   await persistence.closePersistence().catch((error) => {
-    console.warn('[cloud] Persistence shutdown failed:', error instanceof Error ? error.message : error);
+    cloudTelemetry.warn('persistence.shutdown_failed', { error });
   });
   clearTimeout(forceExit);
   process.exitCode = 0;
@@ -2900,6 +3029,10 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 process.once('SIGINT', () => void shutdown('SIGINT'));
 
 server.listen(port, () => {
-  console.log(`[cloud] TrackLab BMX web + multiplayer listening on :${port}`);
+  cloudTelemetry.info('service.started', {
+    port,
+    websocketPath,
+    version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
+  });
   void persistence.initPersistence();
 });

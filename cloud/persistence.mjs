@@ -1,4 +1,6 @@
 import pg from 'pg';
+import { runDatabaseMigrations } from './migrations.mjs';
+import { cloudTelemetry } from './telemetry.mjs';
 
 const { Pool } = pg;
 
@@ -96,10 +98,17 @@ export async function query(text, params = []) {
   if (!ready || !pool) {
     return null;
   }
+  const startedAt = Date.now();
+  const operation = String(text || '').trim().split(/\s+/, 1)[0]?.toLowerCase() || 'unknown';
   try {
-    return await pool.query(text, params);
+    const result = await pool.query(text, params);
+    cloudTelemetry.observe('tracklab_persistence_query_duration_ms', Date.now() - startedAt, { operation });
+    cloudTelemetry.increment('tracklab_persistence_queries_total', { operation, outcome: 'success' });
+    return result;
   } catch (error) {
-    console.warn('[cloud] persistence query failed:', error instanceof Error ? error.message : error);
+    cloudTelemetry.observe('tracklab_persistence_query_duration_ms', Date.now() - startedAt, { operation });
+    cloudTelemetry.increment('tracklab_persistence_queries_total', { operation, outcome: 'error' });
+    cloudTelemetry.warn('persistence.query_failed', { operation, error });
     return null;
   }
 }
@@ -115,279 +124,21 @@ export async function initPersistence() {
 
   readyPromise = (async () => {
     try {
-      await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.profiles (
-        guest_key TEXT PRIMARY KEY,
-        display_name TEXT NOT NULL,
-        email TEXT,
-        membership_tier TEXT NOT NULL DEFAULT 'visitor',
-        available BOOLEAN NOT NULL DEFAULT false,
-        bike_count INTEGER NOT NULL DEFAULT 0,
-        current_track JSONB NOT NULL DEFAULT '{}'::jsonb,
-        last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`ALTER TABLE ${schema}.profiles ADD COLUMN IF NOT EXISTS email TEXT`);
-      await pool.query(`ALTER TABLE ${schema}.profiles ADD COLUMN IF NOT EXISTS membership_tier TEXT NOT NULL DEFAULT 'visitor'`);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.auth_users (
-        id TEXT PRIMARY KEY,
-        email TEXT UNIQUE NOT NULL,
-        display_name TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        membership_tier TEXT NOT NULL DEFAULT 'spectator',
-        bike_seats INTEGER NOT NULL DEFAULT 1,
-        admin BOOLEAN NOT NULL DEFAULT false,
-        square_customer_id TEXT,
-        square_subscription_id TEXT,
-        last_login TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS membership_tier TEXT NOT NULL DEFAULT 'spectator'`);
-      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS bike_seats INTEGER NOT NULL DEFAULT 1`);
-      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS admin BOOLEAN NOT NULL DEFAULT false`);
-      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS square_customer_id TEXT`);
-      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS square_subscription_id TEXT`);
-      await pool.query(`ALTER TABLE ${schema}.auth_users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ`);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.auth_sessions (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
-        token_hash TEXT UNIQUE NOT NULL,
-        expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.billing_checkouts (
-        state_hash TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
-        order_id TEXT UNIQUE NOT NULL,
-        payment_link_id TEXT,
-        bike_seats INTEGER NOT NULL,
-        expected_amount_cents INTEGER NOT NULL,
-        expires_at TIMESTAMPTZ NOT NULL,
-        claimed_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.rooms (
-        id TEXT PRIMARY KEY,
-        host_guest_key TEXT,
-        host_name TEXT,
-        private BOOLEAN NOT NULL DEFAULT true,
-        track JSONB NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        closed_at TIMESTAMPTZ
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.room_members (
-        room_id TEXT NOT NULL REFERENCES ${schema}.rooms(id) ON DELETE CASCADE,
-        guest_key TEXT NOT NULL,
-        display_name TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'racer',
-        seat_count INTEGER NOT NULL DEFAULT 1,
-        joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        left_at TIMESTAMPTZ,
-        PRIMARY KEY (room_id, guest_key)
-      )
-    `);
-      await pool.query(`ALTER TABLE ${schema}.room_members ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'racer'`);
-      await pool.query(`ALTER TABLE ${schema}.room_members ADD COLUMN IF NOT EXISTS seat_count INTEGER NOT NULL DEFAULT 1`);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.room_messages (
-        id TEXT PRIMARY KEY,
-        room_id TEXT NOT NULL REFERENCES ${schema}.rooms(id) ON DELETE CASCADE,
-        author_guest_key TEXT,
-        author_name TEXT NOT NULL,
-        body TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.challenges (
-        id TEXT PRIMARY KEY,
-        from_guest_key TEXT NOT NULL,
-        from_name TEXT NOT NULL,
-        to_guest_key TEXT NOT NULL,
-        to_name TEXT NOT NULL,
-        track JSONB NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        room_id TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        responded_at TIMESTAMPTZ
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.friend_requests (
-        id TEXT PRIMARY KEY,
-        from_guest_key TEXT NOT NULL,
-        from_name TEXT NOT NULL,
-        to_guest_key TEXT NOT NULL,
-        to_name TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        responded_at TIMESTAMPTZ
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.friendships (
-        guest_key_a TEXT NOT NULL,
-        guest_key_b TEXT NOT NULL,
-        display_name_a TEXT NOT NULL,
-        display_name_b TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        PRIMARY KEY (guest_key_a, guest_key_b)
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.groups (
-        id TEXT PRIMARY KEY,
-        owner_guest_key TEXT NOT NULL,
-        name TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.group_members (
-        group_id TEXT NOT NULL REFERENCES ${schema}.groups(id) ON DELETE CASCADE,
-        guest_key TEXT NOT NULL,
-        display_name TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'member',
-        joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        left_at TIMESTAMPTZ,
-        PRIMARY KEY (group_id, guest_key)
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.group_invites (
-        id TEXT PRIMARY KEY,
-        group_id TEXT NOT NULL REFERENCES ${schema}.groups(id) ON DELETE CASCADE,
-        from_guest_key TEXT NOT NULL,
-        from_name TEXT NOT NULL,
-        to_guest_key TEXT NOT NULL,
-        to_name TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        responded_at TIMESTAMPTZ
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.race_results (
-        id BIGSERIAL PRIMARY KEY,
-        dedupe_key TEXT UNIQUE NOT NULL,
-        room_id TEXT NOT NULL,
-        guest_key TEXT NOT NULL,
-        rider_name TEXT NOT NULL,
-        player_id INTEGER NOT NULL,
-        track_id TEXT NOT NULL,
-        track_name TEXT NOT NULL,
-        rank INTEGER NOT NULL,
-        finish_time_ms INTEGER,
-        distance_meters DOUBLE PRECISION NOT NULL DEFAULT 0,
-        top_speed_kph DOUBLE PRECISION,
-        average_speed_kph DOUBLE PRECISION,
-        top_cadence DOUBLE PRECISION,
-        average_cadence DOUBLE PRECISION,
-        top_watts DOUBLE PRECISION,
-        average_watts DOUBLE PRECISION,
-        summary JSONB NOT NULL DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.user_data (
-        guest_key TEXT PRIMARY KEY,
-        track_mappings JSONB NOT NULL DEFAULT '{}'::jsonb,
-        custom_routes JSONB NOT NULL DEFAULT '[]'::jsonb,
-        bike_profiles JSONB NOT NULL DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.public_track_mappings (
-        track_id TEXT PRIMARY KEY,
-        track_name TEXT NOT NULL,
-        country TEXT NOT NULL,
-        state TEXT NOT NULL,
-        mapping JSONB NOT NULL,
-        published_by TEXT,
-        published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `);
-      await pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.ghost_laps (
-        id TEXT PRIMARY KEY,
-        owner_key TEXT NOT NULL,
-        owner_name TEXT NOT NULL,
-        rider_name TEXT NOT NULL,
-        track_id TEXT NOT NULL,
-        track_name TEXT NOT NULL,
-        route_variant_id TEXT,
-        route_key TEXT NOT NULL DEFAULT 'default',
-        finish_time_ms INTEGER NOT NULL,
-        thirty_foot_time_ms INTEGER,
-        color_name TEXT NOT NULL DEFAULT 'lime',
-        accent TEXT NOT NULL DEFAULT '#7ade36',
-        race_source TEXT NOT NULL DEFAULT 'live',
-        lap_count INTEGER NOT NULL DEFAULT 1,
-        analytics_public BOOLEAN NOT NULL DEFAULT FALSE,
-        summary JSONB NOT NULL DEFAULT '{}'::jsonb,
-        zone_results JSONB NOT NULL DEFAULT '[]'::jsonb,
-        points JSONB NOT NULL DEFAULT '[]'::jsonb,
-        saved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE (owner_key, rider_name, track_id, route_key)
-      )
-    `);
-      await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS lap_count INTEGER NOT NULL DEFAULT 1`);
-      await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS race_source TEXT`);
-      await pool.query(`UPDATE ${schema}.ghost_laps SET race_source = CASE WHEN rider_name ILIKE 'Demo Rider %' THEN 'demo' ELSE 'live' END WHERE race_source IS NULL`);
-      await pool.query(`ALTER TABLE ${schema}.ghost_laps ALTER COLUMN race_source SET DEFAULT 'live'`);
-      await pool.query(`ALTER TABLE ${schema}.ghost_laps ALTER COLUMN race_source SET NOT NULL`);
-      await pool.query(`DELETE FROM ${schema}.ghost_laps WHERE race_source = 'demo'`);
-      await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS analytics_public BOOLEAN NOT NULL DEFAULT FALSE`);
-      await pool.query(`ALTER TABLE ${schema}.ghost_laps ADD COLUMN IF NOT EXISTS zone_results JSONB NOT NULL DEFAULT '[]'::jsonb`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_profiles_available ON ${schema}.profiles (available, last_seen DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_rooms_created ON ${schema}.rooms (created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_room_messages_room_created ON ${schema}.room_messages (room_id, created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_challenges_to_status ON ${schema}.challenges (to_guest_key, status, created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_track ON ${schema}.race_results (track_id, created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_speed ON ${schema}.race_results (track_id, top_speed_kph DESC NULLS LAST)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rpm ON ${schema}.race_results (track_id, top_cadence DESC NULLS LAST)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_watts ON ${schema}.race_results (track_id, top_watts DESC NULLS LAST)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rider_rpm ON ${schema}.race_results (track_id, guest_key, rider_name, top_cadence DESC NULLS LAST)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rider_speed ON ${schema}.race_results (track_id, guest_key, rider_name, top_speed_kph DESC NULLS LAST)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_results_rider_watts ON ${schema}.race_results (track_id, guest_key, rider_name, top_watts DESC NULLS LAST)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_public_mappings_updated ON ${schema}.public_track_mappings (updated_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_ghost_laps_track ON ${schema}.ghost_laps (track_id, route_key, finish_time_ms ASC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_ghost_laps_owner ON ${schema}.ghost_laps (owner_key, updated_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_email ON ${schema}.auth_users (email)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_token ON ${schema}.auth_sessions (token_hash)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_auth_sessions_expires ON ${schema}.auth_sessions (expires_at)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_billing_checkouts_user ON ${schema}.billing_checkouts (user_id, created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_billing_checkouts_expires ON ${schema}.billing_checkouts (expires_at) WHERE claimed_at IS NULL`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friend_requests_to ON ${schema}.friend_requests (to_guest_key, status, created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friend_requests_from ON ${schema}.friend_requests (from_guest_key, status, created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_friendships_guest_b ON ${schema}.friendships (guest_key_b, created_at DESC)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_members_guest ON ${schema}.group_members (guest_key, left_at)`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_tracklab_group_invites_to ON ${schema}.group_invites (to_guest_key, status, created_at DESC)`);
-      console.log('[cloud] TrackLab persistence ready.');
+      const migrationResult = await runDatabaseMigrations(pool, { schema });
+      const appliedSummary = migrationResult.applied.length > 0
+        ? ` Applied: ${migrationResult.applied.map((migration) => migration.version).join(', ')}.`
+        : '';
+      cloudTelemetry.setGauge('tracklab_persistence_ready', 1);
+      cloudTelemetry.info('persistence.ready', {
+        schemaVersion: migrationResult.currentVersion,
+        appliedVersions: migrationResult.applied.map((migration) => migration.version),
+        summary: appliedSummary.trim(),
+      });
       persistenceReady = true;
       return true;
     } catch (error) {
-      console.warn('[cloud] TrackLab persistence disabled:', error instanceof Error ? error.message : error);
+      cloudTelemetry.setGauge('tracklab_persistence_ready', 0);
+      cloudTelemetry.error('persistence.disabled', { error });
       await pool?.end().catch(() => {});
       pool = null;
       readyPromise = null;
@@ -860,15 +611,22 @@ export async function loadRoom(roomId) {
 
 export async function loadUserData(guestKey) {
   if (!pool) {
-    return cloneJson(memoryUserDataByGuestKey.get(guestKey), {
+    const fallback = {
       trackMappings: {},
       customRoutes: [],
       bikeProfiles: [],
-    });
+      studioRiders: [],
+    };
+    const stored = cloneJson(memoryUserDataByGuestKey.get(guestKey), fallback);
+    return {
+      ...fallback,
+      ...stored,
+      studioRiders: Array.isArray(stored?.studioRiders) ? stored.studioRiders : [],
+    };
   }
 
   const result = await query(
-    `SELECT track_mappings, custom_routes, bike_profiles FROM ${schema}.user_data WHERE guest_key = $1`,
+    `SELECT track_mappings, custom_routes, bike_profiles, studio_riders FROM ${schema}.user_data WHERE guest_key = $1`,
     [guestKey],
   );
   const row = result?.rows?.[0];
@@ -877,6 +635,7 @@ export async function loadUserData(guestKey) {
     trackMappings: fromJson(row?.track_mappings, {}),
     customRoutes: fromJson(row?.custom_routes, []),
     bikeProfiles: fromJson(row?.bike_profiles, []),
+    studioRiders: fromJson(row?.studio_riders, []),
   };
 }
 
@@ -886,6 +645,7 @@ export async function saveUserData(guestKey, patch) {
     : null;
   const customRoutes = Array.isArray(patch.customRoutes) ? patch.customRoutes : null;
   const bikeProfiles = Array.isArray(patch.bikeProfiles) ? patch.bikeProfiles : null;
+  const studioRiders = Array.isArray(patch.studioRiders) ? patch.studioRiders : null;
 
   if (!pool) {
     const current = await loadUserData(guestKey);
@@ -893,31 +653,35 @@ export async function saveUserData(guestKey, patch) {
       trackMappings: trackMappings ?? current.trackMappings,
       customRoutes: customRoutes ?? current.customRoutes,
       bikeProfiles: bikeProfiles ?? current.bikeProfiles,
+      studioRiders: studioRiders ?? current.studioRiders,
     };
     memoryUserDataByGuestKey.set(guestKey, cloneJson(next, next));
     return cloneJson(next, next);
   }
 
   const result = await query(
-    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, updated_at)
+    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, studio_riders, updated_at)
      VALUES (
        $1,
        COALESCE($2::jsonb, '{}'::jsonb),
        COALESCE($3::jsonb, '[]'::jsonb),
        COALESCE($4::jsonb, '[]'::jsonb),
+       COALESCE($5::jsonb, '[]'::jsonb),
        now()
      )
      ON CONFLICT (guest_key) DO UPDATE SET
        track_mappings = COALESCE($2::jsonb, ${schema}.user_data.track_mappings),
        custom_routes = COALESCE($3::jsonb, ${schema}.user_data.custom_routes),
        bike_profiles = COALESCE($4::jsonb, ${schema}.user_data.bike_profiles),
+       studio_riders = COALESCE($5::jsonb, ${schema}.user_data.studio_riders),
        updated_at = now()
-     RETURNING track_mappings, custom_routes, bike_profiles`,
+     RETURNING track_mappings, custom_routes, bike_profiles, studio_riders`,
     [
       guestKey,
       trackMappings == null ? null : json(trackMappings),
       customRoutes == null ? null : json(customRoutes),
       bikeProfiles == null ? null : json(bikeProfiles),
+      studioRiders == null ? null : json(studioRiders),
     ],
   );
   const row = result?.rows?.[0];
@@ -929,6 +693,7 @@ export async function saveUserData(guestKey, patch) {
     trackMappings: fromJson(row.track_mappings, {}),
     customRoutes: fromJson(row.custom_routes, []),
     bikeProfiles: fromJson(row.bike_profiles, []),
+    studioRiders: fromJson(row.studio_riders, []),
   };
 }
 
@@ -1044,13 +809,18 @@ export async function saveUserTrackMapping(
     if (publish && publicMapping) {
       publicTrackMappingsFallback.set(savedMapping.trackId, cloneJson(publicMapping, publicMapping));
     }
+    cloudTelemetry.increment('tracklab_track_mapping_saves_total', {
+      outcome: 'success',
+      published: publish ? 'yes' : 'no',
+    });
     return {
       mapping: savedMapping,
       publicMapping: publish ? publicMapping : null,
     };
   } catch (error) {
     await client?.query('ROLLBACK').catch(() => {});
-    console.warn('[cloud] atomic track mapping save failed:', error instanceof Error ? error.message : error);
+    cloudTelemetry.increment('tracklab_track_mapping_saves_total', { outcome: 'error' });
+    cloudTelemetry.warn('persistence.track_mapping_save_failed', { error });
     return null;
   } finally {
     client?.release();

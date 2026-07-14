@@ -9,18 +9,22 @@ import { createBleSource } from './ble-source.mjs';
 import { createHybridSource } from './hybrid-source.mjs';
 import { createWattbikeControl } from './wattbike-control.mjs';
 import { bridgeCorsOrigin, bridgeOriginAllowed } from './originPolicy.mjs';
+import { createTelemetry, instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 
 const port = Number(process.env.WATTBIKE_BRIDGE_PORT ?? 8787);
 const inputMode = normalizeInputMode(process.env.WATTBIKE_INPUT);
 const autoStart = process.env.WATTBIKE_BRIDGE_AUTOSTART === '1';
+const bridgeTelemetry = createTelemetry({ service: 'tracklab-bike-connector' });
 const userDataDirectory = path.join(os.homedir(), 'Library', 'Application Support', 'TrackLab BMX');
 const userDataPath = path.join(userDataDirectory, 'user-data.json');
 const server = createServer((request, response) => {
+  const requestId = instrumentHttpRequest(request, response, bridgeTelemetry, { service: 'connector' });
   void handleHttpRequest(request, response).catch((error) => {
     const statusCode = Number(error?.statusCode);
     const clientError = Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500;
     if (!clientError) {
-      warnBridge('HTTP request failed:', error);
+      bridgeTelemetry.increment('tracklab_connector_http_errors_total');
+      bridgeTelemetry.error('connector.http_failed', { requestId, error });
     }
     if (!response.headersSent) {
       writeJson(request, response, clientError ? statusCode : 500, {
@@ -64,13 +68,11 @@ class BridgeRequestError extends Error {
 }
 
 function logBridge(message, extra = null) {
-  const suffix = extra ? ` ${JSON.stringify(extra)}` : '';
-  console.log(`[bridge] ${message}${suffix}`);
+  bridgeTelemetry.info('connector.status', { message, ...(extra ?? {}) });
 }
 
 function warnBridge(message, error = null) {
-  const suffix = error ? ` ${error instanceof Error ? error.message : String(error)}` : '';
-  console.warn(`[bridge] ${message}${suffix}`);
+  bridgeTelemetry.warn('connector.warning', { message, error });
 }
 
 function normalizeInputMode(value) {
@@ -220,6 +222,8 @@ function currentConnectedDevices() {
 
 function statusPayload(extra = {}) {
   const connectedDevices = sourceState === 'running' ? currentConnectedDevices() : [];
+  bridgeTelemetry.setGauge('tracklab_connector_connected_bikes', connectedDevices.length);
+  bridgeTelemetry.setGauge('tracklab_connector_source_running', sourceState === 'running' ? 1 : 0);
 
   return {
     type: 'bridge-status',
@@ -247,7 +251,7 @@ function writeJson(request, response, statusCode, payload) {
   response.writeHead(statusCode, {
     ...(allowedOrigin ? { 'Access-Control-Allow-Origin': allowedOrigin } : {}),
     'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Request-Id',
     'Cache-Control': 'no-store',
     'Content-Type': 'application/json',
     'Vary': 'Origin',
@@ -263,6 +267,7 @@ function defaultUserData() {
     trackMappings: {},
     customRoutes: [],
     bikeProfiles: [],
+    studioRiders: [],
   };
 }
 
@@ -278,6 +283,7 @@ function normalizeUserData(value) {
     trackMappings: value.trackMappings && typeof value.trackMappings === 'object' ? value.trackMappings : {},
     customRoutes: Array.isArray(value.customRoutes) ? value.customRoutes : [],
     bikeProfiles: Array.isArray(value.bikeProfiles) ? value.bikeProfiles : [],
+    studioRiders: Array.isArray(value.studioRiders) ? value.studioRiders : [],
   };
 }
 
@@ -324,6 +330,9 @@ function patchUserData(patch) {
       bikeProfiles: Array.isArray(patch.bikeProfiles)
         ? patch.bikeProfiles
         : current.bikeProfiles,
+      studioRiders: Array.isArray(patch.studioRiders)
+        ? patch.studioRiders
+        : current.studioRiders,
     });
   });
   userDataMutationQueue = mutation.then(() => undefined, () => undefined);
@@ -364,6 +373,7 @@ async function startSource() {
   }
 
   sourceState = 'starting';
+  bridgeTelemetry.increment('tracklab_connector_source_starts_total', { mode: inputMode });
   sourceError = null;
   broadcast(statusPayload());
 
@@ -376,14 +386,17 @@ async function startSource() {
         ? status.devices
         : [];
     rememberSourceDevices(statusDevices);
+    bridgeTelemetry.setGauge('tracklab_connector_connected_bikes', currentConnectedDevices().length);
     logBridge(message);
     broadcast(statusPayload(status));
   });
   nextSource.on('bike', (bike) => {
     const deviceKey = `${bike.source ?? 'unknown'}:${bike.deviceId}`;
     latestBikeSamples.set(bike.deviceId, bike);
+    bridgeTelemetry.increment('tracklab_connector_bike_samples_total', { source: bike.source ?? 'unknown' });
     if (!seenBikeDevices.has(deviceKey)) {
       seenBikeDevices.add(deviceKey);
+      bridgeTelemetry.increment('tracklab_connector_devices_detected_total', { source: bike.source ?? 'unknown' });
       logBridge(`Detected ${bike.source ?? 'bike'} device ${bike.deviceId}.`, {
         label: bike.label,
         watts: bike.watts,
@@ -397,6 +410,7 @@ async function startSource() {
   nextSource.on('error', (error) => {
     sourceState = 'error';
     sourceError = error instanceof Error ? error.message : String(error);
+    bridgeTelemetry.increment('tracklab_connector_source_errors_total', { mode: inputMode });
     warnBridge('Source error:', error);
     broadcast({
       type: 'bridge-error',
@@ -411,11 +425,14 @@ async function startSource() {
     await nextSource.start();
     source = nextSource;
     sourceState = 'running';
+    bridgeTelemetry.setGauge('tracklab_connector_source_running', 1);
     logBridge(`${inputMode.toString().toUpperCase()} source is running.`);
     broadcast(statusPayload());
     return statusPayload();
   } catch (error) {
     sourceState = 'error';
+    bridgeTelemetry.setGauge('tracklab_connector_source_running', 0);
+    bridgeTelemetry.increment('tracklab_connector_source_errors_total', { mode: inputMode });
     sourceError = error instanceof Error ? error.message : String(error);
     await nextSource.stop?.().catch(() => undefined);
     warnBridge('Source failed to start:', error);
@@ -447,6 +464,8 @@ async function stopSource() {
     seenBikeDevices.clear();
     latestBikeSamples.clear();
     sourceConnectedDevices.clear();
+    bridgeTelemetry.setGauge('tracklab_connector_connected_bikes', 0);
+    bridgeTelemetry.setGauge('tracklab_connector_source_running', 0);
     logBridge('Source stopped.');
     broadcast(statusPayload());
   }
@@ -475,6 +494,22 @@ async function handleHttpRequest(request, response) {
       ...statusPayload(),
       controlStatus: controlStatusMessage,
     });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/bridge/metrics') {
+    bridgeTelemetry.setGauge('tracklab_connector_websocket_clients', clients.size);
+    const body = bridgeTelemetry.prometheus();
+    const allowedOrigin = bridgeCorsOrigin(request.headers.origin);
+    response.writeHead(200, {
+      ...(allowedOrigin ? { 'Access-Control-Allow-Origin': allowedOrigin } : {}),
+      'Cache-Control': 'no-store',
+      'Content-Type': prometheusContentType,
+      'Content-Length': Buffer.byteLength(body),
+      'Vary': 'Origin',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    response.end(body);
     return;
   }
 
@@ -510,6 +545,8 @@ async function handleHttpRequest(request, response) {
 
 wss.on('connection', (socket) => {
   clients.add(socket);
+  bridgeTelemetry.increment('tracklab_connector_websocket_connections_total');
+  bridgeTelemetry.setGauge('tracklab_connector_websocket_clients', clients.size);
   socket.send(JSON.stringify(statusPayload({ connectedAt: Date.now() })));
   const now = Date.now();
   for (const bike of latestBikeSamples.values()) {
@@ -566,7 +603,11 @@ wss.on('connection', (socket) => {
     }
   });
 
-  socket.on('close', () => clients.delete(socket));
+  socket.on('close', (code) => {
+    clients.delete(socket);
+    bridgeTelemetry.increment('tracklab_connector_websocket_disconnects_total', { code: String(code) });
+    bridgeTelemetry.setGauge('tracklab_connector_websocket_clients', clients.size);
+  });
 });
 
 try {
@@ -579,7 +620,7 @@ try {
     await startSource();
   }
 } catch (error) {
-  console.error('[bridge] Failed to start local helper:', error);
+  bridgeTelemetry.error('connector.startup_failed', { error });
   broadcast({
     type: 'bridge-error',
     mode: inputMode,
@@ -595,6 +636,7 @@ async function shutdown(signal) {
     return;
   }
   shuttingDown = true;
+  bridgeTelemetry.info('connector.shutdown_started', { signal });
   logBridge(`${signal} received; closing local connector.`);
   await stopSource();
   await userDataMutationQueue;

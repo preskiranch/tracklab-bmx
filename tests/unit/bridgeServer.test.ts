@@ -88,6 +88,15 @@ describe('local connector persistence', () => {
     expect(response.status).toBe(403);
   });
 
+  it('exposes local connector telemetry only to an approved website origin', async () => {
+    const response = await connectorRequest('/api/bridge/metrics');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/);
+    const metrics = await response.text();
+    expect(metrics).toContain('tracklab_process_uptime_seconds{service="tracklab-bike-connector"}');
+    expect(metrics).toContain('tracklab_connector_connected_bikes');
+  });
+
   it('preserves every field across concurrent partial updates', async () => {
     const responses = await Promise.all([
       connectorRequest('/api/user-data', {
@@ -102,6 +111,17 @@ describe('local connector persistence', () => {
         method: 'PATCH',
         body: JSON.stringify({ trackMappings: { 'track-one': { trackId: 'track-one' } } }),
       }),
+      connectorRequest('/api/user-data', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          studioRiders: [{
+            id: 'rider-jordan',
+            name: 'Jordan',
+            createdAt: 100,
+            updatedAt: 100,
+          }],
+        }),
+      }),
     ]);
     expect(responses.every((response) => response.ok)).toBe(true);
 
@@ -111,6 +131,12 @@ describe('local connector persistence', () => {
       bikeProfiles: [{ deviceId: 58701, name: 'Studio One' }],
       customRoutes: [{ id: 'route-one', name: 'Route One' }],
       trackMappings: { 'track-one': { trackId: 'track-one' } },
+      studioRiders: [{
+        id: 'rider-jordan',
+        name: 'Jordan',
+        createdAt: 100,
+        updatedAt: 100,
+      }],
     });
   });
 
