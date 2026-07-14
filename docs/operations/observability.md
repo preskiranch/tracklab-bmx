@@ -74,3 +74,32 @@ increases log volume.
 4. For bike issues, inspect the local connector health and connected-bike gauge.
 5. Confirm no deployment, database migration, or credential rotation overlapped the incident.
 6. Preserve relevant redacted logs and document the resolution.
+
+## Deployment verification
+
+Run the production smoke test after every deploy:
+
+```bash
+TRACKLAB_SMOKE_URL=https://tracklab-bmx.onrender.com \
+TRACKLAB_EXPECT_POSTGRES=1 \
+npm run smoke:deployment
+```
+
+The smoke test verifies health and storage readiness, security headers, the
+compressed immutable application bundle, the track catalog, authentication
+boundaries, and missing-route behavior. Use the bounded read-only load probe
+after infrastructure, caching, database, or networking changes:
+
+```bash
+TRACKLAB_SMOKE_URL=https://tracklab-bmx.onrender.com \
+TRACKLAB_LOAD_REQUESTS=100 \
+TRACKLAB_LOAD_CONCURRENCY=10 \
+TRACKLAB_LOAD_P95_MS=1500 \
+npm run probe:load
+```
+
+Do not use this probe as an unbounded stress test against production. For the
+release sequence, rollback policy, and evidence requirements, follow
+[`release-runbook.md`](./release-runbook.md). Database restoration is defined
+in [`database-recovery.md`](./database-recovery.md), and physical bike
+verification is defined in [`hardware-acceptance.md`](./hardware-acceptance.md).
