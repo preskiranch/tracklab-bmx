@@ -1,180 +1,277 @@
-# TrackLab BMX Production Optimization Review
+# TrackLab BMX Production Readiness Review
 
-Review branch: `optimization/gpt-5.6-sol-review`  
-Baseline: `14e6793` (`main`)  
-Review date: 2026-07-09
+Review branch: `optimization/production-readiness-10`
+Baseline: `0028d45` (`main`)
+Review date: 2026-07-14
 
 ## Executive Summary
 
-The existing application has substantial product depth, but its production boundaries had not kept pace with that feature set. The review found critical authorization gaps around profile storage, Square entitlement changes, and multiplayer identity; data-loss risks in concurrent profile persistence; avoidable database and race-loop work; a 2.33 MB uncompressed global track payload; and no deterministic unit/API test gate.
+TrackLab BMX is a substantial application with live BLE/ANT+ bike input, deterministic BMX rollout physics, satellite track mapping, pedal-zone analysis, local and online racing, ghosts, social features, authentication, billing, and a 1,305-track global catalog. The product surface is well beyond a prototype, but a production platform also needs repeatable schema changes, bounded device state, telemetry, deployment gates, recovery procedures, and hardware acceptance evidence.
 
-This branch addresses the findings that provide clear, measurable value without rewriting the application or changing its user workflows. It adds authenticated ownership, verified billing claims, server-authoritative multiplayer identity, origin controls, bounded runtime state, atomic persistence, database query/index improvements, catalog precompression, deterministic tests, CI, health checks, and graceful shutdown. The existing five browser race scenarios continue to pass.
+This review implemented the improvements that provide measurable security, reliability, performance, maintainability, or operational value without rewriting the product. The branch adds checksummed database migrations, production indexes, structured redacted telemetry, Prometheus metrics, request correlation, bounded live-bike registries, stale-message rejection, listener cleanup, precompressed assets, bundle budgets, deployment smoke tests, a load probe, required-database enforcement, release and recovery runbooks, and a formal 1-4 Wattbike acceptance matrix. It also adds the persistent studio rider roster requested for assigning students to connected bikes without changing bike identity.
 
-The application is materially safer and more reliable after this work. It is not yet ready for unrestricted global scale without additional work on subscription lifecycle webhooks, multi-instance realtime state, TURN-backed voice, observability, database migrations, and incremental decomposition of the largest modules.
+The automated release gate passes in full: 82 unit/API tests, 13 Chromium end-to-end workflows, type checking, catalog validation, production build, dependency audit, and bundle budgets. The production server smoke passes, and a bounded local load probe completed 100/100 requests with 12 ms p95 latency.
+
+The software engineering work on this branch is release-candidate quality. A literal 10/10 production signoff is intentionally conditional on the external acceptance items that code alone cannot prove: the documented physical 1-4 Wattbike matrix, PostgreSQL restore drill, Square lifecycle reconciliation, and representative deployed multiplayer/voice load. Calling the product perfect before those checks would hide operational risk rather than remove it.
 
 ## Review Method
 
-- Established a clean baseline build and five Playwright race tests before implementation.
-- Audited cloud HTTP and WebSocket trust boundaries, local connector access, billing, profile storage, social data, race persistence, and static serving.
-- Reviewed PostgreSQL schema, indexes, query shapes, retention, and concurrent update behavior.
-- Inspected client race physics, synchronization effects, catalog delivery, package roles, Render configuration, and module concentration.
-- Implemented only changes with a direct security, correctness, performance, reliability, or testability benefit.
-- Kept large UI/server decomposition and database normalization as recommendations because attempting them in one review branch would create disproportionate regression risk.
+- Compared the branch with `main` and reviewed all changed production boundaries.
+- Audited authentication, profile ownership, billing claims, realtime identity, local connector access, static serving, and input validation.
+- Reviewed PostgreSQL schema setup, indexes, concurrent writes, migrations, and recovery expectations.
+- Profiled the catalog and production bundle, then introduced hard budgets and compression checks.
+- Reviewed BLE/ANT+ message lifecycle, duplicate connection handling, stale data, cleanup, and sample retention.
+- Added deterministic unit/API tests around new infrastructure and preserved browser workflows for live racing.
+- Exercised the built production server through health, static asset, auth boundary, catalog, 404, and load probes.
+- Deferred broad module decomposition and distributed architecture where regression risk or infrastructure cost exceeds immediate measurable value.
+
+## Implemented Commits
+
+| Commit | Change | Why it matters |
+| --- | --- | --- |
+| `9444d35` | Persistent studio rider roster | Separates student/rider identity from physical bike identity and persists assignments. |
+| `8ce2da3` | Studio roster test coverage | Protects account synchronization and bike assignment behavior. |
+| `bd4b0a6` | Versioned database migrations | Replaces startup schema mutation with ordered, checksummed, locked migrations. |
+| `8f6ecb3` | Structured production observability | Adds redacted JSON logs, request IDs, metrics, and subsystem instrumentation. |
+| `3ecad19` | Live bike connection lifecycle hardening | Rejects stale/malformed data, prevents duplicate reconnect loops, and bounds memory/listeners. |
+| `3037393` | Production release gates | Adds compression, bundle budgets, deployment smoke tests, load probes, CI, and required-database enforcement. |
+| `710f392` | Production operations runbooks | Documents release, rollback, database recovery, observability, and hardware acceptance. |
+| `60ec775` | Compatible dependency refresh | Moves supported patch versions forward with a zero-vulnerability audit and full regression gate. |
 
 ## High-Impact Improvements
 
-| Finding | Why it needed improvement | Implemented change | Benefit | Impact |
-| --- | --- | --- | --- | --- |
-| Profile data was addressable through a caller-supplied `profileKey` | This was an insecure direct object reference: an unauthenticated caller could read or overwrite another profile | Require an authenticated session and derive the profile key exclusively from that session | Restores account ownership and prevents cross-profile access | High |
-| Billing return trusted browser query parameters | A caller could claim Racer entitlement without a verified Square order | Store a hashed one-time checkout state and expected order, then retrieve and verify Square order ID, location, amount, currency, state, expiry, user, and one-time claim | Closes a direct paid-access bypass | High |
-| WebSocket clients supplied their own identity and membership | A client could impersonate another rider or claim a paid role | Authenticate the upgrade cookie and derive immutable identity/membership on the server; enforce host/racer action permissions | Makes multiplayer authorization server-authoritative | High |
-| Private rooms were included in global room broadcasts | Room metadata could be disclosed to unrelated users | Filter room lists per authenticated client and membership | Restores private-room privacy | High |
-| Local connector accepted any web origin | Any website open in the browser could attempt to read/control the loopback connector | Allow the production TrackLab origin, loopback development, and explicit configured origins only | Reduces drive-by local connector access | High |
-| Concurrent profile PATCHes used read-modify-write | Parallel bike-name, route, and map saves could overwrite each other | Use atomic PostgreSQL partial upserts; serialize local mutations; write connector data through atomic file replacement | Prevents lost updates and truncated local profile files | High |
-| No deterministic test or CI gate | Race physics and security behavior could regress unnoticed | Add 26 unit/API/connector tests, preserve five browser tests, and run audit/build/tests in GitHub Actions | Makes production behavior reviewable and repeatable | High |
-| Global catalog transferred as 2,325,231 raw bytes | Initial catalog loading was unnecessarily expensive, especially on mobile | Prebuild Brotli/gzip variants and serve with negotiation and ETag revalidation | Brotli transfer is 135,425 bytes, a 94.2% reduction | High |
+### 1. Versioned, checksummed database migrations
+
+**Current issue:** Production DDL previously ran as part of application startup. That made migration ordering, drift detection, concurrent deploys, and rollback decisions difficult to reason about.
+
+**Implemented:** `cloud/migrations.mjs` now applies ordered migrations under a PostgreSQL advisory lock. Each migration is checksummed and committed in its own transaction. Startup rejects checksum drift and schemas newer than the running application. Production indexes are part of migration 3 rather than ad hoc startup behavior.
+
+**Benefit:** Deterministic deploys, safe concurrent startup, reviewable schema history, and an explicit recovery path.
+**Impact:** High.
+
+### 2. Production observability and correlation
+
+**Current issue:** Failures across HTTP, WebSocket rooms, races, persistence, and the local connector were difficult to correlate, and unstructured logs were unsuitable for alerting.
+
+**Implemented:** Shared telemetry emits structured, redacted JSON logs with request/session correlation. Prometheus-compatible counters, gauges, and histograms cover HTTP traffic, WebSocket connections, database latency, room/race events, and connector behavior. Health responses expose storage readiness without leaking secrets.
+
+**Benefit:** Faster incident diagnosis, measurable service-level indicators, and safer production logs.
+**Impact:** High.
+
+### 3. Bounded live-device lifecycle
+
+**Current issue:** Browser reconnects, duplicated sources, future/stale timestamps, malformed messages, and unbounded samples could produce phantom bikes, stale telemetry, listener leaks, or growing memory.
+
+**Implemented:** The live-bike registry normalizes source identity, rejects malformed/future/stale messages, deduplicates connections, bounds retained samples, and expires inactive devices. Keyed cleanup registries guarantee timers/listeners are replaced and released. BLE and bridge hooks use the shared lifecycle contract.
+
+**Benefit:** More reliable automatic reconnection, accurate connected-bike state, and bounded long-running studio sessions.
+**Impact:** High.
+
+### 4. Enforced release gates
+
+**Current issue:** A passing build did not prove catalog integrity, compressed delivery, bundle size, server health, auth boundaries, or browser race behavior.
+
+**Implemented:** `verify:release:full` now gates audit, unit/API tests, track generation and validation, TypeScript, production build, compression, bundle budgets, and Chromium end-to-end tests. Deployment smoke verifies health, request IDs, security headers, storage readiness, app shell, compressed immutable assets, catalog size, anonymous auth behavior, and 404 handling. A read-only load probe enforces an explicit p95 budget.
+
+**Benefit:** Releases are repeatable, measurable, and fail before deployment when critical contracts regress.
+**Impact:** High.
+
+### 5. Production database requirement
+
+**Current issue:** A production service could silently fall back to in-memory persistence and appear healthy, losing account or race data on restart.
+
+**Implemented:** `TRACKLAB_REQUIRE_DATABASE=1` is set in Render configuration. Health returns unavailable when persistent storage is required but not ready.
+
+**Benefit:** Prevents a deceptively healthy deployment with non-durable storage.
+**Impact:** High.
 
 ## Medium-Impact Improvements
 
-| Finding | Implemented change | Benefit | Impact |
-| --- | --- | --- | --- |
-| Three zone scans and temporary arrays per rider/frame | Resolve active zone, pedal configuration, and first pedal boundary in one allocation-free scan and reuse one frame timestamp | Reduces animation-loop allocations and repeated branch matching | Medium |
-| Leaderboards selected the latest result, not the best result | Select each rider's personal best per metric before ranking | Correct leaderboard semantics | Medium |
-| Race dedupe included unstable timestamps | Use session/rider identity and bounded in-memory dedupe state | Prevents duplicate result rows while avoiding unbounded memory growth | Medium |
-| Shared map publication issued one SQL query per track | Batch all mapping rows into one upsert statement | Reduces database round trips dramatically for catalog publication | Medium |
-| Social state loaded all active group members globally | Restrict membership loading to groups joined by the requesting user | Removes an O(platform members) query and unrelated data exposure | Medium |
-| Rapid profile changes triggered one cloud and connector request per change | Batch independent partial updates after a short pause and serialize sends | Reduces network requests, disk writes, and race conditions while preserving completion/error behavior | Medium |
-| Expired sessions/checkouts and transient invites remained resident | Add periodic pruning and TTL-based cleanup | Bounds memory/table growth | Medium |
-| No service readiness or graceful termination | Add database-aware `/api/health`, HTTP/WebSocket/Postgres shutdown, and Render health configuration | Improves deploy reliability and prevents abrupt write termination | Medium |
-| Native connector modules were treated as core cloud dependencies | Classify them as optional and prune development/optional packages after the Render build | Keeps the runtime deployment focused while retaining local installs | Medium |
+### Static delivery and bundle governance
+
+- Production assets are generated with Brotli and gzip variants.
+- Hashed assets are immutable; mutable data remains revalidated.
+- JavaScript and CSS have raw and Brotli budgets, including a total initial-transfer budget.
+- Current initial JavaScript plus CSS is 143,612 Brotli bytes against a 195,000-byte limit.
+
+**Benefit:** Faster mobile/tablet startup and an objective guard against bundle growth.
+**Impact:** Medium.
+
+### Operational recovery
+
+- Release runbook defines preflight, deployment, smoke, rollback, and incident evidence.
+- Database runbook defines backup, forward-only migration recovery, restore validation, and checksum-drift response.
+- Hardware runbook defines a 1-4 Wattbike matrix, latency targets, reconnect checks, race behavior, and acceptance evidence.
+
+**Benefit:** Operators can recover predictably instead of improvising during an outage.
+**Impact:** Medium.
+
+### Studio rider assignment
+
+- Account-scoped rider profiles can be assigned to connected bikes for a session.
+- Physical bike identity remains keyed by monitor/source ID, while results use the assigned rider identity.
+- Tests cover roster persistence and assignment behavior.
+
+**Benefit:** A studio can track students rather than attributing every result only to a bike.
+**Impact:** Medium.
 
 ## Low-Impact Improvements
 
-- Correct static cache policy so mutable JSON/manifests are revalidated while fingerprinted assets remain immutable.
-- Add ETag, Last-Modified, Content-Length, HEAD, and precompressed static response handling.
-- Return explicit 400/413 responses for malformed or oversized cloud/connector JSON instead of generic 500 errors.
-- Add request and WebSocket payload limits, HTTP timeouts, WebSocket heartbeat, and client message-rate controls.
-- Add security headers, HSTS on HTTPS, same-origin mutation checks, generic login failures, auth/billing rate limits, and password length limits.
-- Correct zero-valued race finish-time checks.
-- Add supporting race metric, room message, challenge, friendship, billing, and social indexes.
-- Declare the supported Node range and update the default Square API version.
+- Updated compatible patch releases for Vite, `ws`, `concurrently`, and Node type definitions.
+- Added explicit Node engine and production build expectations.
+- Added documentation links from the primary README and observability guide.
+- Increased the Vite chunk warning to match the stricter custom bundle budget, avoiding contradictory build output.
+- Added focused unit coverage for migrations, telemetry, bridge messages, cleanup registries, production health, and studio riders.
 
 ## Security Findings
 
-### Resolved
+### Resolved before or during this review
 
-1. **Critical: profile IDOR and unauthenticated writes.** Profile reads/writes now require a valid session and ignore caller-selected identity.
-2. **Critical: billing entitlement forgery.** Racer access is no longer granted from redirect parameters; Square order completion is verified server-side.
-3. **High: multiplayer identity/role spoofing.** Identity, membership, room actions, track changes, route choices, race summaries, and ghost ownership are validated server-side.
-4. **High: private room disclosure.** Private rooms are visible only to authorized participants.
-5. **High: loopback connector origin exposure.** Browser access is restricted by origin and payload size.
-6. **Medium: brute-force and request abuse.** Auth/billing rate controls, payload limits, message-rate limits, and heartbeat termination are active.
-7. **Medium: static path/cache handling.** Resolved paths are constrained to `dist`; missing assets no longer fall through to HTML; mutable data is not cached immutably.
-8. **Medium: information leakage.** Login responses are generic, internal errors carry request IDs, and expected client errors no longer become server failures.
+1. Authenticated profile ownership is derived server-side rather than accepted from a caller-selected profile key.
+2. Square return claims are verified against server-held checkout state and provider order data.
+3. Multiplayer identity and membership are server-authoritative.
+4. Private room visibility is filtered per authenticated participant.
+5. The local connector restricts web origins and payload sizes.
+6. Auth/billing endpoints, HTTP bodies, and WebSocket messages have abuse controls.
+7. Static paths are constrained, missing assets return 404, and cache behavior matches mutability.
+8. Structured logs redact credentials, cookies, tokens, authorization fields, and sensitive query values.
+9. Request IDs and generic client errors reduce information leakage while retaining traceability.
+10. Production can no longer report ready while silently using memory persistence.
 
-### Remaining Security Work
+### Remaining security work
 
-- **Square webhooks: High.** Initial payment is verified, but subscription renewal, cancellation, failed-payment, and refund state are not yet synchronized. Add signed Square webhooks and make database entitlement state authoritative. Follow Square's signature validation guidance: <https://developer.squareup.com/docs/webhooks/step3validate>.
-- **Account recovery and verification: Medium.** Add verified email, password reset, optional MFA/passkeys, session/device management, and account deletion/export flows before a broad public launch.
-- **Content Security Policy: Medium.** A strict CSP should be introduced after inventorying Google Maps/Earth script, worker, image, and connection origins. Adding an incomplete CSP now would risk breaking the core map.
-- **Loopback capability token: Medium.** Origin checks block web drive-by access, but a local native process can still call loopback endpoints. A per-install capability exchanged with the approved site would harden this boundary.
-- **Secrets and audit trail: Medium.** Move toward managed secret rotation and append-only admin/billing/map-publication audit events.
+- **Square lifecycle webhooks (High):** Validate signed renewal, cancellation, refund, and failed-payment events and make entitlement reconciliation authoritative.
+- **Account lifecycle (Medium):** Add verified email, password reset, optional MFA/passkeys, session/device management, account export, and deletion.
+- **Content Security Policy (Medium):** Introduce a tested policy after inventorying Google Maps/Earth script, worker, image, and connection origins.
+- **Connector capability token (Medium):** Add a per-install secret in addition to origin checks to protect loopback APIs from other local processes.
+- **Administrative audit history (Medium):** Persist append-only billing, map-publication, entitlement, and moderation events.
 
 ## Performance Findings
 
-- **Catalog delivery:** 2,325,231 raw bytes became 135,425 Brotli bytes or 198,504 gzip bytes. ETag revalidation returns a zero-body 304 within a deployment.
-- **Race loop:** zone resolution changed from three traversals plus filter/map/sort allocations per rider/frame to one traversal with no intermediate collections.
-- **Database publication:** shared mappings changed from one network round trip per track to one batched upsert.
-- **Profile synchronization:** rapid changes now coalesce into one partial request; connector disk writes are serialized.
-- **Social query:** group-member loading is proportional to the current user's groups rather than the whole platform.
-- **Current application bundle:** approximately 493 KB JavaScript raw / 147 KB gzip and 70 KB CSS raw / 12.7 KB gzip. This is acceptable for the current dashboard, but should be monitored with a bundle budget.
-- **Not implemented:** broad React lazy-loading. Most major panels participate in the primary dashboard and share state from the 6,000-line `App`; superficial splitting would add complexity with little guaranteed initial-load reduction. Extract bounded features first, then measure route-level splitting.
+### Measured
 
-## Database Recommendations
+- 1,305 tracks validated across 49 countries.
+- Generated global catalog: 5,930,857 raw bytes, 362,526 Brotli bytes, 560,775 gzip bytes.
+- Public locator catalog: 453,305 raw bytes, 76,116 Brotli bytes, 102,232 gzip bytes.
+- Application JavaScript: 526,678 raw bytes, 130,620 Brotli bytes.
+- Application CSS: 84,248 raw bytes, 12,992 Brotli bytes.
+- Initial JS + CSS: 143,612 Brotli bytes, 26.4% below budget.
+- Server smoke checks completed between 1 ms and 31 ms locally.
+- Read-only load probe: 100/100 responses, concurrency 8, p50 4 ms, p95 12 ms, p99 19 ms, 1,371 requests/second locally.
+
+### Interpretation
+
+The local load result validates implementation overhead and regression budgets; it is not a capacity promise for Render, PostgreSQL, Google APIs, or cross-region WebSockets. Production capacity must be measured from the deployed region with representative database size and concurrent rooms.
+
+### Deferred performance work
+
+- Split the main bundle only after bounded feature state is extracted from `App.tsx`; superficial lazy loading would move complexity without proving user benefit.
+- Add Redis/pub-sub only when multi-instance deployment is required; current in-process room ownership is simpler and faster for one instance.
+- Compress ghost/race payloads only after production telemetry shows network or storage pressure.
+
+## Database Findings and Recommendations
 
 ### Implemented
 
-- Atomic partial `JSONB` profile upserts eliminate a read and prevent concurrent patch loss.
-- Added composite indexes for personal-best cadence, speed, and watts queries.
-- Added indexes for room message history, challenges, friendship reverse lookup, billing cleanup, and social requests.
-- Corrected leaderboard selection and bounded leaderboard limits.
-- Added expiration cleanup for sessions and billing checkout state.
+- Ordered schema versions with checksums and advisory locking.
+- Per-migration transactions and explicit failure reporting.
+- Atomic partial profile writes and supporting indexes from prior review work.
+- Production indexes for result lookup, social state, messages, billing cleanup, and active room workflows.
+- A database-required production health contract.
 
-### Recommended Next
+### Recommended next
 
-1. **Versioned migrations (High).** Move startup DDL into reviewed, reversible migrations with a schema-version table. Startup `CREATE/ALTER` is convenient but not sufficient for production rollbacks or multi-instance deploys.
-2. **Normalize identity (High).** Replace long-lived `guest_key` text relationships with `auth_users.id` foreign keys. Preserve public profile IDs separately.
-3. **Entitlement model (High).** Store subscription status, provider event ID, effective period, cancellation state, and event history rather than only membership tier/seats.
-4. **Transactions (Medium).** Wrap friend/group invitation acceptance and membership creation in transactions to avoid partial state after a database interruption.
-5. **Constraints (Medium).** Add reviewed `CHECK` constraints for role/status/tier, bike seats, metric ranges, and non-self friendship. Apply only after validating existing rows.
-6. **Result retention (Medium).** Define retention/partitioning for race samples, room messages, challenges, and large ghost point arrays before volume grows.
-7. **Production query analysis (Medium).** Capture `EXPLAIN (ANALYZE, BUFFERS)` against representative data before changing further indexes. Some unique-column indexes created historically are redundant and should be removed through a migration, not ad hoc startup DDL.
-8. **Recovery (High).** Document automated backups, point-in-time recovery, restore drills, and export ownership.
+1. Run the documented backup and restore drill against staging and record restore time and row-count checks.
+2. Normalize long-lived text guest/profile relationships to `auth_users.id` foreign keys through reviewed migrations.
+3. Persist full subscription lifecycle and provider event history, not only current membership tier/seats.
+4. Define retention and partitioning before race samples, room messages, and ghost points reach sustained volume.
+5. Capture `EXPLAIN (ANALYZE, BUFFERS)` on production-sized data before removing or adding more indexes.
+6. Add reviewed constraints for enum-like statuses, seat limits, metric ranges, and non-self relationships after validating existing data.
 
-## Architecture Recommendations
+## Architecture Findings and Recommendations
 
-### Current Strengths
+### Current strengths
 
-- Clear separation exists for device hooks, race physics, mapping helpers, cloud persistence, and local connector sources.
-- The local connector supports BLE/ANT+ behind a unified bridge contract.
-- Race calculations are client-local with bounded multiplayer summaries, which keeps current single-room operation responsive.
-- Map data, race physics, monitor mode, and multiplayer are represented with strict TypeScript types on the frontend.
+- BLE and ANT+ sources converge on a shared live-bike contract.
+- Physics and BMX rollout calculations are isolated enough to test deterministically.
+- Mapping, local connector, cloud persistence, and multiplayer have recognizable boundaries.
+- Frontend contracts are TypeScript-based, and cloud/bridge boundaries have runtime sanitization.
+- Release, schema, observability, and device-lifecycle behavior now have dedicated modules and tests.
 
-### Recommended Evolution
+### Concentrated modules
 
-1. **Incremental bounded-context extraction (High maintainability).** `App.tsx` (~6,100 lines), `cloud/server.mjs` (~2,700), `GoogleMapsTrackLayer.tsx` (~2,250), `cloud/persistence.mjs` (~1,500), and `SessionControlPanel.tsx` (~1,300) concentrate too many reasons to change. Extract race orchestration, mapping editor, profile synchronization, billing/auth routes, social routes, room orchestration, and static serving one feature at a time with tests. Do not rewrite.
-2. **Horizontally scalable realtime state (High scalability).** Rooms, clients, invites, timers, and race state are process-local. A second Render instance would split users. Introduce Redis-compatible shared presence/room state and pub/sub, distributed locks for room transitions, and sticky WebSocket routing before scaling beyond one process.
-3. **Regional race placement (High for global use).** Place a room in the region that minimizes the racers' measured latency, use server-authoritative start timestamps, and keep persistent profile/social APIs region-independent. Do not attempt active-active room simulation without deterministic ownership.
-4. **TURN-backed voice (High reliability).** Public STUN alone will fail behind restrictive NAT/firewalls. Add TURN with short-lived credentials and monitor connection success.
-5. **API contracts (Medium).** Split route handlers and introduce versioned request/response schemas (for example, Zod-generated validation/OpenAPI) rather than expanding handwritten sanitizers indefinitely.
-6. **Connector packaging (Medium).** Package the local connector as its own signed desktop distribution with self-update, diagnostics, a capability token, and platform-specific native dependencies.
-7. **Observability (High).** Add structured logs, request/room/session correlation IDs, error reporting, metrics (connections, race starts/completions, reconnects, DB latency), and alerting tied to SLOs.
+- `src/App.tsx`: 6,452 lines.
+- `cloud/server.mjs`: 3,038 lines.
+- `src/components/GoogleMapsTrackLayer.tsx`: 2,265 lines.
+- `cloud/persistence.mjs`: 1,484 lines.
+- `src/components/SessionControlPanel.tsx`: 1,383 lines.
+- `src/styles.css`: 6,143 lines.
+
+These modules are the largest maintainability risk. They should be decomposed one bounded feature at a time, with tests moved alongside each extraction. A broad rewrite was not justified because it would create a large regression surface without changing user behavior or measured performance.
+
+### Scale evolution
+
+1. **Realtime horizontal scaling:** Introduce shared room/presence state, pub/sub, distributed room ownership, and sticky WebSocket routing before running more than one application instance.
+2. **Regional multiplayer:** Assign rooms to a region from measured participant latency and use server-authoritative start timestamps.
+3. **Voice reliability:** Add TURN with short-lived credentials and measure successful peer connection rate.
+4. **API contracts:** Move handlers into versioned route modules with shared runtime schemas and generated API documentation.
+5. **Connector distribution:** Ship signed macOS/Windows packages with self-update, diagnostics, and a per-install capability token.
 
 ## Technical Debt Identified
 
-- Large orchestration and UI modules make behavior difficult to isolate and increase regression risk.
-- PostgreSQL schema mutation occurs during application startup rather than a migration phase.
-- Profile maps/routes/bikes are stored as whole JSON documents; convenient now, but difficult to query, version, merge, and moderate at scale.
-- Multiplayer and social records use denormalized names and text guest keys.
-- Race state exists in client, room synchronization, persistence summary, ghost data, and review capture forms without a single versioned event contract.
-- Shared track publication has authorization but not review workflow, version history, rollback, ownership, or moderation.
-- Track import jobs do not yet have scheduled freshness, provider change detection, or a formal source-licensing/data-quality workflow.
-- CSS and dashboard composition remain monolithic; visual refactoring should follow component boundary extraction rather than precede it.
-- No service-level telemetry currently proves BLE reconnect rate, race input latency, WebSocket latency, or map load success in production.
+- Large UI and server orchestrators still have too many reasons to change.
+- Profile maps, routes, bikes, and preferences remain partly document-shaped, which is convenient but limits querying, merge semantics, and moderation.
+- Race state is represented in client, room, persistence summary, ghost, and review-capture forms without one versioned event schema.
+- Shared track publication needs moderation, ownership, version history, and rollback.
+- Track imports need scheduled freshness checks, provider-diff reporting, and a formal source licensing/data quality register.
+- CSS remains monolithic and should be split with component extraction, not as a standalone cosmetic rewrite.
+- Current multiplayer room state is process-local and therefore intentionally single-instance.
+
+## Validation Evidence
+
+| Gate | Result |
+| --- | --- |
+| Production dependency audit | 0 known vulnerabilities at the configured high-severity gate |
+| Unit/API suite | 23 files, 82 tests passed |
+| Chromium E2E | 13/13 workflows passed in 1.6 minutes |
+| TypeScript | Passed |
+| Track catalog | 1,305 tracks, 49 countries, 9 providers validated |
+| Production build | Passed with Vite 8.1.4 |
+| Compression | 612,335 eligible raw bytes to 144,024 Brotli bytes, 76.5% smaller |
+| Bundle budgets | All five raw/Brotli budgets passed |
+| Deployment smoke | Health, headers, storage, shell, compressed asset, catalog, auth boundary, and 404 passed |
+| Local load probe | 100/100, concurrency 8, p95 12 ms under 2,000 ms budget |
+
+The E2E suite explicitly covers the public track locator, first-run account flow, Bluetooth pairing state, dashboard layout, shared map publication, advanced connector launch, fullscreen race entry, loop laps, ghost privacy, populated 20-second post-race review, live mapped-zone cadence, two-bike live cadence, persistent bike names, and studio rider assignment.
+
+## Production Signoff Criteria
+
+The branch is ready for review and staging. Award a 10/10 production signoff only after all of the following evidence is attached to a release candidate:
+
+1. The 1-, 2-, 3-, and 4-bike physical matrix passes on supported macOS/Windows connectors and representative Model B firmware.
+2. Bike connect, disconnect, reconnect, monitor IDs, remembered names, live movement, pedal-zone gating, coasting, race cancellation, and post-race metrics meet the hardware runbook targets.
+3. PostgreSQL backup and restore is executed in staging, with migration versions and row counts verified.
+4. The candidate is deployed with PostgreSQL required and passes `smoke:deployment` with `TRACKLAB_EXPECT_POSTGRES=1`.
+5. Representative deployed WebSocket room and race load meets agreed p95 latency and error-rate targets.
+6. Square subscription lifecycle events are reconciled through validated webhooks before paid public enrollment.
+7. Voice, if enabled for public multiplayer, passes TURN-backed connection testing across restrictive networks.
 
 ## Remaining Opportunities
 
-### Before Public Release
+### Before unrestricted public release
 
-1. Square subscription webhooks and entitlement reconciliation.
-2. Email verification, password reset, privacy/terms flows, and account lifecycle.
-3. TURN service and multiplayer connection-success instrumentation.
-4. Structured error/metric collection and on-call alerts.
-5. PostgreSQL backups, migration tooling, and a staging restore test.
-6. Load tests for WebSocket rooms, race-sync cadence, social presence, and leaderboards.
-7. Real Wattbike hardware acceptance matrix across supported macOS/Windows/browser/monitor firmware combinations.
+- Complete the production signoff criteria above.
+- Add email verification/recovery and legal/privacy/account-lifecycle flows.
+- Configure alerting for health, error rate, database latency, reconnect rate, race completion, and WebSocket counts.
+- Run accessibility checks with keyboard, screen reader, contrast, and reduced-motion coverage.
 
-### Later Optimization
+### After measured growth
 
-- Profile and catalog cache layers after production hit-rate measurement.
-- Route-level code splitting after state extraction and bundle profiling.
-- Race/ghost compression or binary encoding only if payload telemetry justifies it.
-- Multi-region room placement after single-region concurrency and latency baselines exist.
-- Map tile and imagery strategy review against Google licensing, quota, and cache rules.
+- Decompose the largest modules by bounded feature.
+- Add shared realtime infrastructure when a second instance is justified.
+- Add regional room placement when cross-region latency data justifies the cost.
+- Add application/database caching only after hit-rate and invalidation requirements are known.
 
-## Validation Results
+## Conclusion
 
-- `npm run build`: passed.
-- `npm run test:unit`: 26 tests passed across rollout, telemetry, physics, HTTP policy, cloud API, connector API, and write batching.
-- `npm run test:e2e`: 5 Chromium scenarios passed, including mapped pedal zones and a two-bike live UCI cadence.
-- `npm audit --omit=dev --omit=optional --audit-level=high`: 0 vulnerabilities.
-- Manual static validation: Brotli selected correctly; decoded catalog matched 2,325,231 bytes; repeated ETag request returned 304 with no body.
-- Production JavaScript: ~493.0 KB raw / ~147.3 KB gzip.
-
-## External API References
-
-- Square Create Payment Link: <https://developer.squareup.com/reference/square/checkout-api/CreatePaymentLink>
-- Square Retrieve Order: <https://developer.squareup.com/reference/square/orders-api/RetrieveOrder>
-- Square order state: <https://developer.squareup.com/reference/square/objects/OrderState>
-- Square subscription checkout: <https://developer.squareup.com/docs/checkout-api/subscription-plan-checkout>
-- Square webhook validation: <https://developer.squareup.com/docs/webhooks/step3validate>
+This branch materially raises TrackLab from a feature-rich application to an operationally reviewable release candidate. The remaining gap to a defensible 10/10 is not another unbounded code-generation pass; it is external acceptance evidence for physical bikes, durable recovery, provider lifecycle events, and deployed realtime behavior. Those gates are documented so completion can be measured rather than assumed.
