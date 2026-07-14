@@ -86,6 +86,7 @@ beforeAll(async () => {
       DATABASE_URL: '',
       TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test',
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
+      TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -111,10 +112,26 @@ describe('cloud API trust boundaries', () => {
     const response = await api('/api/health');
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/);
     await expect(response.json()).resolves.toMatchObject({
       status: 'ok',
       storage: { mode: 'memory', configured: false, ready: true },
     });
+  });
+
+  it('protects production metrics and exposes redacted process telemetry to operators', async () => {
+    const unauthorized = await api('/api/metrics');
+    expect(unauthorized.status).toBe(401);
+
+    const authorized = await api('/api/metrics', {
+      headers: { Authorization: 'Bearer test-metrics-token' },
+    });
+    expect(authorized.status).toBe(200);
+    expect(authorized.headers.get('content-type')).toContain('text/plain');
+    const metrics = await authorized.text();
+    expect(metrics).toContain('tracklab_process_uptime_seconds{service="tracklab-cloud"}');
+    expect(metrics).toContain('tracklab_http_requests_total');
+    expect(metrics).not.toContain('test-metrics-token');
   });
 
   it('requires authentication for profile data', async () => {

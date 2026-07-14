@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { runDatabaseMigrations } from './migrations.mjs';
+import { cloudTelemetry } from './telemetry.mjs';
 
 const { Pool } = pg;
 
@@ -97,10 +98,17 @@ export async function query(text, params = []) {
   if (!ready || !pool) {
     return null;
   }
+  const startedAt = Date.now();
+  const operation = String(text || '').trim().split(/\s+/, 1)[0]?.toLowerCase() || 'unknown';
   try {
-    return await pool.query(text, params);
+    const result = await pool.query(text, params);
+    cloudTelemetry.observe('tracklab_persistence_query_duration_ms', Date.now() - startedAt, { operation });
+    cloudTelemetry.increment('tracklab_persistence_queries_total', { operation, outcome: 'success' });
+    return result;
   } catch (error) {
-    console.warn('[cloud] persistence query failed:', error instanceof Error ? error.message : error);
+    cloudTelemetry.observe('tracklab_persistence_query_duration_ms', Date.now() - startedAt, { operation });
+    cloudTelemetry.increment('tracklab_persistence_queries_total', { operation, outcome: 'error' });
+    cloudTelemetry.warn('persistence.query_failed', { operation, error });
     return null;
   }
 }
@@ -120,11 +128,17 @@ export async function initPersistence() {
       const appliedSummary = migrationResult.applied.length > 0
         ? ` Applied: ${migrationResult.applied.map((migration) => migration.version).join(', ')}.`
         : '';
-      console.log(`[cloud] TrackLab persistence ready at schema v${migrationResult.currentVersion}.${appliedSummary}`);
+      cloudTelemetry.setGauge('tracklab_persistence_ready', 1);
+      cloudTelemetry.info('persistence.ready', {
+        schemaVersion: migrationResult.currentVersion,
+        appliedVersions: migrationResult.applied.map((migration) => migration.version),
+        summary: appliedSummary.trim(),
+      });
       persistenceReady = true;
       return true;
     } catch (error) {
-      console.warn('[cloud] TrackLab persistence disabled:', error instanceof Error ? error.message : error);
+      cloudTelemetry.setGauge('tracklab_persistence_ready', 0);
+      cloudTelemetry.error('persistence.disabled', { error });
       await pool?.end().catch(() => {});
       pool = null;
       readyPromise = null;
@@ -795,13 +809,18 @@ export async function saveUserTrackMapping(
     if (publish && publicMapping) {
       publicTrackMappingsFallback.set(savedMapping.trackId, cloneJson(publicMapping, publicMapping));
     }
+    cloudTelemetry.increment('tracklab_track_mapping_saves_total', {
+      outcome: 'success',
+      published: publish ? 'yes' : 'no',
+    });
     return {
       mapping: savedMapping,
       publicMapping: publish ? publicMapping : null,
     };
   } catch (error) {
     await client?.query('ROLLBACK').catch(() => {});
-    console.warn('[cloud] atomic track mapping save failed:', error instanceof Error ? error.message : error);
+    cloudTelemetry.increment('tracklab_track_mapping_saves_total', { outcome: 'error' });
+    cloudTelemetry.warn('persistence.track_mapping_save_failed', { error });
     return null;
   } finally {
     client?.release();
