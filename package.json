@@ -32,13 +32,18 @@
     "tracks:validate": "node scripts/validate-track-database.mjs",
     "billing:square:setup": "node scripts/setup-square-billing.mjs",
     "billing:square:sync-render": "node scripts/sync-render-square-env.mjs",
-    "build": "npm run tracks:build && tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "build": "npm run tracks:build && npm run typecheck && vite build && node scripts/compress-dist-assets.mjs && node scripts/check-bundle-budget.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test:e2e:install": "playwright install chromium",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:unit": "vitest run",
-    "test": "npm run test:unit && npm run test:e2e"
+    "test": "npm run test:unit && npm run test:e2e",
+    "verify:release": "npm audit --omit=dev --omit=optional --audit-level=high && npm run test:unit && npm run build",
+    "verify:release:full": "npm run verify:release && npm run test:e2e",
+    "smoke:deployment": "node scripts/smoke-deployment.mjs",
+    "probe:load": "node scripts/probe-runtime-load.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.562.0",

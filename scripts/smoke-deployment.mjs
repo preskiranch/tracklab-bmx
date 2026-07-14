@@ -1,0 +1,108 @@
+const defaultTimeoutMs = 10_000;
+const minimumTrackCount = 500;
+
+function argument(name) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : '';
+}
+
+function normalizedBaseUrl(value) {
+  const parsed = new URL(value);
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString().replace(/\/$/, '');
+}
+
+const target = argument('--url') || process.env.TRACKLAB_SMOKE_URL;
+if (!target) {
+  throw new Error('Set TRACKLAB_SMOKE_URL or pass --url https://your-tracklab-host.example.');
+}
+
+const baseUrl = normalizedBaseUrl(target);
+const timeoutMs = Number(process.env.TRACKLAB_SMOKE_TIMEOUT_MS) || defaultTimeoutMs;
+const expectPostgres = process.env.TRACKLAB_EXPECT_POSTGRES === '1';
+
+async function request(pathname, init = {}) {
+  const startedAt = performance.now();
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(timeoutMs),
+    ...init,
+    headers: {
+      'User-Agent': 'TrackLab-Deployment-Smoke/1.0',
+      ...init.headers,
+    },
+  });
+  return { response, durationMs: performance.now() - startedAt };
+}
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+const results = [];
+const healthRequest = await request('/api/health');
+assert(healthRequest.response.ok, `/api/health returned ${healthRequest.response.status}.`);
+assert(healthRequest.response.headers.get('cache-control') === 'no-store', '/api/health must be no-store.');
+assert(/^[0-9a-f-]{36}$/i.test(healthRequest.response.headers.get('x-request-id') || ''), 'Health response has no valid request ID.');
+assert(healthRequest.response.headers.get('x-content-type-options') === 'nosniff', 'X-Content-Type-Options is missing.');
+assert(healthRequest.response.headers.get('x-frame-options') === 'DENY', 'X-Frame-Options is missing.');
+assert(Boolean(healthRequest.response.headers.get('referrer-policy')), 'Referrer-Policy is missing.');
+if (baseUrl.startsWith('https://')) {
+  assert(Boolean(healthRequest.response.headers.get('strict-transport-security')), 'HSTS is missing on HTTPS.');
+}
+const health = await healthRequest.response.json();
+assert(health.status === 'ok' && health.storage?.ready === true, 'Health payload reports an unavailable service.');
+if (expectPostgres) {
+  assert(
+    health.storage?.configured === true && health.storage?.mode === 'postgres',
+    'Production smoke expected PostgreSQL, but the service reported memory persistence.',
+  );
+}
+results.push(['health', healthRequest.durationMs]);
+
+const rootRequest = await request('/', { headers: { Accept: 'text/html' } });
+assert(rootRequest.response.ok, `/ returned ${rootRequest.response.status}.`);
+assert(rootRequest.response.headers.get('content-type')?.includes('text/html'), 'Root response is not HTML.');
+const html = await rootRequest.response.text();
+assert(html.includes('<div id="root"></div>'), 'Root HTML does not contain the application mount point.');
+assert(html.includes('TrackLab BMX'), 'Root HTML does not identify TrackLab BMX.');
+results.push(['application shell', rootRequest.durationMs]);
+
+const assetPath = html.match(/<script[^>]+src="([^"]+\.js)"/)?.[1];
+assert(assetPath, 'Production JavaScript asset could not be discovered from index.html.');
+const assetRequest = await request(assetPath, { headers: { 'Accept-Encoding': 'br, gzip' } });
+assert(assetRequest.response.ok, `Production asset returned ${assetRequest.response.status}.`);
+assert(assetRequest.response.headers.get('cache-control')?.includes('immutable'), 'Hashed asset is not immutable.');
+assert(['br', 'gzip'].includes(assetRequest.response.headers.get('content-encoding')), 'Production asset was not served compressed.');
+await assetRequest.response.arrayBuffer();
+results.push(['compressed application asset', assetRequest.durationMs]);
+
+const locatorRequest = await request('/data/track-locator.json', { headers: { Accept: 'application/json' } });
+assert(locatorRequest.response.ok, `Track locator returned ${locatorRequest.response.status}.`);
+const locator = await locatorRequest.response.json();
+assert(
+  Number(locator.trackCount) >= minimumTrackCount
+    && Array.isArray(locator.tracks)
+    && locator.tracks.length === Number(locator.trackCount),
+  `Track locator contains fewer than ${minimumTrackCount} valid tracks.`,
+);
+results.push([`track locator (${locator.trackCount} tracks)`, locatorRequest.durationMs]);
+
+const authRequest = await request('/api/auth/me');
+assert(authRequest.response.ok, `/api/auth/me returned ${authRequest.response.status}.`);
+const auth = await authRequest.response.json();
+assert(Object.hasOwn(auth, 'user'), 'Anonymous auth response is malformed.');
+results.push(['anonymous authentication boundary', authRequest.durationMs]);
+
+const missingAssetRequest = await request('/assets/tracklab-smoke-missing.js', { headers: { Accept: 'text/html' } });
+assert(missingAssetRequest.response.status === 404, 'A missing static asset did not return 404.');
+results.push(['missing asset boundary', missingAssetRequest.durationMs]);
+
+for (const [label, durationMs] of results) {
+  console.log(`PASS ${label}: ${Math.round(durationMs)} ms`);
+}
+console.log(`Deployment smoke passed for ${baseUrl} at version ${health.version || 'unknown'}.`);

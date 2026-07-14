@@ -30,6 +30,7 @@ const rootDirectory = path.resolve(__dirname, '..');
 const distDirectory = path.join(rootDirectory, 'dist');
 const port = Number(process.env.PORT ?? 10000);
 const websocketPath = '/multiplayer';
+const databaseRequired = process.env.TRACKLAB_REQUIRE_DATABASE === '1';
 
 const clients = new Map();
 const rooms = new Map();
@@ -2262,14 +2263,16 @@ async function serveStatic(request, response) {
     }
 
     const storage = persistence.persistenceStatus();
+    const storageReady = storage.ready && (!databaseRequired || storage.configured);
     const body = JSON.stringify({
-      status: storage.ready ? 'ok' : 'unavailable',
+      status: storageReady ? 'ok' : 'unavailable',
       service: 'tracklab-bmx',
       storage,
+      requirements: { database: databaseRequired },
       uptimeSeconds: Math.round(process.uptime()),
       version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
     });
-    response.writeHead(storage.ready ? 200 : 503, {
+    response.writeHead(storageReady ? 200 : 503, {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
       'Content-Length': Buffer.byteLength(body),

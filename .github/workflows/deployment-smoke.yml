@@ -1,0 +1,49 @@
+name: Deployment Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: Public TrackLab deployment URL
+        required: true
+        default: https://tracklab-bmx.onrender.com
+      run_load_probe:
+        description: Run the bounded read-only load probe
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-smoke-${{ inputs.target_url }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify deployed application
+        run: node scripts/smoke-deployment.mjs
+        env:
+          TRACKLAB_SMOKE_URL: ${{ inputs.target_url }}
+          TRACKLAB_EXPECT_POSTGRES: "1"
+
+      - name: Run bounded read-only load probe
+        if: inputs.run_load_probe
+        run: node scripts/probe-runtime-load.mjs
+        env:
+          TRACKLAB_SMOKE_URL: ${{ inputs.target_url }}
+          TRACKLAB_LOAD_REQUESTS: "40"
+          TRACKLAB_LOAD_CONCURRENCY: "4"
+          TRACKLAB_LOAD_P95_MS: "2000"
