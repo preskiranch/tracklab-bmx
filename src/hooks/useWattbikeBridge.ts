@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sanitizeBikeSample } from '../lib/bikeSampleSanity';
+import { parseBridgeMessage } from '../lib/bridgeMessages';
+import {
+  connectedDeviceFromBikeSample,
+  retainBikeSamples,
+  upsertBoundedBikeSample,
+} from '../lib/liveBikeRegistry';
 import type {
   BikeControlAction,
   BikeControlCommand,
@@ -56,18 +62,6 @@ function normalizeConnectedDevices(
   return [...devicesById.values()].sort((a, b) => a.deviceId - b.deviceId);
 }
 
-function connectedDeviceFromSample(sample: BikeSample): ConnectedBikeDevice {
-  return {
-    at: sample.at,
-    connected: true,
-    connectionOrigin: 'bridge-sample',
-    deviceId: sample.deviceId,
-    label: sample.label,
-    signal: sample.signal,
-    source: sample.source,
-  };
-}
-
 export function useWattbikeBridge(): BridgeSnapshot {
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [mode, setMode] = useState<BridgeSnapshot['mode']>('unknown');
@@ -104,7 +98,10 @@ export function useWattbikeBridge(): BridgeSnapshot {
       });
 
       socket.addEventListener('message', (event) => {
-        const parsed = JSON.parse(event.data as string);
+        const parsed = parseBridgeMessage(event.data);
+        if (!parsed) {
+          return;
+        }
 
         if (parsed.type === 'bridge-status') {
           const statusMessage = parsed as BridgeStatusMessage;
@@ -115,7 +112,19 @@ export function useWattbikeBridge(): BridgeSnapshot {
             ? statusMessage.connectedDevices
             : statusMessage.devices;
           if (statusDevices || statusMessage.sourceState === 'idle' || statusMessage.sourceState === 'stopping') {
-            setDevices(normalizeConnectedDevices(statusDevices, statusMessage.sourceState ?? 'unknown'));
+            const normalizedDevices = normalizeConnectedDevices(
+              statusDevices,
+              statusMessage.sourceState ?? 'unknown',
+            );
+            setDevices(normalizedDevices);
+            if (statusMessage.sourceState !== 'running') {
+              setSamplesByDevice(new Map());
+            } else if (statusDevices) {
+              const connectedIds = new Set(
+                normalizedDevices.filter((device) => device.connected).map((device) => device.deviceId),
+              );
+              setSamplesByDevice((current) => retainBikeSamples(current, connectedIds));
+            }
           }
         }
 
@@ -123,6 +132,8 @@ export function useWattbikeBridge(): BridgeSnapshot {
           setSourceState(parsed.sourceState ?? 'error');
           setError(parsed.message);
           setStatus(parsed.message);
+          setDevices([]);
+          setSamplesByDevice(new Map());
         }
 
         if (parsed.type === 'bike-sample') {
@@ -133,14 +144,10 @@ export function useWattbikeBridge(): BridgeSnapshot {
           setMode(sample.source);
           setDevices((current) => {
             const next = new Map(current.map((device) => [device.deviceId, device]));
-            next.set(sample.deviceId, connectedDeviceFromSample(sample));
+            next.set(sample.deviceId, connectedDeviceFromBikeSample(sample));
             return [...next.values()].sort((a, b) => a.deviceId - b.deviceId);
           });
-          setSamplesByDevice((current) => {
-            const next = new Map(current);
-            next.set(sample.deviceId, sample);
-            return next;
-          });
+          setSamplesByDevice((current) => upsertBoundedBikeSample(current, sample, 16));
         }
 
         if (parsed.type === 'bike-control-result') {
@@ -150,8 +157,12 @@ export function useWattbikeBridge(): BridgeSnapshot {
       });
 
       socket.addEventListener('close', () => {
+        if (socketRef.current !== socket) {
+          return;
+        }
         setConnection('closed');
         setDevices([]);
+        setSamplesByDevice(new Map());
         socketRef.current = null;
         if (!cancelled) {
           const nextAttemptIndex = opened ? attemptIndex : attemptIndex + 1;
@@ -160,9 +171,13 @@ export function useWattbikeBridge(): BridgeSnapshot {
       });
 
       socket.addEventListener('error', () => {
+        if (socketRef.current !== socket) {
+          return;
+        }
         setConnection('error');
         setSourceState('unknown');
         setDevices([]);
+        setSamplesByDevice(new Map());
         setError(`Could not reach TrackLab Bike Connector on ${bridgeUrls.join(' or ')}.`);
       });
     };
@@ -237,9 +252,9 @@ export function useWattbikeBridge(): BridgeSnapshot {
     mode,
     sourceState,
     status,
-      error,
-      devices,
-      samplesByDevice,
+    error,
+    devices,
+    samplesByDevice,
     startLocalBridge,
     stopLocalBridge,
     sendControlCommand,

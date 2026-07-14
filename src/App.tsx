@@ -111,6 +111,11 @@ import {
 } from './lib/raceStartSequence';
 import { reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
 import {
+  bikeSampleIsLive,
+  connectedDeviceFromBikeSample,
+  selectRaceBikeDevices,
+} from './lib/liveBikeRegistry';
+import {
   activeStudioRiders,
   applyStudioRiderAssignments,
   assignStudioRider,
@@ -146,7 +151,6 @@ import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import type {
   AppMode,
   BikeProfile,
-  BikeSample,
   ConnectedBikeDevice,
   DistanceUnit,
   DraftTrackSplit,
@@ -930,75 +934,6 @@ function normalizeBikeName(value: unknown) {
 
 function isDefaultBikeProfileName(profile: Pick<BikeProfile, 'deviceId' | 'name'>) {
   return normalizeBikeName(profile.name).toLowerCase() === defaultBikeName(profile.deviceId).toLowerCase();
-}
-
-function connectedDeviceFromSample(sample: BikeSample): ConnectedBikeDevice {
-  return {
-    at: sample.at,
-    connected: true,
-    connectionOrigin: 'bridge-sample',
-    deviceId: sample.deviceId,
-    label: sample.label,
-    signal: sample.signal,
-    source: sample.source,
-  };
-}
-
-function isLiveBikeSample(sample: BikeSample | undefined, now: number) {
-  return Boolean(sample && now - sample.at <= liveBikeTimeoutMs);
-}
-
-function isSupplementalBikeDevice(device: ConnectedBikeDevice) {
-  const label = device.label.toLowerCase();
-  const isSpeedOrCadence = /speed\/cadence|speed cadence|\bcadence\b|\bspeed\b/.test(label);
-  const isPrimaryPower = /wattbike|bicycle power|cycling power|fitness|power meter|powermeter/.test(label);
-  return isSpeedOrCadence && !isPrimaryPower;
-}
-
-function isConnectedBikeDevice(device: ConnectedBikeDevice, now: number) {
-  if (!device.connected) {
-    return false;
-  }
-
-  if (device.connectionOrigin === 'direct-bluetooth') {
-    return true;
-  }
-
-  if (device.connectionOrigin === 'bridge-status' && device.source === 'bluetooth') {
-    return true;
-  }
-
-  if (device.source === 'usb') {
-    return true;
-  }
-
-  return Number.isFinite(device.at) && now - Number(device.at) <= connectedBikeDeviceTimeoutMs;
-}
-
-function raceBikeDevices(devices: ConnectedBikeDevice[], now: number) {
-  const connectedById = new Map<number, ConnectedBikeDevice>();
-  devices.forEach((device) => {
-    const deviceId = Number(device.deviceId);
-    if (!Number.isFinite(deviceId) || deviceId <= 0 || !isConnectedBikeDevice(device, now)) {
-      return;
-    }
-
-    const normalizedDevice = {
-      ...device,
-      deviceId: Math.round(deviceId),
-      label: device.label || `Wattbike ${Math.round(deviceId)}`,
-    };
-    const previous = connectedById.get(normalizedDevice.deviceId);
-    if (!previous || (normalizedDevice.at ?? 0) >= (previous.at ?? 0)) {
-      connectedById.set(normalizedDevice.deviceId, normalizedDevice);
-    }
-  });
-
-  const connectedDevices = [...connectedById.values()];
-  const primaryDevices = connectedDevices.filter((device) => !isSupplementalBikeDevice(device));
-  return (primaryDevices.length > 0 ? primaryDevices : connectedDevices)
-    .sort((a, b) => a.deviceId - b.deviceId)
-    .slice(0, maxPlayers);
 }
 
 function createBikeProfile(deviceId: number, index: number, name = defaultBikeName(deviceId)): BikeProfile {
@@ -2176,7 +2111,7 @@ export default function App() {
   const liveBikeDeviceIds = useMemo(() => {
     const deviceIds = new Set<number>();
     connectedBikeSamples.forEach((sample, deviceId) => {
-      if (isLiveBikeSample(sample, now)) {
+      if (bikeSampleIsLive(sample, now, liveBikeTimeoutMs)) {
         deviceIds.add(deviceId);
       }
     });
@@ -2190,11 +2125,14 @@ export default function App() {
 
     connectedBikeSamples.forEach((sample) => {
       if (now - sample.at <= connectedBikeDeviceTimeoutMs) {
-        devices.push(connectedDeviceFromSample(sample));
+        devices.push(connectedDeviceFromBikeSample(sample));
       }
     });
 
-    return raceBikeDevices(devices, now)
+    return selectRaceBikeDevices(devices, now, {
+      deviceTimeoutMs: connectedBikeDeviceTimeoutMs,
+      maxDevices: maxPlayers,
+    })
       .filter((device) => liveBikeDeviceIds.has(device.deviceId));
   }, [bluetooth.devices, bridge.devices, connectedBikeSamples, liveBikeDeviceIds, now]);
   const connectedBikeDeviceById = useMemo(
@@ -2398,7 +2336,7 @@ export default function App() {
         return false;
       }
 
-      return isLiveBikeSample(samplesByDevice.get(player.deviceId), now);
+      return bikeSampleIsLive(samplesByDevice.get(player.deviceId), now, liveBikeTimeoutMs);
     }).length,
     [activePlayers, now, samplesByDevice],
   );

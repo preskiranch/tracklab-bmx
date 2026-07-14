@@ -71,6 +71,7 @@ export type BridgeErrorMessage = {
   type: 'bridge-error';
   message: string;
   at: number;
+  sourceState?: BridgeSourceState;
 };
 
 export type BikeSampleMessage = BikeSample & {
