@@ -34,9 +34,9 @@ The software engineering work on this branch is release-candidate quality. A lit
 | `bd4b0a6` | Versioned database migrations | Replaces startup schema mutation with ordered, checksummed, locked migrations. |
 | `8f6ecb3` | Structured production observability | Adds redacted JSON logs, request IDs, metrics, and subsystem instrumentation. |
 | `3ecad19` | Live bike connection lifecycle hardening | Rejects stale/malformed data, prevents duplicate reconnect loops, and bounds memory/listeners. |
-| `3037393` | Production release gates | Adds compression, bundle budgets, deployment smoke tests, load probes, CI, and required-database enforcement. |
-| `710f392` | Production operations runbooks | Documents release, rollback, database recovery, observability, and hardware acceptance. |
-| `60ec775` | Compatible dependency refresh | Moves supported patch versions forward with a zero-vulnerability audit and full regression gate. |
+| `7222dae` | Production release gates | Adds compression, bundle budgets, deployment smoke tests, load probes, CI, and required-database enforcement. |
+| `0a82917` | Production operations runbooks | Documents release, rollback, database recovery, observability, and hardware acceptance. |
+| `27ef50e` | Compatible dependency refresh | Moves supported patch versions forward with a zero-vulnerability audit and full regression gate. |
 
 ## High-Impact Improvements
 
