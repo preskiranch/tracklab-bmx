@@ -102,6 +102,17 @@ describe('local connector persistence', () => {
         method: 'PATCH',
         body: JSON.stringify({ trackMappings: { 'track-one': { trackId: 'track-one' } } }),
       }),
+      connectorRequest('/api/user-data', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          studioRiders: [{
+            id: 'rider-jordan',
+            name: 'Jordan',
+            createdAt: 100,
+            updatedAt: 100,
+          }],
+        }),
+      }),
     ]);
     expect(responses.every((response) => response.ok)).toBe(true);
 
@@ -111,6 +122,12 @@ describe('local connector persistence', () => {
       bikeProfiles: [{ deviceId: 58701, name: 'Studio One' }],
       customRoutes: [{ id: 'route-one', name: 'Route One' }],
       trackMappings: { 'track-one': { trackId: 'track-one' } },
+      studioRiders: [{
+        id: 'rider-jordan',
+        name: 'Jordan',
+        createdAt: 100,
+        updatedAt: 100,
+      }],
     });
   });
 

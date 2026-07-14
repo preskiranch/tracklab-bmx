@@ -139,7 +139,15 @@ describe('cloud API trust boundaries', () => {
 
     const saved = await api('/api/user-data?profileKey=user:someone-else', {
       method: 'PATCH',
-      body: JSON.stringify({ bikeProfiles: [{ deviceId: 58701, name: 'Studio One' }] }),
+      body: JSON.stringify({
+        bikeProfiles: [{ deviceId: 58701, name: 'Studio One' }],
+        studioRiders: [{
+          id: 'rider-jordan',
+          name: 'Jordan',
+          createdAt: 100,
+          updatedAt: 100,
+        }],
+      }),
     });
     expect(saved.status).toBe(200);
 
@@ -147,6 +155,12 @@ describe('cloud API trust boundaries', () => {
     expect(loaded.status).toBe(200);
     await expect(loaded.json()).resolves.toMatchObject({
       bikeProfiles: [{ deviceId: 58701, name: 'Studio One' }],
+      studioRiders: [{
+        id: 'rider-jordan',
+        name: 'Jordan',
+        createdAt: 100,
+        updatedAt: 100,
+      }],
     });
   });
 
