@@ -263,6 +263,7 @@ function defaultUserData() {
     trackMappings: {},
     customRoutes: [],
     bikeProfiles: [],
+    studioRiders: [],
   };
 }
 
@@ -278,6 +279,7 @@ function normalizeUserData(value) {
     trackMappings: value.trackMappings && typeof value.trackMappings === 'object' ? value.trackMappings : {},
     customRoutes: Array.isArray(value.customRoutes) ? value.customRoutes : [],
     bikeProfiles: Array.isArray(value.bikeProfiles) ? value.bikeProfiles : [],
+    studioRiders: Array.isArray(value.studioRiders) ? value.studioRiders : [],
   };
 }
 
@@ -324,6 +326,9 @@ function patchUserData(patch) {
       bikeProfiles: Array.isArray(patch.bikeProfiles)
         ? patch.bikeProfiles
         : current.bikeProfiles,
+      studioRiders: Array.isArray(patch.studioRiders)
+        ? patch.studioRiders
+        : current.studioRiders,
     });
   });
   userDataMutationQueue = mutation.then(() => undefined, () => undefined);

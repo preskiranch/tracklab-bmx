@@ -310,9 +310,14 @@ export async function initPersistence() {
         track_mappings JSONB NOT NULL DEFAULT '{}'::jsonb,
         custom_routes JSONB NOT NULL DEFAULT '[]'::jsonb,
         bike_profiles JSONB NOT NULL DEFAULT '[]'::jsonb,
+        studio_riders JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
+    `);
+      await pool.query(`
+      ALTER TABLE ${schema}.user_data
+      ADD COLUMN IF NOT EXISTS studio_riders JSONB NOT NULL DEFAULT '[]'::jsonb
     `);
       await pool.query(`
       CREATE TABLE IF NOT EXISTS ${schema}.public_track_mappings (
@@ -860,15 +865,22 @@ export async function loadRoom(roomId) {
 
 export async function loadUserData(guestKey) {
   if (!pool) {
-    return cloneJson(memoryUserDataByGuestKey.get(guestKey), {
+    const fallback = {
       trackMappings: {},
       customRoutes: [],
       bikeProfiles: [],
-    });
+      studioRiders: [],
+    };
+    const stored = cloneJson(memoryUserDataByGuestKey.get(guestKey), fallback);
+    return {
+      ...fallback,
+      ...stored,
+      studioRiders: Array.isArray(stored?.studioRiders) ? stored.studioRiders : [],
+    };
   }
 
   const result = await query(
-    `SELECT track_mappings, custom_routes, bike_profiles FROM ${schema}.user_data WHERE guest_key = $1`,
+    `SELECT track_mappings, custom_routes, bike_profiles, studio_riders FROM ${schema}.user_data WHERE guest_key = $1`,
     [guestKey],
   );
   const row = result?.rows?.[0];
@@ -877,6 +889,7 @@ export async function loadUserData(guestKey) {
     trackMappings: fromJson(row?.track_mappings, {}),
     customRoutes: fromJson(row?.custom_routes, []),
     bikeProfiles: fromJson(row?.bike_profiles, []),
+    studioRiders: fromJson(row?.studio_riders, []),
   };
 }
 
@@ -886,6 +899,7 @@ export async function saveUserData(guestKey, patch) {
     : null;
   const customRoutes = Array.isArray(patch.customRoutes) ? patch.customRoutes : null;
   const bikeProfiles = Array.isArray(patch.bikeProfiles) ? patch.bikeProfiles : null;
+  const studioRiders = Array.isArray(patch.studioRiders) ? patch.studioRiders : null;
 
   if (!pool) {
     const current = await loadUserData(guestKey);
@@ -893,31 +907,35 @@ export async function saveUserData(guestKey, patch) {
       trackMappings: trackMappings ?? current.trackMappings,
       customRoutes: customRoutes ?? current.customRoutes,
       bikeProfiles: bikeProfiles ?? current.bikeProfiles,
+      studioRiders: studioRiders ?? current.studioRiders,
     };
     memoryUserDataByGuestKey.set(guestKey, cloneJson(next, next));
     return cloneJson(next, next);
   }
 
   const result = await query(
-    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, updated_at)
+    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, studio_riders, updated_at)
      VALUES (
        $1,
        COALESCE($2::jsonb, '{}'::jsonb),
        COALESCE($3::jsonb, '[]'::jsonb),
        COALESCE($4::jsonb, '[]'::jsonb),
+       COALESCE($5::jsonb, '[]'::jsonb),
        now()
      )
      ON CONFLICT (guest_key) DO UPDATE SET
        track_mappings = COALESCE($2::jsonb, ${schema}.user_data.track_mappings),
        custom_routes = COALESCE($3::jsonb, ${schema}.user_data.custom_routes),
        bike_profiles = COALESCE($4::jsonb, ${schema}.user_data.bike_profiles),
+       studio_riders = COALESCE($5::jsonb, ${schema}.user_data.studio_riders),
        updated_at = now()
-     RETURNING track_mappings, custom_routes, bike_profiles`,
+     RETURNING track_mappings, custom_routes, bike_profiles, studio_riders`,
     [
       guestKey,
       trackMappings == null ? null : json(trackMappings),
       customRoutes == null ? null : json(customRoutes),
       bikeProfiles == null ? null : json(bikeProfiles),
+      studioRiders == null ? null : json(studioRiders),
     ],
   );
   const row = result?.rows?.[0];
@@ -929,6 +947,7 @@ export async function saveUserData(guestKey, patch) {
     trackMappings: fromJson(row.track_mappings, {}),
     customRoutes: fromJson(row.custom_routes, []),
     bikeProfiles: fromJson(row.bike_profiles, []),
+    studioRiders: fromJson(row.studio_riders, []),
   };
 }
 

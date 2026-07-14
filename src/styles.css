@@ -1790,6 +1790,21 @@ input:focus {
   gap: 6px;
 }
 
+.race-entry-card {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid #dbe4ec;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.race-entry-card.entered {
+  border-color: #98d67a;
+  background: #f5fbf1;
+  box-shadow: inset 3px 0 0 #63df29;
+}
+
 .race-entry-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1813,6 +1828,18 @@ input:focus {
   border-color: #98d67a;
   background: #f0faea;
   box-shadow: inset 3px 0 0 #63df29;
+}
+
+.race-entry-card .race-entry-row {
+  min-height: 36px;
+  padding: 3px 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.race-entry-card .race-entry-row:hover {
+  background: rgba(99, 223, 41, 0.08);
 }
 
 .race-entry-row:disabled {
@@ -1865,6 +1892,53 @@ input:focus {
   color: #ffffff;
 }
 
+.race-entry-rider-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding-top: 5px;
+  border-top: 1px solid #e8edf1;
+}
+
+.race-entry-rider-select > span {
+  color: #607080;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.race-entry-rider-select select {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 24px 0 8px;
+  border: 1px solid #d5dee6;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17212b;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.race-entry-empty,
+.studio-rider-empty,
+.studio-rider-error {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.race-entry-empty,
+.studio-rider-empty {
+  color: #62717f;
+}
+
+.studio-rider-error {
+  color: #b42318;
+  font-weight: 800;
+}
+
 .race-entry-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1889,6 +1963,143 @@ input:focus {
 .race-entry-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.studio-rider-manager {
+  border-top: 1px solid #dfe7ed;
+  padding-top: 7px;
+}
+
+.studio-rider-manager summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  color: #344152;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  list-style: none;
+}
+
+.studio-rider-manager summary::-webkit-details-marker {
+  display: none;
+}
+
+.studio-rider-manager summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.studio-rider-manager summary b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 21px;
+  min-height: 21px;
+  border-radius: 50%;
+  background: #edf2f7;
+  color: #43515f;
+  font-size: 9px;
+}
+
+.studio-rider-manager-body {
+  display: grid;
+  gap: 7px;
+  padding-top: 5px;
+}
+
+.studio-rider-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: end;
+  gap: 6px;
+}
+
+.studio-rider-add label {
+  display: grid;
+  gap: 3px;
+}
+
+.studio-rider-add label > span {
+  color: #607080;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.studio-rider-add input,
+.studio-rider-row input {
+  width: 100%;
+  min-width: 0;
+  min-height: 31px;
+  padding: 0 8px;
+  border: 1px solid #d5dee6;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17212b;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.studio-rider-add button,
+.studio-rider-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 31px;
+  border: 1px solid #d5dee6;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #344152;
+}
+
+.studio-rider-add button:hover {
+  border-color: #8fda70;
+  background: #f0faea;
+}
+
+.studio-rider-list {
+  display: grid;
+  gap: 4px;
+  max-height: 188px;
+  overflow: auto;
+}
+
+.studio-rider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 32px;
+  align-items: center;
+  gap: 5px;
+}
+
+.studio-rider-row small {
+  color: #607080;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.studio-rider-row button {
+  color: #b42318;
+}
+
+.studio-rider-row button:hover {
+  border-color: #f0b4ad;
+  background: #fff4f2;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .workflow-split-choice {

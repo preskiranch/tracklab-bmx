@@ -438,6 +438,35 @@ function sanitizeUserDataPatch(value) {
   if (Array.isArray(value.bikeProfiles)) {
     patch.bikeProfiles = value.bikeProfiles.slice(0, 64);
   }
+  if (Array.isArray(value.studioRiders)) {
+    const now = Date.now();
+    patch.studioRiders = value.studioRiders
+      .flatMap((candidate) => {
+        if (!candidate || typeof candidate !== 'object') {
+          return [];
+        }
+
+        const id = sanitizeText(candidate.id, '', 100);
+        const name = sanitizeText(candidate.name, '', 64);
+        if (!id || !name) {
+          return [];
+        }
+
+        const createdAt = Math.max(1, finiteNumber(candidate.createdAt, now));
+        const updatedAt = Math.max(createdAt, finiteNumber(candidate.updatedAt, createdAt));
+        const deletedAt = candidate.deletedAt == null
+          ? null
+          : Math.max(updatedAt, finiteNumber(candidate.deletedAt, updatedAt));
+        return [{
+          id,
+          name,
+          createdAt,
+          updatedAt: deletedAt ?? updatedAt,
+          ...(deletedAt == null ? {} : { deletedAt }),
+        }];
+      })
+      .slice(0, 250);
+  }
   return patch;
 }
 

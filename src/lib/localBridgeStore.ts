@@ -1,4 +1,4 @@
-import type { BikeProfile, TrackRecord } from '../types';
+import type { BikeProfile, StudioRider, TrackRecord } from '../types';
 import type { StoredTrackMappings } from './trackMapping';
 import { fetchBridgeEndpoint } from './localBridgeUrls';
 import { createPatchBatcher } from './patchBatcher';
@@ -9,6 +9,7 @@ export type BridgeUserData = {
   trackMappings: StoredTrackMappings;
   customRoutes: TrackRecord[];
   bikeProfiles: BikeProfile[];
+  studioRiders: StudioRider[];
 };
 
 export async function readBridgeUserData() {

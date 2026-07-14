@@ -92,6 +92,8 @@ export type PlayerSlot = {
   deviceId: number | null;
   deviceLabel?: string;
   deviceSource?: BridgeMode;
+  riderId?: string;
+  bikeName?: string;
 };
 
 export type BikeProfile = {
@@ -101,6 +103,16 @@ export type BikeProfile = {
   accent: string;
   updatedAt: number;
 };
+
+export type StudioRider = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number;
+};
+
+export type StudioRiderAssignments = Record<number, string>;
 
 export type MultiplayerTrackSummary = {
   id: string;
@@ -461,6 +473,8 @@ export type RaceCapture = {
     name: string;
     deviceId: number | null;
     colorName: PlayerSlot['colorName'];
+    riderId?: string;
+    bikeName?: string;
   }>;
   zones: TrackZone[];
   events: RaceCaptureEvent[];

@@ -1,4 +1,4 @@
-import type { BikeProfile, TrackRecord, UserTrackMapping } from '../types';
+import type { BikeProfile, StudioRider, TrackRecord, UserTrackMapping } from '../types';
 import type { StoredTrackMappings } from './trackMapping';
 import { createPatchBatcher } from './patchBatcher';
 
@@ -6,6 +6,7 @@ export type CloudUserData = {
   trackMappings: StoredTrackMappings;
   customRoutes: TrackRecord[];
   bikeProfiles: BikeProfile[];
+  studioRiders: StudioRider[];
 };
 
 export type CloudUserDataPatch = Partial<CloudUserData>;
@@ -20,6 +21,7 @@ const emptyCloudUserData: CloudUserData = {
   trackMappings: {},
   customRoutes: [],
   bikeProfiles: [],
+  studioRiders: [],
 };
 
 function userDataUrl(profileKey: string) {
@@ -32,6 +34,7 @@ function normalizeCloudUserData(value: Partial<CloudUserData> | null | undefined
     trackMappings: value?.trackMappings && typeof value.trackMappings === 'object' ? value.trackMappings : {},
     customRoutes: Array.isArray(value?.customRoutes) ? value.customRoutes : [],
     bikeProfiles: Array.isArray(value?.bikeProfiles) ? value.bikeProfiles : [],
+    studioRiders: Array.isArray(value?.studioRiders) ? value.studioRiders : [],
   };
 }
 
@@ -117,5 +120,6 @@ export function createEmptyCloudUserData(): CloudUserData {
     trackMappings: emptyCloudUserData.trackMappings,
     customRoutes: emptyCloudUserData.customRoutes,
     bikeProfiles: emptyCloudUserData.bikeProfiles,
+    studioRiders: emptyCloudUserData.studioRiders,
   };
 }
