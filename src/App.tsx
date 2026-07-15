@@ -80,6 +80,7 @@ import {
   zoneBoundarySetsFromRouteVariant,
   zoneBoundariesFromRouteVariant,
 } from './lib/trackMapping';
+import { playerVisualForSlot } from './lib/playerIdentity';
 import {
   fetchLocationPredictions,
   hasGoogleMapsApiKey,
@@ -923,7 +924,8 @@ function isCustomRoutePreviewId(trackId: string) {
 }
 
 function profileVisual(index: number) {
-  return defaultPlayerSlots[index % defaultPlayerSlots.length] ?? defaultPlayerSlots[0];
+  const playerId = ((index % defaultPlayerSlots.length) + 1) as PlayerSlot['id'];
+  return playerVisualForSlot(playerId);
 }
 
 function isPlayerColorName(value: unknown): value is PlayerSlot['colorName'] {
@@ -2162,8 +2164,8 @@ export default function App() {
       return {
         id: visual.id,
         name: profile?.name ?? defaultBikeName(deviceId),
-        colorName: profile?.colorName ?? visual.colorName,
-        accent: profile?.accent ?? visual.accent,
+        colorName: visual.colorName,
+        accent: visual.accent,
         deviceId,
         deviceLabel: connectedDevice?.label ?? sample?.label,
         deviceSource: connectedDevice?.source ?? sample?.source,
