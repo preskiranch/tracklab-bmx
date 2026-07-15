@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createInitialRiders, stepRiders, type BranchChoicesByPlayer } from '../game/physics';
+import { nextRaceFinishDeadline } from '../lib/raceLifecycle';
 import type { SplitRouteDecisionPoint } from '../lib/trackMapping';
 import type { BikeSample, PlayerSlot, RaceState, RaceSummaryEntry, RiderState, TrackZone } from '../types';
 
@@ -134,7 +135,9 @@ export function useRaceEngine(
   const [raceState, setRaceState] = useState<RaceState>('ready');
   const [riders, setRiders] = useState<RiderState[]>(() => createInitialRiders(players, branchChoicesByPlayer));
   const [raceSummary, setRaceSummary] = useState<RaceSummaryEntry[]>([]);
+  const [finishWindowEndsAt, setFinishWindowEndsAt] = useState<number | null>(null);
   const raceStartedAtRef = useRef(0);
+  const finishWindowEndsAtRef = useRef<number | null>(null);
   const racePlayersRef = useRef(players);
   const raceStatsRef = useRef<Map<PlayerSlot['id'], RaceMetricAccumulator>>(new Map());
   const frameRef = useRef(0);
@@ -146,45 +149,34 @@ export function useRaceEngine(
   const splitDecisionPointsRef = useRef(splitDecisionPoints);
   const trackZonesRef = useRef(trackZones);
 
-  useEffect(() => {
-    playersRef.current = players;
-  }, [players]);
-
-  useEffect(() => {
-    samplesRef.current = samplesByDevice;
-  }, [samplesByDevice]);
-
-  useEffect(() => {
-    raceLengthRef.current = raceLengthMeters;
-  }, [raceLengthMeters]);
-
-  useEffect(() => {
-    branchChoicesRef.current = branchChoicesByPlayer;
-  }, [branchChoicesByPlayer]);
-
-  useEffect(() => {
-    splitDecisionPointsRef.current = splitDecisionPoints;
-  }, [splitDecisionPoints]);
-
-  useEffect(() => {
-    trackZonesRef.current = trackZones;
-  }, [trackZones]);
+  // Keep the animation loop on the newest render values immediately. Waiting for
+  // effects adds an avoidable frame between a live Wattbike packet and rider motion.
+  playersRef.current = players;
+  samplesRef.current = samplesByDevice;
+  raceLengthRef.current = raceLengthMeters;
+  branchChoicesRef.current = branchChoicesByPlayer;
+  splitDecisionPointsRef.current = splitDecisionPoints;
+  trackZonesRef.current = trackZones;
 
   const resetRace = useCallback(() => {
     window.cancelAnimationFrame(frameRef.current);
     raceStartedAtRef.current = 0;
+    finishWindowEndsAtRef.current = null;
     raceStatsRef.current = new Map();
     lastFrameRef.current = 0;
     setRaceState('ready');
     setRaceSummary([]);
+    setFinishWindowEndsAt(null);
     setRiders(createInitialRiders(playersRef.current, branchChoicesRef.current));
   }, []);
 
   const startRace = useCallback((startedAt = Date.now()) => {
     const racePlayers = playersRef.current;
     racePlayersRef.current = racePlayers;
+    finishWindowEndsAtRef.current = null;
     raceStatsRef.current = new Map();
     setRaceSummary([]);
+    setFinishWindowEndsAt(null);
     setRiders(createInitialRiders(racePlayers, branchChoicesRef.current));
     raceStartedAtRef.current = startedAt;
     lastFrameRef.current = performance.now();
@@ -213,7 +205,14 @@ export function useRaceEngine(
           splitDecisionPointsRef.current,
           trackZonesRef.current,
         );
-        if (next.every((rider) => rider.finishedAt !== null)) {
+        const frameNow = Date.now();
+        const finishDeadline = nextRaceFinishDeadline(finishWindowEndsAtRef.current, next, frameNow);
+        if (finishDeadline !== finishWindowEndsAtRef.current) {
+          finishWindowEndsAtRef.current = finishDeadline;
+          setFinishWindowEndsAt(finishDeadline);
+        }
+
+        if (finishDeadline != null && frameNow >= finishDeadline) {
           setRaceSummary(buildRaceSummary(
             racePlayersRef.current,
             next,
@@ -269,6 +268,7 @@ export function useRaceEngine(
     raceState,
     riders,
     raceSummary,
+    finishWindowEndsAt,
     startRace,
     resetRace,
   };

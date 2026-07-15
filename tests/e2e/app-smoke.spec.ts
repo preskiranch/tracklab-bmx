@@ -726,7 +726,7 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(page.getByText('Complete a live Wattbike race on this track to create your personal ghost.')).toBeVisible();
 });
 
-test('completed race shows a populated 20-second pedal-zone review', async ({ page }, testInfo) => {
+test('completed race holds five seconds after the first finisher then returns to dashboard analysis', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const authUser = {
     id: 'post-race-review-racer',
@@ -792,45 +792,18 @@ test('completed race shows a populated 20-second pedal-zone review', async ({ pa
   await startAction.click();
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/, { timeout: 8_000 });
 
-  const review = page.getByRole('region', { name: 'Post-race review' });
-  await expect(review).toBeVisible({ timeout: 60_000 });
-  await expect(page.locator('.race-review-map')).toBeVisible();
-  await expect(review.getByRole('heading', { name: 'Black Mountain BMX' })).toBeVisible();
-  await expect(review.locator('tbody tr')).toHaveCount(1);
-  await expect(review.getByText('Max speed:', { exact: false }).first()).toBeVisible();
-  await expect(review.getByText('Avg speed:', { exact: false }).first()).toBeVisible();
-  await expect(review.getByText('Max cadence:', { exact: false }).first()).toBeVisible();
-  await expect(review.getByText('Avg cadence:', { exact: false }).first()).toBeVisible();
-  await expect(review.getByText('Max watts:', { exact: false }).first()).toBeVisible();
-  await expect(review.getByText('Avg watts:', { exact: false }).first()).toBeVisible();
-  await expect(review.getByText('No telemetry captured')).toHaveCount(0);
-  const firstRiderMetrics = review.locator('.race-review-rider-card').first();
-  for (const label of ['top speed', 'avg speed', 'max cadence', 'avg cadence', 'max watts', 'avg watts']) {
-    const metric = firstRiderMetrics.locator('.race-review-rider-metrics span').filter({ hasText: label });
-    await expect(metric.locator('strong')).not.toHaveText('--');
-  }
+  const finishCountdown = page.locator('.race-finish-countdown');
+  await expect(finishCountdown).toBeVisible({ timeout: 60_000 });
+  await expect(finishCountdown.locator('strong')).toHaveText(/[1-5]/);
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+  await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
+  await page.waitForTimeout(1_000);
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
 
-  const pauseButton = review.getByRole('button', { name: 'Pause' });
-  await pauseButton.click();
-  const pausedSeconds = await review.locator('.race-review-timer strong').textContent();
-  await page.waitForTimeout(1_200);
-  await expect(review.locator('.race-review-timer strong')).toHaveText(pausedSeconds ?? '20s');
-  await expect(review.getByText('paused', { exact: true })).toBeVisible();
+  await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/, { timeout: 7_000 });
+  await expect(page.getByRole('region', { name: 'Post-race review' })).toHaveCount(0);
+  await expect(page.locator('.race-review-screen')).toHaveCount(0);
 
-  await page.screenshot({
-    fullPage: false,
-    path: testInfo.outputPath('post-race-pedal-zone-review.png'),
-  });
-
-  await page.setViewportSize({ width: 1024, height: 768 });
-  await expect(review.getByRole('button', { name: 'Resume' })).toBeVisible();
-  await expect(review.locator('.race-review-zone-table-wrap')).toBeVisible();
-  await page.screenshot({
-    fullPage: false,
-    path: testInfo.outputPath('post-race-pedal-zone-review-tablet.png'),
-  });
-
-  await review.getByRole('button', { name: 'Dashboard' }).click();
   const dashboardAnalysis = page.locator('.analytics-panel');
   const zoneTableCard = dashboardAnalysis.locator('.zone-table-card');
   await expect(zoneTableCard).toBeVisible();
@@ -865,10 +838,11 @@ test('completed race shows a populated 20-second pedal-zone review', async ({ pa
 test('live race with mapped pedal zones stays active through UCI gate cadence', async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   const bridge = await createMockBikeBridge();
+  let moving = false;
   const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample({
-    watts: 320,
-    cadence: 88,
-    speedKph: 24,
+    watts: moving ? 320 : 0,
+    cadence: moving ? 88 : 0,
+    speedKph: moving ? 24 : 0,
   })), 120);
   const authUser = {
     id: 'pedal-zone-live-racer',
@@ -984,18 +958,122 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
       fullPage: false,
       path: testInfo.outputPath('mapped-pedal-zone-live-race.png'),
     });
-    await page.waitForTimeout(7_000);
-    await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
-    await expect(page.locator('.start-tree-light')).toBeVisible();
     await expect.poll(async () => page.evaluate(() => {
       const debug = (window as typeof window & {
         __tracklabLiveDebug?: {
           raceState?: string;
+        };
+      }).__tracklabLiveDebug;
+      return debug?.raceState;
+    }), { timeout: 18_000 }).toBe('racing');
+    moving = true;
+    await expect.poll(async () => page.evaluate(() => {
+      const debug = (window as typeof window & {
+        __tracklabLiveDebug?: {
           players?: Array<{ riderDistanceMeters?: number | null }>;
         };
       }).__tracklabLiveDebug;
-      return debug?.raceState === 'racing' && (debug.players?.[0]?.riderDistanceMeters ?? 0) > 0.25;
-    }), { timeout: 18_000 }).toBe(true);
+      return debug?.players?.[0]?.riderDistanceMeters ?? 0;
+    }), { timeout: 3_000 }).toBeGreaterThan(0.25);
+    await expect(page.getByText(/False start/i)).toHaveCount(0);
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
+});
+
+test('live cadence detects a false start and automatically rearms after five seconds', async ({ page }, testInfo) => {
+  test.setTimeout(80_000);
+  const bridge = await createMockBikeBridge();
+  let moving = false;
+  const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample({
+    watts: moving ? 140 : 0,
+    cadence: moving ? 25 : 0,
+    speedKph: moving ? 3 : 0,
+  })), 120);
+  const authUser = {
+    id: 'false-start-live-racer',
+    profileKey: 'user:false-start-live-racer',
+    email: 'false-start-live@tracklab.test',
+    name: 'False Start Rider',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 1,
+      updatedAt: Date.now(),
+    },
+  };
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/public-track-mappings', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {
+            'black-mountain-bmx': mockNoPedalZoneMapping,
+          },
+          count: 1,
+        }),
+      });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ trackMappings: {}, customRoutes: [], bikeProfiles: [] }),
+      });
+    });
+    await page.route('**/api/ghosts*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ghosts: [] }),
+      });
+    });
+    await page.route('**/api/multiplayer/leaderboards*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+      });
+    });
+
+    await page.goto('/?track=black-mountain-bmx');
+    await page.getByRole('button', { name: 'Open App' }).click();
+    await expect(page.getByText(/1 connected bike/i).first()).toBeVisible({ timeout: 15_000 });
+
+    const startAction = page.locator('.workflow-step.primary-action');
+    await expect(startAction).toContainText('Start Live Race');
+    await startAction.click();
+    await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+    await expect(page.locator('.start-tree-light')).toBeVisible({ timeout: 20_000 });
+
+    moving = true;
+    const falseStart = page.locator('.race-staging-countdown').filter({ hasText: 'False start' });
+    await expect(falseStart).toBeVisible({ timeout: 5_000 });
+    await expect(falseStart.locator('strong')).toHaveText(/[1-5]/);
+    moving = false;
+
+    await page.screenshot({
+      fullPage: false,
+      path: testInfo.outputPath('live-false-start-reset.png'),
+    });
+
+    await expect(falseStart).toHaveCount(0, { timeout: 7_000 });
+    await expect(page.locator('.start-tree-light')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+    await expect.poll(async () => page.evaluate(() => {
+      const debug = (window as typeof window & {
+        __tracklabLiveDebug?: { raceState?: string };
+      }).__tracklabLiveDebug;
+      return debug?.raceState;
+    })).toBe('ready');
   } finally {
     clearInterval(sampleTimer);
     await bridge.close();
