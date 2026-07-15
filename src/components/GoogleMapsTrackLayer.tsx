@@ -45,6 +45,7 @@ import {
   routeWithSplitBranchSelections,
   splitSharedRouteSegments,
 } from '../lib/trackMapping';
+import { localRiderMarkerLabel } from '../lib/playerIdentity';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -132,6 +133,7 @@ const finishLabelOffsetMeters = 8;
 
 type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
+  setLabel: (label: string) => void;
   setPosition: (position: TrackPoint) => void;
   setRotation: (rotationDegrees: number) => void;
   setTitle: (title: string) => void;
@@ -603,7 +605,7 @@ function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: n
 function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
   return {
     anchor: new google.maps.Point(38, 40),
-    labelOrigin: new google.maps.Point(46, 13),
+    labelOrigin: new google.maps.Point(74, 13),
     scaledSize: new google.maps.Size(38, 43),
     url: riderIconByColor[player.colorName],
   };
@@ -684,14 +686,16 @@ function createRiderMapMarker(
   appearance: RiderMarkerAppearance = 'live',
 ): RiderMapMarker {
   let iconVersion = 0;
+  const markerLabel = (text: string) => ({
+    className: `track-rider-marker-label track-rider-marker-label-${appearance} track-rider-marker-label-p${player.id}`,
+    color: '#ffffff',
+    fontSize: '11px',
+    fontWeight: '900',
+    text,
+  });
   const marker = new google.maps.Marker({
     icon: baseRiderIcon(google, player),
-    label: {
-      color: '#ffffff',
-      fontSize: '12px',
-      fontWeight: '900',
-      text: labelText,
-    },
+    label: markerLabel(labelText),
     map,
     optimized: false,
     position,
@@ -710,7 +714,7 @@ function createRiderMapMarker(
 
         marker.setIcon({
           anchor: riderFrontTireAnchorPoint(google, nextRotation),
-          labelOrigin: new google.maps.Point(52, 15),
+          labelOrigin: new google.maps.Point(74, 15),
           scaledSize: new google.maps.Size(riderCanvasSize, riderCanvasSize),
           url,
         });
@@ -726,6 +730,7 @@ function createRiderMapMarker(
 
   return {
     setMap: (nextMap) => marker.setMap(nextMap),
+    setLabel: (nextLabel) => marker.setLabel?.(markerLabel(nextLabel)),
     setPosition: (nextPosition) => marker.setPosition(nextPosition),
     setRotation: applyRotation,
     setTitle: (nextTitle) => {
@@ -2090,6 +2095,7 @@ export function GoogleMapsTrackLayer({
 
       const rotation = riderScreenRotation(pose.bearing, earthHeading);
       const title = `${player.name} / ${label}`;
+      const markerLabel = localRiderMarkerLabel(player);
       const position = offsetRiderMapPosition(
         pose.position,
         pose.bearing,
@@ -2099,11 +2105,20 @@ export function GoogleMapsTrackLayer({
       if (existing) {
         existing.setPosition(position);
         existing.setRotation(rotation);
+        existing.setLabel(markerLabel);
         existing.setTitle(title);
         return;
       }
 
-      const marker = createRiderMapMarker(google, map, player, position, rotation, title);
+      const marker = createRiderMapMarker(
+        google,
+        map,
+        player,
+        position,
+        rotation,
+        title,
+        markerLabel,
+      );
       markerRefs.current.set(player.id, marker);
     });
   }, [earthHeading, players, riders, samplesByDevice, speedUnit, status, track]);
