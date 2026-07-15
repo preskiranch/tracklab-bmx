@@ -14,7 +14,9 @@ const airDragPerMeter = 0.0038;
 const stopVelocityMps = 0.04;
 const freewheelEngagementToleranceMps = 0.05;
 const minimumRaceDriveWatts = 10;
-const minimumRaceDriveCadenceRpm = 15;
+const minimumRaceDriveCadenceRpm = 1;
+const minimumRaceDriveSpeedKph = 1.609344;
+const initialLaunchResponseMps = 0.6;
 const maxBmxRaceVelocityMps = 13.4;
 const effectiveRiderBikeMassKg = 86;
 const drivetrainEfficiency = 0.88;
@@ -248,7 +250,9 @@ export function stepRiders(
       selectedBranch,
     );
     const driveAllowed = zoneAllowsDrive(activeZone, pedalZonesConfigured, rider.distance, firstPedalStartMeter);
-    const hasPedalingDrive = rawWatts > minimumRaceDriveWatts || rawCadence > minimumRaceDriveCadenceRpm;
+    const hasPedalingDrive = rawWatts >= minimumRaceDriveWatts
+      || rawCadence >= minimumRaceDriveCadenceRpm
+      || rawSpeedKph >= minimumRaceDriveSpeedKph;
     const watts = driveAllowed && hasPedalingDrive ? rawWatts : 0;
     const cadence = driveAllowed && hasPedalingDrive ? rawCadence : 0;
 
@@ -291,7 +295,7 @@ export function stepRiders(
     const demoLaunchAssist = driveEngaged && sample?.source === 'demo' && rider.thirtyFootTimeMs == null
       ? clamp(demoDistanceDeficit / 0.55, 0, 1)
       : 0;
-    const velocity = driveEngaged
+    const acceleratedVelocity = driveEngaged
       ? Math.min(
         targetDriveVelocity,
         coastVelocity + driveAccelerationMps2(
@@ -304,6 +308,9 @@ export function stepRiders(
         ) * dt,
       )
       : coastVelocity;
+    const velocity = driveEngaged && previousDistance <= 0.001 && coastVelocity <= 0.001
+      ? Math.max(acceleratedVelocity, Math.min(targetDriveVelocity, initialLaunchResponseMps))
+      : acceleratedVelocity;
     const baseSettledVelocity = velocity < stopVelocityMps && !driveEngaged ? 0 : velocity;
     let settledVelocity = baseSettledVelocity;
     let predictedDistance = previousDistance + settledVelocity * dt;

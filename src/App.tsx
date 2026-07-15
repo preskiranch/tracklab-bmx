@@ -25,7 +25,6 @@ import { MembershipLanding } from './components/MembershipLanding';
 import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
 import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
-import { RaceReviewPanel } from './components/RaceReviewPanel';
 import { SessionControlPanel } from './components/SessionControlPanel';
 import { StudioRaceEntry } from './components/StudioRaceEntry';
 import {
@@ -105,6 +104,13 @@ import {
 } from './lib/ghosts';
 import { readPublicTrackMappings } from './lib/publicTrackMappings';
 import { buildRaceZoneResults, raceSummaryWithCapturedMetrics } from './lib/raceReview';
+import {
+  countdownSeconds,
+  detectFalseStart,
+  falseStartResetCountdownMs,
+  raceFinishCountdownMs,
+  type FalseStartDetection,
+} from './lib/raceLifecycle';
 import {
   createRaceStagingSteps,
   raceStagingDurationMs,
@@ -1239,7 +1245,7 @@ function formatClock() {
 
 type StartGateStatus = {
   active: boolean;
-  phase: 'idle' | 'staging' | 'cadence' | 'go';
+  phase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
   label: string;
   detail: string;
   lightIndex: 0 | 1 | 2 | 3 | null;
@@ -1293,6 +1299,9 @@ export default function App() {
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
   const startGateSequenceIdRef = useRef(0);
+  const cadenceStartedAtRef = useRef(0);
+  const falseStartActiveRef = useRef(false);
+  const lastFinishToneSecondRef = useRef<number | null>(null);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
   const lastRaceDebugFrameAtRef = useRef(0);
   const activeRaceSessionIdRef = useRef<string | null>(null);
@@ -1312,7 +1321,6 @@ export default function App() {
   const customRoutePreviewRequestIdRef = useRef(0);
   const customRoutePreviewTrackIdRef = useRef<string | null>(null);
   const initialMembershipRef = useRef<MembershipState | null>(null);
-  const raceReviewSessionRef = useRef<string | null>(null);
   if (initialMembershipRef.current === null) {
     initialMembershipRef.current = readStoredMembership();
   }
@@ -1414,9 +1422,6 @@ export default function App() {
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
-  const [raceReviewVisible, setRaceReviewVisible] = useState(false);
-  const [raceReviewRemainingSeconds, setRaceReviewRemainingSeconds] = useState(20);
-  const [raceReviewPaused, setRaceReviewPaused] = useState(false);
   const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
   const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
@@ -2405,7 +2410,7 @@ export default function App() {
       return changed ? next : current;
     });
   }, [multiplayer.clientId, multiplayer.currentRoom?.flow, playMode, racePlayers]);
-  const { raceState, riders, raceSummary, startRace, resetRace } = useRaceEngine(
+  const { raceState, riders, raceSummary, finishWindowEndsAt, startRace, resetRace } = useRaceEngine(
     racePlayers,
     samplesByDevice,
     effectiveRouteLengthMeters,
@@ -2414,6 +2419,9 @@ export default function App() {
     raceZones,
   );
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
+  const finishCountdownSeconds = finishWindowEndsAt != null && raceState === 'racing'
+    ? Math.min(raceFinishCountdownMs / 1000, Math.max(1, countdownSeconds(finishWindowEndsAt, now)))
+    : null;
   const stagedRiders = useMemo(() => {
     if (!startGateStatus.active || raceState === 'racing') {
       return riders;
@@ -2431,15 +2439,35 @@ export default function App() {
     releaseBrowserFullscreen();
   }, []);
 
-  const clearStartGateSequence = useCallback(() => {
+  const cancelStartGateSequence = useCallback(() => {
     startGateSequenceIdRef.current += 1;
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     startGateTimeoutsRef.current = [];
     stopStartGateAudio();
+    cadenceStartedAtRef.current = 0;
+  }, []);
+
+  const clearStartGateSequence = useCallback(() => {
+    cancelStartGateSequence();
+    falseStartActiveRef.current = false;
     setStartGateStatus(idleStartGateStatus);
     setReactionStartAt(null);
     setReactionTimesByPlayer({});
-  }, []);
+  }, [cancelStartGateSequence]);
+
+  useEffect(() => {
+    if (finishCountdownSeconds == null) {
+      lastFinishToneSecondRef.current = null;
+      return;
+    }
+
+    if (lastFinishToneSecondRef.current === finishCountdownSeconds) {
+      return;
+    }
+
+    lastFinishToneSecondRef.current = finishCountdownSeconds;
+    playStartGateTone('tick');
+  }, [finishCountdownSeconds]);
 
   useEffect(() => {
     if (multiplayer.currentRoom?.flow.phase === 'race') {
@@ -2465,8 +2493,6 @@ export default function App() {
     selectedTrackIdRef.current = nextTrackId;
     clearStartGateSequence();
     setMappingFullscreen(false);
-    setRaceReviewVisible(false);
-    setRaceReviewPaused(false);
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     setLockedRacePlayers(null);
@@ -2674,6 +2700,35 @@ export default function App() {
             elapsedMs: at - current.createdAt,
             type,
             label,
+          },
+        ],
+      };
+    });
+  }, []);
+
+  const resetRaceCaptureForFalseStart = useCallback((detection: FalseStartDetection, at = Date.now()) => {
+    setRaceCapture((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        startedAt: null,
+        endedAt: null,
+        status: 'armed',
+        samples: [],
+        frames: [],
+        reactionTimesByPlayer: {},
+        summary: [],
+        zoneResults: [],
+        events: [
+          ...current.events,
+          {
+            at,
+            elapsedMs: at - current.createdAt,
+            type: 'false-start',
+            label: `False start: ${detection.playerName} reached ${(detection.speedKph / 1.609344).toFixed(1)} mph before gate drop`,
           },
         ],
       };
@@ -3434,64 +3489,6 @@ export default function App() {
       };
     });
   }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer]);
-
-  const hideRaceReview = useCallback(() => {
-    setRaceReviewVisible(false);
-    setRaceReviewPaused(false);
-  }, []);
-
-  const extendRaceReview = useCallback(() => {
-    setRaceReviewRemainingSeconds((seconds) => seconds + 20);
-  }, []);
-
-  const toggleRaceReviewPaused = useCallback(() => {
-    setRaceReviewPaused((paused) => !paused);
-  }, []);
-
-  useEffect(() => {
-    if (raceState !== 'finished') {
-      raceReviewSessionRef.current = null;
-      hideRaceReview();
-      return;
-    }
-
-    if (raceSummary.length === 0) {
-      return;
-    }
-
-    if (raceCapture && (raceCapture.status !== 'finished' || raceCapture.summary.length === 0)) {
-      return;
-    }
-
-    const reviewSessionId = raceCapture?.sessionId
-      ?? `${effectiveTrack.id}:${raceSummary.map((summary) => `${summary.playerId}-${summary.finishTimeMs ?? 'dnf'}`).join('|')}`;
-    if (raceReviewSessionRef.current === reviewSessionId) {
-      return;
-    }
-
-    raceReviewSessionRef.current = reviewSessionId;
-    setAppMode('race');
-    setRaceReviewRemainingSeconds(20);
-    setRaceReviewPaused(false);
-    setRaceReviewVisible(true);
-  }, [effectiveTrack.id, hideRaceReview, raceCapture, raceState, raceSummary]);
-
-  useEffect(() => {
-    if (!raceReviewVisible || raceReviewPaused) {
-      return undefined;
-    }
-
-    if (raceReviewRemainingSeconds <= 0) {
-      hideRaceReview();
-      return undefined;
-    }
-
-    const timerId = window.setTimeout(() => {
-      setRaceReviewRemainingSeconds((seconds) => Math.max(0, seconds - 1));
-    }, 1000);
-
-    return () => window.clearTimeout(timerId);
-  }, [hideRaceReview, raceReviewPaused, raceReviewRemainingSeconds, raceReviewVisible]);
 
   useEffect(() => {
     if (
@@ -4818,6 +4815,8 @@ export default function App() {
     }
 
     const gateDropAt = Date.now();
+    cadenceStartedAtRef.current = 0;
+    falseStartActiveRef.current = false;
     ghostRaceStartedAtRef.current = gateDropAt;
     ghostTraceRef.current = new Map();
     ghostTraceLastSampleAtRef.current = new Map();
@@ -4841,6 +4840,155 @@ export default function App() {
     startRace(gateDropAt);
     scheduleStartGateStep(420, () => setStartGateStatus(idleStartGateStatus));
   }, [appendRaceCaptureEvent, bridge, demoMode, scheduleStartGateStep, startRace]);
+
+  const startConfiguredCadence = useCallback(async (startingTrackId: string, sequenceId: number) => {
+    if (
+      sequenceId !== startGateSequenceIdRef.current
+      || selectedTrackIdRef.current !== startingTrackId
+    ) {
+      return;
+    }
+
+    setStartGateStatus({
+      active: true,
+      phase: 'cadence',
+      label: 'UCI CADENCE',
+      detail: 'Starting random cadence audio',
+      lightIndex: null,
+    });
+
+    const voiceStart = await playUciRandomStartVoice();
+    if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
+      return;
+    }
+
+    cadenceStartedAtRef.current = voiceStart.startedAt;
+    const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
+    const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
+    const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
+      const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
+      scheduleStartGateStep(Math.max(0, voiceOffsetMs - elapsedSinceVoiceStartMs), action, sequenceId);
+    };
+
+    setStartGateStatus({
+      active: true,
+      phase: 'cadence',
+      label: 'OK RIDERS',
+      detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback random start voice',
+      lightIndex: null,
+    });
+
+    scheduleVoiceStep(3300, () => {
+      setStartGateStatus({
+        active: true,
+        phase: 'cadence',
+        label: 'RIDERS READY',
+        detail: 'Watch the gate',
+        lightIndex: null,
+      });
+    });
+
+    scheduleVoiceStep(uciVoiceWatchGateOffsetMs, () => {
+      setStartGateStatus({
+        active: true,
+        phase: 'cadence',
+        label: 'RANDOM DELAY',
+        detail: 'Watch the gate',
+        lightIndex: null,
+      });
+    });
+
+    [0, 120, 240].forEach((offsetMs, index) => {
+      scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
+        if (index === 0) {
+          armReactionTimer();
+        }
+
+        const lightIndex = index as 0 | 1 | 2;
+        setStartGateStatus({
+          active: true,
+          phase: 'cadence',
+          label: startTreeLabels[lightIndex],
+          detail: 'UCI cadence',
+          lightIndex,
+        });
+        playStartGateTone('uci-red');
+      });
+    });
+
+    scheduleVoiceStep(firstToneAtMs + 360, () => {
+      playStartGateTone('uci-green');
+      beginRaceAtGateDrop(startingTrackId, sequenceId);
+    });
+  }, [armReactionTimer, beginRaceAtGateDrop, scheduleStartGateStep]);
+
+  const handleFalseStart = useCallback((detection: FalseStartDetection) => {
+    if (falseStartActiveRef.current || raceState === 'racing') {
+      return;
+    }
+
+    falseStartActiveRef.current = true;
+    const startingTrackId = selectedTrackIdRef.current;
+    cancelStartGateSequence();
+    const sequenceId = startGateSequenceIdRef.current;
+    resetRace();
+    resetRaceCaptureForFalseStart(detection);
+    setReactionStartAt(null);
+    setReactionTimesByPlayer({});
+    if (!demoMode) {
+      bridge.sendControlCommand('race-reset');
+    }
+
+    const totalSeconds = Math.ceil(falseStartResetCountdownMs / 1000);
+    const showCountdown = (secondsRemaining: number) => {
+      setStartGateStatus({
+        active: true,
+        phase: 'false-start',
+        label: String(secondsRemaining),
+        detail: `False start: ${detection.playerName}. Gate resets in ${secondsRemaining}`,
+        lightIndex: null,
+      });
+      playStartGateTone('tick');
+    };
+
+    showCountdown(totalSeconds);
+    for (let secondsRemaining = totalSeconds - 1; secondsRemaining >= 1; secondsRemaining -= 1) {
+      scheduleStartGateStep(
+        (totalSeconds - secondsRemaining) * 1000,
+        () => showCountdown(secondsRemaining),
+        sequenceId,
+      );
+    }
+
+    scheduleStartGateStep(falseStartResetCountdownMs, () => {
+      if (selectedTrackIdRef.current !== startingTrackId) {
+        return;
+      }
+
+      falseStartActiveRef.current = false;
+      if (!demoMode) {
+        bridge.sendControlCommand('race-arm');
+      }
+      void startConfiguredCadence(startingTrackId, sequenceId);
+    }, sequenceId);
+  }, [bridge, cancelStartGateSequence, demoMode, raceState, resetRace, resetRaceCaptureForFalseStart, scheduleStartGateStep, startConfiguredCadence]);
+
+  useEffect(() => {
+    if (
+      demoMode
+      || !startGateStatus.active
+      || startGateStatus.phase !== 'cadence'
+      || cadenceStartedAtRef.current <= 0
+      || falseStartActiveRef.current
+    ) {
+      return;
+    }
+
+    const detection = detectFalseStart(racePlayers, samplesByDevice, cadenceStartedAtRef.current);
+    if (detection) {
+      handleFalseStart(detection);
+    }
+  }, [demoMode, handleFalseStart, racePlayers, samplesByDevice, startGateStatus.active, startGateStatus.phase]);
 
   const handleDemoModeChange = (enabled: boolean, nextSource: BikeConnectionSource = enabled ? 'demo' : 'bluetooth') => {
     clearStartGateSequence();
@@ -5100,7 +5248,6 @@ export default function App() {
     clearStartGateSequence();
     setLockedRacePlayers(null);
     setMappingFullscreen(false);
-    hideRaceReview();
     if (!demoMode) {
       bridge.sendControlCommand('race-reset');
     }
@@ -5125,7 +5272,6 @@ export default function App() {
     clearStartGateSequence();
     setLockedRacePlayers(null);
     setMappingFullscreen(false);
-    hideRaceReview();
 
     if (!demoMode) {
       bridge.sendControlCommand('race-reset');
@@ -5290,7 +5436,6 @@ export default function App() {
     const sequenceId = startGateSequenceIdRef.current;
     setMappingMode(false);
     setMappingFullscreen(false);
-    hideRaceReview();
     setDemoSignalsStopped(false);
     createRaceCapture();
     requestBrowserFullscreen(raceShellRef.current);
@@ -5299,86 +5444,6 @@ export default function App() {
     }
 
     primeAudioCues();
-
-    const startConfiguredCadence = async () => {
-      if (
-        sequenceId !== startGateSequenceIdRef.current
-        || selectedTrackIdRef.current !== startingTrackId
-      ) {
-        return;
-      }
-
-      setStartGateStatus({
-        active: true,
-        phase: 'cadence',
-        label: 'UCI CADENCE',
-        detail: 'Starting random cadence audio',
-        lightIndex: null,
-      });
-
-      const voiceStart = await playUciRandomStartVoice();
-      if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
-        return;
-      }
-
-      const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
-      const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
-      const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
-        const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
-        scheduleStartGateStep(Math.max(0, voiceOffsetMs - elapsedSinceVoiceStartMs), action, sequenceId);
-      };
-
-      setStartGateStatus({
-        active: true,
-        phase: 'cadence',
-        label: 'OK RIDERS',
-        detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback random start voice',
-        lightIndex: null,
-      });
-
-      scheduleVoiceStep(3300, () => {
-        setStartGateStatus({
-          active: true,
-          phase: 'cadence',
-          label: 'RIDERS READY',
-          detail: 'Watch the gate',
-          lightIndex: null,
-        });
-      });
-
-      scheduleVoiceStep(uciVoiceWatchGateOffsetMs, () => {
-        setStartGateStatus({
-          active: true,
-          phase: 'cadence',
-          label: 'RANDOM DELAY',
-          detail: 'Watch the gate',
-          lightIndex: null,
-        });
-      });
-
-      [0, 120, 240].forEach((offsetMs, index) => {
-        scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
-          if (index === 0) {
-            armReactionTimer();
-          }
-
-          const lightIndex = index as 0 | 1 | 2;
-          setStartGateStatus({
-            active: true,
-            phase: 'cadence',
-            label: startTreeLabels[lightIndex],
-            detail: 'UCI cadence',
-            lightIndex,
-          });
-          playStartGateTone('uci-red');
-        });
-      });
-
-      scheduleVoiceStep(firstToneAtMs + 360, () => {
-        playStartGateTone('uci-green');
-        beginRaceAtGateDrop(startingTrackId, sequenceId);
-      });
-    };
 
     const stagingSteps = createRaceStagingSteps();
     setStartGateStatus({
@@ -5402,7 +5467,7 @@ export default function App() {
     });
 
     scheduleStartGateStep(raceStagingDurationMs(), () => {
-      void startConfiguredCadence();
+      void startConfiguredCadence(startingTrackId, sequenceId);
     }, sequenceId);
   };
 
@@ -5724,7 +5789,7 @@ export default function App() {
 
   return (
     <div
-      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${raceReviewVisible ? ' race-review-mode' : ''}`}
+      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}`}
       ref={raceShellRef}
     >
       <aside className="sidebar">
@@ -6080,77 +6145,7 @@ export default function App() {
           </div>
         </header>
 
-        {raceReviewVisible ? (
-          <section className="race-review-screen">
-            <div className="race-review-map">
-              <EarthTrackView
-                track={effectiveTrack}
-                riders={stagedRiders}
-                ghostRiders={selectedGhostRiders}
-                remoteRaceStates={remoteRaceStates}
-                players={racePlayers}
-                samplesByDevice={samplesByDevice}
-                speedUnit={speedUnit}
-                distanceUnit={distanceUnit}
-                raceState={raceState}
-                raceViewFullscreen={false}
-                startGateActive={false}
-                startGatePhase="idle"
-                startGateLabel=""
-                startGateDetail=""
-                startGateLightIndex={null}
-                reactionTimesByPlayer={reactionTimesByPlayer}
-                earthAngle={earthAngle}
-                earthHeading={earthHeading}
-                earthCenter={earthCenter}
-                earthZoom={earthZoom}
-                activeZones={activeZones}
-                canCancelRace={false}
-                mappingMode={false}
-                mappingFullscreen={false}
-                mappingEditMode={mappingEditMode}
-                mappingRouteVariantId={mappingRouteVariantId}
-                draftPoints={draftPoints}
-                draftZoneRoutePoints={draftZoneRidePoints}
-                draftZoneMeters={draftZoneMeters}
-                draftZonePoints={draftZonePoints}
-                draftReferenceZones={draftReferenceZones}
-                draftSplitSections={draftSplitSections}
-                draftRouteSplitSections={draftRouteSplitSections}
-                draftSplitBuilder={draftSplitBuilder}
-                onEarthCameraChange={handleEarthCameraChange}
-                onEarthAngleChange={handleEarthAngleChange}
-                onEarthHeadingChange={handleEarthHeadingChange}
-                onCancelRace={handleCancel}
-                onMappingFullscreenChange={handleMappingFullscreenChange}
-                onMappingPathPointAdd={handleMappingPathPointAdd}
-                onMappingPathPointMove={handleMappingPathPointMove}
-                onMappingPathPointRemove={handleMappingPathPointRemove}
-                onMappingZonePointAdd={handleMappingZonePointAdd}
-                onMappingZonePointMove={handleMappingZonePointMove}
-                onMappingZonePointRemove={handleMappingZonePointRemove}
-                onMappingSplitPointAdd={handleMappingSplitPointAdd}
-                onMappingSplitDrawEnd={handleMappingSplitDrawEnd}
-              />
-            </div>
-
-            <RaceReviewPanel
-              track={effectiveTrack}
-              players={racePlayers}
-              raceSummary={raceSummary}
-              raceCapture={raceCapture}
-              activeZones={activeZones}
-              reactionTimesByPlayer={reactionTimesByPlayer}
-              speedUnit={speedUnit}
-              distanceUnit={distanceUnit}
-              remainingSeconds={raceReviewRemainingSeconds}
-              paused={raceReviewPaused}
-              onExtend={extendRaceReview}
-              onPauseToggle={toggleRaceReviewPaused}
-              onReturnToDashboard={hideRaceReview}
-            />
-          </section>
-        ) : appMode === 'monitor' ? (
+        {appMode === 'monitor' ? (
           <MonitorView
             players={activePlayers}
             samplesByDevice={samplesByDevice}
@@ -6226,6 +6221,7 @@ export default function App() {
                   startGateLabel={startGateStatus.label}
                   startGateDetail={startGateStatus.detail}
                   startGateLightIndex={startGateStatus.lightIndex}
+                  finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
                   earthAngle={earthAngle}
                   earthHeading={earthHeading}

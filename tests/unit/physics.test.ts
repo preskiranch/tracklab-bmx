@@ -58,6 +58,51 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBe(0);
   });
 
+  it('does not reuse a moving sample captured before the gate drop', () => {
+    const riders = createInitialRiders([player]);
+    const rider = stepRiders(
+      riders,
+      [player],
+      new Map([[58701, sample(9_999)]]),
+      0.1,
+      10_000,
+      400,
+      {},
+      [],
+      [],
+      10_000,
+    )[0];
+
+    expect(rider.driveSource).toBe('coast');
+    expect(rider.distance).toBe(0);
+  });
+
+  it('moves on the first low but valid post-gate drive packet', () => {
+    const riders = createInitialRiders([player]);
+    const launchSample = {
+      ...sample(10_000),
+      watts: 20,
+      cadence: 0,
+      speedKph: null,
+    };
+    const rider = stepRiders(
+      riders,
+      [player],
+      new Map([[58701, launchSample]]),
+      0.1,
+      10_000,
+      400,
+      {},
+      [],
+      [],
+      10_000,
+    )[0];
+
+    expect(rider.driveAllowed).toBe(true);
+    expect(rider.velocity).toBeGreaterThan(0);
+    expect(rider.distance).toBeGreaterThan(0);
+  });
+
   it('blocks drive outside configured pedal zones after the first zone', () => {
     const zones: TrackZone[] = [{
       id: 'pedal-1',

@@ -52,10 +52,11 @@ type EarthTrackViewProps = {
   raceState: RaceState;
   raceViewFullscreen: boolean;
   startGateActive: boolean;
-  startGatePhase: 'idle' | 'staging' | 'cadence' | 'go';
+  startGatePhase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
   startGateLabel: string;
   startGateDetail: string;
   startGateLightIndex: 0 | 1 | 2 | 3 | null;
+  finishCountdownSeconds: number | null;
   reactionTimesByPlayer: ReactionTimesByPlayer;
   earthAngle: number;
   earthHeading: number;
@@ -136,6 +137,7 @@ export function EarthTrackView({
   startGateLabel,
   startGateDetail,
   startGateLightIndex,
+  finishCountdownSeconds,
   reactionTimesByPlayer,
   earthAngle,
   earthHeading,
@@ -306,15 +308,22 @@ export function EarthTrackView({
           <span>{activeZones.length} pedal zone{activeZones.length === 1 ? '' : 's'}</span>
         </div>
 
-        {raceViewFullscreen && startGateActive && startGatePhase === 'staging' && (
+        {raceViewFullscreen && startGateActive && (startGatePhase === 'staging' || startGatePhase === 'false-start') && (
           <div className="race-staging-countdown" role="status" aria-live="polite">
             <strong>{startGateLabel}</strong>
             <span>{startGateDetail}</span>
           </div>
         )}
 
-        {raceViewFullscreen && startGateActive && startGatePhase !== 'staging' && (
+        {raceViewFullscreen && startGateActive && (startGatePhase === 'cadence' || startGatePhase === 'go') && (
           <StartTreeLight activeIndex={startGateLightIndex} />
+        )}
+
+        {raceViewFullscreen && finishCountdownSeconds != null && (
+          <div className="race-staging-countdown race-finish-countdown" role="status" aria-live="polite">
+            <strong>{finishCountdownSeconds}</strong>
+            <span>Race closes after the first finisher</span>
+          </div>
         )}
 
         {showMappingUi && (

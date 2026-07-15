@@ -447,7 +447,7 @@ export type RaceCaptureFrame = {
 export type RaceCaptureEvent = {
   at: number;
   elapsedMs: number;
-  type: 'race-arm' | 'race-start' | 'race-finish' | 'race-reset' | 'race-cancel';
+  type: 'race-arm' | 'race-start' | 'race-finish' | 'race-reset' | 'race-cancel' | 'false-start';
   label: string;
 };
 
