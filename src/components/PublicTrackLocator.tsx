@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Apple, ExternalLink, Globe2, MapPin, Navigation, Search } from 'lucide-react';
+import { Apple, ExternalLink, Globe2, MapPin, Navigation, Search, Users } from 'lucide-react';
 import {
   trackAppleMapsUrl,
   trackGoogleMapsUrl,
@@ -16,6 +16,19 @@ type PublicTrackLocatorProps = {
 const allCountries = 'All countries';
 const allRegions = 'All states / regions';
 const maximumVisibleResults = 24;
+
+function isFacebookUrl(value?: string) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === 'facebook.com' || hostname.endsWith('.facebook.com');
+  } catch {
+    return false;
+  }
+}
 
 function trackLocation(track: TrackLocatorRecord) {
   return [track.city, track.state, track.country].filter(Boolean).join(', ');
@@ -109,6 +122,11 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
     ?? (filteredTracks.length > 0
       ? filteredTracks[0]
       : sortedTracks.find((track) => track.id === selectedTrackId) ?? sortedTracks[0] ?? null);
+  const selectedWebsiteUrl = selectedTrack?.websiteUrl && !isFacebookUrl(selectedTrack.websiteUrl)
+    ? selectedTrack.websiteUrl
+    : undefined;
+  const selectedFacebookUrl = selectedTrack?.facebookUrl
+    ?? (isFacebookUrl(selectedTrack?.websiteUrl) ? selectedTrack?.websiteUrl : undefined);
 
   useEffect(() => {
     if (!directoryReady || !selectedTrack || selectedTrack.id === selectedTrackId) {
@@ -214,10 +232,15 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                     <p>{selectedTrack.address ?? trackLocation(selectedTrack)}</p>
                     <small>Listed by {selectedTrack.source}</small>
                   </div>
-                  <div className="public-track-actions" aria-label={`Map links for ${selectedTrack.name}`}>
-                    {selectedTrack.websiteUrl && (
-                      <a href={selectedTrack.websiteUrl} target="_blank" rel="noreferrer">
-                        <Globe2 size={16} /> Track Website
+                  <div className="public-track-actions" aria-label={`Track links for ${selectedTrack.name}`}>
+                    {selectedWebsiteUrl && (
+                      <a href={selectedWebsiteUrl} target="_blank" rel="noreferrer">
+                        <Globe2 size={16} /> Official Website
+                      </a>
+                    )}
+                    {selectedFacebookUrl && (
+                      <a href={selectedFacebookUrl} target="_blank" rel="noreferrer">
+                        <Users size={16} /> Facebook
                       </a>
                     )}
                     <a href={trackAppleMapsUrl(selectedTrack)} target="_blank" rel="noreferrer">

@@ -77,6 +77,39 @@ function fallbackGeometry(track) {
   return { outline, centerline };
 }
 
+function normalizeHttpUrl(value) {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = String(value).trim();
+  const candidate = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : /^(?:www\.)?facebook\.com\//i.test(trimmed)
+      ? `https://${trimmed}`
+      : undefined;
+  if (!candidate) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isFacebookUrl(value) {
+  const normalized = normalizeHttpUrl(value);
+  if (!normalized) {
+    return false;
+  }
+
+  const hostname = new URL(normalized).hostname.toLowerCase();
+  return hostname === 'facebook.com' || hostname.endsWith('.facebook.com');
+}
+
 function normalizeTrack(track) {
   const lengthMeters = Number(track.lengthMeters ?? 350);
   const id = track.id || slug(`${track.country || 'unknown'}-${track.state || 'track'}-${track.name}`);
@@ -86,6 +119,11 @@ function normalizeTrack(track) {
   const locatorPoint = track.startGate ?? centerline[0] ?? outline[0];
   const latitude = Number.isFinite(Number(track.latitude)) ? Number(track.latitude) : Number(locatorPoint?.lat);
   const longitude = Number.isFinite(Number(track.longitude)) ? Number(track.longitude) : Number(locatorPoint?.lng);
+  const normalizedWebsiteUrl = normalizeHttpUrl(track.websiteUrl);
+  const normalizedFacebookUrl = normalizeHttpUrl(track.facebookUrl);
+  const websiteUrl = isFacebookUrl(normalizedWebsiteUrl) ? undefined : normalizedWebsiteUrl;
+  const facebookUrl = normalizedFacebookUrl
+    ?? (isFacebookUrl(normalizedWebsiteUrl) ? normalizedWebsiteUrl : undefined);
 
   return {
     id,
@@ -111,8 +149,8 @@ function normalizeTrack(track) {
     longitude: Number.isFinite(longitude) ? longitude : undefined,
     coordinateSource: track.coordinateSource,
     coordinateAccuracy: track.coordinateAccuracy,
-    websiteUrl: track.websiteUrl,
-    facebookUrl: track.facebookUrl,
+    websiteUrl,
+    facebookUrl,
     instagramUrl: track.instagramUrl,
     lengthMeters,
     elevationMeters: Number(track.elevationMeters ?? 0),
@@ -414,6 +452,7 @@ const locatorFields = [
   'latitude',
   'longitude',
   'websiteUrl',
+  'facebookUrl',
 ];
 const locatorDatabase = {
   generatedAt,

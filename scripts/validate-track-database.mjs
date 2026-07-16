@@ -53,6 +53,9 @@ for (const track of tracks) {
   if (track.websiteUrl && !isHttpUrl(track.websiteUrl)) {
     errors.push(`${label}: invalid websiteUrl`);
   }
+  if (track.facebookUrl && !isHttpUrl(track.facebookUrl)) {
+    errors.push(`${label}: invalid facebookUrl`);
+  }
   if (track.providerId && !providers.has(track.providerId)) {
     errors.push(`${label}: unknown providerId ${track.providerId}`);
   }
@@ -98,6 +101,9 @@ for (const track of locatorTracks) {
   }
   if (track.websiteUrl && !isHttpUrl(track.websiteUrl)) {
     errors.push(`${label}: public locator has invalid websiteUrl`);
+  }
+  if (track.facebookUrl && !isHttpUrl(track.facebookUrl)) {
+    errors.push(`${label}: public locator has invalid facebookUrl`);
   }
 }
 

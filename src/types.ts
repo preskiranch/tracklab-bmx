@@ -696,4 +696,5 @@ export type TrackLocatorRecord = Pick<TrackRecord,
   | 'latitude'
   | 'longitude'
   | 'websiteUrl'
+  | 'facebookUrl'
 >;
