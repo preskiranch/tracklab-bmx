@@ -229,7 +229,7 @@ test('public landing page exposes the global track locator without an account', 
   expect(locatorToolHeight).toBeLessThanOrEqual(680);
   await expect(locator.getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Apple Maps' })).toHaveAttribute('href', /maps\.apple\.com/);
-  await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir/);
+  await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/search/);
   await expect(locator.getByRole('link', { name: 'Open Earth' })).toHaveAttribute('href', /earth\.google\.com/);
   await expect(locator.getByText('Needs manual mapping')).toHaveCount(0);
 

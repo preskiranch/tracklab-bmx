@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Apple, ExternalLink, Globe2, MapPin, Navigation, Search } from 'lucide-react';
 import {
-  trackAppleDirectionsUrl,
-  trackGoogleDirectionsUrl,
+  trackAppleMapsUrl,
+  trackGoogleMapsUrl,
   trackGoogleEarthUrl,
 } from '../lib/mapLinks';
 import type { TrackLocatorRecord, TrackRecord } from '../types';
@@ -144,7 +144,7 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
           <div>
             <span className="eyebrow"><Globe2 size={14} /> Global BMX directory</span>
             <h2 id="public-track-locator-title">Find a BMX racing track</h2>
-            <p>Search verified federation directories and community track records, then inspect the location or open driving directions.</p>
+            <p>Search verified federation directories and community track records, then inspect each track in your preferred mapping app.</p>
           </div>
           <strong>{directoryReady ? `${directoryTracks.length.toLocaleString()} tracks` : 'Loading directory'}</strong>
         </header>
@@ -220,10 +220,10 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                         <Globe2 size={16} /> Track Website
                       </a>
                     )}
-                    <a href={trackAppleDirectionsUrl(selectedTrack)} target="_blank" rel="noreferrer">
+                    <a href={trackAppleMapsUrl(selectedTrack)} target="_blank" rel="noreferrer">
                       <Apple size={16} /> Apple Maps
                     </a>
-                    <a href={trackGoogleDirectionsUrl(selectedTrack)} target="_blank" rel="noreferrer">
+                    <a href={trackGoogleMapsUrl(selectedTrack)} target="_blank" rel="noreferrer">
                       <Navigation size={16} /> Google Maps
                     </a>
                     <a href={trackGoogleEarthUrl(selectedTrack)} target="_blank" rel="noreferrer">
