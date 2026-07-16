@@ -238,7 +238,7 @@ test('public landing page exposes the global track locator without an account', 
   await expect(websiteTrack).toBeVisible();
   await websiteTrack.click();
   await expect(locator.getByRole('heading', { name: 'ADF Cycling Club' })).toBeVisible();
-  await expect(locator.getByRole('link', { name: 'Track Website' })).toHaveAttribute('href', 'https://www.adfcc.asn.au/');
+  await expect(locator.getByRole('link', { name: 'Official Website' })).toHaveAttribute('href', 'https://www.adfcc.asn.au/');
   await expect(page).toHaveURL(/locator=auscycling-adf-cycling-club/);
 
   await page.screenshot({
@@ -248,13 +248,22 @@ test('public landing page exposes the global track locator without an account', 
 
   await page.setViewportSize({ width: 390, height: 844 });
   await locator.scrollIntoViewIfNeeded();
-  await expect(locator.getByRole('link', { name: 'Track Website' })).toBeVisible();
+  await expect(locator.getByRole('link', { name: 'Official Website' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Apple Maps' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Google Maps' })).toBeVisible();
   await page.screenshot({
     fullPage: false,
     path: testInfo.outputPath('public-track-locator-mobile.png'),
   });
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await locator.getByLabel('Search tracks').fill('Air Time BMX');
+  await locator.getByRole('button', { name: /Air Time BMX/ }).click();
+  await expect(locator.getByRole('link', { name: 'Facebook' })).toHaveAttribute(
+    'href',
+    'https://www.facebook.com/airtimebmx.reedley/',
+  );
+  await expect(locator.getByRole('link', { name: 'Official Website' })).toHaveCount(0);
 });
 
 test('first-run profile flow opens the TrackLab dashboard', async ({ page }, testInfo) => {
