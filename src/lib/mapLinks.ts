@@ -14,18 +14,17 @@ function coordinatePair(track: MapLinkTrack) {
   return `${center.lat},${center.lng}`;
 }
 
-export function trackGoogleDirectionsUrl(track: MapLinkTrack) {
-  const url = new URL('https://www.google.com/maps/dir/');
+export function trackGoogleMapsUrl(track: MapLinkTrack) {
+  const url = new URL('https://www.google.com/maps/search/');
   url.searchParams.set('api', '1');
-  url.searchParams.set('destination', coordinatePair(track));
-  url.searchParams.set('travelmode', 'driving');
+  url.searchParams.set('query', coordinatePair(track));
   return url.toString();
 }
 
-export function trackAppleDirectionsUrl(track: MapLinkTrack) {
+export function trackAppleMapsUrl(track: MapLinkTrack) {
   const url = new URL('https://maps.apple.com/');
-  url.searchParams.set('daddr', coordinatePair(track));
-  url.searchParams.set('dirflg', 'd');
+  url.searchParams.set('ll', coordinatePair(track));
+  url.searchParams.set('q', track.name);
   return url.toString();
 }
 
