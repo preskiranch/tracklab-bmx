@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import {
   Box,
   ChevronDown,
@@ -176,9 +176,9 @@ export function EarthTrackView({
   const [imageryMode, setImageryMode] = useState<'satellite' | '3d'>('satellite');
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const googleEarthUrl = trackGoogleEarthUrl(track);
-  const threeDAllowed = googleMapsConfigured && !mappingMode && !raceViewFullscreen && raceState !== 'racing';
+  const threeDAllowed = googleMapsConfigured;
   const showing3D = imageryMode === '3d' && threeDAllowed;
-  const imageryLabel = showing3D ? 'Photorealistic 3D preview' : 'Google Earth view';
+  const imageryLabel = showing3D ? 'Photorealistic 3D' : 'Google Earth view';
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'
     : 'Needs manual mapping';
@@ -195,12 +195,6 @@ export function EarthTrackView({
   const mapRiders = mappingMode ? [] : riders;
   const mapGhostRiders = mappingMode ? [] : ghostRiders;
   const mapRemoteRaceStates = mappingMode ? [] : remoteRaceStates;
-
-  useEffect(() => {
-    if (!threeDAllowed && imageryMode === '3d') {
-      setImageryMode('satellite');
-    }
-  }, [imageryMode, threeDAllowed]);
 
   return (
     <section className="earth-panel">
@@ -234,10 +228,10 @@ export function EarthTrackView({
               onClick={() => setImageryMode('3d')}
               aria-pressed={showing3D}
               disabled={!threeDAllowed}
-              title={threeDAllowed ? 'Open photorealistic 3D preview' : '3D preview is available outside editing and active races'}
+              title="Open photorealistic 3D mode"
             >
               <Box size={14} />
-              3D preview
+              3D
             </button>
           </div>
           <a href={googleEarthUrl} target="_blank" rel="noreferrer">
@@ -252,9 +246,38 @@ export function EarthTrackView({
             <GoogleMaps3DTrackLayer
               track={track}
               activeZones={activeZones}
+              riders={mapRiders}
+              ghostRiders={mapGhostRiders}
+              remoteRaceStates={mapRemoteRaceStates}
+              players={players}
+              samplesByDevice={samplesByDevice}
+              speedUnit={speedUnit}
+              raceViewFullscreen={raceViewFullscreen}
+              raceState={raceState}
               earthAngle={earthAngle}
               earthHeading={earthHeading}
+              earthCenter={earthCenter}
+              earthZoom={earthZoom}
+              mappingMode={mappingMode}
+              mappingEditMode={mappingEditMode}
+              mappingRouteVariantId={mappingRouteVariantId}
+              draftPoints={draftPoints}
+              draftZoneRoutePoints={draftZoneRoutePoints}
+              draftZoneMeters={draftZoneMeters}
+              draftZonePoints={draftZonePoints}
+              draftReferenceZones={draftReferenceZones}
+              draftSplitSections={draftSplitSections}
+              draftRouteSplitSections={draftRouteSplitSections}
+              draftSplitBuilder={draftSplitBuilder}
               onEarthCameraChange={onEarthCameraChange}
+              onMappingPathPointAdd={onMappingPathPointAdd}
+              onMappingPathPointMove={onMappingPathPointMove}
+              onMappingPathPointRemove={onMappingPathPointRemove}
+              onMappingZonePointAdd={onMappingZonePointAdd}
+              onMappingZonePointMove={onMappingZonePointMove}
+              onMappingZonePointRemove={onMappingZonePointRemove}
+              onMappingSplitPointAdd={onMappingSplitPointAdd}
+              onMappingSplitDrawEnd={onMappingSplitDrawEnd}
               onUseSatellite={() => setImageryMode('satellite')}
             />
           ) : (
