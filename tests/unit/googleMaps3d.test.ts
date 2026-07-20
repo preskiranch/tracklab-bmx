@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { elevatedPath, previewRangeMeters } from '../../src/lib/googleMaps3d';
+import {
+  elevatedPath,
+  isGoogleMaps3DSteadyEvent,
+  previewRangeMeters,
+} from '../../src/lib/googleMaps3d';
 
 describe('Google Maps 3D preview helpers', () => {
   const center = { lat: 38.2702, lng: -122.2835 };
@@ -15,5 +19,11 @@ describe('Google Maps 3D preview helpers', () => {
 
   it('adds a small terrain-relative altitude without changing coordinates', () => {
     expect(elevatedPath([center], 1.5)).toEqual([{ ...center, altitude: 1.5 }]);
+  });
+
+  it('recognizes the current Google steady-change event contract', () => {
+    expect(isGoogleMaps3DSteadyEvent(Object.assign(new Event('gmp-steadychange'), { isSteady: true }))).toBe(true);
+    expect(isGoogleMaps3DSteadyEvent(Object.assign(new Event('gmp-steadychange'), { isSteady: false }))).toBe(false);
+    expect(isGoogleMaps3DSteadyEvent(new Event('gmp-steadychange'))).toBe(false);
   });
 });

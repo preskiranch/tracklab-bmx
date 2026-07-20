@@ -199,7 +199,6 @@ export type GoogleMap3DElement = HTMLElement & {
   heading?: number;
   mode?: string;
   range?: number;
-  steady?: boolean;
   tilt?: number;
 };
 
@@ -244,8 +243,11 @@ export type PlacePredictionOption = {
 declare global {
   interface Window {
     google?: GoogleMapsRuntime;
+    gm_authFailure?: () => void;
+    __trackLabGoogleMapsAuthHandlerInstalled?: boolean;
+    __trackLabGoogleMapsBootstrapPromise?: Promise<GoogleMapsRuntime>;
+    __trackLabGoogleMapsBootstrapLoaded?: () => void;
     __trackLabGoogleMapsPromise?: Promise<GoogleMapsRuntime>;
-    __trackLabGoogleMapsLoaded?: () => void;
   }
 }
 
@@ -320,21 +322,13 @@ async function hydrateGoogleMapsRuntime(google: GoogleMapsRuntime) {
   return google;
 }
 
-export function loadGoogleMaps() {
-  if (window.google?.maps?.Map) {
+function bootstrapGoogleMapsRuntime() {
+  if (window.google?.maps?.importLibrary) {
     return Promise.resolve(window.google);
   }
 
-  if (window.google?.maps?.importLibrary) {
-    window.__trackLabGoogleMapsPromise = hydrateGoogleMapsRuntime(window.google).catch((error) => {
-      delete window.__trackLabGoogleMapsPromise;
-      throw error;
-    });
-    return window.__trackLabGoogleMapsPromise;
-  }
-
-  if (window.__trackLabGoogleMapsPromise) {
-    return window.__trackLabGoogleMapsPromise;
+  if (window.__trackLabGoogleMapsBootstrapPromise) {
+    return window.__trackLabGoogleMapsBootstrapPromise;
   }
 
   const apiKey = getGoogleMapsApiKey();
@@ -342,41 +336,42 @@ export function loadGoogleMaps() {
     return Promise.reject(new Error('Google Maps API key is not configured.'));
   }
 
-  window.__trackLabGoogleMapsPromise = new Promise((resolve, reject) => {
+  window.__trackLabGoogleMapsBootstrapPromise = new Promise((resolve, reject) => {
+    if (!window.__trackLabGoogleMapsAuthHandlerInstalled) {
+      const existingAuthFailureHandler = window.gm_authFailure;
+      window.gm_authFailure = () => {
+        existingAuthFailureHandler?.();
+        window.dispatchEvent(new Event('tracklab-google-maps-auth-failure'));
+      };
+      window.__trackLabGoogleMapsAuthHandlerInstalled = true;
+    }
+
     const cleanup = () => {
-      delete window.__trackLabGoogleMapsLoaded;
+      delete window.__trackLabGoogleMapsBootstrapLoaded;
     };
 
     const rejectWithCleanup = (error: Error) => {
       cleanup();
-      delete window.__trackLabGoogleMapsPromise;
+      delete window.__trackLabGoogleMapsBootstrapPromise;
       reject(error);
     };
 
-    const resolveRuntime = async () => {
+    const resolveRuntime = () => {
       if (!window.google?.maps) {
         rejectWithCleanup(new Error('Google Maps loaded without the maps runtime.'));
         return;
       }
 
-      try {
-        await hydrateGoogleMapsRuntime(window.google);
-        cleanup();
-        resolve(window.google);
-      } catch (error) {
-        rejectWithCleanup(error instanceof Error ? error : new Error('Google Maps failed to initialize.'));
-      }
+      cleanup();
+      resolve(window.google);
     };
 
-    window.__trackLabGoogleMapsLoaded = () => {
-      resolveRuntime().catch((error: Error) => rejectWithCleanup(error));
-    };
+    window.__trackLabGoogleMapsBootstrapLoaded = resolveRuntime;
 
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?${new URLSearchParams({
       key: apiKey,
-      libraries: 'geometry,places',
-      callback: '__trackLabGoogleMapsLoaded',
+      callback: '__trackLabGoogleMapsBootstrapLoaded',
       loading: 'async',
       v: 'weekly',
     }).toString()}`;
@@ -386,11 +381,32 @@ export function loadGoogleMaps() {
     document.head.appendChild(script);
   });
 
+  return window.__trackLabGoogleMapsBootstrapPromise;
+}
+
+export function loadGoogleMaps() {
+  if (window.google?.maps?.Map) {
+    return Promise.resolve(window.google);
+  }
+
+  if (window.__trackLabGoogleMapsPromise) {
+    return window.__trackLabGoogleMapsPromise;
+  }
+
+  window.__trackLabGoogleMapsPromise = bootstrapGoogleMapsRuntime()
+    .then(hydrateGoogleMapsRuntime)
+    .catch((error) => {
+      delete window.__trackLabGoogleMapsPromise;
+      throw error;
+    });
+
   return window.__trackLabGoogleMapsPromise;
 }
 
 export async function loadGoogleMaps3DLibrary(): Promise<GoogleMaps3DLibrary> {
-  const google = await loadGoogleMaps();
+  // 3D scenes only need the maps3d library. Keeping this independent from
+  // Places/geocoding prevents an unrelated API restriction from blocking 3D.
+  const google = await bootstrapGoogleMapsRuntime();
   if (!google.maps.importLibrary) {
     throw new Error('Google 3D Maps requires a current Maps JavaScript runtime.');
   }

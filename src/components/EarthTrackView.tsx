@@ -173,8 +173,10 @@ export function EarthTrackView({
   onMappingSplitPointAdd,
   onMappingSplitDrawEnd,
 }: EarthTrackViewProps) {
-  const [imageryMode, setImageryMode] = useState<'satellite' | '3d'>('satellite');
   const googleMapsConfigured = hasGoogleMapsApiKey();
+  const [imageryMode, setImageryMode] = useState<'satellite' | '3d'>(
+    googleMapsConfigured ? '3d' : 'satellite',
+  );
   const googleEarthUrl = trackGoogleEarthUrl(track);
   const threeDAllowed = googleMapsConfigured;
   const showing3D = imageryMode === '3d' && threeDAllowed;
