@@ -2366,6 +2366,43 @@ input:focus {
   text-decoration: none;
 }
 
+.earth-imagery-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, auto));
+  gap: 3px;
+  min-height: 30px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f5f7f9;
+}
+
+.earth-imagery-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #536270;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.earth-imagery-switch button.active {
+  background: #111827;
+  color: #ffffff;
+}
+
+.earth-imagery-switch button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .earth-stage {
   position: relative;
   min-height: 530px;
@@ -2381,6 +2418,18 @@ input:focus {
 .google-map-layer {
   position: absolute;
   inset: 0;
+}
+
+.google-map-3d-shell {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #182222;
+}
+
+.google-map-3d-layer {
+  min-width: 100%;
+  min-height: 100%;
 }
 
 .google-map-caption {
@@ -2456,6 +2505,21 @@ input:focus {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.google-map-status button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid #111827;
+  border-radius: 6px;
+  background: #111827;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .google-key-required {

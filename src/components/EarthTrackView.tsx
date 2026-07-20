@@ -1,5 +1,6 @@
-import type { CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import {
+  Box,
   ChevronDown,
   ChevronUp,
   Compass,
@@ -16,6 +17,7 @@ import {
   Signal,
   X,
 } from 'lucide-react';
+import { GoogleMaps3DTrackLayer } from './GoogleMaps3DTrackLayer';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { hasGoogleMapsApiKey } from '../lib/googleMaps';
 import { trackGoogleEarthUrl } from '../lib/mapLinks';
@@ -171,9 +173,12 @@ export function EarthTrackView({
   onMappingSplitPointAdd,
   onMappingSplitDrawEnd,
 }: EarthTrackViewProps) {
+  const [imageryMode, setImageryMode] = useState<'satellite' | '3d'>('satellite');
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const googleEarthUrl = trackGoogleEarthUrl(track);
-  const imageryLabel = 'Google Earth view';
+  const threeDAllowed = googleMapsConfigured && !mappingMode && !raceViewFullscreen && raceState !== 'racing';
+  const showing3D = imageryMode === '3d' && threeDAllowed;
+  const imageryLabel = showing3D ? 'Photorealistic 3D preview' : 'Google Earth view';
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'
     : 'Needs manual mapping';
@@ -191,6 +196,12 @@ export function EarthTrackView({
   const mapGhostRiders = mappingMode ? [] : ghostRiders;
   const mapRemoteRaceStates = mappingMode ? [] : remoteRaceStates;
 
+  useEffect(() => {
+    if (!threeDAllowed && imageryMode === '3d') {
+      setImageryMode('satellite');
+    }
+  }, [imageryMode, threeDAllowed]);
+
   return (
     <section className="earth-panel">
       <div className="earth-header">
@@ -207,6 +218,28 @@ export function EarthTrackView({
           <span title="Catalog source confidence"><ShieldCheck size={15} /> {verificationLabel}</span>
           <span><MapIcon size={15} /> {track.elevationMeters} m elevation</span>
           <span><Flag size={15} /> {routeStatusLabel}</span>
+          <div className="earth-imagery-switch" aria-label="Map imagery">
+            <button
+              className={showing3D ? '' : 'active'}
+              type="button"
+              onClick={() => setImageryMode('satellite')}
+              aria-pressed={!showing3D}
+            >
+              <Satellite size={14} />
+              Satellite
+            </button>
+            <button
+              className={showing3D ? 'active' : ''}
+              type="button"
+              onClick={() => setImageryMode('3d')}
+              aria-pressed={showing3D}
+              disabled={!threeDAllowed}
+              title={threeDAllowed ? 'Open photorealistic 3D preview' : '3D preview is available outside editing and active races'}
+            >
+              <Box size={14} />
+              3D preview
+            </button>
+          </div>
           <a href={googleEarthUrl} target="_blank" rel="noreferrer">
             <ExternalLink size={15} /> Open Earth
           </a>
@@ -215,43 +248,54 @@ export function EarthTrackView({
 
       <div className="earth-stage google-enabled">
         {googleMapsConfigured ? (
-          <GoogleMapsTrackLayer
-            track={track}
-            riders={mapRiders}
-            ghostRiders={mapGhostRiders}
-            remoteRaceStates={mapRemoteRaceStates}
-            players={players}
-            samplesByDevice={samplesByDevice}
-            speedUnit={speedUnit}
-            distanceUnit={distanceUnit}
-            raceViewFullscreen={raceViewFullscreen}
-            raceState={raceState}
-            earthAngle={earthAngle}
-            earthHeading={earthHeading}
-            earthCenter={earthCenter}
-            earthZoom={earthZoom}
-            activeZones={activeZones}
-            mappingMode={mappingMode}
-            mappingEditMode={mappingEditMode}
-            mappingRouteVariantId={mappingRouteVariantId}
-            draftPoints={draftPoints}
-            draftZoneRoutePoints={draftZoneRoutePoints}
-            draftZoneMeters={draftZoneMeters}
-            draftZonePoints={draftZonePoints}
-            draftReferenceZones={draftReferenceZones}
-            draftSplitSections={draftSplitSections}
-            draftRouteSplitSections={draftRouteSplitSections}
-            draftSplitBuilder={draftSplitBuilder}
-            onEarthCameraChange={onEarthCameraChange}
-            onMappingPathPointAdd={onMappingPathPointAdd}
-            onMappingPathPointMove={onMappingPathPointMove}
-            onMappingPathPointRemove={onMappingPathPointRemove}
-            onMappingZonePointAdd={onMappingZonePointAdd}
-            onMappingZonePointMove={onMappingZonePointMove}
-            onMappingZonePointRemove={onMappingZonePointRemove}
-            onMappingSplitPointAdd={onMappingSplitPointAdd}
-            onMappingSplitDrawEnd={onMappingSplitDrawEnd}
-          />
+          showing3D ? (
+            <GoogleMaps3DTrackLayer
+              track={track}
+              activeZones={activeZones}
+              earthAngle={earthAngle}
+              earthHeading={earthHeading}
+              onEarthCameraChange={onEarthCameraChange}
+              onUseSatellite={() => setImageryMode('satellite')}
+            />
+          ) : (
+            <GoogleMapsTrackLayer
+              track={track}
+              riders={mapRiders}
+              ghostRiders={mapGhostRiders}
+              remoteRaceStates={mapRemoteRaceStates}
+              players={players}
+              samplesByDevice={samplesByDevice}
+              speedUnit={speedUnit}
+              distanceUnit={distanceUnit}
+              raceViewFullscreen={raceViewFullscreen}
+              raceState={raceState}
+              earthAngle={earthAngle}
+              earthHeading={earthHeading}
+              earthCenter={earthCenter}
+              earthZoom={earthZoom}
+              activeZones={activeZones}
+              mappingMode={mappingMode}
+              mappingEditMode={mappingEditMode}
+              mappingRouteVariantId={mappingRouteVariantId}
+              draftPoints={draftPoints}
+              draftZoneRoutePoints={draftZoneRoutePoints}
+              draftZoneMeters={draftZoneMeters}
+              draftZonePoints={draftZonePoints}
+              draftReferenceZones={draftReferenceZones}
+              draftSplitSections={draftSplitSections}
+              draftRouteSplitSections={draftRouteSplitSections}
+              draftSplitBuilder={draftSplitBuilder}
+              onEarthCameraChange={onEarthCameraChange}
+              onMappingPathPointAdd={onMappingPathPointAdd}
+              onMappingPathPointMove={onMappingPathPointMove}
+              onMappingPathPointRemove={onMappingPathPointRemove}
+              onMappingZonePointAdd={onMappingZonePointAdd}
+              onMappingZonePointMove={onMappingZonePointMove}
+              onMappingZonePointRemove={onMappingZonePointRemove}
+              onMappingSplitPointAdd={onMappingSplitPointAdd}
+              onMappingSplitDrawEnd={onMappingSplitDrawEnd}
+            />
+          )
         ) : (
           <div className="google-key-required">
             <div>
@@ -284,7 +328,7 @@ export function EarthTrackView({
         <div className="earth-overlay bottom-left">
           <span>Angle {earthAngle} deg</span>
           <span>Heading {earthHeading} deg</span>
-          <span>Satellite</span>
+          <span>{showing3D ? '3D' : 'Satellite'}</span>
           <span>
             {showMappingUi
               ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`

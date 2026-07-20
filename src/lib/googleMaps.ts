@@ -194,6 +194,21 @@ type GoogleMapsRuntime = {
   };
 };
 
+export type GoogleMap3DElement = HTMLElement & {
+  center?: { lat: number; lng: number; altitude?: number };
+  heading?: number;
+  mode?: string;
+  range?: number;
+  tilt?: number;
+};
+
+export type GooglePolyline3DElement = HTMLElement;
+
+export type GoogleMaps3DLibrary = {
+  Map3DElement: new (options?: Record<string, unknown>) => GoogleMap3DElement;
+  Polyline3DElement: new (options?: Record<string, unknown>) => GooglePolyline3DElement;
+};
+
 type GoogleMapsLibraryImport = Record<string, unknown> | null | undefined;
 
 export type PlacePredictionOption = {
@@ -358,6 +373,20 @@ export function loadGoogleMaps() {
   });
 
   return window.__trackLabGoogleMapsPromise;
+}
+
+export async function loadGoogleMaps3DLibrary(): Promise<GoogleMaps3DLibrary> {
+  const google = await loadGoogleMaps();
+  if (!google.maps.importLibrary) {
+    throw new Error('Google 3D Maps requires a current Maps JavaScript runtime.');
+  }
+
+  const library = await google.maps.importLibrary('maps3d') as Partial<GoogleMaps3DLibrary>;
+  if (!library.Map3DElement || !library.Polyline3DElement) {
+    throw new Error('Google 3D Maps is unavailable for this API key.');
+  }
+
+  return library as GoogleMaps3DLibrary;
 }
 
 export function parseLatLngText(value: string): LatLngLiteral | null {
