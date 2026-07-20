@@ -24,3 +24,8 @@ export function localRiderMarkerLabel(player: Pick<PlayerSlot, 'id' | 'name'>) {
   const name = compactRiderName(player.name);
   return name ? `P${player.id} ${name}` : `P${player.id}`;
 }
+
+export function ghostRiderMarkerLabel(name: string, ghostNumber: number) {
+  const compactName = compactRiderName(name);
+  return compactName ? `G${ghostNumber} ${compactName}` : `G${ghostNumber}`;
+}
