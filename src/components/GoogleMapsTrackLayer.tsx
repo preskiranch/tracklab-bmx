@@ -45,7 +45,7 @@ import {
   routeWithSplitBranchSelections,
   splitSharedRouteSegments,
 } from '../lib/trackMapping';
-import { localRiderMarkerLabel } from '../lib/playerIdentity';
+import { ghostRiderMarkerLabel, localRiderMarkerLabel } from '../lib/playerIdentity';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -2159,6 +2159,7 @@ export function GoogleMapsTrackLayer({
       const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const rotation = riderScreenRotation(pose.bearing, earthHeading);
       const title = `${rider.name} / ${label} / ghost`;
+      const markerLabel = ghostRiderMarkerLabel(rider.name, index + 1);
       const position = offsetRiderMapPosition(
         pose.position,
         pose.bearing,
@@ -2168,6 +2169,7 @@ export function GoogleMapsTrackLayer({
       if (existing) {
         existing.setPosition(position);
         existing.setRotation(rotation);
+        existing.setLabel(markerLabel);
         existing.setTitle(title);
         return;
       }
@@ -2179,7 +2181,7 @@ export function GoogleMapsTrackLayer({
         position,
         rotation,
         title,
-        `G${index + 1}`,
+        markerLabel,
         820 + index,
         'ghost',
       );
