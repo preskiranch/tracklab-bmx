@@ -27,6 +27,7 @@ const memoryAuthUsersById = new Map();
 const memoryAuthUserIdByEmail = new Map();
 const memoryAuthSessionsByToken = new Map();
 const memoryBillingCheckoutsByState = new Map();
+const memoryMap3DLoadEvents = new Map();
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -1481,4 +1482,182 @@ export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], l
     const includeAnalytics = row.owner_key === profileKey || Boolean(row.analytics_public);
     return ghostFromRow(row, source, includeAnalytics);
   });
+}
+
+function map3DUsageWindow(now = new Date()) {
+  const current = new Date(now);
+  const monthStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1));
+  const dayStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
+  const activityStart = new Date(dayStart);
+  activityStart.setUTCDate(activityStart.getUTCDate() - 13);
+  return { current, monthStart, dayStart, activityStart };
+}
+
+function emptyMap3DUsage(monthlyAllowance, now = new Date()) {
+  const { current, monthStart } = map3DUsageWindow(now);
+  return {
+    generatedAt: current.toISOString(),
+    monthlyAllowance,
+    thisMonth: {
+      count: 0,
+      remaining: monthlyAllowance,
+      percentUsed: 0,
+      startsAt: monthStart.toISOString(),
+    },
+    today: 0,
+    lifetime: 0,
+    byContext: [],
+    topTracks: [],
+    daily: [],
+  };
+}
+
+function finalizeMap3DUsage(usage, monthlyAllowance) {
+  const monthCount = Number(usage.thisMonth?.count) || 0;
+  return {
+    ...usage,
+    thisMonth: {
+      ...usage.thisMonth,
+      count: monthCount,
+      remaining: Math.max(0, monthlyAllowance - monthCount),
+      percentUsed: monthlyAllowance > 0 ? Math.min(100, (monthCount / monthlyAllowance) * 100) : 0,
+    },
+  };
+}
+
+export async function recordMap3DLoad(event) {
+  if (!event?.eventId || !event.trackId || !event.trackName || !['view', 'edit', 'race'].includes(event.context)) {
+    return false;
+  }
+
+  const normalized = {
+    eventId: event.eventId,
+    userId: event.userId || null,
+    trackId: event.trackId,
+    trackName: event.trackName,
+    context: event.context,
+    createdAt: event.createdAt || new Date().toISOString(),
+  };
+
+  if (!pool) {
+    if (!memoryMap3DLoadEvents.has(normalized.eventId)) {
+      memoryMap3DLoadEvents.set(normalized.eventId, normalized);
+    }
+    return true;
+  }
+
+  const result = await query(
+    `INSERT INTO ${schema}.map_3d_load_events (
+      event_id, user_id, track_id, track_name, context, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (event_id) DO NOTHING
+    RETURNING event_id`,
+    [
+      normalized.eventId,
+      normalized.userId,
+      normalized.trackId,
+      normalized.trackName,
+      normalized.context,
+      normalized.createdAt,
+    ],
+  );
+  return Boolean(result);
+}
+
+export async function loadMap3DUsage({ monthlyAllowance = 5000, now = new Date() } = {}) {
+  const safeAllowance = Math.max(0, Math.round(Number(monthlyAllowance) || 0));
+  const { current, monthStart, dayStart, activityStart } = map3DUsageWindow(now);
+
+  if (!pool) {
+    const events = [...memoryMap3DLoadEvents.values()]
+      .filter((event) => Date.parse(event.createdAt) <= current.getTime());
+    const monthEvents = events.filter((event) => Date.parse(event.createdAt) >= monthStart.getTime());
+    const todayEvents = events.filter((event) => Date.parse(event.createdAt) >= dayStart.getTime());
+    const contextCounts = new Map();
+    const trackCounts = new Map();
+    const dailyCounts = new Map();
+
+    for (const event of monthEvents) {
+      contextCounts.set(event.context, (contextCounts.get(event.context) || 0) + 1);
+      const existingTrack = trackCounts.get(event.trackId) || {
+        trackId: event.trackId,
+        trackName: event.trackName,
+        count: 0,
+      };
+      existingTrack.count += 1;
+      trackCounts.set(event.trackId, existingTrack);
+    }
+    for (const event of events) {
+      const createdAt = Date.parse(event.createdAt);
+      if (createdAt < activityStart.getTime()) {
+        continue;
+      }
+      const date = new Date(createdAt).toISOString().slice(0, 10);
+      dailyCounts.set(date, (dailyCounts.get(date) || 0) + 1);
+    }
+
+    return finalizeMap3DUsage({
+      ...emptyMap3DUsage(safeAllowance, current),
+      thisMonth: { count: monthEvents.length, startsAt: monthStart.toISOString() },
+      today: todayEvents.length,
+      lifetime: events.length,
+      byContext: [...contextCounts.entries()]
+        .map(([context, count]) => ({ context, count }))
+        .sort((left, right) => right.count - left.count),
+      topTracks: [...trackCounts.values()]
+        .sort((left, right) => right.count - left.count)
+        .slice(0, 10),
+      daily: [...dailyCounts.entries()]
+        .map(([date, count]) => ({ date, count }))
+        .sort((left, right) => left.date.localeCompare(right.date)),
+    }, safeAllowance);
+  }
+
+  const result = await query(
+    `WITH scoped AS (
+       SELECT * FROM ${schema}.map_3d_load_events WHERE created_at <= $1
+     ), month_events AS (
+       SELECT * FROM scoped WHERE created_at >= $2
+     )
+     SELECT
+       (SELECT count(*)::integer FROM month_events) AS month_count,
+       (SELECT count(*)::integer FROM scoped WHERE created_at >= $3) AS today_count,
+       (SELECT count(*)::integer FROM scoped) AS lifetime_count,
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object('context', context, 'count', count) ORDER BY count DESC)
+         FROM (SELECT context, count(*)::integer AS count FROM month_events GROUP BY context) contexts
+       ), '[]'::jsonb) AS by_context,
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object('trackId', track_id, 'trackName', track_name, 'count', count) ORDER BY count DESC)
+         FROM (
+           SELECT track_id, max(track_name) AS track_name, count(*)::integer AS count
+           FROM month_events GROUP BY track_id ORDER BY count DESC LIMIT 10
+         ) tracks
+       ), '[]'::jsonb) AS top_tracks,
+       COALESCE((
+         SELECT jsonb_agg(jsonb_build_object('date', day, 'count', count) ORDER BY day)
+         FROM (
+           SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+             count(*)::integer AS count
+           FROM scoped WHERE created_at >= $4 GROUP BY day ORDER BY day
+         ) days
+       ), '[]'::jsonb) AS daily`,
+    [current, monthStart, dayStart, activityStart],
+  );
+
+  const row = result?.rows?.[0];
+  if (!row) {
+    return emptyMap3DUsage(safeAllowance, current);
+  }
+
+  return finalizeMap3DUsage({
+    generatedAt: current.toISOString(),
+    monthlyAllowance: safeAllowance,
+    thisMonth: { count: Number(row.month_count) || 0, startsAt: monthStart.toISOString() },
+    today: Number(row.today_count) || 0,
+    lifetime: Number(row.lifetime_count) || 0,
+    byContext: fromJson(row.by_context, []),
+    topTracks: fromJson(row.top_tracks, []),
+    daily: fromJson(row.daily, []),
+  }, safeAllowance);
 }

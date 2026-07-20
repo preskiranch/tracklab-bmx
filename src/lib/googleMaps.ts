@@ -199,13 +199,27 @@ export type GoogleMap3DElement = HTMLElement & {
   heading?: number;
   mode?: string;
   range?: number;
+  steady?: boolean;
   tilt?: number;
 };
 
 export type GooglePolyline3DElement = HTMLElement;
 
+export type GoogleMarker3DElement = HTMLElement & {
+  label?: string;
+  position?: { lat: number; lng: number; altitude?: number };
+  title?: string;
+  zIndex?: number;
+};
+
+type Google3DMarkerConstructor = new (options?: Record<string, unknown>) => GoogleMarker3DElement;
+
 export type GoogleMaps3DLibrary = {
   Map3DElement: new (options?: Record<string, unknown>) => GoogleMap3DElement;
+  Marker3DElement?: Google3DMarkerConstructor;
+  Marker3DInteractiveElement?: Google3DMarkerConstructor;
+  MarkerElement?: Google3DMarkerConstructor;
+  MarkerInteractiveElement?: Google3DMarkerConstructor;
   Polyline3DElement: new (options?: Record<string, unknown>) => GooglePolyline3DElement;
 };
 

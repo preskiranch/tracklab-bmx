@@ -84,9 +84,10 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(port),
       DATABASE_URL: '',
-      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test',
+      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test',
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
+      TRACKLAB_3D_FREE_LOAD_CAP: '5000',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -193,6 +194,55 @@ describe('cloud API trust boundaries', () => {
       body: JSON.stringify({ billingState: 'forged-checkout-state' }),
     });
     expect(billing.status).toBe(400);
+  });
+
+  it('records idempotent 3D scene loads and restricts usage totals to administrators', async () => {
+    const eventId = `3d-test-${Date.now()}`;
+    const payload = JSON.stringify({
+      eventId,
+      trackId: 'north-bay-bmx-napa-valley',
+      trackName: 'North Bay BMX - Napa Valley',
+      context: 'edit',
+    });
+    const firstLoad = await api('/api/map-3d-loads', { method: 'POST', body: payload });
+    const retriedLoad = await api('/api/map-3d-loads', { method: 'POST', body: payload });
+    expect(firstLoad.status).toBe(201);
+    expect(retriedLoad.status).toBe(201);
+
+    const forbidden = await api('/api/admin/map-3d-usage');
+    expect(forbidden.status).toBe(403);
+
+    const regularCookie = cookie;
+    const adminRegistration = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'TrackLab Operator',
+        email: 'usage-admin@tracklab.test',
+        password: 'admin-correct-horse-battery-staple',
+      }),
+    });
+    expect(adminRegistration.status).toBe(201);
+    cookie = String(adminRegistration.headers.get('set-cookie')).split(';')[0];
+
+    try {
+      const usageResponse = await api('/api/admin/map-3d-usage');
+      expect(usageResponse.status).toBe(200);
+      expect(usageResponse.headers.get('cache-control')).toBe('no-store');
+      await expect(usageResponse.json()).resolves.toMatchObject({
+        monthlyAllowance: 5000,
+        thisMonth: { count: 1, remaining: 4999 },
+        today: 1,
+        lifetime: 1,
+        byContext: [{ context: 'edit', count: 1 }],
+        topTracks: [{
+          trackId: 'north-bay-bmx-napa-valley',
+          trackName: 'North Bay BMX - Napa Valley',
+          count: 1,
+        }],
+      });
+    } finally {
+      cookie = regularCookie;
+    }
   });
 
   it('saves one account mapping atomically and only publishes approved accounts', async () => {

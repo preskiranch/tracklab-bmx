@@ -280,6 +280,22 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         `CREATE INDEX IF NOT EXISTS idx_tracklab_group_invites_to ON ${schema}.group_invites (to_guest_key, status, created_at DESC)`,
       ],
     },
+    {
+      version: 4,
+      name: 'record photorealistic 3D map loads',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.map_3d_load_events (
+          event_id TEXT PRIMARY KEY,
+          user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          track_id TEXT NOT NULL,
+          track_name TEXT NOT NULL,
+          context TEXT NOT NULL CHECK (context IN ('view', 'edit', 'race')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_map_3d_loads_created ON ${schema}.map_3d_load_events (created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_map_3d_loads_track_created ON ${schema}.map_3d_load_events (track_id, created_at DESC)`,
+      ],
+    },
   ];
 }
 

@@ -51,6 +51,7 @@ const transientStateMaxAgeMs = 6 * 60 * 60 * 1000;
 const scryptAsync = promisify(scryptCallback);
 const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const adminAccountEmails = new Set(
   String(process.env.TRACKLAB_ADMIN_EMAILS || defaultAdminAccountEmail)
     .split(',')
@@ -2316,6 +2317,67 @@ async function serveStatic(request, response) {
       'Cache-Control': 'no-cache',
     });
     response.end(JSON.stringify(tracklabManifest(profileKey)));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/map-3d-loads') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, map3DLoadRateLimiter, 300, 'map-3d-load')) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, 8_000);
+    const context = sanitizeText(payload?.context, '', 12).toLowerCase();
+    const trackId = sanitizeText(payload?.trackId, '', 120);
+    const trackName = sanitizeText(payload?.trackName, '', 160);
+    if (!trackId || !trackName || !['view', 'edit', 'race'].includes(context)) {
+      writeJson(response, 400, { error: 'A valid track and 3D load context are required.' });
+      return;
+    }
+
+    const session = await currentAuthSession(request);
+    const recorded = await persistence.recordMap3DLoad({
+      eventId: sanitizeText(payload?.eventId, randomUUID(), 80),
+      userId: session?.user?.id || null,
+      trackId,
+      trackName,
+      context,
+      createdAt: new Date().toISOString(),
+    });
+    if (!recorded) {
+      writeJson(response, 503, { error: '3D usage could not be recorded.' });
+      return;
+    }
+
+    cloudTelemetry.increment('tracklab_map_3d_loads_total', { context });
+    writeJson(response, 201, { recorded: true });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/admin/map-3d-usage') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    if (!session.user.admin && !isAdminEmail(session.user.email)) {
+      writeJson(response, 403, { error: 'Developer access is required.' });
+      return;
+    }
+
+    const monthlyAllowance = Math.max(
+      0,
+      Math.round(Number(process.env.TRACKLAB_3D_FREE_LOAD_CAP) || 5000),
+    );
+    const usage = await persistence.loadMap3DUsage({ monthlyAllowance });
+    writeJson(response, 200, usage, { 'Cache-Control': 'no-store' });
     return;
   }
 
