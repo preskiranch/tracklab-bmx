@@ -196,6 +196,16 @@ type GoogleMapsRuntime = {
 
 export type GoogleMap3DElement = HTMLElement & {
   center?: { lat: number; lng: number; altitude?: number };
+  flyCameraTo?: (options: {
+    endCamera: {
+      altitudeMode?: 'ABSOLUTE' | 'RELATIVE_TO_GROUND';
+      center: { lat: number; lng: number; altitude?: number };
+      heading?: number;
+      range?: number;
+      tilt?: number;
+    };
+    durationMillis?: number;
+  }) => Promise<void> | void;
   heading?: number;
   mode?: string;
   range?: number;

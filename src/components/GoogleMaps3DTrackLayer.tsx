@@ -31,7 +31,12 @@ import {
   type GoogleMarker3DElement,
   type GoogleMaps3DLibrary,
 } from '../lib/googleMaps';
-import { elevatedPath, isGoogleMaps3DSteadyEvent, previewRangeMeters } from '../lib/googleMaps3d';
+import {
+  elevatedPath,
+  isGoogleMaps3DSteadyEvent,
+  previewRangeMeters,
+  terrainRelativeCamera,
+} from '../lib/googleMaps3d';
 import {
   pointAtRouteMeter,
   routeLengthMeters,
@@ -122,6 +127,32 @@ function rangeToZoom(baseRange: number, range: number | undefined, fallback: num
     return fallback ?? undefined;
   }
   return 19 - Math.log2(range / baseRange);
+}
+
+function applyTerrainRelativeCamera(
+  map: GoogleMap3DElement,
+  center: TrackPoint,
+  heading: number,
+  tilt: number,
+  range: number,
+) {
+  const endCamera = terrainRelativeCamera(center, heading, tilt, range);
+  if (map.flyCameraTo) {
+    try {
+      const transition = map.flyCameraTo({ endCamera, durationMillis: 1 });
+      if (transition instanceof Promise) {
+        void transition.catch(() => undefined);
+      }
+      return;
+    } catch {
+      // Older Maps builds may expose the method before the element is connected.
+    }
+  }
+
+  map.center = endCamera.center;
+  map.heading = heading;
+  map.tilt = tilt;
+  map.range = range;
 }
 
 function pointFromMapEvent(event: Event): TrackPoint | null {
@@ -519,11 +550,13 @@ export function GoogleMaps3DTrackLayer({
           return;
         }
         libraryRef.current = library;
+        const initialCenter = earthCenter ?? center;
+        const initialRange = zoomToRange(baseRange, earthZoom);
         const map = new library.Map3DElement({
-          center: { ...(earthCenter ?? center), altitude: 0 },
+          center: { ...initialCenter, altitude: 0 },
           heading: earthHeading,
           mode: 'SATELLITE',
-          range: zoomToRange(baseRange, earthZoom),
+          range: initialRange,
           tilt: earthAngle,
         });
         map.style.width = '100%';
@@ -585,6 +618,13 @@ export function GoogleMaps3DTrackLayer({
         replaceChildrenSafely(containerRef.current, map);
         mountedMap = map;
         mapRef.current = map;
+        applyTerrainRelativeCamera(
+          map,
+          initialCenter,
+          earthHeading,
+          earthAngle,
+          initialRange,
+        );
         readinessTimer = window.setTimeout(() => {
           if (!cancelled && !sceneFailed && mountedMap === map) {
             fallbackToSatellite('Google 3D terrain took too long to load. Switching to satellite view.');
@@ -626,13 +666,14 @@ export function GoogleMaps3DTrackLayer({
     if (!map) {
       return;
     }
-    map.heading = earthHeading;
-    map.tilt = earthAngle;
-    if (earthCenter) {
-      map.center = { ...earthCenter, altitude: 0 };
-    }
-    map.range = zoomToRange(baseRange, earthZoom);
-  }, [baseRange, earthAngle, earthCenter, earthHeading, earthZoom]);
+    applyTerrainRelativeCamera(
+      map,
+      earthCenter ?? center,
+      earthHeading,
+      earthAngle,
+      zoomToRange(baseRange, earthZoom),
+    );
+  }, [baseRange, center, earthAngle, earthCenter, earthHeading, earthZoom]);
 
   useEffect(() => {
     interactionRef.current = (point) => {
