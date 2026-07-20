@@ -4,6 +4,10 @@ import { distanceBetweenTrackPoints } from './trackMapping';
 const minimumPreviewRangeMeters = 180;
 const maximumPreviewRangeMeters = 5_000;
 
+export function isGoogleMaps3DSteadyEvent(event: Event) {
+  return (event as Event & { isSteady?: boolean }).isSteady === true;
+}
+
 export function previewRangeMeters(points: TrackPoint[], center: TrackPoint) {
   const farthestPointMeters = points.reduce((maximum, point) => (
     Math.max(maximum, distanceBetweenTrackPoints(center, point))

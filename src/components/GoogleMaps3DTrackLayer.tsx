@@ -31,7 +31,7 @@ import {
   type GoogleMarker3DElement,
   type GoogleMaps3DLibrary,
 } from '../lib/googleMaps';
-import { elevatedPath, previewRangeMeters } from '../lib/googleMaps3d';
+import { elevatedPath, isGoogleMaps3DSteadyEvent, previewRangeMeters } from '../lib/googleMaps3d';
 import {
   pointAtRouteMeter,
   routeLengthMeters,
@@ -87,6 +87,7 @@ type DynamicMarker = {
   marker: GoogleMarker3DElement;
   content: HTMLDivElement | null;
 };
+type MarkerConstructor = new (options?: Record<string, unknown>) => GoogleMarker3DElement;
 
 const routeColors: Record<TrackRouteVariantId, string> = {
   amateur: '#d8ff3e',
@@ -160,6 +161,18 @@ function makeMarkerContent(className: string, label: string) {
   return content;
 }
 
+function createMarkerSafely(
+  Marker: MarkerConstructor,
+  options: Record<string, unknown>,
+) {
+  try {
+    return new Marker(options);
+  } catch (error) {
+    console.error('TrackLab could not render a Google 3D marker.', error);
+    return null;
+  }
+}
+
 function appendMarker(
   map: GoogleMap3DElement,
   library: GoogleMaps3DLibrary,
@@ -184,15 +197,28 @@ function appendMarker(
     return null;
   }
 
-  const marker = new MarkerConstructor({
-    altitudeMode: 'RELATIVE_TO_GROUND',
-    drawsWhenOccluded: true,
-    label: CustomConstructor ? undefined : options.label,
-    position: { ...position, altitude: 1.2 },
-    sizePreserved: true,
-    title: options.title,
-    zIndex: options.zIndex,
-  });
+  const markerPosition = { ...position, altitude: 1.2 };
+  const marker = CustomConstructor
+    ? createMarkerSafely(MarkerConstructor, {
+        altitudeMode: 'RELATIVE_TO_GROUND',
+        position: markerPosition,
+        title: options.title,
+      })
+    : createMarkerSafely(MarkerConstructor, {
+        altitudeMode: 'RELATIVE_TO_GROUND',
+        drawsWhenOccluded: true,
+        label: options.label,
+        position: markerPosition,
+        sizePreserved: true,
+        title: options.title,
+        zIndex: options.zIndex,
+      });
+  if (!marker) {
+    return null;
+  }
+  if (CustomConstructor && options.zIndex != null) {
+    marker.style.zIndex = String(options.zIndex);
+  }
   const content = CustomConstructor && options.label
     ? makeMarkerContent(options.className ?? 'map-3d-landmark-marker', options.label)
     : null;
@@ -303,15 +329,28 @@ function createDynamicRiderMarker(
   if (!MarkerConstructor) {
     return null;
   }
-  const marker = new MarkerConstructor({
-    altitudeMode: 'RELATIVE_TO_GROUND',
-    drawsWhenOccluded: true,
-    label: library.MarkerElement ? undefined : label,
-    position: { ...position, altitude: 1 },
-    sizePreserved: true,
-    title,
-    zIndex,
-  });
+  const markerPosition = { ...position, altitude: 1 };
+  const marker = library.MarkerElement
+    ? createMarkerSafely(MarkerConstructor, {
+        altitudeMode: 'RELATIVE_TO_GROUND',
+        position: markerPosition,
+        title,
+      })
+    : createMarkerSafely(MarkerConstructor, {
+        altitudeMode: 'RELATIVE_TO_GROUND',
+        drawsWhenOccluded: true,
+        label,
+        position: markerPosition,
+        sizePreserved: true,
+        title,
+        zIndex,
+      });
+  if (!marker) {
+    return null;
+  }
+  if (library.MarkerElement) {
+    marker.style.zIndex = String(zIndex);
+  }
   const content = library.MarkerElement ? createRiderContent(player, label, appearance) : null;
   if (content) {
     marker.append(content);
@@ -346,8 +385,25 @@ function updateDynamicRiderMarker(
 }
 
 function removeElements(elements: SceneElement[]) {
-  elements.forEach((element) => element.remove());
+  elements.forEach((element) => {
+    try {
+      element.remove();
+    } catch {
+      // A rejected Google Maps custom element can throw while disconnecting.
+    }
+  });
   elements.length = 0;
+}
+
+function replaceChildrenSafely(container: HTMLElement | null, ...nodes: Node[]) {
+  if (!container) {
+    return;
+  }
+  try {
+    container.replaceChildren(...nodes);
+  } catch {
+    // Keep the React tree alive if a Google Maps custom element fails to detach.
+  }
 }
 
 export function GoogleMaps3DTrackLayer({
@@ -396,6 +452,7 @@ export function GoogleMaps3DTrackLayer({
   const sceneContextRef = useRef<Map3DLoadContext>('view');
   const interactionRef = useRef<(point: TrackPoint) => void>(() => undefined);
   const cameraChangeRef = useRef(onEarthCameraChange);
+  const useSatelliteRef = useRef(onUseSatellite);
   const baseRangeRef = useRef(500);
   const suppressNextMapClickRef = useRef(false);
   const [layerState, setLayerState] = useState<LayerState>('loading');
@@ -421,6 +478,7 @@ export function GoogleMaps3DTrackLayer({
       ? 'edit'
       : 'view';
   cameraChangeRef.current = onEarthCameraChange;
+  useSatelliteRef.current = onUseSatellite;
   baseRangeRef.current = baseRange;
 
   useEffect(() => {
@@ -428,10 +486,32 @@ export function GoogleMaps3DTrackLayer({
     let mountedMap: GoogleMap3DElement | null = null;
     let loadRecorded = false;
     let sceneFailed = false;
+    let readinessTimer = 0;
+    let fallbackTimer = 0;
     const listeners: Array<{ name: string; listener: EventListener }> = [];
     setLayerState('loading');
     setErrorMessage('');
+    setSceneVersion(0);
     setSelectedEditPoint(null);
+
+    const fallbackToSatellite = (message: string) => {
+      if (cancelled || sceneFailed) {
+        return;
+      }
+      sceneFailed = true;
+      window.clearTimeout(readinessTimer);
+      setLayerState('error');
+      setErrorMessage(message);
+      fallbackTimer = window.setTimeout(() => {
+        if (!cancelled) {
+          useSatelliteRef.current();
+        }
+      }, 0);
+    };
+    const authFailureListener = () => {
+      fallbackToSatellite('Google could not authorize photorealistic 3D. Switching to satellite view.');
+    };
+    window.addEventListener('tracklab-google-maps-auth-failure', authFailureListener);
 
     loadGoogleMaps3DLibrary()
       .then((library) => {
@@ -481,11 +561,13 @@ export function GoogleMaps3DTrackLayer({
         map.addEventListener('gmp-click', mapClickListener);
         listeners.push({ name: 'gmp-click', listener: mapClickListener });
 
-        const steadyListener: EventListener = () => {
-          if (sceneFailed || map.steady !== true) {
+        const steadyListener: EventListener = (event) => {
+          if (sceneFailed || !isGoogleMaps3DSteadyEvent(event)) {
             return;
           }
+          window.clearTimeout(readinessTimer);
           setLayerState('ready');
+          setSceneVersion((current) => current + 1);
           if (!loadRecorded) {
             loadRecorded = true;
             void recordMap3DLoad(track, sceneContextRef.current).catch(() => undefined);
@@ -495,42 +577,45 @@ export function GoogleMaps3DTrackLayer({
         listeners.push({ name: 'gmp-steadychange', listener: steadyListener });
 
         const errorListener: EventListener = () => {
-          sceneFailed = true;
-          setLayerState('error');
-          setErrorMessage('Google could not render this photorealistic 3D scene.');
+          fallbackToSatellite('Google could not render this photorealistic 3D scene.');
         };
         map.addEventListener('gmp-error', errorListener);
         listeners.push({ name: 'gmp-error', listener: errorListener });
 
-        containerRef.current.replaceChildren(map);
+        replaceChildrenSafely(containerRef.current, map);
         mountedMap = map;
         mapRef.current = map;
-        setSceneVersion((current) => current + 1);
-        window.setTimeout(() => {
-          if (!cancelled && !sceneFailed && mountedMap === map && map.steady === true) {
-            steadyListener(new Event('gmp-steadychange'));
+        readinessTimer = window.setTimeout(() => {
+          if (!cancelled && !sceneFailed && mountedMap === map) {
+            fallbackToSatellite('Google 3D terrain took too long to load. Switching to satellite view.');
           }
-        }, 1_500);
+        }, 15_000);
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
-          setLayerState('error');
-          setErrorMessage(error instanceof Error ? error.message : 'The 3D scene could not be loaded.');
-        }
+        fallbackToSatellite(error instanceof Error ? error.message : 'The 3D scene could not be loaded.');
       });
 
     return () => {
       cancelled = true;
+      window.removeEventListener('tracklab-google-maps-auth-failure', authFailureListener);
+      window.clearTimeout(readinessTimer);
+      window.clearTimeout(fallbackTimer);
       window.clearTimeout(cameraTimerRef.current);
       listeners.forEach(({ name, listener }) => mountedMap?.removeEventListener(name, listener));
       removeElements(staticElementsRef.current);
-      dynamicMarkersRef.current.forEach(({ marker }) => marker.remove());
+      dynamicMarkersRef.current.forEach(({ marker }) => {
+        try {
+          marker.remove();
+        } catch {
+          // The map may already have removed a failed custom marker.
+        }
+      });
       dynamicMarkersRef.current.clear();
       if (mapRef.current === mountedMap) {
         mapRef.current = null;
       }
       libraryRef.current = null;
-      containerRef.current?.replaceChildren();
+      replaceChildrenSafely(containerRef.current);
     };
   // A scene load is intentionally tied to the selected track, not changing overlays or rider frames.
   // eslint-disable-next-line react-hooks/exhaustive-deps

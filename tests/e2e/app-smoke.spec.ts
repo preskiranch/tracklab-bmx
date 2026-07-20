@@ -307,6 +307,9 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
       body: JSON.stringify({ user: authUser }),
     });
   });
+  // This test covers account onboarding, not Google's external renderer. The
+  // production key intentionally rejects Playwright's localhost referrer.
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
   await page.goto('/');
 
