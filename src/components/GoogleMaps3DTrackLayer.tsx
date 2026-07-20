@@ -427,6 +427,7 @@ export function GoogleMaps3DTrackLayer({
     let cancelled = false;
     let mountedMap: GoogleMap3DElement | null = null;
     let loadRecorded = false;
+    let sceneFailed = false;
     const listeners: Array<{ name: string; listener: EventListener }> = [];
     setLayerState('loading');
     setErrorMessage('');
@@ -481,7 +482,7 @@ export function GoogleMaps3DTrackLayer({
         listeners.push({ name: 'gmp-click', listener: mapClickListener });
 
         const steadyListener: EventListener = () => {
-          if (map.steady === false) {
+          if (sceneFailed || map.steady !== true) {
             return;
           }
           setLayerState('ready');
@@ -494,6 +495,7 @@ export function GoogleMaps3DTrackLayer({
         listeners.push({ name: 'gmp-steadychange', listener: steadyListener });
 
         const errorListener: EventListener = () => {
+          sceneFailed = true;
           setLayerState('error');
           setErrorMessage('Google could not render this photorealistic 3D scene.');
         };
@@ -505,7 +507,7 @@ export function GoogleMaps3DTrackLayer({
         mapRef.current = map;
         setSceneVersion((current) => current + 1);
         window.setTimeout(() => {
-          if (!cancelled && mountedMap === map && map.steady !== false) {
+          if (!cancelled && !sceneFailed && mountedMap === map && map.steady === true) {
             steadyListener(new Event('gmp-steadychange'));
           }
         }, 1_500);

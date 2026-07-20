@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bike,
   Bluetooth,
+  Code2,
   Database,
   Gauge,
   Globe2,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { DiagnosticsPanel, type CloudUserDataStatus } from './components/DiagnosticsPanel';
+import { DeveloperToolsPanel } from './components/DeveloperToolsPanel';
 import { EarthTrackView } from './components/EarthTrackView';
 import { MembershipLanding } from './components/MembershipLanding';
 import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
@@ -6072,6 +6074,16 @@ export default function App() {
             <Users size={17} />
             Riders
           </button>
+          {adminProfileActive ? (
+            <button
+              className={appMode === 'developer' ? 'selected' : ''}
+              type="button"
+              onClick={() => setAppMode('developer')}
+            >
+              <Code2 size={17} />
+              Developer Tools
+            </button>
+          ) : null}
         </nav>
 
         <section className="membership-mini-card">
@@ -6203,6 +6215,8 @@ export default function App() {
             onOpenRace={() => setAppMode('race')}
             onOpenMonitor={() => setAppMode('monitor')}
           />
+        ) : appMode === 'developer' && adminProfileActive ? (
+          <DeveloperToolsPanel />
         ) : (
           <>
             <div className="dashboard-grid">
