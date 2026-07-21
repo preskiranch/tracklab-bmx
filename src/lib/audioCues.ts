@@ -91,24 +91,12 @@ function cancelPendingStartGateAudio(audio: HTMLAudioElement) {
   }
 }
 
-export function primeAudioCues() {
-  const context = resumeAudioContext();
+export async function primeAudioCues() {
+  const context = getAudioContext();
+  const preloadTasks: Promise<unknown>[] = [];
 
-  if (context && context.state !== 'closed') {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const now = context.currentTime;
-
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(40, now);
-    gain.gain.setValueAtTime(0.00001, now);
-    gain.gain.exponentialRampToValueAtTime(0.00001, now + 0.025);
-
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + 0.03);
-    void loadUciVoiceBuffer(context);
+  if (context?.state === 'suspended') {
+    preloadTasks.push(context.resume());
   }
 
   const audio = getStartGateAudio();
@@ -128,6 +116,28 @@ export function primeAudioCues() {
         audio.muted = false;
         mediaElementPrimePromise = null;
       });
+  }
+  if (mediaElementPrimePromise) {
+    preloadTasks.push(mediaElementPrimePromise);
+  }
+
+  await Promise.allSettled(preloadTasks);
+
+  if (context && context.state === 'running') {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const now = context.currentTime;
+
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(40, now);
+    gain.gain.setValueAtTime(0.00001, now);
+    gain.gain.exponentialRampToValueAtTime(0.00001, now + 0.025);
+
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.03);
+    await loadUciVoiceBuffer(context);
   }
 }
 

@@ -222,6 +222,7 @@ export function stepRiders(
   splitDecisionPoints: SplitRouteDecisionPoint[] = [],
   trackZones: TrackZone[] = [],
   nowMs = Date.now(),
+  inputAllowedAt = raceStartedAt,
 ): RiderState[] {
   const stepped = riders.map((rider) => {
     if (rider.finishedAt != null) {
@@ -234,13 +235,13 @@ export function stepRiders(
     const selectedBranch = branchChoicesByPlayer[rider.playerId] ?? rider.selectedBranch ?? 'a';
     let actualBranches = rider.actualBranches;
     let proPenaltySections = rider.proPenaltySections;
-    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
+    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, inputAllowedAt)
       ? cleanBikeWatts(sample?.physicsWatts ?? sample?.watts ?? 0) ?? 0
       : 0;
-    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt)
+    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, inputAllowedAt)
       ? cleanBikeCadenceRpm(sample?.cadence ?? 0) ?? 0
       : 0;
-    const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, raceStartedAt)
+    const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, inputAllowedAt)
       ? cleanBikeSpeedKph(sample?.speedKph ?? 0) ?? 0
       : 0;
     const { activeZone, pedalZonesConfigured, firstPedalStartMeter } = zoneDriveContext(
@@ -354,8 +355,8 @@ export function stepRiders(
 
     const takeoff = crossedTakeoff(previousDistance, distance);
 
-    if (phase !== 'airborne' && takeoff && settledVelocity > 2.2 && (cadence > 18 || !driveAllowed)) {
-      const cadenceLaunch = driveAllowed ? clamp(cadence / 110, 0.35, 1.25) : 0.55;
+    if (phase !== 'airborne' && takeoff && settledVelocity > 2.2 && driveAllowed && cadence > 18) {
+      const cadenceLaunch = clamp(cadence / 110, 0.35, 1.25);
       const speedLaunch = clamp(settledVelocity / 12, 0.45, 1.3);
       verticalVelocity = (145 + speedLaunch * 56 + cadenceLaunch * 32 + boost * 34) * takeoff.lift;
       pitch = -10 - boost * 8;

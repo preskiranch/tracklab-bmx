@@ -46,6 +46,7 @@ import {
   splitSharedRouteSegments,
 } from '../lib/trackMapping';
 import { ghostRiderMarkerLabel, localRiderMarkerLabel } from '../lib/playerIdentity';
+import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -57,6 +58,7 @@ type GoogleMapsTrackLayerProps = {
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
+  cStartOffsetsByPlayer?: CStartOffsetsByPlayer;
   raceViewFullscreen?: boolean;
   raceState: RaceState;
   earthAngle: number;
@@ -575,18 +577,17 @@ function riderLeanBucket(rotationDegrees: number) {
   return Math.round(uprightRiderOrientation(rotationDegrees).leanDegrees / 2) * 2;
 }
 
-function visualRiderDistanceMeters(distanceMeters: number) {
+function visualRiderDistanceMeters(distanceMeters: number, cStartBackoffMeters = 0) {
+  let visualDistance = distanceMeters;
   if (distanceMeters <= 0) {
-    return -riderStartSetbackMeters;
+    visualDistance = -riderStartSetbackMeters;
+  } else if (distanceMeters < riderStartSetbackBlendMeters) {
+    const progress = Math.max(0, Math.min(1, distanceMeters / riderStartSetbackBlendMeters));
+    const smoothProgress = progress * progress * (3 - 2 * progress);
+    visualDistance = distanceMeters - riderStartSetbackMeters * (1 - smoothProgress);
   }
 
-  if (distanceMeters >= riderStartSetbackBlendMeters) {
-    return distanceMeters;
-  }
-
-  const progress = Math.max(0, Math.min(1, distanceMeters / riderStartSetbackBlendMeters));
-  const smoothProgress = progress * progress * (3 - 2 * progress);
-  return distanceMeters - riderStartSetbackMeters * (1 - smoothProgress);
+  return cStartVisualDistance(visualDistance, cStartBackoffMeters);
 }
 
 function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: number) {
@@ -749,6 +750,7 @@ export function GoogleMapsTrackLayer({
   samplesByDevice,
   speedUnit,
   distanceUnit,
+  cStartOffsetsByPlayer = {},
   raceViewFullscreen = false,
   raceState,
   earthAngle,
@@ -2082,7 +2084,11 @@ export function GoogleMapsTrackLayer({
         return;
       }
 
-      const pose = riderRoutePose(track, visualRiderDistanceMeters(rider.distance), rider.actualBranches);
+      const pose = riderRoutePose(
+        track,
+        visualRiderDistanceMeters(rider.distance, cStartOffsetsByPlayer[player.id] ?? 0),
+        rider.actualBranches,
+      );
       const speedKph = rider.velocity > 0 ? rider.velocity * 3.6 : null;
       const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const existing = markerRefs.current.get(player.id);
@@ -2121,7 +2127,7 @@ export function GoogleMapsTrackLayer({
       );
       markerRefs.current.set(player.id, marker);
     });
-  }, [earthHeading, players, riders, samplesByDevice, speedUnit, status, track]);
+  }, [cStartOffsetsByPlayer, earthHeading, players, riders, samplesByDevice, speedUnit, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;

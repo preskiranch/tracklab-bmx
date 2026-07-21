@@ -2541,6 +2541,8 @@ input:focus {
   height: 42px;
   object-fit: contain;
   transform-origin: 50% 58%;
+  transition: transform 160ms ease-out;
+  will-change: transform;
 }
 
 .map-3d-rider-label {

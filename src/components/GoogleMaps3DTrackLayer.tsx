@@ -46,6 +46,12 @@ import {
 import { ghostRiderMarkerLabel, localRiderMarkerLabel } from '../lib/playerIdentity';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { recordMap3DLoad, type Map3DLoadContext } from '../lib/map3dUsage';
+import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGateStart';
+import {
+  riderAirPixelsToMeters,
+  riderLaneOffsetsByPlayer,
+  uprightRiderOrientation,
+} from '../lib/riderPresentation';
 
 type GoogleMaps3DTrackLayerProps = {
   track: TrackRecord;
@@ -56,6 +62,7 @@ type GoogleMaps3DTrackLayerProps = {
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
+  cStartOffsetsByPlayer?: CStartOffsetsByPlayer;
   raceViewFullscreen?: boolean;
   raceState: RaceState;
   earthAngle: number;
@@ -106,8 +113,6 @@ const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
 };
 const riderStartSetbackMeters = 2.2;
 const riderStartSetbackBlendMeters = 5;
-const riderLaneSpacingMeters = 1.1;
-const riderLaneMaxSpreadMeters = 4.4;
 const remoteRiderLaneOffsetBaseMeters = 3.2;
 const remoteRiderLaneSpacingMeters = 0.7;
 
@@ -299,32 +304,22 @@ function offsetRiderPosition(position: TrackPoint, bearingDegrees: number, later
   );
 }
 
-function riderLaneOffsets(players: PlayerSlot[]) {
-  const sorted = [...players].sort((left, right) => left.id - right.id);
-  const offsets = new Map<PlayerId, number>();
-  const spacing = sorted.length <= 1
-    ? 0
-    : Math.min(riderLaneSpacingMeters, riderLaneMaxSpreadMeters / (sorted.length - 1));
-  const midpoint = (sorted.length - 1) / 2;
-  sorted.forEach((player, index) => offsets.set(player.id, (index - midpoint) * spacing));
-  return offsets;
-}
-
 function remoteRiderLaneOffset(index: number) {
   const side = index % 2 === 0 ? 1 : -1;
   return side * (remoteRiderLaneOffsetBaseMeters + Math.floor(index / 2) * remoteRiderLaneSpacingMeters);
 }
 
-function visualRiderDistance(distanceMeters: number) {
+function visualRiderDistance(distanceMeters: number, cStartBackoffMeters = 0) {
+  let visualDistance = distanceMeters;
   if (distanceMeters <= 0) {
-    return -riderStartSetbackMeters;
+    visualDistance = -riderStartSetbackMeters;
+  } else if (distanceMeters < riderStartSetbackBlendMeters) {
+    const progress = Math.max(0, Math.min(1, distanceMeters / riderStartSetbackBlendMeters));
+    const smoothProgress = progress * progress * (3 - 2 * progress);
+    visualDistance = distanceMeters - riderStartSetbackMeters * (1 - smoothProgress);
   }
-  if (distanceMeters >= riderStartSetbackBlendMeters) {
-    return distanceMeters;
-  }
-  const progress = Math.max(0, Math.min(1, distanceMeters / riderStartSetbackBlendMeters));
-  const smoothProgress = progress * progress * (3 - 2 * progress);
-  return distanceMeters - riderStartSetbackMeters * (1 - smoothProgress);
+
+  return cStartVisualDistance(visualDistance, cStartBackoffMeters);
 }
 
 function createRiderContent(
@@ -398,6 +393,7 @@ function updateDynamicRiderMarker(
   mapHeading: number,
   label: string,
   title: string,
+  cStartLoaded: boolean,
 ) {
   dynamic.marker.position = { ...position, altitude };
   dynamic.marker.title = title;
@@ -405,10 +401,12 @@ function updateDynamicRiderMarker(
     dynamic.marker.label = label;
     return;
   }
+  dynamic.content.classList.toggle('map-3d-rider-marker-c-start', cStartLoaded);
   const image = dynamic.content.querySelector<HTMLImageElement>('.map-3d-rider-image');
   const name = dynamic.content.querySelector<HTMLSpanElement>('.map-3d-rider-label');
   if (image) {
-    image.style.transform = `rotate(${normalizeHeading(bearing - mapHeading - 90)}deg)`;
+    const orientation = uprightRiderOrientation(bearing - mapHeading - 90);
+    image.style.transform = `rotate(${orientation.leanDegrees}deg) scaleX(${orientation.mirrored ? -1 : 1})`;
   }
   if (name) {
     name.textContent = label;
@@ -446,6 +444,7 @@ export function GoogleMaps3DTrackLayer({
   players,
   samplesByDevice,
   speedUnit,
+  cStartOffsetsByPlayer = {},
   raceViewFullscreen = false,
   raceState,
   earthAngle,
@@ -853,7 +852,7 @@ export function GoogleMaps3DTrackLayer({
       return;
     }
     const desired = new Set<string>();
-    const lanes = riderLaneOffsets(players);
+    const lanes = riderLaneOffsetsByPlayer(players);
 
     const updateRider = (
       key: string,
@@ -864,11 +863,12 @@ export function GoogleMaps3DTrackLayer({
       altitude: number,
       bearingSelections: Record<string, 'a' | 'b'>,
       laneOffset: number,
+      cStartBackoffMeters: number,
       appearance: 'live' | 'ghost' | 'remote',
       zIndex: number,
     ) => {
       desired.add(key);
-      const pose = riderRoutePose(track, visualRiderDistance(distance), bearingSelections);
+      const pose = riderRoutePose(track, visualRiderDistance(distance, cStartBackoffMeters), bearingSelections);
       if (!pose) {
         return;
       }
@@ -881,7 +881,16 @@ export function GoogleMaps3DTrackLayer({
         if (!dynamic) return;
         dynamicMarkersRef.current.set(key, dynamic);
       }
-      updateDynamicRiderMarker(dynamic, position, Math.max(1, altitude), pose.bearing, earthHeading, label, title);
+      updateDynamicRiderMarker(
+        dynamic,
+        position,
+        Math.max(1, altitude),
+        pose.bearing,
+        earthHeading,
+        label,
+        title,
+        cStartBackoffMeters > 0,
+      );
     };
 
     if (!mappingMode) {
@@ -894,9 +903,10 @@ export function GoogleMaps3DTrackLayer({
           localRiderMarkerLabel(player),
           rider.distance,
           rider.velocity,
-          1 + Math.max(0, rider.air),
+          1 + riderAirPixelsToMeters(rider.air),
           rider.actualBranches,
           lanes.get(player.id) ?? 0,
+          cStartOffsetsByPlayer[player.id] ?? 0,
           'live',
           900 + player.id,
         );
@@ -919,6 +929,7 @@ export function GoogleMaps3DTrackLayer({
           1,
           rider.actualBranches,
           remoteRiderLaneOffset(index + 1) * 0.45,
+          0,
           'ghost',
           950 + index,
         );
@@ -943,9 +954,10 @@ export function GoogleMaps3DTrackLayer({
           `R${remoteIndex + 1} ${rider.name}`,
           distance,
           rider.velocity,
-          1 + Math.max(0, rider.air),
+          1 + riderAirPixelsToMeters(rider.air),
           rider.actualBranches ?? {},
           remoteRiderLaneOffset(remoteIndex),
+          0,
           'remote',
           1_000 + remoteIndex,
         );
@@ -959,7 +971,7 @@ export function GoogleMaps3DTrackLayer({
         dynamicMarkersRef.current.delete(key);
       }
     });
-  }, [earthHeading, ghostRiders, mappingMode, players, raceState, remoteRaceStates, riders, samplesByDevice, sceneVersion, speedUnit, track]);
+  }, [cStartOffsetsByPlayer, earthHeading, ghostRiders, mappingMode, players, raceState, remoteRaceStates, riders, samplesByDevice, sceneVersion, speedUnit, track]);
 
   const removeSelectedPoint = () => {
     if (selectedEditPoint?.kind === 'path') {

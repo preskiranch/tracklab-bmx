@@ -77,6 +77,27 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBe(0);
   });
 
+  it('uses a valid post-red sample immediately on the first gate-drop frame', () => {
+    const riders = createInitialRiders([player]);
+    const rider = stepRiders(
+      riders,
+      [player],
+      new Map([[58701, sample(9_999)]]),
+      0.1,
+      10_000,
+      400,
+      {},
+      [],
+      [],
+      10_000,
+      9_500,
+    )[0];
+
+    expect(rider.driveAllowed).toBe(true);
+    expect(rider.driveSource).toBe('cadence');
+    expect(rider.distance).toBeGreaterThan(0);
+  });
+
   it('moves on the first low but valid post-gate drive packet', () => {
     const riders = createInitialRiders([player]);
     const launchSample = {
@@ -151,6 +172,39 @@ describe('race physics input gating', () => {
     }
 
     expect(rider.distance).toBeCloseTo(20 + entryVelocityMps * 1.2, 8);
+  });
+
+  it('does not launch over an obstacle while inside a coasting section', () => {
+    const zones: TrackZone[] = [{
+      id: 'pedal-1',
+      name: 'Pedal 1',
+      startMeter: 0,
+      endMeter: 10,
+      type: 'pedal',
+    }];
+    const takeoffMeter = 340 * 0.19;
+    const rider = {
+      ...createInitialRiders([player])[0],
+      distance: takeoffMeter - 0.4,
+      velocity: 8,
+    };
+
+    const result = stepRiders(
+      [rider],
+      [player],
+      new Map([[58701, sample(10_000)]]),
+      0.1,
+      9_000,
+      400,
+      {},
+      [],
+      zones,
+      10_000,
+    )[0];
+
+    expect(result.driveAllowed).toBe(false);
+    expect(result.phase).toBe('pedaling');
+    expect(result.air).toBe(0);
   });
 
   it('enters the next pedal zone without losing the held coasting speed', () => {

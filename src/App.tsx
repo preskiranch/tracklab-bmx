@@ -52,6 +52,12 @@ import {
   uciVoiceWatchGateOffsetMs,
 } from './lib/audioCues';
 import {
+  bikeSampleHasDriveSignalSince,
+  bmxCStartBackoffMeters,
+  bmxCStartReleaseMs,
+  type CStartOffsetsByPlayer,
+} from './lib/bmxGateStart';
+import {
   applyUserTrackMapping,
   createTrackZonesForBoundarySets,
   createZoneBoundarySet,
@@ -172,6 +178,7 @@ import type {
   MetricKey,
   MultiplayerRaceState,
   MultiplayerTrackVoteCandidate,
+  PlayerId,
   PlayerSlot,
   PlayMode,
   RaceCapture,
@@ -1304,6 +1311,9 @@ export default function App() {
   const startGateTimeoutsRef = useRef<number[]>([]);
   const startGateSequenceIdRef = useRef(0);
   const cadenceStartedAtRef = useRef(0);
+  const redLightAtRef = useRef(0);
+  const cStartTriggeredPlayerIdsRef = useRef<Set<PlayerId>>(new Set());
+  const cStartOffsetsByPlayerRef = useRef<CStartOffsetsByPlayer>({});
   const falseStartActiveRef = useRef(false);
   const lastFinishToneSecondRef = useRef<number | null>(null);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
@@ -1423,6 +1433,7 @@ export default function App() {
   const [selectedCustomRoutePrediction, setSelectedCustomRoutePrediction] = useState<PlacePredictionOption | null>(null);
   const [customRoutePreview, setCustomRoutePreview] = useState<CustomRoutePreview | null>(null);
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
+  const [cStartOffsetsByPlayer, setCStartOffsetsByPlayer] = useState<CStartOffsetsByPlayer>({});
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
@@ -2449,6 +2460,10 @@ export default function App() {
     startGateTimeoutsRef.current = [];
     stopStartGateAudio();
     cadenceStartedAtRef.current = 0;
+    redLightAtRef.current = 0;
+    cStartTriggeredPlayerIdsRef.current = new Set();
+    cStartOffsetsByPlayerRef.current = {};
+    setCStartOffsetsByPlayer({});
   }, []);
 
   const clearStartGateSequence = useCallback(() => {
@@ -4804,8 +4819,51 @@ export default function App() {
     startGateTimeoutsRef.current.push(timeoutId);
   }, []);
 
-  const armReactionTimer = useCallback(() => {
-    const armedAt = Date.now();
+  const loadCStartPlayers = useCallback((playerIds: PlayerId[]) => {
+    if (playerIds.length === 0) {
+      return;
+    }
+
+    const next = { ...cStartOffsetsByPlayerRef.current };
+    playerIds.forEach((playerId) => {
+      next[playerId] = bmxCStartBackoffMeters;
+    });
+    cStartOffsetsByPlayerRef.current = next;
+    setCStartOffsetsByPlayer(next);
+  }, []);
+
+  const releaseCStartPlayers = useCallback((playerIds?: PlayerId[]) => {
+    const targetPlayerIds = playerIds ?? racePlayers.map((player) => player.id);
+    const startingOffsets = new Map(targetPlayerIds.map((playerId) => [
+      playerId,
+      cStartOffsetsByPlayerRef.current[playerId] ?? 0,
+    ]));
+    if (![...startingOffsets.values()].some((offset) => offset > 0)) {
+      return;
+    }
+
+    const frameCount = 6;
+    for (let frame = 1; frame <= frameCount; frame += 1) {
+      scheduleStartGateStep((bmxCStartReleaseMs / frameCount) * frame, () => {
+        const progress = frame / frameCount;
+        const easedProgress = progress * progress * (3 - 2 * progress);
+        const next = { ...cStartOffsetsByPlayerRef.current };
+        targetPlayerIds.forEach((playerId) => {
+          const startingOffset = startingOffsets.get(playerId) ?? 0;
+          const nextOffset = startingOffset * (1 - easedProgress);
+          if (nextOffset <= 0.0001) {
+            delete next[playerId];
+          } else {
+            next[playerId] = nextOffset;
+          }
+        });
+        cStartOffsetsByPlayerRef.current = next;
+        setCStartOffsetsByPlayer(next);
+      });
+    }
+  }, [racePlayers, scheduleStartGateStep]);
+
+  const armReactionTimer = useCallback((armedAt = Date.now()) => {
     setReactionStartAt(armedAt);
     setReactionTimesByPlayer({});
   }, []);
@@ -4819,6 +4877,7 @@ export default function App() {
     }
 
     const gateDropAt = Date.now();
+    const inputAllowedAt = redLightAtRef.current || gateDropAt;
     cadenceStartedAtRef.current = 0;
     falseStartActiveRef.current = false;
     ghostRaceStartedAtRef.current = gateDropAt;
@@ -4841,9 +4900,13 @@ export default function App() {
     }
 
     appendRaceCaptureEvent('race-start', 'Gate drop / race started', gateDropAt);
-    startRace(gateDropAt);
-    scheduleStartGateStep(420, () => setStartGateStatus(idleStartGateStatus));
-  }, [appendRaceCaptureEvent, bridge, demoMode, scheduleStartGateStep, startRace]);
+    releaseCStartPlayers();
+    startRace(gateDropAt, inputAllowedAt);
+    scheduleStartGateStep(420, () => {
+      redLightAtRef.current = 0;
+      setStartGateStatus(idleStartGateStatus);
+    });
+  }, [appendRaceCaptureEvent, bridge, demoMode, releaseCStartPlayers, scheduleStartGateStep, startRace]);
 
   const startConfiguredCadence = useCallback(async (startingTrackId: string, sequenceId: number) => {
     if (
@@ -4860,6 +4923,11 @@ export default function App() {
       detail: 'Starting random cadence audio',
       lightIndex: null,
     });
+
+    await primeAudioCues();
+    if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
+      return;
+    }
 
     const voiceStart = await playUciRandomStartVoice();
     if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
@@ -4905,7 +4973,14 @@ export default function App() {
     [0, 120, 240].forEach((offsetMs, index) => {
       scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
         if (index === 0) {
-          armReactionTimer();
+          const redLightAt = Date.now();
+          redLightAtRef.current = redLightAt;
+          armReactionTimer(redLightAt);
+        }
+        if (index === 2 && demoMode) {
+          const demoPlayerIds = racePlayers.map((player) => player.id);
+          cStartTriggeredPlayerIdsRef.current = new Set(demoPlayerIds);
+          loadCStartPlayers(demoPlayerIds);
         }
 
         const lightIndex = index as 0 | 1 | 2;
@@ -4924,7 +4999,7 @@ export default function App() {
       playStartGateTone('uci-green');
       beginRaceAtGateDrop(startingTrackId, sequenceId);
     });
-  }, [armReactionTimer, beginRaceAtGateDrop, scheduleStartGateStep]);
+  }, [armReactionTimer, beginRaceAtGateDrop, demoMode, loadCStartPlayers, racePlayers, scheduleStartGateStep]);
 
   const handleFalseStart = useCallback((detection: FalseStartDetection) => {
     if (falseStartActiveRef.current || raceState === 'racing') {
@@ -4983,6 +5058,7 @@ export default function App() {
       || !startGateStatus.active
       || startGateStatus.phase !== 'cadence'
       || cadenceStartedAtRef.current <= 0
+      || redLightAtRef.current > 0
       || falseStartActiveRef.current
     ) {
       return;
@@ -4993,6 +5069,43 @@ export default function App() {
       handleFalseStart(detection);
     }
   }, [demoMode, handleFalseStart, racePlayers, samplesByDevice, startGateStatus.active, startGateStatus.phase]);
+
+  useEffect(() => {
+    const validStartAt = redLightAtRef.current || reactionStartAt || 0;
+    const canPresentStart = startGateStatus.phase === 'cadence' || raceState === 'racing';
+    if (demoMode || !canPresentStart || validStartAt <= 0) {
+      return;
+    }
+
+    const newlyTriggered = racePlayers.filter((player) => {
+      if (cStartTriggeredPlayerIdsRef.current.has(player.id)) {
+        return false;
+      }
+
+      const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
+      return bikeSampleHasDriveSignalSince(sample, validStartAt);
+    });
+    if (newlyTriggered.length === 0) {
+      return;
+    }
+
+    newlyTriggered.forEach((player) => cStartTriggeredPlayerIdsRef.current.add(player.id));
+    const newlyTriggeredIds = newlyTriggered.map((player) => player.id);
+    loadCStartPlayers(newlyTriggeredIds);
+
+    if (raceState === 'racing') {
+      releaseCStartPlayers(newlyTriggeredIds);
+    }
+  }, [
+    demoMode,
+    loadCStartPlayers,
+    racePlayers,
+    raceState,
+    reactionStartAt,
+    releaseCStartPlayers,
+    samplesByDevice,
+    startGateStatus.phase,
+  ]);
 
   const handleDemoModeChange = (enabled: boolean, nextSource: BikeConnectionSource = enabled ? 'demo' : 'bluetooth') => {
     clearStartGateSequence();
@@ -5447,7 +5560,7 @@ export default function App() {
       bridge.sendControlCommand('race-arm');
     }
 
-    primeAudioCues();
+    void primeAudioCues();
 
     const stagingSteps = createRaceStagingSteps();
     setStartGateStatus({
@@ -5735,7 +5848,7 @@ export default function App() {
               : 'Ready soon',
       state: workflowRaceReady ? 'next' : raceState === 'racing' ? 'complete' : 'idle',
       primaryAction: workflowRaceReady,
-      onPointerDown: workflowRaceReady ? primeAudioCues : undefined,
+      onPointerDown: workflowRaceReady ? () => { void primeAudioCues(); } : undefined,
       onClick: () => {
         setAppMode('race');
         if (workflowRaceReady) {
@@ -6237,6 +6350,7 @@ export default function App() {
                   startGateLabel={startGateStatus.label}
                   startGateDetail={startGateStatus.detail}
                   startGateLightIndex={startGateStatus.lightIndex}
+                  cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                   finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
                   earthAngle={earthAngle}
