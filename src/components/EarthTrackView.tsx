@@ -41,6 +41,7 @@ import type {
   TrackSplitSection,
   TrackZone,
 } from '../types';
+import type { CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 
 type EarthTrackViewProps = {
   track: TrackRecord;
@@ -58,6 +59,7 @@ type EarthTrackViewProps = {
   startGateLabel: string;
   startGateDetail: string;
   startGateLightIndex: 0 | 1 | 2 | 3 | null;
+  cStartOffsetsByPlayer: CStartOffsetsByPlayer;
   finishCountdownSeconds: number | null;
   reactionTimesByPlayer: ReactionTimesByPlayer;
   earthAngle: number;
@@ -139,6 +141,7 @@ export function EarthTrackView({
   startGateLabel,
   startGateDetail,
   startGateLightIndex,
+  cStartOffsetsByPlayer,
   finishCountdownSeconds,
   reactionTimesByPlayer,
   earthAngle,
@@ -254,6 +257,7 @@ export function EarthTrackView({
               players={players}
               samplesByDevice={samplesByDevice}
               speedUnit={speedUnit}
+              cStartOffsetsByPlayer={cStartOffsetsByPlayer}
               raceViewFullscreen={raceViewFullscreen}
               raceState={raceState}
               earthAngle={earthAngle}
@@ -292,6 +296,7 @@ export function EarthTrackView({
               samplesByDevice={samplesByDevice}
               speedUnit={speedUnit}
               distanceUnit={distanceUnit}
+              cStartOffsetsByPlayer={cStartOffsetsByPlayer}
               raceViewFullscreen={raceViewFullscreen}
               raceState={raceState}
               earthAngle={earthAngle}

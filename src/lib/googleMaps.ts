@@ -912,10 +912,11 @@ export function riderRoutePose(
   }
 
   const routeLength = routeLengthMeters(route);
-  const safeDistance = Math.max(0, distanceMeters);
-  const target = routeIsClosedLoop(route) && routeLength > 0
-    ? safeDistance % routeLength
-    : Math.min(routeLength, safeDistance);
+  const target = distanceMeters <= 0
+    ? distanceMeters
+    : routeIsClosedLoop(route) && routeLength > 0
+      ? distanceMeters % routeLength
+      : Math.min(routeLength, distanceMeters);
   if (target <= 0) {
     const start = route[0];
     const end = route[1];

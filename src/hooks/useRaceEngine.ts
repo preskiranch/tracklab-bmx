@@ -137,6 +137,7 @@ export function useRaceEngine(
   const [raceSummary, setRaceSummary] = useState<RaceSummaryEntry[]>([]);
   const [finishWindowEndsAt, setFinishWindowEndsAt] = useState<number | null>(null);
   const raceStartedAtRef = useRef(0);
+  const inputAllowedAtRef = useRef(0);
   const finishWindowEndsAtRef = useRef<number | null>(null);
   const racePlayersRef = useRef(players);
   const raceStatsRef = useRef<Map<PlayerSlot['id'], RaceMetricAccumulator>>(new Map());
@@ -161,6 +162,7 @@ export function useRaceEngine(
   const resetRace = useCallback(() => {
     window.cancelAnimationFrame(frameRef.current);
     raceStartedAtRef.current = 0;
+    inputAllowedAtRef.current = 0;
     finishWindowEndsAtRef.current = null;
     raceStatsRef.current = new Map();
     lastFrameRef.current = 0;
@@ -170,7 +172,7 @@ export function useRaceEngine(
     setRiders(createInitialRiders(playersRef.current, branchChoicesRef.current));
   }, []);
 
-  const startRace = useCallback((startedAt = Date.now()) => {
+  const startRace = useCallback((startedAt = Date.now(), inputAllowedAt = startedAt) => {
     const racePlayers = playersRef.current;
     racePlayersRef.current = racePlayers;
     finishWindowEndsAtRef.current = null;
@@ -179,6 +181,7 @@ export function useRaceEngine(
     setFinishWindowEndsAt(null);
     setRiders(createInitialRiders(racePlayers, branchChoicesRef.current));
     raceStartedAtRef.current = startedAt;
+    inputAllowedAtRef.current = inputAllowedAt;
     lastFrameRef.current = performance.now();
     setRaceState('racing');
   }, []);
@@ -194,6 +197,7 @@ export function useRaceEngine(
       lastFrameRef.current = now;
 
       setRiders((current) => {
+        const frameNow = Date.now();
         const next = stepRiders(
           current,
           playersRef.current,
@@ -204,8 +208,9 @@ export function useRaceEngine(
           branchChoicesRef.current,
           splitDecisionPointsRef.current,
           trackZonesRef.current,
+          frameNow,
+          inputAllowedAtRef.current,
         );
-        const frameNow = Date.now();
         const finishDeadline = nextRaceFinishDeadline(finishWindowEndsAtRef.current, next, frameNow);
         if (finishDeadline !== finishWindowEndsAtRef.current) {
           finishWindowEndsAtRef.current = finishDeadline;

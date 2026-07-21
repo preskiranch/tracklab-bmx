@@ -5,6 +5,8 @@ import {
   previewRangeMeters,
   terrainRelativeCamera,
 } from '../../src/lib/googleMaps3d';
+import { riderRoutePose } from '../../src/lib/googleMaps';
+import { trackCatalog } from '../../src/data/trackCatalog';
 
 describe('Google Maps 3D preview helpers', () => {
   const center = { lat: 38.2702, lng: -122.2835 };
@@ -36,5 +38,17 @@ describe('Google Maps 3D preview helpers', () => {
     expect(isGoogleMaps3DSteadyEvent(Object.assign(new Event('gmp-steadychange'), { isSteady: true }))).toBe(true);
     expect(isGoogleMaps3DSteadyEvent(Object.assign(new Event('gmp-steadychange'), { isSteady: false }))).toBe(false);
     expect(isGoogleMaps3DSteadyEvent(new Event('gmp-steadychange'))).toBe(false);
+  });
+
+  it('extrapolates a staged rider behind the start instead of clamping it onto the line', () => {
+    const track = trackCatalog.find((candidate) => candidate.id === 'air-time-bmx');
+    expect(track).toBeDefined();
+
+    const staged = riderRoutePose(track!, -0.5);
+    const start = riderRoutePose(track!, 0);
+    expect(staged).not.toBeNull();
+    expect(start).not.toBeNull();
+    expect(staged?.bearing).toBe(start?.bearing);
+    expect(staged?.position).not.toEqual(start?.position);
   });
 });

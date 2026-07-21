@@ -77,6 +77,27 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBe(0);
   });
 
+  it('uses a valid post-red sample immediately on the first gate-drop frame', () => {
+    const riders = createInitialRiders([player]);
+    const rider = stepRiders(
+      riders,
+      [player],
+      new Map([[58701, sample(9_999)]]),
+      0.1,
+      10_000,
+      400,
+      {},
+      [],
+      [],
+      10_000,
+      9_500,
+    )[0];
+
+    expect(rider.driveAllowed).toBe(true);
+    expect(rider.driveSource).toBe('cadence');
+    expect(rider.distance).toBeGreaterThan(0);
+  });
+
   it('moves on the first low but valid post-gate drive packet', () => {
     const riders = createInitialRiders([player]);
     const launchSample = {

@@ -222,6 +222,7 @@ export function stepRiders(
   splitDecisionPoints: SplitRouteDecisionPoint[] = [],
   trackZones: TrackZone[] = [],
   nowMs = Date.now(),
+  inputAllowedAt = raceStartedAt,
 ): RiderState[] {
   const stepped = riders.map((rider) => {
     if (rider.finishedAt != null) {
@@ -234,13 +235,13 @@ export function stepRiders(
     const selectedBranch = branchChoicesByPlayer[rider.playerId] ?? rider.selectedBranch ?? 'a';
     let actualBranches = rider.actualBranches;
     let proPenaltySections = rider.proPenaltySections;
-    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, raceStartedAt)
+    const rawWatts = metricIsUsable(sample, sample?.wattsAt, nowMs, inputAllowedAt)
       ? cleanBikeWatts(sample?.physicsWatts ?? sample?.watts ?? 0) ?? 0
       : 0;
-    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, raceStartedAt)
+    const rawCadence = metricIsUsable(sample, sample?.cadenceAt, nowMs, inputAllowedAt)
       ? cleanBikeCadenceRpm(sample?.cadence ?? 0) ?? 0
       : 0;
-    const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, raceStartedAt)
+    const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, inputAllowedAt)
       ? cleanBikeSpeedKph(sample?.speedKph ?? 0) ?? 0
       : 0;
     const { activeZone, pedalZonesConfigured, firstPedalStartMeter } = zoneDriveContext(

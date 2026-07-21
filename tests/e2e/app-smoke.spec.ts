@@ -536,7 +536,7 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
   await expect(page.getByText(/runs locally in the background/i)).toBeVisible();
 });
 
-test('start here race action enters fullscreen race view', async ({ page }) => {
+test('start here race action enters fullscreen race view', async ({ page }, testInfo) => {
   test.setTimeout(45_000);
   const authUser = {
     id: 'quick-start-racer',
@@ -558,17 +558,55 @@ test('start here race action enters fullscreen race view', async ({ page }) => {
     });
   });
   await page.addInitScript(() => {
+    const audioWindow = window as typeof window & {
+      __tracklabVoiceStartCount?: number;
+      __tracklabGateToneStarts?: number[];
+      __tracklabTreeLightSequence?: string[];
+    };
     const prototype = window.AudioBufferSourceNode?.prototype;
-    if (!prototype) {
-      return;
+    if (prototype) {
+      const originalStart = prototype.start;
+      prototype.start = function (...args: Parameters<AudioBufferSourceNode['start']>) {
+        audioWindow.__tracklabVoiceStartCount = (audioWindow.__tracklabVoiceStartCount ?? 0) + 1;
+        return Reflect.apply(originalStart, this, args);
+      };
     }
 
-    const originalStart = prototype.start;
-    prototype.start = function (...args: Parameters<AudioBufferSourceNode['start']>) {
-      const audioWindow = window as typeof window & { __tracklabVoiceStartCount?: number };
-      audioWindow.__tracklabVoiceStartCount = (audioWindow.__tracklabVoiceStartCount ?? 0) + 1;
-      return Reflect.apply(originalStart, this, args);
-    };
+    const audioParamPrototype = window.AudioParam?.prototype;
+    if (audioParamPrototype) {
+      const originalSetValueAtTime = audioParamPrototype.setValueAtTime;
+      audioParamPrototype.setValueAtTime = function (
+        value: number,
+        startTime: number,
+      ) {
+        if (value >= 631 && value <= 633) {
+          audioWindow.__tracklabGateToneStarts = [
+            ...(audioWindow.__tracklabGateToneStarts ?? []),
+            value,
+          ];
+        }
+        return Reflect.apply(originalSetValueAtTime, this, [value, startTime]);
+      };
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      let previousLight = '';
+      const recordActiveLight = () => {
+        const activeLight = document.querySelector<HTMLElement>('.tree-lamp.active')?.getAttribute('aria-label') ?? '';
+        if (activeLight && activeLight !== previousLight) {
+          audioWindow.__tracklabTreeLightSequence = [
+            ...(audioWindow.__tracklabTreeLightSequence ?? []),
+            activeLight,
+          ];
+          previousLight = activeLight;
+        }
+      };
+      new MutationObserver(recordActiveLight).observe(document.documentElement, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+      });
+    }, { once: true });
   });
 
   await page.goto('/?track=air-time-bmx');
@@ -590,6 +628,16 @@ test('start here race action enters fullscreen race view', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabVoiceStartCount?: number }).__tracklabVoiceStartCount ?? 0
   )), { timeout: 5_000 }).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabGateToneStarts?: number[] }).__tracklabGateToneStarts?.length ?? 0
+  )), { timeout: 10_000 }).toBe(4);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabTreeLightSequence?: string[] }).__tracklabTreeLightSequence ?? []
+  )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);
+  await testInfo.attach('demo-race-3d.png', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
   await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
 });
 
