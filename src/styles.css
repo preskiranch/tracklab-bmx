@@ -2545,25 +2545,6 @@ input:focus {
   will-change: transform;
 }
 
-.map-3d-rider-label {
-  position: absolute;
-  left: 50%;
-  top: -15px;
-  max-width: 126px;
-  overflow: hidden;
-  padding: 3px 6px;
-  border: 2px solid var(--rider-accent);
-  border-radius: 5px;
-  background: rgba(15, 23, 42, 0.9);
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 900;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transform: translateX(-50%);
-}
-
 .map-3d-rider-marker-ghost {
   opacity: 0.78;
 }
@@ -2708,6 +2689,131 @@ input:focus {
   stroke-linecap: round;
   stroke-linejoin: round;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+}
+
+.map-3d-split-preview polyline {
+  stroke: #38bdf8;
+}
+
+.race-rider-overlay {
+  position: absolute;
+  left: var(--overlay-x);
+  top: var(--overlay-y);
+  z-index: 1180;
+  width: min(var(--overlay-width), calc(100% - 24px));
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(8, 13, 22, 0.78);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.34);
+  color: #ffffff;
+  pointer-events: auto;
+  touch-action: none;
+  backdrop-filter: blur(10px);
+}
+
+.race-rider-overlay-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(2, 6, 12, 0.42);
+  color: rgba(255, 255, 255, 0.76);
+  cursor: move;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.race-rider-overlay-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 7px;
+}
+
+.race-rider-overlay-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-left: 4px solid var(--player-color);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.84);
+}
+
+.race-rider-overlay-card-ghost {
+  border-style: dashed;
+  background: rgba(8, 47, 73, 0.78);
+}
+
+.race-rider-overlay-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 24px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--player-color);
+  color: #06111f;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.race-rider-overlay-card > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.race-rider-overlay-card strong {
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-rider-overlay-card span:not(.race-rider-overlay-badge) {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-rider-overlay-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-right: 2px solid rgba(255, 255, 255, 0.55);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.55);
+  background: transparent;
+  cursor: ew-resize;
+}
+
+@media (max-width: 780px) {
+  .race-rider-overlay {
+    width: min(var(--overlay-width), calc(100% - 16px));
+  }
+
+  .race-rider-overlay-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .google-key-required {

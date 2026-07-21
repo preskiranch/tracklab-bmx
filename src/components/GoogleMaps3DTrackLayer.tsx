@@ -46,7 +46,6 @@ import {
   routeWithSplitBranchSelections,
 } from '../lib/trackMapping';
 import { curveRawSampleMeters, preparedCurveStroke } from '../lib/trackCurve';
-import { ghostRiderMarkerLabel, localRiderMarkerLabel } from '../lib/playerIdentity';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { recordMap3DLoad, type Map3DLoadContext } from '../lib/map3dUsage';
 import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGateStart';
@@ -108,6 +107,8 @@ const routeColors: Record<TrackRouteVariantId, string> = {
   amateur: '#d8ff3e',
   pro: '#38bdf8',
 };
+const splitBranchMinInteriorPoints = 2;
+const splitBranchEndpointSnapMeters = 8;
 const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
   lime: '/assets/rider-lime.png',
   red: '/assets/rider-red.png',
@@ -296,6 +297,45 @@ function pointAtBearingDistance(point: TrackPoint, bearingDegrees: number, dista
   };
 }
 
+function branchWithSplitAndMerge(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  const next = [...points];
+  const firstPoint = next[0];
+  if (!firstPoint || distanceBetweenTrackPoints(firstPoint, splitPoint) > 0.5) {
+    next.unshift(splitPoint);
+  }
+
+  const lastPoint = next[next.length - 1];
+  if (!lastPoint || distanceBetweenTrackPoints(lastPoint, mergePoint) > 0.5) {
+    next.push(mergePoint);
+  }
+
+  return next;
+}
+
+function branchInteriorPoints(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  return points.filter((point) => (
+    distanceBetweenTrackPoints(point, splitPoint) > 0.5
+    && distanceBetweenTrackPoints(point, mergePoint) > 0.5
+  ));
+}
+
+function branchTouchesMerge(points: TrackPoint[], mergePoint: TrackPoint) {
+  return points.some((point) => distanceBetweenTrackPoints(point, mergePoint) <= splitBranchEndpointSnapMeters);
+}
+
+function draftBranchPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
+  const interiorPoints = branchInteriorPoints(points, splitPoint, mergePoint);
+  if (interiorPoints.length === 0) {
+    return [];
+  }
+
+  if (interiorPoints.length < splitBranchMinInteriorPoints || !branchTouchesMerge(points, mergePoint)) {
+    return [splitPoint, ...interiorPoints];
+  }
+
+  return branchWithSplitAndMerge(interiorPoints, splitPoint, mergePoint);
+}
+
 function offsetRiderPosition(position: TrackPoint, bearingDegrees: number, lateralMeters: number) {
   if (Math.abs(lateralMeters) < 0.05) {
     return position;
@@ -333,14 +373,13 @@ function createRiderContent(
   const content = document.createElement('div');
   content.className = `map-3d-rider-marker map-3d-rider-marker-${appearance}`;
   content.style.setProperty('--rider-accent', appearance === 'ghost' ? '#22d3ee' : player.accent);
+  content.title = label;
+  content.setAttribute('aria-label', label);
   const image = document.createElement('img');
   image.className = 'map-3d-rider-image';
-  image.alt = '';
+  image.alt = label;
   image.src = riderIconByColor[appearance === 'ghost' ? 'blue' : player.colorName];
-  const name = document.createElement('span');
-  name.className = 'map-3d-rider-label';
-  name.textContent = label;
-  content.append(image, name);
+  content.append(image);
   return content;
 }
 
@@ -401,18 +440,16 @@ function updateDynamicRiderMarker(
   dynamic.marker.position = { ...position, altitude };
   dynamic.marker.title = title;
   if (!dynamic.content) {
-    dynamic.marker.label = label;
+    dynamic.marker.label = '';
     return;
   }
+  dynamic.content.title = title;
+  dynamic.content.setAttribute('aria-label', label);
   dynamic.content.classList.toggle('map-3d-rider-marker-c-start', cStartLoaded);
   const image = dynamic.content.querySelector<HTMLImageElement>('.map-3d-rider-image');
-  const name = dynamic.content.querySelector<HTMLSpanElement>('.map-3d-rider-label');
   if (image) {
     const orientation = uprightRiderOrientation(bearing - mapHeading - 90);
     image.style.transform = `rotate(${orientation.leanDegrees}deg) scaleX(${orientation.mirrored ? -1 : 1})`;
-  }
-  if (name) {
-    name.textContent = label;
   }
 }
 
@@ -490,11 +527,14 @@ export function GoogleMaps3DTrackLayer({
   const suppressNextMapClickRef = useRef(false);
   const curvePointerIdRef = useRef<number | null>(null);
   const curveStrokeRef = useRef<TrackPoint[]>([]);
+  const splitPointerIdRef = useRef<number | null>(null);
+  const splitStrokeRef = useRef<TrackPoint[]>([]);
   const [layerState, setLayerState] = useState<LayerState>('loading');
   const [errorMessage, setErrorMessage] = useState('');
   const [sceneVersion, setSceneVersion] = useState(0);
   const [selectedEditPoint, setSelectedEditPoint] = useState<EditSelection>(null);
   const [curvePreviewPixels, setCurvePreviewPixels] = useState<Array<{ x: number; y: number }>>([]);
+  const [splitPreviewPixels, setSplitPreviewPixels] = useState<Array<{ x: number; y: number }>>([]);
   const savedRoute = useMemo(() => mappedTrackRoute(track), [track]);
   const center = useMemo(() => trackCenter(track), [track]);
   const boundsPoints = useMemo(() => trackBoundsPoints(track), [track]);
@@ -508,6 +548,11 @@ export function GoogleMaps3DTrackLayer({
   );
   const activeDraftZoneRoute = draftZoneRoutePoints.length > 1 ? draftZoneRoutePoints : draftRoute;
   const isCurveDrawMode = mappingMode && mappingEditMode === 'curve' && layerState === 'ready';
+  const isSplitBranchDrawMode = mappingMode
+    && mappingEditMode === 'split'
+    && layerState === 'ready'
+    && Boolean(draftSplitBuilder?.splitPoint)
+    && Boolean(draftSplitBuilder?.mergePoint);
 
   sceneContextRef.current = raceViewFullscreen || raceState === 'racing'
     ? 'race'
@@ -687,8 +732,8 @@ export function GoogleMaps3DTrackLayer({
       return;
     }
 
-    map.gestureHandling = isCurveDrawMode ? 'NONE' : 'AUTO';
-  }, [isCurveDrawMode]);
+    map.gestureHandling = isCurveDrawMode || isSplitBranchDrawMode ? 'NONE' : 'AUTO';
+  }, [isCurveDrawMode, isSplitBranchDrawMode]);
 
   useEffect(() => {
     interactionRef.current = (point) => {
@@ -795,12 +840,16 @@ export function GoogleMaps3DTrackLayer({
 
     if (mappingMode && draftSplitBuilder?.splitPoint) {
       const points = draftSplitBuilder.activeBranch === 'a' ? draftSplitBuilder.branchA : draftSplitBuilder.branchB;
-      const branchPath = [draftSplitBuilder.splitPoint, ...points];
-      const line = appendPolyline(map, library.Polyline3DElement, branchPath, {
-        outerColor: '#111827', outerWidth: 0.55,
-        strokeColor: draftSplitBuilder.activeBranch === 'a' ? '#ff2d55' : '#38bdf8', strokeWidth: 10,
-      });
-      if (line) elements.push(line);
+      const branchPath = draftSplitBuilder.mergePoint && points.length > 0
+        ? draftBranchPath(points, draftSplitBuilder.splitPoint, draftSplitBuilder.mergePoint)
+        : [];
+      if (branchPath.length > 1) {
+        const line = appendPolyline(map, library.Polyline3DElement, branchPath, {
+          outerColor: '#111827', outerWidth: 0.55,
+          strokeColor: draftSplitBuilder.activeBranch === 'a' ? '#ff2d55' : '#38bdf8', strokeWidth: 10,
+        });
+        if (line) elements.push(line);
+      }
     }
 
     const start = mappingMode ? draftPoints[0] : trackStartPoint(track);
@@ -916,7 +965,7 @@ export function GoogleMaps3DTrackLayer({
         updateRider(
           `local:${player.id}`,
           player,
-          localRiderMarkerLabel(player),
+          `P${player.id}`,
           rider.distance,
           rider.velocity,
           1 + riderAirPixelsToMeters(rider.air),
@@ -939,7 +988,7 @@ export function GoogleMaps3DTrackLayer({
         updateRider(
           `ghost:${rider.id}`,
           ghostPlayer,
-          ghostRiderMarkerLabel(rider.name, index + 1),
+          `G${index + 1}`,
           rider.distance,
           rider.velocity,
           1,
@@ -967,7 +1016,7 @@ export function GoogleMaps3DTrackLayer({
         updateRider(
           `remote:${state.clientId}:${rider.id}`,
           remotePlayer,
-          `R${remoteIndex + 1} ${rider.name}`,
+          `R${remoteIndex + 1}`,
           distance,
           rider.velocity,
           1 + riderAirPixelsToMeters(rider.air),
@@ -995,6 +1044,12 @@ export function GoogleMaps3DTrackLayer({
     setCurvePreviewPixels([]);
   }, []);
 
+  const clearSplitStroke = useCallback(() => {
+    splitPointerIdRef.current = null;
+    splitStrokeRef.current = [];
+    setSplitPreviewPixels([]);
+  }, []);
+
   const curvePixelFromEvent = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const shell = containerRef.current?.parentElement ?? containerRef.current;
     if (!shell) {
@@ -1006,6 +1061,16 @@ export function GoogleMaps3DTrackLayer({
       x: event.clientX - rect.left,
       y: event.clientY - rect.top,
     };
+  }, []);
+
+  const addSplitStrokePoint = useCallback((point: TrackPoint, pixel: { x: number; y: number }) => {
+    const previous = splitStrokeRef.current[splitStrokeRef.current.length - 1];
+    if (previous && distanceBetweenTrackPoints(previous, point) < curveRawSampleMeters) {
+      return;
+    }
+
+    splitStrokeRef.current = [...splitStrokeRef.current, point];
+    setSplitPreviewPixels((current) => [...current, pixel]);
   }, []);
 
   const screenPointToTrackPoint = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1038,6 +1103,67 @@ export function GoogleMaps3DTrackLayer({
       },
     );
   }, [center, earthAngle, earthCenter, earthHeading, earthZoom]);
+
+  const beginSplitStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isSplitBranchDrawMode || !onMappingSplitPointAdd) {
+      return;
+    }
+
+    const point = screenPointToTrackPoint(event);
+    const pixel = curvePixelFromEvent(event);
+    if (!point || !pixel) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    splitPointerIdRef.current = event.pointerId;
+    splitStrokeRef.current = [];
+    setSplitPreviewPixels([]);
+    addSplitStrokePoint(point, pixel);
+  }, [addSplitStrokePoint, curvePixelFromEvent, isSplitBranchDrawMode, onMappingSplitPointAdd, screenPointToTrackPoint]);
+
+  const updateSplitStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (splitPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    const point = screenPointToTrackPoint(event);
+    const pixel = curvePixelFromEvent(event);
+    if (!point || !pixel) {
+      return;
+    }
+
+    event.preventDefault();
+    addSplitStrokePoint(point, pixel);
+  }, [addSplitStrokePoint, curvePixelFromEvent, screenPointToTrackPoint]);
+
+  const finishSplitStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (splitPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can already be released if the browser cancels the gesture.
+    }
+
+    const point = screenPointToTrackPoint(event);
+    const pixel = curvePixelFromEvent(event);
+    if (point && pixel) {
+      addSplitStrokePoint(point, pixel);
+    }
+
+    const strokePoints = preparedCurveStroke(splitStrokeRef.current);
+    if (strokePoints.length > 0) {
+      strokePoints.forEach((strokePoint) => onMappingSplitPointAdd?.(strokePoint));
+      onMappingSplitDrawEnd?.();
+    }
+
+    clearSplitStroke();
+  }, [addSplitStrokePoint, clearSplitStroke, curvePixelFromEvent, onMappingSplitDrawEnd, onMappingSplitPointAdd, screenPointToTrackPoint]);
 
   const beginCurveStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (!isCurveDrawMode || !onMappingPathPointAdd) {
@@ -1110,6 +1236,12 @@ export function GoogleMaps3DTrackLayer({
     }
   }, [clearCurveStroke, isCurveDrawMode]);
 
+  useEffect(() => {
+    if (!isSplitBranchDrawMode) {
+      clearSplitStroke();
+    }
+  }, [clearSplitStroke, isSplitBranchDrawMode]);
+
   const removeSelectedPoint = () => {
     if (selectedEditPoint?.kind === 'path') {
       onMappingPathPointRemove?.(selectedEditPoint.index);
@@ -1126,7 +1258,9 @@ export function GoogleMaps3DTrackLayer({
       : mappingEditMode === 'zones'
         ? 'Tap the route or terrain to add zone boundaries. Tap an existing pin to move it.'
       : mappingEditMode === 'split'
-        ? 'Tap the terrain to place junctions and branch points.'
+        ? draftSplitBuilder?.splitPoint && draftSplitBuilder.mergePoint
+          ? 'Drag through the branch from split to merge. Multiple strokes are supported.'
+          : 'Tap the terrain to place the split and merge junctions.'
         : mappingEditMode === 'curve'
           ? 'Drag across the terrain to draw a smooth route. Apple Pencil and finger gestures are supported.'
           : 'Tap terrain to add route points. Tap an existing point, then terrain, to move it.';
@@ -1145,6 +1279,21 @@ export function GoogleMaps3DTrackLayer({
           {curvePreviewPixels.length > 1 && (
             <svg className="map-3d-curve-preview" aria-hidden="true">
               <polyline points={curvePreviewPixels.map(({ x, y }) => `${x},${y}`).join(' ')} />
+            </svg>
+          )}
+        </div>
+      )}
+      {isSplitBranchDrawMode && (
+        <div
+          className="map-3d-curve-input"
+          onPointerDown={beginSplitStroke}
+          onPointerMove={updateSplitStroke}
+          onPointerUp={finishSplitStroke}
+          onPointerCancel={finishSplitStroke}
+        >
+          {splitPreviewPixels.length > 1 && (
+            <svg className="map-3d-curve-preview map-3d-split-preview" aria-hidden="true">
+              <polyline points={splitPreviewPixels.map(({ x, y }) => `${x},${y}`).join(' ')} />
             </svg>
           )}
         </div>

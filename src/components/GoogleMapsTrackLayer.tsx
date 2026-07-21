@@ -51,7 +51,6 @@ import {
   samplePointsByDistance,
   smoothCurvePoints,
 } from '../lib/trackCurve';
-import { ghostRiderMarkerLabel, localRiderMarkerLabel } from '../lib/playerIdentity';
 import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 
 type GoogleMapsTrackLayerProps = {
@@ -2050,7 +2049,7 @@ export function GoogleMapsTrackLayer({
 
       const rotation = riderScreenRotation(pose.bearing, earthHeading);
       const title = `${player.name} / ${label}`;
-      const markerLabel = localRiderMarkerLabel(player);
+      const markerLabel = `P${player.id}`;
       const position = offsetRiderMapPosition(
         pose.position,
         pose.bearing,
@@ -2114,7 +2113,7 @@ export function GoogleMapsTrackLayer({
       const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const rotation = riderScreenRotation(pose.bearing, earthHeading);
       const title = `${rider.name} / ${label} / ghost`;
-      const markerLabel = ghostRiderMarkerLabel(rider.name, index + 1);
+      const markerLabel = `G${index + 1}`;
       const position = offsetRiderMapPosition(
         pose.position,
         pose.bearing,

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { GoogleMaps3DTrackLayer } from './GoogleMaps3DTrackLayer';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
+import { RaceRiderOverlay } from './RaceRiderOverlay';
 import { hasGoogleMapsApiKey } from '../lib/googleMaps';
 import { trackGoogleEarthUrl } from '../lib/mapLinks';
 import { formatDistanceMeters, formatReactionTime } from '../units';
@@ -399,6 +400,17 @@ export function EarthTrackView({
             <span>Race closes after the first finisher</span>
           </div>
         )}
+
+        <RaceRiderOverlay
+          trackId={track.id}
+          riders={riders}
+          ghostRiders={ghostRiders}
+          remoteRaceStates={remoteRaceStates}
+          players={players}
+          visible={raceViewFullscreen && !mappingMode}
+          speedUnit={speedUnit}
+          trackLengthMeters={track.lengthMeters}
+        />
 
         {showMappingUi && (
           <div className="map-edit-toolbar" aria-label="Map edit view controls">
