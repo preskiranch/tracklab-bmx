@@ -354,8 +354,8 @@ export function stepRiders(
 
     const takeoff = crossedTakeoff(previousDistance, distance);
 
-    if (phase !== 'airborne' && takeoff && settledVelocity > 2.2 && (cadence > 18 || !driveAllowed)) {
-      const cadenceLaunch = driveAllowed ? clamp(cadence / 110, 0.35, 1.25) : 0.55;
+    if (phase !== 'airborne' && takeoff && settledVelocity > 2.2 && driveAllowed && cadence > 18) {
+      const cadenceLaunch = clamp(cadence / 110, 0.35, 1.25);
       const speedLaunch = clamp(settledVelocity / 12, 0.45, 1.3);
       verticalVelocity = (145 + speedLaunch * 56 + cadenceLaunch * 32 + boost * 34) * takeoff.lift;
       pitch = -10 - boost * 8;

@@ -46,6 +46,11 @@ import {
 import { ghostRiderMarkerLabel, localRiderMarkerLabel } from '../lib/playerIdentity';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { recordMap3DLoad, type Map3DLoadContext } from '../lib/map3dUsage';
+import {
+  riderAirPixelsToMeters,
+  riderLaneOffsetsByPlayer,
+  uprightRiderOrientation,
+} from '../lib/riderPresentation';
 
 type GoogleMaps3DTrackLayerProps = {
   track: TrackRecord;
@@ -106,8 +111,6 @@ const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
 };
 const riderStartSetbackMeters = 2.2;
 const riderStartSetbackBlendMeters = 5;
-const riderLaneSpacingMeters = 1.1;
-const riderLaneMaxSpreadMeters = 4.4;
 const remoteRiderLaneOffsetBaseMeters = 3.2;
 const remoteRiderLaneSpacingMeters = 0.7;
 
@@ -299,17 +302,6 @@ function offsetRiderPosition(position: TrackPoint, bearingDegrees: number, later
   );
 }
 
-function riderLaneOffsets(players: PlayerSlot[]) {
-  const sorted = [...players].sort((left, right) => left.id - right.id);
-  const offsets = new Map<PlayerId, number>();
-  const spacing = sorted.length <= 1
-    ? 0
-    : Math.min(riderLaneSpacingMeters, riderLaneMaxSpreadMeters / (sorted.length - 1));
-  const midpoint = (sorted.length - 1) / 2;
-  sorted.forEach((player, index) => offsets.set(player.id, (index - midpoint) * spacing));
-  return offsets;
-}
-
 function remoteRiderLaneOffset(index: number) {
   const side = index % 2 === 0 ? 1 : -1;
   return side * (remoteRiderLaneOffsetBaseMeters + Math.floor(index / 2) * remoteRiderLaneSpacingMeters);
@@ -408,7 +400,8 @@ function updateDynamicRiderMarker(
   const image = dynamic.content.querySelector<HTMLImageElement>('.map-3d-rider-image');
   const name = dynamic.content.querySelector<HTMLSpanElement>('.map-3d-rider-label');
   if (image) {
-    image.style.transform = `rotate(${normalizeHeading(bearing - mapHeading - 90)}deg)`;
+    const orientation = uprightRiderOrientation(bearing - mapHeading - 90);
+    image.style.transform = `rotate(${orientation.leanDegrees}deg) scaleX(${orientation.mirrored ? -1 : 1})`;
   }
   if (name) {
     name.textContent = label;
@@ -853,7 +846,7 @@ export function GoogleMaps3DTrackLayer({
       return;
     }
     const desired = new Set<string>();
-    const lanes = riderLaneOffsets(players);
+    const lanes = riderLaneOffsetsByPlayer(players);
 
     const updateRider = (
       key: string,
@@ -894,7 +887,7 @@ export function GoogleMaps3DTrackLayer({
           localRiderMarkerLabel(player),
           rider.distance,
           rider.velocity,
-          1 + Math.max(0, rider.air),
+          1 + riderAirPixelsToMeters(rider.air),
           rider.actualBranches,
           lanes.get(player.id) ?? 0,
           'live',
@@ -943,7 +936,7 @@ export function GoogleMaps3DTrackLayer({
           `R${remoteIndex + 1} ${rider.name}`,
           distance,
           rider.velocity,
-          1 + Math.max(0, rider.air),
+          1 + riderAirPixelsToMeters(rider.air),
           rider.actualBranches ?? {},
           remoteRiderLaneOffset(remoteIndex),
           'remote',

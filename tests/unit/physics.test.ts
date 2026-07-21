@@ -153,6 +153,39 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBeCloseTo(20 + entryVelocityMps * 1.2, 8);
   });
 
+  it('does not launch over an obstacle while inside a coasting section', () => {
+    const zones: TrackZone[] = [{
+      id: 'pedal-1',
+      name: 'Pedal 1',
+      startMeter: 0,
+      endMeter: 10,
+      type: 'pedal',
+    }];
+    const takeoffMeter = 340 * 0.19;
+    const rider = {
+      ...createInitialRiders([player])[0],
+      distance: takeoffMeter - 0.4,
+      velocity: 8,
+    };
+
+    const result = stepRiders(
+      [rider],
+      [player],
+      new Map([[58701, sample(10_000)]]),
+      0.1,
+      9_000,
+      400,
+      {},
+      [],
+      zones,
+      10_000,
+    )[0];
+
+    expect(result.driveAllowed).toBe(false);
+    expect(result.phase).toBe('pedaling');
+    expect(result.air).toBe(0);
+  });
+
   it('enters the next pedal zone without losing the held coasting speed', () => {
     const zones: TrackZone[] = [
       {
