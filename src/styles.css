@@ -2642,7 +2642,7 @@ input:focus {
   position: absolute;
   left: 50%;
   top: 14px;
-  z-index: 9;
+  z-index: 12;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -2683,6 +2683,31 @@ input:focus {
 
 .map-3d-edit-console button:hover {
   background: rgba(255, 255, 255, 0.18);
+}
+
+.map-3d-curve-input {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.map-3d-curve-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.map-3d-curve-preview polyline {
+  fill: none;
+  stroke: #d8ff3e;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
 .google-key-required {
@@ -3725,6 +3750,40 @@ input:focus {
   font-weight: 900;
 }
 
+.zone-type-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.zone-type-header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zone-delete-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid #c9d5df;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #af2626;
+}
+
+.zone-delete-button:hover {
+  border-color: #efb4b4;
+  background: #fff0f0;
+}
+
 .zone-type-button span,
 .zone-type-button small {
   color: #4a5866;
@@ -4210,7 +4269,14 @@ input:focus {
   gap: 7px;
 }
 
+.mapping-lifecycle-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
 .mapping-actions button,
+.mapping-lifecycle-actions button,
 .file-button {
   display: inline-flex;
   align-items: center;
@@ -4225,6 +4291,35 @@ input:focus {
   color: #1d2935;
   font-size: 11px;
   font-weight: 900;
+}
+
+.mapping-lifecycle-actions button {
+  justify-content: flex-start;
+  min-height: 44px;
+}
+
+.mapping-lifecycle-actions button > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  text-align: left;
+}
+
+.mapping-lifecycle-actions button strong {
+  overflow: hidden;
+  color: #17212b;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapping-lifecycle-actions button small {
+  overflow: hidden;
+  color: #6a7886;
+  font-size: 10px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mapping-fullscreen-button {
@@ -4246,12 +4341,14 @@ input:focus {
 }
 
 .mapping-actions button:hover,
+.mapping-lifecycle-actions button:hover,
 .file-button:hover {
   border-color: var(--line-strong);
   background: #f7f9fb;
 }
 
-.mapping-actions button:disabled {
+.mapping-actions button:disabled,
+.mapping-lifecycle-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
 }

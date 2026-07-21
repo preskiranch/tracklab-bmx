@@ -36,6 +36,12 @@ export type SplitRouteDecisionPoint = {
 
 export type StoredTrackMappings = Record<string, UserTrackMapping>;
 
+export type TrackZoneBoundaryAnchorSet = {
+  id: string;
+  branchSelections?: TrackZoneBranchSelections;
+  boundaryPoints: TrackPoint[];
+};
+
 const earthRadiusMeters = 6371008.8;
 const splitJunctionToleranceMeters = 4;
 const zoneBoundaryEndpointSnapMeters = 8;
@@ -397,6 +403,65 @@ export function createZoneBoundarySet(
     ...(normalizedBranchSelections ? { branchSelections: normalizedBranchSelections } : {}),
     boundaryMeters: sortedUniqueBoundaries(boundaryMeters, Math.max(0, lengthMeters)),
   };
+}
+
+export function captureZoneBoundaryAnchors(
+  points: TrackPoint[],
+  splitSections: TrackSplitSection[],
+  boundarySets: TrackZoneBoundarySet[],
+): TrackZoneBoundaryAnchorSet[] {
+  const anchors: TrackZoneBoundaryAnchorSet[] = [];
+
+  boundarySets.forEach((set) => {
+    const route = routeWithSplitBranchSelections(points, splitSections, set.branchSelections);
+    const lengthMeters = routeLengthMeters(route);
+    if (route.length < 2 || lengthMeters <= 0) {
+      return;
+    }
+
+    const boundaryPoints = set.boundaryMeters
+      .filter((meter) => meter >= 0 && meter <= lengthMeters)
+      .map((meter) => pointAtRouteMeter(route, meter))
+      .filter((point): point is TrackPoint => Boolean(point));
+
+    if (boundaryPoints.length > 0) {
+      anchors.push({
+        id: set.id,
+        ...(set.branchSelections ? { branchSelections: { ...set.branchSelections } } : {}),
+        boundaryPoints,
+      });
+    }
+  });
+
+  return anchors;
+}
+
+export function reprojectZoneBoundaryAnchors(
+  points: TrackPoint[],
+  splitSections: TrackSplitSection[],
+  anchorSets: TrackZoneBoundaryAnchorSet[],
+): TrackZoneBoundarySet[] {
+  const boundarySets: TrackZoneBoundarySet[] = [];
+
+  anchorSets.forEach((anchor) => {
+    const route = routeWithSplitBranchSelections(points, splitSections, anchor.branchSelections);
+    const lengthMeters = routeLengthMeters(route);
+    if (route.length < 2 || lengthMeters <= 0) {
+      return;
+    }
+
+    const boundarySet = createZoneBoundarySet(
+      anchor.branchSelections,
+      anchor.boundaryPoints.map((point) => nearestRouteMeter(route, point)),
+      splitSections,
+      lengthMeters,
+    );
+    if (boundarySet.boundaryMeters.length > 0) {
+      boundarySets.push(boundarySet);
+    }
+  });
+
+  return boundarySets;
 }
 
 export function zoneMatchesBranchSelections(

@@ -59,6 +59,7 @@ import {
 } from './lib/bmxGateStart';
 import {
   applyUserTrackMapping,
+  captureZoneBoundaryAnchors,
   createTrackZonesForBoundarySets,
   createZoneBoundarySet,
   createTrackZones,
@@ -79,11 +80,13 @@ import {
   routeVariantsFromMapping,
   routeWithDefaultSplitBranches,
   routeWithSplitBranchSelections,
+  reprojectZoneBoundaryAnchors,
   splitBranchLabels,
   splitBranchSelectionsForChoice,
   splitDecisionPointsForRoute,
   writeStoredTrackMappings,
   type StoredTrackMappings,
+  type TrackZoneBoundaryAnchorSet,
   zoneBoundarySetIdForSelections,
   zoneBoundarySetsFromRouteVariant,
   zoneBoundariesFromRouteVariant,
@@ -1357,6 +1360,7 @@ export default function App() {
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
   const [draftZoneBoundarySets, setDraftZoneBoundarySets] = useState<TrackZoneBoundarySet[]>([]);
+  const [preservedZoneAnchorSets, setPreservedZoneAnchorSets] = useState<TrackZoneBoundaryAnchorSet[]>([]);
   const [mappingZoneBranchChoice, setMappingZoneBranchChoice] = useState<SplitBranchId>('a');
   const [draftSplitSections, setDraftSplitSections] = useState<TrackSplitSection[]>([]);
   const [draftSplitBuilder, setDraftSplitBuilder] = useState<DraftTrackSplit | null>(null);
@@ -2011,7 +2015,24 @@ export default function App() {
     })
       .filter((set) => set.boundaryMeters.length > 0 || set.id === defaultZoneBoundarySetId));
   }, []);
+  useEffect(() => {
+    if (preservedZoneAnchorSets.length === 0 || draftPoints.length < 2) {
+      return;
+    }
+
+    const nextBoundarySets = normalizeDraftZoneBoundarySetsForRoute(
+      draftPoints,
+      draftRouteSplitSections,
+      reprojectZoneBoundaryAnchors(draftPoints, draftRouteSplitSections, preservedZoneAnchorSets),
+    );
+
+    setDraftZoneBoundarySets((current) => (
+      zoneBoundarySetsMatch(current, nextBoundarySets) ? current : nextBoundarySets
+    ));
+  }, [draftPoints, draftRouteSplitSections, normalizeDraftZoneBoundarySetsForRoute, preservedZoneAnchorSets]);
+
   const updateCurrentDraftZoneMeters = useCallback((nextMeters: number[]) => {
+    setPreservedZoneAnchorSets([]);
     const storageMeters = draftZoneProRange
       ? nextMeters.map((meter) => draftZoneProRange.start + meter)
       : nextMeters;
@@ -4150,6 +4171,7 @@ export default function App() {
     }
 
     const snappedPoint = snapDraftPointToSplitJunction(point);
+    const zoneAnchors = captureZoneBoundaryAnchors(draftPoints, draftRouteSplitSections, draftZoneBoundarySets);
     rememberMappingEdit('route');
     setDraftPoints((current) => {
       if (index < 0 || index >= current.length) {
@@ -4173,10 +4195,16 @@ export default function App() {
         }
         return draftPoint;
       });
-      setDraftZoneBoundarySets((currentZones) => normalizeDraftZoneBoundarySetsForRoute(next, draftRouteSplitSections, currentZones));
+      setDraftZoneBoundarySets((currentZones) => {
+        const nextZones = zoneAnchors.length > 0
+          ? reprojectZoneBoundaryAnchors(next, draftRouteSplitSections, zoneAnchors)
+          : currentZones;
+
+        return normalizeDraftZoneBoundarySetsForRoute(next, draftRouteSplitSections, nextZones);
+      });
       return next;
     });
-  }, [draftPoints.length, draftRouteSplitSections, normalizeDraftZoneBoundarySetsForRoute, rememberMappingEdit, snapDraftPointToSplitJunction]);
+  }, [draftPoints, draftRouteSplitSections, draftZoneBoundarySets, normalizeDraftZoneBoundarySetsForRoute, rememberMappingEdit, snapDraftPointToSplitJunction]);
 
   const handleMappingPathPointRemove = useCallback((index: number) => {
     if (index < 0 || index >= draftPoints.length) {
@@ -4184,16 +4212,23 @@ export default function App() {
     }
 
     rememberMappingEdit('route');
+    const zoneAnchors = captureZoneBoundaryAnchors(draftPoints, draftRouteSplitSections, draftZoneBoundarySets);
     setDraftPoints((current) => {
       if (index < 0 || index >= current.length) {
         return current;
       }
 
       const next = current.filter((_, draftIndex) => draftIndex !== index);
-      setDraftZoneBoundarySets((currentZones) => normalizeDraftZoneBoundarySetsForRoute(next, draftRouteSplitSections, currentZones));
+      setDraftZoneBoundarySets((currentZones) => {
+        const nextZones = zoneAnchors.length > 0
+          ? reprojectZoneBoundaryAnchors(next, draftRouteSplitSections, zoneAnchors)
+          : currentZones;
+
+        return normalizeDraftZoneBoundarySetsForRoute(next, draftRouteSplitSections, nextZones);
+      });
       return next;
     });
-  }, [draftPoints.length, draftRouteSplitSections, normalizeDraftZoneBoundarySetsForRoute, rememberMappingEdit]);
+  }, [draftPoints, draftRouteSplitSections, draftZoneBoundarySets, normalizeDraftZoneBoundarySetsForRoute, rememberMappingEdit]);
 
   const startOrUpdateSplitBuilder = useCallback((branch: SplitBranchId = 'a') => {
     if (!draftSplitBuilder) {
@@ -4353,12 +4388,40 @@ export default function App() {
   };
 
   const clearMappingDraft = () => {
+    setPreservedZoneAnchorSets([]);
     setDraftPoints([]);
     setDraftZoneBoundarySets([]);
     setDraftSplitSections([]);
     setDraftSplitBuilder(null);
     clearMappingHistory();
   };
+
+  const redrawMappingRoute = useCallback(() => {
+    if (draftPoints.length < 2) {
+      return;
+    }
+
+    rememberMappingEdit('route');
+    setPreservedZoneAnchorSets(captureZoneBoundaryAnchors(
+      draftPoints,
+      draftRouteSplitSections,
+      draftZoneBoundarySets,
+    ));
+    setDraftPoints([]);
+    setDraftSplitBuilder(null);
+    setMappingMode(true);
+    setMappingEditMode('curve');
+  }, [draftPoints, draftRouteSplitSections, draftZoneBoundarySets, rememberMappingEdit]);
+
+  const clearMappingZones = useCallback(() => {
+    if (!draftZoneBoundarySets.some((set) => set.boundaryMeters.length > 0)) {
+      return;
+    }
+
+    rememberMappingEdit('zones');
+    setPreservedZoneAnchorSets([]);
+    setDraftZoneBoundarySets([]);
+  }, [draftZoneBoundarySets, rememberMappingEdit]);
 
   const updateMappingRestSeconds = (seconds: number) => {
     const safeSeconds = Math.max(0, Math.min(30, Number.isFinite(seconds) ? seconds : 0));
@@ -4451,6 +4514,7 @@ export default function App() {
       setDraftSplitBuilder(null);
     }
     clearMappingHistory();
+    setPreservedZoneAnchorSets([]);
     setRaceRouteVariantId(mappingRouteVariantId);
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
@@ -4468,6 +4532,7 @@ export default function App() {
     setDraftZoneBoundarySets([]);
     setDraftSplitSections([]);
     setDraftSplitBuilder(null);
+    setPreservedZoneAnchorSets([]);
     clearMappingHistory();
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
@@ -4511,6 +4576,7 @@ export default function App() {
         setDraftZoneBoundarySets(zoneBoundarySetsFromRouteVariant(importedRoute));
         setDraftSplitSections(importedRoute.splitSections ?? []);
         setDraftSplitBuilder(null);
+        setPreservedZoneAnchorSets([]);
         clearMappingHistory();
         setMappingRestSeconds(importedRoute.restAfterSeconds);
         setMappingEditMode('navigate');
@@ -4618,6 +4684,22 @@ export default function App() {
 
     rememberMappingEdit('zones');
     updateCurrentDraftZoneMeters(draftZoneMeters.filter((_, zoneIndex) => zoneIndex !== index));
+  }, [draftZoneMeters, rememberMappingEdit, updateCurrentDraftZoneMeters]);
+
+  const removeMappingZone = useCallback((index: number) => {
+    if (index < 0) {
+      return;
+    }
+
+    const nextZoneMeters = draftZoneMeters.filter((_, boundaryIndex) => (
+      boundaryIndex !== index * 2 && boundaryIndex !== index * 2 + 1
+    ));
+    if (numbersMatch(draftZoneMeters, nextZoneMeters)) {
+      return;
+    }
+
+    rememberMappingEdit('zones');
+    updateCurrentDraftZoneMeters(nextZoneMeters);
   }, [draftZoneMeters, rememberMappingEdit, updateCurrentDraftZoneMeters]);
 
   const toggleManualZone = (zoneId: string) => {
@@ -6495,6 +6577,9 @@ export default function App() {
                   onMappingUndoPoint={undoMappingPoint}
                   onMappingRedoPoint={redoMappingPoint}
                   onMappingClearDraft={clearMappingDraft}
+                  onMappingRedrawRoute={redrawMappingRoute}
+                  onMappingClearZones={clearMappingZones}
+                  onMappingZoneRemove={removeMappingZone}
                   onMappingSave={saveMapping}
                   onMappingRemove={removeMapping}
                   onMappingExport={exportMapping}

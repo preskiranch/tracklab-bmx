@@ -45,6 +45,12 @@ import {
   routeWithSplitBranchSelections,
   splitSharedRouteSegments,
 } from '../lib/trackMapping';
+import {
+  curveRawSampleMeters,
+  preparedCurveStroke,
+  samplePointsByDistance,
+  smoothCurvePoints,
+} from '../lib/trackCurve';
 import { ghostRiderMarkerLabel, localRiderMarkerLabel } from '../lib/playerIdentity';
 import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 
@@ -98,9 +104,6 @@ const routeVariantColors: Record<TrackRouteVariantId, string> = {
   pro: '#38bdf8',
 };
 const drawSampleMeters = 1.2;
-const curveRawSampleMeters = 0.65;
-const curveCommitSampleMeters = 2;
-const curveSmoothingIterations = 2;
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
 const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
@@ -206,60 +209,6 @@ function draftBranchPath(points: TrackPoint[], splitPoint: TrackPoint, mergePoin
   }
 
   return branchWithSplitAndMerge(interiorPoints, splitPoint, mergePoint);
-}
-
-function samplePointsByDistance(points: TrackPoint[], minimumDistanceMeters: number) {
-  if (points.length <= 2) {
-    return points;
-  }
-
-  const sampled = [points[0]];
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const previous = sampled[sampled.length - 1];
-    if (distanceBetweenTrackPoints(previous, points[index]) >= minimumDistanceMeters) {
-      sampled.push(points[index]);
-    }
-  }
-
-  const lastPoint = points[points.length - 1];
-  if (distanceBetweenTrackPoints(sampled[sampled.length - 1], lastPoint) > 0.25) {
-    sampled.push(lastPoint);
-  }
-
-  return sampled;
-}
-
-function smoothCurvePoints(points: TrackPoint[]) {
-  if (points.length < 3) {
-    return points;
-  }
-
-  let smoothed = points;
-  for (let iteration = 0; iteration < curveSmoothingIterations; iteration += 1) {
-    const next = [smoothed[0]];
-    for (let index = 0; index < smoothed.length - 1; index += 1) {
-      const start = smoothed[index];
-      const end = smoothed[index + 1];
-      next.push({
-        lat: (start.lat * 0.75) + (end.lat * 0.25),
-        lng: (start.lng * 0.75) + (end.lng * 0.25),
-      });
-      next.push({
-        lat: (start.lat * 0.25) + (end.lat * 0.75),
-        lng: (start.lng * 0.25) + (end.lng * 0.75),
-      });
-    }
-    next.push(smoothed[smoothed.length - 1]);
-    smoothed = next;
-  }
-
-  return smoothed;
-}
-
-function preparedCurveStroke(points: TrackPoint[]) {
-  const sampled = samplePointsByDistance(points, curveRawSampleMeters);
-  const smoothed = smoothCurvePoints(sampled);
-  return samplePointsByDistance(smoothed, curveCommitSampleMeters);
 }
 
 function pointAtBearingDistance(point: TrackPoint, bearingDegrees: number, distanceMeters: number): TrackPoint {

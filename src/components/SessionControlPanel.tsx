@@ -173,6 +173,9 @@ type SessionControlPanelProps = {
   onMappingUndoPoint: () => void;
   onMappingRedoPoint: () => void;
   onMappingClearDraft: () => void;
+  onMappingRedrawRoute: () => void;
+  onMappingClearZones: () => void;
+  onMappingZoneRemove: (zoneIndex: number) => void;
   onMappingSave: () => void;
   onMappingRemove: () => void;
   onMappingExport: () => void;
@@ -304,6 +307,9 @@ export function SessionControlPanel({
   onMappingUndoPoint,
   onMappingRedoPoint,
   onMappingClearDraft,
+  onMappingRedrawRoute,
+  onMappingClearZones,
+  onMappingZoneRemove,
   onMappingSave,
   onMappingRemove,
   onMappingExport,
@@ -756,9 +762,19 @@ export function SessionControlPanel({
                     : 'Two pins create one tracked pedaling section'}</small>
                 </div>
                 <div className="zone-type-grid">
-                  {draftZones.map((zone) => (
+                  {draftZones.map((zone, zoneIndex) => (
                     <div className="zone-type-button pedal" key={zone.id}>
-                      <strong>{zone.name}</strong>
+                      <div className="zone-type-header">
+                        <strong>{zone.name}</strong>
+                        <button
+                          type="button"
+                          className="zone-delete-button"
+                          onClick={() => onMappingZoneRemove(zoneIndex)}
+                          aria-label={`Delete ${zone.name}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                       <span>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</span>
                       <small>Performance tracked</small>
                     </div>
@@ -864,6 +880,27 @@ export function SessionControlPanel({
                   <small>sec</small>
                 </label>
 
+                <div className="mapping-lifecycle-actions">
+                  <button type="button" onClick={onMappingRedrawRoute} disabled={draftPointCount < 2}>
+                    <Route size={15} />
+                    <span>
+                      <strong>Redraw route</strong>
+                      <small>Keep pedal zones</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onMappingClearZones}
+                    disabled={draftZoneCount === 0 && draftZonePinCount === 0}
+                  >
+                    <Trash2 size={15} />
+                    <span>
+                      <strong>Clear zones</strong>
+                      <small>Keep route</small>
+                    </span>
+                  </button>
+                </div>
+
                 <div className="mapping-actions">
                   <button type="button" onClick={onMappingUndoPoint} disabled={!canUndoMapping}>
                     <Undo2 size={15} />
@@ -875,7 +912,7 @@ export function SessionControlPanel({
                   </button>
                   <button type="button" onClick={onMappingClearDraft} disabled={draftPointCount === 0}>
                     <Trash2 size={15} />
-                    Clear
+                    Clear all
                   </button>
                   <button
                     type="button"

@@ -195,6 +195,7 @@ type GoogleMapsRuntime = {
 };
 
 export type GoogleMap3DElement = HTMLElement & {
+  cameraPosition?: { lat: number; lng: number; altitude?: number };
   center?: { lat: number; lng: number; altitude?: number };
   flyCameraTo?: (options: {
     endCamera: {
@@ -206,6 +207,8 @@ export type GoogleMap3DElement = HTMLElement & {
     };
     durationMillis?: number;
   }) => Promise<void> | void;
+  fov?: number;
+  gestureHandling?: 'AUTO' | 'COOPERATIVE' | 'GREEDY' | 'NONE' | string;
   heading?: number;
   mode?: string;
   range?: number;

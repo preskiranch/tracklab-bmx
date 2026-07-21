@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Box, Check, MousePointer2, RotateCcw, Trash2, X } from 'lucide-react';
 import type {
   BikeSample,
@@ -35,14 +35,17 @@ import {
   elevatedPath,
   isGoogleMaps3DSteadyEvent,
   previewRangeMeters,
+  projectScreenPointToGround,
   terrainRelativeCamera,
 } from '../lib/googleMaps3d';
 import {
+  distanceBetweenTrackPoints,
   pointAtRouteMeter,
   routeLengthMeters,
   routeWithDefaultSplitBranches,
   routeWithSplitBranchSelections,
 } from '../lib/trackMapping';
+import { curveRawSampleMeters, preparedCurveStroke } from '../lib/trackCurve';
 import { ghostRiderMarkerLabel, localRiderMarkerLabel } from '../lib/playerIdentity';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { recordMap3DLoad, type Map3DLoadContext } from '../lib/map3dUsage';
@@ -485,10 +488,13 @@ export function GoogleMaps3DTrackLayer({
   const useSatelliteRef = useRef(onUseSatellite);
   const baseRangeRef = useRef(500);
   const suppressNextMapClickRef = useRef(false);
+  const curvePointerIdRef = useRef<number | null>(null);
+  const curveStrokeRef = useRef<TrackPoint[]>([]);
   const [layerState, setLayerState] = useState<LayerState>('loading');
   const [errorMessage, setErrorMessage] = useState('');
   const [sceneVersion, setSceneVersion] = useState(0);
   const [selectedEditPoint, setSelectedEditPoint] = useState<EditSelection>(null);
+  const [curvePreviewPixels, setCurvePreviewPixels] = useState<Array<{ x: number; y: number }>>([]);
   const savedRoute = useMemo(() => mappedTrackRoute(track), [track]);
   const center = useMemo(() => trackCenter(track), [track]);
   const boundsPoints = useMemo(() => trackBoundsPoints(track), [track]);
@@ -501,6 +507,7 @@ export function GoogleMaps3DTrackLayer({
     [draftPoints, draftRouteSplitSections],
   );
   const activeDraftZoneRoute = draftZoneRoutePoints.length > 1 ? draftZoneRoutePoints : draftRoute;
+  const isCurveDrawMode = mappingMode && mappingEditMode === 'curve' && layerState === 'ready';
 
   sceneContextRef.current = raceViewFullscreen || raceState === 'racing'
     ? 'race'
@@ -675,6 +682,15 @@ export function GoogleMaps3DTrackLayer({
   }, [baseRange, center, earthAngle, earthCenter, earthHeading, earthZoom]);
 
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    map.gestureHandling = isCurveDrawMode ? 'NONE' : 'AUTO';
+  }, [isCurveDrawMode]);
+
+  useEffect(() => {
     interactionRef.current = (point) => {
       if (!mappingMode || mappingEditMode === 'navigate') {
         return;
@@ -689,7 +705,7 @@ export function GoogleMaps3DTrackLayer({
         setSelectedEditPoint(null);
         return;
       }
-      if ((mappingEditMode === 'draw' || mappingEditMode === 'curve') && onMappingPathPointAdd) {
+      if (mappingEditMode === 'draw' && onMappingPathPointAdd) {
         onMappingPathPointAdd(point);
       } else if (mappingEditMode === 'zones' && onMappingZonePointAdd) {
         onMappingZonePointAdd(point);
@@ -818,7 +834,7 @@ export function GoogleMaps3DTrackLayer({
               onMappingZonePointAdd?.(point);
             } else if (mappingEditMode === 'split') {
               onMappingSplitPointAdd?.(point);
-            } else if (mappingEditMode === 'draw' || mappingEditMode === 'curve') {
+            } else if (mappingEditMode === 'draw') {
               setSelectedEditPoint({ kind: 'path', index });
             }
           },
@@ -973,6 +989,127 @@ export function GoogleMaps3DTrackLayer({
     });
   }, [cStartOffsetsByPlayer, earthHeading, ghostRiders, mappingMode, players, raceState, remoteRaceStates, riders, samplesByDevice, sceneVersion, speedUnit, track]);
 
+  const clearCurveStroke = useCallback(() => {
+    curvePointerIdRef.current = null;
+    curveStrokeRef.current = [];
+    setCurvePreviewPixels([]);
+  }, []);
+
+  const curvePixelFromEvent = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const shell = containerRef.current?.parentElement ?? containerRef.current;
+    if (!shell) {
+      return null;
+    }
+
+    const rect = shell.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  }, []);
+
+  const screenPointToTrackPoint = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const shell = containerRef.current?.parentElement ?? containerRef.current;
+    const map = mapRef.current;
+    if (!shell || !map) {
+      return null;
+    }
+
+    const rect = shell.getBoundingClientRect();
+    const currentCenter = map.center
+      ? { lat: map.center.lat, lng: map.center.lng }
+      : (earthCenter ?? center);
+
+    return projectScreenPointToGround(
+      {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      },
+      {
+        width: rect.width,
+        height: rect.height,
+      },
+      {
+        center: currentCenter,
+        heading: map.heading ?? earthHeading,
+        tilt: map.tilt ?? earthAngle,
+        range: map.range ?? zoomToRange(baseRangeRef.current, earthZoom),
+        fov: map.fov,
+      },
+    );
+  }, [center, earthAngle, earthCenter, earthHeading, earthZoom]);
+
+  const beginCurveStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isCurveDrawMode || !onMappingPathPointAdd) {
+      return;
+    }
+
+    const point = screenPointToTrackPoint(event);
+    const pixel = curvePixelFromEvent(event);
+    if (!point || !pixel) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    curvePointerIdRef.current = event.pointerId;
+    curveStrokeRef.current = [point];
+    setCurvePreviewPixels([pixel]);
+  }, [curvePixelFromEvent, isCurveDrawMode, onMappingPathPointAdd, screenPointToTrackPoint]);
+
+  const updateCurveStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (curvePointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    const point = screenPointToTrackPoint(event);
+    const pixel = curvePixelFromEvent(event);
+    if (!point || !pixel) {
+      return;
+    }
+
+    event.preventDefault();
+    const previous = curveStrokeRef.current[curveStrokeRef.current.length - 1];
+    if (!previous || distanceBetweenTrackPoints(previous, point) >= curveRawSampleMeters) {
+      curveStrokeRef.current = [...curveStrokeRef.current, point];
+      setCurvePreviewPixels((current) => [...current, pixel]);
+    }
+  }, [curvePixelFromEvent, screenPointToTrackPoint]);
+
+  const finishCurveStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (curvePointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can already be released if the browser cancels the gesture.
+    }
+
+    const point = screenPointToTrackPoint(event);
+    if (point) {
+      const previous = curveStrokeRef.current[curveStrokeRef.current.length - 1];
+      if (!previous || distanceBetweenTrackPoints(previous, point) >= 0.25) {
+        curveStrokeRef.current = [...curveStrokeRef.current, point];
+      }
+    }
+
+    const strokePoints = preparedCurveStroke(curveStrokeRef.current);
+    if (strokePoints.length > 1) {
+      strokePoints.forEach((strokePoint) => onMappingPathPointAdd?.(strokePoint));
+    }
+
+    clearCurveStroke();
+  }, [clearCurveStroke, onMappingPathPointAdd, screenPointToTrackPoint]);
+
+  useEffect(() => {
+    if (!isCurveDrawMode) {
+      clearCurveStroke();
+    }
+  }, [clearCurveStroke, isCurveDrawMode]);
+
   const removeSelectedPoint = () => {
     if (selectedEditPoint?.kind === 'path') {
       onMappingPathPointRemove?.(selectedEditPoint.index);
@@ -988,13 +1125,30 @@ export function GoogleMaps3DTrackLayer({
       ? 'Use Google 3D gestures to orbit, tilt, and zoom.'
       : mappingEditMode === 'zones'
         ? 'Tap the route or terrain to add zone boundaries. Tap an existing pin to move it.'
-        : mappingEditMode === 'split'
-          ? 'Tap the terrain to place junctions and branch points.'
+      : mappingEditMode === 'split'
+        ? 'Tap the terrain to place junctions and branch points.'
+        : mappingEditMode === 'curve'
+          ? 'Drag across the terrain to draw a smooth route. Apple Pencil and finger gestures are supported.'
           : 'Tap terrain to add route points. Tap an existing point, then terrain, to move it.';
 
   return (
     <div className="google-map-3d-shell">
       <div className="google-map-layer google-map-3d-layer" ref={containerRef} />
+      {isCurveDrawMode && (
+        <div
+          className="map-3d-curve-input"
+          onPointerDown={beginCurveStroke}
+          onPointerMove={updateCurveStroke}
+          onPointerUp={finishCurveStroke}
+          onPointerCancel={finishCurveStroke}
+        >
+          {curvePreviewPixels.length > 1 && (
+            <svg className="map-3d-curve-preview" aria-hidden="true">
+              <polyline points={curvePreviewPixels.map(({ x, y }) => `${x},${y}`).join(' ')} />
+            </svg>
+          )}
+        </div>
+      )}
       {layerState === 'loading' && (
         <div className="google-map-status loading" role="status">
           <Box size={20} />
