@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TrackZone, UserTrackMapping } from '../../src/types';
 import {
+  appendProSetZoneBoundaryMeter,
   mergeTrackMappingsBySavedAt,
   newestTrackMapping,
   repeatTrackZonesForLaps,
@@ -85,5 +86,17 @@ describe('closed-loop route support', () => {
       expect.objectContaining({ id: 'pedal-1-lap-2', name: 'Lap 2 / Pedal Zone 1', startMeter: 200, endMeter: 235 }),
       expect.objectContaining({ id: 'pedal-1-lap-3', name: 'Lap 3 / Pedal Zone 1', startMeter: 400, endMeter: 435 }),
     ]);
+  });
+});
+
+describe('Pro Set pedal-zone pins', () => {
+  it('locks the first pin to the split before accepting branch pins', () => {
+    expect(appendProSetZoneBoundaryMeter([], 42, 100)).toEqual([0]);
+    expect(appendProSetZoneBoundaryMeter([0], 42, 100)).toEqual([0, 42]);
+    expect(appendProSetZoneBoundaryMeter([0, 42], 68, 100)).toEqual([0, 42, 68]);
+  });
+
+  it('snaps the final endpoint to the merge', () => {
+    expect(appendProSetZoneBoundaryMeter([0, 42, 68], 96, 100)).toEqual([0, 42, 68, 100]);
   });
 });

@@ -11,6 +11,7 @@ import type {
   PlayerSlot,
   RaceState,
   RiderState,
+  SplitBranchChoice,
   SpeedUnit,
   TrackPoint,
   TrackRecord,
@@ -74,8 +75,10 @@ type GoogleMaps3DTrackLayerProps = {
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
   mappingRouteVariantId?: TrackRouteVariantId;
+  mappingZoneBranchChoice?: SplitBranchChoice;
   draftPoints?: TrackPoint[];
   draftZoneRoutePoints?: TrackPoint[];
+  draftZoneSectionId?: string | null;
   draftZoneMeters?: number[];
   draftZonePoints?: TrackPoint[];
   draftReferenceZones?: TrackZone[];
@@ -531,8 +534,10 @@ export function GoogleMaps3DTrackLayer({
   mappingMode = false,
   mappingEditMode = 'navigate',
   mappingRouteVariantId = 'amateur',
+  mappingZoneBranchChoice = 'a',
   draftPoints = [],
   draftZoneRoutePoints = [],
+  draftZoneSectionId = null,
   draftZoneMeters = [],
   draftZonePoints = [],
   draftReferenceZones = [],
@@ -584,6 +589,10 @@ export function GoogleMaps3DTrackLayer({
     [draftPoints, draftRouteSplitSections],
   );
   const activeDraftZoneRoute = draftZoneRoutePoints.length > 1 ? draftZoneRoutePoints : draftRoute;
+  const isProSetZoneMapping = mappingMode
+    && mappingEditMode === 'zones'
+    && mappingZoneBranchChoice === 'b'
+    && Boolean(draftZoneSectionId);
   const isCurveDrawMode = mappingMode && mappingEditMode === 'curve' && layerState === 'ready';
   const isSplitBranchDrawMode = mappingMode
     && mappingEditMode === 'split'
@@ -855,6 +864,8 @@ export function GoogleMaps3DTrackLayer({
     const splitSections = mappingMode ? draftSplitSections : track.splitSections ?? [];
     if (!hideRaceRoute) {
       splitSections.forEach((section) => {
+        const isActiveProZoneSection = isProSetZoneMapping && section.id === draftZoneSectionId;
+        const canUseSectionForZoneBoundary = !isProSetZoneMapping || isActiveProZoneSection;
         const handleJunctionClick = (point: TrackPoint) => {
           suppressNextMapClickRef.current = true;
           if (mappingEditMode === 'zones') {
@@ -866,31 +877,32 @@ export function GoogleMaps3DTrackLayer({
           }
         };
         section.branches.forEach((branch) => {
+          const isActiveProBranch = isActiveProZoneSection && branch.id === 'b';
           const line = appendPolyline(map, library.Polyline3DElement, branch.points, {
             outerColor: '#111827',
-            outerWidth: 0.4,
+            outerWidth: isActiveProBranch ? 0.65 : 0.4,
             strokeColor: branch.id === 'a' ? '#ff2d55' : '#38bdf8',
-            strokeWidth: mappingMode ? 9 : 7,
+            strokeWidth: isActiveProZoneSection ? (isActiveProBranch ? 12 : 5) : mappingMode ? 9 : 7,
           });
           if (line) elements.push(line);
         });
         const splitMarker = appendMarker(map, library, section.splitPoint, {
           className: 'map-3d-junction-marker split',
-          interactive: mappingMode && mappingEditMode !== 'navigate',
+          interactive: mappingMode && mappingEditMode !== 'navigate' && canUseSectionForZoneBoundary,
           label: `S${section.index}`,
-          title: `Split ${section.index}`,
+          title: isActiveProZoneSection ? 'Set Pro Set pedal start at split (0 ft)' : `Split ${section.index}`,
           zIndex: 780,
-          onClick: mappingMode && mappingEditMode !== 'navigate'
+          onClick: mappingMode && mappingEditMode !== 'navigate' && canUseSectionForZoneBoundary
             ? () => handleJunctionClick(section.splitPoint)
             : undefined,
         });
         const mergeMarker = appendMarker(map, library, section.mergePoint, {
           className: 'map-3d-junction-marker merge',
-          interactive: mappingMode && mappingEditMode !== 'navigate',
+          interactive: mappingMode && mappingEditMode !== 'navigate' && canUseSectionForZoneBoundary,
           label: `M${section.index}`,
-          title: `Merge ${section.index}`,
+          title: isActiveProZoneSection ? 'Snap Pro Set pedal endpoint to merge' : `Merge ${section.index}`,
           zIndex: 781,
-          onClick: mappingMode && mappingEditMode !== 'navigate'
+          onClick: mappingMode && mappingEditMode !== 'navigate' && canUseSectionForZoneBoundary
             ? () => handleJunctionClick(section.mergePoint)
             : undefined,
         });
@@ -969,7 +981,7 @@ export function GoogleMaps3DTrackLayer({
     }
 
     return () => removeElements(elements);
-  }, [activeDraftZoneRoute, activeZones, draftPoints, draftReferenceZones, draftRoute, draftRouteSplitSections, draftSplitBuilder, draftSplitSections, draftZoneMeters, draftZonePoints, mappingEditMode, mappingMode, mappingRouteVariantId, onMappingPathPointAdd, onMappingSplitPointAdd, onMappingZonePointAdd, raceState, raceViewFullscreen, savedRoute, sceneVersion, selectedEditPoint, track]);
+  }, [activeDraftZoneRoute, activeZones, draftPoints, draftReferenceZones, draftRoute, draftRouteSplitSections, draftSplitBuilder, draftSplitSections, draftZoneMeters, draftZonePoints, draftZoneSectionId, isProSetZoneMapping, mappingEditMode, mappingMode, mappingRouteVariantId, onMappingPathPointAdd, onMappingSplitPointAdd, onMappingZonePointAdd, raceState, raceViewFullscreen, savedRoute, sceneVersion, selectedEditPoint, track]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1318,7 +1330,9 @@ export function GoogleMaps3DTrackLayer({
     : mappingEditMode === 'navigate'
       ? 'Use Google 3D gestures to orbit, tilt, and zoom.'
       : mappingEditMode === 'zones'
-        ? 'Tap the route or terrain to add zone boundaries. Tap an existing pin to move it.'
+        ? isProSetZoneMapping
+          ? 'Start at S, then tap zone boundaries along the blue Pro route. Use M for the final endpoint.'
+          : 'Tap the route or terrain to add zone boundaries. Tap an existing pin to move it.'
       : mappingEditMode === 'split'
         ? draftSplitBuilder?.splitPoint && draftSplitBuilder.mergePoint
           ? 'Drag through the branch from split to merge. Multiple strokes are supported.'

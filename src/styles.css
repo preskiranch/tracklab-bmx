@@ -3824,16 +3824,57 @@ input:focus {
   gap: 6px;
 }
 
-.zone-route-steps span {
+.zone-route-steps > span,
+.zone-route-steps > button {
+  display: grid;
+  gap: 2px;
+  align-content: center;
   min-width: 0;
-  padding: 6px;
+  min-height: 48px;
+  padding: 6px 5px;
   border: 1px solid #a5d8ff;
   border-radius: 6px;
   background: #eff8ff;
   color: #075985;
+  text-align: center;
+}
+
+.zone-route-steps > button {
+  cursor: pointer;
+}
+
+.zone-route-steps > button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.zone-route-steps > .active {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgb(56 189 248 / 18%);
+}
+
+.zone-route-steps > .complete {
+  border-color: #86d46e;
+  background: #f0faea;
+  color: #226212;
+}
+
+.zone-route-steps strong,
+.zone-route-steps small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.zone-route-steps strong {
   font-size: 10px;
   font-weight: 900;
-  text-align: center;
+}
+
+.zone-route-steps small {
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .zone-type-grid {

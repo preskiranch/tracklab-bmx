@@ -58,6 +58,7 @@ import {
   type CStartOffsetsByPlayer,
 } from './lib/bmxGateStart';
 import {
+  appendProSetZoneBoundaryMeter,
   applyUserTrackMapping,
   captureZoneBoundaryAnchors,
   createTrackZonesForBoundarySets,
@@ -2048,11 +2049,16 @@ export default function App() {
         ...current.filter((set) => set.id !== nextSet.id),
         ...(nextSet.boundaryMeters.length > 0 || nextSet.id === defaultZoneBoundarySetId ? [nextSet] : []),
       ];
-      const next = sortTrackZoneBoundarySets(mergeProBoundarySetsWithSharedZones(
-        draftPoints,
-        draftRouteSplitSections,
-        nextRaw,
-      ));
+      // Keep an unpaired Pro Set pin in its branch-only draft form. Merging
+      // shared zones is safe once the end pin completes the pair.
+      const hasPendingProBoundary = Boolean(draftZoneProRange && nextMeters.length % 2 === 1);
+      const next = sortTrackZoneBoundarySets(hasPendingProBoundary
+        ? nextRaw
+        : mergeProBoundarySetsWithSharedZones(
+            draftPoints,
+            draftRouteSplitSections,
+            nextRaw,
+          ));
       return zoneBoundarySetsMatch(current, next) ? current : next;
     });
   }, [
@@ -4625,23 +4631,27 @@ export default function App() {
       return;
     }
 
-    const existingBoundaryIndex = draftZoneMeters.findIndex((boundary) => (
-      Math.abs(boundary - meter) < zoneBoundaryDuplicateMeters
-    ));
-    let nextZoneMeters = draftZoneMeters;
-    if (draftZoneMeters.length === 0 && meter > zoneBoundaryDuplicateMeters) {
-      nextZoneMeters = [0, meter].sort((a, b) => a - b);
-    } else if (existingBoundaryIndex >= 0) {
-      const exactEndpoint = meter === 0 || meter === draftZoneRouteLengthMeters;
-      if (!exactEndpoint) {
-        return;
-      }
+    let nextZoneMeters = draftZoneProRange
+      ? appendProSetZoneBoundaryMeter(draftZoneMeters, meter, draftZoneRouteLengthMeters)
+      : draftZoneMeters;
+    if (!draftZoneProRange) {
+      const existingBoundaryIndex = draftZoneMeters.findIndex((boundary) => (
+        Math.abs(boundary - meter) < zoneBoundaryDuplicateMeters
+      ));
+      if (draftZoneMeters.length === 0 && meter > zoneBoundaryDuplicateMeters) {
+        nextZoneMeters = [0, meter].sort((a, b) => a - b);
+      } else if (existingBoundaryIndex >= 0) {
+        const exactEndpoint = meter === 0 || meter === draftZoneRouteLengthMeters;
+        if (!exactEndpoint) {
+          return;
+        }
 
-      nextZoneMeters = draftZoneMeters
-        .map((boundary, boundaryIndex) => (boundaryIndex === existingBoundaryIndex ? meter : boundary))
-        .sort((a, b) => a - b);
-    } else {
-      nextZoneMeters = [...draftZoneMeters, meter].sort((a, b) => a - b);
+        nextZoneMeters = draftZoneMeters
+          .map((boundary, boundaryIndex) => (boundaryIndex === existingBoundaryIndex ? meter : boundary))
+          .sort((a, b) => a - b);
+      } else {
+        nextZoneMeters = [...draftZoneMeters, meter].sort((a, b) => a - b);
+      }
     }
 
     if (numbersMatch(draftZoneMeters, nextZoneMeters)) {
@@ -4650,7 +4660,18 @@ export default function App() {
 
     rememberMappingEdit('zones');
     updateCurrentDraftZoneMeters(nextZoneMeters);
-  }, [draftZoneMeters, draftZoneRidePoints, draftZoneRouteLengthMeters, rememberMappingEdit, updateCurrentDraftZoneMeters]);
+  }, [draftZoneMeters, draftZoneProRange, draftZoneRidePoints, draftZoneRouteLengthMeters, rememberMappingEdit, updateCurrentDraftZoneMeters]);
+
+  const handleMappingProZoneEndpointAdd = useCallback((endpoint: 'split' | 'merge') => {
+    if (!draftZoneProRange || draftZoneRidePoints.length < 2) {
+      return;
+    }
+
+    const point = endpoint === 'split'
+      ? draftZoneRidePoints[0]
+      : draftZoneRidePoints[draftZoneRidePoints.length - 1];
+    handleMappingZonePointAdd(point);
+  }, [draftZoneProRange, draftZoneRidePoints, handleMappingZonePointAdd]);
 
   const handleMappingZonePointMove = useCallback((index: number, point: TrackPoint) => {
     if (draftZoneRidePoints.length < 2 || index < 0 || index >= draftZoneMeters.length) {
@@ -6453,8 +6474,10 @@ export default function App() {
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
                   mappingRouteVariantId={mappingRouteVariantId}
+                  mappingZoneBranchChoice={mappingZoneBranchChoice}
                   draftPoints={draftPoints}
                   draftZoneRoutePoints={draftZoneRidePoints}
+                  draftZoneSectionId={draftZoneProSection?.id ?? null}
                   draftZoneMeters={draftZoneMeters}
                   draftZonePoints={draftZonePoints}
                   draftReferenceZones={draftReferenceZones}
@@ -6536,6 +6559,10 @@ export default function App() {
                   draftZonePinCount={draftZoneMeters.length}
                   draftZoneCount={allDraftZones.length}
                   draftZones={draftZones}
+                  draftZoneRouteLengthMeters={draftZoneRouteLengthMeters}
+                  draftZoneStartsAtRouteStart={draftZoneMeters[0] === 0}
+                  draftZoneEndsAtRouteFinish={draftZoneMeters.length > 0
+                    && Math.abs(draftZoneMeters[draftZoneMeters.length - 1] - draftZoneRouteLengthMeters) < 0.5}
                   draftLengthMeters={draftLengthMeters}
                   draftSplitSections={draftSplitSections}
                   draftSplitBuilder={draftSplitBuilder}
@@ -6588,6 +6615,7 @@ export default function App() {
                   onMappingRedrawRoute={redrawMappingRoute}
                   onMappingClearZones={clearMappingZones}
                   onMappingZoneRemove={removeMappingZone}
+                  onMappingProZoneEndpointAdd={handleMappingProZoneEndpointAdd}
                   onMappingSave={saveMapping}
                   onMappingRemove={removeMapping}
                   onMappingExport={exportMapping}

@@ -45,6 +45,7 @@ export type TrackZoneBoundaryAnchorSet = {
 const earthRadiusMeters = 6371008.8;
 const splitJunctionToleranceMeters = 4;
 const zoneBoundaryEndpointSnapMeters = 8;
+const zoneBoundaryDuplicateMeters = 3;
 
 function mappingSavedAtMs(mapping: UserTrackMapping | null | undefined) {
   const savedAt = Date.parse(mapping?.savedAt ?? '');
@@ -104,6 +105,41 @@ export function routeLengthMeters(points: TrackPoint[]) {
 export function routeIsClosedLoop(points: TrackPoint[], toleranceMeters = 8) {
   return points.length >= 3
     && distanceBetweenTrackPoints(points[0], points[points.length - 1]) <= toleranceMeters;
+}
+
+export function appendProSetZoneBoundaryMeter(
+  boundaryMeters: number[],
+  nextMeter: number,
+  branchLengthMeters: number,
+) {
+  const branchLength = Math.max(0, Math.round(branchLengthMeters));
+  if (branchLength === 0 || !Number.isFinite(nextMeter)) {
+    return boundaryMeters;
+  }
+
+  const anchoredBoundaries = boundaryMeters.length === 0
+    ? []
+    : boundaryMeters[0] <= zoneBoundaryDuplicateMeters
+      ? [...boundaryMeters]
+      : [0, ...boundaryMeters];
+
+  // The first Pro Set action always establishes the split as the first pin.
+  // A second action then places the paired boundary on the branch.
+  if (anchoredBoundaries.length === 0) {
+    return [0];
+  }
+
+  const clampedMeter = Math.max(0, Math.min(branchLength, Math.round(nextMeter)));
+  const snappedMeter = clampedMeter <= zoneBoundaryEndpointSnapMeters
+    ? 0
+    : branchLength - clampedMeter <= zoneBoundaryEndpointSnapMeters
+      ? branchLength
+      : clampedMeter;
+  if (anchoredBoundaries.some((boundary) => Math.abs(boundary - snappedMeter) < zoneBoundaryDuplicateMeters)) {
+    return anchoredBoundaries;
+  }
+
+  return [...anchoredBoundaries, snappedMeter].sort((left, right) => left - right);
 }
 
 export function repeatTrackZonesForLaps(

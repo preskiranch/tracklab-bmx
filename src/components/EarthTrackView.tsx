@@ -36,6 +36,7 @@ import type {
   RaceState,
   ReactionTimesByPlayer,
   RiderState,
+  SplitBranchChoice,
   SpeedUnit,
   TrackPoint,
   TrackRecord,
@@ -74,8 +75,10 @@ type EarthTrackViewProps = {
   mappingFullscreen: boolean;
   mappingEditMode: MappingEditMode;
   mappingRouteVariantId: TrackRouteVariantId;
+  mappingZoneBranchChoice: SplitBranchChoice;
   draftPoints: TrackPoint[];
   draftZoneRoutePoints: TrackPoint[];
+  draftZoneSectionId: string | null;
   draftZoneMeters: number[];
   draftZonePoints: TrackPoint[];
   draftReferenceZones: TrackZone[];
@@ -156,8 +159,10 @@ export function EarthTrackView({
   mappingFullscreen,
   mappingEditMode,
   mappingRouteVariantId,
+  mappingZoneBranchChoice,
   draftPoints,
   draftZoneRoutePoints,
+  draftZoneSectionId,
   draftZoneMeters,
   draftZonePoints,
   draftReferenceZones,
@@ -270,8 +275,10 @@ export function EarthTrackView({
               mappingMode={mappingMode}
               mappingEditMode={mappingEditMode}
               mappingRouteVariantId={mappingRouteVariantId}
+              mappingZoneBranchChoice={mappingZoneBranchChoice}
               draftPoints={draftPoints}
               draftZoneRoutePoints={draftZoneRoutePoints}
+              draftZoneSectionId={draftZoneSectionId}
               draftZoneMeters={draftZoneMeters}
               draftZonePoints={draftZonePoints}
               draftReferenceZones={draftReferenceZones}
@@ -310,8 +317,10 @@ export function EarthTrackView({
               mappingMode={mappingMode}
               mappingEditMode={mappingEditMode}
               mappingRouteVariantId={mappingRouteVariantId}
+              mappingZoneBranchChoice={mappingZoneBranchChoice}
               draftPoints={draftPoints}
               draftZoneRoutePoints={draftZoneRoutePoints}
+              draftZoneSectionId={draftZoneSectionId}
               draftZoneMeters={draftZoneMeters}
               draftZonePoints={draftZonePoints}
               draftReferenceZones={draftReferenceZones}

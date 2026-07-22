@@ -124,6 +124,9 @@ type SessionControlPanelProps = {
   draftZonePinCount: number;
   draftZoneCount: number;
   draftZones: TrackZone[];
+  draftZoneRouteLengthMeters: number;
+  draftZoneStartsAtRouteStart: boolean;
+  draftZoneEndsAtRouteFinish: boolean;
   draftLengthMeters: number;
   draftSplitSections: TrackSplitSection[];
   draftSplitBuilder: DraftTrackSplit | null;
@@ -176,6 +179,7 @@ type SessionControlPanelProps = {
   onMappingRedrawRoute: () => void;
   onMappingClearZones: () => void;
   onMappingZoneRemove: (zoneIndex: number) => void;
+  onMappingProZoneEndpointAdd: (endpoint: 'split' | 'merge') => void;
   onMappingSave: () => void;
   onMappingRemove: () => void;
   onMappingExport: () => void;
@@ -258,6 +262,9 @@ export function SessionControlPanel({
   draftZonePinCount,
   draftZoneCount,
   draftZones,
+  draftZoneRouteLengthMeters,
+  draftZoneStartsAtRouteStart,
+  draftZoneEndsAtRouteFinish,
   draftLengthMeters,
   draftSplitSections,
   draftSplitBuilder,
@@ -310,6 +317,7 @@ export function SessionControlPanel({
   onMappingRedrawRoute,
   onMappingClearZones,
   onMappingZoneRemove,
+  onMappingProZoneEndpointAdd,
   onMappingSave,
   onMappingRemove,
   onMappingExport,
@@ -733,9 +741,30 @@ export function SessionControlPanel({
                     </div>
                     {mappingZoneBranchChoice === 'b' && (
                       <div className="zone-route-steps" aria-label="Pro Set pedal zone steps">
-                        <span>S split = 0 ft</span>
-                        <span>Blue route only</span>
-                        <span>M merge = finish</span>
+                        <button
+                          className={draftZoneStartsAtRouteStart ? 'complete' : 'active'}
+                          type="button"
+                          onClick={() => onMappingProZoneEndpointAdd('split')}
+                          disabled={draftZoneStartsAtRouteStart}
+                        >
+                          <strong>1. S split</strong>
+                          <small>{draftZoneStartsAtRouteStart ? 'Pinned at 0 ft' : 'Set first pin'}</small>
+                        </button>
+                        <span className={draftZoneStartsAtRouteStart && !draftZoneEndsAtRouteFinish ? 'active' : ''}>
+                          <strong>2. Blue route</strong>
+                          <small>{draftZonePinCount % 2 === 1 ? 'Tap a zone end' : 'Tap the next start'}</small>
+                        </span>
+                        <button
+                          className={draftZoneEndsAtRouteFinish ? 'complete' : ''}
+                          type="button"
+                          onClick={() => onMappingProZoneEndpointAdd('merge')}
+                          disabled={draftZoneEndsAtRouteFinish || draftZonePinCount % 2 === 0}
+                        >
+                          <strong>3. M merge</strong>
+                          <small>{draftZoneEndsAtRouteFinish
+                            ? `Pinned at ${formatDistanceMeters(draftZoneRouteLengthMeters, distanceUnit)}`
+                            : 'Finish pending zone'}</small>
+                        </button>
                       </div>
                     )}
                   </div>

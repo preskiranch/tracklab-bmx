@@ -11,6 +11,7 @@ import type {
   PlayerSlot,
   RaceState,
   RiderState,
+  SplitBranchChoice,
   SpeedUnit,
   TrackPoint,
   TrackRecord,
@@ -73,8 +74,10 @@ type GoogleMapsTrackLayerProps = {
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
   mappingRouteVariantId?: TrackRouteVariantId;
+  mappingZoneBranchChoice?: SplitBranchChoice;
   draftPoints?: TrackPoint[];
   draftZoneRoutePoints?: TrackPoint[];
+  draftZoneSectionId?: string | null;
   draftZoneMeters?: number[];
   draftZonePoints?: TrackPoint[];
   draftReferenceZones?: TrackZone[];
@@ -689,8 +692,10 @@ export function GoogleMapsTrackLayer({
   mappingMode = false,
   mappingEditMode = 'draw',
   mappingRouteVariantId = 'amateur',
+  mappingZoneBranchChoice = 'a',
   draftPoints = [],
   draftZoneRoutePoints = [],
+  draftZoneSectionId = null,
   draftZoneMeters = [],
   draftZonePoints = [],
   draftReferenceZones = [],
@@ -748,6 +753,10 @@ export function GoogleMapsTrackLayer({
   });
   const suppressCameraSyncRef = useRef(false);
   const lastFitKeyRef = useRef('');
+  const isProSetZoneMapping = mappingMode
+    && mappingEditMode === 'zones'
+    && mappingZoneBranchChoice === 'b'
+    && Boolean(draftZoneSectionId);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
   const draftRouteColor = routeVariantColors[mappingRouteVariantId];
@@ -1492,8 +1501,13 @@ export function GoogleMapsTrackLayer({
     }) : [];
 
     const splitMarkers: GoogleMarker[] = [];
-    const addDraftJunctionClick = (marker: GoogleMarker, point: TrackPoint, allowSplitTool = false) => {
-      if (mappingEditMode === 'zones' && onMappingZonePointAdd) {
+    const addDraftJunctionClick = (
+      marker: GoogleMarker,
+      point: TrackPoint,
+      allowSplitTool = false,
+      allowZoneBoundary = true,
+    ) => {
+      if (allowZoneBoundary && mappingEditMode === 'zones' && onMappingZonePointAdd) {
         draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
           suppressNextMapEditEvent();
           onMappingZonePointAdd(point);
@@ -1515,18 +1529,25 @@ export function GoogleMapsTrackLayer({
       }
     };
     const renderDraftSplit = (section: TrackSplitSection, draft = false) => {
+      const isActiveProZoneSection = isProSetZoneMapping && section.id === draftZoneSectionId;
+      const allowZoneBoundary = !isProSetZoneMapping || isActiveProZoneSection;
       section.branches.forEach((branch) => {
         if (branch.points.length < 2) {
           return;
         }
 
+        const isActiveProBranch = isActiveProZoneSection && branch.id === 'b';
         draftSplitLineRefs.current.push(new google.maps.Polyline({
           clickable: false,
           map,
           path: branch.points,
           strokeColor: branch.id === 'a' ? '#ff2d55' : '#38bdf8',
-          strokeOpacity: draft ? 0.96 : 0.82,
-          strokeWeight: draft ? mappingSplitBranchStrokeWeight : savedRouteStrokeWeight,
+          strokeOpacity: isActiveProZoneSection ? (isActiveProBranch ? 1 : 0.22) : draft ? 0.96 : 0.82,
+          strokeWeight: isActiveProBranch
+            ? mappingSplitBranchStrokeWeight + 2
+            : draft
+              ? mappingSplitBranchStrokeWeight
+              : savedRouteStrokeWeight,
         }));
       });
 
@@ -1539,11 +1560,11 @@ export function GoogleMapsTrackLayer({
         map,
         optimized: false,
         position: section.splitPoint,
-        title: `Split ${section.index}`,
+        title: isActiveProZoneSection ? 'Set Pro Set pedal start at split (0 ft)' : `Split ${section.index}`,
         zIndex: 800 + section.index,
       });
       splitMarkers.push(splitMarker);
-      addDraftJunctionClick(splitMarker, section.splitPoint);
+      addDraftJunctionClick(splitMarker, section.splitPoint, false, allowZoneBoundary);
 
       const mergeMarker = new google.maps.Marker({
         icon: {
@@ -1554,11 +1575,11 @@ export function GoogleMapsTrackLayer({
         map,
         optimized: false,
         position: section.mergePoint,
-        title: `Merge ${section.index}`,
+        title: isActiveProZoneSection ? 'Snap Pro Set pedal endpoint to merge' : `Merge ${section.index}`,
         zIndex: 810 + section.index,
       });
       splitMarkers.push(mergeMarker);
-      addDraftJunctionClick(mergeMarker, section.mergePoint);
+      addDraftJunctionClick(mergeMarker, section.mergePoint, false, allowZoneBoundary);
     };
 
     if (showMappingDraft) {
@@ -1606,7 +1627,8 @@ export function GoogleMapsTrackLayer({
         }));
 
         const splitMarker = splitMarkers[splitMarkers.length - 1];
-        addDraftJunctionClick(splitMarker, draftSplitBuilder.splitPoint, true);
+        const allowZoneBoundary = !isProSetZoneMapping || draftSplitBuilder.id === draftZoneSectionId;
+        addDraftJunctionClick(splitMarker, draftSplitBuilder.splitPoint, true, allowZoneBoundary);
 
         if (draftSplitBuilder.mergePoint) {
           splitMarkers.push(new google.maps.Marker({
@@ -1623,7 +1645,7 @@ export function GoogleMapsTrackLayer({
           }));
 
           const mergeMarker = splitMarkers[splitMarkers.length - 1];
-          addDraftJunctionClick(mergeMarker, draftSplitBuilder.mergePoint, true);
+          addDraftJunctionClick(mergeMarker, draftSplitBuilder.mergePoint, true, allowZoneBoundary);
         }
       }
     }
@@ -1646,6 +1668,8 @@ export function GoogleMapsTrackLayer({
     draftZonePoints,
     draftReferenceZones,
     draftZoneRoutePoints,
+    draftZoneSectionId,
+    isProSetZoneMapping,
     mappingEditMode,
     mappingMode,
     onMappingPathPointAdd,
