@@ -620,21 +620,12 @@ function createRiderMapMarker(
   position: TrackPoint,
   rotationDegrees: number,
   title: string,
-  labelText = `P${player.id}`,
   zIndex = 760 + player.id,
   appearance: RiderMarkerAppearance = 'live',
 ): RiderMapMarker {
   let iconVersion = 0;
-  const markerLabel = (text: string) => ({
-    className: `track-rider-marker-label track-rider-marker-label-${appearance} track-rider-marker-label-p${player.id}`,
-    color: '#ffffff',
-    fontSize: '11px',
-    fontWeight: '900',
-    text,
-  });
   const marker = new google.maps.Marker({
     icon: baseRiderIcon(google, player),
-    label: markerLabel(labelText),
     map,
     optimized: false,
     position,
@@ -669,7 +660,7 @@ function createRiderMapMarker(
 
   return {
     setMap: (nextMap) => marker.setMap(nextMap),
-    setLabel: (nextLabel) => marker.setLabel?.(markerLabel(nextLabel)),
+    setLabel: () => marker.setLabel?.(null),
     setPosition: (nextPosition) => marker.setPosition(nextPosition),
     setRotation: applyRotation,
     setTitle: (nextTitle) => {
@@ -2039,7 +2030,6 @@ export function GoogleMapsTrackLayer({
 
       const rotation = riderScreenRotation(pose.bearing, earthHeading);
       const title = `${player.name} / ${label}`;
-      const markerLabel = `P${player.id}`;
       const position = offsetRiderMapPosition(
         pose.position,
         pose.bearing,
@@ -2049,7 +2039,7 @@ export function GoogleMapsTrackLayer({
       if (existing) {
         existing.setPosition(position);
         existing.setRotation(rotation);
-        existing.setLabel(markerLabel);
+        existing.setLabel('');
         existing.setTitle(title);
         return;
       }
@@ -2061,7 +2051,6 @@ export function GoogleMapsTrackLayer({
         position,
         rotation,
         title,
-        markerLabel,
       );
       markerRefs.current.set(player.id, marker);
     });
@@ -2103,7 +2092,6 @@ export function GoogleMapsTrackLayer({
       const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       const rotation = riderScreenRotation(pose.bearing, earthHeading);
       const title = `${rider.name} / ${label} / ghost`;
-      const markerLabel = `G${index + 1}`;
       const position = offsetRiderMapPosition(
         pose.position,
         pose.bearing,
@@ -2113,7 +2101,7 @@ export function GoogleMapsTrackLayer({
       if (existing) {
         existing.setPosition(position);
         existing.setRotation(rotation);
-        existing.setLabel(markerLabel);
+        existing.setLabel('');
         existing.setTitle(title);
         return;
       }
@@ -2125,7 +2113,6 @@ export function GoogleMapsTrackLayer({
         position,
         rotation,
         title,
-        markerLabel,
         820 + index,
         'ghost',
       );
@@ -2171,7 +2158,6 @@ export function GoogleMapsTrackLayer({
           accent: rider.accent,
           deviceId: null,
         };
-        const labelText = `R${remoteIndex + 1}`;
         const speedKph = rider.speedKph ?? (rider.velocity > 0 ? rider.velocity * 3.6 : null);
         const label = `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
         const rotation = riderScreenRotation(pose.bearing, earthHeading);
@@ -2194,7 +2180,6 @@ export function GoogleMapsTrackLayer({
             position,
             rotation,
             title,
-            labelText,
             900 + remoteIndex,
           );
           remoteMarkerRefs.current.set(markerKey, marker);

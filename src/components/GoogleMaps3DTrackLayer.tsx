@@ -397,7 +397,7 @@ function createDynamicRiderMarker(
     : createMarkerSafely(MarkerConstructor, {
         altitudeMode: 'RELATIVE_TO_GROUND',
         drawsWhenOccluded: true,
-        label,
+        label: '',
         position: markerPosition,
         sizePreserved: true,
         title,
