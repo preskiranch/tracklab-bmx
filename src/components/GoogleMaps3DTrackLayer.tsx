@@ -115,8 +115,6 @@ const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
   blue: '/assets/rider-blue.png',
   yellow: '/assets/rider-yellow.png',
 };
-const riderStartSetbackMeters = 2.2;
-const riderStartSetbackBlendMeters = 5;
 const remoteRiderLaneOffsetBaseMeters = 3.2;
 const remoteRiderLaneSpacingMeters = 0.7;
 
@@ -353,16 +351,8 @@ function remoteRiderLaneOffset(index: number) {
 }
 
 function visualRiderDistance(distanceMeters: number, cStartBackoffMeters = 0) {
-  let visualDistance = distanceMeters;
-  if (distanceMeters <= 0) {
-    visualDistance = -riderStartSetbackMeters;
-  } else if (distanceMeters < riderStartSetbackBlendMeters) {
-    const progress = Math.max(0, Math.min(1, distanceMeters / riderStartSetbackBlendMeters));
-    const smoothProgress = progress * progress * (3 - 2 * progress);
-    visualDistance = distanceMeters - riderStartSetbackMeters * (1 - smoothProgress);
-  }
-
-  return cStartVisualDistance(visualDistance, cStartBackoffMeters);
+  const routeDistance = Math.max(0, distanceMeters);
+  return Math.max(0, cStartVisualDistance(routeDistance, cStartBackoffMeters));
 }
 
 function createRiderContent(

@@ -117,8 +117,6 @@ const riderDrawHeight = 45;
 const riderDrawTop = -23;
 const riderFrontTireInset = 1;
 const riderGroundContactInset = 1;
-const riderStartSetbackMeters = 2.2;
-const riderStartSetbackBlendMeters = 5;
 const riderLaneSpacingMeters = 1.1;
 const riderLaneMaxSpreadMeters = 4.4;
 const remoteRiderLaneOffsetBaseMeters = 3.2;
@@ -526,16 +524,8 @@ function riderLeanBucket(rotationDegrees: number) {
 }
 
 function visualRiderDistanceMeters(distanceMeters: number, cStartBackoffMeters = 0) {
-  let visualDistance = distanceMeters;
-  if (distanceMeters <= 0) {
-    visualDistance = -riderStartSetbackMeters;
-  } else if (distanceMeters < riderStartSetbackBlendMeters) {
-    const progress = Math.max(0, Math.min(1, distanceMeters / riderStartSetbackBlendMeters));
-    const smoothProgress = progress * progress * (3 - 2 * progress);
-    visualDistance = distanceMeters - riderStartSetbackMeters * (1 - smoothProgress);
-  }
-
-  return cStartVisualDistance(visualDistance, cStartBackoffMeters);
+  const routeDistance = Math.max(0, distanceMeters);
+  return Math.max(0, cStartVisualDistance(routeDistance, cStartBackoffMeters));
 }
 
 function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: number) {

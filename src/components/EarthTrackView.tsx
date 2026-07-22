@@ -20,6 +20,7 @@ import {
 import { GoogleMaps3DTrackLayer } from './GoogleMaps3DTrackLayer';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { RaceRiderOverlay } from './RaceRiderOverlay';
+import { supportsPhotorealistic3DMaps } from '../lib/browserCapabilities';
 import { hasGoogleMapsApiKey } from '../lib/googleMaps';
 import { trackGoogleEarthUrl } from '../lib/mapLinks';
 import { formatDistanceMeters, formatReactionTime } from '../units';
@@ -178,11 +179,12 @@ export function EarthTrackView({
   onMappingSplitDrawEnd,
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
+  const threeDSupported = supportsPhotorealistic3DMaps();
   const [imageryMode, setImageryMode] = useState<'satellite' | '3d'>(
-    googleMapsConfigured ? '3d' : 'satellite',
+    googleMapsConfigured && threeDSupported ? '3d' : 'satellite',
   );
   const googleEarthUrl = trackGoogleEarthUrl(track);
-  const threeDAllowed = googleMapsConfigured;
+  const threeDAllowed = googleMapsConfigured && threeDSupported;
   const showing3D = imageryMode === '3d' && threeDAllowed;
   const imageryLabel = showing3D ? 'Photorealistic 3D' : 'Google Earth view';
   const routeStatusLabel = track.routeStatus === 'user-mapped'
@@ -234,7 +236,7 @@ export function EarthTrackView({
               onClick={() => setImageryMode('3d')}
               aria-pressed={showing3D}
               disabled={!threeDAllowed}
-              title="Open photorealistic 3D mode"
+              title={threeDAllowed ? 'Open photorealistic 3D mode' : '3D mode is unavailable in this browser'}
             >
               <Box size={14} />
               3D
