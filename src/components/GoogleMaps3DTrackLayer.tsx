@@ -168,9 +168,50 @@ function pointFromMapEvent(event: Event): TrackPoint | null {
     detail?: { position?: { lat?: number; lng?: number } };
   };
   const position = mapEvent.position ?? mapEvent.detail?.position;
-  return typeof position?.lat === 'number' && typeof position.lng === 'number'
+  const point = typeof position?.lat === 'number' && typeof position.lng === 'number'
     ? { lat: position.lat, lng: position.lng }
     : null;
+
+  return point && isTrackPointUsable(point) ? point : null;
+}
+
+function isTrackPointUsable(point: TrackPoint | null | undefined): point is TrackPoint {
+  return point != null
+    && Number.isFinite(point.lat)
+    && Number.isFinite(point.lng)
+    && Math.abs(point.lat) <= 90
+    && Math.abs(point.lng) <= 180;
+}
+
+function safeNumber(value: number | undefined, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function pointerPixelFromRect(event: ReactPointerEvent<HTMLDivElement>, rect: DOMRect) {
+  const pixel = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  };
+
+  return Number.isFinite(pixel.x) && Number.isFinite(pixel.y) ? pixel : null;
+}
+
+function trySetPointerCapture(element: Element, pointerId: number) {
+  const pointerElement = element as Element & { setPointerCapture?: (pointerId: number) => void };
+  try {
+    pointerElement.setPointerCapture?.(pointerId);
+  } catch {
+    // Browser touch/pencil capture can fail if the pointer was already cancelled.
+  }
+}
+
+function tryReleasePointerCapture(element: Element, pointerId: number) {
+  const pointerElement = element as Element & { releasePointerCapture?: (pointerId: number) => void };
+  try {
+    pointerElement.releasePointerCapture?.(pointerId);
+  } catch {
+    // Pointer capture can already be released if the browser cancels the gesture.
+  }
 }
 
 function appendPolyline(
@@ -179,17 +220,23 @@ function appendPolyline(
   path: TrackPoint[],
   options: Record<string, unknown>,
 ) {
-  if (path.length < 2) {
+  const cleanPath = path.filter(isTrackPointUsable);
+  if (cleanPath.length < 2) {
     return null;
   }
-  const line = new Polyline3DElement({
-    altitudeMode: 'RELATIVE_TO_GROUND',
-    drawsOccludedSegments: true,
-    path: elevatedPath(path),
-    ...options,
-  });
-  map.append(line);
-  return line;
+  try {
+    const line = new Polyline3DElement({
+      altitudeMode: 'RELATIVE_TO_GROUND',
+      drawsOccludedSegments: true,
+      path: elevatedPath(cleanPath),
+      ...options,
+    });
+    map.append(line);
+    return line;
+  } catch (error) {
+    console.error('TrackLab could not render a Google 3D polyline.', error);
+    return null;
+  }
 }
 
 function makeMarkerContent(className: string, label: string) {
@@ -1047,10 +1094,7 @@ export function GoogleMaps3DTrackLayer({
     }
 
     const rect = shell.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
+    return pointerPixelFromRect(event, rect);
   }, []);
 
   const addSplitStrokePoint = useCallback((point: TrackPoint, pixel: { x: number; y: number }) => {
@@ -1074,24 +1118,36 @@ export function GoogleMaps3DTrackLayer({
     const currentCenter = map.center
       ? { lat: map.center.lat, lng: map.center.lng }
       : (earthCenter ?? center);
+    if (!isTrackPointUsable(currentCenter)) {
+      return null;
+    }
 
-    return projectScreenPointToGround(
-      {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      },
-      {
-        width: rect.width,
-        height: rect.height,
-      },
-      {
-        center: currentCenter,
-        heading: map.heading ?? earthHeading,
-        tilt: map.tilt ?? earthAngle,
-        range: map.range ?? zoomToRange(baseRangeRef.current, earthZoom),
-        fov: map.fov,
-      },
-    );
+    const pixel = pointerPixelFromRect(event, rect);
+    if (!pixel) {
+      return null;
+    }
+
+    try {
+      const point = projectScreenPointToGround(
+        pixel,
+        {
+          width: rect.width,
+          height: rect.height,
+        },
+        {
+          center: currentCenter,
+          heading: safeNumber(map.heading, earthHeading),
+          tilt: safeNumber(map.tilt, earthAngle),
+          range: safeNumber(map.range, zoomToRange(baseRangeRef.current, earthZoom)),
+          fov: safeNumber(map.fov, 35),
+        },
+      );
+
+      return isTrackPointUsable(point) ? point : null;
+    } catch (error) {
+      console.error('TrackLab could not project a Google 3D map edit point.', error);
+      return null;
+    }
   }, [center, earthAngle, earthCenter, earthHeading, earthZoom]);
 
   const beginSplitStroke = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1106,7 +1162,7 @@ export function GoogleMaps3DTrackLayer({
     }
 
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    trySetPointerCapture(event.currentTarget, event.pointerId);
     splitPointerIdRef.current = event.pointerId;
     splitStrokeRef.current = [];
     setSplitPreviewPixels([]);
@@ -1134,11 +1190,7 @@ export function GoogleMaps3DTrackLayer({
     }
 
     event.preventDefault();
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture can already be released if the browser cancels the gesture.
-    }
+    tryReleasePointerCapture(event.currentTarget, event.pointerId);
 
     const point = screenPointToTrackPoint(event);
     const pixel = curvePixelFromEvent(event);
@@ -1167,7 +1219,7 @@ export function GoogleMaps3DTrackLayer({
     }
 
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    trySetPointerCapture(event.currentTarget, event.pointerId);
     curvePointerIdRef.current = event.pointerId;
     curveStrokeRef.current = [point];
     setCurvePreviewPixels([pixel]);
@@ -1198,11 +1250,7 @@ export function GoogleMaps3DTrackLayer({
     }
 
     event.preventDefault();
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture can already be released if the browser cancels the gesture.
-    }
+    tryReleasePointerCapture(event.currentTarget, event.pointerId);
 
     const point = screenPointToTrackPoint(event);
     if (point) {
