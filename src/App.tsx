@@ -4804,8 +4804,16 @@ export default function App() {
 
   const handleMappingRouteVariantChange = useCallback((variantId: RaceRouteVariantId) => {
     setMappingRouteVariantId(variantId);
+    setMappingZoneBranchChoice(variantId === 'pro' ? 'b' : 'a');
     setMappingEditMode('navigate');
   }, []);
+
+  const handleMappingEditModeChange = useCallback((mode: MappingEditMode) => {
+    setMappingEditMode(mode);
+    if (mode === 'zones' && mappingRouteVariantId === 'pro' && draftRouteSplitSections.length > 0) {
+      setMappingZoneBranchChoice('b');
+    }
+  }, [draftRouteSplitSections.length, mappingRouteVariantId]);
 
   const handleRaceRouteVariantChange = useCallback((variantId: RaceRouteVariantId) => {
     setRaceRouteVariantId(variantId);
@@ -6565,7 +6573,7 @@ export default function App() {
                   onDemoBikeCountChange={handleDemoBikeCountChange}
                   onMappingModeChange={handleMappingModeChange}
                   onMappingFullscreenChange={handleMappingFullscreenChange}
-                  onMappingEditModeChange={setMappingEditMode}
+                  onMappingEditModeChange={handleMappingEditModeChange}
                   onMappingSplitStart={startOrUpdateSplitBuilder}
                   onMappingSplitBranchChange={handleSplitBranchChange}
                   onMappingSplitSave={saveDraftSplit}

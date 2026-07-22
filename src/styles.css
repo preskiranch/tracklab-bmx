@@ -3818,6 +3818,24 @@ input:focus {
   background: #ffffff;
 }
 
+.zone-route-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.zone-route-steps span {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid #a5d8ff;
+  border-radius: 6px;
+  background: #eff8ff;
+  color: #075985;
+  font-size: 10px;
+  font-weight: 900;
+  text-align: center;
+}
+
 .zone-type-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

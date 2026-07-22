@@ -855,6 +855,16 @@ export function GoogleMaps3DTrackLayer({
     const splitSections = mappingMode ? draftSplitSections : track.splitSections ?? [];
     if (!hideRaceRoute) {
       splitSections.forEach((section) => {
+        const handleJunctionClick = (point: TrackPoint) => {
+          suppressNextMapClickRef.current = true;
+          if (mappingEditMode === 'zones') {
+            onMappingZonePointAdd?.(point);
+          } else if (mappingEditMode === 'split') {
+            onMappingSplitPointAdd?.(point);
+          } else if (mappingEditMode === 'draw') {
+            onMappingPathPointAdd?.(point);
+          }
+        };
         section.branches.forEach((branch) => {
           const line = appendPolyline(map, library.Polyline3DElement, branch.points, {
             outerColor: '#111827',
@@ -865,10 +875,24 @@ export function GoogleMaps3DTrackLayer({
           if (line) elements.push(line);
         });
         const splitMarker = appendMarker(map, library, section.splitPoint, {
-          className: 'map-3d-junction-marker split', label: `S${section.index}`, title: `Split ${section.index}`, zIndex: 780,
+          className: 'map-3d-junction-marker split',
+          interactive: mappingMode && mappingEditMode !== 'navigate',
+          label: `S${section.index}`,
+          title: `Split ${section.index}`,
+          zIndex: 780,
+          onClick: mappingMode && mappingEditMode !== 'navigate'
+            ? () => handleJunctionClick(section.splitPoint)
+            : undefined,
         });
         const mergeMarker = appendMarker(map, library, section.mergePoint, {
-          className: 'map-3d-junction-marker merge', label: `M${section.index}`, title: `Merge ${section.index}`, zIndex: 781,
+          className: 'map-3d-junction-marker merge',
+          interactive: mappingMode && mappingEditMode !== 'navigate',
+          label: `M${section.index}`,
+          title: `Merge ${section.index}`,
+          zIndex: 781,
+          onClick: mappingMode && mappingEditMode !== 'navigate'
+            ? () => handleJunctionClick(section.mergePoint)
+            : undefined,
         });
         if (splitMarker) elements.push(splitMarker);
         if (mergeMarker) elements.push(mergeMarker);
@@ -945,7 +969,7 @@ export function GoogleMaps3DTrackLayer({
     }
 
     return () => removeElements(elements);
-  }, [activeDraftZoneRoute, activeZones, draftPoints, draftReferenceZones, draftRoute, draftRouteSplitSections, draftSplitBuilder, draftSplitSections, draftZoneMeters, draftZonePoints, mappingEditMode, mappingMode, mappingRouteVariantId, onMappingSplitPointAdd, onMappingZonePointAdd, raceState, raceViewFullscreen, savedRoute, sceneVersion, selectedEditPoint, track]);
+  }, [activeDraftZoneRoute, activeZones, draftPoints, draftReferenceZones, draftRoute, draftRouteSplitSections, draftSplitBuilder, draftSplitSections, draftZoneMeters, draftZonePoints, mappingEditMode, mappingMode, mappingRouteVariantId, onMappingPathPointAdd, onMappingSplitPointAdd, onMappingZonePointAdd, raceState, raceViewFullscreen, savedRoute, sceneVersion, selectedEditPoint, track]);
 
   useEffect(() => {
     const map = mapRef.current;

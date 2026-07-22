@@ -704,7 +704,7 @@ export function SessionControlPanel({
               <>
                 <p className="mapping-hint pedal-zone">
                   {draftSplitSections.length > 0 && mappingZoneBranchChoice === 'b'
-                    ? 'Map only the Pro Set between the split and merge. Shared Amateur Line zones are used before the split and after the merge.'
+                    ? 'Map only the Pro Set from split to merge. Tap S for the first pin, trace along the blue Pro route, then tap M for the last pin.'
                     : 'Tap the start and end of each pedaling zone. Unmarked sections become coasting or obstacle sections.'}
                 </p>
                 {draftSplitSections.length > 0 && (
@@ -712,7 +712,7 @@ export function SessionControlPanel({
                     <div className="route-layout-heading">
                       <span>Zone route</span>
                       <small>{mappingZoneBranchChoice === 'b'
-                        ? 'Pro Set zones are branch-only overrides'
+                        ? 'Branch-only zones; shared Amateur Line zones stay before and after'
                         : 'Amateur Line zones are the shared baseline'}</small>
                     </div>
                     <div className="segmented-control compact" aria-label="Pedal zone route">
@@ -731,6 +731,13 @@ export function SessionControlPanel({
                         Pro Set
                       </button>
                     </div>
+                    {mappingZoneBranchChoice === 'b' && (
+                      <div className="zone-route-steps" aria-label="Pro Set pedal zone steps">
+                        <span>S split = 0 ft</span>
+                        <span>Blue route only</span>
+                        <span>M merge = finish</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </>
