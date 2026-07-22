@@ -412,10 +412,14 @@ test('dashboard analysis follows the map without a blank grid row', async ({ pag
 
   await page.goto('/?track=north-bay-bmx-napa-valley');
   await page.getByRole('button', { name: 'Open App' }).click();
-  await expect(page.locator('.earth-panel')).toBeVisible();
+  const earthPanel = page.locator('.earth-panel');
+  await expect(earthPanel).toBeVisible();
+  await expect(earthPanel.locator('.earth-header').getByText('Google satellite view', { exact: true })).toBeVisible();
+  await expect(earthPanel.getByRole('button', { name: '3D', exact: true })).toHaveCount(0);
+  await expect(earthPanel.getByRole('link', { name: 'Open Maps', exact: true })).toBeVisible();
   await expect(page.locator('.analytics-panel')).toBeVisible();
 
-  const mapBounds = await page.locator('.earth-panel').boundingBox();
+  const mapBounds = await earthPanel.boundingBox();
   const analysisBounds = await page.locator('.analytics-panel').boundingBox();
   expect(mapBounds).not.toBeNull();
   expect(analysisBounds).not.toBeNull();

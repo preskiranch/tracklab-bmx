@@ -1,6 +1,5 @@
-import { useState, type CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 import {
-  Box,
   ChevronDown,
   ChevronUp,
   Compass,
@@ -17,12 +16,10 @@ import {
   Signal,
   X,
 } from 'lucide-react';
-import { GoogleMaps3DTrackLayer } from './GoogleMaps3DTrackLayer';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { RaceRiderOverlay } from './RaceRiderOverlay';
-import { supportsPhotorealistic3DMaps } from '../lib/browserCapabilities';
 import { hasGoogleMapsApiKey } from '../lib/googleMaps';
-import { trackGoogleEarthUrl } from '../lib/mapLinks';
+import { trackGoogleMapsUrl } from '../lib/mapLinks';
 import { formatDistanceMeters, formatReactionTime } from '../units';
 import type {
   BikeSample,
@@ -184,14 +181,8 @@ export function EarthTrackView({
   onMappingSplitDrawEnd,
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
-  const threeDSupported = supportsPhotorealistic3DMaps();
-  const [imageryMode, setImageryMode] = useState<'satellite' | '3d'>(
-    googleMapsConfigured && threeDSupported ? '3d' : 'satellite',
-  );
-  const googleEarthUrl = trackGoogleEarthUrl(track);
-  const threeDAllowed = googleMapsConfigured && threeDSupported;
-  const showing3D = imageryMode === '3d' && threeDAllowed;
-  const imageryLabel = showing3D ? 'Photorealistic 3D' : 'Google Earth view';
+  const googleMapsUrl = trackGoogleMapsUrl(track);
+  const imageryLabel = 'Google satellite view';
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'
     : 'Needs manual mapping';
@@ -225,79 +216,15 @@ export function EarthTrackView({
           <span title="Catalog source confidence"><ShieldCheck size={15} /> {verificationLabel}</span>
           <span><MapIcon size={15} /> {track.elevationMeters} m elevation</span>
           <span><Flag size={15} /> {routeStatusLabel}</span>
-          <div className="earth-imagery-switch" aria-label="Map imagery">
-            <button
-              className={showing3D ? '' : 'active'}
-              type="button"
-              onClick={() => setImageryMode('satellite')}
-              aria-pressed={!showing3D}
-            >
-              <Satellite size={14} />
-              Satellite
-            </button>
-            <button
-              className={showing3D ? 'active' : ''}
-              type="button"
-              onClick={() => setImageryMode('3d')}
-              aria-pressed={showing3D}
-              disabled={!threeDAllowed}
-              title={threeDAllowed ? 'Open photorealistic 3D mode' : '3D mode is unavailable in this browser'}
-            >
-              <Box size={14} />
-              3D
-            </button>
-          </div>
-          <a href={googleEarthUrl} target="_blank" rel="noreferrer">
-            <ExternalLink size={15} /> Open Earth
+          <a href={googleMapsUrl} target="_blank" rel="noreferrer">
+            <ExternalLink size={15} /> Open Maps
           </a>
         </div>
       </div>
 
       <div className="earth-stage google-enabled">
         {googleMapsConfigured ? (
-          showing3D ? (
-            <GoogleMaps3DTrackLayer
-              track={track}
-              activeZones={activeZones}
-              riders={mapRiders}
-              ghostRiders={mapGhostRiders}
-              remoteRaceStates={mapRemoteRaceStates}
-              players={players}
-              samplesByDevice={samplesByDevice}
-              speedUnit={speedUnit}
-              cStartOffsetsByPlayer={cStartOffsetsByPlayer}
-              raceViewFullscreen={raceViewFullscreen}
-              raceState={raceState}
-              earthAngle={earthAngle}
-              earthHeading={earthHeading}
-              earthCenter={earthCenter}
-              earthZoom={earthZoom}
-              mappingMode={mappingMode}
-              mappingEditMode={mappingEditMode}
-              mappingRouteVariantId={mappingRouteVariantId}
-              mappingZoneBranchChoice={mappingZoneBranchChoice}
-              draftPoints={draftPoints}
-              draftZoneRoutePoints={draftZoneRoutePoints}
-              draftZoneSectionId={draftZoneSectionId}
-              draftZoneMeters={draftZoneMeters}
-              draftZonePoints={draftZonePoints}
-              draftReferenceZones={draftReferenceZones}
-              draftSplitSections={draftSplitSections}
-              draftRouteSplitSections={draftRouteSplitSections}
-              draftSplitBuilder={draftSplitBuilder}
-              onEarthCameraChange={onEarthCameraChange}
-              onMappingPathPointAdd={onMappingPathPointAdd}
-              onMappingPathPointMove={onMappingPathPointMove}
-              onMappingPathPointRemove={onMappingPathPointRemove}
-              onMappingZonePointAdd={onMappingZonePointAdd}
-              onMappingZonePointMove={onMappingZonePointMove}
-              onMappingZonePointRemove={onMappingZonePointRemove}
-              onMappingSplitPointAdd={onMappingSplitPointAdd}
-              onMappingSplitDrawEnd={onMappingSplitDrawEnd}
-              onUseSatellite={() => setImageryMode('satellite')}
-            />
-          ) : (
-            <GoogleMapsTrackLayer
+          <GoogleMapsTrackLayer
               track={track}
               riders={mapRiders}
               ghostRiders={mapGhostRiders}
@@ -336,8 +263,7 @@ export function EarthTrackView({
               onMappingZonePointRemove={onMappingZonePointRemove}
               onMappingSplitPointAdd={onMappingSplitPointAdd}
               onMappingSplitDrawEnd={onMappingSplitDrawEnd}
-            />
-          )
+          />
         ) : (
           <div className="google-key-required">
             <div>
@@ -370,7 +296,7 @@ export function EarthTrackView({
         <div className="earth-overlay bottom-left">
           <span>Angle {earthAngle} deg</span>
           <span>Heading {earthHeading} deg</span>
-          <span>{showing3D ? '3D' : 'Satellite'}</span>
+          <span>Satellite</span>
           <span>
             {showMappingUi
               ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`

@@ -2366,43 +2366,6 @@ input:focus {
   text-decoration: none;
 }
 
-.earth-imagery-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, auto));
-  gap: 3px;
-  min-height: 30px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #f5f7f9;
-}
-
-.earth-imagery-switch button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-height: 24px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: #536270;
-  font-size: 11px;
-  font-weight: 850;
-  white-space: nowrap;
-}
-
-.earth-imagery-switch button.active {
-  background: #111827;
-  color: #ffffff;
-}
-
-.earth-imagery-switch button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
 .earth-stage {
   position: relative;
   min-height: 530px;
@@ -2418,18 +2381,6 @@ input:focus {
 .google-map-layer {
   position: absolute;
   inset: 0;
-}
-
-.google-map-3d-shell {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  background: #182222;
-}
-
-.google-map-3d-layer {
-  min-width: 100%;
-  min-height: 100%;
 }
 
 .google-map-caption {
@@ -2520,179 +2471,6 @@ input:focus {
   color: #ffffff;
   font-size: 12px;
   font-weight: 850;
-}
-
-.map-3d-rider-marker {
-  --rider-accent: #d8ff3e;
-  position: relative;
-  display: grid;
-  justify-items: center;
-  width: 58px;
-  min-height: 42px;
-  pointer-events: none;
-  filter: drop-shadow(0 3px 4px rgba(15, 23, 42, 0.42));
-  transform: translate(-50%, -78%);
-  transform-origin: 50% 100%;
-}
-
-.map-3d-rider-image {
-  display: block;
-  width: 42px;
-  height: 42px;
-  object-fit: contain;
-  transform-origin: 50% 58%;
-  transition: transform 160ms ease-out;
-  will-change: transform;
-}
-
-.map-3d-rider-marker-ghost {
-  opacity: 0.78;
-}
-
-.map-3d-rider-marker-ghost .map-3d-rider-image {
-  filter: saturate(0.75) hue-rotate(145deg);
-}
-
-.map-3d-edit-marker,
-.map-3d-junction-marker,
-.map-3d-landmark-marker {
-  display: grid;
-  place-items: center;
-  min-width: 27px;
-  min-height: 27px;
-  padding: 0 6px;
-  border: 3px solid #ffffff;
-  border-radius: 999px;
-  background: #111827;
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 950;
-  line-height: 1;
-  box-shadow: 0 3px 9px rgba(15, 23, 42, 0.4);
-  transform: translate(-50%, -50%);
-}
-
-.map-3d-edit-marker {
-  cursor: pointer;
-  background: #ffffff;
-  color: #111827;
-}
-
-.map-3d-edit-marker:hover,
-.map-3d-edit-marker.selected {
-  border-color: #111827;
-  background: #d8ff3e;
-}
-
-.map-3d-edit-marker.zone {
-  border-color: #dcfce7;
-  background: #16a34a;
-  color: #ffffff;
-}
-
-.map-3d-edit-marker.zone.selected {
-  border-color: #052e16;
-  background: #86efac;
-  color: #052e16;
-}
-
-.map-3d-junction-marker.split {
-  background: #e11d48;
-}
-
-.map-3d-junction-marker.merge {
-  background: #0284c7;
-}
-
-.map-3d-landmark-marker {
-  min-width: 48px;
-  border-radius: 5px;
-  letter-spacing: 0;
-}
-
-.map-3d-landmark-marker.start {
-  border-color: #d8ff3e;
-}
-
-.map-3d-landmark-marker.finish {
-  border-color: #ffffff;
-  background: #111827;
-}
-
-.map-3d-edit-console {
-  position: absolute;
-  left: 50%;
-  top: 14px;
-  z-index: 12;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  max-width: min(720px, calc(100% - 220px));
-  min-height: 38px;
-  padding: 6px 8px 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
-  border-radius: 7px;
-  background: rgba(17, 24, 39, 0.88);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 750;
-  backdrop-filter: blur(10px);
-  transform: translateX(-50%);
-}
-
-.map-3d-edit-console > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.map-3d-edit-console button {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.42);
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 850;
-}
-
-.map-3d-edit-console button:hover {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.map-3d-curve-input {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  cursor: crosshair;
-  touch-action: none;
-}
-
-.map-3d-curve-preview {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.map-3d-curve-preview polyline {
-  fill: none;
-  stroke: #d8ff3e;
-  stroke-width: 5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
-}
-
-.map-3d-split-preview polyline {
-  stroke: #38bdf8;
 }
 
 .race-rider-overlay {
@@ -7089,22 +6867,6 @@ input:focus {
 
   .earth-stage {
     min-height: 390px;
-  }
-
-  .map-3d-edit-console {
-    left: 12px;
-    right: 12px;
-    top: 58px;
-    max-width: none;
-    transform: none;
-  }
-
-  .map-3d-edit-console > span {
-    white-space: normal;
-  }
-
-  .map-3d-rider-marker {
-    transform: translate(-50%, -70%) scale(0.86);
   }
 
   .start-panel {

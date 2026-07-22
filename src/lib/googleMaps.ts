@@ -194,47 +194,6 @@ type GoogleMapsRuntime = {
   };
 };
 
-export type GoogleMap3DElement = HTMLElement & {
-  cameraPosition?: { lat: number; lng: number; altitude?: number };
-  center?: { lat: number; lng: number; altitude?: number };
-  flyCameraTo?: (options: {
-    endCamera: {
-      altitudeMode?: 'ABSOLUTE' | 'RELATIVE_TO_GROUND';
-      center: { lat: number; lng: number; altitude?: number };
-      heading?: number;
-      range?: number;
-      tilt?: number;
-    };
-    durationMillis?: number;
-  }) => Promise<void> | void;
-  fov?: number;
-  gestureHandling?: 'AUTO' | 'COOPERATIVE' | 'GREEDY' | 'NONE' | string;
-  heading?: number;
-  mode?: string;
-  range?: number;
-  tilt?: number;
-};
-
-export type GooglePolyline3DElement = HTMLElement;
-
-export type GoogleMarker3DElement = HTMLElement & {
-  label?: string;
-  position?: { lat: number; lng: number; altitude?: number };
-  title?: string;
-  zIndex?: number;
-};
-
-type Google3DMarkerConstructor = new (options?: Record<string, unknown>) => GoogleMarker3DElement;
-
-export type GoogleMaps3DLibrary = {
-  Map3DElement: new (options?: Record<string, unknown>) => GoogleMap3DElement;
-  Marker3DElement?: Google3DMarkerConstructor;
-  Marker3DInteractiveElement?: Google3DMarkerConstructor;
-  MarkerElement?: Google3DMarkerConstructor;
-  MarkerInteractiveElement?: Google3DMarkerConstructor;
-  Polyline3DElement: new (options?: Record<string, unknown>) => GooglePolyline3DElement;
-};
-
 type GoogleMapsLibraryImport = Record<string, unknown> | null | undefined;
 
 export type PlacePredictionOption = {
@@ -414,22 +373,6 @@ export function loadGoogleMaps() {
     });
 
   return window.__trackLabGoogleMapsPromise;
-}
-
-export async function loadGoogleMaps3DLibrary(): Promise<GoogleMaps3DLibrary> {
-  // 3D scenes only need the maps3d library. Keeping this independent from
-  // Places/geocoding prevents an unrelated API restriction from blocking 3D.
-  const google = await bootstrapGoogleMapsRuntime();
-  if (!google.maps.importLibrary) {
-    throw new Error('Google 3D Maps requires a current Maps JavaScript runtime.');
-  }
-
-  const library = await google.maps.importLibrary('maps3d') as Partial<GoogleMaps3DLibrary>;
-  if (!library.Map3DElement || !library.Polyline3DElement) {
-    throw new Error('Google 3D Maps is unavailable for this API key.');
-  }
-
-  return library as GoogleMaps3DLibrary;
 }
 
 export function parseLatLngText(value: string): LatLngLiteral | null {
