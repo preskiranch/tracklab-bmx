@@ -391,6 +391,7 @@ export function EarthTrackView({
           ghostRiders={ghostRiders}
           remoteRaceStates={remoteRaceStates}
           players={players}
+          raceState={raceState}
           visible={raceViewFullscreen && !mappingMode}
           speedUnit={speedUnit}
           trackLengthMeters={track.lengthMeters}

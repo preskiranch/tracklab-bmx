@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { GripHorizontal, Lock, Unlock } from 'lucide-react';
-import type { GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RaceRiderOverlayLayout, RiderState, SpeedUnit } from '../types';
+import type { GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RaceRiderOverlayLayout, RaceState, RiderState, SpeedUnit } from '../types';
 import { defaultRaceRiderOverlayLayout, normalizeRaceRiderOverlayLayout } from '../lib/raceViewPreferences';
+import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 
 type DragState =
@@ -30,6 +31,7 @@ type OverlayEntry = {
   rank: number;
   progressPct: number;
   speedKph: number | null;
+  distanceMeters: number;
   finishedAt: number | null;
   kind: 'local' | 'ghost' | 'remote';
 };
@@ -40,6 +42,7 @@ type RaceRiderOverlayProps = {
   ghostRiders: GhostPlaybackRider[];
   remoteRaceStates: MultiplayerRaceState[];
   players: PlayerSlot[];
+  raceState: RaceState;
   visible: boolean;
   speedUnit: SpeedUnit;
   trackLengthMeters: number;
@@ -81,6 +84,7 @@ export function RaceRiderOverlay({
   ghostRiders,
   remoteRaceStates,
   players,
+  raceState,
   visible,
   speedUnit,
   trackLengthMeters,
@@ -138,6 +142,7 @@ export function RaceRiderOverlay({
         rank: rider.rank,
         progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
         speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
+        distanceMeters: rider.distance,
         finishedAt: rider.finishedAt,
         kind: 'local' as const,
       }];
@@ -151,6 +156,7 @@ export function RaceRiderOverlay({
       rank: rider.rank,
       progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
       speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
+      distanceMeters: rider.distance,
       finishedAt: rider.finishedAt,
       kind: 'ghost' as const,
     }));
@@ -163,6 +169,7 @@ export function RaceRiderOverlay({
       rank: rider.rank,
       progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
       speedKph: rider.speedKph ?? (rider.velocity > 0 ? rider.velocity * 3.6 : null),
+      distanceMeters: rider.distance,
       finishedAt: rider.finishedAt,
       kind: 'remote' as const,
     })));
@@ -170,6 +177,10 @@ export function RaceRiderOverlay({
     return [...localEntries, ...ghostEntries, ...remoteEntries]
       .sort((left, right) => left.rank - right.rank || right.progressPct - left.progressPct);
   }, [ghostRiders, players, remoteRaceStates, riders, trackLengthMeters]);
+  const positionsEstablished = useMemo(
+    () => racePositionsAreEstablished(raceState, entries),
+    [entries, raceState],
+  );
 
   const finishDrag = useCallback(() => {
     const drag = dragRef.current;
@@ -317,7 +328,7 @@ export function RaceRiderOverlay({
       <div className="race-rider-overlay-grid">
         {entries.map((entry) => (
           <div
-            className={`race-rider-overlay-card race-rider-overlay-card-${entry.kind}`}
+            className={`race-rider-overlay-card race-rider-overlay-card-${entry.kind}${positionsEstablished ? '' : ' positions-pending'}`}
             style={{ '--player-color': entry.accent } as CSSProperties}
             key={entry.id}
           >
@@ -330,10 +341,12 @@ export function RaceRiderOverlay({
                 </span>
               </div>
             </div>
-            <div className="race-rider-overlay-place" aria-label={`${ordinal(entry.rank)} place`}>
-              <strong>{ordinal(entry.rank)}</strong>
-              <span>Place</span>
-            </div>
+            {positionsEstablished && (
+              <div className="race-rider-overlay-place" aria-label={`${ordinal(entry.rank)} place`}>
+                <strong>{ordinal(entry.rank)}</strong>
+                <span>Place</span>
+              </div>
+            )}
           </div>
         ))}
       </div>

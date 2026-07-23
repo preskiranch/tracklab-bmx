@@ -342,7 +342,7 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   expect(consoleErrors).toEqual([]);
 });
 
-test('Bluetooth pairing stays pending until TrackLab verifies a bike connection', async ({ page }) => {
+test('Windows Bluetooth pairing widens discovery and stays pending until TrackLab verifies a bike connection', async ({ page }) => {
   const authUser = {
     id: 'bluetooth-pairing-racer',
     profileKey: 'user:bluetooth-pairing-racer',
@@ -353,11 +353,19 @@ test('Bluetooth pairing stays pending until TrackLab verifies a bike connection'
   };
 
   await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0',
+    });
     Object.defineProperty(navigator, 'bluetooth', {
       configurable: true,
       value: {
         getDevices: async () => [],
-        requestDevice: () => new Promise(() => undefined),
+        requestDevice: (options: unknown) => {
+          (window as typeof window & { __tracklabBluetoothRequestOptions?: unknown })
+            .__tracklabBluetoothRequestOptions = options;
+          return new Promise(() => undefined);
+        },
       },
     });
   });
@@ -380,12 +388,29 @@ test('Bluetooth pairing stays pending until TrackLab verifies a bike connection'
   await page.goto('/?track=black-mountain-bmx');
   await page.getByRole('button', { name: 'Open App' }).click();
 
+  await expect(page.getByText(/On Windows Chrome\/Edge/).first()).toBeVisible();
   const pairButton = page.getByRole('button', { name: 'Pair Wattbike', exact: true });
   await expect(pairButton).toBeVisible();
   await pairButton.click();
   await expect(page.getByRole('button', { name: 'Pairing...', exact: true })).toBeDisabled();
   await expect(page.getByText('Pairing with the selected Wattbike and verifying its live data service.').first()).toBeVisible();
   await expect(page.getByText(/connected \/ 0 detected/)).toBeVisible();
+  expect(await page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabBluetoothRequestOptions?: {
+        acceptAllDevices?: boolean;
+        filters?: unknown[];
+        optionalServices?: string[];
+      };
+    }).__tracklabBluetoothRequestOptions
+  ))).toMatchObject({
+    acceptAllDevices: true,
+    optionalServices: expect.arrayContaining([
+      '00001818-0000-1000-8000-00805f9b34fb',
+      '00001816-0000-1000-8000-00805f9b34fb',
+      '00001826-0000-1000-8000-00805f9b34fb',
+    ]),
+  });
 });
 
 test('dashboard analysis follows the map without a blank grid row', async ({ page }, testInfo) => {
@@ -628,29 +653,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(page.locator('.start-tree-light')).toHaveCount(0);
   const riderPanel = page.locator('.race-rider-overlay');
   await expect(riderPanel).toBeVisible();
-  await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4);
-  const desktopRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
-    const name = card.querySelector('.race-rider-overlay-identity strong');
-    const metrics = card.querySelector('.race-rider-overlay-identity span');
-    const place = card.querySelector('.race-rider-overlay-place strong');
-    const summaryBounds = card.querySelector('.race-rider-overlay-summary')?.getBoundingClientRect();
-    const placeBounds = card.querySelector('.race-rider-overlay-place')?.getBoundingClientRect();
-    return {
-      name: name ? Number.parseFloat(getComputedStyle(name).fontSize) : 0,
-      metrics: metrics ? Number.parseFloat(getComputedStyle(metrics).fontSize) : 0,
-      place: place ? Number.parseFloat(getComputedStyle(place).fontSize) : 0,
-      placeIsBottomRow: Boolean(
-        summaryBounds
-        && placeBounds
-        && placeBounds.top >= summaryBounds.bottom
-        && placeBounds.width >= summaryBounds.width
-      ),
-    };
-  });
-  expect(desktopRiderText.name).toBeGreaterThanOrEqual(18);
-  expect(desktopRiderText.metrics).toBeGreaterThanOrEqual(14);
-  expect(desktopRiderText.place).toBeGreaterThanOrEqual(42);
-  expect(desktopRiderText.placeIsBottomRow).toBe(true);
+  await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
+  await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
 
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const riderPanelHandle = page.getByRole('button', { name: 'Move rider panel', exact: true });
@@ -690,6 +694,42 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       await document.exitFullscreen();
     }
   });
+  await page.waitForTimeout(15_500);
+  await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
+  await expect(page.locator('.start-tree-light')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabVoiceStartCount?: number }).__tracklabVoiceStartCount ?? 0
+  )), { timeout: 5_000 }).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabGateToneStarts?: number[] }).__tracklabGateToneStarts?.length ?? 0
+  )), { timeout: 10_000 }).toBe(4);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabTreeLightSequence?: string[] }).__tracklabTreeLightSequence ?? []
+  )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);
+  await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4, { timeout: 5_000 });
+  const desktopRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
+    const name = card.querySelector('.race-rider-overlay-identity strong');
+    const metrics = card.querySelector('.race-rider-overlay-identity span');
+    const place = card.querySelector('.race-rider-overlay-place strong');
+    const summaryBounds = card.querySelector('.race-rider-overlay-summary')?.getBoundingClientRect();
+    const placeBounds = card.querySelector('.race-rider-overlay-place')?.getBoundingClientRect();
+    return {
+      name: name ? Number.parseFloat(getComputedStyle(name).fontSize) : 0,
+      metrics: metrics ? Number.parseFloat(getComputedStyle(metrics).fontSize) : 0,
+      place: place ? Number.parseFloat(getComputedStyle(place).fontSize) : 0,
+      placeIsBottomRow: Boolean(
+        summaryBounds
+        && placeBounds
+        && placeBounds.top >= summaryBounds.bottom
+        && placeBounds.width >= summaryBounds.width
+      ),
+    };
+  });
+  expect(desktopRiderText.name).toBeGreaterThanOrEqual(18);
+  expect(desktopRiderText.metrics).toBeGreaterThanOrEqual(14);
+  expect(desktopRiderText.place).toBeGreaterThanOrEqual(42);
+  expect(desktopRiderText.placeIsBottomRow).toBe(true);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(riderPanel.locator('.race-rider-overlay-card')).toHaveCount(4);
   const mobileRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
@@ -721,18 +761,6 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     contentType: 'image/png',
   });
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.waitForTimeout(15_500);
-  await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
-  await expect(page.locator('.start-tree-light')).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (
-    (window as typeof window & { __tracklabVoiceStartCount?: number }).__tracklabVoiceStartCount ?? 0
-  )), { timeout: 5_000 }).toBeGreaterThan(0);
-  await expect.poll(() => page.evaluate(() => (
-    (window as typeof window & { __tracklabGateToneStarts?: number[] }).__tracklabGateToneStarts?.length ?? 0
-  )), { timeout: 10_000 }).toBe(4);
-  await expect.poll(() => page.evaluate(() => (
-    (window as typeof window & { __tracklabTreeLightSequence?: string[] }).__tracklabTreeLightSequence ?? []
-  )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);
   await testInfo.attach('demo-race-3d.png', {
     body: await page.screenshot({ fullPage: false }),
     contentType: 'image/png',

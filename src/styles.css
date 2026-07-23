@@ -2638,6 +2638,14 @@ input:focus {
   background: rgba(8, 47, 73, 0.78);
 }
 
+.race-rider-overlay-card.positions-pending {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.race-rider-overlay-card.positions-pending .race-rider-overlay-summary {
+  align-self: center;
+}
+
 .race-rider-overlay-badge {
   display: inline-flex;
   flex: 0 0 auto;

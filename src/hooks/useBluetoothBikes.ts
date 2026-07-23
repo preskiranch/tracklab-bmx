@@ -14,6 +14,12 @@ import {
 } from '../lib/bluetoothBikeIdentity';
 import { KeyedCleanupRegistry } from '../lib/keyedCleanupRegistry';
 import { removeBikeSample, upsertBoundedBikeSample } from '../lib/liveBikeRegistry';
+import {
+  isWindowsBluetoothPlatform,
+  wattbikeBluetoothRequestOptions,
+  wattbikeBluetoothServices,
+  type BluetoothRequestDeviceOptions,
+} from '../lib/bluetoothDiscovery';
 import { liveBikeTimeoutMs } from '../data';
 import type { BikeSample, ConnectedBikeDevice } from '../types';
 
@@ -54,12 +60,6 @@ type BluetoothServer = {
   getPrimaryService: (uuid: string) => Promise<BluetoothService>;
 };
 
-type BluetoothDeviceFilter = {
-  name?: string;
-  namePrefix?: string;
-  services?: string[];
-};
-
 type BluetoothDeviceLike = EventTarget & {
   gatt?: {
     connected?: boolean;
@@ -71,11 +71,7 @@ type BluetoothDeviceLike = EventTarget & {
 
 type BluetoothApi = {
   getDevices?: () => Promise<BluetoothDeviceLike[]>;
-  requestDevice: (options: {
-    acceptAllDevices?: boolean;
-    filters?: BluetoothDeviceFilter[];
-    optionalServices: string[];
-  }) => Promise<BluetoothDeviceLike>;
+  requestDevice: (options: BluetoothRequestDeviceOptions) => Promise<BluetoothDeviceLike>;
 };
 
 type BluetoothNavigator = Navigator & {
@@ -86,22 +82,6 @@ type PartialBikeSample = BikeMetricPatch;
 
 const bluetoothIdentityStorageKey = 'tracklab.bluetooth-bike-identities.v1';
 const unsupportedTabletBluetoothMessage = 'Direct Bluetooth is not available in this tablet browser. iPad and iPhone Chrome/Safari cannot pair with Wattbikes from a website; use Advanced Connector on the Mac/PC near the bikes, or use Android Chrome if Web Bluetooth is available.';
-const bluetoothServices = {
-  battery: '0000180f-0000-1000-8000-00805f9b34fb',
-  cyclingPower: '00001818-0000-1000-8000-00805f9b34fb',
-  cyclingSpeedCadence: '00001816-0000-1000-8000-00805f9b34fb',
-  fitnessMachine: '00001826-0000-1000-8000-00805f9b34fb',
-  wattbike: 'f7461223-d7c1-11e4-9ab1-0002a5d5c51b',
-};
-
-const bluetoothFilters: BluetoothDeviceFilter[] = [
-  { namePrefix: 'Wattbike' },
-  { namePrefix: 'WattbikePM' },
-  { services: [bluetoothServices.cyclingPower] },
-  { services: [bluetoothServices.cyclingSpeedCadence] },
-  { services: [bluetoothServices.fitnessMachine] },
-];
-
 const bluetoothCharacteristics = {
   batteryLevel: '00002a19-0000-1000-8000-00805f9b34fb',
   cscMeasurement: '00002a5b-0000-1000-8000-00805f9b34fb',
@@ -519,23 +499,23 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       };
 
       await subscribe(
-        bluetoothServices.fitnessMachine,
+        wattbikeBluetoothServices.fitnessMachine,
         bluetoothCharacteristics.indoorBikeData,
         parseIndoorBikeData,
       );
       await subscribe(
-        bluetoothServices.cyclingPower,
+        wattbikeBluetoothServices.cyclingPower,
         bluetoothCharacteristics.cyclingPowerMeasurement,
         (value) => parseCyclingPowerMeasurement(value, numericId, crankCacheRef.current),
       );
       await subscribe(
-        bluetoothServices.cyclingSpeedCadence,
+        wattbikeBluetoothServices.cyclingSpeedCadence,
         bluetoothCharacteristics.cscMeasurement,
         (value) => parseCscMeasurement(value, numericId, crankCacheRef.current),
       );
 
       try {
-        const batteryService = await server.getPrimaryService(bluetoothServices.battery);
+        const batteryService = await server.getPrimaryService(wattbikeBluetoothServices.battery);
         const batteryLevel = await batteryService.getCharacteristic(bluetoothCharacteristics.batteryLevel);
         const value = await batteryLevel.readValue?.();
         if (value && hasBytes(value, 0, 1)) {
@@ -643,8 +623,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
 
     try {
       const device = await bluetooth.requestDevice({
-        filters: bluetoothFilters,
-        optionalServices: Object.values(bluetoothServices),
+        ...wattbikeBluetoothRequestOptions(navigator.userAgent || ''),
       });
       await connectBluetoothDevice(device);
       setConnection('open');
@@ -674,7 +653,9 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
             ? `${connectedCount} Bluetooth bike${connectedCount === 1 ? '' : 's'} live.`
             : connection === 'open'
               ? 'Wattbike paired and connected. Put it in Just Ride and pedal to confirm live data.'
-              : 'Bluetooth is ready. Saved bikes reconnect automatically; click Pair Wattbike only for first-time pairing.';
+              : isWindowsBluetoothPlatform(navigator.userAgent || '')
+                ? 'Bluetooth is ready. On Windows Chrome/Edge, Pair Wattbike shows all nearby Bluetooth devices—choose the Wattbike or its monitor serial. Close Wattbike Hub and disconnect the Mac connector first so the monitor is available.'
+                : 'Bluetooth is ready. Saved bikes reconnect automatically; click Pair Wattbike only for first-time pairing.';
 
     return {
       connectBike,
