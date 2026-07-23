@@ -68,6 +68,11 @@ import {
   riderMarkerCanvasSize,
   riderMarkerDrawSize,
   riderMarkerDrawTop,
+  riderMarkerMaximumShadowBlurPixels,
+  riderMarkerShadowBlurPixels,
+  riderMarkerShadowOffsetYPixels,
+  riderScreenLaneOffsetsByPlayer,
+  riderScreenLaneTranslation,
   uprightRiderOrientation,
 } from '../lib/riderPresentation';
 
@@ -160,7 +165,11 @@ type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
   setLabel: (label: string) => void;
   setPosition: (position: TrackPoint) => void;
-  setVisual: (rotationDegrees: number, animation: RiderAnimationState) => void;
+  setVisual: (
+    rotationDegrees: number,
+    animation: RiderAnimationState,
+    laneOffsetPixels: number,
+  ) => void;
   setTitle: (title: string) => void;
 };
 
@@ -581,9 +590,17 @@ function riderFrontTireAnchor(rotationDegrees: number) {
   return { x: anchorX, y: anchorY };
 }
 
-function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: number) {
+function riderFrontTireAnchorPoint(
+  google: GoogleMapsRuntime,
+  rotationDegrees: number,
+  laneOffsetPixels: number,
+) {
   const anchor = riderFrontTireAnchor(rotationDegrees);
-  return new google.maps.Point(anchor.x, anchor.y);
+  const laneTranslation = riderScreenLaneTranslation(rotationDegrees, laneOffsetPixels);
+  return new google.maps.Point(
+    anchor.x - laneTranslation.x,
+    anchor.y - laneTranslation.y,
+  );
 }
 
 function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
@@ -803,8 +820,10 @@ function drawUprightRiderCanvas(
   context.rotate((leanBucket * Math.PI) / 180);
   context.scale(orientation.mirrored ? -1 : 1, 1);
   context.shadowColor = appearance === 'ghost' ? 'rgba(34, 211, 238, 0.85)' : 'rgba(0, 0, 0, 0.35)';
-  context.shadowBlur = appearance === 'ghost' ? 14 : 8;
-  context.shadowOffsetY = 5;
+  context.shadowBlur = appearance === 'ghost'
+    ? riderMarkerMaximumShadowBlurPixels
+    : riderMarkerShadowBlurPixels;
+  context.shadowOffsetY = riderMarkerShadowOffsetYPixels;
   context.drawImage(
     image,
     -riderMarkerDrawSize / 2,
@@ -886,6 +905,7 @@ function createPersistentRiderOverlay(
   initialPosition: TrackPoint,
   initialRotationDegrees: number,
   initialAnimation: RiderAnimationState,
+  initialLaneOffsetPixels: number,
   initialTitle: string,
   zIndex: number,
   appearance: RiderMarkerAppearance,
@@ -898,12 +918,16 @@ function createPersistentRiderOverlay(
   const element = document.createElement('div');
   const canvas = document.createElement('canvas');
   element.className = 'tracklab-rider-overlay';
+  element.dataset.playerId = String(player.id);
+  element.dataset.riderCanvasSize = String(riderMarkerCanvasSize);
   element.title = initialTitle;
   element.setAttribute('aria-label', initialTitle);
   element.style.background = `center / auto ${riderMarkerDrawSize}px no-repeat url("${riderFallbackIconByColor[player.colorName]}")`;
   element.style.height = `${riderMarkerCanvasSize}px`;
+  element.style.overflow = 'visible';
   element.style.pointerEvents = 'none';
   element.style.position = 'absolute';
+  element.style.transformOrigin = '0 0';
   element.style.width = `${riderMarkerCanvasSize}px`;
   element.style.willChange = 'left, top, transform';
   element.style.zIndex = String(zIndex);
@@ -915,6 +939,7 @@ function createPersistentRiderOverlay(
   let position = initialPosition;
   let rotationDegrees = initialRotationDegrees;
   let animation = initialAnimation;
+  let laneOffsetPixels = initialLaneOffsetPixels;
   let visualKey = '';
   let frameRequest: number | null = null;
   let riderImage: HTMLImageElement | null = null;
@@ -932,9 +957,12 @@ function createPersistentRiderOverlay(
     }
 
     const anchor = riderFrontTireAnchor(rotationDegrees);
+    const laneTranslation = riderScreenLaneTranslation(rotationDegrees, laneOffsetPixels);
     element.style.left = `${pixel.x}px`;
     element.style.top = `${pixel.y}px`;
-    element.style.transform = `translate3d(${-anchor.x}px, ${-anchor.y}px, 0)`;
+    element.style.transform = `translate3d(${
+      -anchor.x + laneTranslation.x
+    }px, ${-anchor.y + laneTranslation.y}px, 0)`;
   };
 
   const scheduleCanvasDraw = () => {
@@ -961,9 +989,13 @@ function createPersistentRiderOverlay(
     });
   };
 
-  const applyVisual = (nextRotationDegrees: number, nextAnimation: RiderAnimationState) => {
+  const applyVisual = (
+    nextRotationDegrees: number,
+    nextAnimation: RiderAnimationState,
+    nextLaneOffsetPixels: number,
+  ) => {
     const orientation = uprightRiderOrientation(nextRotationDegrees);
-    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotationDegrees)}:${nextAnimation.crankStep}:${nextAnimation.wheelFrameIndex}`;
+    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotationDegrees)}:${nextAnimation.crankStep}:${nextAnimation.wheelFrameIndex}:${nextLaneOffsetPixels}`;
     if (nextVisualKey === visualKey) {
       return;
     }
@@ -971,6 +1003,8 @@ function createPersistentRiderOverlay(
     visualKey = nextVisualKey;
     rotationDegrees = nextRotationDegrees;
     animation = nextAnimation;
+    laneOffsetPixels = nextLaneOffsetPixels;
+    element.dataset.riderLaneOffset = String(nextLaneOffsetPixels);
     drawPosition();
     scheduleCanvasDraw();
   };
@@ -1001,7 +1035,7 @@ function createPersistentRiderOverlay(
     .catch(() => undefined);
 
   overlay.setMap(map);
-  applyVisual(initialRotationDegrees, initialAnimation);
+  applyVisual(initialRotationDegrees, initialAnimation, initialLaneOffsetPixels);
 
   return {
     setMap: (nextMap) => {
@@ -1028,6 +1062,7 @@ function createRiderMapMarker(
   position: TrackPoint,
   rotationDegrees: number,
   animation: RiderAnimationState,
+  laneOffsetPixels: number,
   title: string,
   zIndex = 760 + player.id,
   appearance: RiderMarkerAppearance = 'live',
@@ -1039,6 +1074,7 @@ function createRiderMapMarker(
     position,
     rotationDegrees,
     animation,
+    laneOffsetPixels,
     title,
     zIndex,
     appearance,
@@ -1058,9 +1094,13 @@ function createRiderMapMarker(
     zIndex,
   });
 
-  const applyVisual = (nextRotation: number, nextAnimation: RiderAnimationState) => {
+  const applyVisual = (
+    nextRotation: number,
+    nextAnimation: RiderAnimationState,
+    nextLaneOffsetPixels: number,
+  ) => {
     const orientation = uprightRiderOrientation(nextRotation);
-    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotation)}:${nextAnimation.crankStep}:${nextAnimation.wheelFrameIndex}`;
+    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotation)}:${nextAnimation.crankStep}:${nextAnimation.wheelFrameIndex}:${nextLaneOffsetPixels}`;
     if (nextVisualKey === visualKey) {
       return;
     }
@@ -1075,7 +1115,7 @@ function createRiderMapMarker(
         }
 
         marker.setIcon({
-          anchor: riderFrontTireAnchorPoint(google, nextRotation),
+          anchor: riderFrontTireAnchorPoint(google, nextRotation, nextLaneOffsetPixels),
           labelOrigin: new google.maps.Point(74, 15),
           scaledSize: new google.maps.Size(riderMarkerCanvasSize, riderMarkerCanvasSize),
           url,
@@ -1088,7 +1128,7 @@ function createRiderMapMarker(
       });
   };
 
-  applyVisual(rotationDegrees, animation);
+  applyVisual(rotationDegrees, animation, laneOffsetPixels);
 
   return {
     setMap: (nextMap) => marker.setMap(nextMap),
@@ -2472,6 +2512,7 @@ export function GoogleMapsTrackLayer({
     });
 
     const laneOffsetsByPlayer = riderLaneOffsetsByPlayer(players);
+    const screenLaneOffsetsByPlayer = riderScreenLaneOffsetsByPlayer(players);
 
     riders.forEach((rider) => {
       const player = players.find((slot) => slot.id === rider.playerId);
@@ -2505,6 +2546,7 @@ export function GoogleMapsTrackLayer({
         watts: rider.lastRawWatts,
       });
       const title = `${player.name} / ${label}`;
+      const laneOffsetPixels = screenLaneOffsetsByPlayer.get(player.id) ?? 0;
       const position = offsetRiderMapPosition(
         pose.position,
         pose.bearing,
@@ -2513,7 +2555,7 @@ export function GoogleMapsTrackLayer({
 
       if (existing) {
         existing.setPosition(position);
-        existing.setVisual(rotation, animation);
+        existing.setVisual(rotation, animation, laneOffsetPixels);
         existing.setLabel('');
         existing.setTitle(title);
         return;
@@ -2526,6 +2568,7 @@ export function GoogleMapsTrackLayer({
         position,
         rotation,
         animation,
+        laneOffsetPixels,
         title,
       );
       markerRefs.current.set(player.id, marker);
@@ -2577,7 +2620,7 @@ export function GoogleMapsTrackLayer({
 
       if (existing) {
         existing.setPosition(position);
-        existing.setVisual(rotation, animation);
+        existing.setVisual(rotation, animation, 0);
         existing.setLabel('');
         existing.setTitle(title);
         return;
@@ -2590,6 +2633,7 @@ export function GoogleMapsTrackLayer({
         position,
         rotation,
         animation,
+        0,
         title,
         820 + index,
         'ghost',
@@ -2649,7 +2693,7 @@ export function GoogleMapsTrackLayer({
 
         if (existing) {
           existing.setPosition(position);
-          existing.setVisual(rotation, animation);
+          existing.setVisual(rotation, animation, 0);
           existing.setTitle(title);
         } else {
           const marker = createRiderMapMarker(
@@ -2659,6 +2703,7 @@ export function GoogleMapsTrackLayer({
             position,
             rotation,
             animation,
+            0,
             title,
             900 + remoteIndex,
           );

@@ -2,16 +2,20 @@ import type { PlayerId, PlayerSlot } from '../types';
 
 const riderLaneSpacingMeters = 0.42;
 const riderLaneMaxSpreadMeters = 1.26;
+const riderScreenLaneSpacingPixels = 20;
+const riderScreenLaneMaxSpreadPixels = 60;
 const riderAirMetersPerPixel = 0.025;
 const riderMaximumAltitudeMeters = 0.85;
 
 // The rider stays 58px tall, but turns can lean the square source art by up
-// to 24 degrees. Keep a larger transparent canvas around it so neither end of
-// the bike nor its shadow is clipped on Google Maps raster overlays.
-export const riderMarkerCanvasSize = 96;
+// to 24 degrees. The transparent envelope also has to contain the downward
+// shadow offset, not only the rotated artwork.
+export const riderMarkerCanvasSize = 120;
 export const riderMarkerDrawSize = 58;
 export const riderMarkerDrawTop = -riderMarkerDrawSize / 2;
-export const riderMarkerSafetyPaddingPixels = 8;
+export const riderMarkerShadowBlurPixels = 8;
+export const riderMarkerMaximumShadowBlurPixels = 14;
+export const riderMarkerShadowOffsetYPixels = 5;
 
 function normalizeHeading(value: number) {
   return ((value % 360) + 360) % 360;
@@ -30,6 +34,32 @@ export function riderLaneOffsetsByPlayer(players: PlayerSlot[]) {
   });
 
   return offsets;
+}
+
+export function riderScreenLaneOffsetsByPlayer(players: PlayerSlot[]) {
+  const sortedPlayers = [...players].sort((left, right) => left.id - right.id);
+  const offsets = new Map<PlayerId, number>();
+  const spacing = sortedPlayers.length <= 1
+    ? 0
+    : Math.min(
+      riderScreenLaneSpacingPixels,
+      riderScreenLaneMaxSpreadPixels / (sortedPlayers.length - 1),
+    );
+  const midpoint = (sortedPlayers.length - 1) / 2;
+
+  sortedPlayers.forEach((player, index) => {
+    offsets.set(player.id, (index - midpoint) * spacing);
+  });
+
+  return offsets;
+}
+
+export function riderScreenLaneTranslation(rotationDegrees: number, laneOffsetPixels: number) {
+  const radians = normalizeHeading(rotationDegrees) * (Math.PI / 180);
+  return {
+    x: -Math.sin(radians) * laneOffsetPixels,
+    y: Math.cos(radians) * laneOffsetPixels,
+  };
 }
 
 export function uprightRiderOrientation(rotationDegrees: number) {

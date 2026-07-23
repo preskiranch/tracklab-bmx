@@ -4,7 +4,10 @@ import {
   riderLaneOffsetsByPlayer,
   riderMarkerCanvasSize,
   riderMarkerDrawSize,
-  riderMarkerSafetyPaddingPixels,
+  riderMarkerMaximumShadowBlurPixels,
+  riderMarkerShadowOffsetYPixels,
+  riderScreenLaneOffsetsByPlayer,
+  riderScreenLaneTranslation,
   uprightRiderOrientation,
 } from '../../src/lib/riderPresentation';
 import type { PlayerSlot } from '../../src/types';
@@ -29,10 +32,12 @@ describe('3D rider presentation', () => {
       const radians = Math.abs(leanDegrees) * (Math.PI / 180);
       const rotatedHalfExtent = (riderMarkerDrawSize / 2)
         * (Math.cos(radians) + Math.sin(radians));
-      const availableHalfExtent = (riderMarkerCanvasSize / 2)
-        - riderMarkerSafetyPaddingPixels;
+      const horizontalExtent = rotatedHalfExtent + riderMarkerMaximumShadowBlurPixels;
+      const downwardExtent = horizontalExtent + riderMarkerShadowOffsetYPixels;
+      const availableHalfExtent = riderMarkerCanvasSize / 2;
 
-      expect(rotatedHalfExtent).toBeLessThanOrEqual(availableHalfExtent);
+      expect(horizontalExtent).toBeLessThanOrEqual(availableHalfExtent);
+      expect(downwardExtent).toBeLessThanOrEqual(availableHalfExtent);
     }
   });
 
@@ -49,5 +54,17 @@ describe('3D rider presentation', () => {
     expect(offsets.get(2)).toBeCloseTo(-0.21);
     expect(offsets.get(3)).toBeCloseTo(0.21);
     expect(offsets.get(4)).toBeCloseTo(0.63);
+  });
+
+  it('adds a zoom-independent screen spread so four rider silhouettes stay readable', () => {
+    const offsets = riderScreenLaneOffsetsByPlayer(players);
+    expect(offsets.get(1)).toBe(-30);
+    expect(offsets.get(2)).toBe(-10);
+    expect(offsets.get(3)).toBe(10);
+    expect(offsets.get(4)).toBe(30);
+
+    expect(riderScreenLaneTranslation(0, 20)).toEqual({ x: -0, y: 20 });
+    expect(riderScreenLaneTranslation(90, 20).x).toBeCloseTo(-20);
+    expect(riderScreenLaneTranslation(90, 20).y).toBeCloseTo(0);
   });
 });
