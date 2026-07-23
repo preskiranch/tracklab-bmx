@@ -6,6 +6,7 @@ import {
   raceCommentaryEventIsFresh,
   selectLiveRaceCommentaryEvent,
   type RaceCommentaryEvent,
+  type RaceCommentaryEventKind,
 } from '../lib/raceCommentary';
 import type {
   PlayerSlot,
@@ -20,6 +21,7 @@ import type {
 type CommentaryServiceMode = 'checking' | 'ai' | 'browser';
 type CommentaryPlaybackStatus = 'idle' | 'thinking' | 'speaking';
 type CommentaryPlaybackPhase = CommentaryPlaybackStatus | 'preparing';
+type CommentarySpeechEventKind = RaceCommentaryEventKind | 'preview';
 type ActivePlaybackCancelRef = React.MutableRefObject<(() => void) | null>;
 
 type PreparedStartSpeech = {
@@ -64,10 +66,9 @@ function browserVoiceFor(voicePreset: RaceCommentaryVoicePreset) {
 }
 
 function immediateRaceStartLine(trackName: string, players: PlayerSlot[]) {
-  const names = players.map((player) => player.name).join(', ');
-  return names
-    ? `The gate is down at ${trackName}. ${names} are underway.`
-    : `The gate is down at ${trackName}. We are racing.`;
+  return players.length > 0
+    ? `Gate's down at ${trackName}—here we go! The field charges into the first straight.`
+    : `Gate's down at ${trackName}—here we go!`;
 }
 
 function preparedStartSpeechKey(
@@ -80,6 +81,7 @@ function preparedStartSpeechKey(
 function speakWithBrowser(
   line: string,
   voicePreset: RaceCommentaryVoicePreset,
+  eventKind: CommentarySpeechEventKind,
   volume: number,
   activePlaybackCancelRef: ActivePlaybackCancelRef,
   shouldContinue: () => boolean,
@@ -123,14 +125,25 @@ function speakWithBrowser(
     utterance.lang = speechLanguage(voicePreset);
     utterance.voice = browserVoiceFor(voicePreset);
     utterance.volume = volume;
-    utterance.rate = voicePreset === 'american-man'
-      ? 1.08
+    const baseRate = voicePreset === 'american-man'
+      ? 1.11
       : voicePreset === 'british-woman' || voicePreset === 'british-man'
-        ? 1.05
-        : 1.04;
-    utterance.pitch = voicePreset === 'australian-woman' || voicePreset === 'british-woman'
+        ? 1.08
+        : 1.09;
+    const actionRate = eventKind === 'lead-change' || eventKind === 'pro-set' || eventKind === 'final-push'
+      ? 0.05
+      : eventKind === 'race-start' || eventKind === 'finish'
+        ? 0.03
+        : 0.01;
+    utterance.rate = baseRate + actionRate;
+    const basePitch = voicePreset === 'australian-woman' || voicePreset === 'british-woman'
       ? 1.04
-      : 0.9;
+      : 0.92;
+    utterance.pitch = basePitch + (
+      eventKind === 'lead-change' || eventKind === 'final-push' || eventKind === 'finish'
+        ? 0.03
+        : 0
+    );
     utterance.onend = () => finish(true);
     utterance.onerror = () => finish(false);
     activePlaybackCancelRef.current = cancel;
@@ -155,6 +168,7 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, tim
 async function requestAiSpeechUrl(
   line: string,
   preferences: RaceCommentaryPreferences,
+  eventKind: CommentarySpeechEventKind,
   timeoutMs = 5_000,
   signal?: AbortSignal,
 ) {
@@ -168,6 +182,7 @@ async function requestAiSpeechUrl(
     body: JSON.stringify({
       line,
       voicePreset: preferences.voicePreset,
+      eventKind,
     }),
   }, timeoutMs);
   if (!response.ok) {
@@ -234,13 +249,14 @@ async function playAudioUrl(
 async function playAiSpeech(
   line: string,
   preferences: RaceCommentaryPreferences,
+  eventKind: CommentarySpeechEventKind,
   activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>,
   activePlaybackCancelRef: ActivePlaybackCancelRef,
   shouldContinue: () => boolean,
   onStart: () => void,
   signal?: AbortSignal,
 ) {
-  const audioUrl = await requestAiSpeechUrl(line, preferences, 5_000, signal);
+  const audioUrl = await requestAiSpeechUrl(line, preferences, eventKind, 5_000, signal);
   return await playAudioUrl(
     audioUrl,
     preferences.volume,
@@ -359,7 +375,7 @@ export function useRaceCommentary({
     const requestId = startPrefetchRequestRef.current + 1;
     startPrefetchRequestRef.current = requestId;
     disposePreparedStartSpeech();
-    void requestAiSpeechUrl(startLine, preferences)
+    void requestAiSpeechUrl(startLine, preferences, 'race-start')
       .then((audioUrl) => {
         if (startPrefetchRequestRef.current !== requestId) {
           URL.revokeObjectURL(audioUrl);
@@ -450,6 +466,7 @@ export function useRaceCommentary({
               await speakWithBrowser(
                 line,
                 activePreferences.voicePreset,
+                event.kind,
                 activePreferences.volume,
                 activePlaybackCancelRef,
                 shouldContinue,
@@ -471,6 +488,7 @@ export function useRaceCommentary({
             await speakWithBrowser(
               line,
               activePreferences.voicePreset,
+              event.kind,
               activePreferences.volume,
               activePlaybackCancelRef,
               shouldContinue,
@@ -534,6 +552,7 @@ export function useRaceCommentary({
             await playAiSpeech(
               line,
               activePreferences,
+              event.kind,
               activeAudioRef,
               activePlaybackCancelRef,
               shouldContinue,
@@ -544,6 +563,7 @@ export function useRaceCommentary({
             await speakWithBrowser(
               line,
               activePreferences.voicePreset,
+              event.kind,
               activePreferences.volume,
               activePlaybackCancelRef,
               shouldContinue,
@@ -556,6 +576,7 @@ export function useRaceCommentary({
             await speakWithBrowser(
               line,
               activePreferences.voicePreset,
+              event.kind,
               activePreferences.volume,
               activePlaybackCancelRef,
               shouldContinue,
@@ -659,6 +680,7 @@ export function useRaceCommentary({
         await playAiSpeech(
           line,
           activePreferences,
+          'preview',
           activeAudioRef,
           activePlaybackCancelRef,
           () => true,
@@ -668,6 +690,7 @@ export function useRaceCommentary({
         await speakWithBrowser(
           line,
           activePreferences.voicePreset,
+          'preview',
           activePreferences.volume,
           activePlaybackCancelRef,
           () => true,
@@ -679,6 +702,7 @@ export function useRaceCommentary({
       await speakWithBrowser(
         line,
         activePreferences.voicePreset,
+        'preview',
         activePreferences.volume,
         activePlaybackCancelRef,
         () => true,

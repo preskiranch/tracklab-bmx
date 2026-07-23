@@ -149,6 +149,20 @@ describe('race commentary event detection', () => {
     expect(second).not.toBe(first);
   });
 
+  it('keeps private bike telemetry out of announcer fact packs and local calls', () => {
+    const tracker = createRaceCommentaryTracker();
+    const [event] = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([rider(1), rider(2)]),
+      1_000,
+    );
+    const serializedEvent = JSON.stringify(event);
+    const line = localCommentaryLine(event);
+
+    expect(serializedEvent).not.toMatch(/"watts"|"cadence"|"speedKph"|"reactionTimesByPlayer"/);
+    expect(line).not.toMatch(/\b(?:watts?|rpm|cadence|speed|mph|kph|power output)\b/i);
+  });
+
   it('prioritizes a finish call when several events happen in the same frame', () => {
     const tracker = createRaceCommentaryTracker();
     detectRaceCommentaryEvents(tracker, snapshot([rider(1), rider(2)]), 1_000);

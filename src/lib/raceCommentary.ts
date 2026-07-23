@@ -21,9 +21,6 @@ export type RaceCommentaryRiderFact = {
   name: string;
   rank: number;
   distanceMeters: number;
-  speedKph: number;
-  cadence: number;
-  watts: number;
   driveAllowed: boolean;
   finished: boolean;
 };
@@ -39,7 +36,6 @@ export type RaceCommentaryEvent = {
   previousLeaderPlayerId?: PlayerSlot['id'];
   zoneName?: string;
   splitName?: string;
-  reactionTimesByPlayer: ReactionTimesByPlayer;
   riders: RaceCommentaryRiderFact[];
 };
 
@@ -122,9 +118,6 @@ function riderFacts(snapshot: RaceCommentarySnapshot): RaceCommentaryRiderFact[]
     name: playerById.get(rider.playerId)?.name ?? `Rider ${rider.playerId}`,
     rank: index + 1,
     distanceMeters: Number(Math.max(0, rider.distance).toFixed(2)),
-    speedKph: Number(Math.max(0, rider.velocity * 3.6).toFixed(1)),
-    cadence: Math.max(0, Math.round(rider.lastRawCadence)),
-    watts: Math.max(0, Math.round(rider.lastRawWatts)),
     driveAllowed: rider.driveAllowed,
     finished: rider.finishedAt != null,
   }));
@@ -150,7 +143,6 @@ function eventFor(
       ? Number(Math.min(1, leader.distanceMeters / Math.max(1, snapshot.raceLengthMeters)).toFixed(3))
       : 0,
     leaderPlayerId: leader?.playerId ?? null,
-    reactionTimesByPlayer: snapshot.reactionTimesByPlayer,
     riders: facts,
     ...extra,
   };
@@ -274,39 +266,39 @@ export function localCommentaryLine(event: RaceCommentaryEvent, recentLines: str
   const names = event.riders.map((rider) => rider.name).join(', ');
   const candidates: Record<RaceCommentaryEventKind, string[]> = {
     'race-start': [
-      `The gate is down at ${event.trackName}. ${names} are underway.`,
-      `We are racing at ${event.trackName}, and all eyes are on the opening drive.`,
-      `Clean start at ${event.trackName}. The field charges into the first straight.`,
+      `Gate's down at ${event.trackName}—here we go!`,
+      `We are racing at ${event.trackName}! The field charges into the first straight.`,
+      `Clean snap at ${event.trackName}—${names} are off and racing!`,
     ],
     'positions-established': [
-      `${leader} edges into the early lead${second ? `, with ${second} right there` : ''}.`,
-      `${leader} has the first clear advantage as the order begins to settle.`,
-      `The race takes shape, and it is ${leader} showing in front.`,
+      `${leader} snaps into the early lead${second ? `—${second} is right there!` : '!'}`,
+      `${leader} has the advantage, and the chase is on!`,
+      `The race takes shape—${leader} shows in front!`,
     ],
     'lead-change': [
-      `${leader} makes the move and takes over the lead.`,
-      `New leader: ${leader} has ridden through to the front.`,
-      `${leader} finds the speed and moves into the top spot.`,
+      `${leader} makes the move—new leader!`,
+      `${leader} surges through and takes over!`,
+      `Here comes ${leader}—right to the front!`,
     ],
     'pedal-zone': [
-      `${leader} drives hard through ${event.zoneName ?? 'the next pedal zone'}.`,
-      `Back on the pedals for ${leader} through ${event.zoneName ?? 'this straight'}.`,
-      `${leader} is putting power down in ${event.zoneName ?? 'the pedal section'}.`,
+      `${leader} attacks through ${event.zoneName ?? 'the next pedal zone'}!`,
+      `Back on the pedals—${leader} drives through ${event.zoneName ?? 'this straight'}!`,
+      `${leader} keeps the pressure on through ${event.zoneName ?? 'the pedal section'}!`,
     ],
     'pro-set': [
-      `${leader} commits to the Pro Set and carries speed through the split.`,
-      `It is the blue Pro line for ${leader}, attacking the split section.`,
-      `${leader} takes the Pro Set option and keeps the pressure on.`,
+      `${leader} commits to the Pro Set—full attack through the split!`,
+      `Blue Pro line for ${leader}, and there is no backing off!`,
+      `${leader} takes the Pro Set and keeps the pressure on!`,
     ],
     'final-push': [
-      `${leader} leads the charge into the closing part of the track.`,
-      `Final push now, with ${leader} holding the advantage.`,
-      `${leader} is out front with the finish coming quickly.`,
+      `Last straight—${leader} leads the charge home!`,
+      `Final drive now! ${leader} has the advantage.`,
+      `${leader} is out front, but this race is not over!`,
     ],
     finish: [
-      `${leader} gets to the stripe first at ${event.trackName}.`,
-      `It is ${leader} for the win.`,
-      `${leader} closes it out and takes the race.`,
+      `${leader} gets it done at ${event.trackName}!`,
+      `${leader} takes the win!`,
+      `${leader} brings it home and takes the race!`,
     ],
   };
   return pickLine(candidates[event.kind], event, recentLines);

@@ -137,10 +137,12 @@ describe('cloud API trust boundaries', () => {
         'british-man',
       ],
       research: {
-        knowledgeVersion: 'usabmx-national-2026-07-22-v1',
+        knowledgeVersion: 'usabmx-national-2026-07-22-v2-audio',
         indexedVideos: 166,
         analyzedRaceCallSegments: 18_208,
+        analyzedRaceAudioSections: 6,
         retainsFullTranscripts: false,
+        retainsSourceAudio: false,
       },
     });
     expect(JSON.stringify(config)).not.toContain('OPENAI_API_KEY');
@@ -257,6 +259,22 @@ describe('cloud API trust boundaries', () => {
           recentLines: ['Avery takes it to the stripe.'],
         },
       },
+    });
+  });
+
+  it('refuses to turn telemetry figures into spoken commentary', async () => {
+    const response = await api('/api/commentary/speech', {
+      method: 'POST',
+      body: JSON.stringify({
+        line: 'Avery is holding 120 RPM and 35 KPH.',
+        voicePreset: 'american-man',
+        eventKind: 'final-push',
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Commentary must describe race action without telemetry figures.',
     });
   });
 

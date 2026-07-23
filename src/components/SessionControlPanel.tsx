@@ -1175,7 +1175,8 @@ export function SessionControlPanel({
         </button>
         <p className="announcer-disclosure">
           Voice and wording are AI-generated. Race facts always come from TrackLab telemetry.
-          USA BMX research contributes aggregate terminology, never voice cloning.
+          Calls describe race action—not watts, RPM, or speed figures. Broadcast research
+          contributes aggregate terminology and delivery patterns, never voice cloning.
         </p>
       </section>
 
