@@ -73,6 +73,27 @@ describe('ghost lap categories and privacy metadata', () => {
     expect(mergeGhostLaps([], [demoGhost])).toEqual([]);
   });
 
+  it('ranks selectable ghosts by finish time regardless of ownership source', () => {
+    const personal = rawGhost(1, 'Personal Rider');
+    personal.finishTimeMs = 23_000;
+    const friend = rawGhost(1, 'Friend Rider');
+    friend.source = 'friend';
+    friend.finishTimeMs = 21_000;
+    const worldwide = rawGhost(1, 'Worldwide Rider');
+    worldwide.source = 'top';
+    worldwide.finishTimeMs = 19_000;
+
+    const ranked = [personal, friend, worldwide]
+      .map(sanitizeGhostLap)
+      .filter((ghost) => ghost != null);
+
+    expect(ghostsForTrackRoute(ranked, 'lasalle-loop').map((ghost) => ghost.riderName)).toEqual([
+      'Worldwide Rider',
+      'Friend Rider',
+      'Personal Rider',
+    ]);
+  });
+
   it('stages a selected ghost at rest on the start line before playback begins', () => {
     const savedGhost = rawGhost(1);
     savedGhost.points[0].distanceMeters = 4.5;

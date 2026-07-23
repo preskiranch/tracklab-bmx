@@ -101,13 +101,8 @@ export function normalizeRaceCommentaryPreferences(value: unknown): RaceCommenta
       ? defaultRaceCommentaryPreferences.ambientVolumeLocked
       : Boolean(preferences.ambientVolumeLocked),
     voicePreset,
-    volume: Math.max(0, Math.min(1, finiteNumber(
-      preferences.volume,
-      defaultRaceCommentaryPreferences.volume,
-    ))),
-    adaptiveMemory: preferences.adaptiveMemory == null
-      ? defaultRaceCommentaryPreferences.adaptiveMemory
-      : Boolean(preferences.adaptiveMemory),
+    volume: defaultRaceCommentaryPreferences.volume,
+    adaptiveMemory: true,
     recentLines,
   };
 }

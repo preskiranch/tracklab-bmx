@@ -270,10 +270,7 @@ export function ghostsForTrackRoute(
   const activeRouteKey = ghostRouteKey(trackId, routeVariantId, lapCount);
   return ghosts
     .filter((ghost) => ghostRouteKey(ghost.trackId, ghost.routeVariantId, ghost.lapCount) === activeRouteKey)
-    .sort((left, right) => {
-      const sourceOrder = { personal: 0, friend: 1, top: 2 } satisfies Record<GhostLapSource, number>;
-      return sourceOrder[left.source] - sourceOrder[right.source] || left.finishTimeMs - right.finishTimeMs;
-    });
+    .sort((left, right) => left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt);
 }
 
 export function playbackGhostLap(ghost: GhostLap, elapsedMs: number, index: number): GhostPlaybackRider | null {

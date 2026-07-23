@@ -42,7 +42,6 @@ import type {
 } from '../types';
 
 type CommentaryServiceMode = 'checking' | 'ai' | 'browser';
-type CommentaryPlaybackStatus = 'idle' | 'thinking' | 'speaking';
 type CommentaryPlaybackPhase = RaceCommentaryPlaybackPhase;
 type CommentarySpeechEventKind = RaceCommentaryEventKind | 'pre-race' | 'preview';
 type CommentaryDeliveryStyle = 'straight' | 'wry' | 'pressure' | 'surge' | 'sprint';
@@ -94,12 +93,12 @@ function browserVoiceFor(_voicePreset: RaceCommentaryVoicePreset) {
 
   const voices = window.speechSynthesis.getVoices();
   const americanVoices = voices.filter((voice) => voice.lang.toLowerCase() === 'en-us');
-  const preferredNames = ['aaron', 'alex', 'guy', 'davis', 'david', 'reed', 'eddy'];
+  // Never use the device's first English voice as an automatic fallback:
+  // that changed the announcer to a female system voice on some iPads and PCs.
+  const preferredNames = ['aaron', 'alex', 'guy', 'davis', 'david', 'reed', 'eddy', 'fred'];
   return preferredNames
     .map((name) => americanVoices.find((voice) => voice.name.toLowerCase().includes(name)))
     .find(Boolean)
-    ?? americanVoices[0]
-    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('en'))
     ?? null;
 }
 
@@ -126,17 +125,6 @@ function deliveryStyleForEvent(event: RaceCommentaryEvent): CommentaryDeliverySt
     return 'pressure';
   }
   return 'straight';
-}
-
-function riderNameList(players: PlayerSlot[]) {
-  const names = players.slice(0, 4).map((player) => player.name);
-  if (names.length <= 1) {
-    return names[0] ?? '';
-  }
-  if (names.length === 2) {
-    return `${names[0]} and ${names[1]}`;
-  }
-  return `${names.slice(0, -1).join(', ')}, and ${names.at(-1)}`;
 }
 
 function preparedStartSpeechKey(
@@ -186,6 +174,11 @@ function speakWithBrowser(
       resolve(false);
       return;
     }
+    const browserVoice = browserVoiceFor(voicePreset);
+    if (!browserVoice) {
+      resolve(false);
+      return;
+    }
 
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(line);
@@ -213,7 +206,7 @@ function speakWithBrowser(
       browserSpeechWatchdogMs(line),
     );
     utterance.lang = speechLanguage(voicePreset);
-    utterance.voice = browserVoiceFor(voicePreset);
+    utterance.voice = browserVoice;
     utterance.volume = volume;
     const baseRate = 0.97;
     const actionRate = eventKind === 'lead-change'
@@ -577,8 +570,6 @@ export function useRaceCommentary({
   onRecentLinesChange,
 }: UseRaceCommentaryOptions) {
   const [serviceMode, setServiceMode] = useState<CommentaryServiceMode>('checking');
-  const [playbackStatus, setPlaybackStatus] = useState<CommentaryPlaybackStatus>('idle');
-  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [finishAnnouncementsComplete, setFinishAnnouncementsComplete] = useState(true);
   const trackerRef = useRef(createRaceCommentaryTracker());
   const preferencesRef = useRef(preferences);
@@ -632,10 +623,6 @@ export function useRaceCommentary({
 
   const setPlaybackPhase = useCallback((phase: CommentaryPlaybackPhase) => {
     playbackPhaseRef.current = phase;
-    setPlaybackStatus(phase === 'preparing' ? 'thinking' : phase);
-    if (phase === 'speaking') {
-      setPlaybackError(null);
-    }
   }, []);
 
   const disposePreparedStartSpeech = useCallback(() => {
@@ -982,8 +969,8 @@ export function useRaceCommentary({
           shouldContinue,
           beginSpeaking,
         );
-      } catch {
-        if (shouldContinue()) {
+      } catch (error) {
+        if (serviceMode === 'browser' && shouldContinue()) {
           await speakWithBrowser(
             report.line,
             activePreferences.voicePreset,
@@ -993,6 +980,8 @@ export function useRaceCommentary({
             shouldContinue,
             beginSpeaking,
           );
+        } else if (serviceMode === 'ai') {
+          console.warn('Natural commentary pre-race audio could not play.', error);
         }
       }
     })()
@@ -1125,8 +1114,8 @@ export function useRaceCommentary({
                 beginSpeaking,
               );
             }
-          } catch {
-            if (shouldContinue()) {
+          } catch (error) {
+            if (serviceMode === 'browser' && shouldContinue()) {
               await speakWithBrowser(
                 line,
                 activePreferences.voicePreset,
@@ -1136,6 +1125,8 @@ export function useRaceCommentary({
                 shouldContinue,
                 beginSpeaking,
               );
+            } else if (serviceMode === 'ai') {
+              console.warn('Natural commentary race-start audio could not play.', error);
             }
           } finally {
             if (activeRequestAbortRef.current === requestController) {
@@ -1181,8 +1172,8 @@ export function useRaceCommentary({
                 beginSpeaking,
               );
             }
-          } catch {
-            if (shouldContinue()) {
+          } catch (error) {
+            if (serviceMode === 'browser' && shouldContinue()) {
               await speakWithBrowser(
                 line,
                 activePreferences.voicePreset,
@@ -1192,6 +1183,8 @@ export function useRaceCommentary({
                 shouldContinue,
                 beginSpeaking,
               );
+            } else if (serviceMode === 'ai') {
+              console.warn('Natural commentary finish audio could not play.', error);
             }
           } finally {
             activeFinishCallRef.current = false;
@@ -1286,8 +1279,8 @@ export function useRaceCommentary({
               beginSpeaking,
             );
           }
-        } catch {
-          if (shouldContinue()) {
+        } catch (error) {
+          if (!useAiSpeech && shouldContinue()) {
             await speakWithBrowser(
               line,
               activePreferences.voicePreset,
@@ -1297,6 +1290,8 @@ export function useRaceCommentary({
               shouldContinue,
               beginSpeaking,
             );
+          } else if (useAiSpeech) {
+            console.warn('Natural commentary race audio could not play.', error);
           }
         }
         if (activeRequestAbortRef.current === requestController) {
@@ -1458,11 +1453,14 @@ export function useRaceCommentary({
       })
       .catch(() => undefined);
     if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
-      const unlockUtterance = new SpeechSynthesisUtterance('.');
-      unlockUtterance.lang = 'en-US';
-      unlockUtterance.voice = browserVoiceFor('american-man');
-      unlockUtterance.volume = 0.01;
-      window.speechSynthesis.speak(unlockUtterance);
+      const browserVoice = browserVoiceFor('american-man');
+      if (browserVoice) {
+        const unlockUtterance = new SpeechSynthesisUtterance('.');
+        unlockUtterance.lang = 'en-US';
+        unlockUtterance.voice = browserVoice;
+        unlockUtterance.volume = 0.01;
+        window.speechSynthesis.speak(unlockUtterance);
+      }
     }
     return Promise.race([
       Promise.allSettled([contextPrime, mediaPrime]).then(() => undefined),
@@ -1479,72 +1477,8 @@ export function useRaceCommentary({
     }),
   ]), [primeCommentaryPlayback]);
 
-  const preview = useCallback(async () => {
-    setPlaybackError(null);
-    setPlaybackPhase('thinking');
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    activePlaybackCancelRef.current?.();
-    activePlaybackCancelRef.current = null;
-    await primeCommentaryPlayback();
-    const activePreferences = preferencesRef.current;
-    const names = riderNameList(players);
-    const line = names
-      ? `TrackLab announcer ready. ${names}, get set for the gate.`
-      : 'TrackLab announcer ready. Riders, get set for the gate.';
-    const beginSpeaking = () => setPlaybackPhase('speaking');
-    let played = false;
-    try {
-      if (serviceMode === 'ai') {
-        played = await playAiSpeech(
-          line,
-          activePreferences,
-          'preview',
-          players.map((player) => player.name),
-          'straight',
-          activeAudioRef,
-          activeBufferSourceRef,
-          activePlaybackCancelRef,
-          () => true,
-          beginSpeaking,
-        );
-      } else {
-        played = await speakWithBrowser(
-          line,
-          activePreferences.voicePreset,
-          'preview',
-          activePreferences.volume,
-          activePlaybackCancelRef,
-          () => true,
-          beginSpeaking,
-        );
-      }
-    } catch {
-      played = await speakWithBrowser(
-        line,
-        activePreferences.voicePreset,
-        'preview',
-        activePreferences.volume,
-        activePlaybackCancelRef,
-        () => true,
-        beginSpeaking,
-      );
-    } finally {
-      if (!played) {
-        setPlaybackError('Voice playback could not start. Tap Preview again to unlock audio.');
-      }
-      setPlaybackPhase('idle');
-    }
-  }, [players, primeCommentaryPlayback, serviceMode, setPlaybackPhase]);
-
   return {
-    playbackStatus,
-    playbackError,
-    serviceMode,
-    preRaceReport,
     finishAnnouncementsComplete,
-    preview,
     prime,
     stop: stopPlayback,
   };

@@ -1703,15 +1703,10 @@ export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], l
        WHERE track_id = $1 AND race_source = 'live'
      ) AS ranked
      ORDER BY
-       CASE
-         WHEN owner_key = $2 THEN 0
-         WHEN owner_key = ANY($3::text[]) THEN 1
-         ELSE 2
-       END,
        finish_time_ms ASC,
        saved_at DESC
-     LIMIT $4`,
-    [trackId, profileKey, friendKeys, Math.max(1, Math.min(60, Math.round(Number(limit) || 30)))],
+     LIMIT $2`,
+    [trackId, Math.max(1, Math.min(60, Math.round(Number(limit) || 30)))],
   );
 
   const friends = new Set(friendKeys);

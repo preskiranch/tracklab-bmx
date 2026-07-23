@@ -206,7 +206,6 @@ import type {
   DraftTrackSplit,
   EarthCamera,
   GhostLapPoint,
-  IntervalMode,
   LeaderboardEntry,
   LeaderboardMetric,
   MappingEditMode,
@@ -221,7 +220,6 @@ import type {
   RaceRiderOverlayLayout,
   RaceViewPreferences,
   ReactionTimesByPlayer,
-  SessionMode,
   SpeedUnit,
   StudioRider,
   StudioRiderAssignments,
@@ -1448,9 +1446,6 @@ export default function App() {
   const [selectedCountry, setSelectedCountry] = useState(initialTrack.country);
   const [selectedState, setSelectedState] = useState(initialTrack.state);
   const [selectedTrackId, setSelectedTrackId] = useState(initialTrack.id);
-  const [sessionMode, setSessionMode] = useState<SessionMode>('sprint');
-  const [intervalMode, setIntervalMode] = useState<IntervalMode>('auto');
-  const [manualZoneIds, setManualZoneIds] = useState<string[]>(['z2', 'z4']);
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
   const [branchChoicesByPlayer, setBranchChoicesByPlayer] = useState<Partial<Record<PlayerSlot['id'], SplitBranchId>>>({});
   const [liveRaceReadyDeviceIds, setLiveRaceReadyDeviceIds] = useState<number[]>([]);
@@ -2388,7 +2383,9 @@ export default function App() {
           || ghost.source !== 'personal'
           || ghost.analyticsPublic
         )
-      )),
+      ))
+      .sort((left, right) => left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt)
+      .slice(0, 50),
     [cloudProfileKey, effectiveTrack.id, ghostLaps, ghostRouteVariantId, isLoopTrack, lapCount],
   );
   const selectedGhostLaps = useMemo(
@@ -2510,17 +2507,7 @@ export default function App() {
     () => (effectiveTrack.routeStatus === 'user-mapped' ? effectiveTrack.zones : []),
     [effectiveTrack.routeStatus, effectiveTrack.zones],
   );
-  const activeZones = useMemo(() => {
-    if (sessionMode === 'sprint') {
-      return mappedZones;
-    }
-
-    if (intervalMode === 'auto') {
-      return mappedZones;
-    }
-
-    return mappedZones.filter((zone) => manualZoneIds.includes(zone.id));
-  }, [intervalMode, manualZoneIds, mappedZones, sessionMode]);
+  const activeZones = mappedZones;
   const raceZones = useMemo(
     () => repeatTrackZonesForLaps(activeZones, baseRouteLengthMeters, isLoopTrack ? lapCount : 1),
     [activeZones, baseRouteLengthMeters, isLoopTrack, lapCount],
@@ -2860,7 +2847,7 @@ export default function App() {
         lengthMeters: effectiveTrack.lengthMeters,
         routeLengthMeters: effectiveRouteLengthMeters,
       },
-      sessionMode,
+      sessionMode: 'sprint',
       selectedMetrics,
       players: racePlayers.map((player) => ({
         id: player.id,
@@ -2884,7 +2871,7 @@ export default function App() {
     };
 
     setRaceCapture(capture);
-  }, [demoMode, effectiveRouteLengthMeters, effectiveTrack, racePlayers, raceZones, selectedMetrics, sessionMode]);
+  }, [demoMode, effectiveRouteLengthMeters, effectiveTrack, racePlayers, raceZones, selectedMetrics]);
 
   const appendRaceCaptureEvent = useCallback((type: RaceCapture['events'][number]['type'], label: string, at = Date.now()) => {
     setRaceCapture((current) => {
@@ -3830,11 +3817,6 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    setManualZoneIds((current) => {
-      const valid = current.filter((zoneId) => mappedZones.some((zone) => zone.id === zoneId));
-      return valid.length > 0 ? valid : mappedZones.slice(0, 2).map((zone) => zone.id);
-    });
-
     if (startGateStatus.active || raceState !== 'ready') {
       return;
     }
@@ -4960,14 +4942,6 @@ export default function App() {
     rememberMappingEdit('zones');
     updateCurrentDraftZoneMeters(nextZoneMeters);
   }, [draftZoneMeters, rememberMappingEdit, updateCurrentDraftZoneMeters]);
-
-  const toggleManualZone = (zoneId: string) => {
-    setManualZoneIds((current) => (
-      current.includes(zoneId)
-        ? current.filter((item) => item !== zoneId)
-        : [...current, zoneId]
-    ));
-  };
 
   const toggleMetric = (metric: MetricKey) => {
     setSelectedMetrics((current) => {
@@ -6886,10 +6860,6 @@ export default function App() {
                 <Suspense fallback={<div className="panel-section">Loading race controls…</div>}>
                   <SessionControlPanel
                   track={effectiveTrack}
-                  sessionMode={sessionMode}
-                  intervalMode={intervalMode}
-                  activeZones={activeZones}
-                  manualZoneIds={manualZoneIds}
                   selectedMetrics={selectedMetrics}
                   speedUnit={speedUnit}
                   distanceUnit={distanceUnit}
@@ -6946,13 +6916,6 @@ export default function App() {
                   ghostLaps={availableGhostLaps}
                   selectedGhostIds={selectedGhostIds}
                   commentaryPreferences={raceCommentaryPreferences}
-                  commentaryServiceMode={raceCommentary.serviceMode}
-                  commentaryPlaybackStatus={raceCommentary.playbackStatus}
-                  commentaryPlaybackError={raceCommentary.playbackError}
-                  commentaryPreRaceReport={raceCommentary.preRaceReport}
-                  onSessionModeChange={setSessionMode}
-                  onIntervalModeChange={setIntervalMode}
-                  onManualZoneToggle={toggleManualZone}
                   onMetricToggle={toggleMetric}
                   onSpeedUnitChange={setSpeedUnit}
                   onDistanceUnitChange={setDistanceUnit}
@@ -6997,9 +6960,6 @@ export default function App() {
                   onGhostClear={clearSelectedGhosts}
                   onGhostAnalyticsSharingChange={handleGhostAnalyticsSharingChange}
                   onCommentaryPreferencesChange={handleRaceCommentaryPreferencesChange}
-                  onCommentaryPreview={() => {
-                    void raceCommentary.preview();
-                  }}
                   onPrimeAudio={primeRaceAudio}
                   onStart={handleStart}
                   onCancel={handleCancel}

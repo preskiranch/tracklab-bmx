@@ -31,8 +31,6 @@ function silentWavBuffer(durationMs = 500) {
   return buffer;
 }
 
-const silentVoicePreviewAudio = silentWavBuffer();
-
 const mockPedalZoneMapping = {
   version: 1,
   trackId: 'black-mountain-bmx',
@@ -358,7 +356,11 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByText('Commentary brain', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('option', { name: /Fast|Balanced|Studio/i })).toHaveCount(0);
   await expect(page.getByLabel('Announcer voice')).toHaveCount(0);
-  await expect(page.getByText('American male', { exact: true })).toBeVisible();
+  await expect(page.getByText('American male', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Adaptive memory', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Preview selected voice' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Race type' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Intervals' })).toHaveCount(0);
   const ambientSound = page.getByLabel('Ambient track sound');
   await expect(ambientSound).toBeVisible();
   await expect(ambientSound).toBeChecked();
@@ -1098,13 +1100,6 @@ test.describe('mobile commentary playback', () => {
         preRaceStudioVoiceStartedBeforeReport = true;
       }
       await new Promise((resolve) => setTimeout(resolve, 650));
-      if (payload.eventKind === 'preview') {
-        await route.fulfill({
-          contentType: 'audio/wav',
-          body: silentVoicePreviewAudio,
-        });
-        return;
-      }
       await route.fulfill({
         contentType: 'audio/mpeg',
         path: 'public/assets/uci-random-start.mp3',
@@ -1199,27 +1194,9 @@ test.describe('mobile commentary playback', () => {
       payload.eventKind === 'race-start'
     ))).toHaveLength(initialStartPrefetchCount);
     await expect(page.getByLabel('Announcer voice')).toHaveCount(0);
-    await expect(page.getByText('American male', { exact: true })).toBeVisible();
-    const priorPreviewCount = speechPayloads.filter(
-      (payload) => payload.eventKind === 'preview',
-    ).length;
-    await page.getByRole('button', { name: 'Preview selected voice' }).click();
-    await expect(page.getByRole('button', { name: 'Preparing voice…' })).toBeVisible();
-    await expect.poll(
-      () => speechPayloads.filter((payload) => payload.eventKind === 'preview').length,
-      { timeout: 8_000 },
-    ).toBe(priorPreviewCount + 1);
-    await expect(page.getByRole('button', { name: 'Preview selected voice' })).toBeEnabled({
-      timeout: 8_000,
-    });
-    await expect.poll(() => page.evaluate(() => (
-      (window as typeof window & {
-        __tracklabBufferPlaybackCount?: number;
-      }).__tracklabBufferPlaybackCount ?? 0
-    )), { timeout: 8_000 }).toBeGreaterThanOrEqual(1);
-    expect(speechPayloads
-      .filter((payload) => payload.eventKind === 'preview')
-      .map((payload) => payload.voicePreset)).toEqual(['american-man']);
+    await expect(page.getByText('American male', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Preview selected voice' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Race type' })).toHaveCount(0);
     expect(await page.evaluate(() => ({
       cadence: (window as typeof window & {
         __tracklabCadenceMediaPlayCount?: number;
@@ -1263,7 +1240,7 @@ test.describe('mobile commentary playback', () => {
       )),
       { timeout: 35_000 },
     ).toBe(true);
-    await expect(page.getByText('Natural AI commentary ready')).toBeAttached();
+    await expect(page.getByLabel('Race commentary')).toBeAttached();
   });
 });
 
@@ -1384,11 +1361,12 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   const startHereLapCounter = page.getByRole('group', { name: 'Loop race lap count' });
   await expect(startHereLapCounter).toBeVisible();
   await expect(startHereLapCounter).toContainText('1 lap');
-  await expect(page.getByText('My Ghosts')).toBeVisible();
+  await expect(page.getByText('Top 3')).toBeVisible();
   await expect(page.getByText('Demo Ghosts')).toHaveCount(0);
   await expect(page.getByText('Demo Rider 1')).toHaveCount(0);
   await expect(page.getByText('Studio Bike One')).toBeVisible();
-  await expect(page.getByText('Worldwide')).toBeVisible();
+  await expect(page.getByText('World Leader')).toBeVisible();
+  await expect(page.locator('.ghost-rank-badge')).toHaveText(['#1', '#2']);
   await expect(page.getByText('Gold')).toBeVisible();
   await expect(page.getByText('Replay public / performance private')).toBeVisible();
   await expect(page.getByText('Gate start', { exact: false })).toHaveCount(0);
@@ -1409,7 +1387,7 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await page.getByRole('button', { name: 'Increase Start Here lap count' }).click();
   await expect(startHereLapCounter).toContainText('2 laps');
   await expect(page.locator('.lap-stepper input')).toHaveValue('2');
-  await expect(page.getByText('Complete a live Wattbike race on this track to create your personal ghost.')).toBeVisible();
+  await expect(page.getByText('Complete a live Wattbike race on this track to create the first ranked ghost.')).toBeVisible();
 });
 
 test('completed race waits for the authoritative final result before returning to dashboard analysis', async ({ page }, testInfo) => {

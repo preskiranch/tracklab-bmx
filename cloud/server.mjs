@@ -3811,7 +3811,7 @@ async function serveStatic(request, response) {
       const session = await currentAuthSession(request);
       const profileKey = session?.user ? authProfileKey(session.user) : '';
       const friendKeys = profileKey ? await persistence.loadFriendKeys(profileKey) : [];
-      const ghosts = await persistence.loadGhostLaps(trackId, profileKey, friendKeys, 40);
+      const ghosts = await persistence.loadGhostLaps(trackId, profileKey, friendKeys, 50);
       writeJson(response, 200, {
         trackId,
         persistence: persistence.persistenceEnabled(),

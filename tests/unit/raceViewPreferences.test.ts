@@ -55,7 +55,7 @@ describe('race view preferences', () => {
     expect(preferences.commentary).toEqual(defaultRaceCommentaryPreferences);
   });
 
-  it('normalizes per-account announcer choices and bounded adaptive memory', () => {
+  it('normalizes the single announcer engine and bounded adaptive memory', () => {
     const commentary = normalizeRaceCommentaryPreferences({
       enabled: false,
       ambientEnabled: false,
@@ -74,8 +74,8 @@ describe('race view preferences', () => {
       ambientVolume: 0.2,
       ambientVolumeLocked: false,
       voicePreset: 'american-man',
-      volume: 1,
-      adaptiveMemory: false,
+      volume: 0.9,
+      adaptiveMemory: true,
     });
     expect(commentary.recentLines).toHaveLength(96);
     expect(commentary.recentLines[0]).toBe('Call 24');
@@ -140,7 +140,7 @@ describe('race view preferences', () => {
     expect(merged.earthCamerasByTrack.south).toMatchObject({ angle: 30, heading: 90, zoom: 19 });
     expect(merged.riderOverlaysByTrack.north).toMatchObject({ width: 1100, height: 260, locked: true });
     expect(merged.demoRiderNames).toEqual({ 1: 'Maya Torres', 2: 'Jordan Lee' });
-    expect(merged.commentary.volume).toBe(0.6);
+    expect(merged.commentary.volume).toBe(0.9);
   });
 
   it('uses zero revisions for legacy cameras so loading them does not invent a newer edit', () => {

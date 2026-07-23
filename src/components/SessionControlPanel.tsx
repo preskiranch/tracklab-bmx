@@ -30,18 +30,15 @@ import {
 } from 'lucide-react';
 import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
 import type { PlacePredictionOption } from '../lib/googleMaps';
-import type { PreRaceReport } from '../lib/preRaceReport';
 import { distanceBetweenTrackPoints, routeLengthMeters } from '../lib/trackMapping';
 import type {
   DistanceUnit,
   DraftTrackSplit,
   GhostLap,
-  IntervalMode,
   MappingEditMode,
   MetricKey,
   RaceCommentaryPreferences,
   RaceState,
-  SessionMode,
   SpeedUnit,
   PlayerSlot,
   TrackPoint,
@@ -88,10 +85,6 @@ function splitBranchDraftPath(points: TrackPoint[], splitPoint: TrackPoint, merg
 
 type SessionControlPanelProps = {
   track: TrackRecord;
-  sessionMode: SessionMode;
-  intervalMode: IntervalMode;
-  activeZones: TrackZone[];
-  manualZoneIds: string[];
   selectedMetrics: MetricKey[];
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
@@ -147,13 +140,6 @@ type SessionControlPanelProps = {
   ghostLaps: GhostLap[];
   selectedGhostIds: string[];
   commentaryPreferences: RaceCommentaryPreferences;
-  commentaryServiceMode: 'checking' | 'ai' | 'browser';
-  commentaryPlaybackStatus: 'idle' | 'thinking' | 'speaking';
-  commentaryPlaybackError: string | null;
-  commentaryPreRaceReport: PreRaceReport | null;
-  onSessionModeChange: (mode: SessionMode) => void;
-  onIntervalModeChange: (mode: IntervalMode) => void;
-  onManualZoneToggle: (zoneId: string) => void;
   onMetricToggle: (metric: MetricKey) => void;
   onSpeedUnitChange: (unit: SpeedUnit) => void;
   onDistanceUnitChange: (unit: DistanceUnit) => void;
@@ -198,7 +184,6 @@ type SessionControlPanelProps = {
   onGhostClear: () => void;
   onGhostAnalyticsSharingChange: (ghostId: string, analyticsPublic: boolean) => void;
   onCommentaryPreferencesChange: (preferences: RaceCommentaryPreferences) => void;
-  onCommentaryPreview: () => void;
   onPrimeAudio: () => void;
   onStart: () => void;
   onCancel: () => void;
@@ -228,16 +213,12 @@ function ghostSourceLabel(ghost: GhostLap) {
   return 'My best';
 }
 
-function ghostMedalLabel(rank: GhostLap['medalRank']) {
+function ghostMedalLabel(rank: number) {
   return rank === 1 ? 'Gold' : rank === 2 ? 'Silver' : rank === 3 ? 'Bronze' : null;
 }
 
 export function SessionControlPanel({
   track,
-  sessionMode,
-  intervalMode,
-  activeZones,
-  manualZoneIds,
   selectedMetrics,
   speedUnit,
   distanceUnit,
@@ -293,13 +274,6 @@ export function SessionControlPanel({
   ghostLaps,
   selectedGhostIds,
   commentaryPreferences,
-  commentaryServiceMode,
-  commentaryPlaybackStatus,
-  commentaryPlaybackError,
-  commentaryPreRaceReport,
-  onSessionModeChange,
-  onIntervalModeChange,
-  onManualZoneToggle,
   onMetricToggle,
   onSpeedUnitChange,
   onDistanceUnitChange,
@@ -344,7 +318,6 @@ export function SessionControlPanel({
   onGhostClear,
   onGhostAnalyticsSharingChange,
   onCommentaryPreferencesChange,
-  onCommentaryPreview,
   onPrimeAudio,
   onStart,
   onCancel,
@@ -408,7 +381,6 @@ export function SessionControlPanel({
   const canChooseRaceLayout = raceState !== 'racing' && !startGateActive;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo pedal pin' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const redoLabel = mappingEditMode === 'zones' ? 'Redo pedal pin' : mappingEditMode === 'split' ? 'Redo split' : 'Redo path';
-  const availableZones = hasMappedRoute ? track.zones : [];
   const visibleTrackDistance = draftPointCount > 1 ? draftLengthMeters : hasMappedRoute ? track.lengthMeters : null;
   const filteredCustomRoutes = customRoutes.filter((customRoute) => {
     const filter = customRouteFilter.trim().toLowerCase();
@@ -424,21 +396,14 @@ export function SessionControlPanel({
       customRoute.country,
     ].some((value) => value?.toLowerCase().includes(filter));
   });
-  const personalGhosts = ghostLaps.filter((ghost) => ghost.source === 'personal' && ghost.raceSource === 'live');
-  const friendGhosts = ghostLaps.filter((ghost) => ghost.source === 'friend').slice(0, 4);
-  const topGhosts = ghostLaps.filter((ghost) => ghost.source === 'top').slice(0, 6);
-  const selectedGhostCount = selectedGhostIds.filter((ghostId) => ghostLaps.some((ghost) => ghost.id === ghostId)).length;
-  const ghostGroups = [
-    {
-      id: 'personal',
-      label: 'My Ghosts',
-      ghosts: personalGhosts,
-      emptyMessage: 'Complete a live Wattbike race on this track to create your personal ghost.',
-      alwaysVisible: true,
-    },
-    { id: 'friend', label: 'Friends', ghosts: friendGhosts },
-    { id: 'top', label: 'Worldwide', ghosts: topGhosts },
-  ].filter((group) => group.alwaysVisible || group.ghosts.length > 0);
+  const rankedGhosts = [...ghostLaps]
+    .sort((left, right) => left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt)
+    .slice(0, 50);
+  const podiumGhosts = rankedGhosts.slice(0, 3);
+  const remainingGhosts = rankedGhosts.slice(3);
+  const selectedGhostCount = selectedGhostIds.filter((ghostId) => (
+    rankedGhosts.some((ghost) => ghost.id === ghostId)
+  )).length;
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -463,6 +428,82 @@ export function SessionControlPanel({
   const handleMappingSplitBranchChange = (branch: TrackSplitBranch['id']) => {
     onMappingSplitBranchChange(branch);
     collapseMappingToolsIfNeeded();
+  };
+  const renderGhostOption = (ghost: GhostLap, rank: number) => {
+    const selected = selectedGhostIds.includes(ghost.id);
+    const ownsGhost = ghost.ownerKey === currentProfileKey;
+    const medalLabel = ghostMedalLabel(rank);
+    const riderZoneResults = ghost.zoneResults.flatMap((zone) => (
+      zone.riders[0] ? [{ zone, rider: zone.riders[0] }] : []
+    ));
+
+    return (
+      <div className={`ghost-option ${selected ? 'selected' : ''}`} key={ghost.id}>
+        <button
+          className="ghost-select-button"
+          type="button"
+          onClick={() => onGhostToggle(ghost.id)}
+          aria-pressed={selected}
+        >
+          <span className="ghost-name-row">
+            <span className={`ghost-rank-badge ${rank <= 3 ? `rank-${rank}` : ''}`}>#{rank}</span>
+            <strong>{ghost.riderName}</strong>
+            {medalLabel && (
+              <span className={`ghost-medal rank-${rank}`} title={`${medalLabel} course record`}>
+                <Medal size={16} />
+                {medalLabel}
+              </span>
+            )}
+          </span>
+          <small>
+            {ghostSourceLabel(ghost)} / {formatGhostRaceTime(ghost.finishTimeMs)}
+            {ghost.lapCount > 1 ? ` / ${ghost.lapCount} laps` : ''}
+            {' / '}30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}
+          </small>
+          <small>
+            {ghost.analyticsPublic
+              ? 'Replay and zone data public'
+              : ownsGhost
+                ? 'Replay public / your zone data private'
+                : 'Replay public / performance private'}
+          </small>
+          <span className={`ghost-race-selection ${selected ? 'selected' : ''}`}>
+            {selected ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+            {selected ? 'Selected to race' : 'Select this ghost'}
+          </span>
+        </button>
+        {ownsGhost && (
+          <label className="ghost-share-toggle">
+            <input
+              type="checkbox"
+              checked={ghost.analyticsPublic}
+              onChange={(event) => onGhostAnalyticsSharingChange(ghost.id, event.target.checked)}
+            />
+            <span>Share zone data with other racers</span>
+          </label>
+        )}
+        {(ghost.summary || riderZoneResults.length > 0) && (
+          <details className="ghost-analytics">
+            <summary>View performance</summary>
+            {ghost.summary && (
+              <div className="ghost-overall-metrics">
+                <span>Cadence {ghost.summary.topCadence == null ? '--' : `${Math.round(ghost.summary.topCadence)} RPM`}</span>
+                <span>Speed {ghost.summary.topSpeedKph == null ? '--' : `${(ghost.summary.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
+                <span>Power {ghost.summary.topWatts == null ? '--' : `${Math.round(ghost.summary.topWatts)} W`}</span>
+              </div>
+            )}
+            {riderZoneResults.map(({ zone, rider }) => (
+              <div className="ghost-zone-row" key={zone.zoneId}>
+                <strong>{zone.zoneName}</strong>
+                <span>{rider.topCadence == null ? '--' : `${Math.round(rider.topCadence)} RPM`}</span>
+                <span>{rider.topSpeedKph == null ? '--' : `${(rider.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
+                <span>{rider.topWatts == null ? '--' : `${Math.round(rider.topWatts)} W`}</span>
+              </div>
+            ))}
+          </details>
+        )}
+      </div>
+    );
   };
 
   useEffect(() => {
@@ -1150,183 +1191,6 @@ export function SessionControlPanel({
           </div>
         )}
 
-        <div className={`announcer-service-status ${commentaryServiceMode}`}>
-          <span />
-          {commentaryServiceMode === 'checking'
-            ? 'Checking AI voice service'
-            : commentaryServiceMode === 'ai'
-              ? 'Natural AI commentary ready'
-              : 'Browser voice fallback active'}
-        </div>
-
-        {commentaryPreferences.enabled && (
-          <div className="announcer-briefing-status">
-            <strong>
-              {commentaryPreRaceReport
-                ? `Pre-race report ready · ${commentaryPreRaceReport.supportedVariableCount} variables · ${commentaryPreRaceReport.variableCount} current facts`
-                : 'Preparing track and weather briefing…'}
-            </strong>
-            {commentaryPreRaceReport && commentaryPreRaceReport.sources.length > 0 && (
-              <details>
-                <summary>Track, research, and weather sources</summary>
-                <div>
-                  {commentaryPreRaceReport.sources.map((source) => (
-                    <a
-                      href={source.url}
-                      key={`${source.kind}:${source.url}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {source.title}
-                    </a>
-                  ))}
-                </div>
-              </details>
-            )}
-          </div>
-        )}
-
-        <div className="announcer-select-grid">
-          <div className="announcer-fixed-voice">
-            <span>Announcer voice</span>
-            <strong>American male</strong>
-          </div>
-        </div>
-
-        <label className="announcer-volume-row">
-          <span><Volume2 size={14} /> Volume</span>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={commentaryPreferences.volume}
-            disabled={!commentaryPreferences.enabled}
-            onChange={(event) => onCommentaryPreferencesChange({
-              ...commentaryPreferences,
-              volume: Number(event.target.value),
-            })}
-          />
-          <strong>{Math.round(commentaryPreferences.volume * 100)}%</strong>
-        </label>
-
-        <label className="announcer-memory-row">
-          <input
-            type="checkbox"
-            checked={commentaryPreferences.adaptiveMemory}
-            disabled={!commentaryPreferences.enabled}
-            onChange={(event) => onCommentaryPreferencesChange({
-              ...commentaryPreferences,
-              adaptiveMemory: event.target.checked,
-            })}
-          />
-          <span>
-            <strong>Adaptive memory</strong>
-            <small>Remembers recent calls on your account to avoid repetition</small>
-          </span>
-        </label>
-
-        <button
-          className="announcer-preview-button"
-          type="button"
-          disabled={!commentaryPreferences.enabled || commentaryPlaybackStatus !== 'idle'}
-          onClick={onCommentaryPreview}
-        >
-          <Mic2 size={15} />
-          {commentaryPlaybackStatus === 'thinking'
-            ? 'Preparing voice…'
-            : commentaryPlaybackStatus === 'speaking'
-              ? 'Announcing…'
-              : commentaryPlaybackError
-                ? 'Retry voice preview'
-                : 'Preview selected voice'}
-        </button>
-        {commentaryPlaybackError && (
-          <p className="announcer-playback-error" role="alert">
-            {commentaryPlaybackError}
-          </p>
-        )}
-        <p className="announcer-disclosure">
-          Voice and wording are AI-generated. The 15-second report uses cited track research,
-          current weather, and saved TrackLab race history; missing facts are omitted.
-          Calls describe race action—not watts, RPM, or speed figures. Broadcast research
-          contributes aggregate terminology and delivery patterns, never voice cloning.
-        </p>
-      </section>
-
-      <section className="panel-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Session Setup</span>
-            <h3>Race type</h3>
-          </div>
-          <Timer size={18} />
-        </div>
-
-        <div className="segmented-control" aria-label="Session mode">
-          <button
-            className={sessionMode === 'sprint' ? 'selected' : ''}
-            type="button"
-            onClick={() => onSessionModeChange('sprint')}
-          >
-            <Flag size={15} />
-            Full Track
-          </button>
-          <button
-            className={sessionMode === 'interval' ? 'selected' : ''}
-            type="button"
-            onClick={() => onSessionModeChange('interval')}
-          >
-            <Timer size={15} />
-            Intervals
-          </button>
-        </div>
-
-        {sessionMode === 'interval' && (
-          <>
-            <div className="segmented-control compact" aria-label="Interval zone mode">
-              <button
-                className={intervalMode === 'auto' ? 'selected' : ''}
-                type="button"
-                onClick={() => onIntervalModeChange('auto')}
-              >
-                All pedal zones
-              </button>
-              <button
-                className={intervalMode === 'manual' ? 'selected' : ''}
-                type="button"
-                onClick={() => onIntervalModeChange('manual')}
-              >
-                Manual
-              </button>
-            </div>
-
-            {intervalMode === 'manual' && (
-              <div className="zone-picker">
-                {availableZones.map((zone) => (
-                  <button
-                    className={`${manualZoneIds.includes(zone.id) ? 'selected' : ''} ${zone.type}`}
-                    type="button"
-                    onClick={() => onManualZoneToggle(zone.id)}
-                    key={zone.id}
-                  >
-                    <span>{zone.name}</span>
-                    <small>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)} / Performance tracked</small>
-                  </button>
-                ))}
-                {availableZones.length === 0 && <span className="empty-inline">No mapped pedal zones</span>}
-              </div>
-            )}
-          </>
-        )}
-
-        <div className="active-zone-list">
-          {activeZones.length > 0 ? activeZones.map((zone) => (
-            <span className={`zone-chip ${zone.type}`} key={zone.id}>
-              {zone.name}
-            </span>
-          )) : <span className="empty-inline">No mapped pedal zones</span>}
-        </div>
       </section>
 
       {hasRaceSplitChoices && (
@@ -1468,87 +1332,27 @@ export function SessionControlPanel({
           </button>
         </div>
         <div className="ghost-picker">
-          {ghostGroups.map((group) => (
-            <div className="ghost-group" key={group.id}>
-              <span>{group.label}</span>
-              {group.ghosts.length === 0 ? (
-                <small className="ghost-group-empty">{group.emptyMessage}</small>
-              ) : group.ghosts.map((ghost) => {
-                const selected = selectedGhostIds.includes(ghost.id);
-                const ownsGhost = ghost.ownerKey === currentProfileKey;
-                const medalLabel = ghostMedalLabel(ghost.medalRank);
-                const riderZoneResults = ghost.zoneResults.flatMap((zone) => (
-                  zone.riders[0] ? [{ zone, rider: zone.riders[0] }] : []
-                ));
-                return (
-                  <div className={`ghost-option ${selected ? 'selected' : ''}`} key={ghost.id}>
-                    <button
-                      className="ghost-select-button"
-                      type="button"
-                      onClick={() => onGhostToggle(ghost.id)}
-                      aria-pressed={selected}
-                    >
-                      <span className="ghost-name-row">
-                        <strong>{ghost.riderName}</strong>
-                        {medalLabel && (
-                          <span className={`ghost-medal rank-${ghost.medalRank}`} title={`${medalLabel} course record`}>
-                            <Medal size={16} />
-                            {medalLabel}
-                          </span>
-                        )}
-                      </span>
-                      <small>
-                        {ghostSourceLabel(ghost)} / {formatGhostRaceTime(ghost.finishTimeMs)}
-                        {ghost.lapCount > 1 ? ` / ${ghost.lapCount} laps` : ''}
-                        {' / '}30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}
-                      </small>
-                      <small>
-                        {ghost.analyticsPublic
-                          ? 'Replay and zone data public'
-                          : ownsGhost
-                            ? 'Replay public / your zone data private'
-                            : 'Replay public / performance private'}
-                      </small>
-                      <span className={`ghost-race-selection ${selected ? 'selected' : ''}`}>
-                        {selected ? <CheckCircle2 size={16} /> : <Circle size={16} />}
-                        {selected ? 'Selected to race' : 'Select this ghost'}
-                      </span>
-                    </button>
-                    {ownsGhost && (
-                      <label className="ghost-share-toggle">
-                        <input
-                          type="checkbox"
-                          checked={ghost.analyticsPublic}
-                          onChange={(event) => onGhostAnalyticsSharingChange(ghost.id, event.target.checked)}
-                        />
-                        <span>Share zone data with other racers</span>
-                      </label>
-                    )}
-                    {(ghost.summary || riderZoneResults.length > 0) && (
-                      <details className="ghost-analytics">
-                        <summary>View performance</summary>
-                        {ghost.summary && (
-                          <div className="ghost-overall-metrics">
-                            <span>Cadence {ghost.summary.topCadence == null ? '--' : `${Math.round(ghost.summary.topCadence)} RPM`}</span>
-                            <span>Speed {ghost.summary.topSpeedKph == null ? '--' : `${(ghost.summary.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
-                            <span>Power {ghost.summary.topWatts == null ? '--' : `${Math.round(ghost.summary.topWatts)} W`}</span>
-                          </div>
-                        )}
-                        {riderZoneResults.map(({ zone, rider }) => (
-                          <div className="ghost-zone-row" key={zone.zoneId}>
-                            <strong>{zone.zoneName}</strong>
-                            <span>{rider.topCadence == null ? '--' : `${Math.round(rider.topCadence)} RPM`}</span>
-                            <span>{rider.topSpeedKph == null ? '--' : `${(rider.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
-                            <span>{rider.topWatts == null ? '--' : `${Math.round(rider.topWatts)} W`}</span>
-                          </div>
-                        ))}
-                      </details>
-                    )}
-                  </div>
-                );
-              })}
+          {podiumGhosts.length === 0 ? (
+            <small className="ghost-group-empty">
+              Complete a live Wattbike race on this track to create the first ranked ghost.
+            </small>
+          ) : (
+            <div className="ghost-group ghost-podium">
+              <span>Top 3</span>
+              {podiumGhosts.map((ghost, index) => renderGhostOption(ghost, index + 1))}
             </div>
-          ))}
+          )}
+          {remainingGhosts.length > 0 && (
+            <details className="ghost-rank-dropdown">
+              <summary>
+                <span>Ranks 4–{rankedGhosts.length}</span>
+                <small>Choose another ghost</small>
+              </summary>
+              <div className="ghost-group ghost-ranked-list">
+                {remainingGhosts.map((ghost, index) => renderGhostOption(ghost, index + 4))}
+              </div>
+            </details>
+          )}
         </div>
       </section>
 
