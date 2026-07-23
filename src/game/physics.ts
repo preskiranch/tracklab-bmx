@@ -1,4 +1,4 @@
-import { proSplitMinimumMph, type SplitRouteDecisionPoint, zoneMatchesBranchSelections } from '../lib/trackMapping';
+import { proSplitMinimumMph, type SplitRouteDecisionPoint } from '../lib/trackMapping';
 import { cleanBikeCadenceRpm, cleanBikeSpeedKph, cleanBikeWatts } from '../lib/bikeSampleSanity';
 import type { BikeSample, PlayerSlot, RiderDriveSource, RiderState, SplitBranchChoice, TrackZone } from '../types';
 import { bmxVelocityMpsFromCadence } from './bmxRollout';
@@ -67,7 +67,6 @@ function coastVelocityMps(velocityMps: number, dt: number) {
 type ZoneDriveContext = {
   activeZone: TrackZone | undefined;
   pedalZonesConfigured: boolean;
-  firstPedalStartMeter: number | null;
 };
 
 function branchSelectionCount(zone: TrackZone) {
@@ -78,30 +77,68 @@ function branchSelectionCount(zone: TrackZone) {
   return count;
 }
 
+function riderDistanceInZoneCoordinates(
+  zone: TrackZone,
+  distanceMeters: number,
+  actualBranches: Record<string, SplitBranchChoice>,
+  selectedBranch: SplitBranchChoice,
+  splitDecisionPoints: SplitRouteDecisionPoint[],
+) {
+  let riderRouteOffsetMeters = 0;
+  let zoneRouteOffsetMeters = 0;
+
+  for (const split of splitDecisionPoints) {
+    const riderBranch = actualBranches[split.id] ?? selectedBranch;
+    const zoneBranch = zone.branchSelections?.[split.id] ?? 'a';
+    const amateurBranchLength = split.branchLengthByBranch.a;
+    const riderBranchLength = split.branchLengthByBranch[riderBranch];
+    const zoneBranchLength = split.branchLengthByBranch[zoneBranch];
+    const riderSplitMeter = split.splitMeter + riderRouteOffsetMeters;
+    const zoneSplitMeter = split.splitMeter + zoneRouteOffsetMeters;
+    const riderMergeMeter = riderSplitMeter + riderBranchLength;
+
+    if (distanceMeters < riderSplitMeter) {
+      return distanceMeters + zoneRouteOffsetMeters - riderRouteOffsetMeters;
+    }
+
+    if (distanceMeters < riderMergeMeter) {
+      if (riderBranch !== zoneBranch) {
+        return null;
+      }
+      return distanceMeters + zoneSplitMeter - riderSplitMeter;
+    }
+
+    riderRouteOffsetMeters += riderBranchLength - amateurBranchLength;
+    zoneRouteOffsetMeters += zoneBranchLength - amateurBranchLength;
+  }
+
+  return distanceMeters + zoneRouteOffsetMeters - riderRouteOffsetMeters;
+}
+
 function zoneDriveContext(
   zones: TrackZone[],
   distanceMeters: number,
   actualBranches: Record<string, SplitBranchChoice>,
   selectedBranch: SplitBranchChoice,
+  splitDecisionPoints: SplitRouteDecisionPoint[],
 ): ZoneDriveContext {
   let activeZone: TrackZone | undefined;
   let activeZoneSpecificity = -1;
-  let pedalZonesConfigured = false;
-  let firstPedalStartMeter: number | null = null;
+  const pedalZonesConfigured = zones.some((zone) => zone.type === 'pedal');
 
   for (const zone of zones) {
-    if (!zoneMatchesBranchSelections(zone, actualBranches, selectedBranch)) {
+    const zoneDistanceMeters = riderDistanceInZoneCoordinates(
+      zone,
+      distanceMeters,
+      actualBranches,
+      selectedBranch,
+      splitDecisionPoints,
+    );
+    if (zoneDistanceMeters == null) {
       continue;
     }
 
-    if (zone.type === 'pedal') {
-      pedalZonesConfigured = true;
-      firstPedalStartMeter = firstPedalStartMeter == null
-        ? zone.startMeter
-        : Math.min(firstPedalStartMeter, zone.startMeter);
-    }
-
-    if (distanceMeters < zone.startMeter || distanceMeters >= zone.endMeter) {
+    if (zoneDistanceMeters < zone.startMeter || zoneDistanceMeters >= zone.endMeter) {
       continue;
     }
 
@@ -112,20 +149,14 @@ function zoneDriveContext(
     }
   }
 
-  return { activeZone, pedalZonesConfigured, firstPedalStartMeter };
+  return { activeZone, pedalZonesConfigured };
 }
 
 function zoneAllowsDrive(
   zone: TrackZone | undefined,
   pedalZonesConfigured: boolean,
-  distanceMeters: number,
-  firstPedalStartMeter: number | null,
 ) {
   if (pedalZonesConfigured) {
-    if (!zone && firstPedalStartMeter != null && distanceMeters < firstPedalStartMeter) {
-      return true;
-    }
-
     return zone?.type === 'pedal';
   }
 
@@ -244,13 +275,14 @@ export function stepRiders(
     const rawSpeedKph = metricIsUsable(sample, sample?.speedAt, nowMs, inputAllowedAt)
       ? cleanBikeSpeedKph(sample?.speedKph ?? 0) ?? 0
       : 0;
-    const { activeZone, pedalZonesConfigured, firstPedalStartMeter } = zoneDriveContext(
+    const { activeZone, pedalZonesConfigured } = zoneDriveContext(
       trackZones,
       rider.distance,
       actualBranches,
       selectedBranch,
+      splitDecisionPoints,
     );
-    const driveAllowed = zoneAllowsDrive(activeZone, pedalZonesConfigured, rider.distance, firstPedalStartMeter);
+    const driveAllowed = zoneAllowsDrive(activeZone, pedalZonesConfigured);
     const hasPedalingDrive = rawWatts >= minimumRaceDriveWatts
       || rawCadence >= minimumRaceDriveCadenceRpm
       || rawSpeedKph >= minimumRaceDriveSpeedKph;
@@ -339,12 +371,29 @@ export function stepRiders(
     const distance = crossedFinish || nextDistance >= raceLengthMeters
       ? raceLengthMeters
       : Math.min(raceLengthMeters, nextDistance);
+    const endZoneContext = zoneDriveContext(
+      trackZones,
+      distance,
+      actualBranches,
+      selectedBranch,
+      splitDecisionPoints,
+    );
+    const endDriveAllowed = zoneAllowsDrive(
+      endZoneContext.activeZone,
+      endZoneContext.pedalZonesConfigured,
+    );
+    const endDriveSource: RiderDriveSource = !endDriveAllowed
+      ? 'blocked'
+      : driveSource === 'blocked'
+        ? 'coast'
+        : driveSource;
+    const visibleCadence = endDriveAllowed ? cadence : 0;
     const thirtyFootTimeMs = rider.thirtyFootTimeMs == null
       && previousDistance < thirtyFootSplitMeters
       && distance >= thirtyFootSplitMeters
       ? interpolateSplitTimeMs(previousDistance, distance, thirtyFootSplitMeters, dt, elapsedMs)
       : rider.thirtyFootTimeMs;
-    const cadenceRps = cadence / 60;
+    const cadenceRps = visibleCadence / 60;
     const pedalPhase = cadenceRps > 0
       ? (rider.pedalPhase + cadenceRps * dt) % 1
       : 0;
@@ -393,7 +442,7 @@ export function stepRiders(
         phase = 'pedaling';
       }
     } else {
-      pitch = surfaceAngleDeg(distance) + (cadence > 0 ? Math.sin(pedalPhase * Math.PI * 2) * 1.1 : 0);
+      pitch = surfaceAngleDeg(distance) + (visibleCadence > 0 ? Math.sin(pedalPhase * Math.PI * 2) * 1.1 : 0);
     }
 
     const finishedAt = crossedFinish
@@ -413,12 +462,12 @@ export function stepRiders(
       pedalPhase,
       landingCompression,
       phase,
-      lastWatts: watts,
+      lastWatts: endDriveAllowed ? watts : 0,
       lastRawWatts: rawWatts,
       lastRawCadence: rawCadence,
       lastRawSpeedKph: rawSpeedKph,
-      driveAllowed,
-      driveSource,
+      driveAllowed: endDriveAllowed,
+      driveSource: endDriveSource,
       wattsAverage,
       thirtyFootTimeMs,
       finishedAt,

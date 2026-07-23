@@ -138,6 +138,129 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBe(20);
   });
 
+  it('blocks rider input before the first configured pedal zone', () => {
+    const zones: TrackZone[] = [{
+      id: 'pedal-1',
+      name: 'Pedal 1',
+      startMeter: 10,
+      endMeter: 20,
+      type: 'pedal',
+    }];
+    const rider = step(10_000, 10_000, zones, 5);
+
+    expect(rider.driveAllowed).toBe(false);
+    expect(rider.driveSource).toBe('blocked');
+    expect(rider.pedalPhase).toBe(0);
+    expect(rider.distance).toBe(5);
+  });
+
+  it('shares mapped zones before and after a split but blocks the unmapped branch interior', () => {
+    const splitDecisionPoints = [{
+      id: 'split-1',
+      index: 1,
+      splitMeter: 10,
+      mergeMeterByBranch: { a: 20, b: 25 },
+      branchLengthByBranch: { a: 10, b: 15 },
+    }];
+    const amateurZones: TrackZone[] = [
+      {
+        id: 'shared-before',
+        name: 'Shared before',
+        startMeter: 0,
+        endMeter: 8,
+        type: 'pedal',
+        branchSelections: { 'split-1': 'a' },
+      },
+      {
+        id: 'amateur-branch',
+        name: 'Amateur branch',
+        startMeter: 10,
+        endMeter: 20,
+        type: 'pedal',
+        branchSelections: { 'split-1': 'a' },
+      },
+      {
+        id: 'shared-after',
+        name: 'Shared after',
+        startMeter: 30,
+        endMeter: 40,
+        type: 'pedal',
+        branchSelections: { 'split-1': 'a' },
+      },
+    ];
+    const stepProRider = (distance: number, zones = amateurZones) => stepRiders(
+      [{
+        ...createInitialRiders([player], { 1: 'b' })[0],
+        distance,
+        actualBranches: { 'split-1': 'b' },
+      }],
+      [player],
+      new Map([[58701, sample(10_000)]]),
+      0.1,
+      9_000,
+      400,
+      { 1: 'b' },
+      splitDecisionPoints,
+      zones,
+      10_000,
+    )[0];
+
+    expect(stepProRider(5).driveAllowed).toBe(true);
+    expect(stepProRider(12)).toMatchObject({
+      driveAllowed: false,
+      driveSource: 'blocked',
+      pedalPhase: 0,
+    });
+    expect(stepProRider(35).driveAllowed).toBe(true);
+
+    const proZones: TrackZone[] = [
+      ...amateurZones,
+      {
+        id: 'pro-branch',
+        name: 'Pro branch',
+        startMeter: 10,
+        endMeter: 25,
+        type: 'pedal',
+        branchSelections: { 'split-1': 'b' },
+      },
+    ];
+    expect(stepProRider(12, proZones).driveAllowed).toBe(true);
+  });
+
+  it('locks the crank level on the same frame a rider exits a pedal zone', () => {
+    const zones: TrackZone[] = [{
+      id: 'pedal-1',
+      name: 'Pedal 1',
+      startMeter: 0,
+      endMeter: 10,
+      type: 'pedal',
+    }];
+    const rider = {
+      ...createInitialRiders([player])[0],
+      distance: 9.8,
+      velocity: 8,
+      pedalPhase: 0.73,
+    };
+    const result = stepRiders(
+      [rider],
+      [player],
+      new Map([[58701, sample(10_000)]]),
+      0.1,
+      9_000,
+      400,
+      {},
+      [],
+      zones,
+      10_000,
+    )[0];
+
+    expect(result.distance).toBeGreaterThanOrEqual(10);
+    expect(result.driveAllowed).toBe(false);
+    expect(result.driveSource).toBe('blocked');
+    expect(result.pedalPhase).toBe(0);
+    expect(result.lastWatts).toBe(0);
+  });
+
   it('holds the exact entry speed throughout a coasting section', () => {
     const zones: TrackZone[] = [{
       id: 'pedal-1',

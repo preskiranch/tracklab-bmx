@@ -3379,6 +3379,7 @@ export default function App() {
           riderVelocityMps: rider?.velocity ?? null,
           riderDriveSource: rider?.driveSource ?? null,
           riderDriveAllowed: rider?.driveAllowed ?? null,
+          riderPedalPhase: rider?.pedalPhase ?? null,
           riderRawWatts: rider?.lastRawWatts ?? null,
           riderRawCadence: rider?.lastRawCadence ?? null,
           riderRawSpeedKph: rider?.lastRawSpeedKph ?? null,

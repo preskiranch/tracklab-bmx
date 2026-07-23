@@ -1506,7 +1506,7 @@ test('completed race waits for every finishing-position call before returning to
     'rider-finish',
   ]);
   expect(finishSpeechPayloads.map((payload) => payload.line)).toEqual([
-    expect.stringMatching(/first|wins|takes it|gets there|brings it home/i),
+    expect.stringMatching(/first|wins|takes it|gets there|brings it home|claims the victory/i),
     expect.stringMatching(/second/i),
     expect.stringMatching(/third/i),
     expect.stringMatching(/fourth/i),
@@ -1686,6 +1686,46 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
       }).__tracklabLiveDebug;
       return debug?.players?.[0]?.riderDistanceMeters ?? 0;
     }), { timeout: 3_000 }).toBeGreaterThan(0.25);
+    await expect.poll(async () => page.evaluate(() => {
+      const rider = (window as typeof window & {
+        __tracklabLiveDebug?: {
+          players?: Array<{
+            riderDistanceMeters?: number | null;
+            riderDriveAllowed?: boolean | null;
+            riderDriveSource?: string | null;
+            riderPedalPhase?: number | null;
+          }>;
+        };
+      }).__tracklabLiveDebug?.players?.[0];
+      return rider?.riderDriveAllowed === false
+        ? {
+          distanceInCoastZone: (
+            (rider.riderDistanceMeters ?? 0) >= 30
+            && (rider.riderDistanceMeters ?? 0) < 60
+          ),
+          driveSource: rider.riderDriveSource,
+          pedalPhase: rider.riderPedalPhase,
+        }
+        : null;
+    }), { timeout: 10_000 }).toEqual({
+      distanceInCoastZone: true,
+      driveSource: 'blocked',
+      pedalPhase: 0,
+    });
+    await expect.poll(async () => page.evaluate(() => {
+      const rider = (window as typeof window & {
+        __tracklabLiveDebug?: {
+          players?: Array<{
+            riderDistanceMeters?: number | null;
+            riderDriveAllowed?: boolean | null;
+          }>;
+        };
+      }).__tracklabLiveDebug?.players?.[0];
+      return (
+        (rider?.riderDistanceMeters ?? 0) >= 60
+        && rider?.riderDriveAllowed === true
+      );
+    }), { timeout: 10_000 }).toBe(true);
     await expect(page.getByText(/False start/i)).toHaveCount(0);
   } finally {
     clearInterval(sampleTimer);
