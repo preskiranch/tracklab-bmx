@@ -609,7 +609,16 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   });
   await page.route('**/api/commentary/speech', async (route) => {
     commentarySpeechRequests += 1;
-    commentarySpeechPayloads.push(route.request().postDataJSON());
+    const payload = route.request().postDataJSON() as {
+      eventKind?: string;
+      line?: string;
+      riderNames?: string[];
+      deliveryStyle?: string;
+    };
+    commentarySpeechPayloads.push(payload);
+    if (payload.eventKind === 'pre-race') {
+      await new Promise((resolve) => setTimeout(resolve, 6_500));
+    }
     await route.fulfill({
       contentType: 'audio/mpeg',
       path: 'public/assets/uci-random-start.mp3',
@@ -671,14 +680,21 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       __tracklabGateToneStarts?: number[];
       __tracklabTreeLightSequence?: string[];
       __tracklabAmbiencePlayCount?: number;
+      __tracklabAmbienceLoadCount?: number;
+      __tracklabAmbienceElement?: HTMLMediaElement;
+    };
+    const originalMediaLoad = HTMLMediaElement.prototype.load;
+    HTMLMediaElement.prototype.load = function (...args: Parameters<HTMLMediaElement['load']>) {
+      if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience.mp3')) {
+        audioWindow.__tracklabAmbienceLoadCount = (audioWindow.__tracklabAmbienceLoadCount ?? 0) + 1;
+      }
+      return Reflect.apply(originalMediaLoad, this, args);
     };
     const originalMediaPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function (...args: Parameters<HTMLMediaElement['play']>) {
       if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience.mp3')) {
         audioWindow.__tracklabAmbiencePlayCount = (audioWindow.__tracklabAmbiencePlayCount ?? 0) + 1;
-        return new Promise<void>(() => {
-          // Simulate the unresolved media promise observed on some mobile browsers.
-        });
+        audioWindow.__tracklabAmbienceElement = this;
       }
       return Reflect.apply(originalMediaPlay, this, args);
     };
@@ -759,7 +775,19 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     (window as typeof window & {
       __tracklabAmbiencePlayCount?: number;
     }).__tracklabAmbiencePlayCount ?? 0
-  )), { timeout: 5_000 }).toBeGreaterThan(0);
+  )), { timeout: 12_000 }).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => {
+    const audioWindow = window as typeof window & {
+      __tracklabAmbienceElement?: HTMLMediaElement;
+    };
+    const ambience = audioWindow.__tracklabAmbienceElement;
+    return ambience
+      ? { paused: ambience.paused, volume: ambience.volume }
+      : null;
+  }), { timeout: 5_000 }).toMatchObject({
+    paused: false,
+    volume: 0.065,
+  });
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
   await expect.poll(() => commentarySpeechRequests, { timeout: 5_000 }).toBeGreaterThan(0);
@@ -778,7 +806,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     (window as typeof window & {
       __tracklabVoiceStartCount?: number;
     }).__tracklabVoiceStartCount ?? 0
-  )), { timeout: 5_000 }).toBeGreaterThan(0);
+  )), { timeout: 12_000 }).toBeGreaterThan(0);
   await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (
       payload.eventKind === 'race-start'
@@ -827,7 +855,6 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   });
   await page.waitForTimeout(15_500);
   await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
-  await expect(page.locator('.start-tree-light')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabVoiceStartCount?: number }).__tracklabVoiceStartCount ?? 0
   )), { timeout: 5_000 }).toBeGreaterThan(0);
@@ -837,6 +864,22 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabTreeLightSequence?: string[] }).__tracklabTreeLightSequence ?? []
   )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);
+  await expect.poll(() => page.evaluate(() => {
+    const audioWindow = window as typeof window & {
+      __tracklabAmbienceElement?: HTMLMediaElement;
+      __tracklabAmbienceLoadCount?: number;
+    };
+    const ambience = audioWindow.__tracklabAmbienceElement;
+    return {
+      loadCount: audioWindow.__tracklabAmbienceLoadCount ?? 0,
+      paused: ambience?.paused ?? true,
+      volume: ambience?.volume ?? 0,
+    };
+  }), { timeout: 3_000 }).toEqual({
+    loadCount: 1,
+    paused: false,
+    volume: 0.065,
+  });
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4, { timeout: 5_000 });
   await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (

@@ -296,7 +296,7 @@ function commentarySpeechTimeoutMs(eventKind: CommentarySpeechEventKind) {
     return 20_000;
   }
   if (eventKind === 'pre-race') {
-    return 5_500;
+    return 10_000;
   }
   if (eventKind === 'race-start') {
     return 15_000;

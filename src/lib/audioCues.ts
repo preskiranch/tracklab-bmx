@@ -182,8 +182,8 @@ export async function primeAudioCues() {
   }
 
   const ambience = getRaceAmbienceAudio();
-  ambience.load();
   if (!raceAmbiencePrimed && !raceAmbiencePrimePromise) {
+    ambience.load();
     ambience.muted = false;
     ambience.volume = 0.0001;
     raceAmbiencePrimePromise = ambience.play()
@@ -196,7 +196,7 @@ export async function primeAudioCues() {
         // A later race-start gesture can retry playback when priming is blocked.
       })
       .finally(() => {
-        ambience.volume = 0.14;
+        ambience.volume = 0.065;
         ambience.muted = false;
         raceAmbiencePrimePromise = null;
       });
@@ -214,7 +214,7 @@ export async function primeAudioCues() {
   }
 }
 
-export async function startBmxEventAmbience(volume = 0.14) {
+export async function startBmxEventAmbience(volume = 0.065) {
   const ambience = getRaceAmbienceAudio();
   const pendingPrime = raceAmbiencePrimePromise;
   if (pendingPrime) {
@@ -223,7 +223,7 @@ export async function startBmxEventAmbience(volume = 0.14) {
 
   ambience.loop = true;
   ambience.muted = false;
-  ambience.volume = Math.max(0, Math.min(0.3, volume));
+  ambience.volume = Math.max(0, Math.min(0.2, volume));
   try {
     await ambience.play();
     return true;
