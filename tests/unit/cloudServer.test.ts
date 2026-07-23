@@ -273,6 +273,56 @@ describe('cloud API trust boundaries', () => {
     });
   });
 
+  it('prepares a truthful local pre-race briefing when hosted AI is unavailable', async () => {
+    const response = await api('/api/commentary/pre-race', {
+      method: 'POST',
+      body: JSON.stringify({
+        track: {
+          id: 'north-bay-bmx',
+          name: 'North Bay BMX',
+          country: 'United States',
+          countryCode: 'US',
+          state: 'California',
+          region: 'North America',
+          city: 'Napa',
+          surface: 'dirt',
+          lengthMeters: 340,
+          source: 'USA BMX',
+          sourceUrl: 'https://www.usabmx.com/tracks/1946',
+          zoneCount: 4,
+          pedalZoneCount: 3,
+          pedalMeters: 180,
+          recoveryZoneCount: 1,
+          recoveryMeters: 40,
+          technicalZoneCount: 0,
+          technicalMeters: 0,
+          splitCount: 1,
+          hasProSet: true,
+          lapCount: 1,
+          riders: [
+            { playerId: 1, name: 'Maya Torres', colorName: 'lime' },
+            { playerId: 2, name: 'Jordan Lee', colorName: 'blue' },
+          ],
+        },
+        model: 'gpt-5.6-terra',
+        voicePreset: 'american-man',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      line: expect.stringMatching(/Maya Torres and Jordan Lee.*North Bay BMX/),
+      source: 'local',
+      supportedVariableCount: 73,
+      weather: { available: false },
+      sources: [{
+        title: 'USA BMX',
+        url: 'https://www.usabmx.com/tracks/1946',
+        kind: 'track',
+      }],
+    });
+  });
+
   it('refuses to turn telemetry figures into spoken commentary', async () => {
     const response = await api('/api/commentary/speech', {
       method: 'POST',

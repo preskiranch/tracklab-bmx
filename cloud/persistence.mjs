@@ -28,6 +28,9 @@ const memoryAuthUserIdByEmail = new Map();
 const memoryAuthSessionsByToken = new Map();
 const memoryBillingCheckoutsByState = new Map();
 const memoryMap3DLoadEvents = new Map();
+const memoryTrackBriefings = new Map();
+const memoryLocalRaceResults = new Map();
+let memoryRaceResultSequence = 0;
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -1256,6 +1259,84 @@ export async function saveRaceResults(room, client, raceState) {
   );
 }
 
+export async function saveLocalRaceResults({
+  sessionId,
+  profileKey,
+  trackId,
+  trackName,
+  summaries,
+}) {
+  const entries = (Array.isArray(summaries) ? summaries : []).slice(0, 4).map((summary) => ({
+    dedupeKey: `local:${sessionId}:${profileKey}:${summary.playerId}`,
+    roomId: 'local',
+    guestKey: profileKey,
+    riderName: summary.riderName,
+    playerId: summary.playerId,
+    trackId,
+    trackName,
+    rank: summary.rank,
+    finishTimeMs: summary.finishTimeMs,
+    distanceMeters: summary.distanceMeters ?? 0,
+    topSpeedKph: summary.topSpeedKph,
+    averageSpeedKph: summary.averageSpeedKph,
+    topCadence: summary.topCadence,
+    averageCadence: summary.averageCadence,
+    topWatts: summary.topWatts,
+    averageWatts: summary.averageWatts,
+    summary,
+    createdAt: new Date().toISOString(),
+    sequence: memoryRaceResultSequence += 1,
+  }));
+  if (!pool) {
+    entries.forEach((entry) => {
+      if (!memoryLocalRaceResults.has(entry.dedupeKey)) {
+        memoryLocalRaceResults.set(entry.dedupeKey, entry);
+      }
+    });
+    return { rowCount: entries.length };
+  }
+  if (entries.length === 0) {
+    return null;
+  }
+  const values = [];
+  const placeholders = [];
+  entries.forEach((entry, index) => {
+    const base = index * 17;
+    values.push(
+      entry.dedupeKey,
+      entry.roomId,
+      entry.guestKey,
+      entry.riderName,
+      entry.playerId,
+      entry.trackId,
+      entry.trackName,
+      entry.rank,
+      entry.finishTimeMs,
+      entry.distanceMeters,
+      entry.topSpeedKph,
+      entry.averageSpeedKph,
+      entry.topCadence,
+      entry.averageCadence,
+      entry.topWatts,
+      entry.averageWatts,
+      json(entry.summary),
+    );
+    placeholders.push(`(
+      $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8},
+      $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${base + 14}, $${base + 15}, $${base + 16}, $${base + 17}::jsonb
+    )`);
+  });
+  return query(
+    `INSERT INTO ${schema}.race_results (
+      dedupe_key, room_id, guest_key, rider_name, player_id, track_id, track_name, rank,
+      finish_time_ms, distance_meters, top_speed_kph, average_speed_kph, top_cadence, average_cadence,
+      top_watts, average_watts, summary
+    ) VALUES ${placeholders.join(', ')}
+    ON CONFLICT (dedupe_key) DO NOTHING`,
+    values,
+  );
+}
+
 export async function loadLeaderboards(trackId, limit = 10) {
   const safeLimit = Math.max(1, Math.min(50, Math.round(Number(limit) || 10)));
   const result = await query(
@@ -1308,6 +1389,154 @@ export async function loadLeaderboards(trackId, limit = 10) {
     speed: boards.speed.slice(0, safeLimit),
     watts: boards.watts.slice(0, safeLimit),
   };
+}
+
+export async function loadTrackBriefing(trackId) {
+  if (!pool) {
+    return cloneJson(memoryTrackBriefings.get(trackId), null);
+  }
+  const result = await query(
+    `SELECT track_id, track_name, research, researched_at
+     FROM ${schema}.track_briefings
+     WHERE track_id = $1
+     LIMIT 1`,
+    [trackId],
+  );
+  const row = result?.rows?.[0];
+  if (!row) {
+    return null;
+  }
+  return {
+    ...fromJson(row.research, { facts: [], sources: [] }),
+    trackId: row.track_id,
+    trackName: row.track_name,
+    researchedAt: new Date(row.researched_at).toISOString(),
+  };
+}
+
+export async function saveTrackBriefing(trackId, trackName, research) {
+  const saved = {
+    ...cloneJson(research, { facts: [], sources: [] }),
+    trackId,
+    trackName,
+    researchedAt: research?.researchedAt || new Date().toISOString(),
+  };
+  if (!pool) {
+    memoryTrackBriefings.set(trackId, saved);
+    return cloneJson(saved, null);
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.track_briefings (
+       track_id, track_name, research, researched_at, updated_at
+     )
+     VALUES ($1, $2, $3::jsonb, $4, now())
+     ON CONFLICT (track_id) DO UPDATE SET
+       track_name = EXCLUDED.track_name,
+       research = EXCLUDED.research,
+       researched_at = EXCLUDED.researched_at,
+       updated_at = now()
+     RETURNING track_id, track_name, research, researched_at`,
+    [trackId, trackName, json(research), saved.researchedAt],
+  );
+  const row = result?.rows?.[0];
+  return row ? {
+    ...fromJson(row.research, { facts: [], sources: [] }),
+    trackId: row.track_id,
+    trackName: row.track_name,
+    researchedAt: new Date(row.researched_at).toISOString(),
+  } : saved;
+}
+
+export async function loadPreRaceRiderStats(trackId, profileKey, riderNames) {
+  const names = [...new Set((Array.isArray(riderNames) ? riderNames : [])
+    .map((name) => String(name || '').trim())
+    .filter(Boolean))]
+    .slice(0, 4);
+  if (!profileKey || names.length === 0) {
+    return [];
+  }
+  if (!pool) {
+    const nameKeys = new Set(names.map((name) => name.toLocaleLowerCase()));
+    const matching = [...memoryLocalRaceResults.values()]
+      .filter((entry) => (
+        entry.trackId === trackId
+        && entry.guestKey === profileKey
+        && nameKeys.has(entry.riderName.toLocaleLowerCase())
+      ))
+      .sort((left, right) => (
+        (right.sequence ?? 0) - (left.sequence ?? 0)
+        || Date.parse(right.createdAt) - Date.parse(left.createdAt)
+      ));
+    return names.flatMap((name) => {
+      const riderEntries = matching.filter((entry) => (
+        entry.riderName.toLocaleLowerCase() === name.toLocaleLowerCase()
+      ));
+      if (riderEntries.length === 0) {
+        return [];
+      }
+      let currentWinStreak = 0;
+      for (const entry of riderEntries) {
+        if (entry.rank !== 1) {
+          break;
+        }
+        currentWinStreak += 1;
+      }
+      const finishedTimes = riderEntries
+        .map((entry) => Number(entry.finishTimeMs))
+        .filter((value) => Number.isFinite(value) && value > 0);
+      return [{
+        name: riderEntries[0].riderName,
+        starts: riderEntries.length,
+        wins: riderEntries.filter((entry) => entry.rank === 1).length,
+        currentWinStreak,
+        ...(finishedTimes.length > 0 ? { bestFinishTimeMs: Math.min(...finishedTimes) } : {}),
+      }];
+    });
+  }
+  const result = await query(
+    `WITH matching AS (
+       SELECT rider_name, rank, finish_time_ms, created_at,
+         ROW_NUMBER() OVER (
+           PARTITION BY lower(rider_name)
+           ORDER BY created_at DESC
+         ) AS recent_order
+       FROM ${schema}.race_results
+       WHERE track_id = $1
+         AND guest_key = $2
+         AND lower(rider_name) = ANY($3::text[])
+     ), aggregates AS (
+       SELECT
+         lower(rider_name) AS rider_key,
+         max(rider_name) AS rider_name,
+         count(*)::integer AS starts,
+         count(*) FILTER (WHERE rank = 1)::integer AS wins,
+         min(finish_time_ms) FILTER (WHERE finish_time_ms IS NOT NULL)::integer AS best_finish_time_ms
+       FROM matching
+       GROUP BY lower(rider_name)
+     ), streaks AS (
+       SELECT lower(rider_name) AS rider_key,
+         count(*) FILTER (WHERE rank = 1)::integer AS current_win_streak
+       FROM matching
+       WHERE recent_order <= (
+         SELECT COALESCE(min(recent_order), 1000000)
+         FROM matching AS first_loss
+         WHERE lower(first_loss.rider_name) = lower(matching.rider_name)
+           AND first_loss.rank <> 1
+       ) - 1
+       GROUP BY lower(rider_name)
+     )
+     SELECT aggregates.*, COALESCE(streaks.current_win_streak, 0) AS current_win_streak
+     FROM aggregates
+     LEFT JOIN streaks USING (rider_key)`,
+    [trackId, profileKey, names.map((name) => name.toLocaleLowerCase())],
+  );
+  return (result?.rows ?? []).map((row) => ({
+    name: row.rider_name,
+    starts: Number(row.starts) || 0,
+    wins: Number(row.wins) || 0,
+    currentWinStreak: Number(row.current_win_streak) || 0,
+    ...(row.best_finish_time_ms != null ? { bestFinishTimeMs: Number(row.best_finish_time_ms) } : {}),
+  }));
 }
 
 export async function pruneExpiredData(now = Date.now()) {

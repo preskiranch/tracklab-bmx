@@ -3326,6 +3326,43 @@ input:focus {
   box-shadow: 0 0 0 3px rgba(35, 136, 232, 0.14);
 }
 
+.announcer-briefing-status {
+  display: grid;
+  gap: 5px;
+  padding: 8px 9px;
+  border: 1px solid #cfe6fa;
+  border-radius: 7px;
+  background: #f2f8fe;
+  color: #284b69;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.announcer-briefing-status strong {
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.announcer-briefing-status summary {
+  cursor: pointer;
+  color: #1d6fb8;
+  font-weight: 850;
+}
+
+.announcer-briefing-status details > div {
+  display: grid;
+  gap: 3px;
+  padding-top: 5px;
+}
+
+.announcer-briefing-status a {
+  overflow: hidden;
+  color: #1d6fb8;
+  text-decoration: underline;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .announcer-select-grid {
   display: grid;
   grid-template-columns: 1fr;

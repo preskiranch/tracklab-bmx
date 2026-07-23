@@ -15,6 +15,7 @@ import {
 import {
   commentaryLineMentionsRider,
   commentaryLineUsesDemeaningSarcasm,
+  commentaryLineUsesForbiddenPreRaceTelemetry,
   commentaryLineUsesForbiddenTelemetry,
 } from './commentarySafety.mjs';
 import {
@@ -26,6 +27,16 @@ import {
   commentaryLineWordCount,
   selectNovelCommentaryLine,
 } from './commentaryVariation.mjs';
+import {
+  generatePreRaceLine,
+  localPreRaceLine,
+  preRaceSources,
+  researchTrackFacts,
+  sanitizePreRaceTrackContext,
+  supportedPreRaceVariables,
+  trackResearchIsFresh,
+} from './preRaceBriefing.mjs';
+import { loadTrackWeather } from './weather.mjs';
 import { instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 import {
   createRacerSubscriptionCheckout,
@@ -80,6 +91,7 @@ const commentaryVoicePresets = new Set([
   'british-man',
 ]);
 const commentaryEventKinds = new Set([
+  'pre-race',
   'race-start',
   'positions-established',
   'lead-change',
@@ -523,6 +535,30 @@ function sanitizeCommentaryRider(value, index) {
   };
 }
 
+function sanitizeLocalRaceResult(value, index) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const playerId = Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(value.playerId, index + 1))));
+  const rank = Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(value.rank, index + 1))));
+  const finishTimeMs = value.finishTimeMs == null
+    ? null
+    : Math.max(1, Math.min(3_600_000, Math.round(finiteNumber(value.finishTimeMs, 0))));
+  return {
+    playerId,
+    riderName: sanitizeText(value.riderName, `Rider ${playerId}`, 64),
+    rank,
+    finishTimeMs,
+    distanceMeters: Math.max(0, finiteNumber(value.distanceMeters, 0)),
+    topSpeedKph: Math.max(0, finiteNumber(value.topSpeedKph, 0)),
+    averageSpeedKph: Math.max(0, finiteNumber(value.averageSpeedKph, 0)),
+    topCadence: Math.max(0, finiteNumber(value.topCadence, 0)),
+    averageCadence: Math.max(0, finiteNumber(value.averageCadence, 0)),
+    topWatts: Math.max(0, finiteNumber(value.topWatts, 0)),
+    averageWatts: Math.max(0, finiteNumber(value.averageWatts, 0)),
+  };
+}
+
 function sanitizeCommentaryEvent(value) {
   if (!value || typeof value !== 'object' || !commentaryEventKinds.has(value.kind)) {
     return null;
@@ -573,6 +609,9 @@ function commentarySpeechDirection(eventKind, deliveryStyle) {
   const wryDirection = deliveryStyle === 'wry'
     ? 'Let the brief dry aside land with a small knowing shift in tone, then return immediately to energetic race calling. Keep it playful, never cruel or cynical.'
     : '';
+  if (eventKind === 'pre-race') {
+    return 'Deliver a polished pre-race television desk report with lively anticipation, confident authority, and enough breathing room for every rider name. Build energy toward the final gate-ready phrase without sounding rushed.';
+  }
   if (eventKind === 'race-start') {
     return `Hit the gate drop with an immediate burst of excitement, then carry bright momentum into the opening charge. ${wryDirection}`;
   }
@@ -598,6 +637,9 @@ function commentarySpeechDirection(eventKind, deliveryStyle) {
 }
 
 function commentarySpeechSpeed(eventKind) {
+  if (eventKind === 'pre-race') {
+    return 0.94;
+  }
   if (eventKind === 'lead-change' || eventKind === 'pro-set' || eventKind === 'final-push') {
     return 0.99;
   }
@@ -631,7 +673,9 @@ function commentaryVoiceDefinition(preset, eventKind, deliveryStyle) {
     voice,
     instructions: [
       `Perform as ${persona}.`,
-      'This is passionate, high-energy live BMX play-by-play, not a commercial or dramatic voice-over. Sound fully engaged in a real head-to-head race.',
+      eventKind === 'pre-race'
+        ? 'This is a concise, energetic pre-race BMX television briefing, not a commercial or dramatic voice-over. Sound informed, anticipatory, and fully present at the track.'
+        : 'This is passionate, high-energy live BMX play-by-play, not a commercial or dramatic voice-over. Sound fully engaged in a real head-to-head race.',
       'Keep a natural, clearly articulated pace. Create excitement through dynamic emphasis, rising and falling intonation, and punch on rider names and action verbs—not by racing through the words.',
       'Use quick natural breaths and brief punctuation pauses. Vary the rhythm and emphasis from call to call so the delivery never settles into a repeated robotic pattern.',
       'Pronounce every rider name clearly as a person’s name, exactly as written in the call. Do not skip, abbreviate, or spell out a name.',
@@ -2848,6 +2892,112 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/commentary/pre-race') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    if (!enforceRateLimit(request, response, commentaryRateLimiter, 12, 'commentary-pre-race')) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, 64_000);
+    const track = sanitizePreRaceTrackContext(payload?.track);
+    if (!track) {
+      writeJson(response, 400, { error: 'A track and at least one rider are required.' });
+      return;
+    }
+    const model = sanitizeCommentaryModel(payload?.model);
+    const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
+    const recentLines = Array.isArray(payload?.recentLines)
+      ? payload.recentLines
+        .slice(-24)
+        .map((line) => sanitizeText(line, '', 220))
+        .filter(Boolean)
+      : [];
+    const key = openAiApiKey();
+    const profileKey = authProfileKey(session.user);
+    const [weather, riderStats, cachedResearch] = await Promise.all([
+      loadTrackWeather(track.latitude, track.longitude),
+      persistence.loadPreRaceRiderStats(
+        track.id,
+        profileKey,
+        track.riders.map((rider) => rider.name),
+      ),
+      persistence.loadTrackBriefing(track.id),
+    ]);
+    let research = cachedResearch ?? {
+      facts: [],
+      sources: [],
+      researchedAt: new Date(0).toISOString(),
+    };
+    if (key && !trackResearchIsFresh(research)) {
+      try {
+        research = await researchTrackFacts({
+          track,
+          apiKey: key,
+          model: 'gpt-5.6-luna',
+        });
+        await persistence.saveTrackBriefing(track.id, track.name, research);
+      } catch (error) {
+        cloudTelemetry.warn('commentary.pre_race_research_failed', {
+          trackId: track.id,
+          error,
+        });
+      }
+    }
+
+    let report;
+    try {
+      report = await generatePreRaceLine({
+        track,
+        weather,
+        research,
+        riderStats,
+        recentLines,
+        apiKey: key,
+        model,
+        voicePreset,
+      });
+    } catch (error) {
+      cloudTelemetry.warn('commentary.pre_race_generation_failed', {
+        trackId: track.id,
+        model,
+        error,
+      });
+      report = await generatePreRaceLine({
+        track,
+        weather,
+        research,
+        riderStats,
+        recentLines,
+        apiKey: '',
+        model,
+        voicePreset,
+      });
+    }
+    const line = sanitizeText(report.line, localPreRaceLine(track, weather), 220);
+    const sources = preRaceSources(track, weather, research);
+    cloudTelemetry.increment('tracklab_commentary_pre_race_total', {
+      source: report.source,
+      weather: weather.available ? 'available' : 'unavailable',
+    });
+    writeJson(response, 200, {
+      line,
+      source: report.source,
+      generatedAt: new Date().toISOString(),
+      variableCount: report.variableCount,
+      supportedVariableCount: supportedPreRaceVariables.length,
+      sources,
+      weather,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/commentary/line') {
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' });
@@ -2926,7 +3076,9 @@ async function serveStatic(request, response) {
         .filter(Boolean)
       : [];
     if (
-      commentaryLineUsesForbiddenTelemetry(line, riderNames)
+      (eventKind === 'pre-race'
+        ? commentaryLineUsesForbiddenPreRaceTelemetry(line, riderNames)
+        : commentaryLineUsesForbiddenTelemetry(line, riderNames))
       || commentaryLineUsesDemeaningSarcasm(line)
       || commentaryLineViolatesRaceStyle(line, {
         kind: eventKind,
@@ -3429,6 +3581,48 @@ async function serveStatic(request, response) {
     }
 
     writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/race-results') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    if (membershipForAccount(session.user).tier !== 'racer') {
+      writeJson(response, 403, { error: 'Racer access is required to save race history.' });
+      return;
+    }
+    const payload = await readJsonBody(request, 64_000);
+    const sessionId = sanitizeText(payload?.sessionId, '', 160);
+    const trackId = sanitizeText(payload?.trackId, '', 140);
+    const trackName = sanitizeText(payload?.trackName, '', 140);
+    const summaries = Array.isArray(payload?.summaries)
+      ? payload.summaries
+        .slice(0, maxRaceBikeCount)
+        .map(sanitizeLocalRaceResult)
+        .filter(Boolean)
+      : [];
+    if (!sessionId || !trackId || !trackName || summaries.length === 0) {
+      writeJson(response, 400, { error: 'A session, track, and finished race summaries are required.' });
+      return;
+    }
+    await persistence.saveLocalRaceResults({
+      sessionId,
+      profileKey: authProfileKey(session.user),
+      trackId,
+      trackName,
+      summaries,
+    });
+    writeJson(response, 201, {
+      ok: true,
+      saved: summaries.length,
+      persistence: persistence.persistenceEnabled(),
+    });
     return;
   }
 

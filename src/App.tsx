@@ -2529,11 +2529,14 @@ export default function App() {
     preferences: raceCommentaryPreferences,
     raceState,
     startGateActive: startGateStatus.active,
-    trackName: effectiveTrack.name,
+    startGatePhase: startGateStatus.phase,
+    track: effectiveTrack,
     raceLengthMeters: effectiveRouteLengthMeters,
     players: racePlayers,
     riders,
     zones: raceZones,
+    ghostLaps: availableGhostLaps,
+    lapCount: isLoopTrack ? lapCount : 1,
     reactionTimesByPlayer,
     onRecentLinesChange: handleRaceCommentaryRecentLinesChange,
   });
@@ -3706,6 +3709,25 @@ export default function App() {
 
     ghostSavedSessionIdsRef.current.add(sessionId);
     setGhostLaps((current) => mergeGhostLaps(current, nextGhosts));
+    void fetch('/api/race-results', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sessionId,
+        trackId: effectiveTrack.id,
+        trackName: effectiveTrack.name,
+        summaries: raceCapture.summary,
+      }),
+    }).then((response) => {
+      if (!response.ok) {
+        throw new Error(`Race history service returned ${response.status}`);
+      }
+    }).catch((error: Error) => {
+      console.warn(`Could not save TrackLab race history: ${error.message}`);
+    });
     nextGhosts.forEach((ghost) => {
       void syncGhostLapToCloud(ghost, ownerKey).catch((error: Error) => {
         console.warn(`Could not sync TrackLab ghost: ${error.message}`);
@@ -6809,6 +6831,7 @@ export default function App() {
                   commentaryPreferences={raceCommentaryPreferences}
                   commentaryServiceMode={raceCommentary.serviceMode}
                   commentaryPlaybackStatus={raceCommentary.playbackStatus}
+                  commentaryPreRaceReport={raceCommentary.preRaceReport}
                   onSessionModeChange={setSessionMode}
                   onIntervalModeChange={setIntervalMode}
                   onManualZoneToggle={toggleManualZone}

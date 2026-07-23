@@ -583,6 +583,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   }> = [];
   const commentaryLineRiderNames: string[][] = [];
   const commentaryRaceLineCounts: number[] = [];
+  const preRaceRiderNames: string[][] = [];
   const authUser = {
     id: 'quick-start-racer',
     profileKey: 'user:quick-start-racer',
@@ -614,6 +615,34 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     await route.fulfill({
       contentType: 'audio/mpeg',
       path: 'public/assets/uci-random-start.mp3',
+    });
+  });
+  await page.route('**/api/commentary/pre-race', async (route) => {
+    const payload = route.request().postDataJSON() as {
+      track?: {
+        name?: string;
+        riders?: Array<{ name?: string }>;
+      };
+    };
+    const names = payload.track?.riders?.flatMap((rider) => (
+      typeof rider.name === 'string' ? [rider.name] : []
+    )) ?? [];
+    preRaceRiderNames.push(names);
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        line: `${names.join(', ')} are set for ${payload.track?.name ?? 'the track'} under clear skies. The gate is next.`,
+        source: 'ai',
+        generatedAt: new Date().toISOString(),
+        variableCount: 67,
+        supportedVariableCount: 73,
+        weather: { available: true, provider: 'MET Norway', summary: 'clear' },
+        sources: [{
+          title: 'Data from MET Norway',
+          url: 'https://www.met.no/en/free-meteorological-data',
+          kind: 'weather',
+        }],
+      }),
     });
   });
   await page.route('**/api/commentary/line', async (route) => {
@@ -722,6 +751,17 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
   await expect.poll(() => commentarySpeechRequests, { timeout: 5_000 }).toBeGreaterThan(0);
+  await expect.poll(
+    () => preRaceRiderNames.some((names) => customDemoNames.every((name) => names.includes(name))),
+    { timeout: 5_000 },
+  ).toBe(true);
+  await expect.poll(
+    () => commentarySpeechPayloads.some((payload) => (
+      payload.eventKind === 'pre-race'
+      && customDemoNames.every((name) => payload.riderNames?.includes(name))
+    )),
+    { timeout: 5_000 },
+  ).toBe(true);
   await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (
       payload.eventKind === 'race-start'
@@ -917,6 +957,26 @@ test.describe('mobile commentary playback', () => {
       await route.fulfill({
         contentType: 'audio/mpeg',
         path: 'public/assets/uci-random-start.mp3',
+      });
+    });
+    await page.route('**/api/commentary/pre-race', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        track?: { name?: string; riders?: Array<{ name?: string }> };
+      };
+      const names = payload.track?.riders?.flatMap((rider) => (
+        typeof rider.name === 'string' ? [rider.name] : []
+      )) ?? [];
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          line: `${names.join(', ')} are ready at ${payload.track?.name ?? 'the track'}. The gate is next.`,
+          source: 'ai',
+          generatedAt: new Date().toISOString(),
+          variableCount: 58,
+          supportedVariableCount: 73,
+          sources: [],
+          weather: { available: false },
+        }),
       });
     });
     await page.route('**/api/commentary/line', async (route) => {

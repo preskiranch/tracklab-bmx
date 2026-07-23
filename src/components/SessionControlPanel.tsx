@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
 import type { PlacePredictionOption } from '../lib/googleMaps';
+import type { PreRaceReport } from '../lib/preRaceReport';
 import { distanceBetweenTrackPoints, routeLengthMeters } from '../lib/trackMapping';
 import type {
   DistanceUnit,
@@ -147,6 +148,7 @@ type SessionControlPanelProps = {
   commentaryPreferences: RaceCommentaryPreferences;
   commentaryServiceMode: 'checking' | 'ai' | 'browser';
   commentaryPlaybackStatus: 'idle' | 'thinking' | 'speaking';
+  commentaryPreRaceReport: PreRaceReport | null;
   onSessionModeChange: (mode: SessionMode) => void;
   onIntervalModeChange: (mode: IntervalMode) => void;
   onManualZoneToggle: (zoneId: string) => void;
@@ -290,6 +292,7 @@ export function SessionControlPanel({
   commentaryPreferences,
   commentaryServiceMode,
   commentaryPlaybackStatus,
+  commentaryPreRaceReport,
   onSessionModeChange,
   onIntervalModeChange,
   onManualZoneToggle,
@@ -1096,6 +1099,33 @@ export function SessionControlPanel({
               : 'Browser voice fallback active'}
         </div>
 
+        {commentaryPreferences.enabled && (
+          <div className="announcer-briefing-status">
+            <strong>
+              {commentaryPreRaceReport
+                ? `Pre-race report ready · ${commentaryPreRaceReport.supportedVariableCount} variables · ${commentaryPreRaceReport.variableCount} current facts`
+                : 'Preparing track and weather briefing…'}
+            </strong>
+            {commentaryPreRaceReport && commentaryPreRaceReport.sources.length > 0 && (
+              <details>
+                <summary>Track, research, and weather sources</summary>
+                <div>
+                  {commentaryPreRaceReport.sources.map((source) => (
+                    <a
+                      href={source.url}
+                      key={`${source.kind}:${source.url}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {source.title}
+                    </a>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+
         <div className="announcer-select-grid">
           <label>
             <span>Commentary brain</span>
@@ -1174,7 +1204,8 @@ export function SessionControlPanel({
           {commentaryPlaybackStatus === 'speaking' ? 'Announcing…' : 'Preview selected voice'}
         </button>
         <p className="announcer-disclosure">
-          Voice and wording are AI-generated. Race facts always come from TrackLab telemetry.
+          Voice and wording are AI-generated. The 15-second report uses cited track research,
+          current weather, and saved TrackLab race history; missing facts are omitted.
           Calls describe race action—not watts, RPM, or speed figures. Broadcast research
           contributes aggregate terminology and delivery patterns, never voice cloning.
         </p>

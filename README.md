@@ -427,6 +427,13 @@ VITE_TRACKLAB_MULTIPLAYER_URL
 wss://tracklab-bmx.onrender.com/multiplayer
 ```
 
+When commentary is enabled, TrackLab prepares a source-backed pre-race report before
+the 15-second staging countdown. Catalog facts, cited web research, saved TrackLab
+records, and current conditions are combined without inventing missing history.
+Track research is cached in PostgreSQL for 30 days. Current weather uses MET Norway's
+no-key Locationforecast service and is displayed with the required attribution; no
+additional weather API key is needed.
+
 Render can host the web platform, show Google imagery when `VITE_GOOGLE_MAPS_API_KEY` is configured, and coordinate online rooms/challenges. Render cannot directly read a USB ANT+ dongle on your local PC. For real bikes, the PC still needs to run the local bridge, and the hosted app needs a reachable WebSocket bridge URL. Local development defaults to:
 
 ```text

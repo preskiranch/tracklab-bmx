@@ -303,6 +303,21 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         `ALTER TABLE ${schema}.user_data ADD COLUMN IF NOT EXISTS race_view_preferences JSONB`,
       ],
     },
+    {
+      version: 6,
+      name: 'cache verified track briefing research',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.track_briefings (
+          track_id TEXT PRIMARY KEY,
+          track_name TEXT NOT NULL,
+          research JSONB NOT NULL DEFAULT '{"facts":[],"sources":[]}'::jsonb,
+          researched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_track_briefings_researched
+          ON ${schema}.track_briefings (researched_at DESC)`,
+      ],
+    },
   ];
 }
 

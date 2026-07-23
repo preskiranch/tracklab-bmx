@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createRaceCommentaryTracker,
   detectRaceCommentaryEvents,
@@ -19,20 +19,28 @@ import {
   primeAudioCues,
   uciRandomStartVoiceUrl,
 } from '../lib/audioCues';
+import {
+  buildPreRaceTrackContext,
+  localPreRaceReportLine,
+  preRaceVariableCount,
+  type PreRaceReport,
+} from '../lib/preRaceReport';
 import type {
+  GhostLap,
   PlayerSlot,
   RaceCommentaryPreferences,
   RaceCommentaryVoicePreset,
   RaceState,
   ReactionTimesByPlayer,
   RiderState,
+  TrackRecord,
   TrackZone,
 } from '../types';
 
 type CommentaryServiceMode = 'checking' | 'ai' | 'browser';
 type CommentaryPlaybackStatus = 'idle' | 'thinking' | 'speaking';
 type CommentaryPlaybackPhase = RaceCommentaryPlaybackPhase;
-type CommentarySpeechEventKind = RaceCommentaryEventKind | 'preview';
+type CommentarySpeechEventKind = RaceCommentaryEventKind | 'pre-race' | 'preview';
 type CommentaryDeliveryStyle = 'straight' | 'wry';
 type ActivePlaybackCancelRef = React.MutableRefObject<(() => void) | null>;
 
@@ -42,15 +50,24 @@ type PreparedStartSpeech = {
   audioBlob: Blob;
 };
 
+type PreparedPreRaceSpeech = {
+  key: string;
+  report: PreRaceReport;
+  audioBlob?: Blob;
+};
+
 type UseRaceCommentaryOptions = {
   preferences: RaceCommentaryPreferences;
   raceState: RaceState;
   startGateActive: boolean;
-  trackName: string;
+  startGatePhase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
+  track: TrackRecord;
   raceLengthMeters: number;
   players: PlayerSlot[];
   riders: RiderState[];
   zones: TrackZone[];
+  ghostLaps: GhostLap[];
+  lapCount: number;
   reactionTimesByPlayer: ReactionTimesByPlayer;
   onRecentLinesChange: (lines: string[]) => void;
 };
@@ -122,8 +139,31 @@ function riderNameList(players: PlayerSlot[]) {
 function preparedStartSpeechKey(
   line: string,
   preferences: RaceCommentaryPreferences,
+  players: PlayerSlot[],
 ) {
-  return `${preferences.voicePreset}:${line}`;
+  return `${preferences.voicePreset}:${players.map((player) => `${player.id}:${player.name}`).join('|')}:${line}`;
+}
+
+function preparedPreRaceSpeechKey(
+  trackId: string,
+  players: PlayerSlot[],
+  ghostLaps: GhostLap[],
+  lapCount: number,
+  preferences: RaceCommentaryPreferences,
+) {
+  const riderKey = players.map((player) => `${player.id}:${player.name}`).join('|');
+  const ghostKey = ghostLaps
+    .map((ghost) => `${ghost.id}:${ghost.finishTimeMs}:${ghost.savedAt}`)
+    .sort()
+    .join('|');
+  return [
+    trackId,
+    lapCount,
+    riderKey,
+    ghostKey,
+    preferences.model,
+    preferences.voicePreset,
+  ].join('::');
 }
 
 function speakWithBrowser(
@@ -465,11 +505,14 @@ export function useRaceCommentary({
   preferences,
   raceState,
   startGateActive,
-  trackName,
+  startGatePhase,
+  track,
   raceLengthMeters,
   players,
   riders,
   zones,
+  ghostLaps,
+  lapCount,
   reactionTimesByPlayer,
   onRecentLinesChange,
 }: UseRaceCommentaryOptions) {
@@ -488,15 +531,32 @@ export function useRaceCommentary({
   const activeBufferSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const activePlaybackCancelRef = useRef<(() => void) | null>(null);
   const activeRequestAbortRef = useRef<AbortController | null>(null);
+  const preRacePlaybackAbortRef = useRef<AbortController | null>(null);
   const preparedStartSpeechRef = useRef<PreparedStartSpeech | null>(null);
+  const preparedPreRaceSpeechRef = useRef<PreparedPreRaceSpeech | null>(null);
+  const playedPreRaceKeyRef = useRef('');
   const startPrefetchRequestRef = useRef(0);
+  const preRacePrefetchRequestRef = useRef(0);
+  const [preRaceReport, setPreRaceReport] = useState<PreRaceReport | null>(null);
 
   preferencesRef.current = preferences;
   recentLinesChangeRef.current = onRecentLinesChange;
+  const trackName = track.name;
   const startLine = immediateRaceStartLine(
     trackName,
     players,
     preferences.adaptiveMemory ? preferences.recentLines : [],
+  );
+  const preRaceContext = useMemo(
+    () => buildPreRaceTrackContext(track, players, ghostLaps, lapCount),
+    [ghostLaps, lapCount, players, track],
+  );
+  const preRaceKey = preparedPreRaceSpeechKey(
+    track.id,
+    players,
+    ghostLaps,
+    lapCount,
+    preferences,
   );
 
   const setPlaybackPhase = useCallback((phase: CommentaryPlaybackPhase) => {
@@ -516,6 +576,8 @@ export function useRaceCommentary({
     activePlaybackCancelRef.current = null;
     activeRequestAbortRef.current?.abort();
     activeRequestAbortRef.current = null;
+    preRacePlaybackAbortRef.current?.abort();
+    preRacePlaybackAbortRef.current = null;
     activeAudioRef.current?.pause();
     activeBufferSourceRef.current = null;
     if ('speechSynthesis' in window) {
@@ -549,21 +611,15 @@ export function useRaceCommentary({
   }, []);
 
   useEffect(() => {
-    if (raceState === 'ready' && !startGateActive) {
-      startPrefetchRequestRef.current += 1;
-      disposePreparedStartSpeech();
-      return;
-    }
     if (
       raceState !== 'ready'
-      || !startGateActive
       || !preferences.enabled
       || serviceMode !== 'ai'
     ) {
       return;
     }
 
-    const key = preparedStartSpeechKey(startLine, preferences);
+    const key = preparedStartSpeechKey(startLine, preferences, players);
     if (preparedStartSpeechRef.current?.key === key) {
       return;
     }
@@ -589,11 +645,134 @@ export function useRaceCommentary({
       });
   }, [
     disposePreparedStartSpeech,
+    players,
     preferences,
     raceState,
     serviceMode,
-    startGateActive,
     startLine,
+  ]);
+
+  useEffect(() => {
+    if (raceState !== 'ready' || !preferences.enabled || players.length === 0) {
+      preRacePrefetchRequestRef.current += 1;
+      preparedPreRaceSpeechRef.current = null;
+      setPreRaceReport(null);
+      return;
+    }
+    if (preparedPreRaceSpeechRef.current?.key === preRaceKey) {
+      setPreRaceReport(preparedPreRaceSpeechRef.current.report);
+      return;
+    }
+
+    const requestId = preRacePrefetchRequestRef.current + 1;
+    preRacePrefetchRequestRef.current = requestId;
+    const controller = new AbortController();
+    const localReport: PreRaceReport = {
+      line: localPreRaceReportLine(preRaceContext),
+      source: 'local',
+      generatedAt: new Date().toISOString(),
+      variableCount: preRaceVariableCount(preRaceContext),
+      supportedVariableCount: 73,
+      sources: [
+        ...(preRaceContext.sourceUrl ? [{
+          title: preRaceContext.source || 'Track catalog source',
+          url: preRaceContext.sourceUrl,
+          kind: 'track' as const,
+        }] : []),
+        ...(preRaceContext.websiteUrl ? [{
+          title: 'Official track website',
+          url: preRaceContext.websiteUrl,
+          kind: 'track' as const,
+        }] : []),
+      ],
+      weather: { available: false },
+    };
+
+    void fetchWithTimeout('/api/commentary/pre-race', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        track: preRaceContext,
+        model: preferences.model,
+        voicePreset: preferences.voicePreset,
+        recentLines: preferences.adaptiveMemory ? preferences.recentLines : [],
+      }),
+    }, 20_000)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Pre-race briefing returned ${response.status}`);
+        }
+        const payload = await response.json() as Partial<PreRaceReport>;
+        const report: PreRaceReport = {
+          line: typeof payload.line === 'string' && payload.line.trim()
+            ? payload.line.trim()
+            : localReport.line,
+          source: payload.source === 'ai' ? 'ai' : 'local',
+          generatedAt: typeof payload.generatedAt === 'string'
+            ? payload.generatedAt
+            : new Date().toISOString(),
+          variableCount: Number.isFinite(Number(payload.variableCount))
+            ? Number(payload.variableCount)
+            : localReport.variableCount,
+          supportedVariableCount: Number.isFinite(Number(payload.supportedVariableCount))
+            ? Number(payload.supportedVariableCount)
+            : localReport.supportedVariableCount,
+          sources: Array.isArray(payload.sources)
+            ? payload.sources
+              .filter((source) => source?.title && source?.url)
+              .slice(0, 12) as PreRaceReport['sources']
+            : localReport.sources,
+          weather: payload.weather?.available
+            ? payload.weather
+            : { available: false },
+        };
+        if (preRacePrefetchRequestRef.current !== requestId) {
+          return;
+        }
+        preparedPreRaceSpeechRef.current = { key: preRaceKey, report };
+        setPreRaceReport(report);
+
+        if (serviceMode !== 'ai') {
+          return;
+        }
+        try {
+          const audioBlob = await requestAiSpeechBlob(
+            report.line,
+            preferences,
+            'pre-race',
+            players.map((player) => player.name),
+            'straight',
+            10_000,
+            controller.signal,
+          );
+          if (preRacePrefetchRequestRef.current === requestId) {
+            preparedPreRaceSpeechRef.current = { key: preRaceKey, report, audioBlob };
+          }
+        } catch {
+          // The staged report will use the device voice if studio speech was not ready.
+        }
+      })
+      .catch(() => {
+        if (preRacePrefetchRequestRef.current !== requestId) {
+          return;
+        }
+        preparedPreRaceSpeechRef.current = { key: preRaceKey, report: localReport };
+        setPreRaceReport(localReport);
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [
+    players,
+    preRaceContext,
+    preRaceKey,
+    preferences,
+    raceState,
+    serviceMode,
   ]);
 
   const rememberLine = useCallback((line: string) => {
@@ -609,6 +788,99 @@ export function useRaceCommentary({
     preferencesRef.current = { ...currentPreferences, recentLines: lines };
     recentLinesChangeRef.current(lines);
   }, []);
+
+  useEffect(() => {
+    if (
+      !preferences.enabled
+      || !startGateActive
+      || startGatePhase !== 'staging'
+      || playedPreRaceKeyRef.current === preRaceKey
+    ) {
+      return;
+    }
+    playedPreRaceKeyRef.current = preRaceKey;
+    const prepared = preparedPreRaceSpeechRef.current?.key === preRaceKey
+      ? preparedPreRaceSpeechRef.current
+      : null;
+    const report = prepared?.report ?? {
+      line: localPreRaceReportLine(preRaceContext),
+      source: 'local' as const,
+      generatedAt: new Date().toISOString(),
+      variableCount: preRaceVariableCount(preRaceContext),
+      supportedVariableCount: 73,
+      sources: [],
+      weather: { available: false },
+    };
+    const controller = new AbortController();
+    preRacePlaybackAbortRef.current = controller;
+    const lifecycleGeneration = lifecycleGenerationRef.current;
+    const shouldContinue = () => (
+      !controller.signal.aborted
+      && lifecycleGeneration === lifecycleGenerationRef.current
+      && preferencesRef.current.enabled
+    );
+    const beginSpeaking = () => {
+      if (shouldContinue()) {
+        rememberLine(report.line);
+        setPlaybackPhase('speaking');
+      }
+    };
+    setPlaybackPhase(prepared?.audioBlob ? 'preparing' : 'thinking');
+    void (prepared?.audioBlob
+      ? playAudioBlob(
+        prepared.audioBlob,
+        preferences.volume,
+        activeAudioRef,
+        activeBufferSourceRef,
+        activePlaybackCancelRef,
+        shouldContinue,
+        beginSpeaking,
+      )
+      : speakWithBrowser(
+        report.line,
+        preferences.voicePreset,
+        'pre-race',
+        preferences.volume,
+        activePlaybackCancelRef,
+        shouldContinue,
+        beginSpeaking,
+      ))
+      .finally(() => {
+        if (preRacePlaybackAbortRef.current === controller) {
+          preRacePlaybackAbortRef.current = null;
+        }
+        if (shouldContinue()) {
+          setPlaybackPhase('idle');
+        }
+      });
+    return () => {
+      controller.abort();
+      activePlaybackCancelRef.current?.();
+      activePlaybackCancelRef.current = null;
+      activeAudioRef.current?.pause();
+      activeBufferSourceRef.current = null;
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      setPlaybackPhase('idle');
+    };
+  }, [
+    preRaceContext,
+    preRaceKey,
+    preferences.enabled,
+    preferences.voicePreset,
+    preferences.volume,
+    rememberLine,
+    setPlaybackPhase,
+    startGateActive,
+    startGatePhase,
+  ]);
+
+  useEffect(() => {
+    if (!startGateActive && startGatePhase === 'idle') {
+      playedPreRaceKeyRef.current = '';
+    }
+  }, [startGateActive, startGatePhase]);
 
   const drainQueue = useCallback(async () => {
     if (drainingRef.current) {
@@ -654,7 +926,7 @@ export function useRaceCommentary({
         if (event.kind === 'race-start') {
           line = startLine;
           const prepared = preparedStartSpeechRef.current;
-          const preparedMatches = prepared?.key === preparedStartSpeechKey(line, activePreferences);
+          const preparedMatches = prepared?.key === preparedStartSpeechKey(line, activePreferences, players);
           if (preparedMatches && prepared) {
             preparedStartSpeechRef.current = null;
           }
@@ -874,7 +1146,7 @@ export function useRaceCommentary({
         setPlaybackPhase('idle');
       }
     }
-  }, [rememberLine, serviceMode, setPlaybackPhase, startLine]);
+  }, [players, rememberLine, serviceMode, setPlaybackPhase, startLine]);
 
   useEffect(() => {
     if (!preferences.enabled) {
@@ -936,7 +1208,9 @@ export function useRaceCommentary({
 
   useEffect(() => () => {
     startPrefetchRequestRef.current += 1;
+    preRacePrefetchRequestRef.current += 1;
     disposePreparedStartSpeech();
+    preparedPreRaceSpeechRef.current = null;
     stopPlayback();
   }, [disposePreparedStartSpeech, stopPlayback]);
 
@@ -1030,6 +1304,7 @@ export function useRaceCommentary({
   return {
     playbackStatus,
     serviceMode,
+    preRaceReport,
     preview,
     prime,
     stop: stopPlayback,
