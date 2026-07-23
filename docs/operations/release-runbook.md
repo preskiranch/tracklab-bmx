@@ -27,6 +27,7 @@ Render must use Node.js 22 or newer and contain these server-side values:
 | `TRACKLAB_ADMIN_EMAILS` | Comma-separated administrator email allowlist. |
 | `TRACKLAB_METRICS_TOKEN` | Long, random secret used only by the metrics collector. |
 | `VITE_GOOGLE_MAPS_API_KEY` | Browser-restricted Google Maps JavaScript API key. |
+| `OPENAI_API_KEY` | Optional server-only key for natural AI race wording and speech. Without it, TrackLab uses the browser voice fallback. |
 | `SQUARE_ENVIRONMENT` | `sandbox` during billing acceptance; `production` only after approval. |
 | `SQUARE_ACCESS_TOKEN` | Server-only Square credential. Never use a `VITE_` prefix. |
 | `SQUARE_LOCATION_ID` | Square location that owns the subscriptions. |
@@ -161,4 +162,3 @@ Attach the following to the release record:
 - database backup checksum and restore-drill date;
 - applicable hardware acceptance sheet;
 - known limitations and any temporary alert suppression.
-

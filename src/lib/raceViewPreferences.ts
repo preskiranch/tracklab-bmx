@@ -1,5 +1,12 @@
 import { raceViewPreferencesStorageKey } from '../data';
-import type { EarthCamera, RaceRiderOverlayLayout, RaceViewPreferences } from '../types';
+import type {
+  EarthCamera,
+  RaceCommentaryModel,
+  RaceCommentaryPreferences,
+  RaceCommentaryVoicePreset,
+  RaceRiderOverlayLayout,
+  RaceViewPreferences,
+} from '../types';
 
 export const defaultRaceRiderOverlayLayout: RaceRiderOverlayLayout = {
   xPct: 0.04,
@@ -8,6 +15,26 @@ export const defaultRaceRiderOverlayLayout: RaceRiderOverlayLayout = {
   height: 220,
   locked: false,
 };
+
+export const defaultRaceCommentaryPreferences: RaceCommentaryPreferences = {
+  enabled: true,
+  model: 'gpt-5.6-terra',
+  voicePreset: 'australian-woman',
+  volume: 0.9,
+  adaptiveMemory: true,
+  recentLines: [],
+};
+
+const commentaryModels = new Set<RaceCommentaryModel>([
+  'gpt-5.6-luna',
+  'gpt-5.6-terra',
+  'gpt-5.6-sol',
+]);
+const commentaryVoices = new Set<RaceCommentaryVoicePreset>([
+  'australian-woman',
+  'australian-man',
+  'american-man',
+]);
 
 function finiteNumber(value: unknown, fallback: number) {
   const number = Number(value);
@@ -48,6 +75,41 @@ export function normalizeRaceRiderOverlayLayout(value: unknown): RaceRiderOverla
   };
 }
 
+export function normalizeRaceCommentaryPreferences(value: unknown): RaceCommentaryPreferences {
+  const preferences = value && typeof value === 'object'
+    ? value as Partial<RaceCommentaryPreferences>
+    : {};
+  const model = commentaryModels.has(preferences.model as RaceCommentaryModel)
+    ? preferences.model as RaceCommentaryModel
+    : defaultRaceCommentaryPreferences.model;
+  const voicePreset = commentaryVoices.has(preferences.voicePreset as RaceCommentaryVoicePreset)
+    ? preferences.voicePreset as RaceCommentaryVoicePreset
+    : defaultRaceCommentaryPreferences.voicePreset;
+  const recentLines = Array.isArray(preferences.recentLines)
+    ? preferences.recentLines
+      .filter((line): line is string => typeof line === 'string')
+      .map((line) => line.trim().replace(/\s+/g, ' ').slice(0, 220))
+      .filter(Boolean)
+      .slice(-12)
+    : [];
+
+  return {
+    enabled: preferences.enabled == null
+      ? defaultRaceCommentaryPreferences.enabled
+      : Boolean(preferences.enabled),
+    model,
+    voicePreset,
+    volume: Math.max(0, Math.min(1, finiteNumber(
+      preferences.volume,
+      defaultRaceCommentaryPreferences.volume,
+    ))),
+    adaptiveMemory: preferences.adaptiveMemory == null
+      ? defaultRaceCommentaryPreferences.adaptiveMemory
+      : Boolean(preferences.adaptiveMemory),
+    recentLines,
+  };
+}
+
 export function normalizeRaceViewPreferences(
   value: unknown,
   fallbackCameras: Record<string, EarthCamera> = {},
@@ -78,6 +140,7 @@ export function normalizeRaceViewPreferences(
         .filter(([trackId]) => trackId.trim().length > 0)
         .map(([trackId, layout]) => [trackId, normalizeRaceRiderOverlayLayout(layout)]),
     ),
+    commentary: normalizeRaceCommentaryPreferences(preferences.commentary),
   };
 }
 

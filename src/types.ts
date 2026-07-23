@@ -557,10 +557,23 @@ export type RaceRiderOverlayLayout = {
   locked: boolean;
 };
 
+export type RaceCommentaryModel = 'gpt-5.6-luna' | 'gpt-5.6-terra' | 'gpt-5.6-sol';
+export type RaceCommentaryVoicePreset = 'australian-woman' | 'australian-man' | 'american-man';
+
+export type RaceCommentaryPreferences = {
+  enabled: boolean;
+  model: RaceCommentaryModel;
+  voicePreset: RaceCommentaryVoicePreset;
+  volume: number;
+  adaptiveMemory: boolean;
+  recentLines: string[];
+};
+
 export type RaceViewPreferences = {
   cameraLocked: boolean;
   earthCamerasByTrack: Record<string, EarthCamera>;
   riderOverlaysByTrack: Record<string, RaceRiderOverlayLayout>;
+  commentary: RaceCommentaryPreferences;
 };
 
 export type TrackZone = {

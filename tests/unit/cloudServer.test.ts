@@ -88,6 +88,7 @@ beforeAll(async () => {
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
+      OPENAI_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -120,6 +121,19 @@ describe('cloud API trust boundaries', () => {
     });
   });
 
+  it('reports commentary capability without exposing a server key', async () => {
+    const response = await api('/api/commentary/config');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const config = await response.json();
+    expect(config).toMatchObject({
+      aiAvailable: false,
+      speechModel: 'gpt-4o-mini-tts',
+      voicePresets: ['australian-woman', 'australian-man', 'american-man'],
+    });
+    expect(JSON.stringify(config)).not.toContain('OPENAI_API_KEY');
+  });
+
   it('protects production metrics and exposes redacted process telemetry to operators', async () => {
     const unauthorized = await api('/api/metrics');
     expect(unauthorized.status).toBe(401);
@@ -144,6 +158,12 @@ describe('cloud API trust boundaries', () => {
       headers: { Origin: baseUrl },
     });
     expect(mappingSave.status).toBe(401);
+
+    const commentary = await fetch(`${baseUrl}/api/commentary/line`, {
+      method: 'POST',
+      headers: { Origin: baseUrl },
+    });
+    expect(commentary.status).toBe(401);
   });
 
   it('keeps profile reads and writes bound to the authenticated account', async () => {
@@ -179,6 +199,14 @@ describe('cloud API trust boundaries', () => {
               locked: true,
             },
           },
+          commentary: {
+            enabled: true,
+            model: 'gpt-5.6-sol',
+            voicePreset: 'american-man',
+            volume: 0.75,
+            adaptiveMemory: true,
+            recentLines: ['Avery takes it to the stripe.'],
+          },
         },
       }),
     });
@@ -207,6 +235,14 @@ describe('cloud API trust boundaries', () => {
             height: 190,
             locked: true,
           },
+        },
+        commentary: {
+          enabled: true,
+          model: 'gpt-5.6-sol',
+          voicePreset: 'american-man',
+          volume: 0.75,
+          adaptiveMemory: true,
+          recentLines: ['Avery takes it to the stripe.'],
         },
       },
     });

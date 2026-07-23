@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  defaultRaceCommentaryPreferences,
   defaultRaceRiderOverlayLayout,
+  normalizeRaceCommentaryPreferences,
   normalizeRaceRiderOverlayLayout,
   normalizeRaceViewPreferences,
 } from '../../src/lib/raceViewPreferences';
@@ -48,5 +50,27 @@ describe('race view preferences', () => {
       height: 190,
       locked: true,
     });
+    expect(preferences.commentary).toEqual(defaultRaceCommentaryPreferences);
+  });
+
+  it('normalizes per-account announcer choices and bounded adaptive memory', () => {
+    const commentary = normalizeRaceCommentaryPreferences({
+      enabled: false,
+      model: 'unsupported-model',
+      voicePreset: 'american-man',
+      volume: 4,
+      adaptiveMemory: false,
+      recentLines: [...Array.from({ length: 14 }, (_, index) => ` Call ${index} `), 42],
+    });
+
+    expect(commentary).toMatchObject({
+      enabled: false,
+      model: 'gpt-5.6-terra',
+      voicePreset: 'american-man',
+      volume: 1,
+      adaptiveMemory: false,
+    });
+    expect(commentary.recentLines).toHaveLength(12);
+    expect(commentary.recentLines.at(-1)).toBe('Call 13');
   });
 });

@@ -129,6 +129,7 @@ import {
 } from './lib/raceStartSequence';
 import {
   normalizeRaceViewPreferences,
+  normalizeRaceCommentaryPreferences,
   readStoredRaceViewPreferences,
   writeStoredRaceViewPreferences,
 } from './lib/raceViewPreferences';
@@ -166,6 +167,7 @@ import {
 } from './lib/membership';
 import { createInitialRiders } from './game/physics';
 import { useRaceEngine } from './hooks/useRaceEngine';
+import { useRaceCommentary } from './hooks/useRaceCommentary';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
 import { useMultiplayer } from './hooks/useMultiplayer';
@@ -190,6 +192,7 @@ import type {
   PlayerSlot,
   PlayMode,
   RaceCapture,
+  RaceCommentaryPreferences,
   RaceRiderOverlayLayout,
   RaceViewPreferences,
   ReactionTimesByPlayer,
@@ -1396,6 +1399,9 @@ export default function App() {
   const raceViewPreferencesRef = useRef<RaceViewPreferences>(
     normalizeRaceViewPreferences(null, earthCamerasByTrack),
   );
+  const [raceCommentaryPreferences, setRaceCommentaryPreferences] = useState<RaceCommentaryPreferences>(
+    () => raceViewPreferencesRef.current.commentary,
+  );
   const [appMode, setAppMode] = useState<AppMode>('race');
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
   const [showMembershipLanding, setShowMembershipLanding] = useState(() => initialMembershipRef.current?.tier === 'visitor');
@@ -2283,6 +2289,7 @@ export default function App() {
     setEarthCamerasByTrack(normalized.earthCamerasByTrack);
     setRaceCameraLocked(normalized.cameraLocked);
     setRiderOverlaysByTrack(normalized.riderOverlaysByTrack);
+    setRaceCommentaryPreferences(normalized.commentary);
   }, []);
   const persistRaceViewPreferences = useCallback((preferences: RaceViewPreferences) => {
     const normalized = normalizeRaceViewPreferences(preferences);
@@ -2298,6 +2305,25 @@ export default function App() {
     const localPreferences = readStoredRaceViewPreferences(cloudProfileKey, readStoredEarthCameras());
     applyRaceViewPreferences(localPreferences);
   }, [applyRaceViewPreferences, cloudProfileKey]);
+  const handleRaceCommentaryPreferencesChange = useCallback((preferences: RaceCommentaryPreferences) => {
+    const normalized = normalizeRaceCommentaryPreferences(preferences);
+    setRaceCommentaryPreferences(normalized);
+    persistRaceViewPreferences({
+      ...raceViewPreferencesRef.current,
+      commentary: normalized,
+    });
+  }, [persistRaceViewPreferences]);
+  const handleRaceCommentaryRecentLinesChange = useCallback((recentLines: string[]) => {
+    const normalized = normalizeRaceCommentaryPreferences({
+      ...raceViewPreferencesRef.current.commentary,
+      recentLines,
+    });
+    setRaceCommentaryPreferences(normalized);
+    persistRaceViewPreferences({
+      ...raceViewPreferencesRef.current,
+      commentary: normalized,
+    });
+  }, [persistRaceViewPreferences]);
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
   const adminProfileActive = Boolean(authUser?.admin);
@@ -2492,6 +2518,17 @@ export default function App() {
     splitDecisionPoints,
     raceZones,
   );
+  const raceCommentary = useRaceCommentary({
+    preferences: raceCommentaryPreferences,
+    raceState,
+    trackName: effectiveTrack.name,
+    raceLengthMeters: effectiveRouteLengthMeters,
+    players: racePlayers,
+    riders,
+    zones: raceZones,
+    reactionTimesByPlayer,
+    onRecentLinesChange: handleRaceCommentaryRecentLinesChange,
+  });
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const finishCountdownSeconds = finishWindowEndsAt != null && raceState === 'racing'
     ? Math.min(raceFinishCountdownMs / 1000, Math.max(1, countdownSeconds(finishWindowEndsAt, now)))
@@ -6624,6 +6661,8 @@ export default function App() {
                   cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                   finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
+                  commentaryLine={raceCommentary.currentLine}
+                  commentaryPlaybackStatus={raceCommentary.playbackStatus}
                   earthAngle={earthAngle}
                   earthHeading={earthHeading}
                   earthCenter={earthCenter}
@@ -6743,6 +6782,9 @@ export default function App() {
                   startGateDetail={startGateStatus.detail}
                   ghostLaps={availableGhostLaps}
                   selectedGhostIds={selectedGhostIds}
+                  commentaryPreferences={raceCommentaryPreferences}
+                  commentaryServiceMode={raceCommentary.serviceMode}
+                  commentaryPlaybackStatus={raceCommentary.playbackStatus}
                   onSessionModeChange={setSessionMode}
                   onIntervalModeChange={setIntervalMode}
                   onManualZoneToggle={toggleManualZone}
@@ -6789,6 +6831,10 @@ export default function App() {
                   onGhostToggle={toggleGhostLap}
                   onGhostClear={clearSelectedGhosts}
                   onGhostAnalyticsSharingChange={handleGhostAnalyticsSharingChange}
+                  onCommentaryPreferencesChange={handleRaceCommentaryPreferencesChange}
+                  onCommentaryPreview={() => {
+                    void raceCommentary.preview();
+                  }}
                   onPrimeAudio={primeAudioCues}
                   onStart={handleStart}
                   onCancel={handleCancel}

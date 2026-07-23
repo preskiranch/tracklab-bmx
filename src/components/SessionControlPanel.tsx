@@ -11,6 +11,7 @@ import {
   MapPinned,
   Maximize2,
   Medal,
+  Mic2,
   Minimize2,
   Minus,
   Plus,
@@ -25,6 +26,7 @@ import {
   Upload,
   X,
   Zap,
+  Volume2,
 } from 'lucide-react';
 import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
 import type { PlacePredictionOption } from '../lib/googleMaps';
@@ -36,6 +38,7 @@ import type {
   IntervalMode,
   MappingEditMode,
   MetricKey,
+  RaceCommentaryPreferences,
   RaceState,
   SessionMode,
   SpeedUnit,
@@ -141,6 +144,9 @@ type SessionControlPanelProps = {
   startGateDetail: string;
   ghostLaps: GhostLap[];
   selectedGhostIds: string[];
+  commentaryPreferences: RaceCommentaryPreferences;
+  commentaryServiceMode: 'checking' | 'ai' | 'browser';
+  commentaryPlaybackStatus: 'idle' | 'thinking' | 'speaking';
   onSessionModeChange: (mode: SessionMode) => void;
   onIntervalModeChange: (mode: IntervalMode) => void;
   onManualZoneToggle: (zoneId: string) => void;
@@ -187,6 +193,8 @@ type SessionControlPanelProps = {
   onGhostToggle: (ghostId: string) => void;
   onGhostClear: () => void;
   onGhostAnalyticsSharingChange: (ghostId: string, analyticsPublic: boolean) => void;
+  onCommentaryPreferencesChange: (preferences: RaceCommentaryPreferences) => void;
+  onCommentaryPreview: () => void;
   onPrimeAudio: () => void;
   onStart: () => void;
   onCancel: () => void;
@@ -279,6 +287,9 @@ export function SessionControlPanel({
   startGateDetail,
   ghostLaps,
   selectedGhostIds,
+  commentaryPreferences,
+  commentaryServiceMode,
+  commentaryPlaybackStatus,
   onSessionModeChange,
   onIntervalModeChange,
   onManualZoneToggle,
@@ -325,6 +336,8 @@ export function SessionControlPanel({
   onGhostToggle,
   onGhostClear,
   onGhostAnalyticsSharingChange,
+  onCommentaryPreferencesChange,
+  onCommentaryPreview,
   onPrimeAudio,
   onStart,
   onCancel,
@@ -1048,6 +1061,119 @@ export function SessionControlPanel({
             </div>
           </>
         )}
+      </section>
+
+      <section className="panel-section race-announcer-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Live Audio</span>
+            <h3>AI race announcer</h3>
+          </div>
+          <Mic2 size={18} />
+        </div>
+
+        <label className="announcer-enable-row">
+          <span>
+            <strong>Race commentary</strong>
+            <small>Calls live race events after the gate drops</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={commentaryPreferences.enabled}
+            onChange={(event) => onCommentaryPreferencesChange({
+              ...commentaryPreferences,
+              enabled: event.target.checked,
+            })}
+          />
+        </label>
+
+        <div className={`announcer-service-status ${commentaryServiceMode}`}>
+          <span />
+          {commentaryServiceMode === 'checking'
+            ? 'Checking AI voice service'
+            : commentaryServiceMode === 'ai'
+              ? 'Natural AI commentary ready'
+              : 'Browser voice fallback active'}
+        </div>
+
+        <div className="announcer-select-grid">
+          <label>
+            <span>Commentary brain</span>
+            <select
+              value={commentaryPreferences.model}
+              disabled={!commentaryPreferences.enabled}
+              onChange={(event) => onCommentaryPreferencesChange({
+                ...commentaryPreferences,
+                model: event.target.value as RaceCommentaryPreferences['model'],
+              })}
+            >
+              <option value="gpt-5.6-luna">Fast — live response</option>
+              <option value="gpt-5.6-terra">Balanced — recommended</option>
+              <option value="gpt-5.6-sol">Studio — richest wording</option>
+            </select>
+          </label>
+          <label>
+            <span>Announcer voice</span>
+            <select
+              value={commentaryPreferences.voicePreset}
+              disabled={!commentaryPreferences.enabled}
+              onChange={(event) => onCommentaryPreferencesChange({
+                ...commentaryPreferences,
+                voicePreset: event.target.value as RaceCommentaryPreferences['voicePreset'],
+              })}
+            >
+              <option value="australian-woman">Australian woman</option>
+              <option value="australian-man">Australian man</option>
+              <option value="american-man">American man</option>
+            </select>
+          </label>
+        </div>
+
+        <label className="announcer-volume-row">
+          <span><Volume2 size={14} /> Volume</span>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={commentaryPreferences.volume}
+            disabled={!commentaryPreferences.enabled}
+            onChange={(event) => onCommentaryPreferencesChange({
+              ...commentaryPreferences,
+              volume: Number(event.target.value),
+            })}
+          />
+          <strong>{Math.round(commentaryPreferences.volume * 100)}%</strong>
+        </label>
+
+        <label className="announcer-memory-row">
+          <input
+            type="checkbox"
+            checked={commentaryPreferences.adaptiveMemory}
+            disabled={!commentaryPreferences.enabled}
+            onChange={(event) => onCommentaryPreferencesChange({
+              ...commentaryPreferences,
+              adaptiveMemory: event.target.checked,
+            })}
+          />
+          <span>
+            <strong>Adaptive memory</strong>
+            <small>Remembers recent calls on your account to avoid repetition</small>
+          </span>
+        </label>
+
+        <button
+          className="announcer-preview-button"
+          type="button"
+          disabled={!commentaryPreferences.enabled || commentaryPlaybackStatus === 'speaking'}
+          onClick={onCommentaryPreview}
+        >
+          <Mic2 size={15} />
+          {commentaryPlaybackStatus === 'speaking' ? 'Announcing…' : 'Preview selected voice'}
+        </button>
+        <p className="announcer-disclosure">
+          Voice and wording are AI-generated. Race facts always come from TrackLab telemetry.
+        </p>
       </section>
 
       <section className="panel-section">

@@ -26,6 +26,8 @@ services:
         value: "0"
       - key: TRACKLAB_SLOW_REQUEST_MS
         value: "1000"
+      - key: OPENAI_API_KEY
+        sync: false
       - key: SQUARE_ENVIRONMENT
         sync: false
       - key: SQUARE_VERSION
