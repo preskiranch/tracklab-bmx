@@ -8,6 +8,12 @@ import {
   type RaceCommentaryEvent,
   type RaceCommentaryEventKind,
 } from '../lib/raceCommentary';
+import {
+  browserSpeechWatchdogMs,
+  raceStateStopsCommentary,
+  shouldInterruptCommentaryForEvent,
+  type RaceCommentaryPlaybackPhase,
+} from '../lib/raceCommentaryPlayback';
 import type {
   PlayerSlot,
   RaceCommentaryPreferences,
@@ -20,7 +26,7 @@ import type {
 
 type CommentaryServiceMode = 'checking' | 'ai' | 'browser';
 type CommentaryPlaybackStatus = 'idle' | 'thinking' | 'speaking';
-type CommentaryPlaybackPhase = CommentaryPlaybackStatus | 'preparing';
+type CommentaryPlaybackPhase = RaceCommentaryPlaybackPhase;
 type CommentarySpeechEventKind = RaceCommentaryEventKind | 'preview';
 type ActivePlaybackCancelRef = React.MutableRefObject<(() => void) | null>;
 
@@ -65,10 +71,35 @@ function browserVoiceFor(voicePreset: RaceCommentaryVoicePreset) {
     ?? null;
 }
 
-function immediateRaceStartLine(trackName: string, players: PlayerSlot[]) {
-  return players.length > 0
-    ? `Gate's down at ${trackName}—here we go! The field charges into the first straight.`
-    : `Gate's down at ${trackName}—here we go!`;
+function immediateRaceStartLine(
+  trackName: string,
+  players: PlayerSlot[],
+  recentLines: string[],
+) {
+  const candidates = players.length > 1
+    ? [
+      `Gate's down at ${trackName}—here we go! The field charges into the first straight.`,
+      `${trackName} comes alive—the gate drops and the whole field launches!`,
+      `They're racing at ${trackName}! Everyone charges hard into the first straight.`,
+      `A clean release at ${trackName}, and the field explodes down the first straight!`,
+      `Here we go at ${trackName}—the riders launch together from the gate!`,
+    ]
+    : players.length === 1
+      ? [
+        `Gate's down at ${trackName}—${players[0].name} charges into the first straight!`,
+        `${players[0].name} launches from the gate at ${trackName}!`,
+        `They're racing at ${trackName}, and ${players[0].name} is underway!`,
+      ]
+    : [
+      `Gate's down at ${trackName}—here we go!`,
+      `${trackName} comes alive as the gate drops!`,
+      `They're racing at ${trackName}!`,
+    ];
+  const unused = candidates.filter((candidate) => !recentLines.includes(candidate));
+  const pool = unused.length > 0 ? unused : candidates;
+  const seedText = `${trackName}:${recentLines.at(-1) ?? ''}:${recentLines.length}`;
+  const seed = [...seedText].reduce((total, character) => total + character.charCodeAt(0), 0);
+  return pool[seed % pool.length];
 }
 
 function riderNameList(players: PlayerSlot[]) {
@@ -130,8 +161,8 @@ function speakWithBrowser(
       finish(false);
     };
     timeout = window.setTimeout(
-      () => finish(true),
-      Math.min(6_500, Math.max(1_800, line.length * 55)),
+      cancel,
+      browserSpeechWatchdogMs(line),
     );
     utterance.lang = speechLanguage(voicePreset);
     utterance.voice = browserVoiceFor(voicePreset);
@@ -150,7 +181,12 @@ function speakWithBrowser(
     const basePitch = voicePreset === 'australian-woman' || voicePreset === 'british-woman'
       ? 1
       : 0.96;
-    utterance.pitch = basePitch;
+    const actionPitchLift = eventKind === 'lead-change' || eventKind === 'finish'
+      ? 0.05
+      : eventKind === 'race-start' || eventKind === 'final-push'
+        ? 0.03
+        : 0;
+    utterance.pitch = basePitch + actionPitchLift;
     utterance.onend = () => finish(true);
     utterance.onerror = () => finish(false);
     activePlaybackCancelRef.current = cancel;
@@ -184,7 +220,7 @@ async function requestAiSpeechUrl(
     method: 'POST',
     signal,
     headers: {
-      Accept: 'audio/mpeg',
+      Accept: 'audio/wav',
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -314,7 +350,11 @@ export function useRaceCommentary({
 
   preferencesRef.current = preferences;
   recentLinesChangeRef.current = onRecentLinesChange;
-  const startLine = immediateRaceStartLine(trackName, players);
+  const startLine = immediateRaceStartLine(
+    trackName,
+    players,
+    preferences.adaptiveMemory ? preferences.recentLines : [],
+  );
 
   const setPlaybackPhase = useCallback((phase: CommentaryPlaybackPhase) => {
     playbackPhaseRef.current = phase;
@@ -422,7 +462,7 @@ export function useRaceCommentary({
     if (!currentPreferences.adaptiveMemory) {
       return;
     }
-    const lines = [...currentPreferences.recentLines.filter((item) => item !== line), line].slice(-12);
+    const lines = [...currentPreferences.recentLines.filter((item) => item !== line), line].slice(-24);
     preferencesRef.current = { ...currentPreferences, recentLines: lines };
     recentLinesChangeRef.current(lines);
   }, []);
@@ -636,11 +676,7 @@ export function useRaceCommentary({
       zones,
       reactionTimesByPlayer,
     });
-    if (raceState === 'ready') {
-      stopPlayback();
-      return;
-    }
-    if (raceState === 'finished') {
+    if (raceStateStopsCommentary(raceState)) {
       stopPlayback();
       return;
     }
@@ -657,7 +693,7 @@ export function useRaceCommentary({
     queueRef.current = [nextEvent];
     activeRequestAbortRef.current?.abort();
     activeRequestAbortRef.current = null;
-    if (nextEvent.kind === 'finish') {
+    if (shouldInterruptCommentaryForEvent(playbackPhaseRef.current, nextEvent.kind)) {
       activePlaybackCancelRef.current?.();
       activePlaybackCancelRef.current = null;
       activeAudioRef.current?.pause();

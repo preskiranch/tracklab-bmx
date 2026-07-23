@@ -61,7 +61,7 @@ export function maximumRaceCommentaryEventAgeMs(kind: RaceCommentaryEventKind) {
     return 2_500;
   }
   if (kind === 'finish') {
-    return 2_000;
+    return 8_000;
   }
   if (kind === 'final-push') {
     return 3_500;
@@ -315,9 +315,46 @@ export function detectRaceCommentaryEvents(
     : events.slice(0, 2);
 }
 
+function lineTokens(line: string) {
+  return line
+    .normalize('NFKD')
+    .toLocaleLowerCase('en')
+    .replace(/[^\p{L}\p{N}']+/gu, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function tokenSimilarity(leftLine: string, rightLine: string) {
+  const left = new Set(lineTokens(leftLine));
+  const right = new Set(lineTokens(rightLine));
+  if (left.size === 0 || right.size === 0) {
+    return 0;
+  }
+
+  let shared = 0;
+  left.forEach((token) => {
+    if (right.has(token)) {
+      shared += 1;
+    }
+  });
+  return shared / (left.size + right.size - shared);
+}
+
 function pickLine(candidates: string[], event: RaceCommentaryEvent, recentLines: string[]) {
-  const unused = candidates.filter((candidate) => !recentLines.includes(candidate));
-  const pool = unused.length > 0 ? unused : candidates;
+  const ranked = candidates
+    .map((candidate) => ({
+      candidate,
+      similarity: recentLines.reduce(
+        (highest, recentLine) => Math.max(highest, tokenSimilarity(candidate, recentLine)),
+        0,
+      ),
+    }))
+    .sort((left, right) => left.similarity - right.similarity);
+  const bestSimilarity = ranked[0]?.similarity ?? 0;
+  const pool = ranked
+    .filter((item) => item.similarity <= bestSimilarity + 0.05)
+    .map((item) => item.candidate);
   const seed = [...event.id].reduce((total, character) => total + character.charCodeAt(0), 0);
   return pool[seed % pool.length];
 }
@@ -355,6 +392,12 @@ function courseActionLines(
     closeBattle && second
       ? `${second} keeps the pressure on ${leader} through the ${phase}.`
       : `${leader} carries the lead into the ${phase}.`,
+    closeBattle && second
+      ? `Nothing between ${leader} and ${second} in the ${phase}.`
+      : `Smooth and fast, ${leader} controls the ${phase}.`,
+    closeBattle && second
+      ? `${leader} has company—${second} is charging through the ${phase}.`
+      : `The advantage belongs to ${leader} through the ${phase}.`,
     ...(event.pedalReferenceAllowed
       ? [second
         ? `${leader} gets back on the pedals, with ${second} giving chase.`
@@ -366,38 +409,49 @@ function courseActionLines(
 export function localCommentaryLine(event: RaceCommentaryEvent, recentLines: string[] = []) {
   const leader = riderName(event, event.leaderPlayerId);
   const second = event.riders[1]?.name;
-  const names = event.riders.map((rider) => rider.name).join(', ');
   const candidates: Record<RaceCommentaryEventKind, string[]> = {
     'race-start': [
       `Gate's down at ${event.trackName}. Here we go.`,
       `They're racing at ${event.trackName}, charging down the first straight.`,
       `A clean gate at ${event.trackName}, and the field is underway.`,
+      `${event.trackName} comes alive as the gate drops.`,
+      `Here we go at ${event.trackName}—the whole field launches.`,
     ],
     'positions-established': [
       `${leader} shows in front${second ? `, with ${second} close behind.` : '.'}`,
       `${leader} has the early advantage, and the race is taking shape.`,
       `${leader} leads the charge down the first straight.`,
+      `${second ? `${second} gives chase, but ` : ''}${leader} has the early lead.`,
+      `Out front early, it's ${leader}${second ? ` with ${second} pressing.` : '.'}`,
     ],
     'lead-change': [
       `${leader} makes the move and takes over.`,
       `Here comes ${leader}, moving through to the front.`,
       `${leader} finds a way past. We have a new leader.`,
+      `What a move from ${leader}—straight into the lead!`,
+      `The race turns as ${leader} sweeps to the front.`,
     ],
     'pedal-zone': courseActionLines(event, leader, second),
     'pro-set': [
       `${leader} commits to the Pro Set, with ${second ?? 'the field'} still in pursuit.`,
       `${leader} takes the blue Pro line and holds the advantage.`,
       `Pro Set for ${leader}. ${second ? `${second} stays close.` : 'A confident line through the split.'}`,
+      `${leader} chooses the Pro line${second ? `, and ${second} keeps chasing.` : '.'}`,
+      `Through the split, ${leader} goes Pro and stays in command.`,
     ],
     'final-push': [
       `${leader} leads them into the last straight.`,
       `Final drive to the line, with ${leader} holding the advantage.`,
       `${leader} is out front, but ${second ? `${second} is not done yet.` : 'the race is not over.'}`,
+      `${second ? `${second} is coming, but ` : ''}${leader} still owns the last straight.`,
+      `It's ${leader} in front with the stripe rushing closer.`,
     ],
     finish: [
       `${leader} gets it done at ${event.trackName}.`,
       `${leader} takes the win.`,
       `${leader} brings it home and wins the race.`,
+      `Across the stripe, it's ${leader} with the victory!`,
+      `${leader} holds on and takes it at ${event.trackName}!`,
     ],
   };
   return pickLine(candidates[event.kind], event, recentLines);

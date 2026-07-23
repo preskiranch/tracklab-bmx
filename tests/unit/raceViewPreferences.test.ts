@@ -61,7 +61,7 @@ describe('race view preferences', () => {
       voicePreset: 'british-man',
       volume: 4,
       adaptiveMemory: false,
-      recentLines: [...Array.from({ length: 14 }, (_, index) => ` Call ${index} `), 42],
+      recentLines: [...Array.from({ length: 28 }, (_, index) => ` Call ${index} `), 42],
     });
 
     expect(commentary).toMatchObject({
@@ -71,8 +71,8 @@ describe('race view preferences', () => {
       volume: 1,
       adaptiveMemory: false,
     });
-    expect(commentary.recentLines).toHaveLength(12);
-    expect(commentary.recentLines.at(-1)).toBe('Call 13');
+    expect(commentary.recentLines).toHaveLength(24);
+    expect(commentary.recentLines.at(-1)).toBe('Call 27');
   });
 
   it('normalizes four per-account demo rider names', () => {

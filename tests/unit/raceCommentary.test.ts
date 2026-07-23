@@ -253,4 +253,18 @@ describe('race commentary event detection', () => {
     expect(raceCommentaryEventIsFresh(startEvent, 3_500)).toBe(true);
     expect(raceCommentaryEventIsFresh(startEvent, 3_501)).toBe(false);
   });
+
+  it('keeps a winner call live long enough for the active sentence to finish', () => {
+    const tracker = createRaceCommentaryTracker();
+    detectRaceCommentaryEvents(tracker, snapshot([rider(1), rider(2)]), 1_000);
+    const [finishEvent] = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([rider(1, 300, { finishedAt: 31_200 }), rider(2, 280)]),
+      2_000,
+    );
+
+    expect(finishEvent.kind).toBe('finish');
+    expect(raceCommentaryEventIsFresh(finishEvent, 10_000)).toBe(true);
+    expect(raceCommentaryEventIsFresh(finishEvent, 10_001)).toBe(false);
+  });
 });

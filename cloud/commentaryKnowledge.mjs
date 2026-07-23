@@ -61,13 +61,13 @@ const eventLanguage = Object.freeze({
 });
 
 const eventDelivery = Object.freeze({
-  'race-start': 'Open promptly with anticipation, then settle into a natural race-calling rhythm.',
-  'positions-established': 'Sound observant and conversational; give the early order without forcing excitement.',
-  'lead-change': 'Let the pass create a genuine but controlled lift in energy.',
-  'pedal-zone': 'Describe the rider battle and current track phase, not the mapped input zone.',
-  'pro-set': 'Briefly note the line choice and how the other rider responds.',
-  'final-push': 'Build measured urgency through the last straight and toward the line.',
-  finish: 'Celebrate the winner clearly, then finish the call without shouting or dragging out the result.',
+  'race-start': 'Open promptly with an exciting gate-drop burst and carry that momentum into the first straight.',
+  'positions-established': 'Sound alert and invested; give the early order with lively forward motion.',
+  'lead-change': 'Let the pass trigger a sharp, authentic surge of excitement.',
+  'pedal-zone': 'Describe the rider battle and current track phase with urgent flow, not the mapped input zone.',
+  'pro-set': 'Give the line choice a quick lift and connect it directly to the chase.',
+  'final-push': 'Build powerful, controlled urgency through the last straight and toward the line.',
+  finish: 'Celebrate the winner passionately, emphasize the name, and complete the result cleanly.',
 });
 
 export function commentaryGuideForEvent(eventKind) {
@@ -78,7 +78,7 @@ export function commentaryGuideForEvent(eventKind) {
     eventDelivery[eventKind] ?? 'Match the vocal energy to the live action.',
     'Lead with the live action, name a rider only when the telemetry identifies that rider, and keep the call easy to understand at race speed.',
     'Focus on racer against racer: the leader, the chaser, pressure, passes, straights, turns, rhythm, and the run to the line.',
-    'Professional BMX calls use short clauses, occasional fragments, varied pacing, and action-triggered excitement rather than constant shouting.',
+    'Professional BMX calls use short clauses, occasional fragments, varied pacing, and high energy that surges naturally with passes and the run to the line.',
     'Do not imitate, identify, or reproduce the voice, catchphrases, or signature delivery of any source announcer.',
   ].join(' ');
 }
