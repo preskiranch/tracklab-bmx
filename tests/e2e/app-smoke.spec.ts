@@ -1379,8 +1379,18 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(page.getByText('Complete a live Wattbike race on this track to create your personal ghost.')).toBeVisible();
 });
 
-test('completed race holds ten seconds after the first finisher then returns to dashboard analysis', async ({ page }, testInfo) => {
+test('completed race waits for every finishing-position call before returning to dashboard analysis', async ({ page }, testInfo) => {
   test.setTimeout(100_000);
+  const finishSpeechPayloads: Array<{
+    eventKind?: string;
+    line?: string;
+    riderNames?: string[];
+  }> = [];
+  let releaseHeldFinishSpeech = () => {};
+  const heldFinishSpeech = new Promise<void>((resolve) => {
+    releaseHeldFinishSpeech = resolve;
+  });
+  let holdFinishSpeech = true;
   const authUser = {
     id: 'post-race-review-racer',
     profileKey: 'user:post-race-review-racer',
@@ -1399,6 +1409,29 @@ test('completed race holds ten seconds after the first finisher then returns to 
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ user: authUser }),
+    });
+  });
+  await page.route('**/api/commentary/config', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ aiAvailable: true }),
+    });
+  });
+  await page.route('**/api/commentary/speech', async (route) => {
+    const payload = route.request().postDataJSON() as {
+      eventKind?: string;
+      line?: string;
+      riderNames?: string[];
+    };
+    if (payload.eventKind === 'finish' || payload.eventKind === 'rider-finish') {
+      finishSpeechPayloads.push(payload);
+      if (holdFinishSpeech) {
+        await heldFinishSpeech;
+      }
+    }
+    await route.fulfill({
+      contentType: 'audio/wav',
+      body: silentWavBuffer(500),
     });
   });
   await page.route('**/api/public-track-mappings', async (route) => {
@@ -1454,6 +1487,30 @@ test('completed race holds ten seconds after the first finisher then returns to 
   await page.waitForTimeout(1_000);
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
 
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabLiveDebug?: { raceState?: string };
+    }).__tracklabLiveDebug?.raceState
+  )), { timeout: 12_000 }).toBe('finished');
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+  await page.waitForTimeout(750);
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+
+  holdFinishSpeech = false;
+  releaseHeldFinishSpeech();
+  await expect.poll(() => finishSpeechPayloads.length, { timeout: 12_000 }).toBe(4);
+  expect(finishSpeechPayloads.map((payload) => payload.eventKind)).toEqual([
+    'finish',
+    'rider-finish',
+    'rider-finish',
+    'rider-finish',
+  ]);
+  expect(finishSpeechPayloads.map((payload) => payload.line)).toEqual([
+    expect.stringMatching(/first|wins|takes it|gets there|brings it home/i),
+    expect.stringMatching(/second/i),
+    expect.stringMatching(/third/i),
+    expect.stringMatching(/fourth/i),
+  ]);
   await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/, { timeout: 12_000 });
   await expect(page.getByRole('region', { name: 'Post-race review' })).toHaveCount(0);
   await expect(page.locator('.race-review-screen')).toHaveCount(0);

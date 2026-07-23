@@ -293,6 +293,40 @@ describe('race commentary event detection', () => {
     ).map((event) => event.kind)).not.toContain('rider-finish');
   });
 
+  it('queues every placement when several riders cross in the same frame', () => {
+    const tracker = createRaceCommentaryTracker();
+    detectRaceCommentaryEvents(
+      tracker,
+      snapshot(players.map((player) => rider(player.id))),
+      1_000,
+    );
+
+    const finishEvents = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200, rank: 1 }),
+        rider(2, 300, { finishedAt: 31_350, rank: 2 }),
+        rider(3, 300, { finishedAt: 31_500, rank: 3 }),
+        rider(4, 300, { finishedAt: 31_650, rank: 4 }),
+      ]),
+      2_000,
+    );
+
+    expect(finishEvents.map((event) => event.kind)).toEqual([
+      'finish',
+      'rider-finish',
+      'rider-finish',
+      'rider-finish',
+    ]);
+    expect(finishEvents.map((event) => event.finishingPlayerId)).toEqual([1, 2, 3, 4]);
+    expect(finishEvents.map((event) => localCommentaryLine(event))).toEqual([
+      expect.stringMatching(/Avery.*wins|Avery.*takes it|Avery.*gets there|Avery.*first/i),
+      expect.stringMatching(/Blake.*second/i),
+      expect.stringMatching(/Casey.*third/i),
+      expect.stringMatching(/Drew.*fourth/i),
+    ]);
+  });
+
   it('provides varied local lines when the AI service is unavailable', () => {
     const tracker = createRaceCommentaryTracker();
     const [event] = detectRaceCommentaryEvents(
@@ -612,7 +646,7 @@ describe('race commentary event detection', () => {
     );
 
     expect(finishEvent.kind).toBe('finish');
-    expect(raceCommentaryEventIsFresh(finishEvent, 26_000)).toBe(true);
-    expect(raceCommentaryEventIsFresh(finishEvent, 26_001)).toBe(false);
+    expect(raceCommentaryEventIsFresh(finishEvent, 62_000)).toBe(true);
+    expect(raceCommentaryEventIsFresh(finishEvent, 62_001)).toBe(false);
   });
 });

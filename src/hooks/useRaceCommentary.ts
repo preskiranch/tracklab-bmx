@@ -565,6 +565,7 @@ export function useRaceCommentary({
   const [serviceMode, setServiceMode] = useState<CommentaryServiceMode>('checking');
   const [playbackStatus, setPlaybackStatus] = useState<CommentaryPlaybackStatus>('idle');
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [finishAnnouncementsComplete, setFinishAnnouncementsComplete] = useState(true);
   const trackerRef = useRef(createRaceCommentaryTracker());
   const preferencesRef = useRef(preferences);
   const recentLinesChangeRef = useRef(onRecentLinesChange);
@@ -576,6 +577,7 @@ export function useRaceCommentary({
   const callSequenceRef = useRef(0);
   const playbackPhaseRef = useRef<CommentaryPlaybackPhase>('idle');
   const previousRaceStateRef = useRef<RaceState>(raceState);
+  const raceStateRef = useRef<RaceState>(raceState);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeBufferSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const activePlaybackCancelRef = useRef<(() => void) | null>(null);
@@ -590,6 +592,7 @@ export function useRaceCommentary({
 
   preferencesRef.current = preferences;
   recentLinesChangeRef.current = onRecentLinesChange;
+  raceStateRef.current = raceState;
   const trackName = track.name;
   const startLine = localRaceStartLine(
     trackName,
@@ -1262,6 +1265,16 @@ export function useRaceCommentary({
       drainingRef.current = false;
       if (lifecycleGeneration === lifecycleGenerationRef.current) {
         setPlaybackPhase('idle');
+        const hasQueuedFinishCall = queueRef.current.some((event) => (
+          event.kind === 'finish' || event.kind === 'rider-finish'
+        ));
+        if (
+          raceStateRef.current === 'finished'
+          && !activeFinishCallRef.current
+          && !hasQueuedFinishCall
+        ) {
+          setFinishAnnouncementsComplete(true);
+        }
       }
     }
   }, [players, rememberLine, serviceMode, setPlaybackPhase, startLine]);
@@ -1271,9 +1284,11 @@ export function useRaceCommentary({
     previousRaceStateRef.current = raceState;
     if (raceState === 'racing' && previousRaceState !== 'racing') {
       raceLinesRef.current = [];
+      setFinishAnnouncementsComplete(true);
     }
     if (!preferences.enabled) {
       raceLinesRef.current = [];
+      setFinishAnnouncementsComplete(true);
       stopPlayback();
       trackerRef.current = createRaceCommentaryTracker();
       return;
@@ -1291,6 +1306,7 @@ export function useRaceCommentary({
     if (raceStateStopsCommentary(raceState)) {
       raceLinesRef.current = [];
       queueRef.current = [];
+      setFinishAnnouncementsComplete(true);
       trackerRef.current = createRaceCommentaryTracker();
       if (previousRaceState !== 'ready' && !startGateActive) {
         stopPlayback();
@@ -1298,20 +1314,40 @@ export function useRaceCommentary({
       return;
     }
     if (events.length === 0) {
+      const hasQueuedFinishCall = queueRef.current.some((event) => (
+        event.kind === 'finish' || event.kind === 'rider-finish'
+      ));
+      if (
+        raceState === 'finished'
+        && !activeFinishCallRef.current
+        && !hasQueuedFinishCall
+      ) {
+        setFinishAnnouncementsComplete(true);
+      }
       return;
     }
 
-    const nextEvent = selectLiveRaceCommentaryEvent(events);
+    const finishEvents = events.filter((event) => (
+      event.kind === 'finish' || event.kind === 'rider-finish'
+    ));
+    const nextEvent = finishEvents[0] ?? selectLiveRaceCommentaryEvent(events);
     if (!nextEvent) {
       return;
     }
 
-    if (nextEvent.kind === 'finish' || nextEvent.kind === 'rider-finish') {
+    if (finishEvents.length > 0) {
+      setFinishAnnouncementsComplete(false);
+      const finishEventIds = new Set(finishEvents.map((event) => event.id));
       queueRef.current = [
-        ...queueRef.current.filter((event) => event.id !== nextEvent.id),
-        nextEvent,
+        ...queueRef.current.filter((event) => !finishEventIds.has(event.id)),
+        ...finishEvents,
       ].slice(-4);
-    } else {
+    } else if (
+      !activeFinishCallRef.current
+      && !queueRef.current.some((event) => (
+        event.kind === 'finish' || event.kind === 'rider-finish'
+      ))
+    ) {
       queueRef.current = [nextEvent];
     }
     if (
@@ -1343,6 +1379,18 @@ export function useRaceCommentary({
     trackName,
     zones,
   ]);
+
+  useEffect(() => {
+    if (raceState !== 'finished' || finishAnnouncementsComplete) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      stopPlayback();
+      setFinishAnnouncementsComplete(true);
+    }, 60_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [finishAnnouncementsComplete, raceState, stopPlayback]);
 
   useEffect(() => () => {
     startPrefetchRequestRef.current += 1;
@@ -1440,6 +1488,7 @@ export function useRaceCommentary({
     playbackError,
     serviceMode,
     preRaceReport,
+    finishAnnouncementsComplete,
     preview,
     prime,
     stop: stopPlayback,

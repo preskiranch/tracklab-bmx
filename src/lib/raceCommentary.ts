@@ -78,7 +78,7 @@ export function maximumRaceCommentaryEventAgeMs(kind: RaceCommentaryEventKind) {
     return 2_750;
   }
   if (kind === 'finish' || kind === 'rider-finish') {
-    return 24_000;
+    return 60_000;
   }
   if (kind === 'final-push') {
     return 3_500;
@@ -378,22 +378,26 @@ export function detectRaceCommentaryEvents(
     }
   }
 
-  const newlyFinishedRider = ordered.find((rider) => (
+  const newlyFinishedRiders = ordered.filter((rider) => (
     rider.finishedAt != null && !tracker.finishedPlayerIds.has(rider.playerId)
   ));
-  if (newlyFinishedRider) {
+  newlyFinishedRiders.forEach((newlyFinishedRider) => {
     const kind = tracker.finishedPlayerIds.size === 0 ? 'finish' : 'rider-finish';
     tracker.finishedPlayerIds.add(newlyFinishedRider.playerId);
     events.push(eventFor(tracker, snapshot, kind, now, {
       finishingPlayerId: newlyFinishedRider.playerId,
     }));
-  }
+  });
 
   tracker.raceState = snapshot.raceState;
-  const finishEvent = events.find((event) => event.kind === 'finish')
-    ?? events.find((event) => event.kind === 'rider-finish');
-  return finishEvent
-    ? [finishEvent, ...events.filter((event) => event !== finishEvent)].slice(0, 2)
+  const finishEvents = events.filter((event) => (
+    event.kind === 'finish' || event.kind === 'rider-finish'
+  ));
+  return finishEvents.length > 0
+    ? [
+      ...finishEvents,
+      ...events.filter((event) => !finishEvents.includes(event)),
+    ].slice(0, 4)
     : events.slice(0, 2);
 }
 
