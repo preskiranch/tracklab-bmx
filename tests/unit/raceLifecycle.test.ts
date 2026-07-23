@@ -55,18 +55,18 @@ function rider(finishedAt: number | null): RiderState {
 }
 
 describe('race lifecycle timing', () => {
-  it('starts one five-second finish window when the first rider finishes', () => {
+  it('starts one ten-second finish window when the first rider finishes', () => {
     expect(nextRaceFinishDeadline(null, [rider(null)], 20_000)).toBeNull();
     expect(nextRaceFinishDeadline(null, [rider(19_500)], 20_000)).toBe(20_000 + raceFinishCountdownMs);
-    expect(nextRaceFinishDeadline(25_000, [rider(19_500)], 21_000)).toBe(25_000);
+    expect(nextRaceFinishDeadline(30_000, [rider(19_500)], 21_000)).toBe(30_000);
   });
 
   it('reports stable whole-second countdown values', () => {
-    expect(countdownSeconds(25_000, 20_000)).toBe(5);
-    expect(countdownSeconds(25_000, 20_001)).toBe(5);
-    expect(countdownSeconds(25_000, 21_001)).toBe(4);
-    expect(countdownSeconds(25_000, 24_999)).toBe(1);
-    expect(countdownSeconds(25_000, 25_000)).toBe(0);
+    expect(countdownSeconds(30_000, 20_000)).toBe(10);
+    expect(countdownSeconds(30_000, 20_001)).toBe(10);
+    expect(countdownSeconds(30_000, 21_001)).toBe(9);
+    expect(countdownSeconds(30_000, 29_999)).toBe(1);
+    expect(countdownSeconds(30_000, 30_000)).toBe(0);
   });
 });
 

@@ -179,16 +179,22 @@ describe('race commentary event detection', () => {
     expect(line).toMatch(/wheel-to-wheel|fight for third|scrap for third|side-by-side|duel for third/i);
   });
 
-  it('recognizes pedal zones, the Pro Set, the final push, and the winner once', () => {
+  it('recognizes course action, the winner, and every later finisher once', () => {
     const tracker = createRaceCommentaryTracker();
-    detectRaceCommentaryEvents(tracker, snapshot([rider(1), rider(2)]), 1_000);
-    detectRaceCommentaryEvents(tracker, snapshot([rider(1, 1), rider(2, 0)]), 1_100);
+    detectRaceCommentaryEvents(tracker, snapshot(players.map((player) => rider(player.id))), 1_000);
+    detectRaceCommentaryEvents(
+      tracker,
+      snapshot([rider(1, 1), rider(2, 0), rider(3, 0), rider(4, 0)]),
+      1_100,
+    );
 
     const pedalAndPro = detectRaceCommentaryEvents(
       tracker,
       snapshot([
         rider(1, 45, { actualBranches: { 'Split 1': 'b' } }),
         rider(2, 44.5),
+        rider(3, 40),
+        rider(4, 39),
       ]),
       2_000,
     );
@@ -199,27 +205,80 @@ describe('race commentary event detection', () => {
       battleState: 'side-by-side',
       pedalReferenceAllowed: false,
     });
-    expect(localCommentaryLine(courseCall!)).toMatch(/Avery.*Blake|Blake.*Avery/);
-    expect(localCommentaryLine(courseCall!)).not.toMatch(/\b(?:attack|pedal(?:ling|ing)? zone)\b/i);
+    const courseLine = localCommentaryLine(courseCall!);
+    expect(players.filter((player) => courseLine.includes(player.name))).toHaveLength(2);
+    expect(courseLine).not.toMatch(/\b(?:attack|pedal(?:ling|ing)? zone)\b/i);
 
     const finalPush = detectRaceCommentaryEvents(
       tracker,
-      snapshot([rider(1, 240), rider(2, 220)]),
+      snapshot([rider(1, 240), rider(2, 220), rider(3, 210), rider(4, 200)]),
       3_000,
     );
     expect(finalPush.map((event) => event.kind)).toContain('final-push');
 
     const finish = detectRaceCommentaryEvents(
       tracker,
-      snapshot([rider(1, 300, { finishedAt: 31_200 }), rider(2, 270)]),
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200 }),
+        rider(2, 270),
+        rider(3, 260),
+        rider(4, 250),
+      ]),
       4_000,
     );
-    expect(finish.map((event) => event.kind)).toContain('finish');
+    expect(finish.find((event) => event.kind === 'finish')).toMatchObject({
+      finishingPlayerId: 1,
+    });
+
+    const secondFinish = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200 }),
+        rider(2, 300, { finishedAt: 32_100 }),
+        rider(3, 280),
+        rider(4, 270),
+      ]),
+      4_100,
+    ).find((event) => event.kind === 'rider-finish');
+    expect(secondFinish).toMatchObject({ finishingPlayerId: 2 });
+    expect(localCommentaryLine(secondFinish!)).toMatch(/Blake.*second/i);
+
+    const thirdFinish = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200 }),
+        rider(2, 300, { finishedAt: 32_100 }),
+        rider(3, 300, { finishedAt: 33_000 }),
+        rider(4, 290),
+      ]),
+      4_200,
+    ).find((event) => event.kind === 'rider-finish');
+    expect(thirdFinish).toMatchObject({ finishingPlayerId: 3 });
+    expect(localCommentaryLine(thirdFinish!)).toMatch(/Casey.*third/i);
+
+    const fourthFinish = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200 }),
+        rider(2, 300, { finishedAt: 32_100 }),
+        rider(3, 300, { finishedAt: 33_000 }),
+        rider(4, 300, { finishedAt: 34_000 }),
+      ]),
+      4_300,
+    ).find((event) => event.kind === 'rider-finish');
+    expect(fourthFinish).toMatchObject({ finishingPlayerId: 4 });
+    expect(localCommentaryLine(fourthFinish!)).toMatch(/Drew.*fourth/i);
+
     expect(detectRaceCommentaryEvents(
       tracker,
-      snapshot([rider(1, 300, { finishedAt: 31_200 }), rider(2, 280)]),
-      4_100,
-    ).map((event) => event.kind)).not.toContain('finish');
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200 }),
+        rider(2, 300, { finishedAt: 32_100 }),
+        rider(3, 300, { finishedAt: 33_000 }),
+        rider(4, 300, { finishedAt: 34_000 }),
+      ]),
+      4_400,
+    ).map((event) => event.kind)).not.toContain('rider-finish');
   });
 
   it('provides varied local lines when the AI service is unavailable', () => {
@@ -467,7 +526,7 @@ describe('race commentary event detection', () => {
     }, 3_751)).toBe(false);
   });
 
-  it('keeps a winner call live long enough for the active sentence to finish', () => {
+  it('keeps queued finish calls live long enough to complete after the ten-second window', () => {
     const tracker = createRaceCommentaryTracker();
     detectRaceCommentaryEvents(tracker, snapshot([rider(1), rider(2)]), 1_000);
     const [finishEvent] = detectRaceCommentaryEvents(
@@ -477,7 +536,7 @@ describe('race commentary event detection', () => {
     );
 
     expect(finishEvent.kind).toBe('finish');
-    expect(raceCommentaryEventIsFresh(finishEvent, 10_000)).toBe(true);
-    expect(raceCommentaryEventIsFresh(finishEvent, 10_001)).toBe(false);
+    expect(raceCommentaryEventIsFresh(finishEvent, 26_000)).toBe(true);
+    expect(raceCommentaryEventIsFresh(finishEvent, 26_001)).toBe(false);
   });
 });

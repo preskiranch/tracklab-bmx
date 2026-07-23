@@ -79,10 +79,21 @@ describe('full-field commentary coverage', () => {
       .toEqual([3, 2]);
   });
 
+  it('requires the rider who just crossed for each placement call', () => {
+    const riderFinish = {
+      ...event(8, 'rider-finish'),
+      finishingPlayerId: 3,
+    };
+
+    expect(requiredCommentaryRiders(riderFinish, []).map((rider) => rider.playerId))
+      .toEqual([3]);
+  });
+
   it('adds a wry aside only occasionally and never to the gate or finish', () => {
     expect(commentaryUsesWryAside(event(4, 'pedal-zone'))).toBe(false);
     expect(commentaryUsesWryAside(event(5, 'pedal-zone'))).toBe(true);
     expect(commentaryUsesWryAside(event(10, 'finish'))).toBe(false);
+    expect(commentaryUsesWryAside(event(10, 'rider-finish'))).toBe(false);
     expect(commentaryUsesWryAside(event(10, 'race-start'))).toBe(false);
   });
 });

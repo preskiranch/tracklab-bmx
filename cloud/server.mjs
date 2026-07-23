@@ -101,6 +101,7 @@ const commentaryEventKinds = new Set([
   'pro-set',
   'final-push',
   'finish',
+  'rider-finish',
 ]);
 const commentaryCoursePhases = new Set([
   'first-straight',
@@ -582,6 +583,7 @@ function sanitizeCommentaryEvent(value) {
   const previousLeaderPlayerId = Math.round(finiteNumber(value.previousLeaderPlayerId, 0));
   const passingPlayerId = Math.round(finiteNumber(value.passingPlayerId, 0));
   const passedPlayerId = Math.round(finiteNumber(value.passedPlayerId, 0));
+  const finishingPlayerId = Math.round(finiteNumber(value.finishingPlayerId, 0));
   const closeBattles = Array.isArray(value.closeBattles)
     ? value.closeBattles
       .slice(0, maxRaceBikeCount - 1)
@@ -615,6 +617,7 @@ function sanitizeCommentaryEvent(value) {
     ...(knownPlayerIds.has(previousLeaderPlayerId) ? { previousLeaderPlayerId } : {}),
     ...(knownPlayerIds.has(passingPlayerId) ? { passingPlayerId } : {}),
     ...(knownPlayerIds.has(passedPlayerId) ? { passedPlayerId } : {}),
+    ...(knownPlayerIds.has(finishingPlayerId) ? { finishingPlayerId } : {}),
     ...(value.splitName ? { splitName: sanitizeText(value.splitName, '', 80) } : {}),
     coursePhase: commentaryCoursePhases.has(value.coursePhase)
       ? value.coursePhase
@@ -642,7 +645,12 @@ function commentaryDeliveryStyleForEvent(event) {
   if (event.kind === 'lead-change' || event.kind === 'position-change') {
     return 'surge';
   }
-  if (event.kind === 'race-start' || event.kind === 'final-push' || event.kind === 'finish') {
+  if (
+    event.kind === 'race-start'
+    || event.kind === 'final-push'
+    || event.kind === 'finish'
+    || event.kind === 'rider-finish'
+  ) {
     return 'sprint';
   }
   if (commentaryUsesWryAside(event)) {
@@ -696,6 +704,9 @@ function commentarySpeechDirection(eventKind, deliveryStyle) {
   if (eventKind === 'finish') {
     return `Reach a celebratory peak on the winner’s name and victory, then complete the sentence cleanly with a strong finish. ${intensityDirection} ${wryDirection}`;
   }
+  if (eventKind === 'rider-finish') {
+    return `Call the rider’s exact finishing place as they cross the stripe. Give the name and placement a fresh lift, then acknowledge any rider still racing without stealing focus from the finish. Complete the sentence cleanly. ${intensityDirection}`;
+  }
   return `Give this preview a warm, confident sports-broadcast delivery with lively anticipation. ${intensityDirection} ${wryDirection}`;
 }
 
@@ -711,7 +722,7 @@ function commentarySpeechSpeed(eventKind) {
   ) {
     return 0.99;
   }
-  if (eventKind === 'race-start' || eventKind === 'finish') {
+  if (eventKind === 'race-start' || eventKind === 'finish' || eventKind === 'rider-finish') {
     return 0.98;
   }
   return 0.96;
@@ -925,6 +936,18 @@ function commentaryFallbackLine(
       `It's ${leader} out front with the stripe rushing closer!`,
       `Final charge to the line, and ${leader} has the advantage!`,
     ];
+  } else if (event.kind === 'rider-finish') {
+    const finisher = event.riders.find(
+      (rider) => rider.playerId === event.finishingPlayerId,
+    );
+    const remaining = event.riders.find((rider) => !rider.finished);
+    candidates = finisher
+      ? [
+        `${finisher.name} crosses in ${commentaryOrdinal(finisher.rank)}!${remaining ? ` ${remaining.name} is still racing.` : ' The field is complete.'}`,
+        `${commentaryOrdinal(finisher.rank)} belongs to ${finisher.name} at the stripe!${remaining ? ` ${remaining.name} keeps charging.` : ''}`,
+        `${finisher.name} secures ${commentaryOrdinal(finisher.rank)}!${remaining ? ` The race continues for ${remaining.name}.` : ' Everyone is home.'}`,
+      ]
+      : [`Another rider is home as the field races to the line!`];
   } else {
     candidates = [
       `${leader} takes the win!`,
@@ -1016,6 +1039,7 @@ async function generateCommentaryLine({
         'When closeBattles names a pair, describe them as wheel-to-wheel, side-by-side, under pressure, or locked in a fight for the supplied position. Never ignore a required third-versus-fourth battle.',
         'For lead-change, celebrate the new leader immediately, identify the displaced leader’s current position, then connect naturally to any required close battle behind.',
         'For position-change, state the supplied passing rider, passed rider, and new position with an authentic surge of excitement.',
+        'For finish, celebrate the supplied finishing rider as the winner. For rider-finish, call the supplied finishing rider’s exact rank as they cross and naturally acknowledge anyone still racing.',
         `Every candidate must naturally name all required focus riders: ${requiredRiderNames.join(', ') || 'none for this gate call'}.`,
         'Never claim a focused rider is gaining, fading, passing, or closing a gap unless the event facts support that action. It is safe to state their supplied running position and that they remain in the race or chase.',
         'Make racer-versus-racer action the center of the call: running order, pressure, passes, line choice, straights, turns, rhythm, and finish.',

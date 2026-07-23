@@ -102,7 +102,12 @@ function deliveryStyleForEvent(event: RaceCommentaryEvent): CommentaryDeliverySt
   if (event.kind === 'lead-change' || event.kind === 'position-change') {
     return 'surge';
   }
-  if (event.kind === 'race-start' || event.kind === 'final-push' || event.kind === 'finish') {
+  if (
+    event.kind === 'race-start'
+    || event.kind === 'final-push'
+    || event.kind === 'rider-finish'
+    || event.kind === 'finish'
+  ) {
     return 'sprint';
   }
   if (event.sequence % 5 === 0) {
@@ -216,7 +221,7 @@ function speakWithBrowser(
       || eventKind === 'pro-set'
       || eventKind === 'final-push'
       ? 0.02
-      : eventKind === 'race-start' || eventKind === 'finish'
+      : eventKind === 'race-start' || eventKind === 'rider-finish' || eventKind === 'finish'
         ? 0.01
         : 0;
     utterance.rate = baseRate + actionRate;
@@ -227,6 +232,7 @@ function speakWithBrowser(
       : 0.96;
     const actionPitchLift = eventKind === 'lead-change'
       || eventKind === 'position-change'
+      || eventKind === 'rider-finish'
       || eventKind === 'finish'
       ? 0.05
       : eventKind === 'race-start' || eventKind === 'final-push'
@@ -295,7 +301,7 @@ function commentarySpeechTimeoutMs(eventKind: CommentarySpeechEventKind) {
   if (eventKind === 'lead-change' || eventKind === 'position-change') {
     return 5_000;
   }
-  if (eventKind === 'finish') {
+  if (eventKind === 'finish' || eventKind === 'rider-finish') {
     return 12_000;
   }
   return 9_000;
@@ -564,6 +570,7 @@ export function useRaceCommentary({
   const raceLinesRef = useRef<string[]>([]);
   const queueRef = useRef<RaceCommentaryEvent[]>([]);
   const drainingRef = useRef(false);
+  const activeFinishCallRef = useRef(false);
   const lifecycleGenerationRef = useRef(0);
   const callSequenceRef = useRef(0);
   const playbackPhaseRef = useRef<CommentaryPlaybackPhase>('idle');
@@ -616,6 +623,7 @@ export function useRaceCommentary({
     lifecycleGenerationRef.current += 1;
     callSequenceRef.current += 1;
     queueRef.current = [];
+    activeFinishCallRef.current = false;
     activePlaybackCancelRef.current?.();
     activePlaybackCancelRef.current = null;
     activeRequestAbortRef.current?.abort();
@@ -1093,7 +1101,8 @@ export function useRaceCommentary({
           continue;
         }
 
-        if (event.kind === 'finish') {
+        if (event.kind === 'finish' || event.kind === 'rider-finish') {
+          activeFinishCallRef.current = true;
           line = localCommentaryLine(
             event,
             activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
@@ -1140,10 +1149,10 @@ export function useRaceCommentary({
               );
             }
           } finally {
+            activeFinishCallRef.current = false;
             if (activeRequestAbortRef.current === requestController) {
               activeRequestAbortRef.current = null;
             }
-            queueRef.current = [];
             setPlaybackPhase('idle');
           }
           continue;
@@ -1296,8 +1305,18 @@ export function useRaceCommentary({
       return;
     }
 
-    queueRef.current = [nextEvent];
-    if (shouldInterruptCommentaryForEvent(playbackPhaseRef.current, nextEvent.kind)) {
+    if (nextEvent.kind === 'finish' || nextEvent.kind === 'rider-finish') {
+      queueRef.current = [
+        ...queueRef.current.filter((event) => event.id !== nextEvent.id),
+        nextEvent,
+      ].slice(-4);
+    } else {
+      queueRef.current = [nextEvent];
+    }
+    if (
+      !activeFinishCallRef.current
+      && shouldInterruptCommentaryForEvent(playbackPhaseRef.current, nextEvent.kind)
+    ) {
       callSequenceRef.current += 1;
       activeRequestAbortRef.current?.abort();
       activeRequestAbortRef.current = null;

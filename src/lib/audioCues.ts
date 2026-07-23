@@ -8,8 +8,12 @@ let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
 let uciVoiceBufferPromise: Promise<AudioBuffer | null> | null = null;
 let mediaElementPrimed = false;
 let mediaElementPrimePromise: Promise<void> | null = null;
+let raceAmbienceAudio: HTMLAudioElement | null = null;
+let raceAmbiencePrimed = false;
+let raceAmbiencePrimePromise: Promise<void> | null = null;
 
 export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
+export const bmxEventAmbienceUrl = '/assets/bmx-event-ambience.mp3';
 export const uciVoiceWatchGateOffsetMs = 5300;
 
 type UciVoiceStartSource = 'audio' | 'fallback';
@@ -44,6 +48,17 @@ function getStartGateAudio() {
   }
 
   return activeStartGateAudio;
+}
+
+function getRaceAmbienceAudio() {
+  if (!raceAmbienceAudio) {
+    raceAmbienceAudio = new Audio(bmxEventAmbienceUrl);
+    raceAmbienceAudio.preload = 'auto';
+    raceAmbienceAudio.loop = true;
+    raceAmbienceAudio.setAttribute('playsinline', '');
+  }
+
+  return raceAmbienceAudio;
 }
 
 function loadUciVoiceBuffer(context: AudioContext) {
@@ -150,10 +165,64 @@ export async function primeAudioCues() {
     preloadTasks.push(mediaElementPrimePromise);
   }
 
+  const ambience = getRaceAmbienceAudio();
+  ambience.load();
+  if (!raceAmbiencePrimed && !raceAmbiencePrimePromise) {
+    ambience.muted = false;
+    ambience.volume = 0.0001;
+    raceAmbiencePrimePromise = ambience.play()
+      .then(() => {
+        ambience.pause();
+        ambience.currentTime = 0;
+        raceAmbiencePrimed = true;
+      })
+      .catch(() => {
+        // A later race-start gesture can retry playback when priming is blocked.
+      })
+      .finally(() => {
+        ambience.volume = 0.14;
+        ambience.muted = false;
+        raceAmbiencePrimePromise = null;
+      });
+  }
+  if (raceAmbiencePrimePromise) {
+    preloadTasks.push(raceAmbiencePrimePromise);
+  }
+
   await Promise.allSettled(preloadTasks);
 
   if (context && context.state === 'running') {
     await loadUciVoiceBuffer(context);
+  }
+}
+
+export async function startBmxEventAmbience(volume = 0.14) {
+  const ambience = getRaceAmbienceAudio();
+  const pendingPrime = raceAmbiencePrimePromise;
+  if (pendingPrime) {
+    await pendingPrime;
+  }
+
+  ambience.loop = true;
+  ambience.muted = false;
+  ambience.volume = Math.max(0, Math.min(0.3, volume));
+  try {
+    await ambience.play();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function stopBmxEventAmbience() {
+  if (!raceAmbienceAudio) {
+    return;
+  }
+  raceAmbienceAudio.pause();
+  try {
+    raceAmbienceAudio.currentTime = 0;
+  } catch {
+    // The media element may not have loaded enough metadata yet.
   }
 }
 

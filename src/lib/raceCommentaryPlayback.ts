@@ -15,6 +15,7 @@ export function raceStateStopsCommentary(raceState: RaceState) {
 export function commentaryNeedsImmediateLine(eventKind: RaceCommentaryEventKind) {
   return eventKind === 'lead-change'
     || eventKind === 'position-change'
+    || eventKind === 'rider-finish'
     || eventKind === 'finish';
 }
 

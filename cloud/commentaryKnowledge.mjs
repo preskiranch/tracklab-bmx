@@ -128,6 +128,16 @@ const eventLanguage = Object.freeze({
     'field follows home',
     'holds on at the stripe',
   ],
+  'rider-finish': [
+    'crosses in position',
+    'secures the place',
+    'home at the stripe',
+    'field follows home',
+    'keeps charging to the line',
+    'everyone is home',
+    'race continues behind',
+    'final rider across',
+  ],
 });
 
 const eventDelivery = Object.freeze({
@@ -139,6 +149,7 @@ const eventDelivery = Object.freeze({
   'pro-set': 'Give the line choice a quick lift and connect it directly to the chase.',
   'final-push': 'Build powerful, controlled urgency through the last straight and toward the line.',
   finish: 'Celebrate the winner passionately, emphasize the name, and complete the result cleanly.',
+  'rider-finish': 'Call the named rider’s exact finishing place with a fresh lift, then keep attention on anyone still racing.',
 });
 
 export function commentaryGuideForEvent(eventKind) {

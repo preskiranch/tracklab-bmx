@@ -88,8 +88,11 @@ export function requiredCommentaryRiders(event, raceLines = []) {
   if (event.kind === 'race-start') {
     return [];
   }
-  if (event.kind === 'finish') {
-    return [leaderFor(event)].filter(Boolean);
+  if (event.kind === 'finish' || event.kind === 'rider-finish') {
+    const finisher = event.riders.find(
+      (rider) => rider.playerId === event.finishingPlayerId,
+    );
+    return [finisher || leaderFor(event)].filter(Boolean);
   }
   if (event.kind === 'lead-change') {
     const newLeader = leaderFor(event);
@@ -127,6 +130,6 @@ export function requiredCommentaryRiders(event, raceLines = []) {
 }
 
 export function commentaryUsesWryAside(event) {
-  return !['race-start', 'finish'].includes(event?.kind)
+  return !['race-start', 'finish', 'rider-finish'].includes(event?.kind)
     && Math.max(0, Math.round(Number(event?.sequence) || 0)) % 5 === 0;
 }

@@ -1,7 +1,7 @@
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 import type { BikeSample, PlayerSlot, RiderState } from '../types';
 
-export const raceFinishCountdownMs = 5000;
+export const raceFinishCountdownMs = 10_000;
 export const falseStartResetCountdownMs = 5000;
 export const falseStartSpeedThresholdKph = 1.609344;
 export const falseStartSampleFreshMs = 1800;

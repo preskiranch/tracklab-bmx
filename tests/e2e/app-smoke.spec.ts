@@ -670,6 +670,14 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       __tracklabVoiceStartCount?: number;
       __tracklabGateToneStarts?: number[];
       __tracklabTreeLightSequence?: string[];
+      __tracklabAmbiencePlayCount?: number;
+    };
+    const originalMediaPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (...args: Parameters<HTMLMediaElement['play']>) {
+      if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience.mp3')) {
+        audioWindow.__tracklabAmbiencePlayCount = (audioWindow.__tracklabAmbiencePlayCount ?? 0) + 1;
+      }
+      return Reflect.apply(originalMediaPlay, this, args);
     };
     const prototype = window.AudioBufferSourceNode?.prototype;
     if (prototype) {
@@ -744,6 +752,11 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     await expect(riderPanel.getByText(customName, { exact: true })).toBeVisible();
   }
   await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabAmbiencePlayCount?: number;
+    }).__tracklabAmbiencePlayCount ?? 0
+  )), { timeout: 5_000 }).toBeGreaterThan(0);
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
   await expect.poll(() => commentarySpeechRequests, { timeout: 5_000 }).toBeGreaterThan(0);
@@ -1233,8 +1246,8 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(page.getByText('Complete a live Wattbike race on this track to create your personal ghost.')).toBeVisible();
 });
 
-test('completed race holds five seconds after the first finisher then returns to dashboard analysis', async ({ page }, testInfo) => {
-  test.setTimeout(90_000);
+test('completed race holds ten seconds after the first finisher then returns to dashboard analysis', async ({ page }, testInfo) => {
+  test.setTimeout(100_000);
   const authUser = {
     id: 'post-race-review-racer',
     profileKey: 'user:post-race-review-racer',
@@ -1301,13 +1314,14 @@ test('completed race holds five seconds after the first finisher then returns to
 
   const finishCountdown = page.locator('.race-finish-countdown');
   await expect(finishCountdown).toBeVisible({ timeout: 60_000 });
-  await expect(finishCountdown.locator('strong')).toHaveText(/[1-5]/);
+  await expect(finishCountdown.locator('strong')).toHaveText(/10|[1-9]/);
+  await expect(finishCountdown).toContainText('remaining riders still racing');
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
   await page.waitForTimeout(1_000);
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
 
-  await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/, { timeout: 7_000 });
+  await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/, { timeout: 12_000 });
   await expect(page.getByRole('region', { name: 'Post-race review' })).toHaveCount(0);
   await expect(page.locator('.race-review-screen')).toHaveCount(0);
 

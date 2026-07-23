@@ -381,7 +381,7 @@ export function EarthTrackView({
         {raceViewFullscreen && finishCountdownSeconds != null && (
           <div className="race-staging-countdown race-finish-countdown" role="status" aria-live="polite">
             <strong>{finishCountdownSeconds}</strong>
-            <span>Race closes after the first finisher</span>
+            <span>Finish window — remaining riders still racing</span>
           </div>
         )}
 

@@ -48,6 +48,8 @@ import {
   playStartGateTone,
   playUciRandomStartVoice,
   primeAudioCues,
+  startBmxEventAmbience,
+  stopBmxEventAmbience,
   stopStartGateAudio,
   uciVoiceWatchGateOffsetMs,
 } from './lib/audioCues';
@@ -2541,6 +2543,7 @@ export default function App() {
     onRecentLinesChange: handleRaceCommentaryRecentLinesChange,
   });
   const primeRaceAudio = raceCommentary.prime;
+  const raceAmbienceActive = startGateStatus.active || raceState === 'racing';
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const finishCountdownSeconds = finishWindowEndsAt != null && raceState === 'racing'
     ? Math.min(raceFinishCountdownMs / 1000, Math.max(1, countdownSeconds(finishWindowEndsAt, now)))
@@ -2557,6 +2560,18 @@ export default function App() {
     });
   }, [activeBranchChoicesByPlayer, racePlayers, raceState, riders, startGateStatus.active]);
   const canCancelRace = startGateStatus.active || raceState === 'racing';
+
+  useEffect(() => {
+    if (raceAmbienceActive) {
+      void startBmxEventAmbience();
+    } else {
+      stopBmxEventAmbience();
+    }
+  }, [raceAmbienceActive]);
+
+  useEffect(() => () => {
+    stopBmxEventAmbience();
+  }, []);
 
   const releaseRaceFullscreen = useCallback(() => {
     releaseBrowserFullscreen();

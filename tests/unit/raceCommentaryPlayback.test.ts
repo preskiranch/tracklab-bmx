@@ -15,7 +15,9 @@ describe('race commentary playback sequencing', () => {
 
   it('replaces calls that are still being prepared without cutting off spoken sentences', () => {
     expect(shouldInterruptCommentaryForEvent('speaking', 'finish')).toBe(false);
+    expect(shouldInterruptCommentaryForEvent('speaking', 'rider-finish')).toBe(false);
     expect(shouldInterruptCommentaryForEvent('preparing', 'finish')).toBe(true);
+    expect(shouldInterruptCommentaryForEvent('preparing', 'rider-finish')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('thinking', 'finish')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('thinking', 'lead-change')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('speaking', 'lead-change')).toBe(false);
@@ -26,8 +28,10 @@ describe('race commentary playback sequencing', () => {
   it('skips generative wording latency for live passes', () => {
     expect(commentaryNeedsImmediateLine('lead-change')).toBe(true);
     expect(commentaryNeedsImmediateLine('position-change')).toBe(true);
+    expect(commentaryNeedsImmediateLine('rider-finish')).toBe(true);
     expect(commentaryLineRequestBudgetMs('lead-change')).toBe(0);
     expect(commentaryLineRequestBudgetMs('position-change')).toBe(0);
+    expect(commentaryLineRequestBudgetMs('rider-finish')).toBe(0);
     expect(commentaryLineRequestBudgetMs('pedal-zone')).toBe(1_200);
   });
 
