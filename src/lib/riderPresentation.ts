@@ -2,8 +2,10 @@ import type { PlayerId, PlayerSlot } from '../types';
 
 const riderLaneSpacingMeters = 0.42;
 const riderLaneMaxSpreadMeters = 1.26;
-const riderScreenLaneSpacingPixels = 20;
-const riderScreenLaneMaxSpreadPixels = 60;
+// Geographic lane offsets already separate the riders across the real track
+// surface. Keep the extra screen-space offset neutral so zoom level cannot
+// push the outer riders beyond the track edges.
+const riderScreenLaneSpacingPixels = 0;
 const riderAirMetersPerPixel = 0.025;
 const riderMaximumAltitudeMeters = 0.85;
 
@@ -41,10 +43,7 @@ export function riderScreenLaneOffsetsByPlayer(players: PlayerSlot[]) {
   const offsets = new Map<PlayerId, number>();
   const spacing = sortedPlayers.length <= 1
     ? 0
-    : Math.min(
-      riderScreenLaneSpacingPixels,
-      riderScreenLaneMaxSpreadPixels / (sortedPlayers.length - 1),
-    );
+    : riderScreenLaneSpacingPixels;
   const midpoint = (sortedPlayers.length - 1) / 2;
 
   sortedPlayers.forEach((player, index) => {

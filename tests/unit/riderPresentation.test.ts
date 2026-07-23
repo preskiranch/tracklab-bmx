@@ -56,15 +56,20 @@ describe('3D rider presentation', () => {
     expect(offsets.get(4)).toBeCloseTo(0.63);
   });
 
-  it('adds a zoom-independent screen spread so four rider silhouettes stay readable', () => {
+  it('keeps extra screen-space spread neutral so all four riders stay on track', () => {
     const offsets = riderScreenLaneOffsetsByPlayer(players);
-    expect(offsets.get(1)).toBe(-30);
-    expect(offsets.get(2)).toBe(-10);
-    expect(offsets.get(3)).toBe(10);
-    expect(offsets.get(4)).toBe(30);
+    expect(offsets.get(1)).toBe(-0);
+    expect(offsets.get(2)).toBe(-0);
+    expect(offsets.get(3)).toBe(0);
+    expect(offsets.get(4)).toBe(0);
 
-    expect(riderScreenLaneTranslation(0, 20)).toEqual({ x: -0, y: 20 });
-    expect(riderScreenLaneTranslation(90, 20).x).toBeCloseTo(-20);
-    expect(riderScreenLaneTranslation(90, 20).y).toBeCloseTo(0);
+    offsets.forEach((offset) => {
+      const forwardTranslation = riderScreenLaneTranslation(0, offset);
+      const turnTranslation = riderScreenLaneTranslation(90, offset);
+      expect(forwardTranslation.x).toBeCloseTo(0);
+      expect(forwardTranslation.y).toBeCloseTo(0);
+      expect(turnTranslation.x).toBeCloseTo(0);
+      expect(turnTranslation.y).toBeCloseTo(0);
+    });
   });
 });
