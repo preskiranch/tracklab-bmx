@@ -171,6 +171,7 @@ import {
 import {
   benchmarkDemoTrackId,
   createMembership,
+  isAdminAccountEmail,
   normalizeAccountEmail,
   readStoredMembership,
   writeStoredMembership,
@@ -2347,6 +2348,7 @@ export default function App() {
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
   const adminProfileActive = Boolean(authUser?.admin);
+  const developerRaceLayoutActive = isAdminAccountEmail(accountEmail);
   const ghostRouteVariantId = effectiveTrack.activeRouteVariantId ?? (hasDualStartRoutes ? raceRouteVariantId : undefined);
   const availableGhostLaps = useMemo(
     () => ghostsForTrackRoute(ghostLaps, effectiveTrack.id, ghostRouteVariantId, isLoopTrack ? lapCount : 1)
@@ -5119,14 +5121,20 @@ export default function App() {
   }, [handleEarthCameraChange]);
 
   const handleRaceCameraLockedChange = useCallback((locked: boolean) => {
+    if (!developerRaceLayoutActive) {
+      return;
+    }
     setRaceCameraLocked(locked);
     persistRaceViewPreferences({
       ...raceViewPreferencesRef.current,
       cameraLocked: locked,
     });
-  }, [persistRaceViewPreferences]);
+  }, [developerRaceLayoutActive, persistRaceViewPreferences]);
 
   const handleRiderOverlayPreferenceChange = useCallback((trackId: string, layout: RaceRiderOverlayLayout) => {
+    if (!developerRaceLayoutActive) {
+      return;
+    }
     setRiderOverlaysByTrack((current) => {
       const next = {
         ...current,
@@ -5138,7 +5146,7 @@ export default function App() {
       });
       return next;
     });
-  }, [persistRaceViewPreferences]);
+  }, [developerRaceLayoutActive, persistRaceViewPreferences]);
 
   useEffect(() => () => clearStartGateSequence(), [clearStartGateSequence]);
 
@@ -6759,6 +6767,7 @@ export default function App() {
                   earthCenter={earthCenter}
                   earthZoom={earthZoom}
                   raceCameraLocked={raceCameraLocked}
+                  canEditRaceLayout={developerRaceLayoutActive}
                   riderOverlayPreference={riderOverlaysByTrack[effectiveTrack.id]}
                   activeZones={activeZones}
                   canCancelRace={canCancelRace}

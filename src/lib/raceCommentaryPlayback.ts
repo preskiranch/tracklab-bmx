@@ -2,6 +2,7 @@ import type { RaceState } from '../types';
 import type { RaceCommentaryEventKind } from './raceCommentary';
 
 export type RaceCommentaryPlaybackPhase = 'idle' | 'thinking' | 'preparing' | 'speaking';
+export const finishCommentaryReleaseTimeoutMs = 12_000;
 
 export function browserSpeechWatchdogMs(line: string) {
   const wordCount = line.trim().split(/\s+/).filter(Boolean).length;

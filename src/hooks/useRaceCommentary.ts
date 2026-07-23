@@ -13,6 +13,7 @@ import {
   browserSpeechWatchdogMs,
   commentaryLineRequestBudgetMs,
   commentaryNeedsImmediateLine,
+  finishCommentaryReleaseTimeoutMs,
   raceStateStopsCommentary,
   shouldInterruptCommentaryForEvent,
   type RaceCommentaryPlaybackPhase,
@@ -334,6 +335,7 @@ async function playAudioBlobWithWebAudio(
   activePlaybackCancelRef: ActivePlaybackCancelRef,
   shouldContinue: () => boolean,
   onStart: () => void,
+  watchdogMs: number,
 ) {
   const context = getTrackLabAudioContext();
   if (!context) {
@@ -365,6 +367,7 @@ async function playAudioBlobWithWebAudio(
     const source = context.createBufferSource();
     const gain = context.createGain();
     let settled = false;
+    let watchdogId: number | null = null;
     source.buffer = buffer;
     gain.gain.value = volume;
     source.connect(gain);
@@ -376,6 +379,9 @@ async function playAudioBlobWithWebAudio(
         return;
       }
       settled = true;
+      if (watchdogId != null) {
+        window.clearTimeout(watchdogId);
+      }
       source.onended = null;
       source.disconnect();
       gain.disconnect();
@@ -404,6 +410,7 @@ async function playAudioBlobWithWebAudio(
     try {
       source.start();
       onStart();
+      watchdogId = window.setTimeout(cancel, watchdogMs);
     } catch (error) {
       release(false, error);
     }
@@ -429,6 +436,7 @@ async function playAudioBlobWithMediaElement(
   activePlaybackCancelRef: ActivePlaybackCancelRef,
   shouldContinue: () => boolean,
   onStart: () => void,
+  watchdogMs: number,
 ) {
   if (!shouldContinue()) {
     return false;
@@ -444,11 +452,15 @@ async function playAudioBlobWithMediaElement(
   audio.load();
   return await new Promise<boolean>((resolve, reject) => {
     let settled = false;
+    let watchdogId: number | null = null;
     const release = (played: boolean, error?: unknown) => {
       if (settled) {
         return;
       }
       settled = true;
+      if (watchdogId != null) {
+        window.clearTimeout(watchdogId);
+      }
       audio.onended = null;
       audio.onerror = null;
       URL.revokeObjectURL(audioUrl);
@@ -473,6 +485,7 @@ async function playAudioBlobWithMediaElement(
     };
     activePlaybackCancelRef.current = cancel;
     onStart();
+    watchdogId = window.setTimeout(cancel, watchdogMs);
     void audio.play().catch((error) => {
       release(false, error);
     });
@@ -487,6 +500,7 @@ async function playAudioBlob(
   activePlaybackCancelRef: ActivePlaybackCancelRef,
   shouldContinue: () => boolean,
   onStart: () => void,
+  watchdogMs: number,
 ) {
   const webAudioResult = await playAudioBlobWithWebAudio(
     audioBlob,
@@ -495,6 +509,7 @@ async function playAudioBlob(
     activePlaybackCancelRef,
     shouldContinue,
     onStart,
+    watchdogMs,
   );
   if (webAudioResult != null) {
     return webAudioResult;
@@ -507,6 +522,7 @@ async function playAudioBlob(
     activePlaybackCancelRef,
     shouldContinue,
     onStart,
+    watchdogMs,
   );
 }
 
@@ -540,6 +556,7 @@ async function playAiSpeech(
     activePlaybackCancelRef,
     shouldContinue,
     onStart,
+    browserSpeechWatchdogMs(line),
   );
   if (!played) {
     throw new Error('AI speech audio did not start.');
@@ -909,6 +926,7 @@ export function useRaceCommentary({
             activePlaybackCancelRef,
             shouldContinue,
             beginSpeaking,
+            browserSpeechWatchdogMs(report.line),
           );
           if (!played) {
             throw new Error('Prepared pre-race speech did not start.');
@@ -1053,6 +1071,7 @@ export function useRaceCommentary({
                 activePlaybackCancelRef,
                 shouldContinue,
                 beginSpeaking,
+                browserSpeechWatchdogMs(line),
               );
               if (!played) {
                 throw new Error('Prepared race-start speech did not start.');
@@ -1388,7 +1407,7 @@ export function useRaceCommentary({
     const timeoutId = window.setTimeout(() => {
       stopPlayback();
       setFinishAnnouncementsComplete(true);
-    }, 60_000);
+    }, finishCommentaryReleaseTimeoutMs);
     return () => window.clearTimeout(timeoutId);
   }, [finishAnnouncementsComplete, raceState, stopPlayback]);
 

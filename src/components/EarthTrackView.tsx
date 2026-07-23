@@ -74,6 +74,7 @@ type EarthTrackViewProps = {
   earthCenter: TrackPoint | null;
   earthZoom: number | null;
   raceCameraLocked: boolean;
+  canEditRaceLayout: boolean;
   riderOverlayPreference?: RaceRiderOverlayLayout;
   activeZones: TrackZone[];
   canCancelRace: boolean;
@@ -166,6 +167,7 @@ export function EarthTrackView({
   earthCenter,
   earthZoom,
   raceCameraLocked,
+  canEditRaceLayout,
   riderOverlayPreference,
   activeZones,
   canCancelRace,
@@ -256,7 +258,7 @@ export function EarthTrackView({
               distanceUnit={distanceUnit}
               cStartOffsetsByPlayer={cStartOffsetsByPlayer}
               raceViewFullscreen={raceViewFullscreen}
-              cameraLocked={raceViewFullscreen && raceCameraLocked}
+              cameraLocked={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
               raceState={raceState}
               earthAngle={earthAngle}
               earthHeading={earthHeading}
@@ -323,7 +325,7 @@ export function EarthTrackView({
           </button>
         )}
 
-        {raceViewFullscreen && (
+        {raceViewFullscreen && canEditRaceLayout && (
           <button
             className={`race-camera-lock-overlay${raceCameraLocked ? ' locked' : ''}`}
             type="button"
@@ -334,6 +336,12 @@ export function EarthTrackView({
             {raceCameraLocked ? <Lock size={17} /> : <Unlock size={17} />}
             {raceCameraLocked ? 'View Locked' : 'Lock View'}
           </button>
+        )}
+        {raceViewFullscreen && !canEditRaceLayout && (
+          <div className="race-camera-lock-overlay locked" aria-label="Race layout locked">
+            <Lock size={17} />
+            Layout Locked
+          </div>
         )}
 
         <div className="earth-overlay top-left">
@@ -396,6 +404,7 @@ export function EarthTrackView({
           speedUnit={speedUnit}
           trackLengthMeters={track.lengthMeters}
           preference={riderOverlayPreference}
+          canEditLayout={canEditRaceLayout}
           onPreferenceChange={onRiderOverlayPreferenceChange}
           onFullscreenInteraction={onRaceFullscreenInteraction}
         />
@@ -414,12 +423,15 @@ export function EarthTrackView({
           </div>
         )}
 
-        <div className={`map-camera-pad${raceViewFullscreen && raceCameraLocked ? ' locked' : ''}`} aria-label="Map camera controls">
+        <div
+          className={`map-camera-pad${raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked) ? ' locked' : ''}`}
+          aria-label="Map camera controls"
+        >
           <button
             aria-label="Rotate map left"
             title="Rotate left"
             type="button"
-            disabled={raceViewFullscreen && raceCameraLocked}
+            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
             onClick={() => onEarthHeadingChange((earthHeading + 345) % 360)}
           >
             <RotateCcw size={16} />
@@ -428,7 +440,7 @@ export function EarthTrackView({
             aria-label="Tilt map up"
             title="Tilt up"
             type="button"
-            disabled={raceViewFullscreen && raceCameraLocked}
+            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
             onClick={() => onEarthAngleChange(Math.min(67, earthAngle + 5))}
           >
             <ChevronUp size={16} />
@@ -437,7 +449,7 @@ export function EarthTrackView({
             aria-label="Reset map north"
             title="Reset north"
             type="button"
-            disabled={raceViewFullscreen && raceCameraLocked}
+            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
             onClick={() => onEarthHeadingChange(0)}
           >
             <Compass size={16} />
@@ -446,7 +458,7 @@ export function EarthTrackView({
             aria-label="Tilt map down"
             title="Tilt down"
             type="button"
-            disabled={raceViewFullscreen && raceCameraLocked}
+            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
             onClick={() => onEarthAngleChange(Math.max(0, earthAngle - 5))}
           >
             <ChevronDown size={16} />
@@ -455,7 +467,7 @@ export function EarthTrackView({
             aria-label="Rotate map right"
             title="Rotate right"
             type="button"
-            disabled={raceViewFullscreen && raceCameraLocked}
+            disabled={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
             onClick={() => onEarthHeadingChange((earthHeading + 15) % 360)}
           >
             <RotateCw size={16} />

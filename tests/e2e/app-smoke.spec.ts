@@ -617,7 +617,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   const authUser = {
     id: 'quick-start-racer',
     profileKey: 'user:quick-start-racer',
-    email: 'quick-start@tracklab.test',
+    email: 'preskiranch@gmail.com',
     name: 'Quick Start Rider',
     admin: true,
     membership: {
@@ -709,7 +709,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await page.addInitScript(() => {
     const audioWindow = window as typeof window & {
       __tracklabVoiceStartCount?: number;
-      __tracklabGateToneStarts?: number[];
+      __tracklabCadenceVoiceStarts?: number;
+      __tracklabGateToneStarts?: Array<number | string>;
       __tracklabTreeLightSequence?: string[];
       __tracklabAmbiencePlayCount?: number;
       __tracklabAmbienceLoadCount?: number;
@@ -724,6 +725,16 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     };
     const originalMediaPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function (...args: Parameters<HTMLMediaElement['play']>) {
+      if ((this.currentSrc || this.src).includes('/assets/uci-random-start.mp3')) {
+        audioWindow.__tracklabCadenceVoiceStarts = (audioWindow.__tracklabCadenceVoiceStarts ?? 0) + 1;
+      }
+      const gateTone = this.getAttribute('data-tracklab-start-gate-tone');
+      if (gateTone && gateTone !== 'prime') {
+        audioWindow.__tracklabGateToneStarts = [
+          ...(audioWindow.__tracklabGateToneStarts ?? []),
+          gateTone,
+        ];
+      }
       if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience')) {
         audioWindow.__tracklabAmbiencePlayCount = (audioWindow.__tracklabAmbiencePlayCount ?? 0) + 1;
         audioWindow.__tracklabAmbienceElements = [
@@ -913,7 +924,14 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     (window as typeof window & { __tracklabVoiceStartCount?: number }).__tracklabVoiceStartCount ?? 0
   )), { timeout: 5_000 }).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => (
-    (window as typeof window & { __tracklabGateToneStarts?: number[] }).__tracklabGateToneStarts?.length ?? 0
+    (window as typeof window & {
+      __tracklabCadenceVoiceStarts?: number;
+    }).__tracklabCadenceVoiceStarts ?? 0
+  )), { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabGateToneStarts?: Array<number | string>;
+    }).__tracklabGateToneStarts?.length ?? 0
   )), { timeout: 10_000 }).toBe(4);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabTreeLightSequence?: string[] }).__tracklabTreeLightSequence ?? []
@@ -1656,6 +1674,11 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
     await expect(page.locator('.race-staging-countdown')).toBeVisible();
+    await expect(page.getByLabel('Race layout locked')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Lock View', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Unlock rider panel', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Resize rider overlay', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Rotate map left', exact: true })).toBeDisabled();
     await expect(page.locator('.race-staging-countdown strong')).toHaveText(/1[3-5]/);
     await expect(page.locator('.start-tree-light')).toHaveCount(0);
     await expect(page.locator('.rider-stat.ghost')).toContainText('0% / ghost');
@@ -1833,6 +1856,10 @@ test('live cadence detects a false start and automatically rearms after five sec
 
 test('two-bike live race stays fullscreen through UCI cadence with no pedal zones', async ({ page }, testInfo) => {
   const bridge = await createMockBikeBridge([58701, 58702]);
+  const raceViewPreferencePatches: Array<{
+    cameraLocked?: boolean;
+    riderOverlaysByTrack?: Record<string, { locked?: boolean }>;
+  }> = [];
   const sampleTimer = setInterval(() => {
     bridge.broadcast(mockBikeSample({
       deviceId: 58701,
@@ -1852,7 +1879,7 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
   const authUser = {
     id: 'two-bike-live-racer',
     profileKey: 'user:two-bike-live-racer',
-    email: 'two-bike-live@tracklab.test',
+    email: 'preskiranch@gmail.com',
     name: 'Two Bike Live Rider',
     admin: true,
     membership: {
@@ -1884,12 +1911,26 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
       });
     });
     await page.route('**/api/user-data*', async (route) => {
+      const payload = route.request().method() === 'PATCH'
+        ? route.request().postDataJSON() as {
+          raceViewPreferences?: {
+            cameraLocked?: boolean;
+            riderOverlaysByTrack?: Record<string, { locked?: boolean }>;
+          };
+        }
+        : null;
+      if (payload?.raceViewPreferences) {
+        raceViewPreferencePatches.push(payload.raceViewPreferences);
+      }
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
           trackMappings: {},
           customRoutes: [],
           bikeProfiles: [],
+          ...(payload?.raceViewPreferences
+            ? { raceViewPreferences: payload.raceViewPreferences }
+            : {}),
         }),
       });
     });
@@ -1938,6 +1979,10 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
     await page.getByRole('button', { name: 'Lock rider panel position and size', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Unlock rider panel', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('button', { name: 'Resize rider overlay', exact: true })).toHaveCount(0);
+    await expect.poll(() => raceViewPreferencePatches.some((preferences) => (
+      preferences.cameraLocked === true
+      && preferences.riderOverlaysByTrack?.['black-mountain-bmx']?.locked === true
+    )), { timeout: 5_000 }).toBe(true);
 
     await page.getByRole('button', { name: 'Resume Countdown', exact: true }).click();
     await expect(page.locator('.race-staging-countdown strong')).not.toHaveText('PAUSED');

@@ -47,6 +47,7 @@ type RaceRiderOverlayProps = {
   speedUnit: SpeedUnit;
   trackLengthMeters: number;
   preference?: RaceRiderOverlayLayout;
+  canEditLayout: boolean;
   onPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onFullscreenInteraction: () => void;
 };
@@ -89,6 +90,7 @@ export function RaceRiderOverlay({
   speedUnit,
   trackLengthMeters,
   preference,
+  canEditLayout,
   onPreferenceChange,
   onFullscreenInteraction,
 }: RaceRiderOverlayProps) {
@@ -123,9 +125,11 @@ export function RaceRiderOverlay({
     ) {
       layoutRef.current = nextLayout;
       setLayout(nextLayout);
-      onPreferenceChange(trackId, nextLayout);
+      if (canEditLayout && !layout.locked) {
+        onPreferenceChange(trackId, nextLayout);
+      }
     }
-  }, [layout, onPreferenceChange, trackId, visible]);
+  }, [canEditLayout, layout, onPreferenceChange, trackId, visible]);
 
   const entries = useMemo<OverlayEntry[]>(() => {
     const localEntries = riders.flatMap((rider) => {
@@ -237,7 +241,7 @@ export function RaceRiderOverlay({
   }, [finishDrag, moveDrag]);
 
   const beginMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (layout.locked) {
+    if (!canEditLayout || layout.locked) {
       return;
     }
     event.preventDefault();
@@ -255,7 +259,7 @@ export function RaceRiderOverlay({
   };
 
   const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (layout.locked) {
+    if (!canEditLayout || layout.locked) {
       return;
     }
     event.preventDefault();
@@ -273,6 +277,9 @@ export function RaceRiderOverlay({
   };
 
   const toggleLock = () => {
+    if (!canEditLayout) {
+      return;
+    }
     dragRef.current = null;
     const next = { ...layout, locked: !layout.locked };
     layoutRef.current = next;
@@ -286,7 +293,7 @@ export function RaceRiderOverlay({
 
   return (
     <div
-      className={`race-rider-overlay${layout.locked ? ' locked' : ''}`}
+      className={`race-rider-overlay${!canEditLayout || layout.locked ? ' locked' : ''}`}
       ref={overlayRef}
       aria-label="Race rider positions"
       style={{
@@ -301,29 +308,36 @@ export function RaceRiderOverlay({
           className="race-rider-overlay-handle"
           onPointerDown={beginMove}
           role="button"
-          tabIndex={layout.locked ? -1 : 0}
-          aria-disabled={layout.locked}
-          aria-label={layout.locked ? 'Rider panel position locked' : 'Move rider panel'}
+          tabIndex={!canEditLayout || layout.locked ? -1 : 0}
+          aria-disabled={!canEditLayout || layout.locked}
+          aria-label={!canEditLayout || layout.locked ? 'Rider panel position locked' : 'Move rider panel'}
         >
           <GripHorizontal size={16} />
           <span>Rider positions</span>
-          {!layout.locked && <small>Drag to move / drag corner to resize</small>}
+          {canEditLayout && !layout.locked && <small>Drag to move / drag corner to resize</small>}
         </div>
-        <button
-          className="race-rider-overlay-lock"
-          type="button"
-          aria-pressed={layout.locked}
-          aria-label={layout.locked ? 'Unlock rider panel' : 'Lock rider panel position and size'}
-          title={layout.locked ? 'Unlock rider panel' : 'Lock rider panel'}
-          onPointerDown={(event) => {
-            event.stopPropagation();
-            onFullscreenInteraction();
-          }}
-          onClick={toggleLock}
-        >
-          {layout.locked ? <Lock size={15} /> : <Unlock size={15} />}
-          <span>{layout.locked ? 'Locked' : 'Lock panel'}</span>
-        </button>
+        {canEditLayout ? (
+          <button
+            className="race-rider-overlay-lock"
+            type="button"
+            aria-pressed={layout.locked}
+            aria-label={layout.locked ? 'Unlock rider panel' : 'Lock rider panel position and size'}
+            title={layout.locked ? 'Unlock rider panel' : 'Lock rider panel'}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              onFullscreenInteraction();
+            }}
+            onClick={toggleLock}
+          >
+            {layout.locked ? <Lock size={15} /> : <Unlock size={15} />}
+            <span>{layout.locked ? 'Locked' : 'Lock panel'}</span>
+          </button>
+        ) : (
+          <span className="race-rider-overlay-lock" aria-label="Rider panel locked">
+            <Lock size={15} />
+            <span>Locked</span>
+          </span>
+        )}
       </div>
       <div className="race-rider-overlay-grid">
         {entries.map((entry) => (
@@ -350,14 +364,15 @@ export function RaceRiderOverlay({
           </div>
         ))}
       </div>
-      <button
-        className="race-rider-overlay-resize"
-        type="button"
-        aria-label="Resize rider overlay"
-        title="Resize rider panel horizontally and vertically"
-        disabled={layout.locked}
-        onPointerDown={beginResize}
-      />
+      {canEditLayout && !layout.locked && (
+        <button
+          className="race-rider-overlay-resize"
+          type="button"
+          aria-label="Resize rider overlay"
+          title="Resize rider panel horizontally and vertically"
+          onPointerDown={beginResize}
+        />
+      )}
     </div>
   );
 }

@@ -5,6 +5,10 @@ type AudioWindow = Window & typeof globalThis & {
 let audioContext: AudioContext | null = null;
 let activeStartGateAudio: HTMLAudioElement | null = null;
 let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
+let startGateToneAudioPool: HTMLAudioElement[] = [];
+let startGateToneAudioIndex = 0;
+let startGateToneMediaPrimed = false;
+let startGateToneMediaPrimePromise: Promise<void> | null = null;
 let uciVoiceBufferPromise: Promise<AudioBuffer | null> | null = null;
 let mediaElementPrimed = false;
 let mediaElementPrimePromise: Promise<void> | null = null;
@@ -81,6 +85,7 @@ export function bmxEventAmbienceProfile(index: number): BmxEventAmbienceProfile 
 }
 
 type UciVoiceStartSource = 'audio' | 'fallback';
+type StartGateToneKind = 'tick' | 'gate' | 'uci-red' | 'uci-green';
 
 export type UciVoiceStartResult = {
   startedAt: number;
@@ -125,9 +130,87 @@ function getStartGateAudio() {
   if (!activeStartGateAudio) {
     activeStartGateAudio = new Audio(uciRandomStartVoiceUrl);
     activeStartGateAudio.preload = 'auto';
+    activeStartGateAudio.setAttribute('playsinline', '');
   }
 
   return activeStartGateAudio;
+}
+
+function startGateToneProfile(kind: StartGateToneKind) {
+  const isGateTone = kind === 'gate' || kind === 'uci-green';
+  return {
+    frequency: kind.startsWith('uci') ? 632 : isGateTone ? 880 : 660,
+    durationSeconds: kind === 'uci-green' ? 2.28 : isGateTone ? 0.76 : 0.17,
+    volume: isGateTone ? 0.24 : 0.17,
+  };
+}
+
+function wavToneDataUrl(kind: StartGateToneKind) {
+  const { frequency, durationSeconds, volume } = startGateToneProfile(kind);
+  const sampleRate = 8_000;
+  const sampleCount = Math.ceil(sampleRate * durationSeconds);
+  const dataSize = sampleCount * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeText = (offset: number, text: string) => {
+    for (let index = 0; index < text.length; index += 1) {
+      view.setUint8(offset + index, text.charCodeAt(index));
+    }
+  };
+  writeText(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeText(8, 'WAVE');
+  writeText(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeText(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const elapsedSeconds = index / sampleRate;
+    const attack = Math.min(1, elapsedSeconds / 0.012);
+    const release = Math.min(1, (durationSeconds - elapsedSeconds) / 0.045);
+    const envelope = Math.max(0, Math.min(attack, release));
+    const sample = Math.sin(elapsedSeconds * frequency * Math.PI * 2)
+      * volume
+      * envelope;
+    view.setInt16(44 + index * 2, Math.round(sample * 32_767), true);
+  }
+
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
+
+const startGateToneDataUrls = new Map<StartGateToneKind, string>();
+
+function startGateToneUrl(kind: StartGateToneKind) {
+  const existing = startGateToneDataUrls.get(kind);
+  if (existing) {
+    return existing;
+  }
+  const dataUrl = wavToneDataUrl(kind);
+  startGateToneDataUrls.set(kind, dataUrl);
+  return dataUrl;
+}
+
+function getStartGateToneAudio(index = 0) {
+  while (startGateToneAudioPool.length <= index) {
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.setAttribute('playsinline', '');
+    startGateToneAudioPool.push(audio);
+  }
+  return startGateToneAudioPool[index];
 }
 
 function keepRaceCrowdInsideActiveAudio() {
@@ -320,6 +403,36 @@ export async function primeAudioCues() {
     preloadTasks.push(mediaElementPrimePromise);
   }
 
+  const toneAudios = Array.from({ length: 4 }, (_, index) => getStartGateToneAudio(index));
+  if (!startGateToneMediaPrimed && !startGateToneMediaPrimePromise) {
+    toneAudios.forEach((toneAudio) => {
+      toneAudio.src = startGateToneUrl('tick');
+      toneAudio.setAttribute('data-tracklab-start-gate-tone', 'prime');
+      toneAudio.muted = false;
+      toneAudio.volume = 0.0001;
+      toneAudio.load();
+    });
+    startGateToneMediaPrimePromise = Promise.allSettled(
+      toneAudios.map((toneAudio) => toneAudio.play()),
+    )
+      .then((results) => {
+        startGateToneMediaPrimed = results.every((result) => result.status === 'fulfilled');
+      })
+      .finally(() => {
+        toneAudios.forEach((toneAudio) => {
+          toneAudio.pause();
+          toneAudio.currentTime = 0;
+          toneAudio.volume = 1;
+          toneAudio.muted = false;
+          toneAudio.removeAttribute('data-tracklab-start-gate-tone');
+        });
+        startGateToneMediaPrimePromise = null;
+      });
+  }
+  if (startGateToneMediaPrimePromise) {
+    preloadTasks.push(startGateToneMediaPrimePromise);
+  }
+
   const { bed, crowd, profile } = prepareRaceAmbience();
   if (!raceAmbiencePrimed && !raceAmbiencePrimePromise) {
     bed.load();
@@ -421,7 +534,7 @@ export function playZoneCue(kind: 'start' | 'stop') {
   oscillator.stop(now + (kind === 'start' ? 0.18 : 0.26));
 }
 
-export function playStartGateTone(kind: 'tick' | 'gate' | 'uci-red' | 'uci-green') {
+function playStartGateToneWithWebAudio(kind: StartGateToneKind) {
   const context = resumeAudioContext();
   if (!context) {
     return;
@@ -430,18 +543,42 @@ export function playStartGateTone(kind: 'tick' | 'gate' | 'uci-red' | 'uci-green
   const oscillator = context.createOscillator();
   const gain = context.createGain();
   const now = context.currentTime;
+  const { frequency, durationSeconds, volume } = startGateToneProfile(kind);
   const isGateTone = kind === 'gate' || kind === 'uci-green';
 
   oscillator.type = 'sine';
-  oscillator.frequency.setValueAtTime(kind.startsWith('uci') ? 632 : isGateTone ? 880 : 660, now);
+  oscillator.frequency.setValueAtTime(frequency, now);
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(isGateTone ? 0.24 : 0.17, now + 0.012);
+  gain.gain.exponentialRampToValueAtTime(volume, now + 0.012);
   gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === 'uci-green' ? 2.25 : isGateTone ? 0.72 : 0.14));
 
   oscillator.connect(gain);
   gain.connect(context.destination);
   oscillator.start(now);
-  oscillator.stop(now + (kind === 'uci-green' ? 2.28 : isGateTone ? 0.76 : 0.17));
+  oscillator.stop(now + durationSeconds);
+}
+
+export function playStartGateTone(kind: StartGateToneKind) {
+  const audioIndex = startGateToneAudioIndex % 4;
+  startGateToneAudioIndex += 1;
+  const audio = getStartGateToneAudio(audioIndex);
+  audio.pause();
+  audio.src = startGateToneUrl(kind);
+  audio.preload = 'auto';
+  audio.muted = false;
+  audio.volume = 1;
+  audio.currentTime = 0;
+  audio.setAttribute('data-tracklab-start-gate-tone', kind);
+  audio.load();
+  void settleWithin(
+    audio.play().then(() => true).catch(() => false),
+    500,
+    false,
+  ).then((started) => {
+    if (!started) {
+      playStartGateToneWithWebAudio(kind);
+    }
+  });
 }
 
 export function speakStartGatePhrase(text: string) {
@@ -472,13 +609,67 @@ export function stopStartGateAudio() {
     activeStartGateAudio.currentTime = 0;
   }
 
+  startGateToneAudioPool.forEach((audio) => {
+    audio.pause();
+    audio.currentTime = 0;
+  });
+
   window.speechSynthesis?.cancel();
 }
 
 export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoiceStartResult> {
   stopStartGateAudio();
-  const context = getAudioContext();
+  const audio = getStartGateAudio();
+  if (!audio.src.endsWith(uciRandomStartVoiceUrl)) {
+    audio.src = uciRandomStartVoiceUrl;
+  }
+  audio.preload = 'auto';
+  audio.setAttribute('playsinline', '');
+  audio.muted = false;
+  audio.volume = 1;
+  audio.currentTime = 0;
 
+  const mediaResult = await new Promise<UciVoiceStartResult | null>((resolve) => {
+    let settled = false;
+    let timeoutId: number | null = null;
+
+    const cleanup = () => {
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+      audio.removeEventListener('playing', handleAudioStarted);
+    };
+
+    const finish = (result: UciVoiceStartResult | null) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+
+    function handleAudioStarted() {
+      finish({ startedAt: Date.now(), source: 'audio' });
+    }
+
+    audio.addEventListener('playing', handleAudioStarted, { once: true });
+    timeoutId = window.setTimeout(() => finish(null), timeoutMs);
+
+    void audio.play()
+      .then(() => {
+        finish({ startedAt: Date.now(), source: 'audio' });
+      })
+      .catch(() => finish(null));
+  });
+
+  if (mediaResult) {
+    return mediaResult;
+  }
+
+  cancelPendingStartGateAudio(audio);
+  const context = getAudioContext();
   if (context && context.state !== 'running' && context.state !== 'closed') {
     await settleWithin(context.resume(), 1_200, undefined);
   }
@@ -502,51 +693,7 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
     }
   }
 
-  const audio = getStartGateAudio();
-  audio.preload = 'auto';
-  audio.muted = false;
-  audio.volume = 1;
-  audio.currentTime = 0;
-
-  return new Promise((resolve) => {
-    let settled = false;
-    let timeoutId: number | null = null;
-
-    const cleanup = () => {
-      if (timeoutId != null) {
-        window.clearTimeout(timeoutId);
-      }
-      audio.removeEventListener('playing', handleAudioStarted);
-    };
-
-    const finish = (source: UciVoiceStartSource) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      cleanup();
-      resolve({ startedAt: Date.now(), source });
-    };
-
-    const startFallback = () => {
-      cancelPendingStartGateAudio(audio);
-      playStartGateTone('tick');
-      speakStartGatePhrase('OK riders, random start. Riders ready. Watch the gate.');
-      finish('fallback');
-    };
-
-    function handleAudioStarted() {
-      finish('audio');
-    }
-
-    audio.addEventListener('playing', handleAudioStarted, { once: true });
-    timeoutId = window.setTimeout(startFallback, timeoutMs);
-
-    void audio.play()
-      .then(() => {
-        finish('audio');
-      })
-      .catch(startFallback);
-  });
+  playStartGateTone('tick');
+  speakStartGatePhrase('OK riders, random start. Riders ready. Watch the gate.');
+  return { startedAt: Date.now(), source: 'fallback' };
 }

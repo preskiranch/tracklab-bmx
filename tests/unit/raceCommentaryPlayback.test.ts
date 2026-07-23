@@ -3,6 +3,7 @@ import {
   browserSpeechWatchdogMs,
   commentaryLineRequestBudgetMs,
   commentaryNeedsImmediateLine,
+  finishCommentaryReleaseTimeoutMs,
   raceStateStopsCommentary,
   shouldInterruptCommentaryForEvent,
 } from '../../src/lib/raceCommentaryPlayback';
@@ -38,5 +39,9 @@ describe('race commentary playback sequencing', () => {
   it('preserves finish playback until the race returns to the gate', () => {
     expect(raceStateStopsCommentary('finished')).toBe(false);
     expect(raceStateStopsCommentary('ready')).toBe(true);
+  });
+
+  it('bounds stalled finish playback so fullscreen can always release', () => {
+    expect(finishCommentaryReleaseTimeoutMs).toBe(12_000);
   });
 });

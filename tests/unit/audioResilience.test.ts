@@ -91,6 +91,25 @@ describe('race audio resilience', () => {
     await expect(voiceStart).resolves.toMatchObject({ source: 'fallback' });
   });
 
+  it('uses the primed media cadence when playback is available', async () => {
+    StalledAudio.stallPlayback = false;
+    const {
+      playUciRandomStartVoice,
+      primeAudioCues,
+      uciRandomStartVoiceUrl,
+    } = await import('../../src/lib/audioCues');
+
+    await primeAudioCues();
+    await expect(playUciRandomStartVoice(100)).resolves.toMatchObject({ source: 'audio' });
+
+    const cadenceAudio = StalledAudio.instances.find((audio) => audio.src.endsWith(uciRandomStartVoiceUrl));
+    expect(cadenceAudio).toMatchObject({
+      muted: false,
+      paused: false,
+      volume: 1,
+    });
+  });
+
   it('does not reload or stop ambience when cadence preparation runs', async () => {
     StalledAudio.stallPlayback = false;
     const {
