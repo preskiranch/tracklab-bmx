@@ -64,6 +64,12 @@ import {
   riderRigGeometry,
   type RiderRigPoint,
 } from '../lib/riderRig';
+import {
+  riderMarkerCanvasSize,
+  riderMarkerDrawSize,
+  riderMarkerDrawTop,
+  uprightRiderOrientation,
+} from '../lib/riderPresentation';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -132,9 +138,6 @@ const riderRigBaseByColor: Record<PlayerSlot['colorName'], string> = {
   blue: '/assets/rider-blue-rig-base.png',
   yellow: '/assets/rider-yellow-rig-base.png',
 };
-const riderCanvasSize = 64;
-const riderDrawSize = 58;
-const riderDrawTop = -29;
 const riderFrontTireInset = 1;
 const riderGroundContactInset = 1;
 const riderLaneSpacingMeters = 1.1;
@@ -556,24 +559,6 @@ function riderScreenRotation(routeBearing: number, mapHeading: number) {
   return normalizeHeading(routeBearing - mapHeading - 90);
 }
 
-function signedRotationDegrees(rotationDegrees: number) {
-  const normalized = normalizeHeading(rotationDegrees);
-  return normalized > 180 ? normalized - 360 : normalized;
-}
-
-function uprightRiderOrientation(rotationDegrees: number) {
-  const signedRotation = signedRotationDegrees(rotationDegrees);
-  const mirrored = Math.abs(signedRotation) > 90;
-  const facingLean = mirrored
-    ? signedRotation - Math.sign(signedRotation || 1) * 180
-    : signedRotation;
-
-  return {
-    leanDegrees: Math.max(-24, Math.min(24, facingLean)),
-    mirrored,
-  };
-}
-
 function riderLeanBucket(rotationDegrees: number) {
   return Math.round(uprightRiderOrientation(rotationDegrees).leanDegrees / 2) * 2;
 }
@@ -586,12 +571,12 @@ function visualRiderDistanceMeters(distanceMeters: number, cStartBackoffMeters =
 function riderFrontTireAnchor(rotationDegrees: number) {
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
-  const frontTireX = (riderDrawSize / 2) - riderFrontTireInset;
-  const groundY = riderDrawTop + riderDrawSize - riderGroundContactInset;
+  const frontTireX = (riderMarkerDrawSize / 2) - riderFrontTireInset;
+  const groundY = riderMarkerDrawTop + riderMarkerDrawSize - riderGroundContactInset;
   const localX = orientation.mirrored ? -frontTireX : frontTireX;
   const radians = (leanBucket * Math.PI) / 180;
-  const anchorX = (riderCanvasSize / 2) + (localX * Math.cos(radians)) - (groundY * Math.sin(radians));
-  const anchorY = (riderCanvasSize / 2) + (localX * Math.sin(radians)) + (groundY * Math.cos(radians));
+  const anchorX = (riderMarkerCanvasSize / 2) + (localX * Math.cos(radians)) - (groundY * Math.sin(radians));
+  const anchorY = (riderMarkerCanvasSize / 2) + (localX * Math.sin(radians)) + (groundY * Math.cos(radians));
 
   return { x: anchorX, y: anchorY };
 }
@@ -631,8 +616,8 @@ type RiderMarkerAppearance = 'live' | 'ghost';
 
 function riderRigCanvasPoint(point: RiderRigPoint) {
   return {
-    x: (-riderDrawSize / 2) + point.x * riderDrawSize,
-    y: riderDrawTop + point.y * riderDrawSize,
+    x: (-riderMarkerDrawSize / 2) + point.x * riderMarkerDrawSize,
+    y: riderMarkerDrawTop + point.y * riderMarkerDrawSize,
   };
 }
 
@@ -806,7 +791,7 @@ function drawUprightRiderCanvas(
 ) {
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
-  const size = riderCanvasSize;
+  const size = riderMarkerCanvasSize;
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext('2d');
@@ -822,10 +807,10 @@ function drawUprightRiderCanvas(
   context.shadowOffsetY = 5;
   context.drawImage(
     image,
-    -riderDrawSize / 2,
-    riderDrawTop,
-    riderDrawSize,
-    riderDrawSize,
+    -riderMarkerDrawSize / 2,
+    riderMarkerDrawTop,
+    riderMarkerDrawSize,
+    riderMarkerDrawSize,
   );
   context.shadowColor = 'transparent';
   context.shadowBlur = 0;
@@ -915,16 +900,16 @@ function createPersistentRiderOverlay(
   element.className = 'tracklab-rider-overlay';
   element.title = initialTitle;
   element.setAttribute('aria-label', initialTitle);
-  element.style.background = `center / contain no-repeat url("${riderFallbackIconByColor[player.colorName]}")`;
-  element.style.height = `${riderCanvasSize}px`;
+  element.style.background = `center / auto ${riderMarkerDrawSize}px no-repeat url("${riderFallbackIconByColor[player.colorName]}")`;
+  element.style.height = `${riderMarkerCanvasSize}px`;
   element.style.pointerEvents = 'none';
   element.style.position = 'absolute';
-  element.style.width = `${riderCanvasSize}px`;
+  element.style.width = `${riderMarkerCanvasSize}px`;
   element.style.willChange = 'left, top, transform';
   element.style.zIndex = String(zIndex);
-  canvas.height = riderCanvasSize;
+  canvas.height = riderMarkerCanvasSize;
   canvas.style.display = 'block';
-  canvas.width = riderCanvasSize;
+  canvas.width = riderMarkerCanvasSize;
   element.appendChild(canvas);
 
   let position = initialPosition;
@@ -1092,7 +1077,7 @@ function createRiderMapMarker(
         marker.setIcon({
           anchor: riderFrontTireAnchorPoint(google, nextRotation),
           labelOrigin: new google.maps.Point(74, 15),
-          scaledSize: new google.maps.Size(riderCanvasSize, riderCanvasSize),
+          scaledSize: new google.maps.Size(riderMarkerCanvasSize, riderMarkerCanvasSize),
           url,
         });
       })

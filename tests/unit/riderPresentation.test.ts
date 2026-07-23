@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   riderAirPixelsToMeters,
   riderLaneOffsetsByPlayer,
+  riderMarkerCanvasSize,
+  riderMarkerDrawSize,
+  riderMarkerSafetyPaddingPixels,
   uprightRiderOrientation,
 } from '../../src/lib/riderPresentation';
 import type { PlayerSlot } from '../../src/types';
@@ -19,6 +22,18 @@ describe('3D rider presentation', () => {
     expect(uprightRiderOrientation(180)).toEqual({ leanDegrees: 0, mirrored: true });
     expect(uprightRiderOrientation(270)).toEqual({ leanDegrees: -24, mirrored: false });
     expect(uprightRiderOrientation(135)).toEqual({ leanDegrees: -24, mirrored: true });
+  });
+
+  it('keeps the complete rider inside the marker canvas at every supported lean', () => {
+    for (let leanDegrees = -24; leanDegrees <= 24; leanDegrees += 2) {
+      const radians = Math.abs(leanDegrees) * (Math.PI / 180);
+      const rotatedHalfExtent = (riderMarkerDrawSize / 2)
+        * (Math.cos(radians) + Math.sin(radians));
+      const availableHalfExtent = (riderMarkerCanvasSize / 2)
+        - riderMarkerSafetyPaddingPixels;
+
+      expect(rotatedHalfExtent).toBeLessThanOrEqual(availableHalfExtent);
+    }
   });
 
   it('converts game air pixels to a bounded terrain altitude', () => {

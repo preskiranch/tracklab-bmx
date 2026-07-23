@@ -2557,7 +2557,7 @@ input:focus {
   padding: 0 10px;
   color: rgba(255, 255, 255, 0.76);
   cursor: move;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 850;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2566,7 +2566,7 @@ input:focus {
 .race-rider-overlay-handle small {
   overflow: hidden;
   color: rgba(255, 255, 255, 0.5);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
   text-overflow: ellipsis;
@@ -2591,7 +2591,7 @@ input:focus {
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.1);
   color: #ffffff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 850;
 }
 
@@ -2632,13 +2632,13 @@ input:focus {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  min-width: 38px;
-  min-height: 36px;
-  padding: 0 7px;
+  min-width: 42px;
+  min-height: 40px;
+  padding: 0 8px;
   border-radius: 7px;
   background: var(--player-color);
   color: #06111f;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 950;
 }
 
@@ -2651,18 +2651,18 @@ input:focus {
 .race-rider-overlay-card strong {
   overflow: hidden;
   color: #ffffff;
-  font-size: 16px;
-  line-height: 1.1;
+  font-size: 18px;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .race-rider-overlay-card span:not(.race-rider-overlay-badge) {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 12px;
-  font-weight: 750;
-  line-height: 1.15;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2692,6 +2692,9 @@ input:focus {
 
   .race-rider-overlay-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
+    gap: 6px;
+    padding: 6px;
   }
 
   .race-rider-overlay-handle small,
@@ -2700,7 +2703,24 @@ input:focus {
   }
 
   .race-rider-overlay-card strong {
-    font-size: 14px;
+    font-size: 16px;
+  }
+
+  .race-rider-overlay-card {
+    gap: 6px;
+    padding: 4px 7px;
+  }
+
+  .race-rider-overlay-card span:not(.race-rider-overlay-badge) {
+    font-size: 13px;
+    letter-spacing: -0.01em;
+  }
+
+  .race-rider-overlay-badge {
+    min-width: 38px;
+    min-height: 38px;
+    padding: 0 6px;
+    font-size: 15px;
   }
 }
 

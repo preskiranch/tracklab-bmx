@@ -626,6 +626,52 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(page.locator('.race-staging-countdown')).toBeVisible();
   await expect(page.locator('.race-staging-countdown strong')).toHaveText(/1[3-5]/);
   await expect(page.locator('.start-tree-light')).toHaveCount(0);
+  const riderPanel = page.locator('.race-rider-overlay');
+  await expect(riderPanel).toBeVisible();
+  const desktopRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
+    const name = card.querySelector('strong');
+    const metrics = card.querySelector('div > span');
+    return {
+      name: name ? Number.parseFloat(getComputedStyle(name).fontSize) : 0,
+      metrics: metrics ? Number.parseFloat(getComputedStyle(metrics).fontSize) : 0,
+    };
+  });
+  expect(desktopRiderText.name).toBeGreaterThanOrEqual(18);
+  expect(desktopRiderText.metrics).toBeGreaterThanOrEqual(14);
+
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(riderPanel.locator('.race-rider-overlay-card')).toHaveCount(4);
+  const mobileRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
+    const name = card.querySelector('strong');
+    const metrics = card.querySelector('div > span');
+    return {
+      name: name ? Number.parseFloat(getComputedStyle(name).fontSize) : 0,
+      metrics: metrics ? Number.parseFloat(getComputedStyle(metrics).fontSize) : 0,
+    };
+  });
+  expect(mobileRiderText.name).toBeGreaterThanOrEqual(16);
+  expect(mobileRiderText.metrics).toBeGreaterThanOrEqual(13);
+  const mobileCardsFit = await riderPanel.evaluate((panel) => {
+    const panelBounds = panel.getBoundingClientRect();
+    return [...panel.querySelectorAll('.race-rider-overlay-card')].every((card) => {
+      const cardBounds = card.getBoundingClientRect();
+      return cardBounds.left >= panelBounds.left
+        && cardBounds.right <= panelBounds.right
+        && cardBounds.top >= panelBounds.top
+        && cardBounds.bottom <= panelBounds.bottom;
+    });
+  });
+  expect(mobileCardsFit).toBe(true);
+  await testInfo.attach('demo-race-rider-panel-mobile.png', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.waitForTimeout(15_500);
   await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
   await expect(page.locator('.start-tree-light')).toBeVisible();

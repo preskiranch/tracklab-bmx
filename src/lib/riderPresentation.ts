@@ -5,6 +5,14 @@ const riderLaneMaxSpreadMeters = 1.26;
 const riderAirMetersPerPixel = 0.025;
 const riderMaximumAltitudeMeters = 0.85;
 
+// The rider stays 58px tall, but turns can lean the square source art by up
+// to 24 degrees. Keep a larger transparent canvas around it so neither end of
+// the bike nor its shadow is clipped on Google Maps raster overlays.
+export const riderMarkerCanvasSize = 96;
+export const riderMarkerDrawSize = 58;
+export const riderMarkerDrawTop = -riderMarkerDrawSize / 2;
+export const riderMarkerSafetyPaddingPixels = 8;
+
 function normalizeHeading(value: number) {
   return ((value % 360) + 360) % 360;
 }
