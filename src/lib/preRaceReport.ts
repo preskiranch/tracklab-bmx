@@ -3,6 +3,7 @@ import type {
   PlayerSlot,
   TrackRecord,
 } from '../types';
+import { selectCommentaryRiderName } from './commentaryNames';
 
 export type PreRaceSource = {
   title: string;
@@ -316,7 +317,23 @@ export function localPreRaceReportLine(
   weather?: PreRaceWeather,
   recentLines: string[] = [],
 ) {
-  const names = naturalNameList(context.riders.map((rider) => rider.name));
+  const nameSeed = [
+    context.id,
+    context.riders.map((rider) => rider.name).join('|'),
+    recentLines.length,
+    recentLines.at(-1) ?? '',
+  ].join('|');
+  let nameHash = 2_166_136_261;
+  for (const character of nameSeed) {
+    nameHash ^= character.charCodeAt(0);
+    nameHash = Math.imul(nameHash, 16_777_619);
+  }
+  const names = naturalNameList(context.riders.map((rider, index) => (
+    selectCommentaryRiderName(
+      rider.name,
+      (((nameHash >>> 0) + index * 263) % 1000) / 1000,
+    )
+  )));
   const place = usefulText(context.city) ?? usefulText(context.state) ?? usefulText(context.country);
   const location = place ? ` in ${place}` : '';
   const weatherFacts = weather?.available && weather.summary

@@ -769,7 +769,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     window.addEventListener('DOMContentLoaded', () => {
       let previousLight = '';
       const recordActiveLight = () => {
-        const activeLight = document.querySelector<HTMLElement>('.tree-lamp.active')?.getAttribute('aria-label') ?? '';
+        const activeLights = document.querySelectorAll<HTMLElement>('.tree-lamp.active');
+        const activeLight = activeLights.item(activeLights.length - 1)?.getAttribute('aria-label') ?? '';
         if (activeLight && activeLight !== previousLight) {
           audioWindow.__tracklabTreeLightSequence = [
             ...(audioWindow.__tracklabTreeLightSequence ?? []),

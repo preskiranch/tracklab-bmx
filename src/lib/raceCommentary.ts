@@ -1,4 +1,9 @@
 import { racePositionsAreEstablished } from './racePositionDisplay';
+import {
+  commentaryRiderNameParts,
+  commentaryRiderNameForms,
+  selectCommentaryRiderName,
+} from './commentaryNames';
 import type {
   PlayerSlot,
   RaceState,
@@ -515,7 +520,12 @@ function commentaryChoice<T>(
 
 function lineMentionsLocalRider(line: string, rider: RaceCommentaryRiderFact) {
   const lineWords = new Set(lineTokens(line));
-  const aliases = [rider.name, rider.name.split(/\s+/)[0]].map(lineTokens);
+  const nameForms = commentaryRiderNameForms(rider.name);
+  const legalFirstName = commentaryRiderNameParts(rider.name).legalName.split(/\s+/)[0];
+  const aliases = [
+    ...nameForms,
+    legalFirstName,
+  ].map(lineTokens);
   return aliases.some((alias) => (
     alias.length > 0 && alias.every((word) => lineWords.has(word))
   ));
@@ -775,15 +785,24 @@ export function localRaceStartLine(
   riderNames: string[],
   recentLines: string[] = [],
 ) {
-  const fieldNames = riderNames.length > 1
-    ? `${riderNames.slice(0, -1).join(', ')} and ${riderNames.at(-1)}`
-    : riderNames[0] ?? '';
-  const soloActions = riderNames[0]
+  const seed = stableCommentaryHash([
+    trackName,
+    riderNames.join('|'),
+    recentLines.length,
+    recentLines.at(-1) ?? '',
+  ].join('|'));
+  const spokenRiderNames = riderNames.map((name, index) => (
+    selectCommentaryRiderName(name, ((seed + index * 263) % 1000) / 1000)
+  ));
+  const fieldNames = spokenRiderNames.length > 1
+    ? `${spokenRiderNames.slice(0, -1).join(', ')} and ${spokenRiderNames.at(-1)}`
+    : spokenRiderNames[0] ?? '';
+  const soloActions = spokenRiderNames[0]
     ? [
-      `${riderNames[0]} launches`,
-      `${riderNames[0]} drives into the opening sprint`,
-      `${riderNames[0]} is underway`,
-      `${riderNames[0]} powers into the race`,
+      `${spokenRiderNames[0]} launches`,
+      `${spokenRiderNames[0]} drives into the opening sprint`,
+      `${spokenRiderNames[0]} is underway`,
+      `${spokenRiderNames[0]} powers into the race`,
     ]
     : ['the race is underway', 'the opening sprint begins', 'here we go'];
   const namedFieldActions = [
@@ -792,13 +811,7 @@ export function localRaceStartLine(
     `${fieldNames} power into the opening sprint`,
     `${fieldNames} are racing`,
   ];
-  const actions = riderNames.length > 1 ? namedFieldActions : soloActions;
-  const seed = stableCommentaryHash([
-    trackName,
-    riderNames.join('|'),
-    recentLines.length,
-    recentLines.at(-1) ?? '',
-  ].join('|'));
+  const actions = spokenRiderNames.length > 1 ? namedFieldActions : soloActions;
   const candidates = Array.from({ length: 24 }, (_, index) => (
     `${startOpeningFragments[(seed + index * 17) % startOpeningFragments.length]} ${trackName}—${actions[(seed + index * 29) % actions.length]}!`
   ));
@@ -964,6 +977,23 @@ function localCommentaryCandidates(
   recentLines: string[],
   raceLines: string[],
 ) {
+  const nameSeed = stableCommentaryHash([
+    event.id,
+    event.sequence,
+    recentLines.length,
+    raceLines.length,
+    'rider-name',
+  ].join('|'));
+  event = {
+    ...event,
+    riders: event.riders.map((rider, index) => ({
+      ...rider,
+      name: selectCommentaryRiderName(
+        rider.name,
+        ((nameSeed + index * 263) % 1000) / 1000,
+      ),
+    })),
+  };
   const leader = event.riders.find((rider) => rider.playerId === event.leaderPlayerId)
     ?? event.riders[0];
   const second = event.riders[1];

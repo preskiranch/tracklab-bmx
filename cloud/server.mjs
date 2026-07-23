@@ -19,6 +19,10 @@ import {
   commentaryLineUsesForbiddenTelemetry,
 } from './commentarySafety.mjs';
 import {
+  commentaryRiderNameFact,
+  selectCommentaryRiderName,
+} from './commentaryNames.mjs';
+import {
   commentaryUsesWryAside,
   requiredCommentaryRiders,
 } from './commentaryCoverage.mjs';
@@ -796,6 +800,23 @@ function commentaryFallbackLine(
   requiredRiders = [],
   useWryAside = false,
 ) {
+  const fallbackNames = new Map(
+    [...event.riders, ...requiredRiders].map((rider) => [
+      rider.playerId,
+      selectCommentaryRiderName(rider.name),
+    ]),
+  );
+  event = {
+    ...event,
+    riders: event.riders.map((rider) => ({
+      ...rider,
+      name: fallbackNames.get(rider.playerId) ?? rider.name,
+    })),
+  };
+  requiredRiders = requiredRiders.map((rider) => ({
+    ...rider,
+    name: fallbackNames.get(rider.playerId) ?? rider.name,
+  }));
   const leader = event.riders.find((rider) => rider.playerId === event.leaderPlayerId)?.name
     ?? event.riders[0]?.name
     ?? 'The leader';
@@ -977,6 +998,7 @@ async function generateCommentaryLine({
         'Call what is happening on track, never the sensor data behind it.',
         'Never rank riders at race-start. During the race, the supplied rank for each rider is authoritative; use first, second, third, or fourth only when that exact rank is supplied.',
         'Every rider must be named naturally during the race. requiredFocusRiders carries any rider who still needs in-race coverage; include every one without turning a concise update into the main story.',
+        'Names containing a parenthetical nickname include authorized nameForms. Across calls, naturally rotate among legalName, nickname alone, and fullCall; never force a nickname every time. A nickname-only call still names that rider. Never invent or alter a nickname.',
         'Editorial priority follows live action: lead changes first, then actual passes, then the smallest supplied close-battle gap wherever it occurs in the field. Keep the leader connected to the story when the hottest battle is behind.',
         'When requiredFocusRiders contains a close-battle pair, make the passing threat clear with wheel-to-wheel, side-by-side, under pressure, or locked-in language for the supplied position. Do not shift attention to a different closeBattles pair.',
         'For lead-change, celebrate the new leader immediately, identify the displaced leader’s current position, and keep the call centered on the fight at the front.',
@@ -1007,7 +1029,12 @@ async function generateCommentaryLine({
         variationKey: randomUUID(),
         requiredFocusRiders: requiredRiders.map((rider) => ({
           name: rider.name,
+          nameForms: commentaryRiderNameFact(rider.name),
           rank: rider.rank,
+        })),
+        riderNameForms: event.riders.map((rider) => ({
+          playerId: rider.playerId,
+          ...commentaryRiderNameFact(rider.name),
         })),
         useWryAside,
       }),

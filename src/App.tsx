@@ -139,6 +139,11 @@ import {
   liveRaceStagingSeconds,
 } from './lib/raceStartSequence';
 import {
+  uciRandomDelayMaxMs,
+  uciRandomDelayMinMs,
+  uciStartToneIntervalMs,
+} from './lib/uciStartGate';
+import {
   normalizeRaceViewPreferences,
   normalizeRaceCommentaryPreferences,
   readStoredRaceViewPreferences,
@@ -228,8 +233,6 @@ const SessionControlPanel = lazy(() => import('./components/SessionControlPanel'
   .then((module) => ({ default: module.SessionControlPanel })));
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
-const uciRandomDelayMinMs = 100;
-const uciRandomDelayMaxMs = 2700;
 const customRouteInitialZoom = 18;
 const customRouteInitialAngle = 0;
 const customRouteInitialHeading = 0;
@@ -5320,7 +5323,7 @@ export default function App() {
       });
     });
 
-    [0, 120, 240].forEach((offsetMs, index) => {
+    [0, uciStartToneIntervalMs, uciStartToneIntervalMs * 2].forEach((offsetMs, index) => {
       scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
         if (index === 0) {
           const redLightAt = Date.now();
@@ -5345,7 +5348,7 @@ export default function App() {
       });
     });
 
-    scheduleVoiceStep(firstToneAtMs + 360, () => {
+    scheduleVoiceStep(firstToneAtMs + uciStartToneIntervalMs * 3, () => {
       playStartGateTone('uci-green');
       beginRaceAtGateDrop(startingTrackId, sequenceId);
     });

@@ -110,6 +110,60 @@ describe('race audio resilience', () => {
     });
   });
 
+  it('starts each UCI light tone immediately through Web Audio when available', async () => {
+    const frequencies: number[] = [];
+    const stopTimes: number[] = [];
+    class GateAudioContext {
+      currentTime = 4;
+      destination = {};
+      state = 'running';
+
+      createGain() {
+        return {
+          connect() {},
+          gain: {
+            exponentialRampToValueAtTime() {},
+            setValueAtTime() {},
+          },
+        };
+      }
+
+      createOscillator() {
+        return {
+          connect() {},
+          frequency: {
+            setValueAtTime(value: number) {
+              frequencies.push(value);
+            },
+          },
+          start() {},
+          stop(at: number) {
+            stopTimes.push(at);
+          },
+          type: 'sine',
+        };
+      }
+
+      resume() {
+        return Promise.resolve();
+      }
+    }
+    vi.stubGlobal('window', {
+      AudioContext: GateAudioContext,
+      webkitAudioContext: undefined,
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+      speechSynthesis: undefined,
+    });
+    const { playStartGateTone } = await import('../../src/lib/audioCues');
+
+    playStartGateTone('uci-red');
+
+    expect(frequencies).toEqual([632]);
+    expect(stopTimes[0]).toBeCloseTo(4.062, 5);
+    expect(StalledAudio.instances).toHaveLength(0);
+  });
+
   it('does not reload or stop ambience when cadence preparation runs', async () => {
     StalledAudio.stallPlayback = false;
     const {

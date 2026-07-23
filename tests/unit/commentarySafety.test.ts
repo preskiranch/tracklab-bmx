@@ -4,6 +4,11 @@ import {
   commentaryLineUsesDemeaningSarcasm,
   commentaryLineUsesForbiddenTelemetry,
 } from '../../cloud/commentarySafety.mjs';
+import {
+  commentaryRiderNameForms,
+  commentaryRiderNameParts,
+  selectCommentaryRiderName,
+} from '../../cloud/commentaryNames.mjs';
 
 describe('commentary rider-name safety', () => {
   it('does not mistake a real rider name for forbidden race telemetry', () => {
@@ -24,6 +29,34 @@ describe('commentary rider-name safety', () => {
 
     expect(commentaryLineMentionsRider('Maya takes over in the rhythm section.', riderNames)).toBe(true);
     expect(commentaryLineMentionsRider('The leader takes over in the rhythm section.', riderNames)).toBe(false);
+  });
+
+  it('treats a parenthetical nickname as an authorized natural rider call', () => {
+    const riderName = 'Connor Fields (The Captain)';
+
+    expect(commentaryRiderNameParts(riderName)).toEqual({
+      enteredName: riderName,
+      legalName: 'Connor Fields',
+      nickname: 'The Captain',
+      fullCall: 'Connor Fields, The Captain',
+    });
+    expect(commentaryRiderNameForms(riderName)).toEqual([
+      riderName,
+      'Connor Fields',
+      'The Captain',
+      'Connor Fields, The Captain',
+    ]);
+    expect(selectCommentaryRiderName(riderName, 0.2)).toBe('Connor Fields');
+    expect(selectCommentaryRiderName(riderName, 0.6)).toBe('The Captain');
+    expect(selectCommentaryRiderName(riderName, 0.9)).toBe('Connor Fields, The Captain');
+    expect(commentaryLineMentionsRider(
+      'The Captain sweeps into the lead!',
+      [riderName],
+    )).toBe(true);
+    expect(commentaryLineMentionsRider(
+      'Connor Fields holds the front through the rhythm.',
+      [riderName],
+    )).toBe(true);
   });
 
   it('allows playful race wit but rejects insults or crash jokes', () => {

@@ -132,7 +132,7 @@ function StartTreeLight({ activeIndex }: { activeIndex: 0 | 1 | 2 | 3 | null }) 
     <div className="start-tree-light" aria-label="BMX start tree light">
       {startTreeLamps.map((lamp, index) => (
         <span
-          className={`tree-lamp ${lamp.className}${activeIndex === index ? ' active' : ''}`}
+          className={`tree-lamp ${lamp.className}${activeIndex != null && index <= activeIndex ? ' active' : ''}`}
           aria-label={lamp.label}
           key={`${lamp.className}-${index}`}
         />

@@ -1,3 +1,8 @@
+import {
+  uciGreenToneDurationSeconds,
+  uciShortToneDurationSeconds,
+} from './uciStartGate';
+
 type AudioWindow = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
@@ -140,7 +145,13 @@ function startGateToneProfile(kind: StartGateToneKind) {
   const isGateTone = kind === 'gate' || kind === 'uci-green';
   return {
     frequency: kind.startsWith('uci') ? 632 : isGateTone ? 880 : 660,
-    durationSeconds: kind === 'uci-green' ? 2.28 : isGateTone ? 0.76 : 0.17,
+    durationSeconds: kind === 'uci-green'
+      ? uciGreenToneDurationSeconds
+      : kind === 'uci-red'
+        ? uciShortToneDurationSeconds
+        : isGateTone
+          ? 0.76
+          : 0.17,
     volume: isGateTone ? 0.24 : 0.17,
   };
 }
@@ -536,29 +547,44 @@ export function playZoneCue(kind: 'start' | 'stop') {
 
 function playStartGateToneWithWebAudio(kind: StartGateToneKind) {
   const context = resumeAudioContext();
-  if (!context) {
-    return;
+  if (!context || context.state === 'closed') {
+    return false;
   }
 
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  const now = context.currentTime;
-  const { frequency, durationSeconds, volume } = startGateToneProfile(kind);
-  const isGateTone = kind === 'gate' || kind === 'uci-green';
+  try {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const now = context.currentTime;
+    const { frequency, durationSeconds, volume } = startGateToneProfile(kind);
+    const attackSeconds = Math.min(0.012, durationSeconds * 0.2);
+    const releaseSeconds = Math.min(0.045, durationSeconds * 0.25);
+    const releaseAt = now + Math.max(
+      attackSeconds + 0.001,
+      durationSeconds - releaseSeconds,
+    );
 
-  oscillator.type = 'sine';
-  oscillator.frequency.setValueAtTime(frequency, now);
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(volume, now + 0.012);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === 'uci-green' ? 2.25 : isGateTone ? 0.72 : 0.14));
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(frequency, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(volume, now + attackSeconds);
+    gain.gain.setValueAtTime(volume, releaseAt);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSeconds);
 
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start(now);
-  oscillator.stop(now + durationSeconds);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + durationSeconds + 0.002);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function playStartGateTone(kind: StartGateToneKind) {
+  if (playStartGateToneWithWebAudio(kind)) {
+    return;
+  }
+
   const audioIndex = startGateToneAudioIndex % 4;
   startGateToneAudioIndex += 1;
   const audio = getStartGateToneAudio(audioIndex);
@@ -574,11 +600,7 @@ export function playStartGateTone(kind: StartGateToneKind) {
     audio.play().then(() => true).catch(() => false),
     500,
     false,
-  ).then((started) => {
-    if (!started) {
-      playStartGateToneWithWebAudio(kind);
-    }
-  });
+  );
 }
 
 export function speakStartGatePhrase(text: string) {
