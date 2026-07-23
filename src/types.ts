@@ -558,7 +558,12 @@ export type RaceRiderOverlayLayout = {
 };
 
 export type RaceCommentaryModel = 'gpt-5.6-luna' | 'gpt-5.6-terra' | 'gpt-5.6-sol';
-export type RaceCommentaryVoicePreset = 'australian-woman' | 'australian-man' | 'american-man';
+export type RaceCommentaryVoicePreset =
+  | 'australian-woman'
+  | 'australian-man'
+  | 'american-man'
+  | 'british-woman'
+  | 'british-man';
 
 export type RaceCommentaryPreferences = {
   enabled: boolean;

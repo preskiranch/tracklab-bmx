@@ -129,7 +129,19 @@ describe('cloud API trust boundaries', () => {
     expect(config).toMatchObject({
       aiAvailable: false,
       speechModel: 'gpt-4o-mini-tts',
-      voicePresets: ['australian-woman', 'australian-man', 'american-man'],
+      voicePresets: [
+        'australian-woman',
+        'australian-man',
+        'american-man',
+        'british-woman',
+        'british-man',
+      ],
+      research: {
+        knowledgeVersion: 'usabmx-national-2026-07-22-v1',
+        indexedVideos: 166,
+        analyzedRaceCallSegments: 18_208,
+        retainsFullTranscripts: false,
+      },
     });
     expect(JSON.stringify(config)).not.toContain('OPENAI_API_KEY');
   });

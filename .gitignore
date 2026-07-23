@@ -3,6 +3,7 @@ dist/
 captures/
 .npm-cache/
 .env.local
+.venv-commentary/
 *.tsbuildinfo
 playwright-report/
 test-results/

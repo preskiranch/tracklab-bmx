@@ -31,7 +31,13 @@ type UseRaceCommentaryOptions = {
 };
 
 function speechLanguage(voicePreset: RaceCommentaryVoicePreset) {
-  return voicePreset === 'american-man' ? 'en-US' : 'en-AU';
+  if (voicePreset === 'american-man') {
+    return 'en-US';
+  }
+  if (voicePreset === 'british-woman' || voicePreset === 'british-man') {
+    return 'en-GB';
+  }
+  return 'en-AU';
 }
 
 function browserVoiceFor(voicePreset: RaceCommentaryVoicePreset) {
@@ -75,8 +81,14 @@ function speakWithBrowser(
     utterance.lang = speechLanguage(voicePreset);
     utterance.voice = browserVoiceFor(voicePreset);
     utterance.volume = volume;
-    utterance.rate = voicePreset === 'american-man' ? 1.08 : 1.04;
-    utterance.pitch = voicePreset === 'australian-woman' ? 1.04 : 0.9;
+    utterance.rate = voicePreset === 'american-man'
+      ? 1.08
+      : voicePreset === 'british-woman' || voicePreset === 'british-man'
+        ? 1.05
+        : 1.04;
+    utterance.pitch = voicePreset === 'australian-woman' || voicePreset === 'british-woman'
+      ? 1.04
+      : 0.9;
     utterance.onend = finish;
     utterance.onerror = finish;
     window.speechSynthesis.speak(utterance);

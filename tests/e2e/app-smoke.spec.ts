@@ -332,6 +332,11 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByText('1,305 tracks', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Open App', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Race Dashboard', exact: true })).toBeVisible();
+  const announcerVoice = page.getByLabel('Announcer voice');
+  await expect(announcerVoice).toContainText('British woman — England, UK');
+  await expect(announcerVoice).toContainText('British man — England, UK');
+  await announcerVoice.selectOption('british-man');
+  await expect(announcerVoice).toHaveValue('british-man');
 
   await page.screenshot({
     fullPage: false,

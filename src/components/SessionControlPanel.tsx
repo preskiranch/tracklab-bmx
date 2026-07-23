@@ -1125,6 +1125,8 @@ export function SessionControlPanel({
               <option value="australian-woman">Australian woman</option>
               <option value="australian-man">Australian man</option>
               <option value="american-man">American man</option>
+              <option value="british-woman">British woman — England, UK</option>
+              <option value="british-man">British man — England, UK</option>
             </select>
           </label>
         </div>
@@ -1173,6 +1175,7 @@ export function SessionControlPanel({
         </button>
         <p className="announcer-disclosure">
           Voice and wording are AI-generated. Race facts always come from TrackLab telemetry.
+          USA BMX research contributes aggregate terminology, never voice cloning.
         </p>
       </section>
 

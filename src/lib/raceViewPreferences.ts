@@ -34,6 +34,8 @@ const commentaryVoices = new Set<RaceCommentaryVoicePreset>([
   'australian-woman',
   'australian-man',
   'american-man',
+  'british-woman',
+  'british-man',
 ]);
 
 function finiteNumber(value: unknown, fallback: number) {

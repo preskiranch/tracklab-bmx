@@ -57,7 +57,7 @@ describe('race view preferences', () => {
     const commentary = normalizeRaceCommentaryPreferences({
       enabled: false,
       model: 'unsupported-model',
-      voicePreset: 'american-man',
+      voicePreset: 'british-man',
       volume: 4,
       adaptiveMemory: false,
       recentLines: [...Array.from({ length: 14 }, (_, index) => ` Call ${index} `), 42],
@@ -66,7 +66,7 @@ describe('race view preferences', () => {
     expect(commentary).toMatchObject({
       enabled: false,
       model: 'gpt-5.6-terra',
-      voicePreset: 'american-man',
+      voicePreset: 'british-man',
       volume: 1,
       adaptiveMemory: false,
     });

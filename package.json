@@ -33,6 +33,7 @@
     "tracks:validate": "node scripts/validate-track-database.mjs",
     "billing:square:setup": "node scripts/setup-square-billing.mjs",
     "billing:square:sync-render": "node scripts/sync-render-square-env.mjs",
+    "commentary:research:usabmx": "python3 scripts/analyze-usabmx-commentary.py --years 2025 2026 --output data/commentary/usabmx-national-analysis.json",
     "typecheck": "tsc -b --pretty false",
     "build": "npm run tracks:build && npm run typecheck && vite build && node scripts/compress-dist-assets.mjs && node scripts/check-bundle-budget.mjs",
     "preview": "vite preview --host 127.0.0.1",
