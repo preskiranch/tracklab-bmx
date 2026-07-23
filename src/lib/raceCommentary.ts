@@ -532,16 +532,12 @@ export function selectLocalCommentaryFocusRiders(
       0,
     ),
   ]));
-  if (event.sequence % 4 !== 0 || trailingRiders.length === 0) {
-    return (frontRiders.length > 0 ? frontRiders : riders).slice(0, limit);
-  }
-
   const trailingFocus = [...trailingRiders].sort((left, right) => (
     (mentionCounts.get(left.playerId) ?? 0) - (mentionCounts.get(right.playerId) ?? 0)
     || left.rank - right.rank
   ))[0];
   return [...new Map(
-    [frontRiders[0], trailingFocus]
+    [...frontRiders, trailingFocus]
       .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
       .map((rider) => [rider.playerId, rider]),
   ).values()].slice(0, limit);
@@ -558,17 +554,13 @@ function closeBattleRiders(
       0,
     ),
   ]));
-  const trailingCoverageDue = event.sequence % 4 === 0;
-  const eligibleBattles = trailingCoverageDue
-    ? event.closeBattles.filter((battle) => battle.position >= 3)
-    : event.closeBattles.filter((battle) => battle.position <= 2);
-  const battle = [...(eligibleBattles.length > 0 ? eligibleBattles : event.closeBattles)].sort((left, right) => {
+  const battle = [...event.closeBattles].sort((left, right) => {
     const leftMentions = (mentionCounts.get(left.frontPlayerId) ?? 0)
       + (mentionCounts.get(left.behindPlayerId) ?? 0);
     const rightMentions = (mentionCounts.get(right.frontPlayerId) ?? 0)
       + (mentionCounts.get(right.behindPlayerId) ?? 0);
-    return left.position - right.position
-      || left.gapMeters - right.gapMeters
+    return left.gapMeters - right.gapMeters
+      || left.position - right.position
       || leftMentions - rightMentions;
   })[0];
   if (!battle) {
@@ -583,7 +575,7 @@ function requiredLocalCommentaryRiders(
   event: RaceCommentaryEvent,
   raceLines: string[],
 ) {
-  const focusRiders = selectLocalCommentaryFocusRiders(event, raceLines, 2);
+  const focusRiders = selectLocalCommentaryFocusRiders(event, raceLines, 3);
   const battleRiders = closeBattleRiders(event, raceLines);
   const leader = event.riders.find((rider) => rider.playerId === event.leaderPlayerId)
     ?? event.riders[0];
@@ -602,10 +594,10 @@ function requiredLocalCommentaryRiders(
       (rider) => rider.playerId === event.previousLeaderPlayerId,
     );
     return [...new Map(
-      [leader, previousLeader]
+      [leader, previousLeader, ...focusRiders]
         .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 3);
   }
   if (event.kind === 'position-change') {
     const passingRider = event.riders.find(
@@ -615,19 +607,23 @@ function requiredLocalCommentaryRiders(
       (rider) => rider.playerId === event.passedPlayerId,
     );
     return [...new Map(
-      [passingRider, passedRider]
+      [passingRider, passedRider, leader, ...focusRiders]
         .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 3);
   }
   if (event.kind === 'pro-set' || event.kind === 'final-push') {
     return [...new Map(
-      [leader, ...event.riders.filter((rider) => rider.rank === 2)]
+      [leader, ...event.riders.filter((rider) => rider.rank === 2), ...focusRiders]
         .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 3);
   }
-  return battleRiders.length > 0 ? battleRiders : focusRiders;
+  return [...new Map(
+    [leader, ...battleRiders, ...focusRiders]
+      .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
+      .map((rider) => [rider.playerId, rider]),
+  ).values()].slice(0, 3);
 }
 
 function localPositionClause(rider: RaceCommentaryRiderFact) {
@@ -642,6 +638,20 @@ function localOrdinal(rank: number) {
   if (rank === 2) return 'second';
   if (rank === 3) return 'third';
   return 'fourth';
+}
+
+function withRequiredRiderCoverage(
+  line: string,
+  requiredRiders: RaceCommentaryRiderFact[],
+) {
+  const missingRiders = requiredRiders.filter((rider) => (
+    !lineMentionsLocalRider(line, rider)
+  ));
+  if (missingRiders.length === 0) {
+    return line;
+  }
+  const clauses = missingRiders.map(localPositionClause);
+  return `${line} ${clauses.join(' while ')}.`;
 }
 
 const leadHeadlines = [
@@ -746,6 +756,9 @@ export function localRaceStartLine(
   riderNames: string[],
   recentLines: string[] = [],
 ) {
+  const fieldNames = riderNames.length > 1
+    ? `${riderNames.slice(0, -1).join(', ')} and ${riderNames.at(-1)}`
+    : riderNames[0] ?? '';
   const soloActions = riderNames[0]
     ? [
       `${riderNames[0]} launches`,
@@ -754,7 +767,13 @@ export function localRaceStartLine(
       `${riderNames[0]} powers into the race`,
     ]
     : ['the race is underway', 'the opening sprint begins', 'here we go'];
-  const actions = riderNames.length > 1 ? startActions : soloActions;
+  const namedFieldActions = [
+    `${fieldNames} launch together`,
+    `${fieldNames} explode away from the gate`,
+    `${fieldNames} power into the opening sprint`,
+    `${fieldNames} are racing`,
+  ];
+  const actions = riderNames.length > 1 ? namedFieldActions : soloActions;
   const seed = stableCommentaryHash([
     trackName,
     riderNames.join('|'),
@@ -933,6 +952,19 @@ function localCommentaryCandidates(
   const passed = event.riders.find((rider) => rider.playerId === event.passedPlayerId);
   const finisher = event.riders.find((rider) => rider.playerId === event.finishingPlayerId);
   const required = requiredLocalCommentaryRiders(event, raceLines);
+  const requiredPlayerIds = new Set(required.map((rider) => rider.playerId));
+  const focusedBattle = [...event.closeBattles]
+    .sort((left, right) => left.gapMeters - right.gapMeters)
+    .find((battle) => (
+      requiredPlayerIds.has(battle.frontPlayerId)
+      && requiredPlayerIds.has(battle.behindPlayerId)
+    ));
+  const focusedBattleFront = focusedBattle
+    ? event.riders.find((rider) => rider.playerId === focusedBattle.frontPlayerId)
+    : undefined;
+  const focusedBattleChaser = focusedBattle
+    ? event.riders.find((rider) => rider.playerId === focusedBattle.behindPlayerId)
+    : undefined;
   const phaseOptions = phasePhrases[event.coursePhase];
 
   return Array.from({ length: 36 }, (_, variant) => {
@@ -1066,17 +1098,25 @@ function localCommentaryCandidates(
         'final-hook',
       );
       line = `${finalHook}—${leader.name} ${commentaryChoice(controlActions, event, recentLines, raceLines, variant, 'final-lead')}${second ? `, but ${second.name} ${commentaryChoice(chaseActions, event, recentLines, raceLines, variant, 'final-chase')}` : ''}!`;
-    } else if (
-      leader
-      && required.some((rider) => rider.rank === 3)
-      && required.some((rider) => rider.rank === 4)
-    ) {
-      const third = required.find((rider) => rider.rank === 3)!;
-      const fourth = required.find((rider) => rider.rank === 4)!;
-      line = `${phase}, ${leader.name} ${commentaryChoice(controlActions, event, recentLines, raceLines, variant, 'rear-lead')}; ${commentaryChoice(rearBattleLinks, event, recentLines, raceLines, variant, 'rear-link')}, ${third.name} and ${fourth.name} ${commentaryChoice(rearBattleActions, event, recentLines, raceLines, variant, 'rear-action')}.`;
+    } else if (focusedBattleFront && focusedBattleChaser) {
+      if (
+        leader
+        && focusedBattleFront.rank === 3
+        && focusedBattleChaser.rank === 4
+      ) {
+        line = `${phase}, ${leader.name} ${commentaryChoice(controlActions, event, recentLines, raceLines, variant, 'rear-lead')}; ${commentaryChoice(rearBattleLinks, event, recentLines, raceLines, variant, 'rear-link')}, ${focusedBattleFront.name} and ${focusedBattleChaser.name} ${commentaryChoice(rearBattleActions, event, recentLines, raceLines, variant, 'rear-action')}.`;
+      } else {
+        const action = commentaryChoice(
+          pressureActions,
+          event,
+          recentLines,
+          raceLines,
+          variant,
+          'focused-pressure-action',
+        );
+        line = `${phase}, ${focusedBattleChaser.name} ${action} ${focusedBattleFront.name} for ${localOrdinal(focusedBattleFront.rank)}!`;
+      }
     } else if (leader && second && event.battleState !== 'clear-lead') {
-      const front = required[0] ?? leader;
-      const chaser = required[1] ?? second;
       const action = commentaryChoice(
         pressureActions,
         event,
@@ -1085,7 +1125,7 @@ function localCommentaryCandidates(
         variant,
         'pressure-action',
       );
-      line = `${phase}, ${chaser.name} ${action} ${front.name} for ${localOrdinal(front.rank)}!`;
+      line = `${phase}, ${second.name} ${action} ${leader.name} for ${localOrdinal(leader.rank)}!`;
     } else if (leader) {
       const focus = required[0] ?? leader;
       const partner = required[1];
@@ -1094,7 +1134,13 @@ function localCommentaryCandidates(
       line = `The field keeps the race alive ${phase}.`;
     }
 
-    return withOptionalWit(line, event, recentLines, raceLines, variant);
+    return withOptionalWit(
+      withRequiredRiderCoverage(line, required),
+      event,
+      recentLines,
+      raceLines,
+      variant,
+    );
   });
 }
 

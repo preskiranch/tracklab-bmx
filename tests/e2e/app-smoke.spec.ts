@@ -10,6 +10,29 @@ const ignoredConsoleFragments = [
   'ws://localhost:',
 ];
 
+function silentWavBuffer(durationMs = 500) {
+  const sampleRate = 8_000;
+  const sampleCount = Math.ceil(sampleRate * durationMs / 1_000);
+  const dataSize = sampleCount * 2;
+  const buffer = Buffer.alloc(44 + dataSize);
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+  return buffer;
+}
+
+const silentVoicePreviewAudio = silentWavBuffer();
+
 const mockPedalZoneMapping = {
   version: 1,
   trackId: 'black-mountain-bmx',
@@ -332,6 +355,8 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByText('1,305 tracks', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Open App', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Race Dashboard', exact: true })).toBeVisible();
+  await expect(page.getByText('Commentary brain', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: /Fast|Balanced|Studio/i })).toHaveCount(0);
   const announcerVoice = page.getByLabel('Announcer voice');
   await expect(announcerVoice).toContainText('British woman — England, UK');
   await expect(announcerVoice).toContainText('British man — England, UK');
@@ -1045,6 +1070,13 @@ test.describe('mobile commentary playback', () => {
         preRaceStudioVoiceStartedBeforeReport = true;
       }
       await new Promise((resolve) => setTimeout(resolve, 650));
+      if (payload.eventKind === 'preview') {
+        await route.fulfill({
+          contentType: 'audio/wav',
+          body: silentVoicePreviewAudio,
+        });
+        return;
+      }
       await route.fulfill({
         contentType: 'audio/mpeg',
         path: 'public/assets/uci-random-start.mp3',
@@ -1092,8 +1124,21 @@ test.describe('mobile commentary playback', () => {
       const audioWindow = window as typeof window & {
         __tracklabBlockedMediaPlayCount?: number;
         __tracklabBufferPlaybackCount?: number;
+        __tracklabCadenceMediaPlayCount?: number;
+        __tracklabAmbienceMediaPlayCount?: number;
       };
       HTMLMediaElement.prototype.play = function () {
+        const source = String(this.currentSrc || this.src || '');
+        if (source.includes('/assets/uci-random-start.mp3')) {
+          audioWindow.__tracklabCadenceMediaPlayCount = (
+            audioWindow.__tracklabCadenceMediaPlayCount ?? 0
+          ) + 1;
+        }
+        if (source.includes('/assets/bmx-event-ambience')) {
+          audioWindow.__tracklabAmbienceMediaPlayCount = (
+            audioWindow.__tracklabAmbienceMediaPlayCount ?? 0
+          ) + 1;
+        }
         audioWindow.__tracklabBlockedMediaPlayCount = (
           audioWindow.__tracklabBlockedMediaPlayCount ?? 0
         ) + 1;
@@ -1128,6 +1173,14 @@ test.describe('mobile commentary playback', () => {
       }).__tracklabBufferPlaybackCount ?? 0
     )), { timeout: 8_000 }).toBeGreaterThanOrEqual(1);
     await expect(page.getByRole('button', { name: 'Preview selected voice' })).toBeEnabled();
+    expect(await page.evaluate(() => ({
+      cadence: (window as typeof window & {
+        __tracklabCadenceMediaPlayCount?: number;
+      }).__tracklabCadenceMediaPlayCount ?? 0,
+      ambience: (window as typeof window & {
+        __tracklabAmbienceMediaPlayCount?: number;
+      }).__tracklabAmbienceMediaPlayCount ?? 0,
+    }))).toEqual({ cadence: 0, ambience: 0 });
     const startAction = page.locator('.workflow-step.primary-action');
     await expect(startAction).toContainText('Start Demo Race');
     await startAction.click();

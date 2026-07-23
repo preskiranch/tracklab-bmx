@@ -1188,21 +1188,6 @@ export function SessionControlPanel({
 
         <div className="announcer-select-grid">
           <label>
-            <span>Commentary brain</span>
-            <select
-              value={commentaryPreferences.model}
-              disabled={!commentaryPreferences.enabled}
-              onChange={(event) => onCommentaryPreferencesChange({
-                ...commentaryPreferences,
-                model: event.target.value as RaceCommentaryPreferences['model'],
-              })}
-            >
-              <option value="gpt-5.6-luna">Fast — live response</option>
-              <option value="gpt-5.6-terra">Balanced — recommended</option>
-              <option value="gpt-5.6-sol">Studio — richest wording</option>
-            </select>
-          </label>
-          <label>
             <span>Announcer voice</span>
             <select
               value={commentaryPreferences.voicePreset}

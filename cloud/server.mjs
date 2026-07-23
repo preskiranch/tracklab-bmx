@@ -82,7 +82,13 @@ const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
-const commentaryModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
+const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
+const configuredCommentaryEngineModel = String(
+  process.env.TRACKLAB_COMMENTARY_MODEL || '',
+).trim();
+const commentaryEngineModel = commentaryEngineModels.has(configuredCommentaryEngineModel)
+  ? configuredCommentaryEngineModel
+  : 'gpt-5.6-terra';
 const commentaryVoicePresets = new Set([
   'australian-woman',
   'australian-man',
@@ -515,10 +521,6 @@ function openAiApiKey() {
   return String(process.env.OPENAI_API_KEY || '').trim();
 }
 
-function sanitizeCommentaryModel(value) {
-  return commentaryModels.has(value) ? value : 'gpt-5.6-terra';
-}
-
 function sanitizeCommentaryVoicePreset(value) {
   return commentaryVoicePresets.has(value) ? value : 'australian-woman';
 }
@@ -693,7 +695,7 @@ function commentarySpeechDirection(eventKind, deliveryStyle) {
     return `React immediately to the overtake with a bright surge of excitement. Punch the passing rider’s name, make the position change unmistakable, and keep the delivery connected to the surrounding battle. ${intensityDirection} ${wryDirection}`;
   }
   if (eventKind === 'pedal-zone') {
-    return `Keep the front-pack battle urgent and flowing, with energetic emphasis on the lead, pressure, pursuit, and track action. When a trailing rider is explicitly focused, give that rider a concise natural update without taking over the call. ${intensityDirection} ${wryDirection}`;
+    return `Keep the live battle urgent and flowing. Keep the leader connected to the story, but give the tightest passing threat a clear lift of excitement wherever it is in the field. Give any coverage rider a concise natural update without letting it overshadow the action. ${intensityDirection} ${wryDirection}`;
   }
   if (eventKind === 'pro-set') {
     return `Give the line choice a quick lift of excitement and stay emotionally connected to the chase. ${intensityDirection} ${wryDirection}`;
@@ -829,15 +831,29 @@ function commentaryCoverageFallbackLines(event, requiredRiders, useWryAside) {
       `${first.name} gets it done and moves ahead of ${second.name}!`,
     ];
   }
-  const closeBattle = (event.closeBattles || []).some((battle) => (
-    battle.frontPlayerId === first.playerId
-    && battle.behindPlayerId === second.playerId
-  ));
-  if (closeBattle) {
+  const requiredPlayerIds = new Set(requiredRiders.map((rider) => rider.playerId));
+  const closeBattle = [...(event.closeBattles || [])]
+    .sort((left, right) => Number(left.gapMeters || 0) - Number(right.gapMeters || 0))
+    .find((battle) => (
+      requiredPlayerIds.has(battle.frontPlayerId)
+      && requiredPlayerIds.has(battle.behindPlayerId)
+    ));
+  const battleFront = closeBattle
+    ? requiredRiders.find((rider) => rider.playerId === closeBattle.frontPlayerId)
+    : null;
+  const battleChaser = closeBattle
+    ? requiredRiders.find((rider) => rider.playerId === closeBattle.behindPlayerId)
+    : null;
+  if (battleFront && battleChaser) {
+    const contextRider = requiredRiders.find((rider) => (
+      rider.playerId !== battleFront.playerId
+      && rider.playerId !== battleChaser.playerId
+    ));
+    const context = contextRider ? ` ${commentaryPositionClause(contextRider)}.` : '';
     return applyWryAside([
-      `${first.name} and ${second.name} are wheel-to-wheel for ${commentaryOrdinal(first.rank)}!`,
-      `Nothing between ${first.name} and ${second.name} in the fight for ${commentaryOrdinal(first.rank)}.`,
-      `${second.name} is all over ${first.name} in the battle for ${commentaryOrdinal(first.rank)}.`,
+      `${battleFront.name} and ${battleChaser.name} are wheel-to-wheel for ${commentaryOrdinal(battleFront.rank)}!${context}`,
+      `Nothing between ${battleFront.name} and ${battleChaser.name} in the fight for ${commentaryOrdinal(battleFront.rank)}.${context}`,
+      `${battleChaser.name} is all over ${battleFront.name} in the battle for ${commentaryOrdinal(battleFront.rank)}.${context}`,
     ]);
   }
   if (event.kind === 'pro-set') {
@@ -864,6 +880,18 @@ function commentaryCoverageFallbackLines(event, requiredRiders, useWryAside) {
     `${firstClause}; ${secondClause} remains part of the fight.`,
     `${firstClause}, with ${secondClause} holding position in the chase.`,
   ];
+}
+
+function ensureFallbackRiderCoverage(lines, requiredRiders) {
+  return lines.map((line) => {
+    const missingRiders = requiredRiders.filter((rider) => (
+      !commentaryLineMentionsRider(line, [rider.name])
+    ));
+    if (missingRiders.length === 0) {
+      return line;
+    }
+    return `${line} ${missingRiders.map(commentaryPositionClause).join(' while ')}.`;
+  });
 }
 
 function commentaryFallbackLine(
@@ -961,10 +989,9 @@ function commentaryFallbackLine(
       `Across the stripe, it's ${leader} with the victory!`,
     ];
   }
-  const coverageCandidates = commentaryCoverageFallbackLines(
-    event,
+  const coverageCandidates = ensureFallbackRiderCoverage(
+    commentaryCoverageFallbackLines(event, requiredRiders, useWryAside),
     requiredRiders,
-    useWryAside,
   );
   if (coverageCandidates.length > 0) {
     candidates = coverageCandidates;
@@ -1041,9 +1068,9 @@ async function generateCommentaryLine({
         'Never mention watts, power output, cadence, RPM, speed, MPH, KPH, distance, progress percentages, or reaction times—even when those facts appear in the input.',
         'Call what is happening on track, never the sensor data behind it.',
         'Never rank riders at race-start. During the race, the supplied rank for each rider is authoritative; use first, second, third, or fourth only when that exact rank is supplied.',
-        'Editorial priority: the leader, second place, and the closest battle at the front are the main story. Roughly three calls out of four should be led by the front two or a fight for the lead.',
-        'Riders in third and fourth must not be forgotten, but they should receive concise periodic updates rather than dominating the broadcast. Give them primary attention only for an actual supplied pass, finish, or scheduled requiredFocusRiders call.',
-        'When requiredFocusRiders contains a close-battle pair, describe them as wheel-to-wheel, side-by-side, under pressure, or locked in a fight for the supplied position. Do not shift attention to a different closeBattles pair.',
+        'Every rider must be named naturally during the race. requiredFocusRiders carries any rider who still needs in-race coverage; include every one without turning a concise update into the main story.',
+        'Editorial priority follows live action: lead changes first, then actual passes, then the smallest supplied close-battle gap wherever it occurs in the field. Keep the leader connected to the story when the hottest battle is behind.',
+        'When requiredFocusRiders contains a close-battle pair, make the passing threat clear with wheel-to-wheel, side-by-side, under pressure, or locked-in language for the supplied position. Do not shift attention to a different closeBattles pair.',
         'For lead-change, celebrate the new leader immediately, identify the displaced leader’s current position, and keep the call centered on the fight at the front.',
         'For position-change, state the supplied passing rider, passed rider, and new position with an authentic surge of excitement.',
         'For finish, celebrate the supplied finishing rider as the winner. For rider-finish, call the supplied finishing rider’s exact rank as they cross and naturally acknowledge anyone still racing.',
@@ -1051,7 +1078,7 @@ async function generateCommentaryLine({
         'Never claim a focused rider is gaining, fading, passing, or closing a gap unless the event facts support that action. It is safe to state their supplied running position and that they remain in the race or chase.',
         'Make racer-versus-racer action the center of the call: running order, pressure, passes, line choice, straights, turns, rhythm, and finish.',
         'Use a live broadcast action chain when the facts support it: establish the pressure, call the move, react to the changed order, then reset the chase or battle behind. Do not force every step into every call.',
-        'Vary the editorial focus as well as the synonyms. Across a race, rotate among the lead battle, the two spot, current section, passes, and the run to the stripe, with occasional concise third-or-fourth updates.',
+        'Vary the editorial focus as well as the synonyms. Across a race, connect the lead battle, the hottest passing threat, current section, confirmed passes, every rider’s coverage, and the run to the stripe.',
         'For pedal-zone events, use coursePhase as context, not mandatory wording. If recent race lines already named that section, cover rider positions or the battle instead. Never say pedal zone or use attack/attacking. Mention being back on the pedals only when pedalReferenceAllowed is true.',
         'Use active verbs, contractions, and short speech-first play-by-play. A pass, final push, or finish may use one exclamation mark.',
         'Make all three candidates materially different: use different openings, verbs, clause order, and sentence rhythm.',
@@ -1207,7 +1234,6 @@ function sanitizeUserDataPatch(value) {
     const overlays = value.raceViewPreferences.riderOverlaysByTrack;
     const demoRiderNames = value.raceViewPreferences.demoRiderNames;
     const commentary = value.raceViewPreferences.commentary;
-    const commentaryModel = sanitizeCommentaryModel(commentary?.model);
     const commentaryVoicePreset = sanitizeCommentaryVoicePreset(commentary?.voicePreset);
     patch.raceViewPreferences = {
       cameraLocked: Boolean(value.raceViewPreferences.cameraLocked),
@@ -1233,7 +1259,6 @@ function sanitizeUserDataPatch(value) {
         ambientVolumeLocked: commentary?.ambientVolumeLocked == null
           ? true
           : Boolean(commentary.ambientVolumeLocked),
-        model: commentaryModel,
         voicePreset: commentaryVoicePreset,
         volume: Math.max(0, Math.min(1, finiteNumber(commentary?.volume, 0.9))),
         adaptiveMemory: commentary?.adaptiveMemory == null ? true : Boolean(commentary.adaptiveMemory),
@@ -3045,7 +3070,7 @@ async function serveStatic(request, response) {
     }
     const body = JSON.stringify({
       aiAvailable: Boolean(openAiApiKey()),
-      textModels: [...commentaryModels],
+      textModel: commentaryEngineModel,
       speechModel: 'gpt-4o-mini-tts',
       voicePresets: [...commentaryVoicePresets],
       research: commentaryResearchMetadata,
@@ -3078,7 +3103,7 @@ async function serveStatic(request, response) {
       writeJson(response, 400, { error: 'A track and at least one rider are required.' });
       return;
     }
-    const model = sanitizeCommentaryModel(payload?.model);
+    const model = commentaryEngineModel;
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
     const recentLines = Array.isArray(payload?.recentLines)
       ? payload.recentLines
@@ -3107,7 +3132,7 @@ async function serveStatic(request, response) {
         research = await researchTrackFacts({
           track,
           apiKey: key,
-          model: 'gpt-5.6-luna',
+          model: commentaryEngineModel,
         });
         await persistence.saveTrackBriefing(track.id, track.name, research);
       } catch (error) {
@@ -3190,7 +3215,7 @@ async function serveStatic(request, response) {
       writeJson(response, 400, { error: 'A valid race event is required.' });
       return;
     }
-    const model = sanitizeCommentaryModel(payload?.model);
+    const model = commentaryEngineModel;
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
     const recentLines = Array.isArray(payload?.recentLines)
       ? payload.recentLines

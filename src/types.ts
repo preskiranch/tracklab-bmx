@@ -558,7 +558,6 @@ export type RaceRiderOverlayLayout = {
   locked: boolean;
 };
 
-export type RaceCommentaryModel = 'gpt-5.6-luna' | 'gpt-5.6-terra' | 'gpt-5.6-sol';
 export type RaceCommentaryVoicePreset =
   | 'australian-woman'
   | 'australian-man'
@@ -572,7 +571,6 @@ export type RaceCommentaryPreferences = {
   ambientEnabled: boolean;
   ambientVolume: number;
   ambientVolumeLocked: boolean;
-  model: RaceCommentaryModel;
   voicePreset: RaceCommentaryVoicePreset;
   volume: number;
   adaptiveMemory: boolean;

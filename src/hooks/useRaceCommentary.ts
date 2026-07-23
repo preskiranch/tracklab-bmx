@@ -20,7 +20,6 @@ import {
 import {
   getTrackLabAudioContext,
   primeAudioCues,
-  uciRandomStartVoiceUrl,
 } from '../lib/audioCues';
 import {
   buildPreRaceTrackContext,
@@ -159,7 +158,6 @@ function preparedPreRaceSpeechKey(
     lapCount,
     riderKey,
     ghostKey,
-    preferences.model,
     preferences.voicePreset,
   ].join('::');
 }
@@ -756,7 +754,6 @@ export function useRaceCommentary({
       },
       body: JSON.stringify({
         track: preRaceContext,
-        model: preferences.model,
         voicePreset: preferences.voicePreset,
         recentLines: preferences.adaptiveMemory ? preferences.recentLines : [],
       }),
@@ -977,7 +974,6 @@ export function useRaceCommentary({
     preRaceContext,
     preRaceKey,
     preferences.enabled,
-    preferences.model,
     preferences.voicePreset,
     preferences.volume,
     rememberLine,
@@ -1179,7 +1175,6 @@ export function useRaceCommentary({
               },
               body: JSON.stringify({
                 event,
-                model: activePreferences.model,
                 voicePreset: activePreferences.voicePreset,
                 recentLines: activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
                 raceLines: raceLinesRef.current,
@@ -1274,6 +1269,9 @@ export function useRaceCommentary({
   useEffect(() => {
     const previousRaceState = previousRaceStateRef.current;
     previousRaceStateRef.current = raceState;
+    if (raceState === 'racing' && previousRaceState !== 'racing') {
+      raceLinesRef.current = [];
+    }
     if (!preferences.enabled) {
       raceLinesRef.current = [];
       stopPlayback();
@@ -1354,51 +1352,35 @@ export function useRaceCommentary({
     stopPlayback();
   }, [disposePreparedStartSpeech, stopPlayback]);
 
-  const prime = useCallback(() => {
-    const cuePrime = primeAudioCues();
-    const audio = commentaryAudioElement(activeAudioRef);
-    audio.pause();
-    audio.src = uciRandomStartVoiceUrl;
-    audio.preload = 'auto';
-    audio.setAttribute('playsinline', '');
-    audio.muted = false;
-    audio.volume = 0.0001;
-    audio.load();
-    const primingSource = audio.src;
-    const mediaPrime = audio.play()
-      .catch(() => {
-        // The shared Web Audio context remains the primary iPad/mobile path.
-      })
-      .finally(() => {
-        if (audio.src === primingSource) {
-          audio.pause();
-          try {
-            audio.currentTime = 0;
-          } catch {
-            // Metadata may not be ready yet.
-          }
-        }
-        audio.volume = preferencesRef.current.volume;
-        audio.muted = false;
-      });
-
+  const primeCommentaryPlayback = useCallback(() => {
+    const context = getTrackLabAudioContext();
+    const contextPrime = context && context.state !== 'closed'
+      ? context.resume().catch(() => undefined)
+      : Promise.resolve();
     if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
       const unlockUtterance = new SpeechSynthesisUtterance('');
       unlockUtterance.volume = 0;
       window.speechSynthesis.speak(unlockUtterance);
     }
     return Promise.race([
-      Promise.allSettled([cuePrime, mediaPrime]).then(() => undefined),
+      contextPrime.then(() => undefined),
       new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 1_500);
+        window.setTimeout(resolve, 800);
       }),
     ]);
   }, []);
 
+  const prime = useCallback(() => Promise.race([
+    Promise.allSettled([primeAudioCues(), primeCommentaryPlayback()]).then(() => undefined),
+    new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 1_500);
+    }),
+  ]), [primeCommentaryPlayback]);
+
   const preview = useCallback(async () => {
     setPlaybackError(null);
     setPlaybackPhase('thinking');
-    await prime();
+    await primeCommentaryPlayback();
     const activePreferences = preferencesRef.current;
     const names = riderNameList(players);
     const line = names
@@ -1451,7 +1433,7 @@ export function useRaceCommentary({
       }
       setPlaybackPhase('idle');
     }
-  }, [players, prime, serviceMode, setPlaybackPhase]);
+  }, [players, primeCommentaryPlayback, serviceMode, setPlaybackPhase]);
 
   return {
     playbackStatus,

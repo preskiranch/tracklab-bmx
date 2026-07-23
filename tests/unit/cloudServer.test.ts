@@ -128,6 +128,7 @@ describe('cloud API trust boundaries', () => {
     const config = await response.json();
     expect(config).toMatchObject({
       aiAvailable: false,
+      textModel: 'gpt-5.6-terra',
       speechModel: 'gpt-4o-mini-tts',
       voicePresets: [
         'australian-woman',
@@ -148,6 +149,7 @@ describe('cloud API trust boundaries', () => {
         retainsSourceAudio: false,
       },
     });
+    expect(config).not.toHaveProperty('textModels');
     expect(JSON.stringify(config)).not.toContain('OPENAI_API_KEY');
   });
 
@@ -239,7 +241,8 @@ describe('cloud API trust boundaries', () => {
 
     const loaded = await api('/api/user-data?profileKey=user:someone-else');
     expect(loaded.status).toBe(200);
-    await expect(loaded.json()).resolves.toMatchObject({
+    const loadedPayload = await loaded.json();
+    expect(loadedPayload).toMatchObject({
       bikeProfiles: [{ deviceId: 58701, name: 'Studio One' }],
       studioRiders: [{
         id: 'rider-jordan',
@@ -270,7 +273,6 @@ describe('cloud API trust boundaries', () => {
           ambientEnabled: false,
           ambientVolume: 0.11,
           ambientVolumeLocked: true,
-          model: 'gpt-5.6-sol',
           voicePreset: 'american-man',
           volume: 0.75,
           adaptiveMemory: true,
@@ -278,6 +280,7 @@ describe('cloud API trust boundaries', () => {
         },
       },
     });
+    expect(loadedPayload.raceViewPreferences.commentary).not.toHaveProperty('model');
   });
 
   it('prepares a truthful local pre-race briefing when hosted AI is unavailable', async () => {

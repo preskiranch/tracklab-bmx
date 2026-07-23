@@ -2,7 +2,6 @@ import { raceViewPreferencesStorageKey } from '../data';
 import type {
   DemoRiderNames,
   EarthCamera,
-  RaceCommentaryModel,
   RaceCommentaryPreferences,
   RaceCommentaryVoicePreset,
   RaceRiderOverlayLayout,
@@ -23,18 +22,12 @@ export const defaultRaceCommentaryPreferences: RaceCommentaryPreferences = {
   ambientEnabled: true,
   ambientVolume: 0.065,
   ambientVolumeLocked: true,
-  model: 'gpt-5.6-terra',
   voicePreset: 'australian-woman',
   volume: 0.9,
   adaptiveMemory: true,
   recentLines: [],
 };
 
-const commentaryModels = new Set<RaceCommentaryModel>([
-  'gpt-5.6-luna',
-  'gpt-5.6-terra',
-  'gpt-5.6-sol',
-]);
 const commentaryVoices = new Set<RaceCommentaryVoicePreset>([
   'australian-woman',
   'australian-man',
@@ -88,9 +81,6 @@ export function normalizeRaceCommentaryPreferences(value: unknown): RaceCommenta
   const preferences = value && typeof value === 'object'
     ? value as Partial<RaceCommentaryPreferences>
     : {};
-  const model = commentaryModels.has(preferences.model as RaceCommentaryModel)
-    ? preferences.model as RaceCommentaryModel
-    : defaultRaceCommentaryPreferences.model;
   const voicePreset = commentaryVoices.has(preferences.voicePreset as RaceCommentaryVoicePreset)
     ? preferences.voicePreset as RaceCommentaryVoicePreset
     : defaultRaceCommentaryPreferences.voicePreset;
@@ -116,7 +106,6 @@ export function normalizeRaceCommentaryPreferences(value: unknown): RaceCommenta
     ambientVolumeLocked: preferences.ambientVolumeLocked == null
       ? defaultRaceCommentaryPreferences.ambientVolumeLocked
       : Boolean(preferences.ambientVolumeLocked),
-    model,
     voicePreset,
     volume: Math.max(0, Math.min(1, finiteNumber(
       preferences.volume,

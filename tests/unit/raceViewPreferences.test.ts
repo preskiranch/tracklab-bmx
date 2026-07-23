@@ -72,7 +72,6 @@ describe('race view preferences', () => {
       ambientEnabled: false,
       ambientVolume: 0.2,
       ambientVolumeLocked: false,
-      model: 'gpt-5.6-terra',
       voicePreset: 'british-man',
       volume: 1,
       adaptiveMemory: false,
@@ -80,6 +79,7 @@ describe('race view preferences', () => {
     expect(commentary.recentLines).toHaveLength(96);
     expect(commentary.recentLines[0]).toBe('Call 24');
     expect(commentary.recentLines.at(-1)).toBe('Call 119');
+    expect(commentary).not.toHaveProperty('model');
   });
 
   it('preserves the American woman announcer choice', () => {

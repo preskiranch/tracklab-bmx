@@ -39,18 +39,13 @@ export function selectCommentaryFocusRiders(event, raceLines = [], limit = 2) {
 
   const frontRiders = riders.filter((rider) => rider.rank <= 2);
   const trailingRiders = riders.filter((rider) => rider.rank >= 3);
-  const sequence = Math.max(1, Math.round(Number(event?.sequence) || 1));
   const mentionCounts = commentaryRiderMentionCounts(riders, raceLines);
-  if (sequence % 4 !== 0 || trailingRiders.length === 0) {
-    return (frontRiders.length > 0 ? frontRiders : riders).slice(0, limit);
-  }
-
   const trailingFocus = [...trailingRiders].sort((left, right) => (
     (mentionCounts.get(left.playerId) || 0) - (mentionCounts.get(right.playerId) || 0)
     || left.rank - right.rank
   ))[0];
   return [...new Map(
-    [frontRiders[0], trailingFocus]
+    [...frontRiders, trailingFocus]
       .filter(Boolean)
       .map((rider) => [rider.playerId, rider]),
   ).values()].slice(0, limit);
@@ -65,18 +60,14 @@ function leaderFor(event) {
 function closeBattleRiders(event, raceLines = []) {
   const riders = [...(event?.riders || [])];
   const mentionCounts = commentaryRiderMentionCounts(riders, raceLines);
-  const trailingCoverageDue = Math.max(1, Math.round(Number(event?.sequence) || 1)) % 4 === 0;
   const battles = [...(event?.closeBattles || [])];
-  const eligibleBattles = trailingCoverageDue
-    ? battles.filter((battle) => Number(battle.position) >= 3)
-    : battles.filter((battle) => Number(battle.position) <= 2);
-  const battle = (eligibleBattles.length > 0 ? eligibleBattles : battles).sort((left, right) => {
+  const battle = battles.sort((left, right) => {
     const leftMentions = (mentionCounts.get(left.frontPlayerId) || 0)
       + (mentionCounts.get(left.behindPlayerId) || 0);
     const rightMentions = (mentionCounts.get(right.frontPlayerId) || 0)
       + (mentionCounts.get(right.behindPlayerId) || 0);
-    return Number(left.position || 0) - Number(right.position || 0)
-      || Number(left.gapMeters || 0) - Number(right.gapMeters || 0)
+    return Number(left.gapMeters || 0) - Number(right.gapMeters || 0)
+      || Number(left.position || 0) - Number(right.position || 0)
       || leftMentions - rightMentions;
   })[0];
   if (!battle) {
@@ -88,7 +79,7 @@ function closeBattleRiders(event, raceLines = []) {
 }
 
 export function requiredCommentaryRiders(event, raceLines = []) {
-  const focusRiders = selectCommentaryFocusRiders(event, raceLines, 2);
+  const focusRiders = selectCommentaryFocusRiders(event, raceLines, 3);
   const battleRiders = closeBattleRiders(event, raceLines);
   if (event.kind === 'race-start') {
     return [];
@@ -108,10 +99,10 @@ export function requiredCommentaryRiders(event, raceLines = []) {
       (rider) => rider.playerId === event.previousLeaderPlayerId,
     );
     return [...new Map(
-      [newLeader, previousLeader]
+      [newLeader, previousLeader, ...focusRiders]
         .filter(Boolean)
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 3);
   }
   if (event.kind === 'position-change') {
     const passingRider = event.riders.find(
@@ -121,20 +112,24 @@ export function requiredCommentaryRiders(event, raceLines = []) {
       (rider) => rider.playerId === event.passedPlayerId,
     );
     return [...new Map(
-      [passingRider, passedRider]
+      [passingRider, passedRider, leaderFor(event), ...focusRiders]
         .filter(Boolean)
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 3);
   }
   if (event.kind === 'pro-set' || event.kind === 'final-push') {
     const leader = leaderFor(event);
     return [...new Map(
-      [leader, ...event.riders.filter((rider) => rider.rank === 2)]
+      [leader, ...event.riders.filter((rider) => rider.rank === 2), ...focusRiders]
         .filter(Boolean)
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 3);
   }
-  return battleRiders.length > 0 ? battleRiders : focusRiders;
+  return [...new Map(
+    [leaderFor(event), ...battleRiders, ...focusRiders]
+      .filter(Boolean)
+      .map((rider) => [rider.playerId, rider]),
+  ).values()].slice(0, 3);
 }
 
 export function commentaryUsesWryAside(event) {
