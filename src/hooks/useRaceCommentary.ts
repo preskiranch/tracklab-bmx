@@ -629,6 +629,7 @@ export function useRaceCommentary({
     lapCount,
     preferences,
   );
+  const startSpeechKey = preparedStartSpeechKey(startLine, preferences, players);
 
   const setPlaybackPhase = useCallback((phase: CommentaryPlaybackPhase) => {
     playbackPhaseRef.current = phase;
@@ -694,8 +695,7 @@ export function useRaceCommentary({
       return;
     }
 
-    const key = preparedStartSpeechKey(startLine, preferences, players);
-    if (preparedStartSpeechRef.current?.key === key) {
+    if (preparedStartSpeechRef.current?.key === startSpeechKey) {
       return;
     }
 
@@ -713,18 +713,21 @@ export function useRaceCommentary({
         if (startPrefetchRequestRef.current !== requestId) {
           return;
         }
-        preparedStartSpeechRef.current = { key, line: startLine, audioBlob };
+        preparedStartSpeechRef.current = {
+          key: startSpeechKey,
+          line: startLine,
+          audioBlob,
+        };
       })
       .catch(() => {
         // Gate calls use immediate browser speech when preloading is unavailable.
       });
   }, [
     disposePreparedStartSpeech,
-    players,
-    preferences,
+    preferences.enabled,
     raceState,
     serviceMode,
-    startLine,
+    startSpeechKey,
   ]);
 
   useEffect(() => {
@@ -848,10 +851,8 @@ export function useRaceCommentary({
       controller.abort();
     };
   }, [
-    players,
-    preRaceContext,
     preRaceKey,
-    preferences,
+    preferences.enabled,
     raceState,
     serviceMode,
   ]);

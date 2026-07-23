@@ -1121,7 +1121,7 @@ test.describe('mobile commentary playback', () => {
       )) ?? [];
       await Promise.race([
         preRaceReportGate,
-        new Promise((resolve) => setTimeout(resolve, 10_000)),
+        new Promise((resolve) => setTimeout(resolve, 30_000)),
       ]);
       preRaceReportReleased = true;
       await route.fulfill({
@@ -1189,6 +1189,17 @@ test.describe('mobile commentary playback', () => {
     await page.goto('/?track=air-time-bmx');
     await page.getByRole('button', { name: 'Open App' }).click();
     await page.getByRole('button', { name: /Demo/i }).first().click();
+    await expect.poll(
+      () => speechPayloads.filter((payload) => payload.eventKind === 'race-start').length,
+      { timeout: 8_000 },
+    ).toBeGreaterThanOrEqual(1);
+    const initialStartPrefetchCount = speechPayloads.filter(
+      (payload) => payload.eventKind === 'race-start',
+    ).length;
+    await page.waitForTimeout(1_500);
+    expect(speechPayloads.filter((payload) => (
+      payload.eventKind === 'race-start'
+    ))).toHaveLength(initialStartPrefetchCount);
     const previewPresets = [
       'australian-woman',
       'australian-man',
