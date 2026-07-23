@@ -20,6 +20,9 @@ export const defaultRaceRiderOverlayLayout: RaceRiderOverlayLayout = {
 
 export const defaultRaceCommentaryPreferences: RaceCommentaryPreferences = {
   enabled: true,
+  ambientEnabled: true,
+  ambientVolume: 0.065,
+  ambientVolumeLocked: true,
   model: 'gpt-5.6-terra',
   voicePreset: 'australian-woman',
   volume: 0.9,
@@ -103,6 +106,16 @@ export function normalizeRaceCommentaryPreferences(value: unknown): RaceCommenta
     enabled: preferences.enabled == null
       ? defaultRaceCommentaryPreferences.enabled
       : Boolean(preferences.enabled),
+    ambientEnabled: preferences.ambientEnabled == null
+      ? defaultRaceCommentaryPreferences.ambientEnabled
+      : Boolean(preferences.ambientEnabled),
+    ambientVolume: Math.max(0, Math.min(0.2, finiteNumber(
+      preferences.ambientVolume,
+      defaultRaceCommentaryPreferences.ambientVolume,
+    ))),
+    ambientVolumeLocked: preferences.ambientVolumeLocked == null
+      ? defaultRaceCommentaryPreferences.ambientVolumeLocked
+      : Boolean(preferences.ambientVolumeLocked),
     model,
     voicePreset,
     volume: Math.max(0, Math.min(1, finiteNumber(

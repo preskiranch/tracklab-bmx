@@ -337,6 +337,13 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(announcerVoice).toContainText('British man — England, UK');
   await announcerVoice.selectOption('british-man');
   await expect(announcerVoice).toHaveValue('british-man');
+  const ambientSound = page.getByLabel('Ambient track sound');
+  await expect(ambientSound).toBeVisible();
+  await expect(ambientSound).toBeChecked();
+  await ambientSound.uncheck();
+  await expect(ambientSound).not.toBeChecked();
+  await expect(page.getByText('Developer ambient calibration')).toHaveCount(0);
+  await expect(page.getByLabel('Ambient sound volume')).toHaveCount(0);
   await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
   await expect(page.getByText('AI Announcer', { exact: true })).toHaveCount(0);
 
@@ -757,6 +764,16 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     await expect(nameInput).toHaveValue(customDemoNames[index]);
   }
 
+  await expect(page.getByText('Developer ambient calibration')).toBeVisible();
+  const ambientVolume = page.getByLabel('Ambient sound volume');
+  await expect(ambientVolume).toBeDisabled();
+  await page.getByRole('button', { name: 'Unlock ambient volume' }).click();
+  await expect(ambientVolume).toBeEnabled();
+  await ambientVolume.fill('0.09');
+  await expect(ambientVolume).toHaveValue('0.09');
+  await page.getByRole('button', { name: 'Lock ambient volume' }).click();
+  await expect(ambientVolume).toBeDisabled();
+
   const startAction = page.locator('.workflow-step.primary-action');
   await expect(startAction).toContainText('Start Demo Race');
   await startAction.click();
@@ -786,7 +803,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       : null;
   }), { timeout: 5_000 }).toMatchObject({
     paused: false,
-    volume: 0.065,
+    volume: 0.09,
   });
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
@@ -878,7 +895,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   }), { timeout: 3_000 }).toEqual({
     loadCount: 1,
     paused: false,
-    volume: 0.065,
+    volume: 0.09,
   });
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4, { timeout: 5_000 });
   await expect.poll(

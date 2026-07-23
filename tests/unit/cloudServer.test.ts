@@ -223,6 +223,9 @@ describe('cloud API trust boundaries', () => {
           },
           commentary: {
             enabled: true,
+            ambientEnabled: false,
+            ambientVolume: 0.11,
+            ambientVolumeLocked: true,
             model: 'gpt-5.6-sol',
             voicePreset: 'american-man',
             volume: 0.75,
@@ -264,6 +267,9 @@ describe('cloud API trust boundaries', () => {
         },
         commentary: {
           enabled: true,
+          ambientEnabled: false,
+          ambientVolume: 0.11,
+          ambientVolumeLocked: true,
           model: 'gpt-5.6-sol',
           voicePreset: 'american-man',
           volume: 0.75,

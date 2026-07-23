@@ -1,4 +1,13 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Activity,
   BarChart3,
@@ -27,7 +36,6 @@ import { MembershipLanding } from './components/MembershipLanding';
 import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
 import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
-import { SessionControlPanel } from './components/SessionControlPanel';
 import { StudioRaceEntry } from './components/StudioRaceEntry';
 import {
   bikeConnectionSourceStorageKey,
@@ -214,6 +222,9 @@ import type {
   TrackSplitSection,
   UserTrackMapping,
 } from './types';
+
+const SessionControlPanel = lazy(() => import('./components/SessionControlPanel')
+  .then((module) => ({ default: module.SessionControlPanel })));
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const uciRandomDelayMinMs = 100;
@@ -2562,12 +2573,16 @@ export default function App() {
   const canCancelRace = startGateStatus.active || raceState === 'racing';
 
   useEffect(() => {
-    if (raceAmbienceActive) {
-      void startBmxEventAmbience();
+    if (raceAmbienceActive && raceCommentaryPreferences.ambientEnabled) {
+      void startBmxEventAmbience(raceCommentaryPreferences.ambientVolume);
     } else {
       stopBmxEventAmbience();
     }
-  }, [raceAmbienceActive]);
+  }, [
+    raceAmbienceActive,
+    raceCommentaryPreferences.ambientEnabled,
+    raceCommentaryPreferences.ambientVolume,
+  ]);
 
   useEffect(() => () => {
     stopBmxEventAmbience();
@@ -6786,7 +6801,8 @@ export default function App() {
               </div>
 
               <div className="dashboard-secondary-column">
-                <SessionControlPanel
+                <Suspense fallback={<div className="panel-section">Loading race controls…</div>}>
+                  <SessionControlPanel
                   track={effectiveTrack}
                   sessionMode={sessionMode}
                   intervalMode={intervalMode}
@@ -6815,6 +6831,7 @@ export default function App() {
                   isLoopTrack={isLoopTrack}
                   lapCount={lapCount}
                   currentProfileKey={cloudProfileKey}
+                  isAdminProfile={adminProfileActive}
                   raceState={raceState}
                   activeBikeCount={racePlayers.length}
                   maxPlayers={maxPlayers}
@@ -6905,7 +6922,8 @@ export default function App() {
                   onStart={handleStart}
                   onCancel={handleCancel}
                   onReset={handleReset}
-                />
+                  />
+                </Suspense>
 
                 <MultiplayerPanel
                   playMode={playMode}

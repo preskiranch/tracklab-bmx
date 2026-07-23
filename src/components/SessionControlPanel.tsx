@@ -115,6 +115,7 @@ type SessionControlPanelProps = {
   isLoopTrack: boolean;
   lapCount: number;
   currentProfileKey: string;
+  isAdminProfile: boolean;
   raceState: RaceState;
   activeBikeCount: number;
   maxPlayers: number;
@@ -260,6 +261,7 @@ export function SessionControlPanel({
   isLoopTrack,
   lapCount,
   currentProfileKey,
+  isAdminProfile,
   raceState,
   activeBikeCount,
   maxPlayers,
@@ -1091,6 +1093,62 @@ export function SessionControlPanel({
             })}
           />
         </label>
+
+        <label className="announcer-enable-row">
+          <span>
+            <strong>Ambient track sound</strong>
+            <small>Crowd chatter through staging, cadence, and racing</small>
+          </span>
+          <input
+            type="checkbox"
+            checked={commentaryPreferences.ambientEnabled}
+            onChange={(event) => onCommentaryPreferencesChange({
+              ...commentaryPreferences,
+              ambientEnabled: event.target.checked,
+            })}
+          />
+        </label>
+
+        {isAdminProfile && (
+          <div className="ambient-admin-controls">
+            <div className="ambient-admin-heading">
+              <span>Developer ambient calibration</span>
+              <button
+                type="button"
+                className={commentaryPreferences.ambientVolumeLocked ? 'locked' : ''}
+                aria-pressed={commentaryPreferences.ambientVolumeLocked}
+                aria-label={commentaryPreferences.ambientVolumeLocked
+                  ? 'Unlock ambient volume'
+                  : 'Lock ambient volume'}
+                onClick={() => onCommentaryPreferencesChange({
+                  ...commentaryPreferences,
+                  ambientVolumeLocked: !commentaryPreferences.ambientVolumeLocked,
+                })}
+              >
+                {commentaryPreferences.ambientVolumeLocked ? 'Locked' : 'Lock level'}
+              </button>
+            </div>
+            <label className="announcer-volume-row">
+              <span><Volume2 size={14} /> Ambience</span>
+              <input
+                aria-label="Ambient sound volume"
+                type="range"
+                min="0"
+                max="0.2"
+                step="0.005"
+                value={commentaryPreferences.ambientVolume}
+                disabled={!commentaryPreferences.ambientEnabled
+                  || commentaryPreferences.ambientVolumeLocked}
+                onChange={(event) => onCommentaryPreferencesChange({
+                  ...commentaryPreferences,
+                  ambientVolume: Number(event.target.value),
+                })}
+              />
+              <strong>{Math.round(commentaryPreferences.ambientVolume * 100)}%</strong>
+            </label>
+            <small>Saved only to your developer account. Unlock to recalibrate.</small>
+          </div>
+        )}
 
         <div className={`announcer-service-status ${commentaryServiceMode}`}>
           <span />

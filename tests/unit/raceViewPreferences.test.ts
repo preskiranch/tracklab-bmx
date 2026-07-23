@@ -57,6 +57,9 @@ describe('race view preferences', () => {
   it('normalizes per-account announcer choices and bounded adaptive memory', () => {
     const commentary = normalizeRaceCommentaryPreferences({
       enabled: false,
+      ambientEnabled: false,
+      ambientVolume: 4,
+      ambientVolumeLocked: false,
       model: 'unsupported-model',
       voicePreset: 'british-man',
       volume: 4,
@@ -66,6 +69,9 @@ describe('race view preferences', () => {
 
     expect(commentary).toMatchObject({
       enabled: false,
+      ambientEnabled: false,
+      ambientVolume: 0.2,
+      ambientVolumeLocked: false,
       model: 'gpt-5.6-terra',
       voicePreset: 'british-man',
       volume: 1,

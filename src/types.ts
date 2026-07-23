@@ -569,6 +569,9 @@ export type RaceCommentaryVoicePreset =
 
 export type RaceCommentaryPreferences = {
   enabled: boolean;
+  ambientEnabled: boolean;
+  ambientVolume: number;
+  ambientVolumeLocked: boolean;
   model: RaceCommentaryModel;
   voicePreset: RaceCommentaryVoicePreset;
   volume: number;

@@ -1221,6 +1221,11 @@ function sanitizeUserDataPatch(value) {
         : {},
       commentary: {
         enabled: commentary?.enabled == null ? true : Boolean(commentary.enabled),
+        ambientEnabled: commentary?.ambientEnabled == null ? true : Boolean(commentary.ambientEnabled),
+        ambientVolume: Math.max(0, Math.min(0.2, finiteNumber(commentary?.ambientVolume, 0.065))),
+        ambientVolumeLocked: commentary?.ambientVolumeLocked == null
+          ? true
+          : Boolean(commentary.ambientVolumeLocked),
         model: commentaryModel,
         voicePreset: commentaryVoicePreset,
         volume: Math.max(0, Math.min(1, finiteNumber(commentary?.volume, 0.9))),
