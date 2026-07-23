@@ -8,7 +8,8 @@ let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
 let uciVoiceBufferPromise: Promise<AudioBuffer | null> | null = null;
 let mediaElementPrimed = false;
 let mediaElementPrimePromise: Promise<void> | null = null;
-let raceAmbienceAudio: HTMLAudioElement | null = null;
+let raceAmbienceBedAudio: HTMLAudioElement | null = null;
+let raceAmbienceCrowdAudio: HTMLAudioElement | null = null;
 let raceAmbiencePrimed = false;
 let raceAmbiencePrimePromise: Promise<void> | null = null;
 let activeRaceAmbienceProfile: BmxEventAmbienceProfile | null = null;
@@ -17,24 +18,33 @@ let lastRaceAmbienceProfileIndex = -1;
 export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
 export const bmxEventAmbienceUrl = '/assets/bmx-event-ambience.mp3';
 export const bmxEventAmbienceSources = [
-  { url: bmxEventAmbienceUrl, durationSeconds: 15.046 },
-  { url: '/assets/bmx-event-ambience-sports.mp3', durationSeconds: 76.826 },
-  { url: '/assets/bmx-event-ambience-light-applause.mp3', durationSeconds: 11.128 },
-  { url: '/assets/bmx-event-ambience-victory-cheer.mp3', durationSeconds: 10.109 },
-  { url: '/assets/bmx-event-ambience-stadium.mp3', durationSeconds: 17.319 },
-  { url: '/assets/bmx-event-ambience-chant.mp3', durationSeconds: 11.102 },
-  { url: '/assets/bmx-event-ambience-rhythmic.mp3', durationSeconds: 14.393 },
+  {
+    url: bmxEventAmbienceUrl,
+    durationSeconds: 15.046,
+    role: 'trackside-bed',
+  },
+  {
+    url: '/assets/bmx-event-ambience-sports.mp3',
+    durationSeconds: 76.826,
+    role: 'race-crowd',
+  },
 ] as const;
-const bmxEventAmbienceProfilesPerSource = 16;
-export const bmxEventAmbienceVariationCount = (
-  bmxEventAmbienceSources.length * bmxEventAmbienceProfilesPerSource
-);
+export const bmxEventAmbienceVariationCount = 128;
+const tracksideBedSource = bmxEventAmbienceSources[0];
+const raceCrowdSource = bmxEventAmbienceSources[1];
+const raceCrowdLoopEndSeconds = 68;
+const raceAmbienceBedMix = 0.74;
+const raceAmbienceCrowdMix = 0.34;
 export const uciVoiceWatchGateOffsetMs = 5300;
 
 export type BmxEventAmbienceProfile = {
   index: number;
+  bedSourceUrl: string;
+  bedStartOffsetSeconds: number;
   sourceUrl: string;
   startOffsetSeconds: number;
+  loopStartOffsetSeconds: number;
+  loopEndOffsetSeconds: number;
   playbackRate: number;
 };
 
@@ -43,17 +53,30 @@ export function bmxEventAmbienceProfile(index: number): BmxEventAmbienceProfile 
     (Math.round(index) % bmxEventAmbienceVariationCount)
     + bmxEventAmbienceVariationCount
   ) % bmxEventAmbienceVariationCount;
-  const source = bmxEventAmbienceSources[
-    normalizedIndex % bmxEventAmbienceSources.length
-  ];
-  const sourceVariation = Math.floor(normalizedIndex / bmxEventAmbienceSources.length);
   return {
     index: normalizedIndex,
-    sourceUrl: source.url,
-    startOffsetSeconds: Number((
-      source.durationSeconds * ((sourceVariation * 7) % bmxEventAmbienceProfilesPerSource) / 34
+    bedSourceUrl: tracksideBedSource.url,
+    bedStartOffsetSeconds: Number((
+      0.75 + (
+        ((normalizedIndex * 29) % bmxEventAmbienceVariationCount)
+        / bmxEventAmbienceVariationCount
+      ) * 12
     ).toFixed(3)),
-    playbackRate: Number((0.985 + (sourceVariation % 4) * 0.01).toFixed(3)),
+    sourceUrl: raceCrowdSource.url,
+    startOffsetSeconds: Number((
+      4 + (
+        ((normalizedIndex * 47) % bmxEventAmbienceVariationCount)
+        / bmxEventAmbienceVariationCount
+      ) * 28
+    ).toFixed(3)),
+    loopStartOffsetSeconds: Number((
+      4 + (
+        ((normalizedIndex * 17) % bmxEventAmbienceVariationCount)
+        / bmxEventAmbienceVariationCount
+      ) * 8
+    ).toFixed(3)),
+    loopEndOffsetSeconds: raceCrowdLoopEndSeconds,
+    playbackRate: Number((0.991 + (normalizedIndex % 7) * 0.003).toFixed(3)),
   };
 }
 
@@ -107,15 +130,34 @@ function getStartGateAudio() {
   return activeStartGateAudio;
 }
 
-function getRaceAmbienceAudio() {
-  if (!raceAmbienceAudio) {
-    raceAmbienceAudio = new Audio(bmxEventAmbienceUrl);
-    raceAmbienceAudio.preload = 'auto';
-    raceAmbienceAudio.loop = true;
-    raceAmbienceAudio.setAttribute('playsinline', '');
+function keepRaceCrowdInsideActiveAudio() {
+  if (!raceAmbienceCrowdAudio || !activeRaceAmbienceProfile) {
+    return;
+  }
+  if (raceAmbienceCrowdAudio.currentTime >= activeRaceAmbienceProfile.loopEndOffsetSeconds) {
+    raceAmbienceCrowdAudio.currentTime = activeRaceAmbienceProfile.loopStartOffsetSeconds;
+  }
+}
+
+function getRaceAmbienceAudioLayers() {
+  if (!raceAmbienceBedAudio) {
+    raceAmbienceBedAudio = new Audio(tracksideBedSource.url);
+    raceAmbienceBedAudio.preload = 'auto';
+    raceAmbienceBedAudio.loop = true;
+    raceAmbienceBedAudio.setAttribute('playsinline', '');
+  }
+  if (!raceAmbienceCrowdAudio) {
+    raceAmbienceCrowdAudio = new Audio(raceCrowdSource.url);
+    raceAmbienceCrowdAudio.preload = 'auto';
+    raceAmbienceCrowdAudio.loop = true;
+    raceAmbienceCrowdAudio.setAttribute('playsinline', '');
+    raceAmbienceCrowdAudio.addEventListener('timeupdate', keepRaceCrowdInsideActiveAudio);
   }
 
-  return raceAmbienceAudio;
+  return {
+    bed: raceAmbienceBedAudio,
+    crowd: raceAmbienceCrowdAudio,
+  };
 }
 
 function nextRaceAmbienceProfile() {
@@ -135,23 +177,43 @@ function nextRaceAmbienceProfile() {
 }
 
 function prepareRaceAmbience() {
-  const ambience = getRaceAmbienceAudio();
+  const { bed, crowd } = getRaceAmbienceAudioLayers();
   const profile = activeRaceAmbienceProfile ?? nextRaceAmbienceProfile();
   activeRaceAmbienceProfile = profile;
-  if (!ambience.src.endsWith(profile.sourceUrl)) {
-    ambience.src = profile.sourceUrl;
+  if (!bed.src.endsWith(profile.bedSourceUrl)) {
+    bed.src = profile.bedSourceUrl;
     raceAmbiencePrimed = false;
   }
-  ambience.loop = true;
-  ambience.playbackRate = profile.playbackRate;
-  if (ambience.paused) {
+  if (!crowd.src.endsWith(profile.sourceUrl)) {
+    crowd.src = profile.sourceUrl;
+    raceAmbiencePrimed = false;
+  }
+  bed.loop = true;
+  bed.playbackRate = 1;
+  crowd.loop = true;
+  crowd.playbackRate = profile.playbackRate;
+  if (bed.paused) {
     try {
-      ambience.currentTime = profile.startOffsetSeconds;
+      bed.currentTime = profile.bedStartOffsetSeconds;
     } catch {
-      // The browser will begin at its earliest seekable point if metadata is not ready.
+      // The bed will start at its earliest seekable point if metadata is not ready.
     }
   }
-  return { ambience, profile };
+  if (crowd.paused) {
+    try {
+      crowd.currentTime = profile.startOffsetSeconds;
+    } catch {
+      // The crowd layer will start at its earliest seekable point if metadata is not ready.
+    }
+  }
+  return { bed, crowd, profile };
+}
+
+function setRaceAmbienceVolume(volume: number) {
+  const masterVolume = Math.max(0, Math.min(0.2, volume));
+  const { bed, crowd } = getRaceAmbienceAudioLayers();
+  bed.volume = masterVolume * raceAmbienceBedMix;
+  crowd.volume = masterVolume * raceAmbienceCrowdMix;
 }
 
 function loadUciVoiceBuffer(context: AudioContext) {
@@ -258,23 +320,29 @@ export async function primeAudioCues() {
     preloadTasks.push(mediaElementPrimePromise);
   }
 
-  const { ambience, profile } = prepareRaceAmbience();
+  const { bed, crowd, profile } = prepareRaceAmbience();
   if (!raceAmbiencePrimed && !raceAmbiencePrimePromise) {
-    ambience.load();
-    ambience.muted = false;
-    ambience.volume = 0.0001;
-    raceAmbiencePrimePromise = ambience.play()
-      .then(() => {
-        ambience.pause();
-        ambience.currentTime = profile.startOffsetSeconds;
-        raceAmbiencePrimed = true;
-      })
-      .catch(() => {
-        // A later race-start gesture can retry playback when priming is blocked.
+    bed.load();
+    crowd.load();
+    for (const layer of [bed, crowd]) {
+      layer.muted = false;
+      layer.volume = 0.0001;
+    }
+    raceAmbiencePrimePromise = Promise.allSettled([
+      bed.play(),
+      crowd.play(),
+    ])
+      .then((results) => {
+        bed.pause();
+        crowd.pause();
+        bed.currentTime = profile.bedStartOffsetSeconds;
+        crowd.currentTime = profile.startOffsetSeconds;
+        raceAmbiencePrimed = results.every((result) => result.status === 'fulfilled');
       })
       .finally(() => {
-        ambience.volume = 0.065;
-        ambience.muted = false;
+        setRaceAmbienceVolume(0.065);
+        bed.muted = false;
+        crowd.muted = false;
         raceAmbiencePrimePromise = null;
       });
   }
@@ -292,34 +360,38 @@ export async function primeAudioCues() {
 }
 
 export async function startBmxEventAmbience(volume = 0.065) {
-  const { ambience, profile } = prepareRaceAmbience();
+  const { bed, crowd, profile } = prepareRaceAmbience();
   const pendingPrime = raceAmbiencePrimePromise;
   if (pendingPrime) {
     await settleWithin(pendingPrime, 1_200, undefined);
   }
 
-  ambience.loop = true;
-  ambience.muted = false;
-  ambience.playbackRate = profile.playbackRate;
-  ambience.volume = Math.max(0, Math.min(0.2, volume));
-  try {
-    await ambience.play();
-    return true;
-  } catch {
-    return false;
-  }
+  bed.loop = true;
+  bed.muted = false;
+  bed.playbackRate = 1;
+  crowd.loop = true;
+  crowd.muted = false;
+  crowd.playbackRate = profile.playbackRate;
+  setRaceAmbienceVolume(volume);
+  const [bedStarted, crowdStarted] = await Promise.all([
+    settleWithin(bed.play().then(() => true).catch(() => false), 1_200, false),
+    settleWithin(crowd.play().then(() => true).catch(() => false), 1_200, false),
+  ]);
+  return bedStarted || crowdStarted;
 }
 
 export function stopBmxEventAmbience() {
   activeRaceAmbienceProfile = null;
-  if (!raceAmbienceAudio) {
-    return;
-  }
-  raceAmbienceAudio.pause();
-  try {
-    raceAmbienceAudio.currentTime = 0;
-  } catch {
-    // The media element may not have loaded enough metadata yet.
+  for (const layer of [raceAmbienceBedAudio, raceAmbienceCrowdAudio]) {
+    if (!layer) {
+      continue;
+    }
+    layer.pause();
+    try {
+      layer.currentTime = 0;
+    } catch {
+      // The media element may not have loaded enough metadata yet.
+    }
   }
 }
 

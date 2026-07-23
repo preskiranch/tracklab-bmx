@@ -101,17 +101,41 @@ describe('race audio resilience', () => {
 
     await primeAudioCues();
     await startBmxEventAmbience();
-    const ambience = StalledAudio.instances.find((audio) => (
+    const ambienceLayers = StalledAudio.instances.filter((audio) => (
       bmxEventAmbienceSources.some((source) => audio.src.endsWith(source.url))
     ));
-    const activeStartOffset = ambience?.currentTime;
+    const activeStartOffsets = ambienceLayers.map((audio) => audio.currentTime);
     await primeAudioCues();
 
-    expect(ambience).toMatchObject({
-      loadCount: 1,
-      paused: false,
-      volume: 0.065,
-      currentTime: activeStartOffset,
+    expect(ambienceLayers).toHaveLength(2);
+    ambienceLayers.forEach((ambience, index) => {
+      expect(ambience).toMatchObject({
+        loadCount: 1,
+        paused: false,
+        currentTime: activeStartOffsets[index],
+      });
+      expect(ambience.volume).toBeGreaterThan(0);
     });
+  });
+
+  it('keeps the crowd layer out of the silent end of its recording', async () => {
+    StalledAudio.stallPlayback = false;
+    const {
+      bmxEventAmbienceSources,
+      primeAudioCues,
+      startBmxEventAmbience,
+    } = await import('../../src/lib/audioCues');
+
+    await primeAudioCues();
+    await startBmxEventAmbience();
+    const crowd = StalledAudio.instances.find((audio) => (
+      audio.src.endsWith(bmxEventAmbienceSources[1].url)
+    ));
+    expect(crowd).toBeDefined();
+    crowd!.currentTime = 70;
+    crowd!.dispatchEvent(new Event('timeupdate'));
+
+    expect(crowd!.currentTime).toBeGreaterThanOrEqual(4);
+    expect(crowd!.currentTime).toBeLessThan(68);
   });
 });

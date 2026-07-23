@@ -713,7 +713,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       __tracklabTreeLightSequence?: string[];
       __tracklabAmbiencePlayCount?: number;
       __tracklabAmbienceLoadCount?: number;
-      __tracklabAmbienceElement?: HTMLMediaElement;
+      __tracklabAmbienceElements?: HTMLMediaElement[];
     };
     const originalMediaLoad = HTMLMediaElement.prototype.load;
     HTMLMediaElement.prototype.load = function (...args: Parameters<HTMLMediaElement['load']>) {
@@ -726,7 +726,9 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     HTMLMediaElement.prototype.play = function (...args: Parameters<HTMLMediaElement['play']>) {
       if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience')) {
         audioWindow.__tracklabAmbiencePlayCount = (audioWindow.__tracklabAmbiencePlayCount ?? 0) + 1;
-        audioWindow.__tracklabAmbienceElement = this;
+        audioWindow.__tracklabAmbienceElements = [
+          ...new Set([...(audioWindow.__tracklabAmbienceElements ?? []), this]),
+        ];
       }
       return Reflect.apply(originalMediaPlay, this, args);
     };
@@ -817,19 +819,29 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     (window as typeof window & {
       __tracklabAmbiencePlayCount?: number;
     }).__tracklabAmbiencePlayCount ?? 0
-  )), { timeout: 12_000 }).toBeGreaterThan(0);
+  )), { timeout: 12_000 }).toBeGreaterThanOrEqual(2);
   await expect.poll(() => page.evaluate(() => {
     const audioWindow = window as typeof window & {
-      __tracklabAmbienceElement?: HTMLMediaElement;
+      __tracklabAmbienceElements?: HTMLMediaElement[];
     };
-    const ambience = audioWindow.__tracklabAmbienceElement;
-    return ambience
-      ? { paused: ambience.paused, volume: ambience.volume }
-      : null;
-  }), { timeout: 5_000 }).toMatchObject({
-    paused: false,
-    volume: 0.09,
+    return (audioWindow.__tracklabAmbienceElements ?? []).filter(
+      (ambience) => !ambience.paused && ambience.volume > 0,
+    ).length;
+  }), { timeout: 5_000 }).toBe(2);
+  const activeAmbienceLayers = await page.evaluate(() => {
+    const audioWindow = window as typeof window & {
+      __tracklabAmbienceElements?: HTMLMediaElement[];
+    };
+    return (audioWindow.__tracklabAmbienceElements ?? []).map((ambience) => ({
+      source: ambience.currentSrc || ambience.src,
+      paused: ambience.paused,
+      volume: ambience.volume,
+    }));
   });
+  expect(activeAmbienceLayers).toHaveLength(2);
+  expect(activeAmbienceLayers.every((layer) => !layer.paused)).toBe(true);
+  expect(activeAmbienceLayers.reduce((total, layer) => total + layer.volume, 0))
+    .toBeCloseTo(0.09 * 1.08, 5);
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
   await expect.poll(() => commentarySpeechRequests, { timeout: 5_000 }).toBeGreaterThan(0);
@@ -908,19 +920,19 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);
   await expect.poll(() => page.evaluate(() => {
     const audioWindow = window as typeof window & {
-      __tracklabAmbienceElement?: HTMLMediaElement;
+      __tracklabAmbienceElements?: HTMLMediaElement[];
       __tracklabAmbienceLoadCount?: number;
     };
-    const ambience = audioWindow.__tracklabAmbienceElement;
+    const ambienceLayers = audioWindow.__tracklabAmbienceElements ?? [];
     return {
       loadCount: audioWindow.__tracklabAmbienceLoadCount ?? 0,
-      paused: ambience?.paused ?? true,
-      volume: ambience?.volume ?? 0,
+      activeLayerCount: ambienceLayers.filter((ambience) => !ambience.paused).length,
+      audibleLayerCount: ambienceLayers.filter((ambience) => ambience.volume > 0).length,
     };
   }), { timeout: 3_000 }).toEqual({
-    loadCount: 1,
-    paused: false,
-    volume: 0.09,
+    loadCount: 2,
+    activeLayerCount: 2,
+    audibleLayerCount: 2,
   });
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4, { timeout: 5_000 });
   await expect.poll(
