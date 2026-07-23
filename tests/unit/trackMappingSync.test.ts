@@ -74,7 +74,7 @@ describe('cross-browser track mapping resolution', () => {
       })).toBe(false);
       expect(setItem).toHaveBeenCalledWith(trackMappingStorageKey, expect.any(String));
       expect(warning).toHaveBeenCalledWith(
-        expect.stringContaining('Could not cache track mappings in this browser'),
+        expect.stringContaining(`Could not cache ${trackMappingStorageKey} in this browser`),
       );
     } finally {
       vi.unstubAllGlobals();

@@ -51,6 +51,7 @@ import {
   stopStartGateAudio,
   uciVoiceWatchGateOffsetMs,
 } from './lib/audioCues';
+import { safeSetLocalStorage } from './lib/browserStorage';
 import {
   bikeSampleHasDriveSignalSince,
   bmxCStartBackoffMeters,
@@ -776,7 +777,7 @@ function readStoredCustomRoutes(): TrackRecord[] {
 }
 
 function writeStoredCustomRoutes(routes: TrackRecord[]) {
-  window.localStorage.setItem(customRoutesStorageKey, JSON.stringify(routes));
+  safeSetLocalStorage(customRoutesStorageKey, JSON.stringify(routes));
 }
 
 const defaultEarthCamera = {
@@ -1059,7 +1060,7 @@ function readStoredBikeProfiles(): BikeProfile[] {
 }
 
 function writeStoredBikeProfiles(profiles: BikeProfile[]) {
-  window.localStorage.setItem(bikeProfilesStorageKey, JSON.stringify(dedupeBikeProfiles(profiles)));
+  safeSetLocalStorage(bikeProfilesStorageKey, JSON.stringify(dedupeBikeProfiles(profiles)));
 }
 
 function readStoredStudioRiders(): StudioRider[] {
@@ -1072,7 +1073,7 @@ function readStoredStudioRiders(): StudioRider[] {
 }
 
 function writeStoredStudioRiders(riders: StudioRider[]) {
-  window.localStorage.setItem(studioRidersStorageKey, JSON.stringify(mergeStudioRiders(riders)));
+  safeSetLocalStorage(studioRidersStorageKey, JSON.stringify(mergeStudioRiders(riders)));
 }
 
 function readStoredBikeConnectionSource(): BikeConnectionSource {
@@ -2974,7 +2975,7 @@ export default function App() {
       return;
     }
 
-    window.localStorage.setItem(bikeConnectionSourceStorageKey, bikeConnectionSource);
+    safeSetLocalStorage(bikeConnectionSourceStorageKey, bikeConnectionSource);
   }, [bikeConnectionSource]);
 
   useEffect(() => {
@@ -3280,11 +3281,11 @@ export default function App() {
   }, [bridge.connection, storedMappings]);
 
   useEffect(() => {
-    window.localStorage.setItem(speedUnitStorageKey, speedUnit);
+    safeSetLocalStorage(speedUnitStorageKey, speedUnit);
   }, [speedUnit]);
 
   useEffect(() => {
-    window.localStorage.setItem(distanceUnitStorageKey, distanceUnit);
+    safeSetLocalStorage(distanceUnitStorageKey, distanceUnit);
   }, [distanceUnit]);
 
   useEffect(() => {
@@ -3292,7 +3293,7 @@ export default function App() {
       return;
     }
 
-    window.localStorage.setItem(raceCaptureStorageKey, JSON.stringify(raceCapture));
+    safeSetLocalStorage(raceCaptureStorageKey, JSON.stringify(raceCapture));
     (window as typeof window & { __tracklabLastRaceCapture?: RaceCapture | null }).__tracklabLastRaceCapture = raceCapture;
   }, [raceCapture]);
 
@@ -3343,7 +3344,7 @@ export default function App() {
     };
 
     (window as typeof window & { __tracklabLiveDebug?: unknown }).__tracklabLiveDebug = liveDebug;
-    window.localStorage.setItem('tracklab-live-debug', JSON.stringify(liveDebug));
+    safeSetLocalStorage('tracklab-live-debug', JSON.stringify(liveDebug));
     document.documentElement.setAttribute('data-tracklab-live-debug', JSON.stringify(liveDebug));
   }, [
     effectiveRouteLengthMeters,

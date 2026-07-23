@@ -9,6 +9,7 @@ import type {
   RaceZoneResult,
   TrackRouteVariantId,
 } from '../types';
+import { safeSetLocalStorage } from './browserStorage';
 
 const maxStoredGhosts = 80;
 const maxGhostPoints = 900;
@@ -168,7 +169,7 @@ export function readStoredGhostLaps() {
 }
 
 export function writeStoredGhostLaps(ghosts: GhostLap[]) {
-  window.localStorage.setItem(
+  safeSetLocalStorage(
     ghostLapsStorageKey,
     JSON.stringify(ghosts.filter((ghost) => ghost.raceSource === 'live').slice(0, maxStoredGhosts)),
   );

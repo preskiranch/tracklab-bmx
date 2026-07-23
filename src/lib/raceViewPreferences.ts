@@ -7,6 +7,7 @@ import type {
   RaceRiderOverlayLayout,
   RaceViewPreferences,
 } from '../types';
+import { safeSetLocalStorage } from './browserStorage';
 
 export const defaultRaceRiderOverlayLayout: RaceRiderOverlayLayout = {
   xPct: 0.04,
@@ -171,7 +172,7 @@ export function writeStoredRaceViewPreferences(profileKey: string, preferences: 
     return;
   }
 
-  window.localStorage.setItem(
+  safeSetLocalStorage(
     profileStorageKey(profileKey),
     JSON.stringify(normalizeRaceViewPreferences(preferences)),
   );

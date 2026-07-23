@@ -1,3 +1,5 @@
+import { safeSetLocalStorage } from './browserStorage';
+
 export type MembershipTier = 'visitor' | 'spectator' | 'racer';
 
 export type MembershipState = {
@@ -102,7 +104,7 @@ export function writeStoredMembership(membership: MembershipState) {
     return;
   }
 
-  window.localStorage.setItem(membershipStorageKey, JSON.stringify({
+  safeSetLocalStorage(membershipStorageKey, JSON.stringify({
     ...membership,
     bikeSeats: clampBikeSeats(membership.bikeSeats),
   }));

@@ -15,6 +15,7 @@ import type {
   SplitBranchChoice,
   TrackRecord,
 } from '../types';
+import { safeSetLocalStorage } from '../lib/browserStorage';
 
 type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
@@ -146,7 +147,7 @@ function readProfile(): MultiplayerProfile {
 }
 
 function writeProfile(profile: MultiplayerProfile) {
-  window.localStorage.setItem(profileStorageKey, JSON.stringify(profile));
+  safeSetLocalStorage(profileStorageKey, JSON.stringify(profile));
 }
 
 function multiplayerUrl() {

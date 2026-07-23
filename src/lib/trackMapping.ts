@@ -10,6 +10,7 @@ import type {
   TrackZone,
   UserTrackMapping,
 } from '../types';
+import { safeSetLocalStorage } from './browserStorage';
 
 export const trackMappingStorageKey = 'tracklab:user-track-mappings:v1';
 export const defaultZoneBoundarySetId = 'default';
@@ -925,21 +926,8 @@ export function readStoredTrackMappings(): StoredTrackMappings {
   }
 }
 
-let warnedAboutTrackMappingStorageWrite = false;
-
 export function writeStoredTrackMappings(mappings: StoredTrackMappings) {
-  try {
-    window.localStorage.setItem(trackMappingStorageKey, JSON.stringify(mappings));
-    warnedAboutTrackMappingStorageWrite = false;
-    return true;
-  } catch (error) {
-    if (!warnedAboutTrackMappingStorageWrite) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Could not cache track mappings in this browser: ${message}`);
-      warnedAboutTrackMappingStorageWrite = true;
-    }
-    return false;
-  }
+  return safeSetLocalStorage(trackMappingStorageKey, JSON.stringify(mappings));
 }
 
 export function zoneBoundariesFromMapping(mapping: UserTrackMapping) {
