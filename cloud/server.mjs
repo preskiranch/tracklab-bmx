@@ -78,6 +78,7 @@ const persistedRaceResultKeys = new Map();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const userDataWriteChains = new Map();
+const globalRaceViewProfileKey = 'global:developer-race-view';
 const maxRaceBikeCount = 4;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
@@ -1189,6 +1190,27 @@ function sanitizeRaceViewPreferences(value) {
         : [],
     },
     commentaryUpdatedAt: sanitizedPreferenceRevision(value.commentaryUpdatedAt),
+  };
+}
+
+function sanitizeGlobalRaceViewPreferences(value) {
+  const preferences = sanitizeRaceViewPreferences(value);
+  if (!preferences || Object.keys(preferences.earthCamerasByTrack).length === 0) {
+    return null;
+  }
+
+  const newestCameraRevision = Math.max(
+    0,
+    ...Object.values(preferences.earthCamerasByTrack)
+      .map((camera) => sanitizedPreferenceRevision(camera?.updatedAt)),
+  );
+  return {
+    cameraLocked: true,
+    cameraLockedUpdatedAt: Math.max(
+      preferences.cameraLockedUpdatedAt,
+      newestCameraRevision,
+    ),
+    earthCamerasByTrack: preferences.earthCamerasByTrack,
   };
 }
 
@@ -3150,6 +3172,57 @@ async function serveStatic(request, response) {
       'Content-Length': Buffer.byteLength(body),
     });
     response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/global-race-view') {
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      const userData = await persistence.loadUserData(globalRaceViewProfileKey);
+      const raceViewPreferences = sanitizeGlobalRaceViewPreferences(
+        userData?.raceViewPreferences,
+      );
+      const body = JSON.stringify({ raceViewPreferences });
+      response.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Length': Buffer.byteLength(body),
+      });
+      response.end(request.method === 'HEAD' ? undefined : body);
+      return;
+    }
+
+    if (request.method === 'PATCH' || request.method === 'POST') {
+      const session = await requireAuthSession(request, response);
+      if (!session) {
+        return;
+      }
+      if (!session.user.admin && !isAdminEmail(session.user.email)) {
+        writeJson(response, 403, { error: 'Only the TrackLab developer can publish the global race view.' });
+        return;
+      }
+
+      const payload = await readJsonBody(request, 32_000);
+      const raceViewPreferences = sanitizeGlobalRaceViewPreferences(
+        payload?.raceViewPreferences,
+      );
+      if (!raceViewPreferences) {
+        writeJson(response, 400, { error: 'At least one saved track camera is required.' });
+        return;
+      }
+      const saved = await persistence.saveUserData(globalRaceViewProfileKey, {
+        raceViewPreferences,
+      });
+      if (!saved) {
+        writeJson(response, 503, { error: 'Global race view storage is temporarily unavailable.' });
+        return;
+      }
+      writeJson(response, 200, {
+        raceViewPreferences: sanitizeGlobalRaceViewPreferences(saved.raceViewPreferences),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    writeJson(response, 405, { error: 'Method not allowed' });
     return;
   }
 

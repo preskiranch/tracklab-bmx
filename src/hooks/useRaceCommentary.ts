@@ -970,8 +970,8 @@ export function useRaceCommentary({
           beginSpeaking,
         );
       } catch (error) {
-        if (serviceMode === 'browser' && shouldContinue()) {
-          await speakWithBrowser(
+        if (shouldContinue()) {
+          const fallbackPlayed = await speakWithBrowser(
             report.line,
             activePreferences.voicePreset,
             'pre-race',
@@ -980,6 +980,9 @@ export function useRaceCommentary({
             shouldContinue,
             beginSpeaking,
           );
+          if (!fallbackPlayed && serviceMode === 'ai') {
+            console.warn('Natural commentary pre-race audio and the safe male device fallback could not play.', error);
+          }
         } else if (serviceMode === 'ai') {
           console.warn('Natural commentary pre-race audio could not play.', error);
         }
@@ -1115,8 +1118,8 @@ export function useRaceCommentary({
               );
             }
           } catch (error) {
-            if (serviceMode === 'browser' && shouldContinue()) {
-              await speakWithBrowser(
+            if (shouldContinue()) {
+              const fallbackPlayed = await speakWithBrowser(
                 line,
                 activePreferences.voicePreset,
                 event.kind,
@@ -1125,6 +1128,9 @@ export function useRaceCommentary({
                 shouldContinue,
                 beginSpeaking,
               );
+              if (!fallbackPlayed && serviceMode === 'ai') {
+                console.warn('Natural commentary race-start audio and the safe male device fallback could not play.', error);
+              }
             } else if (serviceMode === 'ai') {
               console.warn('Natural commentary race-start audio could not play.', error);
             }
@@ -1173,8 +1179,8 @@ export function useRaceCommentary({
               );
             }
           } catch (error) {
-            if (serviceMode === 'browser' && shouldContinue()) {
-              await speakWithBrowser(
+            if (shouldContinue()) {
+              const fallbackPlayed = await speakWithBrowser(
                 line,
                 activePreferences.voicePreset,
                 event.kind,
@@ -1183,6 +1189,9 @@ export function useRaceCommentary({
                 shouldContinue,
                 beginSpeaking,
               );
+              if (!fallbackPlayed && serviceMode === 'ai') {
+                console.warn('Natural commentary finish audio and the safe male device fallback could not play.', error);
+              }
             } else if (serviceMode === 'ai') {
               console.warn('Natural commentary finish audio could not play.', error);
             }
@@ -1280,8 +1289,8 @@ export function useRaceCommentary({
             );
           }
         } catch (error) {
-          if (!useAiSpeech && shouldContinue()) {
-            await speakWithBrowser(
+          if (shouldContinue()) {
+            const fallbackPlayed = await speakWithBrowser(
               line,
               activePreferences.voicePreset,
               event.kind,
@@ -1290,6 +1299,9 @@ export function useRaceCommentary({
               shouldContinue,
               beginSpeaking,
             );
+            if (!fallbackPlayed && useAiSpeech) {
+              console.warn('Natural commentary race audio and the safe male device fallback could not play.', error);
+            }
           } else if (useAiSpeech) {
             console.warn('Natural commentary race audio could not play.', error);
           }

@@ -8,6 +8,7 @@ import {
   normalizeRaceRiderOverlayLayout,
   normalizeRaceViewPreferences,
 } from '../../src/lib/raceViewPreferences';
+import { applyGlobalRaceViewPreferences } from '../../src/lib/globalRaceView';
 
 describe('race view preferences', () => {
   it('uses a larger two-axis rider panel by default', () => {
@@ -149,5 +150,42 @@ describe('race view preferences', () => {
         north: { angle: 20, heading: 40 },
       },
     }).earthCamerasByTrack.north.updatedAt).toBe(0);
+  });
+
+  it('applies the developer camera globally without replacing account-only settings', () => {
+    const account = normalizeRaceViewPreferences({
+      cameraLocked: false,
+      cameraLockedUpdatedAt: 400,
+      earthCamerasByTrack: {
+        north: { angle: 20, heading: 40, zoom: 18, updatedAt: 400 },
+        south: { angle: 30, heading: 90, zoom: 19, updatedAt: 300 },
+      },
+      demoRiderNames: { 1: 'Maya Torres' },
+      demoRiderNamesUpdatedAt: 500,
+      commentary: { ...defaultRaceCommentaryPreferences, ambientEnabled: false },
+      commentaryUpdatedAt: 500,
+    });
+    const global = normalizeRaceViewPreferences({
+      cameraLocked: true,
+      cameraLockedUpdatedAt: 900,
+      earthCamerasByTrack: {
+        north: { angle: 55, heading: 225, zoom: 21, updatedAt: 900 },
+      },
+    });
+
+    const applied = applyGlobalRaceViewPreferences(account, global);
+
+    expect(applied.cameraLocked).toBe(true);
+    expect(applied.earthCamerasByTrack.north).toMatchObject({
+      angle: 55,
+      heading: 225,
+      zoom: 21,
+    });
+    expect(applied.earthCamerasByTrack.south).toMatchObject({
+      angle: 30,
+      heading: 90,
+    });
+    expect(applied.demoRiderNames).toEqual({ 1: 'Maya Torres' });
+    expect(applied.commentary.ambientEnabled).toBe(false);
   });
 });

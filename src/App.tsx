@@ -122,6 +122,11 @@ import {
   saveCloudTrackMapping,
 } from './lib/cloudUserData';
 import {
+  applyGlobalRaceViewPreferences,
+  readGlobalRaceViewPreferences,
+  saveGlobalRaceViewPreferences,
+} from './lib/globalRaceView';
+import {
   buildGhostLapFromRace,
   ghostsForTrackRoute,
   loadGhostLapsFromCloud,
@@ -3131,8 +3136,14 @@ export default function App() {
       }
 
       loading = true;
-      void readCloudUserData(cloudProfileKey)
-        .then((data) => {
+      void Promise.all([
+        readCloudUserData(cloudProfileKey),
+        readGlobalRaceViewPreferences().catch((error: Error) => {
+          console.warn(`Could not load the developer's global race view: ${error.message}`);
+          return null;
+        }),
+      ])
+        .then(([data, globalRaceViewPreferences]) => {
           if (cancelled) {
             return;
           }
@@ -3153,25 +3164,51 @@ export default function App() {
             cloudProfileKey,
             readStoredEarthCameras(),
           );
-          const mergedRaceViewPreferences = data.raceViewPreferences
+          const accountRaceViewPreferences = data.raceViewPreferences
             ? mergeRaceViewPreferences(localRaceViewPreferences, data.raceViewPreferences)
             : localRaceViewPreferences;
+          const mergedRaceViewPreferences = applyGlobalRaceViewPreferences(
+            accountRaceViewPreferences,
+            globalRaceViewPreferences,
+          );
           applyRaceViewPreferences(mergedRaceViewPreferences);
           writeStoredRaceViewPreferences(cloudProfileKey, mergedRaceViewPreferences);
           cloudUserDataAvailableRef.current = true;
           cloudUserDataLoadedKeyRef.current = cloudProfileKey;
           if (
             !data.raceViewPreferences
-            || !raceViewPreferencesMatch(data.raceViewPreferences, mergedRaceViewPreferences)
+            || !raceViewPreferencesMatch(data.raceViewPreferences, accountRaceViewPreferences)
           ) {
             void queueCloudUserDataPatch(cloudProfileKey, {
-              raceViewPreferences: mergedRaceViewPreferences,
+              raceViewPreferences: accountRaceViewPreferences,
             }).catch((error: Error) => {
               console.warn(`Could not reconcile race view preferences with TrackLab cloud: ${error.message}`);
             });
           }
+          if (
+            !globalRaceViewPreferences
+            && developerRaceLayoutActive
+            && accountRaceViewPreferences.cameraLocked
+            && Object.keys(accountRaceViewPreferences.earthCamerasByTrack).length > 0
+          ) {
+            void saveGlobalRaceViewPreferences(accountRaceViewPreferences)
+              .then((savedGlobalPreferences) => {
+                if (cancelled) {
+                  return;
+                }
+                const nextPreferences = applyGlobalRaceViewPreferences(
+                  raceViewPreferencesRef.current,
+                  savedGlobalPreferences,
+                );
+                applyRaceViewPreferences(nextPreferences);
+                writeStoredRaceViewPreferences(cloudProfileKey, nextPreferences);
+              })
+              .catch((error: Error) => {
+                console.warn(`Could not publish the developer's existing race view: ${error.message}`);
+              });
+          }
           setCloudUserDataStatus('online');
-          setCloudUserDataMessage('Bike names, race view preferences, studio riders, custom routes, and track maps are syncing to this profile.');
+          setCloudUserDataMessage('Bike names, the developer camera view, studio riders, custom routes, and track maps are syncing.');
 
           if (authUser && mappingBackfillProfileRef.current !== cloudProfileKey) {
             mappingBackfillProfileRef.current = cloudProfileKey;
@@ -3240,7 +3277,7 @@ export default function App() {
       window.removeEventListener('focus', refreshCloudUserData);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [applyRaceViewPreferences, authUser, cloudProfileKey]);
+  }, [applyRaceViewPreferences, authUser, cloudProfileKey, developerRaceLayoutActive]);
 
   useEffect(() => {
     writeStoredBikeProfiles(bikeProfiles);
@@ -5154,12 +5191,32 @@ export default function App() {
       return;
     }
     setRaceCameraLocked(locked);
-    persistRaceViewPreferences({
+    const nextPreferences = normalizeRaceViewPreferences({
       ...raceViewPreferencesRef.current,
       cameraLocked: locked,
       cameraLockedUpdatedAt: Date.now(),
     });
-  }, [developerRaceLayoutActive, persistRaceViewPreferences]);
+    persistRaceViewPreferences(nextPreferences);
+    if (locked && Object.keys(nextPreferences.earthCamerasByTrack).length > 0) {
+      void saveGlobalRaceViewPreferences(nextPreferences)
+        .then((savedGlobalPreferences) => {
+          const globallyLockedPreferences = applyGlobalRaceViewPreferences(
+            raceViewPreferencesRef.current,
+            savedGlobalPreferences,
+          );
+          applyRaceViewPreferences(globallyLockedPreferences);
+          writeStoredRaceViewPreferences(cloudProfileKey, globallyLockedPreferences);
+        })
+        .catch((error: Error) => {
+          console.warn(`Could not publish the locked race view globally: ${error.message}`);
+        });
+    }
+  }, [
+    applyRaceViewPreferences,
+    cloudProfileKey,
+    developerRaceLayoutActive,
+    persistRaceViewPreferences,
+  ]);
 
   const handleRiderOverlayPreferenceChange = useCallback((trackId: string, layout: RaceRiderOverlayLayout) => {
     if (!developerRaceLayoutActive) {

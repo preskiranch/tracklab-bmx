@@ -1242,6 +1242,124 @@ test.describe('mobile commentary playback', () => {
     ).toBe(true);
     await expect(page.getByLabel('Race commentary')).toBeAttached();
   });
+
+  test('uses only a recognized male device voice when hosted speech is temporarily unavailable', async ({ page }) => {
+    test.setTimeout(35_000);
+    const authUser = {
+      id: 'ipad-commentary-fallback-racer',
+      profileKey: 'user:ipad-commentary-fallback-racer',
+      email: 'ipad-commentary-fallback@tracklab.test',
+      name: 'Fallback Commentary Rider',
+      admin: true,
+      membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+    };
+
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {},
+          customRoutes: [],
+          bikeProfiles: [],
+          studioRiders: [],
+          raceViewPreferences: null,
+        }),
+      });
+    });
+    await page.route('**/api/commentary/config', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ aiAvailable: true }),
+      });
+    });
+    await page.route('**/api/commentary/speech', async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Hosted speech temporarily unavailable.' }),
+      });
+    });
+    await page.route('**/api/commentary/pre-race', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          line: 'All four riders are set and the gate is next.',
+          source: 'local',
+          generatedAt: new Date().toISOString(),
+          variableCount: 12,
+          supportedVariableCount: 73,
+          sources: [],
+          weather: { available: false },
+        }),
+      });
+    });
+    await page.addInitScript(() => {
+      const audioWindow = window as typeof window & {
+        __tracklabBrowserFallbackCalls?: Array<{ line: string; voice: string }>;
+      };
+      class MockSpeechSynthesisUtterance {
+        lang = '';
+        onend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        pitch = 1;
+        rate = 1;
+        text: string;
+        voice: SpeechSynthesisVoice | null = null;
+        volume = 1;
+
+        constructor(text: string) {
+          this.text = text;
+        }
+      }
+      const alexVoice = {
+        default: true,
+        lang: 'en-US',
+        localService: true,
+        name: 'Alex',
+        voiceURI: 'Alex',
+      } as SpeechSynthesisVoice;
+      Object.defineProperty(window, 'SpeechSynthesisUtterance', {
+        configurable: true,
+        value: MockSpeechSynthesisUtterance,
+      });
+      Object.defineProperty(window, 'speechSynthesis', {
+        configurable: true,
+        value: {
+          cancel() {},
+          getVoices: () => [alexVoice],
+          speak(utterance: MockSpeechSynthesisUtterance) {
+            audioWindow.__tracklabBrowserFallbackCalls = [
+              ...(audioWindow.__tracklabBrowserFallbackCalls ?? []),
+              { line: utterance.text, voice: utterance.voice?.name ?? '' },
+            ];
+            window.setTimeout(() => utterance.onend?.(), 0);
+          },
+        },
+      });
+    });
+
+    await page.goto('/?track=air-time-bmx');
+    await page.getByRole('button', { name: 'Open App' }).click();
+    await page.getByRole('button', { name: /Demo/i }).first().click();
+    const startAction = page.locator('.workflow-step.primary-action');
+    await expect(startAction).toContainText('Start Demo Race');
+    await startAction.click();
+
+    await expect.poll(() => page.evaluate(() => (
+      (window as typeof window & {
+        __tracklabBrowserFallbackCalls?: Array<{ line: string; voice: string }>;
+      }).__tracklabBrowserFallbackCalls ?? []
+    )), { timeout: 10_000 }).toContainEqual({
+      line: 'All four riders are set and the gate is next.',
+      voice: 'Alex',
+    });
+  });
 });
 
 test('loop races expose lap controls and privacy-safe ghost selection without a cadence card', async ({ page }, testInfo) => {
@@ -2129,6 +2247,7 @@ test('demo rider names and the last track view restore from the signed-in accoun
     },
     commentaryUpdatedAt: 100,
   };
+  let globalRaceViewPreferences: typeof cloudRaceViewPreferences | null = null;
 
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
@@ -2165,6 +2284,23 @@ test('demo rider names and the last track view restore from the signed-in accoun
       }),
     });
   });
+  await page.route('**/api/global-race-view', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const payload = route.request().postDataJSON() as {
+        raceViewPreferences?: typeof cloudRaceViewPreferences;
+      };
+      if (payload.raceViewPreferences) {
+        globalRaceViewPreferences = {
+          ...payload.raceViewPreferences,
+          cameraLocked: true,
+        };
+      }
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ raceViewPreferences: globalRaceViewPreferences }),
+    });
+  });
   await page.route('**/api/ghosts*', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -2199,6 +2335,37 @@ test('demo rider names and the last track view restore from the signed-in accoun
   expect(cloudRaceViewPreferences.demoRiderNamesUpdatedAt).toBeGreaterThan(100);
   expect(cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].updatedAt).toBeGreaterThan(100);
 
+  await page.locator('.workflow-step.primary-action').click();
+  await expect(page.getByRole('button', { name: 'Lock View', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Lock View', exact: true }).click();
+  await expect.poll(() => globalRaceViewPreferences?.cameraLocked).toBe(true);
+  await expect.poll(
+    () => globalRaceViewPreferences?.earthCamerasByTrack['black-mountain-bmx'].angle,
+  ).toBe(52);
+  await expect.poll(
+    () => globalRaceViewPreferences?.earthCamerasByTrack['black-mountain-bmx'].heading,
+  ).toBe(195);
+  await page.getByRole('button', { name: /Cancel Race/i }).click();
+
+  cloudRaceViewPreferences = {
+    ...cloudRaceViewPreferences,
+    cameraLocked: false,
+    cameraLockedUpdatedAt: Date.now() + 2_000,
+    earthCamerasByTrack: {
+      ...cloudRaceViewPreferences.earthCamerasByTrack,
+      'black-mountain-bmx': {
+        ...cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'],
+        angle: 10,
+        heading: 20,
+        updatedAt: Date.now() + 2_000,
+      },
+    },
+  };
+  await page.evaluate(() => {
+    Object.keys(window.localStorage)
+      .filter((key) => key.startsWith('tracklab-bmx-race-view-preferences-v1'))
+      .forEach((key) => window.localStorage.removeItem(key));
+  });
   await page.reload();
   await expect(page.getByRole('button', { name: /Demo/i }).first()).toBeVisible();
   await page.getByRole('button', { name: /Demo/i }).first().click();

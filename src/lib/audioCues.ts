@@ -152,7 +152,7 @@ function startGateToneProfile(kind: StartGateToneKind) {
         : isGateTone
           ? 0.76
           : 0.17,
-    volume: isGateTone ? 0.24 : 0.17,
+    volume: kind.startsWith('uci') ? 0.42 : isGateTone ? 0.28 : 0.17,
   };
 }
 
@@ -546,8 +546,8 @@ export function playZoneCue(kind: 'start' | 'stop') {
 }
 
 function playStartGateToneWithWebAudio(kind: StartGateToneKind) {
-  const context = resumeAudioContext();
-  if (!context || context.state === 'closed') {
+  const context = getAudioContext();
+  if (!context || context.state !== 'running') {
     return false;
   }
 
@@ -581,6 +581,7 @@ function playStartGateToneWithWebAudio(kind: StartGateToneKind) {
 }
 
 export function playStartGateTone(kind: StartGateToneKind) {
+  const context = resumeAudioContext();
   if (playStartGateToneWithWebAudio(kind)) {
     return;
   }
@@ -600,7 +601,16 @@ export function playStartGateTone(kind: StartGateToneKind) {
     audio.play().then(() => true).catch(() => false),
     500,
     false,
-  );
+  ).then((started) => {
+    if (started || !context || context.state === 'closed') {
+      return;
+    }
+    void context.resume()
+      .then(() => {
+        playStartGateToneWithWebAudio(kind);
+      })
+      .catch(() => undefined);
+  });
 }
 
 export function speakStartGatePhrase(text: string) {

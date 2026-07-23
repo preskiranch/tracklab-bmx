@@ -164,6 +164,38 @@ describe('race audio resilience', () => {
     expect(StalledAudio.instances).toHaveLength(0);
   });
 
+  it('uses the audible media fallback while Web Audio is still suspended', async () => {
+    StalledAudio.stallPlayback = false;
+    class SuspendedGateAudioContext {
+      currentTime = 0;
+      destination = {};
+      state = 'suspended';
+
+      resume() {
+        return Promise.resolve();
+      }
+    }
+    vi.stubGlobal('window', {
+      AudioContext: SuspendedGateAudioContext,
+      webkitAudioContext: undefined,
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+      speechSynthesis: undefined,
+    });
+    const { playStartGateTone } = await import('../../src/lib/audioCues');
+
+    playStartGateTone('uci-red');
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(StalledAudio.instances).toHaveLength(1);
+    expect(StalledAudio.instances[0]).toMatchObject({
+      muted: false,
+      paused: false,
+      volume: 1,
+    });
+    expect(StalledAudio.instances[0].src).toMatch(/^data:audio\/wav;base64,/);
+  });
+
   it('does not reload or stop ambience when cadence preparation runs', async () => {
     StalledAudio.stallPlayback = false;
     const {

@@ -84,7 +84,7 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(port),
       DATABASE_URL: '',
-      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test',
+      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test',
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
@@ -350,6 +350,81 @@ describe('cloud API trust boundaries', () => {
         recentLines: ['A newer commentary preference.'],
       },
     });
+  });
+
+  it('publishes one developer-locked camera view for every account and device', async () => {
+    const nonAdminCookie = cookie;
+    const forbidden = await api('/api/global-race-view', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        raceViewPreferences: {
+          cameraLocked: true,
+          earthCamerasByTrack: {
+            'north-bay-bmx': { angle: 10, heading: 20, zoom: 18, updatedAt: 100 },
+          },
+        },
+      }),
+    });
+    expect(forbidden.status).toBe(403);
+
+    const registration = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'TrackLab Developer',
+        email: 'global-view-admin@tracklab.test',
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(registration.status).toBe(201);
+    cookie = String(registration.headers.get('set-cookie')).split(';')[0];
+
+    const saved = await api('/api/global-race-view', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        raceViewPreferences: {
+          cameraLocked: false,
+          cameraLockedUpdatedAt: 700,
+          earthCamerasByTrack: {
+            'north-bay-bmx': {
+              angle: 53,
+              heading: 215,
+              center: { lat: 38.2445, lng: -122.2825 },
+              zoom: 20,
+              updatedAt: 750,
+            },
+          },
+          demoRiderNames: { 1: 'Must stay private' },
+        },
+      }),
+    });
+    expect(saved.status).toBe(200);
+    await expect(saved.json()).resolves.toMatchObject({
+      raceViewPreferences: {
+        cameraLocked: true,
+        cameraLockedUpdatedAt: 750,
+        earthCamerasByTrack: {
+          'north-bay-bmx': {
+            angle: 53,
+            heading: 215,
+            zoom: 20,
+            updatedAt: 750,
+          },
+        },
+      },
+    });
+
+    cookie = '';
+    const publicView = await api('/api/global-race-view');
+    expect(publicView.status).toBe(200);
+    const publicPayload = await publicView.json();
+    expect(publicPayload.raceViewPreferences).toMatchObject({
+      cameraLocked: true,
+      earthCamerasByTrack: {
+        'north-bay-bmx': { angle: 53, heading: 215, zoom: 20 },
+      },
+    });
+    expect(publicPayload.raceViewPreferences).not.toHaveProperty('demoRiderNames');
+    cookie = nonAdminCookie;
   });
 
   it('prepares a truthful local pre-race briefing when hosted AI is unavailable', async () => {
