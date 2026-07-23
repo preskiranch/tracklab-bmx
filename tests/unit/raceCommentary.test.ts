@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createRaceCommentaryTracker,
   detectRaceCommentaryEvents,
+  localCommentaryCombinationCount,
   localCommentaryLine,
   raceCommentaryEventIsFresh,
   selectLiveRaceCommentaryEvent,
@@ -174,7 +175,7 @@ describe('race commentary event detection', () => {
     expect(line).toMatch(/Avery/i);
     expect(line).toMatch(/Casey/i);
     expect(line).toMatch(/Drew/i);
-    expect(line).toMatch(/takes charge|takes command|new leader|out front|seizes the lead/i);
+    expect(line).toMatch(/takes charge|takes command|new leader|out front|seizes the lead|front changes hands|hits the front/i);
     expect(line).toMatch(/wheel-to-wheel|fight for third|scrap for third|side-by-side|duel for third/i);
   });
 
@@ -233,6 +234,48 @@ describe('race commentary event detection', () => {
 
     expect(first).toContain('North Bay BMX');
     expect(second).not.toBe(first);
+  });
+
+  it('builds live calls from more than 100,000 sentence paths without repeating a demo series', () => {
+    expect(localCommentaryCombinationCount).toBeGreaterThan(100_000);
+    const baseEvent = {
+      id: 'variation-0',
+      sequence: 4,
+      kind: 'lead-change' as const,
+      occurredAt: 1_000,
+      trackName: 'North Bay BMX',
+      raceLengthMeters: 300,
+      progress: 0.45,
+      leaderPlayerId: 2 as const,
+      previousLeaderPlayerId: 1 as const,
+      coursePhase: 'second-straight' as const,
+      battleState: 'under-pressure' as const,
+      closeBattles: [{
+        frontPlayerId: 3 as const,
+        behindPlayerId: 4 as const,
+        position: 3,
+        gapMeters: 0.4,
+      }],
+      pedalReferenceAllowed: false,
+      riders: [
+        { playerId: 2 as const, name: 'Blake', rank: 1, distanceMeters: 140, driveAllowed: true, finished: false },
+        { playerId: 1 as const, name: 'Avery', rank: 2, distanceMeters: 139.5, driveAllowed: true, finished: false },
+        { playerId: 3 as const, name: 'Casey', rank: 3, distanceMeters: 138, driveAllowed: true, finished: false },
+        { playerId: 4 as const, name: 'Drew', rank: 4, distanceMeters: 137.6, driveAllowed: true, finished: false },
+      ],
+    };
+    const memory: string[] = [];
+    for (let index = 0; index < 48; index += 1) {
+      const line = localCommentaryLine({
+        ...baseEvent,
+        id: `variation-${index}`,
+        sequence: index + 4,
+      }, memory, memory.slice(-12));
+      memory.push(line);
+    }
+
+    expect(new Set(memory).size).toBe(memory.length);
+    expect(memory.join(' ')).toMatch(/\b(?:two spot|bar-to-bar|side-by-side|out front)\b/i);
   });
 
   it('rotates local fallback coverage through all four running positions', () => {

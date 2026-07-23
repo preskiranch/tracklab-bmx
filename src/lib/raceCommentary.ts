@@ -442,11 +442,12 @@ function pickLine(
   recentLines: string[],
   raceLines: string[],
 ) {
-  const ranked = candidates
+  const memoryLines = [...recentLines, ...raceLines];
+  const ranked = [...new Set(candidates.filter(Boolean))]
     .map((candidate) => ({
       candidate,
       repeatsRaceSection: lineRepeatsRecentRaceSection(candidate, raceLines),
-      similarity: recentLines.reduce(
+      similarity: memoryLines.reduce(
         (highest, recentLine) => Math.max(highest, tokenSimilarity(candidate, recentLine)),
         0,
       ),
@@ -463,8 +464,44 @@ function pickLine(
       && item.similarity <= bestSimilarity + 0.05
     ))
     .map((item) => item.candidate);
-  const seed = [...event.id].reduce((total, character) => total + character.charCodeAt(0), 0);
-  return pool[seed % pool.length];
+  const seed = stableCommentaryHash([
+    event.id,
+    event.sequence,
+    recentLines.length,
+    recentLines.at(-1) ?? '',
+    raceLines.at(-1) ?? '',
+  ].join('|'));
+  return pool[seed % pool.length] ?? ranked[0]?.candidate ?? '';
+}
+
+function stableCommentaryHash(value: string) {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+function commentaryChoice<T>(
+  values: readonly T[],
+  event: RaceCommentaryEvent,
+  recentLines: string[],
+  raceLines: string[],
+  variant: number,
+  salt: string,
+) {
+  const seed = stableCommentaryHash([
+    event.id,
+    event.sequence,
+    event.kind,
+    recentLines.length,
+    recentLines.at(-1) ?? '',
+    raceLines.at(-1) ?? '',
+    variant,
+    salt,
+  ].join('|'));
+  return values[seed % values.length];
 }
 
 function lineMentionsLocalRider(line: string, rider: RaceCommentaryRiderFact) {
@@ -590,133 +627,469 @@ function localOrdinal(rank: number) {
   return 'fourth';
 }
 
-function localCoverageLines(
-  event: RaceCommentaryEvent,
-  requiredRiders: RaceCommentaryRiderFact[],
+const leadHeadlines = [
+  'New leader',
+  'The order flips',
+  'Out front now',
+  'That changes the race',
+  'The front changes hands',
+  'There is the move',
+  'The pressure breaks through',
+  'A decisive pass',
+  'The race turns',
+  'The challenge lands',
+  'A new name at the front',
+  'The lead is gone',
+] as const;
+
+const leadActions = [
+  'takes charge',
+  'takes command',
+  'seizes the lead',
+  'takes over out front',
+  'moves into the lead',
+  'claims the front',
+  'hits the front',
+  'takes control',
+  'goes to the lead',
+  'comes through for the lead',
+  'finds the front',
+  'powers into the lead',
+] as const;
+
+const chaseActions = [
+  'drops into the two spot',
+  'gives chase from second',
+  'responds from second',
+  'stays in the hunt',
+  'slots into second',
+  'keeps the leader honest',
+  'holds the two spot',
+  'comes back in the chase',
+  'regroups in second',
+  'remains right in this race',
+] as const;
+
+const rearBattleActions = [
+  'fight side-by-side for third',
+  'run bar-to-bar for third',
+  'are locked in a fight for third',
+  'have nothing between them for third',
+  'keep the third-place battle alive',
+  'scrap for third',
+  'are wheel-to-wheel for third',
+  'trade pressure for third',
+  'stay locked together for third',
+  'duel for third',
+] as const;
+
+const rearBattleLinks = [
+  'behind them',
+  'further back',
+  'and look at the battle behind',
+  'with the chase still unsettled',
+  'while the pack stays busy',
+  'and the fight behind is alive',
+  'with no peace in the chase',
+  'while third remains up for grabs',
+  'and there is more action behind',
+  'with the rear battle still raging',
+  'while nobody behind is giving an inch',
+  'and the order is far from settled',
+] as const;
+
+// A single four-rider lead-change call can take more than 170,000 valid
+// sentence paths before rider names, track phase, or optional wit are varied.
+export const localCommentaryCombinationCount = (
+  leadHeadlines.length
+  * leadActions.length
+  * chaseActions.length
+  * rearBattleActions.length
+  * rearBattleLinks.length
+);
+
+const startOpeningFragments = [
+  `Gate's down at`,
+  `They're racing at`,
+  'Race on at',
+  'Here we go at',
+  'The field is away at',
+  'A clean release at',
+  'The race comes alive at',
+  'The gate releases them at',
+] as const;
+
+const startActions = [
+  'the whole field launches',
+  'the riders explode away together',
+  'the pack powers into motion',
+  'the opening sprint is on',
+  'every rider snaps into the race',
+  'the field surges away as one',
+  'all lanes fire into action',
+  'the opening battle starts now',
+] as const;
+
+export function localRaceStartLine(
+  trackName: string,
+  riderNames: string[],
+  recentLines: string[] = [],
 ) {
-  const [first, second, third, fourth] = requiredRiders;
-  if (!first || !second) {
-    return [];
-  }
-  const firstClause = localPositionClause(first);
-  const secondClause = localPositionClause(second);
-  const wryAside = event.kind !== 'finish' && event.sequence % 5 === 0;
-  const applyWryAside = (lines: string[]) => wryAside
-    ? lines.map((line) => `${line.replace(/[.!]$/, '')}—calm clearly stayed home.`)
-    : lines;
-  if (event.kind === 'lead-change') {
-    if (third && fourth) {
-      return [
-        `${first.name} takes charge! ${second.name} drops to second, while ${third.name} and ${fourth.name} fight for third.`,
-        `New leader—${first.name}! ${second.name} gives chase as ${third.name} and ${fourth.name} run wheel-to-wheel.`,
-        `${first.name} blasts into the lead! ${second.name} is second; behind them, ${third.name} and ${fourth.name} are locked together.`,
-        `Oh, what a pass—${first.name} takes command! ${second.name} chases while ${third.name} and ${fourth.name} scrap for third.`,
-        `${first.name} seizes the lead from ${second.name}! ${third.name} and ${fourth.name} are still side-by-side behind them.`,
-        `The order flips—${first.name} is out front! ${second.name} responds as ${third.name} and ${fourth.name} duel for third.`,
-      ];
-    }
-    return applyWryAside([
-      `What a move—${first.name} takes over! ${secondClause} after the pass.`,
-      `${first.name} storms to the front! ${second.name} is forced back to second.`,
-      `New leader—${first.name} sweeps through! ${second.name} drops into the chase.`,
-      `${first.name} takes charge with a brilliant pass! ${second.name} is now second.`,
-      `There goes ${first.name}, straight into the lead! ${second.name} has to respond.`,
-    ]);
-  }
-  if (event.kind === 'position-change') {
-    return [
-      `${first.name} surges past ${second.name} into ${localOrdinal(first.rank)}!`,
-      `There’s the move—${first.name} takes ${localOrdinal(first.rank)} from ${second.name}!`,
-      `${first.name} gets it done and moves ahead of ${second.name}!`,
-      `What a pass from ${first.name}—${second.name} loses ${localOrdinal(first.rank)}!`,
-      `${first.name} finds the opening and takes ${localOrdinal(first.rank)} from ${second.name}!`,
-      `The pressure pays off—${first.name} powers ahead of ${second.name}!`,
-    ];
-  }
-  if (event.kind === 'pro-set') {
-    return applyWryAside([
-      `${first.name} goes Pro, while ${secondClause} in the chase.`,
-      `Pro line for ${first.name}; ${secondClause} and stays involved.`,
-    ]);
-  }
-  if (event.kind === 'final-push') {
-    return applyWryAside([
-      `${firstClause} toward the line, while ${secondClause}.`,
-      `The final charge belongs to ${first.name}; ${secondClause} behind.`,
-    ]);
-  }
-  const closeBattle = event.closeBattles.some((battle) => (
-    battle.frontPlayerId === first.playerId
-    && battle.behindPlayerId === second.playerId
+  const soloActions = riderNames[0]
+    ? [
+      `${riderNames[0]} launches`,
+      `${riderNames[0]} drives into the opening sprint`,
+      `${riderNames[0]} is underway`,
+      `${riderNames[0]} powers into the race`,
+    ]
+    : ['the race is underway', 'the opening sprint begins', 'here we go'];
+  const actions = riderNames.length > 1 ? startActions : soloActions;
+  const seed = stableCommentaryHash([
+    trackName,
+    riderNames.join('|'),
+    recentLines.length,
+    recentLines.at(-1) ?? '',
+  ].join('|'));
+  const candidates = Array.from({ length: 24 }, (_, index) => (
+    `${startOpeningFragments[(seed + index * 17) % startOpeningFragments.length]} ${trackName}—${actions[(seed + index * 29) % actions.length]}!`
   ));
-  if (closeBattle) {
-    return applyWryAside([
-      `${first.name} and ${second.name} are wheel-to-wheel for ${localOrdinal(first.rank)}!`,
-      `Nothing between ${first.name} and ${second.name} in the fight for ${localOrdinal(first.rank)}.`,
-      `${second.name} is all over ${first.name} in the battle for ${localOrdinal(first.rank)}.`,
-      `${first.name} barely holds ${localOrdinal(first.rank)}—${second.name} is right alongside!`,
-      `This battle is alive: ${first.name} and ${second.name}, side-by-side for ${localOrdinal(first.rank)}!`,
-    ]);
-  }
-  if (wryAside) {
-    return [
-      `${firstClause}, while ${secondClause}—calm clearly stayed home.`,
-      `${firstClause}; ${secondClause}. Nobody is making this simple.`,
-      `${firstClause}, with ${secondClause} still ruining everyone’s quiet ride.`,
-    ];
-  }
-  return [
-    `${firstClause}, while ${secondClause} stays firmly in the race.`,
-    `${firstClause}; ${secondClause} remains part of the fight.`,
-    `${firstClause}, with ${secondClause} holding position in the chase.`,
-  ];
+  const novel = candidates.filter((candidate) => !recentLines.includes(candidate));
+  const pool = novel.length > 0 ? novel : candidates;
+  return pool[seed % pool.length];
 }
 
-function riderName(event: RaceCommentaryEvent, playerId: PlayerSlot['id'] | null | undefined) {
-  return event.riders.find((rider) => rider.playerId === playerId)?.name ?? 'the leader';
-}
+const passActions = [
+  'surges past',
+  'finds a way by',
+  'powers around',
+  'comes through on',
+  'gets the move done on',
+  'edges ahead of',
+  'breaks the pressure of',
+  'moves cleanly past',
+  'takes the spot from',
+  'wins the position from',
+  'forces the order to change on',
+  'turns pressure into a pass on',
+] as const;
 
-function coursePhaseLabel(phase: RaceCommentaryCoursePhase) {
-  const labels: Record<RaceCommentaryCoursePhase, string> = {
-    'first-straight': 'first straight',
-    'turn-one': 'turn one',
-    'second-straight': 'second straight',
-    'rhythm-section': 'rhythm section',
-    'final-turn': 'final turn',
-    'last-straight': 'last straight',
-  };
-  return labels[phase];
-}
+const pressureActions = [
+  'is all over',
+  'keeps the pressure on',
+  'runs wheel-to-wheel with',
+  'stays right on the wheel of',
+  'is locked together with',
+  'keeps contact with',
+  'refuses to let go of',
+  'continues the chase of',
+  'leaves no breathing room for',
+  'keeps the battle alive with',
+] as const;
 
-function courseActionLines(
+const controlActions = [
+  'keeps the advantage',
+  'controls the front',
+  'holds the race together',
+  'keeps the line tidy',
+  'stays composed out front',
+  'carries the lead',
+  'keeps the chase behind',
+  'maintains the early edge',
+] as const;
+
+const winActions = [
+  'gets the win',
+  'takes it at the line',
+  'brings it home',
+  'claims the victory',
+  'wins the run',
+  'holds on for the win',
+  'takes the race',
+  'gets it done',
+] as const;
+
+const wryAsides = [
+  'calm clearly stayed home',
+  'nobody ordered a quiet race',
+  'simple has left the building',
+  'the quiet option is officially gone',
+  'apparently calm missed the gate',
+  'nobody is making this simple',
+  'so much for a quiet lap',
+  'the easy route has been declined',
+] as const;
+
+const phasePhrases: Record<RaceCommentaryCoursePhase, readonly string[]> = {
+  'first-straight': [
+    'down the first straight',
+    'on the opening straight',
+    'through the opening drive',
+    'away from the gate',
+  ],
+  'turn-one': [
+    'into turn one',
+    'around the first turn',
+    'through turn one',
+    'at the opening corner',
+  ],
+  'second-straight': [
+    'down the second straight',
+    'through straight two',
+    'on the second straight',
+    'out of the first turn',
+  ],
+  'rhythm-section': [
+    'through the rhythm section',
+    'across the rhythm',
+    'in the rhythm section',
+    'through the middle of the lap',
+  ],
+  'final-turn': [
+    'into the final turn',
+    'around the last corner',
+    'through the final turn',
+    'at the last corner',
+  ],
+  'last-straight': [
+    'down the last straight',
+    'on the run to the stripe',
+    'through the final straight',
+    'with the line coming fast',
+  ],
+};
+
+function withOptionalWit(
+  line: string,
   event: RaceCommentaryEvent,
-  leader: string,
-  second: string | undefined,
+  recentLines: string[],
+  raceLines: string[],
+  variant: number,
 ) {
-  const phase = coursePhaseLabel(event.coursePhase);
-  const closeBattle = event.battleState === 'side-by-side' || event.battleState === 'under-pressure';
-  return [
-    closeBattle && second
-      ? `${leader} leads through the ${phase}, with ${second} right on the wheel.`
-      : `${leader} keeps it clean through the ${phase}.`,
-    closeBattle && second
-      ? `${leader} and ${second} are locked together through the ${phase}.`
-      : `${leader} is flying through the ${phase}.`,
-    closeBattle && second
-      ? `${second} keeps the pressure on ${leader} through the ${phase}.`
-      : `${leader} carries the lead into the ${phase}.`,
-    closeBattle && second
-      ? `Nothing between ${leader} and ${second} in the ${phase}.`
-      : `Smooth and fast, ${leader} controls the ${phase}.`,
-    closeBattle && second
-      ? `${leader} has company—${second} is charging through the ${phase}.`
-      : `The advantage belongs to ${leader} through the ${phase}.`,
-    ...(event.pedalReferenceAllowed
-      ? [second
-        ? `${leader} gets back on the pedals, with ${second} giving chase.`
-        : `${leader} gets back on the pedals and drives toward the ${phase}.`]
-      : []),
-  ];
+  if (event.kind === 'finish' || event.sequence % 5 !== 0) {
+    return line;
+  }
+  const aside = commentaryChoice(
+    wryAsides,
+    event,
+    recentLines,
+    raceLines,
+    variant,
+    'wry',
+  );
+  return `${line.replace(/[.!]$/, '')}—${aside}.`;
+}
+
+function runningOrderLine(
+  riders: RaceCommentaryRiderFact[],
+  event: RaceCommentaryEvent,
+  recentLines: string[],
+  raceLines: string[],
+  variant: number,
+) {
+  const [first, second, third, fourth] = riders;
+  if (!first) {
+    return `The field is underway at ${event.trackName}.`;
+  }
+  const lead = commentaryChoice(
+    ['shows out front', 'has the early advantage', 'leads the charge', 'sets the pace', 'is the early leader', 'holds the front'],
+    event,
+    recentLines,
+    raceLines,
+    variant,
+    'order-lead',
+  );
+  const secondPhrase = second
+    ? commentaryChoice(
+      ['is in the two spot', 'runs second', 'gives chase', 'holds second', 'is next in line', 'stays close in second'],
+      event,
+      recentLines,
+      raceLines,
+      variant,
+      'order-second',
+    )
+    : '';
+  const thirdPhrase = third
+    ? commentaryChoice(
+      ['holds third', 'runs in three', 'has third', 'is third in the order', 'occupies the three spot', 'keeps third'],
+      event,
+      recentLines,
+      raceLines,
+      variant,
+      'order-third',
+    )
+    : '';
+  const fourthPhrase = fourth
+    ? commentaryChoice(
+      ['runs fourth', 'is fourth', 'stays involved in fourth', 'holds the fourth spot', 'keeps fighting from fourth', 'completes the order'],
+      event,
+      recentLines,
+      raceLines,
+      variant,
+      'order-fourth',
+    )
+    : '';
+  const clauses = [
+    `${first.name} ${lead}`,
+    second ? `${second.name} ${secondPhrase}` : '',
+    third ? `${third.name} ${thirdPhrase}` : '',
+    fourth ? `${fourth.name} ${fourthPhrase}` : '',
+  ].filter(Boolean);
+  return `${clauses.slice(0, -1).join('; ')}${clauses.length > 1 ? '; and ' : ''}${clauses.at(-1)}.`;
+}
+
+function localCommentaryCandidates(
+  event: RaceCommentaryEvent,
+  recentLines: string[],
+  raceLines: string[],
+) {
+  const leader = event.riders.find((rider) => rider.playerId === event.leaderPlayerId)
+    ?? event.riders[0];
+  const second = event.riders[1];
+  const passing = event.riders.find((rider) => rider.playerId === event.passingPlayerId);
+  const passed = event.riders.find((rider) => rider.playerId === event.passedPlayerId);
+  const required = requiredLocalCommentaryRiders(event, raceLines);
+  const phaseOptions = phasePhrases[event.coursePhase];
+
+  return Array.from({ length: 36 }, (_, variant) => {
+    const phase = commentaryChoice(
+      phaseOptions,
+      event,
+      recentLines,
+      raceLines,
+      variant,
+      'phase',
+    );
+    let line: string;
+
+    if (event.kind === 'race-start') {
+      const opening = commentaryChoice(
+        startOpeningFragments,
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'start-opening',
+      );
+      const launch = commentaryChoice(
+        startActions,
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'start-launch',
+      );
+      line = `${opening} ${event.trackName}—${launch}!`;
+    } else if (event.kind === 'positions-established') {
+      line = runningOrderLine(event.riders, event, recentLines, raceLines, variant);
+    } else if (event.kind === 'lead-change' && leader && second) {
+      const headline = commentaryChoice(
+        leadHeadlines,
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'lead-headline',
+      );
+      const leadAction = commentaryChoice(
+        leadActions,
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'lead-action',
+      );
+      const chaseAction = commentaryChoice(
+        chaseActions,
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'chase-action',
+      );
+      const third = required.find((rider) => rider.rank === 3);
+      const fourth = required.find((rider) => rider.rank === 4);
+      const rearBattle = third && fourth
+        ? `; ${commentaryChoice(rearBattleLinks, event, recentLines, raceLines, variant, 'rear-link')}, ${third.name} and ${fourth.name} ${commentaryChoice(rearBattleActions, event, recentLines, raceLines, variant, 'rear-action')}`
+        : '';
+      line = `${headline}—${leader.name} ${leadAction}! ${second.name} ${chaseAction}${rearBattle}.`;
+    } else if (event.kind === 'position-change' && passing && passed) {
+      const hook = commentaryChoice(
+        ['There is the move', 'Position change', 'The pressure pays off', 'That battle breaks open', 'The order changes', 'A pass develops', 'Here comes the challenge', 'The opening appears'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'pass-hook',
+      );
+      const action = commentaryChoice(
+        passActions,
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'pass-action',
+      );
+      const extraRiders = required.filter((rider) => (
+        rider.playerId !== passing.playerId && rider.playerId !== passed.playerId
+      ));
+      const extra = extraRiders.length >= 2
+        ? `; ${extraRiders[0].name} and ${extraRiders[1].name} stay wheel-to-wheel elsewhere`
+        : extraRiders[0]
+          ? `; ${extraRiders[0].name} remains in the fight`
+          : '';
+      line = `${hook} ${phase}—${passing.name} ${action} ${passed.name} for ${localOrdinal(passing.rank)}${extra}!`;
+    } else if (event.kind === 'finish' && leader) {
+      const finishHook = commentaryChoice(
+        ['At the stripe', 'Across the line', 'Race complete', 'That settles it', 'The win is decided', 'Home to the line', 'Checkered and complete', 'The result is in'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'finish-hook',
+      );
+      line = `${finishHook}—${leader.name} ${commentaryChoice(winActions, event, recentLines, raceLines, variant, 'finish-action')} at ${event.trackName}!`;
+    } else if (event.kind === 'pro-set' && leader) {
+      const action = commentaryChoice(
+        ['commits to the Pro Set', 'takes the blue Pro line', 'chooses the bigger line', 'takes the alternate route', 'goes Pro through the split', 'selects the Pro branch', 'works the blue line', 'takes on the Pro side'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'pro-action',
+      );
+      line = `${leader.name} ${action}${second ? `; ${second.name} ${commentaryChoice(chaseActions, event, recentLines, raceLines, variant, 'pro-chase')}` : ''}.`;
+    } else if (event.kind === 'final-push' && leader) {
+      const finalHook = commentaryChoice(
+        ['Final charge', 'One last drive', 'The stripe is coming', 'Last straight now', 'The race turns for home', 'Everything to the line', 'The finish is in sight', 'No time left to wait'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'final-hook',
+      );
+      line = `${finalHook}—${leader.name} ${commentaryChoice(controlActions, event, recentLines, raceLines, variant, 'final-lead')}${second ? `, but ${second.name} ${commentaryChoice(chaseActions, event, recentLines, raceLines, variant, 'final-chase')}` : ''}!`;
+    } else if (leader && second && event.battleState !== 'clear-lead') {
+      const front = required[0] ?? leader;
+      const chaser = required[1] ?? second;
+      const action = commentaryChoice(
+        pressureActions,
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'pressure-action',
+      );
+      line = `${phase}, ${chaser.name} ${action} ${front.name} for ${localOrdinal(front.rank)}!`;
+    } else if (leader) {
+      const focus = required[0] ?? leader;
+      const partner = required[1];
+      line = `${phase}, ${localPositionClause(focus)}${partner ? ` while ${localPositionClause(partner)}` : ` and ${commentaryChoice(controlActions, event, recentLines, raceLines, variant, 'control')}`}.`;
+    } else {
+      line = `The field keeps the race alive ${phase}.`;
+    }
+
+    return withOptionalWit(line, event, recentLines, raceLines, variant);
+  });
 }
 
 export function localCommentaryLine(
@@ -724,62 +1097,8 @@ export function localCommentaryLine(
   recentLines: string[] = [],
   raceLines: string[] = [],
 ) {
-  const leader = riderName(event, event.leaderPlayerId);
-  const second = event.riders[1]?.name;
-  const requiredRiders = requiredLocalCommentaryRiders(event, raceLines);
-  const candidates: Record<RaceCommentaryEventKind, string[]> = {
-    'race-start': [
-      `Gate's down at ${event.trackName}. Here we go.`,
-      `They're racing at ${event.trackName}, charging down the first straight.`,
-      `A clean gate at ${event.trackName}, and the field is underway.`,
-      `${event.trackName} comes alive as the gate drops.`,
-      `Here we go at ${event.trackName}—the whole field launches.`,
-    ],
-    'positions-established': [
-      `${leader} shows in front${second ? `, with ${second} close behind.` : '.'}`,
-      `${leader} has the early advantage, and the race is taking shape.`,
-      `${leader} leads the charge down the first straight.`,
-      `${second ? `${second} gives chase, but ` : ''}${leader} has the early lead.`,
-      `Out front early, it's ${leader}${second ? ` with ${second} pressing.` : '.'}`,
-    ],
-    'lead-change': [
-      `${leader} makes the move and takes over.`,
-      `Here comes ${leader}, moving through to the front.`,
-      `${leader} finds a way past. We have a new leader.`,
-      `What a move from ${leader}—straight into the lead!`,
-      `The race turns as ${leader} sweeps to the front.`,
-    ],
-    'position-change': [
-      `${riderName(event, event.passingPlayerId)} makes the pass and moves up!`,
-      `${riderName(event, event.passingPlayerId)} finds a way through!`,
-      `Position change—${riderName(event, event.passingPlayerId)} gets the move done!`,
-    ],
-    'pedal-zone': courseActionLines(event, leader, second),
-    'pro-set': [
-      `${leader} commits to the Pro Set, with ${second ?? 'the field'} still in pursuit.`,
-      `${leader} takes the blue Pro line and holds the advantage.`,
-      `Pro Set for ${leader}. ${second ? `${second} stays close.` : 'A confident line through the split.'}`,
-      `${leader} chooses the Pro line${second ? `, and ${second} keeps chasing.` : '.'}`,
-      `Through the split, ${leader} goes Pro and stays in command.`,
-    ],
-    'final-push': [
-      `${leader} leads them into the last straight.`,
-      `Final drive to the line, with ${leader} holding the advantage.`,
-      `${leader} is out front, but ${second ? `${second} is not done yet.` : 'the race is not over.'}`,
-      `${second ? `${second} is coming, but ` : ''}${leader} still owns the last straight.`,
-      `It's ${leader} in front with the stripe rushing closer.`,
-    ],
-    finish: [
-      `${leader} gets it done at ${event.trackName}.`,
-      `${leader} takes the win.`,
-      `${leader} brings it home and wins the race.`,
-      `Across the stripe, it's ${leader} with the victory!`,
-      `${leader} holds on and takes it at ${event.trackName}!`,
-    ],
-  };
-  const coverageLines = localCoverageLines(event, requiredRiders);
   return pickLine(
-    coverageLines.length > 0 ? coverageLines : candidates[event.kind],
+    localCommentaryCandidates(event, recentLines, raceLines),
     event,
     recentLines,
     raceLines,

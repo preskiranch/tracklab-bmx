@@ -61,7 +61,7 @@ describe('race view preferences', () => {
       voicePreset: 'british-man',
       volume: 4,
       adaptiveMemory: false,
-      recentLines: [...Array.from({ length: 28 }, (_, index) => ` Call ${index} `), 42],
+      recentLines: [...Array.from({ length: 120 }, (_, index) => ` Call ${index} `), 42],
     });
 
     expect(commentary).toMatchObject({
@@ -71,8 +71,9 @@ describe('race view preferences', () => {
       volume: 1,
       adaptiveMemory: false,
     });
-    expect(commentary.recentLines).toHaveLength(24);
-    expect(commentary.recentLines.at(-1)).toBe('Call 27');
+    expect(commentary.recentLines).toHaveLength(96);
+    expect(commentary.recentLines[0]).toBe('Call 24');
+    expect(commentary.recentLines.at(-1)).toBe('Call 119');
   });
 
   it('preserves the American woman announcer choice', () => {

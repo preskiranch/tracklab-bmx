@@ -138,7 +138,7 @@ describe('cloud API trust boundaries', () => {
         'british-man',
       ],
       research: {
-        knowledgeVersion: 'usabmx-national-2026-07-22-v4-full-field',
+        knowledgeVersion: 'usabmx-national-2026-07-23-v5-generative-flow',
         indexedVideos: 166,
         analyzedRaceCallSegments: 18_208,
         analyzedRaceAudioSections: 6,

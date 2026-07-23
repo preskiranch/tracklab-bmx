@@ -1,6 +1,6 @@
 export const commentaryResearchMetadata = Object.freeze({
-  knowledgeVersion: 'usabmx-national-2026-07-22-v4-full-field',
-  method: 'aggregate-caption-and-broadcast-audio-context',
+  knowledgeVersion: 'usabmx-national-2026-07-23-v5-generative-flow',
+  method: 'aggregate-caption-terminology-and-event-driven-broadcast-flow',
   officialChannel: 'https://www.youtube.com/@usabmxvideos/streams',
   broadcastAudioReference: 'https://www.youtube.com/watch?v=JRfRMptCE-I',
   coverageCutoff: '2026-07-22',
@@ -43,6 +43,8 @@ const eventLanguage = Object.freeze({
     'keeps the race alive',
     'the full field',
     'running order',
+    'in the three spot',
+    'the chase behind',
   ],
   'lead-change': [
     'takes over',
@@ -56,6 +58,9 @@ const eventLanguage = Object.freeze({
     'responds immediately',
     'door opens',
     'pressure pays off',
+    'out front now',
+    'front changes hands',
+    'drops into the two spot',
   ],
   'position-change': [
     'makes the pass',
@@ -67,6 +72,9 @@ const eventLanguage = Object.freeze({
     'gets the move done',
     'pressure turns into a pass',
     'battle stays alive',
+    'bar to bar',
+    'side by side',
+    'responds to the move',
   ],
   'pedal-zone': [
     'rider giving chase',
@@ -82,6 +90,8 @@ const eventLanguage = Object.freeze({
     'works the course',
     'keeps the wheels moving',
     'order remains tight',
+    'nothing between them',
+    'coming back in the chase',
   ],
   'pro-set': [
     'commits to the Pro Set',
@@ -104,6 +114,8 @@ const eventLanguage = Object.freeze({
     'order on the line',
     'one final response',
     'nothing settled behind',
+    'down the last straight',
+    'one more charge',
   ],
   finish: [
     'gets the win',
@@ -114,6 +126,7 @@ const eventLanguage = Object.freeze({
     'claims the victory',
     'wins the run',
     'field follows home',
+    'holds on at the stripe',
   ],
 });
 
@@ -138,6 +151,9 @@ export function commentaryGuideForEvent(eventKind) {
     'Lead with the live action, name riders only when the race facts identify them, and keep the call easy to understand at race speed.',
     'Cover the full running order across the race: leader, second, third, and fourth, plus pressure, passes, line choices, turns, rhythm, and the run to the line.',
     'Professional BMX calls use short clauses, occasional fragments, varied pacing, and high energy that surges naturally with passes and the run to the line.',
+    'Use a flexible live-race flow: establish the order, build pressure, call the decisive action, react to the change, then reset the running order. This is a structure, not a script.',
+    'For close racing, tension should rise before a verified pass and release into a clear new-order call afterward. For quiet intervals, rotate attention through the field instead of repeating the leader.',
+    'Useful USA BMX running-order language includes out front, the two spot, the three spot, coming back, bar to bar, side by side, down the straight, to the stripe, and gets the win. Use it selectively and generate original surrounding wording.',
     'Do not imitate, identify, or reproduce the voice, catchphrases, or signature delivery of any source announcer.',
   ].join(' ');
 }

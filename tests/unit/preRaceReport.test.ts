@@ -129,4 +129,26 @@ describe('pre-race report facts', () => {
     expect(line).toContain('partly cloudy');
     expect(line).not.toMatch(/\b(?:first|second|record|streak)\b/i);
   });
+
+  it('varies repeated pre-race briefings while preserving every rider name and known condition', () => {
+    const context = buildPreRaceTrackContext(track, players, [], 1);
+    const memory: string[] = [];
+    for (let index = 0; index < 16; index += 1) {
+      const line = localPreRaceReportLine(context, {
+        available: true,
+        summary: 'Clear',
+      }, memory);
+      memory.push(line);
+    }
+
+    expect(new Set(memory).size).toBe(memory.length);
+    for (const line of memory) {
+      expect(line).toContain('Maya Torres');
+      expect(line).toContain('Jordan Lee');
+      expect(line).toContain('Avery Cole');
+      expect(line).toContain('Sam Rivers');
+      expect(line).toMatch(/\bclear\b/i);
+      expect(line).not.toMatch(/\b(?:first place|second place|winner)\b/i);
+    }
+  });
 });

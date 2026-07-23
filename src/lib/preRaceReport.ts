@@ -314,15 +314,82 @@ function naturalNameList(names: string[]) {
 export function localPreRaceReportLine(
   context: PreRaceTrackContext,
   weather?: PreRaceWeather,
+  recentLines: string[] = [],
 ) {
   const names = naturalNameList(context.riders.map((rider) => rider.name));
   const place = usefulText(context.city) ?? usefulText(context.state) ?? usefulText(context.country);
-  const conditions = weather?.available && weather.summary
-    ? `, with ${weather.summary.toLowerCase()} conditions`
-    : '';
-  const surface = usefulText(context.surface)
-    ? ` on the ${context.surface} surface`
-    : '';
   const location = place ? ` in ${place}` : '';
-  return `${names} are set for ${context.name}${location}${surface}${conditions}. The gate is next.`;
+  const weatherFacts = weather?.available && weather.summary
+    ? [
+      `${weather.summary.toLowerCase()} skies frame the track`,
+      `the forecast says ${weather.summary.toLowerCase()}`,
+      `${weather.summary.toLowerCase()} weather sits over the course`,
+    ]
+    : [];
+  const facts = [
+    ...(usefulText(context.surface)
+      ? [`the ${context.surface} surface is ready`, `this one runs on ${context.surface}`, `${context.surface} is under the wheels`]
+      : []),
+    ...(context.lengthMeters
+      ? [`${Math.round(context.lengthMeters)} meters of racing lie ahead`, `the ${Math.round(context.lengthMeters)}-meter course is waiting`]
+      : []),
+    ...(context.hasProSet
+      ? ['the Pro Set adds a major line choice', 'the split line could shape the middle of the race']
+      : []),
+    ...(context.knownTrackBestMs
+      ? [`the TrackLab benchmark stands at ${(context.knownTrackBestMs / 1000).toFixed(2)} seconds`]
+      : []),
+    'the start is moments away',
+  ];
+  const openings = [
+    `${names} are set for ${context.name}${location}`,
+    `The gate is nearly ready for ${names} at ${context.name}${location}`,
+    `${names} line up next at ${context.name}${location}`,
+    `Race time is close for ${names} at ${context.name}${location}`,
+    `All eyes turn to ${names} at ${context.name}${location}`,
+    `Next on the gate: ${names}, here at ${context.name}${location}`,
+    `${context.name}${location} is ready for ${names}`,
+    `The next matchup brings ${names} to ${context.name}${location}`,
+    `Staging now at ${context.name}${location}: ${names}`,
+    `The course belongs to ${names} next at ${context.name}${location}`,
+  ];
+  const closers = [
+    'The gate is next.',
+    'Everything starts with the gate.',
+    'The opening charge is almost here.',
+    'One clean start can change the whole race.',
+    'The countdown is nearly complete.',
+    'The next sound is the start cadence.',
+    'The race is ready to come alive.',
+    'Now the focus moves to the gate.',
+  ];
+  const seedText = [
+    context.id,
+    names,
+    recentLines.length,
+    recentLines.at(-1) ?? '',
+  ].join('|');
+  let seed = 2_166_136_261;
+  for (const character of seedText) {
+    seed ^= character.charCodeAt(0);
+    seed = Math.imul(seed, 16_777_619);
+  }
+  const baseSeed = seed >>> 0;
+  const candidates = Array.from({ length: 36 }, (_, index) => {
+    const opening = openings[(baseSeed + index * 17) % openings.length];
+    const trackFact = facts[(baseSeed + index * 23) % facts.length];
+    const fact = weatherFacts.length > 0
+      ? `${weatherFacts[(baseSeed + index * 19) % weatherFacts.length]}; ${trackFact}`
+      : trackFact;
+    const closer = closers[(baseSeed + index * 31) % closers.length];
+    return `${opening}; ${fact}. ${closer}`;
+  });
+  const normalizedMemory = new Set(recentLines.map((line) => (
+    line.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  )));
+  const novel = candidates.filter((candidate) => !normalizedMemory.has(
+    candidate.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim(),
+  ));
+  const pool = novel.length > 0 ? novel : candidates;
+  return pool[baseSeed % pool.length];
 }

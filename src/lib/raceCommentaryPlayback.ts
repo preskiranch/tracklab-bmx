@@ -26,5 +26,6 @@ export function shouldInterruptCommentaryForEvent(
   phase: RaceCommentaryPlaybackPhase,
   eventKind: RaceCommentaryEventKind,
 ) {
-  return commentaryNeedsImmediateLine(eventKind) && phase !== 'idle';
+  return commentaryNeedsImmediateLine(eventKind)
+    && (phase === 'thinking' || phase === 'preparing');
 }

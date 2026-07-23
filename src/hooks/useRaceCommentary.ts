@@ -3,6 +3,7 @@ import {
   createRaceCommentaryTracker,
   detectRaceCommentaryEvents,
   localCommentaryLine,
+  localRaceStartLine,
   raceCommentaryEventIsFresh,
   selectLiveRaceCommentaryEvent,
   type RaceCommentaryEvent,
@@ -43,7 +44,7 @@ type CommentaryServiceMode = 'checking' | 'ai' | 'browser';
 type CommentaryPlaybackStatus = 'idle' | 'thinking' | 'speaking';
 type CommentaryPlaybackPhase = RaceCommentaryPlaybackPhase;
 type CommentarySpeechEventKind = RaceCommentaryEventKind | 'pre-race' | 'preview';
-type CommentaryDeliveryStyle = 'straight' | 'wry';
+type CommentaryDeliveryStyle = 'straight' | 'wry' | 'pressure' | 'surge' | 'sprint';
 type ActivePlaybackCancelRef = React.MutableRefObject<(() => void) | null>;
 
 type PreparedStartSpeech = {
@@ -97,35 +98,24 @@ function browserVoiceFor(voicePreset: RaceCommentaryVoicePreset) {
     ?? null;
 }
 
-function immediateRaceStartLine(
-  trackName: string,
-  players: PlayerSlot[],
-  recentLines: string[],
-) {
-  const candidates = players.length > 1
-    ? [
-      `Gate's down at ${trackName}—here we go! The field charges into the opening sprint.`,
-      `${trackName} comes alive—the gate drops and the whole field launches!`,
-      `They're racing at ${trackName}! Everyone charges hard as the race opens.`,
-      `A clean release at ${trackName}, and the field explodes away!`,
-      `Here we go at ${trackName}—the riders launch together from the gate!`,
-    ]
-    : players.length === 1
-      ? [
-        `Gate's down at ${trackName}—${players[0].name} charges into the opening sprint!`,
-        `${players[0].name} launches from the gate at ${trackName}!`,
-        `They're racing at ${trackName}, and ${players[0].name} is underway!`,
-      ]
-    : [
-      `Gate's down at ${trackName}—here we go!`,
-      `${trackName} comes alive as the gate drops!`,
-      `They're racing at ${trackName}!`,
-    ];
-  const unused = candidates.filter((candidate) => !recentLines.includes(candidate));
-  const pool = unused.length > 0 ? unused : candidates;
-  const seedText = `${trackName}:${recentLines.at(-1) ?? ''}:${recentLines.length}`;
-  const seed = [...seedText].reduce((total, character) => total + character.charCodeAt(0), 0);
-  return pool[seed % pool.length];
+function deliveryStyleForEvent(event: RaceCommentaryEvent): CommentaryDeliveryStyle {
+  if (event.kind === 'lead-change' || event.kind === 'position-change') {
+    return 'surge';
+  }
+  if (event.kind === 'race-start' || event.kind === 'final-push' || event.kind === 'finish') {
+    return 'sprint';
+  }
+  if (event.sequence % 5 === 0) {
+    return 'wry';
+  }
+  if (
+    event.battleState === 'side-by-side'
+    || event.battleState === 'under-pressure'
+    || event.closeBattles.length > 0
+  ) {
+    return 'pressure';
+  }
+  return 'straight';
 }
 
 function riderNameList(players: PlayerSlot[]) {
@@ -593,9 +583,9 @@ export function useRaceCommentary({
   preferencesRef.current = preferences;
   recentLinesChangeRef.current = onRecentLinesChange;
   const trackName = track.name;
-  const startLine = immediateRaceStartLine(
+  const startLine = localRaceStartLine(
     trackName,
-    players,
+    players.map((player) => player.name),
     preferences.adaptiveMemory ? preferences.recentLines : [],
   );
   const preRaceContext = useMemo(
@@ -686,7 +676,7 @@ export function useRaceCommentary({
       preferences,
       'race-start',
       players.map((player) => player.name),
-      'straight',
+      'sprint',
     )
       .then((audioBlob) => {
         if (startPrefetchRequestRef.current !== requestId) {
@@ -722,7 +712,11 @@ export function useRaceCommentary({
     preRacePrefetchRequestRef.current = requestId;
     const controller = new AbortController();
     const localReport: PreRaceReport = {
-      line: localPreRaceReportLine(preRaceContext),
+      line: localPreRaceReportLine(
+        preRaceContext,
+        undefined,
+        preferences.adaptiveMemory ? preferences.recentLines : [],
+      ),
       source: 'local',
       generatedAt: new Date().toISOString(),
       variableCount: preRaceVariableCount(preRaceContext),
@@ -836,12 +830,12 @@ export function useRaceCommentary({
     raceLinesRef.current = [
       ...raceLinesRef.current.filter((item) => item !== line),
       line,
-    ].slice(-16);
+    ].slice(-24);
     const currentPreferences = preferencesRef.current;
     if (!currentPreferences.adaptiveMemory) {
       return;
     }
-    const lines = [...currentPreferences.recentLines.filter((item) => item !== line), line].slice(-24);
+    const lines = [...currentPreferences.recentLines.filter((item) => item !== line), line].slice(-96);
     preferencesRef.current = { ...currentPreferences, recentLines: lines };
     recentLinesChangeRef.current(lines);
   }, []);
@@ -860,7 +854,11 @@ export function useRaceCommentary({
       ? preparedPreRaceSpeechRef.current
       : null;
     const report = prepared?.report ?? {
-      line: localPreRaceReportLine(preRaceContext),
+      line: localPreRaceReportLine(
+        preRaceContext,
+        undefined,
+        preferences.adaptiveMemory ? preferences.recentLines : [],
+      ),
       source: 'local' as const,
       generatedAt: new Date().toISOString(),
       variableCount: preRaceVariableCount(preRaceContext),
@@ -1024,7 +1022,7 @@ export function useRaceCommentary({
         setPlaybackPhase('thinking');
         let line = '';
         const useAiSpeech = serviceMode === 'ai';
-        let deliveryStyle: CommentaryDeliveryStyle = 'straight';
+        let deliveryStyle: CommentaryDeliveryStyle = deliveryStyleForEvent(event);
 
         if (event.kind === 'race-start') {
           line = startLine;
@@ -1055,7 +1053,7 @@ export function useRaceCommentary({
                 activePreferences,
                 event.kind,
                 event.riders.map((rider) => rider.name),
-                'straight',
+                'sprint',
                 activeAudioRef,
                 activeBufferSourceRef,
                 activePlaybackCancelRef,
@@ -1110,7 +1108,7 @@ export function useRaceCommentary({
                 activePreferences,
                 event.kind,
                 event.riders.map((rider) => rider.name),
-                'straight',
+                'sprint',
                 activeAudioRef,
                 activeBufferSourceRef,
                 activePlaybackCancelRef,
@@ -1183,7 +1181,10 @@ export function useRaceCommentary({
               deliveryStyle?: CommentaryDeliveryStyle;
             };
             line = typeof payload.line === 'string' ? payload.line.trim() : '';
-            deliveryStyle = payload.deliveryStyle === 'wry' ? 'wry' : 'straight';
+            deliveryStyle = ['straight', 'wry', 'pressure', 'surge', 'sprint']
+              .includes(payload.deliveryStyle ?? '')
+              ? payload.deliveryStyle as CommentaryDeliveryStyle
+              : deliveryStyleForEvent(event);
             if (!line) {
               throw new Error('Commentary service returned an empty call.');
             }

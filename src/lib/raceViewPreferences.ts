@@ -96,7 +96,7 @@ export function normalizeRaceCommentaryPreferences(value: unknown): RaceCommenta
       .filter((line): line is string => typeof line === 'string')
       .map((line) => line.trim().replace(/\s+/g, ' ').slice(0, 220))
       .filter(Boolean)
-      .slice(-24)
+      .slice(-96)
     : [];
 
   return {
