@@ -157,6 +157,25 @@ describe('race commentary event detection', () => {
     expect(second).not.toBe(first);
   });
 
+  it('keeps announcing at course-phase changes even without another pedal-zone boundary', () => {
+    const tracker = createRaceCommentaryTracker();
+    const noZones = (distance: number): RaceCommentarySnapshot => ({
+      ...snapshot([rider(1, distance), rider(2, Math.max(0, distance - 0.5))]),
+      zones: [],
+    });
+
+    detectRaceCommentaryEvents(tracker, noZones(0), 1_000);
+    detectRaceCommentaryEvents(tracker, noZones(1), 1_100);
+    const turnOne = detectRaceCommentaryEvents(tracker, noZones(70), 2_000);
+
+    expect(turnOne).toHaveLength(1);
+    expect(turnOne[0]).toMatchObject({
+      kind: 'pedal-zone',
+      coursePhase: 'turn-one',
+      pedalReferenceAllowed: false,
+    });
+  });
+
   it('keeps private bike telemetry out of announcer fact packs and local calls', () => {
     const tracker = createRaceCommentaryTracker();
     const [event] = detectRaceCommentaryEvents(

@@ -573,8 +573,14 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
 });
 
 test('start here race action enters fullscreen race view', async ({ page }, testInfo) => {
-  test.setTimeout(45_000);
+  test.setTimeout(55_000);
   let commentarySpeechRequests = 0;
+  const commentarySpeechPayloads: Array<{
+    eventKind?: string;
+    line?: string;
+    riderNames?: string[];
+  }> = [];
+  const commentaryLineRiderNames: string[][] = [];
   const authUser = {
     id: 'quick-start-racer',
     profileKey: 'user:quick-start-racer',
@@ -602,15 +608,29 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   });
   await page.route('**/api/commentary/speech', async (route) => {
     commentarySpeechRequests += 1;
+    commentarySpeechPayloads.push(route.request().postDataJSON());
     await route.fulfill({
       contentType: 'audio/mpeg',
       path: 'public/assets/uci-random-start.mp3',
     });
   });
   await page.route('**/api/commentary/line', async (route) => {
+    const payload = route.request().postDataJSON() as {
+      event?: {
+        leaderPlayerId?: number;
+        riders?: Array<{ playerId?: number; name?: string }>;
+      };
+    };
+    const riderNames = payload.event?.riders?.flatMap((rider) => (
+      typeof rider.name === 'string' ? [rider.name] : []
+    )) ?? [];
+    commentaryLineRiderNames.push(riderNames);
+    const leaderName = payload.event?.riders?.find(
+      (rider) => rider.playerId === payload.event?.leaderPlayerId,
+    )?.name ?? riderNames[0] ?? 'The leader';
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ line: 'The race order is changing on the next straight.' }),
+      body: JSON.stringify({ line: `${leaderName} leads the charge through the next straight.` }),
     });
   });
   await page.addInitScript(() => {
@@ -669,11 +689,14 @@ test('start here race action enters fullscreen race view', async ({ page }, test
 
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
-  const firstDemoRiderName = page.getByLabel('Name for player 1');
-  await expect(firstDemoRiderName).toHaveValue('Demo Rider 1');
-  await firstDemoRiderName.fill('Maya Torres');
-  await firstDemoRiderName.press('Enter');
-  await expect(firstDemoRiderName).toHaveValue('Maya Torres');
+  const customDemoNames = ['Miles Power', 'Cadence Watts', 'Maya Torres', 'Jordan Lee'];
+  for (let index = 0; index < customDemoNames.length; index += 1) {
+    const nameInput = page.getByLabel(`Name for player ${index + 1}`);
+    await expect(nameInput).toHaveValue(`Demo Rider ${index + 1}`);
+    await nameInput.fill(customDemoNames[index]);
+    await nameInput.press('Enter');
+    await expect(nameInput).toHaveValue(customDemoNames[index]);
+  }
 
   const startAction = page.locator('.workflow-step.primary-action');
   await expect(startAction).toContainText('Start Demo Race');
@@ -685,11 +708,20 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(page.locator('.start-tree-light')).toHaveCount(0);
   const riderPanel = page.locator('.race-rider-overlay');
   await expect(riderPanel).toBeVisible();
-  await expect(riderPanel.getByText('Maya Torres', { exact: true })).toBeVisible();
+  for (const customName of customDemoNames) {
+    await expect(riderPanel.getByText(customName, { exact: true })).toBeVisible();
+  }
   await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
   await expect.poll(() => commentarySpeechRequests, { timeout: 5_000 }).toBeGreaterThan(0);
+  await expect.poll(
+    () => commentarySpeechPayloads.some((payload) => (
+      payload.eventKind === 'race-start'
+      && customDemoNames.every((name) => payload.riderNames?.includes(name))
+    )),
+    { timeout: 5_000 },
+  ).toBe(true);
 
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const riderPanelHandle = page.getByRole('button', { name: 'Move rider panel', exact: true });
@@ -742,6 +774,20 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     (window as typeof window & { __tracklabTreeLightSequence?: string[] }).__tracklabTreeLightSequence ?? []
   )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4, { timeout: 5_000 });
+  await expect.poll(
+    () => commentaryLineRiderNames.some((names) => (
+      customDemoNames.every((name) => names.includes(name))
+    )),
+    { timeout: 10_000 },
+  ).toBe(true);
+  await expect.poll(
+    () => commentarySpeechPayloads.some((payload) => (
+      payload.eventKind !== 'race-start'
+      && customDemoNames.some((name) => payload.line?.includes(name))
+      && customDemoNames.every((name) => payload.riderNames?.includes(name))
+    )),
+    { timeout: 10_000 },
+  ).toBe(true);
   const desktopRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
     const name = card.querySelector('.race-rider-overlay-identity strong');
     const metrics = card.querySelector('.race-rider-overlay-identity span');
@@ -795,7 +841,27 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     body: await page.screenshot({ fullPage: false }),
     contentType: 'image/png',
   });
-  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(riderPanel.locator('.race-rider-overlay-card')).toHaveCount(4);
+  for (const customName of customDemoNames) {
+    await expect(riderPanel.getByText(customName, { exact: true })).toBeVisible();
+  }
+  const tabletCardsFit = await riderPanel.evaluate((panel) => {
+    const panelBounds = panel.getBoundingClientRect();
+    return [...panel.querySelectorAll('.race-rider-overlay-card')].every((card) => {
+      const cardBounds = card.getBoundingClientRect();
+      return cardBounds.left >= panelBounds.left
+        && cardBounds.right <= panelBounds.right
+        && cardBounds.top >= panelBounds.top
+        && cardBounds.bottom <= panelBounds.bottom;
+    });
+  });
+  expect(tabletCardsFit).toBe(true);
+  await testInfo.attach('demo-race-rider-panel-tablet.png', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await testInfo.attach('demo-race-3d.png', {
     body: await page.screenshot({ fullPage: false }),
     contentType: 'image/png',

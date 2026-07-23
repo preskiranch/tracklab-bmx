@@ -12,6 +12,10 @@ import {
   commentaryGuideForEvent,
   commentaryResearchMetadata,
 } from './commentaryKnowledge.mjs';
+import {
+  commentaryLineMentionsRider,
+  commentaryLineUsesForbiddenTelemetry,
+} from './commentarySafety.mjs';
 import { instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 import {
   createRacerSubscriptionCheckout,
@@ -611,15 +615,12 @@ function commentaryVoiceDefinition(preset, eventKind) {
       `Perform as ${persona}.`,
       'This is live BMX play-by-play, not a commercial or a dramatic voice-over. Sound like a real commentator watching the race unfold.',
       'Use a comfortable conversational pace, natural breaths, subtle changes in intonation, and brief pauses where the punctuation calls for them.',
-      'Keep rider names clear. Let the actual contest create the excitement; do not force intensity into every word or rush between phrases.',
+      'Pronounce every rider name clearly as a person’s name, exactly as written in the call. Do not skip, abbreviate, or spell out a name.',
+      'Let the actual contest create the excitement; do not force intensity into every word or rush between phrases.',
       commentarySpeechDirection(eventKind),
       'Avoid a robotic rhythm, exaggerated pitch changes, announcer clichés, fake crowd noise, singing, or imitation of any real person.',
     ].join(' '),
   };
-}
-
-function commentaryLineUsesForbiddenTelemetry(line) {
-  return /\b(?:watts?|wattage|rpm|cadence|speed|mph|kph|km\/?h|kilomet(?:er|re)s?\s+per\s+hour|miles?\s+per\s+hour|power\s+output|reaction\s+time|milliseconds?|meters?|metres?|feet|foot|percent(?:age)?)\b|%/i.test(line);
 }
 
 function commentaryFallbackLine(event) {
@@ -714,6 +715,7 @@ async function generateCommentaryLine({ event, model, voicePreset, recentLines }
         'Call what is happening on track, never the sensor data behind it.',
         'Never rank riders at race-start and never invent a numbered running order. For mid-race calls, describe only the leader-versus-chaser relationship supported by the rider ranks and battleState.',
         'Make racer-versus-racer action the center of the call: leader, chaser, pressure, passes, line choice, straights, turns, rhythm, and finish.',
+        'Every call must naturally say at least one supplied rider name. Prefer the leader and closest chaser when both are relevant.',
         'For pedal-zone events, describe the supplied coursePhase and battleState. Never say pedal zone or use attack/attacking. Mention being back on the pedals only when pedalReferenceAllowed is true.',
         'Use active verbs, contractions, and short play-by-play fragments. Exclamation marks should be rare and reserved for a real pass or finish.',
         'Avoid polished narration, generic filler, repeated sentence shapes, fake quotations, requests for a crowd response, and repetitive catchphrases.',
@@ -751,7 +753,10 @@ async function generateCommentaryLine({ event, model, voicePreset, recentLines }
   if (!line) {
     throw new Error('OpenAI commentary returned no usable line.');
   }
-  return commentaryLineUsesForbiddenTelemetry(line) || commentaryLineViolatesRaceStyle(line, event)
+  const riderNames = event.riders.map((rider) => rider.name);
+  return commentaryLineUsesForbiddenTelemetry(line, riderNames)
+    || !commentaryLineMentionsRider(line, riderNames)
+    || commentaryLineViolatesRaceStyle(line, event)
     ? commentaryFallbackLine(event)
     : line;
 }
@@ -2739,8 +2744,14 @@ async function serveStatic(request, response) {
       return;
     }
     const eventKind = sanitizeCommentarySpeechEventKind(payload?.eventKind);
+    const riderNames = Array.isArray(payload?.riderNames)
+      ? payload.riderNames
+        .slice(0, maxRaceBikeCount)
+        .map((name) => sanitizeText(name, '', 64))
+        .filter(Boolean)
+      : [];
     if (
-      commentaryLineUsesForbiddenTelemetry(line)
+      commentaryLineUsesForbiddenTelemetry(line, riderNames)
       || commentaryLineViolatesRaceStyle(line, {
         kind: eventKind,
         pedalReferenceAllowed: true,

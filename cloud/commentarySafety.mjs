@@ -1,0 +1,44 @@
+const forbiddenTelemetryPattern = /\b(?:watts?|wattage|rpm|cadence|speed|mph|kph|km\/?h|kilomet(?:er|re)s?\s+per\s+hour|miles?\s+per\s+hour|power\s+output|reaction\s+time|milliseconds?|meters?|metres?|feet|foot|percent(?:age)?)\b|%/i;
+
+function escapeRegularExpression(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function riderNameAliases(riderNames) {
+  if (!Array.isArray(riderNames)) {
+    return [];
+  }
+
+  return [...new Set(
+    riderNames
+      .filter((name) => typeof name === 'string')
+      .flatMap((name) => {
+        const normalized = name.trim().replace(/\s+/g, ' ');
+        return normalized ? [normalized, ...normalized.split(' ')] : [];
+      })
+      .filter((name) => name.length >= 2),
+  )].sort((left, right) => right.length - left.length);
+}
+
+function lineWithoutRiderNames(line, riderNames) {
+  return riderNameAliases(riderNames).reduce(
+    (remaining, name) => remaining.replace(
+      new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegularExpression(name)}(?=$|[^\\p{L}\\p{N}])`, 'giu'),
+      '$1',
+    ),
+    line,
+  );
+}
+
+export function commentaryLineUsesForbiddenTelemetry(line, riderNames = []) {
+  return forbiddenTelemetryPattern.test(lineWithoutRiderNames(line, riderNames));
+}
+
+export function commentaryLineMentionsRider(line, riderNames) {
+  return riderNameAliases(riderNames).some((name) => (
+    new RegExp(
+      `(^|[^\\p{L}\\p{N}])${escapeRegularExpression(name)}(?=$|[^\\p{L}\\p{N}])`,
+      'iu',
+    ).test(line)
+  ));
+}

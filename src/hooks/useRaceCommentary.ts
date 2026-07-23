@@ -71,6 +71,17 @@ function immediateRaceStartLine(trackName: string, players: PlayerSlot[]) {
     : `Gate's down at ${trackName}—here we go!`;
 }
 
+function riderNameList(players: PlayerSlot[]) {
+  const names = players.slice(0, 4).map((player) => player.name);
+  if (names.length <= 1) {
+    return names[0] ?? '';
+  }
+  if (names.length === 2) {
+    return `${names[0]} and ${names[1]}`;
+  }
+  return `${names.slice(0, -1).join(', ')}, and ${names.at(-1)}`;
+}
+
 function preparedStartSpeechKey(
   line: string,
   preferences: RaceCommentaryPreferences,
@@ -165,6 +176,7 @@ async function requestAiSpeechUrl(
   line: string,
   preferences: RaceCommentaryPreferences,
   eventKind: CommentarySpeechEventKind,
+  riderNames: string[],
   timeoutMs = 5_000,
   signal?: AbortSignal,
 ) {
@@ -179,6 +191,7 @@ async function requestAiSpeechUrl(
       line,
       voicePreset: preferences.voicePreset,
       eventKind,
+      riderNames,
     }),
   }, timeoutMs);
   if (!response.ok) {
@@ -246,13 +259,21 @@ async function playAiSpeech(
   line: string,
   preferences: RaceCommentaryPreferences,
   eventKind: CommentarySpeechEventKind,
+  riderNames: string[],
   activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>,
   activePlaybackCancelRef: ActivePlaybackCancelRef,
   shouldContinue: () => boolean,
   onStart: () => void,
   signal?: AbortSignal,
 ) {
-  const audioUrl = await requestAiSpeechUrl(line, preferences, eventKind, 5_000, signal);
+  const audioUrl = await requestAiSpeechUrl(
+    line,
+    preferences,
+    eventKind,
+    riderNames,
+    5_000,
+    signal,
+  );
   return await playAudioUrl(
     audioUrl,
     preferences.volume,
@@ -371,7 +392,12 @@ export function useRaceCommentary({
     const requestId = startPrefetchRequestRef.current + 1;
     startPrefetchRequestRef.current = requestId;
     disposePreparedStartSpeech();
-    void requestAiSpeechUrl(startLine, preferences, 'race-start')
+    void requestAiSpeechUrl(
+      startLine,
+      preferences,
+      'race-start',
+      players.map((player) => player.name),
+    )
       .then((audioUrl) => {
         if (startPrefetchRequestRef.current !== requestId) {
           URL.revokeObjectURL(audioUrl);
@@ -549,6 +575,7 @@ export function useRaceCommentary({
               line,
               activePreferences,
               event.kind,
+              event.riders.map((rider) => rider.name),
               activeAudioRef,
               activePlaybackCancelRef,
               shouldContinue,
@@ -661,8 +688,9 @@ export function useRaceCommentary({
 
   const preview = useCallback(async () => {
     const activePreferences = preferencesRef.current;
-    const line = activePreferences.voicePreset === 'american-man'
-      ? 'TrackLab announcer ready. Riders, get set for the gate.'
+    const names = riderNameList(players);
+    const line = names
+      ? `TrackLab announcer ready. ${names}, get set for the gate.`
       : 'TrackLab announcer ready. Riders, get set for the gate.';
     activeAudioRef.current?.pause();
     if ('speechSynthesis' in window) {
@@ -677,6 +705,7 @@ export function useRaceCommentary({
           line,
           activePreferences,
           'preview',
+          players.map((player) => player.name),
           activeAudioRef,
           activePlaybackCancelRef,
           () => true,
@@ -707,7 +736,7 @@ export function useRaceCommentary({
     } finally {
       setPlaybackPhase('idle');
     }
-  }, [serviceMode, setPlaybackPhase]);
+  }, [players, serviceMode, setPlaybackPhase]);
 
   return {
     playbackStatus,

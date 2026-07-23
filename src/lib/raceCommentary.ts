@@ -99,6 +99,7 @@ export type RaceCommentaryTracker = {
   positionsEstablished: boolean;
   leaderPlayerId: PlayerSlot['id'] | null;
   leaderZoneId: string | null;
+  leaderCoursePhase: RaceCommentaryCoursePhase | null;
   lastCourseCallProgress: number;
   courseCallCount: number;
   finalPushCalled: boolean;
@@ -113,6 +114,7 @@ export function createRaceCommentaryTracker(): RaceCommentaryTracker {
     positionsEstablished: false,
     leaderPlayerId: null,
     leaderZoneId: null,
+    leaderCoursePhase: null,
     lastCourseCallProgress: 0,
     courseCallCount: 0,
     finalPushCalled: false,
@@ -197,6 +199,7 @@ function resetTrackerForReady(tracker: RaceCommentaryTracker) {
   tracker.positionsEstablished = false;
   tracker.leaderPlayerId = null;
   tracker.leaderZoneId = null;
+  tracker.leaderCoursePhase = null;
   tracker.lastCourseCallProgress = 0;
   tracker.courseCallCount = 0;
   tracker.finalPushCalled = false;
@@ -253,20 +256,32 @@ export function detectRaceCommentaryEvents(
       && leader.distance >= zone.startMeter
       && leader.distance < zone.endMeter
     ));
+    let enteredLeaderPedalZone = false;
     if (leaderZone && leaderZone.id !== tracker.leaderZoneId) {
       tracker.leaderZoneId = leaderZone.id;
-      const progress = leader.distance / Math.max(1, snapshot.raceLengthMeters);
-      const courseCallSpaced = progress - tracker.lastCourseCallProgress >= 0.14;
-      if (courseCallSpaced && progress >= 0.08 && progress <= 0.92) {
-        tracker.lastCourseCallProgress = progress;
-        tracker.courseCallCount += 1;
-        events.push(eventFor(tracker, snapshot, 'pedal-zone', now, {
-          zoneName: leaderZone.name,
-          pedalReferenceAllowed: tracker.courseCallCount % 4 === 0,
-        }));
-      }
+      enteredLeaderPedalZone = true;
     } else if (!leaderZone) {
       tracker.leaderZoneId = null;
+    }
+
+    const progress = leader.distance / Math.max(1, snapshot.raceLengthMeters);
+    const coursePhase = coursePhaseForProgress(progress);
+    const enteredNewCoursePhase = tracker.leaderCoursePhase != null
+      && coursePhase !== tracker.leaderCoursePhase;
+    tracker.leaderCoursePhase = coursePhase;
+    const courseCallSpaced = progress - tracker.lastCourseCallProgress >= 0.14;
+    if (
+      (enteredLeaderPedalZone || enteredNewCoursePhase)
+      && courseCallSpaced
+      && progress >= 0.08
+      && progress <= 0.92
+    ) {
+      tracker.lastCourseCallProgress = progress;
+      tracker.courseCallCount += 1;
+      events.push(eventFor(tracker, snapshot, 'pedal-zone', now, {
+        ...(leaderZone ? { zoneName: leaderZone.name } : {}),
+        pedalReferenceAllowed: Boolean(leaderZone) && tracker.courseCallCount % 4 === 0,
+      }));
     }
 
     Object.entries(leader.actualBranches).forEach(([splitName, branch]) => {
@@ -277,7 +292,6 @@ export function detectRaceCommentaryEvents(
       }
     });
 
-    const progress = leader.distance / Math.max(1, snapshot.raceLengthMeters);
     if (!tracker.finalPushCalled && progress >= 0.78 && leader.finishedAt == null) {
       tracker.finalPushCalled = true;
       events.push(eventFor(tracker, snapshot, 'final-push', now));
