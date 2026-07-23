@@ -12,9 +12,19 @@ export function raceStateStopsCommentary(raceState: RaceState) {
   return raceState === 'ready';
 }
 
+export function commentaryNeedsImmediateLine(eventKind: RaceCommentaryEventKind) {
+  return eventKind === 'lead-change'
+    || eventKind === 'position-change'
+    || eventKind === 'finish';
+}
+
+export function commentaryLineRequestBudgetMs(eventKind: RaceCommentaryEventKind) {
+  return commentaryNeedsImmediateLine(eventKind) ? 0 : 1_200;
+}
+
 export function shouldInterruptCommentaryForEvent(
   phase: RaceCommentaryPlaybackPhase,
   eventKind: RaceCommentaryEventKind,
 ) {
-  return eventKind === 'finish' && phase !== 'idle' && phase !== 'speaking';
+  return commentaryNeedsImmediateLine(eventKind) && phase !== 'idle';
 }

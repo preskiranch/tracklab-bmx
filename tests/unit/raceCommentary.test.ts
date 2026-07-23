@@ -12,9 +12,15 @@ import type { PlayerSlot, RiderState } from '../../src/types';
 const players: PlayerSlot[] = [
   { id: 1, name: 'Avery', colorName: 'lime', accent: '#65d636', deviceId: 101 },
   { id: 2, name: 'Blake', colorName: 'red', accent: '#e84b3d', deviceId: 102 },
+  { id: 3, name: 'Casey', colorName: 'blue', accent: '#3d8ee8', deviceId: 103 },
+  { id: 4, name: 'Drew', colorName: 'yellow', accent: '#e8ca3d', deviceId: 104 },
 ];
 
-function rider(playerId: 1 | 2, distance = 0, overrides: Partial<RiderState> = {}): RiderState {
+function rider(
+  playerId: 1 | 2 | 3 | 4,
+  distance = 0,
+  overrides: Partial<RiderState> = {},
+): RiderState {
   return {
     playerId,
     distance,
@@ -100,6 +106,78 @@ describe('race commentary event detection', () => {
     });
   });
 
+  it('calls mid-pack passes and carries close third-versus-fourth battles', () => {
+    const tracker = createRaceCommentaryTracker();
+    detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 10),
+        rider(2, 9),
+        rider(3, 8),
+        rider(4, 7.2),
+      ]),
+      1_000,
+    );
+
+    const pass = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 20),
+        rider(3, 19),
+        rider(2, 18.7),
+        rider(4, 18.2),
+      ]),
+      1_200,
+    );
+    const positionChange = pass.find((event) => event.kind === 'position-change');
+
+    expect(positionChange).toMatchObject({
+      passingPlayerId: 3,
+      passedPlayerId: 2,
+    });
+    expect(positionChange?.closeBattles).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        frontPlayerId: 2,
+        behindPlayerId: 4,
+        position: 3,
+      }),
+    ]));
+    expect(localCommentaryLine(positionChange!)).toMatch(/Casey.*Blake/i);
+  });
+
+  it('pairs an excited new-leader call with a close battle behind', () => {
+    const tracker = createRaceCommentaryTracker();
+    detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 10),
+        rider(2, 9.5),
+        rider(3, 8.5),
+        rider(4, 8),
+      ]),
+      1_000,
+    );
+    const events = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(2, 20),
+        rider(1, 19.7),
+        rider(3, 18),
+        rider(4, 17.5),
+      ]),
+      1_200,
+    );
+    const leadChange = events.find((event) => event.kind === 'lead-change');
+    const line = localCommentaryLine(leadChange!);
+
+    expect(line).toMatch(/Blake/i);
+    expect(line).toMatch(/Avery/i);
+    expect(line).toMatch(/Casey/i);
+    expect(line).toMatch(/Drew/i);
+    expect(line).toMatch(/takes charge|takes command|new leader|out front|seizes the lead/i);
+    expect(line).toMatch(/wheel-to-wheel|fight for third|scrap for third|side-by-side|duel for third/i);
+  });
+
   it('recognizes pedal zones, the Pro Set, the final push, and the winner once', () => {
     const tracker = createRaceCommentaryTracker();
     detectRaceCommentaryEvents(tracker, snapshot([rider(1), rider(2)]), 1_000);
@@ -169,6 +247,7 @@ describe('race commentary event detection', () => {
       leaderPlayerId: 1 as const,
       coursePhase: 'first-straight' as const,
       battleState: 'under-pressure' as const,
+      closeBattles: [],
       pedalReferenceAllowed: false,
       riders: [
         { playerId: 1 as const, name: 'Avery', rank: 1, distanceMeters: 30, driveAllowed: true, finished: false },
@@ -306,6 +385,43 @@ describe('race commentary event detection', () => {
 
     expect(raceCommentaryEventIsFresh(startEvent, 3_500)).toBe(true);
     expect(raceCommentaryEventIsFresh(startEvent, 3_501)).toBe(false);
+  });
+
+  it('expires pass calls quickly enough to avoid announcing an old order', () => {
+    expect(raceCommentaryEventIsFresh({
+      id: 'pass-1',
+      sequence: 3,
+      kind: 'position-change',
+      occurredAt: 1_000,
+      trackName: 'North Bay BMX',
+      raceLengthMeters: 300,
+      progress: 0.4,
+      leaderPlayerId: 1,
+      passingPlayerId: 3,
+      passedPlayerId: 2,
+      coursePhase: 'second-straight',
+      battleState: 'under-pressure',
+      closeBattles: [],
+      pedalReferenceAllowed: false,
+      riders: [],
+    }, 3_750)).toBe(true);
+    expect(raceCommentaryEventIsFresh({
+      id: 'pass-1',
+      sequence: 3,
+      kind: 'position-change',
+      occurredAt: 1_000,
+      trackName: 'North Bay BMX',
+      raceLengthMeters: 300,
+      progress: 0.4,
+      leaderPlayerId: 1,
+      passingPlayerId: 3,
+      passedPlayerId: 2,
+      coursePhase: 'second-straight',
+      battleState: 'under-pressure',
+      closeBattles: [],
+      pedalReferenceAllowed: false,
+      riders: [],
+    }, 3_751)).toBe(false);
   });
 
   it('keeps a winner call live long enough for the active sentence to finish', () => {

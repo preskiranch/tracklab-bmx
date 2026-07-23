@@ -11,6 +11,7 @@ export type RaceCommentaryEventKind =
   | 'race-start'
   | 'positions-established'
   | 'lead-change'
+  | 'position-change'
   | 'pedal-zone'
   | 'pro-set'
   | 'final-push'
@@ -39,6 +40,13 @@ export type RaceCommentaryRiderFact = {
   finished: boolean;
 };
 
+export type RaceCommentaryCloseBattleFact = {
+  frontPlayerId: PlayerSlot['id'];
+  behindPlayerId: PlayerSlot['id'];
+  position: number;
+  gapMeters: number;
+};
+
 export type RaceCommentaryEvent = {
   id: string;
   sequence: number;
@@ -49,10 +57,13 @@ export type RaceCommentaryEvent = {
   progress: number;
   leaderPlayerId: PlayerSlot['id'] | null;
   previousLeaderPlayerId?: PlayerSlot['id'];
+  passingPlayerId?: PlayerSlot['id'];
+  passedPlayerId?: PlayerSlot['id'];
   zoneName?: string;
   splitName?: string;
   coursePhase: RaceCommentaryCoursePhase;
   battleState: RaceCommentaryBattleState;
+  closeBattles: RaceCommentaryCloseBattleFact[];
   pedalReferenceAllowed: boolean;
   riders: RaceCommentaryRiderFact[];
 };
@@ -60,6 +71,9 @@ export type RaceCommentaryEvent = {
 export function maximumRaceCommentaryEventAgeMs(kind: RaceCommentaryEventKind) {
   if (kind === 'race-start') {
     return 2_500;
+  }
+  if (kind === 'lead-change' || kind === 'position-change') {
+    return 2_750;
   }
   if (kind === 'finish') {
     return 8_000;
@@ -80,6 +94,8 @@ export function raceCommentaryEventIsFresh(
 export function selectLiveRaceCommentaryEvent(events: RaceCommentaryEvent[]) {
   return events.find((event) => event.kind === 'finish')
     ?? events.find((event) => event.kind === 'race-start')
+    ?? events.find((event) => event.kind === 'lead-change')
+    ?? events.find((event) => event.kind === 'position-change')
     ?? events.at(-1)
     ?? null;
 }
@@ -99,6 +115,7 @@ export type RaceCommentaryTracker = {
   sequence: number;
   positionsEstablished: boolean;
   leaderPlayerId: PlayerSlot['id'] | null;
+  runningOrderPlayerIds: PlayerSlot['id'][];
   leaderZoneId: string | null;
   leaderCoursePhase: RaceCommentaryCoursePhase | null;
   lastCourseCallProgress: number;
@@ -114,6 +131,7 @@ export function createRaceCommentaryTracker(): RaceCommentaryTracker {
     sequence: 0,
     positionsEstablished: false,
     leaderPlayerId: null,
+    runningOrderPlayerIds: [],
     leaderZoneId: null,
     leaderCoursePhase: null,
     lastCourseCallProgress: 0,
@@ -167,6 +185,24 @@ function battleStateForFacts(facts: RaceCommentaryRiderFact[]): RaceCommentaryBa
   return 'clear-lead';
 }
 
+function closeBattlesForFacts(
+  facts: RaceCommentaryRiderFact[],
+): RaceCommentaryCloseBattleFact[] {
+  return facts.slice(0, -1).flatMap((frontRider, index) => {
+    const behindRider = facts[index + 1];
+    const gapMeters = Math.max(0, frontRider.distanceMeters - behindRider.distanceMeters);
+    if (gapMeters > 1.25) {
+      return [];
+    }
+    return [{
+      frontPlayerId: frontRider.playerId,
+      behindPlayerId: behindRider.playerId,
+      position: frontRider.rank,
+      gapMeters: Number(gapMeters.toFixed(2)),
+    }];
+  });
+}
+
 function eventFor(
   tracker: RaceCommentaryTracker,
   snapshot: RaceCommentarySnapshot,
@@ -191,6 +227,7 @@ function eventFor(
     leaderPlayerId: leader?.playerId ?? null,
     coursePhase: coursePhaseForProgress(progress),
     battleState: battleStateForFacts(facts),
+    closeBattles: closeBattlesForFacts(facts),
     pedalReferenceAllowed: false,
     riders: facts,
     ...extra,
@@ -200,6 +237,7 @@ function eventFor(
 function resetTrackerForReady(tracker: RaceCommentaryTracker) {
   tracker.positionsEstablished = false;
   tracker.leaderPlayerId = null;
+  tracker.runningOrderPlayerIds = [];
   tracker.leaderZoneId = null;
   tracker.leaderCoursePhase = null;
   tracker.lastCourseCallProgress = 0;
@@ -239,16 +277,53 @@ export function detectRaceCommentaryEvents(
   if (positionsEstablished && !tracker.positionsEstablished) {
     tracker.positionsEstablished = true;
     tracker.leaderPlayerId = ordered[0]?.playerId ?? null;
+    tracker.runningOrderPlayerIds = ordered.map((rider) => rider.playerId);
     events.push(eventFor(tracker, snapshot, 'positions-established', now));
-  } else if (
-    positionsEstablished
-    && tracker.leaderPlayerId != null
-    && ordered[0]
-    && ordered[0].playerId !== tracker.leaderPlayerId
-  ) {
-    const previousLeaderPlayerId = tracker.leaderPlayerId;
-    tracker.leaderPlayerId = ordered[0].playerId;
-    events.push(eventFor(tracker, snapshot, 'lead-change', now, { previousLeaderPlayerId }));
+  } else if (positionsEstablished) {
+    const nextOrderPlayerIds = ordered.map((rider) => rider.playerId);
+    const orderChanged = nextOrderPlayerIds.some(
+      (playerId, index) => tracker.runningOrderPlayerIds[index] !== playerId,
+    );
+    if (orderChanged) {
+      const previousOrderPlayerIds = tracker.runningOrderPlayerIds;
+      const previousLeaderPlayerId = tracker.leaderPlayerId;
+      const nextLeaderPlayerId = ordered[0]?.playerId ?? null;
+      if (
+        previousLeaderPlayerId != null
+        && nextLeaderPlayerId != null
+        && nextLeaderPlayerId !== previousLeaderPlayerId
+      ) {
+        events.push(eventFor(tracker, snapshot, 'lead-change', now, {
+          previousLeaderPlayerId,
+        }));
+      } else {
+        const passingRider = nextOrderPlayerIds
+          .map((playerId, nextIndex) => ({
+            playerId,
+            nextIndex,
+            previousIndex: previousOrderPlayerIds.indexOf(playerId),
+          }))
+          .filter(({ previousIndex, nextIndex }) => (
+            previousIndex >= 0 && previousIndex > nextIndex
+          ))
+          .sort((left, right) => left.nextIndex - right.nextIndex)[0];
+        const passedPlayerId = passingRider
+          ? previousOrderPlayerIds[passingRider.nextIndex]
+          : undefined;
+        if (
+          passingRider
+          && passedPlayerId != null
+          && passedPlayerId !== passingRider.playerId
+        ) {
+          events.push(eventFor(tracker, snapshot, 'position-change', now, {
+            passingPlayerId: passingRider.playerId,
+            passedPlayerId,
+          }));
+        }
+      }
+      tracker.leaderPlayerId = nextLeaderPlayerId;
+      tracker.runningOrderPlayerIds = nextOrderPlayerIds;
+    }
   }
 
   const leader = ordered[0];
@@ -430,11 +505,40 @@ export function selectLocalCommentaryFocusRiders(
     .slice(0, Math.min(limit, riders.length));
 }
 
+function closeBattleRiders(
+  event: RaceCommentaryEvent,
+  raceLines: string[],
+) {
+  const mentionCounts = new Map(event.riders.map((rider) => [
+    rider.playerId,
+    raceLines.reduce(
+      (count, line) => count + (lineMentionsLocalRider(line, rider) ? 1 : 0),
+      0,
+    ),
+  ]));
+  const battle = [...event.closeBattles].sort((left, right) => {
+    const leftMentions = (mentionCounts.get(left.frontPlayerId) ?? 0)
+      + (mentionCounts.get(left.behindPlayerId) ?? 0);
+    const rightMentions = (mentionCounts.get(right.frontPlayerId) ?? 0)
+      + (mentionCounts.get(right.behindPlayerId) ?? 0);
+    return leftMentions - rightMentions
+      || right.position - left.position
+      || left.gapMeters - right.gapMeters;
+  })[0];
+  if (!battle) {
+    return [];
+  }
+  return [battle.frontPlayerId, battle.behindPlayerId]
+    .map((playerId) => event.riders.find((rider) => rider.playerId === playerId))
+    .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider));
+}
+
 function requiredLocalCommentaryRiders(
   event: RaceCommentaryEvent,
   raceLines: string[],
 ) {
   const focusRiders = selectLocalCommentaryFocusRiders(event, raceLines, 2);
+  const battleRiders = closeBattleRiders(event, raceLines);
   const leader = event.riders.find((rider) => rider.playerId === event.leaderPlayerId)
     ?? event.riders[0];
   if (event.kind === 'race-start') return [];
@@ -444,19 +548,32 @@ function requiredLocalCommentaryRiders(
       (rider) => rider.playerId === event.previousLeaderPlayerId,
     );
     return [...new Map(
-      [leader, previousLeader, ...focusRiders]
+      [leader, previousLeader, ...battleRiders]
         .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 4);
+  }
+  if (event.kind === 'position-change') {
+    const passingRider = event.riders.find(
+      (rider) => rider.playerId === event.passingPlayerId,
+    );
+    const passedRider = event.riders.find(
+      (rider) => rider.playerId === event.passedPlayerId,
+    );
+    return [...new Map(
+      [passingRider, passedRider, ...battleRiders]
+        .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
+        .map((rider) => [rider.playerId, rider]),
+    ).values()].slice(0, 4);
   }
   if (event.kind === 'pro-set' || event.kind === 'final-push') {
     return [...new Map(
-      [leader, ...focusRiders]
+      [leader, ...battleRiders, ...focusRiders]
         .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 3);
   }
-  return focusRiders;
+  return battleRiders.length > 0 ? battleRiders : focusRiders;
 }
 
 function localPositionClause(rider: RaceCommentaryRiderFact) {
@@ -466,11 +583,18 @@ function localPositionClause(rider: RaceCommentaryRiderFact) {
   return `${rider.name} is fourth`;
 }
 
+function localOrdinal(rank: number) {
+  if (rank === 1) return 'the lead';
+  if (rank === 2) return 'second';
+  if (rank === 3) return 'third';
+  return 'fourth';
+}
+
 function localCoverageLines(
   event: RaceCommentaryEvent,
   requiredRiders: RaceCommentaryRiderFact[],
 ) {
-  const [first, second] = requiredRiders;
+  const [first, second, third, fourth] = requiredRiders;
   if (!first || !second) {
     return [];
   }
@@ -481,10 +605,33 @@ function localCoverageLines(
     ? lines.map((line) => `${line.replace(/[.!]$/, '')}—calm clearly stayed home.`)
     : lines;
   if (event.kind === 'lead-change') {
+    if (third && fourth) {
+      return [
+        `${first.name} takes charge! ${second.name} drops to second, while ${third.name} and ${fourth.name} fight for third.`,
+        `New leader—${first.name}! ${second.name} gives chase as ${third.name} and ${fourth.name} run wheel-to-wheel.`,
+        `${first.name} blasts into the lead! ${second.name} is second; behind them, ${third.name} and ${fourth.name} are locked together.`,
+        `Oh, what a pass—${first.name} takes command! ${second.name} chases while ${third.name} and ${fourth.name} scrap for third.`,
+        `${first.name} seizes the lead from ${second.name}! ${third.name} and ${fourth.name} are still side-by-side behind them.`,
+        `The order flips—${first.name} is out front! ${second.name} responds as ${third.name} and ${fourth.name} duel for third.`,
+      ];
+    }
     return applyWryAside([
-      `${first.name} takes over, while ${secondClause}.`,
-      `${first.name} moves in front; ${secondClause} after the change.`,
+      `What a move—${first.name} takes over! ${secondClause} after the pass.`,
+      `${first.name} storms to the front! ${second.name} is forced back to second.`,
+      `New leader—${first.name} sweeps through! ${second.name} drops into the chase.`,
+      `${first.name} takes charge with a brilliant pass! ${second.name} is now second.`,
+      `There goes ${first.name}, straight into the lead! ${second.name} has to respond.`,
     ]);
+  }
+  if (event.kind === 'position-change') {
+    return [
+      `${first.name} surges past ${second.name} into ${localOrdinal(first.rank)}!`,
+      `There’s the move—${first.name} takes ${localOrdinal(first.rank)} from ${second.name}!`,
+      `${first.name} gets it done and moves ahead of ${second.name}!`,
+      `What a pass from ${first.name}—${second.name} loses ${localOrdinal(first.rank)}!`,
+      `${first.name} finds the opening and takes ${localOrdinal(first.rank)} from ${second.name}!`,
+      `The pressure pays off—${first.name} powers ahead of ${second.name}!`,
+    ];
   }
   if (event.kind === 'pro-set') {
     return applyWryAside([
@@ -496,6 +643,19 @@ function localCoverageLines(
     return applyWryAside([
       `${firstClause} toward the line, while ${secondClause}.`,
       `The final charge belongs to ${first.name}; ${secondClause} behind.`,
+    ]);
+  }
+  const closeBattle = event.closeBattles.some((battle) => (
+    battle.frontPlayerId === first.playerId
+    && battle.behindPlayerId === second.playerId
+  ));
+  if (closeBattle) {
+    return applyWryAside([
+      `${first.name} and ${second.name} are wheel-to-wheel for ${localOrdinal(first.rank)}!`,
+      `Nothing between ${first.name} and ${second.name} in the fight for ${localOrdinal(first.rank)}.`,
+      `${second.name} is all over ${first.name} in the battle for ${localOrdinal(first.rank)}.`,
+      `${first.name} barely holds ${localOrdinal(first.rank)}—${second.name} is right alongside!`,
+      `This battle is alive: ${first.name} and ${second.name}, side-by-side for ${localOrdinal(first.rank)}!`,
     ]);
   }
   if (wryAside) {
@@ -588,6 +748,11 @@ export function localCommentaryLine(
       `${leader} finds a way past. We have a new leader.`,
       `What a move from ${leader}—straight into the lead!`,
       `The race turns as ${leader} sweeps to the front.`,
+    ],
+    'position-change': [
+      `${riderName(event, event.passingPlayerId)} makes the pass and moves up!`,
+      `${riderName(event, event.passingPlayerId)} finds a way through!`,
+      `Position change—${riderName(event, event.passingPlayerId)} gets the move done!`,
     ],
     'pedal-zone': courseActionLines(event, leader, second),
     'pro-set': [

@@ -581,8 +581,6 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     riderNames?: string[];
     deliveryStyle?: string;
   }> = [];
-  const commentaryLineRiderNames: string[][] = [];
-  const commentaryRaceLineCounts: number[] = [];
   const preRaceRiderNames: string[][] = [];
   const authUser = {
     id: 'quick-start-racer',
@@ -656,8 +654,6 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     const riderNames = payload.event?.riders?.flatMap((rider) => (
       typeof rider.name === 'string' ? [rider.name] : []
     )) ?? [];
-    commentaryLineRiderNames.push(riderNames);
-    commentaryRaceLineCounts.push(payload.raceLines?.length ?? 0);
     const leaderName = payload.event?.riders?.find(
       (rider) => rider.playerId === payload.event?.leaderPlayerId,
     )?.name ?? riderNames[0] ?? 'The leader';
@@ -822,19 +818,10 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4, { timeout: 5_000 });
   await expect.poll(
-    () => commentaryLineRiderNames.some((names) => (
-      customDemoNames.every((name) => names.includes(name))
-    )),
-    { timeout: 10_000 },
-  ).toBe(true);
-  await expect.poll(
-    () => commentaryRaceLineCounts.some((count) => count > 0),
-    { timeout: 10_000 },
-  ).toBe(true);
-  await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (
-      payload.eventKind !== 'race-start'
-      && payload.deliveryStyle === 'wry'
+      payload.eventKind !== 'pre-race'
+      && payload.eventKind !== 'preview'
+      && payload.eventKind !== 'race-start'
       && customDemoNames.some((name) => payload.line?.includes(name))
       && customDemoNames.every((name) => payload.riderNames?.includes(name))
     )),

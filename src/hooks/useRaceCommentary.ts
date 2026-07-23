@@ -10,6 +10,8 @@ import {
 } from '../lib/raceCommentary';
 import {
   browserSpeechWatchdogMs,
+  commentaryLineRequestBudgetMs,
+  commentaryNeedsImmediateLine,
   raceStateStopsCommentary,
   shouldInterruptCommentaryForEvent,
   type RaceCommentaryPlaybackPhase,
@@ -219,7 +221,10 @@ function speakWithBrowser(
       : voicePreset === 'british-woman' || voicePreset === 'british-man'
         ? 0.96
         : 0.97;
-    const actionRate = eventKind === 'lead-change' || eventKind === 'pro-set' || eventKind === 'final-push'
+    const actionRate = eventKind === 'lead-change'
+      || eventKind === 'position-change'
+      || eventKind === 'pro-set'
+      || eventKind === 'final-push'
       ? 0.02
       : eventKind === 'race-start' || eventKind === 'finish'
         ? 0.01
@@ -230,7 +235,9 @@ function speakWithBrowser(
       || voicePreset === 'british-woman'
       ? 1
       : 0.96;
-    const actionPitchLift = eventKind === 'lead-change' || eventKind === 'finish'
+    const actionPitchLift = eventKind === 'lead-change'
+      || eventKind === 'position-change'
+      || eventKind === 'finish'
       ? 0.05
       : eventKind === 'race-start' || eventKind === 'final-push'
         ? 0.03
@@ -294,6 +301,9 @@ function commentarySpeechTimeoutMs(eventKind: CommentarySpeechEventKind) {
   }
   if (eventKind === 'race-start') {
     return 15_000;
+  }
+  if (eventKind === 'lead-change' || eventKind === 'position-change') {
+    return 5_000;
   }
   if (eventKind === 'finish') {
     return 12_000;
@@ -978,6 +988,7 @@ export function useRaceCommentary({
           lifecycleGeneration === lifecycleGenerationRef.current
           && callSequence === callSequenceRef.current
           && preferencesRef.current.enabled
+          && raceCommentaryEventIsFresh(event)
         );
         let lineRemembered = false;
         const beginSpeaking = () => {
@@ -1122,7 +1133,12 @@ export function useRaceCommentary({
 
         const requestController = new AbortController();
         activeRequestAbortRef.current = requestController;
-        if (serviceMode === 'ai') {
+        const lineRequestBudgetMs = commentaryLineRequestBudgetMs(event.kind);
+        if (
+          serviceMode === 'ai'
+          && !commentaryNeedsImmediateLine(event.kind)
+          && lineRequestBudgetMs > 0
+        ) {
           try {
             const response = await fetchWithTimeout('/api/commentary/line', {
               method: 'POST',
@@ -1138,7 +1154,7 @@ export function useRaceCommentary({
                 recentLines: activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
                 raceLines: raceLinesRef.current,
               }),
-            }, 4_000);
+            }, lineRequestBudgetMs);
             if (!response.ok) {
               throw new Error(`Commentary service returned ${response.status}`);
             }

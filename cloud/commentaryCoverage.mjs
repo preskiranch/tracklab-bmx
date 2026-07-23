@@ -62,8 +62,29 @@ function leaderFor(event) {
     || null;
 }
 
+function closeBattleRiders(event, raceLines = []) {
+  const riders = [...(event?.riders || [])];
+  const mentionCounts = commentaryRiderMentionCounts(riders, raceLines);
+  const battle = [...(event?.closeBattles || [])].sort((left, right) => {
+    const leftMentions = (mentionCounts.get(left.frontPlayerId) || 0)
+      + (mentionCounts.get(left.behindPlayerId) || 0);
+    const rightMentions = (mentionCounts.get(right.frontPlayerId) || 0)
+      + (mentionCounts.get(right.behindPlayerId) || 0);
+    return leftMentions - rightMentions
+      || Number(right.position || 0) - Number(left.position || 0)
+      || Number(left.gapMeters || 0) - Number(right.gapMeters || 0);
+  })[0];
+  if (!battle) {
+    return [];
+  }
+  return [battle.frontPlayerId, battle.behindPlayerId]
+    .map((playerId) => riders.find((rider) => rider.playerId === playerId))
+    .filter(Boolean);
+}
+
 export function requiredCommentaryRiders(event, raceLines = []) {
   const focusRiders = selectCommentaryFocusRiders(event, raceLines, 2);
+  const battleRiders = closeBattleRiders(event, raceLines);
   if (event.kind === 'race-start') {
     return [];
   }
@@ -76,20 +97,33 @@ export function requiredCommentaryRiders(event, raceLines = []) {
       (rider) => rider.playerId === event.previousLeaderPlayerId,
     );
     return [...new Map(
-      [newLeader, previousLeader, ...focusRiders]
+      [newLeader, previousLeader, ...battleRiders]
         .filter(Boolean)
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 4);
+  }
+  if (event.kind === 'position-change') {
+    const passingRider = event.riders.find(
+      (rider) => rider.playerId === event.passingPlayerId,
+    );
+    const passedRider = event.riders.find(
+      (rider) => rider.playerId === event.passedPlayerId,
+    );
+    return [...new Map(
+      [passingRider, passedRider, ...battleRiders]
+        .filter(Boolean)
+        .map((rider) => [rider.playerId, rider]),
+    ).values()].slice(0, 4);
   }
   if (event.kind === 'pro-set' || event.kind === 'final-push') {
     const leader = leaderFor(event);
     return [...new Map(
-      [leader, ...focusRiders]
+      [leader, ...battleRiders, ...focusRiders]
         .filter(Boolean)
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 2);
+    ).values()].slice(0, 3);
   }
-  return focusRiders;
+  return battleRiders.length > 0 ? battleRiders : focusRiders;
 }
 
 export function commentaryUsesWryAside(event) {

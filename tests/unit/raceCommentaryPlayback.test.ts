@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   browserSpeechWatchdogMs,
+  commentaryLineRequestBudgetMs,
+  commentaryNeedsImmediateLine,
   raceStateStopsCommentary,
   shouldInterruptCommentaryForEvent,
 } from '../../src/lib/raceCommentaryPlayback';
@@ -11,12 +13,22 @@ describe('race commentary playback sequencing', () => {
     expect(browserSpeechWatchdogMs(Array.from({ length: 40 }, () => 'racing').join(' '))).toBe(30_000);
   });
 
-  it('lets an active sentence finish before the winner call', () => {
-    expect(shouldInterruptCommentaryForEvent('speaking', 'finish')).toBe(false);
+  it('interrupts stale calls for passes and the finish', () => {
+    expect(shouldInterruptCommentaryForEvent('speaking', 'finish')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('preparing', 'finish')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('thinking', 'finish')).toBe(true);
-    expect(shouldInterruptCommentaryForEvent('thinking', 'lead-change')).toBe(false);
+    expect(shouldInterruptCommentaryForEvent('thinking', 'lead-change')).toBe(true);
+    expect(shouldInterruptCommentaryForEvent('speaking', 'lead-change')).toBe(true);
+    expect(shouldInterruptCommentaryForEvent('preparing', 'position-change')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('preparing', 'pedal-zone')).toBe(false);
+  });
+
+  it('skips generative wording latency for live passes', () => {
+    expect(commentaryNeedsImmediateLine('lead-change')).toBe(true);
+    expect(commentaryNeedsImmediateLine('position-change')).toBe(true);
+    expect(commentaryLineRequestBudgetMs('lead-change')).toBe(0);
+    expect(commentaryLineRequestBudgetMs('position-change')).toBe(0);
+    expect(commentaryLineRequestBudgetMs('pedal-zone')).toBe(1_200);
   });
 
   it('preserves finish playback until the race returns to the gate', () => {

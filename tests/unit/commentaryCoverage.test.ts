@@ -18,6 +18,7 @@ function event(sequence = 2, kind = 'positions-established') {
     sequence,
     kind,
     leaderPlayerId: 1,
+    closeBattles: [],
     riders,
   };
 }
@@ -48,6 +49,34 @@ describe('full-field commentary coverage', () => {
 
     expect(requiredCommentaryRiders(leadChange, []).map((rider) => rider.playerId))
       .toEqual([3, 1]);
+  });
+
+  it('adds a close third-versus-fourth battle to a new-leader call', () => {
+    const leadChange = {
+      ...event(4, 'lead-change'),
+      leaderPlayerId: 2,
+      previousLeaderPlayerId: 1,
+      closeBattles: [{
+        frontPlayerId: 3,
+        behindPlayerId: 4,
+        position: 3,
+        gapMeters: 0.4,
+      }],
+    };
+
+    expect(requiredCommentaryRiders(leadChange, []).map((rider) => rider.playerId))
+      .toEqual([2, 1, 3, 4]);
+  });
+
+  it('keeps both riders involved in a mid-pack pass required', () => {
+    const positionChange = {
+      ...event(6, 'position-change'),
+      passingPlayerId: 3,
+      passedPlayerId: 2,
+    };
+
+    expect(requiredCommentaryRiders(positionChange, []).map((rider) => rider.playerId))
+      .toEqual([3, 2]);
   });
 
   it('adds a wry aside only occasionally and never to the gate or finish', () => {
