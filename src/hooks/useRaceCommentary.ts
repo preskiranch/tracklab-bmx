@@ -882,17 +882,19 @@ export function useRaceCommentary({
         setPlaybackPhase('speaking');
       }
     };
+    const activePreferences = preferencesRef.current;
+    const riderNames = preRaceContext.riders.map((rider) => rider.name);
     setPlaybackPhase(prepared?.audioBlob || prepared?.audioPromise ? 'preparing' : 'thinking');
     void (async () => {
       try {
         const audioBlob = prepared?.audioBlob
           ?? (prepared?.audioPromise
-            ? await waitForPreparedSpeech(prepared.audioPromise, 1_200)
+            ? await waitForPreparedSpeech(prepared.audioPromise, 4_500)
             : null);
         if (audioBlob) {
           const played = await playAudioBlob(
             audioBlob,
-            preferences.volume,
+            activePreferences.volume,
             activeAudioRef,
             activeBufferSourceRef,
             activePlaybackCancelRef,
@@ -904,11 +906,27 @@ export function useRaceCommentary({
           }
           return;
         }
+        if (serviceMode === 'ai') {
+          await playAiSpeech(
+            report.line,
+            activePreferences,
+            'pre-race',
+            riderNames,
+            'straight',
+            activeAudioRef,
+            activeBufferSourceRef,
+            activePlaybackCancelRef,
+            shouldContinue,
+            beginSpeaking,
+            controller.signal,
+          );
+          return;
+        }
         await speakWithBrowser(
           report.line,
-          preferences.voicePreset,
+          activePreferences.voicePreset,
           'pre-race',
-          preferences.volume,
+          activePreferences.volume,
           activePlaybackCancelRef,
           shouldContinue,
           beginSpeaking,
@@ -917,9 +935,9 @@ export function useRaceCommentary({
         if (shouldContinue()) {
           await speakWithBrowser(
             report.line,
-            preferences.voicePreset,
+            activePreferences.voicePreset,
             'pre-race',
-            preferences.volume,
+            activePreferences.volume,
             activePlaybackCancelRef,
             shouldContinue,
             beginSpeaking,
@@ -950,9 +968,11 @@ export function useRaceCommentary({
     preRaceContext,
     preRaceKey,
     preferences.enabled,
+    preferences.model,
     preferences.voicePreset,
     preferences.volume,
     rememberLine,
+    serviceMode,
     setPlaybackPhase,
     startGateActive,
     startGatePhase,

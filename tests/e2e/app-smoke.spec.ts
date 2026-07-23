@@ -919,6 +919,17 @@ test.describe('mobile commentary playback', () => {
     test.setTimeout(65_000);
     let speechRequests = 0;
     const speechEventKinds: string[] = [];
+    const speechPayloads: Array<{
+      eventKind?: string;
+      voicePreset?: string;
+      line?: string;
+    }> = [];
+    let preRaceReportReleased = false;
+    let releasePreRaceReport = () => {};
+    const preRaceReportGate = new Promise<void>((resolve) => {
+      releasePreRaceReport = resolve;
+    });
+    let preRaceStudioVoiceStartedBeforeReport = false;
     const authUser = {
       id: 'ipad-commentary-racer',
       profileKey: 'user:ipad-commentary-racer',
@@ -942,8 +953,16 @@ test.describe('mobile commentary playback', () => {
     });
     await page.route('**/api/commentary/speech', async (route) => {
       speechRequests += 1;
-      const payload = route.request().postDataJSON() as { eventKind?: string };
+      const payload = route.request().postDataJSON() as {
+        eventKind?: string;
+        voicePreset?: string;
+        line?: string;
+      };
+      speechPayloads.push(payload);
       speechEventKinds.push(payload.eventKind ?? '');
+      if (payload.eventKind === 'pre-race' && !preRaceReportReleased) {
+        preRaceStudioVoiceStartedBeforeReport = true;
+      }
       await new Promise((resolve) => setTimeout(resolve, 650));
       await route.fulfill({
         contentType: 'audio/mpeg',
@@ -957,6 +976,11 @@ test.describe('mobile commentary playback', () => {
       const names = payload.track?.riders?.flatMap((rider) => (
         typeof rider.name === 'string' ? [rider.name] : []
       )) ?? [];
+      await Promise.race([
+        preRaceReportGate,
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
+      preRaceReportReleased = true;
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
@@ -1032,6 +1056,12 @@ test.describe('mobile commentary playback', () => {
       () => speechEventKinds.includes('pre-race'),
       { timeout: 8_000 },
     ).toBe(true);
+    expect(preRaceStudioVoiceStartedBeforeReport).toBe(true);
+    expect(speechPayloads.find((payload) => payload.eventKind === 'preview')?.voicePreset)
+      .toBe('american-woman');
+    expect(speechPayloads.find((payload) => payload.eventKind === 'pre-race')?.voicePreset)
+      .toBe('american-woman');
+    releasePreRaceReport();
     await expect.poll(() => page.evaluate(() => (
       (window as typeof window & {
         __tracklabBlockedMediaPlayCount?: number;
