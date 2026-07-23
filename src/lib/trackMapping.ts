@@ -925,8 +925,21 @@ export function readStoredTrackMappings(): StoredTrackMappings {
   }
 }
 
+let warnedAboutTrackMappingStorageWrite = false;
+
 export function writeStoredTrackMappings(mappings: StoredTrackMappings) {
-  window.localStorage.setItem(trackMappingStorageKey, JSON.stringify(mappings));
+  try {
+    window.localStorage.setItem(trackMappingStorageKey, JSON.stringify(mappings));
+    warnedAboutTrackMappingStorageWrite = false;
+    return true;
+  } catch (error) {
+    if (!warnedAboutTrackMappingStorageWrite) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Could not cache track mappings in this browser: ${message}`);
+      warnedAboutTrackMappingStorageWrite = true;
+    }
+    return false;
+  }
 }
 
 export function zoneBoundariesFromMapping(mapping: UserTrackMapping) {

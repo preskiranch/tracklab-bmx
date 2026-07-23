@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { TrackZone, UserTrackMapping } from '../../src/types';
 import {
   appendProSetZoneBoundaryMeter,
@@ -6,6 +6,8 @@ import {
   newestTrackMapping,
   repeatTrackZonesForLaps,
   routeIsClosedLoop,
+  trackMappingStorageKey,
+  writeStoredTrackMappings,
 } from '../../src/lib/trackMapping';
 
 function mapping(trackId: string, savedAt: string, zoneCount: number): UserTrackMapping {
@@ -55,6 +57,29 @@ describe('cross-browser track mapping resolution', () => {
 
     expect(merged['north-bay']).toBe(current);
     expect(merged['oak-creek']).toBe(otherTrack);
+  });
+
+  it('keeps the app running when the browser track-map cache exceeds its quota', () => {
+    const setItem = vi.fn(() => {
+      const error = new Error('The quota has been exceeded.');
+      error.name = 'QuotaExceededError';
+      throw error;
+    });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubGlobal('window', { localStorage: { setItem } });
+
+    try {
+      expect(writeStoredTrackMappings({
+        'north-bay': mapping('north-bay', '2026-07-10T12:00:00.000Z', 8),
+      })).toBe(false);
+      expect(setItem).toHaveBeenCalledWith(trackMappingStorageKey, expect.any(String));
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining('Could not cache track mappings in this browser'),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      warning.mockRestore();
+    }
   });
 });
 
