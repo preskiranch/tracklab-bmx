@@ -10,6 +10,7 @@ class StalledAudio extends EventTarget {
   muted = false;
   paused = true;
   preload = '';
+  playbackRate = 1;
   src: string;
   volume = 1;
 
@@ -93,20 +94,24 @@ describe('race audio resilience', () => {
   it('does not reload or stop ambience when cadence preparation runs', async () => {
     StalledAudio.stallPlayback = false;
     const {
-      bmxEventAmbienceUrl,
+      bmxEventAmbienceSources,
       primeAudioCues,
       startBmxEventAmbience,
     } = await import('../../src/lib/audioCues');
 
     await primeAudioCues();
     await startBmxEventAmbience();
+    const ambience = StalledAudio.instances.find((audio) => (
+      bmxEventAmbienceSources.some((source) => audio.src.endsWith(source.url))
+    ));
+    const activeStartOffset = ambience?.currentTime;
     await primeAudioCues();
 
-    const ambience = StalledAudio.instances.find((audio) => audio.src === bmxEventAmbienceUrl);
     expect(ambience).toMatchObject({
       loadCount: 1,
       paused: false,
       volume: 0.065,
+      currentTime: activeStartOffset,
     });
   });
 });

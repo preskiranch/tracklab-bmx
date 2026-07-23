@@ -5,6 +5,7 @@ import {
   localCommentaryCombinationCount,
   localCommentaryLine,
   raceCommentaryEventIsFresh,
+  selectLocalCommentaryFocusRiders,
   selectLiveRaceCommentaryEvent,
   type RaceCommentarySnapshot,
 } from '../../src/lib/raceCommentary';
@@ -146,7 +147,7 @@ describe('race commentary event detection', () => {
     expect(localCommentaryLine(positionChange!)).toMatch(/Casey.*Blake/i);
   });
 
-  it('pairs an excited new-leader call with a close battle behind', () => {
+  it('keeps an excited new-leader call centered on the front battle', () => {
     const tracker = createRaceCommentaryTracker();
     detectRaceCommentaryEvents(
       tracker,
@@ -173,10 +174,8 @@ describe('race commentary event detection', () => {
 
     expect(line).toMatch(/Blake/i);
     expect(line).toMatch(/Avery/i);
-    expect(line).toMatch(/Casey/i);
-    expect(line).toMatch(/Drew/i);
-    expect(line).toMatch(/takes charge|takes command|new leader|out front|seizes the lead|front changes hands|hits the front/i);
-    expect(line).toMatch(/wheel-to-wheel|fight for third|scrap for third|side-by-side|duel for third/i);
+    expect(line).not.toMatch(/Casey|Drew/i);
+    expect(line).toMatch(/takes charge|takes command|new leader|out front|seizes the lead|front changes hands|hits the front|finds the front/i);
   });
 
   it('recognizes course action, the winner, and every later finisher once', () => {
@@ -372,6 +371,35 @@ describe('race commentary event detection', () => {
     expect(combined).toContain('Casey');
     expect(combined).toContain('Drew');
     expect(combined).toMatch(/\b(?:second|third|fourth|leads)\b/i);
+  });
+
+  it('keeps three of every four local fallback focus calls on the front two', () => {
+    const baseEvent = {
+      id: 'focus-balance',
+      sequence: 1,
+      kind: 'pedal-zone' as const,
+      occurredAt: 1_000,
+      trackName: 'North Bay BMX',
+      raceLengthMeters: 300,
+      progress: 0.4,
+      leaderPlayerId: 1 as const,
+      coursePhase: 'second-straight' as const,
+      battleState: 'under-pressure' as const,
+      closeBattles: [],
+      pedalReferenceAllowed: false,
+      riders: [
+        { playerId: 1 as const, name: 'Avery', rank: 1, distanceMeters: 120, driveAllowed: true, finished: false },
+        { playerId: 2 as const, name: 'Blake', rank: 2, distanceMeters: 119, driveAllowed: true, finished: false },
+        { playerId: 3 as const, name: 'Casey', rank: 3, distanceMeters: 116, driveAllowed: true, finished: false },
+        { playerId: 4 as const, name: 'Drew', rank: 4, distanceMeters: 114, driveAllowed: true, finished: false },
+      ],
+    };
+    const calls = Array.from({ length: 12 }, (_, index) => (
+      selectLocalCommentaryFocusRiders({ ...baseEvent, sequence: index + 1 })
+    ));
+
+    expect(calls.filter((call) => call.every((rider) => rider.rank <= 2))).toHaveLength(9);
+    expect(calls.filter((call) => call.some((rider) => rider.rank >= 3))).toHaveLength(3);
   });
 
   it('uses occasional good-natured wit in local fallback calls', () => {

@@ -11,10 +11,51 @@ let mediaElementPrimePromise: Promise<void> | null = null;
 let raceAmbienceAudio: HTMLAudioElement | null = null;
 let raceAmbiencePrimed = false;
 let raceAmbiencePrimePromise: Promise<void> | null = null;
+let activeRaceAmbienceProfile: BmxEventAmbienceProfile | null = null;
+let lastRaceAmbienceProfileIndex = -1;
 
 export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
 export const bmxEventAmbienceUrl = '/assets/bmx-event-ambience.mp3';
+export const bmxEventAmbienceSources = [
+  { url: bmxEventAmbienceUrl, durationSeconds: 15.046 },
+  { url: '/assets/bmx-event-ambience-sports.mp3', durationSeconds: 76.826 },
+  { url: '/assets/bmx-event-ambience-light-applause.mp3', durationSeconds: 11.128 },
+  { url: '/assets/bmx-event-ambience-victory-cheer.mp3', durationSeconds: 10.109 },
+  { url: '/assets/bmx-event-ambience-stadium.mp3', durationSeconds: 17.319 },
+  { url: '/assets/bmx-event-ambience-chant.mp3', durationSeconds: 11.102 },
+  { url: '/assets/bmx-event-ambience-rhythmic.mp3', durationSeconds: 14.393 },
+] as const;
+const bmxEventAmbienceProfilesPerSource = 16;
+export const bmxEventAmbienceVariationCount = (
+  bmxEventAmbienceSources.length * bmxEventAmbienceProfilesPerSource
+);
 export const uciVoiceWatchGateOffsetMs = 5300;
+
+export type BmxEventAmbienceProfile = {
+  index: number;
+  sourceUrl: string;
+  startOffsetSeconds: number;
+  playbackRate: number;
+};
+
+export function bmxEventAmbienceProfile(index: number): BmxEventAmbienceProfile {
+  const normalizedIndex = (
+    (Math.round(index) % bmxEventAmbienceVariationCount)
+    + bmxEventAmbienceVariationCount
+  ) % bmxEventAmbienceVariationCount;
+  const source = bmxEventAmbienceSources[
+    normalizedIndex % bmxEventAmbienceSources.length
+  ];
+  const sourceVariation = Math.floor(normalizedIndex / bmxEventAmbienceSources.length);
+  return {
+    index: normalizedIndex,
+    sourceUrl: source.url,
+    startOffsetSeconds: Number((
+      source.durationSeconds * ((sourceVariation * 7) % bmxEventAmbienceProfilesPerSource) / 34
+    ).toFixed(3)),
+    playbackRate: Number((0.985 + (sourceVariation % 4) * 0.01).toFixed(3)),
+  };
+}
 
 type UciVoiceStartSource = 'audio' | 'fallback';
 
@@ -75,6 +116,42 @@ function getRaceAmbienceAudio() {
   }
 
   return raceAmbienceAudio;
+}
+
+function nextRaceAmbienceProfile() {
+  const values = new Uint32Array(1);
+  let index = Date.now() % bmxEventAmbienceVariationCount;
+  try {
+    window.crypto?.getRandomValues(values);
+    index = values[0] % bmxEventAmbienceVariationCount;
+  } catch {
+    // Time-based selection still rotates the profile when secure randomness is unavailable.
+  }
+  if (index === lastRaceAmbienceProfileIndex) {
+    index = (index + 37) % bmxEventAmbienceVariationCount;
+  }
+  lastRaceAmbienceProfileIndex = index;
+  return bmxEventAmbienceProfile(index);
+}
+
+function prepareRaceAmbience() {
+  const ambience = getRaceAmbienceAudio();
+  const profile = activeRaceAmbienceProfile ?? nextRaceAmbienceProfile();
+  activeRaceAmbienceProfile = profile;
+  if (!ambience.src.endsWith(profile.sourceUrl)) {
+    ambience.src = profile.sourceUrl;
+    raceAmbiencePrimed = false;
+  }
+  ambience.loop = true;
+  ambience.playbackRate = profile.playbackRate;
+  if (ambience.paused) {
+    try {
+      ambience.currentTime = profile.startOffsetSeconds;
+    } catch {
+      // The browser will begin at its earliest seekable point if metadata is not ready.
+    }
+  }
+  return { ambience, profile };
 }
 
 function loadUciVoiceBuffer(context: AudioContext) {
@@ -181,7 +258,7 @@ export async function primeAudioCues() {
     preloadTasks.push(mediaElementPrimePromise);
   }
 
-  const ambience = getRaceAmbienceAudio();
+  const { ambience, profile } = prepareRaceAmbience();
   if (!raceAmbiencePrimed && !raceAmbiencePrimePromise) {
     ambience.load();
     ambience.muted = false;
@@ -189,7 +266,7 @@ export async function primeAudioCues() {
     raceAmbiencePrimePromise = ambience.play()
       .then(() => {
         ambience.pause();
-        ambience.currentTime = 0;
+        ambience.currentTime = profile.startOffsetSeconds;
         raceAmbiencePrimed = true;
       })
       .catch(() => {
@@ -215,7 +292,7 @@ export async function primeAudioCues() {
 }
 
 export async function startBmxEventAmbience(volume = 0.065) {
-  const ambience = getRaceAmbienceAudio();
+  const { ambience, profile } = prepareRaceAmbience();
   const pendingPrime = raceAmbiencePrimePromise;
   if (pendingPrime) {
     await settleWithin(pendingPrime, 1_200, undefined);
@@ -223,6 +300,7 @@ export async function startBmxEventAmbience(volume = 0.065) {
 
   ambience.loop = true;
   ambience.muted = false;
+  ambience.playbackRate = profile.playbackRate;
   ambience.volume = Math.max(0, Math.min(0.2, volume));
   try {
     await ambience.play();
@@ -233,6 +311,7 @@ export async function startBmxEventAmbience(volume = 0.065) {
 }
 
 export function stopBmxEventAmbience() {
+  activeRaceAmbienceProfile = null;
   if (!raceAmbienceAudio) {
     return;
   }

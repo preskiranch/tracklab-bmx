@@ -37,23 +37,23 @@ export function selectCommentaryFocusRiders(event, raceLines = [], limit = 2) {
     return [];
   }
 
+  const frontRiders = riders.filter((rider) => rider.rank <= 2);
+  const trailingRiders = riders.filter((rider) => rider.rank >= 3);
+  const sequence = Math.max(1, Math.round(Number(event?.sequence) || 1));
   const mentionCounts = commentaryRiderMentionCounts(riders, raceLines);
-  const startIndex = Math.max(0, Math.round(Number(event?.sequence) || 1) - 1) % riders.length;
-  const orderByPlayerId = new Map(riders.map((rider, index) => [rider.playerId, index]));
-  return riders
-    .sort((left, right) => {
-      const mentionDifference = (mentionCounts.get(left.playerId) || 0)
-        - (mentionCounts.get(right.playerId) || 0);
-      if (mentionDifference !== 0) {
-        return mentionDifference;
-      }
-      const leftIndex = orderByPlayerId.get(left.playerId) || 0;
-      const rightIndex = orderByPlayerId.get(right.playerId) || 0;
-      const leftRotation = (leftIndex - startIndex + riders.length) % riders.length;
-      const rightRotation = (rightIndex - startIndex + riders.length) % riders.length;
-      return leftRotation - rightRotation;
-    })
-    .slice(0, Math.min(limit, riders.length));
+  if (sequence % 4 !== 0 || trailingRiders.length === 0) {
+    return (frontRiders.length > 0 ? frontRiders : riders).slice(0, limit);
+  }
+
+  const trailingFocus = [...trailingRiders].sort((left, right) => (
+    (mentionCounts.get(left.playerId) || 0) - (mentionCounts.get(right.playerId) || 0)
+    || left.rank - right.rank
+  ))[0];
+  return [...new Map(
+    [frontRiders[0], trailingFocus]
+      .filter(Boolean)
+      .map((rider) => [rider.playerId, rider]),
+  ).values()].slice(0, limit);
 }
 
 function leaderFor(event) {
@@ -65,14 +65,19 @@ function leaderFor(event) {
 function closeBattleRiders(event, raceLines = []) {
   const riders = [...(event?.riders || [])];
   const mentionCounts = commentaryRiderMentionCounts(riders, raceLines);
-  const battle = [...(event?.closeBattles || [])].sort((left, right) => {
+  const trailingCoverageDue = Math.max(1, Math.round(Number(event?.sequence) || 1)) % 4 === 0;
+  const battles = [...(event?.closeBattles || [])];
+  const eligibleBattles = trailingCoverageDue
+    ? battles.filter((battle) => Number(battle.position) >= 3)
+    : battles.filter((battle) => Number(battle.position) <= 2);
+  const battle = (eligibleBattles.length > 0 ? eligibleBattles : battles).sort((left, right) => {
     const leftMentions = (mentionCounts.get(left.frontPlayerId) || 0)
       + (mentionCounts.get(left.behindPlayerId) || 0);
     const rightMentions = (mentionCounts.get(right.frontPlayerId) || 0)
       + (mentionCounts.get(right.behindPlayerId) || 0);
-    return leftMentions - rightMentions
-      || Number(right.position || 0) - Number(left.position || 0)
-      || Number(left.gapMeters || 0) - Number(right.gapMeters || 0);
+    return Number(left.position || 0) - Number(right.position || 0)
+      || Number(left.gapMeters || 0) - Number(right.gapMeters || 0)
+      || leftMentions - rightMentions;
   })[0];
   if (!battle) {
     return [];
@@ -88,6 +93,9 @@ export function requiredCommentaryRiders(event, raceLines = []) {
   if (event.kind === 'race-start') {
     return [];
   }
+  if (event.kind === 'positions-established') {
+    return [...event.riders].sort((left, right) => left.rank - right.rank);
+  }
   if (event.kind === 'finish' || event.kind === 'rider-finish') {
     const finisher = event.riders.find(
       (rider) => rider.playerId === event.finishingPlayerId,
@@ -100,10 +108,10 @@ export function requiredCommentaryRiders(event, raceLines = []) {
       (rider) => rider.playerId === event.previousLeaderPlayerId,
     );
     return [...new Map(
-      [newLeader, previousLeader, ...battleRiders]
+      [newLeader, previousLeader]
         .filter(Boolean)
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 4);
+    ).values()].slice(0, 2);
   }
   if (event.kind === 'position-change') {
     const passingRider = event.riders.find(
@@ -113,18 +121,18 @@ export function requiredCommentaryRiders(event, raceLines = []) {
       (rider) => rider.playerId === event.passedPlayerId,
     );
     return [...new Map(
-      [passingRider, passedRider, ...battleRiders]
+      [passingRider, passedRider]
         .filter(Boolean)
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 4);
+    ).values()].slice(0, 2);
   }
   if (event.kind === 'pro-set' || event.kind === 'final-push') {
     const leader = leaderFor(event);
     return [...new Map(
-      [leader, ...battleRiders, ...focusRiders]
+      [leader, ...event.riders.filter((rider) => rider.rank === 2)]
         .filter(Boolean)
         .map((rider) => [rider.playerId, rider]),
-    ).values()].slice(0, 3);
+    ).values()].slice(0, 2);
   }
   return battleRiders.length > 0 ? battleRiders : focusRiders;
 }

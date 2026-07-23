@@ -687,13 +687,13 @@ function commentarySpeechDirection(eventKind, deliveryStyle) {
     return `Sound alert and invested as the early battle takes shape. Give the full running order clearly with lively forward motion. ${intensityDirection} ${wryDirection}`;
   }
   if (eventKind === 'lead-change') {
-    return `React to the pass like a genuine live surprise: a quick lift, a sharp surge of excitement, and strong emphasis on the new leader’s name. Make “takes the lead” feel decisive, then stay urgently connected to the chase and any close battle behind. ${intensityDirection} ${wryDirection}`;
+    return `React to the pass like a genuine live surprise: a quick lift, a sharp surge of excitement, and strong emphasis on the new leader’s name. Make “takes the lead” feel decisive, then stay urgently connected to the displaced leader and nearest front-pack chase. ${intensityDirection} ${wryDirection}`;
   }
   if (eventKind === 'position-change') {
     return `React immediately to the overtake with a bright surge of excitement. Punch the passing rider’s name, make the position change unmistakable, and keep the delivery connected to the surrounding battle. ${intensityDirection} ${wryDirection}`;
   }
   if (eventKind === 'pedal-zone') {
-    return `Keep the full-field battle urgent and flowing, with energetic emphasis on position, pressure, pursuit, and track action. ${intensityDirection} ${wryDirection}`;
+    return `Keep the front-pack battle urgent and flowing, with energetic emphasis on the lead, pressure, pursuit, and track action. When a trailing rider is explicitly focused, give that rider a concise natural update without taking over the call. ${intensityDirection} ${wryDirection}`;
   }
   if (eventKind === 'pro-set') {
     return `Give the line choice a quick lift of excitement and stay emotionally connected to the chase. ${intensityDirection} ${wryDirection}`;
@@ -804,6 +804,12 @@ function commentaryCoverageFallbackLines(event, requiredRiders, useWryAside) {
   const applyWryAside = (lines) => useWryAside
     ? lines.map((line) => `${line.replace(/[.!]$/, '')}—calm clearly stayed home.`)
     : lines;
+  if (event.kind === 'positions-established') {
+    const clauses = requiredRiders.map(commentaryPositionClause);
+    return applyWryAside([
+      `${clauses.slice(0, -1).join('; ')}${clauses.length > 1 ? '; and ' : ''}${clauses.at(-1)}.`,
+    ]);
+  }
   if (event.kind === 'lead-change') {
     if (third && fourth) {
       return [
@@ -1035,16 +1041,17 @@ async function generateCommentaryLine({
         'Never mention watts, power output, cadence, RPM, speed, MPH, KPH, distance, progress percentages, or reaction times—even when those facts appear in the input.',
         'Call what is happening on track, never the sensor data behind it.',
         'Never rank riders at race-start. During the race, the supplied rank for each rider is authoritative; use first, second, third, or fourth only when that exact rank is supplied.',
-        'Rotate attention through the entire field. Riders in third and fourth are still part of the story and must receive natural position-aware coverage, not only the leader and closest chaser.',
-        'When closeBattles names a pair, describe them as wheel-to-wheel, side-by-side, under pressure, or locked in a fight for the supplied position. Never ignore a required third-versus-fourth battle.',
-        'For lead-change, celebrate the new leader immediately, identify the displaced leader’s current position, then connect naturally to any required close battle behind.',
+        'Editorial priority: the leader, second place, and the closest battle at the front are the main story. Roughly three calls out of four should be led by the front two or a fight for the lead.',
+        'Riders in third and fourth must not be forgotten, but they should receive concise periodic updates rather than dominating the broadcast. Give them primary attention only for an actual supplied pass, finish, or scheduled requiredFocusRiders call.',
+        'When requiredFocusRiders contains a close-battle pair, describe them as wheel-to-wheel, side-by-side, under pressure, or locked in a fight for the supplied position. Do not shift attention to a different closeBattles pair.',
+        'For lead-change, celebrate the new leader immediately, identify the displaced leader’s current position, and keep the call centered on the fight at the front.',
         'For position-change, state the supplied passing rider, passed rider, and new position with an authentic surge of excitement.',
         'For finish, celebrate the supplied finishing rider as the winner. For rider-finish, call the supplied finishing rider’s exact rank as they cross and naturally acknowledge anyone still racing.',
         `Every candidate must naturally name all required focus riders: ${requiredRiderNames.join(', ') || 'none for this gate call'}.`,
         'Never claim a focused rider is gaining, fading, passing, or closing a gap unless the event facts support that action. It is safe to state their supplied running position and that they remain in the race or chase.',
         'Make racer-versus-racer action the center of the call: running order, pressure, passes, line choice, straights, turns, rhythm, and finish.',
         'Use a live broadcast action chain when the facts support it: establish the pressure, call the move, react to the changed order, then reset the chase or battle behind. Do not force every step into every call.',
-        'Vary the editorial focus as well as the synonyms. Across a race, alternate among the leader, the two spot, a third-versus-fourth fight, the current section, a pass response, and the run to the stripe.',
+        'Vary the editorial focus as well as the synonyms. Across a race, rotate among the lead battle, the two spot, current section, passes, and the run to the stripe, with occasional concise third-or-fourth updates.',
         'For pedal-zone events, use coursePhase as context, not mandatory wording. If recent race lines already named that section, cover rider positions or the battle instead. Never say pedal zone or use attack/attacking. Mention being back on the pedals only when pedalReferenceAllowed is true.',
         'Use active verbs, contractions, and short speech-first play-by-play. A pass, final push, or finish may use one exclamation mark.',
         'Make all three candidates materially different: use different openings, verbs, clause order, and sentence rhythm.',

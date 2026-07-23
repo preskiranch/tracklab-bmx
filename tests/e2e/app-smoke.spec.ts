@@ -692,14 +692,14 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     };
     const originalMediaLoad = HTMLMediaElement.prototype.load;
     HTMLMediaElement.prototype.load = function (...args: Parameters<HTMLMediaElement['load']>) {
-      if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience.mp3')) {
+      if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience')) {
         audioWindow.__tracklabAmbienceLoadCount = (audioWindow.__tracklabAmbienceLoadCount ?? 0) + 1;
       }
       return Reflect.apply(originalMediaLoad, this, args);
     };
     const originalMediaPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function (...args: Parameters<HTMLMediaElement['play']>) {
-      if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience.mp3')) {
+      if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience')) {
         audioWindow.__tracklabAmbiencePlayCount = (audioWindow.__tracklabAmbiencePlayCount ?? 0) + 1;
         audioWindow.__tracklabAmbienceElement = this;
       }

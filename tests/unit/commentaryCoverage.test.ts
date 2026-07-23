@@ -24,13 +24,13 @@ function event(sequence = 2, kind = 'positions-established') {
 }
 
 describe('full-field commentary coverage', () => {
-  it('rotates through riders who have not been named in the current race', () => {
+  it('keeps the front two primary and periodically includes an under-covered trailer', () => {
     const firstFocus = selectCommentaryFocusRiders(event(2), [], 2);
-    expect(firstFocus.map((rider) => rider.playerId)).toEqual([2, 3]);
+    expect(firstFocus.map((rider) => rider.playerId)).toEqual([1, 2]);
 
     const raceLines = ['Blake Rivers runs second while Casey Lane holds third.'];
-    const secondFocus = selectCommentaryFocusRiders(event(3, 'pedal-zone'), raceLines, 2);
-    expect(secondFocus.map((rider) => rider.playerId)).toEqual([4, 1]);
+    const secondFocus = selectCommentaryFocusRiders(event(4, 'pedal-zone'), raceLines, 2);
+    expect(secondFocus.map((rider) => rider.playerId)).toEqual([1, 4]);
 
     expect([...commentaryRiderMentionCounts(riders, raceLines).entries()]).toEqual([
       [1, 0],
@@ -38,6 +38,14 @@ describe('full-field commentary coverage', () => {
       [3, 1],
       [4, 0],
     ]);
+  });
+
+  it('gives three of every four general calls to the front two', () => {
+    const calls = Array.from({ length: 12 }, (_, index) => (
+      selectCommentaryFocusRiders(event(index + 1, 'pedal-zone'), [], 2)
+    ));
+    expect(calls.filter((call) => call.every((rider) => rider.rank <= 2))).toHaveLength(9);
+    expect(calls.filter((call) => call.some((rider) => rider.rank >= 3))).toHaveLength(3);
   });
 
   it('keeps the actual pass riders required during a lead change', () => {
@@ -51,7 +59,7 @@ describe('full-field commentary coverage', () => {
       .toEqual([3, 1]);
   });
 
-  it('adds a close third-versus-fourth battle to a new-leader call', () => {
+  it('keeps a new-leader call centered on the new and displaced leaders', () => {
     const leadChange = {
       ...event(4, 'lead-change'),
       leaderPlayerId: 2,
@@ -65,7 +73,25 @@ describe('full-field commentary coverage', () => {
     };
 
     expect(requiredCommentaryRiders(leadChange, []).map((rider) => rider.playerId))
-      .toEqual([2, 1, 3, 4]);
+      .toEqual([2, 1]);
+  });
+
+  it('prioritizes a close lead battle but rotates to a close rear battle periodically', () => {
+    const closeBattles = [
+      { frontPlayerId: 1, behindPlayerId: 2, position: 1, gapMeters: 0.5 },
+      { frontPlayerId: 3, behindPlayerId: 4, position: 3, gapMeters: 0.3 },
+    ];
+    const frontCall = requiredCommentaryRiders({
+      ...event(3, 'pedal-zone'),
+      closeBattles,
+    }, []);
+    const periodicRearCall = requiredCommentaryRiders({
+      ...event(4, 'pedal-zone'),
+      closeBattles,
+    }, []);
+
+    expect(frontCall.map((rider) => rider.playerId)).toEqual([1, 2]);
+    expect(periodicRearCall.map((rider) => rider.playerId)).toEqual([3, 4]);
   });
 
   it('keeps both riders involved in a mid-pack pass required', () => {
