@@ -344,8 +344,10 @@ export function stepRiders(
       && distance >= thirtyFootSplitMeters
       ? interpolateSplitTimeMs(previousDistance, distance, thirtyFootSplitMeters, dt, elapsedMs)
       : rider.thirtyFootTimeMs;
-    const cadenceRps = Math.max(0.1, cadence / 60);
-    const pedalPhase = (rider.pedalPhase + cadenceRps * dt) % 1;
+    const cadenceRps = cadence / 60;
+    const pedalPhase = cadenceRps > 0
+      ? (rider.pedalPhase + cadenceRps * dt) % 1
+      : 0;
 
     let air = rider.air;
     let verticalVelocity = rider.verticalVelocity;

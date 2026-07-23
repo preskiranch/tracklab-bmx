@@ -174,6 +174,53 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBeCloseTo(20 + entryVelocityMps * 1.2, 8);
   });
 
+  it('locks the crank phase level while coasting and resumes at Wattbike cadence', () => {
+    const zones: TrackZone[] = [{
+      id: 'pedal-1',
+      name: 'Pedal 1',
+      startMeter: 0,
+      endMeter: 10,
+      type: 'pedal',
+    }];
+    const coastingRider = {
+      ...createInitialRiders([player])[0],
+      distance: 20,
+      velocity: 8,
+      pedalPhase: 0.73,
+    };
+    const coastResult = stepRiders(
+      [coastingRider],
+      [player],
+      new Map([[58701, sample(10_000)]]),
+      0.1,
+      9_000,
+      400,
+      {},
+      [],
+      zones,
+      10_000,
+    )[0];
+
+    expect(coastResult.driveAllowed).toBe(false);
+    expect(coastResult.pedalPhase).toBe(0);
+
+    const pedalResult = stepRiders(
+      [{ ...coastResult, distance: 0 }],
+      [player],
+      new Map([[58701, sample(10_100)]]),
+      0.1,
+      9_000,
+      400,
+      {},
+      [],
+      zones,
+      10_100,
+    )[0];
+
+    expect(pedalResult.driveSource).toBe('coast');
+    expect(pedalResult.pedalPhase).toBeCloseTo((100 / 60) * 0.1);
+  });
+
   it('does not launch over an obstacle while inside a coasting section', () => {
     const zones: TrackZone[] = [{
       id: 'pedal-1',

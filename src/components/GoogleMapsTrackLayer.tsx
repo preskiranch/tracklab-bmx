@@ -55,11 +55,15 @@ import {
 import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 import {
   riderAnimationState,
-  riderAtlasFrameCount,
-  riderFrameBlendSteps,
   riderWheelFrameCount,
   type RiderAnimationState,
 } from '../lib/riderAnimation';
+import {
+  riderCrankPedalPositions,
+  riderLegKnee,
+  riderRigGeometry,
+  type RiderRigPoint,
+} from '../lib/riderRig';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -121,11 +125,11 @@ const riderFallbackIconByColor: Record<PlayerSlot['colorName'], string> = {
   blue: '/assets/rider-blue.png',
   yellow: '/assets/rider-yellow.png',
 };
-const riderAtlasByColor: Record<PlayerSlot['colorName'], string> = {
-  lime: '/assets/rider-lime-animated.png',
-  red: '/assets/rider-red-animated.png',
-  blue: '/assets/rider-blue-animated.png',
-  yellow: '/assets/rider-yellow-animated.png',
+const riderRigBaseByColor: Record<PlayerSlot['colorName'], string> = {
+  lime: '/assets/rider-lime-rig-base.png',
+  red: '/assets/rider-red-rig-base.png',
+  blue: '/assets/rider-blue-rig-base.png',
+  yellow: '/assets/rider-yellow-rig-base.png',
 };
 const riderCanvasSize = 64;
 const riderDrawSize = 58;
@@ -619,19 +623,183 @@ function loadRiderImage(url: string) {
 
 type RiderMarkerAppearance = 'live' | 'ghost';
 
+function riderRigCanvasPoint(point: RiderRigPoint) {
+  return {
+    x: (-riderDrawSize / 2) + point.x * riderDrawSize,
+    y: riderDrawTop + point.y * riderDrawSize,
+  };
+}
+
+function eraseMovingRiderParts(context: CanvasRenderingContext2D) {
+  const point = (x: number, y: number) => riderRigCanvasPoint({ x, y });
+  const legPaths = [
+    [[0.36, 0.34], [0.33, 0.5], [0.39, 0.65], [0.48, 0.7]],
+    [[0.4, 0.34], [0.45, 0.51], [0.44, 0.66], [0.53, 0.71]],
+  ] as const;
+  context.strokeStyle = '#000000';
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.lineWidth = 6.4;
+  for (const legPath of legPaths) {
+    const start = point(legPath[0][0], legPath[0][1]);
+    context.beginPath();
+    context.moveTo(start.x, start.y);
+    for (const [x, y] of legPath.slice(1)) {
+      const next = point(x, y);
+      context.lineTo(next.x, next.y);
+    }
+    context.stroke();
+  }
+
+  const crank = riderRigCanvasPoint(riderRigGeometry.crankCenter);
+  context.fillStyle = '#000000';
+  context.beginPath();
+  context.arc(crank.x, crank.y, 4.2, 0, Math.PI * 2);
+  context.fill();
+}
+
+function strokeRigSegment(
+  context: CanvasRenderingContext2D,
+  start: RiderRigPoint,
+  end: RiderRigPoint,
+  color: string,
+  width: number,
+) {
+  const localStart = riderRigCanvasPoint(start);
+  const localEnd = riderRigCanvasPoint(end);
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.beginPath();
+  context.moveTo(localStart.x, localStart.y);
+  context.lineTo(localEnd.x, localEnd.y);
+  context.stroke();
+}
+
+function drawReconstructedBmxFrame(context: CanvasRenderingContext2D, accent: string) {
+  const rearHub = { x: 0.22, y: 0.745 };
+  const bottomBracket = riderRigGeometry.crankCenter;
+  const seatJoint = { x: 0.365, y: 0.55 };
+  const headTop = { x: 0.655, y: 0.485 };
+  const headBottom = { x: 0.66, y: 0.555 };
+  const frameSegments = [
+    [rearHub, seatJoint],
+    [rearHub, bottomBracket],
+    [seatJoint, bottomBracket],
+    [seatJoint, headTop],
+    [headBottom, bottomBracket],
+    [headTop, headBottom],
+  ] as const;
+
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  frameSegments.forEach(([start, end]) => strokeRigSegment(context, start, end, '#07090b', 2.1));
+  frameSegments.forEach(([start, end]) => strokeRigSegment(context, start, end, '#343b40', 0.9));
+  strokeRigSegment(context, seatJoint, headTop, accent, 0.35);
+  strokeRigSegment(context, rearHub, bottomBracket, '#9ca3af', 0.42);
+  strokeRigSegment(
+    context,
+    { x: rearHub.x, y: rearHub.y + 0.012 },
+    { x: bottomBracket.x, y: bottomBracket.y + 0.014 },
+    '#6b7280',
+    0.42,
+  );
+
+  const crank = riderRigCanvasPoint(bottomBracket);
+  context.fillStyle = '#080a0c';
+  context.strokeStyle = '#aeb5bd';
+  context.lineWidth = 0.65;
+  context.beginPath();
+  context.arc(crank.x, crank.y, 2.15, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+}
+
+function drawCrankArm(context: CanvasRenderingContext2D, pedal: RiderRigPoint, color: string) {
+  strokeRigSegment(context, riderRigGeometry.crankCenter, pedal, '#050607', 1.8);
+  strokeRigSegment(context, riderRigGeometry.crankCenter, pedal, color, 0.75);
+  const localPedal = riderRigCanvasPoint(pedal);
+  context.strokeStyle = '#08090b';
+  context.lineCap = 'round';
+  context.lineWidth = 1.2;
+  context.beginPath();
+  context.moveTo(localPedal.x - 1.6, localPedal.y);
+  context.lineTo(localPedal.x + 1.6, localPedal.y);
+  context.stroke();
+}
+
+function drawRiderLeg(
+  context: CanvasRenderingContext2D,
+  hip: RiderRigPoint,
+  pedal: RiderRigPoint,
+  accent: string,
+  rear: boolean,
+) {
+  const knee = riderLegKnee(hip, pedal);
+  const localHip = riderRigCanvasPoint(hip);
+  const localKnee = riderRigCanvasPoint(knee);
+  const localPedal = riderRigCanvasPoint(pedal);
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.globalAlpha = rear ? 0.72 : 1;
+  context.strokeStyle = '#050607';
+  context.lineWidth = rear ? 4.2 : 4.6;
+  context.beginPath();
+  context.moveTo(localHip.x, localHip.y);
+  context.lineTo(localKnee.x, localKnee.y);
+  context.lineTo(localPedal.x, localPedal.y);
+  context.stroke();
+  context.strokeStyle = rear ? '#111417' : '#202427';
+  context.lineWidth = rear ? 3.1 : 3.45;
+  context.stroke();
+  context.strokeStyle = accent;
+  context.globalAlpha = rear ? 0.32 : 0.74;
+  context.lineWidth = 0.52;
+  context.stroke();
+
+  context.globalAlpha = rear ? 0.72 : 1;
+  context.strokeStyle = '#050607';
+  context.lineWidth = rear ? 2.2 : 2.55;
+  context.beginPath();
+  context.moveTo(localPedal.x - 1.5, localPedal.y - 0.15);
+  context.lineTo(localPedal.x + 2.9, localPedal.y - 0.15);
+  context.stroke();
+  context.strokeStyle = rear ? '#24282c' : '#3b4146';
+  context.lineWidth = 0.75;
+  context.stroke();
+  context.globalAlpha = 1;
+}
+
+function drawRiderCrankAndLegRig(
+  context: CanvasRenderingContext2D,
+  crankAngleRadians: number,
+  accent: string,
+) {
+  const pedals = riderCrankPedalPositions(crankAngleRadians);
+  drawCrankArm(context, pedals.rear, '#555c63');
+  drawRiderLeg(context, riderRigGeometry.rearHip, pedals.rear, accent, true);
+  drawCrankArm(context, pedals.front, '#aeb5bd');
+  drawRiderLeg(context, riderRigGeometry.frontHip, pedals.front, accent, false);
+
+  const crank = riderRigCanvasPoint(riderRigGeometry.crankCenter);
+  context.fillStyle = '#d1d5db';
+  context.strokeStyle = '#050607';
+  context.lineWidth = 0.7;
+  context.beginPath();
+  context.arc(crank.x, crank.y, 1.05, 0, Math.PI * 2);
+  context.fill();
+  context.stroke();
+}
+
 async function uprightRiderIconUrl(
   player: PlayerSlot,
   rotationDegrees: number,
   animation: RiderAnimationState,
   appearance: RiderMarkerAppearance = 'live',
 ) {
-  const imageUrl = riderAtlasByColor[player.colorName];
+  const imageUrl = riderRigBaseByColor[player.colorName];
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
-  const frameIndex = Math.max(0, Math.min(riderAtlasFrameCount - 1, animation.frameIndex));
-  const nextFrameIndex = Math.max(0, Math.min(riderAtlasFrameCount - 1, animation.nextFrameIndex));
-  const blendBucket = Math.round(animation.frameBlend * riderFrameBlendSteps);
-  const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}:${frameIndex}:${nextFrameIndex}:${blendBucket}:${animation.wheelFrameIndex}`;
+  const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}:${animation.crankStep}:${animation.wheelFrameIndex}`;
   const cached = cachedRiderIcon(cacheKey);
   if (cached) {
     return cached;
@@ -653,26 +821,22 @@ async function uprightRiderIconUrl(
   context.shadowColor = appearance === 'ghost' ? 'rgba(34, 211, 238, 0.85)' : 'rgba(0, 0, 0, 0.35)';
   context.shadowBlur = appearance === 'ghost' ? 14 : 8;
   context.shadowOffsetY = 5;
-  const atlasFrameWidth = image.naturalWidth / riderAtlasFrameCount;
-  const frameBlend = Math.max(0, Math.min(1, animation.frameBlend));
-  const drawAtlasFrame = (nextIndex: number, alpha: number) => {
-    context.globalAlpha = alpha;
-    context.drawImage(
-      image,
-      nextIndex * atlasFrameWidth,
-      0,
-      atlasFrameWidth,
-      image.naturalHeight,
-      -riderDrawSize / 2,
-      riderDrawTop,
-      riderDrawSize,
-      riderDrawSize,
-    );
-  };
-  drawAtlasFrame(frameIndex, nextFrameIndex === frameIndex ? 1 : 1 - frameBlend);
-  if (nextFrameIndex !== frameIndex && frameBlend > 0) {
-    drawAtlasFrame(nextFrameIndex, frameBlend);
-  }
+  context.drawImage(
+    image,
+    -riderDrawSize / 2,
+    riderDrawTop,
+    riderDrawSize,
+    riderDrawSize,
+  );
+  context.shadowColor = 'transparent';
+  context.shadowBlur = 0;
+  context.shadowOffsetY = 0;
+  context.save();
+  context.globalCompositeOperation = 'destination-out';
+  eraseMovingRiderParts(context);
+  context.restore();
+  drawReconstructedBmxFrame(context, player.accent);
+  drawRiderCrankAndLegRig(context, animation.crankAngleRadians, player.accent);
   context.globalAlpha = 1;
   const wheelRotation = (animation.wheelFrameIndex / riderWheelFrameCount) * Math.PI * 2;
   context.strokeStyle = appearance === 'ghost' ? 'rgba(103, 232, 249, 0.78)' : player.accent;
@@ -731,8 +895,7 @@ function createRiderMapMarker(
 
   const applyVisual = (nextRotation: number, nextAnimation: RiderAnimationState) => {
     const orientation = uprightRiderOrientation(nextRotation);
-    const nextBlendBucket = Math.round(nextAnimation.frameBlend * riderFrameBlendSteps);
-    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotation)}:${nextAnimation.frameIndex}:${nextAnimation.nextFrameIndex}:${nextBlendBucket}:${nextAnimation.wheelFrameIndex}`;
+    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotation)}:${nextAnimation.crankStep}:${nextAnimation.wheelFrameIndex}`;
     if (nextVisualKey === visualKey) {
       return;
     }

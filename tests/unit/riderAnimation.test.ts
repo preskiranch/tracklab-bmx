@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   riderAnimationState,
-  riderCoastFrameIndex,
-  riderPedalFrameCount,
+  riderCrankStepCount,
 } from '../../src/lib/riderAnimation';
 
 describe('rider animation', () => {
@@ -15,11 +14,14 @@ describe('rider animation', () => {
       driveSource: 'cadence',
       cadenceRpm: 92,
       watts: 640,
-    })).toMatchObject({ frameIndex: Math.floor(0.42 * riderPedalFrameCount), pedaling: true });
+    })).toMatchObject({
+      crankStep: Math.floor(0.42 * riderCrankStepCount),
+      pedaling: true,
+    });
   });
 
-  it('advances through a complete 360-degree cycle without reversing', () => {
-    const frameAt = (pedalPhase: number) => riderAnimationState({
+  it('advances the crank forward through a complete 360-degree cycle without reversing', () => {
+    const animationAt = (pedalPhase: number) => riderAnimationState({
       raceState: 'racing',
       distanceMeters: 12,
       pedalPhase,
@@ -28,12 +30,16 @@ describe('rider animation', () => {
       cadenceRpm: 90,
       watts: 600,
     });
-    const frames = Array.from({ length: riderPedalFrameCount }, (_, index) => (
-      frameAt(index / riderPedalFrameCount).frameIndex
+    const steps = Array.from({ length: riderCrankStepCount }, (_, index) => (
+      animationAt(index / riderCrankStepCount).crankStep
     ));
 
-    expect(frames).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-    expect(frameAt(0.99)).toMatchObject({ frameIndex: 7, nextFrameIndex: 0 });
+    expect(steps).toEqual(Array.from({ length: riderCrankStepCount }, (_, index) => index));
+    expect(animationAt(0).crankAngleRadians).toBe(0);
+    expect(animationAt(0.25).crankAngleRadians).toBeCloseTo(Math.PI / 2);
+    expect(animationAt(0.5).crankAngleRadians).toBeCloseTo(Math.PI);
+    expect(animationAt(0.75).crankAngleRadians).toBeCloseTo(Math.PI * 1.5);
+    expect(animationAt(0.99).crankStep).toBe(riderCrankStepCount - 1);
   });
 
   it.each([
@@ -45,7 +51,22 @@ describe('rider animation', () => {
       distanceMeters: 12,
       pedalPhase: 0.8,
       ...input,
-    })).toMatchObject({ frameIndex: riderCoastFrameIndex, pedaling: false });
+    })).toMatchObject({ crankAngleRadians: 0, crankStep: 0, pedaling: false });
+  });
+
+  it('shows fresh Wattbike cadence in a pedal zone even before it adds rollout speed', () => {
+    expect(riderAnimationState({
+      raceState: 'racing',
+      distanceMeters: 30,
+      pedalPhase: 0.25,
+      driveAllowed: true,
+      driveSource: 'coast',
+      cadenceRpm: 100,
+      watts: 700,
+    })).toMatchObject({
+      crankAngleRadians: Math.PI / 2,
+      pedaling: true,
+    });
   });
 
   it('does not animate pedaling before the race starts', () => {
@@ -58,9 +79,8 @@ describe('rider animation', () => {
       cadenceRpm: 80,
       watts: 500,
     })).toEqual({
-      frameIndex: riderCoastFrameIndex,
-      nextFrameIndex: riderCoastFrameIndex,
-      frameBlend: 0,
+      crankAngleRadians: 0,
+      crankStep: 0,
       pedaling: false,
       wheelFrameIndex: 0,
     });

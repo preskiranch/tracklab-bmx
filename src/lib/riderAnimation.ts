@@ -1,10 +1,7 @@
 import type { RaceState, RiderDriveSource } from '../types';
 
-export const riderPedalFrameCount = 8;
-export const riderCoastFrameIndex = riderPedalFrameCount;
-export const riderAtlasFrameCount = riderPedalFrameCount + 1;
+export const riderCrankStepCount = 24;
 export const riderWheelFrameCount = 4;
-export const riderFrameBlendSteps = 4;
 const bmxWheelCircumferenceMeters = Math.PI * 0.508;
 
 type RiderAnimationInput = {
@@ -18,9 +15,8 @@ type RiderAnimationInput = {
 };
 
 export type RiderAnimationState = {
-  frameIndex: number;
-  nextFrameIndex: number;
-  frameBlend: number;
+  crankAngleRadians: number;
+  crankStep: number;
   pedaling: boolean;
   wheelFrameIndex: number;
 };
@@ -38,36 +34,29 @@ export function riderAnimationState({
   distanceMeters,
   pedalPhase,
   driveAllowed,
-  driveSource,
   cadenceRpm,
-  watts,
 }: RiderAnimationInput): RiderAnimationState {
   const wheelTurns = Math.max(0, distanceMeters) / bmxWheelCircumferenceMeters;
   const wheelFrameIndex = Math.floor(normalizedPedalPhase(wheelTurns) * riderWheelFrameCount) % riderWheelFrameCount;
-  const driveIsEngaged = driveSource === 'cadence'
-    || driveSource === 'power'
-    || driveSource === 'speed';
-  const hasPedalInput = cadenceRpm >= 1 || watts >= 10;
-  const pedaling = raceState === 'racing' && driveAllowed && driveIsEngaged && hasPedalInput;
+  const hasFreshCadence = cadenceRpm >= 1;
+  const pedaling = raceState === 'racing' && driveAllowed && hasFreshCadence;
 
   if (!pedaling) {
     return {
-      frameIndex: riderCoastFrameIndex,
-      nextFrameIndex: riderCoastFrameIndex,
-      frameBlend: 0,
+      crankAngleRadians: 0,
+      crankStep: 0,
       pedaling: false,
       wheelFrameIndex,
     };
   }
 
-  const frameProgress = normalizedPedalPhase(pedalPhase) * riderPedalFrameCount;
-  const frameIndex = Math.floor(frameProgress) % riderPedalFrameCount;
-  const frameBlend = Math.floor((frameProgress - frameIndex) * riderFrameBlendSteps) / riderFrameBlendSteps;
+  const crankStep = Math.floor(
+    (normalizedPedalPhase(pedalPhase) * riderCrankStepCount) + Number.EPSILON * riderCrankStepCount,
+  ) % riderCrankStepCount;
 
   return {
-    frameIndex,
-    nextFrameIndex: (frameIndex + 1) % riderPedalFrameCount,
-    frameBlend,
+    crankAngleRadians: (crankStep / riderCrankStepCount) * Math.PI * 2,
+    crankStep,
     pedaling: true,
     wheelFrameIndex,
   };
