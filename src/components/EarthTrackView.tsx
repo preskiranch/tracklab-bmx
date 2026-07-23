@@ -96,6 +96,7 @@ type EarthTrackViewProps = {
   onEarthHeadingChange: (heading: number) => void;
   onRaceCameraLockedChange: (locked: boolean) => void;
   onRiderOverlayPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
+  onRaceFullscreenInteraction: () => void;
   onStartCountdownPauseToggle: () => void;
   onCancelRace: () => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
@@ -187,6 +188,7 @@ export function EarthTrackView({
   onEarthHeadingChange,
   onRaceCameraLockedChange,
   onRiderOverlayPreferenceChange,
+  onRaceFullscreenInteraction,
   onStartCountdownPauseToggle,
   onCancelRace,
   onMappingFullscreenChange,
@@ -394,6 +396,7 @@ export function EarthTrackView({
           trackLengthMeters={track.lengthMeters}
           preference={riderOverlayPreference}
           onPreferenceChange={onRiderOverlayPreferenceChange}
+          onFullscreenInteraction={onRaceFullscreenInteraction}
         />
 
         {showMappingUi && (

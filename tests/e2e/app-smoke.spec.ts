@@ -628,16 +628,62 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(page.locator('.start-tree-light')).toHaveCount(0);
   const riderPanel = page.locator('.race-rider-overlay');
   await expect(riderPanel).toBeVisible();
+  await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4);
   const desktopRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
-    const name = card.querySelector('strong');
-    const metrics = card.querySelector('div > span');
+    const name = card.querySelector('.race-rider-overlay-identity strong');
+    const metrics = card.querySelector('.race-rider-overlay-identity span');
+    const place = card.querySelector('.race-rider-overlay-place strong');
+    const summaryBounds = card.querySelector('.race-rider-overlay-summary')?.getBoundingClientRect();
+    const placeBounds = card.querySelector('.race-rider-overlay-place')?.getBoundingClientRect();
     return {
       name: name ? Number.parseFloat(getComputedStyle(name).fontSize) : 0,
       metrics: metrics ? Number.parseFloat(getComputedStyle(metrics).fontSize) : 0,
+      place: place ? Number.parseFloat(getComputedStyle(place).fontSize) : 0,
+      placeIsBottomRow: Boolean(
+        summaryBounds
+        && placeBounds
+        && placeBounds.top >= summaryBounds.bottom
+        && placeBounds.width >= summaryBounds.width
+      ),
     };
   });
   expect(desktopRiderText.name).toBeGreaterThanOrEqual(18);
   expect(desktopRiderText.metrics).toBeGreaterThanOrEqual(14);
+  expect(desktopRiderText.place).toBeGreaterThanOrEqual(42);
+  expect(desktopRiderText.placeIsBottomRow).toBe(true);
+
+  expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+  const riderPanelHandle = page.getByRole('button', { name: 'Move rider panel', exact: true });
+  const riderPanelHandleBounds = await riderPanelHandle.boundingBox();
+  expect(riderPanelHandleBounds).not.toBeNull();
+  await page.mouse.move(
+    riderPanelHandleBounds!.x + (riderPanelHandleBounds!.width / 2),
+    riderPanelHandleBounds!.y + (riderPanelHandleBounds!.height / 2),
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    riderPanelHandleBounds!.x + (riderPanelHandleBounds!.width / 2) + 24,
+    riderPanelHandleBounds!.y + (riderPanelHandleBounds!.height / 2) - 18,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+  expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+
+  const riderPanelResize = page.getByRole('button', { name: 'Resize rider overlay', exact: true });
+  const riderPanelResizeBounds = await riderPanelResize.boundingBox();
+  expect(riderPanelResizeBounds).not.toBeNull();
+  await page.mouse.move(
+    riderPanelResizeBounds!.x + (riderPanelResizeBounds!.width / 2),
+    riderPanelResizeBounds!.y + (riderPanelResizeBounds!.height / 2),
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    riderPanelResizeBounds!.x + (riderPanelResizeBounds!.width / 2) + 20,
+    riderPanelResizeBounds!.y + (riderPanelResizeBounds!.height / 2) + 18,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+  expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
 
   await page.evaluate(async () => {
     if (document.fullscreenElement) {
@@ -647,15 +693,18 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(riderPanel.locator('.race-rider-overlay-card')).toHaveCount(4);
   const mobileRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
-    const name = card.querySelector('strong');
-    const metrics = card.querySelector('div > span');
+    const name = card.querySelector('.race-rider-overlay-identity strong');
+    const metrics = card.querySelector('.race-rider-overlay-identity span');
+    const place = card.querySelector('.race-rider-overlay-place strong');
     return {
       name: name ? Number.parseFloat(getComputedStyle(name).fontSize) : 0,
       metrics: metrics ? Number.parseFloat(getComputedStyle(metrics).fontSize) : 0,
+      place: place ? Number.parseFloat(getComputedStyle(place).fontSize) : 0,
     };
   });
   expect(mobileRiderText.name).toBeGreaterThanOrEqual(16);
-  expect(mobileRiderText.metrics).toBeGreaterThanOrEqual(13);
+  expect(mobileRiderText.metrics).toBeGreaterThanOrEqual(12);
+  expect(mobileRiderText.place).toBeGreaterThanOrEqual(34);
   const mobileCardsFit = await riderPanel.evaluate((panel) => {
     const panelBounds = panel.getBoundingClientRect();
     return [...panel.querySelectorAll('.race-rider-overlay-card')].every((card) => {

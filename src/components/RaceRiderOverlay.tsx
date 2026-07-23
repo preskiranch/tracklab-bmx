@@ -5,8 +5,22 @@ import { defaultRaceRiderOverlayLayout, normalizeRaceRiderOverlayLayout } from '
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 
 type DragState =
-  | { kind: 'move'; pointerId: number; startX: number; startY: number; layout: RaceRiderOverlayLayout }
-  | { kind: 'resize'; pointerId: number; startX: number; startY: number; layout: RaceRiderOverlayLayout };
+  | {
+      kind: 'move';
+      pointerId: number;
+      startX: number;
+      startY: number;
+      layout: RaceRiderOverlayLayout;
+      captureTarget: HTMLElement;
+    }
+  | {
+      kind: 'resize';
+      pointerId: number;
+      startX: number;
+      startY: number;
+      layout: RaceRiderOverlayLayout;
+      captureTarget: HTMLElement;
+    };
 
 type OverlayEntry = {
   id: string;
@@ -31,6 +45,7 @@ type RaceRiderOverlayProps = {
   trackLengthMeters: number;
   preference?: RaceRiderOverlayLayout;
   onPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
+  onFullscreenInteraction: () => void;
 };
 
 function ordinal(value: number) {
@@ -43,8 +58,12 @@ function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | nu
     return layout;
   }
 
+  const minimumHeight = container.clientWidth <= 780 ? 230 : 190;
   const width = Math.max(320, Math.min(layout.width, Math.max(320, container.clientWidth - 24)));
-  const height = Math.max(112, Math.min(layout.height, Math.max(112, container.clientHeight - 24)));
+  const height = Math.max(
+    minimumHeight,
+    Math.min(layout.height, Math.max(minimumHeight, container.clientHeight - 24)),
+  );
   const maxX = Math.max(0, 1 - (width / Math.max(1, container.clientWidth)));
   const maxY = Math.max(0, 1 - (height / Math.max(1, container.clientHeight)));
   return {
@@ -67,6 +86,7 @@ export function RaceRiderOverlay({
   trackLengthMeters,
   preference,
   onPreferenceChange,
+  onFullscreenInteraction,
 }: RaceRiderOverlayProps) {
   const [layout, setLayout] = useState<RaceRiderOverlayLayout>(
     () => normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout),
@@ -152,8 +172,12 @@ export function RaceRiderOverlay({
   }, [ghostRiders, players, remoteRaceStates, riders, trackLengthMeters]);
 
   const finishDrag = useCallback(() => {
-    if (dragRef.current) {
+    const drag = dragRef.current;
+    if (drag) {
       onPreferenceChange(trackId, layoutRef.current);
+      if (drag.captureTarget.hasPointerCapture?.(drag.pointerId)) {
+        drag.captureTarget.releasePointerCapture(drag.pointerId);
+      }
     }
     dragRef.current = null;
   }, [onPreferenceChange, trackId]);
@@ -166,6 +190,9 @@ export function RaceRiderOverlay({
       return;
     }
 
+    if (event.cancelable) {
+      event.preventDefault();
+    }
     const rect = container.getBoundingClientRect();
     if (drag.kind === 'move') {
       const next = clampLayout({
@@ -188,7 +215,7 @@ export function RaceRiderOverlay({
   }, []);
 
   useEffect(() => {
-    window.addEventListener('pointermove', moveDrag);
+    window.addEventListener('pointermove', moveDrag, { passive: false });
     window.addEventListener('pointerup', finishDrag);
     window.addEventListener('pointercancel', finishDrag);
     return () => {
@@ -204,12 +231,15 @@ export function RaceRiderOverlay({
     }
     event.preventDefault();
     event.stopPropagation();
+    onFullscreenInteraction();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     dragRef.current = {
       kind: 'move',
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       layout,
+      captureTarget: event.currentTarget,
     };
   };
 
@@ -219,12 +249,15 @@ export function RaceRiderOverlay({
     }
     event.preventDefault();
     event.stopPropagation();
+    onFullscreenInteraction();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     dragRef.current = {
       kind: 'resize',
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       layout,
+      captureTarget: event.currentTarget,
     };
   };
 
@@ -271,7 +304,10 @@ export function RaceRiderOverlay({
           aria-pressed={layout.locked}
           aria-label={layout.locked ? 'Unlock rider panel' : 'Lock rider panel position and size'}
           title={layout.locked ? 'Unlock rider panel' : 'Lock rider panel'}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            onFullscreenInteraction();
+          }}
           onClick={toggleLock}
         >
           {layout.locked ? <Lock size={15} /> : <Unlock size={15} />}
@@ -285,12 +321,18 @@ export function RaceRiderOverlay({
             style={{ '--player-color': entry.accent } as CSSProperties}
             key={entry.id}
           >
-            <span className="race-rider-overlay-badge">{entry.badge}</span>
-            <div>
-              <strong>{entry.name}</strong>
-              <span>
-                {ordinal(entry.rank)} / {Math.round(entry.progressPct)}% / {formatSpeedFromKph(entry.speedKph, speedUnit)} {speedUnitLabel(speedUnit)}
-              </span>
+            <div className="race-rider-overlay-summary">
+              <span className="race-rider-overlay-badge">{entry.badge}</span>
+              <div className="race-rider-overlay-identity">
+                <strong>{entry.name}</strong>
+                <span>
+                  {Math.round(entry.progressPct)}% track / {formatSpeedFromKph(entry.speedKph, speedUnit)} {speedUnitLabel(speedUnit)}
+                </span>
+              </div>
+            </div>
+            <div className="race-rider-overlay-place" aria-label={`${ordinal(entry.rank)} place`}>
+              <strong>{ordinal(entry.rank)}</strong>
+              <span>Place</span>
             </div>
           </div>
         ))}

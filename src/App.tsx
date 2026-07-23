@@ -2513,6 +2513,21 @@ export default function App() {
     releaseBrowserFullscreen();
   }, []);
 
+  const requestRaceFullscreen = useCallback(() => {
+    if (raceViewFullscreen) {
+      requestBrowserFullscreen(raceShellRef.current);
+    }
+  }, [raceViewFullscreen]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('tracklab-race-active', raceViewFullscreen);
+    document.body.classList.toggle('tracklab-race-active', raceViewFullscreen);
+    return () => {
+      document.documentElement.classList.remove('tracklab-race-active');
+      document.body.classList.remove('tracklab-race-active');
+    };
+  }, [raceViewFullscreen]);
+
   const cancelStartGateSequence = useCallback(() => {
     startGateSequenceIdRef.current += 1;
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -6636,6 +6651,7 @@ export default function App() {
                   onEarthHeadingChange={handleEarthHeadingChange}
                   onRaceCameraLockedChange={handleRaceCameraLockedChange}
                   onRiderOverlayPreferenceChange={handleRiderOverlayPreferenceChange}
+                  onRaceFullscreenInteraction={requestRaceFullscreen}
                   onStartCountdownPauseToggle={handleStartCountdownPauseToggle}
                   onCancelRace={handleCancel}
                   onMappingFullscreenChange={handleMappingFullscreenChange}

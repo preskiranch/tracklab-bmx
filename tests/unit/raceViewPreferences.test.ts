@@ -9,7 +9,7 @@ describe('race view preferences', () => {
   it('uses a larger two-axis rider panel by default', () => {
     expect(defaultRaceRiderOverlayLayout).toMatchObject({
       width: 940,
-      height: 150,
+      height: 220,
       locked: false,
     });
   });
@@ -25,7 +25,7 @@ describe('race view preferences', () => {
       xPct: 0,
       yPct: 1,
       width: 1800,
-      height: 112,
+      height: 190,
       locked: true,
     });
   });
@@ -45,7 +45,7 @@ describe('race view preferences', () => {
     expect(preferences.earthCamerasByTrack.north.heading).toBe(10);
     expect(preferences.riderOverlaysByTrack.north).toMatchObject({
       width: 1000,
-      height: 180,
+      height: 190,
       locked: true,
     });
   });

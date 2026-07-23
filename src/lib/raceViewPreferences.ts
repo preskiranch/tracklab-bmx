@@ -3,9 +3,9 @@ import type { EarthCamera, RaceRiderOverlayLayout, RaceViewPreferences } from '.
 
 export const defaultRaceRiderOverlayLayout: RaceRiderOverlayLayout = {
   xPct: 0.04,
-  yPct: 0.76,
+  yPct: 0.7,
   width: 940,
-  height: 150,
+  height: 220,
   locked: false,
 };
 
@@ -43,7 +43,7 @@ export function normalizeRaceRiderOverlayLayout(value: unknown): RaceRiderOverla
     xPct: Math.max(0, Math.min(1, finiteNumber(layout.xPct, defaultRaceRiderOverlayLayout.xPct))),
     yPct: Math.max(0, Math.min(1, finiteNumber(layout.yPct, defaultRaceRiderOverlayLayout.yPct))),
     width: Math.max(320, Math.min(1800, finiteNumber(layout.width, defaultRaceRiderOverlayLayout.width))),
-    height: Math.max(112, Math.min(900, finiteNumber(layout.height, defaultRaceRiderOverlayLayout.height))),
+    height: Math.max(190, Math.min(900, finiteNumber(layout.height, defaultRaceRiderOverlayLayout.height))),
     locked: Boolean(layout.locked),
   };
 }
