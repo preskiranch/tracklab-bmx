@@ -1094,7 +1094,13 @@ async function generateCommentarySpeech(line, voicePreset, eventKind, deliverySt
     ),
   });
   if (!response.ok) {
-    throw new Error(`OpenAI speech returned ${response.status}`);
+    const errorPayload = await response.json().catch(() => null);
+    const errorCode = String(
+      errorPayload?.error?.code || errorPayload?.error?.type || '',
+    ).replace(/[^a-z0-9_-]/gi, '').slice(0, 80);
+    throw new Error(
+      `OpenAI speech returned ${response.status}${errorCode ? ` (${errorCode})` : ''}`,
+    );
   }
   return Buffer.from(await response.arrayBuffer());
 }

@@ -55,6 +55,11 @@ type PreparedStartSpeech = {
   audioBlob: Blob;
 };
 
+type StartSpeechPrefetchAttempt = {
+  inFlight: boolean;
+  retryAt: number;
+};
+
 type PreparedPreRaceSpeech = {
   key: string;
   report: PreRaceReport;
@@ -606,6 +611,10 @@ export function useRaceCommentary({
   const preparedPreRaceSpeechRef = useRef<PreparedPreRaceSpeech | null>(null);
   const playedPreRaceKeyRef = useRef('');
   const startPrefetchRequestRef = useRef(0);
+  const startPrefetchAttemptRef = useRef<StartSpeechPrefetchAttempt>({
+    inFlight: false,
+    retryAt: 0,
+  });
   const preRacePrefetchRequestRef = useRef(0);
   const [preRaceReport, setPreRaceReport] = useState<PreRaceReport | null>(null);
 
@@ -691,6 +700,7 @@ export function useRaceCommentary({
       raceState !== 'ready'
       || !preferences.enabled
       || serviceMode !== 'ai'
+      || players.length === 0
     ) {
       return;
     }
@@ -698,9 +708,20 @@ export function useRaceCommentary({
     if (preparedStartSpeechRef.current?.key === startSpeechKey) {
       return;
     }
+    const now = Date.now();
+    if (
+      startPrefetchAttemptRef.current.inFlight
+      || startPrefetchAttemptRef.current.retryAt > now
+    ) {
+      return;
+    }
 
     const requestId = startPrefetchRequestRef.current + 1;
     startPrefetchRequestRef.current = requestId;
+    startPrefetchAttemptRef.current = {
+      inFlight: true,
+      retryAt: now + 15_000,
+    };
     disposePreparedStartSpeech();
     void requestAiSpeechBlob(
       startLine,
@@ -718,8 +739,18 @@ export function useRaceCommentary({
           line: startLine,
           audioBlob,
         };
+        startPrefetchAttemptRef.current = {
+          inFlight: false,
+          retryAt: 0,
+        };
       })
       .catch(() => {
+        if (startPrefetchRequestRef.current === requestId) {
+          startPrefetchAttemptRef.current = {
+            inFlight: false,
+            retryAt: Date.now() + 60_000,
+          };
+        }
         // Gate calls use immediate browser speech when preloading is unavailable.
       });
   }, [
