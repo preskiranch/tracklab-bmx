@@ -129,7 +129,7 @@ describe('cloud API trust boundaries', () => {
     expect(config).toMatchObject({
       aiAvailable: false,
       textModel: 'gpt-5.6-terra',
-      speechModel: 'gpt-4o-mini-tts',
+      speechModel: 'gpt-audio-1.5',
       voicePresets: ['american-man'],
       research: {
         knowledgeVersion: 'usabmx-national-2026-07-23-v5-generative-flow',

@@ -38,8 +38,9 @@ import {
 } from './preRaceBriefing.mjs';
 import { loadTrackWeather } from './weather.mjs';
 import {
-  commentarySpeechSpeed,
-  commentaryVoiceDefinition,
+  commentaryAudioBuffer,
+  commentaryAudioRequest,
+  commentarySpeechModel,
 } from './commentaryVoices.mjs';
 import { instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 import {
@@ -1067,21 +1068,18 @@ async function generateCommentarySpeech(line, voicePreset, eventKind, deliverySt
     throw new HttpRequestError(503, 'AI speech is not configured on this server.');
   }
 
-  const voice = commentaryVoiceDefinition(voicePreset, eventKind, deliveryStyle);
-  const response = await fetch('https://api.openai.com/v1/audio/speech', {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini-tts',
-      voice: voice.voice,
-      input: line,
-      instructions: voice.instructions,
-      response_format: 'wav',
-      speed: commentarySpeechSpeed(eventKind),
-    }),
+    body: JSON.stringify(commentaryAudioRequest(
+      line,
+      voicePreset,
+      eventKind,
+      deliveryStyle,
+    )),
     signal: AbortSignal.timeout(
       eventKind === 'preview' ? 30_000 : eventKind === 'pre-race' ? 20_000 : 12_000,
     ),
@@ -1092,10 +1090,10 @@ async function generateCommentarySpeech(line, voicePreset, eventKind, deliverySt
       errorPayload?.error?.code || errorPayload?.error?.type || '',
     ).replace(/[^a-z0-9_-]/gi, '').slice(0, 80);
     throw new Error(
-      `OpenAI speech returned ${response.status}${errorCode ? ` (${errorCode})` : ''}`,
+      `OpenAI natural audio returned ${response.status}${errorCode ? ` (${errorCode})` : ''}`,
     );
   }
-  return Buffer.from(await response.arrayBuffer());
+  return commentaryAudioBuffer(await response.json());
 }
 
 function sanitizeUserDataPatch(value) {
@@ -2984,7 +2982,7 @@ async function serveStatic(request, response) {
     const body = JSON.stringify({
       aiAvailable: Boolean(openAiApiKey()),
       textModel: commentaryEngineModel,
-      speechModel: 'gpt-4o-mini-tts',
+      speechModel: commentarySpeechModel,
       voicePresets: [...commentaryVoicePresets],
       research: commentaryResearchMetadata,
     });
