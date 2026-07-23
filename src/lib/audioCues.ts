@@ -33,6 +33,10 @@ function getAudioContext() {
   return audioContext;
 }
 
+export function getTrackLabAudioContext() {
+  return getAudioContext();
+}
+
 function getStartGateAudio() {
   if (!activeStartGateAudio) {
     activeStartGateAudio = new Audio(uciRandomStartVoiceUrl);

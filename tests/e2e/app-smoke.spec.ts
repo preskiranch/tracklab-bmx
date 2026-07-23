@@ -881,6 +881,102 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
 });
 
+test.describe('mobile commentary playback', () => {
+  test.use({
+    viewport: { width: 820, height: 1180 },
+    hasTouch: true,
+    isMobile: true,
+  });
+
+  test('keeps AI announcing on iPad-style browsers when delayed media playback is blocked', async ({ page }) => {
+    test.setTimeout(50_000);
+    let speechRequests = 0;
+    const authUser = {
+      id: 'ipad-commentary-racer',
+      profileKey: 'user:ipad-commentary-racer',
+      email: 'ipad-commentary@tracklab.test',
+      name: 'iPad Commentary Rider',
+      admin: true,
+      membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+    };
+
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/commentary/config', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ aiAvailable: true }),
+      });
+    });
+    await page.route('**/api/commentary/speech', async (route) => {
+      speechRequests += 1;
+      await route.fulfill({
+        contentType: 'audio/mpeg',
+        path: 'public/assets/uci-random-start.mp3',
+      });
+    });
+    await page.route('**/api/commentary/line', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        event?: { riders?: Array<{ name?: string }> };
+      };
+      const riderName = payload.event?.riders?.[0]?.name ?? 'The leader';
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          line: `${riderName} drives the pace while the whole field stays in the fight.`,
+          deliveryStyle: 'straight',
+        }),
+      });
+    });
+    await page.addInitScript(() => {
+      const audioWindow = window as typeof window & {
+        __tracklabBlockedMediaPlayCount?: number;
+        __tracklabBufferPlaybackCount?: number;
+      };
+      HTMLMediaElement.prototype.play = function () {
+        audioWindow.__tracklabBlockedMediaPlayCount = (
+          audioWindow.__tracklabBlockedMediaPlayCount ?? 0
+        ) + 1;
+        return Promise.reject(new DOMException('Playback needs a user gesture.', 'NotAllowedError'));
+      };
+      const prototype = window.AudioBufferSourceNode?.prototype;
+      if (prototype) {
+        const originalStart = prototype.start;
+        prototype.start = function (...args: Parameters<AudioBufferSourceNode['start']>) {
+          audioWindow.__tracklabBufferPlaybackCount = (
+            audioWindow.__tracklabBufferPlaybackCount ?? 0
+          ) + 1;
+          return Reflect.apply(originalStart, this, args);
+        };
+      }
+    });
+
+    await page.goto('/?track=air-time-bmx');
+    await page.getByRole('button', { name: 'Open App' }).click();
+    await page.getByRole('button', { name: /Demo/i }).first().click();
+    const startAction = page.locator('.workflow-step.primary-action');
+    await expect(startAction).toContainText('Start Demo Race');
+    await startAction.click();
+
+    await expect.poll(() => speechRequests, { timeout: 8_000 }).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() => (
+      (window as typeof window & {
+        __tracklabBlockedMediaPlayCount?: number;
+      }).__tracklabBlockedMediaPlayCount ?? 0
+    ))).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() => (
+      (window as typeof window & {
+        __tracklabBufferPlaybackCount?: number;
+      }).__tracklabBufferPlaybackCount ?? 0
+    )), { timeout: 35_000 }).toBeGreaterThanOrEqual(2);
+    await expect(page.getByText('Natural AI commentary ready')).toBeAttached();
+  });
+});
+
 test('loop races expose lap controls and privacy-safe ghost selection without a cadence card', async ({ page }, testInfo) => {
   const authUser = {
     id: 'loop-ghost-racer',

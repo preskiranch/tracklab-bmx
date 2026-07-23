@@ -15,6 +15,8 @@ describe('race commentary playback sequencing', () => {
     expect(shouldInterruptCommentaryForEvent('speaking', 'finish')).toBe(false);
     expect(shouldInterruptCommentaryForEvent('preparing', 'finish')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('thinking', 'finish')).toBe(true);
+    expect(shouldInterruptCommentaryForEvent('thinking', 'lead-change')).toBe(false);
+    expect(shouldInterruptCommentaryForEvent('preparing', 'pedal-zone')).toBe(false);
   });
 
   it('preserves finish playback until the race returns to the gate', () => {

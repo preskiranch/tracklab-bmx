@@ -14,6 +14,11 @@ import {
   shouldInterruptCommentaryForEvent,
   type RaceCommentaryPlaybackPhase,
 } from '../lib/raceCommentaryPlayback';
+import {
+  getTrackLabAudioContext,
+  primeAudioCues,
+  uciRandomStartVoiceUrl,
+} from '../lib/audioCues';
 import type {
   PlayerSlot,
   RaceCommentaryPreferences,
@@ -34,7 +39,7 @@ type ActivePlaybackCancelRef = React.MutableRefObject<(() => void) | null>;
 type PreparedStartSpeech = {
   key: string;
   line: string;
-  audioUrl: string;
+  audioBlob: Blob;
 };
 
 type UseRaceCommentaryOptions = {
@@ -209,7 +214,7 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, tim
   }
 }
 
-async function requestAiSpeechUrl(
+async function requestAiSpeechBlob(
   line: string,
   preferences: RaceCommentaryPreferences,
   eventKind: CommentarySpeechEventKind,
@@ -237,11 +242,106 @@ async function requestAiSpeechUrl(
     throw new Error(`Speech service returned ${response.status}`);
   }
 
-  return URL.createObjectURL(await response.blob());
+  return await response.blob();
 }
 
-async function playAudioUrl(
-  audioUrl: string,
+async function playAudioBlobWithWebAudio(
+  audioBlob: Blob,
+  volume: number,
+  activeBufferSourceRef: React.MutableRefObject<AudioBufferSourceNode | null>,
+  activePlaybackCancelRef: ActivePlaybackCancelRef,
+  shouldContinue: () => boolean,
+  onStart: () => void,
+) {
+  const context = getTrackLabAudioContext();
+  if (!context) {
+    return null;
+  }
+
+  if (context.state === 'suspended') {
+    try {
+      await context.resume();
+    } catch {
+      return null;
+    }
+  }
+  if (context.state !== 'running') {
+    return null;
+  }
+
+  let buffer: AudioBuffer;
+  try {
+    buffer = await context.decodeAudioData(await audioBlob.arrayBuffer());
+  } catch {
+    return null;
+  }
+  if (!shouldContinue()) {
+    return false;
+  }
+
+  return await new Promise<boolean>((resolve, reject) => {
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    let settled = false;
+    source.buffer = buffer;
+    gain.gain.value = volume;
+    source.connect(gain);
+    gain.connect(context.destination);
+    activeBufferSourceRef.current = source;
+
+    const release = (played: boolean, error?: unknown) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      source.onended = null;
+      source.disconnect();
+      gain.disconnect();
+      if (activeBufferSourceRef.current === source) {
+        activeBufferSourceRef.current = null;
+      }
+      if (activePlaybackCancelRef.current === cancel) {
+        activePlaybackCancelRef.current = null;
+      }
+      if (error) {
+        reject(error);
+      } else {
+        resolve(played);
+      }
+    };
+    const cancel = () => {
+      try {
+        source.stop();
+      } catch {
+        // The source may not have started or may already have ended.
+      }
+      release(false);
+    };
+    source.onended = () => release(true);
+    activePlaybackCancelRef.current = cancel;
+    try {
+      source.start();
+      onStart();
+    } catch (error) {
+      release(false, error);
+    }
+  });
+}
+
+function commentaryAudioElement(
+  audioRef: React.MutableRefObject<HTMLAudioElement | null>,
+) {
+  if (!audioRef.current) {
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.setAttribute('playsinline', '');
+    audioRef.current = audio;
+  }
+  return audioRef.current;
+}
+
+async function playAudioBlobWithMediaElement(
+  audioBlob: Blob,
   volume: number,
   activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>,
   activePlaybackCancelRef: ActivePlaybackCancelRef,
@@ -249,13 +349,17 @@ async function playAudioUrl(
   onStart: () => void,
 ) {
   if (!shouldContinue()) {
-    URL.revokeObjectURL(audioUrl);
     return false;
   }
 
-  const audio = new Audio(audioUrl);
-  activeAudioRef.current = audio;
+  const audioUrl = URL.createObjectURL(audioBlob);
+  const audio = commentaryAudioElement(activeAudioRef);
+  audio.src = audioUrl;
+  audio.preload = 'auto';
+  audio.setAttribute('playsinline', '');
+  audio.muted = false;
   audio.volume = volume;
+  audio.load();
   return await new Promise<boolean>((resolve, reject) => {
     let settled = false;
     const release = (played: boolean, error?: unknown) => {
@@ -263,10 +367,9 @@ async function playAudioUrl(
         return;
       }
       settled = true;
+      audio.onended = null;
+      audio.onerror = null;
       URL.revokeObjectURL(audioUrl);
-      if (activeAudioRef.current === audio) {
-        activeAudioRef.current = null;
-      }
       if (activePlaybackCancelRef.current === cancel) {
         activePlaybackCancelRef.current = null;
       }
@@ -294,6 +397,37 @@ async function playAudioUrl(
   });
 }
 
+async function playAudioBlob(
+  audioBlob: Blob,
+  volume: number,
+  activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>,
+  activeBufferSourceRef: React.MutableRefObject<AudioBufferSourceNode | null>,
+  activePlaybackCancelRef: ActivePlaybackCancelRef,
+  shouldContinue: () => boolean,
+  onStart: () => void,
+) {
+  const webAudioResult = await playAudioBlobWithWebAudio(
+    audioBlob,
+    volume,
+    activeBufferSourceRef,
+    activePlaybackCancelRef,
+    shouldContinue,
+    onStart,
+  );
+  if (webAudioResult != null) {
+    return webAudioResult;
+  }
+
+  return await playAudioBlobWithMediaElement(
+    audioBlob,
+    volume,
+    activeAudioRef,
+    activePlaybackCancelRef,
+    shouldContinue,
+    onStart,
+  );
+}
+
 async function playAiSpeech(
   line: string,
   preferences: RaceCommentaryPreferences,
@@ -301,12 +435,13 @@ async function playAiSpeech(
   riderNames: string[],
   deliveryStyle: CommentaryDeliveryStyle,
   activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>,
+  activeBufferSourceRef: React.MutableRefObject<AudioBufferSourceNode | null>,
   activePlaybackCancelRef: ActivePlaybackCancelRef,
   shouldContinue: () => boolean,
   onStart: () => void,
   signal?: AbortSignal,
 ) {
-  const audioUrl = await requestAiSpeechUrl(
+  const audioBlob = await requestAiSpeechBlob(
     line,
     preferences,
     eventKind,
@@ -315,10 +450,11 @@ async function playAiSpeech(
     5_000,
     signal,
   );
-  return await playAudioUrl(
-    audioUrl,
+  return await playAudioBlob(
+    audioBlob,
     preferences.volume,
     activeAudioRef,
+    activeBufferSourceRef,
     activePlaybackCancelRef,
     shouldContinue,
     onStart,
@@ -349,6 +485,7 @@ export function useRaceCommentary({
   const callSequenceRef = useRef(0);
   const playbackPhaseRef = useRef<CommentaryPlaybackPhase>('idle');
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const activeBufferSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const activePlaybackCancelRef = useRef<(() => void) | null>(null);
   const activeRequestAbortRef = useRef<AbortController | null>(null);
   const preparedStartSpeechRef = useRef<PreparedStartSpeech | null>(null);
@@ -368,11 +505,7 @@ export function useRaceCommentary({
   }, []);
 
   const disposePreparedStartSpeech = useCallback(() => {
-    const prepared = preparedStartSpeechRef.current;
     preparedStartSpeechRef.current = null;
-    if (prepared) {
-      URL.revokeObjectURL(prepared.audioUrl);
-    }
   }, []);
 
   const stopPlayback = useCallback(() => {
@@ -384,7 +517,7 @@ export function useRaceCommentary({
     activeRequestAbortRef.current?.abort();
     activeRequestAbortRef.current = null;
     activeAudioRef.current?.pause();
-    activeAudioRef.current = null;
+    activeBufferSourceRef.current = null;
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -438,19 +571,18 @@ export function useRaceCommentary({
     const requestId = startPrefetchRequestRef.current + 1;
     startPrefetchRequestRef.current = requestId;
     disposePreparedStartSpeech();
-    void requestAiSpeechUrl(
+    void requestAiSpeechBlob(
       startLine,
       preferences,
       'race-start',
       players.map((player) => player.name),
       'straight',
     )
-      .then((audioUrl) => {
+      .then((audioBlob) => {
         if (startPrefetchRequestRef.current !== requestId) {
-          URL.revokeObjectURL(audioUrl);
           return;
         }
-        preparedStartSpeechRef.current = { key, line: startLine, audioUrl };
+        preparedStartSpeechRef.current = { key, line: startLine, audioBlob };
       })
       .catch(() => {
         // Gate calls use immediate browser speech when preloading is unavailable.
@@ -495,13 +627,13 @@ export function useRaceCommentary({
           continue;
         }
 
+        callSequenceRef.current += 1;
         const callSequence = callSequenceRef.current;
         const activePreferences = preferencesRef.current;
         const shouldContinue = () => (
           lifecycleGeneration === lifecycleGenerationRef.current
           && callSequence === callSequenceRef.current
           && preferencesRef.current.enabled
-          && raceCommentaryEventIsFresh(event)
         );
         let lineRemembered = false;
         const beginSpeaking = () => {
@@ -526,15 +658,32 @@ export function useRaceCommentary({
           if (preparedMatches && prepared) {
             preparedStartSpeechRef.current = null;
           }
+          const requestController = new AbortController();
+          activeRequestAbortRef.current = requestController;
           try {
             if (preparedMatches && prepared) {
-              await playAudioUrl(
-                prepared.audioUrl,
+              await playAudioBlob(
+                prepared.audioBlob,
                 activePreferences.volume,
                 activeAudioRef,
+                activeBufferSourceRef,
                 activePlaybackCancelRef,
                 shouldContinue,
                 beginSpeaking,
+              );
+            } else if (serviceMode === 'ai') {
+              await playAiSpeech(
+                line,
+                activePreferences,
+                event.kind,
+                event.riders.map((rider) => rider.name),
+                'straight',
+                activeAudioRef,
+                activeBufferSourceRef,
+                activePlaybackCancelRef,
+                shouldContinue,
+                beginSpeaking,
+                requestController.signal,
               );
             } else {
               await speakWithBrowser(
@@ -547,7 +696,22 @@ export function useRaceCommentary({
                 beginSpeaking,
               );
             }
+          } catch {
+            if (shouldContinue()) {
+              await speakWithBrowser(
+                line,
+                activePreferences.voicePreset,
+                event.kind,
+                activePreferences.volume,
+                activePlaybackCancelRef,
+                shouldContinue,
+                beginSpeaking,
+              );
+            }
           } finally {
+            if (activeRequestAbortRef.current === requestController) {
+              activeRequestAbortRef.current = null;
+            }
             setPlaybackPhase('idle');
           }
           continue;
@@ -559,17 +723,50 @@ export function useRaceCommentary({
             activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
             raceLinesRef.current,
           );
+          const requestController = new AbortController();
+          activeRequestAbortRef.current = requestController;
           try {
-            await speakWithBrowser(
-              line,
-              activePreferences.voicePreset,
-              event.kind,
-              activePreferences.volume,
-              activePlaybackCancelRef,
-              shouldContinue,
-              beginSpeaking,
-            );
+            if (serviceMode === 'ai') {
+              await playAiSpeech(
+                line,
+                activePreferences,
+                event.kind,
+                event.riders.map((rider) => rider.name),
+                'straight',
+                activeAudioRef,
+                activeBufferSourceRef,
+                activePlaybackCancelRef,
+                shouldContinue,
+                beginSpeaking,
+                requestController.signal,
+              );
+            } else {
+              await speakWithBrowser(
+                line,
+                activePreferences.voicePreset,
+                event.kind,
+                activePreferences.volume,
+                activePlaybackCancelRef,
+                shouldContinue,
+                beginSpeaking,
+              );
+            }
+          } catch {
+            if (shouldContinue()) {
+              await speakWithBrowser(
+                line,
+                activePreferences.voicePreset,
+                event.kind,
+                activePreferences.volume,
+                activePlaybackCancelRef,
+                shouldContinue,
+                beginSpeaking,
+              );
+            }
           } finally {
+            if (activeRequestAbortRef.current === requestController) {
+              activeRequestAbortRef.current = null;
+            }
             queueRef.current = [];
             setPlaybackPhase('idle');
           }
@@ -611,7 +808,6 @@ export function useRaceCommentary({
             if (!shouldContinue()) {
               continue;
             }
-            setServiceMode('browser');
             useAiSpeech = false;
           }
         }
@@ -637,6 +833,7 @@ export function useRaceCommentary({
               event.riders.map((rider) => rider.name),
               deliveryStyle,
               activeAudioRef,
+              activeBufferSourceRef,
               activePlaybackCancelRef,
               shouldContinue,
               beginSpeaking,
@@ -655,7 +852,6 @@ export function useRaceCommentary({
           }
         } catch {
           if (shouldContinue()) {
-            setServiceMode('browser');
             await speakWithBrowser(
               line,
               activePreferences.voicePreset,
@@ -711,15 +907,15 @@ export function useRaceCommentary({
       return;
     }
 
-    callSequenceRef.current += 1;
     queueRef.current = [nextEvent];
-    activeRequestAbortRef.current?.abort();
-    activeRequestAbortRef.current = null;
     if (shouldInterruptCommentaryForEvent(playbackPhaseRef.current, nextEvent.kind)) {
+      callSequenceRef.current += 1;
+      activeRequestAbortRef.current?.abort();
+      activeRequestAbortRef.current = null;
       activePlaybackCancelRef.current?.();
       activePlaybackCancelRef.current = null;
       activeAudioRef.current?.pause();
-      activeAudioRef.current = null;
+      activeBufferSourceRef.current = null;
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
@@ -744,7 +940,41 @@ export function useRaceCommentary({
     stopPlayback();
   }, [disposePreparedStartSpeech, stopPlayback]);
 
+  const prime = useCallback(() => {
+    void primeAudioCues();
+    const audio = commentaryAudioElement(activeAudioRef);
+    if (audio.paused && !audio.currentSrc) {
+      audio.src = uciRandomStartVoiceUrl;
+      audio.preload = 'auto';
+      audio.setAttribute('playsinline', '');
+      audio.muted = true;
+      audio.load();
+      void audio.play()
+        .then(() => {
+          audio.pause();
+          try {
+            audio.currentTime = 0;
+          } catch {
+            // Metadata may not be ready yet.
+          }
+        })
+        .catch(() => {
+          // The shared Web Audio context remains the primary iPad/mobile path.
+        })
+        .finally(() => {
+          audio.muted = false;
+        });
+    }
+
+    if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
+      const unlockUtterance = new SpeechSynthesisUtterance('');
+      unlockUtterance.volume = 0;
+      window.speechSynthesis.speak(unlockUtterance);
+    }
+  }, []);
+
   const preview = useCallback(async () => {
+    prime();
     const activePreferences = preferencesRef.current;
     const names = riderNameList(players);
     const line = names
@@ -766,6 +996,7 @@ export function useRaceCommentary({
           players.map((player) => player.name),
           'straight',
           activeAudioRef,
+          activeBufferSourceRef,
           activePlaybackCancelRef,
           () => true,
           beginSpeaking,
@@ -782,7 +1013,6 @@ export function useRaceCommentary({
         );
       }
     } catch {
-      setServiceMode('browser');
       await speakWithBrowser(
         line,
         activePreferences.voicePreset,
@@ -795,12 +1025,13 @@ export function useRaceCommentary({
     } finally {
       setPlaybackPhase('idle');
     }
-  }, [players, serviceMode, setPlaybackPhase]);
+  }, [players, prime, serviceMode, setPlaybackPhase]);
 
   return {
     playbackStatus,
     serviceMode,
     preview,
+    prime,
     stop: stopPlayback,
   };
 }

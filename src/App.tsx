@@ -2537,6 +2537,7 @@ export default function App() {
     reactionTimesByPlayer,
     onRecentLinesChange: handleRaceCommentaryRecentLinesChange,
   });
+  const primeRaceAudio = raceCommentary.prime;
   const raceViewFullscreen = startGateStatus.active || raceState === 'racing';
   const finishCountdownSeconds = finishWindowEndsAt != null && raceState === 'racing'
     ? Math.min(raceFinishCountdownMs / 1000, Math.max(1, countdownSeconds(finishWindowEndsAt, now)))
@@ -5914,7 +5915,7 @@ export default function App() {
       bridge.sendControlCommand('race-arm');
     }
 
-    void primeAudioCues();
+    primeRaceAudio();
 
     scheduleStagingCountdown(startingTrackId, sequenceId);
   };
@@ -6179,7 +6180,7 @@ export default function App() {
               : 'Ready soon',
       state: workflowRaceReady ? 'next' : raceState === 'racing' ? 'complete' : 'idle',
       primaryAction: workflowRaceReady,
-      onPointerDown: workflowRaceReady ? () => { void primeAudioCues(); } : undefined,
+      onPointerDown: workflowRaceReady ? primeRaceAudio : undefined,
       onClick: () => {
         setAppMode('race');
         if (workflowRaceReady) {
@@ -6858,7 +6859,7 @@ export default function App() {
                   onCommentaryPreview={() => {
                     void raceCommentary.preview();
                   }}
-                  onPrimeAudio={primeAudioCues}
+                  onPrimeAudio={primeRaceAudio}
                   onStart={handleStart}
                   onCancel={handleCancel}
                   onReset={handleReset}
