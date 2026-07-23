@@ -558,13 +558,7 @@ export type RaceRiderOverlayLayout = {
   locked: boolean;
 };
 
-export type RaceCommentaryVoicePreset =
-  | 'australian-woman'
-  | 'australian-man'
-  | 'american-woman'
-  | 'american-man'
-  | 'british-woman'
-  | 'british-man';
+export type RaceCommentaryVoicePreset = 'american-man';
 
 export type RaceCommentaryPreferences = {
   enabled: boolean;

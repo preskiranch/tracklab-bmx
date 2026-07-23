@@ -130,14 +130,7 @@ describe('cloud API trust boundaries', () => {
       aiAvailable: false,
       textModel: 'gpt-5.6-terra',
       speechModel: 'gpt-4o-mini-tts',
-      voicePresets: [
-        'australian-woman',
-        'australian-man',
-        'american-woman',
-        'american-man',
-        'british-woman',
-        'british-man',
-      ],
+      voicePresets: ['american-man'],
       research: {
         knowledgeVersion: 'usabmx-national-2026-07-23-v5-generative-flow',
         indexedVideos: 166,

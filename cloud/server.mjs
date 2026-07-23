@@ -93,14 +93,7 @@ const configuredCommentaryEngineModel = String(
 const commentaryEngineModel = commentaryEngineModels.has(configuredCommentaryEngineModel)
   ? configuredCommentaryEngineModel
   : 'gpt-5.6-terra';
-const commentaryVoicePresets = new Set([
-  'australian-woman',
-  'australian-man',
-  'american-woman',
-  'american-man',
-  'british-woman',
-  'british-man',
-]);
+const commentaryVoicePresets = new Set(['american-man']);
 const commentaryEventKinds = new Set([
   'pre-race',
   'race-start',
@@ -525,8 +518,8 @@ function openAiApiKey() {
   return String(process.env.OPENAI_API_KEY || '').trim();
 }
 
-function sanitizeCommentaryVoicePreset(value) {
-  return commentaryVoicePresets.has(value) ? value : 'australian-woman';
+function sanitizeCommentaryVoicePreset(_value) {
+  return 'american-man';
 }
 
 function sanitizeCommentaryRider(value, index) {
@@ -1002,7 +995,7 @@ async function generateCommentaryLine({
           ? 'This is an occasional wit call. Give every candidate one brief, playful, dry or lightly sarcastic observation about the race pressure or lack of calm. Keep it affectionate and broadcast-safe. Never mock a rider’s ability, identity, appearance, body, crash, injury, or failure.'
           : 'Keep this call straight play-by-play; do not add sarcasm to this one.',
         commentaryGuideForEvent(event.kind),
-        `The selected delivery preset is ${voicePreset}. The speech engine supplies the accent, so do not force regional slang.`,
+        'The sole announcer uses natural American English. Do not force regional slang or phonetic spellings.',
         'Treat recentLines as adaptive memory. Do not reuse their openings, signature verbs, clause patterns, or closing phrases.',
         'Return only JSON matching the schema.',
       ].join(' '),

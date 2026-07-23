@@ -1187,24 +1187,10 @@ export function SessionControlPanel({
         )}
 
         <div className="announcer-select-grid">
-          <label>
+          <div className="announcer-fixed-voice">
             <span>Announcer voice</span>
-            <select
-              value={commentaryPreferences.voicePreset}
-              disabled={!commentaryPreferences.enabled}
-              onChange={(event) => onCommentaryPreferencesChange({
-                ...commentaryPreferences,
-                voicePreset: event.target.value as RaceCommentaryPreferences['voicePreset'],
-              })}
-            >
-              <option value="australian-woman">Australian woman</option>
-              <option value="australian-man">Australian man</option>
-              <option value="american-woman">American woman</option>
-              <option value="american-man">American man</option>
-              <option value="british-woman">British woman — England, UK</option>
-              <option value="british-man">British man — England, UK</option>
-            </select>
-          </label>
+            <strong>American male</strong>
+          </div>
         </div>
 
         <label className="announcer-volume-row">

@@ -22,20 +22,12 @@ export const defaultRaceCommentaryPreferences: RaceCommentaryPreferences = {
   ambientEnabled: true,
   ambientVolume: 0.065,
   ambientVolumeLocked: true,
-  voicePreset: 'australian-woman',
+  voicePreset: 'american-man',
   volume: 0.9,
   adaptiveMemory: true,
   recentLines: [],
 };
 
-const commentaryVoices = new Set<RaceCommentaryVoicePreset>([
-  'australian-woman',
-  'australian-man',
-  'american-woman',
-  'american-man',
-  'british-woman',
-  'british-man',
-]);
 const demoRiderIds = [1, 2, 3, 4] as const;
 
 function finiteNumber(value: unknown, fallback: number) {
@@ -81,9 +73,7 @@ export function normalizeRaceCommentaryPreferences(value: unknown): RaceCommenta
   const preferences = value && typeof value === 'object'
     ? value as Partial<RaceCommentaryPreferences>
     : {};
-  const voicePreset = commentaryVoices.has(preferences.voicePreset as RaceCommentaryVoicePreset)
-    ? preferences.voicePreset as RaceCommentaryVoicePreset
-    : defaultRaceCommentaryPreferences.voicePreset;
+  const voicePreset: RaceCommentaryVoicePreset = 'american-man';
   const recentLines = Array.isArray(preferences.recentLines)
     ? preferences.recentLines
       .filter((line): line is string => typeof line === 'string')

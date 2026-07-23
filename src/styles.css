@@ -3416,12 +3416,14 @@ input:focus {
   gap: 9px;
 }
 
-.announcer-select-grid label {
+.announcer-select-grid label,
+.announcer-fixed-voice {
   display: grid;
   gap: 5px;
 }
 
 .announcer-select-grid label > span,
+.announcer-fixed-voice > span,
 .announcer-volume-row > span {
   color: #516171;
   font-size: 11px;
@@ -3434,6 +3436,18 @@ input:focus {
   width: 100%;
   min-height: 38px;
   padding: 0 9px;
+}
+
+.announcer-fixed-voice strong {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid #c9d2db;
+  border-radius: 6px;
+  background: #f7f9fb;
+  color: #17212b;
+  font-size: 14px;
 }
 
 .announcer-volume-row > span {

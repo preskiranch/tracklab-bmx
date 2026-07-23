@@ -422,7 +422,7 @@ export async function generatePreRaceLine({
   recentLines = [],
   apiKey,
   model = 'gpt-5.6-terra',
-  voicePreset = 'australian-woman',
+  voicePreset = 'american-man',
   variationKey = '',
   fetchImplementation = fetch,
 }) {
@@ -458,7 +458,7 @@ export async function generatePreRaceLine({
         'Do not mention watts, power, cadence, RPM, bike speed, MPH, KPH, pedal zones, telemetry, AI, sources, or the application.',
         'Do not assign first through fourth before the gate. Do not predict a winner.',
         'Sound anticipatory and human, not like an advertisement. Use a different editorial angle, opening, sentence shape, and closing rhythm in every candidate.',
-        `The selected accent preset is ${voicePreset}; wording should remain natural international BMX English.`,
+        'The sole announcer uses natural American English. Do not force regional slang or phonetic spellings.',
         'Return JSON only matching the schema.',
       ].join(' '),
       input: JSON.stringify({

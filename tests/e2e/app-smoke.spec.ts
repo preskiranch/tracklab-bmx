@@ -357,11 +357,8 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByRole('button', { name: 'Race Dashboard', exact: true })).toBeVisible();
   await expect(page.getByText('Commentary brain', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('option', { name: /Fast|Balanced|Studio/i })).toHaveCount(0);
-  const announcerVoice = page.getByLabel('Announcer voice');
-  await expect(announcerVoice).toContainText('British woman — England, UK');
-  await expect(announcerVoice).toContainText('British man — England, UK');
-  await announcerVoice.selectOption('british-man');
-  await expect(announcerVoice).toHaveValue('british-man');
+  await expect(page.getByLabel('Announcer voice')).toHaveCount(0);
+  await expect(page.getByText('American male', { exact: true })).toBeVisible();
   const ambientSound = page.getByLabel('Ambient track sound');
   await expect(ambientSound).toBeVisible();
   await expect(ambientSound).toBeChecked();
@@ -1200,37 +1197,28 @@ test.describe('mobile commentary playback', () => {
     expect(speechPayloads.filter((payload) => (
       payload.eventKind === 'race-start'
     ))).toHaveLength(initialStartPrefetchCount);
-    const previewPresets = [
-      'australian-woman',
-      'australian-man',
-      'american-woman',
-      'american-man',
-      'british-woman',
-      'british-man',
-    ];
-    for (const voicePreset of previewPresets) {
-      await page.getByLabel('Announcer voice').selectOption(voicePreset);
-      const priorPreviewCount = speechPayloads.filter(
-        (payload) => payload.eventKind === 'preview',
-      ).length;
-      await page.getByRole('button', { name: 'Preview selected voice' }).click();
-      await expect(page.getByRole('button', { name: 'Preparing voice…' })).toBeVisible();
-      await expect.poll(
-        () => speechPayloads.filter((payload) => payload.eventKind === 'preview').length,
-        { timeout: 8_000 },
-      ).toBe(priorPreviewCount + 1);
-      await expect(page.getByRole('button', { name: 'Preview selected voice' })).toBeEnabled({
-        timeout: 8_000,
-      });
-    }
+    await expect(page.getByLabel('Announcer voice')).toHaveCount(0);
+    await expect(page.getByText('American male', { exact: true })).toBeVisible();
+    const priorPreviewCount = speechPayloads.filter(
+      (payload) => payload.eventKind === 'preview',
+    ).length;
+    await page.getByRole('button', { name: 'Preview selected voice' }).click();
+    await expect(page.getByRole('button', { name: 'Preparing voice…' })).toBeVisible();
+    await expect.poll(
+      () => speechPayloads.filter((payload) => payload.eventKind === 'preview').length,
+      { timeout: 8_000 },
+    ).toBe(priorPreviewCount + 1);
+    await expect(page.getByRole('button', { name: 'Preview selected voice' })).toBeEnabled({
+      timeout: 8_000,
+    });
     await expect.poll(() => page.evaluate(() => (
       (window as typeof window & {
         __tracklabBufferPlaybackCount?: number;
       }).__tracklabBufferPlaybackCount ?? 0
-    )), { timeout: 8_000 }).toBeGreaterThanOrEqual(previewPresets.length);
+    )), { timeout: 8_000 }).toBeGreaterThanOrEqual(1);
     expect(speechPayloads
       .filter((payload) => payload.eventKind === 'preview')
-      .map((payload) => payload.voicePreset)).toEqual(previewPresets);
+      .map((payload) => payload.voicePreset)).toEqual(['american-man']);
     expect(await page.evaluate(() => ({
       cadence: (window as typeof window & {
         __tracklabCadenceMediaPlayCount?: number;
@@ -1250,7 +1238,7 @@ test.describe('mobile commentary playback', () => {
     ).toBe(true);
     expect(preRaceStudioVoiceStartedBeforeReport).toBe(true);
     expect(speechPayloads.find((payload) => payload.eventKind === 'pre-race')?.voicePreset)
-      .toBe('british-man');
+      .toBe('american-man');
     releasePreRaceReport();
     await expect.poll(() => page.evaluate(() => (
       (window as typeof window & {

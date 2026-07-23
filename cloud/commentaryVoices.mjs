@@ -1,28 +1,6 @@
-const commentaryVoicePresets = {
-  'australian-woman': {
-    voice: 'marin',
-    persona: 'an Australian female BMX race announcer using clear, natural Australian English',
-  },
-  'australian-man': {
-    voice: 'cedar',
-    persona: 'an Australian male BMX race announcer using clear, natural Australian English',
-  },
-  'american-woman': {
-    voice: 'coral',
-    persona: 'an American female BMX race announcer using clear, natural American English',
-  },
-  'american-man': {
-    voice: 'onyx',
-    persona: 'an American male BMX race announcer using clear, natural American English',
-  },
-  'british-woman': {
-    voice: 'shimmer',
-    persona: 'a female BMX race announcer from England using clear, contemporary British English',
-  },
-  'british-man': {
-    voice: 'fable',
-    persona: 'a male BMX race announcer from England using clear, contemporary British English',
-  },
+const commentaryVoice = {
+  voice: 'cedar',
+  persona: 'a natural American male BMX race announcer using contemporary American English',
 };
 
 function commentarySpeechDirection(eventKind, deliveryStyle) {
@@ -87,22 +65,21 @@ export function commentarySpeechSpeed(eventKind) {
   return 0.96;
 }
 
-export function commentaryVoiceDefinition(preset, eventKind, deliveryStyle) {
-  const selected = commentaryVoicePresets[preset]
-    ?? commentaryVoicePresets['australian-woman'];
+export function commentaryVoiceDefinition(_preset, eventKind, deliveryStyle) {
   return {
-    voice: selected.voice,
+    voice: commentaryVoice.voice,
     instructions: [
-      `Perform as ${selected.persona}.`,
+      `Perform as ${commentaryVoice.persona}.`,
       eventKind === 'pre-race'
         ? 'This is a concise, energetic pre-race BMX television briefing, not a commercial or dramatic voice-over. Sound informed, anticipatory, and fully present at the track.'
         : 'This is passionate, high-energy live BMX play-by-play, not a commercial or dramatic voice-over. Sound fully engaged in a real head-to-head race.',
-      'Keep a natural, clearly articulated pace. Create excitement through dynamic emphasis, rising and falling intonation, and punch on rider names and action verbs—not by racing through the words.',
-      'Use quick natural breaths and brief punctuation pauses. Vary the rhythm and emphasis from call to call so the delivery never settles into a repeated robotic pattern.',
+      'Speak like a real live broadcaster talking to fans, not a synthetic narrator: conversational, spontaneous, warm, and emotionally responsive to the action.',
+      'Keep a natural, clearly articulated pace without over-enunciating. Create excitement through dynamic emphasis, rising and falling intonation, and punch on rider names and action verbs—not by racing through the words.',
+      'Use subtle natural breaths, short thinking pauses, and varied sentence timing. Let important moments breathe. Vary rhythm and emphasis from call to call so the delivery never settles into a repeated robotic pattern.',
       'Pronounce every rider name clearly as a person’s name, exactly as written in the call. Do not skip, abbreviate, or spell out a name.',
       'Match the intensity to the event: lively throughout, a clear surge for passes, maximum controlled urgency on the final straight, and a passionate celebration at the finish.',
       commentarySpeechDirection(eventKind, deliveryStyle),
-      'Project strongly without screaming, distorting words, using fake crowd noise, singing, or imitating any real person.',
+      'Project strongly without screaming, distorting words, using fake crowd noise, singing, adopting a commercial voice, or imitating any real person.',
     ].join(' '),
   };
 }

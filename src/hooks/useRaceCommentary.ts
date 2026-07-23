@@ -83,25 +83,23 @@ type UseRaceCommentaryOptions = {
   onRecentLinesChange: (lines: string[]) => void;
 };
 
-function speechLanguage(voicePreset: RaceCommentaryVoicePreset) {
-  if (voicePreset === 'american-woman' || voicePreset === 'american-man') {
-    return 'en-US';
-  }
-  if (voicePreset === 'british-woman' || voicePreset === 'british-man') {
-    return 'en-GB';
-  }
-  return 'en-AU';
+function speechLanguage(_voicePreset: RaceCommentaryVoicePreset) {
+  return 'en-US';
 }
 
-function browserVoiceFor(voicePreset: RaceCommentaryVoicePreset) {
+function browserVoiceFor(_voicePreset: RaceCommentaryVoicePreset) {
   if (!('speechSynthesis' in window)) {
     return null;
   }
 
-  const language = speechLanguage(voicePreset).toLowerCase();
   const voices = window.speechSynthesis.getVoices();
-  return voices.find((voice) => voice.lang.toLowerCase() === language)
-    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(language.slice(0, 2)))
+  const americanVoices = voices.filter((voice) => voice.lang.toLowerCase() === 'en-us');
+  const preferredNames = ['aaron', 'alex', 'guy', 'davis', 'david', 'reed', 'eddy'];
+  return preferredNames
+    .map((name) => americanVoices.find((voice) => voice.name.toLowerCase().includes(name)))
+    .find(Boolean)
+    ?? americanVoices[0]
+    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith('en'))
     ?? null;
 }
 
@@ -217,11 +215,7 @@ function speakWithBrowser(
     utterance.lang = speechLanguage(voicePreset);
     utterance.voice = browserVoiceFor(voicePreset);
     utterance.volume = volume;
-    const baseRate = voicePreset === 'american-woman' || voicePreset === 'american-man'
-      ? 0.98
-      : voicePreset === 'british-woman' || voicePreset === 'british-man'
-        ? 0.96
-        : 0.97;
+    const baseRate = 0.97;
     const actionRate = eventKind === 'lead-change'
       || eventKind === 'position-change'
       || eventKind === 'pro-set'
@@ -231,11 +225,7 @@ function speakWithBrowser(
         ? 0.01
         : 0;
     utterance.rate = baseRate + actionRate;
-    const basePitch = voicePreset === 'australian-woman'
-      || voicePreset === 'american-woman'
-      || voicePreset === 'british-woman'
-      ? 1
-      : 0.96;
+    const basePitch = 0.96;
     const actionPitchLift = eventKind === 'lead-change'
       || eventKind === 'position-change'
       || eventKind === 'rider-finish'
@@ -1468,8 +1458,10 @@ export function useRaceCommentary({
       })
       .catch(() => undefined);
     if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
-      const unlockUtterance = new SpeechSynthesisUtterance('');
-      unlockUtterance.volume = 0;
+      const unlockUtterance = new SpeechSynthesisUtterance('.');
+      unlockUtterance.lang = 'en-US';
+      unlockUtterance.voice = browserVoiceFor('american-man');
+      unlockUtterance.volume = 0.01;
       window.speechSynthesis.speak(unlockUtterance);
     }
     return Promise.race([

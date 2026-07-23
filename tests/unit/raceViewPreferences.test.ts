@@ -72,7 +72,7 @@ describe('race view preferences', () => {
       ambientEnabled: false,
       ambientVolume: 0.2,
       ambientVolumeLocked: false,
-      voicePreset: 'british-man',
+      voicePreset: 'american-man',
       volume: 1,
       adaptiveMemory: false,
     });
@@ -82,10 +82,10 @@ describe('race view preferences', () => {
     expect(commentary).not.toHaveProperty('model');
   });
 
-  it('preserves the American woman announcer choice', () => {
+  it('normalizes every legacy announcer choice to the American male voice', () => {
     expect(normalizeRaceCommentaryPreferences({
       voicePreset: 'american-woman',
-    }).voicePreset).toBe('american-woman');
+    }).voicePreset).toBe('american-man');
   });
 
   it('normalizes four per-account demo rider names', () => {

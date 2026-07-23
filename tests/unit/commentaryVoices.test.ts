@@ -1,35 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { commentaryVoiceDefinition } from '../../cloud/commentaryVoices.mjs';
 
-const voicePresets = [
-  ['australian-woman', 'marin', /Australian female/i],
-  ['australian-man', 'cedar', /Australian male/i],
-  ['american-woman', 'coral', /American female/i],
-  ['american-man', 'onyx', /American male/i],
-  ['british-woman', 'shimmer', /female.*England/i],
-  ['british-man', 'fable', /male.*England/i],
+const legacyVoicePresets = [
+  'australian-woman',
+  'australian-man',
+  'american-woman',
+  'american-man',
+  'british-woman',
+  'british-man',
 ] as const;
 
-describe('commentary voice presets', () => {
-  it.each(voicePresets)(
-    'maps %s previews to its own base voice and requested accent persona',
-    (preset, expectedVoice, expectedPersona) => {
+describe('commentary voice', () => {
+  it.each(legacyVoicePresets)(
+    'normalizes the legacy %s preset to the sole American male announcer',
+    (preset) => {
       const definition = commentaryVoiceDefinition(preset, 'preview', 'straight');
-      expect(definition.voice).toBe(expectedVoice);
-      expect(definition.instructions).toMatch(expectedPersona);
+      expect(definition.voice).toBe('cedar');
+      expect(definition.instructions).toMatch(/natural American male/i);
       expect(definition.instructions).toMatch(/preview/i);
     },
   );
 
-  it('does not reuse one male or female base voice for different regional presets', () => {
-    const voices = voicePresets.map(([preset]) => (
-      commentaryVoiceDefinition(preset, 'preview', 'straight').voice
-    ));
-    expect(new Set(voices).size).toBe(voicePresets.length);
+  it('asks for conversational human timing without imitating a real person', () => {
+    const definition = commentaryVoiceDefinition('american-man', 'lead-change', 'surge');
+    expect(definition.instructions).toMatch(/conversational, spontaneous/i);
+    expect(definition.instructions).toMatch(/subtle natural breaths/i);
+    expect(definition.instructions).toMatch(/without.*imitating any real person/i);
   });
 
   it('forbids stale still-racing claims in delayed finishing calls', () => {
-    const definition = commentaryVoiceDefinition('australian-man', 'rider-finish', 'sprint');
+    const definition = commentaryVoiceDefinition('american-man', 'rider-finish', 'sprint');
     expect(definition.instructions).toMatch(/Never claim that anybody is still racing/i);
   });
 });
