@@ -115,7 +115,12 @@ import {
   type PlacePredictionOption,
 } from './lib/googleMaps';
 import { queueBridgeUserDataPatch, readBridgeUserData } from './lib/localBridgeStore';
-import { queueCloudUserDataPatch, readCloudUserData, saveCloudTrackMapping } from './lib/cloudUserData';
+import {
+  flushCloudUserDataPatches,
+  queueCloudUserDataPatch,
+  readCloudUserData,
+  saveCloudTrackMapping,
+} from './lib/cloudUserData';
 import {
   buildGhostLapFromRace,
   ghostsForTrackRoute,
@@ -144,8 +149,10 @@ import {
   uciStartToneIntervalMs,
 } from './lib/uciStartGate';
 import {
+  mergeRaceViewPreferences,
   normalizeRaceViewPreferences,
   normalizeRaceCommentaryPreferences,
+  raceViewPreferencesMatch,
   readStoredRaceViewPreferences,
   writeStoredRaceViewPreferences,
 } from './lib/raceViewPreferences';
@@ -846,7 +853,7 @@ function normalizeEarthCamera(value: Partial<EarthCamera> | unknown): EarthCamer
     heading: normalizeEarthHeading(camera.heading),
     ...(center ? { center } : {}),
     ...(zoom !== undefined ? { zoom } : {}),
-    updatedAt: Number.isFinite(camera.updatedAt) ? Number(camera.updatedAt) : Date.now(),
+    updatedAt: Number.isFinite(camera.updatedAt) ? Number(camera.updatedAt) : 0,
   };
 }
 
@@ -2306,6 +2313,23 @@ export default function App() {
     [localRaceSeatLimit, raceCandidatePlayers],
   );
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
+  useEffect(() => {
+    const flushPendingPreferences = () => {
+      void flushCloudUserDataPatches(cloudProfileKey);
+    };
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingPreferences();
+      }
+    };
+
+    window.addEventListener('pagehide', flushPendingPreferences);
+    document.addEventListener('visibilitychange', flushWhenHidden);
+    return () => {
+      window.removeEventListener('pagehide', flushPendingPreferences);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
+    };
+  }, [cloudProfileKey]);
   const applyRaceViewPreferences = useCallback((preferences: RaceViewPreferences) => {
     const normalized = normalizeRaceViewPreferences(preferences);
     raceViewPreferencesRef.current = normalized;
@@ -2335,6 +2359,7 @@ export default function App() {
     persistRaceViewPreferences({
       ...raceViewPreferencesRef.current,
       commentary: normalized,
+      commentaryUpdatedAt: Date.now(),
     });
   }, [persistRaceViewPreferences]);
   const handleRaceCommentaryRecentLinesChange = useCallback((recentLines: string[]) => {
@@ -2346,6 +2371,7 @@ export default function App() {
     persistRaceViewPreferences({
       ...raceViewPreferencesRef.current,
       commentary: normalized,
+      commentaryUpdatedAt: Date.now(),
     });
   }, [persistRaceViewPreferences]);
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
@@ -3136,17 +3162,25 @@ export default function App() {
           });
           setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
           setStudioRiders((current) => mergeStudioRiders(current, data.studioRiders));
-          if (data.raceViewPreferences) {
-            applyRaceViewPreferences(data.raceViewPreferences);
-            writeStoredRaceViewPreferences(cloudProfileKey, data.raceViewPreferences);
-          }
+          const localRaceViewPreferences = readStoredRaceViewPreferences(
+            cloudProfileKey,
+            readStoredEarthCameras(),
+          );
+          const mergedRaceViewPreferences = data.raceViewPreferences
+            ? mergeRaceViewPreferences(localRaceViewPreferences, data.raceViewPreferences)
+            : localRaceViewPreferences;
+          applyRaceViewPreferences(mergedRaceViewPreferences);
+          writeStoredRaceViewPreferences(cloudProfileKey, mergedRaceViewPreferences);
           cloudUserDataAvailableRef.current = true;
           cloudUserDataLoadedKeyRef.current = cloudProfileKey;
-          if (!data.raceViewPreferences) {
+          if (
+            !data.raceViewPreferences
+            || !raceViewPreferencesMatch(data.raceViewPreferences, mergedRaceViewPreferences)
+          ) {
             void queueCloudUserDataPatch(cloudProfileKey, {
-              raceViewPreferences: raceViewPreferencesRef.current,
+              raceViewPreferences: mergedRaceViewPreferences,
             }).catch((error: Error) => {
-              console.warn(`Could not migrate local race view preferences to TrackLab cloud: ${error.message}`);
+              console.warn(`Could not reconcile race view preferences with TrackLab cloud: ${error.message}`);
             });
           }
           setCloudUserDataStatus('online');
@@ -3851,6 +3885,7 @@ export default function App() {
     persistRaceViewPreferences({
       ...raceViewPreferencesRef.current,
       demoRiderNames: nextNames,
+      demoRiderNamesUpdatedAt: Date.now(),
     });
   }, [persistRaceViewPreferences]);
 
@@ -5095,6 +5130,12 @@ export default function App() {
     ));
 
     setEarthCamerasByTrack((current) => {
+      const accountPreferencesAreHydrated = authStatus !== 'loading'
+        && (!authUser || cloudUserDataLoadedKeyRef.current === cloudProfileKey);
+      if (!accountPreferencesAreHydrated) {
+        return current;
+      }
+
       if (!cameraIsOnSelectedTrack) {
         return current;
       }
@@ -5113,7 +5154,18 @@ export default function App() {
       });
       return next;
     });
-  }, [earthAngle, earthCenter, earthHeading, earthZoom, effectiveTrack, persistRaceViewPreferences, selectedTrack.id]);
+  }, [
+    authStatus,
+    authUser,
+    cloudProfileKey,
+    earthAngle,
+    earthCenter,
+    earthHeading,
+    earthZoom,
+    effectiveTrack,
+    persistRaceViewPreferences,
+    selectedTrack.id,
+  ]);
 
   const handleEarthAngleChange = useCallback((angle: number) => {
     handleEarthCameraChange({ angle });
@@ -5131,6 +5183,7 @@ export default function App() {
     persistRaceViewPreferences({
       ...raceViewPreferencesRef.current,
       cameraLocked: locked,
+      cameraLockedUpdatedAt: Date.now(),
     });
   }, [developerRaceLayoutActive, persistRaceViewPreferences]);
 
@@ -5139,6 +5192,7 @@ export default function App() {
       return;
     }
     setRiderOverlaysByTrack((current) => {
+      const updatedAt = Date.now();
       const next = {
         ...current,
         [trackId]: layout,
@@ -5146,6 +5200,10 @@ export default function App() {
       persistRaceViewPreferences({
         ...raceViewPreferencesRef.current,
         riderOverlaysByTrack: next,
+        riderOverlayUpdatedAtByTrack: {
+          ...raceViewPreferencesRef.current.riderOverlayUpdatedAtByTrack,
+          [trackId]: updatedAt,
+        },
       });
       return next;
     });

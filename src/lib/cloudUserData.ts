@@ -121,6 +121,13 @@ export function queueCloudUserDataPatch(profileKey: string, patch: CloudUserData
   return queued;
 }
 
+export function flushCloudUserDataPatches(profileKey?: string) {
+  const batchers = profileKey
+    ? [cloudPatchBatchers.get(profileKey)].filter(Boolean)
+    : [...cloudPatchBatchers.values()];
+  return Promise.allSettled(batchers.map((batcher) => batcher!.flush()));
+}
+
 export function createEmptyCloudUserData(): CloudUserData {
   return {
     trackMappings: emptyCloudUserData.trackMappings,

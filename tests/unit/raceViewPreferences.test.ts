@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   defaultRaceCommentaryPreferences,
   defaultRaceRiderOverlayLayout,
+  mergeRaceViewPreferences,
   normalizeDemoRiderNames,
   normalizeRaceCommentaryPreferences,
   normalizeRaceRiderOverlayLayout,
@@ -99,5 +100,54 @@ describe('race view preferences', () => {
       2: 'Jordan Lee',
       4: 'R'.repeat(64),
     });
+  });
+
+  it('keeps newer names and per-track layouts when a stale browser saves other preferences', () => {
+    const current = normalizeRaceViewPreferences({
+      cameraLocked: true,
+      cameraLockedUpdatedAt: 200,
+      earthCamerasByTrack: {
+        north: { angle: 42, heading: 180, zoom: 20, updatedAt: 200 },
+      },
+      riderOverlaysByTrack: {
+        north: { xPct: 0.1, yPct: 0.7, width: 1100, height: 260, locked: true },
+      },
+      riderOverlayUpdatedAtByTrack: { north: 200 },
+      demoRiderNames: { 1: 'Maya Torres', 2: 'Jordan Lee' },
+      demoRiderNamesUpdatedAt: 200,
+      commentary: { ...defaultRaceCommentaryPreferences, volume: 0.8 },
+      commentaryUpdatedAt: 200,
+    });
+    const merged = mergeRaceViewPreferences(current, {
+      cameraLocked: false,
+      cameraLockedUpdatedAt: 100,
+      earthCamerasByTrack: {
+        north: { angle: 0, heading: 0, zoom: 17, updatedAt: 100 },
+        south: { angle: 30, heading: 90, zoom: 19, updatedAt: 250 },
+      },
+      riderOverlaysByTrack: {
+        north: { xPct: 0, yPct: 0, width: 320, height: 190, locked: false },
+      },
+      riderOverlayUpdatedAtByTrack: { north: 100 },
+      demoRiderNames: {},
+      demoRiderNamesUpdatedAt: 100,
+      commentary: { ...defaultRaceCommentaryPreferences, volume: 0.6 },
+      commentaryUpdatedAt: 300,
+    });
+
+    expect(merged.cameraLocked).toBe(true);
+    expect(merged.earthCamerasByTrack.north).toMatchObject({ angle: 42, heading: 180, zoom: 20 });
+    expect(merged.earthCamerasByTrack.south).toMatchObject({ angle: 30, heading: 90, zoom: 19 });
+    expect(merged.riderOverlaysByTrack.north).toMatchObject({ width: 1100, height: 260, locked: true });
+    expect(merged.demoRiderNames).toEqual({ 1: 'Maya Torres', 2: 'Jordan Lee' });
+    expect(merged.commentary.volume).toBe(0.6);
+  });
+
+  it('uses zero revisions for legacy cameras so loading them does not invent a newer edit', () => {
+    expect(normalizeRaceViewPreferences({
+      earthCamerasByTrack: {
+        north: { angle: 20, heading: 40 },
+      },
+    }).earthCamerasByTrack.north.updatedAt).toBe(0);
   });
 });

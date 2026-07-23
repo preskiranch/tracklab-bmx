@@ -35,6 +35,10 @@ function finiteNumber(value: unknown, fallback: number) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function normalizedRevision(value: unknown) {
+  return Math.max(0, finiteNumber(value, 0));
+}
+
 function normalizedCamera(value: unknown): EarthCamera | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -52,7 +56,7 @@ function normalizedCamera(value: unknown): EarthCamera | null {
     heading: ((finiteNumber(camera.heading, 0) % 360) + 360) % 360,
     ...(center ? { center } : {}),
     ...(zoom != null ? { zoom } : {}),
-    updatedAt: Math.max(0, finiteNumber(camera.updatedAt, Date.now())),
+    updatedAt: normalizedRevision(camera.updatedAt),
   };
 }
 
@@ -142,9 +146,14 @@ export function normalizeRaceViewPreferences(
     && typeof preferences.riderOverlaysByTrack === 'object'
     ? preferences.riderOverlaysByTrack
     : {};
+  const overlayRevisionCandidates = preferences.riderOverlayUpdatedAtByTrack
+    && typeof preferences.riderOverlayUpdatedAtByTrack === 'object'
+    ? preferences.riderOverlayUpdatedAtByTrack
+    : {};
 
   return {
     cameraLocked: Boolean(preferences.cameraLocked),
+    cameraLockedUpdatedAt: normalizedRevision(preferences.cameraLockedUpdatedAt),
     earthCamerasByTrack: Object.fromEntries(
       Object.entries(cameraCandidates)
         .flatMap(([trackId, camera]) => {
@@ -157,9 +166,94 @@ export function normalizeRaceViewPreferences(
         .filter(([trackId]) => trackId.trim().length > 0)
         .map(([trackId, layout]) => [trackId, normalizeRaceRiderOverlayLayout(layout)]),
     ),
+    riderOverlayUpdatedAtByTrack: Object.fromEntries(
+      Object.entries(overlayRevisionCandidates)
+        .filter(([trackId]) => trackId.trim().length > 0)
+        .map(([trackId, updatedAt]) => [trackId, normalizedRevision(updatedAt)]),
+    ),
     demoRiderNames: normalizeDemoRiderNames(preferences.demoRiderNames),
+    demoRiderNamesUpdatedAt: normalizedRevision(preferences.demoRiderNamesUpdatedAt),
     commentary: normalizeRaceCommentaryPreferences(preferences.commentary),
+    commentaryUpdatedAt: normalizedRevision(preferences.commentaryUpdatedAt),
   };
+}
+
+function mergeRevisionedRecords<T>(
+  current: Record<string, T>,
+  incoming: Record<string, T>,
+  revisionFor: (key: string, value: T, source: 'current' | 'incoming') => number,
+) {
+  const merged = { ...current };
+  Object.entries(incoming).forEach(([key, value]) => {
+    const currentValue = current[key];
+    if (
+      currentValue === undefined
+      || revisionFor(key, value, 'incoming') >= revisionFor(key, currentValue, 'current')
+    ) {
+      merged[key] = value;
+    }
+  });
+  return merged;
+}
+
+/**
+ * Combines a local snapshot with a cloud snapshot without allowing an older
+ * write from either browser to erase a newer per-track or per-setting change.
+ * Equal legacy revisions prefer the incoming (cloud) snapshot.
+ */
+export function mergeRaceViewPreferences(
+  currentValue: unknown,
+  incomingValue: unknown,
+): RaceViewPreferences {
+  const current = normalizeRaceViewPreferences(currentValue);
+  const incoming = normalizeRaceViewPreferences(incomingValue);
+  const cameraLockedFromIncoming = incoming.cameraLockedUpdatedAt >= current.cameraLockedUpdatedAt;
+  const namesFromIncoming = incoming.demoRiderNamesUpdatedAt >= current.demoRiderNamesUpdatedAt;
+  const commentaryFromIncoming = incoming.commentaryUpdatedAt >= current.commentaryUpdatedAt;
+  const riderOverlayUpdatedAtByTrack = Object.fromEntries(
+    [...new Set([
+      ...Object.keys(current.riderOverlayUpdatedAtByTrack),
+      ...Object.keys(incoming.riderOverlayUpdatedAtByTrack),
+    ])].map((trackId) => [
+      trackId,
+      Math.max(
+        current.riderOverlayUpdatedAtByTrack[trackId] ?? 0,
+        incoming.riderOverlayUpdatedAtByTrack[trackId] ?? 0,
+      ),
+    ]),
+  );
+
+  return normalizeRaceViewPreferences({
+    cameraLocked: cameraLockedFromIncoming ? incoming.cameraLocked : current.cameraLocked,
+    cameraLockedUpdatedAt: Math.max(current.cameraLockedUpdatedAt, incoming.cameraLockedUpdatedAt),
+    earthCamerasByTrack: mergeRevisionedRecords(
+      current.earthCamerasByTrack,
+      incoming.earthCamerasByTrack,
+      (_key, camera) => camera.updatedAt,
+    ),
+    riderOverlaysByTrack: mergeRevisionedRecords(
+      current.riderOverlaysByTrack,
+      incoming.riderOverlaysByTrack,
+      (trackId, _layout, source) => (
+        source === 'incoming'
+          ? incoming.riderOverlayUpdatedAtByTrack[trackId] ?? 0
+          : current.riderOverlayUpdatedAtByTrack[trackId] ?? 0
+      ),
+    ),
+    riderOverlayUpdatedAtByTrack,
+    demoRiderNames: namesFromIncoming ? incoming.demoRiderNames : current.demoRiderNames,
+    demoRiderNamesUpdatedAt: Math.max(
+      current.demoRiderNamesUpdatedAt,
+      incoming.demoRiderNamesUpdatedAt,
+    ),
+    commentary: commentaryFromIncoming ? incoming.commentary : current.commentary,
+    commentaryUpdatedAt: Math.max(current.commentaryUpdatedAt, incoming.commentaryUpdatedAt),
+  });
+}
+
+export function raceViewPreferencesMatch(left: unknown, right: unknown) {
+  return JSON.stringify(normalizeRaceViewPreferences(left))
+    === JSON.stringify(normalizeRaceViewPreferences(right));
 }
 
 function profileStorageKey(profileKey: string) {

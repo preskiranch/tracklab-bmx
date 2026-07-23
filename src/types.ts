@@ -573,10 +573,14 @@ export type RaceCommentaryPreferences = {
 
 export type RaceViewPreferences = {
   cameraLocked: boolean;
+  cameraLockedUpdatedAt: number;
   earthCamerasByTrack: Record<string, EarthCamera>;
   riderOverlaysByTrack: Record<string, RaceRiderOverlayLayout>;
+  riderOverlayUpdatedAtByTrack: Record<string, number>;
   demoRiderNames: DemoRiderNames;
+  demoRiderNamesUpdatedAt: number;
   commentary: RaceCommentaryPreferences;
+  commentaryUpdatedAt: number;
 };
 
 export type TrackZone = {

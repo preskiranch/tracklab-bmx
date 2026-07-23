@@ -199,8 +199,9 @@ describe('cloud API trust boundaries', () => {
         }],
         raceViewPreferences: {
           cameraLocked: true,
+          cameraLockedUpdatedAt: 200,
           earthCamerasByTrack: {
-            'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 100 },
+            'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 200 },
           },
           riderOverlaysByTrack: {
             'north-bay-bmx': {
@@ -211,11 +212,15 @@ describe('cloud API trust boundaries', () => {
               locked: true,
             },
           },
+          riderOverlayUpdatedAtByTrack: {
+            'north-bay-bmx': 200,
+          },
           demoRiderNames: {
             1: 'Maya Torres',
             2: 'Jordan Lee',
             5: 'Invalid Lane',
           },
+          demoRiderNamesUpdatedAt: 200,
           commentary: {
             enabled: true,
             ambientEnabled: false,
@@ -227,6 +232,7 @@ describe('cloud API trust boundaries', () => {
             adaptiveMemory: true,
             recentLines: ['Avery takes it to the stripe.'],
           },
+          commentaryUpdatedAt: 200,
         },
       }),
     });
@@ -245,8 +251,9 @@ describe('cloud API trust boundaries', () => {
       }],
       raceViewPreferences: {
         cameraLocked: true,
+        cameraLockedUpdatedAt: 200,
         earthCamerasByTrack: {
-          'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 100 },
+          'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 200 },
         },
         riderOverlaysByTrack: {
           'north-bay-bmx': {
@@ -257,10 +264,14 @@ describe('cloud API trust boundaries', () => {
             locked: true,
           },
         },
+        riderOverlayUpdatedAtByTrack: {
+          'north-bay-bmx': 200,
+        },
         demoRiderNames: {
           1: 'Maya Torres',
           2: 'Jordan Lee',
         },
+        demoRiderNamesUpdatedAt: 200,
         commentary: {
           enabled: true,
           ambientEnabled: false,
@@ -271,9 +282,74 @@ describe('cloud API trust boundaries', () => {
           adaptiveMemory: true,
           recentLines: ['Avery takes it to the stripe.'],
         },
+        commentaryUpdatedAt: 200,
       },
     });
     expect(loadedPayload.raceViewPreferences.commentary).not.toHaveProperty('model');
+
+    const staleBrowserSave = await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        raceViewPreferences: {
+          cameraLocked: false,
+          cameraLockedUpdatedAt: 100,
+          earthCamerasByTrack: {
+            'north-bay-bmx': { angle: 0, heading: 0, zoom: 17, updatedAt: 100 },
+          },
+          riderOverlaysByTrack: {
+            'north-bay-bmx': {
+              xPct: 0,
+              yPct: 0,
+              width: 320,
+              height: 190,
+              locked: false,
+            },
+          },
+          riderOverlayUpdatedAtByTrack: {
+            'north-bay-bmx': 100,
+          },
+          demoRiderNames: {},
+          demoRiderNamesUpdatedAt: 100,
+          commentary: {
+            enabled: false,
+            ambientEnabled: false,
+            ambientVolume: 0.05,
+            ambientVolumeLocked: true,
+            voicePreset: 'american-man',
+            volume: 0.6,
+            adaptiveMemory: true,
+            recentLines: ['A newer commentary preference.'],
+          },
+          commentaryUpdatedAt: 300,
+        },
+      }),
+    });
+    expect(staleBrowserSave.status).toBe(200);
+    const mergedPayload = await staleBrowserSave.json();
+    expect(mergedPayload.raceViewPreferences).toMatchObject({
+      cameraLocked: true,
+      earthCamerasByTrack: {
+        'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 200 },
+      },
+      riderOverlaysByTrack: {
+        'north-bay-bmx': {
+          xPct: 0.08,
+          yPct: 0.72,
+          width: 1040,
+          height: 190,
+          locked: true,
+        },
+      },
+      demoRiderNames: {
+        1: 'Maya Torres',
+        2: 'Jordan Lee',
+      },
+      commentary: {
+        enabled: false,
+        volume: 0.6,
+        recentLines: ['A newer commentary preference.'],
+      },
+    });
   });
 
   it('prepares a truthful local pre-race briefing when hosted AI is unavailable', async () => {

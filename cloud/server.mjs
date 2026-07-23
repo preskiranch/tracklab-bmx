@@ -77,6 +77,7 @@ const matchInvites = new Map();
 const persistedRaceResultKeys = new Map();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
+const userDataWriteChains = new Map();
 const maxRaceBikeCount = 4;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
@@ -1123,6 +1124,146 @@ async function generateCommentarySpeech(line, voicePreset, eventKind, deliverySt
   return commentaryAudioBuffer(await response.json());
 }
 
+function sanitizedPreferenceRevision(value) {
+  return Math.max(0, finiteNumber(value, 0));
+}
+
+function sanitizedPreferenceRevisionMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .slice(0, 500)
+      .filter(([trackId]) => trackId.trim().length > 0)
+      .map(([trackId, updatedAt]) => [trackId, sanitizedPreferenceRevision(updatedAt)]),
+  );
+}
+
+function sanitizeRaceViewPreferences(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const cameras = value.earthCamerasByTrack;
+  const overlays = value.riderOverlaysByTrack;
+  const demoRiderNames = value.demoRiderNames;
+  const commentary = value.commentary;
+  const commentaryVoicePreset = sanitizeCommentaryVoicePreset(commentary?.voicePreset);
+  return {
+    cameraLocked: Boolean(value.cameraLocked),
+    cameraLockedUpdatedAt: sanitizedPreferenceRevision(value.cameraLockedUpdatedAt),
+    earthCamerasByTrack: cameras && typeof cameras === 'object' && !Array.isArray(cameras)
+      ? Object.fromEntries(Object.entries(cameras).slice(0, 500))
+      : {},
+    riderOverlaysByTrack: overlays && typeof overlays === 'object' && !Array.isArray(overlays)
+      ? Object.fromEntries(Object.entries(overlays).slice(0, 500))
+      : {},
+    riderOverlayUpdatedAtByTrack: sanitizedPreferenceRevisionMap(value.riderOverlayUpdatedAtByTrack),
+    demoRiderNames: demoRiderNames && typeof demoRiderNames === 'object' && !Array.isArray(demoRiderNames)
+      ? Object.fromEntries(
+        Object.entries(demoRiderNames)
+          .filter(([playerId]) => ['1', '2', '3', '4'].includes(playerId))
+          .filter(([, name]) => typeof name === 'string')
+          .map(([playerId, name]) => [playerId, sanitizeText(name, '', 64)])
+          .filter(([, name]) => Boolean(name)),
+      )
+      : {},
+    demoRiderNamesUpdatedAt: sanitizedPreferenceRevision(value.demoRiderNamesUpdatedAt),
+    commentary: {
+      enabled: commentary?.enabled == null ? true : Boolean(commentary.enabled),
+      ambientEnabled: commentary?.ambientEnabled == null ? true : Boolean(commentary.ambientEnabled),
+      ambientVolume: Math.max(0, Math.min(0.2, finiteNumber(commentary?.ambientVolume, 0.065))),
+      ambientVolumeLocked: commentary?.ambientVolumeLocked == null
+        ? true
+        : Boolean(commentary.ambientVolumeLocked),
+      voicePreset: commentaryVoicePreset,
+      volume: Math.max(0, Math.min(1, finiteNumber(commentary?.volume, 0.9))),
+      adaptiveMemory: commentary?.adaptiveMemory == null ? true : Boolean(commentary.adaptiveMemory),
+      recentLines: Array.isArray(commentary?.recentLines)
+        ? commentary.recentLines
+          .slice(-96)
+          .map((line) => sanitizeText(line, '', 220))
+          .filter(Boolean)
+        : [],
+    },
+    commentaryUpdatedAt: sanitizedPreferenceRevision(value.commentaryUpdatedAt),
+  };
+}
+
+function mergePreferenceRecords(current, incoming, revisionFor) {
+  const merged = { ...current };
+  Object.entries(incoming).forEach(([key, value]) => {
+    if (
+      current[key] === undefined
+      || revisionFor(key, value, 'incoming') > revisionFor(key, current[key], 'current')
+    ) {
+      merged[key] = value;
+    }
+  });
+  return merged;
+}
+
+function mergeSavedRaceViewPreferences(currentValue, incomingValue) {
+  const current = sanitizeRaceViewPreferences(currentValue);
+  const incoming = sanitizeRaceViewPreferences(incomingValue);
+  if (!current) {
+    return incoming;
+  }
+  if (!incoming) {
+    return current;
+  }
+
+  const incomingCameraLockIsNewer = incoming.cameraLockedUpdatedAt > current.cameraLockedUpdatedAt;
+  const incomingNamesAreNewer = incoming.demoRiderNamesUpdatedAt > current.demoRiderNamesUpdatedAt
+    || (
+      incoming.demoRiderNamesUpdatedAt === current.demoRiderNamesUpdatedAt
+      && Object.keys(current.demoRiderNames).length === 0
+      && Object.keys(incoming.demoRiderNames).length > 0
+    );
+  const incomingCommentaryIsNewer = incoming.commentaryUpdatedAt > current.commentaryUpdatedAt;
+  const overlayRevisionTrackIds = new Set([
+    ...Object.keys(current.riderOverlayUpdatedAtByTrack),
+    ...Object.keys(incoming.riderOverlayUpdatedAtByTrack),
+  ]);
+
+  return {
+    cameraLocked: incomingCameraLockIsNewer ? incoming.cameraLocked : current.cameraLocked,
+    cameraLockedUpdatedAt: Math.max(current.cameraLockedUpdatedAt, incoming.cameraLockedUpdatedAt),
+    earthCamerasByTrack: mergePreferenceRecords(
+      current.earthCamerasByTrack,
+      incoming.earthCamerasByTrack,
+      (_trackId, camera) => sanitizedPreferenceRevision(camera?.updatedAt),
+    ),
+    riderOverlaysByTrack: mergePreferenceRecords(
+      current.riderOverlaysByTrack,
+      incoming.riderOverlaysByTrack,
+      (trackId, _layout, source) => (
+        source === 'incoming'
+          ? incoming.riderOverlayUpdatedAtByTrack[trackId] ?? 0
+          : current.riderOverlayUpdatedAtByTrack[trackId] ?? 0
+      ),
+    ),
+    riderOverlayUpdatedAtByTrack: Object.fromEntries(
+      [...overlayRevisionTrackIds].map((trackId) => [
+        trackId,
+        Math.max(
+          current.riderOverlayUpdatedAtByTrack[trackId] ?? 0,
+          incoming.riderOverlayUpdatedAtByTrack[trackId] ?? 0,
+        ),
+      ]),
+    ),
+    demoRiderNames: incomingNamesAreNewer ? incoming.demoRiderNames : current.demoRiderNames,
+    demoRiderNamesUpdatedAt: Math.max(
+      current.demoRiderNamesUpdatedAt,
+      incoming.demoRiderNamesUpdatedAt,
+    ),
+    commentary: incomingCommentaryIsNewer ? incoming.commentary : current.commentary,
+    commentaryUpdatedAt: Math.max(current.commentaryUpdatedAt, incoming.commentaryUpdatedAt),
+  };
+}
+
 function sanitizeUserDataPatch(value) {
   if (!value || typeof value !== 'object') {
     return {};
@@ -1167,49 +1308,39 @@ function sanitizeUserDataPatch(value) {
       })
       .slice(0, 250);
   }
-  if (value.raceViewPreferences && typeof value.raceViewPreferences === 'object') {
-    const cameras = value.raceViewPreferences.earthCamerasByTrack;
-    const overlays = value.raceViewPreferences.riderOverlaysByTrack;
-    const demoRiderNames = value.raceViewPreferences.demoRiderNames;
-    const commentary = value.raceViewPreferences.commentary;
-    const commentaryVoicePreset = sanitizeCommentaryVoicePreset(commentary?.voicePreset);
-    patch.raceViewPreferences = {
-      cameraLocked: Boolean(value.raceViewPreferences.cameraLocked),
-      earthCamerasByTrack: cameras && typeof cameras === 'object' && !Array.isArray(cameras)
-        ? Object.fromEntries(Object.entries(cameras).slice(0, 500))
-        : {},
-      riderOverlaysByTrack: overlays && typeof overlays === 'object' && !Array.isArray(overlays)
-        ? Object.fromEntries(Object.entries(overlays).slice(0, 500))
-        : {},
-      demoRiderNames: demoRiderNames && typeof demoRiderNames === 'object' && !Array.isArray(demoRiderNames)
-        ? Object.fromEntries(
-          Object.entries(demoRiderNames)
-            .filter(([playerId]) => ['1', '2', '3', '4'].includes(playerId))
-            .filter(([, name]) => typeof name === 'string')
-            .map(([playerId, name]) => [playerId, sanitizeText(name, '', 64)])
-            .filter(([, name]) => Boolean(name)),
-        )
-        : {},
-      commentary: {
-        enabled: commentary?.enabled == null ? true : Boolean(commentary.enabled),
-        ambientEnabled: commentary?.ambientEnabled == null ? true : Boolean(commentary.ambientEnabled),
-        ambientVolume: Math.max(0, Math.min(0.2, finiteNumber(commentary?.ambientVolume, 0.065))),
-        ambientVolumeLocked: commentary?.ambientVolumeLocked == null
-          ? true
-          : Boolean(commentary.ambientVolumeLocked),
-        voicePreset: commentaryVoicePreset,
-        volume: Math.max(0, Math.min(1, finiteNumber(commentary?.volume, 0.9))),
-        adaptiveMemory: commentary?.adaptiveMemory == null ? true : Boolean(commentary.adaptiveMemory),
-        recentLines: Array.isArray(commentary?.recentLines)
-          ? commentary.recentLines
-            .slice(-96)
-            .map((line) => sanitizeText(line, '', 220))
-            .filter(Boolean)
-          : [],
-      },
-    };
+  const raceViewPreferences = sanitizeRaceViewPreferences(value.raceViewPreferences);
+  if (raceViewPreferences) {
+    patch.raceViewPreferences = raceViewPreferences;
   }
   return patch;
+}
+
+function saveMergedUserData(profileKey, patch) {
+  const previousWrite = userDataWriteChains.get(profileKey) ?? Promise.resolve();
+  const operation = previousWrite
+    .catch(() => undefined)
+    .then(async () => {
+      let mergedPatch = patch;
+      if (patch.raceViewPreferences) {
+        const current = await persistence.loadUserData(profileKey);
+        mergedPatch = {
+          ...patch,
+          raceViewPreferences: mergeSavedRaceViewPreferences(
+            current?.raceViewPreferences,
+            patch.raceViewPreferences,
+          ),
+        };
+      }
+      return persistence.saveUserData(profileKey, mergedPatch);
+    });
+  const tail = operation.then(() => undefined, () => undefined);
+  userDataWriteChains.set(profileKey, tail);
+  void tail.finally(() => {
+    if (userDataWriteChains.get(profileKey) === tail) {
+      userDataWriteChains.delete(profileKey);
+    }
+  });
+  return operation;
 }
 
 function sanitizeTrackPoint(value) {
@@ -3590,7 +3721,7 @@ async function serveStatic(request, response) {
 
     if (request.method === 'PATCH' || request.method === 'POST') {
       const patch = sanitizeUserDataPatch(await readJsonBody(request));
-      const userData = await persistence.saveUserData(profileKey, patch);
+      const userData = await saveMergedUserData(profileKey, patch);
       if (!userData) {
         writeJson(response, 503, { error: 'Cloud profile storage is temporarily unavailable.' });
         return;

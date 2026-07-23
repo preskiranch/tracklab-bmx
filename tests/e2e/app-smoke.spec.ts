@@ -2105,6 +2105,131 @@ test('connected bike names remain bound to their monitor IDs after reload', asyn
   }
 });
 
+test('demo rider names and the last track view restore from the signed-in account after reload', async ({ page }) => {
+  const authUser = {
+    id: 'race-view-racer',
+    profileKey: 'user:race-view-racer',
+    email: 'preskiranch@gmail.com',
+    name: 'Race View Rider',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: Date.now(),
+    },
+  };
+  let cloudRaceViewPreferences = {
+    cameraLocked: false,
+    cameraLockedUpdatedAt: 100,
+    earthCamerasByTrack: {
+      'black-mountain-bmx': {
+        angle: 47,
+        heading: 180,
+        center: { lat: 33.71225, lng: -112.0663 },
+        zoom: 20,
+        updatedAt: 100,
+      },
+    },
+    riderOverlaysByTrack: {},
+    riderOverlayUpdatedAtByTrack: {},
+    demoRiderNames: {
+      1: 'Maya Torres',
+      2: 'Jordan Lee',
+      3: 'Taylor Reed',
+      4: 'Avery Cole',
+    },
+    demoRiderNamesUpdatedAt: 100,
+    commentary: {
+      enabled: true,
+      ambientEnabled: true,
+      ambientVolume: 0.065,
+      ambientVolumeLocked: true,
+      voicePreset: 'american-man',
+      volume: 0.9,
+      adaptiveMemory: true,
+      recentLines: [],
+    },
+    commentaryUpdatedAt: 100,
+  };
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ user: authUser }),
+    });
+  });
+  await page.route('**/api/public-track-mappings', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { 'black-mountain-bmx': mockPedalZoneMapping },
+        count: 1,
+      }),
+    });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const patch = route.request().postDataJSON() as {
+        raceViewPreferences?: typeof cloudRaceViewPreferences;
+      };
+      if (patch.raceViewPreferences) {
+        cloudRaceViewPreferences = patch.raceViewPreferences;
+      }
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { 'black-mountain-bmx': mockPedalZoneMapping },
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: [],
+        raceViewPreferences: cloudRaceViewPreferences,
+      }),
+    });
+  });
+  await page.route('**/api/ghosts*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ghosts: [] }),
+    });
+  });
+  await page.route('**/api/multiplayer/leaderboards*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+    });
+  });
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  await page.goto('/?track=black-mountain-bmx');
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  await expect(page.getByLabel('Name for player 1')).toHaveValue('Maya Torres');
+  await expect(page.getByLabel('Name for player 2')).toHaveValue('Jordan Lee');
+  await expect(page.getByText('Angle 47 deg', { exact: true })).toBeVisible();
+  await expect(page.getByText('Heading 180 deg', { exact: true })).toBeVisible();
+
+  await page.getByLabel('Name for player 1').fill('Gate Master');
+  await page.getByLabel('Name for player 2').fill('Rhythm Queen');
+  await page.getByRole('button', { name: 'Tilt map up', exact: true }).click();
+  await page.getByRole('button', { name: 'Rotate map right', exact: true }).click();
+
+  await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[1]).toBe('Gate Master');
+  await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[2]).toBe('Rhythm Queen');
+  await expect.poll(() => cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].angle).toBe(52);
+  await expect.poll(() => cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].heading).toBe(195);
+  expect(cloudRaceViewPreferences.demoRiderNamesUpdatedAt).toBeGreaterThan(100);
+  expect(cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].updatedAt).toBeGreaterThan(100);
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: /Demo/i }).first()).toBeVisible();
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  await expect(page.getByLabel('Name for player 1')).toHaveValue('Gate Master');
+  await expect(page.getByLabel('Name for player 2')).toHaveValue('Rhythm Queen');
+  await expect(page.getByText('Angle 52 deg', { exact: true })).toBeVisible();
+  await expect(page.getByText('Heading 195 deg', { exact: true })).toBeVisible();
+});
+
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {
   const bridge = await createMockBikeBridge([58701]);
   const sampleTimer = setInterval(() => {

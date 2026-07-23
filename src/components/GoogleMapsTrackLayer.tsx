@@ -1222,6 +1222,7 @@ export function GoogleMapsTrackLayer({
     earthZoom,
   });
   const suppressCameraSyncRef = useRef(false);
+  const cameraSyncReleaseTimerRef = useRef<number | null>(null);
   const lastFitKeyRef = useRef('');
   const isProSetZoneMapping = mappingMode
     && mappingEditMode === 'zones'
@@ -1334,6 +1335,10 @@ export function GoogleMapsTrackLayer({
       ghostMarkerRefs.current.clear();
       remoteMarkerRefs.current.clear();
       mapRef.current = null;
+      if (cameraSyncReleaseTimerRef.current != null) {
+        window.clearTimeout(cameraSyncReleaseTimerRef.current);
+        cameraSyncReleaseTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -1365,7 +1370,15 @@ export function GoogleMapsTrackLayer({
       return;
     }
 
+    suppressCameraSyncRef.current = true;
+    if (cameraSyncReleaseTimerRef.current != null) {
+      window.clearTimeout(cameraSyncReleaseTimerRef.current);
+    }
     applyCamera(map, nextCamera);
+    cameraSyncReleaseTimerRef.current = window.setTimeout(() => {
+      cameraSyncReleaseTimerRef.current = null;
+      suppressCameraSyncRef.current = false;
+    }, 250);
   }, [earthAngle, earthCenter, earthHeading, earthZoom, track]);
 
   useEffect(() => {
