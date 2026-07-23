@@ -37,6 +37,10 @@ import {
   trackResearchIsFresh,
 } from './preRaceBriefing.mjs';
 import { loadTrackWeather } from './weather.mjs';
+import {
+  commentarySpeechSpeed,
+  commentaryVoiceDefinition,
+} from './commentaryVoices.mjs';
 import { instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 import {
   createRacerSubscriptionCheckout,
@@ -668,108 +672,6 @@ function commentaryDeliveryStyleForEvent(event) {
   return 'straight';
 }
 
-function commentarySpeechDirection(eventKind, deliveryStyle) {
-  const wryDirection = deliveryStyle === 'wry'
-    ? 'Let the brief dry aside land with a small knowing shift in tone, then return immediately to energetic race calling. Keep it playful, never cruel or cynical.'
-    : '';
-  const intensityDirection = deliveryStyle === 'surge'
-    ? 'The race order just changed. React with a genuine spontaneous lift in pitch and intensity on the decisive action, then settle just enough to state the new order clearly.'
-    : deliveryStyle === 'pressure'
-      ? 'Build tension through the battle: begin focused, tighten the rhythm as the riders stay close, and use rising intonation without rushing the words.'
-      : deliveryStyle === 'sprint'
-        ? 'Use a strong broadcast crescendo with controlled urgency, brighter pitch on the key action, and a clean resolved ending.'
-        : '';
-  if (eventKind === 'pre-race') {
-    return `Deliver a polished pre-race television desk report with lively anticipation, confident authority, and enough breathing room for every rider name. Build energy toward the final gate-ready phrase without sounding rushed. ${intensityDirection}`;
-  }
-  if (eventKind === 'race-start') {
-    return `Hit the gate drop with an immediate burst of excitement, then carry bright momentum into the opening charge. ${intensityDirection} ${wryDirection}`;
-  }
-  if (eventKind === 'positions-established') {
-    return `Sound alert and invested as the early battle takes shape. Give the full running order clearly with lively forward motion. ${intensityDirection} ${wryDirection}`;
-  }
-  if (eventKind === 'lead-change') {
-    return `React to the pass like a genuine live surprise: a quick lift, a sharp surge of excitement, and strong emphasis on the new leader’s name. Make “takes the lead” feel decisive, then stay urgently connected to the displaced leader and nearest front-pack chase. ${intensityDirection} ${wryDirection}`;
-  }
-  if (eventKind === 'position-change') {
-    return `React immediately to the overtake with a bright surge of excitement. Punch the passing rider’s name, make the position change unmistakable, and keep the delivery connected to the surrounding battle. ${intensityDirection} ${wryDirection}`;
-  }
-  if (eventKind === 'pedal-zone') {
-    return `Keep the live battle urgent and flowing. Keep the leader connected to the story, but give the tightest passing threat a clear lift of excitement wherever it is in the field. Give any coverage rider a concise natural update without letting it overshadow the action. ${intensityDirection} ${wryDirection}`;
-  }
-  if (eventKind === 'pro-set') {
-    return `Give the line choice a quick lift of excitement and stay emotionally connected to the chase. ${intensityDirection} ${wryDirection}`;
-  }
-  if (eventKind === 'final-push') {
-    return `Build powerful, controlled urgency through the last straight. Make every named rider’s run to the stripe feel immediate. ${intensityDirection} ${wryDirection}`;
-  }
-  if (eventKind === 'finish') {
-    return `Reach a celebratory peak on the winner’s name and victory, then complete the sentence cleanly with a strong finish. ${intensityDirection} ${wryDirection}`;
-  }
-  if (eventKind === 'rider-finish') {
-    return `Call the rider’s exact finishing place as they cross the stripe. Give the name and placement a fresh lift, then acknowledge any rider still racing without stealing focus from the finish. Complete the sentence cleanly. ${intensityDirection}`;
-  }
-  return `Give this preview a warm, confident sports-broadcast delivery with lively anticipation. ${intensityDirection} ${wryDirection}`;
-}
-
-function commentarySpeechSpeed(eventKind) {
-  if (eventKind === 'pre-race') {
-    return 0.94;
-  }
-  if (
-    eventKind === 'lead-change'
-    || eventKind === 'position-change'
-    || eventKind === 'pro-set'
-    || eventKind === 'final-push'
-  ) {
-    return 0.99;
-  }
-  if (eventKind === 'race-start' || eventKind === 'finish' || eventKind === 'rider-finish') {
-    return 0.98;
-  }
-  return 0.96;
-}
-
-function commentaryVoiceDefinition(preset, eventKind, deliveryStyle) {
-  let voice;
-  let persona;
-  if (preset === 'australian-man') {
-    voice = 'cedar';
-    persona = 'an Australian male BMX race announcer using clear, natural Australian English';
-  } else if (preset === 'american-woman') {
-    voice = 'marin';
-    persona = 'an American female BMX race announcer using clear, natural American English';
-  } else if (preset === 'american-man') {
-    voice = 'cedar';
-    persona = 'an American male BMX race announcer using clear, natural American English';
-  } else if (preset === 'british-woman') {
-    voice = 'marin';
-    persona = 'a female BMX race announcer from England using clear, contemporary British English';
-  } else if (preset === 'british-man') {
-    voice = 'cedar';
-    persona = 'a male BMX race announcer from England using clear, contemporary British English';
-  } else {
-    voice = 'marin';
-    persona = 'an Australian female BMX race announcer using clear, natural Australian English';
-  }
-
-  return {
-    voice,
-    instructions: [
-      `Perform as ${persona}.`,
-      eventKind === 'pre-race'
-        ? 'This is a concise, energetic pre-race BMX television briefing, not a commercial or dramatic voice-over. Sound informed, anticipatory, and fully present at the track.'
-        : 'This is passionate, high-energy live BMX play-by-play, not a commercial or dramatic voice-over. Sound fully engaged in a real head-to-head race.',
-      'Keep a natural, clearly articulated pace. Create excitement through dynamic emphasis, rising and falling intonation, and punch on rider names and action verbs—not by racing through the words.',
-      'Use quick natural breaths and brief punctuation pauses. Vary the rhythm and emphasis from call to call so the delivery never settles into a repeated robotic pattern.',
-      'Pronounce every rider name clearly as a person’s name, exactly as written in the call. Do not skip, abbreviate, or spell out a name.',
-      'Match the intensity to the event: lively throughout, a clear surge for passes, maximum controlled urgency on the final straight, and a passionate celebration at the finish.',
-      commentarySpeechDirection(eventKind, deliveryStyle),
-      'Project strongly without screaming, distorting words, using fake crowd noise, singing, or imitating any real person.',
-    ].join(' '),
-  };
-}
-
 function commentaryPositionClause(rider) {
   if (rider.rank === 1) {
     return `${rider.name} leads`;
@@ -974,13 +876,25 @@ function commentaryFallbackLine(
     const finisher = event.riders.find(
       (rider) => rider.playerId === event.finishingPlayerId,
     );
-    const remaining = event.riders.find((rider) => !rider.finished);
-    candidates = finisher
-      ? [
-        `${finisher.name} crosses in ${commentaryOrdinal(finisher.rank)}!${remaining ? ` ${remaining.name} is still racing.` : ' The field is complete.'}`,
-        `${commentaryOrdinal(finisher.rank)} belongs to ${finisher.name} at the stripe!${remaining ? ` ${remaining.name} keeps charging.` : ''}`,
-        `${finisher.name} secures ${commentaryOrdinal(finisher.rank)}!${remaining ? ` The race continues for ${remaining.name}.` : ' Everyone is home.'}`,
-      ]
+    const fieldComplete = event.riders.length > 0
+      && event.riders.every((rider) => rider.finished);
+    const finishClauses = [...event.riders]
+      .sort((left, right) => left.rank - right.rank)
+      .map((rider) => {
+        if (rider.rank === 1) return `${rider.name} wins`;
+        return `${rider.name} takes ${commentaryOrdinal(rider.rank)}`;
+      });
+    const fieldResult = finishClauses.length <= 1
+      ? finishClauses[0]
+      : `${finishClauses.slice(0, -1).join(', ')}, and ${finishClauses.at(-1)}`;
+    candidates = fieldComplete
+      ? [`The field is home—${fieldResult}.`]
+      : finisher
+        ? [
+          `${finisher.name} crosses in ${commentaryOrdinal(finisher.rank)}!`,
+          `${commentaryOrdinal(finisher.rank)} belongs to ${finisher.name} at the stripe!`,
+          `${finisher.name} secures ${commentaryOrdinal(finisher.rank)}!`,
+        ]
       : [`Another rider is home as the field races to the line!`];
   } else {
     candidates = [
@@ -1073,7 +987,7 @@ async function generateCommentaryLine({
         'When requiredFocusRiders contains a close-battle pair, make the passing threat clear with wheel-to-wheel, side-by-side, under pressure, or locked-in language for the supplied position. Do not shift attention to a different closeBattles pair.',
         'For lead-change, celebrate the new leader immediately, identify the displaced leader’s current position, and keep the call centered on the fight at the front.',
         'For position-change, state the supplied passing rider, passed rider, and new position with an authentic surge of excitement.',
-        'For finish, celebrate the supplied finishing rider as the winner. For rider-finish, call the supplied finishing rider’s exact rank as they cross and naturally acknowledge anyone still racing.',
+        'For finish, celebrate the supplied finishing rider as the winner. For rider-finish, call only the supplied confirmed finishing result. If every rider is marked finished, give the complete final order and close the race. Never claim that a rider is still racing.',
         `Every candidate must naturally name all required focus riders: ${requiredRiderNames.join(', ') || 'none for this gate call'}.`,
         'Never claim a focused rider is gaining, fading, passing, or closing a gap unless the event facts support that action. It is safe to state their supplied running position and that they remain in the race or chase.',
         'Make racer-versus-racer action the center of the call: running order, pressure, passes, line choice, straights, turns, rhythm, and finish.',
@@ -1176,7 +1090,7 @@ async function generateCommentarySpeech(line, voicePreset, eventKind, deliverySt
       speed: commentarySpeechSpeed(eventKind),
     }),
     signal: AbortSignal.timeout(
-      eventKind === 'preview' || eventKind === 'pre-race' ? 20_000 : 12_000,
+      eventKind === 'preview' ? 30_000 : eventKind === 'pre-race' ? 20_000 : 12_000,
     ),
   });
   if (!response.ok) {

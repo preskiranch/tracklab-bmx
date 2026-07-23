@@ -13,6 +13,7 @@ import {
   browserSpeechWatchdogMs,
   commentaryLineRequestBudgetMs,
   commentaryNeedsImmediateLine,
+  enqueueFinishCommentaryEvents,
   finishCommentaryReleaseTimeoutMs,
   raceStateStopsCommentary,
   shouldInterruptCommentaryForEvent,
@@ -46,6 +47,7 @@ type CommentaryPlaybackPhase = RaceCommentaryPlaybackPhase;
 type CommentarySpeechEventKind = RaceCommentaryEventKind | 'pre-race' | 'preview';
 type CommentaryDeliveryStyle = 'straight' | 'wry' | 'pressure' | 'surge' | 'sprint';
 type ActivePlaybackCancelRef = React.MutableRefObject<(() => void) | null>;
+const commentaryUnlockAudioDataUrl = 'data:audio/wav;base64,UklGRqQCAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YYACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 type PreparedStartSpeech = {
   key: string;
@@ -292,7 +294,7 @@ async function requestAiSpeechBlob(
 
 function commentarySpeechTimeoutMs(eventKind: CommentarySpeechEventKind) {
   if (eventKind === 'preview') {
-    return 20_000;
+    return 32_000;
   }
   if (eventKind === 'pre-race') {
     return 10_000;
@@ -1356,11 +1358,7 @@ export function useRaceCommentary({
 
     if (finishEvents.length > 0) {
       setFinishAnnouncementsComplete(false);
-      const finishEventIds = new Set(finishEvents.map((event) => event.id));
-      queueRef.current = [
-        ...queueRef.current.filter((event) => !finishEventIds.has(event.id)),
-        ...finishEvents,
-      ].slice(-4);
+      queueRef.current = enqueueFinishCommentaryEvents(queueRef.current, finishEvents);
     } else if (
       !activeFinishCallRef.current
       && !queueRef.current.some((event) => (
@@ -1424,13 +1422,26 @@ export function useRaceCommentary({
     const contextPrime = context && context.state !== 'closed'
       ? context.resume().catch(() => undefined)
       : Promise.resolve();
+    const audio = commentaryAudioElement(activeAudioRef);
+    audio.pause();
+    audio.src = commentaryUnlockAudioDataUrl;
+    audio.preload = 'auto';
+    audio.muted = false;
+    audio.volume = 0.01;
+    audio.load();
+    const mediaPrime = audio.play()
+      .then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+      })
+      .catch(() => undefined);
     if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
       const unlockUtterance = new SpeechSynthesisUtterance('');
       unlockUtterance.volume = 0;
       window.speechSynthesis.speak(unlockUtterance);
     }
     return Promise.race([
-      contextPrime.then(() => undefined),
+      Promise.allSettled([contextPrime, mediaPrime]).then(() => undefined),
       new Promise<void>((resolve) => {
         window.setTimeout(resolve, 800);
       }),
@@ -1447,16 +1458,17 @@ export function useRaceCommentary({
   const preview = useCallback(async () => {
     setPlaybackError(null);
     setPlaybackPhase('thinking');
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    activePlaybackCancelRef.current?.();
+    activePlaybackCancelRef.current = null;
     await primeCommentaryPlayback();
     const activePreferences = preferencesRef.current;
     const names = riderNameList(players);
     const line = names
       ? `TrackLab announcer ready. ${names}, get set for the gate.`
       : 'TrackLab announcer ready. Riders, get set for the gate.';
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    activePlaybackCancelRef.current?.();
     const beginSpeaking = () => setPlaybackPhase('speaking');
     let played = false;
     try {

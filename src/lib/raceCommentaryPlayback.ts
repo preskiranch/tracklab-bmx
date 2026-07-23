@@ -1,8 +1,39 @@
 import type { RaceState } from '../types';
-import type { RaceCommentaryEventKind } from './raceCommentary';
+import type { RaceCommentaryEvent, RaceCommentaryEventKind } from './raceCommentary';
 
 export type RaceCommentaryPlaybackPhase = 'idle' | 'thinking' | 'preparing' | 'speaking';
-export const finishCommentaryReleaseTimeoutMs = 12_000;
+export const finishCommentaryReleaseTimeoutMs = 40_000;
+
+function isFinishEvent(event: RaceCommentaryEvent) {
+  return event.kind === 'finish' || event.kind === 'rider-finish';
+}
+
+export function finishEventHasCompleteField(event: RaceCommentaryEvent) {
+  return isFinishEvent(event)
+    && event.riders.length > 0
+    && event.riders.every((rider) => rider.finished);
+}
+
+export function enqueueFinishCommentaryEvents(
+  currentQueue: RaceCommentaryEvent[],
+  incomingEvents: RaceCommentaryEvent[],
+) {
+  const completeFieldEvent = [...incomingEvents]
+    .reverse()
+    .find(finishEventHasCompleteField);
+  if (completeFieldEvent) {
+    return [
+      ...currentQueue.filter((event) => !isFinishEvent(event)),
+      completeFieldEvent,
+    ].slice(-4);
+  }
+
+  const incomingIds = new Set(incomingEvents.map((event) => event.id));
+  return [
+    ...currentQueue.filter((event) => !incomingIds.has(event.id)),
+    ...incomingEvents,
+  ].slice(-4);
+}
 
 export function browserSpeechWatchdogMs(line: string) {
   const wordCount = line.trim().split(/\s+/).filter(Boolean).length;

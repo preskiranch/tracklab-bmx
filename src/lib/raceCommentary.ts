@@ -644,6 +644,21 @@ function localOrdinal(rank: number) {
   return 'fourth';
 }
 
+function localFieldResultLine(riders: RaceCommentaryRiderFact[]) {
+  const clauses = [...riders]
+    .sort((left, right) => left.rank - right.rank)
+    .map((rider) => {
+      if (rider.rank === 1) return `${rider.name} wins`;
+      if (rider.rank === 2) return `${rider.name} takes second`;
+      if (rider.rank === 3) return `${rider.name} takes third`;
+      return `${rider.name} takes fourth`;
+    });
+  const result = clauses.length <= 1
+    ? clauses[0] ?? 'the field is complete'
+    : `${clauses.slice(0, -1).join(', ')}, and ${clauses.at(-1)}`;
+  return `The field is home—${result}.`;
+}
+
 function withRequiredRiderCoverage(
   line: string,
   requiredRiders: RaceCommentaryRiderFact[],
@@ -1060,17 +1075,20 @@ function localCommentaryCandidates(
           : '';
       line = `${hook} ${phase}—${passing.name} ${action} ${passed.name} for ${localOrdinal(passing.rank)}${extra}!`;
     } else if (event.kind === 'rider-finish' && finisher) {
-      const placement = localOrdinal(finisher.rank);
-      const placementAction = commentaryChoice(
-        ['finishes', 'secures', 'crosses in', 'locks down'],
-        event,
-        recentLines,
-        raceLines,
-        variant,
-        'placement-finish',
-      );
-      const remaining = event.riders.find((rider) => !rider.finished);
-      line = `${finisher.name} ${placementAction} ${placement} at the stripe!${remaining ? ` ${remaining.name} is still racing.` : ' The field is complete.'}`;
+      if (event.riders.length > 0 && event.riders.every((rider) => rider.finished)) {
+        line = localFieldResultLine(event.riders);
+      } else {
+        const placement = localOrdinal(finisher.rank);
+        const placementAction = commentaryChoice(
+          ['finishes', 'secures', 'crosses in', 'locks down'],
+          event,
+          recentLines,
+          raceLines,
+          variant,
+          'placement-finish',
+        );
+        line = `${finisher.name} ${placementAction} ${placement} at the stripe!`;
+      }
     } else if (event.kind === 'finish' && (finisher ?? leader)) {
       const winner = finisher ?? leader!;
       const finishHook = commentaryChoice(

@@ -1189,20 +1189,37 @@ test.describe('mobile commentary playback', () => {
     await page.goto('/?track=air-time-bmx');
     await page.getByRole('button', { name: 'Open App' }).click();
     await page.getByRole('button', { name: /Demo/i }).first().click();
-    await page.getByLabel('Announcer voice').selectOption('american-woman');
-    const previewButton = page.getByRole('button', { name: 'Preview selected voice' });
-    await previewButton.click();
-    await expect(page.getByRole('button', { name: 'Preparing voice…' })).toBeVisible();
-    await expect.poll(
-      () => speechEventKinds.includes('preview'),
-      { timeout: 8_000 },
-    ).toBe(true);
+    const previewPresets = [
+      'australian-woman',
+      'australian-man',
+      'american-woman',
+      'american-man',
+      'british-woman',
+      'british-man',
+    ];
+    for (const voicePreset of previewPresets) {
+      await page.getByLabel('Announcer voice').selectOption(voicePreset);
+      const priorPreviewCount = speechPayloads.filter(
+        (payload) => payload.eventKind === 'preview',
+      ).length;
+      await page.getByRole('button', { name: 'Preview selected voice' }).click();
+      await expect(page.getByRole('button', { name: 'Preparing voice…' })).toBeVisible();
+      await expect.poll(
+        () => speechPayloads.filter((payload) => payload.eventKind === 'preview').length,
+        { timeout: 8_000 },
+      ).toBe(priorPreviewCount + 1);
+      await expect(page.getByRole('button', { name: 'Preview selected voice' })).toBeEnabled({
+        timeout: 8_000,
+      });
+    }
     await expect.poll(() => page.evaluate(() => (
       (window as typeof window & {
         __tracklabBufferPlaybackCount?: number;
       }).__tracklabBufferPlaybackCount ?? 0
-    )), { timeout: 8_000 }).toBeGreaterThanOrEqual(1);
-    await expect(page.getByRole('button', { name: 'Preview selected voice' })).toBeEnabled();
+    )), { timeout: 8_000 }).toBeGreaterThanOrEqual(previewPresets.length);
+    expect(speechPayloads
+      .filter((payload) => payload.eventKind === 'preview')
+      .map((payload) => payload.voicePreset)).toEqual(previewPresets);
     expect(await page.evaluate(() => ({
       cadence: (window as typeof window & {
         __tracklabCadenceMediaPlayCount?: number;
@@ -1221,10 +1238,8 @@ test.describe('mobile commentary playback', () => {
       { timeout: 8_000 },
     ).toBe(true);
     expect(preRaceStudioVoiceStartedBeforeReport).toBe(true);
-    expect(speechPayloads.find((payload) => payload.eventKind === 'preview')?.voicePreset)
-      .toBe('american-woman');
     expect(speechPayloads.find((payload) => payload.eventKind === 'pre-race')?.voicePreset)
-      .toBe('american-woman');
+      .toBe('british-man');
     releasePreRaceReport();
     await expect.poll(() => page.evaluate(() => (
       (window as typeof window & {
@@ -1397,7 +1412,7 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(page.getByText('Complete a live Wattbike race on this track to create your personal ghost.')).toBeVisible();
 });
 
-test('completed race waits for every finishing-position call before returning to dashboard analysis', async ({ page }, testInfo) => {
+test('completed race waits for the authoritative final result before returning to dashboard analysis', async ({ page }, testInfo) => {
   test.setTimeout(100_000);
   const finishSpeechPayloads: Array<{
     eventKind?: string;
@@ -1516,19 +1531,16 @@ test('completed race waits for every finishing-position call before returning to
 
   holdFinishSpeech = false;
   releaseHeldFinishSpeech();
-  await expect.poll(() => finishSpeechPayloads.length, { timeout: 12_000 }).toBe(4);
-  expect(finishSpeechPayloads.map((payload) => payload.eventKind)).toEqual([
-    'finish',
-    'rider-finish',
-    'rider-finish',
-    'rider-finish',
-  ]);
-  expect(finishSpeechPayloads.map((payload) => payload.line)).toEqual([
-    expect.stringMatching(/first|wins|takes it|gets there|brings it home|claims the victory/i),
-    expect.stringMatching(/second/i),
-    expect.stringMatching(/third/i),
-    expect.stringMatching(/fourth/i),
-  ]);
+  await expect.poll(
+    () => finishSpeechPayloads.at(-1)?.line ?? '',
+    { timeout: 12_000 },
+  ).toMatch(/wins.*second.*third.*fourth/i);
+  expect(finishSpeechPayloads.length).toBeGreaterThanOrEqual(1);
+  expect(finishSpeechPayloads.length).toBeLessThanOrEqual(2);
+  expect(finishSpeechPayloads.at(-1)?.eventKind).toBe('rider-finish');
+  expect(finishSpeechPayloads.at(-1)?.riderNames).toHaveLength(4);
+  expect(finishSpeechPayloads.map((payload) => payload.line).join(' '))
+    .not.toMatch(/still racing|race continues|keeps charging/i);
   await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/, { timeout: 12_000 });
   await expect(page.getByRole('region', { name: 'Post-race review' })).toHaveCount(0);
   await expect(page.locator('.race-review-screen')).toHaveCount(0);

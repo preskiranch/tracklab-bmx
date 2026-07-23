@@ -279,7 +279,10 @@ describe('race commentary event detection', () => {
       4_300,
     ).find((event) => event.kind === 'rider-finish');
     expect(fourthFinish).toMatchObject({ finishingPlayerId: 4 });
-    expect(localCommentaryLine(fourthFinish!)).toMatch(/Drew.*fourth/i);
+    expect(localCommentaryLine(fourthFinish!)).toMatch(
+      /Avery wins.*Blake takes second.*Casey takes third.*Drew takes fourth/i,
+    );
+    expect(localCommentaryLine(fourthFinish!)).not.toMatch(/still racing|race continues/i);
 
     expect(detectRaceCommentaryEvents(
       tracker,
@@ -319,12 +322,12 @@ describe('race commentary event detection', () => {
       'rider-finish',
     ]);
     expect(finishEvents.map((event) => event.finishingPlayerId)).toEqual([1, 2, 3, 4]);
-    expect(finishEvents.map((event) => localCommentaryLine(event))).toEqual([
-      expect.stringMatching(/Avery.*wins|Avery.*takes it|Avery.*gets there|Avery.*first/i),
-      expect.stringMatching(/Blake.*second/i),
-      expect.stringMatching(/Casey.*third/i),
-      expect.stringMatching(/Drew.*fourth/i),
-    ]);
+    const localLines = finishEvents.map((event) => localCommentaryLine(event));
+    expect(localLines[0]).toMatch(/Avery.*wins|Avery.*takes it|Avery.*gets there|Avery.*first/i);
+    expect(localLines.at(-1)).toMatch(
+      /Avery wins.*Blake takes second.*Casey takes third.*Drew takes fourth/i,
+    );
+    expect(localLines.join(' ')).not.toMatch(/still racing|race continues/i);
   });
 
   it('provides varied local lines when the AI service is unavailable', () => {
