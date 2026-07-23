@@ -61,10 +61,18 @@ type GoogleMarker = {
 
 type GoogleMapCanvasProjection = {
   fromContainerPixelToLatLng: (point: unknown) => { toJSON: () => LatLngLiteral } | null;
+  fromLatLngToDivPixel: (position: unknown) => { x: number; y: number } | null;
+};
+
+type GoogleMapPanes = {
+  floatPane?: HTMLElement;
+  overlayLayer?: HTMLElement;
+  overlayMouseTarget?: HTMLElement;
 };
 
 type GoogleOverlayView = {
   draw: () => void;
+  getPanes: () => GoogleMapPanes | null;
   getProjection: () => GoogleMapCanvasProjection | null;
   onAdd: () => void;
   onRemove: () => void;
@@ -176,6 +184,7 @@ type GoogleMapsRuntime = {
     event?: {
       trigger: (target: unknown, eventName: string) => void;
     };
+    LatLng: new (lat: number, lng: number) => unknown;
     LatLngBounds: new () => GoogleLatLngBounds;
     Geocoder?: new () => GoogleGeocoder;
     Map: GoogleMapConstructor;

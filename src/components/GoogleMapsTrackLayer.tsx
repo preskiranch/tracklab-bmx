@@ -582,7 +582,7 @@ function visualRiderDistanceMeters(distanceMeters: number, cStartBackoffMeters =
   return Math.max(0, cStartVisualDistance(routeDistance, cStartBackoffMeters));
 }
 
-function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: number) {
+function riderFrontTireAnchor(rotationDegrees: number) {
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
   const frontTireX = (riderDrawSize / 2) - riderFrontTireInset;
@@ -592,7 +592,12 @@ function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: n
   const anchorX = (riderCanvasSize / 2) + (localX * Math.cos(radians)) - (groundY * Math.sin(radians));
   const anchorY = (riderCanvasSize / 2) + (localX * Math.sin(radians)) + (groundY * Math.cos(radians));
 
-  return new google.maps.Point(anchorX, anchorY);
+  return { x: anchorX, y: anchorY };
+}
+
+function riderFrontTireAnchorPoint(google: GoogleMapsRuntime, rotationDegrees: number) {
+  const anchor = riderFrontTireAnchor(rotationDegrees);
+  return new google.maps.Point(anchor.x, anchor.y);
 }
 
 function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
@@ -790,29 +795,22 @@ function drawRiderCrankAndLegRig(
   context.stroke();
 }
 
-async function uprightRiderIconUrl(
+function drawUprightRiderCanvas(
+  canvas: HTMLCanvasElement,
+  image: HTMLImageElement,
   player: PlayerSlot,
   rotationDegrees: number,
   animation: RiderAnimationState,
   appearance: RiderMarkerAppearance = 'live',
 ) {
-  const imageUrl = riderRigBaseByColor[player.colorName];
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
-  const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}:${animation.crankStep}:${animation.wheelFrameIndex}`;
-  const cached = cachedRiderIcon(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const image = await loadRiderImage(imageUrl);
-  const canvas = document.createElement('canvas');
   const size = riderCanvasSize;
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext('2d');
   if (!context) {
-    return imageUrl;
+    return false;
   }
 
   context.translate(size / 2, size / 2);
@@ -866,9 +864,175 @@ async function uprightRiderIconUrl(
     context.fillRect(0, 0, size, size);
   }
 
+  return true;
+}
+
+async function uprightRiderIconUrl(
+  player: PlayerSlot,
+  rotationDegrees: number,
+  animation: RiderAnimationState,
+  appearance: RiderMarkerAppearance = 'live',
+) {
+  const imageUrl = riderRigBaseByColor[player.colorName];
+  const orientation = uprightRiderOrientation(rotationDegrees);
+  const leanBucket = riderLeanBucket(rotationDegrees);
+  const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}:${animation.crankStep}:${animation.wheelFrameIndex}`;
+  const cached = cachedRiderIcon(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const image = await loadRiderImage(imageUrl);
+  const canvas = document.createElement('canvas');
+  if (!drawUprightRiderCanvas(canvas, image, player, rotationDegrees, animation, appearance)) {
+    return imageUrl;
+  }
+
   const dataUrl = canvas.toDataURL('image/png');
   rememberRiderIcon(cacheKey, dataUrl);
   return dataUrl;
+}
+
+function createPersistentRiderOverlay(
+  google: GoogleMapsRuntime,
+  map: GoogleMap,
+  player: PlayerSlot,
+  initialPosition: TrackPoint,
+  initialRotationDegrees: number,
+  initialAnimation: RiderAnimationState,
+  initialTitle: string,
+  zIndex: number,
+  appearance: RiderMarkerAppearance,
+): RiderMapMarker | null {
+  if (!google.maps.OverlayView) {
+    return null;
+  }
+
+  const overlay = new google.maps.OverlayView();
+  const element = document.createElement('div');
+  const canvas = document.createElement('canvas');
+  element.className = 'tracklab-rider-overlay';
+  element.title = initialTitle;
+  element.setAttribute('aria-label', initialTitle);
+  element.style.background = `center / contain no-repeat url("${riderFallbackIconByColor[player.colorName]}")`;
+  element.style.height = `${riderCanvasSize}px`;
+  element.style.pointerEvents = 'none';
+  element.style.position = 'absolute';
+  element.style.width = `${riderCanvasSize}px`;
+  element.style.willChange = 'left, top, transform';
+  element.style.zIndex = String(zIndex);
+  canvas.height = riderCanvasSize;
+  canvas.style.display = 'block';
+  canvas.width = riderCanvasSize;
+  element.appendChild(canvas);
+
+  let position = initialPosition;
+  let rotationDegrees = initialRotationDegrees;
+  let animation = initialAnimation;
+  let visualKey = '';
+  let frameRequest: number | null = null;
+  let riderImage: HTMLImageElement | null = null;
+  let disposed = false;
+
+  const drawPosition = () => {
+    const projection = overlay.getProjection();
+    if (!projection) {
+      return;
+    }
+
+    const pixel = projection.fromLatLngToDivPixel(new google.maps.LatLng(position.lat, position.lng));
+    if (!pixel) {
+      return;
+    }
+
+    const anchor = riderFrontTireAnchor(rotationDegrees);
+    element.style.left = `${pixel.x}px`;
+    element.style.top = `${pixel.y}px`;
+    element.style.transform = `translate3d(${-anchor.x}px, ${-anchor.y}px, 0)`;
+  };
+
+  const scheduleCanvasDraw = () => {
+    if (disposed || !riderImage || frameRequest != null) {
+      return;
+    }
+
+    frameRequest = window.requestAnimationFrame(() => {
+      frameRequest = null;
+      if (disposed || !riderImage) {
+        return;
+      }
+
+      if (drawUprightRiderCanvas(
+        canvas,
+        riderImage,
+        player,
+        rotationDegrees,
+        animation,
+        appearance,
+      )) {
+        element.style.background = 'none';
+      }
+    });
+  };
+
+  const applyVisual = (nextRotationDegrees: number, nextAnimation: RiderAnimationState) => {
+    const orientation = uprightRiderOrientation(nextRotationDegrees);
+    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotationDegrees)}:${nextAnimation.crankStep}:${nextAnimation.wheelFrameIndex}`;
+    if (nextVisualKey === visualKey) {
+      return;
+    }
+
+    visualKey = nextVisualKey;
+    rotationDegrees = nextRotationDegrees;
+    animation = nextAnimation;
+    drawPosition();
+    scheduleCanvasDraw();
+  };
+
+  overlay.onAdd = () => {
+    const panes = overlay.getPanes();
+    const pane = panes?.overlayMouseTarget ?? panes?.floatPane ?? panes?.overlayLayer;
+    pane?.appendChild(element);
+    drawPosition();
+  };
+  overlay.draw = drawPosition;
+  overlay.onRemove = () => {
+    element.remove();
+    if (frameRequest != null) {
+      window.cancelAnimationFrame(frameRequest);
+      frameRequest = null;
+    }
+  };
+
+  void loadRiderImage(riderRigBaseByColor[player.colorName])
+    .then((image) => {
+      if (disposed) {
+        return;
+      }
+      riderImage = image;
+      scheduleCanvasDraw();
+    })
+    .catch(() => undefined);
+
+  overlay.setMap(map);
+  applyVisual(initialRotationDegrees, initialAnimation);
+
+  return {
+    setMap: (nextMap) => {
+      disposed = nextMap == null;
+      overlay.setMap(nextMap);
+    },
+    setLabel: () => undefined,
+    setPosition: (nextPosition) => {
+      position = nextPosition;
+      drawPosition();
+    },
+    setVisual: applyVisual,
+    setTitle: (nextTitle) => {
+      element.title = nextTitle;
+      element.setAttribute('aria-label', nextTitle);
+    },
+  };
 }
 
 function createRiderMapMarker(
@@ -882,6 +1046,21 @@ function createRiderMapMarker(
   zIndex = 760 + player.id,
   appearance: RiderMarkerAppearance = 'live',
 ): RiderMapMarker {
+  const persistentOverlay = createPersistentRiderOverlay(
+    google,
+    map,
+    player,
+    position,
+    rotationDegrees,
+    animation,
+    title,
+    zIndex,
+    appearance,
+  );
+  if (persistentOverlay) {
+    return persistentOverlay;
+  }
+
   let iconVersion = 0;
   let visualKey = '';
   const marker = new google.maps.Marker({
