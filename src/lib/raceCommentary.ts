@@ -43,6 +43,33 @@ export type RaceCommentaryEvent = {
   riders: RaceCommentaryRiderFact[];
 };
 
+export function maximumRaceCommentaryEventAgeMs(kind: RaceCommentaryEventKind) {
+  if (kind === 'race-start') {
+    return 2_500;
+  }
+  if (kind === 'finish') {
+    return 2_000;
+  }
+  if (kind === 'final-push') {
+    return 3_500;
+  }
+  return 4_500;
+}
+
+export function raceCommentaryEventIsFresh(
+  event: RaceCommentaryEvent,
+  now = Date.now(),
+) {
+  return now - event.occurredAt <= maximumRaceCommentaryEventAgeMs(event.kind);
+}
+
+export function selectLiveRaceCommentaryEvent(events: RaceCommentaryEvent[]) {
+  return events.find((event) => event.kind === 'finish')
+    ?? events.find((event) => event.kind === 'race-start')
+    ?? events.at(-1)
+    ?? null;
+}
+
 export type RaceCommentarySnapshot = {
   raceState: RaceState;
   trackName: string;

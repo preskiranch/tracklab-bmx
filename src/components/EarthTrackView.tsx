@@ -69,8 +69,6 @@ type EarthTrackViewProps = {
   cStartOffsetsByPlayer: CStartOffsetsByPlayer;
   finishCountdownSeconds: number | null;
   reactionTimesByPlayer: ReactionTimesByPlayer;
-  commentaryLine: string | null;
-  commentaryPlaybackStatus: 'idle' | 'thinking' | 'speaking';
   earthAngle: number;
   earthHeading: number;
   earthCenter: TrackPoint | null;
@@ -163,8 +161,6 @@ export function EarthTrackView({
   cStartOffsetsByPlayer,
   finishCountdownSeconds,
   reactionTimesByPlayer,
-  commentaryLine,
-  commentaryPlaybackStatus,
   earthAngle,
   earthHeading,
   earthCenter,
@@ -386,17 +382,6 @@ export function EarthTrackView({
           <div className="race-staging-countdown race-finish-countdown" role="status" aria-live="polite">
             <strong>{finishCountdownSeconds}</strong>
             <span>Race closes after the first finisher</span>
-          </div>
-        )}
-
-        {raceViewFullscreen && commentaryLine && (
-          <div
-            className={`race-commentary-caption ${commentaryPlaybackStatus}`}
-            role="status"
-            aria-live="polite"
-          >
-            <span>AI Announcer</span>
-            <strong>{commentaryLine}</strong>
           </div>
         )}
 

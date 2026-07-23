@@ -2522,6 +2522,7 @@ export default function App() {
   const raceCommentary = useRaceCommentary({
     preferences: raceCommentaryPreferences,
     raceState,
+    startGateActive: startGateStatus.active,
     trackName: effectiveTrack.name,
     raceLengthMeters: effectiveRouteLengthMeters,
     players: racePlayers,
@@ -6662,8 +6663,6 @@ export default function App() {
                   cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                   finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
-                  commentaryLine={raceCommentary.currentLine}
-                  commentaryPlaybackStatus={raceCommentary.playbackStatus}
                   earthAngle={earthAngle}
                   earthHeading={earthHeading}
                   earthCenter={earthCenter}

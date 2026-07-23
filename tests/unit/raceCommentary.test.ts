@@ -3,6 +3,8 @@ import {
   createRaceCommentaryTracker,
   detectRaceCommentaryEvents,
   localCommentaryLine,
+  raceCommentaryEventIsFresh,
+  selectLiveRaceCommentaryEvent,
   type RaceCommentarySnapshot,
 } from '../../src/lib/raceCommentary';
 import type { PlayerSlot, RiderState } from '../../src/types';
@@ -161,5 +163,30 @@ describe('race commentary event detection', () => {
     );
 
     expect(events[0].kind).toBe('finish');
+    expect(selectLiveRaceCommentaryEvent(events)?.kind).toBe('finish');
+  });
+
+  it('keeps the gate call ahead of an early position call', () => {
+    const tracker = createRaceCommentaryTracker();
+    const events = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([rider(1, 1), rider(2, 0)]),
+      1_000,
+    );
+
+    expect(events.map((event) => event.kind)).toEqual(['race-start', 'positions-established']);
+    expect(selectLiveRaceCommentaryEvent(events)?.kind).toBe('race-start');
+  });
+
+  it('drops race calls that are no longer live', () => {
+    const tracker = createRaceCommentaryTracker();
+    const [startEvent] = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([rider(1), rider(2)]),
+      1_000,
+    );
+
+    expect(raceCommentaryEventIsFresh(startEvent, 3_500)).toBe(true);
+    expect(raceCommentaryEventIsFresh(startEvent, 3_501)).toBe(false);
   });
 });

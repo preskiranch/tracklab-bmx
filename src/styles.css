@@ -2523,44 +2523,6 @@ input:focus {
   font-weight: 850;
 }
 
-.race-commentary-caption {
-  position: absolute;
-  top: 78px;
-  left: 50%;
-  z-index: 1210;
-  display: grid;
-  width: min(680px, calc(100% - 180px));
-  gap: 3px;
-  padding: 10px 14px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.26);
-  border-radius: 8px;
-  background: rgba(4, 10, 18, 0.84);
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.3);
-  color: #ffffff;
-  text-align: center;
-  transform: translateX(-50%);
-  pointer-events: none;
-  backdrop-filter: blur(9px);
-}
-
-.race-commentary-caption span {
-  color: #8ee837;
-  font-size: 10px;
-  font-weight: 950;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-}
-
-.race-commentary-caption strong {
-  font-size: clamp(15px, 1.45vw, 21px);
-  line-height: 1.2;
-  text-wrap: balance;
-}
-
-.race-commentary-caption.thinking {
-  opacity: 0.76;
-}
-
 .race-rider-overlay {
   position: absolute;
   left: var(--overlay-x);
@@ -2780,16 +2742,6 @@ input:focus {
 }
 
 @media (max-width: 780px) {
-  .race-commentary-caption {
-    top: 72px;
-    width: min(520px, calc(100% - 96px));
-    padding: 8px 10px 9px;
-  }
-
-  .race-commentary-caption strong {
-    font-size: 14px;
-  }
-
   .race-rider-overlay {
     width: min(var(--overlay-width), calc(100% - 16px));
     height: min(var(--overlay-height), calc(100% - 16px));

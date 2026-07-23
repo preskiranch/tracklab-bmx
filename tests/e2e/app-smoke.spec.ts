@@ -337,6 +337,8 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(announcerVoice).toContainText('British man — England, UK');
   await announcerVoice.selectOption('british-man');
   await expect(announcerVoice).toHaveValue('british-man');
+  await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
+  await expect(page.getByText('AI Announcer', { exact: true })).toHaveCount(0);
 
   await page.screenshot({
     fullPage: false,
@@ -572,6 +574,7 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
 
 test('start here race action enters fullscreen race view', async ({ page }, testInfo) => {
   test.setTimeout(45_000);
+  let commentarySpeechRequests = 0;
   const authUser = {
     id: 'quick-start-racer',
     profileKey: 'user:quick-start-racer',
@@ -589,6 +592,25 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ user: authUser }),
+    });
+  });
+  await page.route('**/api/commentary/config', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ aiAvailable: true }),
+    });
+  });
+  await page.route('**/api/commentary/speech', async (route) => {
+    commentarySpeechRequests += 1;
+    await route.fulfill({
+      contentType: 'audio/mpeg',
+      path: 'public/assets/uci-random-start.mp3',
+    });
+  });
+  await page.route('**/api/commentary/line', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ line: 'The race order is changing on the next straight.' }),
     });
   });
   await page.addInitScript(() => {
@@ -658,8 +680,10 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(page.locator('.start-tree-light')).toHaveCount(0);
   const riderPanel = page.locator('.race-rider-overlay');
   await expect(riderPanel).toBeVisible();
+  await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
+  await expect.poll(() => commentarySpeechRequests, { timeout: 5_000 }).toBeGreaterThan(0);
 
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const riderPanelHandle = page.getByRole('button', { name: 'Move rider panel', exact: true });
