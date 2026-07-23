@@ -292,8 +292,11 @@ async function requestAiSpeechBlob(
 }
 
 function commentarySpeechTimeoutMs(eventKind: CommentarySpeechEventKind) {
-  if (eventKind === 'preview' || eventKind === 'pre-race') {
+  if (eventKind === 'preview') {
     return 20_000;
+  }
+  if (eventKind === 'pre-race') {
+    return 5_500;
   }
   if (eventKind === 'race-start') {
     return 15_000;
@@ -1361,16 +1364,19 @@ export function useRaceCommentary({
     audio.muted = false;
     audio.volume = 0.0001;
     audio.load();
+    const primingSource = audio.src;
     const mediaPrime = audio.play()
       .catch(() => {
         // The shared Web Audio context remains the primary iPad/mobile path.
       })
       .finally(() => {
-        audio.pause();
-        try {
-          audio.currentTime = 0;
-        } catch {
-          // Metadata may not be ready yet.
+        if (audio.src === primingSource) {
+          audio.pause();
+          try {
+            audio.currentTime = 0;
+          } catch {
+            // Metadata may not be ready yet.
+          }
         }
         audio.volume = preferencesRef.current.volume;
         audio.muted = false;
@@ -1381,7 +1387,12 @@ export function useRaceCommentary({
       unlockUtterance.volume = 0;
       window.speechSynthesis.speak(unlockUtterance);
     }
-    return Promise.allSettled([cuePrime, mediaPrime]).then(() => undefined);
+    return Promise.race([
+      Promise.allSettled([cuePrime, mediaPrime]).then(() => undefined),
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 1_500);
+      }),
+    ]);
   }, []);
 
   const preview = useCallback(async () => {

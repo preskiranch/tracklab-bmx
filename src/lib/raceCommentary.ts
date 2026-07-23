@@ -992,7 +992,7 @@ function localCommentaryCandidates(
       line = `${headline}—${leader.name} ${leadAction}! ${second.name} ${chaseAction}${rearBattle}.`;
     } else if (event.kind === 'position-change' && passing && passed) {
       const hook = commentaryChoice(
-        ['There is the move', 'Position change', 'The pressure pays off', 'That battle breaks open', 'The order changes', 'A pass develops', 'Here comes the challenge', 'The opening appears'],
+        ['There is the move', 'The pressure pays off', 'The order changes', 'Here comes the challenge'],
         event,
         recentLines,
         raceLines,
@@ -1019,7 +1019,7 @@ function localCommentaryCandidates(
     } else if (event.kind === 'rider-finish' && finisher) {
       const placement = localOrdinal(finisher.rank);
       const placementAction = commentaryChoice(
-        ['finishes', 'is home in', 'secures', 'crosses in', 'locks down', 'takes'],
+        ['finishes', 'secures', 'crosses in', 'locks down'],
         event,
         recentLines,
         raceLines,
@@ -1031,7 +1031,7 @@ function localCommentaryCandidates(
     } else if (event.kind === 'finish' && (finisher ?? leader)) {
       const winner = finisher ?? leader!;
       const finishHook = commentaryChoice(
-        ['At the stripe', 'Across the line', 'Race complete', 'That settles it', 'The win is decided', 'Home to the line', 'Checkered and complete', 'The result is in'],
+        ['At the stripe', 'Across the line', 'That settles it', 'The win is decided', 'The result is in'],
         event,
         recentLines,
         raceLines,
@@ -1041,7 +1041,7 @@ function localCommentaryCandidates(
       line = `${finishHook}—${winner.name} ${commentaryChoice(winActions, event, recentLines, raceLines, variant, 'finish-action')} at ${event.trackName}!`;
     } else if (event.kind === 'pro-set' && leader) {
       const action = commentaryChoice(
-        ['commits to the Pro Set', 'takes the blue Pro line', 'chooses the bigger line', 'takes the alternate route', 'goes Pro through the split', 'selects the Pro branch', 'works the blue line', 'takes on the Pro side'],
+        ['commits to the Pro Set', 'takes the blue Pro line', 'goes Pro through the split', 'works the blue line'],
         event,
         recentLines,
         raceLines,
@@ -1051,7 +1051,7 @@ function localCommentaryCandidates(
       line = `${leader.name} ${action}${second ? `; ${second.name} ${commentaryChoice(chaseActions, event, recentLines, raceLines, variant, 'pro-chase')}` : ''}.`;
     } else if (event.kind === 'final-push' && leader) {
       const finalHook = commentaryChoice(
-        ['Final charge', 'One last drive', 'The stripe is coming', 'Last straight now', 'The race turns for home', 'Everything to the line', 'The finish is in sight', 'No time left to wait'],
+        ['Final charge', 'The stripe is coming', 'The race turns for home', 'Everything to the line'],
         event,
         recentLines,
         raceLines,

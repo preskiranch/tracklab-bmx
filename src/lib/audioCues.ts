@@ -23,6 +23,22 @@ export type UciVoiceStartResult = {
   source: UciVoiceStartSource;
 };
 
+function settleWithin<T>(promise: Promise<T>, timeoutMs: number, fallback: T) {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const finish = (value: T) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeoutId);
+      resolve(value);
+    };
+    const timeoutId = window.setTimeout(() => finish(fallback), timeoutMs);
+    promise.then(finish).catch(() => finish(fallback));
+  });
+}
+
 function getAudioContext() {
   if (audioContext && audioContext.state !== 'closed') {
     return audioContext;
@@ -189,10 +205,12 @@ export async function primeAudioCues() {
     preloadTasks.push(raceAmbiencePrimePromise);
   }
 
-  await Promise.allSettled(preloadTasks);
+  await Promise.allSettled(
+    preloadTasks.map((task) => settleWithin(Promise.resolve(task), 1_200, undefined)),
+  );
 
   if (context && context.state === 'running') {
-    await loadUciVoiceBuffer(context);
+    await settleWithin(loadUciVoiceBuffer(context), 2_500, null);
   }
 }
 
@@ -200,7 +218,7 @@ export async function startBmxEventAmbience(volume = 0.14) {
   const ambience = getRaceAmbienceAudio();
   const pendingPrime = raceAmbiencePrimePromise;
   if (pendingPrime) {
-    await pendingPrime;
+    await settleWithin(pendingPrime, 1_200, undefined);
   }
 
   ambience.loop = true;
@@ -306,20 +324,16 @@ export function stopStartGateAudio() {
   window.speechSynthesis?.cancel();
 }
 
-export async function playUciRandomStartVoice(timeoutMs = 8000): Promise<UciVoiceStartResult> {
+export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoiceStartResult> {
   stopStartGateAudio();
   const context = getAudioContext();
 
   if (context && context.state !== 'running' && context.state !== 'closed') {
-    try {
-      await context.resume();
-    } catch {
-      // Fall back to the primed media element and speech synthesis below.
-    }
+    await settleWithin(context.resume(), 1_200, undefined);
   }
 
   if (context?.state === 'running') {
-    const voiceBuffer = await loadUciVoiceBuffer(context);
+    const voiceBuffer = await settleWithin(loadUciVoiceBuffer(context), 2_500, null);
     if (voiceBuffer) {
       const source = context.createBufferSource();
       source.buffer = voiceBuffer;

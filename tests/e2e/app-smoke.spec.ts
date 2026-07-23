@@ -676,6 +676,9 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     HTMLMediaElement.prototype.play = function (...args: Parameters<HTMLMediaElement['play']>) {
       if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience.mp3')) {
         audioWindow.__tracklabAmbiencePlayCount = (audioWindow.__tracklabAmbiencePlayCount ?? 0) + 1;
+        return new Promise<void>(() => {
+          // Simulate the unresolved media promise observed on some mobile browsers.
+        });
       }
       return Reflect.apply(originalMediaPlay, this, args);
     };
@@ -771,6 +774,11 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     )),
     { timeout: 5_000 },
   ).toBe(true);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabVoiceStartCount?: number;
+    }).__tracklabVoiceStartCount ?? 0
+  )), { timeout: 5_000 }).toBeGreaterThan(0);
   await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (
       payload.eventKind === 'race-start'

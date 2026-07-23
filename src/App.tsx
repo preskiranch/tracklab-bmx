@@ -5236,12 +5236,15 @@ export default function App() {
       lightIndex: null,
     });
 
-    await primeAudioCues();
-    if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
-      return;
-    }
+    void primeAudioCues().catch(() => undefined);
 
-    const voiceStart = await playUciRandomStartVoice();
+    const voiceStart = await playUciRandomStartVoice().catch(() => {
+      playStartGateTone('tick');
+      return {
+        startedAt: Date.now(),
+        source: 'fallback' as const,
+      };
+    });
     if (sequenceId !== startGateSequenceIdRef.current || selectedTrackIdRef.current !== startingTrackId) {
       return;
     }
