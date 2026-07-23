@@ -788,6 +788,7 @@ function sanitizeUserDataPatch(value) {
   if (value.raceViewPreferences && typeof value.raceViewPreferences === 'object') {
     const cameras = value.raceViewPreferences.earthCamerasByTrack;
     const overlays = value.raceViewPreferences.riderOverlaysByTrack;
+    const demoRiderNames = value.raceViewPreferences.demoRiderNames;
     const commentary = value.raceViewPreferences.commentary;
     const commentaryModel = sanitizeCommentaryModel(commentary?.model);
     const commentaryVoicePreset = sanitizeCommentaryVoicePreset(commentary?.voicePreset);
@@ -798,6 +799,15 @@ function sanitizeUserDataPatch(value) {
         : {},
       riderOverlaysByTrack: overlays && typeof overlays === 'object' && !Array.isArray(overlays)
         ? Object.fromEntries(Object.entries(overlays).slice(0, 500))
+        : {},
+      demoRiderNames: demoRiderNames && typeof demoRiderNames === 'object' && !Array.isArray(demoRiderNames)
+        ? Object.fromEntries(
+          Object.entries(demoRiderNames)
+            .filter(([playerId]) => ['1', '2', '3', '4'].includes(playerId))
+            .filter(([, name]) => typeof name === 'string')
+            .map(([playerId, name]) => [playerId, sanitizeText(name, '', 64)])
+            .filter(([, name]) => Boolean(name)),
+        )
         : {},
       commentary: {
         enabled: commentary?.enabled == null ? true : Boolean(commentary.enabled),

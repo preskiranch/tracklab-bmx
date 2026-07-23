@@ -84,6 +84,7 @@ export type PlayerId = 1 | 2 | 3 | 4;
 export type PlayerColorName = 'lime' | 'red' | 'blue' | 'yellow';
 export type SplitBranchChoice = 'a' | 'b';
 export type TrackZoneBranchSelections = Partial<Record<string, SplitBranchChoice>>;
+export type DemoRiderNames = Partial<Record<PlayerId, string>>;
 
 export type PlayerSlot = {
   id: PlayerId;
@@ -578,6 +579,7 @@ export type RaceViewPreferences = {
   cameraLocked: boolean;
   earthCamerasByTrack: Record<string, EarthCamera>;
   riderOverlaysByTrack: Record<string, RaceRiderOverlayLayout>;
+  demoRiderNames: DemoRiderNames;
   commentary: RaceCommentaryPreferences;
 };
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { defaultPlayerSlots, maxPlayers } from '../data';
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 import { wattbikeProAirHighWattsFromCadence } from '../game/wattbikePowerTable';
-import type { BikeSample, PlayerSlot } from '../types';
+import type { BikeSample, DemoRiderNames, PlayerSlot } from '../types';
 
 export const demoDeviceIds = [91001, 91002, 91003, 91004] as const;
 
@@ -145,11 +145,14 @@ function createProfiles(bikeCount: number, raceSeed: number): DemoProfile[] {
   });
 }
 
-export function createDemoPlayers(bikeCount: number): PlayerSlot[] {
+export function createDemoPlayers(
+  bikeCount: number,
+  riderNames: DemoRiderNames = {},
+): PlayerSlot[] {
   const safeCount = clamp(Math.round(bikeCount), 1, maxPlayers);
   return defaultPlayerSlots.slice(0, safeCount).map((slot, index) => ({
     ...slot,
-    name: `Demo Rider ${index + 1}`,
+    name: riderNames[slot.id] ?? `Demo Rider ${index + 1}`,
     deviceId: demoDeviceIds[index],
   }));
 }

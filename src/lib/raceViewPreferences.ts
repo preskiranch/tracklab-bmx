@@ -1,5 +1,6 @@
 import { raceViewPreferencesStorageKey } from '../data';
 import type {
+  DemoRiderNames,
   EarthCamera,
   RaceCommentaryModel,
   RaceCommentaryPreferences,
@@ -38,6 +39,7 @@ const commentaryVoices = new Set<RaceCommentaryVoicePreset>([
   'british-woman',
   'british-man',
 ]);
+const demoRiderIds = [1, 2, 3, 4] as const;
 
 function finiteNumber(value: unknown, fallback: number) {
   const number = Number(value);
@@ -113,6 +115,25 @@ export function normalizeRaceCommentaryPreferences(value: unknown): RaceCommenta
   };
 }
 
+export function normalizeDemoRiderNames(value: unknown): DemoRiderNames {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const candidates = value as Record<string, unknown>;
+  return Object.fromEntries(
+    demoRiderIds.flatMap((playerId) => {
+      const candidate = candidates[playerId];
+      if (typeof candidate !== 'string') {
+        return [];
+      }
+
+      const name = candidate.trim().replace(/\s+/g, ' ').slice(0, 64);
+      return name ? [[playerId, name]] : [];
+    }),
+  ) as DemoRiderNames;
+}
+
 export function normalizeRaceViewPreferences(
   value: unknown,
   fallbackCameras: Record<string, EarthCamera> = {},
@@ -143,6 +164,7 @@ export function normalizeRaceViewPreferences(
         .filter(([trackId]) => trackId.trim().length > 0)
         .map(([trackId, layout]) => [trackId, normalizeRaceRiderOverlayLayout(layout)]),
     ),
+    demoRiderNames: normalizeDemoRiderNames(preferences.demoRiderNames),
     commentary: normalizeRaceCommentaryPreferences(preferences.commentary),
   };
 }

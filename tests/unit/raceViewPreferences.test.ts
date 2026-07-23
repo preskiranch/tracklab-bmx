@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   defaultRaceCommentaryPreferences,
   defaultRaceRiderOverlayLayout,
+  normalizeDemoRiderNames,
   normalizeRaceCommentaryPreferences,
   normalizeRaceRiderOverlayLayout,
   normalizeRaceViewPreferences,
@@ -72,5 +73,18 @@ describe('race view preferences', () => {
     });
     expect(commentary.recentLines).toHaveLength(12);
     expect(commentary.recentLines.at(-1)).toBe('Call 13');
+  });
+
+  it('normalizes four per-account demo rider names', () => {
+    expect(normalizeDemoRiderNames({
+      1: '  Maya   Torres ',
+      2: 'Jordan Lee',
+      4: 'R'.repeat(80),
+      5: 'Not a valid lane',
+    })).toEqual({
+      1: 'Maya Torres',
+      2: 'Jordan Lee',
+      4: 'R'.repeat(64),
+    });
   });
 });

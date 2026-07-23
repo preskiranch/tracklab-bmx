@@ -669,6 +669,11 @@ test('start here race action enters fullscreen race view', async ({ page }, test
 
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
+  const firstDemoRiderName = page.getByLabel('Name for player 1');
+  await expect(firstDemoRiderName).toHaveValue('Demo Rider 1');
+  await firstDemoRiderName.fill('Maya Torres');
+  await firstDemoRiderName.press('Enter');
+  await expect(firstDemoRiderName).toHaveValue('Maya Torres');
 
   const startAction = page.locator('.workflow-step.primary-action');
   await expect(startAction).toContainText('Start Demo Race');
@@ -680,6 +685,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(page.locator('.start-tree-light')).toHaveCount(0);
   const riderPanel = page.locator('.race-rider-overlay');
   await expect(riderPanel).toBeVisible();
+  await expect(riderPanel.getByText('Maya Torres', { exact: true })).toBeVisible();
   await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);

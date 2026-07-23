@@ -213,6 +213,11 @@ describe('cloud API trust boundaries', () => {
               locked: true,
             },
           },
+          demoRiderNames: {
+            1: 'Maya Torres',
+            2: 'Jordan Lee',
+            5: 'Invalid Lane',
+          },
           commentary: {
             enabled: true,
             model: 'gpt-5.6-sol',
@@ -249,6 +254,10 @@ describe('cloud API trust boundaries', () => {
             height: 190,
             locked: true,
           },
+        },
+        demoRiderNames: {
+          1: 'Maya Torres',
+          2: 'Jordan Lee',
         },
         commentary: {
           enabled: true,

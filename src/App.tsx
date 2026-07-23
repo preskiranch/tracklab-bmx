@@ -178,6 +178,7 @@ import type {
   AppMode,
   BikeProfile,
   ConnectedBikeDevice,
+  DemoRiderNames,
   DistanceUnit,
   DraftTrackSplit,
   EarthCamera,
@@ -1391,6 +1392,7 @@ export default function App() {
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
+  const [demoRiderNames, setDemoRiderNames] = useState<DemoRiderNames>({});
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
   const [demoRaceStartedAt, setDemoRaceStartedAt] = useState<number | null>(null);
   const [demoSignalsStopped, setDemoSignalsStopped] = useState(false);
@@ -2164,7 +2166,10 @@ export default function App() {
     () => Boolean(draftSplitBuilder && splitSectionFromDraft(draftSplitBuilder)),
     [draftSplitBuilder],
   );
-  const demoPlayers = useMemo(() => createDemoPlayers(demoBikeCount), [demoBikeCount]);
+  const demoPlayers = useMemo(
+    () => createDemoPlayers(demoBikeCount, demoRiderNames),
+    [demoBikeCount, demoRiderNames],
+  );
   const connectedBikeSamples = useMemo(() => {
     const next = new Map(bridge.samplesByDevice);
     bluetooth.samplesByDevice.forEach((sample, deviceId) => {
@@ -2290,6 +2295,7 @@ export default function App() {
     setEarthCamerasByTrack(normalized.earthCamerasByTrack);
     setRaceCameraLocked(normalized.cameraLocked);
     setRiderOverlaysByTrack(normalized.riderOverlaysByTrack);
+    setDemoRiderNames(normalized.demoRiderNames);
     setRaceCommentaryPreferences(normalized.commentary);
   }, []);
   const persistRaceViewPreferences = useCallback((preferences: RaceViewPreferences) => {
@@ -3760,6 +3766,23 @@ export default function App() {
         : dedupeBikeProfiles([...next, createBikeProfile(deviceId, playerId - 1, safeName)]);
     });
   }, [sessionPlayers]);
+
+  const renameDemoPlayer = useCallback((playerId: PlayerSlot['id'], name: string) => {
+    const safeName = normalizeBikeName(name);
+    if (!safeName) {
+      return;
+    }
+
+    const nextNames = {
+      ...raceViewPreferencesRef.current.demoRiderNames,
+      [playerId]: safeName,
+    };
+    setDemoRiderNames(nextNames);
+    persistRaceViewPreferences({
+      ...raceViewPreferencesRef.current,
+      demoRiderNames: nextNames,
+    });
+  }, [persistRaceViewPreferences]);
 
   const assignDevice = useCallback((playerId: PlayerSlot['id'], deviceId: number | null) => {
     const player = sessionPlayers.find((item) => item.id === playerId);
@@ -6526,13 +6549,13 @@ export default function App() {
           devices={demoMode ? undefined : connectedBikeDevices}
           onAssign={demoMode ? () => undefined : assignDevice}
           onAutoAssign={demoMode ? () => undefined : autoAssign}
-          onRename={demoMode ? undefined : renamePlayer}
+          onRename={demoMode ? renameDemoPlayer : renamePlayer}
           onBluetoothConnect={showBluetoothPairing && !liveBikeAccessLocked ? bluetooth.connectBike : undefined}
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}
           bluetoothDeviceCount={bluetooth.connectedCount}
           title={demoMode ? 'Demo Riders' : 'Connected Bikes'}
-          subtitle={demoMode ? `${demoBikeCount} simulated / max ${maxPlayers}` : undefined}
+          subtitle={demoMode ? `${demoBikeCount} simulated / edit names below` : undefined}
           emptyMessage={pairingEmptyMessage}
           deviceLabel={demoMode ? 'Demo device' : pairingDeviceLabel}
           readOnly={demoMode}

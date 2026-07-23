@@ -168,7 +168,7 @@ export function PairingRail({
                   P{player.id}
                 </span>
                 <div>
-                  {readOnly || !onRename ? (
+                  {!onRename ? (
                     <h3>{player.name}</h3>
                   ) : (
                     <input

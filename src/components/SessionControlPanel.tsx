@@ -1036,7 +1036,7 @@ export function SessionControlPanel({
         </div>
         <p className="panel-helper">
           {demoMode
-            ? 'Demo generates race data for testing maps, zones, ghosts, and summaries.'
+            ? 'Demo generates race data for testing. Edit each simulated rider’s name in the Demo Riders cards.'
             : 'Live Bikes uses connected Wattbikes for the same race engine and BMX rollout logic.'}
         </p>
 
