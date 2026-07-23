@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  commentaryLineRepeatsRecentRaceSection,
   commentaryLineSimilarity,
   commentaryLineWordCount,
   selectNovelCommentaryLine,
@@ -43,5 +44,16 @@ describe('adaptive commentary variation', () => {
 
     expect(selectNovelCommentaryLine(candidates, [], () => 0)).toBe(candidates[0]);
     expect(selectNovelCommentaryLine(candidates, [], () => 0.999)).toBe(candidates[2]);
+  });
+
+  it('recognizes repeated course-section wording even when the preposition changes', () => {
+    expect(commentaryLineRepeatsRecentRaceSection(
+      'Avery is flying down the first straight.',
+      ['Blake has pressure behind in the first straight.'],
+    )).toBe(true);
+    expect(commentaryLineRepeatsRecentRaceSection(
+      'Casey holds third and stays in this race.',
+      ['Blake has pressure behind in the first straight.'],
+    )).toBe(false);
   });
 });

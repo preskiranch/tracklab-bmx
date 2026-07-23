@@ -12,6 +12,32 @@ export function commentaryLineWordCount(line) {
   return normalizedTokens(line).length;
 }
 
+const raceSectionPatterns = Object.freeze({
+  'first-straight': /\b(?:first|opening)\s+straight(?:away)?\b/i,
+  'turn-one': /\b(?:turn|corner)\s+(?:one|1|first)\b|\bfirst\s+(?:turn|corner)\b/i,
+  'second-straight': /\bsecond\s+straight(?:away)?\b/i,
+  'rhythm-section': /\brhythm(?:\s+section)?\b/i,
+  'final-turn': /\b(?:final|last)\s+(?:turn|corner)\b/i,
+  'last-straight': /\b(?:final|last|home)\s+straight(?:away)?\b/i,
+});
+
+function raceSectionsInLine(line) {
+  return Object.entries(raceSectionPatterns)
+    .filter(([, pattern]) => pattern.test(String(line || '')))
+    .map(([section]) => section);
+}
+
+export function commentaryLineRepeatsRecentRaceSection(line, recentLines = []) {
+  const sections = raceSectionsInLine(line);
+  if (sections.length === 0) {
+    return false;
+  }
+  const recentSections = new Set(
+    recentLines.slice(-4).flatMap((recentLine) => raceSectionsInLine(recentLine)),
+  );
+  return sections.some((section) => recentSections.has(section));
+}
+
 function ngrams(tokens, size) {
   if (tokens.length < size) {
     return [];

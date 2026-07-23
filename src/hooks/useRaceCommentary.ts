@@ -28,6 +28,7 @@ type CommentaryServiceMode = 'checking' | 'ai' | 'browser';
 type CommentaryPlaybackStatus = 'idle' | 'thinking' | 'speaking';
 type CommentaryPlaybackPhase = RaceCommentaryPlaybackPhase;
 type CommentarySpeechEventKind = RaceCommentaryEventKind | 'preview';
+type CommentaryDeliveryStyle = 'straight' | 'wry';
 type ActivePlaybackCancelRef = React.MutableRefObject<(() => void) | null>;
 
 type PreparedStartSpeech = {
@@ -78,15 +79,15 @@ function immediateRaceStartLine(
 ) {
   const candidates = players.length > 1
     ? [
-      `Gate's down at ${trackName}—here we go! The field charges into the first straight.`,
+      `Gate's down at ${trackName}—here we go! The field charges into the opening sprint.`,
       `${trackName} comes alive—the gate drops and the whole field launches!`,
-      `They're racing at ${trackName}! Everyone charges hard into the first straight.`,
-      `A clean release at ${trackName}, and the field explodes down the first straight!`,
+      `They're racing at ${trackName}! Everyone charges hard as the race opens.`,
+      `A clean release at ${trackName}, and the field explodes away!`,
       `Here we go at ${trackName}—the riders launch together from the gate!`,
     ]
     : players.length === 1
       ? [
-        `Gate's down at ${trackName}—${players[0].name} charges into the first straight!`,
+        `Gate's down at ${trackName}—${players[0].name} charges into the opening sprint!`,
         `${players[0].name} launches from the gate at ${trackName}!`,
         `They're racing at ${trackName}, and ${players[0].name} is underway!`,
       ]
@@ -213,6 +214,7 @@ async function requestAiSpeechUrl(
   preferences: RaceCommentaryPreferences,
   eventKind: CommentarySpeechEventKind,
   riderNames: string[],
+  deliveryStyle: CommentaryDeliveryStyle = 'straight',
   timeoutMs = 5_000,
   signal?: AbortSignal,
 ) {
@@ -228,6 +230,7 @@ async function requestAiSpeechUrl(
       voicePreset: preferences.voicePreset,
       eventKind,
       riderNames,
+      deliveryStyle,
     }),
   }, timeoutMs);
   if (!response.ok) {
@@ -296,6 +299,7 @@ async function playAiSpeech(
   preferences: RaceCommentaryPreferences,
   eventKind: CommentarySpeechEventKind,
   riderNames: string[],
+  deliveryStyle: CommentaryDeliveryStyle,
   activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>,
   activePlaybackCancelRef: ActivePlaybackCancelRef,
   shouldContinue: () => boolean,
@@ -307,6 +311,7 @@ async function playAiSpeech(
     preferences,
     eventKind,
     riderNames,
+    deliveryStyle,
     5_000,
     signal,
   );
@@ -337,6 +342,7 @@ export function useRaceCommentary({
   const trackerRef = useRef(createRaceCommentaryTracker());
   const preferencesRef = useRef(preferences);
   const recentLinesChangeRef = useRef(onRecentLinesChange);
+  const raceLinesRef = useRef<string[]>([]);
   const queueRef = useRef<RaceCommentaryEvent[]>([]);
   const drainingRef = useRef(false);
   const lifecycleGenerationRef = useRef(0);
@@ -437,6 +443,7 @@ export function useRaceCommentary({
       preferences,
       'race-start',
       players.map((player) => player.name),
+      'straight',
     )
       .then((audioUrl) => {
         if (startPrefetchRequestRef.current !== requestId) {
@@ -458,6 +465,10 @@ export function useRaceCommentary({
   ]);
 
   const rememberLine = useCallback((line: string) => {
+    raceLinesRef.current = [
+      ...raceLinesRef.current.filter((item) => item !== line),
+      line,
+    ].slice(-16);
     const currentPreferences = preferencesRef.current;
     if (!currentPreferences.adaptiveMemory) {
       return;
@@ -506,6 +517,7 @@ export function useRaceCommentary({
         setPlaybackPhase('thinking');
         let line = '';
         let useAiSpeech = serviceMode === 'ai';
+        let deliveryStyle: CommentaryDeliveryStyle = 'straight';
 
         if (event.kind === 'race-start') {
           line = startLine;
@@ -545,6 +557,7 @@ export function useRaceCommentary({
           line = localCommentaryLine(
             event,
             activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
+            raceLinesRef.current,
           );
           try {
             await speakWithBrowser(
@@ -579,13 +592,18 @@ export function useRaceCommentary({
                 model: activePreferences.model,
                 voicePreset: activePreferences.voicePreset,
                 recentLines: activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
+                raceLines: raceLinesRef.current,
               }),
             }, 4_000);
             if (!response.ok) {
               throw new Error(`Commentary service returned ${response.status}`);
             }
-            const payload = await response.json() as { line?: string };
+            const payload = await response.json() as {
+              line?: string;
+              deliveryStyle?: CommentaryDeliveryStyle;
+            };
             line = typeof payload.line === 'string' ? payload.line.trim() : '';
+            deliveryStyle = payload.deliveryStyle === 'wry' ? 'wry' : 'straight';
             if (!line) {
               throw new Error('Commentary service returned an empty call.');
             }
@@ -602,6 +620,7 @@ export function useRaceCommentary({
           line = localCommentaryLine(
             event,
             activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
+            raceLinesRef.current,
           );
         }
         if (!shouldContinue()) {
@@ -616,6 +635,7 @@ export function useRaceCommentary({
               activePreferences,
               event.kind,
               event.riders.map((rider) => rider.name),
+              deliveryStyle,
               activeAudioRef,
               activePlaybackCancelRef,
               shouldContinue,
@@ -662,6 +682,7 @@ export function useRaceCommentary({
 
   useEffect(() => {
     if (!preferences.enabled) {
+      raceLinesRef.current = [];
       stopPlayback();
       trackerRef.current = createRaceCommentaryTracker();
       return;
@@ -677,6 +698,7 @@ export function useRaceCommentary({
       reactionTimesByPlayer,
     });
     if (raceStateStopsCommentary(raceState)) {
+      raceLinesRef.current = [];
       stopPlayback();
       return;
     }
@@ -742,6 +764,7 @@ export function useRaceCommentary({
           activePreferences,
           'preview',
           players.map((player) => player.name),
+          'straight',
           activeAudioRef,
           activePlaybackCancelRef,
           () => true,

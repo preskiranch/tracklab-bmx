@@ -14,9 +14,15 @@ import {
 } from './commentaryKnowledge.mjs';
 import {
   commentaryLineMentionsRider,
+  commentaryLineUsesDemeaningSarcasm,
   commentaryLineUsesForbiddenTelemetry,
 } from './commentarySafety.mjs';
 import {
+  commentaryUsesWryAside,
+  requiredCommentaryRiders,
+} from './commentaryCoverage.mjs';
+import {
+  commentaryLineRepeatsRecentRaceSection,
   commentaryLineWordCount,
   selectNovelCommentaryLine,
 } from './commentaryVariation.mjs';
@@ -538,6 +544,7 @@ function sanitizeCommentaryEvent(value) {
   const previousLeaderPlayerId = Math.round(finiteNumber(value.previousLeaderPlayerId, 0));
 
   return {
+    sequence: Math.max(1, Math.min(1_000_000, Math.round(finiteNumber(value.sequence, 1)))),
     kind: value.kind,
     trackName: sanitizeText(value.trackName, 'this BMX track', 120),
     leaderPlayerId: knownPlayerIds.has(leaderPlayerId) ? leaderPlayerId : null,
@@ -558,29 +565,36 @@ function sanitizeCommentarySpeechEventKind(value) {
   return commentaryEventKinds.has(value) ? value : 'preview';
 }
 
-function commentarySpeechDirection(eventKind) {
+function sanitizeCommentaryDeliveryStyle(value) {
+  return value === 'wry' ? 'wry' : 'straight';
+}
+
+function commentarySpeechDirection(eventKind, deliveryStyle) {
+  const wryDirection = deliveryStyle === 'wry'
+    ? 'Let the brief dry aside land with a small knowing shift in tone, then return immediately to energetic race calling. Keep it playful, never cruel or cynical.'
+    : '';
   if (eventKind === 'race-start') {
-    return 'Hit the gate drop with an immediate burst of excitement, then carry bright momentum down the first straight.';
+    return `Hit the gate drop with an immediate burst of excitement, then carry bright momentum into the opening charge. ${wryDirection}`;
   }
   if (eventKind === 'positions-established') {
-    return 'Sound alert and invested as the early battle takes shape. Give the order clearly with lively forward motion.';
+    return `Sound alert and invested as the early battle takes shape. Give the full running order clearly with lively forward motion. ${wryDirection}`;
   }
   if (eventKind === 'lead-change') {
-    return 'React to the pass with a sharp, authentic surge of excitement. Punch the new leader’s name and decisive action.';
+    return `React to the pass with a sharp, authentic surge of excitement. Punch the new leader’s name and decisive action. ${wryDirection}`;
   }
   if (eventKind === 'pedal-zone') {
-    return 'Keep the rider battle urgent and flowing, with energetic emphasis on pressure, pursuit, and track action.';
+    return `Keep the full-field battle urgent and flowing, with energetic emphasis on position, pressure, pursuit, and track action. ${wryDirection}`;
   }
   if (eventKind === 'pro-set') {
-    return 'Give the line choice a quick lift of excitement and stay emotionally connected to the chase.';
+    return `Give the line choice a quick lift of excitement and stay emotionally connected to the chase. ${wryDirection}`;
   }
   if (eventKind === 'final-push') {
-    return 'Build powerful, controlled urgency through the last straight. Make the run to the stripe feel decisive and immediate.';
+    return `Build powerful, controlled urgency through the last straight. Make every named rider’s run to the stripe feel immediate. ${wryDirection}`;
   }
   if (eventKind === 'finish') {
-    return 'Reach a celebratory peak on the winner’s name and victory, then complete the sentence cleanly with a strong finish.';
+    return `Reach a celebratory peak on the winner’s name and victory, then complete the sentence cleanly with a strong finish. ${wryDirection}`;
   }
-  return 'Give this preview a warm, confident sports-broadcast delivery with lively anticipation.';
+  return `Give this preview a warm, confident sports-broadcast delivery with lively anticipation. ${wryDirection}`;
 }
 
 function commentarySpeechSpeed(eventKind) {
@@ -593,7 +607,7 @@ function commentarySpeechSpeed(eventKind) {
   return 0.96;
 }
 
-function commentaryVoiceDefinition(preset, eventKind) {
+function commentaryVoiceDefinition(preset, eventKind, deliveryStyle) {
   let voice;
   let persona;
   if (preset === 'australian-man') {
@@ -622,13 +636,73 @@ function commentaryVoiceDefinition(preset, eventKind) {
       'Use quick natural breaths and brief punctuation pauses. Vary the rhythm and emphasis from call to call so the delivery never settles into a repeated robotic pattern.',
       'Pronounce every rider name clearly as a person’s name, exactly as written in the call. Do not skip, abbreviate, or spell out a name.',
       'Match the intensity to the event: lively throughout, a clear surge for passes, maximum controlled urgency on the final straight, and a passionate celebration at the finish.',
-      commentarySpeechDirection(eventKind),
+      commentarySpeechDirection(eventKind, deliveryStyle),
       'Project strongly without screaming, distorting words, using fake crowd noise, singing, or imitating any real person.',
     ].join(' '),
   };
 }
 
-function commentaryFallbackLine(event, recentLines = []) {
+function commentaryPositionClause(rider) {
+  if (rider.rank === 1) {
+    return `${rider.name} leads`;
+  }
+  if (rider.rank === 2) {
+    return `${rider.name} runs second`;
+  }
+  if (rider.rank === 3) {
+    return `${rider.name} holds third`;
+  }
+  return `${rider.name} is fourth`;
+}
+
+function commentaryCoverageFallbackLines(event, requiredRiders, useWryAside) {
+  const [first, second] = requiredRiders;
+  if (!first || !second) {
+    return [];
+  }
+  const firstClause = commentaryPositionClause(first);
+  const secondClause = commentaryPositionClause(second);
+  const applyWryAside = (lines) => useWryAside
+    ? lines.map((line) => `${line.replace(/[.!]$/, '')}—calm clearly stayed home.`)
+    : lines;
+  if (event.kind === 'lead-change') {
+    return applyWryAside([
+      `${first.name} takes over, while ${secondClause}.`,
+      `${first.name} moves in front; ${secondClause} after the change.`,
+    ]);
+  }
+  if (event.kind === 'pro-set') {
+    return applyWryAside([
+      `${first.name} goes Pro, while ${secondClause} in the chase.`,
+      `Pro line for ${first.name}; ${secondClause} and stays involved.`,
+    ]);
+  }
+  if (event.kind === 'final-push') {
+    return applyWryAside([
+      `${firstClause} toward the line, while ${secondClause}.`,
+      `The final charge belongs to ${first.name}; ${secondClause} behind.`,
+    ]);
+  }
+  if (useWryAside) {
+    return [
+      `${firstClause}, while ${secondClause}—calm clearly stayed home.`,
+      `${firstClause}; ${secondClause}. Nobody seems interested in making this simple.`,
+      `${firstClause}, with ${secondClause} still busy ruining everyone’s quiet ride.`,
+    ];
+  }
+  return [
+    `${firstClause}, while ${secondClause} stays firmly in the race.`,
+    `${firstClause}; ${secondClause} remains part of the fight.`,
+    `${firstClause}, with ${secondClause} holding position in the chase.`,
+  ];
+}
+
+function commentaryFallbackLine(
+  event,
+  recentLines = [],
+  requiredRiders = [],
+  useWryAside = false,
+) {
   const leader = event.riders.find((rider) => rider.playerId === event.leaderPlayerId)?.name
     ?? event.riders[0]?.name
     ?? 'The leader';
@@ -692,6 +766,14 @@ function commentaryFallbackLine(event, recentLines = []) {
       `Across the stripe, it's ${leader} with the victory!`,
     ];
   }
+  const coverageCandidates = commentaryCoverageFallbackLines(
+    event,
+    requiredRiders,
+    useWryAside,
+  );
+  if (coverageCandidates.length > 0) {
+    candidates = coverageCandidates;
+  }
   return selectNovelCommentaryLine(candidates, recentLines);
 }
 
@@ -729,12 +811,21 @@ function commentaryLinesFromResponse(payload) {
   }
 }
 
-async function generateCommentaryLine({ event, model, voicePreset, recentLines }) {
+async function generateCommentaryLine({
+  event,
+  model,
+  voicePreset,
+  recentLines,
+  raceLines,
+}) {
   const key = openAiApiKey();
   if (!key) {
     throw new HttpRequestError(503, 'AI commentary is not configured on this server.');
   }
 
+  const requiredRiders = requiredCommentaryRiders(event, raceLines);
+  const requiredRiderNames = requiredRiders.map((rider) => rider.name);
+  const useWryAside = commentaryUsesWryAside(event);
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: {
@@ -753,13 +844,19 @@ async function generateCommentaryLine({ event, model, voicePreset, recentLines }
         'Never invent a pass, position, rider, result, location, sponsor, number, track feature, or backstory.',
         'Never mention watts, power output, cadence, RPM, speed, MPH, KPH, distance, progress percentages, or reaction times—even when those facts appear in the input.',
         'Call what is happening on track, never the sensor data behind it.',
-        'Never rank riders at race-start and never invent a numbered running order. For mid-race calls, describe only the leader-versus-chaser relationship supported by the rider ranks and battleState.',
-        'Make racer-versus-racer action the center of the call: leader, chaser, pressure, passes, line choice, straights, turns, rhythm, and finish.',
-        'Every call must naturally say at least one supplied rider name. Prefer the leader and closest chaser when both are relevant.',
-        'For pedal-zone events, describe the supplied coursePhase and battleState. Never say pedal zone or use attack/attacking. Mention being back on the pedals only when pedalReferenceAllowed is true.',
+        'Never rank riders at race-start. During the race, the supplied rank for each rider is authoritative; use first, second, third, or fourth only when that exact rank is supplied.',
+        'Rotate attention through the entire field. Riders in third and fourth are still part of the story and must receive natural position-aware coverage, not only the leader and closest chaser.',
+        `Every candidate must naturally name all required focus riders: ${requiredRiderNames.join(', ') || 'none for this gate call'}.`,
+        'Never claim a focused rider is gaining, fading, passing, or closing a gap unless the event facts support that action. It is safe to state their supplied running position and that they remain in the race or chase.',
+        'Make racer-versus-racer action the center of the call: running order, pressure, passes, line choice, straights, turns, rhythm, and finish.',
+        'For pedal-zone events, use coursePhase as context, not mandatory wording. If recent race lines already named that section, cover rider positions or the battle instead. Never say pedal zone or use attack/attacking. Mention being back on the pedals only when pedalReferenceAllowed is true.',
         'Use active verbs, contractions, and short speech-first play-by-play. A pass, final push, or finish may use one exclamation mark.',
         'Make all three candidates materially different: use different openings, verbs, clause order, and sentence rhythm.',
         'Avoid polished narration, generic filler, repeated sentence shapes, fake quotations, requests for a crowd response, and reusable catchphrases.',
+        'Draw from broad contemporary English and BMX vocabulary rather than a small phrase bank. The research foundation contains 642,428 analyzed caption words and 18,208 race-call segments; use its patterns as context while creating original wording.',
+        useWryAside
+          ? 'This is an occasional wit call. Give every candidate one brief, playful, dry or lightly sarcastic observation about the race pressure or lack of calm. Keep it affectionate and broadcast-safe. Never mock a rider’s ability, identity, appearance, body, crash, injury, or failure.'
+          : 'Keep this call straight play-by-play; do not add sarcasm to this one.',
         commentaryGuideForEvent(event.kind),
         `The selected delivery preset is ${voicePreset}. The speech engine supplies the accent, so do not force regional slang.`,
         'Treat recentLines as adaptive memory. Do not reuse their openings, signature verbs, clause patterns, or closing phrases.',
@@ -768,6 +865,12 @@ async function generateCommentaryLine({ event, model, voicePreset, recentLines }
       input: JSON.stringify({
         event,
         recentLines,
+        raceLines,
+        requiredFocusRiders: requiredRiders.map((rider) => ({
+          name: rider.name,
+          rank: rider.rank,
+        })),
+        useWryAside,
       }),
       text: {
         format: {
@@ -805,20 +908,28 @@ async function generateCommentaryLine({ event, model, voicePreset, recentLines }
     commentaryLineWordCount(line) >= 6
     && commentaryLineWordCount(line) <= 16
     && !commentaryLineUsesForbiddenTelemetry(line, riderNames)
+    && !commentaryLineUsesDemeaningSarcasm(line)
     && commentaryLineMentionsRider(line, riderNames)
+    && requiredRiderNames.every((name) => commentaryLineMentionsRider(line, [name]))
     && !commentaryLineViolatesRaceStyle(line, event)
+    && !commentaryLineRepeatsRecentRaceSection(line, raceLines)
   ));
   return selectNovelCommentaryLine(validLines, recentLines)
-    || commentaryFallbackLine(event, recentLines);
+    || commentaryFallbackLine(
+      event,
+      recentLines,
+      requiredRiders,
+      useWryAside,
+    );
 }
 
-async function generateCommentarySpeech(line, voicePreset, eventKind) {
+async function generateCommentarySpeech(line, voicePreset, eventKind, deliveryStyle) {
   const key = openAiApiKey();
   if (!key) {
     throw new HttpRequestError(503, 'AI speech is not configured on this server.');
   }
 
-  const voice = commentaryVoiceDefinition(voicePreset, eventKind);
+  const voice = commentaryVoiceDefinition(voicePreset, eventKind, deliveryStyle);
   const response = await fetch('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
     headers: {
@@ -2764,14 +2875,27 @@ async function serveStatic(request, response) {
         .map((line) => sanitizeText(line, '', 220))
         .filter(Boolean)
       : [];
+    const raceLines = Array.isArray(payload?.raceLines)
+      ? payload.raceLines
+        .slice(-16)
+        .map((line) => sanitizeText(line, '', 220))
+        .filter(Boolean)
+      : [];
     const line = await generateCommentaryLine({
       event,
       model,
       voicePreset,
       recentLines,
+      raceLines,
     });
+    const deliveryStyle = commentaryUsesWryAside(event) ? 'wry' : 'straight';
     cloudTelemetry.increment('tracklab_commentary_lines_total', { model, voicePreset });
-    writeJson(response, 200, { line, model, source: 'ai' }, { 'Cache-Control': 'no-store' });
+    writeJson(
+      response,
+      200,
+      { line, model, source: 'ai', deliveryStyle },
+      { 'Cache-Control': 'no-store' },
+    );
     return;
   }
 
@@ -2803,18 +2927,25 @@ async function serveStatic(request, response) {
       : [];
     if (
       commentaryLineUsesForbiddenTelemetry(line, riderNames)
+      || commentaryLineUsesDemeaningSarcasm(line)
       || commentaryLineViolatesRaceStyle(line, {
         kind: eventKind,
         pedalReferenceAllowed: true,
       })
     ) {
       writeJson(response, 400, {
-        error: 'Commentary must describe natural race action without sensor figures or mapped-zone jargon.',
+        error: 'Commentary must use safe, natural race action without sensor figures, mapped-zone jargon, or demeaning rider remarks.',
       });
       return;
     }
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
-    const audio = await generateCommentarySpeech(line, voicePreset, eventKind);
+    const deliveryStyle = sanitizeCommentaryDeliveryStyle(payload?.deliveryStyle);
+    const audio = await generateCommentarySpeech(
+      line,
+      voicePreset,
+      eventKind,
+      deliveryStyle,
+    );
     cloudTelemetry.increment('tracklab_commentary_speech_total', { voicePreset, eventKind });
     response.writeHead(200, {
       'Content-Type': 'audio/wav',

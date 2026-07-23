@@ -41,6 +41,7 @@ export type RaceCommentaryRiderFact = {
 
 export type RaceCommentaryEvent = {
   id: string;
+  sequence: number;
   kind: RaceCommentaryEventKind;
   occurredAt: number;
   trackName: string;
@@ -181,6 +182,7 @@ function eventFor(
     : 0;
   return {
     id: `${now}-${tracker.sequence}-${kind}`,
+    sequence: tracker.sequence,
     kind,
     occurredAt: now,
     trackName: snapshot.trackName,
@@ -341,22 +343,173 @@ function tokenSimilarity(leftLine: string, rightLine: string) {
   return shared / (left.size + right.size - shared);
 }
 
-function pickLine(candidates: string[], event: RaceCommentaryEvent, recentLines: string[]) {
+function lineRaceSections(line: string) {
+  const patterns: Array<[RaceCommentaryCoursePhase, RegExp]> = [
+    ['first-straight', /\b(?:first|opening)\s+straight(?:away)?\b/i],
+    ['turn-one', /\b(?:turn|corner)\s+(?:one|1|first)\b|\bfirst\s+(?:turn|corner)\b/i],
+    ['second-straight', /\bsecond\s+straight(?:away)?\b/i],
+    ['rhythm-section', /\brhythm(?:\s+section)?\b/i],
+    ['final-turn', /\b(?:final|last)\s+(?:turn|corner)\b/i],
+    ['last-straight', /\b(?:final|last|home)\s+straight(?:away)?\b/i],
+  ];
+  return patterns.filter(([, pattern]) => pattern.test(line)).map(([section]) => section);
+}
+
+function lineRepeatsRecentRaceSection(line: string, raceLines: string[]) {
+  const sections = lineRaceSections(line);
+  const recentSections = new Set(raceLines.slice(-4).flatMap(lineRaceSections));
+  return sections.some((section) => recentSections.has(section));
+}
+
+function pickLine(
+  candidates: string[],
+  event: RaceCommentaryEvent,
+  recentLines: string[],
+  raceLines: string[],
+) {
   const ranked = candidates
     .map((candidate) => ({
       candidate,
+      repeatsRaceSection: lineRepeatsRecentRaceSection(candidate, raceLines),
       similarity: recentLines.reduce(
         (highest, recentLine) => Math.max(highest, tokenSimilarity(candidate, recentLine)),
         0,
       ),
     }))
-    .sort((left, right) => left.similarity - right.similarity);
+    .sort((left, right) => (
+      Number(left.repeatsRaceSection) - Number(right.repeatsRaceSection)
+      || left.similarity - right.similarity
+    ));
+  const bestRepeatsRaceSection = ranked[0]?.repeatsRaceSection ?? false;
   const bestSimilarity = ranked[0]?.similarity ?? 0;
   const pool = ranked
-    .filter((item) => item.similarity <= bestSimilarity + 0.05)
+    .filter((item) => (
+      item.repeatsRaceSection === bestRepeatsRaceSection
+      && item.similarity <= bestSimilarity + 0.05
+    ))
     .map((item) => item.candidate);
   const seed = [...event.id].reduce((total, character) => total + character.charCodeAt(0), 0);
   return pool[seed % pool.length];
+}
+
+function lineMentionsLocalRider(line: string, rider: RaceCommentaryRiderFact) {
+  const lineWords = new Set(lineTokens(line));
+  const aliases = [rider.name, rider.name.split(/\s+/)[0]].map(lineTokens);
+  return aliases.some((alias) => (
+    alias.length > 0 && alias.every((word) => lineWords.has(word))
+  ));
+}
+
+export function selectLocalCommentaryFocusRiders(
+  event: RaceCommentaryEvent,
+  raceLines: string[] = [],
+  limit = 2,
+) {
+  const riders = [...event.riders].sort((left, right) => left.rank - right.rank);
+  const mentionCounts = new Map(riders.map((rider) => [
+    rider.playerId,
+    raceLines.reduce(
+      (count, line) => count + (lineMentionsLocalRider(line, rider) ? 1 : 0),
+      0,
+    ),
+  ]));
+  const startIndex = Math.max(0, event.sequence - 1) % Math.max(1, riders.length);
+  const orderByPlayerId = new Map(riders.map((rider, index) => [rider.playerId, index]));
+  return riders
+    .sort((left, right) => {
+      const mentionDifference = (mentionCounts.get(left.playerId) ?? 0)
+        - (mentionCounts.get(right.playerId) ?? 0);
+      if (mentionDifference !== 0) {
+        return mentionDifference;
+      }
+      const leftIndex = orderByPlayerId.get(left.playerId) ?? 0;
+      const rightIndex = orderByPlayerId.get(right.playerId) ?? 0;
+      return ((leftIndex - startIndex + riders.length) % riders.length)
+        - ((rightIndex - startIndex + riders.length) % riders.length);
+    })
+    .slice(0, Math.min(limit, riders.length));
+}
+
+function requiredLocalCommentaryRiders(
+  event: RaceCommentaryEvent,
+  raceLines: string[],
+) {
+  const focusRiders = selectLocalCommentaryFocusRiders(event, raceLines, 2);
+  const leader = event.riders.find((rider) => rider.playerId === event.leaderPlayerId)
+    ?? event.riders[0];
+  if (event.kind === 'race-start') return [];
+  if (event.kind === 'finish') return leader ? [leader] : [];
+  if (event.kind === 'lead-change') {
+    const previousLeader = event.riders.find(
+      (rider) => rider.playerId === event.previousLeaderPlayerId,
+    );
+    return [...new Map(
+      [leader, previousLeader, ...focusRiders]
+        .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
+        .map((rider) => [rider.playerId, rider]),
+    ).values()].slice(0, 2);
+  }
+  if (event.kind === 'pro-set' || event.kind === 'final-push') {
+    return [...new Map(
+      [leader, ...focusRiders]
+        .filter((rider): rider is RaceCommentaryRiderFact => Boolean(rider))
+        .map((rider) => [rider.playerId, rider]),
+    ).values()].slice(0, 2);
+  }
+  return focusRiders;
+}
+
+function localPositionClause(rider: RaceCommentaryRiderFact) {
+  if (rider.rank === 1) return `${rider.name} leads`;
+  if (rider.rank === 2) return `${rider.name} runs second`;
+  if (rider.rank === 3) return `${rider.name} holds third`;
+  return `${rider.name} is fourth`;
+}
+
+function localCoverageLines(
+  event: RaceCommentaryEvent,
+  requiredRiders: RaceCommentaryRiderFact[],
+) {
+  const [first, second] = requiredRiders;
+  if (!first || !second) {
+    return [];
+  }
+  const firstClause = localPositionClause(first);
+  const secondClause = localPositionClause(second);
+  const wryAside = event.kind !== 'finish' && event.sequence % 5 === 0;
+  const applyWryAside = (lines: string[]) => wryAside
+    ? lines.map((line) => `${line.replace(/[.!]$/, '')}—calm clearly stayed home.`)
+    : lines;
+  if (event.kind === 'lead-change') {
+    return applyWryAside([
+      `${first.name} takes over, while ${secondClause}.`,
+      `${first.name} moves in front; ${secondClause} after the change.`,
+    ]);
+  }
+  if (event.kind === 'pro-set') {
+    return applyWryAside([
+      `${first.name} goes Pro, while ${secondClause} in the chase.`,
+      `Pro line for ${first.name}; ${secondClause} and stays involved.`,
+    ]);
+  }
+  if (event.kind === 'final-push') {
+    return applyWryAside([
+      `${firstClause} toward the line, while ${secondClause}.`,
+      `The final charge belongs to ${first.name}; ${secondClause} behind.`,
+    ]);
+  }
+  if (wryAside) {
+    return [
+      `${firstClause}, while ${secondClause}—calm clearly stayed home.`,
+      `${firstClause}; ${secondClause}. Nobody is making this simple.`,
+      `${firstClause}, with ${secondClause} still ruining everyone’s quiet ride.`,
+    ];
+  }
+  return [
+    `${firstClause}, while ${secondClause} stays firmly in the race.`,
+    `${firstClause}; ${secondClause} remains part of the fight.`,
+    `${firstClause}, with ${secondClause} holding position in the chase.`,
+  ];
 }
 
 function riderName(event: RaceCommentaryEvent, playerId: PlayerSlot['id'] | null | undefined) {
@@ -406,9 +559,14 @@ function courseActionLines(
   ];
 }
 
-export function localCommentaryLine(event: RaceCommentaryEvent, recentLines: string[] = []) {
+export function localCommentaryLine(
+  event: RaceCommentaryEvent,
+  recentLines: string[] = [],
+  raceLines: string[] = [],
+) {
   const leader = riderName(event, event.leaderPlayerId);
   const second = event.riders[1]?.name;
+  const requiredRiders = requiredLocalCommentaryRiders(event, raceLines);
   const candidates: Record<RaceCommentaryEventKind, string[]> = {
     'race-start': [
       `Gate's down at ${event.trackName}. Here we go.`,
@@ -454,5 +612,11 @@ export function localCommentaryLine(event: RaceCommentaryEvent, recentLines: str
       `${leader} holds on and takes it at ${event.trackName}!`,
     ],
   };
-  return pickLine(candidates[event.kind], event, recentLines);
+  const coverageLines = localCoverageLines(event, requiredRiders);
+  return pickLine(
+    coverageLines.length > 0 ? coverageLines : candidates[event.kind],
+    event,
+    recentLines,
+    raceLines,
+  );
 }

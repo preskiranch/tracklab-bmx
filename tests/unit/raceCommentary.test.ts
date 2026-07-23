@@ -157,6 +157,60 @@ describe('race commentary event detection', () => {
     expect(second).not.toBe(first);
   });
 
+  it('rotates local fallback coverage through all four running positions', () => {
+    const baseEvent = {
+      id: 'coverage-2',
+      sequence: 2,
+      kind: 'positions-established' as const,
+      occurredAt: 1_000,
+      trackName: 'North Bay BMX',
+      raceLengthMeters: 300,
+      progress: 0.1,
+      leaderPlayerId: 1 as const,
+      coursePhase: 'first-straight' as const,
+      battleState: 'under-pressure' as const,
+      pedalReferenceAllowed: false,
+      riders: [
+        { playerId: 1 as const, name: 'Avery', rank: 1, distanceMeters: 30, driveAllowed: true, finished: false },
+        { playerId: 2 as const, name: 'Blake', rank: 2, distanceMeters: 29, driveAllowed: true, finished: false },
+        { playerId: 3 as const, name: 'Casey', rank: 3, distanceMeters: 28, driveAllowed: true, finished: false },
+        { playerId: 4 as const, name: 'Drew', rank: 4, distanceMeters: 27, driveAllowed: true, finished: false },
+      ],
+    };
+    const firstLine = localCommentaryLine(baseEvent, [], []);
+    const secondLine = localCommentaryLine({
+      ...baseEvent,
+      id: 'coverage-3',
+      sequence: 3,
+      kind: 'pedal-zone',
+    }, [firstLine], [firstLine]);
+    const combined = `${firstLine} ${secondLine}`;
+
+    expect(combined).toContain('Avery');
+    expect(combined).toContain('Blake');
+    expect(combined).toContain('Casey');
+    expect(combined).toContain('Drew');
+    expect(combined).toMatch(/\b(?:second|third|fourth|leads)\b/i);
+  });
+
+  it('uses occasional good-natured wit in local fallback calls', () => {
+    const tracker = createRaceCommentaryTracker();
+    const [event] = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([rider(1, 10), rider(2, 9)]),
+      1_000,
+    );
+    const wittyEvent = {
+      ...event,
+      id: 'wry-5',
+      sequence: 5,
+      kind: 'positions-established' as const,
+    };
+
+    expect(localCommentaryLine(wittyEvent, [], []))
+      .toMatch(/\b(?:calm|simple|quiet)\b/i);
+  });
+
   it('keeps announcing at course-phase changes even without another pedal-zone boundary', () => {
     const tracker = createRaceCommentaryTracker();
     const noZones = (distance: number): RaceCommentarySnapshot => ({

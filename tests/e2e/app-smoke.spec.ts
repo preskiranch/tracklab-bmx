@@ -579,8 +579,10 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     eventKind?: string;
     line?: string;
     riderNames?: string[];
+    deliveryStyle?: string;
   }> = [];
   const commentaryLineRiderNames: string[][] = [];
+  const commentaryRaceLineCounts: number[] = [];
   const authUser = {
     id: 'quick-start-racer',
     profileKey: 'user:quick-start-racer',
@@ -620,17 +622,22 @@ test('start here race action enters fullscreen race view', async ({ page }, test
         leaderPlayerId?: number;
         riders?: Array<{ playerId?: number; name?: string }>;
       };
+      raceLines?: string[];
     };
     const riderNames = payload.event?.riders?.flatMap((rider) => (
       typeof rider.name === 'string' ? [rider.name] : []
     )) ?? [];
     commentaryLineRiderNames.push(riderNames);
+    commentaryRaceLineCounts.push(payload.raceLines?.length ?? 0);
     const leaderName = payload.event?.riders?.find(
       (rider) => rider.playerId === payload.event?.leaderPlayerId,
     )?.name ?? riderNames[0] ?? 'The leader';
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ line: `${leaderName} leads the charge through the next straight.` }),
+      body: JSON.stringify({
+        line: `${leaderName} leads the charge through the next straight.`,
+        deliveryStyle: 'wry',
+      }),
     });
   });
   await page.addInitScript(() => {
@@ -781,8 +788,13 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     { timeout: 10_000 },
   ).toBe(true);
   await expect.poll(
+    () => commentaryRaceLineCounts.some((count) => count > 0),
+    { timeout: 10_000 },
+  ).toBe(true);
+  await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (
       payload.eventKind !== 'race-start'
+      && payload.deliveryStyle === 'wry'
       && customDemoNames.some((name) => payload.line?.includes(name))
       && customDemoNames.every((name) => payload.riderNames?.includes(name))
     )),

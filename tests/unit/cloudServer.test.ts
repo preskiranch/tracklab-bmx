@@ -137,10 +137,12 @@ describe('cloud API trust boundaries', () => {
         'british-man',
       ],
       research: {
-        knowledgeVersion: 'usabmx-national-2026-07-22-v3-natural-race',
+        knowledgeVersion: 'usabmx-national-2026-07-22-v4-full-field',
         indexedVideos: 166,
         analyzedRaceCallSegments: 18_208,
         analyzedRaceAudioSections: 6,
+        minimumGenerativeVocabularyTarget: 10_000,
+        vocabularyStrategy: 'open-generative-lexicon',
         retainsFullTranscripts: false,
         retainsSourceAudio: false,
       },
@@ -283,7 +285,7 @@ describe('cloud API trust boundaries', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      error: 'Commentary must describe natural race action without sensor figures or mapped-zone jargon.',
+      error: 'Commentary must use safe, natural race action without sensor figures, mapped-zone jargon, or demeaning rider remarks.',
     });
   });
 
@@ -299,7 +301,24 @@ describe('cloud API trust boundaries', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      error: 'Commentary must describe natural race action without sensor figures or mapped-zone jargon.',
+      error: 'Commentary must use safe, natural race action without sensor figures, mapped-zone jargon, or demeaning rider remarks.',
+    });
+  });
+
+  it('refuses demeaning sarcasm about a racer', async () => {
+    const response = await api('/api/commentary/speech', {
+      method: 'POST',
+      body: JSON.stringify({
+        line: 'Avery is a pathetic rider who does not belong.',
+        voicePreset: 'american-man',
+        eventKind: 'pedal-zone',
+        deliveryStyle: 'wry',
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Commentary must use safe, natural race action without sensor figures, mapped-zone jargon, or demeaning rider remarks.',
     });
   });
 
