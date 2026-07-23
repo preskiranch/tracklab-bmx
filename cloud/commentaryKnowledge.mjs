@@ -1,5 +1,5 @@
 export const commentaryResearchMetadata = Object.freeze({
-  knowledgeVersion: 'usabmx-national-2026-07-22-v2-audio',
+  knowledgeVersion: 'usabmx-national-2026-07-22-v3-natural-race',
   method: 'aggregate-caption-and-broadcast-audio-context',
   officialChannel: 'https://www.youtube.com/@usabmxvideos/streams',
   broadcastAudioReference: 'https://www.youtube.com/watch?v=JRfRMptCE-I',
@@ -36,10 +36,10 @@ const eventLanguage = Object.freeze({
     'coming back',
   ],
   'pedal-zone': [
-    'back on the pedals',
-    'attacks the straight',
-    'drives through the section',
-    'rhythm',
+    'rider giving chase',
+    'pressure from behind',
+    'through the rhythm section',
+    'down the straight',
   ],
   'pro-set': [
     'commits to the Pro Set',
@@ -61,13 +61,13 @@ const eventLanguage = Object.freeze({
 });
 
 const eventDelivery = Object.freeze({
-  'race-start': 'Open instantly and brightly, with a crisp gate-drop burst.',
-  'positions-established': 'Sound alert and observant; lift the leader name without prematurely peaking.',
-  'lead-change': 'Use a sudden, spontaneous vocal surge for the move and the new leader.',
-  'pedal-zone': 'Give the call forward momentum and emphasize the attack.',
-  'pro-set': 'Briefly lift the energy around the commitment and risk of the line choice.',
-  'final-push': 'Build urgency through the last straight and toward the line.',
-  finish: 'Peak decisively on the winner, celebrate briefly, and land the result cleanly.',
+  'race-start': 'Open promptly with anticipation, then settle into a natural race-calling rhythm.',
+  'positions-established': 'Sound observant and conversational; give the early order without forcing excitement.',
+  'lead-change': 'Let the pass create a genuine but controlled lift in energy.',
+  'pedal-zone': 'Describe the rider battle and current track phase, not the mapped input zone.',
+  'pro-set': 'Briefly note the line choice and how the other rider responds.',
+  'final-push': 'Build measured urgency through the last straight and toward the line.',
+  finish: 'Celebrate the winner clearly, then finish the call without shouting or dragging out the result.',
 });
 
 export function commentaryGuideForEvent(eventKind) {
@@ -77,6 +77,7 @@ export function commentaryGuideForEvent(eventKind) {
     `Relevant race-phase vocabulary: ${cues.join(', ')}.`,
     eventDelivery[eventKind] ?? 'Match the vocal energy to the live action.',
     'Lead with the live action, name a rider only when the telemetry identifies that rider, and keep the call easy to understand at race speed.',
+    'Focus on racer against racer: the leader, the chaser, pressure, passes, straights, turns, rhythm, and the run to the line.',
     'Professional BMX calls use short clauses, occasional fragments, varied pacing, and action-triggered excitement rather than constant shouting.',
     'Do not imitate, identify, or reproduce the voice, catchphrases, or signature delivery of any source announcer.',
   ].join(' ');

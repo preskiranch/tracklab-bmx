@@ -16,6 +16,20 @@ export type RaceCommentaryEventKind =
   | 'final-push'
   | 'finish';
 
+export type RaceCommentaryCoursePhase =
+  | 'first-straight'
+  | 'turn-one'
+  | 'second-straight'
+  | 'rhythm-section'
+  | 'final-turn'
+  | 'last-straight';
+
+export type RaceCommentaryBattleState =
+  | 'solo'
+  | 'side-by-side'
+  | 'under-pressure'
+  | 'clear-lead';
+
 export type RaceCommentaryRiderFact = {
   playerId: PlayerSlot['id'];
   name: string;
@@ -36,6 +50,9 @@ export type RaceCommentaryEvent = {
   previousLeaderPlayerId?: PlayerSlot['id'];
   zoneName?: string;
   splitName?: string;
+  coursePhase: RaceCommentaryCoursePhase;
+  battleState: RaceCommentaryBattleState;
+  pedalReferenceAllowed: boolean;
   riders: RaceCommentaryRiderFact[];
 };
 
@@ -82,6 +99,8 @@ export type RaceCommentaryTracker = {
   positionsEstablished: boolean;
   leaderPlayerId: PlayerSlot['id'] | null;
   leaderZoneId: string | null;
+  lastCourseCallProgress: number;
+  courseCallCount: number;
   finalPushCalled: boolean;
   calledProBranches: Set<string>;
   finishedPlayerIds: Set<PlayerSlot['id']>;
@@ -94,6 +113,8 @@ export function createRaceCommentaryTracker(): RaceCommentaryTracker {
     positionsEstablished: false,
     leaderPlayerId: null,
     leaderZoneId: null,
+    lastCourseCallProgress: 0,
+    courseCallCount: 0,
     finalPushCalled: false,
     calledProBranches: new Set(),
     finishedPlayerIds: new Set(),
@@ -123,6 +144,26 @@ function riderFacts(snapshot: RaceCommentarySnapshot): RaceCommentaryRiderFact[]
   }));
 }
 
+function coursePhaseForProgress(progress: number): RaceCommentaryCoursePhase {
+  if (progress < 0.22) return 'first-straight';
+  if (progress < 0.34) return 'turn-one';
+  if (progress < 0.55) return 'second-straight';
+  if (progress < 0.72) return 'rhythm-section';
+  if (progress < 0.84) return 'final-turn';
+  return 'last-straight';
+}
+
+function battleStateForFacts(facts: RaceCommentaryRiderFact[]): RaceCommentaryBattleState {
+  if (facts.length < 2) {
+    return 'solo';
+  }
+
+  const gapMeters = Math.max(0, facts[0].distanceMeters - facts[1].distanceMeters);
+  if (gapMeters <= 0.75) return 'side-by-side';
+  if (gapMeters <= 2.5) return 'under-pressure';
+  return 'clear-lead';
+}
+
 function eventFor(
   tracker: RaceCommentaryTracker,
   snapshot: RaceCommentarySnapshot,
@@ -133,16 +174,20 @@ function eventFor(
   tracker.sequence += 1;
   const facts = riderFacts(snapshot);
   const leader = facts[0] ?? null;
+  const progress = leader
+    ? Number(Math.min(1, leader.distanceMeters / Math.max(1, snapshot.raceLengthMeters)).toFixed(3))
+    : 0;
   return {
     id: `${now}-${tracker.sequence}-${kind}`,
     kind,
     occurredAt: now,
     trackName: snapshot.trackName,
     raceLengthMeters: Number(Math.max(1, snapshot.raceLengthMeters).toFixed(2)),
-    progress: leader
-      ? Number(Math.min(1, leader.distanceMeters / Math.max(1, snapshot.raceLengthMeters)).toFixed(3))
-      : 0,
+    progress,
     leaderPlayerId: leader?.playerId ?? null,
+    coursePhase: coursePhaseForProgress(progress),
+    battleState: battleStateForFacts(facts),
+    pedalReferenceAllowed: false,
     riders: facts,
     ...extra,
   };
@@ -152,6 +197,8 @@ function resetTrackerForReady(tracker: RaceCommentaryTracker) {
   tracker.positionsEstablished = false;
   tracker.leaderPlayerId = null;
   tracker.leaderZoneId = null;
+  tracker.lastCourseCallProgress = 0;
+  tracker.courseCallCount = 0;
   tracker.finalPushCalled = false;
   tracker.calledProBranches.clear();
   tracker.finishedPlayerIds.clear();
@@ -206,13 +253,18 @@ export function detectRaceCommentaryEvents(
       && leader.distance >= zone.startMeter
       && leader.distance < zone.endMeter
     ));
-    if (
-      leaderZone
-      && leaderZone.id !== tracker.leaderZoneId
-      && leader.distance / Math.max(1, snapshot.raceLengthMeters) >= 0.04
-    ) {
+    if (leaderZone && leaderZone.id !== tracker.leaderZoneId) {
       tracker.leaderZoneId = leaderZone.id;
-      events.push(eventFor(tracker, snapshot, 'pedal-zone', now, { zoneName: leaderZone.name }));
+      const progress = leader.distance / Math.max(1, snapshot.raceLengthMeters);
+      const courseCallSpaced = progress - tracker.lastCourseCallProgress >= 0.14;
+      if (courseCallSpaced && progress >= 0.08 && progress <= 0.92) {
+        tracker.lastCourseCallProgress = progress;
+        tracker.courseCallCount += 1;
+        events.push(eventFor(tracker, snapshot, 'pedal-zone', now, {
+          zoneName: leaderZone.name,
+          pedalReferenceAllowed: tracker.courseCallCount % 4 === 0,
+        }));
+      }
     } else if (!leaderZone) {
       tracker.leaderZoneId = null;
     }
@@ -260,45 +312,78 @@ function riderName(event: RaceCommentaryEvent, playerId: PlayerSlot['id'] | null
   return event.riders.find((rider) => rider.playerId === playerId)?.name ?? 'the leader';
 }
 
+function coursePhaseLabel(phase: RaceCommentaryCoursePhase) {
+  const labels: Record<RaceCommentaryCoursePhase, string> = {
+    'first-straight': 'first straight',
+    'turn-one': 'turn one',
+    'second-straight': 'second straight',
+    'rhythm-section': 'rhythm section',
+    'final-turn': 'final turn',
+    'last-straight': 'last straight',
+  };
+  return labels[phase];
+}
+
+function courseActionLines(
+  event: RaceCommentaryEvent,
+  leader: string,
+  second: string | undefined,
+) {
+  const phase = coursePhaseLabel(event.coursePhase);
+  const closeBattle = event.battleState === 'side-by-side' || event.battleState === 'under-pressure';
+  return [
+    closeBattle && second
+      ? `${leader} leads through the ${phase}, with ${second} right on the wheel.`
+      : `${leader} keeps it clean through the ${phase}.`,
+    closeBattle && second
+      ? `${leader} and ${second} are locked together through the ${phase}.`
+      : `${leader} is flying through the ${phase}.`,
+    closeBattle && second
+      ? `${second} keeps the pressure on ${leader} through the ${phase}.`
+      : `${leader} carries the lead into the ${phase}.`,
+    ...(event.pedalReferenceAllowed
+      ? [second
+        ? `${leader} gets back on the pedals, with ${second} giving chase.`
+        : `${leader} gets back on the pedals and drives toward the ${phase}.`]
+      : []),
+  ];
+}
+
 export function localCommentaryLine(event: RaceCommentaryEvent, recentLines: string[] = []) {
   const leader = riderName(event, event.leaderPlayerId);
   const second = event.riders[1]?.name;
   const names = event.riders.map((rider) => rider.name).join(', ');
   const candidates: Record<RaceCommentaryEventKind, string[]> = {
     'race-start': [
-      `Gate's down at ${event.trackName}—here we go!`,
-      `We are racing at ${event.trackName}! The field charges into the first straight.`,
-      `Clean snap at ${event.trackName}—${names} are off and racing!`,
+      `Gate's down at ${event.trackName}. Here we go.`,
+      `They're racing at ${event.trackName}, charging down the first straight.`,
+      `A clean gate at ${event.trackName}, and the field is underway.`,
     ],
     'positions-established': [
-      `${leader} snaps into the early lead${second ? `—${second} is right there!` : '!'}`,
-      `${leader} has the advantage, and the chase is on!`,
-      `The race takes shape—${leader} shows in front!`,
+      `${leader} shows in front${second ? `, with ${second} close behind.` : '.'}`,
+      `${leader} has the early advantage, and the race is taking shape.`,
+      `${leader} leads the charge down the first straight.`,
     ],
     'lead-change': [
-      `${leader} makes the move—new leader!`,
-      `${leader} surges through and takes over!`,
-      `Here comes ${leader}—right to the front!`,
+      `${leader} makes the move and takes over.`,
+      `Here comes ${leader}, moving through to the front.`,
+      `${leader} finds a way past. We have a new leader.`,
     ],
-    'pedal-zone': [
-      `${leader} attacks through ${event.zoneName ?? 'the next pedal zone'}!`,
-      `Back on the pedals—${leader} drives through ${event.zoneName ?? 'this straight'}!`,
-      `${leader} keeps the pressure on through ${event.zoneName ?? 'the pedal section'}!`,
-    ],
+    'pedal-zone': courseActionLines(event, leader, second),
     'pro-set': [
-      `${leader} commits to the Pro Set—full attack through the split!`,
-      `Blue Pro line for ${leader}, and there is no backing off!`,
-      `${leader} takes the Pro Set and keeps the pressure on!`,
+      `${leader} commits to the Pro Set, with ${second ?? 'the field'} still in pursuit.`,
+      `${leader} takes the blue Pro line and holds the advantage.`,
+      `Pro Set for ${leader}. ${second ? `${second} stays close.` : 'A confident line through the split.'}`,
     ],
     'final-push': [
-      `Last straight—${leader} leads the charge home!`,
-      `Final drive now! ${leader} has the advantage.`,
-      `${leader} is out front, but this race is not over!`,
+      `${leader} leads them into the last straight.`,
+      `Final drive to the line, with ${leader} holding the advantage.`,
+      `${leader} is out front, but ${second ? `${second} is not done yet.` : 'the race is not over.'}`,
     ],
     finish: [
-      `${leader} gets it done at ${event.trackName}!`,
-      `${leader} takes the win!`,
-      `${leader} brings it home and takes the race!`,
+      `${leader} gets it done at ${event.trackName}.`,
+      `${leader} takes the win.`,
+      `${leader} brings it home and wins the race.`,
     ],
   };
   return pickLine(candidates[event.kind], event, recentLines);

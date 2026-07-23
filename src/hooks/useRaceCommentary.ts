@@ -126,24 +126,20 @@ function speakWithBrowser(
     utterance.voice = browserVoiceFor(voicePreset);
     utterance.volume = volume;
     const baseRate = voicePreset === 'american-man'
-      ? 1.11
+      ? 0.98
       : voicePreset === 'british-woman' || voicePreset === 'british-man'
-        ? 1.08
-        : 1.09;
+        ? 0.96
+        : 0.97;
     const actionRate = eventKind === 'lead-change' || eventKind === 'pro-set' || eventKind === 'final-push'
-      ? 0.05
+      ? 0.02
       : eventKind === 'race-start' || eventKind === 'finish'
-        ? 0.03
-        : 0.01;
+        ? 0.01
+        : 0;
     utterance.rate = baseRate + actionRate;
     const basePitch = voicePreset === 'australian-woman' || voicePreset === 'british-woman'
-      ? 1.04
-      : 0.92;
-    utterance.pitch = basePitch + (
-      eventKind === 'lead-change' || eventKind === 'final-push' || eventKind === 'finish'
-        ? 0.03
-        : 0
-    );
+      ? 1
+      : 0.96;
+    utterance.pitch = basePitch;
     utterance.onend = () => finish(true);
     utterance.onerror = () => finish(false);
     activePlaybackCancelRef.current = cancel;

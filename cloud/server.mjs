@@ -74,6 +74,20 @@ const commentaryEventKinds = new Set([
   'final-push',
   'finish',
 ]);
+const commentaryCoursePhases = new Set([
+  'first-straight',
+  'turn-one',
+  'second-straight',
+  'rhythm-section',
+  'final-turn',
+  'last-straight',
+]);
+const commentaryBattleStates = new Set([
+  'solo',
+  'side-by-side',
+  'under-pressure',
+  'clear-lead',
+]);
 const adminAccountEmails = new Set(
   String(process.env.TRACKLAB_ADMIN_EMAILS || defaultAdminAccountEmail)
     .split(',')
@@ -520,8 +534,14 @@ function sanitizeCommentaryEvent(value) {
     trackName: sanitizeText(value.trackName, 'this BMX track', 120),
     leaderPlayerId: knownPlayerIds.has(leaderPlayerId) ? leaderPlayerId : null,
     ...(knownPlayerIds.has(previousLeaderPlayerId) ? { previousLeaderPlayerId } : {}),
-    ...(value.zoneName ? { zoneName: sanitizeText(value.zoneName, '', 80) } : {}),
     ...(value.splitName ? { splitName: sanitizeText(value.splitName, '', 80) } : {}),
+    coursePhase: commentaryCoursePhases.has(value.coursePhase)
+      ? value.coursePhase
+      : 'first-straight',
+    battleState: commentaryBattleStates.has(value.battleState)
+      ? value.battleState
+      : riders.length > 1 ? 'under-pressure' : 'solo',
+    pedalReferenceAllowed: Boolean(value.pedalReferenceAllowed),
     riders,
   };
 }
@@ -532,37 +552,37 @@ function sanitizeCommentarySpeechEventKind(value) {
 
 function commentarySpeechDirection(eventKind) {
   if (eventKind === 'race-start') {
-    return 'Hit the opening immediately with a bright, explosive gate-drop lift, then drive forward into the first straight.';
+    return 'Open promptly with anticipation, then settle into a comfortable natural rhythm down the first straight.';
   }
   if (eventKind === 'positions-established') {
-    return 'Sound alert and spontaneous. Lift the leader name, but leave vocal room for the race to develop.';
+    return 'Sound observant and conversational. Give the early order clearly and leave room for the race to develop.';
   }
   if (eventKind === 'lead-change') {
-    return 'Give the move a sharp, genuine surge of surprise, then land firmly on the new leader.';
+    return 'Let the pass bring a genuine, controlled lift in energy, then settle naturally on the new leader.';
   }
   if (eventKind === 'pedal-zone') {
-    return 'Use urgent forward motion and crisp emphasis as the rider attacks the section.';
+    return 'Call the rider battle and track action conversationally, as part of one continuous race.';
   }
   if (eventKind === 'pro-set') {
-    return 'Give the Pro Set choice a brief lift of risk and commitment, with controlled excitement.';
+    return 'Briefly note the line choice and keep the delivery connected to the chase.';
   }
   if (eventKind === 'final-push') {
-    return 'Build urgency through the line and rise naturally into the last-straight action.';
+    return 'Build measured urgency through the last straight without rushing the words.';
   }
   if (eventKind === 'finish') {
-    return 'Reach a decisive peak on the winner name, celebrate the result, and finish cleanly without trailing off.';
+    return 'Celebrate the winner clearly, then finish cleanly without shouting or dragging out the result.';
   }
-  return 'Give this preview lively race-night energy with natural variation, as if the gate is about to drop.';
+  return 'Give this preview a warm, believable sports-broadcast delivery at an unhurried pace.';
 }
 
 function commentarySpeechSpeed(eventKind) {
   if (eventKind === 'lead-change' || eventKind === 'pro-set' || eventKind === 'final-push') {
-    return 1.16;
+    return 0.99;
   }
   if (eventKind === 'race-start' || eventKind === 'finish') {
-    return 1.14;
+    return 0.98;
   }
-  return 1.11;
+  return 0.96;
 }
 
 function commentaryVoiceDefinition(preset, eventKind) {
@@ -572,7 +592,7 @@ function commentaryVoiceDefinition(preset, eventKind) {
     voice = 'cedar';
     persona = 'an Australian male BMX race announcer using clear, natural Australian English';
   } else if (preset === 'american-man') {
-    voice = 'onyx';
+    voice = 'cedar';
     persona = 'an American male BMX race announcer using clear, natural American English';
   } else if (preset === 'british-woman') {
     voice = 'marin';
@@ -589,11 +609,11 @@ function commentaryVoiceDefinition(preset, eventKind) {
     voice,
     instructions: [
       `Perform as ${persona}.`,
-      'This is live BMX play-by-play, not a studio read: begin immediately, stay conversational, and use alert, high-energy delivery.',
-      'Vary pace, pitch, and intensity with the action. Punch rider names and decisive verbs, use tiny natural pauses, and let urgent phrases accelerate.',
+      'This is live BMX play-by-play, not a commercial or a dramatic voice-over. Sound like a real commentator watching the race unfold.',
+      'Use a comfortable conversational pace, natural breaths, subtle changes in intonation, and brief pauses where the punctuation calls for them.',
+      'Keep rider names clear. Let the actual contest create the excitement; do not force intensity into every word or rush between phrases.',
       commentarySpeechDirection(eventKind),
-      'Never sound flat, evenly paced, corporate, synthetic, promotional, or like a navigation voice.',
-      'Keep the excitement believable: do not sing, scream through the whole line, add fake crowd noise, or imitate any real person.',
+      'Avoid a robotic rhythm, exaggerated pitch changes, announcer clichés, fake crowd noise, singing, or imitation of any real person.',
     ].join(' '),
   };
 }
@@ -607,25 +627,47 @@ function commentaryFallbackLine(event) {
     ?? event.riders[0]?.name
     ?? 'The leader';
   const second = event.riders[1]?.name;
+  const phaseLabels = {
+    'first-straight': 'first straight',
+    'turn-one': 'turn one',
+    'second-straight': 'second straight',
+    'rhythm-section': 'rhythm section',
+    'final-turn': 'final turn',
+    'last-straight': 'last straight',
+  };
+  const phase = phaseLabels[event.coursePhase] || 'track';
   if (event.kind === 'race-start') {
     return `Gate's down at ${event.trackName}—here we go!`;
   }
   if (event.kind === 'positions-established') {
-    return `${leader} takes the early advantage${second ? `—${second} is right there!` : '!'}`;
+    return `${leader} takes the early advantage${second ? `, with ${second} close behind.` : '.'}`;
   }
   if (event.kind === 'lead-change') {
-    return `${leader} makes the move—new leader!`;
+    return `${leader} makes the move and takes over.`;
   }
   if (event.kind === 'pedal-zone') {
-    return `${leader} attacks through ${event.zoneName || 'the next pedal zone'}!`;
+    return second && event.battleState !== 'clear-lead'
+      ? `${leader} leads through the ${phase}, with ${second} right there.`
+      : `${leader} keeps it clean through the ${phase}.`;
   }
   if (event.kind === 'pro-set') {
-    return `${leader} commits to the Pro Set—full attack!`;
+    return `${leader} commits to the Pro Set and holds the advantage.`;
   }
   if (event.kind === 'final-push') {
-    return `Last straight—${leader} leads the charge home!`;
+    return `${leader} leads them into the last straight.`;
   }
-  return `${leader} takes the win!`;
+  return `${leader} takes the win.`;
+}
+
+function commentaryLineViolatesRaceStyle(line, event) {
+  if (event.kind !== 'pedal-zone') {
+    return false;
+  }
+
+  if (/\b(?:attack|attacks|attacking|pedal(?:ling|ing)?\s+zone)\b/i.test(line)) {
+    return true;
+  }
+  return !event.pedalReferenceAllowed && /\b(?:pedals?|pedalling|pedaling)\b/i.test(line);
 }
 
 function commentaryLineFromResponse(payload) {
@@ -670,9 +712,11 @@ async function generateCommentaryLine({ event, model, voicePreset, recentLines }
         'Never invent a pass, position, rider, result, location, sponsor, number, track feature, or backstory.',
         'Never mention watts, power output, cadence, RPM, speed, MPH, KPH, distance, progress percentages, or reaction times—even when those facts appear in the input.',
         'Call what is happening on track, never the sensor data behind it.',
-        'Do not announce positions unless the event kind is positions-established, lead-change, final-push, or finish.',
-        'Use active verbs, contractions, and short play-by-play fragments. One natural exclamation is enough when the action earns it.',
-        'Avoid polished narration, generic filler, repeated sentence shapes, fake quotations, and requests for a crowd response.',
+        'Never rank riders at race-start and never invent a numbered running order. For mid-race calls, describe only the leader-versus-chaser relationship supported by the rider ranks and battleState.',
+        'Make racer-versus-racer action the center of the call: leader, chaser, pressure, passes, line choice, straights, turns, rhythm, and finish.',
+        'For pedal-zone events, describe the supplied coursePhase and battleState. Never say pedal zone or use attack/attacking. Mention being back on the pedals only when pedalReferenceAllowed is true.',
+        'Use active verbs, contractions, and short play-by-play fragments. Exclamation marks should be rare and reserved for a real pass or finish.',
+        'Avoid polished narration, generic filler, repeated sentence shapes, fake quotations, requests for a crowd response, and repetitive catchphrases.',
         commentaryGuideForEvent(event.kind),
         `The selected delivery preset is ${voicePreset}. The speech engine supplies the accent, so do not force regional slang.`,
         'Avoid wording used in recentLines. Return only JSON matching the schema.',
@@ -707,7 +751,7 @@ async function generateCommentaryLine({ event, model, voicePreset, recentLines }
   if (!line) {
     throw new Error('OpenAI commentary returned no usable line.');
   }
-  return commentaryLineUsesForbiddenTelemetry(line)
+  return commentaryLineUsesForbiddenTelemetry(line) || commentaryLineViolatesRaceStyle(line, event)
     ? commentaryFallbackLine(event)
     : line;
 }
@@ -2694,12 +2738,20 @@ async function serveStatic(request, response) {
       writeJson(response, 400, { error: 'A commentary line is required.' });
       return;
     }
-    if (commentaryLineUsesForbiddenTelemetry(line)) {
-      writeJson(response, 400, { error: 'Commentary must describe race action without telemetry figures.' });
+    const eventKind = sanitizeCommentarySpeechEventKind(payload?.eventKind);
+    if (
+      commentaryLineUsesForbiddenTelemetry(line)
+      || commentaryLineViolatesRaceStyle(line, {
+        kind: eventKind,
+        pedalReferenceAllowed: true,
+      })
+    ) {
+      writeJson(response, 400, {
+        error: 'Commentary must describe natural race action without sensor figures or mapped-zone jargon.',
+      });
       return;
     }
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
-    const eventKind = sanitizeCommentarySpeechEventKind(payload?.eventKind);
     const audio = await generateCommentarySpeech(line, voicePreset, eventKind);
     cloudTelemetry.increment('tracklab_commentary_speech_total', { voicePreset, eventKind });
     response.writeHead(200, {

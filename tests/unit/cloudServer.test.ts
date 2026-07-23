@@ -137,7 +137,7 @@ describe('cloud API trust boundaries', () => {
         'british-man',
       ],
       research: {
-        knowledgeVersion: 'usabmx-national-2026-07-22-v2-audio',
+        knowledgeVersion: 'usabmx-national-2026-07-22-v3-natural-race',
         indexedVideos: 166,
         analyzedRaceCallSegments: 18_208,
         analyzedRaceAudioSections: 6,
@@ -283,7 +283,23 @@ describe('cloud API trust boundaries', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      error: 'Commentary must describe race action without telemetry figures.',
+      error: 'Commentary must describe natural race action without sensor figures or mapped-zone jargon.',
+    });
+  });
+
+  it('refuses repetitive mapped-zone jargon in live race speech', async () => {
+    const response = await api('/api/commentary/speech', {
+      method: 'POST',
+      body: JSON.stringify({
+        line: 'Avery attacks Pedal Zone 4.',
+        voicePreset: 'american-man',
+        eventKind: 'pedal-zone',
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Commentary must describe natural race action without sensor figures or mapped-zone jargon.',
     });
   });
 

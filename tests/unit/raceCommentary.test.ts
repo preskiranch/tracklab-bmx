@@ -109,11 +109,19 @@ describe('race commentary event detection', () => {
       tracker,
       snapshot([
         rider(1, 45, { actualBranches: { 'Split 1': 'b' } }),
-        rider(2, 40),
+        rider(2, 44.5),
       ]),
       2_000,
     );
     expect(pedalAndPro.map((event) => event.kind)).toEqual(expect.arrayContaining(['pedal-zone', 'pro-set']));
+    const courseCall = pedalAndPro.find((event) => event.kind === 'pedal-zone');
+    expect(courseCall).toMatchObject({
+      coursePhase: 'first-straight',
+      battleState: 'side-by-side',
+      pedalReferenceAllowed: false,
+    });
+    expect(localCommentaryLine(courseCall!)).toMatch(/Avery.*Blake|Blake.*Avery/);
+    expect(localCommentaryLine(courseCall!)).not.toMatch(/\b(?:attack|pedal(?:ling|ing)? zone)\b/i);
 
     const finalPush = detectRaceCommentaryEvents(
       tracker,
@@ -161,6 +169,29 @@ describe('race commentary event detection', () => {
 
     expect(serializedEvent).not.toMatch(/"watts"|"cadence"|"speedKph"|"reactionTimesByPlayer"/);
     expect(line).not.toMatch(/\b(?:watts?|rpm|cadence|speed|mph|kph|power output)\b/i);
+  });
+
+  it('spaces mapped-zone cues so they do not dominate the live call', () => {
+    const tracker = createRaceCommentaryTracker();
+    const withZones = (distance: number) => ({
+      ...snapshot([rider(1, distance), rider(2, Math.max(0, distance - 1))]),
+      zones: [
+        { id: 'z1', name: 'Pedal Zone 1', startMeter: 40, endMeter: 50, type: 'pedal' as const },
+        { id: 'z2', name: 'Pedal Zone 2', startMeter: 65, endMeter: 75, type: 'pedal' as const },
+        { id: 'z3', name: 'Pedal Zone 3', startMeter: 95, endMeter: 110, type: 'pedal' as const },
+      ],
+    });
+
+    detectRaceCommentaryEvents(tracker, withZones(0), 1_000);
+    detectRaceCommentaryEvents(tracker, withZones(1), 1_100);
+    expect(detectRaceCommentaryEvents(tracker, withZones(45), 2_000)
+      .map((event) => event.kind)).toContain('pedal-zone');
+    detectRaceCommentaryEvents(tracker, withZones(55), 2_100);
+    expect(detectRaceCommentaryEvents(tracker, withZones(70), 2_200)
+      .map((event) => event.kind)).not.toContain('pedal-zone');
+    detectRaceCommentaryEvents(tracker, withZones(80), 2_300);
+    expect(detectRaceCommentaryEvents(tracker, withZones(100), 2_400)
+      .map((event) => event.kind)).toContain('pedal-zone');
   });
 
   it('prioritizes a finish call when several events happen in the same frame', () => {
