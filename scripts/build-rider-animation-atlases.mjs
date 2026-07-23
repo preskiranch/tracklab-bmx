@@ -9,11 +9,12 @@ if (!inputDirectory || !outputDirectory) {
 }
 
 const colors = ['lime', 'red', 'blue', 'yellow'];
-const columns = 2;
+const columns = 3;
 const rows = 3;
 const frameCount = columns * rows;
 const alphaThreshold = 128;
 const framePadding = 18;
+const cellLeftInset = 24;
 
 const sheets = await Promise.all(colors.map(async (color) => {
   const file = path.join(inputDirectory, `${color}-alpha.png`);
@@ -36,61 +37,77 @@ for (const sheet of sheets) {
 
 const sourceFrameWidth = width / columns;
 const sourceFrameHeight = height / rows;
-const bounds = {
-  minX: sourceFrameWidth,
-  minY: sourceFrameHeight,
-  maxX: -1,
-  maxY: -1,
-};
+function visibleFrameBounds(png, frameIndex) {
+  const column = frameIndex % columns;
+  const row = Math.floor(frameIndex / columns);
+  const bounds = {
+    minX: sourceFrameWidth,
+    minY: sourceFrameHeight,
+    maxX: -1,
+    maxY: -1,
+  };
 
-for (const { png } of sheets) {
-  for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
-    const column = frameIndex % columns;
-    const row = Math.floor(frameIndex / columns);
-    for (let y = 0; y < sourceFrameHeight; y += 1) {
-      for (let x = 0; x < sourceFrameWidth; x += 1) {
-        const sourceIndex = (((row * sourceFrameHeight + y) * width) + (column * sourceFrameWidth + x)) * 4;
-        if (png.data[sourceIndex + 3] < alphaThreshold) {
-          continue;
-        }
-
-        bounds.minX = Math.min(bounds.minX, x);
-        bounds.minY = Math.min(bounds.minY, y);
-        bounds.maxX = Math.max(bounds.maxX, x);
-        bounds.maxY = Math.max(bounds.maxY, y);
+  for (let y = 0; y < sourceFrameHeight; y += 1) {
+    for (let x = cellLeftInset; x < sourceFrameWidth; x += 1) {
+      const sourceIndex = (((row * sourceFrameHeight + y) * width) + (column * sourceFrameWidth + x)) * 4;
+      if (png.data[sourceIndex + 3] < alphaThreshold) {
+        continue;
       }
+
+      bounds.minX = Math.min(bounds.minX, x);
+      bounds.minY = Math.min(bounds.minY, y);
+      bounds.maxX = Math.max(bounds.maxX, x);
+      bounds.maxY = Math.max(bounds.maxY, y);
     }
   }
+
+  if (bounds.maxX < bounds.minX || bounds.maxY < bounds.minY) {
+    throw new Error(`No visible rider pixels were found in frame ${frameIndex}.`);
+  }
+
+  return {
+    ...bounds,
+    width: bounds.maxX - bounds.minX + 1,
+    height: bounds.maxY - bounds.minY + 1,
+  };
 }
 
-if (bounds.maxX < bounds.minX || bounds.maxY < bounds.minY) {
-  throw new Error('No visible rider pixels were found in the source sheets.');
-}
-
-const contentWidth = bounds.maxX - bounds.minX + 1;
-const contentHeight = bounds.maxY - bounds.minY + 1;
-const frameSize = Math.max(contentWidth, contentHeight) + (framePadding * 2);
-const destinationX = Math.floor((frameSize - contentWidth) / 2);
-const destinationY = Math.floor((frameSize - contentHeight) / 2);
+const preparedSheets = sheets.map((sheet) => ({
+  ...sheet,
+  frameBounds: Array.from({ length: frameCount }, (_, frameIndex) => visibleFrameBounds(sheet.png, frameIndex)),
+}));
+const targetSubjectSize = Math.max(...preparedSheets.flatMap((sheet) => (
+  sheet.frameBounds.flatMap((bounds) => [bounds.width, bounds.height])
+)));
+const frameSize = targetSubjectSize + (framePadding * 2);
 
 await mkdir(outputDirectory, { recursive: true });
 
-for (const { color, png } of sheets) {
+for (const { color, png, frameBounds } of preparedSheets) {
   const atlas = new PNG({ width: frameSize * frameCount, height: frameSize });
 
   for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
     const column = frameIndex % columns;
     const row = Math.floor(frameIndex / columns);
-    PNG.bitblt(
-      png,
-      atlas,
-      (column * sourceFrameWidth) + bounds.minX,
-      (row * sourceFrameHeight) + bounds.minY,
-      contentWidth,
-      contentHeight,
-      (frameIndex * frameSize) + destinationX,
-      destinationY,
-    );
+    const bounds = frameBounds[frameIndex];
+    const scale = Math.min(targetSubjectSize / bounds.width, targetSubjectSize / bounds.height);
+    const destinationWidth = Math.max(1, Math.round(bounds.width * scale));
+    const destinationHeight = Math.max(1, Math.round(bounds.height * scale));
+    const destinationX = (frameIndex * frameSize) + Math.floor((frameSize - destinationWidth) / 2);
+    const destinationY = frameSize - framePadding - destinationHeight;
+
+    for (let y = 0; y < destinationHeight; y += 1) {
+      const sourceY = Math.min(bounds.height - 1, Math.floor(y / scale));
+      for (let x = 0; x < destinationWidth; x += 1) {
+        const sourceX = Math.min(bounds.width - 1, Math.floor(x / scale));
+        const sourceIndex = (
+          ((row * sourceFrameHeight + bounds.minY + sourceY) * width)
+          + (column * sourceFrameWidth + bounds.minX + sourceX)
+        ) * 4;
+        const destinationIndex = (((destinationY + y) * atlas.width) + destinationX + x) * 4;
+        png.data.copy(atlas.data, destinationIndex, sourceIndex, sourceIndex + 4);
+      }
+    }
   }
 
   const outputFile = path.join(outputDirectory, `rider-${color}-animated.png`);
@@ -98,4 +115,4 @@ for (const { color, png } of sheets) {
   console.log(`Wrote ${outputFile}`);
 }
 
-console.log(JSON.stringify({ bounds, contentWidth, contentHeight, frameSize }));
+console.log(JSON.stringify({ targetSubjectSize, frameSize }));

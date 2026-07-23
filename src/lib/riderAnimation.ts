@@ -1,9 +1,10 @@
 import type { RaceState, RiderDriveSource } from '../types';
 
-export const riderPedalFrameCount = 5;
+export const riderPedalFrameCount = 8;
 export const riderCoastFrameIndex = riderPedalFrameCount;
 export const riderAtlasFrameCount = riderPedalFrameCount + 1;
 export const riderWheelFrameCount = 4;
+export const riderFrameBlendSteps = 4;
 const bmxWheelCircumferenceMeters = Math.PI * 0.508;
 
 type RiderAnimationInput = {
@@ -18,6 +19,8 @@ type RiderAnimationInput = {
 
 export type RiderAnimationState = {
   frameIndex: number;
+  nextFrameIndex: number;
+  frameBlend: number;
   pedaling: boolean;
   wheelFrameIndex: number;
 };
@@ -48,11 +51,23 @@ export function riderAnimationState({
   const pedaling = raceState === 'racing' && driveAllowed && driveIsEngaged && hasPedalInput;
 
   if (!pedaling) {
-    return { frameIndex: riderCoastFrameIndex, pedaling: false, wheelFrameIndex };
+    return {
+      frameIndex: riderCoastFrameIndex,
+      nextFrameIndex: riderCoastFrameIndex,
+      frameBlend: 0,
+      pedaling: false,
+      wheelFrameIndex,
+    };
   }
 
+  const frameProgress = normalizedPedalPhase(pedalPhase) * riderPedalFrameCount;
+  const frameIndex = Math.floor(frameProgress) % riderPedalFrameCount;
+  const frameBlend = Math.floor((frameProgress - frameIndex) * riderFrameBlendSteps) / riderFrameBlendSteps;
+
   return {
-    frameIndex: Math.floor(normalizedPedalPhase(pedalPhase) * riderPedalFrameCount) % riderPedalFrameCount,
+    frameIndex,
+    nextFrameIndex: (frameIndex + 1) % riderPedalFrameCount,
+    frameBlend,
     pedaling: true,
     wheelFrameIndex,
   };

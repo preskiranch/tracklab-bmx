@@ -56,6 +56,7 @@ import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGate
 import {
   riderAnimationState,
   riderAtlasFrameCount,
+  riderFrameBlendSteps,
   riderWheelFrameCount,
   type RiderAnimationState,
 } from '../lib/riderAnimation';
@@ -157,6 +158,30 @@ type RiderMapMarker = {
 
 const riderImagePromises = new Map<string, Promise<HTMLImageElement>>();
 const riderIconCache = new Map<string, string>();
+const riderIconCacheMaxEntries = 768;
+
+function cachedRiderIcon(cacheKey: string) {
+  const cached = riderIconCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  riderIconCache.delete(cacheKey);
+  riderIconCache.set(cacheKey, cached);
+  return cached;
+}
+
+function rememberRiderIcon(cacheKey: string, dataUrl: string) {
+  while (riderIconCache.size >= riderIconCacheMaxEntries) {
+    const oldestKey = riderIconCache.keys().next().value;
+    if (typeof oldestKey !== 'string') {
+      break;
+    }
+    riderIconCache.delete(oldestKey);
+  }
+  riderIconCache.set(cacheKey, dataUrl);
+}
+
 function coastingRiderAnimation(distanceMeters: number): RiderAnimationState {
   return riderAnimationState({
     raceState: 'ready',
@@ -604,8 +629,10 @@ async function uprightRiderIconUrl(
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
   const frameIndex = Math.max(0, Math.min(riderAtlasFrameCount - 1, animation.frameIndex));
-  const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}:${frameIndex}:${animation.wheelFrameIndex}`;
-  const cached = riderIconCache.get(cacheKey);
+  const nextFrameIndex = Math.max(0, Math.min(riderAtlasFrameCount - 1, animation.nextFrameIndex));
+  const blendBucket = Math.round(animation.frameBlend * riderFrameBlendSteps);
+  const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}:${frameIndex}:${nextFrameIndex}:${blendBucket}:${animation.wheelFrameIndex}`;
+  const cached = cachedRiderIcon(cacheKey);
   if (cached) {
     return cached;
   }
@@ -627,17 +654,26 @@ async function uprightRiderIconUrl(
   context.shadowBlur = appearance === 'ghost' ? 14 : 8;
   context.shadowOffsetY = 5;
   const atlasFrameWidth = image.naturalWidth / riderAtlasFrameCount;
-  context.drawImage(
-    image,
-    frameIndex * atlasFrameWidth,
-    0,
-    atlasFrameWidth,
-    image.naturalHeight,
-    -riderDrawSize / 2,
-    riderDrawTop,
-    riderDrawSize,
-    riderDrawSize,
-  );
+  const frameBlend = Math.max(0, Math.min(1, animation.frameBlend));
+  const drawAtlasFrame = (nextIndex: number, alpha: number) => {
+    context.globalAlpha = alpha;
+    context.drawImage(
+      image,
+      nextIndex * atlasFrameWidth,
+      0,
+      atlasFrameWidth,
+      image.naturalHeight,
+      -riderDrawSize / 2,
+      riderDrawTop,
+      riderDrawSize,
+      riderDrawSize,
+    );
+  };
+  drawAtlasFrame(frameIndex, nextFrameIndex === frameIndex ? 1 : 1 - frameBlend);
+  if (nextFrameIndex !== frameIndex && frameBlend > 0) {
+    drawAtlasFrame(nextFrameIndex, frameBlend);
+  }
+  context.globalAlpha = 1;
   const wheelRotation = (animation.wheelFrameIndex / riderWheelFrameCount) * Math.PI * 2;
   context.strokeStyle = appearance === 'ghost' ? 'rgba(103, 232, 249, 0.78)' : player.accent;
   context.globalAlpha = appearance === 'ghost' ? 0.65 : 0.72;
@@ -667,7 +703,7 @@ async function uprightRiderIconUrl(
   }
 
   const dataUrl = canvas.toDataURL('image/png');
-  riderIconCache.set(cacheKey, dataUrl);
+  rememberRiderIcon(cacheKey, dataUrl);
   return dataUrl;
 }
 
@@ -695,7 +731,8 @@ function createRiderMapMarker(
 
   const applyVisual = (nextRotation: number, nextAnimation: RiderAnimationState) => {
     const orientation = uprightRiderOrientation(nextRotation);
-    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotation)}:${nextAnimation.frameIndex}:${nextAnimation.wheelFrameIndex}`;
+    const nextBlendBucket = Math.round(nextAnimation.frameBlend * riderFrameBlendSteps);
+    const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotation)}:${nextAnimation.frameIndex}:${nextAnimation.nextFrameIndex}:${nextBlendBucket}:${nextAnimation.wheelFrameIndex}`;
     if (nextVisualKey === visualKey) {
       return;
     }
