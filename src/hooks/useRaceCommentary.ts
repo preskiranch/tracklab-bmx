@@ -54,6 +54,7 @@ type PreparedPreRaceSpeech = {
   key: string;
   report: PreRaceReport;
   audioBlob?: Blob;
+  audioPromise?: Promise<Blob | null>;
 };
 
 type UseRaceCommentaryOptions = {
@@ -73,7 +74,7 @@ type UseRaceCommentaryOptions = {
 };
 
 function speechLanguage(voicePreset: RaceCommentaryVoicePreset) {
-  if (voicePreset === 'american-man') {
+  if (voicePreset === 'american-woman' || voicePreset === 'american-man') {
     return 'en-US';
   }
   if (voicePreset === 'british-woman' || voicePreset === 'british-man') {
@@ -213,7 +214,7 @@ function speakWithBrowser(
     utterance.lang = speechLanguage(voicePreset);
     utterance.voice = browserVoiceFor(voicePreset);
     utterance.volume = volume;
-    const baseRate = voicePreset === 'american-man'
+    const baseRate = voicePreset === 'american-woman' || voicePreset === 'american-man'
       ? 0.98
       : voicePreset === 'british-woman' || voicePreset === 'british-man'
         ? 0.96
@@ -224,7 +225,9 @@ function speakWithBrowser(
         ? 0.01
         : 0;
     utterance.rate = baseRate + actionRate;
-    const basePitch = voicePreset === 'australian-woman' || voicePreset === 'british-woman'
+    const basePitch = voicePreset === 'australian-woman'
+      || voicePreset === 'american-woman'
+      || voicePreset === 'british-woman'
       ? 1
       : 0.96;
     const actionPitchLift = eventKind === 'lead-change' || eventKind === 'finish'
@@ -260,7 +263,7 @@ async function requestAiSpeechBlob(
   eventKind: CommentarySpeechEventKind,
   riderNames: string[],
   deliveryStyle: CommentaryDeliveryStyle = 'straight',
-  timeoutMs = 5_000,
+  timeoutMs = 12_000,
   signal?: AbortSignal,
 ) {
   const response = await fetchWithTimeout('/api/commentary/speech', {
@@ -285,6 +288,38 @@ async function requestAiSpeechBlob(
   return await response.blob();
 }
 
+function commentarySpeechTimeoutMs(eventKind: CommentarySpeechEventKind) {
+  if (eventKind === 'preview' || eventKind === 'pre-race') {
+    return 20_000;
+  }
+  if (eventKind === 'race-start') {
+    return 15_000;
+  }
+  if (eventKind === 'finish') {
+    return 12_000;
+  }
+  return 9_000;
+}
+
+async function waitForPreparedSpeech(
+  promise: Promise<Blob | null>,
+  timeoutMs: number,
+) {
+  let timeout: number | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timeout = window.setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout != null) {
+      window.clearTimeout(timeout);
+    }
+  }
+}
+
 async function playAudioBlobWithWebAudio(
   audioBlob: Blob,
   volume: number,
@@ -298,7 +333,7 @@ async function playAudioBlobWithWebAudio(
     return null;
   }
 
-  if (context.state === 'suspended') {
+  if (context.state !== 'running' && context.state !== 'closed') {
     try {
       await context.resume();
     } catch {
@@ -487,10 +522,10 @@ async function playAiSpeech(
     eventKind,
     riderNames,
     deliveryStyle,
-    5_000,
+    commentarySpeechTimeoutMs(eventKind),
     signal,
   );
-  return await playAudioBlob(
+  const played = await playAudioBlob(
     audioBlob,
     preferences.volume,
     activeAudioRef,
@@ -499,6 +534,10 @@ async function playAiSpeech(
     shouldContinue,
     onStart,
   );
+  if (!played) {
+    throw new Error('AI speech audio did not start.');
+  }
+  return true;
 }
 
 export function useRaceCommentary({
@@ -518,6 +557,7 @@ export function useRaceCommentary({
 }: UseRaceCommentaryOptions) {
   const [serviceMode, setServiceMode] = useState<CommentaryServiceMode>('checking');
   const [playbackStatus, setPlaybackStatus] = useState<CommentaryPlaybackStatus>('idle');
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const trackerRef = useRef(createRaceCommentaryTracker());
   const preferencesRef = useRef(preferences);
   const recentLinesChangeRef = useRef(onRecentLinesChange);
@@ -527,6 +567,7 @@ export function useRaceCommentary({
   const lifecycleGenerationRef = useRef(0);
   const callSequenceRef = useRef(0);
   const playbackPhaseRef = useRef<CommentaryPlaybackPhase>('idle');
+  const previousRaceStateRef = useRef<RaceState>(raceState);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeBufferSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const activePlaybackCancelRef = useRef<(() => void) | null>(null);
@@ -562,6 +603,9 @@ export function useRaceCommentary({
   const setPlaybackPhase = useCallback((phase: CommentaryPlaybackPhase) => {
     playbackPhaseRef.current = phase;
     setPlaybackStatus(phase === 'preparing' ? 'thinking' : phase);
+    if (phase === 'speaking') {
+      setPlaybackError(null);
+    }
   }, []);
 
   const disposePreparedStartSpeech = useCallback(() => {
@@ -733,27 +777,30 @@ export function useRaceCommentary({
         if (preRacePrefetchRequestRef.current !== requestId) {
           return;
         }
-        preparedPreRaceSpeechRef.current = { key: preRaceKey, report };
         setPreRaceReport(report);
 
         if (serviceMode !== 'ai') {
+          preparedPreRaceSpeechRef.current = { key: preRaceKey, report };
           return;
         }
-        try {
-          const audioBlob = await requestAiSpeechBlob(
-            report.line,
-            preferences,
-            'pre-race',
-            players.map((player) => player.name),
-            'straight',
-            10_000,
-            controller.signal,
-          );
-          if (preRacePrefetchRequestRef.current === requestId) {
-            preparedPreRaceSpeechRef.current = { key: preRaceKey, report, audioBlob };
-          }
-        } catch {
-          // The staged report will use the device voice if studio speech was not ready.
+        const audioPromise = requestAiSpeechBlob(
+          report.line,
+          preferences,
+          'pre-race',
+          players.map((player) => player.name),
+          'straight',
+          commentarySpeechTimeoutMs('pre-race'),
+          controller.signal,
+        )
+          .catch(() => null);
+        preparedPreRaceSpeechRef.current = {
+          key: preRaceKey,
+          report,
+          audioPromise,
+        };
+        const audioBlob = await audioPromise;
+        if (preRacePrefetchRequestRef.current === requestId && audioBlob) {
+          preparedPreRaceSpeechRef.current = { key: preRaceKey, report, audioBlob };
         }
       })
       .catch(() => {
@@ -825,26 +872,51 @@ export function useRaceCommentary({
         setPlaybackPhase('speaking');
       }
     };
-    setPlaybackPhase(prepared?.audioBlob ? 'preparing' : 'thinking');
-    void (prepared?.audioBlob
-      ? playAudioBlob(
-        prepared.audioBlob,
-        preferences.volume,
-        activeAudioRef,
-        activeBufferSourceRef,
-        activePlaybackCancelRef,
-        shouldContinue,
-        beginSpeaking,
-      )
-      : speakWithBrowser(
-        report.line,
-        preferences.voicePreset,
-        'pre-race',
-        preferences.volume,
-        activePlaybackCancelRef,
-        shouldContinue,
-        beginSpeaking,
-      ))
+    setPlaybackPhase(prepared?.audioBlob || prepared?.audioPromise ? 'preparing' : 'thinking');
+    void (async () => {
+      try {
+        const audioBlob = prepared?.audioBlob
+          ?? (prepared?.audioPromise
+            ? await waitForPreparedSpeech(prepared.audioPromise, 1_200)
+            : null);
+        if (audioBlob) {
+          const played = await playAudioBlob(
+            audioBlob,
+            preferences.volume,
+            activeAudioRef,
+            activeBufferSourceRef,
+            activePlaybackCancelRef,
+            shouldContinue,
+            beginSpeaking,
+          );
+          if (!played) {
+            throw new Error('Prepared pre-race speech did not start.');
+          }
+          return;
+        }
+        await speakWithBrowser(
+          report.line,
+          preferences.voicePreset,
+          'pre-race',
+          preferences.volume,
+          activePlaybackCancelRef,
+          shouldContinue,
+          beginSpeaking,
+        );
+      } catch {
+        if (shouldContinue()) {
+          await speakWithBrowser(
+            report.line,
+            preferences.voicePreset,
+            'pre-race',
+            preferences.volume,
+            activePlaybackCancelRef,
+            shouldContinue,
+            beginSpeaking,
+          );
+        }
+      }
+    })()
       .finally(() => {
         if (preRacePlaybackAbortRef.current === controller) {
           preRacePlaybackAbortRef.current = null;
@@ -920,7 +992,7 @@ export function useRaceCommentary({
         };
         setPlaybackPhase('thinking');
         let line = '';
-        let useAiSpeech = serviceMode === 'ai';
+        const useAiSpeech = serviceMode === 'ai';
         let deliveryStyle: CommentaryDeliveryStyle = 'straight';
 
         if (event.kind === 'race-start') {
@@ -934,7 +1006,7 @@ export function useRaceCommentary({
           activeRequestAbortRef.current = requestController;
           try {
             if (preparedMatches && prepared) {
-              await playAudioBlob(
+              const played = await playAudioBlob(
                 prepared.audioBlob,
                 activePreferences.volume,
                 activeAudioRef,
@@ -943,6 +1015,9 @@ export function useRaceCommentary({
                 shouldContinue,
                 beginSpeaking,
               );
+              if (!played) {
+                throw new Error('Prepared race-start speech did not start.');
+              }
             } else if (serviceMode === 'ai') {
               await playAiSpeech(
                 line,
@@ -1080,7 +1155,6 @@ export function useRaceCommentary({
             if (!shouldContinue()) {
               continue;
             }
-            useAiSpeech = false;
           }
         }
 
@@ -1149,6 +1223,8 @@ export function useRaceCommentary({
   }, [players, rememberLine, serviceMode, setPlaybackPhase, startLine]);
 
   useEffect(() => {
+    const previousRaceState = previousRaceStateRef.current;
+    previousRaceStateRef.current = raceState;
     if (!preferences.enabled) {
       raceLinesRef.current = [];
       stopPlayback();
@@ -1167,7 +1243,11 @@ export function useRaceCommentary({
     });
     if (raceStateStopsCommentary(raceState)) {
       raceLinesRef.current = [];
-      stopPlayback();
+      queueRef.current = [];
+      trackerRef.current = createRaceCommentaryTracker();
+      if (previousRaceState !== 'ready' && !startGateActive) {
+        stopPlayback();
+      }
       return;
     }
     if (events.length === 0) {
@@ -1201,6 +1281,7 @@ export function useRaceCommentary({
     raceState,
     reactionTimesByPlayer,
     riders,
+    startGateActive,
     stopPlayback,
     trackName,
     zones,
@@ -1215,55 +1296,56 @@ export function useRaceCommentary({
   }, [disposePreparedStartSpeech, stopPlayback]);
 
   const prime = useCallback(() => {
-    void primeAudioCues();
+    const cuePrime = primeAudioCues();
     const audio = commentaryAudioElement(activeAudioRef);
-    if (audio.paused && !audio.currentSrc) {
-      audio.src = uciRandomStartVoiceUrl;
-      audio.preload = 'auto';
-      audio.setAttribute('playsinline', '');
-      audio.muted = true;
-      audio.load();
-      void audio.play()
-        .then(() => {
-          audio.pause();
-          try {
-            audio.currentTime = 0;
-          } catch {
-            // Metadata may not be ready yet.
-          }
-        })
-        .catch(() => {
-          // The shared Web Audio context remains the primary iPad/mobile path.
-        })
-        .finally(() => {
-          audio.muted = false;
-        });
-    }
+    audio.pause();
+    audio.src = uciRandomStartVoiceUrl;
+    audio.preload = 'auto';
+    audio.setAttribute('playsinline', '');
+    audio.muted = false;
+    audio.volume = 0.0001;
+    audio.load();
+    const mediaPrime = audio.play()
+      .catch(() => {
+        // The shared Web Audio context remains the primary iPad/mobile path.
+      })
+      .finally(() => {
+        audio.pause();
+        try {
+          audio.currentTime = 0;
+        } catch {
+          // Metadata may not be ready yet.
+        }
+        audio.volume = preferencesRef.current.volume;
+        audio.muted = false;
+      });
 
     if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
       const unlockUtterance = new SpeechSynthesisUtterance('');
       unlockUtterance.volume = 0;
       window.speechSynthesis.speak(unlockUtterance);
     }
+    return Promise.allSettled([cuePrime, mediaPrime]).then(() => undefined);
   }, []);
 
   const preview = useCallback(async () => {
-    prime();
+    setPlaybackError(null);
+    setPlaybackPhase('thinking');
+    await prime();
     const activePreferences = preferencesRef.current;
     const names = riderNameList(players);
     const line = names
       ? `TrackLab announcer ready. ${names}, get set for the gate.`
       : 'TrackLab announcer ready. Riders, get set for the gate.';
-    activeAudioRef.current?.pause();
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
     activePlaybackCancelRef.current?.();
-    setPlaybackPhase('thinking');
     const beginSpeaking = () => setPlaybackPhase('speaking');
+    let played = false;
     try {
       if (serviceMode === 'ai') {
-        await playAiSpeech(
+        played = await playAiSpeech(
           line,
           activePreferences,
           'preview',
@@ -1276,7 +1358,7 @@ export function useRaceCommentary({
           beginSpeaking,
         );
       } else {
-        await speakWithBrowser(
+        played = await speakWithBrowser(
           line,
           activePreferences.voicePreset,
           'preview',
@@ -1287,7 +1369,7 @@ export function useRaceCommentary({
         );
       }
     } catch {
-      await speakWithBrowser(
+      played = await speakWithBrowser(
         line,
         activePreferences.voicePreset,
         'preview',
@@ -1297,12 +1379,16 @@ export function useRaceCommentary({
         beginSpeaking,
       );
     } finally {
+      if (!played) {
+        setPlaybackError('Voice playback could not start. Tap Preview again to unlock audio.');
+      }
       setPlaybackPhase('idle');
     }
   }, [players, prime, serviceMode, setPlaybackPhase]);
 
   return {
     playbackStatus,
+    playbackError,
     serviceMode,
     preRaceReport,
     preview,

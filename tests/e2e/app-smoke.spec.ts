@@ -929,8 +929,9 @@ test.describe('mobile commentary playback', () => {
   });
 
   test('keeps AI announcing on iPad-style browsers when delayed media playback is blocked', async ({ page }) => {
-    test.setTimeout(50_000);
+    test.setTimeout(65_000);
     let speechRequests = 0;
+    const speechEventKinds: string[] = [];
     const authUser = {
       id: 'ipad-commentary-racer',
       profileKey: 'user:ipad-commentary-racer',
@@ -954,6 +955,9 @@ test.describe('mobile commentary playback', () => {
     });
     await page.route('**/api/commentary/speech', async (route) => {
       speechRequests += 1;
+      const payload = route.request().postDataJSON() as { eventKind?: string };
+      speechEventKinds.push(payload.eventKind ?? '');
+      await new Promise((resolve) => setTimeout(resolve, 650));
       await route.fulfill({
         contentType: 'audio/mpeg',
         path: 'public/assets/uci-random-start.mp3',
@@ -1018,11 +1022,29 @@ test.describe('mobile commentary playback', () => {
     await page.goto('/?track=air-time-bmx');
     await page.getByRole('button', { name: 'Open App' }).click();
     await page.getByRole('button', { name: /Demo/i }).first().click();
+    await page.getByLabel('Announcer voice').selectOption('american-woman');
+    const previewButton = page.getByRole('button', { name: 'Preview selected voice' });
+    await previewButton.click();
+    await expect(page.getByRole('button', { name: 'Preparing voice…' })).toBeVisible();
+    await expect.poll(
+      () => speechEventKinds.includes('preview'),
+      { timeout: 8_000 },
+    ).toBe(true);
+    await expect.poll(() => page.evaluate(() => (
+      (window as typeof window & {
+        __tracklabBufferPlaybackCount?: number;
+      }).__tracklabBufferPlaybackCount ?? 0
+    )), { timeout: 8_000 }).toBeGreaterThanOrEqual(1);
+    await expect(page.getByRole('button', { name: 'Preview selected voice' })).toBeEnabled();
     const startAction = page.locator('.workflow-step.primary-action');
     await expect(startAction).toContainText('Start Demo Race');
     await startAction.click();
 
     await expect.poll(() => speechRequests, { timeout: 8_000 }).toBeGreaterThan(0);
+    await expect.poll(
+      () => speechEventKinds.includes('pre-race'),
+      { timeout: 8_000 },
+    ).toBe(true);
     await expect.poll(() => page.evaluate(() => (
       (window as typeof window & {
         __tracklabBlockedMediaPlayCount?: number;
@@ -1032,7 +1054,19 @@ test.describe('mobile commentary playback', () => {
       (window as typeof window & {
         __tracklabBufferPlaybackCount?: number;
       }).__tracklabBufferPlaybackCount ?? 0
-    )), { timeout: 35_000 }).toBeGreaterThanOrEqual(2);
+    )), { timeout: 35_000 }).toBeGreaterThanOrEqual(4);
+    await expect.poll(
+      () => speechEventKinds.includes('race-start'),
+      { timeout: 35_000 },
+    ).toBe(true);
+    await expect.poll(
+      () => speechEventKinds.some((kind) => (
+        kind !== 'preview'
+        && kind !== 'pre-race'
+        && kind !== 'race-start'
+      )),
+      { timeout: 35_000 },
+    ).toBe(true);
     await expect(page.getByText('Natural AI commentary ready')).toBeAttached();
   });
 });

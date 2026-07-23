@@ -86,6 +86,7 @@ const commentaryModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'
 const commentaryVoicePresets = new Set([
   'australian-woman',
   'australian-man',
+  'american-woman',
   'american-man',
   'british-woman',
   'british-man',
@@ -655,6 +656,9 @@ function commentaryVoiceDefinition(preset, eventKind, deliveryStyle) {
   if (preset === 'australian-man') {
     voice = 'cedar';
     persona = 'an Australian male BMX race announcer using clear, natural Australian English';
+  } else if (preset === 'american-woman') {
+    voice = 'marin';
+    persona = 'an American female BMX race announcer using clear, natural American English';
   } else if (preset === 'american-man') {
     voice = 'cedar';
     persona = 'an American male BMX race announcer using clear, natural American English';
@@ -988,7 +992,9 @@ async function generateCommentarySpeech(line, voicePreset, eventKind, deliverySt
       response_format: 'wav',
       speed: commentarySpeechSpeed(eventKind),
     }),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(
+      eventKind === 'preview' || eventKind === 'pre-race' ? 20_000 : 12_000,
+    ),
   });
   if (!response.ok) {
     throw new Error(`OpenAI speech returned ${response.status}`);

@@ -132,6 +132,7 @@ describe('cloud API trust boundaries', () => {
       voicePresets: [
         'australian-woman',
         'australian-man',
+        'american-woman',
         'american-man',
         'british-woman',
         'british-man',

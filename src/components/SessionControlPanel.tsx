@@ -148,6 +148,7 @@ type SessionControlPanelProps = {
   commentaryPreferences: RaceCommentaryPreferences;
   commentaryServiceMode: 'checking' | 'ai' | 'browser';
   commentaryPlaybackStatus: 'idle' | 'thinking' | 'speaking';
+  commentaryPlaybackError: string | null;
   commentaryPreRaceReport: PreRaceReport | null;
   onSessionModeChange: (mode: SessionMode) => void;
   onIntervalModeChange: (mode: IntervalMode) => void;
@@ -292,6 +293,7 @@ export function SessionControlPanel({
   commentaryPreferences,
   commentaryServiceMode,
   commentaryPlaybackStatus,
+  commentaryPlaybackError,
   commentaryPreRaceReport,
   onSessionModeChange,
   onIntervalModeChange,
@@ -1154,6 +1156,7 @@ export function SessionControlPanel({
             >
               <option value="australian-woman">Australian woman</option>
               <option value="australian-man">Australian man</option>
+              <option value="american-woman">American woman</option>
               <option value="american-man">American man</option>
               <option value="british-woman">British woman — England, UK</option>
               <option value="british-man">British man — England, UK</option>
@@ -1197,12 +1200,23 @@ export function SessionControlPanel({
         <button
           className="announcer-preview-button"
           type="button"
-          disabled={!commentaryPreferences.enabled || commentaryPlaybackStatus === 'speaking'}
+          disabled={!commentaryPreferences.enabled || commentaryPlaybackStatus !== 'idle'}
           onClick={onCommentaryPreview}
         >
           <Mic2 size={15} />
-          {commentaryPlaybackStatus === 'speaking' ? 'Announcing…' : 'Preview selected voice'}
+          {commentaryPlaybackStatus === 'thinking'
+            ? 'Preparing voice…'
+            : commentaryPlaybackStatus === 'speaking'
+              ? 'Announcing…'
+              : commentaryPlaybackError
+                ? 'Retry voice preview'
+                : 'Preview selected voice'}
         </button>
+        {commentaryPlaybackError && (
+          <p className="announcer-playback-error" role="alert">
+            {commentaryPlaybackError}
+          </p>
+        )}
         <p className="announcer-disclosure">
           Voice and wording are AI-generated. The 15-second report uses cited track research,
           current weather, and saved TrackLab race history; missing facts are omitted.

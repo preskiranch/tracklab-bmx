@@ -20,7 +20,7 @@ export type UciVoiceStartResult = {
 };
 
 function getAudioContext() {
-  if (audioContext) {
+  if (audioContext && audioContext.state !== 'closed') {
     return audioContext;
   }
 
@@ -65,11 +65,31 @@ function loadUciVoiceBuffer(context: AudioContext) {
 
 function resumeAudioContext() {
   const context = getAudioContext();
-  if (context?.state === 'suspended') {
+  if (context && context.state !== 'running' && context.state !== 'closed') {
     void context.resume();
   }
 
   return context;
+}
+
+function startSilentUnlockPulse(context: AudioContext) {
+  if (context.state === 'closed') {
+    return;
+  }
+  try {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const now = context.currentTime;
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(40, now);
+    gain.gain.setValueAtTime(0.00001, now);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start(now);
+    oscillator.stop(now + 0.03);
+  } catch {
+    // The media-element path remains available when Web Audio cannot start.
+  }
 }
 
 function cancelPendingStartGateAudio(audio: HTMLAudioElement) {
@@ -99,14 +119,18 @@ export async function primeAudioCues() {
   const context = getAudioContext();
   const preloadTasks: Promise<unknown>[] = [];
 
-  if (context?.state === 'suspended') {
+  if (context && context.state !== 'running' && context.state !== 'closed') {
     preloadTasks.push(context.resume());
+  }
+  if (context) {
+    startSilentUnlockPulse(context);
   }
 
   const audio = getStartGateAudio();
   audio.load();
   if (!mediaElementPrimed && !mediaElementPrimePromise) {
-    audio.muted = true;
+    audio.muted = false;
+    audio.volume = 0.0001;
     mediaElementPrimePromise = audio.play()
       .then(() => {
         audio.pause();
@@ -117,6 +141,7 @@ export async function primeAudioCues() {
         // AudioContext remains the primary path when media-element priming is blocked.
       })
       .finally(() => {
+        audio.volume = 1;
         audio.muted = false;
         mediaElementPrimePromise = null;
       });
@@ -128,19 +153,6 @@ export async function primeAudioCues() {
   await Promise.allSettled(preloadTasks);
 
   if (context && context.state === 'running') {
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const now = context.currentTime;
-
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(40, now);
-    gain.gain.setValueAtTime(0.00001, now);
-    gain.gain.exponentialRampToValueAtTime(0.00001, now + 0.025);
-
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + 0.03);
     await loadUciVoiceBuffer(context);
   }
 }
@@ -151,7 +163,7 @@ export function playZoneCue(kind: 'start' | 'stop') {
     return;
   }
 
-  if (context.state === 'suspended') {
+  if (context.state !== 'running' && context.state !== 'closed') {
     void context.resume();
   }
 
@@ -229,7 +241,7 @@ export async function playUciRandomStartVoice(timeoutMs = 8000): Promise<UciVoic
   stopStartGateAudio();
   const context = getAudioContext();
 
-  if (context?.state === 'suspended') {
+  if (context && context.state !== 'running' && context.state !== 'closed') {
     try {
       await context.resume();
     } catch {

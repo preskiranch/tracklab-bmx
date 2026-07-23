@@ -35,6 +35,7 @@ const commentaryModels = new Set<RaceCommentaryModel>([
 const commentaryVoices = new Set<RaceCommentaryVoicePreset>([
   'australian-woman',
   'australian-man',
+  'american-woman',
   'american-man',
   'british-woman',
   'british-man',

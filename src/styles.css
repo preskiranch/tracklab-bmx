@@ -3431,6 +3431,14 @@ input:focus {
   font-weight: 900;
 }
 
+.announcer-playback-error {
+  margin: -2px 0 0;
+  color: #a53030;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
 .announcer-disclosure {
   color: var(--muted);
   font-size: 10px;

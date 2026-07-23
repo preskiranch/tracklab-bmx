@@ -6831,6 +6831,7 @@ export default function App() {
                   commentaryPreferences={raceCommentaryPreferences}
                   commentaryServiceMode={raceCommentary.serviceMode}
                   commentaryPlaybackStatus={raceCommentary.playbackStatus}
+                  commentaryPlaybackError={raceCommentary.playbackError}
                   commentaryPreRaceReport={raceCommentary.preRaceReport}
                   onSessionModeChange={setSessionMode}
                   onIntervalModeChange={setIntervalMode}

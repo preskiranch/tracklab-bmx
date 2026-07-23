@@ -75,6 +75,12 @@ describe('race view preferences', () => {
     expect(commentary.recentLines.at(-1)).toBe('Call 27');
   });
 
+  it('preserves the American woman announcer choice', () => {
+    expect(normalizeRaceCommentaryPreferences({
+      voicePreset: 'american-woman',
+    }).voicePreset).toBe('american-woman');
+  });
+
   it('normalizes four per-account demo rider names', () => {
     expect(normalizeDemoRiderNames({
       1: '  Maya   Torres ',

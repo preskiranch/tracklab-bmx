@@ -562,6 +562,7 @@ export type RaceCommentaryModel = 'gpt-5.6-luna' | 'gpt-5.6-terra' | 'gpt-5.6-so
 export type RaceCommentaryVoicePreset =
   | 'australian-woman'
   | 'australian-man'
+  | 'american-woman'
   | 'american-man'
   | 'british-woman'
   | 'british-man';
