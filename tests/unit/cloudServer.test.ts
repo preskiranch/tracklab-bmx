@@ -165,6 +165,21 @@ describe('cloud API trust boundaries', () => {
           createdAt: 100,
           updatedAt: 100,
         }],
+        raceViewPreferences: {
+          cameraLocked: true,
+          earthCamerasByTrack: {
+            'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 100 },
+          },
+          riderOverlaysByTrack: {
+            'north-bay-bmx': {
+              xPct: 0.08,
+              yPct: 0.72,
+              width: 1040,
+              height: 190,
+              locked: true,
+            },
+          },
+        },
       }),
     });
     expect(saved.status).toBe(200);
@@ -179,6 +194,21 @@ describe('cloud API trust boundaries', () => {
         createdAt: 100,
         updatedAt: 100,
       }],
+      raceViewPreferences: {
+        cameraLocked: true,
+        earthCamerasByTrack: {
+          'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 100 },
+        },
+        riderOverlaysByTrack: {
+          'north-bay-bmx': {
+            xPct: 0.08,
+            yPct: 0.72,
+            width: 1040,
+            height: 190,
+            locked: true,
+          },
+        },
+      },
     });
   });
 

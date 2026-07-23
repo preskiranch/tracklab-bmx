@@ -77,6 +77,7 @@ type GoogleMapsTrackLayerProps = {
   distanceUnit: DistanceUnit;
   cStartOffsetsByPlayer?: CStartOffsetsByPlayer;
   raceViewFullscreen?: boolean;
+  cameraLocked?: boolean;
   raceState: RaceState;
   earthAngle: number;
   earthHeading: number;
@@ -1127,6 +1128,7 @@ export function GoogleMapsTrackLayer({
   distanceUnit,
   cStartOffsetsByPlayer = {},
   raceViewFullscreen = false,
+  cameraLocked = false,
   raceState,
   earthAngle,
   earthHeading,
@@ -1279,8 +1281,8 @@ export function GoogleMapsTrackLayer({
       draftLineRefs.current.forEach((line) => line.setMap(null));
       draftSplitLineRefs.current.forEach((line) => line.setMap(null));
       draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
-      draftMarkerListenerRefs.current.forEach((listener) => listener.remove());
-      mapListenerRefs.current.forEach((listener) => listener.remove());
+      draftMarkerListenerRefs.current.forEach((listener) => listener?.remove?.());
+      mapListenerRefs.current.forEach((listener) => listener?.remove?.());
       curvePreviewLineRef.current?.setMap(null);
       projectionOverlayRef.current?.setMap(null);
       markerRefs.current.forEach((marker) => marker.setMap(null));
@@ -1365,7 +1367,7 @@ export function GoogleMapsTrackLayer({
     }
 
     const syncCamera = () => {
-      if (suppressCameraSyncRef.current) {
+      if (suppressCameraSyncRef.current || cameraLocked) {
         return;
       }
 
@@ -1387,8 +1389,8 @@ export function GoogleMapsTrackLayer({
       map.addListener('idle', syncCamera),
     ];
 
-    return () => listeners.forEach((listener) => listener.remove());
-  }, [earthAngle, earthHeading, onEarthCameraChange, status]);
+    return () => listeners.forEach((listener) => listener?.remove?.());
+  }, [cameraLocked, earthAngle, earthHeading, onEarthCameraChange, status]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -1687,7 +1689,7 @@ export function GoogleMapsTrackLayer({
     draftLineRefs.current.forEach((line) => line.setMap(null));
     draftSplitLineRefs.current.forEach((line) => line.setMap(null));
     draftMarkerRefs.current.forEach((marker) => marker.setMap(null));
-    draftMarkerListenerRefs.current.forEach((listener) => listener.remove());
+    draftMarkerListenerRefs.current.forEach((listener) => listener?.remove?.());
     draftLineRefs.current = [];
     draftSplitLineRefs.current = [];
     draftMarkerRefs.current = [];
@@ -2135,7 +2137,7 @@ export function GoogleMapsTrackLayer({
       return undefined;
     }
 
-    mapListenerRefs.current.forEach((listener) => listener.remove());
+    mapListenerRefs.current.forEach((listener) => listener?.remove?.());
     mapListenerRefs.current = [];
     curvePreviewLineRef.current?.setMap(null);
     curvePreviewLineRef.current = null;
@@ -2155,12 +2157,18 @@ export function GoogleMapsTrackLayer({
     const isCurveDrawMode = mappingInputEnabled && mappingEditMode === 'curve';
     const isDrawMode = mappingInputEnabled && (mappingEditMode === 'draw' || isCurveDrawMode || isSplitBranchDrawMode);
     const isNavigateMode = !mappingInputEnabled || mappingEditMode === 'navigate';
+    const raceCameraInputLocked = raceViewFullscreen && cameraLocked;
     map.setOptions({
-      draggable: !isDrawMode && !isSplitPlacementMode,
+      cameraControl: !raceCameraInputLocked,
+      draggable: !raceCameraInputLocked && !isDrawMode && !isSplitPlacementMode,
       draggableCursor: mappingInputEnabled && !isNavigateMode ? 'crosshair' : undefined,
-      gestureHandling: isCurveDrawMode ? 'none' : 'greedy',
-      headingInteractionEnabled: isNavigateMode,
-      tiltInteractionEnabled: isNavigateMode,
+      gestureHandling: raceCameraInputLocked || isCurveDrawMode ? 'none' : 'greedy',
+      headingInteractionEnabled: !raceCameraInputLocked && isNavigateMode,
+      keyboardShortcuts: !raceCameraInputLocked,
+      rotateControl: !raceCameraInputLocked,
+      scrollwheel: !raceCameraInputLocked,
+      tiltInteractionEnabled: !raceCameraInputLocked && isNavigateMode,
+      zoomControl: !raceCameraInputLocked,
     });
     if (isCurveDrawMode && container) {
       container.style.touchAction = 'none';
@@ -2431,16 +2439,21 @@ export function GoogleMapsTrackLayer({
       window.removeEventListener('pointercancel', finishCurveStroke);
       window.removeEventListener('mouseup', finishSplitBranchDrawing);
       window.removeEventListener('touchend', finishSplitBranchDrawing);
-      mapListenerRefs.current.forEach((listener) => listener.remove());
+      mapListenerRefs.current.forEach((listener) => listener?.remove?.());
       mapListenerRefs.current = [];
       suppressNextMapEditEventRef.current = false;
       clearCurveStroke();
       map.setOptions({
+        cameraControl: true,
         draggable: true,
         draggableCursor: undefined,
         gestureHandling: 'greedy',
         headingInteractionEnabled: true,
+        keyboardShortcuts: true,
+        rotateControl: true,
+        scrollwheel: true,
         tiltInteractionEnabled: true,
+        zoomControl: true,
       });
     };
   }, [
@@ -2454,6 +2467,7 @@ export function GoogleMapsTrackLayer({
     onMappingZonePointAdd,
     raceState,
     raceViewFullscreen,
+    cameraLocked,
     status,
   ]);
 

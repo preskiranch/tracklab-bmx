@@ -1,4 +1,5 @@
-import type { BikeProfile, StudioRider, TrackRecord, UserTrackMapping } from '../types';
+import type { BikeProfile, RaceViewPreferences, StudioRider, TrackRecord, UserTrackMapping } from '../types';
+import { normalizeRaceViewPreferences } from './raceViewPreferences';
 import type { StoredTrackMappings } from './trackMapping';
 import { createPatchBatcher } from './patchBatcher';
 
@@ -7,6 +8,7 @@ export type CloudUserData = {
   customRoutes: TrackRecord[];
   bikeProfiles: BikeProfile[];
   studioRiders: StudioRider[];
+  raceViewPreferences: RaceViewPreferences | null;
 };
 
 export type CloudUserDataPatch = Partial<CloudUserData>;
@@ -22,6 +24,7 @@ const emptyCloudUserData: CloudUserData = {
   customRoutes: [],
   bikeProfiles: [],
   studioRiders: [],
+  raceViewPreferences: null,
 };
 
 function userDataUrl(profileKey: string) {
@@ -35,6 +38,9 @@ function normalizeCloudUserData(value: Partial<CloudUserData> | null | undefined
     customRoutes: Array.isArray(value?.customRoutes) ? value.customRoutes : [],
     bikeProfiles: Array.isArray(value?.bikeProfiles) ? value.bikeProfiles : [],
     studioRiders: Array.isArray(value?.studioRiders) ? value.studioRiders : [],
+    raceViewPreferences: value?.raceViewPreferences && typeof value.raceViewPreferences === 'object'
+      ? normalizeRaceViewPreferences(value.raceViewPreferences)
+      : null,
   };
 }
 
@@ -121,5 +127,6 @@ export function createEmptyCloudUserData(): CloudUserData {
     customRoutes: emptyCloudUserData.customRoutes,
     bikeProfiles: emptyCloudUserData.bikeProfiles,
     studioRiders: emptyCloudUserData.studioRiders,
+    raceViewPreferences: emptyCloudUserData.raceViewPreferences,
   };
 }

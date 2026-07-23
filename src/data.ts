@@ -21,3 +21,4 @@ export const raceCaptureStorageKey = 'tracklab-bmx-last-race-capture-v1';
 export const ghostLapsStorageKey = 'tracklab-bmx-ghost-laps-v1';
 export const customRoutesStorageKey = 'tracklab-bmx-custom-routes-v1';
 export const earthCameraStorageKey = 'tracklab-bmx-earth-camera-v1';
+export const raceViewPreferencesStorageKey = 'tracklab-bmx-race-view-preferences-v1';

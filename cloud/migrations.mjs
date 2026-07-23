@@ -296,6 +296,13 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         `CREATE INDEX IF NOT EXISTS idx_tracklab_map_3d_loads_track_created ON ${schema}.map_3d_load_events (track_id, created_at DESC)`,
       ],
     },
+    {
+      version: 5,
+      name: 'save race view preferences per account',
+      statements: [
+        `ALTER TABLE ${schema}.user_data ADD COLUMN IF NOT EXISTS race_view_preferences JSONB`,
+      ],
+    },
   ];
 }
 

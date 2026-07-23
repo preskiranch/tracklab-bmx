@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { GripHorizontal } from 'lucide-react';
-import type { GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RiderState, SpeedUnit } from '../types';
+import { GripHorizontal, Lock, Unlock } from 'lucide-react';
+import type { GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RaceRiderOverlayLayout, RiderState, SpeedUnit } from '../types';
+import { defaultRaceRiderOverlayLayout, normalizeRaceRiderOverlayLayout } from '../lib/raceViewPreferences';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 
-type OverlayLayout = {
-  xPct: number;
-  yPct: number;
-  width: number;
-};
-
 type DragState =
-  | { kind: 'move'; pointerId: number; startX: number; startY: number; layout: OverlayLayout }
-  | { kind: 'resize'; pointerId: number; startX: number; layout: OverlayLayout };
+  | { kind: 'move'; pointerId: number; startX: number; startY: number; layout: RaceRiderOverlayLayout }
+  | { kind: 'resize'; pointerId: number; startX: number; startY: number; layout: RaceRiderOverlayLayout };
 
 type OverlayEntry = {
   id: string;
@@ -34,68 +29,30 @@ type RaceRiderOverlayProps = {
   visible: boolean;
   speedUnit: SpeedUnit;
   trackLengthMeters: number;
+  preference?: RaceRiderOverlayLayout;
+  onPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
 };
-
-const storageKey = 'tracklab:race-rider-overlay-layout:v1';
-const defaultLayout: OverlayLayout = {
-  xPct: 0.07,
-  yPct: 0.82,
-  width: 760,
-};
-
-function loadLayouts() {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? '{}');
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, OverlayLayout> : {};
-  } catch {
-    return {};
-  }
-}
-
-function savedTrackLayout(trackId: string) {
-  const layout = loadLayouts()[trackId];
-  if (!layout) {
-    return defaultLayout;
-  }
-
-  return {
-    xPct: Number.isFinite(layout.xPct) ? layout.xPct : defaultLayout.xPct,
-    yPct: Number.isFinite(layout.yPct) ? layout.yPct : defaultLayout.yPct,
-    width: Number.isFinite(layout.width) ? layout.width : defaultLayout.width,
-  };
-}
-
-function saveTrackLayout(trackId: string, layout: OverlayLayout) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const layouts = loadLayouts();
-  layouts[trackId] = layout;
-  window.localStorage.setItem(storageKey, JSON.stringify(layouts));
-}
 
 function ordinal(value: number) {
   const suffix = value === 1 ? 'st' : value === 2 ? 'nd' : value === 3 ? 'rd' : 'th';
   return `${value}${suffix}`;
 }
 
-function clampLayout(layout: OverlayLayout, container: HTMLElement | null) {
+function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | null) {
   if (!container) {
     return layout;
   }
 
-  const width = Math.max(300, Math.min(layout.width, Math.max(300, container.clientWidth - 24)));
+  const width = Math.max(320, Math.min(layout.width, Math.max(320, container.clientWidth - 24)));
+  const height = Math.max(112, Math.min(layout.height, Math.max(112, container.clientHeight - 24)));
   const maxX = Math.max(0, 1 - (width / Math.max(1, container.clientWidth)));
-  const maxY = 0.92;
+  const maxY = Math.max(0, 1 - (height / Math.max(1, container.clientHeight)));
   return {
     width,
+    height,
     xPct: Math.max(0, Math.min(maxX, layout.xPct)),
     yPct: Math.max(0, Math.min(maxY, layout.yPct)),
+    locked: layout.locked,
   };
 }
 
@@ -108,14 +65,25 @@ export function RaceRiderOverlay({
   visible,
   speedUnit,
   trackLengthMeters,
+  preference,
+  onPreferenceChange,
 }: RaceRiderOverlayProps) {
-  const [layout, setLayout] = useState<OverlayLayout>(() => savedTrackLayout(trackId));
+  const [layout, setLayout] = useState<RaceRiderOverlayLayout>(
+    () => normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout),
+  );
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const layoutRef = useRef(layout);
 
   useEffect(() => {
-    setLayout(savedTrackLayout(trackId));
-  }, [trackId]);
+    layoutRef.current = layout;
+  }, [layout]);
+
+  useEffect(() => {
+    const next = normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout);
+    layoutRef.current = next;
+    setLayout(next);
+  }, [preference, trackId]);
 
   useEffect(() => {
     if (!visible) {
@@ -125,13 +93,15 @@ export function RaceRiderOverlay({
     const nextLayout = clampLayout(layout, overlayRef.current?.parentElement ?? null);
     if (
       nextLayout.width !== layout.width
+      || nextLayout.height !== layout.height
       || nextLayout.xPct !== layout.xPct
       || nextLayout.yPct !== layout.yPct
     ) {
+      layoutRef.current = nextLayout;
       setLayout(nextLayout);
-      saveTrackLayout(trackId, nextLayout);
+      onPreferenceChange(trackId, nextLayout);
     }
-  }, [layout, trackId, visible]);
+  }, [layout, onPreferenceChange, trackId, visible]);
 
   const entries = useMemo<OverlayEntry[]>(() => {
     const localEntries = riders.flatMap((rider) => {
@@ -182,8 +152,11 @@ export function RaceRiderOverlay({
   }, [ghostRiders, players, remoteRaceStates, riders, trackLengthMeters]);
 
   const finishDrag = useCallback(() => {
+    if (dragRef.current) {
+      onPreferenceChange(trackId, layoutRef.current);
+    }
     dragRef.current = null;
-  }, []);
+  }, [onPreferenceChange, trackId]);
 
   const moveDrag = useCallback((event: PointerEvent) => {
     const drag = dragRef.current;
@@ -200,18 +173,19 @@ export function RaceRiderOverlay({
         xPct: drag.layout.xPct + ((event.clientX - drag.startX) / Math.max(1, rect.width)),
         yPct: drag.layout.yPct + ((event.clientY - drag.startY) / Math.max(1, rect.height)),
       }, container);
+      layoutRef.current = next;
       setLayout(next);
-      saveTrackLayout(trackId, next);
       return;
     }
 
     const next = clampLayout({
       ...drag.layout,
       width: drag.layout.width + (event.clientX - drag.startX),
+      height: drag.layout.height + (event.clientY - drag.startY),
     }, container);
+    layoutRef.current = next;
     setLayout(next);
-    saveTrackLayout(trackId, next);
-  }, [trackId]);
+  }, []);
 
   useEffect(() => {
     window.addEventListener('pointermove', moveDrag);
@@ -225,6 +199,9 @@ export function RaceRiderOverlay({
   }, [finishDrag, moveDrag]);
 
   const beginMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (layout.locked) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     dragRef.current = {
@@ -237,14 +214,26 @@ export function RaceRiderOverlay({
   };
 
   const beginResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (layout.locked) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     dragRef.current = {
       kind: 'resize',
       pointerId: event.pointerId,
       startX: event.clientX,
+      startY: event.clientY,
       layout,
     };
+  };
+
+  const toggleLock = () => {
+    dragRef.current = null;
+    const next = { ...layout, locked: !layout.locked };
+    layoutRef.current = next;
+    setLayout(next);
+    onPreferenceChange(trackId, next);
   };
 
   if (!visible || entries.length === 0) {
@@ -253,23 +242,41 @@ export function RaceRiderOverlay({
 
   return (
     <div
-      className="race-rider-overlay"
+      className={`race-rider-overlay${layout.locked ? ' locked' : ''}`}
       ref={overlayRef}
+      aria-label="Race rider positions"
       style={{
         '--overlay-x': `${layout.xPct * 100}%`,
         '--overlay-y': `${layout.yPct * 100}%`,
         '--overlay-width': `${layout.width}px`,
+        '--overlay-height': `${layout.height}px`,
       } as CSSProperties}
     >
-      <div
-        className="race-rider-overlay-handle"
-        onPointerDown={beginMove}
-        role="button"
-        tabIndex={0}
-        aria-label="Move rider overlay"
-      >
-        <GripHorizontal size={14} />
-        <span>Riders</span>
+      <div className="race-rider-overlay-toolbar">
+        <div
+          className="race-rider-overlay-handle"
+          onPointerDown={beginMove}
+          role="button"
+          tabIndex={layout.locked ? -1 : 0}
+          aria-disabled={layout.locked}
+          aria-label={layout.locked ? 'Rider panel position locked' : 'Move rider panel'}
+        >
+          <GripHorizontal size={16} />
+          <span>Rider positions</span>
+          {!layout.locked && <small>Drag to move / drag corner to resize</small>}
+        </div>
+        <button
+          className="race-rider-overlay-lock"
+          type="button"
+          aria-pressed={layout.locked}
+          aria-label={layout.locked ? 'Unlock rider panel' : 'Lock rider panel position and size'}
+          title={layout.locked ? 'Unlock rider panel' : 'Lock rider panel'}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={toggleLock}
+        >
+          {layout.locked ? <Lock size={15} /> : <Unlock size={15} />}
+          <span>{layout.locked ? 'Locked' : 'Lock panel'}</span>
+        </button>
       </div>
       <div className="race-rider-overlay-grid">
         {entries.map((entry) => (
@@ -292,7 +299,8 @@ export function RaceRiderOverlay({
         className="race-rider-overlay-resize"
         type="button"
         aria-label="Resize rider overlay"
-        title="Resize"
+        title="Resize rider panel horizontally and vertically"
+        disabled={layout.locked}
         onPointerDown={beginResize}
       />
     </div>

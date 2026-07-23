@@ -490,6 +490,19 @@ function sanitizeUserDataPatch(value) {
       })
       .slice(0, 250);
   }
+  if (value.raceViewPreferences && typeof value.raceViewPreferences === 'object') {
+    const cameras = value.raceViewPreferences.earthCamerasByTrack;
+    const overlays = value.raceViewPreferences.riderOverlaysByTrack;
+    patch.raceViewPreferences = {
+      cameraLocked: Boolean(value.raceViewPreferences.cameraLocked),
+      earthCamerasByTrack: cameras && typeof cameras === 'object' && !Array.isArray(cameras)
+        ? Object.fromEntries(Object.entries(cameras).slice(0, 500))
+        : {},
+      riderOverlaysByTrack: overlays && typeof overlays === 'object' && !Array.isArray(overlays)
+        ? Object.fromEntries(Object.entries(overlays).slice(0, 500))
+        : {},
+    };
+  }
   return patch;
 }
 

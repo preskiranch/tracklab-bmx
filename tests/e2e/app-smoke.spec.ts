@@ -1238,6 +1238,22 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
     await expect(page.locator('.race-staging-countdown')).toBeVisible();
     await expect(page.locator('.race-staging-countdown strong')).toHaveText('15');
     await expect(page.locator('.start-tree-light')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Pause Countdown', exact: true }).click();
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText('PAUSED');
+    const pausedDetail = await page.locator('.race-staging-countdown span').innerText();
+    await page.waitForTimeout(1_200);
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText('PAUSED');
+    await expect(page.locator('.race-staging-countdown span')).toHaveText(pausedDetail);
+
+    await page.getByRole('button', { name: 'Lock View', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'View Locked', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Rotate map left', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Lock rider panel position and size', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Unlock rider panel', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Resize rider overlay', exact: true })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Resume Countdown', exact: true }).click();
+    await expect(page.locator('.race-staging-countdown strong')).not.toHaveText('PAUSED');
     await page.waitForTimeout(8_500);
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);

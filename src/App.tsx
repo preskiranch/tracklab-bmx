@@ -125,9 +125,13 @@ import {
   type FalseStartDetection,
 } from './lib/raceLifecycle';
 import {
-  createRaceStagingSteps,
-  raceStagingDurationMs,
+  liveRaceStagingSeconds,
 } from './lib/raceStartSequence';
+import {
+  normalizeRaceViewPreferences,
+  readStoredRaceViewPreferences,
+  writeStoredRaceViewPreferences,
+} from './lib/raceViewPreferences';
 import { reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
 import {
   bikeSampleIsLive,
@@ -186,6 +190,8 @@ import type {
   PlayerSlot,
   PlayMode,
   RaceCapture,
+  RaceRiderOverlayLayout,
+  RaceViewPreferences,
   ReactionTimesByPlayer,
   SessionMode,
   SpeedUnit,
@@ -873,10 +879,6 @@ function readStoredEarthCameras(): Record<string, EarthCamera> {
   }
 }
 
-function writeStoredEarthCameras(cameras: Record<string, EarthCamera>) {
-  window.localStorage.setItem(earthCameraStorageKey, JSON.stringify(cameras));
-}
-
 function slugify(value: string) {
   return value
     .toLowerCase()
@@ -1314,6 +1316,9 @@ export default function App() {
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
   const startGateSequenceIdRef = useRef(0);
+  const stagingCountdownEndsAtRef = useRef(0);
+  const stagingCountdownRemainingMsRef = useRef(0);
+  const stagingCountdownTrackIdRef = useRef<string | null>(null);
   const cadenceStartedAtRef = useRef(0);
   const redLightAtRef = useRef(0);
   const cStartTriggeredPlayerIdsRef = useRef<Set<PlayerId>>(new Set());
@@ -1386,6 +1391,11 @@ export default function App() {
   const [demoRaceStartedAt, setDemoRaceStartedAt] = useState<number | null>(null);
   const [demoSignalsStopped, setDemoSignalsStopped] = useState(false);
   const [earthCamerasByTrack, setEarthCamerasByTrack] = useState<Record<string, EarthCamera>>(readStoredEarthCameras);
+  const [raceCameraLocked, setRaceCameraLocked] = useState(false);
+  const [riderOverlaysByTrack, setRiderOverlaysByTrack] = useState<Record<string, RaceRiderOverlayLayout>>({});
+  const raceViewPreferencesRef = useRef<RaceViewPreferences>(
+    normalizeRaceViewPreferences(null, earthCamerasByTrack),
+  );
   const [appMode, setAppMode] = useState<AppMode>('race');
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
   const [showMembershipLanding, setShowMembershipLanding] = useState(() => initialMembershipRef.current?.tier === 'visitor');
@@ -1438,6 +1448,7 @@ export default function App() {
   const [selectedCustomRoutePrediction, setSelectedCustomRoutePrediction] = useState<PlacePredictionOption | null>(null);
   const [customRoutePreview, setCustomRoutePreview] = useState<CustomRoutePreview | null>(null);
   const [startGateStatus, setStartGateStatus] = useState<StartGateStatus>(idleStartGateStatus);
+  const [startCountdownPaused, setStartCountdownPaused] = useState(false);
   const [cStartOffsetsByPlayer, setCStartOffsetsByPlayer] = useState<CStartOffsetsByPlayer>({});
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
@@ -2266,6 +2277,27 @@ export default function App() {
     [localRaceSeatLimit, raceCandidatePlayers],
   );
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
+  const applyRaceViewPreferences = useCallback((preferences: RaceViewPreferences) => {
+    const normalized = normalizeRaceViewPreferences(preferences);
+    raceViewPreferencesRef.current = normalized;
+    setEarthCamerasByTrack(normalized.earthCamerasByTrack);
+    setRaceCameraLocked(normalized.cameraLocked);
+    setRiderOverlaysByTrack(normalized.riderOverlaysByTrack);
+  }, []);
+  const persistRaceViewPreferences = useCallback((preferences: RaceViewPreferences) => {
+    const normalized = normalizeRaceViewPreferences(preferences);
+    raceViewPreferencesRef.current = normalized;
+    writeStoredRaceViewPreferences(cloudProfileKey, normalized);
+    if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+      void queueCloudUserDataPatch(cloudProfileKey, { raceViewPreferences: normalized }).catch((error: Error) => {
+        console.warn(`Could not save race view preferences to TrackLab cloud: ${error.message}`);
+      });
+    }
+  }, [cloudProfileKey]);
+  useEffect(() => {
+    const localPreferences = readStoredRaceViewPreferences(cloudProfileKey, readStoredEarthCameras());
+    applyRaceViewPreferences(localPreferences);
+  }, [applyRaceViewPreferences, cloudProfileKey]);
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
   const adminProfileActive = Boolean(authUser?.admin);
@@ -2486,6 +2518,10 @@ export default function App() {
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     startGateTimeoutsRef.current = [];
     stopStartGateAudio();
+    stagingCountdownEndsAtRef.current = 0;
+    stagingCountdownRemainingMsRef.current = 0;
+    stagingCountdownTrackIdRef.current = null;
+    setStartCountdownPaused(false);
     cadenceStartedAtRef.current = 0;
     redLightAtRef.current = 0;
     cStartTriggeredPlayerIdsRef.current = new Set();
@@ -2990,10 +3026,21 @@ export default function App() {
           });
           setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
           setStudioRiders((current) => mergeStudioRiders(current, data.studioRiders));
+          if (data.raceViewPreferences) {
+            applyRaceViewPreferences(data.raceViewPreferences);
+            writeStoredRaceViewPreferences(cloudProfileKey, data.raceViewPreferences);
+          }
           cloudUserDataAvailableRef.current = true;
           cloudUserDataLoadedKeyRef.current = cloudProfileKey;
+          if (!data.raceViewPreferences) {
+            void queueCloudUserDataPatch(cloudProfileKey, {
+              raceViewPreferences: raceViewPreferencesRef.current,
+            }).catch((error: Error) => {
+              console.warn(`Could not migrate local race view preferences to TrackLab cloud: ${error.message}`);
+            });
+          }
           setCloudUserDataStatus('online');
-          setCloudUserDataMessage('Bike names, studio riders, custom routes, and track maps are syncing to this profile.');
+          setCloudUserDataMessage('Bike names, race view preferences, studio riders, custom routes, and track maps are syncing to this profile.');
 
           if (authUser && mappingBackfillProfileRef.current !== cloudProfileKey) {
             mappingBackfillProfileRef.current = cloudProfileKey;
@@ -3062,7 +3109,7 @@ export default function App() {
       window.removeEventListener('focus', refreshCloudUserData);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [authUser, cloudProfileKey]);
+  }, [applyRaceViewPreferences, authUser, cloudProfileKey]);
 
   useEffect(() => {
     writeStoredBikeProfiles(bikeProfiles);
@@ -3726,11 +3773,14 @@ export default function App() {
 
         const next = { ...current };
         delete next[previewTrackId];
-        writeStoredEarthCameras(next);
+        persistRaceViewPreferences({
+          ...raceViewPreferencesRef.current,
+          earthCamerasByTrack: next,
+        });
         return next;
       });
     }
-  }, []);
+  }, [persistRaceViewPreferences]);
 
   const handleCountryChange = (country: string) => {
     const nextState = statesForCountry(country, persistentCatalogTracks)[0];
@@ -3941,7 +3991,10 @@ export default function App() {
         if (previewTrackId) {
           delete next[previewTrackId];
         }
-        writeStoredEarthCameras(next);
+        persistRaceViewPreferences({
+          ...raceViewPreferencesRef.current,
+          earthCamerasByTrack: next,
+        });
         return next;
       });
       const previewTrackId = customRoutePreviewTrackIdRef.current;
@@ -4020,7 +4073,10 @@ export default function App() {
 
       const next = { ...current };
       delete next[trackId];
-      writeStoredEarthCameras(next);
+      persistRaceViewPreferences({
+        ...raceViewPreferencesRef.current,
+        earthCamerasByTrack: next,
+      });
       return next;
     });
 
@@ -4904,10 +4960,13 @@ export default function App() {
         ...current,
         [selectedTrack.id]: safeCamera,
       };
-      writeStoredEarthCameras(next);
+      persistRaceViewPreferences({
+        ...raceViewPreferencesRef.current,
+        earthCamerasByTrack: next,
+      });
       return next;
     });
-  }, [earthAngle, earthCenter, earthHeading, earthZoom, effectiveTrack, selectedTrack.id]);
+  }, [earthAngle, earthCenter, earthHeading, earthZoom, effectiveTrack, persistRaceViewPreferences, selectedTrack.id]);
 
   const handleEarthAngleChange = useCallback((angle: number) => {
     handleEarthCameraChange({ angle });
@@ -4916,6 +4975,28 @@ export default function App() {
   const handleEarthHeadingChange = useCallback((heading: number) => {
     handleEarthCameraChange({ heading });
   }, [handleEarthCameraChange]);
+
+  const handleRaceCameraLockedChange = useCallback((locked: boolean) => {
+    setRaceCameraLocked(locked);
+    persistRaceViewPreferences({
+      ...raceViewPreferencesRef.current,
+      cameraLocked: locked,
+    });
+  }, [persistRaceViewPreferences]);
+
+  const handleRiderOverlayPreferenceChange = useCallback((trackId: string, layout: RaceRiderOverlayLayout) => {
+    setRiderOverlaysByTrack((current) => {
+      const next = {
+        ...current,
+        [trackId]: layout,
+      };
+      persistRaceViewPreferences({
+        ...raceViewPreferencesRef.current,
+        riderOverlaysByTrack: next,
+      });
+      return next;
+    });
+  }, [persistRaceViewPreferences]);
 
   useEffect(() => () => clearStartGateSequence(), [clearStartGateSequence]);
 
@@ -5027,6 +5108,11 @@ export default function App() {
       return;
     }
 
+    stagingCountdownEndsAtRef.current = 0;
+    stagingCountdownRemainingMsRef.current = 0;
+    stagingCountdownTrackIdRef.current = null;
+    setStartCountdownPaused(false);
+
     setStartGateStatus({
       active: true,
       phase: 'cadence',
@@ -5111,6 +5197,86 @@ export default function App() {
       beginRaceAtGateDrop(startingTrackId, sequenceId);
     });
   }, [armReactionTimer, beginRaceAtGateDrop, demoMode, loadCStartPlayers, racePlayers, scheduleStartGateStep]);
+
+  const scheduleStagingCountdown = useCallback((
+    startingTrackId: string,
+    sequenceId: number,
+    durationMs = liveRaceStagingSeconds * 1000,
+  ) => {
+    if (
+      sequenceId !== startGateSequenceIdRef.current
+      || selectedTrackIdRef.current !== startingTrackId
+    ) {
+      return;
+    }
+
+    startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    startGateTimeoutsRef.current = [];
+    const secondsRemaining = Math.max(1, Math.ceil(durationMs / 1000));
+    const normalizedDurationMs = secondsRemaining * 1000;
+    stagingCountdownEndsAtRef.current = Date.now() + normalizedDurationMs;
+    stagingCountdownRemainingMsRef.current = normalizedDurationMs;
+    stagingCountdownTrackIdRef.current = startingTrackId;
+    setStartCountdownPaused(false);
+    setStartGateStatus({
+      active: true,
+      phase: 'staging',
+      label: String(secondsRemaining),
+      detail: 'Adjust the view, then return to your bike',
+      lightIndex: null,
+    });
+
+    for (let nextSeconds = secondsRemaining - 1; nextSeconds >= 1; nextSeconds -= 1) {
+      scheduleStartGateStep((secondsRemaining - nextSeconds) * 1000, () => {
+        stagingCountdownRemainingMsRef.current = nextSeconds * 1000;
+        setStartGateStatus({
+          active: true,
+          phase: 'staging',
+          label: String(nextSeconds),
+          detail: 'Adjust the view, then return to your bike',
+          lightIndex: null,
+        });
+      }, sequenceId);
+    }
+
+    scheduleStartGateStep(normalizedDurationMs, () => {
+      void startConfiguredCadence(startingTrackId, sequenceId);
+    }, sequenceId);
+  }, [scheduleStartGateStep, startConfiguredCadence]);
+
+  const handleStartCountdownPauseToggle = useCallback(() => {
+    if (playMode !== 'local' || !startGateStatus.active || startGateStatus.phase !== 'staging') {
+      return;
+    }
+
+    const startingTrackId = stagingCountdownTrackIdRef.current;
+    if (!startingTrackId) {
+      return;
+    }
+
+    if (startCountdownPaused) {
+      scheduleStagingCountdown(
+        startingTrackId,
+        startGateSequenceIdRef.current,
+        stagingCountdownRemainingMsRef.current,
+      );
+      return;
+    }
+
+    const remainingMs = Math.max(1000, stagingCountdownEndsAtRef.current - Date.now());
+    stagingCountdownRemainingMsRef.current = Math.ceil(remainingMs / 1000) * 1000;
+    stagingCountdownEndsAtRef.current = 0;
+    startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    startGateTimeoutsRef.current = [];
+    setStartCountdownPaused(true);
+    setStartGateStatus((current) => current.phase === 'staging'
+      ? {
+        ...current,
+        label: 'PAUSED',
+        detail: `${Math.ceil(stagingCountdownRemainingMsRef.current / 1000)} seconds remaining`,
+      }
+      : current);
+  }, [playMode, scheduleStagingCountdown, startCountdownPaused, startGateStatus.active, startGateStatus.phase]);
 
   const handleFalseStart = useCallback((detection: FalseStartDetection) => {
     if (falseStartActiveRef.current || raceState === 'racing') {
@@ -5673,30 +5839,7 @@ export default function App() {
 
     void primeAudioCues();
 
-    const stagingSteps = createRaceStagingSteps();
-    setStartGateStatus({
-      active: true,
-      phase: 'staging',
-      label: String(stagingSteps[0].secondsRemaining),
-      detail: 'Adjust the view, then return to your bike',
-      lightIndex: null,
-    });
-
-    stagingSteps.slice(1).forEach(({ delayMs, secondsRemaining }) => {
-      scheduleStartGateStep(delayMs, () => {
-        setStartGateStatus({
-          active: true,
-          phase: 'staging',
-          label: String(secondsRemaining),
-          detail: 'Adjust the view, then return to your bike',
-          lightIndex: null,
-        });
-      }, sequenceId);
-    });
-
-    scheduleStartGateStep(raceStagingDurationMs(), () => {
-      void startConfiguredCadence(startingTrackId, sequenceId);
-    }, sequenceId);
+    scheduleStagingCountdown(startingTrackId, sequenceId);
   };
 
   useEffect(() => {
@@ -6461,6 +6604,8 @@ export default function App() {
                   startGateLabel={startGateStatus.label}
                   startGateDetail={startGateStatus.detail}
                   startGateLightIndex={startGateStatus.lightIndex}
+                  startCountdownPaused={startCountdownPaused}
+                  canPauseStartCountdown={playMode === 'local' && startGateStatus.active && startGateStatus.phase === 'staging'}
                   cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                   finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
@@ -6468,6 +6613,8 @@ export default function App() {
                   earthHeading={earthHeading}
                   earthCenter={earthCenter}
                   earthZoom={earthZoom}
+                  raceCameraLocked={raceCameraLocked}
+                  riderOverlayPreference={riderOverlaysByTrack[effectiveTrack.id]}
                   activeZones={activeZones}
                   canCancelRace={canCancelRace}
                   mappingMode={mappingMode}
@@ -6487,6 +6634,9 @@ export default function App() {
                   onEarthCameraChange={handleEarthCameraChange}
                   onEarthAngleChange={handleEarthAngleChange}
                   onEarthHeadingChange={handleEarthHeadingChange}
+                  onRaceCameraLockedChange={handleRaceCameraLockedChange}
+                  onRiderOverlayPreferenceChange={handleRiderOverlayPreferenceChange}
+                  onStartCountdownPauseToggle={handleStartCountdownPauseToggle}
                   onCancelRace={handleCancel}
                   onMappingFullscreenChange={handleMappingFullscreenChange}
                   onMappingPathPointAdd={handleMappingPathPointAdd}

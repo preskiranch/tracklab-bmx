@@ -1195,6 +1195,48 @@ input:focus {
   background: rgba(172, 32, 38, 0.92);
 }
 
+.race-countdown-pause-overlay,
+.race-camera-lock-overlay {
+  position: fixed;
+  z-index: 2147483000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 7px;
+  background: rgba(18, 24, 33, 0.88);
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.26);
+  font-size: 13px;
+  font-weight: 900;
+  backdrop-filter: blur(12px);
+}
+
+.race-countdown-pause-overlay {
+  top: max(68px, calc(env(safe-area-inset-top, 0px) + 68px));
+  left: max(14px, calc(env(safe-area-inset-left, 0px) + 14px));
+}
+
+.race-countdown-pause-overlay:hover,
+.race-countdown-pause-overlay.paused {
+  border-color: rgba(255, 216, 61, 0.82);
+  background: rgba(108, 75, 9, 0.92);
+}
+
+.race-camera-lock-overlay {
+  top: max(14px, calc(env(safe-area-inset-top, 0px) + 14px));
+  right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
+}
+
+.race-camera-lock-overlay:hover,
+.race-camera-lock-overlay.locked {
+  border-color: rgba(122, 222, 54, 0.76);
+  background: rgba(35, 76, 23, 0.92);
+}
+
 .platform-shell.map-fullscreen {
   display: block;
   width: 100vw;
@@ -2479,7 +2521,12 @@ input:focus {
   top: var(--overlay-y);
   z-index: 1180;
   width: min(var(--overlay-width), calc(100% - 24px));
+  height: min(var(--overlay-height), calc(100% - 24px));
+  min-height: 112px;
   max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
@@ -2491,35 +2538,84 @@ input:focus {
   backdrop-filter: blur(10px);
 }
 
-.race-rider-overlay-handle {
+.race-rider-overlay-toolbar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 22px;
+  justify-content: space-between;
+  min-height: 34px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(2, 6, 12, 0.42);
+}
+
+.race-rider-overlay-handle {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
   color: rgba(255, 255, 255, 0.76);
   cursor: move;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 850;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
+.race-rider-overlay-handle small {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.race-rider-overlay.locked .race-rider-overlay-handle {
+  cursor: default;
+}
+
+.race-rider-overlay-lock {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 27px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-right: 5px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.race-rider-overlay-lock:hover,
+.race-rider-overlay-lock[aria-pressed='true'] {
+  background: rgba(122, 222, 54, 0.2);
+  border-color: rgba(122, 222, 54, 0.64);
+}
+
 .race-rider-overlay-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  padding: 7px;
+  grid-auto-rows: minmax(64px, 1fr);
+  gap: 8px;
+  min-height: 0;
+  padding: 9px;
 }
 
 .race-rider-overlay-card {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 7px;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 9px 11px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-left: 4px solid var(--player-color);
   border-radius: 7px;
@@ -2536,13 +2632,13 @@ input:focus {
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
-  min-height: 24px;
-  padding: 0 5px;
-  border-radius: 5px;
+  min-width: 38px;
+  min-height: 36px;
+  padding: 0 7px;
+  border-radius: 7px;
   background: var(--player-color);
   color: #06111f;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 950;
 }
 
@@ -2555,7 +2651,7 @@ input:focus {
 .race-rider-overlay-card strong {
   overflow: hidden;
   color: #ffffff;
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2564,7 +2660,7 @@ input:focus {
 .race-rider-overlay-card span:not(.race-rider-overlay-badge) {
   overflow: hidden;
   color: rgba(255, 255, 255, 0.72);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
   line-height: 1.15;
   text-overflow: ellipsis;
@@ -2575,22 +2671,36 @@ input:focus {
   position: absolute;
   right: 2px;
   bottom: 2px;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   border: 0;
   border-right: 2px solid rgba(255, 255, 255, 0.55);
   border-bottom: 2px solid rgba(255, 255, 255, 0.55);
   background: transparent;
-  cursor: ew-resize;
+  cursor: nwse-resize;
+}
+
+.race-rider-overlay-resize:disabled {
+  display: none;
 }
 
 @media (max-width: 780px) {
   .race-rider-overlay {
     width: min(var(--overlay-width), calc(100% - 16px));
+    height: min(var(--overlay-height), calc(100% - 16px));
   }
 
   .race-rider-overlay-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .race-rider-overlay-handle small,
+  .race-rider-overlay-lock span {
+    display: none;
+  }
+
+  .race-rider-overlay-card strong {
+    font-size: 14px;
   }
 }
 
@@ -2877,6 +2987,15 @@ input:focus {
 
 .map-camera-pad button:hover {
   background: #ffffff;
+}
+
+.map-camera-pad button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.map-camera-pad.locked {
+  opacity: 0.72;
 }
 
 .map-camera-pad button:nth-child(1) {

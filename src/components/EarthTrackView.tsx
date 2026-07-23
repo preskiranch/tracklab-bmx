@@ -5,15 +5,19 @@ import {
   Compass,
   ExternalLink,
   Flag,
+  Lock,
   Map as MapIcon,
   MapPinned,
   Maximize2,
   Minimize2,
+  Pause,
+  Play,
   RotateCcw,
   RotateCw,
   Satellite,
   ShieldCheck,
   Signal,
+  Unlock,
   X,
 } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
@@ -32,6 +36,7 @@ import type {
   PlayerSlot,
   RaceState,
   ReactionTimesByPlayer,
+  RaceRiderOverlayLayout,
   RiderState,
   SplitBranchChoice,
   SpeedUnit,
@@ -59,6 +64,8 @@ type EarthTrackViewProps = {
   startGateLabel: string;
   startGateDetail: string;
   startGateLightIndex: 0 | 1 | 2 | 3 | null;
+  startCountdownPaused: boolean;
+  canPauseStartCountdown: boolean;
   cStartOffsetsByPlayer: CStartOffsetsByPlayer;
   finishCountdownSeconds: number | null;
   reactionTimesByPlayer: ReactionTimesByPlayer;
@@ -66,6 +73,8 @@ type EarthTrackViewProps = {
   earthHeading: number;
   earthCenter: TrackPoint | null;
   earthZoom: number | null;
+  raceCameraLocked: boolean;
+  riderOverlayPreference?: RaceRiderOverlayLayout;
   activeZones: TrackZone[];
   canCancelRace: boolean;
   mappingMode: boolean;
@@ -85,6 +94,9 @@ type EarthTrackViewProps = {
   onEarthCameraChange: (camera: Partial<EarthCamera>) => void;
   onEarthAngleChange: (angle: number) => void;
   onEarthHeadingChange: (heading: number) => void;
+  onRaceCameraLockedChange: (locked: boolean) => void;
+  onRiderOverlayPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
+  onStartCountdownPauseToggle: () => void;
   onCancelRace: () => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingPathPointAdd: (point: TrackPoint) => void;
@@ -143,6 +155,8 @@ export function EarthTrackView({
   startGateLabel,
   startGateDetail,
   startGateLightIndex,
+  startCountdownPaused,
+  canPauseStartCountdown,
   cStartOffsetsByPlayer,
   finishCountdownSeconds,
   reactionTimesByPlayer,
@@ -150,6 +164,8 @@ export function EarthTrackView({
   earthHeading,
   earthCenter,
   earthZoom,
+  raceCameraLocked,
+  riderOverlayPreference,
   activeZones,
   canCancelRace,
   mappingMode,
@@ -169,6 +185,9 @@ export function EarthTrackView({
   onEarthCameraChange,
   onEarthAngleChange,
   onEarthHeadingChange,
+  onRaceCameraLockedChange,
+  onRiderOverlayPreferenceChange,
+  onStartCountdownPauseToggle,
   onCancelRace,
   onMappingFullscreenChange,
   onMappingPathPointAdd,
@@ -235,6 +254,7 @@ export function EarthTrackView({
               distanceUnit={distanceUnit}
               cStartOffsetsByPlayer={cStartOffsetsByPlayer}
               raceViewFullscreen={raceViewFullscreen}
+              cameraLocked={raceViewFullscreen && raceCameraLocked}
               raceState={raceState}
               earthAngle={earthAngle}
               earthHeading={earthHeading}
@@ -286,6 +306,31 @@ export function EarthTrackView({
           <button className="race-cancel-overlay" type="button" onClick={onCancelRace}>
             <X size={18} />
             Cancel Race
+          </button>
+        )}
+
+        {canPauseStartCountdown && (
+          <button
+            className={`race-countdown-pause-overlay${startCountdownPaused ? ' paused' : ''}`}
+            type="button"
+            onClick={onStartCountdownPauseToggle}
+            aria-pressed={startCountdownPaused}
+          >
+            {startCountdownPaused ? <Play size={18} /> : <Pause size={18} />}
+            {startCountdownPaused ? 'Resume Countdown' : 'Pause Countdown'}
+          </button>
+        )}
+
+        {raceViewFullscreen && (
+          <button
+            className={`race-camera-lock-overlay${raceCameraLocked ? ' locked' : ''}`}
+            type="button"
+            onClick={() => onRaceCameraLockedChange(!raceCameraLocked)}
+            aria-pressed={raceCameraLocked}
+            title={raceCameraLocked ? 'Unlock satellite view' : 'Lock camera angle and track position'}
+          >
+            {raceCameraLocked ? <Lock size={17} /> : <Unlock size={17} />}
+            {raceCameraLocked ? 'View Locked' : 'Lock View'}
           </button>
         )}
 
@@ -347,6 +392,8 @@ export function EarthTrackView({
           visible={raceViewFullscreen && !mappingMode}
           speedUnit={speedUnit}
           trackLengthMeters={track.lengthMeters}
+          preference={riderOverlayPreference}
+          onPreferenceChange={onRiderOverlayPreferenceChange}
         />
 
         {showMappingUi && (
@@ -363,11 +410,12 @@ export function EarthTrackView({
           </div>
         )}
 
-        <div className="map-camera-pad" aria-label="Map camera controls">
+        <div className={`map-camera-pad${raceViewFullscreen && raceCameraLocked ? ' locked' : ''}`} aria-label="Map camera controls">
           <button
             aria-label="Rotate map left"
             title="Rotate left"
             type="button"
+            disabled={raceViewFullscreen && raceCameraLocked}
             onClick={() => onEarthHeadingChange((earthHeading + 345) % 360)}
           >
             <RotateCcw size={16} />
@@ -376,6 +424,7 @@ export function EarthTrackView({
             aria-label="Tilt map up"
             title="Tilt up"
             type="button"
+            disabled={raceViewFullscreen && raceCameraLocked}
             onClick={() => onEarthAngleChange(Math.min(67, earthAngle + 5))}
           >
             <ChevronUp size={16} />
@@ -384,6 +433,7 @@ export function EarthTrackView({
             aria-label="Reset map north"
             title="Reset north"
             type="button"
+            disabled={raceViewFullscreen && raceCameraLocked}
             onClick={() => onEarthHeadingChange(0)}
           >
             <Compass size={16} />
@@ -392,6 +442,7 @@ export function EarthTrackView({
             aria-label="Tilt map down"
             title="Tilt down"
             type="button"
+            disabled={raceViewFullscreen && raceCameraLocked}
             onClick={() => onEarthAngleChange(Math.max(0, earthAngle - 5))}
           >
             <ChevronDown size={16} />
@@ -400,6 +451,7 @@ export function EarthTrackView({
             aria-label="Rotate map right"
             title="Rotate right"
             type="button"
+            disabled={raceViewFullscreen && raceCameraLocked}
             onClick={() => onEarthHeadingChange((earthHeading + 15) % 360)}
           >
             <RotateCw size={16} />

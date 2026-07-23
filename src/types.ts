@@ -549,6 +549,20 @@ export type EarthCamera = {
   updatedAt: number;
 };
 
+export type RaceRiderOverlayLayout = {
+  xPct: number;
+  yPct: number;
+  width: number;
+  height: number;
+  locked: boolean;
+};
+
+export type RaceViewPreferences = {
+  cameraLocked: boolean;
+  earthCamerasByTrack: Record<string, EarthCamera>;
+  riderOverlaysByTrack: Record<string, RaceRiderOverlayLayout>;
+};
+
 export type TrackZone = {
   id: string;
   name: string;
