@@ -138,7 +138,10 @@ export type RaceCommentaryTracker = {
   lastAnnouncerCallAt: number;
 };
 
-export const continuousRaceCommentaryIntervalMs = 2_500;
+// Capture a fresh live snapshot quickly enough to prepare the next spoken call
+// while the current one is still playing. The playback queue coalesces these
+// snapshots, so this is a buffering cadence rather than a speech-request rate.
+export const continuousRaceCommentaryIntervalMs = 400;
 
 export function createRaceCommentaryTracker(): RaceCommentaryTracker {
   return {
@@ -837,6 +840,15 @@ const startActions = [
   'the battle starts immediately',
 ] as const;
 
+const startBridgeFragments = [
+  'The opening fight for room starts now.',
+  'The whole field is already under pressure.',
+  'The battle takes shape immediately.',
+  'Every lane is alive in the opening charge.',
+  'Nobody gets a quiet opening here.',
+  'The race is busy from the opening drive.',
+] as const;
+
 export function localRaceStartLine(
   trackName: string,
   riderNames: string[],
@@ -870,7 +882,7 @@ export function localRaceStartLine(
   ];
   const actions = spokenRiderNames.length > 1 ? namedFieldActions : soloActions;
   const candidates = Array.from({ length: 24 }, (_, index) => (
-    `${startOpeningFragments[(seed + index * 17) % startOpeningFragments.length]} ${trackName}—${actions[(seed + index * 29) % actions.length]}!`
+    `${startOpeningFragments[(seed + index * 17) % startOpeningFragments.length]} ${trackName}—${actions[(seed + index * 29) % actions.length]}! ${startBridgeFragments[(seed + index * 37) % startBridgeFragments.length]}`
   ));
   const novel = candidates.filter((candidate) => !recentLines.includes(candidate));
   const pool = novel.length > 0 ? novel : candidates;

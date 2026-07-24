@@ -53,10 +53,13 @@ const commentaryUnlockAudioDataUrl = 'data:audio/wav;base64,UklGRqQCAABXQVZFZm10
 type PreparedStartSpeech = {
   key: string;
   line: string;
-  audioBlob: Blob;
+  audioBlob?: Blob;
+  audioPromise?: Promise<Blob | null>;
+  controller?: AbortController;
 };
 
 type StartSpeechPrefetchAttempt = {
+  key: string;
   inFlight: boolean;
   retryAt: number;
 };
@@ -226,6 +229,15 @@ function commentarySpeechTimeoutMs(eventKind: CommentarySpeechEventKind) {
     return 12_000;
   }
   return 9_000;
+}
+
+function notifyCommentaryPlaybackStart(eventKind: CommentarySpeechEventKind) {
+  window.dispatchEvent(new CustomEvent('tracklab-commentary-playback-start', {
+    detail: {
+      eventKind,
+      at: performance.now(),
+    },
+  }));
 }
 
 async function waitForPreparedSpeech(
@@ -524,21 +536,50 @@ export function useRaceCommentary({
   const playedPreRaceKeyRef = useRef('');
   const startPrefetchRequestRef = useRef(0);
   const startPrefetchAttemptRef = useRef<StartSpeechPrefetchAttempt>({
+    key: '',
     inFlight: false,
     retryAt: 0,
   });
   const preRacePrefetchRequestRef = useRef(0);
   const [preRaceReport, setPreRaceReport] = useState<PreRaceReport | null>(null);
 
+  const trackName = track.name;
+  const riderNamesKey = players.map((player) => `${player.id}:${player.name}`).join('|');
+  const startLineRef = useRef({ identity: '', line: '' });
   preferencesRef.current = preferences;
   recentLinesChangeRef.current = onRecentLinesChange;
   raceStateRef.current = raceState;
-  const trackName = track.name;
-  const startLine = localRaceStartLine(
-    trackName,
-    players.map((player) => player.name),
-    preferences.adaptiveMemory ? preferences.recentLines : [],
-  );
+  if (raceState === 'ready' && !startGateActive) {
+    const startLineIdentity = [
+      trackName,
+      riderNamesKey,
+      preferences.adaptiveMemory ? preferences.recentLines.length : 0,
+      preferences.adaptiveMemory ? preferences.recentLines.at(-1) ?? '' : '',
+    ].join('::');
+    if (startLineRef.current.identity !== startLineIdentity) {
+      startLineRef.current = {
+        identity: startLineIdentity,
+        line: localRaceStartLine(
+          trackName,
+          players.map((player) => player.name),
+          preferences.adaptiveMemory ? preferences.recentLines : [],
+        ),
+      };
+    }
+  }
+  if (!startLineRef.current.line) {
+    startLineRef.current = {
+      identity: `${trackName}::${riderNamesKey}::initial`,
+      line: localRaceStartLine(
+        trackName,
+        players.map((player) => player.name),
+        preferences.adaptiveMemory
+          ? preferences.recentLines
+          : [],
+      ),
+    };
+  }
+  const startLine = startLineRef.current.line;
   const preRaceContext = useMemo(
     () => buildPreRaceTrackContext(track, players, ghostLaps, lapCount),
     [ghostLaps, lapCount, players, track],
@@ -577,6 +618,7 @@ export function useRaceCommentary({
   }, [recordSpeechFailure]);
 
   const disposePreparedStartSpeech = useCallback(() => {
+    preparedStartSpeechRef.current?.controller?.abort();
     preparedStartSpeechRef.current = null;
   }, []);
 
@@ -647,8 +689,11 @@ export function useRaceCommentary({
     }
     const now = Date.now();
     if (
-      startPrefetchAttemptRef.current.inFlight
-      || startPrefetchAttemptRef.current.retryAt > now
+      startPrefetchAttemptRef.current.key === startSpeechKey
+      && (
+        startPrefetchAttemptRef.current.inFlight
+        || startPrefetchAttemptRef.current.retryAt > now
+      )
     ) {
       return;
     }
@@ -656,41 +701,64 @@ export function useRaceCommentary({
     const requestId = startPrefetchRequestRef.current + 1;
     startPrefetchRequestRef.current = requestId;
     startPrefetchAttemptRef.current = {
+      key: startSpeechKey,
       inFlight: true,
       retryAt: now + 15_000,
     };
     disposePreparedStartSpeech();
-    void requestAiSpeechBlob(
+    const controller = new AbortController();
+    const audioPromise = requestAiSpeechBlob(
       startLine,
       preferences,
       'race-start',
       players.map((player) => player.name),
       'sprint',
+      commentarySpeechTimeoutMs('race-start'),
+      controller.signal,
     )
       .then((audioBlob) => {
         setSpeechStatus('ready');
-        if (startPrefetchRequestRef.current !== requestId) {
-          return;
-        }
-        preparedStartSpeechRef.current = {
-          key: startSpeechKey,
-          line: startLine,
-          audioBlob,
-        };
-        startPrefetchAttemptRef.current = {
-          inFlight: false,
-          retryAt: 0,
-        };
+        return audioBlob;
       })
       .catch((error) => {
         recordSpeechFailure(error);
         if (startPrefetchRequestRef.current === requestId) {
           startPrefetchAttemptRef.current = {
+            key: startSpeechKey,
             inFlight: false,
             retryAt: Date.now() + 60_000,
           };
         }
+        return null;
       });
+    preparedStartSpeechRef.current = {
+      key: startSpeechKey,
+      line: startLine,
+      audioPromise,
+      controller,
+    };
+    void audioPromise.then((audioBlob) => {
+      if (
+        startPrefetchRequestRef.current !== requestId
+        || preparedStartSpeechRef.current?.controller !== controller
+      ) {
+        return;
+      }
+      if (!audioBlob) {
+        preparedStartSpeechRef.current = null;
+        return;
+      }
+      preparedStartSpeechRef.current = {
+        key: startSpeechKey,
+        line: startLine,
+        audioBlob,
+      };
+      startPrefetchAttemptRef.current = {
+        key: startSpeechKey,
+        inFlight: false,
+        retryAt: 0,
+      };
+    });
   }, [
     disposePreparedStartSpeech,
     preferences.enabled,
@@ -971,6 +1039,7 @@ export function useRaceCommentary({
       if (shouldContinue()) {
         rememberLine(report.line);
         setPlaybackPhase('speaking');
+        notifyCommentaryPlaybackStart('pre-race');
       }
     };
     const activePreferences = preferencesRef.current;
@@ -1088,6 +1157,7 @@ export function useRaceCommentary({
             return;
           }
           setPlaybackPhase('speaking');
+          notifyCommentaryPlaybackStart(event.kind);
           if (!lineRemembered) {
             rememberLine(line);
             lineRemembered = true;
@@ -1102,15 +1172,21 @@ export function useRaceCommentary({
           line = startLine;
           const prepared = preparedStartSpeechRef.current;
           const preparedMatches = prepared?.key === preparedStartSpeechKey(line, activePreferences, players);
-          if (preparedMatches && prepared) {
-            preparedStartSpeechRef.current = null;
-          }
           const requestController = new AbortController();
           activeRequestAbortRef.current = requestController;
           try {
             if (preparedMatches && prepared) {
+              const preparedAudio = prepared.audioBlob
+                ?? (prepared.audioPromise
+                  ? await waitForPreparedSpeech(prepared.audioPromise, 350)
+                  : null);
+              preparedStartSpeechRef.current = null;
+              prepared.controller?.abort();
+              if (!preparedAudio) {
+                throw new Error('Prepared race-start speech was not ready at the gate.');
+              }
               const played = await playAudioBlob(
-                prepared.audioBlob,
+                preparedAudio,
                 activePreferences.volume,
                 activeAudioRef,
                 activeBufferSourceRef,
@@ -1407,8 +1483,16 @@ export function useRaceCommentary({
         event.kind === 'finish' || event.kind === 'rider-finish'
       ))
     ) {
-      queueRef.current = [nextEvent];
-      prepareRaceSpeech(nextEvent);
+      const bufferedEvent = queueRef.current[0];
+      const bufferedSpeech = preparedRaceSpeechRef.current;
+      const keepBufferedCall = !commentaryNeedsImmediateLine(nextEvent.kind)
+        && bufferedEvent != null
+        && bufferedSpeech?.eventId === bufferedEvent.id
+        && raceCommentaryEventIsFresh(bufferedEvent);
+      if (!keepBufferedCall) {
+        queueRef.current = [nextEvent];
+        prepareRaceSpeech(nextEvent);
+      }
     }
     if (completeFieldFinish) {
       callSequenceRef.current += 1;

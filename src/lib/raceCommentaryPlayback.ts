@@ -53,7 +53,7 @@ export function commentaryNeedsImmediateLine(eventKind: RaceCommentaryEventKind)
 }
 
 export function commentaryLineRequestBudgetMs(eventKind: RaceCommentaryEventKind) {
-  return commentaryNeedsImmediateLine(eventKind) ? 0 : 1_200;
+  return commentaryNeedsImmediateLine(eventKind) ? 0 : 800;
 }
 
 export function shouldInterruptCommentaryForEvent(

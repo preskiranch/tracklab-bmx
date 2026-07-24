@@ -35,7 +35,7 @@ describe('race commentary playback sequencing', () => {
     expect(commentaryLineRequestBudgetMs('lead-change')).toBe(0);
     expect(commentaryLineRequestBudgetMs('position-change')).toBe(0);
     expect(commentaryLineRequestBudgetMs('rider-finish')).toBe(0);
-    expect(commentaryLineRequestBudgetMs('pedal-zone')).toBe(1_200);
+    expect(commentaryLineRequestBudgetMs('pedal-zone')).toBe(800);
   });
 
   it('preserves finish playback until the race returns to the gate', () => {

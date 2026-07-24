@@ -604,7 +604,7 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
 });
 
 test('start here race action enters fullscreen race view', async ({ page }, testInfo) => {
-  test.setTimeout(55_000);
+  test.setTimeout(80_000);
   let commentarySpeechRequests = 0;
   const commentarySpeechPayloads: Array<{
     eventKind?: string;
@@ -649,6 +649,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     commentarySpeechPayloads.push(payload);
     if (payload.eventKind === 'pre-race') {
       await new Promise((resolve) => setTimeout(resolve, 6_500));
+    } else if (payload.eventKind !== 'race-start') {
+      await new Promise((resolve) => setTimeout(resolve, 2_600));
     }
     await route.fulfill({
       contentType: 'audio/mpeg',
@@ -715,8 +717,28 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       __tracklabAmbiencePlayCount?: number;
       __tracklabAmbienceLoadCount?: number;
       __tracklabAmbienceElements?: HTMLMediaElement[];
+      __tracklabCommentaryPlaybackStarts?: Array<{
+        eventKind: string;
+        at: number;
+      }>;
     };
     const originalMediaLoad = HTMLMediaElement.prototype.load;
+    window.addEventListener('tracklab-commentary-playback-start', (event) => {
+      const detail = (event as CustomEvent<{
+        eventKind?: string;
+        at?: number;
+      }>).detail;
+      if (typeof detail?.eventKind !== 'string' || !Number.isFinite(detail.at)) {
+        return;
+      }
+      audioWindow.__tracklabCommentaryPlaybackStarts = [
+        ...(audioWindow.__tracklabCommentaryPlaybackStarts ?? []),
+        {
+          eventKind: detail.eventKind,
+          at: Number(detail.at),
+        },
+      ];
+    });
     HTMLMediaElement.prototype.load = function (...args: Parameters<HTMLMediaElement['load']>) {
       if ((this.currentSrc || this.src).includes('/assets/bmx-event-ambience')) {
         audioWindow.__tracklabAmbienceLoadCount = (audioWindow.__tracklabAmbienceLoadCount ?? 0) + 1;
@@ -957,6 +979,48 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     expect(interval).toBeGreaterThanOrEqual(90);
     expect(interval).toBeLessThanOrEqual(300);
   }
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabCommentaryPlaybackStarts?: Array<{
+        eventKind: string;
+        at: number;
+      }>;
+    }).__tracklabCommentaryPlaybackStarts?.filter(
+      (playback) => playback.eventKind !== 'pre-race',
+    ).length ?? 0
+  )), { timeout: 16_000 }).toBeGreaterThanOrEqual(3);
+  const commentaryPlaybackStarts = await page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabCommentaryPlaybackStarts?: Array<{
+        eventKind: string;
+        at: number;
+      }>;
+    }).__tracklabCommentaryPlaybackStarts ?? []
+  ));
+  const raceStartPlayback = commentaryPlaybackStarts.find(
+    (playback) => playback.eventKind === 'race-start',
+  );
+  expect(raceStartPlayback).toBeDefined();
+  expect(raceStartPlayback!.at - treeLightTimes.at(-1)!).toBeGreaterThanOrEqual(-100);
+  expect(raceStartPlayback!.at - treeLightTimes.at(-1)!).toBeLessThanOrEqual(750);
+  const liveCommentaryStarts = commentaryPlaybackStarts.filter(
+    (playback) => playback.eventKind !== 'pre-race',
+  );
+  expect(liveCommentaryStarts.length).toBeGreaterThanOrEqual(3);
+  const liveCommentaryStartGaps = liveCommentaryStarts.slice(1).map(
+    (playback, index) => playback.at - liveCommentaryStarts[index].at,
+  );
+  // The fixture is six seconds long and non-start calls are deliberately
+  // delayed by 2.6 seconds, leaving no room for a quarter-lap silent start.
+  expect(
+    Math.max(...liveCommentaryStartGaps),
+    JSON.stringify(liveCommentaryStarts),
+  ).toBeLessThanOrEqual(10_000);
+  expect(commentarySpeechPayloads.filter((payload) => (
+    payload.eventKind === 'race-start'
+    && customDemoNames.every((name) => payload.riderNames?.includes(name))
+    && customDemoNames.every((name) => payload.line?.includes(name))
+  ))).toHaveLength(1);
   await expect.poll(() => page.evaluate(() => {
     const audioWindow = window as typeof window & {
       __tracklabAmbienceElements?: HTMLMediaElement[];
