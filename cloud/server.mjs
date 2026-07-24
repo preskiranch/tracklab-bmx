@@ -5,7 +5,7 @@ import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSa
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import * as persistence from './persistence.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
 import {
@@ -42,8 +42,9 @@ import {
 } from './preRaceBriefing.mjs';
 import { loadTrackWeather } from './weather.mjs';
 import {
-  commentaryAudioBuffer,
-  commentaryAudioRequest,
+  commentaryPcmToWav,
+  commentaryRealtimeResponseCreate,
+  commentaryRealtimeSessionUpdate,
   commentarySpeechModel,
 } from './commentaryVoices.mjs';
 import { createCommentaryCapacity } from './commentaryCapacity.mjs';
@@ -100,12 +101,13 @@ const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
+const commentaryLiveTextModel = 'local-race-engine';
 const configuredCommentaryEngineModel = String(
   process.env.TRACKLAB_COMMENTARY_MODEL || '',
 ).trim();
 const commentaryEngineModel = commentaryEngineModels.has(configuredCommentaryEngineModel)
   ? configuredCommentaryEngineModel
-  : 'gpt-5.6-terra';
+  : 'gpt-5.6-luna';
 const commentaryVoicePresets = new Set(['american-man']);
 const commentaryEventKinds = new Set([
   'pre-race',
@@ -1171,6 +1173,174 @@ async function generateCommentaryLine({
     );
 }
 
+function realtimeSpeechError(message, code = 'speech_unavailable', statusCode = 502) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function realtimeSpeechEventError(event) {
+  const details = event?.error
+    ?? event?.response?.status_details?.error
+    ?? event?.response?.status_details
+    ?? {};
+  const code = String(details?.code || details?.type || 'speech_unavailable')
+    .replace(/[^a-z0-9_-]/gi, '')
+    .slice(0, 80);
+  return realtimeSpeechError(
+    sanitizeText(details?.message, 'OpenAI Realtime speech failed.', 240),
+    code || 'speech_unavailable',
+    code === 'insufficient_quota' ? 429 : 502,
+  );
+}
+
+async function requestRealtimeCommentarySpeech({
+  apiKey,
+  line,
+  voicePreset,
+  eventKind,
+  deliveryStyle,
+  signal,
+}) {
+  if (signal?.aborted) {
+    throw realtimeSpeechError('OpenAI Realtime speech was cancelled.', 'speech_cancelled', 499);
+  }
+
+  return await new Promise((resolve, reject) => {
+    const audioChunks = [];
+    const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(commentarySpeechModel)}`;
+    const socket = new WebSocket(url, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+    let settled = false;
+    let responseRequested = false;
+
+    const cleanup = () => {
+      signal?.removeEventListener('abort', handleAbort);
+    };
+    const closeSocket = () => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.close(1000);
+      } else if (socket.readyState === WebSocket.CONNECTING) {
+        socket.terminate();
+      }
+    };
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      closeSocket();
+      try {
+        resolve(commentaryPcmToWav(audioChunks));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      closeSocket();
+      reject(error);
+    };
+    const handleAbort = () => {
+      fail(realtimeSpeechError(
+        'OpenAI Realtime speech timed out.',
+        'speech_timeout',
+        504,
+      ));
+    };
+
+    signal?.addEventListener('abort', handleAbort, { once: true });
+
+    socket.on('open', () => {
+      socket.send(JSON.stringify(commentaryRealtimeSessionUpdate(
+        voicePreset,
+        eventKind,
+        deliveryStyle,
+      )));
+    });
+    socket.on('message', (message) => {
+      let event;
+      try {
+        event = JSON.parse(message.toString());
+      } catch {
+        fail(realtimeSpeechError(
+          'OpenAI Realtime returned an invalid event.',
+          'invalid_realtime_event',
+        ));
+        return;
+      }
+
+      if (event.type === 'session.updated' && !responseRequested) {
+        responseRequested = true;
+        socket.send(JSON.stringify(commentaryRealtimeResponseCreate(
+          line,
+          voicePreset,
+          eventKind,
+          deliveryStyle,
+        )));
+        return;
+      }
+      if (event.type === 'response.output_audio.delta' && typeof event.delta === 'string') {
+        audioChunks.push(Buffer.from(event.delta, 'base64'));
+        return;
+      }
+      if (event.type === 'error') {
+        fail(realtimeSpeechEventError(event));
+        return;
+      }
+      if (event.type === 'response.done') {
+        if (event.response?.status !== 'completed') {
+          fail(realtimeSpeechEventError(event));
+          return;
+        }
+        finish();
+      }
+    });
+    socket.on('unexpected-response', (_request, response) => {
+      const chunks = [];
+      response.on('data', (chunk) => {
+        if (chunks.reduce((total, item) => total + item.length, 0) < 8_192) {
+          chunks.push(Buffer.from(chunk));
+        }
+      });
+      response.on('end', () => {
+        let payload = null;
+        try {
+          payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        } catch {
+          // The HTTP status below still gives us a safe provider failure.
+        }
+        const error = realtimeSpeechEventError(payload ?? {});
+        error.statusCode = response.statusCode;
+        fail(error);
+      });
+    });
+    socket.on('error', (error) => {
+      fail(realtimeSpeechError(
+        sanitizeText(error?.message, 'OpenAI Realtime connection failed.', 240),
+        error?.code || 'realtime_connection_failed',
+      ));
+    });
+    socket.on('close', () => {
+      if (!settled) {
+        fail(realtimeSpeechError(
+          'OpenAI Realtime closed before completing the race call.',
+          'realtime_closed_early',
+        ));
+      }
+    });
+  });
+}
+
 async function generateCommentarySpeech(
   line,
   voicePreset,
@@ -1193,28 +1363,25 @@ async function generateCommentarySpeech(
     );
   }
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(commentaryAudioRequest(
+  try {
+    const audio = await requestRealtimeCommentarySpeech({
+      apiKey: key,
       line,
       voicePreset,
       eventKind,
       deliveryStyle,
-    )),
-    signal: signalWithTimeout(
-      signal,
-      eventKind === 'preview' ? 30_000 : eventKind === 'pre-race' ? 20_000 : 12_000,
-    ),
-  });
-  if (!response.ok) {
-    const errorPayload = await response.json().catch(() => null);
-    const errorCode = String(
-      errorPayload?.error?.code || errorPayload?.error?.type || '',
-    ).replace(/[^a-z0-9_-]/gi, '').slice(0, 80);
+      signal: signalWithTimeout(
+        signal,
+        eventKind === 'preview' ? 30_000 : eventKind === 'pre-race' ? 20_000 : 12_000,
+      ),
+    });
+    commentarySpeechProviderStatus = 'ready';
+    commentarySpeechProviderRetryAt = 0;
+    return audio;
+  } catch (error) {
+    const errorCode = String(error?.code || error?.type || '')
+      .replace(/[^a-z0-9_-]/gi, '')
+      .slice(0, 80);
     commentarySpeechProviderStatus = errorCode === 'insufficient_quota'
       ? 'quota-exhausted'
       : 'unavailable';
@@ -1222,17 +1389,13 @@ async function generateCommentarySpeech(
       ? Date.now() + 15_000
       : 0;
     throw new HttpRequestError(
-      response.status === 429 ? 503 : 502,
+      Number(error?.statusCode) === 429 ? 503 : 502,
       errorCode === 'insufficient_quota'
         ? 'Natural commentary is paused because the OpenAI API project has no available quota.'
         : 'Natural commentary audio is temporarily unavailable.',
       errorCode || 'speech_unavailable',
     );
   }
-  const audio = commentaryAudioBuffer(await response.json());
-  commentarySpeechProviderStatus = 'ready';
-  commentarySpeechProviderRetryAt = 0;
-  return audio;
 }
 
 function sanitizedPreferenceRevision(value) {
@@ -3272,7 +3435,8 @@ async function serveStatic(request, response) {
     const body = JSON.stringify({
       aiAvailable: Boolean(openAiApiKey()),
       speechStatus: openAiApiKey() ? commentarySpeechProviderStatus : 'not-configured',
-      textModel: commentaryEngineModel,
+      textModel: commentaryLiveTextModel,
+      preRaceTextModel: commentaryEngineModel,
       speechModel: commentarySpeechModel,
       voicePresets: [...commentaryVoicePresets],
       research: commentaryResearchMetadata,
@@ -3468,7 +3632,7 @@ async function serveStatic(request, response) {
       writeJson(response, 400, { error: 'A valid race event is required.' });
       return;
     }
-    const model = commentaryEngineModel;
+    const model = commentaryLiveTextModel;
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
     const recentLines = Array.isArray(payload?.recentLines)
       ? payload.recentLines
@@ -3482,29 +3646,19 @@ async function serveStatic(request, response) {
         .map((line) => sanitizeText(line, '', 220))
         .filter(Boolean)
       : [];
-    const releaseCapacity = acquireCommentaryCapacity(response);
-    if (!releaseCapacity) {
-      return;
-    }
-    let line;
-    try {
-      line = await generateCommentaryLine({
-        event,
-        model,
-        voicePreset,
-        recentLines,
-        raceLines,
-        signal: requestAbortSignal(request, response),
-      });
-    } finally {
-      releaseCommentaryCapacity(releaseCapacity);
-    }
+    const requiredRiders = requiredCommentaryRiders(event, raceLines);
+    const line = commentaryFallbackLine(
+      event,
+      [...recentLines, ...raceLines],
+      requiredRiders,
+      commentaryUsesWryAside(event),
+    );
     const deliveryStyle = commentaryDeliveryStyleForEvent(event);
     cloudTelemetry.increment('tracklab_commentary_lines_total', { model, voicePreset });
     writeJson(
       response,
       200,
-      { line, model, source: 'ai', deliveryStyle },
+      { line, model, source: 'local', deliveryStyle },
       { 'Cache-Control': 'no-store' },
     );
     return;

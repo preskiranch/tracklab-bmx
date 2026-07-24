@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  commentaryAudioBuffer,
-  commentaryAudioRequest,
+  commentaryPcmToWav,
+  commentaryRealtimeResponseCreate,
+  commentaryRealtimeSessionUpdate,
   commentarySpeechModel,
   commentaryVoiceDefinition,
 } from '../../cloud/commentaryVoices.mjs';
@@ -38,38 +39,70 @@ describe('commentary voice', () => {
     expect(definition.instructions).toMatch(/Never claim that anybody is still racing/i);
   });
 
-  it('builds the current natural audio request without storing race calls', () => {
+  it('builds a private Realtime session using the natural American male voice', () => {
+    const request = commentaryRealtimeSessionUpdate(
+      'american-man',
+      'lead-change',
+      'surge',
+    );
+
+    expect(commentarySpeechModel).toBe('gpt-realtime-2.1-mini');
+    expect(request).toMatchObject({
+      type: 'session.update',
+      session: {
+        type: 'realtime',
+        model: 'gpt-realtime-2.1-mini',
+        output_modalities: ['audio'],
+        audio: {
+          output: {
+            format: { type: 'audio/pcm' },
+            voice: 'cedar',
+          },
+        },
+      },
+    });
+    expect(request.session.instructions).toMatch(/natural American male/i);
+  });
+
+  it('builds an out-of-band exact race-call response', () => {
     const line = 'Riley takes charge while Jordan fights back down the second straight!';
-    const request = commentaryAudioRequest(
+    const request = commentaryRealtimeResponseCreate(
       line,
       'american-man',
       'lead-change',
       'surge',
     );
 
-    expect(commentarySpeechModel).toBe('gpt-audio-1.5');
     expect(request).toMatchObject({
-      model: 'gpt-audio-1.5',
-      modalities: ['text', 'audio'],
-      audio: { voice: 'cedar', format: 'wav' },
-      store: false,
+      type: 'response.create',
+      response: {
+        conversation: 'none',
+        output_modalities: ['audio'],
+      },
     });
-    expect(request.messages[0]).toMatchObject({ role: 'developer' });
-    expect(request.messages[0].content).toMatch(/word for word/i);
-    expect(request.messages[0].content).toMatch(/entire call/i);
-    expect(request.messages[1]).toEqual({
+    expect(request.response.instructions).toMatch(/word for word/i);
+    expect(request.response.instructions).toMatch(/entire call/i);
+    expect(request.response.input).toEqual([{
+      type: 'message',
       role: 'user',
-      content: `Perform this exact TrackLab BMX race call:\n${JSON.stringify(line)}`,
-    });
+      content: [{
+        type: 'input_text',
+        text: `Perform this exact TrackLab BMX race call:\n${JSON.stringify(line)}`,
+      }],
+    }]);
   });
 
-  it('decodes the WAV bytes returned by Chat Completions audio output', () => {
-    const wav = Buffer.from('RIFF-tracklab-WAVE');
-    const decoded = commentaryAudioBuffer({
-      choices: [{ message: { audio: { data: wav.toString('base64') } } }],
-    });
+  it('wraps streamed Realtime PCM chunks in a playable WAV container', () => {
+    const pcm = Buffer.from([0, 0, 255, 127, 0, 128, 0, 0]);
+    const wav = commentaryPcmToWav([pcm.subarray(0, 4), pcm.subarray(4)]);
 
-    expect(decoded.equals(wav)).toBe(true);
-    expect(() => commentaryAudioBuffer({ choices: [] })).toThrow(/no usable WAV data/i);
+    expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(wav.toString('ascii', 8, 12)).toBe('WAVE');
+    expect(wav.readUInt32LE(24)).toBe(24_000);
+    expect(wav.readUInt16LE(22)).toBe(1);
+    expect(wav.readUInt16LE(34)).toBe(16);
+    expect(wav.readUInt32LE(40)).toBe(pcm.length);
+    expect(wav.subarray(44).equals(pcm)).toBe(true);
+    expect(() => commentaryPcmToWav([])).toThrow(/no usable PCM audio/i);
   });
 });

@@ -11,8 +11,6 @@ import {
 } from '../lib/raceCommentary';
 import {
   browserSpeechWatchdogMs,
-  commentaryLineRequestBudgetMs,
-  commentaryNeedsImmediateLine,
   completeFieldFinishReplacesActiveCall,
   enqueueFinishCommentaryEvents,
   finishCommentaryReleaseTimeoutMs,
@@ -1038,46 +1036,8 @@ export function useRaceCommentary({
     const raceLines = [...raceLinesRef.current];
     const initialDeliveryStyle = deliveryStyleForEvent(event);
     const promise = (async () => {
-      let line = '';
-      let deliveryStyle = initialDeliveryStyle;
-      const lineRequestBudgetMs = commentaryLineRequestBudgetMs(event.kind);
-      if (!commentaryNeedsImmediateLine(event.kind) && lineRequestBudgetMs > 0) {
-        try {
-          const response = await fetchWithTimeout('/api/commentary/line', {
-            method: 'POST',
-            signal: controller.signal,
-            headers: {
-              Accept: 'application/json',
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              event,
-              voicePreset: activePreferences.voicePreset,
-              recentLines,
-              raceLines,
-            }),
-          }, lineRequestBudgetMs);
-          if (!response.ok) {
-            throw new Error(`Commentary service returned ${response.status}`);
-          }
-          const payload = await response.json() as {
-            line?: string;
-            deliveryStyle?: CommentaryDeliveryStyle;
-          };
-          line = typeof payload.line === 'string' ? payload.line.trim() : '';
-          deliveryStyle = ['straight', 'wry', 'pressure', 'surge', 'sprint']
-            .includes(payload.deliveryStyle ?? '')
-            ? payload.deliveryStyle as CommentaryDeliveryStyle
-            : initialDeliveryStyle;
-        } catch (error) {
-          if (controller.signal.aborted) {
-            throw error;
-          }
-        }
-      }
-      if (!line) {
-        line = localCommentaryLine(event, recentLines, raceLines);
-      }
+      const line = localCommentaryLine(event, recentLines, raceLines);
+      const deliveryStyle = initialDeliveryStyle;
       const audioBlob = await requestAiSpeechBlob(
         line,
         activePreferences,
@@ -1408,56 +1368,11 @@ export function useRaceCommentary({
 
         const requestController = new AbortController();
         activeRequestAbortRef.current = requestController;
-        const lineRequestBudgetMs = commentaryLineRequestBudgetMs(event.kind);
-        if (
-          serviceMode === 'ai'
-          && !commentaryNeedsImmediateLine(event.kind)
-          && lineRequestBudgetMs > 0
-        ) {
-          try {
-            const response = await fetchWithTimeout('/api/commentary/line', {
-              method: 'POST',
-              signal: requestController.signal,
-              headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                event,
-                voicePreset: activePreferences.voicePreset,
-                recentLines: activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
-                raceLines: raceLinesRef.current,
-              }),
-            }, lineRequestBudgetMs);
-            if (!response.ok) {
-              throw new Error(`Commentary service returned ${response.status}`);
-            }
-            const payload = await response.json() as {
-              line?: string;
-              deliveryStyle?: CommentaryDeliveryStyle;
-            };
-            line = typeof payload.line === 'string' ? payload.line.trim() : '';
-            deliveryStyle = ['straight', 'wry', 'pressure', 'surge', 'sprint']
-              .includes(payload.deliveryStyle ?? '')
-              ? payload.deliveryStyle as CommentaryDeliveryStyle
-              : deliveryStyleForEvent(event);
-            if (!line) {
-              throw new Error('Commentary service returned an empty call.');
-            }
-          } catch {
-            if (!shouldContinue()) {
-              continue;
-            }
-          }
-        }
-
-        if (!line) {
-          line = localCommentaryLine(
-            event,
-            activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
-            raceLinesRef.current,
-          );
-        }
+        line = localCommentaryLine(
+          event,
+          activePreferences.adaptiveMemory ? activePreferences.recentLines : [],
+          raceLinesRef.current,
+        );
         if (!shouldContinue()) {
           continue;
         }

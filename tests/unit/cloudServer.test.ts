@@ -129,8 +129,9 @@ describe('cloud API trust boundaries', () => {
     expect(config).toMatchObject({
       aiAvailable: false,
       speechStatus: 'not-configured',
-      textModel: 'gpt-5.6-terra',
-      speechModel: 'gpt-audio-1.5',
+      textModel: 'local-race-engine',
+      preRaceTextModel: 'gpt-5.6-luna',
+      speechModel: 'gpt-realtime-2.1-mini',
       voicePresets: ['american-man'],
       research: {
         knowledgeVersion: 'usabmx-national-2026-07-23-v6-2024-inventory-and-prosody',
