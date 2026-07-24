@@ -58,6 +58,7 @@ import {
   primeAudioCues,
   startBmxEventAmbience,
   stopBmxEventAmbience,
+  stopRaceAudioKeepAlive,
   stopStartGateAudio,
   uciVoiceWatchGateOffsetMs,
 } from './lib/audioCues';
@@ -2608,11 +2609,17 @@ export default function App() {
   const canCancelRace = startGateStatus.active || raceState === 'racing';
 
   useEffect(() => {
-    if (raceAmbienceActive && raceCommentaryPreferences.ambientEnabled) {
-      void startBmxEventAmbience(raceCommentaryPreferences.ambientVolume);
-    } else {
-      stopBmxEventAmbience();
+    if (raceAmbienceActive) {
+      if (raceCommentaryPreferences.ambientEnabled) {
+        void startBmxEventAmbience(raceCommentaryPreferences.ambientVolume);
+      } else {
+        stopBmxEventAmbience();
+      }
+      return;
     }
+
+    stopBmxEventAmbience();
+    stopRaceAudioKeepAlive();
   }, [
     raceAmbienceActive,
     raceCommentaryPreferences.ambientEnabled,
@@ -2621,6 +2628,7 @@ export default function App() {
 
   useEffect(() => () => {
     stopBmxEventAmbience();
+    stopRaceAudioKeepAlive();
   }, []);
 
   useEffect(() => {

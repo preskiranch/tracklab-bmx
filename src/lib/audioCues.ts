@@ -8,6 +8,8 @@ type AudioWindow = Window & typeof globalThis & {
 };
 
 let audioContext: AudioContext | null = null;
+let raceAudioKeepAliveOscillator: OscillatorNode | null = null;
+let raceAudioKeepAliveGain: GainNode | null = null;
 let activeStartGateAudio: HTMLAudioElement | null = null;
 let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
 let startGateToneAudioPool: HTMLAudioElement[] = [];
@@ -116,6 +118,10 @@ function settleWithin<T>(promise: Promise<T>, timeoutMs: number, fallback: T) {
 function getAudioContext() {
   if (audioContext && audioContext.state !== 'closed') {
     return audioContext;
+  }
+  if (audioContext?.state === 'closed') {
+    stopRaceAudioKeepAlive();
+    audioContext = null;
   }
 
   const AudioContextConstructor = window.AudioContext ?? (window as AudioWindow).webkitAudioContext;
@@ -356,6 +362,43 @@ function startSilentUnlockPulse(context: AudioContext) {
   }
 }
 
+function startRaceAudioKeepAlive(context: AudioContext) {
+  if (context.state === 'closed' || raceAudioKeepAliveOscillator) {
+    return;
+  }
+
+  try {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(18, context.currentTime);
+    gain.gain.setValueAtTime(0.00001, context.currentTime);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    raceAudioKeepAliveOscillator = oscillator;
+    raceAudioKeepAliveGain = gain;
+  } catch {
+    // Primed media elements remain available when Web Audio is unsupported.
+  }
+}
+
+export function stopRaceAudioKeepAlive() {
+  if (raceAudioKeepAliveOscillator) {
+    try {
+      raceAudioKeepAliveOscillator.stop();
+    } catch {
+      // The oscillator may already have stopped with its audio context.
+    }
+    raceAudioKeepAliveOscillator.disconnect();
+    raceAudioKeepAliveOscillator = null;
+  }
+  if (raceAudioKeepAliveGain) {
+    raceAudioKeepAliveGain.disconnect();
+    raceAudioKeepAliveGain = null;
+  }
+}
+
 function cancelPendingStartGateAudio(audio: HTMLAudioElement) {
   audio.muted = true;
   audio.pause();
@@ -388,6 +431,10 @@ export async function primeAudioCues() {
   }
   if (context) {
     startSilentUnlockPulse(context);
+    // Mobile browsers can suspend an otherwise idle AudioContext during the
+    // staging countdown. Keep it active so the delayed UCI cadence and natural
+    // commentary can still start after the full pre-race window.
+    startRaceAudioKeepAlive(context);
   }
 
   const audio = getStartGateAudio();

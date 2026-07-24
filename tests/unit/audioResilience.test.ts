@@ -164,6 +164,82 @@ describe('race audio resilience', () => {
     expect(StalledAudio.instances).toHaveLength(0);
   });
 
+  it('keeps Web Audio active through staging and releases it after the race', async () => {
+    StalledAudio.stallPlayback = false;
+    const oscillatorStops: number[] = [];
+    const oscillatorDisconnects: number[] = [];
+    const gainDisconnects: number[] = [];
+    const oscillatorFrequencies: number[] = [];
+    let oscillatorStarts = 0;
+
+    class KeepAliveAudioContext {
+      currentTime = 4;
+      destination = {};
+      state = 'running';
+
+      createGain() {
+        return {
+          connect() {},
+          disconnect() {
+            gainDisconnects.push(1);
+          },
+          gain: {
+            setValueAtTime() {},
+          },
+        };
+      }
+
+      createOscillator() {
+        return {
+          connect() {},
+          disconnect() {
+            oscillatorDisconnects.push(1);
+          },
+          frequency: {
+            setValueAtTime(value: number) {
+              oscillatorFrequencies.push(value);
+            },
+          },
+          start() {
+            oscillatorStarts += 1;
+          },
+          stop(at?: number) {
+            oscillatorStops.push(at ?? 4);
+          },
+          type: 'sine',
+        };
+      }
+
+      resume() {
+        return Promise.resolve();
+      }
+    }
+    vi.stubGlobal('window', {
+      AudioContext: KeepAliveAudioContext,
+      webkitAudioContext: undefined,
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+      speechSynthesis: undefined,
+    });
+    const {
+      primeAudioCues,
+      stopRaceAudioKeepAlive,
+    } = await import('../../src/lib/audioCues');
+
+    await primeAudioCues();
+    await primeAudioCues();
+
+    expect(oscillatorStarts).toBe(3);
+    expect(oscillatorFrequencies).toEqual([40, 18, 40]);
+    expect(oscillatorStops).toEqual([4.03, 4.03]);
+
+    stopRaceAudioKeepAlive();
+
+    expect(oscillatorStops).toEqual([4.03, 4.03, 4]);
+    expect(oscillatorDisconnects).toHaveLength(1);
+    expect(gainDisconnects).toHaveLength(1);
+  });
+
   it('uses the audible media fallback while Web Audio is still suspended', async () => {
     StalledAudio.stallPlayback = false;
     class SuspendedGateAudioContext {
