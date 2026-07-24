@@ -1640,11 +1640,27 @@ test('completed race waits for the authoritative final result before returning t
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/, { timeout: 8_000 });
 
   const finishCountdown = page.locator('.race-finish-countdown');
-  await expect(finishCountdown).toBeVisible({ timeout: 60_000 });
-  await expect(finishCountdown.locator('strong')).toHaveText(/10|[1-9]/);
-  await expect(finishCountdown).toContainText('remaining riders still racing');
+  await expect.poll(async () => (
+    await finishCountdown.isVisible()
+    || await page.evaluate(() => (
+      (window as typeof window & {
+        __tracklabLiveDebug?: { raceState?: string };
+      }).__tracklabLiveDebug?.raceState === 'finished'
+    ))
+  ), { timeout: 60_000 }).toBe(true);
+  if (await finishCountdown.isVisible()) {
+    await expect(finishCountdown.locator('strong')).toHaveText(/10|[1-9]/);
+    await expect(finishCountdown).toContainText('remaining riders still racing');
+  }
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-  await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
+  const raceStillActive = await page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabLiveDebug?: { raceState?: string };
+    }).__tracklabLiveDebug?.raceState === 'racing'
+  ));
+  if (raceStillActive) {
+    await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
+  }
   await page.waitForTimeout(1_000);
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
 

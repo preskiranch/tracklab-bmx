@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "knowledgeVersion": "usabmx-national-2026-07-22-v1",
-  "generatedAt": "2026-07-22",
-  "coverageCutoff": "2026-07-22",
+  "knowledgeVersion": "usabmx-national-2026-07-23-v1",
+  "generatedAt": "2026-07-23",
+  "coverageCutoff": "2026-07-23",
   "source": {
     "organization": "USA BMX",
     "officialChannel": "https://www.youtube.com/@usabmxvideos/streams",
@@ -10,15 +10,16 @@
     "officialSchedule": "https://www.usabmx.com/news-and-media/6/2025-08-26/2026-USA-BMX-National-Schedule?id=2057"
   },
   "method": {
-    "description": "Inventory official 2025 and published-to-date 2026 National-series-related streams, analyze available public English caption tracks, and retain only aggregate terminology, race-pattern counts, and per-video coverage metadata.",
+    "description": "Inventory official National-series-related streams, analyze available public English caption tracks, and retain only aggregate terminology, race-pattern counts, and per-video coverage metadata.",
     "retainsVideo": false,
     "retainsAudio": false,
     "retainsFullTranscripts": false,
     "originalityRule": "Use aggregate BMX vocabulary and race-phase patterns only. Do not quote, imitate, or clone source announcers."
   },
   "summary": {
-    "indexedVideos": 166,
+    "indexedVideos": 285,
     "indexedEventsByYear": {
+      "2024": 50,
       "2025": 29,
       "2026": 20
     },
@@ -26,10 +27,68 @@
     "analyzedCaptionSegments": 101530,
     "analyzedCaptionWords": 642428,
     "analyzedRaceCallSegments": 18208,
-    "pendingCaptionTracks": 150,
+    "pendingCaptionTracks": 269,
     "captionsDisabledBySource": 2
   },
   "byYear": {
+    "2024": {
+      "videos": 119,
+      "captionedVideos": 0,
+      "captionWords": 0,
+      "raceCallSegments": 0,
+      "events": [
+        "Blue Ridge Nationals",
+        "Buckeye Nationals Day One",
+        "Buckeye Nationals Day Three",
+        "Buckeye Nationals Day Two",
+        "Cajun Nationals",
+        "Carolina Nationals",
+        "Citrus Nationals Day One",
+        "Citrus Nationals Day Three",
+        "Citrus Nationals Day Two",
+        "Derby City Nationals",
+        "Dixieland Nationals",
+        "East Coast Nationals Day One",
+        "East Coast Nationals Day Three",
+        "East Coast Nationals Day Two",
+        "Gator Nationals",
+        "Golden State Nationals",
+        "Grands",
+        "Great Northwest Nationals",
+        "Great Salt Lake Nationals Day One",
+        "Great Salt Lake Nationals Day Three",
+        "Great Salt Lake Nationals Day Two",
+        "Land O' Lakes Nationals",
+        "Legacy Nationals",
+        "Lone Star Nationals",
+        "Lumberjack Nationals",
+        "Midwest Nationals",
+        "Mike Redman Nationals Day One",
+        "Mike Redman Nationals Day Three",
+        "Mike Redman Nationals Day Two",
+        "Music City Nationals",
+        "New England Nationals Day One",
+        "New England Nationals Day Three",
+        "New England Nationals Day Two",
+        "Nor-Cal Nationals Day One",
+        "Nor-Cal Nationals Day Three",
+        "Nor-Cal Nationals Day Two",
+        "Pro Championship Finals",
+        "Race of Champions",
+        "Red River Nationals",
+        "Show Me State Nationals",
+        "So-Cal Nationals",
+        "Stars N' Stripes Nationals",
+        "Sunshine State Nationals",
+        "Texas National Day One",
+        "Texas National Day Two",
+        "Texas Nationals Day Three",
+        "Texas Nationals Day Two Amateur",
+        "Winter Nationals Day One",
+        "Winter Nationals Day Three",
+        "Winter Nationals Day Two"
+      ]
+    },
     "2025": {
       "videos": 85,
       "captionedVideos": 0,
@@ -1704,6 +1763,1077 @@
       "event": "Vegas Nationals",
       "kind": "race-broadcast",
       "url": "https://www.youtube.com/watch?v=Z2ZePkCK4hA",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "zqOITxSrBnM",
+      "title": "2024 USA BMX Blue Ridge Nationals Day One",
+      "year": 2024,
+      "event": "Blue Ridge Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=zqOITxSrBnM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "M5oss18X6F0",
+      "title": "2024 USA BMX Blue Ridge Nationals Day Three",
+      "year": 2024,
+      "event": "Blue Ridge Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=M5oss18X6F0",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "W0YFyvAOBI8",
+      "title": "2024 USA BMX Blue Ridge Nationals Day Two",
+      "year": 2024,
+      "event": "Blue Ridge Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=W0YFyvAOBI8",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "pLmUCtv9vhw",
+      "title": "2024 USA BMX Buckeye Nationals Day One",
+      "year": 2024,
+      "event": "Buckeye Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=pLmUCtv9vhw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "E4K6XO7xEXA",
+      "title": "2024 USA BMX Buckeye Nationals Day Three",
+      "year": 2024,
+      "event": "Buckeye Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=E4K6XO7xEXA",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "hv246rItuvQ",
+      "title": "2024 USA BMX Buckeye Nationals Day Three",
+      "year": 2024,
+      "event": "Buckeye Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=hv246rItuvQ",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "bQmWnmTqmZ8",
+      "title": "2024 USA BMX Buckeye Nationals Day Two",
+      "year": 2024,
+      "event": "Buckeye Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=bQmWnmTqmZ8",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "hJMKUkefo1k",
+      "title": "2024 USA BMX Buckeye Nationals Day Two",
+      "year": 2024,
+      "event": "Buckeye Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=hJMKUkefo1k",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "HaQyncg3oOU",
+      "title": "2024 USA BMX Cajun Nationals Day One",
+      "year": 2024,
+      "event": "Cajun Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=HaQyncg3oOU",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "zPJi9NL0dv4",
+      "title": "2024 USA BMX Cajun Nationals Day Three",
+      "year": 2024,
+      "event": "Cajun Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=zPJi9NL0dv4",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "5Cl5JomVXvw",
+      "title": "2024 USA BMX Cajun Nationals Day Two",
+      "year": 2024,
+      "event": "Cajun Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=5Cl5JomVXvw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "R-AYQXXoWgA",
+      "title": "2024 USA BMX Carolina Nationals Day One",
+      "year": 2024,
+      "event": "Carolina Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=R-AYQXXoWgA",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "-36ru7fyqGo",
+      "title": "2024 USA BMX Carolina Nationals Day Three",
+      "year": 2024,
+      "event": "Carolina Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=-36ru7fyqGo",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "btcyl1-m1To",
+      "title": "2024 USA BMX Carolina Nationals Day Two (Day One Semis and Mains)",
+      "year": 2024,
+      "event": "Carolina Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=btcyl1-m1To",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "eC0BTmve8A4",
+      "title": "2024 USA BMX Citrus Nationals Day One",
+      "year": 2024,
+      "event": "Citrus Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=eC0BTmve8A4",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "73Qee5XQmvw",
+      "title": "2024 USA BMX Citrus Nationals Day Three",
+      "year": 2024,
+      "event": "Citrus Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=73Qee5XQmvw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "U-eSB1HeuJo",
+      "title": "2024 USA BMX Citrus Nationals Day Two",
+      "year": 2024,
+      "event": "Citrus Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=U-eSB1HeuJo",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "8eM8FIhgvWE",
+      "title": "2024 USA BMX Derby City Nationals Day One",
+      "year": 2024,
+      "event": "Derby City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=8eM8FIhgvWE",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "BLLovHTld7g",
+      "title": "2024 USA BMX Derby City Nationals Day One Part 2",
+      "year": 2024,
+      "event": "Derby City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=BLLovHTld7g",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "rgAhwEEsABo",
+      "title": "2024 USA BMX Derby City Nationals Day Three",
+      "year": 2024,
+      "event": "Derby City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=rgAhwEEsABo",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "JVWzf08uE_g",
+      "title": "2024 USA BMX Derby City Nationals Day Two",
+      "year": 2024,
+      "event": "Derby City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=JVWzf08uE_g",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "XTM2MMXJPC8",
+      "title": "2024 USA BMX Derby City Nationals Day Two Night Show",
+      "year": 2024,
+      "event": "Derby City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=XTM2MMXJPC8",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "wMiBNZzkZrY",
+      "title": "2024 USA BMX Dixieland Nationals Day One",
+      "year": 2024,
+      "event": "Dixieland Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=wMiBNZzkZrY",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "c6JcZTHy26g",
+      "title": "2024 USA BMX Dixieland Nationals Day Three",
+      "year": 2024,
+      "event": "Dixieland Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=c6JcZTHy26g",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "Nca54rw94j8",
+      "title": "2024 USA BMX Dixieland Nationals Day Two",
+      "year": 2024,
+      "event": "Dixieland Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=Nca54rw94j8",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "1MkH5hV7EDw",
+      "title": "2024 USA BMX East Coast Nationals Day One",
+      "year": 2024,
+      "event": "East Coast Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=1MkH5hV7EDw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "6ACDhP9EbpI",
+      "title": "2024 USA BMX East Coast Nationals Day One",
+      "year": 2024,
+      "event": "East Coast Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=6ACDhP9EbpI",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "r2kwknigaZA",
+      "title": "2024 USA BMX East Coast Nationals Day Three",
+      "year": 2024,
+      "event": "East Coast Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=r2kwknigaZA",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "_DY1JSkWUMw",
+      "title": "2024 USA BMX East Coast Nationals Day Two",
+      "year": 2024,
+      "event": "East Coast Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=_DY1JSkWUMw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "ElVQUbcBjMY",
+      "title": "2024 USA BMX Gator Nationals Day One",
+      "year": 2024,
+      "event": "Gator Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=ElVQUbcBjMY",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "tW_Cm0WFsTM",
+      "title": "2024 USA BMX Gator Nationals Day Three",
+      "year": 2024,
+      "event": "Gator Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=tW_Cm0WFsTM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "woMW0pthgqI",
+      "title": "2024 USA BMX Gator Nationals Day Two",
+      "year": 2024,
+      "event": "Gator Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=woMW0pthgqI",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "_YjRsCvtUds",
+      "title": "2024 USA BMX Golden State Nationals Day One",
+      "year": 2024,
+      "event": "Golden State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=_YjRsCvtUds",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "hPW8UkktXjs",
+      "title": "2024 USA BMX Golden State Nationals Day Three",
+      "year": 2024,
+      "event": "Golden State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=hPW8UkktXjs",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "n6GvjVZUHwc",
+      "title": "2024 USA BMX Golden State Nationals Day Three",
+      "year": 2024,
+      "event": "Golden State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=n6GvjVZUHwc",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "-pFZPTr52Kc",
+      "title": "2024 USA BMX Golden State Nationals Day Two",
+      "year": 2024,
+      "event": "Golden State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=-pFZPTr52Kc",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "XT4ObYVlriU",
+      "title": "2024 USA BMX Grands Amateur Pre Show",
+      "year": 2024,
+      "event": "Grands",
+      "kind": "pre-show",
+      "url": "https://www.youtube.com/watch?v=XT4ObYVlriU",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "lnpq9ohH-3Q",
+      "title": "2024 USA BMX Grands Day 1",
+      "year": 2024,
+      "event": "Grands",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=lnpq9ohH-3Q",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "YwXqkondSIo",
+      "title": "2024 USA BMX Grands Day 2",
+      "year": 2024,
+      "event": "Grands",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=YwXqkondSIo",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "WKNoZA38b0o",
+      "title": "2024 USA BMX Grands Main Events",
+      "year": 2024,
+      "event": "Grands",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=WKNoZA38b0o",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "JFWZbMUtnhk",
+      "title": "2024 USA BMX Grands Pro Pre Show",
+      "year": 2024,
+      "event": "Grands",
+      "kind": "pre-show",
+      "url": "https://www.youtube.com/watch?v=JFWZbMUtnhk",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "9H2DEeZfEpU",
+      "title": "2024 USA BMX Great Northwest Nationals Day One",
+      "year": 2024,
+      "event": "Great Northwest Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=9H2DEeZfEpU",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "no9v8AkEjxE",
+      "title": "2024 USA BMX Great Northwest Nationals Day Three",
+      "year": 2024,
+      "event": "Great Northwest Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=no9v8AkEjxE",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "8jUmJLWkLRQ",
+      "title": "2024 USA BMX Great Northwest Nationals Day Two",
+      "year": 2024,
+      "event": "Great Northwest Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=8jUmJLWkLRQ",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "oP8V5XgS54I",
+      "title": "2024 USA BMX Great Salt Lake Nationals Day One",
+      "year": 2024,
+      "event": "Great Salt Lake Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=oP8V5XgS54I",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "4vnVWV1K_iE",
+      "title": "2024 USA BMX Great Salt Lake Nationals Day Three",
+      "year": 2024,
+      "event": "Great Salt Lake Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=4vnVWV1K_iE",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "SOgP1mHzg9I",
+      "title": "2024 USA BMX Great Salt Lake Nationals Day Two",
+      "year": 2024,
+      "event": "Great Salt Lake Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=SOgP1mHzg9I",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "J8I3e7WP0lM",
+      "title": "2024 USA BMX Land O' Lakes Nationals Day One",
+      "year": 2024,
+      "event": "Land O' Lakes Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=J8I3e7WP0lM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "p50-1vpn2HQ",
+      "title": "2024 USA BMX Land O' Lakes Nationals Day Three",
+      "year": 2024,
+      "event": "Land O' Lakes Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=p50-1vpn2HQ",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "59PRckAB15U",
+      "title": "2024 USA BMX Land O' Lakes Nationals Day Two",
+      "year": 2024,
+      "event": "Land O' Lakes Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=59PRckAB15U",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "WbXD_BcyDak",
+      "title": "2024 USA BMX Legacy Nationals Day One",
+      "year": 2024,
+      "event": "Legacy Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=WbXD_BcyDak",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "etZg_PAMIaE",
+      "title": "2024 USA BMX Legacy Nationals Day One Pro Racing and Inter & Expert Mains",
+      "year": 2024,
+      "event": "Legacy Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=etZg_PAMIaE",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "7FaUvURxoGk",
+      "title": "2024 USA BMX Legacy Nationals Day One Pro Semis & Mains",
+      "year": 2024,
+      "event": "Legacy Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=7FaUvURxoGk",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "ftr7lxeOJlM",
+      "title": "2024 USA BMX Legacy Nationals Day Three",
+      "year": 2024,
+      "event": "Legacy Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=ftr7lxeOJlM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "oRWzN9o_CJU",
+      "title": "2024 USA BMX Legacy Nationals Day Two",
+      "year": 2024,
+      "event": "Legacy Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=oRWzN9o_CJU",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "kSiR2g4oNDo",
+      "title": "2024 USA BMX Legacy Nationals Day Two Pro Racing",
+      "year": 2024,
+      "event": "Legacy Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=kSiR2g4oNDo",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "w_q4ZGZUjzs",
+      "title": "2024 USA BMX Lone Star Nationals Day One",
+      "year": 2024,
+      "event": "Lone Star Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=w_q4ZGZUjzs",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "dO6N90hVKa8",
+      "title": "2024 USA BMX Lone Star Nationals Day Three",
+      "year": 2024,
+      "event": "Lone Star Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=dO6N90hVKa8",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "y7MKRJnph8o",
+      "title": "2024 USA BMX Lone Star Nationals Day Two",
+      "year": 2024,
+      "event": "Lone Star Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=y7MKRJnph8o",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "4kaVjI9KoKU",
+      "title": "2024 USA BMX Lone Star Nationals Day Two",
+      "year": 2024,
+      "event": "Lone Star Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=4kaVjI9KoKU",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "vYqm__PpDUI",
+      "title": "2024 USA BMX Lumberjack Nationals Day One",
+      "year": 2024,
+      "event": "Lumberjack Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=vYqm__PpDUI",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "8hYmze09Sto",
+      "title": "2024 USA BMX Lumberjack Nationals Day One",
+      "year": 2024,
+      "event": "Lumberjack Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=8hYmze09Sto",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "_iPEn3e4-PY",
+      "title": "2024 USA BMX Lumberjack Nationals Day Three",
+      "year": 2024,
+      "event": "Lumberjack Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=_iPEn3e4-PY",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "gHyW4W4Vv3I",
+      "title": "2024 USA BMX Lumberjack Nationals Day Three",
+      "year": 2024,
+      "event": "Lumberjack Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=gHyW4W4Vv3I",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "WdUDLZ29w7k",
+      "title": "2024 USA BMX Lumberjack Nationals Day Two",
+      "year": 2024,
+      "event": "Lumberjack Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=WdUDLZ29w7k",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "NIKGL-d0bTw",
+      "title": "2024 USA BMX Midwest Nationals Day One",
+      "year": 2024,
+      "event": "Midwest Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=NIKGL-d0bTw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "FEz3sMDAfZ0",
+      "title": "2024 USA BMX Midwest Nationals Day Three",
+      "year": 2024,
+      "event": "Midwest Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=FEz3sMDAfZ0",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "h0Ro6-ccHX0",
+      "title": "2024 USA BMX Midwest Nationals Day Two",
+      "year": 2024,
+      "event": "Midwest Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=h0Ro6-ccHX0",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "nzbBQ1ylTgg",
+      "title": "2024 USA BMX Mike Redman Nationals Day One",
+      "year": 2024,
+      "event": "Mike Redman Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=nzbBQ1ylTgg",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "J1JUR5zcaIA",
+      "title": "2024 USA BMX Mike Redman Nationals Day Three",
+      "year": 2024,
+      "event": "Mike Redman Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=J1JUR5zcaIA",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "7lxz_odL9vc",
+      "title": "2024 USA BMX Mike Redman Nationals Day Two",
+      "year": 2024,
+      "event": "Mike Redman Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=7lxz_odL9vc",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "rVjYGLU5tfo",
+      "title": "2024 USA BMX Music City Nationals Day One",
+      "year": 2024,
+      "event": "Music City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=rVjYGLU5tfo",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "VJRSJnkkeNI",
+      "title": "2024 USA BMX Music City Nationals Day One",
+      "year": 2024,
+      "event": "Music City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=VJRSJnkkeNI",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "V9bLLxT6MeU",
+      "title": "2024 USA BMX Music City Nationals Day Three",
+      "year": 2024,
+      "event": "Music City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=V9bLLxT6MeU",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "xSvTMSqthN4",
+      "title": "2024 USA BMX Music City Nationals Day Three",
+      "year": 2024,
+      "event": "Music City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=xSvTMSqthN4",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "v3GyaKyujWw",
+      "title": "2024 USA BMX Music City Nationals Day Two",
+      "year": 2024,
+      "event": "Music City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=v3GyaKyujWw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "YLAlXWjVWjg",
+      "title": "2024 USA BMX Music City Nationals Day Two",
+      "year": 2024,
+      "event": "Music City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=YLAlXWjVWjg",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "xwPNWx4WYuw",
+      "title": "2024 USA BMX Music City Nationals Day Two",
+      "year": 2024,
+      "event": "Music City Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=xwPNWx4WYuw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "fL2DBkF8WxU",
+      "title": "2024 USA BMX New England Nationals Day One",
+      "year": 2024,
+      "event": "New England Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=fL2DBkF8WxU",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "876pMCkTDik",
+      "title": "2024 USA BMX New England Nationals Day Three",
+      "year": 2024,
+      "event": "New England Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=876pMCkTDik",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "INAeTL-uBVM",
+      "title": "2024 USA BMX New England Nationals Day Two",
+      "year": 2024,
+      "event": "New England Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=INAeTL-uBVM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "ru4u9dIGYfQ",
+      "title": "2024 USA BMX New England Nationals Day Two Mains",
+      "year": 2024,
+      "event": "New England Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=ru4u9dIGYfQ",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "6qjKnSG5Vcs",
+      "title": "2024 USA BMX Nor-Cal Nationals Day One",
+      "year": 2024,
+      "event": "Nor-Cal Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=6qjKnSG5Vcs",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "-e0j5XM-2vM",
+      "title": "2024 USA BMX Nor-Cal Nationals Day Three",
+      "year": 2024,
+      "event": "Nor-Cal Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=-e0j5XM-2vM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "7U8H5TMPHz4",
+      "title": "2024 USA BMX Nor-Cal Nationals Day Two",
+      "year": 2024,
+      "event": "Nor-Cal Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=7U8H5TMPHz4",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "C_cFq_IOhLM",
+      "title": "2024 USA BMX Pro Championship Finals",
+      "year": 2024,
+      "event": "Pro Championship Finals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=C_cFq_IOhLM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "HXT9_5mIRoM",
+      "title": "2024 USA BMX Race of Champions Day 1",
+      "year": 2024,
+      "event": "Race of Champions",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=HXT9_5mIRoM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "Frxxm2-LV5I",
+      "title": "2024 USA BMX Race of Champions Day 1",
+      "year": 2024,
+      "event": "Race of Champions",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=Frxxm2-LV5I",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "WL7W-dnmpaE",
+      "title": "2024 USA BMX Race of Champions Day 1",
+      "year": 2024,
+      "event": "Race of Champions",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=WL7W-dnmpaE",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "FOE8wPi18S4",
+      "title": "2024 USA BMX Race of Champions Day 1",
+      "year": 2024,
+      "event": "Race of Champions",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=FOE8wPi18S4",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "xV9JyKrodqE",
+      "title": "2024 USA BMX Race of Champions Day 2",
+      "year": 2024,
+      "event": "Race of Champions",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=xV9JyKrodqE",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "sv1QDk8-ZIc",
+      "title": "2024 USA BMX Red River Nationals Day One",
+      "year": 2024,
+      "event": "Red River Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=sv1QDk8-ZIc",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "TvtakK9tlqk",
+      "title": "2024 USA BMX Red River Nationals Day One",
+      "year": 2024,
+      "event": "Red River Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=TvtakK9tlqk",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "B1k22-kzQFc",
+      "title": "2024 USA BMX Red River Nationals Day Three",
+      "year": 2024,
+      "event": "Red River Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=B1k22-kzQFc",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "yx7TihcoYKY",
+      "title": "2024 USA BMX Red River Nationals Day Three",
+      "year": 2024,
+      "event": "Red River Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=yx7TihcoYKY",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "QnQMdQ5ON7U",
+      "title": "2024 USA BMX Red River Nationals Day Two",
+      "year": 2024,
+      "event": "Red River Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=QnQMdQ5ON7U",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "W92HfO4PHWM",
+      "title": "2024 USA BMX Show Me State Nationals Day One",
+      "year": 2024,
+      "event": "Show Me State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=W92HfO4PHWM",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "lc_-vAsMz20",
+      "title": "2024 USA BMX Show Me State Nationals Day Three",
+      "year": 2024,
+      "event": "Show Me State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=lc_-vAsMz20",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "NRv6neG-4IA",
+      "title": "2024 USA BMX Show Me State Nationals Day Two",
+      "year": 2024,
+      "event": "Show Me State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=NRv6neG-4IA",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "W_UaFxY8nu4",
+      "title": "2024 So Cal Nationals Day One",
+      "year": 2024,
+      "event": "So-Cal Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=W_UaFxY8nu4",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "6knmxdipW1Q",
+      "title": "2024 So Cal Nationals Day Three",
+      "year": 2024,
+      "event": "So-Cal Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=6knmxdipW1Q",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "YHdVG_RbqB4",
+      "title": "2024 So Cal Nationals Day Two",
+      "year": 2024,
+      "event": "So-Cal Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=YHdVG_RbqB4",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "92bp33D1myw",
+      "title": "2024 So Cal Nationals Timing Day One",
+      "year": 2024,
+      "event": "So-Cal Nationals",
+      "kind": "timing-audio",
+      "url": "https://www.youtube.com/watch?v=92bp33D1myw",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "5rwe68GGe1A",
+      "title": "2024 USA BMX Stars & Stripes Nationals Day One",
+      "year": 2024,
+      "event": "Stars N' Stripes Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=5rwe68GGe1A",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "Ar3M1nJccko",
+      "title": "2024 USA BMX Stars & Stripes Nationals Day One",
+      "year": 2024,
+      "event": "Stars N' Stripes Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=Ar3M1nJccko",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "a63Gll6uD7Q",
+      "title": "2024 USA BMX Stars & Stripes Nationals Day Three",
+      "year": 2024,
+      "event": "Stars N' Stripes Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=a63Gll6uD7Q",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "JHK5H-kFQqU",
+      "title": "2024 USA BMX Stars & Stripes Nationals Day Two",
+      "year": 2024,
+      "event": "Stars N' Stripes Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=JHK5H-kFQqU",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "YkkSh92okIQ",
+      "title": "2024 USA BMX Sunshine State Nationals Day One",
+      "year": 2024,
+      "event": "Sunshine State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=YkkSh92okIQ",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "SDmnY7V69q8",
+      "title": "2024 USA BMX Sunshine State Nationals Day Three",
+      "year": 2024,
+      "event": "Sunshine State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=SDmnY7V69q8",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "2ssSNtnqhus",
+      "title": "2024 USA BMX Sunshine State Nationals Day Two",
+      "year": 2024,
+      "event": "Sunshine State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=2ssSNtnqhus",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "kFKAFQM2hbI",
+      "title": "2024 USA BMX Sunshine State Nationals Pros Day Two",
+      "year": 2024,
+      "event": "Sunshine State Nationals",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=kFKAFQM2hbI",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "pcER56Y6u8Y",
+      "title": "2024 Texas National Day One",
+      "year": 2024,
+      "event": "Texas National Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=pcER56Y6u8Y",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "Xc3IDxidaA8",
+      "title": "2024 Texas National Day One",
+      "year": 2024,
+      "event": "Texas National Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=Xc3IDxidaA8",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "sRbCBbGBm9I",
+      "title": "2024 Texas National Day Two",
+      "year": 2024,
+      "event": "Texas National Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=sRbCBbGBm9I",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "cJ_Tj-_tPzE",
+      "title": "2024 USA BMX Texas Nationals Day Three",
+      "year": 2024,
+      "event": "Texas Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=cJ_Tj-_tPzE",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "65XFLaHLfRk",
+      "title": "2024 USA BMX Texas Nationals Day Two Amateur Mains and Pro Racing",
+      "year": 2024,
+      "event": "Texas Nationals Day Two Amateur",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=65XFLaHLfRk",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "d9YBr8HLa6Y",
+      "title": "2024 USA BMX Winter Nationals Day One",
+      "year": 2024,
+      "event": "Winter Nationals Day One",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=d9YBr8HLa6Y",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "IZszpC7PdrY",
+      "title": "2024 USA BMX Winter Nationals Day Three",
+      "year": 2024,
+      "event": "Winter Nationals Day Three",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=IZszpC7PdrY",
+      "captionStatus": "pending-youtube-throttled"
+    },
+    {
+      "id": "q3CLBAJRfEE",
+      "title": "2024 USA BMX Winter Nationals Day Two",
+      "year": 2024,
+      "event": "Winter Nationals Day Two",
+      "kind": "race-broadcast",
+      "url": "https://www.youtube.com/watch?v=q3CLBAJRfEE",
       "captionStatus": "pending-youtube-throttled"
     }
   ]

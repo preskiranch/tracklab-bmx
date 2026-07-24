@@ -189,7 +189,7 @@ describe('race commentary event detection', () => {
     expect(line).toMatch(/Blake/i);
     expect(line).toMatch(/Avery/i);
     expect(line).toMatch(/Casey|Drew/i);
-    expect(line).toMatch(/takes charge|takes command|new leader|out front|seizes the lead|front changes hands|hits the front|finds the front/i);
+    expect(line).toMatch(/takes charge|takes command|new leader|out front|seizes the lead|front changes hands|hits the front|finds the front|comes through for the lead/i);
   });
 
   it('recognizes course action, the winner, and every later finisher once', () => {
@@ -324,7 +324,7 @@ describe('race commentary event detection', () => {
     ]);
     expect(finishEvents.map((event) => event.finishingPlayerId)).toEqual([1, 2, 3, 4]);
     const localLines = finishEvents.map((event) => localCommentaryLine(event));
-    expect(localLines[0]).toMatch(/Avery.*wins|Avery.*takes it|Avery.*gets there|Avery.*first/i);
+    expect(localLines[0]).toMatch(/Avery.*wins|Avery.*takes it|Avery.*gets there|Avery.*first|Avery.*claims the victory/i);
     expect(localLines.at(-1)).toMatch(
       /Avery wins.*Blake takes second.*Casey takes third.*Drew takes fourth/i,
     );
@@ -485,7 +485,7 @@ describe('race commentary event detection', () => {
     expect(line).toMatch(/Avery/);
     expect(line).toMatch(/Casey/);
     expect(line).toMatch(/Drew/);
-    expect(line).toMatch(/wheel-to-wheel|bar-to-bar|side-by-side|fight|pressure/i);
+    expect(line).toMatch(/wheel-to-wheel|bar-to-bar|side-by-side|fight|pressure|locked together/i);
   });
 
   it('uses occasional good-natured wit in local fallback calls', () => {

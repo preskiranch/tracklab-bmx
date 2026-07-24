@@ -13,6 +13,7 @@ import {
   browserSpeechWatchdogMs,
   commentaryLineRequestBudgetMs,
   commentaryNeedsImmediateLine,
+  completeFieldFinishReplacesActiveCall,
   enqueueFinishCommentaryEvents,
   finishCommentaryReleaseTimeoutMs,
   raceStateStopsCommentary,
@@ -843,7 +844,7 @@ export function useRaceCommentary({
     if (!currentPreferences.adaptiveMemory) {
       return;
     }
-    const lines = [...currentPreferences.recentLines.filter((item) => item !== line), line].slice(-96);
+    const lines = [...currentPreferences.recentLines.filter((item) => item !== line), line].slice(-240);
     preferencesRef.current = { ...currentPreferences, recentLines: lines };
     recentLinesChangeRef.current(lines);
   }, []);
@@ -1389,6 +1390,7 @@ export function useRaceCommentary({
     const finishEvents = events.filter((event) => (
       event.kind === 'finish' || event.kind === 'rider-finish'
     ));
+    const completeFieldFinish = finishEvents.find(completeFieldFinishReplacesActiveCall);
     const nextEvent = finishEvents[0] ?? selectLiveRaceCommentaryEvent(events);
     if (!nextEvent) {
       return;
@@ -1408,8 +1410,18 @@ export function useRaceCommentary({
       queueRef.current = [nextEvent];
       prepareRaceSpeech(nextEvent);
     }
+    if (completeFieldFinish) {
+      callSequenceRef.current += 1;
+      activeRequestAbortRef.current?.abort();
+      activeRequestAbortRef.current = null;
+      activePlaybackCancelRef.current?.();
+      activePlaybackCancelRef.current = null;
+      activeAudioRef.current?.pause();
+      activeBufferSourceRef.current = null;
+    }
     if (
-      !activeFinishCallRef.current
+      !completeFieldFinish
+      && !activeFinishCallRef.current
       && shouldInterruptCommentaryForEvent(playbackPhaseRef.current, nextEvent.kind)
     ) {
       callSequenceRef.current += 1;

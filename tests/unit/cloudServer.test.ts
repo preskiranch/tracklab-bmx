@@ -133,10 +133,10 @@ describe('cloud API trust boundaries', () => {
       speechModel: 'gpt-audio-1.5',
       voicePresets: ['american-man'],
       research: {
-        knowledgeVersion: 'usabmx-national-2026-07-23-v5-generative-flow',
-        indexedVideos: 166,
+        knowledgeVersion: 'usabmx-national-2026-07-23-v6-2024-inventory-and-prosody',
+        indexedVideos: 285,
         analyzedRaceCallSegments: 18_208,
-        analyzedRaceAudioSections: 6,
+        analyzedRaceAudioSections: 9,
         minimumGenerativeVocabularyTarget: 10_000,
         vocabularyStrategy: 'open-generative-lexicon',
         retainsFullTranscripts: false,

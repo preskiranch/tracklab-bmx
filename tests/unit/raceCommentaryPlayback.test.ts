@@ -3,6 +3,7 @@ import {
   browserSpeechWatchdogMs,
   commentaryLineRequestBudgetMs,
   commentaryNeedsImmediateLine,
+  completeFieldFinishReplacesActiveCall,
   enqueueFinishCommentaryEvents,
   finishCommentaryReleaseTimeoutMs,
   raceStateStopsCommentary,
@@ -70,11 +71,19 @@ describe('race commentary playback sequencing', () => {
       riders,
     });
     const queued = enqueueFinishCommentaryEvents(
-      [event('1', 'finish', 1), event('2', 'rider-finish', 2)],
+      [
+        {
+          ...event('0', 'finish', 1),
+          kind: 'race-update',
+        },
+        event('1', 'finish', 1),
+        event('2', 'rider-finish', 2),
+      ],
       [event('3', 'rider-finish', 3), event('4', 'rider-finish', 4)],
     );
 
     expect(queued).toHaveLength(1);
     expect(queued[0]).toMatchObject({ id: '4', finishingPlayerId: 4 });
+    expect(completeFieldFinishReplacesActiveCall(queued[0])).toBe(true);
   });
 });

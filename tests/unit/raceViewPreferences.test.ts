@@ -66,7 +66,7 @@ describe('race view preferences', () => {
       voicePreset: 'british-man',
       volume: 4,
       adaptiveMemory: false,
-      recentLines: [...Array.from({ length: 120 }, (_, index) => ` Call ${index} `), 42],
+      recentLines: [...Array.from({ length: 300 }, (_, index) => ` Call ${index} `), 42],
     });
 
     expect(commentary).toMatchObject({
@@ -78,9 +78,9 @@ describe('race view preferences', () => {
       volume: 0.9,
       adaptiveMemory: true,
     });
-    expect(commentary.recentLines).toHaveLength(96);
-    expect(commentary.recentLines[0]).toBe('Call 24');
-    expect(commentary.recentLines.at(-1)).toBe('Call 119');
+    expect(commentary.recentLines).toHaveLength(240);
+    expect(commentary.recentLines[0]).toBe('Call 60');
+    expect(commentary.recentLines.at(-1)).toBe('Call 299');
     expect(commentary).not.toHaveProperty('model');
   });
 

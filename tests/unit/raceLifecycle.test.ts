@@ -33,9 +33,9 @@ function bikeSample(overrides: Partial<BikeSample> = {}): BikeSample {
   };
 }
 
-function rider(finishedAt: number | null): RiderState {
+function rider(finishedAt: number | null, playerId: 1 | 2 = 1): RiderState {
   return {
-    playerId: 1,
+    playerId,
     distance: finishedAt == null ? 20 : 100,
     velocity: 0,
     phase: finishedAt == null ? 'pedaling' : 'finished',
@@ -57,8 +57,25 @@ function rider(finishedAt: number | null): RiderState {
 describe('race lifecycle timing', () => {
   it('starts one ten-second finish window when the first rider finishes', () => {
     expect(nextRaceFinishDeadline(null, [rider(null)], 20_000)).toBeNull();
-    expect(nextRaceFinishDeadline(null, [rider(19_500)], 20_000)).toBe(20_000 + raceFinishCountdownMs);
-    expect(nextRaceFinishDeadline(30_000, [rider(19_500)], 21_000)).toBe(30_000);
+    expect(nextRaceFinishDeadline(
+      null,
+      [rider(19_500), rider(null, 2)],
+      20_000,
+    )).toBe(20_000 + raceFinishCountdownMs);
+    expect(nextRaceFinishDeadline(
+      30_000,
+      [rider(19_500), rider(null, 2)],
+      21_000,
+    )).toBe(30_000);
+  });
+
+  it('ends the grace window immediately once the complete field is home', () => {
+    expect(nextRaceFinishDeadline(
+      30_000,
+      [rider(19_500), rider(20_500, 2)],
+      21_000,
+    )).toBe(21_000);
+    expect(nextRaceFinishDeadline(null, [rider(19_500)], 20_000)).toBe(20_000);
   });
 
   it('reports stable whole-second countdown values', () => {

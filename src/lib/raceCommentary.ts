@@ -344,7 +344,9 @@ export function detectRaceCommentaryEvents(
   }
 
   const leader = ordered[0];
-  if (positionsEstablished && leader) {
+  const fieldComplete = ordered.length > 0
+    && ordered.every((rider) => rider.finishedAt != null);
+  if (positionsEstablished && leader && !fieldComplete) {
     const leaderZone = snapshot.zones.find((zone) => (
       zone.type === 'pedal'
       && leader.distance >= zone.startMeter
@@ -403,7 +405,7 @@ export function detectRaceCommentaryEvents(
     }));
   });
 
-  if (snapshot.raceState === 'racing' && positionsEstablished) {
+  if (snapshot.raceState === 'racing' && positionsEstablished && !fieldComplete) {
     if (events.length > 0) {
       tracker.lastAnnouncerCallAt = now;
     } else if (
@@ -438,8 +440,10 @@ function lineTokens(line: string) {
 }
 
 function tokenSimilarity(leftLine: string, rightLine: string) {
-  const left = new Set(lineTokens(leftLine));
-  const right = new Set(lineTokens(rightLine));
+  const leftTokens = lineTokens(leftLine);
+  const rightTokens = lineTokens(rightLine);
+  const left = new Set(leftTokens);
+  const right = new Set(rightTokens);
   if (left.size === 0 || right.size === 0) {
     return 0;
   }
@@ -450,7 +454,29 @@ function tokenSimilarity(leftLine: string, rightLine: string) {
       shared += 1;
     }
   });
-  return shared / (left.size + right.size - shared);
+  const tokenScore = shared / (left.size + right.size - shared);
+  const bigrams = (tokens: string[]) => (
+    tokens.slice(0, -1).map((token, index) => `${token} ${tokens[index + 1]}`)
+  );
+  const leftBigrams = new Set(bigrams(leftTokens));
+  const rightBigrams = new Set(bigrams(rightTokens));
+  let sharedBigrams = 0;
+  leftBigrams.forEach((bigram) => {
+    if (rightBigrams.has(bigram)) {
+      sharedBigrams += 1;
+    }
+  });
+  const bigramScore = leftBigrams.size > 0 && rightBigrams.size > 0
+    ? sharedBigrams / (leftBigrams.size + rightBigrams.size - sharedBigrams)
+    : 0;
+  const openingScore = leftTokens.slice(0, 3).join(' ') === rightTokens.slice(0, 3).join(' ')
+    ? 0.9
+    : leftTokens.slice(0, 2).join(' ') === rightTokens.slice(0, 2).join(' ')
+      ? 0.72
+      : leftTokens[0] === rightTokens[0]
+        ? 0.42
+        : 0;
+  return Math.max(openingScore, tokenScore * 0.82, bigramScore);
 }
 
 function lineRaceSections(line: string) {
@@ -791,6 +817,11 @@ const startOpeningFragments = [
   'Race on at',
   'Here we go at',
   'The field is away at',
+  'The gate releases them at',
+  'A clean break gets this moving at',
+  'Four riders charge away at',
+  'The track comes alive at',
+  'The opening battle is underway at',
 ] as const;
 
 const startActions = [
@@ -799,6 +830,11 @@ const startActions = [
   'the pack powers into motion',
   'the opening sprint is on',
   'every rider snaps into the race',
+  'the field drives hard off the hill',
+  'every lane comes alive',
+  'the first charge begins',
+  'they break together and the race is alive',
+  'the battle starts immediately',
 ] as const;
 
 export function localRaceStartLine(
@@ -848,6 +884,12 @@ const passActions = [
   'comes through on',
   'gets the move done on',
   'edges ahead of',
+  'sweeps by',
+  'takes the position from',
+  'threads through on',
+  'wins the drag race against',
+  'moves cleanly ahead of',
+  'turns pressure into a pass on',
 ] as const;
 
 const pressureActions = [
@@ -856,6 +898,13 @@ const pressureActions = [
   'runs wheel-to-wheel with',
   'stays right on the wheel of',
   'is locked together with',
+  'refuses to let go of',
+  'shadows every move from',
+  'draws alongside',
+  'keeps the gap pinned to',
+  'stays within striking distance of',
+  'has the line covered against',
+  'keeps asking the question of',
 ] as const;
 
 const controlActions = [
@@ -863,6 +912,12 @@ const controlActions = [
   'controls the front',
   'holds the race together',
   'keeps the line tidy',
+  'protects the lead',
+  'dictates the pace up front',
+  'stays composed in command',
+  'keeps the chase behind',
+  'owns the racing line',
+  'holds firm at the head of the field',
 ] as const;
 
 const winActions = [
@@ -871,6 +926,11 @@ const winActions = [
   'brings it home',
   'claims the victory',
   'wins the run',
+  'seals the result',
+  'owns the stripe',
+  'finishes the job',
+  'holds on for victory',
+  'takes the win at the stripe',
 ] as const;
 
 const wryAsides = [
@@ -886,31 +946,55 @@ const phasePhrases: Record<RaceCommentaryCoursePhase, readonly string[]> = {
     'down the first straight',
     'on the opening straight',
     'through the opening drive',
+    'away from the gate',
+    'in the first charge',
+    'with the opening sprint unfolding',
+    'as the field leaves the hill',
   ],
   'turn-one': [
     'into turn one',
     'around the first turn',
     'through turn one',
+    'at the first corner',
+    'as the first berm tightens',
+    'with the inside line in play',
+    'through the opening bend',
   ],
   'second-straight': [
     'down the second straight',
     'through straight two',
     'on the second straight',
+    'as the race stretches into straight two',
+    'with the chase driving forward',
+    'across the next set of obstacles',
+    'on the run away from turn one',
   ],
   'rhythm-section': [
     'through the rhythm section',
     'across the rhythm',
     'in the rhythm section',
+    'through the rollers',
+    'as the rhythm opens up',
+    'with timing deciding the line',
+    'across the technical middle of the track',
   ],
   'final-turn': [
     'into the final turn',
     'around the last corner',
     'through the final turn',
+    'at the last berm',
+    'with one corner left',
+    'as the field swings for home',
+    'through the closing bend',
   ],
   'last-straight': [
     'down the last straight',
     'on the run to the stripe',
     'through the final straight',
+    'with the finish coming fast',
+    'on the charge for home',
+    'as the stripe fills the view',
+    'in the final drag race',
   ],
 };
 
@@ -1037,7 +1121,7 @@ function localCommentaryCandidates(
     : undefined;
   const phaseOptions = phasePhrases[event.coursePhase];
 
-  return Array.from({ length: 36 }, (_, variant) => {
+  return Array.from({ length: 72 }, (_, variant) => {
     const phase = commentaryChoice(
       phaseOptions,
       event,

@@ -166,9 +166,9 @@ RACE_TERMS = [
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--channel", default=DEFAULT_CHANNEL)
-    parser.add_argument("--years", nargs="+", type=int, default=[2025, 2026])
+    parser.add_argument("--years", nargs="+", type=int, default=[2024, 2025, 2026])
     parser.add_argument("--output", default="data/commentary/usabmx-national-analysis.json")
-    parser.add_argument("--playlist-end", type=int, default=400)
+    parser.add_argument("--playlist-end", type=int, default=900)
     parser.add_argument("--delay-seconds", type=float, default=2.0)
     parser.add_argument("--max-caption-videos", type=int)
     parser.add_argument("--coverage-cutoff", default=datetime.date.today().isoformat())
@@ -199,7 +199,7 @@ def canonical_event(title):
             return event
 
     cleaned = re.sub(
-        r"^20(?:25|26)\s+(?:usa\s+bmx\s+)?", "", title, flags=re.IGNORECASE
+        r"^20\d{2}\s+(?:usa\s+bmx\s+)?", "", title, flags=re.IGNORECASE
     )
     cleaned = re.split(
         r"\s+(?:day\s+\d|timing|audio|pre[- ]?race|pre[- ]?show|replay|mains?)\b",

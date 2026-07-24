@@ -14,6 +14,10 @@ export function finishEventHasCompleteField(event: RaceCommentaryEvent) {
     && event.riders.every((rider) => rider.finished);
 }
 
+export function completeFieldFinishReplacesActiveCall(event: RaceCommentaryEvent) {
+  return finishEventHasCompleteField(event);
+}
+
 export function enqueueFinishCommentaryEvents(
   currentQueue: RaceCommentaryEvent[],
   incomingEvents: RaceCommentaryEvent[],
@@ -22,10 +26,7 @@ export function enqueueFinishCommentaryEvents(
     .reverse()
     .find(finishEventHasCompleteField);
   if (completeFieldEvent) {
-    return [
-      ...currentQueue.filter((event) => !isFinishEvent(event)),
-      completeFieldEvent,
-    ].slice(-4);
+    return [completeFieldEvent];
   }
 
   const incomingIds = new Set(incomingEvents.map((event) => event.id));

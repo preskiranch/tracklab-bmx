@@ -84,6 +84,10 @@ export function nextRaceFinishDeadline(
   riders: RiderState[],
   now = Date.now(),
 ) {
+  if (riders.length > 0 && riders.every((rider) => rider.finishedAt != null)) {
+    return now;
+  }
+
   if (currentDeadline != null) {
     return currentDeadline;
   }

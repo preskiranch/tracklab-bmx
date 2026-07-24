@@ -10,11 +10,11 @@ function commentarySpeechDirection(eventKind, deliveryStyle) {
     ? 'Let the brief dry aside land with a small knowing shift in tone, then return immediately to energetic race calling. Keep it playful, never cruel or cynical.'
     : '';
   const intensityDirection = deliveryStyle === 'surge'
-    ? 'The race order just changed. React with a genuine spontaneous lift in pitch and intensity on the decisive action, then settle just enough to state the new order clearly.'
+    ? 'The race order just changed. React with a genuine spontaneous lift in pitch and intensity on the decisive action, then ease the pace slightly on the new leader or position so the result lands clearly.'
     : deliveryStyle === 'pressure'
-      ? 'Build tension through the battle: begin focused, tighten the rhythm as the riders stay close, and use rising intonation without rushing the words.'
+      ? 'Build tension through the battle in one connected thought: begin focused, gradually lift the pitch and intensity, reduce unnecessary pauses as the pressure rises, then release cleanly without rushing the words.'
       : deliveryStyle === 'sprint'
-        ? 'Use a strong broadcast crescendo with controlled urgency, brighter pitch on the key action, and a clean resolved ending.'
+        ? 'Use a strong broadcast crescendo with controlled urgency and brighter pitch on the key action. At the finish, decelerate slightly and give the decisive rider name or placement a touch more length before a clean resolved ending.'
         : '';
   if (eventKind === 'pre-race') {
     return `Deliver a polished pre-race television desk report with lively anticipation, confident authority, and enough breathing room for every rider name. Build energy toward the final gate-ready phrase without sounding rushed. ${intensityDirection}`;
