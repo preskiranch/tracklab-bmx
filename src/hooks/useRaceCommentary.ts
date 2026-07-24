@@ -433,6 +433,34 @@ async function playAudioBlob(
   onStart: () => void,
   watchdogMs: number,
 ) {
+  // Mobile browsers are most reliable when the user-primed media element gets
+  // the first attempt. Desktop browsers keep the lower-latency Web Audio path.
+  const prefersPrimedMediaPlayback = /Android|iPad|iPhone|iPod|Mobile/i.test(navigator.userAgent);
+  if (!prefersPrimedMediaPlayback) {
+    const webAudioResult = await playAudioBlobWithWebAudio(
+      audioBlob,
+      volume,
+      activeBufferSourceRef,
+      activePlaybackCancelRef,
+      shouldContinue,
+      onStart,
+      watchdogMs,
+    );
+    if (webAudioResult != null) {
+      return webAudioResult;
+    }
+
+    return await playAudioBlobWithMediaElement(
+      audioBlob,
+      volume,
+      activeAudioRef,
+      activePlaybackCancelRef,
+      shouldContinue,
+      onStart,
+      watchdogMs,
+    );
+  }
+
   let mediaPlaybackError: unknown = null;
   try {
     const mediaResult = await playAudioBlobWithMediaElement(
