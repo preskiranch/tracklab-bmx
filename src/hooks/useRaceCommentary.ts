@@ -207,6 +207,9 @@ function commentarySpeechStatusFromError(error: unknown): CommentarySpeechStatus
   if (error instanceof DOMException && error.name === 'AbortError') {
     return null;
   }
+  if ((error as { code?: string } | null)?.code === 'commentary_busy') {
+    return null;
+  }
   return (error as { code?: string } | null)?.code === 'insufficient_quota'
     ? 'quota-exhausted'
     : 'unavailable';

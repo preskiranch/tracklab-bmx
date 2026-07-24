@@ -46,6 +46,7 @@ import {
   commentaryAudioRequest,
   commentarySpeechModel,
 } from './commentaryVoices.mjs';
+import { createCommentaryCapacity } from './commentaryCapacity.mjs';
 import { instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 import {
   createRacerSubscriptionCheckout,
@@ -94,6 +95,7 @@ const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
 const configuredCommentaryEngineModel = String(
   process.env.TRACKLAB_COMMENTARY_MODEL || '',
@@ -427,6 +429,57 @@ function writeJson(response, statusCode, payload, headers = {}) {
     ...headers,
   });
   response.end(JSON.stringify(payload));
+}
+
+function requestAbortSignal(request, response) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const abortIfIncomplete = () => {
+    if (!response.writableEnded) {
+      abort();
+    }
+  };
+  const cleanup = () => {
+    request.removeListener('aborted', abort);
+    response.removeListener('close', abortIfIncomplete);
+    response.removeListener('finish', cleanup);
+  };
+
+  request.once('aborted', abort);
+  response.once('close', abortIfIncomplete);
+  response.once('finish', cleanup);
+  controller.signal.addEventListener('abort', cleanup, { once: true });
+  return controller.signal;
+}
+
+function signalWithTimeout(signal, timeoutMs) {
+  return AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+}
+
+function acquireCommentaryCapacity(response) {
+  const release = commentaryGenerationCapacity.tryAcquire();
+  if (release) {
+    cloudTelemetry.setGauge(
+      'tracklab_commentary_generation_active',
+      commentaryGenerationCapacity.active,
+    );
+    return release;
+  }
+
+  response.setHeader('Retry-After', '1');
+  writeJson(response, 503, {
+    error: 'Natural commentary is busy. The next race call will retry automatically.',
+    code: 'commentary_busy',
+  }, { 'Cache-Control': 'no-store' });
+  return null;
+}
+
+function releaseCommentaryCapacity(release) {
+  release();
+  cloudTelemetry.setGauge(
+    'tracklab_commentary_generation_active',
+    commentaryGenerationCapacity.active,
+  );
 }
 
 function cookieValue(request, name) {
@@ -985,6 +1038,7 @@ async function generateCommentaryLine({
   voicePreset,
   recentLines,
   raceLines,
+  signal,
 }) {
   const key = openAiApiKey();
   if (!key) {
@@ -1077,7 +1131,7 @@ async function generateCommentaryLine({
         },
       },
     }),
-    signal: AbortSignal.timeout(8_000),
+    signal: signalWithTimeout(signal, 8_000),
   });
   if (!response.ok) {
     throw new Error(`OpenAI commentary returned ${response.status}`);
@@ -1108,7 +1162,13 @@ async function generateCommentaryLine({
     );
 }
 
-async function generateCommentarySpeech(line, voicePreset, eventKind, deliveryStyle) {
+async function generateCommentarySpeech(
+  line,
+  voicePreset,
+  eventKind,
+  deliveryStyle,
+  signal,
+) {
   const key = openAiApiKey();
   if (!key) {
     throw new HttpRequestError(503, 'AI speech is not configured on this server.');
@@ -1126,7 +1186,8 @@ async function generateCommentarySpeech(line, voicePreset, eventKind, deliverySt
       eventKind,
       deliveryStyle,
     )),
-    signal: AbortSignal.timeout(
+    signal: signalWithTimeout(
+      signal,
       eventKind === 'preview' ? 30_000 : eventKind === 'pre-race' ? 20_000 : 12_000,
     ),
   });
@@ -3398,13 +3459,23 @@ async function serveStatic(request, response) {
         .map((line) => sanitizeText(line, '', 220))
         .filter(Boolean)
       : [];
-    const line = await generateCommentaryLine({
-      event,
-      model,
-      voicePreset,
-      recentLines,
-      raceLines,
-    });
+    const releaseCapacity = acquireCommentaryCapacity(response);
+    if (!releaseCapacity) {
+      return;
+    }
+    let line;
+    try {
+      line = await generateCommentaryLine({
+        event,
+        model,
+        voicePreset,
+        recentLines,
+        raceLines,
+        signal: requestAbortSignal(request, response),
+      });
+    } finally {
+      releaseCommentaryCapacity(releaseCapacity);
+    }
     const deliveryStyle = commentaryDeliveryStyleForEvent(event);
     cloudTelemetry.increment('tracklab_commentary_lines_total', { model, voicePreset });
     writeJson(
@@ -3459,12 +3530,22 @@ async function serveStatic(request, response) {
     }
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
     const deliveryStyle = sanitizeCommentaryDeliveryStyle(payload?.deliveryStyle);
-    const audio = await generateCommentarySpeech(
-      line,
-      voicePreset,
-      eventKind,
-      deliveryStyle,
-    );
+    const releaseCapacity = acquireCommentaryCapacity(response);
+    if (!releaseCapacity) {
+      return;
+    }
+    let audio;
+    try {
+      audio = await generateCommentarySpeech(
+        line,
+        voicePreset,
+        eventKind,
+        deliveryStyle,
+        requestAbortSignal(request, response),
+      );
+    } finally {
+      releaseCommentaryCapacity(releaseCapacity);
+    }
     cloudTelemetry.increment('tracklab_commentary_speech_total', { voicePreset, eventKind });
     response.writeHead(200, {
       'Content-Type': 'audio/wav',
@@ -4115,6 +4196,9 @@ const server = createServer((request, response) => {
   }
 
   void serveStatic(request, response).catch((error) => {
+    if (request.aborted || response.destroyed) {
+      return;
+    }
     const statusCode = Number(error?.statusCode);
     if (
       error instanceof HttpRequestError
