@@ -331,6 +331,58 @@ describe('race commentary event detection', () => {
     expect(localLines.join(' ')).not.toMatch(/still racing|race continues/i);
   });
 
+  it('creates one final placement summary when the finish window ends', () => {
+    const tracker = createRaceCommentaryTracker();
+    detectRaceCommentaryEvents(
+      tracker,
+      snapshot(players.map((player) => rider(player.id))),
+      1_000,
+    );
+    detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200, rank: 1 }),
+        rider(2, 287, { rank: 2 }),
+        rider(3, 279, { rank: 3 }),
+        rider(4, 268, { rank: 4 }),
+      ]),
+      2_000,
+    );
+
+    const finalEvents = detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200, rank: 1 }),
+        rider(2, 296, { rank: 2 }),
+        rider(3, 291, { rank: 3 }),
+        rider(4, 281, { rank: 4 }),
+      ], 'finished'),
+      12_000,
+    );
+    const finalResult = finalEvents.find((event) => event.resultsFinal);
+
+    expect(finalResult).toMatchObject({
+      kind: 'rider-finish',
+      resultsFinal: true,
+    });
+    expect(localCommentaryLine(finalResult!)).toMatch(
+      /Avery wins.*Blake takes second.*Casey takes third.*Drew takes fourth/i,
+    );
+    expect(localCommentaryLine(finalResult!)).not.toMatch(
+      /still racing|race continues|keeps charging/i,
+    );
+    expect(detectRaceCommentaryEvents(
+      tracker,
+      snapshot([
+        rider(1, 300, { finishedAt: 31_200, rank: 1 }),
+        rider(2, 296, { rank: 2 }),
+        rider(3, 291, { rank: 3 }),
+        rider(4, 281, { rank: 4 }),
+      ], 'finished'),
+      12_100,
+    )).toEqual([]);
+  });
+
   it('provides varied local lines when the AI service is unavailable', () => {
     const tracker = createRaceCommentaryTracker();
     const [event] = detectRaceCommentaryEvents(

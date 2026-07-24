@@ -58,6 +58,7 @@ export type RaceCommentaryEvent = {
   id: string;
   sequence: number;
   kind: RaceCommentaryEventKind;
+  resultsFinal?: boolean;
   occurredAt: number;
   trackName: string;
   raceLengthMeters: number;
@@ -273,6 +274,10 @@ export function detectRaceCommentaryEvents(
   now = Date.now(),
 ) {
   const events: RaceCommentaryEvent[] = [];
+  const raceJustFinished = (
+    snapshot.raceState === 'finished'
+    && tracker.raceState !== 'finished'
+  );
 
   if (snapshot.raceState === 'ready') {
     resetTrackerForReady(tracker);
@@ -400,13 +405,23 @@ export function detectRaceCommentaryEvents(
   const newlyFinishedRiders = ordered.filter((rider) => (
     rider.finishedAt != null && !tracker.finishedPlayerIds.has(rider.playerId)
   ));
-  newlyFinishedRiders.forEach((newlyFinishedRider) => {
-    const kind = tracker.finishedPlayerIds.size === 0 ? 'finish' : 'rider-finish';
-    tracker.finishedPlayerIds.add(newlyFinishedRider.playerId);
-    events.push(eventFor(tracker, snapshot, kind, now, {
-      finishingPlayerId: newlyFinishedRider.playerId,
+  if (raceJustFinished && ordered.length > 0) {
+    newlyFinishedRiders.forEach((rider) => {
+      tracker.finishedPlayerIds.add(rider.playerId);
+    });
+    events.push(eventFor(tracker, snapshot, 'rider-finish', now, {
+      finishingPlayerId: ordered.at(-1)?.playerId,
+      resultsFinal: true,
     }));
-  });
+  } else {
+    newlyFinishedRiders.forEach((newlyFinishedRider) => {
+      const kind = tracker.finishedPlayerIds.size === 0 ? 'finish' : 'rider-finish';
+      tracker.finishedPlayerIds.add(newlyFinishedRider.playerId);
+      events.push(eventFor(tracker, snapshot, kind, now, {
+        finishingPlayerId: newlyFinishedRider.playerId,
+      }));
+    });
+  }
 
   if (snapshot.raceState === 'racing' && positionsEstablished && !fieldComplete) {
     if (events.length > 0) {
@@ -1222,7 +1237,10 @@ function localCommentaryCandidates(
           : '';
       line = `${hook} ${phase}—${passing.name} ${action} ${passed.name} for ${localOrdinal(passing.rank)}${extra}!`;
     } else if (event.kind === 'rider-finish' && finisher) {
-      if (event.riders.length > 0 && event.riders.every((rider) => rider.finished)) {
+      if (
+        event.resultsFinal
+        || (event.riders.length > 0 && event.riders.every((rider) => rider.finished))
+      ) {
         line = localFieldResultLine(event.riders);
       } else {
         const placement = localOrdinal(finisher.rank);

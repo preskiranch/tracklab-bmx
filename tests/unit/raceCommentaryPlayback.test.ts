@@ -7,6 +7,7 @@ import {
   enqueueFinishCommentaryEvents,
   finishCommentaryReleaseTimeoutMs,
   raceStateStopsCommentary,
+  shouldReplacePendingCallForFinish,
   shouldInterruptCommentaryForEvent,
 } from '../../src/lib/raceCommentaryPlayback';
 
@@ -85,5 +86,67 @@ describe('race commentary playback sequencing', () => {
     expect(queued).toHaveLength(1);
     expect(queued[0]).toMatchObject({ id: '4', finishingPlayerId: 4 });
     expect(completeFieldFinishReplacesActiveCall(queued[0])).toBe(true);
+  });
+
+  it('drops stale race action when a rider reaches the finish', () => {
+    const riders = [
+      { playerId: 1, name: 'Avery', rank: 1, distanceMeters: 300, driveAllowed: false, finished: true },
+      { playerId: 2, name: 'Blake', rank: 2, distanceMeters: 285, driveAllowed: false, finished: false },
+    ];
+    const finishEvent = {
+      id: 'finish-1',
+      kind: 'finish' as const,
+      sequence: 2,
+      occurredAt: Date.now(),
+      trackName: 'Test Track',
+      raceLengthMeters: 300,
+      progress: 1,
+      coursePhase: 'last-straight' as const,
+      battleState: 'clear-lead' as const,
+      leaderPlayerId: 1,
+      finishingPlayerId: 1,
+      pedalReferenceAllowed: false,
+      closeBattles: [],
+      riders,
+    };
+    const queued = enqueueFinishCommentaryEvents(
+      [{ ...finishEvent, id: 'live-1', kind: 'race-update' }],
+      [finishEvent],
+    );
+
+    expect(queued).toEqual([finishEvent]);
+    expect(shouldReplacePendingCallForFinish('preparing', finishEvent, 'race-update')).toBe(true);
+    expect(shouldReplacePendingCallForFinish('speaking', finishEvent, 'race-update')).toBe(false);
+    expect(shouldReplacePendingCallForFinish('preparing', finishEvent, 'finish')).toBe(false);
+  });
+
+  it('replaces any silent pending call with the final results summary', () => {
+    const finalResult = {
+      id: 'final-results',
+      kind: 'rider-finish' as const,
+      resultsFinal: true,
+      sequence: 5,
+      occurredAt: Date.now(),
+      trackName: 'Test Track',
+      raceLengthMeters: 300,
+      progress: 1,
+      coursePhase: 'last-straight' as const,
+      battleState: 'clear-lead' as const,
+      leaderPlayerId: 1,
+      finishingPlayerId: 4,
+      pedalReferenceAllowed: false,
+      closeBattles: [],
+      riders: [
+        { playerId: 1, name: 'Avery', rank: 1, distanceMeters: 300, driveAllowed: false, finished: true },
+        { playerId: 2, name: 'Blake', rank: 2, distanceMeters: 296, driveAllowed: false, finished: false },
+        { playerId: 3, name: 'Casey', rank: 3, distanceMeters: 291, driveAllowed: false, finished: false },
+        { playerId: 4, name: 'Drew', rank: 4, distanceMeters: 281, driveAllowed: false, finished: false },
+      ],
+    };
+
+    expect(completeFieldFinishReplacesActiveCall(finalResult)).toBe(true);
+    expect(shouldReplacePendingCallForFinish('thinking', finalResult, 'finish')).toBe(true);
+    expect(shouldReplacePendingCallForFinish('preparing', finalResult, 'finish')).toBe(true);
+    expect(shouldReplacePendingCallForFinish('speaking', finalResult, 'race-update')).toBe(false);
   });
 });

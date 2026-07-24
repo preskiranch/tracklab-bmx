@@ -11,10 +11,10 @@ import {
 } from '../lib/raceCommentary';
 import {
   browserSpeechWatchdogMs,
-  completeFieldFinishReplacesActiveCall,
   enqueueFinishCommentaryEvents,
   finishCommentaryReleaseTimeoutMs,
   raceStateStopsCommentary,
+  shouldReplacePendingCallForFinish,
   shouldInterruptCommentaryForEvent,
   type RaceCommentaryPlaybackPhase,
 } from '../lib/raceCommentaryPlayback';
@@ -668,6 +668,7 @@ export function useRaceCommentary({
   const queueRef = useRef<RaceCommentaryEvent[]>([]);
   const drainingRef = useRef(false);
   const activeFinishCallRef = useRef(false);
+  const activeEventKindRef = useRef<RaceCommentaryEvent['kind'] | null>(null);
   const lifecycleGenerationRef = useRef(0);
   const callSequenceRef = useRef(0);
   const playbackPhaseRef = useRef<CommentaryPlaybackPhase>('idle');
@@ -837,6 +838,7 @@ export function useRaceCommentary({
     activePlaybackCancelRef.current = null;
     activeRequestAbortRef.current?.abort();
     activeRequestAbortRef.current = null;
+    activeEventKindRef.current = null;
     preRacePlaybackAbortRef.current?.abort();
     preRacePlaybackAbortRef.current = null;
     preparedRaceSpeechRef.current?.controller.abort();
@@ -1375,6 +1377,7 @@ export function useRaceCommentary({
         if (!event || !preferencesRef.current.enabled || !raceCommentaryEventIsFresh(event)) {
           continue;
         }
+        activeEventKindRef.current = event.kind;
 
         callSequenceRef.current += 1;
         const callSequence = callSequenceRef.current;
@@ -1573,6 +1576,7 @@ export function useRaceCommentary({
       }
     } finally {
       drainingRef.current = false;
+      activeEventKindRef.current = null;
       if (lifecycleGeneration === lifecycleGenerationRef.current) {
         setPlaybackPhase('idle');
         const hasQueuedFinishCall = queueRef.current.some((event) => (
@@ -1647,7 +1651,6 @@ export function useRaceCommentary({
     const finishEvents = events.filter((event) => (
       event.kind === 'finish' || event.kind === 'rider-finish'
     ));
-    const completeFieldFinish = finishEvents.find(completeFieldFinishReplacesActiveCall);
     const nextEvent = finishEvents[0] ?? selectLiveRaceCommentaryEvent(events);
     if (!nextEvent) {
       return;
@@ -1669,14 +1672,14 @@ export function useRaceCommentary({
       // requests that are immediately cancelled before playback.
       queueRef.current = [nextEvent];
     }
-    if (
-      completeFieldFinish
-      && shouldInterruptCommentaryForEvent(playbackPhaseRef.current, nextEvent.kind)
-    ) {
-      // The authoritative full-field result can replace a call that has not
-      // started yet, but it must never cut off a sentence riders can already
-      // hear. Once spoken audio ends, drainQueue continues with the queued
-      // placement call before releasing the race view.
+    if (shouldReplacePendingCallForFinish(
+      playbackPhaseRef.current,
+      nextEvent,
+      activeEventKindRef.current,
+    )) {
+      // A finish result replaces race action that has not become audible yet.
+      // Spoken sentences are never interrupted; the queued placement call
+      // begins as soon as the audible sentence resolves.
       callSequenceRef.current += 1;
       activeRequestAbortRef.current?.abort();
       activeRequestAbortRef.current = null;
@@ -1686,7 +1689,7 @@ export function useRaceCommentary({
       activeBufferSourceRef.current = null;
     }
     if (
-      !completeFieldFinish
+      finishEvents.length === 0
       && !activeFinishCallRef.current
       && shouldInterruptCommentaryForEvent(playbackPhaseRef.current, nextEvent.kind)
     ) {

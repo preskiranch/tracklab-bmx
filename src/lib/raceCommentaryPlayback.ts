@@ -10,8 +10,13 @@ function isFinishEvent(event: RaceCommentaryEvent) {
 
 export function finishEventHasCompleteField(event: RaceCommentaryEvent) {
   return isFinishEvent(event)
-    && event.riders.length > 0
-    && event.riders.every((rider) => rider.finished);
+    && (
+      event.resultsFinal === true
+      || (
+        event.riders.length > 0
+        && event.riders.every((rider) => rider.finished)
+      )
+    );
 }
 
 export function completeFieldFinishReplacesActiveCall(event: RaceCommentaryEvent) {
@@ -31,9 +36,27 @@ export function enqueueFinishCommentaryEvents(
 
   const incomingIds = new Set(incomingEvents.map((event) => event.id));
   return [
-    ...currentQueue.filter((event) => !incomingIds.has(event.id)),
+    ...currentQueue.filter((event) => (
+      isFinishEvent(event)
+      && !incomingIds.has(event.id)
+    )),
     ...incomingEvents,
   ].slice(-4);
+}
+
+export function shouldReplacePendingCallForFinish(
+  phase: RaceCommentaryPlaybackPhase,
+  incomingEvent: RaceCommentaryEvent,
+  activeEventKind: RaceCommentaryEventKind | null,
+) {
+  if (!isFinishEvent(incomingEvent) || phase === 'speaking' || phase === 'idle') {
+    return false;
+  }
+  if (phase === 'thinking') {
+    return true;
+  }
+  return finishEventHasCompleteField(incomingEvent)
+    || (activeEventKind !== 'finish' && activeEventKind !== 'rider-finish');
 }
 
 export function browserSpeechWatchdogMs(line: string) {
