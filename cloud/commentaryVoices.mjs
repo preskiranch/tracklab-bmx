@@ -25,6 +25,9 @@ function commentarySpeechDirection(eventKind, deliveryStyle) {
   if (eventKind === 'positions-established') {
     return `Sound alert and invested as the early battle takes shape. Give the full running order clearly with lively forward motion. ${intensityDirection} ${wryDirection}`;
   }
+  if (eventKind === 'race-update') {
+    return `Flow naturally from the previous call as continuous live play-by-play. Stay energized, center the strongest current battle, and vary the rhythm so this sounds like one unfolding race rather than a series of resets. ${intensityDirection} ${wryDirection}`;
+  }
   if (eventKind === 'lead-change') {
     return `React to the pass like a genuine live surprise: a quick lift, a sharp surge of excitement, and strong emphasis on the new leader’s name. Make “takes the lead” feel decisive, then stay urgently connected to the displaced leader and nearest front-pack chase. ${intensityDirection} ${wryDirection}`;
   }

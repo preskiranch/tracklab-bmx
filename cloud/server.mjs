@@ -106,6 +106,7 @@ const commentaryEventKinds = new Set([
   'pre-race',
   'race-start',
   'positions-established',
+  'race-update',
   'lead-change',
   'position-change',
   'pedal-zone',
@@ -847,6 +848,18 @@ function commentaryFallbackLine(
       `${leader} leads the charge${second ? ` while ${second} gives chase.` : '.'}`,
       `Out front early, it's ${leader}${second ? ` under pressure from ${second}.` : '.'}`,
     ];
+  } else if (event.kind === 'race-update') {
+    candidates = second && event.battleState !== 'clear-lead'
+      ? [
+        `${leader} holds the advantage through the ${phase}, but ${second} stays right on the hunt.`,
+        `${second} keeps ${leader} honest through the ${phase} as the field charges on.`,
+        `${leader} remains out front, with ${second} applying pressure in the ${phase}.`,
+      ]
+      : [
+        `${leader} controls the race through the ${phase} as the chase continues behind.`,
+        `${leader} carries the advantage into the ${phase}, and the field keeps pushing.`,
+        `Still ${leader} out front through the ${phase}, with the order taking shape behind.`,
+      ];
   } else if (event.kind === 'lead-change') {
     candidates = [
       `${leader} makes the move and takes over!`,

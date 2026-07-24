@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  continuousRaceCommentaryIntervalMs,
   createRaceCommentaryTracker,
   detectRaceCommentaryEvents,
   localCommentaryCombinationCount,
@@ -524,6 +525,54 @@ describe('race commentary event detection', () => {
     });
   });
 
+  it('fills quiet stretches with current live race updates and resets after real action', () => {
+    const tracker = createRaceCommentaryTracker();
+    const noZones = (distances: [number, number, number, number]): RaceCommentarySnapshot => ({
+      ...snapshot(distances.map((distance, index) => rider((index + 1) as 1 | 2 | 3 | 4, distance))),
+      zones: [],
+    });
+
+    detectRaceCommentaryEvents(tracker, noZones([0, 0, 0, 0]), 1_000);
+    detectRaceCommentaryEvents(tracker, noZones([1, 0.8, 0.6, 0.4]), 1_100);
+
+    expect(detectRaceCommentaryEvents(
+      tracker,
+      noZones([10, 9.8, 9.6, 9.4]),
+      1_100 + continuousRaceCommentaryIntervalMs - 1,
+    )).toEqual([]);
+
+    const quietUpdate = detectRaceCommentaryEvents(
+      tracker,
+      noZones([11, 10.8, 10.6, 10.4]),
+      1_100 + continuousRaceCommentaryIntervalMs,
+    );
+    expect(quietUpdate).toHaveLength(1);
+    expect(quietUpdate[0]).toMatchObject({
+      kind: 'race-update',
+      leaderPlayerId: 1,
+      battleState: 'side-by-side',
+    });
+    expect(localCommentaryLine(quietUpdate[0])).toMatch(/Avery/i);
+
+    const passAt = 1_100 + continuousRaceCommentaryIntervalMs + 100;
+    expect(detectRaceCommentaryEvents(
+      tracker,
+      noZones([12, 13, 11, 10]),
+      passAt,
+    ).map((event) => event.kind)).toContain('lead-change');
+
+    expect(detectRaceCommentaryEvents(
+      tracker,
+      noZones([20, 21, 18, 17]),
+      passAt + continuousRaceCommentaryIntervalMs - 1,
+    )).toEqual([]);
+    expect(detectRaceCommentaryEvents(
+      tracker,
+      noZones([21, 22, 19, 18]),
+      passAt + continuousRaceCommentaryIntervalMs,
+    ).map((event) => event.kind)).toEqual(['race-update']);
+  });
+
   it('keeps private bike telemetry out of announcer fact packs and local calls', () => {
     const tracker = createRaceCommentaryTracker();
     const [event] = detectRaceCommentaryEvents(
@@ -600,6 +649,39 @@ describe('race commentary event detection', () => {
 
     expect(raceCommentaryEventIsFresh(startEvent, 3_500)).toBe(true);
     expect(raceCommentaryEventIsFresh(startEvent, 3_501)).toBe(false);
+  });
+
+  it('keeps a buffered race update live long enough to bridge consecutive calls', () => {
+    expect(raceCommentaryEventIsFresh({
+      id: 'update-1',
+      sequence: 4,
+      kind: 'race-update',
+      occurredAt: 1_000,
+      trackName: 'North Bay BMX',
+      raceLengthMeters: 300,
+      progress: 0.4,
+      leaderPlayerId: 1,
+      coursePhase: 'second-straight',
+      battleState: 'under-pressure',
+      closeBattles: [],
+      pedalReferenceAllowed: false,
+      riders: [],
+    }, 7_500)).toBe(true);
+    expect(raceCommentaryEventIsFresh({
+      id: 'update-1',
+      sequence: 4,
+      kind: 'race-update',
+      occurredAt: 1_000,
+      trackName: 'North Bay BMX',
+      raceLengthMeters: 300,
+      progress: 0.4,
+      leaderPlayerId: 1,
+      coursePhase: 'second-straight',
+      battleState: 'under-pressure',
+      closeBattles: [],
+      pedalReferenceAllowed: false,
+      riders: [],
+    }, 7_501)).toBe(false);
   });
 
   it('expires pass calls quickly enough to avoid announcing an old order', () => {

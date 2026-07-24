@@ -15,6 +15,7 @@ import type {
 export type RaceCommentaryEventKind =
   | 'race-start'
   | 'positions-established'
+  | 'race-update'
   | 'lead-change'
   | 'position-change'
   | 'pedal-zone'
@@ -85,6 +86,9 @@ export function maximumRaceCommentaryEventAgeMs(kind: RaceCommentaryEventKind) {
   if (kind === 'finish' || kind === 'rider-finish') {
     return 60_000;
   }
+  if (kind === 'race-update') {
+    return 6_500;
+  }
   if (kind === 'final-push') {
     return 3_500;
   }
@@ -131,7 +135,10 @@ export type RaceCommentaryTracker = {
   finalPushCalled: boolean;
   calledProBranches: Set<string>;
   finishedPlayerIds: Set<PlayerSlot['id']>;
+  lastAnnouncerCallAt: number;
 };
+
+export const continuousRaceCommentaryIntervalMs = 2_500;
 
 export function createRaceCommentaryTracker(): RaceCommentaryTracker {
   return {
@@ -147,6 +154,7 @@ export function createRaceCommentaryTracker(): RaceCommentaryTracker {
     finalPushCalled: false,
     calledProBranches: new Set(),
     finishedPlayerIds: new Set(),
+    lastAnnouncerCallAt: 0,
   };
 }
 
@@ -253,6 +261,7 @@ function resetTrackerForReady(tracker: RaceCommentaryTracker) {
   tracker.finalPushCalled = false;
   tracker.calledProBranches.clear();
   tracker.finishedPlayerIds.clear();
+  tracker.lastAnnouncerCallAt = 0;
 }
 
 export function detectRaceCommentaryEvents(
@@ -393,6 +402,18 @@ export function detectRaceCommentaryEvents(
       finishingPlayerId: newlyFinishedRider.playerId,
     }));
   });
+
+  if (snapshot.raceState === 'racing' && positionsEstablished) {
+    if (events.length > 0) {
+      tracker.lastAnnouncerCallAt = now;
+    } else if (
+      tracker.lastAnnouncerCallAt > 0
+      && now - tracker.lastAnnouncerCallAt >= continuousRaceCommentaryIntervalMs
+    ) {
+      events.push(eventFor(tracker, snapshot, 'race-update', now));
+      tracker.lastAnnouncerCallAt = now;
+    }
+  }
 
   tracker.raceState = snapshot.raceState;
   const finishEvents = events.filter((event) => (

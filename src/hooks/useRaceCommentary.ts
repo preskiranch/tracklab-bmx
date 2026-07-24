@@ -67,6 +67,16 @@ type PreparedPreRaceSpeech = {
   audioPromise?: Promise<Blob | null>;
 };
 
+type PreparedRaceSpeech = {
+  eventId: string;
+  controller: AbortController;
+  promise: Promise<{
+    line: string;
+    deliveryStyle: CommentaryDeliveryStyle;
+    audioBlob: Blob;
+  } | null>;
+};
+
 type UseRaceCommentaryOptions = {
   preferences: RaceCommentaryPreferences;
   raceState: RaceState;
@@ -509,6 +519,7 @@ export function useRaceCommentary({
   const preRacePlaybackAbortRef = useRef<AbortController | null>(null);
   const preparedStartSpeechRef = useRef<PreparedStartSpeech | null>(null);
   const preparedPreRaceSpeechRef = useRef<PreparedPreRaceSpeech | null>(null);
+  const preparedRaceSpeechRef = useRef<PreparedRaceSpeech | null>(null);
   const playedPreRaceKeyRef = useRef('');
   const startPrefetchRequestRef = useRef(0);
   const startPrefetchAttemptRef = useRef<StartSpeechPrefetchAttempt>({
@@ -579,6 +590,8 @@ export function useRaceCommentary({
     activeRequestAbortRef.current = null;
     preRacePlaybackAbortRef.current?.abort();
     preRacePlaybackAbortRef.current = null;
+    preparedRaceSpeechRef.current?.controller.abort();
+    preparedRaceSpeechRef.current = null;
     activeAudioRef.current?.pause();
     activeBufferSourceRef.current = null;
     setPlaybackPhase('idle');
@@ -834,6 +847,90 @@ export function useRaceCommentary({
     preferencesRef.current = { ...currentPreferences, recentLines: lines };
     recentLinesChangeRef.current(lines);
   }, []);
+
+  const prepareRaceSpeech = useCallback((event: RaceCommentaryEvent) => {
+    if (
+      serviceMode !== 'ai'
+      || event.kind === 'race-start'
+      || event.kind === 'finish'
+      || event.kind === 'rider-finish'
+    ) {
+      return null;
+    }
+    const existing = preparedRaceSpeechRef.current;
+    if (existing?.eventId === event.id) {
+      return existing;
+    }
+    existing?.controller.abort();
+
+    const controller = new AbortController();
+    const activePreferences = preferencesRef.current;
+    const recentLines = activePreferences.adaptiveMemory
+      ? activePreferences.recentLines
+      : [];
+    const raceLines = [...raceLinesRef.current];
+    const initialDeliveryStyle = deliveryStyleForEvent(event);
+    const promise = (async () => {
+      let line = '';
+      let deliveryStyle = initialDeliveryStyle;
+      const lineRequestBudgetMs = commentaryLineRequestBudgetMs(event.kind);
+      if (!commentaryNeedsImmediateLine(event.kind) && lineRequestBudgetMs > 0) {
+        try {
+          const response = await fetchWithTimeout('/api/commentary/line', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              event,
+              voicePreset: activePreferences.voicePreset,
+              recentLines,
+              raceLines,
+            }),
+          }, lineRequestBudgetMs);
+          if (!response.ok) {
+            throw new Error(`Commentary service returned ${response.status}`);
+          }
+          const payload = await response.json() as {
+            line?: string;
+            deliveryStyle?: CommentaryDeliveryStyle;
+          };
+          line = typeof payload.line === 'string' ? payload.line.trim() : '';
+          deliveryStyle = ['straight', 'wry', 'pressure', 'surge', 'sprint']
+            .includes(payload.deliveryStyle ?? '')
+            ? payload.deliveryStyle as CommentaryDeliveryStyle
+            : initialDeliveryStyle;
+        } catch (error) {
+          if (controller.signal.aborted) {
+            throw error;
+          }
+        }
+      }
+      if (!line) {
+        line = localCommentaryLine(event, recentLines, raceLines);
+      }
+      const audioBlob = await requestAiSpeechBlob(
+        line,
+        activePreferences,
+        event.kind,
+        event.riders.map((rider) => rider.name),
+        deliveryStyle,
+        commentarySpeechTimeoutMs(event.kind),
+        controller.signal,
+      );
+      setSpeechStatus('ready');
+      return { line, deliveryStyle, audioBlob };
+    })()
+      .catch((error) => {
+        recordSpeechFailure(error);
+        return null;
+      });
+    const prepared = { eventId: event.id, controller, promise };
+    preparedRaceSpeechRef.current = prepared;
+    return prepared;
+  }, [recordSpeechFailure, serviceMode]);
 
   useEffect(() => {
     if (
@@ -1091,6 +1188,47 @@ export function useRaceCommentary({
           continue;
         }
 
+        const preparedRaceSpeech = preparedRaceSpeechRef.current?.eventId === event.id
+          ? preparedRaceSpeechRef.current
+          : prepareRaceSpeech(event);
+        if (preparedRaceSpeechRef.current?.eventId === event.id) {
+          preparedRaceSpeechRef.current = null;
+        }
+        if (preparedRaceSpeech && useAiSpeech) {
+          activeRequestAbortRef.current = preparedRaceSpeech.controller;
+          setPlaybackPhase('preparing');
+          try {
+            const prepared = await preparedRaceSpeech.promise;
+            if (prepared && shouldContinue()) {
+              line = prepared.line;
+              deliveryStyle = prepared.deliveryStyle;
+              const played = await playAudioBlob(
+                prepared.audioBlob,
+                activePreferences.volume,
+                activeAudioRef,
+                activeBufferSourceRef,
+                activePlaybackCancelRef,
+                shouldContinue,
+                beginSpeaking,
+                browserSpeechWatchdogMs(line),
+              );
+              if (!played && shouldContinue()) {
+                throw new Error('Buffered race commentary audio did not start.');
+              }
+            }
+          } catch (error) {
+            if (shouldContinue()) {
+              console.warn('Buffered natural commentary audio could not play.', error);
+            }
+          } finally {
+            if (activeRequestAbortRef.current === preparedRaceSpeech.controller) {
+              activeRequestAbortRef.current = null;
+            }
+            setPlaybackPhase('idle');
+          }
+          continue;
+        }
+
         const requestController = new AbortController();
         activeRequestAbortRef.current = requestController;
         const lineRequestBudgetMs = commentaryLineRequestBudgetMs(event.kind);
@@ -1190,7 +1328,15 @@ export function useRaceCommentary({
         }
       }
     }
-  }, [playNaturalSpeech, players, rememberLine, serviceMode, setPlaybackPhase, startLine]);
+  }, [
+    playNaturalSpeech,
+    players,
+    prepareRaceSpeech,
+    rememberLine,
+    serviceMode,
+    setPlaybackPhase,
+    startLine,
+  ]);
 
   useEffect(() => {
     const previousRaceState = previousRaceStateRef.current;
@@ -1250,6 +1396,8 @@ export function useRaceCommentary({
 
     if (finishEvents.length > 0) {
       setFinishAnnouncementsComplete(false);
+      preparedRaceSpeechRef.current?.controller.abort();
+      preparedRaceSpeechRef.current = null;
       queueRef.current = enqueueFinishCommentaryEvents(queueRef.current, finishEvents);
     } else if (
       !activeFinishCallRef.current
@@ -1258,6 +1406,7 @@ export function useRaceCommentary({
       ))
     ) {
       queueRef.current = [nextEvent];
+      prepareRaceSpeech(nextEvent);
     }
     if (
       !activeFinishCallRef.current
@@ -1275,6 +1424,7 @@ export function useRaceCommentary({
   }, [
     drainQueue,
     players,
+    prepareRaceSpeech,
     preferences.enabled,
     raceLengthMeters,
     raceState,

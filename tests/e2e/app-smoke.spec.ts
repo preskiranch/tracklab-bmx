@@ -984,6 +984,14 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     )),
     { timeout: 10_000 },
   ).toBe(true);
+  await expect.poll(
+    () => commentarySpeechPayloads.filter((payload) => (
+      payload.eventKind !== 'pre-race'
+      && payload.eventKind !== 'preview'
+      && payload.eventKind !== 'race-start'
+    )).length,
+    { timeout: 12_000 },
+  ).toBeGreaterThanOrEqual(3);
   const desktopRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
     const name = card.querySelector('.race-rider-overlay-identity strong');
     const metrics = card.querySelector('.race-rider-overlay-identity span');
