@@ -428,7 +428,7 @@ wss://tracklab-bmx.onrender.com/multiplayer
 ```
 
 When commentary is enabled, TrackLab prepares a source-backed pre-race report before
-the 15-second staging countdown. Catalog facts, cited web research, saved TrackLab
+the 20-second staging countdown. Catalog facts, cited web research, saved TrackLab
 records, and current conditions are combined without inventing missing history.
 Track research is cached in PostgreSQL for 30 days. Current weather uses MET Norway's
 no-key Locationforecast service and is displayed with the required attribution; no

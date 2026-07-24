@@ -1,4 +1,4 @@
-export const liveRaceStagingSeconds = 15;
+export const liveRaceStagingSeconds = 20;
 
 export type RaceStagingStep = {
   delayMs: number;

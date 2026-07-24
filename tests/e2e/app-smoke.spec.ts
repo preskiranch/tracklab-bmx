@@ -845,7 +845,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
 
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   await expect(page.locator('.race-staging-countdown')).toBeVisible();
-  await expect(page.locator('.race-staging-countdown strong')).toHaveText(/1[3-5]/);
+  await expect(page.locator('.race-staging-countdown strong')).toHaveText(/20|1[8-9]/);
   await expect(page.locator('.start-tree-light')).toHaveCount(0);
   const riderPanel = page.locator('.race-rider-overlay');
   await expect(riderPanel).toBeVisible();
@@ -1940,13 +1940,13 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await expect(page.getByRole('button', { name: 'Unlock rider panel', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Resize rider overlay', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Rotate map left', exact: true })).toBeDisabled();
-    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/1[3-5]/);
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/20|1[8-9]/);
     await expect(page.locator('.start-tree-light')).toHaveCount(0);
     await expect(page.locator('.rider-stat.ghost')).toContainText('0% / ghost');
     await page.waitForTimeout(8_500);
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/[5-7]/);
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/1[0-2]/);
     await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
     await expect(page.getByText(/False start/i)).toHaveCount(0);
     await page.screenshot({
@@ -1960,7 +1960,7 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
         };
       }).__tracklabLiveDebug;
       return debug?.raceState;
-    }), { timeout: 18_000 }).toBe('racing');
+    }), { timeout: 23_000 }).toBe('racing');
     moving = true;
     await expect.poll(async () => page.evaluate(() => {
       const debug = (window as typeof window & {
@@ -2225,7 +2225,7 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
     await expect(page.locator('.race-staging-countdown')).toBeVisible();
-    await expect(page.locator('.race-staging-countdown strong')).toHaveText('15');
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText('20');
     await expect(page.locator('.start-tree-light')).toHaveCount(0);
     await page.getByRole('button', { name: 'Pause Countdown', exact: true }).click();
     await expect(page.locator('.race-staging-countdown strong')).toHaveText('PAUSED');
@@ -2250,7 +2250,7 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
     await page.waitForTimeout(8_500);
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/[5-7]/);
+    await expect(page.locator('.race-staging-countdown strong')).toHaveText(/1[0-2]/);
     await expect(page.getByRole('button', { name: /Cancel Race/i })).toBeVisible();
     await page.screenshot({
       fullPage: false,
