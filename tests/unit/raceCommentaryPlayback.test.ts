@@ -16,15 +16,15 @@ describe('race commentary playback sequencing', () => {
     expect(browserSpeechWatchdogMs(Array.from({ length: 40 }, () => 'racing').join(' '))).toBe(30_000);
   });
 
-  it('replaces calls that are still being prepared without cutting off spoken sentences', () => {
+  it('only replaces calls before paid speech preparation begins', () => {
     expect(shouldInterruptCommentaryForEvent('speaking', 'finish')).toBe(false);
     expect(shouldInterruptCommentaryForEvent('speaking', 'rider-finish')).toBe(false);
-    expect(shouldInterruptCommentaryForEvent('preparing', 'finish')).toBe(true);
-    expect(shouldInterruptCommentaryForEvent('preparing', 'rider-finish')).toBe(true);
+    expect(shouldInterruptCommentaryForEvent('preparing', 'finish')).toBe(false);
+    expect(shouldInterruptCommentaryForEvent('preparing', 'rider-finish')).toBe(false);
     expect(shouldInterruptCommentaryForEvent('thinking', 'finish')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('thinking', 'lead-change')).toBe(true);
     expect(shouldInterruptCommentaryForEvent('speaking', 'lead-change')).toBe(false);
-    expect(shouldInterruptCommentaryForEvent('preparing', 'position-change')).toBe(true);
+    expect(shouldInterruptCommentaryForEvent('preparing', 'position-change')).toBe(false);
     expect(shouldInterruptCommentaryForEvent('preparing', 'pedal-zone')).toBe(false);
   });
 

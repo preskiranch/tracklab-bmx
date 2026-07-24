@@ -61,5 +61,5 @@ export function shouldInterruptCommentaryForEvent(
   eventKind: RaceCommentaryEventKind,
 ) {
   return commentaryNeedsImmediateLine(eventKind)
-    && (phase === 'thinking' || phase === 'preparing');
+    && phase === 'thinking';
 }

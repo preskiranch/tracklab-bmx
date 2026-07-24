@@ -606,6 +606,8 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
 test('start here race action enters fullscreen race view', async ({ page }, testInfo) => {
   test.setTimeout(80_000);
   let commentarySpeechRequests = 0;
+  let activeLiveSpeechRequests = 0;
+  let maximumActiveLiveSpeechRequests = 0;
   const commentarySpeechPayloads: Array<{
     eventKind?: string;
     line?: string;
@@ -647,15 +649,31 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       deliveryStyle?: string;
     };
     commentarySpeechPayloads.push(payload);
+    const isLiveRaceCall = payload.eventKind !== 'pre-race'
+      && payload.eventKind !== 'preview'
+      && payload.eventKind !== 'race-start';
+    if (isLiveRaceCall) {
+      activeLiveSpeechRequests += 1;
+      maximumActiveLiveSpeechRequests = Math.max(
+        maximumActiveLiveSpeechRequests,
+        activeLiveSpeechRequests,
+      );
+    }
     if (payload.eventKind === 'pre-race') {
       await new Promise((resolve) => setTimeout(resolve, 6_500));
     } else if (payload.eventKind !== 'race-start') {
       await new Promise((resolve) => setTimeout(resolve, 2_600));
     }
-    await route.fulfill({
-      contentType: 'audio/mpeg',
-      path: 'public/assets/uci-random-start.mp3',
-    });
+    try {
+      await route.fulfill({
+        contentType: 'audio/wav',
+        body: silentWavBuffer(3_500),
+      });
+    } finally {
+      if (isLiveRaceCall) {
+        activeLiveSpeechRequests -= 1;
+      }
+    }
   });
   await page.route('**/api/commentary/pre-race', async (route) => {
     const payload = route.request().postDataJSON() as {
@@ -1079,6 +1097,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     )).length,
     { timeout: 12_000 },
   ).toBeGreaterThanOrEqual(3);
+  expect(maximumActiveLiveSpeechRequests).toBe(1);
   const desktopRiderText = await riderPanel.locator('.race-rider-overlay-card').first().evaluate((card) => {
     const name = card.querySelector('.race-rider-overlay-identity strong');
     const metrics = card.querySelector('.race-rider-overlay-identity span');
@@ -1298,17 +1317,8 @@ test.describe('mobile commentary playback', () => {
     await page.goto('/?track=air-time-bmx');
     await page.getByRole('button', { name: 'Open App' }).click();
     await page.getByRole('button', { name: /Demo/i }).first().click();
-    await expect.poll(
-      () => speechPayloads.filter((payload) => payload.eventKind === 'race-start').length,
-      { timeout: 8_000 },
-    ).toBeGreaterThanOrEqual(1);
-    const initialStartPrefetchCount = speechPayloads.filter(
-      (payload) => payload.eventKind === 'race-start',
-    ).length;
     await page.waitForTimeout(1_500);
-    expect(speechPayloads.filter((payload) => (
-      payload.eventKind === 'race-start'
-    ))).toHaveLength(initialStartPrefetchCount);
+    expect(speechPayloads).toHaveLength(0);
     await expect(page.getByLabel('Announcer voice')).toHaveCount(0);
     await expect(page.getByText('American male', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Preview selected voice' })).toHaveCount(0);

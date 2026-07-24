@@ -47,6 +47,7 @@ import {
   commentarySpeechModel,
 } from './commentaryVoices.mjs';
 import { createCommentaryCapacity } from './commentaryCapacity.mjs';
+import { createCommentarySpeechCache } from './commentarySpeechCache.mjs';
 import { instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 import {
   createRacerSubscriptionCheckout,
@@ -81,6 +82,7 @@ const routeSelectTimers = new Map();
 const userDataWriteChains = new Map();
 const globalRaceViewProfileKey = 'global:developer-race-view';
 let commentarySpeechProviderStatus = 'unknown';
+let commentarySpeechProviderRetryAt = 0;
 const maxRaceBikeCount = 4;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
@@ -96,6 +98,7 @@ const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
+const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
 const configuredCommentaryEngineModel = String(
   process.env.TRACKLAB_COMMENTARY_MODEL || '',
@@ -480,6 +483,12 @@ function releaseCommentaryCapacity(release) {
     'tracklab_commentary_generation_active',
     commentaryGenerationCapacity.active,
   );
+}
+
+function commentarySpeechCacheKey(line, voicePreset, eventKind, deliveryStyle) {
+  return createHash('sha256')
+    .update(JSON.stringify({ line, voicePreset, eventKind, deliveryStyle }))
+    .digest('hex');
 }
 
 function cookieValue(request, name) {
@@ -1173,6 +1182,16 @@ async function generateCommentarySpeech(
   if (!key) {
     throw new HttpRequestError(503, 'AI speech is not configured on this server.');
   }
+  if (
+    commentarySpeechProviderStatus === 'quota-exhausted'
+    && commentarySpeechProviderRetryAt > Date.now()
+  ) {
+    throw new HttpRequestError(
+      503,
+      'Natural commentary is paused because the OpenAI API project has no available quota.',
+      'insufficient_quota',
+    );
+  }
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -1199,6 +1218,9 @@ async function generateCommentarySpeech(
     commentarySpeechProviderStatus = errorCode === 'insufficient_quota'
       ? 'quota-exhausted'
       : 'unavailable';
+    commentarySpeechProviderRetryAt = errorCode === 'insufficient_quota'
+      ? Date.now() + 15_000
+      : 0;
     throw new HttpRequestError(
       response.status === 429 ? 503 : 502,
       errorCode === 'insufficient_quota'
@@ -1209,6 +1231,7 @@ async function generateCommentarySpeech(
   }
   const audio = commentaryAudioBuffer(await response.json());
   commentarySpeechProviderStatus = 'ready';
+  commentarySpeechProviderRetryAt = 0;
   return audio;
 }
 
@@ -3530,27 +3553,39 @@ async function serveStatic(request, response) {
     }
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
     const deliveryStyle = sanitizeCommentaryDeliveryStyle(payload?.deliveryStyle);
-    const releaseCapacity = acquireCommentaryCapacity(response);
-    if (!releaseCapacity) {
-      return;
-    }
-    let audio;
-    try {
-      audio = await generateCommentarySpeech(
+    const speechCacheKey = commentarySpeechCacheKey(
+      line,
+      voicePreset,
+      eventKind,
+      deliveryStyle,
+    );
+    let cachedSpeech = commentarySpeechCache.get(speechCacheKey);
+    if (!cachedSpeech) {
+      const releaseCapacity = acquireCommentaryCapacity(response);
+      if (!releaseCapacity) {
+        return;
+      }
+      const speechPromise = generateCommentarySpeech(
         line,
         voicePreset,
         eventKind,
         deliveryStyle,
-        requestAbortSignal(request, response),
-      );
-    } finally {
-      releaseCommentaryCapacity(releaseCapacity);
+        AbortSignal.timeout(eventKind === 'pre-race' ? 25_000 : 15_000),
+      ).finally(() => {
+        releaseCommentaryCapacity(releaseCapacity);
+      });
+      cachedSpeech = commentarySpeechCache.setPending(speechCacheKey, speechPromise);
+    }
+    const audio = await cachedSpeech.promise;
+    if (response.destroyed || response.writableEnded) {
+      return;
     }
     cloudTelemetry.increment('tracklab_commentary_speech_total', { voicePreset, eventKind });
     response.writeHead(200, {
       'Content-Type': 'audio/wav',
       'Cache-Control': 'no-store',
       'Content-Length': audio.length,
+      'X-TrackLab-Commentary-Cache': cachedSpeech.status,
     });
     response.end(audio);
     return;

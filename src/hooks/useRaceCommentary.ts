@@ -723,6 +723,8 @@ export function useRaceCommentary({
       || !preferences.enabled
       || serviceMode !== 'ai'
       || players.length === 0
+      || !startGateActive
+      || startGatePhase !== 'staging'
     ) {
       return;
     }
@@ -808,6 +810,8 @@ export function useRaceCommentary({
     raceState,
     recordSpeechFailure,
     serviceMode,
+    startGateActive,
+    startGatePhase,
     startSpeechKey,
   ]);
 
@@ -818,9 +822,58 @@ export function useRaceCommentary({
       setPreRaceReport(null);
       return;
     }
-    if (preparedPreRaceSpeechRef.current?.key === preRaceKey) {
-      setPreRaceReport(preparedPreRaceSpeechRef.current.report);
-      return;
+    const stagingIsActive = startGateActive && startGatePhase === 'staging';
+    const existing = preparedPreRaceSpeechRef.current?.key === preRaceKey
+      ? preparedPreRaceSpeechRef.current
+      : null;
+    if (existing) {
+      setPreRaceReport(existing.report);
+      if (
+        serviceMode !== 'ai'
+        || !stagingIsActive
+        || existing.audioBlob
+        || existing.audioPromise
+      ) {
+        return;
+      }
+
+      const requestId = preRacePrefetchRequestRef.current + 1;
+      preRacePrefetchRequestRef.current = requestId;
+      const controller = new AbortController();
+      const audioPromise = requestAiSpeechBlob(
+        existing.report.line,
+        preferences,
+        'pre-race',
+        players.map((player) => player.name),
+        'straight',
+        commentarySpeechTimeoutMs('pre-race'),
+        controller.signal,
+      )
+        .then((audioBlob) => {
+          setSpeechStatus('ready');
+          return audioBlob;
+        })
+        .catch((error) => {
+          recordSpeechFailure(error);
+          return null;
+        });
+      preparedPreRaceSpeechRef.current = {
+        key: preRaceKey,
+        report: existing.report,
+        audioPromise,
+      };
+      void audioPromise.then((audioBlob) => {
+        if (preRacePrefetchRequestRef.current === requestId && audioBlob) {
+          preparedPreRaceSpeechRef.current = {
+            key: preRaceKey,
+            report: existing.report,
+            audioBlob,
+          };
+        }
+      });
+      return () => {
+        controller.abort();
+      };
     }
 
     const requestId = preRacePrefetchRequestRef.current + 1;
@@ -897,7 +950,7 @@ export function useRaceCommentary({
         }
         setPreRaceReport(report);
 
-        if (serviceMode !== 'ai') {
+        if (serviceMode !== 'ai' || !stagingIsActive) {
           preparedPreRaceSpeechRef.current = { key: preRaceKey, report };
           return;
         }
@@ -944,6 +997,8 @@ export function useRaceCommentary({
     raceState,
     recordSpeechFailure,
     serviceMode,
+    startGateActive,
+    startGatePhase,
   ]);
 
   const rememberLine = useCallback((line: string) => {
@@ -1217,6 +1272,7 @@ export function useRaceCommentary({
           const preparedMatches = prepared?.key === preparedStartSpeechKey(line, activePreferences, players);
           const requestController = new AbortController();
           activeRequestAbortRef.current = requestController;
+          setPlaybackPhase('preparing');
           try {
             if (preparedMatches && prepared) {
               const preparedAudio = prepared.audioBlob
@@ -1278,6 +1334,7 @@ export function useRaceCommentary({
           );
           const requestController = new AbortController();
           activeRequestAbortRef.current = requestController;
+          setPlaybackPhase('preparing');
           try {
             if (serviceMode === 'ai') {
               await playNaturalSpeech(
@@ -1308,6 +1365,7 @@ export function useRaceCommentary({
           continue;
         }
 
+        setPlaybackPhase('preparing');
         const preparedRaceSpeech = preparedRaceSpeechRef.current?.eventId === event.id
           ? preparedRaceSpeechRef.current
           : prepareRaceSpeech(event);
@@ -1316,7 +1374,6 @@ export function useRaceCommentary({
         }
         if (preparedRaceSpeech && useAiSpeech) {
           activeRequestAbortRef.current = preparedRaceSpeech.controller;
-          setPlaybackPhase('preparing');
           try {
             const prepared = await preparedRaceSpeech.promise;
             if (prepared && shouldContinue()) {
@@ -1526,16 +1583,10 @@ export function useRaceCommentary({
         event.kind === 'finish' || event.kind === 'rider-finish'
       ))
     ) {
-      const bufferedEvent = queueRef.current[0];
-      const bufferedSpeech = preparedRaceSpeechRef.current;
-      const keepBufferedCall = !commentaryNeedsImmediateLine(nextEvent.kind)
-        && bufferedEvent != null
-        && bufferedSpeech?.eventId === bufferedEvent.id
-        && raceCommentaryEventIsFresh(bufferedEvent);
-      if (!keepBufferedCall) {
-        queueRef.current = [nextEvent];
-        prepareRaceSpeech(nextEvent);
-      }
+      // Keep only the newest waiting event. Speech generation starts inside
+      // drainQueue so rapid telemetry updates cannot create overlapping paid
+      // requests that are immediately cancelled before playback.
+      queueRef.current = [nextEvent];
     }
     if (
       completeFieldFinish
@@ -1570,7 +1621,6 @@ export function useRaceCommentary({
   }, [
     drainQueue,
     players,
-    prepareRaceSpeech,
     preferences.enabled,
     raceLengthMeters,
     raceState,
