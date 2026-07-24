@@ -1154,19 +1154,19 @@ export function SessionControlPanel({
 
         {commentaryPreferences.enabled && commentarySpeechStatus === 'quota-exhausted' && (
           <div className="announcer-service-status warning" role="status">
-            <strong>Natural commentary paused</strong>
+            <strong>Device announcer active</strong>
             <small>
               {isAdminProfile
-                ? 'The OpenAI API project needs available credits or a higher spend limit. TrackLab will not substitute a robotic device voice.'
-                : 'The natural announcer service is temporarily unavailable. TrackLab will not substitute a robotic device voice.'}
+                ? 'OpenAI credits are unavailable, so TrackLab is announcing locally without sending more paid voice requests.'
+                : 'TrackLab is using this device’s built-in English announcer while the natural voice service is unavailable.'}
             </small>
           </div>
         )}
 
         {commentaryPreferences.enabled && commentarySpeechStatus === 'unavailable' && (
           <div className="announcer-service-status warning" role="status">
-            <strong>Natural commentary unavailable</strong>
-            <small>TrackLab will stay quiet instead of switching to a robotic device voice.</small>
+            <strong>Device announcer active</strong>
+            <small>TrackLab is continuing commentary with this device’s built-in English voice.</small>
           </div>
         )}
 
