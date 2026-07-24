@@ -79,6 +79,7 @@ const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const userDataWriteChains = new Map();
 const globalRaceViewProfileKey = 'global:developer-race-view';
+let commentarySpeechProviderStatus = 'unknown';
 const maxRaceBikeCount = 4;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
@@ -167,10 +168,11 @@ const contentTypes = new Map([
 ]);
 
 class HttpRequestError extends Error {
-  constructor(statusCode, message) {
+  constructor(statusCode, message, code = '') {
     super(message);
     this.name = 'HttpRequestError';
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
@@ -1118,11 +1120,20 @@ async function generateCommentarySpeech(line, voicePreset, eventKind, deliverySt
     const errorCode = String(
       errorPayload?.error?.code || errorPayload?.error?.type || '',
     ).replace(/[^a-z0-9_-]/gi, '').slice(0, 80);
-    throw new Error(
-      `OpenAI natural audio returned ${response.status}${errorCode ? ` (${errorCode})` : ''}`,
+    commentarySpeechProviderStatus = errorCode === 'insufficient_quota'
+      ? 'quota-exhausted'
+      : 'unavailable';
+    throw new HttpRequestError(
+      response.status === 429 ? 503 : 502,
+      errorCode === 'insufficient_quota'
+        ? 'Natural commentary is paused because the OpenAI API project has no available quota.'
+        : 'Natural commentary audio is temporarily unavailable.',
+      errorCode || 'speech_unavailable',
     );
   }
-  return commentaryAudioBuffer(await response.json());
+  const audio = commentaryAudioBuffer(await response.json());
+  commentarySpeechProviderStatus = 'ready';
+  return audio;
 }
 
 function sanitizedPreferenceRevision(value) {
@@ -3161,6 +3172,7 @@ async function serveStatic(request, response) {
     }
     const body = JSON.stringify({
       aiAvailable: Boolean(openAiApiKey()),
+      speechStatus: openAiApiKey() ? commentarySpeechProviderStatus : 'not-configured',
       textModel: commentaryEngineModel,
       speechModel: commentarySpeechModel,
       voicePresets: [...commentaryVoicePresets],
@@ -4089,10 +4101,16 @@ const server = createServer((request, response) => {
 
   void serveStatic(request, response).catch((error) => {
     const statusCode = Number(error?.statusCode);
-    if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500) {
+    if (
+      error instanceof HttpRequestError
+      && Number.isInteger(statusCode)
+      && statusCode >= 400
+      && statusCode < 600
+    ) {
       if (!response.headersSent) {
         writeJson(response, statusCode, {
           error: error instanceof Error ? error.message : 'Invalid request.',
+          code: error.code || undefined,
         });
       } else {
         response.destroy();

@@ -8,7 +8,7 @@ import {
 } from '../../src/lib/uciStartGate';
 
 describe('UCI random start timing', () => {
-  it('keeps the random hold and four synchronized tone intervals in specification', () => {
+  it('keeps the UCI random hold and synchronized tone timing', () => {
     expect(uciRandomDelayMinMs).toBe(100);
     expect(uciRandomDelayMaxMs).toBe(2700);
     expect(uciStartToneIntervalMs).toBe(120);

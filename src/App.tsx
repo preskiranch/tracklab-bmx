@@ -5412,35 +5412,41 @@ export default function App() {
       });
     });
 
-    [0, uciStartToneIntervalMs, uciStartToneIntervalMs * 2].forEach((offsetMs, index) => {
-      scheduleVoiceStep(firstToneAtMs + offsetMs, () => {
-        if (index === 0) {
-          const redLightAt = Date.now();
-          redLightAtRef.current = redLightAt;
-          armReactionTimer(redLightAt);
-        }
-        if (index === 2 && demoMode) {
-          const demoPlayerIds = racePlayers.map((player) => player.id);
-          cStartTriggeredPlayerIdsRef.current = new Set(demoPlayerIds);
-          loadCStartPlayers(demoPlayerIds);
-        }
+    const runCadenceTone = (index: 0 | 1 | 2) => {
+      if (index === 0) {
+        const redLightAt = Date.now();
+        redLightAtRef.current = redLightAt;
+        armReactionTimer(redLightAt);
+      }
+      if (index === 2 && demoMode) {
+        const demoPlayerIds = racePlayers.map((player) => player.id);
+        cStartTriggeredPlayerIdsRef.current = new Set(demoPlayerIds);
+        loadCStartPlayers(demoPlayerIds);
+      }
 
-        const lightIndex = index as 0 | 1 | 2;
-        setStartGateStatus({
-          active: true,
-          phase: 'cadence',
-          label: startTreeLabels[lightIndex],
-          detail: 'UCI cadence',
-          lightIndex,
-        });
-        playStartGateTone('uci-red');
+      setStartGateStatus({
+        active: true,
+        phase: 'cadence',
+        label: startTreeLabels[index],
+        detail: 'UCI cadence',
+        lightIndex: index,
       });
-    });
+      playStartGateTone('uci-red');
 
-    scheduleVoiceStep(firstToneAtMs + uciStartToneIntervalMs * 3, () => {
-      playStartGateTone('uci-green');
-      beginRaceAtGateDrop(startingTrackId, sequenceId);
-    });
+      // Chain each UCI step from the moment the previous one actually rendered.
+      // Independent absolute timers can collapse into one burst when a busy map
+      // delays the browser event loop, especially on tablets.
+      scheduleStartGateStep(uciStartToneIntervalMs, () => {
+        if (index < 2) {
+          runCadenceTone((index + 1) as 1 | 2);
+          return;
+        }
+        playStartGateTone('uci-green');
+        beginRaceAtGateDrop(startingTrackId, sequenceId);
+      }, sequenceId);
+    };
+
+    scheduleVoiceStep(firstToneAtMs, () => runCadenceTone(0));
   }, [armReactionTimer, beginRaceAtGateDrop, demoMode, loadCStartPlayers, racePlayers, scheduleStartGateStep]);
 
   const scheduleStagingCountdown = useCallback((
@@ -6973,6 +6979,7 @@ export default function App() {
                   ghostLaps={availableGhostLaps}
                   selectedGhostIds={selectedGhostIds}
                   commentaryPreferences={raceCommentaryPreferences}
+                  commentarySpeechStatus={raceCommentary.speechStatus}
                   onMetricToggle={toggleMetric}
                   onSpeedUnitChange={setSpeedUnit}
                   onDistanceUnitChange={setDistanceUnit}

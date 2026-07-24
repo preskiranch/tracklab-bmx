@@ -3289,6 +3289,26 @@ input:focus {
   accent-color: #2388e8;
 }
 
+.announcer-service-status {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid #e4b24b;
+  border-radius: 7px;
+  background: #fff8e7;
+  color: #6c4a00;
+}
+
+.announcer-service-status strong {
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.announcer-service-status small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .ambient-admin-controls {
   display: grid;
   gap: 8px;

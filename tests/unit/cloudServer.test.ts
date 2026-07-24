@@ -128,6 +128,7 @@ describe('cloud API trust boundaries', () => {
     const config = await response.json();
     expect(config).toMatchObject({
       aiAvailable: false,
+      speechStatus: 'not-configured',
       textModel: 'gpt-5.6-terra',
       speechModel: 'gpt-audio-1.5',
       voicePresets: ['american-man'],

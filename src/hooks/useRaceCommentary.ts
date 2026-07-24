@@ -41,7 +41,8 @@ import type {
   TrackZone,
 } from '../types';
 
-type CommentaryServiceMode = 'checking' | 'ai' | 'browser';
+type CommentaryServiceMode = 'checking' | 'ai' | 'unavailable';
+export type CommentarySpeechStatus = 'checking' | 'ready' | 'quota-exhausted' | 'unavailable';
 type CommentaryPlaybackPhase = RaceCommentaryPlaybackPhase;
 type CommentarySpeechEventKind = RaceCommentaryEventKind | 'pre-race' | 'preview';
 type CommentaryDeliveryStyle = 'straight' | 'wry' | 'pressure' | 'surge' | 'sprint';
@@ -81,26 +82,6 @@ type UseRaceCommentaryOptions = {
   reactionTimesByPlayer: ReactionTimesByPlayer;
   onRecentLinesChange: (lines: string[]) => void;
 };
-
-function speechLanguage(_voicePreset: RaceCommentaryVoicePreset) {
-  return 'en-US';
-}
-
-function browserVoiceFor(_voicePreset: RaceCommentaryVoicePreset) {
-  if (!('speechSynthesis' in window)) {
-    return null;
-  }
-
-  const voices = window.speechSynthesis.getVoices();
-  const americanVoices = voices.filter((voice) => voice.lang.toLowerCase() === 'en-us');
-  // Never use the device's first English voice as an automatic fallback:
-  // that changed the announcer to a female system voice on some iPads and PCs.
-  const preferredNames = ['aaron', 'alex', 'guy', 'davis', 'david', 'reed', 'eddy', 'fred'];
-  return preferredNames
-    .map((name) => americanVoices.find((voice) => voice.name.toLowerCase().includes(name)))
-    .find(Boolean)
-    ?? null;
-}
 
 function deliveryStyleForEvent(event: RaceCommentaryEvent): CommentaryDeliveryStyle {
   if (event.kind === 'lead-change' || event.kind === 'position-change') {
@@ -156,86 +137,6 @@ function preparedPreRaceSpeechKey(
   ].join('::');
 }
 
-function speakWithBrowser(
-  line: string,
-  voicePreset: RaceCommentaryVoicePreset,
-  eventKind: CommentarySpeechEventKind,
-  volume: number,
-  activePlaybackCancelRef: ActivePlaybackCancelRef,
-  shouldContinue: () => boolean,
-  onStart: () => void,
-) {
-  return new Promise<boolean>((resolve) => {
-    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
-      resolve(false);
-      return;
-    }
-    if (!shouldContinue()) {
-      resolve(false);
-      return;
-    }
-    const browserVoice = browserVoiceFor(voicePreset);
-    if (!browserVoice) {
-      resolve(false);
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(line);
-    let settled = false;
-    let timeout: number | null = null;
-    const finish = (played: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (timeout != null) {
-        window.clearTimeout(timeout);
-      }
-      if (activePlaybackCancelRef.current === cancel) {
-        activePlaybackCancelRef.current = null;
-      }
-      resolve(played);
-    };
-    const cancel = () => {
-      window.speechSynthesis.cancel();
-      finish(false);
-    };
-    timeout = window.setTimeout(
-      cancel,
-      browserSpeechWatchdogMs(line),
-    );
-    utterance.lang = speechLanguage(voicePreset);
-    utterance.voice = browserVoice;
-    utterance.volume = volume;
-    const baseRate = 0.97;
-    const actionRate = eventKind === 'lead-change'
-      || eventKind === 'position-change'
-      || eventKind === 'pro-set'
-      || eventKind === 'final-push'
-      ? 0.02
-      : eventKind === 'race-start' || eventKind === 'rider-finish' || eventKind === 'finish'
-        ? 0.01
-        : 0;
-    utterance.rate = baseRate + actionRate;
-    const basePitch = 0.96;
-    const actionPitchLift = eventKind === 'lead-change'
-      || eventKind === 'position-change'
-      || eventKind === 'rider-finish'
-      || eventKind === 'finish'
-      ? 0.05
-      : eventKind === 'race-start' || eventKind === 'final-push'
-        ? 0.03
-        : 0;
-    utterance.pitch = basePitch + actionPitchLift;
-    utterance.onend = () => finish(true);
-    utterance.onerror = () => finish(false);
-    activePlaybackCancelRef.current = cancel;
-    onStart();
-    window.speechSynthesis.speak(utterance);
-  });
-}
-
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
   const forwardAbort = () => controller.abort();
@@ -274,10 +175,27 @@ async function requestAiSpeechBlob(
     }),
   }, timeoutMs);
   if (!response.ok) {
-    throw new Error(`Speech service returned ${response.status}`);
+    const payload = await response.json().catch(() => null) as {
+      error?: string;
+      code?: string;
+    } | null;
+    const error = new Error(payload?.error || `Speech service returned ${response.status}`) as Error & {
+      code?: string;
+    };
+    error.code = payload?.code || 'speech_unavailable';
+    throw error;
   }
 
   return await response.blob();
+}
+
+function commentarySpeechStatusFromError(error: unknown): CommentarySpeechStatus | null {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return null;
+  }
+  return (error as { code?: string } | null)?.code === 'insufficient_quota'
+    ? 'quota-exhausted'
+    : 'unavailable';
 }
 
 function commentarySpeechTimeoutMs(eventKind: CommentarySpeechEventKind) {
@@ -570,6 +488,7 @@ export function useRaceCommentary({
   onRecentLinesChange,
 }: UseRaceCommentaryOptions) {
   const [serviceMode, setServiceMode] = useState<CommentaryServiceMode>('checking');
+  const [speechStatus, setSpeechStatus] = useState<CommentarySpeechStatus>('checking');
   const [finishAnnouncementsComplete, setFinishAnnouncementsComplete] = useState(true);
   const trackerRef = useRef(createRaceCommentaryTracker());
   const preferencesRef = useRef(preferences);
@@ -625,6 +544,26 @@ export function useRaceCommentary({
     playbackPhaseRef.current = phase;
   }, []);
 
+  const recordSpeechFailure = useCallback((error: unknown) => {
+    const nextStatus = commentarySpeechStatusFromError(error);
+    if (nextStatus) {
+      setSpeechStatus(nextStatus);
+    }
+  }, []);
+
+  const playNaturalSpeech = useCallback(async (
+    ...args: Parameters<typeof playAiSpeech>
+  ) => {
+    try {
+      const played = await playAiSpeech(...args);
+      setSpeechStatus('ready');
+      return played;
+    } catch (error) {
+      recordSpeechFailure(error);
+      throw error;
+    }
+  }, [recordSpeechFailure]);
+
   const disposePreparedStartSpeech = useCallback(() => {
     preparedStartSpeechRef.current = null;
   }, []);
@@ -642,9 +581,6 @@ export function useRaceCommentary({
     preRacePlaybackAbortRef.current = null;
     activeAudioRef.current?.pause();
     activeBufferSourceRef.current = null;
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
     setPlaybackPhase('idle');
   }, [setPlaybackPhase]);
 
@@ -655,16 +591,26 @@ export function useRaceCommentary({
       headers: { Accept: 'application/json' },
     })
       .then(async (response) => response.ok
-        ? await response.json() as { aiAvailable?: boolean }
-        : { aiAvailable: false })
+        ? await response.json() as { aiAvailable?: boolean; speechStatus?: string }
+        : { aiAvailable: false, speechStatus: 'unavailable' })
       .then((config) => {
         if (!cancelled) {
-          setServiceMode(config.aiAvailable ? 'ai' : 'browser');
+          setServiceMode(config.aiAvailable ? 'ai' : 'unavailable');
+          setSpeechStatus(
+            config.speechStatus === 'ready'
+              ? 'ready'
+              : config.speechStatus === 'quota-exhausted'
+                ? 'quota-exhausted'
+                : config.aiAvailable
+                  ? 'checking'
+                  : 'unavailable',
+          );
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setServiceMode('browser');
+          setServiceMode('unavailable');
+          setSpeechStatus('unavailable');
         }
       });
     return () => {
@@ -708,6 +654,7 @@ export function useRaceCommentary({
       'sprint',
     )
       .then((audioBlob) => {
+        setSpeechStatus('ready');
         if (startPrefetchRequestRef.current !== requestId) {
           return;
         }
@@ -721,19 +668,20 @@ export function useRaceCommentary({
           retryAt: 0,
         };
       })
-      .catch(() => {
+      .catch((error) => {
+        recordSpeechFailure(error);
         if (startPrefetchRequestRef.current === requestId) {
           startPrefetchAttemptRef.current = {
             inFlight: false,
             retryAt: Date.now() + 60_000,
           };
         }
-        // Gate calls use immediate browser speech when preloading is unavailable.
       });
   }, [
     disposePreparedStartSpeech,
     preferences.enabled,
     raceState,
+    recordSpeechFailure,
     serviceMode,
     startSpeechKey,
   ]);
@@ -837,7 +785,14 @@ export function useRaceCommentary({
           commentarySpeechTimeoutMs('pre-race'),
           controller.signal,
         )
-          .catch(() => null);
+          .then((audioBlob) => {
+            setSpeechStatus('ready');
+            return audioBlob;
+          })
+          .catch((error) => {
+            recordSpeechFailure(error);
+            return null;
+          });
         preparedPreRaceSpeechRef.current = {
           key: preRaceKey,
           report,
@@ -862,6 +817,7 @@ export function useRaceCommentary({
     preRaceKey,
     preferences.enabled,
     raceState,
+    recordSpeechFailure,
     serviceMode,
   ]);
 
@@ -945,7 +901,7 @@ export function useRaceCommentary({
           return;
         }
         if (serviceMode === 'ai') {
-          await playAiSpeech(
+          await playNaturalSpeech(
             report.line,
             activePreferences,
             'pre-race',
@@ -960,30 +916,8 @@ export function useRaceCommentary({
           );
           return;
         }
-        await speakWithBrowser(
-          report.line,
-          activePreferences.voicePreset,
-          'pre-race',
-          activePreferences.volume,
-          activePlaybackCancelRef,
-          shouldContinue,
-          beginSpeaking,
-        );
       } catch (error) {
-        if (shouldContinue()) {
-          const fallbackPlayed = await speakWithBrowser(
-            report.line,
-            activePreferences.voicePreset,
-            'pre-race',
-            activePreferences.volume,
-            activePlaybackCancelRef,
-            shouldContinue,
-            beginSpeaking,
-          );
-          if (!fallbackPlayed && serviceMode === 'ai') {
-            console.warn('Natural commentary pre-race audio and the safe male device fallback could not play.', error);
-          }
-        } else if (serviceMode === 'ai') {
+        if (serviceMode === 'ai') {
           console.warn('Natural commentary pre-race audio could not play.', error);
         }
       }
@@ -1002,9 +936,6 @@ export function useRaceCommentary({
       activePlaybackCancelRef.current = null;
       activeAudioRef.current?.pause();
       activeBufferSourceRef.current = null;
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
       setPlaybackPhase('idle');
     };
   }, [
@@ -1013,6 +944,7 @@ export function useRaceCommentary({
     preferences.enabled,
     preferences.voicePreset,
     preferences.volume,
+    playNaturalSpeech,
     rememberLine,
     serviceMode,
     setPlaybackPhase,
@@ -1093,7 +1025,7 @@ export function useRaceCommentary({
                 throw new Error('Prepared race-start speech did not start.');
               }
             } else if (serviceMode === 'ai') {
-              await playAiSpeech(
+              await playNaturalSpeech(
                 line,
                 activePreferences,
                 event.kind,
@@ -1106,32 +1038,9 @@ export function useRaceCommentary({
                 beginSpeaking,
                 requestController.signal,
               );
-            } else {
-              await speakWithBrowser(
-                line,
-                activePreferences.voicePreset,
-                event.kind,
-                activePreferences.volume,
-                activePlaybackCancelRef,
-                shouldContinue,
-                beginSpeaking,
-              );
             }
           } catch (error) {
-            if (shouldContinue()) {
-              const fallbackPlayed = await speakWithBrowser(
-                line,
-                activePreferences.voicePreset,
-                event.kind,
-                activePreferences.volume,
-                activePlaybackCancelRef,
-                shouldContinue,
-                beginSpeaking,
-              );
-              if (!fallbackPlayed && serviceMode === 'ai') {
-                console.warn('Natural commentary race-start audio and the safe male device fallback could not play.', error);
-              }
-            } else if (serviceMode === 'ai') {
+            if (serviceMode === 'ai') {
               console.warn('Natural commentary race-start audio could not play.', error);
             }
           } finally {
@@ -1154,7 +1063,7 @@ export function useRaceCommentary({
           activeRequestAbortRef.current = requestController;
           try {
             if (serviceMode === 'ai') {
-              await playAiSpeech(
+              await playNaturalSpeech(
                 line,
                 activePreferences,
                 event.kind,
@@ -1167,32 +1076,9 @@ export function useRaceCommentary({
                 beginSpeaking,
                 requestController.signal,
               );
-            } else {
-              await speakWithBrowser(
-                line,
-                activePreferences.voicePreset,
-                event.kind,
-                activePreferences.volume,
-                activePlaybackCancelRef,
-                shouldContinue,
-                beginSpeaking,
-              );
             }
           } catch (error) {
-            if (shouldContinue()) {
-              const fallbackPlayed = await speakWithBrowser(
-                line,
-                activePreferences.voicePreset,
-                event.kind,
-                activePreferences.volume,
-                activePlaybackCancelRef,
-                shouldContinue,
-                beginSpeaking,
-              );
-              if (!fallbackPlayed && serviceMode === 'ai') {
-                console.warn('Natural commentary finish audio and the safe male device fallback could not play.', error);
-              }
-            } else if (serviceMode === 'ai') {
+            if (serviceMode === 'ai') {
               console.warn('Natural commentary finish audio could not play.', error);
             }
           } finally {
@@ -1264,7 +1150,7 @@ export function useRaceCommentary({
         setPlaybackPhase('preparing');
         try {
           if (useAiSpeech) {
-            await playAiSpeech(
+            await playNaturalSpeech(
               line,
               activePreferences,
               event.kind,
@@ -1277,32 +1163,9 @@ export function useRaceCommentary({
               beginSpeaking,
               requestController.signal,
             );
-          } else {
-            await speakWithBrowser(
-              line,
-              activePreferences.voicePreset,
-              event.kind,
-              activePreferences.volume,
-              activePlaybackCancelRef,
-              shouldContinue,
-              beginSpeaking,
-            );
           }
         } catch (error) {
-          if (shouldContinue()) {
-            const fallbackPlayed = await speakWithBrowser(
-              line,
-              activePreferences.voicePreset,
-              event.kind,
-              activePreferences.volume,
-              activePlaybackCancelRef,
-              shouldContinue,
-              beginSpeaking,
-            );
-            if (!fallbackPlayed && useAiSpeech) {
-              console.warn('Natural commentary race audio and the safe male device fallback could not play.', error);
-            }
-          } else if (useAiSpeech) {
+          if (useAiSpeech) {
             console.warn('Natural commentary race audio could not play.', error);
           }
         }
@@ -1327,7 +1190,7 @@ export function useRaceCommentary({
         }
       }
     }
-  }, [players, rememberLine, serviceMode, setPlaybackPhase, startLine]);
+  }, [playNaturalSpeech, players, rememberLine, serviceMode, setPlaybackPhase, startLine]);
 
   useEffect(() => {
     const previousRaceState = previousRaceStateRef.current;
@@ -1407,9 +1270,6 @@ export function useRaceCommentary({
       activePlaybackCancelRef.current = null;
       activeAudioRef.current?.pause();
       activeBufferSourceRef.current = null;
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
     }
     void drainQueue();
   }, [
@@ -1464,16 +1324,6 @@ export function useRaceCommentary({
         audio.currentTime = 0;
       })
       .catch(() => undefined);
-    if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
-      const browserVoice = browserVoiceFor('american-man');
-      if (browserVoice) {
-        const unlockUtterance = new SpeechSynthesisUtterance('.');
-        unlockUtterance.lang = 'en-US';
-        unlockUtterance.voice = browserVoice;
-        unlockUtterance.volume = 0.01;
-        window.speechSynthesis.speak(unlockUtterance);
-      }
-    }
     return Promise.race([
       Promise.allSettled([contextPrime, mediaPrime]).then(() => undefined),
       new Promise<void>((resolve) => {
@@ -1491,6 +1341,7 @@ export function useRaceCommentary({
 
   return {
     finishAnnouncementsComplete,
+    speechStatus,
     prime,
     stop: stopPlayback,
   };

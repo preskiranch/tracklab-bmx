@@ -140,6 +140,7 @@ type SessionControlPanelProps = {
   ghostLaps: GhostLap[];
   selectedGhostIds: string[];
   commentaryPreferences: RaceCommentaryPreferences;
+  commentarySpeechStatus: 'checking' | 'ready' | 'quota-exhausted' | 'unavailable';
   onMetricToggle: (metric: MetricKey) => void;
   onSpeedUnitChange: (unit: SpeedUnit) => void;
   onDistanceUnitChange: (unit: DistanceUnit) => void;
@@ -274,6 +275,7 @@ export function SessionControlPanel({
   ghostLaps,
   selectedGhostIds,
   commentaryPreferences,
+  commentarySpeechStatus,
   onMetricToggle,
   onSpeedUnitChange,
   onDistanceUnitChange,
@@ -1149,6 +1151,24 @@ export function SessionControlPanel({
             })}
           />
         </label>
+
+        {commentaryPreferences.enabled && commentarySpeechStatus === 'quota-exhausted' && (
+          <div className="announcer-service-status warning" role="status">
+            <strong>Natural commentary paused</strong>
+            <small>
+              {isAdminProfile
+                ? 'The OpenAI API project needs available credits or a higher spend limit. TrackLab will not substitute a robotic device voice.'
+                : 'The natural announcer service is temporarily unavailable. TrackLab will not substitute a robotic device voice.'}
+            </small>
+          </div>
+        )}
+
+        {commentaryPreferences.enabled && commentarySpeechStatus === 'unavailable' && (
+          <div className="announcer-service-status warning" role="status">
+            <strong>Natural commentary unavailable</strong>
+            <small>TrackLab will stay quiet instead of switching to a robotic device voice.</small>
+          </div>
+        )}
 
         {isAdminProfile && (
           <div className="ambient-admin-controls">

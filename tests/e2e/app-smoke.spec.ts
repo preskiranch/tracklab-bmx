@@ -711,6 +711,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       __tracklabCadenceVoiceStarts?: number;
       __tracklabGateToneStarts?: Array<number | string>;
       __tracklabTreeLightSequence?: string[];
+      __tracklabTreeLightTimes?: number[];
       __tracklabAmbiencePlayCount?: number;
       __tracklabAmbienceLoadCount?: number;
       __tracklabAmbienceElements?: HTMLMediaElement[];
@@ -777,6 +778,10 @@ test('start here race action enters fullscreen race view', async ({ page }, test
           audioWindow.__tracklabTreeLightSequence = [
             ...(audioWindow.__tracklabTreeLightSequence ?? []),
             activeLight,
+          ];
+          audioWindow.__tracklabTreeLightTimes = [
+            ...(audioWindow.__tracklabTreeLightTimes ?? []),
+            performance.now(),
           ];
           previousLight = activeLight;
         }
@@ -851,8 +856,13 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   });
   expect(activeAmbienceLayers).toHaveLength(2);
   expect(activeAmbienceLayers.every((layer) => !layer.paused)).toBe(true);
-  expect(activeAmbienceLayers.reduce((total, layer) => total + layer.volume, 0))
-    .toBeCloseTo(0.09 * 1.08, 5);
+  await expect.poll(() => page.evaluate(() => {
+    const audioWindow = window as typeof window & {
+      __tracklabAmbienceElements?: HTMLMediaElement[];
+    };
+    return (audioWindow.__tracklabAmbienceElements ?? [])
+      .reduce((total, ambience) => total + ambience.volume, 0);
+  }), { timeout: 3_000 }).toBeCloseTo(0.09 * 1.08, 5);
   await expect(riderPanel.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(0);
   await expect.poll(() => commentarySpeechRequests, { timeout: 5_000 }).toBeGreaterThan(0);
@@ -936,6 +946,17 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabTreeLightSequence?: string[] }).__tracklabTreeLightSequence ?? []
   )), { timeout: 3_000 }).toEqual(['Red', 'Yellow one', 'Yellow two', 'Green']);
+  const treeLightTimes = await page.evaluate(() => (
+    (window as typeof window & { __tracklabTreeLightTimes?: number[] }).__tracklabTreeLightTimes ?? []
+  ));
+  expect(treeLightTimes).toHaveLength(4);
+  const treeLightIntervals = treeLightTimes.slice(1).map((time, index) => (
+    time - treeLightTimes[index]
+  ));
+  for (const interval of treeLightIntervals) {
+    expect(interval).toBeGreaterThanOrEqual(90);
+    expect(interval).toBeLessThanOrEqual(300);
+  }
   await expect.poll(() => page.evaluate(() => {
     const audioWindow = window as typeof window & {
       __tracklabAmbienceElements?: HTMLMediaElement[];
@@ -1243,8 +1264,9 @@ test.describe('mobile commentary playback', () => {
     await expect(page.getByLabel('Race commentary')).toBeAttached();
   });
 
-  test('uses only a recognized male device voice when hosted speech is temporarily unavailable', async ({ page }) => {
+  test('does not substitute a robotic device voice when natural speech is unavailable', async ({ page }) => {
     test.setTimeout(35_000);
+    let hostedSpeechAttempts = 0;
     const authUser = {
       id: 'ipad-commentary-fallback-racer',
       profileKey: 'user:ipad-commentary-fallback-racer',
@@ -1279,10 +1301,14 @@ test.describe('mobile commentary playback', () => {
       });
     });
     await page.route('**/api/commentary/speech', async (route) => {
+      hostedSpeechAttempts += 1;
       await route.fulfill({
         status: 503,
         contentType: 'application/json',
-        body: JSON.stringify({ error: 'Hosted speech temporarily unavailable.' }),
+        body: JSON.stringify({
+          error: 'Natural commentary is paused because the OpenAI API project has no available quota.',
+          code: 'insufficient_quota',
+        }),
       });
     });
     await page.route('**/api/commentary/pre-race', async (route) => {
@@ -1351,14 +1377,12 @@ test.describe('mobile commentary playback', () => {
     await expect(startAction).toContainText('Start Demo Race');
     await startAction.click();
 
+    await expect.poll(() => hostedSpeechAttempts, { timeout: 10_000 }).toBeGreaterThan(0);
     await expect.poll(() => page.evaluate(() => (
       (window as typeof window & {
         __tracklabBrowserFallbackCalls?: Array<{ line: string; voice: string }>;
       }).__tracklabBrowserFallbackCalls ?? []
-    )), { timeout: 10_000 }).toContainEqual({
-      line: 'All four riders are set and the gate is next.',
-      voice: 'Alex',
-    });
+    )), { timeout: 2_000 }).toHaveLength(0);
   });
 });
 
