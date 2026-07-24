@@ -61,6 +61,11 @@ import {
   stopStartGateAudio,
   uciVoiceWatchGateOffsetMs,
 } from './lib/audioCues';
+import {
+  primeBikeRaceAudio,
+  stopBikeRaceAudio,
+  updateBikeRaceAudio,
+} from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
 import {
   bikeSampleHasDriveSignalSince,
@@ -2616,6 +2621,14 @@ export default function App() {
 
   useEffect(() => () => {
     stopBmxEventAmbience();
+  }, []);
+
+  useEffect(() => {
+    updateBikeRaceAudio(raceState, riders);
+  }, [raceState, riders]);
+
+  useEffect(() => () => {
+    stopBikeRaceAudio();
   }, []);
 
   const releaseRaceFullscreen = useCallback(() => {
@@ -6089,6 +6102,7 @@ export default function App() {
     }
 
     primeRaceAudio();
+    void primeBikeRaceAudio();
 
     scheduleStagingCountdown(startingTrackId, sequenceId);
   };

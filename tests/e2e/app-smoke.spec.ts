@@ -963,6 +963,21 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       }>;
     }).__tracklabCommentaryPlaybackStarts?.length ?? 0
   )), { timeout: 5_000 }).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => {
+    const bikeAudio = (window as typeof window & {
+      __tracklabBikeRaceAudio?: {
+        ready: boolean;
+        seenModes: Record<number, string[]>;
+      };
+    }).__tracklabBikeRaceAudio;
+    return {
+      ready: bikeAudio?.ready ?? false,
+      modes: [...new Set(Object.values(bikeAudio?.seenModes ?? {}).flat())].sort(),
+    };
+  }), { timeout: 12_000 }).toEqual({
+    ready: true,
+    modes: ['freewheel', 'pedaling'],
+  });
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
       __tracklabCadenceVoiceStarts?: number;
