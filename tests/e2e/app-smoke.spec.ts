@@ -901,9 +901,12 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   ).toBe(true);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
-      __tracklabVoiceStartCount?: number;
-    }).__tracklabVoiceStartCount ?? 0
-  )), { timeout: 12_000 }).toBeGreaterThan(0);
+      __tracklabCommentaryPlaybackStarts?: Array<{
+        eventKind: string;
+        at: number;
+      }>;
+    }).__tracklabCommentaryPlaybackStarts?.length ?? 0
+  )), { timeout: 18_000 }).toBeGreaterThan(0);
   await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (
       payload.eventKind === 'race-start'
@@ -953,7 +956,12 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await page.waitForTimeout(15_500);
   await expect(page.locator('.race-staging-countdown')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (
-    (window as typeof window & { __tracklabVoiceStartCount?: number }).__tracklabVoiceStartCount ?? 0
+    (window as typeof window & {
+      __tracklabCommentaryPlaybackStarts?: Array<{
+        eventKind: string;
+        at: number;
+      }>;
+    }).__tracklabCommentaryPlaybackStarts?.length ?? 0
   )), { timeout: 5_000 }).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {

@@ -433,6 +433,24 @@ async function playAudioBlob(
   onStart: () => void,
   watchdogMs: number,
 ) {
+  let mediaPlaybackError: unknown = null;
+  try {
+    const mediaResult = await playAudioBlobWithMediaElement(
+      audioBlob,
+      volume,
+      activeAudioRef,
+      activePlaybackCancelRef,
+      shouldContinue,
+      onStart,
+      watchdogMs,
+    );
+    if (mediaResult || !shouldContinue()) {
+      return mediaResult;
+    }
+  } catch (error) {
+    mediaPlaybackError = error;
+  }
+
   const webAudioResult = await playAudioBlobWithWebAudio(
     audioBlob,
     volume,
@@ -445,16 +463,10 @@ async function playAudioBlob(
   if (webAudioResult != null) {
     return webAudioResult;
   }
-
-  return await playAudioBlobWithMediaElement(
-    audioBlob,
-    volume,
-    activeAudioRef,
-    activePlaybackCancelRef,
-    shouldContinue,
-    onStart,
-    watchdogMs,
-  );
+  if (mediaPlaybackError) {
+    throw mediaPlaybackError;
+  }
+  return false;
 }
 
 async function playAiSpeech(
