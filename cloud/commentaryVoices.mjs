@@ -101,7 +101,6 @@ export function commentaryRealtimeSessionUpdate(
     type: 'session.update',
     session: {
       type: 'realtime',
-      model: commentarySpeechModel,
       output_modalities: ['audio'],
       max_output_tokens: 1_200,
       reasoning: { effort: 'low' },

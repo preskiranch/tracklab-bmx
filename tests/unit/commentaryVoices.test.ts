@@ -51,7 +51,6 @@ describe('commentary voice', () => {
       type: 'session.update',
       session: {
         type: 'realtime',
-        model: 'gpt-realtime-2.1-mini',
         output_modalities: ['audio'],
         audio: {
           output: {
@@ -61,6 +60,7 @@ describe('commentary voice', () => {
         },
       },
     });
+    expect(request.session).not.toHaveProperty('model');
     expect(request.session.instructions).toMatch(/natural American male/i);
   });
 
