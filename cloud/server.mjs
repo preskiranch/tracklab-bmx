@@ -3432,9 +3432,15 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
+    const speechStatus = !openAiApiKey()
+      ? 'not-configured'
+      : commentarySpeechProviderStatus === 'quota-exhausted'
+        && commentarySpeechProviderRetryAt <= Date.now()
+        ? 'checking'
+        : commentarySpeechProviderStatus;
     const body = JSON.stringify({
       aiAvailable: Boolean(openAiApiKey()),
-      speechStatus: openAiApiKey() ? commentarySpeechProviderStatus : 'not-configured',
+      speechStatus,
       textModel: commentaryLiveTextModel,
       preRaceTextModel: commentaryEngineModel,
       speechModel: commentarySpeechModel,
