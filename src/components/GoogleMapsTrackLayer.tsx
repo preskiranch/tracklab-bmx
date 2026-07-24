@@ -75,6 +75,11 @@ import {
   riderScreenLaneTranslation,
   uprightRiderOrientation,
 } from '../lib/riderPresentation';
+import {
+  pedalZoneLabelAnchor,
+  pedalZoneLabelPosition,
+  pedalZoneLabelSizePixels,
+} from '../lib/mapZoneLabels';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -497,17 +502,6 @@ function offsetRiderMapPosition(position: TrackPoint, bearingDegrees: number, la
   return offsetTrackPoint(position, sideBearing, Math.abs(lateralMeters));
 }
 
-function bearingDegreesBetween(start: TrackPoint, end: TrackPoint) {
-  const startLat = start.lat * (Math.PI / 180);
-  const endLat = end.lat * (Math.PI / 180);
-  const deltaLng = (end.lng - start.lng) * (Math.PI / 180);
-  const y = Math.sin(deltaLng) * Math.cos(endLat);
-  const x = Math.cos(startLat) * Math.sin(endLat)
-    - Math.sin(startLat) * Math.cos(endLat) * Math.cos(deltaLng);
-
-  return ((Math.atan2(y, x) * (180 / Math.PI)) + 360) % 360;
-}
-
 function routePathBetweenMeters(route: TrackPoint[], startMeter: number, endMeter: number) {
   if (route.length < 2 || endMeter <= startMeter) {
     return [];
@@ -518,17 +512,6 @@ function routePathBetweenMeters(route: TrackPoint[], startMeter: number, endMete
     const meter = startMeter + (endMeter - startMeter) * progress;
     return pointAtRouteMeter(route, meter);
   }).filter((point): point is TrackPoint => point != null);
-}
-
-function offsetRouteLabelPosition(route: TrackPoint[], startMeter: number, endMeter: number) {
-  const start = pointAtRouteMeter(route, startMeter);
-  const end = pointAtRouteMeter(route, endMeter);
-  const midpoint = pointAtRouteMeter(route, startMeter + (endMeter - startMeter) / 2);
-  if (!start || !end || !midpoint) {
-    return null;
-  }
-
-  return offsetTrackPoint(midpoint, bearingDegreesBetween(start, end) + 90, 10);
 }
 
 function splitJunctionIcon(text: string, color = '#ff2d55') {
@@ -1612,7 +1595,7 @@ export function GoogleMapsTrackLayer({
       }
 
       const route = mappedTrackRouteWithBranchSelections(track, zone.branchSelections);
-      const position = offsetRouteLabelPosition(route, zone.startMeter, zone.endMeter);
+      const position = pedalZoneLabelPosition(route, zone.startMeter, zone.endMeter);
       if (!position) {
         return;
       }
@@ -1620,8 +1603,11 @@ export function GoogleMapsTrackLayer({
       const distance = Math.max(0, zone.endMeter - zone.startMeter);
       distanceLabelRefs.current.push(new google.maps.Marker({
         icon: {
-          anchor: new google.maps.Point(15, 15),
-          scaledSize: new google.maps.Size(30, 30),
+          anchor: new google.maps.Point(pedalZoneLabelAnchor.x, pedalZoneLabelAnchor.y),
+          scaledSize: new google.maps.Size(
+            pedalZoneLabelSizePixels,
+            pedalZoneLabelSizePixels,
+          ),
           url: pedalZoneNumberIcon(index + 1),
         },
         map,
@@ -1850,15 +1836,22 @@ export function GoogleMapsTrackLayer({
     draftLineRefs.current = [...draftLineRefs.current, ...draftReferencePedalLines, ...draftPedalLines];
 
     const draftZoneDistanceMarkers = draftPedalSpans.map((span, index) => {
-      const labelPosition = offsetRouteLabelPosition(activeDraftZoneRoute, span.startMeter, span.endMeter);
+      const labelPosition = pedalZoneLabelPosition(
+        activeDraftZoneRoute,
+        span.startMeter,
+        span.endMeter,
+      );
       if (!labelPosition) {
         return null;
       }
 
       return new google.maps.Marker({
         icon: {
-          anchor: new google.maps.Point(15, 15),
-          scaledSize: new google.maps.Size(30, 30),
+          anchor: new google.maps.Point(pedalZoneLabelAnchor.x, pedalZoneLabelAnchor.y),
+          scaledSize: new google.maps.Size(
+            pedalZoneLabelSizePixels,
+            pedalZoneLabelSizePixels,
+          ),
           url: pedalZoneNumberIcon(index + 1),
         },
         map,

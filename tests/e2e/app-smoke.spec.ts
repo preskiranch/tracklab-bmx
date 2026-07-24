@@ -1656,6 +1656,10 @@ test('completed race waits for the authoritative final result before returning t
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   await page.waitForTimeout(750);
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('finished-race-zone-label-placement.png'),
+  });
 
   holdFinishSpeech = false;
   releaseHeldFinishSpeech();
