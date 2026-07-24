@@ -34,7 +34,7 @@ describe('race position display', () => {
     ])).toBe(true);
   });
 
-  it('shows place for a solo rider after leaving the gate and for finished races', () => {
+  it('shows place for a solo rider after leaving the gate and throughout the finished state', () => {
     expect(racePositionsAreEstablished('racing', [contender(0)])).toBe(false);
     expect(racePositionsAreEstablished('racing', [
       contender(racePositionSeparationMeters),
@@ -42,6 +42,12 @@ describe('race position display', () => {
     expect(racePositionsAreEstablished('racing', [
       contender(100, Date.now()),
       contender(100),
+    ])).toBe(true);
+    expect(racePositionsAreEstablished('finished', [
+      contender(100, Date.now()),
+      contender(100, Date.now() + 100),
+      contender(100, Date.now() + 200),
+      contender(100, Date.now() + 300),
     ])).toBe(true);
   });
 });

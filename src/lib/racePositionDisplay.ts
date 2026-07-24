@@ -12,8 +12,12 @@ export function racePositionsAreEstablished(
   raceState: RaceState,
   contenders: RacePositionContender[],
 ) {
-  if (raceState !== 'racing' || contenders.length === 0) {
+  if (contenders.length === 0 || raceState === 'ready') {
     return false;
+  }
+
+  if (raceState === 'finished') {
+    return true;
   }
 
   if (contenders.some((contender) => contender.finishedAt != null)) {
