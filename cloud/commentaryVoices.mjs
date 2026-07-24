@@ -106,7 +106,10 @@ export function commentaryRealtimeSessionUpdate(
       reasoning: { effort: 'low' },
       audio: {
         output: {
-          format: { type: 'audio/pcm' },
+          format: {
+            type: 'audio/pcm',
+            rate: commentarySpeechSampleRate,
+          },
           voice: voice.voice,
         },
       },

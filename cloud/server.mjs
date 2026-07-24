@@ -1382,6 +1382,17 @@ async function generateCommentarySpeech(
     const errorCode = String(error?.code || error?.type || '')
       .replace(/[^a-z0-9_-]/gi, '')
       .slice(0, 80);
+    cloudTelemetry.warn('commentary.speech_generation_failed', {
+      model: commentarySpeechModel,
+      eventKind,
+      errorCode: errorCode || 'speech_unavailable',
+      statusCode: Number(error?.statusCode) || 502,
+      message: sanitizeText(
+        error?.message,
+        'OpenAI Realtime speech failed.',
+        240,
+      ),
+    });
     commentarySpeechProviderStatus = errorCode === 'insufficient_quota'
       ? 'quota-exhausted'
       : 'unavailable';

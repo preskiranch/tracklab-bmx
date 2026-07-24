@@ -54,7 +54,10 @@ describe('commentary voice', () => {
         output_modalities: ['audio'],
         audio: {
           output: {
-            format: { type: 'audio/pcm' },
+            format: {
+              type: 'audio/pcm',
+              rate: 24_000,
+            },
             voice: 'cedar',
           },
         },
