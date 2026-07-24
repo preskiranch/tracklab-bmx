@@ -1627,7 +1627,7 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(page.getByText('Complete a live Wattbike race on this track to create the first ranked ghost.')).toBeVisible();
 });
 
-test('completed race waits for the authoritative final result before returning to dashboard analysis', async ({ page }, testInfo) => {
+test('completed race finishes the active sentence and authoritative placements before returning to dashboard analysis', async ({ page }, testInfo) => {
   test.setTimeout(100_000);
   const finishSpeechPayloads: Array<{
     eventKind?: string;
@@ -1679,7 +1679,9 @@ test('completed race waits for the authoritative final result before returning t
     }
     await route.fulfill({
       contentType: 'audio/wav',
-      body: silentWavBuffer(500),
+      // Keep the gate call speaking through this short demo race. The final
+      // placement call must queue behind it rather than cutting it off.
+      body: silentWavBuffer(payload.eventKind === 'race-start' ? 10_000 : 500),
     });
   });
   await page.route('**/api/public-track-mappings', async (route) => {
@@ -1768,17 +1770,20 @@ test('completed race waits for the authoritative final result before returning t
   await page.waitForTimeout(750);
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   await expect(finalPlacementCards).toHaveCount(4);
+  expect(finishSpeechPayloads.filter((payload) => (
+    /wins.*second.*third.*fourth/i.test(payload.line ?? '')
+  ))).toHaveLength(0);
   await page.screenshot({
     fullPage: false,
     path: testInfo.outputPath('finished-race-zone-label-placement.png'),
   });
 
-  holdFinishSpeech = false;
-  releaseHeldFinishSpeech();
   await expect.poll(
     () => finishSpeechPayloads.at(-1)?.line ?? '',
     { timeout: 12_000 },
   ).toMatch(/wins.*second.*third.*fourth/i);
+  holdFinishSpeech = false;
+  releaseHeldFinishSpeech();
   expect(finishSpeechPayloads.length).toBeGreaterThanOrEqual(1);
   expect(finishSpeechPayloads.length).toBeLessThanOrEqual(2);
   expect(finishSpeechPayloads.at(-1)?.eventKind).toBe('rider-finish');

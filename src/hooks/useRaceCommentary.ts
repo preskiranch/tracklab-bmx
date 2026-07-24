@@ -1534,7 +1534,14 @@ export function useRaceCommentary({
         prepareRaceSpeech(nextEvent);
       }
     }
-    if (completeFieldFinish) {
+    if (
+      completeFieldFinish
+      && shouldInterruptCommentaryForEvent(playbackPhaseRef.current, nextEvent.kind)
+    ) {
+      // The authoritative full-field result can replace a call that has not
+      // started yet, but it must never cut off a sentence riders can already
+      // hear. Once spoken audio ends, drainQueue continues with the queued
+      // placement call before releasing the race view.
       callSequenceRef.current += 1;
       activeRequestAbortRef.current?.abort();
       activeRequestAbortRef.current = null;
