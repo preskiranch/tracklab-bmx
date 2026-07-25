@@ -1402,6 +1402,7 @@ export default function App() {
   const [mappingMode, setMappingMode] = useState(false);
   const [mappingFullscreen, setMappingFullscreen] = useState(false);
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
+  const [mappingObstacleView3D, setMappingObstacleView3D] = useState(false);
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
   const [draftZoneBoundarySets, setDraftZoneBoundarySets] = useState<TrackZoneBoundarySet[]>([]);
   const [preservedZoneAnchorSets, setPreservedZoneAnchorSets] = useState<TrackZoneBoundaryAnchorSet[]>([]);
@@ -4324,6 +4325,12 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!mappingMode || mappingEditMode !== 'zones') {
+      setMappingObstacleView3D(false);
+    }
+  }, [mappingEditMode, mappingMode]);
+
+  useEffect(() => {
     setMappingRouteVariantId('amateur');
     setRaceRouteVariantId('amateur');
     setMappingEditMode('navigate');
@@ -6894,6 +6901,7 @@ export default function App() {
                   mappingMode={mappingMode}
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
+                  mappingObstacleView3D={mappingObstacleView3D}
                   mappingRouteVariantId={mappingRouteVariantId}
                   mappingZoneBranchChoice={mappingZoneBranchChoice}
                   draftPoints={draftPoints}
@@ -6914,6 +6922,7 @@ export default function App() {
                   onStartCountdownPauseToggle={handleStartCountdownPauseToggle}
                   onCancelRace={handleCancel}
                   onMappingFullscreenChange={handleMappingFullscreenChange}
+                  onMappingObstacleView3DChange={setMappingObstacleView3D}
                   onMappingPathPointAdd={handleMappingPathPointAdd}
                   onMappingPathPointMove={handleMappingPathPointMove}
                   onMappingPathPointRemove={handleMappingPathPointRemove}
@@ -6978,6 +6987,7 @@ export default function App() {
                   mappingMode={mappingMode}
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
+                  mappingObstacleView3D={mappingObstacleView3D}
                   draftPointCount={draftPoints.length}
                   draftZonePinCount={draftZoneMeters.length}
                   draftZoneCount={allDraftZones.length}
@@ -7023,6 +7033,7 @@ export default function App() {
                   onMappingModeChange={handleMappingModeChange}
                   onMappingFullscreenChange={handleMappingFullscreenChange}
                   onMappingEditModeChange={handleMappingEditModeChange}
+                  onMappingObstacleView3DChange={setMappingObstacleView3D}
                   onMappingSplitStart={startOrUpdateSplitBuilder}
                   onMappingSplitBranchChange={handleSplitBranchChange}
                   onMappingSplitSave={saveDraftSplit}

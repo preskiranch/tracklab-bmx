@@ -572,6 +572,66 @@ test('track map save waits for account sync and shared publication', async ({ pa
   expect(savedMapping?.zones).toHaveLength(2);
 });
 
+test('pedal-zone mapping can temporarily use 3D while normal views stay satellite', async ({ page }) => {
+  const authUser = {
+    id: 'mapping-3d-admin',
+    profileKey: 'user:mapping-3d-admin',
+    email: 'mapping-3d-admin@tracklab.test',
+    name: 'Mapping 3D Admin',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: Date.now(),
+    },
+  };
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ user: authUser }),
+    });
+  });
+  await page.route('**/api/user-data?profileKey=*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { [mockPedalZoneMapping.trackId]: mockPedalZoneMapping },
+        customRoutes: [],
+        bikeProfiles: [],
+      }),
+    });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await page.getByRole('button', { name: 'Edit map' }).click();
+
+  const mappingPanel = page.locator('.mapping-section');
+  await mappingPanel.getByRole('button', { name: 'Pedal Zones', exact: true }).click();
+  const obstacleToggle = mappingPanel.locator('.mapping-obstacle-view-toggle');
+  await expect(obstacleToggle).toBeVisible();
+  await expect(obstacleToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(obstacleToggle.getByText('Racing remains satellite.', { exact: false })).toBeVisible();
+
+  const toggleBounds = await obstacleToggle.boundingBox();
+  expect(toggleBounds).not.toBeNull();
+  expect(toggleBounds!.height).toBeGreaterThanOrEqual(60);
+
+  await obstacleToggle.click();
+  await expect(obstacleToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.earth-header').getByText('3D obstacle view', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Use satellite for pedal zone mapping' })).toBeVisible();
+
+  await mappingPanel.getByRole('button', { name: 'Draw path', exact: true }).click();
+  await expect(mappingPanel.locator('.mapping-obstacle-view-toggle')).toHaveCount(0);
+  await expect(page.locator('.earth-header').getByText('Google satellite view', { exact: true })).toBeVisible();
+
+  await mappingPanel.getByRole('button', { name: 'Pedal Zones', exact: true }).click();
+  await expect(mappingPanel.locator('.mapping-obstacle-view-toggle')).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('advanced connector prompts racer accounts to open the Mac connector', async ({ page }) => {
   const authUser = {
     id: 'connector-racer',

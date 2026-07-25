@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent, type CSSProperties } from 'react
 import {
   Activity,
   Bike,
+  Box,
   CheckCircle2,
   Circle,
   Compass,
@@ -118,6 +119,7 @@ type SessionControlPanelProps = {
   mappingMode: boolean;
   mappingFullscreen: boolean;
   mappingEditMode: MappingEditMode;
+  mappingObstacleView3D: boolean;
   draftPointCount: number;
   draftZonePinCount: number;
   draftZoneCount: number;
@@ -162,6 +164,7 @@ type SessionControlPanelProps = {
   onMappingModeChange: (enabled: boolean) => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
+  onMappingObstacleView3DChange: (enabled: boolean) => void;
   onMappingSplitStart: (branch?: TrackSplitBranch['id']) => void;
   onMappingSplitBranchChange: (branch: TrackSplitBranch['id']) => void;
   onMappingSplitSave: () => void;
@@ -253,6 +256,7 @@ export function SessionControlPanel({
   mappingMode,
   mappingFullscreen,
   mappingEditMode,
+  mappingObstacleView3D,
   draftPointCount,
   draftZonePinCount,
   draftZoneCount,
@@ -297,6 +301,7 @@ export function SessionControlPanel({
   onMappingModeChange,
   onMappingFullscreenChange,
   onMappingEditModeChange,
+  onMappingObstacleView3DChange,
   onMappingSplitStart,
   onMappingSplitBranchChange,
   onMappingSplitSave,
@@ -778,6 +783,23 @@ export function SessionControlPanel({
                     ? 'Map only the Pro Set from split to merge. Tap S for the first pin, trace along the blue Pro route, then tap M for the last pin.'
                     : 'Tap the start and end of each pedaling zone. Unmarked sections become coasting or obstacle sections.'}
                 </p>
+                <button
+                  className={`mapping-obstacle-view-toggle${mappingObstacleView3D ? ' active' : ''}`}
+                  type="button"
+                  onClick={() => onMappingObstacleView3DChange(!mappingObstacleView3D)}
+                  aria-pressed={mappingObstacleView3D}
+                >
+                  <Box size={20} />
+                  <span>
+                    <strong>3D obstacle view</strong>
+                    <small>
+                      {mappingObstacleView3D
+                        ? 'On — orbit the terrain to place pins around jump faces and landings.'
+                        : 'Use only while placing pedal-zone pins. Racing remains satellite.'}
+                    </small>
+                  </span>
+                  <b>{mappingObstacleView3D ? 'ON' : 'OFF'}</b>
+                </button>
                 {draftSplitSections.length > 0 && (
                   <div className="zone-route-card">
                     <div className="route-layout-heading">
