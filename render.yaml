@@ -28,6 +28,10 @@ services:
         value: "1000"
       - key: OPENAI_API_KEY
         sync: false
+      - key: ZOOM_VIDEO_SDK_KEY
+        sync: false
+      - key: ZOOM_VIDEO_SDK_SECRET
+        sync: false
       - key: SQUARE_ENVIRONMENT
         sync: false
       - key: SQUARE_VERSION

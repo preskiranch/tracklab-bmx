@@ -14,6 +14,8 @@ import {
   Trophy,
   UserPlus,
   Users,
+  Video,
+  VideoOff,
   Vote,
   X,
   Zap,
@@ -103,12 +105,20 @@ type MultiplayerPanelProps = {
   onRespondToGroupInvite: (inviteId: string, accepted: boolean) => void;
   onChatDraftChange: (value: string) => void;
   onChatSend: () => void;
-  voiceEnabled: boolean;
-  voiceSupported: boolean;
-  voiceStatus: string;
-  voiceRemoteCount: number;
-  onVoiceStart: () => void;
-  onVoiceStop: () => void;
+  workoutVideoAvailable: boolean;
+  workoutVideoCameraOn: boolean;
+  workoutVideoEligible: boolean;
+  workoutVideoJoined: boolean;
+  workoutVideoJoining: boolean;
+  workoutVideoMicrophoneOn: boolean;
+  workoutVideoParticipantCount: number;
+  workoutVideoStatus: string;
+  workoutVideoSupported: boolean;
+  workoutVideoVisible: boolean;
+  onWorkoutVideoCameraToggle: () => void;
+  onWorkoutVideoJoin: () => void;
+  onWorkoutVideoLeave: () => void;
+  onWorkoutVideoMicrophoneToggle: () => void;
 };
 
 function sampleForPlayer(player: PlayerSlot, samplesByDevice: Map<number, BikeSample>) {
@@ -185,12 +195,20 @@ export function MultiplayerPanel({
   onRespondToGroupInvite,
   onChatDraftChange,
   onChatSend,
-  voiceEnabled,
-  voiceSupported,
-  voiceStatus,
-  voiceRemoteCount,
-  onVoiceStart,
-  onVoiceStop,
+  workoutVideoAvailable,
+  workoutVideoCameraOn,
+  workoutVideoEligible,
+  workoutVideoJoined,
+  workoutVideoJoining,
+  workoutVideoMicrophoneOn,
+  workoutVideoParticipantCount,
+  workoutVideoStatus,
+  workoutVideoSupported,
+  workoutVideoVisible,
+  onWorkoutVideoCameraToggle,
+  onWorkoutVideoJoin,
+  onWorkoutVideoLeave,
+  onWorkoutVideoMicrophoneToggle,
 }: MultiplayerPanelProps) {
   const [profileKeyDraft, setProfileKeyDraft] = useState(profileKey);
   const [selectedRiderIds, setSelectedRiderIds] = useState<string[]>([]);
@@ -530,26 +548,57 @@ export function MultiplayerPanel({
         </section>
       )}
 
-      {playMode === 'multiplayer' && currentRoom && (
-        <section className="panel-section voice-section">
+      {playMode === 'multiplayer' && currentRoom && workoutVideoVisible && (
+        <section className="panel-section workout-video-section">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Voice</span>
-              <h3>Live audio chat</h3>
+              <span className="eyebrow">Optional live video</span>
+              <h3>Workout Cameras</h3>
             </div>
-            {voiceEnabled ? <Mic size={18} /> : <MicOff size={18} />}
+            {workoutVideoJoined ? <Video size={18} /> : <VideoOff size={18} />}
           </div>
 
-          <div className="voice-card">
-            <button
-              type="button"
-              disabled={!voiceSupported}
-              onClick={voiceEnabled ? onVoiceStop : onVoiceStart}
-            >
-              {voiceEnabled ? <MicOff size={15} /> : <Mic size={15} />}
-              {voiceEnabled ? 'Mute voice' : 'Enable voice'}
-            </button>
-            <span>{voiceStatus} {voiceEnabled ? `/ ${voiceRemoteCount} connected` : ''}</span>
+          <div className="workout-video-card">
+            {workoutVideoJoined ? (
+              <div className="workout-video-card-controls">
+                <button type="button" onClick={onWorkoutVideoCameraToggle}>
+                  {workoutVideoCameraOn ? <VideoOff size={15} /> : <Video size={15} />}
+                  {workoutVideoCameraOn ? 'Camera off' : 'Camera on'}
+                </button>
+                <button
+                  type="button"
+                  className={workoutVideoMicrophoneOn ? 'microphone-on' : ''}
+                  onClick={onWorkoutVideoMicrophoneToggle}
+                >
+                  {workoutVideoMicrophoneOn ? <Mic size={15} /> : <MicOff size={15} />}
+                  {workoutVideoMicrophoneOn ? 'Mute mic' : 'Mic muted'}
+                </button>
+                <button type="button" onClick={onWorkoutVideoLeave}>
+                  <X size={15} />
+                  Leave video
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={
+                  !multiplayerOnline
+                  || !workoutVideoEligible
+                  || !workoutVideoSupported
+                  || !workoutVideoAvailable
+                  || workoutVideoJoining
+                }
+                onClick={onWorkoutVideoJoin}
+              >
+                <Video size={15} />
+                {workoutVideoJoining ? 'Connecting camera…' : 'Share workout camera'}
+              </button>
+            )}
+            <span>
+              {workoutVideoStatus}
+              {workoutVideoJoined ? ` / ${workoutVideoParticipantCount} connected` : ''}
+            </span>
+            <small>Opt-in only · up to four racers · microphone muted by default · no recording</small>
           </div>
         </section>
       )}

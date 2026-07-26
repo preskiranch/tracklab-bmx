@@ -57,6 +57,13 @@ import {
   verifyRacerSubscriptionOrder,
 } from './squareBilling.mjs';
 import {
+  createZoomVideoToken,
+  zoomVideoConfigStatus,
+  zoomVideoParticipantLimit,
+  zoomVideoSdkVersion,
+  zoomVideoSessionName,
+} from './zoomVideo.mjs';
+import {
   applySecurityHeaders,
   createRateLimiter,
   mutationOriginAllowed,
@@ -98,6 +105,7 @@ const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const zoomVideoTokenRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
@@ -4281,6 +4289,7 @@ async function serveStatic(request, response) {
   }
 
   if (requestUrl.pathname === '/api/multiplayer/health') {
+    const zoomVideo = zoomVideoConfigStatus();
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({
       ok: true,
@@ -4293,7 +4302,108 @@ async function serveStatic(request, response) {
         oneBikeMonthlyCents: racerMonthlyCents(1),
         fourBikeMonthlyCents: racerMonthlyCents(maxRaceBikeCount),
       },
+      workoutVideo: {
+        provider: 'zoom',
+        configured: zoomVideo.configured,
+        maxParticipants: zoomVideoParticipantLimit,
+        recording: false,
+        sdkVersion: zoomVideoSdkVersion,
+      },
     }));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/multiplayer/video/config') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    const zoomVideo = zoomVideoConfigStatus();
+    const body = JSON.stringify({
+      provider: 'zoom',
+      available: zoomVideo.configured,
+      maxParticipants: zoomVideoParticipantLimit,
+      recording: false,
+      sdkVersion: zoomVideoSdkVersion,
+    });
+    response.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/multiplayer/video/token') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+
+    if (!enforceRateLimit(request, response, zoomVideoTokenRateLimiter, 30, 'zoom-video-token')) {
+      return;
+    }
+
+    const zoomVideo = zoomVideoConfigStatus();
+    if (!zoomVideo.configured) {
+      writeJson(response, 503, {
+        error: 'Zoom workout cameras are not configured yet.',
+        code: 'ZOOM_VIDEO_NOT_CONFIGURED',
+      });
+      return;
+    }
+
+    const payload = await readJsonBody(request, 8_000);
+    const roomId = sanitizeText(payload?.roomId, '', 32).toUpperCase();
+    const room = rooms.get(roomId);
+    if (!room) {
+      writeJson(response, 404, { error: 'Join an active multiplayer room before sharing a camera.' });
+      return;
+    }
+
+    const profileKey = authProfileKey(session.user);
+    const roomClients = [...room.members]
+      .map((clientId) => clients.get(clientId))
+      .filter((client) => client?.guestKey === profileKey);
+    const racerClient = roomClients.find((client) => room.racers?.has(client.id));
+    if (!racerClient) {
+      writeJson(response, 403, { error: 'Only racers in this room can share workout video.' });
+      return;
+    }
+
+    const role = roomClients.some((client) => client.id === room.hostId) ? 1 : 0;
+    const videoToken = createZoomVideoToken({
+      sdkKey: zoomVideo.sdkKey,
+      sdkSecret: zoomVideo.sdkSecret,
+      roomId: room.id,
+      profileKey,
+      role,
+    });
+    cloudTelemetry.increment('tracklab_zoom_video_tokens_total', {
+      role: role === 1 ? 'host' : 'participant',
+    });
+    writeJson(response, 200, {
+      provider: 'zoom',
+      token: videoToken.token,
+      expiresAt: videoToken.expiresAt,
+      sessionName: zoomVideoSessionName(room.id),
+      userName: sanitizeText(session.user.displayName, racerClient.name, 64),
+      maxParticipants: zoomVideoParticipantLimit,
+      recording: false,
+      sdkVersion: zoomVideoSdkVersion,
+    });
     return;
   }
 

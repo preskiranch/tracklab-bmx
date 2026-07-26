@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 
 let child: ChildProcess;
 let baseUrl = '';
@@ -46,6 +47,25 @@ function api(pathname: string, init: RequestInit = {}) {
   });
 }
 
+function waitForSocketMessage(socket: WebSocket, type: string) {
+  return new Promise<Record<string, unknown>>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.off('message', onMessage);
+      reject(new Error(`Timed out waiting for ${type}.`));
+    }, 5_000);
+    const onMessage = (raw: WebSocket.RawData) => {
+      const message = JSON.parse(raw.toString()) as Record<string, unknown>;
+      if (message.type !== type) {
+        return;
+      }
+      clearTimeout(timeout);
+      socket.off('message', onMessage);
+      resolve(message);
+    };
+    socket.on('message', onMessage);
+  });
+}
+
 function trackMapping(trackId: string) {
   const startGate = { lat: 38.244, lng: -122.283 };
   const finishLine = { lat: 38.245, lng: -122.282 };
@@ -84,11 +104,13 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(port),
       DATABASE_URL: '',
-      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test',
+      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,video-admin@tracklab.test',
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
       OPENAI_API_KEY: '',
+      ZOOM_VIDEO_SDK_KEY: 'test-video-sdk-key',
+      ZOOM_VIDEO_SDK_SECRET: 'test-video-sdk-secret',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -178,6 +200,111 @@ describe('cloud API trust boundaries', () => {
       headers: { Origin: baseUrl },
     });
     expect(commentary.status).toBe(401);
+
+    const workoutVideoConfig = await fetch(`${baseUrl}/api/multiplayer/video/config`);
+    expect(workoutVideoConfig.status).toBe(401);
+    const workoutVideoToken = await fetch(`${baseUrl}/api/multiplayer/video/token`, {
+      method: 'POST',
+      headers: { Origin: baseUrl, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId: 'ROOM-TEST' }),
+    });
+    expect(workoutVideoToken.status).toBe(401);
+  });
+
+  it('reports Zoom workout video availability without exposing server credentials', async () => {
+    const registration = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { Origin: baseUrl, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Video Test Rider',
+        email: 'video-admin@tracklab.test',
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(registration.status).toBe(201);
+    const videoCookie = String(registration.headers.get('set-cookie')).split(';')[0];
+
+    const configResponse = await fetch(`${baseUrl}/api/multiplayer/video/config`, {
+      headers: { Cookie: videoCookie },
+    });
+    expect(configResponse.status).toBe(200);
+    expect(configResponse.headers.get('cache-control')).toBe('no-store');
+    const config = await configResponse.json();
+    expect(config).toMatchObject({
+      provider: 'zoom',
+      available: true,
+      maxParticipants: 4,
+      recording: false,
+      sdkVersion: '2.4.5',
+    });
+    expect(JSON.stringify(config)).not.toContain('ZOOM_VIDEO_SDK');
+
+    const socketUrl = baseUrl.replace(/^http/, 'ws');
+    const socket = new WebSocket(`${socketUrl}/multiplayer`, {
+      headers: { Cookie: videoCookie, Origin: baseUrl },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    const welcome = waitForSocketMessage(socket, 'welcome');
+    socket.send(JSON.stringify({
+      type: 'hello',
+      guestKey: 'user:ignored-client-value',
+      name: 'Ignored Client Name',
+      email: 'attacker@tracklab.test',
+      available: true,
+      membershipTier: 'visitor',
+      bikeCount: 1,
+      track: {
+        id: 'north-bay-bmx',
+        name: 'North Bay BMX',
+        country: 'United States',
+        state: 'California',
+      },
+    }));
+    await welcome;
+    const roomStatePromise = waitForSocketMessage(socket, 'room-state');
+    socket.send(JSON.stringify({
+      type: 'create-room',
+      private: true,
+      track: {
+        id: 'north-bay-bmx',
+        name: 'North Bay BMX',
+        country: 'United States',
+        state: 'California',
+      },
+    }));
+    const roomState = await roomStatePromise;
+    const room = roomState.room as { id: string };
+
+    const tokenResponse = await fetch(`${baseUrl}/api/multiplayer/video/token`, {
+      method: 'POST',
+      headers: {
+        Cookie: videoCookie,
+        Origin: baseUrl,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ roomId: room.id }),
+    });
+    expect(tokenResponse.status).toBe(200);
+    const token = await tokenResponse.json();
+    expect(token).toMatchObject({
+      provider: 'zoom',
+      sessionName: `tracklab-${room.id}`,
+      userName: 'Video Test Rider',
+      maxParticipants: 4,
+      recording: false,
+      sdkVersion: '2.4.5',
+    });
+    const jwtPayload = JSON.parse(Buffer.from(String(token.token).split('.')[1], 'base64url').toString('utf8'));
+    expect(jwtPayload).toMatchObject({
+      app_key: 'test-video-sdk-key',
+      role_type: 1,
+      tpc: `tracklab-${room.id}`,
+    });
+    expect(String(token.token)).not.toContain('test-video-sdk-secret');
+    socket.close();
   });
 
   it('keeps profile reads and writes bound to the authenticated account', async () => {
