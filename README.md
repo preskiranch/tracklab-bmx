@@ -417,8 +417,7 @@ Render environment variables:
 ```text
 VITE_GOOGLE_MAPS_API_KEY
 OPENAI_API_KEY
-ZOOM_VIDEO_SDK_KEY
-ZOOM_VIDEO_SDK_SECRET
+DAILY_API_KEY
 VITE_WATTBIKE_BRIDGE_URL
 VITE_TRACKLAB_MULTIPLAYER_URL
 ```
@@ -429,13 +428,14 @@ VITE_TRACKLAB_MULTIPLAYER_URL
 wss://tracklab-bmx.onrender.com/multiplayer
 ```
 
-`ZOOM_VIDEO_SDK_KEY` and `ZOOM_VIDEO_SDK_SECRET` are optional server-only
-credentials from a Zoom Build Platform Video SDK app. When configured,
-multiplayer racers can explicitly join a private four-camera workout panel.
-The SDK is loaded only after a racer presses **Share workout camera**, cameras
-and microphones are otherwise untouched, microphones begin muted, and TrackLab
-does not start cloud recording. A Zoom failure never stops the race or the
-Wattbike data path.
+`DAILY_API_KEY` is an optional server-only credential from Daily. When
+configured, authenticated multiplayer racers can explicitly join a private
+four-camera workout panel. Daily is loaded only after a racer accepts the
+per-session safety rules and presses **Share workout camera**. Room and token
+permissions allow video only: audio, recording, chat, transcription, and screen
+sharing are disabled. Sessions expire after 30 minutes and close after the race.
+Workout cameras are 13+ until TrackLab has a verified guardian-consent flow for
+younger riders. A Daily failure never stops the race or Wattbike data path.
 
 When commentary is enabled, TrackLab prepares a source-backed pre-race report before
 the 20-second staging countdown. Catalog facts, cited web research, saved TrackLab

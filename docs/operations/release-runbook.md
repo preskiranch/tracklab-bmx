@@ -28,8 +28,7 @@ Render must use Node.js 22 or newer and contain these server-side values:
 | `TRACKLAB_METRICS_TOKEN` | Long, random secret used only by the metrics collector. |
 | `VITE_GOOGLE_MAPS_API_KEY` | Browser-restricted Google Maps JavaScript API key. |
 | `OPENAI_API_KEY` | Optional server-only key for source-backed track research, pre-race reports, natural race wording, and speech. Without it, TrackLab uses verified catalog facts and the browser voice fallback. |
-| `ZOOM_VIDEO_SDK_KEY` | Server-only Zoom Video SDK key used for opt-in multiplayer workout cameras. This is not a Meeting SDK key. |
-| `ZOOM_VIDEO_SDK_SECRET` | Server-only Zoom Video SDK secret used to sign short-lived room tokens. Never use a `VITE_` prefix. |
+| `DAILY_API_KEY` | Server-only Daily API key used to create private camera-only rooms and short-lived meeting tokens. Never use a `VITE_` prefix. |
 | `SQUARE_ENVIRONMENT` | `sandbox` during billing acceptance; `production` only after approval. |
 | `SQUARE_ACCESS_TOKEN` | Server-only Square credential. Never use a `VITE_` prefix. |
 | `SQUARE_LOCATION_ID` | Square location that owns the subscriptions. |

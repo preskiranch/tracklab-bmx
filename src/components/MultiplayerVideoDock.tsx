@@ -2,19 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronUp,
-  Mic,
-  MicOff,
+  ShieldCheck,
   Video,
   VideoOff,
   X,
 } from 'lucide-react';
 import type {
+  DailyRoomVideoController,
   TrackLabVideoParticipant,
-  ZoomRoomVideoController,
-} from '../hooks/useZoomRoomVideo';
+} from '../hooks/useDailyRoomVideo';
 
 type MultiplayerVideoDockProps = {
-  controller: ZoomRoomVideoController;
+  controller: DailyRoomVideoController;
   raceActive: boolean;
 };
 
@@ -22,7 +21,7 @@ function WorkoutVideoTile({
   bindVideoTile,
   participant,
 }: {
-  bindVideoTile: ZoomRoomVideoController['bindVideoTile'];
+  bindVideoTile: DailyRoomVideoController['bindVideoTile'];
   participant: TrackLabVideoParticipant;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -44,7 +43,7 @@ function WorkoutVideoTile({
       <footer>
         <strong>{participant.name}</strong>
         {participant.local && <span>You</span>}
-        {participant.microphoneMuted ? <MicOff size={13} /> : <Mic size={13} />}
+        <ShieldCheck size={13} aria-label="Private camera-only video" />
       </footer>
     </article>
   );
@@ -108,15 +107,7 @@ export function MultiplayerVideoDock({
               {controller.cameraOn ? <VideoOff size={15} /> : <Video size={15} />}
               {controller.cameraOn ? 'Camera off' : 'Camera on'}
             </button>
-            <button
-              type="button"
-              className={controller.microphoneOn ? 'microphone-on' : ''}
-              onClick={() => void controller.toggleMicrophone()}
-            >
-              {controller.microphoneOn ? <Mic size={15} /> : <MicOff size={15} />}
-              {controller.microphoneOn ? 'Mute' : 'Mic muted'}
-            </button>
-            <span>Live only · not recorded</span>
+            <span>Camera only · private · not recorded</span>
           </div>
           <p role="status">{controller.status}</p>
         </>

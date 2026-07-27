@@ -109,8 +109,7 @@ beforeAll(async () => {
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
       OPENAI_API_KEY: '',
-      ZOOM_VIDEO_SDK_KEY: 'test-video-sdk-key',
-      ZOOM_VIDEO_SDK_SECRET: 'test-video-sdk-secret',
+      DAILY_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -211,7 +210,7 @@ describe('cloud API trust boundaries', () => {
     expect(workoutVideoToken.status).toBe(401);
   });
 
-  it('reports Zoom workout video availability without exposing server credentials', async () => {
+  it('reports child-safe Daily video controls and requires per-session confirmation', async () => {
     const registration = await fetch(`${baseUrl}/api/auth/register`, {
       method: 'POST',
       headers: { Origin: baseUrl, 'Content-Type': 'application/json' },
@@ -231,13 +230,18 @@ describe('cloud API trust boundaries', () => {
     expect(configResponse.headers.get('cache-control')).toBe('no-store');
     const config = await configResponse.json();
     expect(config).toMatchObject({
-      provider: 'zoom',
-      available: true,
+      provider: 'daily',
+      available: false,
       maxParticipants: 4,
+      audio: false,
+      chat: false,
+      privateRoomsOnly: true,
       recording: false,
-      sdkVersion: '2.4.5',
+      screenSharing: false,
+      sdkVersion: '0.91.0',
+      under13Allowed: false,
     });
-    expect(JSON.stringify(config)).not.toContain('ZOOM_VIDEO_SDK');
+    expect(JSON.stringify(config)).not.toContain('DAILY_API_KEY');
 
     const socketUrl = baseUrl.replace(/^http/, 'ws');
     const socket = new WebSocket(`${socketUrl}/multiplayer`, {
@@ -287,23 +291,24 @@ describe('cloud API trust boundaries', () => {
       },
       body: JSON.stringify({ roomId: room.id }),
     });
-    expect(tokenResponse.status).toBe(200);
-    const token = await tokenResponse.json();
-    expect(token).toMatchObject({
-      provider: 'zoom',
-      sessionName: `tracklab-${room.id}`,
-      userName: 'Video Test Rider',
-      maxParticipants: 4,
-      recording: false,
-      sdkVersion: '2.4.5',
+    expect(tokenResponse.status).toBe(400);
+    await expect(tokenResponse.json()).resolves.toMatchObject({
+      code: 'VIDEO_SAFETY_CONFIRMATION_REQUIRED',
     });
-    const jwtPayload = JSON.parse(Buffer.from(String(token.token).split('.')[1], 'base64url').toString('utf8'));
-    expect(jwtPayload).toMatchObject({
-      app_key: 'test-video-sdk-key',
-      role_type: 1,
-      tpc: `tracklab-${room.id}`,
+
+    const confirmedResponse = await fetch(`${baseUrl}/api/multiplayer/video/token`, {
+      method: 'POST',
+      headers: {
+        Cookie: videoCookie,
+        Origin: baseUrl,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ roomId: room.id, safetyConfirmed: true }),
     });
-    expect(String(token.token)).not.toContain('test-video-sdk-secret');
+    expect(confirmedResponse.status).toBe(503);
+    await expect(confirmedResponse.json()).resolves.toMatchObject({
+      code: 'DAILY_VIDEO_NOT_CONFIGURED',
+    });
     socket.close();
   });
 

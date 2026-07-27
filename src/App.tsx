@@ -207,7 +207,7 @@ import { useRaceCommentary } from './hooks/useRaceCommentary';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
 import { useMultiplayer } from './hooks/useMultiplayer';
-import { useZoomRoomVideo } from './hooks/useZoomRoomVideo';
+import { useDailyRoomVideo } from './hooks/useDailyRoomVideo';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import type {
   AppMode,
@@ -2295,12 +2295,6 @@ export default function App() {
     track: effectiveTrack,
     bikeCount: demoMode ? activePlayers.length : enteredRacePlayers.length,
   });
-  const roomVideo = useZoomRoomVideo({
-    currentRoom: multiplayer.currentRoom,
-    currentUserId: multiplayer.clientId,
-    enabled: playMode === 'multiplayer',
-    riderName: multiplayer.profile.name,
-  });
   const localRaceSeatLimit = useMemo(() => {
     const raceCandidateCount = lockedRacePlayers?.length ?? (demoMode ? activePlayers.length : enteredRacePlayers.length);
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
@@ -2569,6 +2563,13 @@ export default function App() {
     splitDecisionPoints,
     raceZones,
   );
+  const roomVideo = useDailyRoomVideo({
+    currentRoom: multiplayer.currentRoom,
+    currentUserId: multiplayer.clientId,
+    enabled: playMode === 'multiplayer',
+    raceFinished: raceState === 'finished',
+    riderName: multiplayer.profile.name,
+  });
   const raceCommentary = useRaceCommentary({
     preferences: raceCommentaryPreferences,
     raceState,
@@ -7127,7 +7128,6 @@ export default function App() {
                   workoutVideoEligible={roomVideo.eligible}
                   workoutVideoJoined={roomVideo.joined}
                   workoutVideoJoining={roomVideo.joining}
-                  workoutVideoMicrophoneOn={roomVideo.microphoneOn}
                   workoutVideoParticipantCount={roomVideo.participants.length}
                   workoutVideoStatus={roomVideo.status}
                   workoutVideoSupported={roomVideo.supported}
@@ -7135,7 +7135,6 @@ export default function App() {
                   onWorkoutVideoCameraToggle={() => void roomVideo.toggleCamera()}
                   onWorkoutVideoJoin={() => void roomVideo.join()}
                   onWorkoutVideoLeave={() => void roomVideo.leave()}
-                  onWorkoutVideoMicrophoneToggle={() => void roomVideo.toggleMicrophone()}
                 />
               </div>
             </div>

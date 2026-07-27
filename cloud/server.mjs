@@ -57,12 +57,11 @@ import {
   verifyRacerSubscriptionOrder,
 } from './squareBilling.mjs';
 import {
-  createZoomVideoToken,
-  zoomVideoConfigStatus,
-  zoomVideoParticipantLimit,
-  zoomVideoSdkVersion,
-  zoomVideoSessionName,
-} from './zoomVideo.mjs';
+  createDailyMeetingAccess,
+  dailyVideoConfigStatus,
+  dailyVideoParticipantLimit,
+  dailyVideoSdkVersion,
+} from './dailyVideo.mjs';
 import {
   applySecurityHeaders,
   createRateLimiter,
@@ -105,7 +104,7 @@ const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
-const zoomVideoTokenRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const dailyVideoTokenRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
@@ -4289,7 +4288,7 @@ async function serveStatic(request, response) {
   }
 
   if (requestUrl.pathname === '/api/multiplayer/health') {
-    const zoomVideo = zoomVideoConfigStatus();
+    const dailyVideo = dailyVideoConfigStatus();
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({
       ok: true,
@@ -4303,11 +4302,16 @@ async function serveStatic(request, response) {
         fourBikeMonthlyCents: racerMonthlyCents(maxRaceBikeCount),
       },
       workoutVideo: {
-        provider: 'zoom',
-        configured: zoomVideo.configured,
-        maxParticipants: zoomVideoParticipantLimit,
+        provider: 'daily',
+        configured: dailyVideo.configured,
+        maxParticipants: dailyVideoParticipantLimit,
+        audio: false,
+        chat: false,
+        privateRoomsOnly: true,
         recording: false,
-        sdkVersion: zoomVideoSdkVersion,
+        screenSharing: false,
+        sdkVersion: dailyVideoSdkVersion,
+        under13Allowed: false,
       },
     }));
     return;
@@ -4324,13 +4328,18 @@ async function serveStatic(request, response) {
       return;
     }
 
-    const zoomVideo = zoomVideoConfigStatus();
+    const dailyVideo = dailyVideoConfigStatus();
     const body = JSON.stringify({
-      provider: 'zoom',
-      available: zoomVideo.configured,
-      maxParticipants: zoomVideoParticipantLimit,
+      provider: 'daily',
+      available: dailyVideo.configured,
+      maxParticipants: dailyVideoParticipantLimit,
+      audio: false,
+      chat: false,
+      privateRoomsOnly: true,
       recording: false,
-      sdkVersion: zoomVideoSdkVersion,
+      screenSharing: false,
+      sdkVersion: dailyVideoSdkVersion,
+      under13Allowed: false,
     });
     response.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
@@ -4352,16 +4361,7 @@ async function serveStatic(request, response) {
       return;
     }
 
-    if (!enforceRateLimit(request, response, zoomVideoTokenRateLimiter, 30, 'zoom-video-token')) {
-      return;
-    }
-
-    const zoomVideo = zoomVideoConfigStatus();
-    if (!zoomVideo.configured) {
-      writeJson(response, 503, {
-        error: 'Zoom workout cameras are not configured yet.',
-        code: 'ZOOM_VIDEO_NOT_CONFIGURED',
-      });
+    if (!enforceRateLimit(request, response, dailyVideoTokenRateLimiter, 30, 'daily-video-token')) {
       return;
     }
 
@@ -4370,6 +4370,22 @@ async function serveStatic(request, response) {
     const room = rooms.get(roomId);
     if (!room) {
       writeJson(response, 404, { error: 'Join an active multiplayer room before sharing a camera.' });
+      return;
+    }
+
+    if (room.private !== true) {
+      writeJson(response, 403, {
+        error: 'Workout cameras are available only in private invited rooms.',
+        code: 'PRIVATE_VIDEO_ROOM_REQUIRED',
+      });
+      return;
+    }
+
+    if (payload?.safetyConfirmed !== true) {
+      writeJson(response, 400, {
+        error: 'Confirm the workout camera safety rules before sharing video.',
+        code: 'VIDEO_SAFETY_CONFIRMATION_REQUIRED',
+      });
       return;
     }
 
@@ -4383,26 +4399,50 @@ async function serveStatic(request, response) {
       return;
     }
 
-    const role = roomClients.some((client) => client.id === room.hostId) ? 1 : 0;
-    const videoToken = createZoomVideoToken({
-      sdkKey: zoomVideo.sdkKey,
-      sdkSecret: zoomVideo.sdkSecret,
-      roomId: room.id,
-      profileKey,
-      role,
-    });
-    cloudTelemetry.increment('tracklab_zoom_video_tokens_total', {
-      role: role === 1 ? 'host' : 'participant',
-    });
+    const dailyVideo = dailyVideoConfigStatus();
+    if (!dailyVideo.configured) {
+      writeJson(response, 503, {
+        error: 'Daily workout cameras are not configured yet.',
+        code: 'DAILY_VIDEO_NOT_CONFIGURED',
+      });
+      return;
+    }
+
+    const userName = sanitizeText(session.user.displayName, racerClient.name, 64);
+    let videoAccess;
+    try {
+      videoAccess = await createDailyMeetingAccess({
+        apiBaseUrl: dailyVideo.apiBaseUrl,
+        apiKey: dailyVideo.apiKey,
+        roomId: room.id,
+        profileKey,
+        userName,
+      });
+    } catch (error) {
+      console.error('Daily workout video authorization failed:', error instanceof Error ? error.message : error);
+      cloudTelemetry.increment('tracklab_daily_video_token_failures_total');
+      writeJson(response, 502, {
+        error: 'Private workout video could not start. The race is still available.',
+        code: 'DAILY_VIDEO_AUTHORIZATION_FAILED',
+      });
+      return;
+    }
+
+    cloudTelemetry.increment('tracklab_daily_video_tokens_total');
     writeJson(response, 200, {
-      provider: 'zoom',
-      token: videoToken.token,
-      expiresAt: videoToken.expiresAt,
-      sessionName: zoomVideoSessionName(room.id),
-      userName: sanitizeText(session.user.displayName, racerClient.name, 64),
-      maxParticipants: zoomVideoParticipantLimit,
+      provider: 'daily',
+      token: videoAccess.token,
+      expiresAt: videoAccess.expiresAt,
+      roomUrl: videoAccess.roomUrl,
+      userName,
+      maxParticipants: dailyVideoParticipantLimit,
+      audio: false,
+      chat: false,
+      privateRoomsOnly: true,
       recording: false,
-      sdkVersion: zoomVideoSdkVersion,
+      screenSharing: false,
+      sdkVersion: dailyVideoSdkVersion,
+      under13Allowed: false,
     });
     return;
   }

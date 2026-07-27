@@ -5,11 +5,10 @@ import {
   Link,
   LogOut,
   MessageSquare,
-  Mic,
-  MicOff,
   Plus,
   RadioTower,
   Send,
+  ShieldCheck,
   Shuffle,
   Trophy,
   UserPlus,
@@ -110,7 +109,6 @@ type MultiplayerPanelProps = {
   workoutVideoEligible: boolean;
   workoutVideoJoined: boolean;
   workoutVideoJoining: boolean;
-  workoutVideoMicrophoneOn: boolean;
   workoutVideoParticipantCount: number;
   workoutVideoStatus: string;
   workoutVideoSupported: boolean;
@@ -118,7 +116,6 @@ type MultiplayerPanelProps = {
   onWorkoutVideoCameraToggle: () => void;
   onWorkoutVideoJoin: () => void;
   onWorkoutVideoLeave: () => void;
-  onWorkoutVideoMicrophoneToggle: () => void;
 };
 
 function sampleForPlayer(player: PlayerSlot, samplesByDevice: Map<number, BikeSample>) {
@@ -200,7 +197,6 @@ export function MultiplayerPanel({
   workoutVideoEligible,
   workoutVideoJoined,
   workoutVideoJoining,
-  workoutVideoMicrophoneOn,
   workoutVideoParticipantCount,
   workoutVideoStatus,
   workoutVideoSupported,
@@ -208,15 +204,19 @@ export function MultiplayerPanel({
   onWorkoutVideoCameraToggle,
   onWorkoutVideoJoin,
   onWorkoutVideoLeave,
-  onWorkoutVideoMicrophoneToggle,
 }: MultiplayerPanelProps) {
   const [profileKeyDraft, setProfileKeyDraft] = useState(profileKey);
   const [selectedRiderIds, setSelectedRiderIds] = useState<string[]>([]);
   const [localSeatCount, setLocalSeatCount] = useState(1);
   const [groupNameDraft, setGroupNameDraft] = useState('');
   const [activeGroupId, setActiveGroupId] = useState('');
+  const [workoutVideoSafetyConfirmed, setWorkoutVideoSafetyConfirmed] = useState(false);
   const localBikeCapacity = Math.max(1, Math.min(maxPlayers, players.length || 1));
   const localSeatOptions = Array.from({ length: localBikeCapacity }, (_, index) => index + 1);
+
+  useEffect(() => {
+    setWorkoutVideoSafetyConfirmed(false);
+  }, [currentRoom?.id]);
 
   useEffect(() => {
     setProfileKeyDraft(profileKey);
@@ -548,7 +548,7 @@ export function MultiplayerPanel({
         </section>
       )}
 
-      {playMode === 'multiplayer' && currentRoom && workoutVideoVisible && (
+      {playMode === 'multiplayer' && currentRoom?.private && workoutVideoVisible && (
         <section className="panel-section workout-video-section">
           <div className="section-heading">
             <div>
@@ -559,6 +559,14 @@ export function MultiplayerPanel({
           </div>
 
           <div className="workout-video-card">
+            <div className="workout-video-safety">
+              <ShieldCheck size={19} />
+              <div>
+                <strong>Private camera-only room</strong>
+                <span>Daily audio, chat, recording, transcription and screen sharing are disabled.</span>
+                <span>Use video only with people you know. Never share private information.</span>
+              </div>
+            </div>
             {workoutVideoJoined ? (
               <div className="workout-video-card-controls">
                 <button type="button" onClick={onWorkoutVideoCameraToggle}>
@@ -567,38 +575,53 @@ export function MultiplayerPanel({
                 </button>
                 <button
                   type="button"
-                  className={workoutVideoMicrophoneOn ? 'microphone-on' : ''}
-                  onClick={onWorkoutVideoMicrophoneToggle}
+                  onClick={() => {
+                    setWorkoutVideoSafetyConfirmed(false);
+                    onWorkoutVideoLeave();
+                  }}
                 >
-                  {workoutVideoMicrophoneOn ? <Mic size={15} /> : <MicOff size={15} />}
-                  {workoutVideoMicrophoneOn ? 'Mute mic' : 'Mic muted'}
-                </button>
-                <button type="button" onClick={onWorkoutVideoLeave}>
                   <X size={15} />
                   Leave video
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
-                disabled={
-                  !multiplayerOnline
-                  || !workoutVideoEligible
-                  || !workoutVideoSupported
-                  || !workoutVideoAvailable
-                  || workoutVideoJoining
-                }
-                onClick={onWorkoutVideoJoin}
-              >
-                <Video size={15} />
-                {workoutVideoJoining ? 'Connecting camera…' : 'Share workout camera'}
-              </button>
+              <>
+                <label className="workout-video-consent">
+                  <input
+                    type="checkbox"
+                    checked={workoutVideoSafetyConfirmed}
+                    onChange={(event) => setWorkoutVideoSafetyConfirmed(event.target.checked)}
+                  />
+                  <span>
+                    I am 13 or older, I have permission to share this camera, and an adult is
+                    supervising any rider under 18.
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  disabled={
+                    !multiplayerOnline
+                    || !workoutVideoEligible
+                    || !workoutVideoSupported
+                    || !workoutVideoAvailable
+                    || !workoutVideoSafetyConfirmed
+                    || workoutVideoJoining
+                  }
+                  onClick={onWorkoutVideoJoin}
+                >
+                  <Video size={15} />
+                  {workoutVideoJoining ? 'Connecting camera…' : 'Share workout camera'}
+                </button>
+              </>
             )}
             <span>
               {workoutVideoStatus}
               {workoutVideoJoined ? ` / ${workoutVideoParticipantCount} connected` : ''}
             </span>
-            <small>Opt-in only · up to four racers · microphone muted by default · no recording</small>
+            <small>
+              Opt-in every session · up to four invited racers · riders under 13 cannot use
+              workout cameras until verified guardian consent is available
+            </small>
           </div>
         </section>
       )}

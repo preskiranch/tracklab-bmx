@@ -5467,10 +5467,63 @@ input:focus {
   gap: 7px;
 }
 
-.workout-video-card-controls .microphone-on,
-.workout-video-dock-controls .microphone-on {
-  border-color: #16a34a;
-  background: #166534;
+.workout-video-safety {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #bbf7d0;
+  border-radius: 7px;
+  background: #f0fdf4;
+  color: #14532d;
+}
+
+.workout-video-safety > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.workout-video-safety > div {
+  display: grid;
+  gap: 2px;
+}
+
+.workout-video-safety strong {
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.workout-video-safety span {
+  color: #166534;
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.workout-video-consent {
+  display: grid;
+  grid-template-columns: 19px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.workout-video-consent input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #15803d;
+}
+
+.workout-video-consent span {
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .workout-video-dock {
@@ -5579,10 +5632,7 @@ input:focus {
 }
 
 .workout-video-render,
-.zoom-video-render-surface,
-.zoom-video-player,
-.workout-video-render video-player-container,
-.workout-video-render video-player {
+.daily-video-player {
   display: block;
   width: 100% !important;
   height: 100% !important;
@@ -5594,7 +5644,7 @@ input:focus {
   inset: 0;
 }
 
-.workout-video-render video-player {
+.daily-video-player {
   object-fit: cover;
 }
 
