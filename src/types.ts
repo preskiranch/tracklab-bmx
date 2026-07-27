@@ -85,6 +85,7 @@ export type PlayerColorName = 'lime' | 'red' | 'blue' | 'yellow';
 export type SplitBranchChoice = 'a' | 'b';
 export type TrackZoneBranchSelections = Partial<Record<string, SplitBranchChoice>>;
 export type DemoRiderNames = Partial<Record<PlayerId, string>>;
+export type DemoRiderPhotos = Partial<Record<PlayerId, string>>;
 
 export type PlayerSlot = {
   id: PlayerId;
@@ -96,6 +97,7 @@ export type PlayerSlot = {
   deviceSource?: BridgeMode;
   riderId?: string;
   bikeName?: string;
+  photoUrl?: string;
 };
 
 export type BikeProfile = {
@@ -109,6 +111,7 @@ export type BikeProfile = {
 export type StudioRider = {
   id: string;
   name: string;
+  photoUrl?: string;
   createdAt: number;
   updatedAt: number;
   deletedAt?: number;
@@ -266,6 +269,7 @@ export type MultiplayerRaceRider = {
   id: string;
   playerId: PlayerSlot['id'];
   name: string;
+  photoUrl?: string;
   colorName: PlayerColorName;
   accent: string;
   distance: number;
@@ -579,6 +583,8 @@ export type RaceViewPreferences = {
   riderOverlayUpdatedAtByTrack: Record<string, number>;
   demoRiderNames: DemoRiderNames;
   demoRiderNamesUpdatedAt: number;
+  demoRiderPhotos: DemoRiderPhotos;
+  demoRiderPhotosUpdatedAt: number;
   commentary: RaceCommentaryPreferences;
   commentaryUpdatedAt: number;
 };

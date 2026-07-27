@@ -181,6 +181,7 @@ import {
   mergeStudioRiders,
   removeStudioRider,
   renameStudioRider,
+  updateStudioRiderPhoto,
 } from './lib/studioRiders';
 import {
   claimBillingReturn,
@@ -213,6 +214,7 @@ import type {
   BikeProfile,
   ConnectedBikeDevice,
   DemoRiderNames,
+  DemoRiderPhotos,
   DistanceUnit,
   DraftTrackSplit,
   EarthCamera,
@@ -1379,6 +1381,8 @@ export default function App() {
   const roomRaceStartTimeoutRef = useRef<number | null>(null);
   const liveRaceEntryTouchedRef = useRef(false);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
+  const racePhotoSyncPendingRef = useRef(true);
+  const racePhotoSignatureRef = useRef('');
   const customRoutePreviewRequestIdRef = useRef(0);
   const customRoutePreviewTrackIdRef = useRef<string | null>(null);
   const initialMembershipRef = useRef<MembershipState | null>(null);
@@ -1427,6 +1431,7 @@ export default function App() {
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
   const [demoRiderNames, setDemoRiderNames] = useState<DemoRiderNames>({});
+  const [demoRiderPhotos, setDemoRiderPhotos] = useState<DemoRiderPhotos>({});
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
   const [demoRaceStartedAt, setDemoRaceStartedAt] = useState<number | null>(null);
   const [demoSignalsStopped, setDemoSignalsStopped] = useState(false);
@@ -2198,8 +2203,8 @@ export default function App() {
     [draftSplitBuilder],
   );
   const demoPlayers = useMemo(
-    () => createDemoPlayers(demoBikeCount, demoRiderNames),
-    [demoBikeCount, demoRiderNames],
+    () => createDemoPlayers(demoBikeCount, demoRiderNames, demoRiderPhotos),
+    [demoBikeCount, demoRiderNames, demoRiderPhotos],
   );
   const connectedBikeSamples = useMemo(() => {
     const next = new Map(bridge.samplesByDevice);
@@ -2344,6 +2349,7 @@ export default function App() {
     setRaceCameraLocked(normalized.cameraLocked);
     setRiderOverlaysByTrack(normalized.riderOverlaysByTrack);
     setDemoRiderNames(normalized.demoRiderNames);
+    setDemoRiderPhotos(normalized.demoRiderPhotos);
     setRaceCommentaryPreferences(normalized.commentary);
   }, []);
   const persistRaceViewPreferences = useCallback((preferences: RaceViewPreferences) => {
@@ -2768,45 +2774,59 @@ export default function App() {
   useEffect(() => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
       latestRaceSyncRef.current = null;
+      racePhotoSyncPendingRef.current = true;
+      racePhotoSignatureRef.current = '';
       return;
+    }
+
+    const syncedRiders = racePlayers
+      .map((player) => {
+        const rider = riders.find((item) => item.playerId === player.id);
+        if (!rider) {
+          return null;
+        }
+
+        const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
+        return {
+          id: `${player.deviceId ?? player.id}`,
+          playerId: player.id,
+          name: player.name,
+          ...(player.photoUrl ? { photoUrl: player.photoUrl } : {}),
+          colorName: player.colorName,
+          accent: player.accent,
+          distance: rider.distance,
+          velocity: rider.velocity,
+          boost: rider.boost,
+          air: rider.air,
+          pitch: rider.pitch,
+          phase: rider.phase,
+          rank: rider.rank,
+          finishedAt: rider.finishedAt,
+          selectedBranch: rider.selectedBranch,
+          actualBranches: rider.actualBranches,
+          watts: sample?.watts ?? rider.lastWatts,
+          cadence: sample?.cadence ?? null,
+          speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
+          signal: sample?.signal ?? 0,
+          sampleAt: sample?.at ?? null,
+        };
+      })
+      .filter((rider): rider is OutgoingMultiplayerRaceState['riders'][number] => rider != null);
+    const photoSignature = syncedRiders
+      .map((rider) => (
+        `${rider.id}:${rider.photoUrl?.length ?? 0}:${rider.photoUrl?.slice(-24) ?? ''}`
+      ))
+      .join('|');
+    if (photoSignature !== racePhotoSignatureRef.current) {
+      racePhotoSignatureRef.current = photoSignature;
+      racePhotoSyncPendingRef.current = true;
     }
 
     latestRaceSyncRef.current = {
       sessionId: raceCapture?.sessionId ?? `${multiplayer.currentRoom.id}:${effectiveTrack.id}:manual`,
       trackId: effectiveTrack.id,
       raceState,
-      riders: racePlayers
-        .map((player) => {
-          const rider = riders.find((item) => item.playerId === player.id);
-          if (!rider) {
-            return null;
-          }
-
-          const sample = player.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
-          return {
-            id: `${player.deviceId ?? player.id}`,
-            playerId: player.id,
-            name: player.name,
-            colorName: player.colorName,
-            accent: player.accent,
-            distance: rider.distance,
-            velocity: rider.velocity,
-            boost: rider.boost,
-            air: rider.air,
-            pitch: rider.pitch,
-            phase: rider.phase,
-            rank: rider.rank,
-            finishedAt: rider.finishedAt,
-            selectedBranch: rider.selectedBranch,
-            actualBranches: rider.actualBranches,
-            watts: sample?.watts ?? rider.lastWatts,
-            cadence: sample?.cadence ?? null,
-            speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
-            signal: sample?.signal ?? 0,
-            sampleAt: sample?.at ?? null,
-          };
-        })
-        .filter((rider): rider is OutgoingMultiplayerRaceState['riders'][number] => rider != null),
+      riders: syncedRiders,
       summary: raceSummary,
     };
   }, [effectiveTrack.id, multiplayer.currentRoom, playMode, raceCapture?.sessionId, racePlayers, raceState, raceSummary, riders, samplesByDevice]);
@@ -2817,8 +2837,21 @@ export default function App() {
     }
 
     const sendRaceState = () => {
-      if (latestRaceSyncRef.current) {
-        multiplayer.sendRaceState(latestRaceSyncRef.current);
+      const state = latestRaceSyncRef.current;
+      if (state) {
+        const includePhotos = racePhotoSyncPendingRef.current;
+        multiplayer.sendRaceState({
+          ...state,
+          riders: state.riders.map((rider) => {
+            // The server retains the last photo; high-frequency race packets carry telemetry only.
+            if (includePhotos) {
+              return { ...rider, photoUrl: rider.photoUrl ?? '' };
+            }
+            const { photoUrl: _photoUrl, ...telemetry } = rider;
+            return telemetry;
+          }),
+        });
+        racePhotoSyncPendingRef.current = false;
       }
     };
 
@@ -3927,6 +3960,25 @@ export default function App() {
       ...raceViewPreferencesRef.current,
       demoRiderNames: nextNames,
       demoRiderNamesUpdatedAt: Date.now(),
+    });
+  }, [persistRaceViewPreferences]);
+
+  const handleDemoRiderPhotoChange = useCallback((
+    playerId: PlayerSlot['id'],
+    photoUrl: string | undefined,
+  ) => {
+    setLockedRacePlayers(null);
+    const nextPhotos = { ...raceViewPreferencesRef.current.demoRiderPhotos };
+    if (photoUrl) {
+      nextPhotos[playerId] = photoUrl;
+    } else {
+      delete nextPhotos[playerId];
+    }
+    setDemoRiderPhotos(nextPhotos);
+    persistRaceViewPreferences({
+      ...raceViewPreferencesRef.current,
+      demoRiderPhotos: nextPhotos,
+      demoRiderPhotosUpdatedAt: Date.now(),
     });
   }, [persistRaceViewPreferences]);
 
@@ -5081,6 +5133,16 @@ export default function App() {
   const handleStudioRiderRename = useCallback((riderId: string, name: string) => {
     setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
       rider.id === riderId ? renameStudioRider(rider, name) : rider
+    ))));
+  }, []);
+
+  const handleStudioRiderPhotoChange = useCallback((
+    riderId: string,
+    photoUrl: string | undefined,
+  ) => {
+    setLockedRacePlayers(null);
+    setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
+      rider.id === riderId ? updateStudioRiderPhoto(rider, photoUrl) : rider
     ))));
   }, []);
 
@@ -6620,6 +6682,7 @@ export default function App() {
               onAssignRider={handleStudioRiderAssignment}
               onAddRider={handleStudioRiderAdd}
               onRenameRider={handleStudioRiderRename}
+              onPhotoChange={handleStudioRiderPhotoChange}
               onRemoveRider={handleStudioRiderRemove}
             />
           )}
@@ -6753,6 +6816,7 @@ export default function App() {
           onAssign={demoMode ? () => undefined : assignDevice}
           onAutoAssign={demoMode ? () => undefined : autoAssign}
           onRename={demoMode ? renameDemoPlayer : renamePlayer}
+          onPhotoChange={demoMode ? handleDemoRiderPhotoChange : undefined}
           onBluetoothConnect={showBluetoothPairing && !liveBikeAccessLocked ? bluetooth.connectBike : undefined}
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}

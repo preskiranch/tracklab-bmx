@@ -4,6 +4,7 @@ import {
   defaultRaceRiderOverlayLayout,
   mergeRaceViewPreferences,
   normalizeDemoRiderNames,
+  normalizeDemoRiderPhotos,
   normalizeRaceCommentaryPreferences,
   normalizeRaceRiderOverlayLayout,
   normalizeRaceViewPreferences,
@@ -103,6 +104,15 @@ describe('race view preferences', () => {
     });
   });
 
+  it('keeps only safe per-account demo rider photos', () => {
+    const photoUrl = 'data:image/jpeg;base64,QUJDRA==';
+    expect(normalizeDemoRiderPhotos({
+      1: photoUrl,
+      2: 'data:image/svg+xml;base64,PHN2Zz4=',
+      5: photoUrl,
+    })).toEqual({ 1: photoUrl });
+  });
+
   it('keeps newer names and per-track layouts when a stale browser saves other preferences', () => {
     const current = normalizeRaceViewPreferences({
       cameraLocked: true,
@@ -116,6 +126,8 @@ describe('race view preferences', () => {
       riderOverlayUpdatedAtByTrack: { north: 200 },
       demoRiderNames: { 1: 'Maya Torres', 2: 'Jordan Lee' },
       demoRiderNamesUpdatedAt: 200,
+      demoRiderPhotos: { 1: 'data:image/jpeg;base64,QUJDRA==' },
+      demoRiderPhotosUpdatedAt: 200,
       commentary: { ...defaultRaceCommentaryPreferences, volume: 0.8 },
       commentaryUpdatedAt: 200,
     });
@@ -132,6 +144,8 @@ describe('race view preferences', () => {
       riderOverlayUpdatedAtByTrack: { north: 100 },
       demoRiderNames: {},
       demoRiderNamesUpdatedAt: 100,
+      demoRiderPhotos: {},
+      demoRiderPhotosUpdatedAt: 100,
       commentary: { ...defaultRaceCommentaryPreferences, volume: 0.6 },
       commentaryUpdatedAt: 300,
     });
@@ -141,6 +155,7 @@ describe('race view preferences', () => {
     expect(merged.earthCamerasByTrack.south).toMatchObject({ angle: 30, heading: 90, zoom: 19 });
     expect(merged.riderOverlaysByTrack.north).toMatchObject({ width: 1100, height: 260, locked: true });
     expect(merged.demoRiderNames).toEqual({ 1: 'Maya Torres', 2: 'Jordan Lee' });
+    expect(merged.demoRiderPhotos).toEqual({ 1: 'data:image/jpeg;base64,QUJDRA==' });
     expect(merged.commentary.volume).toBe(0.9);
   });
 

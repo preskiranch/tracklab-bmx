@@ -31,6 +31,13 @@ function silentWavBuffer(durationMs = 500) {
   return buffer;
 }
 
+function tinyPngBuffer() {
+  return Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+}
+
 const mockPedalZoneMapping = {
   version: 1,
   trackId: 'black-mountain-bmx',
@@ -2467,6 +2474,8 @@ test('demo rider names and the last track view restore from the signed-in accoun
       4: 'Avery Cole',
     },
     demoRiderNamesUpdatedAt: 100,
+    demoRiderPhotos: {} as Partial<Record<number, string>>,
+    demoRiderPhotosUpdatedAt: 100,
     commentary: {
       enabled: true,
       ambientEnabled: true,
@@ -2557,11 +2566,17 @@ test('demo rider names and the last track view restore from the signed-in accoun
 
   await page.getByLabel('Name for player 1').fill('Gate Master');
   await page.getByLabel('Name for player 2').fill('Rhythm Queen');
+  await page.getByLabel('Upload photo for Gate Master').setInputFiles({
+    name: 'gate-master.png',
+    mimeType: 'image/png',
+    buffer: tinyPngBuffer(),
+  });
   await page.getByRole('button', { name: 'Tilt map up', exact: true }).click();
   await page.getByRole('button', { name: 'Rotate map right', exact: true }).click();
 
   await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[1]).toBe('Gate Master');
   await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[2]).toBe('Rhythm Queen');
+  await expect.poll(() => cloudRaceViewPreferences.demoRiderPhotos[1]).toMatch(/^data:image\/jpeg;base64,/);
   await expect.poll(() => cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].angle).toBe(52);
   await expect.poll(() => cloudRaceViewPreferences.earthCamerasByTrack['black-mountain-bmx'].heading).toBe(195);
   expect(cloudRaceViewPreferences.demoRiderNamesUpdatedAt).toBeGreaterThan(100);
@@ -2569,6 +2584,9 @@ test('demo rider names and the last track view restore from the signed-in accoun
 
   await page.locator('.workflow-step.primary-action').click();
   await expect(page.getByRole('button', { name: 'Lock View', exact: true })).toBeVisible();
+  await expect(
+    page.locator('.race-rider-overlay-card').filter({ hasText: 'Gate Master' }).locator('.rider-avatar img'),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Lock View', exact: true }).click();
   await expect.poll(() => globalRaceViewPreferences?.cameraLocked).toBe(true);
   await expect.poll(
@@ -2603,6 +2621,7 @@ test('demo rider names and the last track view restore from the signed-in accoun
   await page.getByRole('button', { name: /Demo/i }).first().click();
   await expect(page.getByLabel('Name for player 1')).toHaveValue('Gate Master');
   await expect(page.getByLabel('Name for player 2')).toHaveValue('Rhythm Queen');
+  await expect(page.getByLabel('Gate Master profile picture').locator('img')).toBeVisible();
   await expect(page.getByText('Angle 52 deg', { exact: true })).toBeVisible();
   await expect(page.getByText('Heading 195 deg', { exact: true })).toBeVisible();
 });
@@ -2632,6 +2651,7 @@ test('studio rider roster syncs to the account and can be assigned to a connecte
   let cloudStudioRiders: Array<{
     id: string;
     name: string;
+    photoUrl?: string;
     createdAt: number;
     updatedAt: number;
     deletedAt?: number;
@@ -2673,15 +2693,28 @@ test('studio rider roster syncs to the account and can be assigned to a connecte
     await page.getByPlaceholder('Add student').fill('Jordan H');
     await page.getByRole('button', { name: 'Add studio rider' }).click();
     await expect.poll(() => cloudStudioRiders.find((rider) => !rider.deletedAt)?.name).toBe('Jordan H');
+    await page.getByLabel('Upload photo for Jordan H').setInputFiles({
+      name: 'jordan.png',
+      mimeType: 'image/png',
+      buffer: tinyPngBuffer(),
+    });
+    await expect.poll(() => cloudStudioRiders.find((rider) => !rider.deletedAt)?.photoUrl)
+      .toMatch(/^data:image\/jpeg;base64,/);
 
     const studentSelect = page.getByLabel(/Student riding Bike 58701/i);
     await studentSelect.selectOption({ label: 'Jordan H' });
     await expect(studentSelect).toHaveValue(cloudStudioRiders[0].id);
     await expect(page.getByText(/1 entered \/ 1 connected/i)).toBeVisible();
+    await expect(page.locator('.race-entry-rider-photo .rider-avatar img')).toBeVisible();
 
     await page.reload();
     await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole('option', { name: 'Jordan H' })).toBeAttached();
+    const studioManager = page.locator('.studio-rider-manager');
+    if (await studioManager.getAttribute('open') == null) {
+      await studioManager.locator('summary').click();
+    }
+    await expect(page.getByLabel('Jordan H profile picture').locator('img')).toBeVisible();
   } finally {
     clearInterval(sampleTimer);
     await bridge.close();

@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Bluetooth, Link, Link2Off, RadioTower, Signal, Usb } from 'lucide-react';
 import type { BikeSample, ConnectedBikeDevice, PlayerSlot } from '../types';
+import { RiderPhotoEditor } from './RiderAvatar';
 
 type PairingRailProps = {
   players: PlayerSlot[];
@@ -9,6 +10,7 @@ type PairingRailProps = {
   onAssign: (playerId: PlayerSlot['id'], deviceId: number | null) => void;
   onAutoAssign: () => void;
   onRename?: (playerId: PlayerSlot['id'], name: string) => void;
+  onPhotoChange?: (playerId: PlayerSlot['id'], photoUrl: string | undefined) => void;
   onBluetoothConnect?: () => void;
   bluetoothSupported?: boolean;
   bluetoothStatus?: string;
@@ -55,6 +57,7 @@ export function PairingRail({
   onAssign,
   onAutoAssign,
   onRename,
+  onPhotoChange,
   onBluetoothConnect,
   bluetoothSupported = false,
   bluetoothStatus,
@@ -209,6 +212,15 @@ export function PairingRail({
                   </button>
                 )}
               </div>
+
+              {onPhotoChange && (
+                <RiderPhotoEditor
+                  name={player.name}
+                  photoUrl={player.photoUrl}
+                  accent={player.accent}
+                  onPhotoChange={(photoUrl) => onPhotoChange(player.id, photoUrl)}
+                />
+              )}
 
               <label className="select-label" htmlFor={`player-${player.id}-device`}>
                 <Usb size={14} />

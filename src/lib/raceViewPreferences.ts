@@ -1,6 +1,7 @@
 import { raceViewPreferencesStorageKey } from '../data';
 import type {
   DemoRiderNames,
+  DemoRiderPhotos,
   EarthCamera,
   RaceCommentaryPreferences,
   RaceCommentaryVoicePreset,
@@ -8,6 +9,7 @@ import type {
   RaceViewPreferences,
 } from '../types';
 import { safeSetLocalStorage } from './browserStorage';
+import { normalizeRiderPhotoDataUrl } from './riderPhotos';
 
 export const defaultRaceRiderOverlayLayout: RaceRiderOverlayLayout = {
   xPct: 0.04,
@@ -126,6 +128,20 @@ export function normalizeDemoRiderNames(value: unknown): DemoRiderNames {
   ) as DemoRiderNames;
 }
 
+export function normalizeDemoRiderPhotos(value: unknown): DemoRiderPhotos {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const candidates = value as Record<string, unknown>;
+  return Object.fromEntries(
+    demoRiderIds.flatMap((playerId) => {
+      const photoUrl = normalizeRiderPhotoDataUrl(candidates[playerId]);
+      return photoUrl ? [[playerId, photoUrl]] : [];
+    }),
+  ) as DemoRiderPhotos;
+}
+
 export function normalizeRaceViewPreferences(
   value: unknown,
   fallbackCameras: Record<string, EarthCamera> = {},
@@ -168,6 +184,8 @@ export function normalizeRaceViewPreferences(
     ),
     demoRiderNames: normalizeDemoRiderNames(preferences.demoRiderNames),
     demoRiderNamesUpdatedAt: normalizedRevision(preferences.demoRiderNamesUpdatedAt),
+    demoRiderPhotos: normalizeDemoRiderPhotos(preferences.demoRiderPhotos),
+    demoRiderPhotosUpdatedAt: normalizedRevision(preferences.demoRiderPhotosUpdatedAt),
     commentary: normalizeRaceCommentaryPreferences(preferences.commentary),
     commentaryUpdatedAt: normalizedRevision(preferences.commentaryUpdatedAt),
   };
@@ -204,6 +222,7 @@ export function mergeRaceViewPreferences(
   const incoming = normalizeRaceViewPreferences(incomingValue);
   const cameraLockedFromIncoming = incoming.cameraLockedUpdatedAt >= current.cameraLockedUpdatedAt;
   const namesFromIncoming = incoming.demoRiderNamesUpdatedAt >= current.demoRiderNamesUpdatedAt;
+  const photosFromIncoming = incoming.demoRiderPhotosUpdatedAt >= current.demoRiderPhotosUpdatedAt;
   const commentaryFromIncoming = incoming.commentaryUpdatedAt >= current.commentaryUpdatedAt;
   const riderOverlayUpdatedAtByTrack = Object.fromEntries(
     [...new Set([
@@ -240,6 +259,11 @@ export function mergeRaceViewPreferences(
     demoRiderNamesUpdatedAt: Math.max(
       current.demoRiderNamesUpdatedAt,
       incoming.demoRiderNamesUpdatedAt,
+    ),
+    demoRiderPhotos: photosFromIncoming ? incoming.demoRiderPhotos : current.demoRiderPhotos,
+    demoRiderPhotosUpdatedAt: Math.max(
+      current.demoRiderPhotosUpdatedAt,
+      incoming.demoRiderPhotosUpdatedAt,
     ),
     commentary: commentaryFromIncoming ? incoming.commentary : current.commentary,
     commentaryUpdatedAt: Math.max(current.commentaryUpdatedAt, incoming.commentaryUpdatedAt),

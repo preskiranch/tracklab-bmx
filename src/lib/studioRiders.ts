@@ -1,4 +1,5 @@
 import type { PlayerSlot, StudioRider, StudioRiderAssignments } from '../types';
+import { normalizeRiderPhotoDataUrl } from './riderPhotos';
 
 export const studioRiderNameMaxLength = 64;
 export const studioRiderRosterMaxSize = 250;
@@ -31,10 +32,12 @@ export function normalizeStudioRider(value: unknown, fallbackNow = Date.now()): 
   const deletedAt = candidate.deletedAt == null
     ? undefined
     : Math.max(updatedAt, normalizeTimestamp(candidate.deletedAt, updatedAt));
+  const photoUrl = normalizeRiderPhotoDataUrl(candidate.photoUrl);
 
   return {
     id,
     name,
+    ...(photoUrl ? { photoUrl } : {}),
     createdAt,
     updatedAt: deletedAt ?? updatedAt,
     ...(deletedAt ? { deletedAt } : {}),
@@ -109,6 +112,28 @@ export function renameStudioRider(rider: StudioRider, name: string, now = Date.n
   };
 }
 
+export function updateStudioRiderPhoto(
+  rider: StudioRider,
+  photoUrl: string | undefined,
+  now = Date.now(),
+) {
+  if (rider.deletedAt) {
+    return rider;
+  }
+
+  const normalizedPhotoUrl = normalizeRiderPhotoDataUrl(photoUrl);
+  const next = {
+    ...rider,
+    updatedAt: now,
+  };
+  if (normalizedPhotoUrl) {
+    return { ...next, photoUrl: normalizedPhotoUrl };
+  }
+
+  delete next.photoUrl;
+  return next;
+}
+
 export function removeStudioRider(rider: StudioRider, now = Date.now()): StudioRider {
   return {
     ...rider,
@@ -159,6 +184,7 @@ export function applyStudioRiderAssignments(
       name: rider.name,
       riderId: rider.id,
       bikeName: player.name,
+      ...(rider.photoUrl ? { photoUrl: rider.photoUrl } : {}),
     };
   });
 }

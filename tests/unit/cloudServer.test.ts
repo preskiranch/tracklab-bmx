@@ -196,6 +196,7 @@ describe('cloud API trust boundaries', () => {
         studioRiders: [{
           id: 'rider-jordan',
           name: 'Jordan',
+          photoUrl: 'data:image/jpeg;base64,QUJDRA==',
           createdAt: 100,
           updatedAt: 100,
         }],
@@ -223,6 +224,11 @@ describe('cloud API trust boundaries', () => {
             5: 'Invalid Lane',
           },
           demoRiderNamesUpdatedAt: 200,
+          demoRiderPhotos: {
+            1: 'data:image/jpeg;base64,QUJDRA==',
+            2: 'data:image/svg+xml;base64,PHN2Zz4=',
+          },
+          demoRiderPhotosUpdatedAt: 200,
           commentary: {
             enabled: true,
             ambientEnabled: false,
@@ -248,6 +254,7 @@ describe('cloud API trust boundaries', () => {
       studioRiders: [{
         id: 'rider-jordan',
         name: 'Jordan',
+        photoUrl: 'data:image/jpeg;base64,QUJDRA==',
         createdAt: 100,
         updatedAt: 100,
       }],
@@ -274,6 +281,10 @@ describe('cloud API trust boundaries', () => {
           2: 'Jordan Lee',
         },
         demoRiderNamesUpdatedAt: 200,
+        demoRiderPhotos: {
+          1: 'data:image/jpeg;base64,QUJDRA==',
+        },
+        demoRiderPhotosUpdatedAt: 200,
         commentary: {
           enabled: true,
           ambientEnabled: false,
@@ -312,6 +323,8 @@ describe('cloud API trust boundaries', () => {
           },
           demoRiderNames: {},
           demoRiderNamesUpdatedAt: 100,
+          demoRiderPhotos: {},
+          demoRiderPhotosUpdatedAt: 100,
           commentary: {
             enabled: false,
             ambientEnabled: false,
@@ -345,6 +358,9 @@ describe('cloud API trust boundaries', () => {
       demoRiderNames: {
         1: 'Maya Torres',
         2: 'Jordan Lee',
+      },
+      demoRiderPhotos: {
+        1: 'data:image/jpeg;base64,QUJDRA==',
       },
       commentary: {
         enabled: false,

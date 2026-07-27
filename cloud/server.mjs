@@ -228,6 +228,21 @@ function sanitizeText(value, fallback, maxLength = 80) {
   return (text || fallback).slice(0, maxLength);
 }
 
+function sanitizeRiderPhotoDataUrl(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const candidate = value.trim();
+  if (!candidate || candidate.length > 60_000) {
+    return '';
+  }
+  const match = /^data:image\/(jpeg|png|webp);base64,([a-z0-9+/]+={0,2})$/i.exec(candidate);
+  if (!match || match[2].length < 4) {
+    return '';
+  }
+  return `data:image/${match[1].toLowerCase()};base64,${match[2]}`;
+}
+
 function sanitizeGuestKey(value, fallback) {
   const text = sanitizeText(value, fallback, 160);
   return text.replace(/[^a-zA-Z0-9:._-]/g, '').slice(0, 160) || fallback;
@@ -1434,6 +1449,7 @@ function sanitizeRaceViewPreferences(value) {
   const cameras = value.earthCamerasByTrack;
   const overlays = value.riderOverlaysByTrack;
   const demoRiderNames = value.demoRiderNames;
+  const demoRiderPhotos = value.demoRiderPhotos;
   const commentary = value.commentary;
   const commentaryVoicePreset = sanitizeCommentaryVoicePreset(commentary?.voicePreset);
   return {
@@ -1456,6 +1472,15 @@ function sanitizeRaceViewPreferences(value) {
       )
       : {},
     demoRiderNamesUpdatedAt: sanitizedPreferenceRevision(value.demoRiderNamesUpdatedAt),
+    demoRiderPhotos: demoRiderPhotos && typeof demoRiderPhotos === 'object' && !Array.isArray(demoRiderPhotos)
+      ? Object.fromEntries(
+        Object.entries(demoRiderPhotos)
+          .filter(([playerId]) => ['1', '2', '3', '4'].includes(playerId))
+          .map(([playerId, photoUrl]) => [playerId, sanitizeRiderPhotoDataUrl(photoUrl)])
+          .filter(([, photoUrl]) => Boolean(photoUrl)),
+      )
+      : {},
+    demoRiderPhotosUpdatedAt: sanitizedPreferenceRevision(value.demoRiderPhotosUpdatedAt),
     commentary: {
       enabled: commentary?.enabled == null ? true : Boolean(commentary.enabled),
       ambientEnabled: commentary?.ambientEnabled == null ? true : Boolean(commentary.ambientEnabled),
@@ -1528,6 +1553,12 @@ function mergeSavedRaceViewPreferences(currentValue, incomingValue) {
       && Object.keys(current.demoRiderNames).length === 0
       && Object.keys(incoming.demoRiderNames).length > 0
     );
+  const incomingPhotosAreNewer = incoming.demoRiderPhotosUpdatedAt > current.demoRiderPhotosUpdatedAt
+    || (
+      incoming.demoRiderPhotosUpdatedAt === current.demoRiderPhotosUpdatedAt
+      && Object.keys(current.demoRiderPhotos).length === 0
+      && Object.keys(incoming.demoRiderPhotos).length > 0
+    );
   const incomingCommentaryIsNewer = incoming.commentaryUpdatedAt > current.commentaryUpdatedAt;
   const overlayRevisionTrackIds = new Set([
     ...Object.keys(current.riderOverlayUpdatedAtByTrack),
@@ -1564,6 +1595,11 @@ function mergeSavedRaceViewPreferences(currentValue, incomingValue) {
     demoRiderNamesUpdatedAt: Math.max(
       current.demoRiderNamesUpdatedAt,
       incoming.demoRiderNamesUpdatedAt,
+    ),
+    demoRiderPhotos: incomingPhotosAreNewer ? incoming.demoRiderPhotos : current.demoRiderPhotos,
+    demoRiderPhotosUpdatedAt: Math.max(
+      current.demoRiderPhotosUpdatedAt,
+      incoming.demoRiderPhotosUpdatedAt,
     ),
     commentary: incomingCommentaryIsNewer ? incoming.commentary : current.commentary,
     commentaryUpdatedAt: Math.max(current.commentaryUpdatedAt, incoming.commentaryUpdatedAt),
@@ -1604,9 +1640,11 @@ function sanitizeUserDataPatch(value) {
         const deletedAt = candidate.deletedAt == null
           ? null
           : Math.max(updatedAt, finiteNumber(candidate.deletedAt, updatedAt));
+        const photoUrl = sanitizeRiderPhotoDataUrl(candidate.photoUrl);
         return [{
           id,
           name,
+          ...(photoUrl ? { photoUrl } : {}),
           createdAt,
           updatedAt: deletedAt ?? updatedAt,
           ...(deletedAt == null ? {} : { deletedAt }),
@@ -2177,16 +2215,25 @@ function sanitizeRaceState(value, client, room) {
   }
 
   const allowedRiderCount = roomRacerSeatCountForMember(room, client.id);
+  const previousRiderPhotos = new Map(
+    (room.raceStates.get(client.id)?.riders ?? [])
+      .map((rider) => [rider.id, sanitizeRiderPhotoDataUrl(rider.photoUrl)]),
+  );
   const riders = Array.isArray(value.riders)
     ? value.riders.slice(0, allowedRiderCount).map((rider, index) => {
       const colorName = ['lime', 'red', 'blue', 'yellow'].includes(rider?.colorName)
         ? rider.colorName
         : ['lime', 'red', 'blue', 'yellow'][index % 4];
+      const riderId = sanitizeText(rider?.id, `${client.id}:${index + 1}`, 120);
+      const photoUrl = Object.prototype.hasOwnProperty.call(rider ?? {}, 'photoUrl')
+        ? sanitizeRiderPhotoDataUrl(rider?.photoUrl)
+        : previousRiderPhotos.get(riderId) ?? '';
 
       return {
-        id: sanitizeText(rider?.id, `${client.id}:${index + 1}`, 120),
+        id: riderId,
         playerId: Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(rider?.playerId, index + 1)))),
         name: sanitizeText(rider?.name, `${client.name} ${index + 1}`, 64),
+        ...(photoUrl ? { photoUrl } : {}),
         colorName,
         accent: sanitizeText(rider?.accent, '#7ade36', 24),
         distance: Math.max(0, finiteNumber(rider?.distance, 0)),
@@ -4107,7 +4154,7 @@ async function serveStatic(request, response) {
     }
 
     if (request.method === 'PATCH' || request.method === 'POST') {
-      const patch = sanitizeUserDataPatch(await readJsonBody(request));
+      const patch = sanitizeUserDataPatch(await readJsonBody(request, 5_000_000));
       const userData = await saveMergedUserData(profileKey, patch);
       if (!userData) {
         writeJson(response, 503, { error: 'Cloud profile storage is temporarily unavailable.' });

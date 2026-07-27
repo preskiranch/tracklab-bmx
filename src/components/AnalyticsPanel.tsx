@@ -14,6 +14,7 @@ import type {
   TrackRecord,
   TrackZone,
 } from '../types';
+import { RiderAvatar } from './RiderAvatar';
 
 type AnalyticsPanelProps = {
   track: TrackRecord;
@@ -179,6 +180,10 @@ export function AnalyticsPanel({
   const bestWatts = bestSummaryValue(raceSummary, (summary) => summary.topWatts);
   const bestReaction = bestReactionTime(raceSummary, reactionTimesByPlayer);
   const bestThirtyFoot = bestSplitTime(raceSummary);
+  const playerById = useMemo(
+    () => new Map(players.map((player) => [player.id, player])),
+    [players],
+  );
 
   return (
     <section className="analytics-panel">
@@ -290,6 +295,12 @@ export function AnalyticsPanel({
                     </td>
                     <td>
                       <div className="summary-rider">
+                        <RiderAvatar
+                          name={summary.riderName}
+                          photoUrl={playerById.get(summary.playerId)?.photoUrl}
+                          accent={summary.accent}
+                          className="summary-rider-avatar"
+                        />
                         <span
                           className="player-chip"
                           style={{ '--player-color': summary.accent } as CSSProperties}

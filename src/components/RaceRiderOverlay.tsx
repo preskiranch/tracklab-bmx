@@ -4,6 +4,7 @@ import type { GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RaceRiderOve
 import { defaultRaceRiderOverlayLayout, normalizeRaceRiderOverlayLayout } from '../lib/raceViewPreferences';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
+import { RiderAvatar } from './RiderAvatar';
 
 type DragState =
   | {
@@ -27,6 +28,7 @@ type OverlayEntry = {
   id: string;
   badge: string;
   name: string;
+  photoUrl?: string;
   accent: string;
   rank: number;
   progressPct: number;
@@ -142,6 +144,7 @@ export function RaceRiderOverlay({
         id: `local-${player.id}`,
         badge: `P${player.id}`,
         name: player.name,
+        photoUrl: player.photoUrl,
         accent: player.accent,
         rank: rider.rank,
         progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
@@ -156,6 +159,7 @@ export function RaceRiderOverlay({
       id: `ghost-${rider.id}`,
       badge: `G${index + 1}`,
       name: rider.name,
+      photoUrl: undefined,
       accent: '#22d3ee',
       rank: rider.rank,
       progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
@@ -169,6 +173,7 @@ export function RaceRiderOverlay({
       id: `remote-${state.clientId}-${rider.id}`,
       badge: `R${index + 1}`,
       name: rider.name,
+      photoUrl: rider.photoUrl,
       accent: rider.accent,
       rank: rider.rank,
       progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
@@ -347,6 +352,12 @@ export function RaceRiderOverlay({
             key={entry.id}
           >
             <div className="race-rider-overlay-summary">
+              <RiderAvatar
+                name={entry.name}
+                photoUrl={entry.photoUrl}
+                accent={entry.accent}
+                className="race-rider-overlay-avatar"
+              />
               <span className="race-rider-overlay-badge">{entry.badge}</span>
               <div className="race-rider-overlay-identity">
                 <strong>{entry.name}</strong>

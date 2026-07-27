@@ -4,6 +4,7 @@ import {
   assignStudioRider,
   mergeStudioRiders,
   removeStudioRider,
+  updateStudioRiderPhoto,
 } from '../../src/lib/studioRiders';
 import type { PlayerSlot, StudioRider } from '../../src/types';
 
@@ -60,5 +61,22 @@ describe('studio rider roster', () => {
       },
       players[1],
     ]);
+  });
+
+  it('saves a studio rider photo and carries it into the assigned race slot', () => {
+    const photoUrl = 'data:image/jpeg;base64,QUJDRA==';
+    const photographed = updateStudioRiderPhoto(rider(), photoUrl, 250);
+
+    expect(photographed).toMatchObject({ photoUrl, updatedAt: 250 });
+    expect(applyStudioRiderAssignments(
+      [player(1, 58701, 'Gate Trainer')],
+      [photographed],
+      { 58701: 'rider-jordan' },
+    )[0]).toMatchObject({
+      name: 'Jordan',
+      photoUrl,
+      bikeName: 'Gate Trainer',
+    });
+    expect(updateStudioRiderPhoto(photographed, undefined, 300)).not.toHaveProperty('photoUrl');
   });
 });

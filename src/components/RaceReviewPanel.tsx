@@ -17,6 +17,7 @@ import type {
   TrackRecord,
   TrackZone,
 } from '../types';
+import { RiderAvatar } from './RiderAvatar';
 
 type RaceReviewPanelProps = {
   track: TrackRecord;
@@ -122,6 +123,10 @@ export function RaceReviewPanel({
       deviceId: null,
     }))
     : players;
+  const playerById = useMemo(
+    () => new Map(players.map((player) => [player.id, player])),
+    [players],
+  );
 
   return (
     <section className="race-review-panel" aria-label="Post-race review">
@@ -160,6 +165,12 @@ export function RaceReviewPanel({
           {reviewSummary.map((summary) => (
             <div className="race-review-rider-card" key={summary.playerId}>
               <div className="race-review-rider-heading">
+                <RiderAvatar
+                  name={summary.riderName}
+                  photoUrl={playerById.get(summary.playerId)?.photoUrl}
+                  accent={summary.accent}
+                  className="race-review-rider-avatar"
+                />
                 <span
                   className="player-chip"
                   style={{ '--player-color': summary.accent } as CSSProperties}

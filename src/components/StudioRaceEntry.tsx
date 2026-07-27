@@ -3,6 +3,7 @@ import { Trash2, UserPlus, Users } from 'lucide-react';
 import { distinctBikeDisplayName } from '../lib/bikeProfileIdentity';
 import { normalizeStudioRiderName } from '../lib/studioRiders';
 import type { PlayerSlot, StudioRider, StudioRiderAssignments } from '../types';
+import { RiderAvatar, RiderPhotoEditor } from './RiderAvatar';
 
 type StudioRaceEntryProps = {
   players: PlayerSlot[];
@@ -16,6 +17,7 @@ type StudioRaceEntryProps = {
   onAssignRider: (deviceId: number, riderId: string | null) => void;
   onAddRider: (name: string) => boolean;
   onRenameRider: (riderId: string, name: string) => void;
+  onPhotoChange: (riderId: string, photoUrl: string | undefined) => void;
   onRemoveRider: (riderId: string) => void;
 };
 
@@ -31,6 +33,7 @@ export function StudioRaceEntry({
   onAssignRider,
   onAddRider,
   onRenameRider,
+  onPhotoChange,
   onRemoveRider,
 }: StudioRaceEntryProps) {
   const [newRiderName, setNewRiderName] = useState('');
@@ -97,6 +100,9 @@ export function StudioRaceEntry({
             const entered = deviceId != null && enteredDeviceIds.includes(deviceId);
             const displayName = distinctBikeDisplayName(player, players);
             const assignedRiderId = deviceId == null ? '' : assignments[deviceId] ?? '';
+            const assignedRider = assignedRiderId
+              ? riders.find((rider) => rider.id === assignedRiderId)
+              : undefined;
 
             return (
               <div className={`race-entry-card ${entered ? 'entered' : ''}`} key={deviceId ?? player.id}>
@@ -152,6 +158,16 @@ export function StudioRaceEntry({
                     })}
                   </select>
                 </label>
+                {assignedRider ? (
+                  <div className="race-entry-rider-photo">
+                    <RiderAvatar
+                      name={assignedRider.name}
+                      photoUrl={assignedRider.photoUrl}
+                      accent={player.accent}
+                    />
+                    <span>Rider profile</span>
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -209,39 +225,46 @@ export function StudioRaceEntry({
                 const assignedPlayer = assignedDeviceId == null ? undefined : playerByDevice.get(assignedDeviceId);
                 return (
                   <div className="studio-rider-row" key={rider.id}>
-                    <label>
-                      <span className="sr-only">Rider name</span>
-                      <input
-                        type="text"
-                        value={nameDrafts[rider.id] ?? rider.name}
-                        maxLength={64}
-                        onChange={(event) => setNameDrafts((current) => ({
-                          ...current,
-                          [rider.id]: event.target.value,
-                        }))}
-                        onBlur={() => commitRiderName(rider)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.currentTarget.blur();
-                          } else if (event.key === 'Escape') {
-                            setNameDrafts((current) => {
-                              const next = { ...current };
-                              delete next[rider.id];
-                              return next;
-                            });
-                          }
-                        }}
-                      />
-                    </label>
-                    <small>{assignedPlayer ? `P${assignedPlayer.id}` : 'Available'}</small>
-                    <button
-                      type="button"
-                      title={`Remove ${rider.name}`}
-                      aria-label={`Remove ${rider.name} from studio riders`}
-                      onClick={() => onRemoveRider(rider.id)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="studio-rider-row-main">
+                      <label>
+                        <span className="sr-only">Rider name</span>
+                        <input
+                          type="text"
+                          value={nameDrafts[rider.id] ?? rider.name}
+                          maxLength={64}
+                          onChange={(event) => setNameDrafts((current) => ({
+                            ...current,
+                            [rider.id]: event.target.value,
+                          }))}
+                          onBlur={() => commitRiderName(rider)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.currentTarget.blur();
+                            } else if (event.key === 'Escape') {
+                              setNameDrafts((current) => {
+                                const next = { ...current };
+                                delete next[rider.id];
+                                return next;
+                              });
+                            }
+                          }}
+                        />
+                      </label>
+                      <small>{assignedPlayer ? `P${assignedPlayer.id}` : 'Available'}</small>
+                      <button
+                        type="button"
+                        title={`Remove ${rider.name}`}
+                        aria-label={`Remove ${rider.name} from studio riders`}
+                        onClick={() => onRemoveRider(rider.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <RiderPhotoEditor
+                      name={rider.name}
+                      photoUrl={rider.photoUrl}
+                      onPhotoChange={(photoUrl) => onPhotoChange(rider.id, photoUrl)}
+                    />
                   </div>
                 );
               })}
