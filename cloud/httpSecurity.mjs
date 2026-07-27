@@ -55,7 +55,7 @@ export function applySecurityHeaders(request, response) {
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('X-Frame-Options', 'DENY');
   response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  response.setHeader('Permissions-Policy', 'camera=(self), geolocation=(self), microphone=(self), fullscreen=(self)');
+  response.setHeader('Permissions-Policy', 'camera=(), geolocation=(self), microphone=(self), fullscreen=(self)');
 
   const origin = publicRequestOrigin(request);
   if (origin?.startsWith('https://')) {

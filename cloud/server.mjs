@@ -57,12 +57,6 @@ import {
   verifyRacerSubscriptionOrder,
 } from './squareBilling.mjs';
 import {
-  createDailyMeetingAccess,
-  dailyVideoConfigStatus,
-  dailyVideoParticipantLimit,
-  dailyVideoSdkVersion,
-} from './dailyVideo.mjs';
-import {
   applySecurityHeaders,
   createRateLimiter,
   mutationOriginAllowed,
@@ -104,7 +98,6 @@ const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
-const dailyVideoTokenRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
@@ -4288,7 +4281,6 @@ async function serveStatic(request, response) {
   }
 
   if (requestUrl.pathname === '/api/multiplayer/health') {
-    const dailyVideo = dailyVideoConfigStatus();
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({
       ok: true,
@@ -4301,149 +4293,7 @@ async function serveStatic(request, response) {
         oneBikeMonthlyCents: racerMonthlyCents(1),
         fourBikeMonthlyCents: racerMonthlyCents(maxRaceBikeCount),
       },
-      workoutVideo: {
-        provider: 'daily',
-        configured: dailyVideo.configured,
-        maxParticipants: dailyVideoParticipantLimit,
-        audio: false,
-        chat: false,
-        privateRoomsOnly: true,
-        recording: false,
-        screenSharing: false,
-        sdkVersion: dailyVideoSdkVersion,
-        under13Allowed: false,
-      },
     }));
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/multiplayer/video/config') {
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
-      writeJson(response, 405, { error: 'Method not allowed' });
-      return;
-    }
-
-    const session = await requireAuthSession(request, response);
-    if (!session) {
-      return;
-    }
-
-    const dailyVideo = dailyVideoConfigStatus();
-    const body = JSON.stringify({
-      provider: 'daily',
-      available: dailyVideo.configured,
-      maxParticipants: dailyVideoParticipantLimit,
-      audio: false,
-      chat: false,
-      privateRoomsOnly: true,
-      recording: false,
-      screenSharing: false,
-      sdkVersion: dailyVideoSdkVersion,
-      under13Allowed: false,
-    });
-    response.writeHead(200, {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'Content-Length': Buffer.byteLength(body),
-    });
-    response.end(request.method === 'HEAD' ? undefined : body);
-    return;
-  }
-
-  if (requestUrl.pathname === '/api/multiplayer/video/token') {
-    if (request.method !== 'POST') {
-      writeJson(response, 405, { error: 'Method not allowed' });
-      return;
-    }
-
-    const session = await requireAuthSession(request, response);
-    if (!session) {
-      return;
-    }
-
-    if (!enforceRateLimit(request, response, dailyVideoTokenRateLimiter, 30, 'daily-video-token')) {
-      return;
-    }
-
-    const payload = await readJsonBody(request, 8_000);
-    const roomId = sanitizeText(payload?.roomId, '', 32).toUpperCase();
-    const room = rooms.get(roomId);
-    if (!room) {
-      writeJson(response, 404, { error: 'Join an active multiplayer room before sharing a camera.' });
-      return;
-    }
-
-    if (room.private !== true) {
-      writeJson(response, 403, {
-        error: 'Workout cameras are available only in private invited rooms.',
-        code: 'PRIVATE_VIDEO_ROOM_REQUIRED',
-      });
-      return;
-    }
-
-    if (payload?.safetyConfirmed !== true) {
-      writeJson(response, 400, {
-        error: 'Confirm the workout camera safety rules before sharing video.',
-        code: 'VIDEO_SAFETY_CONFIRMATION_REQUIRED',
-      });
-      return;
-    }
-
-    const profileKey = authProfileKey(session.user);
-    const roomClients = [...room.members]
-      .map((clientId) => clients.get(clientId))
-      .filter((client) => client?.guestKey === profileKey);
-    const racerClient = roomClients.find((client) => room.racers?.has(client.id));
-    if (!racerClient) {
-      writeJson(response, 403, { error: 'Only racers in this room can share workout video.' });
-      return;
-    }
-
-    const dailyVideo = dailyVideoConfigStatus();
-    if (!dailyVideo.configured) {
-      writeJson(response, 503, {
-        error: 'Daily workout cameras are not configured yet.',
-        code: 'DAILY_VIDEO_NOT_CONFIGURED',
-      });
-      return;
-    }
-
-    const userName = sanitizeText(session.user.displayName, racerClient.name, 64);
-    let videoAccess;
-    try {
-      videoAccess = await createDailyMeetingAccess({
-        apiBaseUrl: dailyVideo.apiBaseUrl,
-        apiKey: dailyVideo.apiKey,
-        roomId: room.id,
-        profileKey,
-        userName,
-      });
-    } catch (error) {
-      console.error('Daily workout video authorization failed:', error instanceof Error ? error.message : error);
-      cloudTelemetry.increment('tracklab_daily_video_token_failures_total');
-      writeJson(response, 502, {
-        error: 'Private workout video could not start. The race is still available.',
-        code: 'DAILY_VIDEO_AUTHORIZATION_FAILED',
-      });
-      return;
-    }
-
-    cloudTelemetry.increment('tracklab_daily_video_tokens_total');
-    writeJson(response, 200, {
-      provider: 'daily',
-      token: videoAccess.token,
-      expiresAt: videoAccess.expiresAt,
-      roomUrl: videoAccess.roomUrl,
-      userName,
-      maxParticipants: dailyVideoParticipantLimit,
-      audio: false,
-      chat: false,
-      privateRoomsOnly: true,
-      recording: false,
-      screenSharing: false,
-      sdkVersion: dailyVideoSdkVersion,
-      under13Allowed: false,
-    });
     return;
   }
 

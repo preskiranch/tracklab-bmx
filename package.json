@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.14 <25"
+    "node": ">=22.12 <25"
   },
   "scripts": {
     "dev": "concurrently -k -n bike-connector,web -c cyan,green \"npm:bridge\" \"npm:web\"",
@@ -48,7 +48,6 @@
     "probe:load": "node scripts/probe-runtime-load.mjs"
   },
   "dependencies": {
-    "@daily-co/daily-js": "^0.91.0",
     "lucide-react": "^0.562.0",
     "pg": "^8.22.0",
     "react": "^19.2.3",

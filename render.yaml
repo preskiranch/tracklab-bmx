@@ -28,8 +28,6 @@ services:
         value: "1000"
       - key: OPENAI_API_KEY
         sync: false
-      - key: DAILY_API_KEY
-        sync: false
       - key: SQUARE_ENVIRONMENT
         sync: false
       - key: SQUARE_VERSION

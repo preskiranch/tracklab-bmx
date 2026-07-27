@@ -34,7 +34,6 @@ import { DeveloperToolsPanel } from './components/DeveloperToolsPanel';
 import { EarthTrackView } from './components/EarthTrackView';
 import { MembershipLanding } from './components/MembershipLanding';
 import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
-import { MultiplayerVideoDock } from './components/MultiplayerVideoDock';
 import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { StudioRaceEntry } from './components/StudioRaceEntry';
@@ -207,7 +206,7 @@ import { useRaceCommentary } from './hooks/useRaceCommentary';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
 import { useMultiplayer } from './hooks/useMultiplayer';
-import { useDailyRoomVideo } from './hooks/useDailyRoomVideo';
+import { useRoomVoiceChat } from './hooks/useRoomVoiceChat';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import type {
   AppMode,
@@ -2295,6 +2294,12 @@ export default function App() {
     track: effectiveTrack,
     bikeCount: demoMode ? activePlayers.length : enteredRacePlayers.length,
   });
+  const roomVoice = useRoomVoiceChat({
+    currentRoom: multiplayer.currentRoom,
+    currentUserId: multiplayer.clientId,
+    voiceSignals: multiplayer.voiceSignals,
+    sendVoiceSignal: multiplayer.sendVoiceSignal,
+  });
   const localRaceSeatLimit = useMemo(() => {
     const raceCandidateCount = lockedRacePlayers?.length ?? (demoMode ? activePlayers.length : enteredRacePlayers.length);
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
@@ -2563,13 +2568,6 @@ export default function App() {
     splitDecisionPoints,
     raceZones,
   );
-  const roomVideo = useDailyRoomVideo({
-    currentRoom: multiplayer.currentRoom,
-    currentUserId: multiplayer.clientId,
-    enabled: playMode === 'multiplayer',
-    raceFinished: raceState === 'finished',
-    riderName: multiplayer.profile.name,
-  });
   const raceCommentary = useRaceCommentary({
     preferences: raceCommentaryPreferences,
     raceState,
@@ -6445,10 +6443,6 @@ export default function App() {
       className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}`}
       ref={raceShellRef}
     >
-      <MultiplayerVideoDock
-        controller={roomVideo}
-        raceActive={raceState === 'racing' || startGateStatus.active}
-      />
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark">
@@ -7123,18 +7117,12 @@ export default function App() {
                   onChatDraftChange={setChatDraft}
                   onChatSend={sendChatMessage}
                   trackVoteCandidates={multiplayerVoteCandidates}
-                  workoutVideoAvailable={roomVideo.available}
-                  workoutVideoCameraOn={roomVideo.cameraOn}
-                  workoutVideoEligible={roomVideo.eligible}
-                  workoutVideoJoined={roomVideo.joined}
-                  workoutVideoJoining={roomVideo.joining}
-                  workoutVideoParticipantCount={roomVideo.participants.length}
-                  workoutVideoStatus={roomVideo.status}
-                  workoutVideoSupported={roomVideo.supported}
-                  workoutVideoVisible={roomVideo.available || adminProfileActive}
-                  onWorkoutVideoCameraToggle={() => void roomVideo.toggleCamera()}
-                  onWorkoutVideoJoin={() => void roomVideo.join()}
-                  onWorkoutVideoLeave={() => void roomVideo.leave()}
+                  voiceEnabled={roomVoice.enabled}
+                  voiceSupported={roomVoice.supported}
+                  voiceStatus={roomVoice.status}
+                  voiceRemoteCount={roomVoice.remoteCount}
+                  onVoiceStart={roomVoice.start}
+                  onVoiceStop={roomVoice.stop}
                 />
               </div>
             </div>

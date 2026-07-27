@@ -5,16 +5,15 @@ import {
   Link,
   LogOut,
   MessageSquare,
+  Mic,
+  MicOff,
   Plus,
   RadioTower,
   Send,
-  ShieldCheck,
   Shuffle,
   Trophy,
   UserPlus,
   Users,
-  Video,
-  VideoOff,
   Vote,
   X,
   Zap,
@@ -104,18 +103,12 @@ type MultiplayerPanelProps = {
   onRespondToGroupInvite: (inviteId: string, accepted: boolean) => void;
   onChatDraftChange: (value: string) => void;
   onChatSend: () => void;
-  workoutVideoAvailable: boolean;
-  workoutVideoCameraOn: boolean;
-  workoutVideoEligible: boolean;
-  workoutVideoJoined: boolean;
-  workoutVideoJoining: boolean;
-  workoutVideoParticipantCount: number;
-  workoutVideoStatus: string;
-  workoutVideoSupported: boolean;
-  workoutVideoVisible: boolean;
-  onWorkoutVideoCameraToggle: () => void;
-  onWorkoutVideoJoin: () => void;
-  onWorkoutVideoLeave: () => void;
+  voiceEnabled: boolean;
+  voiceSupported: boolean;
+  voiceStatus: string;
+  voiceRemoteCount: number;
+  onVoiceStart: () => void;
+  onVoiceStop: () => void;
 };
 
 function sampleForPlayer(player: PlayerSlot, samplesByDevice: Map<number, BikeSample>) {
@@ -192,31 +185,20 @@ export function MultiplayerPanel({
   onRespondToGroupInvite,
   onChatDraftChange,
   onChatSend,
-  workoutVideoAvailable,
-  workoutVideoCameraOn,
-  workoutVideoEligible,
-  workoutVideoJoined,
-  workoutVideoJoining,
-  workoutVideoParticipantCount,
-  workoutVideoStatus,
-  workoutVideoSupported,
-  workoutVideoVisible,
-  onWorkoutVideoCameraToggle,
-  onWorkoutVideoJoin,
-  onWorkoutVideoLeave,
+  voiceEnabled,
+  voiceSupported,
+  voiceStatus,
+  voiceRemoteCount,
+  onVoiceStart,
+  onVoiceStop,
 }: MultiplayerPanelProps) {
   const [profileKeyDraft, setProfileKeyDraft] = useState(profileKey);
   const [selectedRiderIds, setSelectedRiderIds] = useState<string[]>([]);
   const [localSeatCount, setLocalSeatCount] = useState(1);
   const [groupNameDraft, setGroupNameDraft] = useState('');
   const [activeGroupId, setActiveGroupId] = useState('');
-  const [workoutVideoSafetyConfirmed, setWorkoutVideoSafetyConfirmed] = useState(false);
   const localBikeCapacity = Math.max(1, Math.min(maxPlayers, players.length || 1));
   const localSeatOptions = Array.from({ length: localBikeCapacity }, (_, index) => index + 1);
-
-  useEffect(() => {
-    setWorkoutVideoSafetyConfirmed(false);
-  }, [currentRoom?.id]);
 
   useEffect(() => {
     setProfileKeyDraft(profileKey);
@@ -548,80 +530,26 @@ export function MultiplayerPanel({
         </section>
       )}
 
-      {playMode === 'multiplayer' && currentRoom?.private && workoutVideoVisible && (
-        <section className="panel-section workout-video-section">
+      {playMode === 'multiplayer' && currentRoom && (
+        <section className="panel-section voice-section">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Optional live video</span>
-              <h3>Workout Cameras</h3>
+              <span className="eyebrow">Voice</span>
+              <h3>Live audio chat</h3>
             </div>
-            {workoutVideoJoined ? <Video size={18} /> : <VideoOff size={18} />}
+            {voiceEnabled ? <Mic size={18} /> : <MicOff size={18} />}
           </div>
 
-          <div className="workout-video-card">
-            <div className="workout-video-safety">
-              <ShieldCheck size={19} />
-              <div>
-                <strong>Private camera-only room</strong>
-                <span>Daily audio, chat, recording, transcription and screen sharing are disabled.</span>
-                <span>Use video only with people you know. Never share private information.</span>
-              </div>
-            </div>
-            {workoutVideoJoined ? (
-              <div className="workout-video-card-controls">
-                <button type="button" onClick={onWorkoutVideoCameraToggle}>
-                  {workoutVideoCameraOn ? <VideoOff size={15} /> : <Video size={15} />}
-                  {workoutVideoCameraOn ? 'Camera off' : 'Camera on'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWorkoutVideoSafetyConfirmed(false);
-                    onWorkoutVideoLeave();
-                  }}
-                >
-                  <X size={15} />
-                  Leave video
-                </button>
-              </div>
-            ) : (
-              <>
-                <label className="workout-video-consent">
-                  <input
-                    type="checkbox"
-                    checked={workoutVideoSafetyConfirmed}
-                    onChange={(event) => setWorkoutVideoSafetyConfirmed(event.target.checked)}
-                  />
-                  <span>
-                    I am 13 or older, I have permission to share this camera, and an adult is
-                    supervising any rider under 18.
-                  </span>
-                </label>
-                <button
-                  type="button"
-                  disabled={
-                    !multiplayerOnline
-                    || !workoutVideoEligible
-                    || !workoutVideoSupported
-                    || !workoutVideoAvailable
-                    || !workoutVideoSafetyConfirmed
-                    || workoutVideoJoining
-                  }
-                  onClick={onWorkoutVideoJoin}
-                >
-                  <Video size={15} />
-                  {workoutVideoJoining ? 'Connecting camera…' : 'Share workout camera'}
-                </button>
-              </>
-            )}
-            <span>
-              {workoutVideoStatus}
-              {workoutVideoJoined ? ` / ${workoutVideoParticipantCount} connected` : ''}
-            </span>
-            <small>
-              Opt-in every session · up to four invited racers · riders under 13 cannot use
-              workout cameras until verified guardian consent is available
-            </small>
+          <div className="voice-card">
+            <button
+              type="button"
+              disabled={!voiceSupported}
+              onClick={voiceEnabled ? onVoiceStop : onVoiceStart}
+            >
+              {voiceEnabled ? <MicOff size={15} /> : <Mic size={15} />}
+              {voiceEnabled ? 'Mute voice' : 'Enable voice'}
+            </button>
+            <span>{voiceStatus} {voiceEnabled ? `/ ${voiceRemoteCount} connected` : ''}</span>
           </div>
         </section>
       )}

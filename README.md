@@ -417,7 +417,6 @@ Render environment variables:
 ```text
 VITE_GOOGLE_MAPS_API_KEY
 OPENAI_API_KEY
-DAILY_API_KEY
 VITE_WATTBIKE_BRIDGE_URL
 VITE_TRACKLAB_MULTIPLAYER_URL
 ```
@@ -427,15 +426,6 @@ VITE_TRACKLAB_MULTIPLAYER_URL
 ```text
 wss://tracklab-bmx.onrender.com/multiplayer
 ```
-
-`DAILY_API_KEY` is an optional server-only credential from Daily. When
-configured, authenticated multiplayer racers can explicitly join a private
-four-camera workout panel. Daily is loaded only after a racer accepts the
-per-session safety rules and presses **Share workout camera**. Room and token
-permissions allow video only: audio, recording, chat, transcription, and screen
-sharing are disabled. Sessions expire after 30 minutes and close after the race.
-Workout cameras are 13+ until TrackLab has a verified guardian-consent flow for
-younger riders. A Daily failure never stops the race or Wattbike data path.
 
 When commentary is enabled, TrackLab prepares a source-backed pre-race report before
 the 20-second staging countdown. Catalog facts, cited web research, saved TrackLab

@@ -2166,7 +2166,7 @@ test('live cadence detects a false start and automatically rearms after five sec
     await expect(startAction).toContainText('Start Live Race');
     await startAction.click();
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-    await expect(page.locator('.start-tree-light')).toBeVisible({ timeout: 25_000 });
+    await expect(page.locator('.start-tree-light')).toBeVisible({ timeout: 20_000 });
 
     moving = true;
     const falseStart = page.locator('.race-staging-countdown').filter({ hasText: 'False start' });

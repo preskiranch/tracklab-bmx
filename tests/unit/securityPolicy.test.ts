@@ -2,7 +2,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { bridgeCorsOrigin, bridgeOriginAllowed } from '../../bridge/originPolicy.mjs';
 import {
-  applySecurityHeaders,
   createRateLimiter,
   mutationOriginAllowed,
   pathIsInside,
@@ -49,16 +48,6 @@ describe('HTTP security policy', () => {
     expect(limiter.check('login:one', 2, 1_100).allowed).toBe(true);
     expect(limiter.check('login:one', 2, 1_200).allowed).toBe(false);
     expect(limiter.check('login:one', 2, 2_001).allowed).toBe(true);
-  });
-
-  it('allows same-origin workout cameras without opening cross-origin camera access', () => {
-    const headers = new Map<string, string>();
-    applySecurityHeaders(
-      request({ host: 'tracklab.example', 'x-forwarded-proto': 'https' }),
-      { setHeader: (name: string, value: string) => headers.set(name, value) },
-    );
-    expect(headers.get('Permissions-Policy')).toContain('camera=(self)');
-    expect(headers.get('Permissions-Policy')).toContain('microphone=(self)');
   });
 });
 
