@@ -13,9 +13,9 @@ import { normalizeRiderPhotoDataUrl } from './riderPhotos';
 
 export const defaultRaceRiderOverlayLayout: RaceRiderOverlayLayout = {
   xPct: 0.04,
-  yPct: 0.52,
+  yPct: 0.6,
   width: 940,
-  height: 420,
+  height: 340,
   locked: false,
 };
 
@@ -70,7 +70,7 @@ export function normalizeRaceRiderOverlayLayout(value: unknown): RaceRiderOverla
     xPct: Math.max(0, Math.min(1, finiteNumber(layout.xPct, defaultRaceRiderOverlayLayout.xPct))),
     yPct: Math.max(0, Math.min(1, finiteNumber(layout.yPct, defaultRaceRiderOverlayLayout.yPct))),
     width: Math.max(320, Math.min(1800, finiteNumber(layout.width, defaultRaceRiderOverlayLayout.width))),
-    height: Math.max(360, Math.min(900, finiteNumber(layout.height, defaultRaceRiderOverlayLayout.height))),
+    height: Math.max(280, Math.min(900, finiteNumber(layout.height, defaultRaceRiderOverlayLayout.height))),
     locked: Boolean(layout.locked),
   };
 }

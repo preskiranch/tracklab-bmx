@@ -1063,8 +1063,8 @@ input:focus {
 .race-review-rider-avatar {
   grid-column: 1 / -1;
   justify-self: center;
-  width: 132px;
-  height: 132px;
+  width: 88px;
+  height: 88px;
 }
 
 .race-review-rider-heading > div {
@@ -2175,8 +2175,8 @@ input:focus {
 }
 
 .race-entry-rider-photo .rider-avatar {
-  width: 102px;
-  height: 102px;
+  width: 68px;
+  height: 68px;
 }
 
 .sr-only {
@@ -2766,7 +2766,7 @@ input:focus {
   z-index: 1180;
   width: min(var(--overlay-width), calc(100% - 24px));
   height: min(var(--overlay-height), calc(100% - 24px));
-  min-height: min(360px, calc(100% - 24px));
+  min-height: min(280px, calc(100% - 24px));
   max-width: calc(100% - 24px);
   max-height: calc(100% - 24px);
   display: grid;
@@ -2909,10 +2909,10 @@ input:focus {
 .race-rider-overlay-avatar {
   grid-column: 1 / -1;
   justify-self: center;
-  width: 132px;
-  height: 132px;
+  width: 88px;
+  height: 88px;
   border-width: 3px;
-  font-size: 39px;
+  font-size: 26px;
 }
 
 .race-rider-overlay-identity {
@@ -2991,7 +2991,7 @@ input:focus {
   .race-rider-overlay {
     width: min(var(--overlay-width), calc(100% - 16px));
     height: min(var(--overlay-height), calc(100% - 16px));
-    min-height: min(480px, calc(100% - 16px));
+    min-height: min(440px, calc(100% - 16px));
   }
 
   .race-rider-overlay-grid {
@@ -3020,10 +3020,10 @@ input:focus {
   }
 
   .race-rider-overlay-avatar {
-    width: 132px;
-    height: 132px;
+    width: 88px;
+    height: 88px;
     border-width: 2px;
-    font-size: 39px;
+    font-size: 26px;
   }
 
   .race-rider-overlay-identity span {
@@ -3403,7 +3403,7 @@ input:focus {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 9px;
   min-width: 0;
-  min-height: 230px;
+  min-height: 190px;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--player-color) 55%, #273344);
   border-left: 4px solid var(--player-color);
@@ -3455,8 +3455,8 @@ input:focus {
 .rider-stat-avatar {
   grid-area: avatar;
   justify-self: center;
-  width: 132px;
-  height: 132px;
+  width: 88px;
+  height: 88px;
 }
 
 .rider-card-place {
@@ -3495,8 +3495,8 @@ input:focus {
   position: relative;
   display: inline-grid;
   flex: 0 0 auto;
-  width: 132px;
-  height: 132px;
+  width: 88px;
+  height: 88px;
   place-items: center;
   overflow: hidden;
   border: 2px solid var(--rider-avatar-accent);
@@ -3504,7 +3504,7 @@ input:focus {
   background: #253145;
   color: #ffffff;
   box-shadow: 0 2px 7px rgba(15, 23, 42, 0.18);
-  font-size: 39px;
+  font-size: 26px;
   font-weight: 950;
   letter-spacing: 0.02em;
   line-height: 1;
@@ -6332,12 +6332,12 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-width: 300px;
+  min-width: 240px;
 }
 
 .summary-rider-avatar {
-  width: 114px;
-  height: 114px;
+  width: 76px;
+  height: 76px;
 }
 
 .summary-rider > div {
