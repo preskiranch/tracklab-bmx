@@ -1213,7 +1213,12 @@ export function GoogleMapsTrackLayer({
     && Boolean(draftZoneSectionId);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
+  const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
   const draftRouteColor = routeVariantColors[mappingRouteVariantId];
+
+  useEffect(() => {
+    setSelectedPathPointIndex(null);
+  }, [mappingEditMode, mappingMode, track.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1862,8 +1867,7 @@ export function GoogleMapsTrackLayer({
       });
     }).filter((marker): marker is GoogleMarker => marker != null);
 
-    const canMovePathPoints = Boolean(onMappingPathPointMove)
-      && (mappingEditMode === 'draw' || mappingEditMode === 'curve');
+    const canMovePathPoints = Boolean(onMappingPathPointMove) && mappingEditMode === 'adjust';
     const canUseRoutePointAsZoneBoundary = mappingEditMode === 'zones' && Boolean(onMappingZonePointAdd);
     const suppressNextMapEditEvent = () => {
       suppressNextMapEditEventRef.current = true;
@@ -1873,43 +1877,57 @@ export function GoogleMapsTrackLayer({
     const pathPointMarkers = showMappingDraft ? draftPoints.map((point, index) => {
       const isStart = index === 0;
       const isFinish = index === draftPoints.length - 1 && draftPoints.length > 1;
-      const pointLabel = isStart ? null : {
+      const isSelected = mappingEditMode === 'adjust' && selectedPathPointIndex === index;
+      const pointLabel = isStart && mappingEditMode !== 'adjust' ? null : {
         color: '#111827',
         fontSize: '11px',
         fontWeight: '900',
-        text: isFinish ? 'F' : String(index + 1),
+        text: isStart ? 'S' : isFinish ? 'F' : String(index + 1),
       };
       const marker = new google.maps.Marker({
         clickable: true,
         cursor: canMovePathPoints ? 'grab' : canUseRoutePointAsZoneBoundary ? 'pointer' : undefined,
         draggable: canMovePathPoints,
         icon: {
-          fillColor: isStart || isFinish ? draftRouteColor : '#ffffff',
+          fillColor: isSelected ? '#fbbf24' : isStart || isFinish ? draftRouteColor : '#ffffff',
           fillOpacity: isStart ? 0.82 : 1,
           path: google.maps.SymbolPath.CIRCLE,
-          scale: isStart ? 6 : isFinish ? 14 : 8,
+          scale: isSelected ? 12 : isStart ? 6 : isFinish ? 14 : 8,
           strokeColor: '#111827',
-          strokeWeight: isStart ? 2 : isFinish ? 3 : 2,
+          strokeWeight: isSelected ? 4 : isStart ? 2 : isFinish ? 3 : 2,
         },
         ...(pointLabel ? { label: pointLabel } : {}),
         map,
         optimized: !(isFinish),
         position: point,
-        title: isStart ? 'Drag mapping start line' : isFinish ? 'Mapping finish' : `Mapping point ${index + 1}`,
-        zIndex: isStart ? 902 : isFinish ? 950 + index : 620 + index,
+        title: mappingEditMode === 'adjust'
+          ? `${isStart ? 'Start point' : isFinish ? 'Finish point' : `Route point ${index + 1}`} — tap or drag to move`
+          : isStart
+            ? 'Mapping start line'
+            : isFinish
+              ? 'Mapping finish'
+              : `Mapping point ${index + 1}`,
+        zIndex: isSelected ? 1_100 : isStart ? 902 : isFinish ? 950 + index : 620 + index,
       });
 
-      draftMarkerListenerRefs.current.push(marker.addListener('mousedown', suppressNextMapEditEvent));
+      if (mappingEditMode !== 'adjust') {
+        draftMarkerListenerRefs.current.push(marker.addListener('mousedown', suppressNextMapEditEvent));
+      }
 
       if (canMovePathPoints && onMappingPathPointMove) {
         draftMarkerListenerRefs.current.push(marker.addListener('dragstart', () => {
-          suppressNextMapEditEvent();
+          isDrawingRef.current = false;
+          lastDrawPointRef.current = null;
         }));
         draftMarkerListenerRefs.current.push(marker.addListener('dragend', (event) => {
           const nextPoint = event?.latLng?.toJSON();
           if (nextPoint) {
             onMappingPathPointMove(index, nextPoint);
           }
+          setSelectedPathPointIndex(null);
+        }));
+        draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
+          setSelectedPathPointIndex((current) => current === index ? null : index);
         }));
       }
 
@@ -2157,6 +2175,7 @@ export function GoogleMapsTrackLayer({
     onMappingZonePointRemove,
     raceState,
     raceViewFullscreen,
+    selectedPathPointIndex,
     status,
   ]);
 
@@ -2186,6 +2205,7 @@ export function GoogleMapsTrackLayer({
       && mappingEditMode === 'split'
       && Boolean(draftSplitBuilder?.splitPoint && draftSplitBuilder.mergePoint);
     const isCurveDrawMode = mappingInputEnabled && mappingEditMode === 'curve';
+    const isAdjustMode = mappingInputEnabled && mappingEditMode === 'adjust';
     const isDrawMode = mappingInputEnabled && (mappingEditMode === 'draw' || isCurveDrawMode || isSplitBranchDrawMode);
     const isNavigateMode = !mappingInputEnabled || mappingEditMode === 'navigate';
     const raceCameraInputLocked = raceViewFullscreen && cameraLocked;
@@ -2396,6 +2416,10 @@ export function GoogleMapsTrackLayer({
           return;
         }
 
+        if (isAdjustMode) {
+          return;
+        }
+
         if (isSplitPlacementMode) {
           return;
         }
@@ -2450,6 +2474,16 @@ export function GoogleMapsTrackLayer({
         }
 
         const point = event?.latLng?.toJSON();
+        if (
+          point
+          && isAdjustMode
+          && selectedPathPointIndex != null
+          && onMappingPathPointMove
+        ) {
+          onMappingPathPointMove(selectedPathPointIndex, point);
+          setSelectedPathPointIndex(null);
+          return;
+        }
         if (point && mappingEditMode === 'zones') {
           onMappingZonePointAdd?.(point);
         }
@@ -2493,12 +2527,14 @@ export function GoogleMapsTrackLayer({
     mappingMode,
     draftSplitBuilder,
     onMappingPathPointAdd,
+    onMappingPathPointMove,
     onMappingSplitDrawEnd,
     onMappingSplitPointAdd,
     onMappingZonePointAdd,
     raceState,
     raceViewFullscreen,
     cameraLocked,
+    selectedPathPointIndex,
     status,
   ]);
 

@@ -5,7 +5,7 @@ export type DistanceUnit = 'ft' | 'm';
 export type SessionMode = 'sprint' | 'interval';
 export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
-export type MappingEditMode = 'navigate' | 'draw' | 'curve' | 'zones' | 'split';
+export type MappingEditMode = 'navigate' | 'draw' | 'adjust' | 'curve' | 'zones' | 'split';
 export type MetricKey = 'cadence' | 'speed' | 'power' | 'reaction';
 export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
 

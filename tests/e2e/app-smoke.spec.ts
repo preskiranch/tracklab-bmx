@@ -688,6 +688,12 @@ test('pedal-zone mapping can temporarily use 3D while normal views stay satellit
   await page.getByRole('button', { name: 'Edit map' }).click();
 
   const mappingPanel = page.locator('.mapping-section');
+  const adjustPoints = mappingPanel.getByRole('button', { name: 'Adjust points', exact: true });
+  await expect(adjustPoints).toBeVisible();
+  await adjustPoints.click();
+  await expect(adjustPoints).toHaveClass(/selected/);
+  await expect(mappingPanel.getByText('Tap a route point, then tap its new location', { exact: false })).toBeVisible();
+
   await mappingPanel.getByRole('button', { name: 'Pedal Zones', exact: true }).click();
   const obstacleToggle = mappingPanel.locator('.mapping-obstacle-view-toggle');
   await expect(obstacleToggle).toBeVisible();

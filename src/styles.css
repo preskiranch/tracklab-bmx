@@ -3819,6 +3819,16 @@ input:focus {
   font-size: 11px;
 }
 
+.segmented-control.track-tools {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.segmented-control.track-tools button {
+  min-height: 34px;
+  gap: 4px;
+  font-size: 11px;
+}
+
 .segmented-control button {
   display: inline-flex;
   align-items: center;

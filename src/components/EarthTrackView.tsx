@@ -464,9 +464,13 @@ export function EarthTrackView({
                 ? 'Move map'
                 : mappingEditMode === 'draw'
                   ? 'Draw path'
-                  : mappingEditMode === 'zones'
-                    ? 'Pedal Zones'
-                    : 'Split'}
+                  : mappingEditMode === 'adjust'
+                    ? 'Adjust points'
+                    : mappingEditMode === 'curve'
+                      ? 'Curve'
+                      : mappingEditMode === 'zones'
+                        ? 'Pedal Zones'
+                        : 'Split'}
             </span>
           )}
           <span>{activeZones.length} pedal zone{activeZones.length === 1 ? '' : 's'}</span>

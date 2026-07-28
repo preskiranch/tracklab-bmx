@@ -610,7 +610,7 @@ export function SessionControlPanel({
             )}
 
             {mappingMode && (
-              <div className="segmented-control compact five-way" aria-label="Track tools">
+              <div className="segmented-control compact track-tools" aria-label="Track tools">
                 <button
                   className={mappingEditMode === 'navigate' ? 'selected' : ''}
                   type="button"
@@ -624,6 +624,13 @@ export function SessionControlPanel({
                   onClick={() => handleMappingEditModeChange('draw')}
                 >
                   Draw path
+                </button>
+                <button
+                  className={mappingEditMode === 'adjust' ? 'selected' : ''}
+                  type="button"
+                  onClick={() => handleMappingEditModeChange('adjust')}
+                >
+                  Adjust points
                 </button>
                 <button
                   className={mappingEditMode === 'curve' ? 'selected' : ''}
@@ -657,6 +664,11 @@ export function SessionControlPanel({
             </div>
 
             {splitDrawHint && <p className="mapping-hint">{splitDrawHint}</p>}
+            {mappingMode && mappingEditMode === 'adjust' && (
+              <p className="mapping-hint">
+                Tap a route point, then tap its new location—or drag it directly. Use S for the start and F for the finish.
+              </p>
+            )}
             {mappingMode && mappingEditMode === 'zones' && (
               <>
                 <p className="mapping-hint pedal-zone">
