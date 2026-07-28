@@ -350,7 +350,8 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await page.getByLabel('Password').fill('playwright-pass-2026');
   await page.getByRole('button', { name: 'Create Account', exact: true }).click();
 
-  await expect(page.getByLabel('Race control')).toBeVisible();
+  await expect(page.getByLabel('Race controls')).toBeVisible();
+  await expect(page.locator('.race-control-dock')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Custom Location/i })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Demo/i }).first()).toBeVisible();
   await expect(page.getByText(/Track Mapping|Trace route/i)).toHaveCount(0);
@@ -630,7 +631,8 @@ test('regular racers can use published tracks but cannot access mapping tools', 
   await page.getByRole('button', { name: 'Open App' }).click();
 
   await expect(page.getByLabel('Race readiness')).toContainText('Track Ready');
-  await expect(page.getByLabel('Race control')).toBeVisible();
+  await expect(page.getByLabel('Race controls')).toBeVisible();
+  await expect(page.locator('.race-control-dock')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Custom Location' })).toHaveCount(0);
   await expect(page.getByLabel('Preview regular user interface')).toHaveCount(0);
@@ -724,7 +726,7 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
   await page.goto('/');
 
   await page.getByRole('button', { name: 'Open App' }).click();
-  await expect(page.getByLabel('Race control')).toBeVisible();
+  await expect(page.getByLabel('Race controls')).toBeVisible();
   await page.getByRole('button', { name: 'Advanced Connector' }).click();
 
   await expect(page.getByRole('button', { name: 'Open Mac Connector' })).toBeVisible();

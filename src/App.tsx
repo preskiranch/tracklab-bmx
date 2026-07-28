@@ -7072,48 +7072,6 @@ export default function App() {
                   onMappingSplitPointAdd={handleMappingSplitPointAdd}
                   onMappingSplitDrawEnd={handleMappingSplitDrawEnd}
                   />
-                  {!mappingMode && !raceViewFullscreen && (
-                    <aside className="race-control-dock" aria-label="Race control">
-                      <span className="eyebrow">Race Control</span>
-                      <strong>{workflowRaceReady ? 'Everything is ready' : 'Finish race setup'}</strong>
-                      <label>
-                        <span>Commentary</span>
-                        <input
-                          type="checkbox"
-                          checked={raceCommentaryPreferences.enabled}
-                          onChange={(event) => handleRaceCommentaryPreferencesChange({
-                            ...raceCommentaryPreferences,
-                            enabled: event.target.checked,
-                          })}
-                        />
-                      </label>
-                      <label>
-                        <span>Ambient sound</span>
-                        <input
-                          type="checkbox"
-                          checked={raceCommentaryPreferences.ambientEnabled}
-                          onChange={(event) => handleRaceCommentaryPreferencesChange({
-                            ...raceCommentaryPreferences,
-                            ambientEnabled: event.target.checked,
-                          })}
-                        />
-                      </label>
-                      <button
-                        className="race-control-start"
-                        type="button"
-                        disabled={!workflowRaceReady}
-                        onPointerDown={workflowRaceReady ? primeRaceAudio : undefined}
-                        onClick={() => void handleStart()}
-                      >
-                        {raceState === 'finished' ? 'Race Again' : 'Start Race'}
-                      </button>
-                      {canCancelRace && (
-                        <button className="race-control-cancel" type="button" onClick={handleCancel}>
-                          Cancel Race
-                        </button>
-                      )}
-                    </aside>
-                  )}
                 </div>
 
                 <AnalyticsPanel

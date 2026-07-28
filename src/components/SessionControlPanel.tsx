@@ -1237,6 +1237,39 @@ export function SessionControlPanel({
           </div>
         )}
 
+        <div className="race-control-actions" aria-label="Race controls">
+          <button
+            className="action-button primary"
+            type="button"
+            onPointerDown={onPrimeAudio}
+            onClick={onStart}
+            disabled={!canStart}
+          >
+            <Flag size={18} />
+            {!hasMappedRoute
+              ? 'Map Route First'
+              : activeBikeCount === 0
+                ? (demoMode ? 'Choose Demo Riders' : 'Connect Bikes First')
+                : startGateActive
+                  ? startGateLabel || 'Gate Sequence'
+                : raceState === 'finished'
+                  ? 'Race Again'
+                : raceState === 'racing'
+                  ? 'Racing'
+                  : demoMode ? 'Start Demo Race' : 'Start Live Race'}
+          </button>
+          {canCancel && (
+            <button className="action-button danger" type="button" onClick={onCancel}>
+              <X size={18} />
+              Cancel
+            </button>
+          )}
+          <button className="action-button secondary" type="button" onClick={onReset}>
+            <RotateCcw size={18} />
+            Reset
+          </button>
+        </div>
+
       </section>
 
       {hasRaceSplitChoices && (
@@ -1473,38 +1506,6 @@ export function SessionControlPanel({
         </div>
       </section>
 
-      <section className="panel-section start-panel">
-        <button
-          className="action-button primary"
-          type="button"
-          onPointerDown={onPrimeAudio}
-          onClick={onStart}
-          disabled={!canStart}
-        >
-          <Flag size={18} />
-          {!hasMappedRoute
-            ? 'Map Route First'
-            : activeBikeCount === 0
-              ? (demoMode ? 'Choose Demo Riders' : 'Connect Bikes First')
-              : startGateActive
-                ? startGateLabel || 'Gate Sequence'
-              : raceState === 'finished'
-                ? 'Race Again'
-              : raceState === 'racing'
-                ? 'Racing'
-                : demoMode ? 'Start Demo Race' : 'Start Live Race'}
-        </button>
-        {canCancel && (
-          <button className="action-button danger" type="button" onClick={onCancel}>
-            <X size={18} />
-            Cancel
-          </button>
-        )}
-        <button className="action-button secondary" type="button" onClick={onReset}>
-          <RotateCcw size={18} />
-          Reset
-        </button>
-      </section>
     </aside>
   );
 }
