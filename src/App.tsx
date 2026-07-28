@@ -217,8 +217,6 @@ import type {
   DraftTrackSplit,
   EarthCamera,
   GhostLapPoint,
-  LeaderboardEntry,
-  LeaderboardMetric,
   MappingEditMode,
   MetricKey,
   MultiplayerRaceState,
@@ -1505,8 +1503,6 @@ export default function App() {
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [cloudUserDataStatus, setCloudUserDataStatus] = useState<CloudUserDataStatus>('loading');
   const [cloudUserDataMessage, setCloudUserDataMessage] = useState('Loading cloud profile data.');
-  const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
-  const [publicLeaderboards, setPublicLeaderboards] = useState<Record<LeaderboardMetric, LeaderboardEntry[]> | null>(null);
   const [chatDraft, setChatDraft] = useState('');
   const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
   const [regularUserPreview, setRegularUserPreview] = useState(false);
@@ -1828,24 +1824,10 @@ export default function App() {
     selectedTrack.longitude,
   ]);
   const effectiveTrack = useMemo(
-    () => {
-      const mappedTrack = selectedTrackMapping
-        ? applyUserTrackMapping(selectedTrack, selectedTrackMapping, hasDualStartRoutes ? raceRouteVariantId : undefined)
-        : selectedTrack;
-      if (!publicLeaderboards) {
-        return mappedTrack;
-      }
-
-      return {
-        ...mappedTrack,
-        leaderboards: {
-          rpm: publicLeaderboards.rpm.length > 0 ? publicLeaderboards.rpm : mappedTrack.leaderboards.rpm,
-          speed: publicLeaderboards.speed.length > 0 ? publicLeaderboards.speed : mappedTrack.leaderboards.speed,
-          watts: publicLeaderboards.watts.length > 0 ? publicLeaderboards.watts : mappedTrack.leaderboards.watts,
-        },
-      };
-    },
-    [hasDualStartRoutes, publicLeaderboards, raceRouteVariantId, selectedTrack, selectedTrackMapping],
+    () => (selectedTrackMapping
+      ? applyUserTrackMapping(selectedTrack, selectedTrackMapping, hasDualStartRoutes ? raceRouteVariantId : undefined)
+      : selectedTrack),
+    [hasDualStartRoutes, raceRouteVariantId, selectedTrack, selectedTrackMapping],
   );
   const baseRouteLengthMeters = useMemo(() => {
     if (!effectiveTrack.centerline || effectiveTrack.centerline.length < 2) {
@@ -1901,41 +1883,6 @@ export default function App() {
     }
   }, [hasDualStartRoutes, raceRouteVariantId, selectedTrack.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setPublicLeaderboards(null);
-
-    if (isCustomRoutePreviewId(selectedTrack.id)) {
-      return undefined;
-    }
-
-    fetch(`/api/multiplayer/leaderboards?trackId=${encodeURIComponent(selectedTrack.id)}`)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Leaderboard request returned ${response.status}`);
-        }
-        return response.json() as Promise<{ leaderboards?: Record<LeaderboardMetric, LeaderboardEntry[]> }>;
-      })
-      .then((payload) => {
-        if (cancelled || !payload.leaderboards) {
-          return;
-        }
-        setPublicLeaderboards({
-          rpm: Array.isArray(payload.leaderboards.rpm) ? payload.leaderboards.rpm : [],
-          speed: Array.isArray(payload.leaderboards.speed) ? payload.leaderboards.speed : [],
-          watts: Array.isArray(payload.leaderboards.watts) ? payload.leaderboards.watts : [],
-        });
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPublicLeaderboards(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTrack.id]);
   const draftRouteSplitSections = useMemo(() => {
     const activeSplitPreview = draftSplitBuilder ? splitSectionPreviewFromDraft(draftSplitBuilder) : null;
     return activeSplitPreview ? [...draftSplitSections, activeSplitPreview] : draftSplitSections;
@@ -7111,14 +7058,18 @@ export default function App() {
                     raceSummary={raceSummary}
                     selectedMetrics={selectedMetrics}
                     reactionTimesByPlayer={reactionTimesByPlayer}
-                    leaderboardMetric={leaderboardMetric}
                     speedUnit={speedUnit}
                     distanceUnit={distanceUnit}
                     activeZones={activeZones}
                     raceCapture={raceCapture}
+                    ghostLaps={availableGhostLaps}
+                    selectedGhostIds={selectedGhostIds}
+                    currentProfileKey={cloudProfileKey}
                     onRaceCaptureJsonExport={exportRaceCaptureJson}
                     onRaceCaptureCsvExport={exportRaceCaptureCsv}
-                    onLeaderboardMetricChange={setLeaderboardMetric}
+                    onGhostToggle={toggleGhostLap}
+                    onGhostClear={clearSelectedGhosts}
+                    onGhostAnalyticsSharingChange={handleGhostAnalyticsSharingChange}
                   />
                 </Suspense>
               </div>
@@ -7149,7 +7100,6 @@ export default function App() {
                   hasDualStartRoutes={hasDualStartRoutes}
                   isLoopTrack={isLoopTrack}
                   lapCount={lapCount}
-                  currentProfileKey={cloudProfileKey}
                   isAdminProfile={developerUiActive}
                   raceState={raceState}
                   activeBikeCount={racePlayers.length}
@@ -7181,8 +7131,6 @@ export default function App() {
                   startGateActive={startGateStatus.active}
                   startGateLabel={startGateStatus.label}
                   startGateDetail={startGateStatus.detail}
-                  ghostLaps={availableGhostLaps}
-                  selectedGhostIds={selectedGhostIds}
                   commentaryPreferences={raceCommentaryPreferences}
                   commentarySpeechStatus={raceCommentary.speechStatus}
                   onMetricToggle={toggleMetric}
@@ -7226,9 +7174,6 @@ export default function App() {
                   onMappingRemove={removeMapping}
                   onMappingExport={exportMapping}
                   onMappingImport={importMapping}
-                  onGhostToggle={toggleGhostLap}
-                  onGhostClear={clearSelectedGhosts}
-                  onGhostAnalyticsSharingChange={handleGhostAnalyticsSharingChange}
                   onCommentaryPreferencesChange={handleRaceCommentaryPreferencesChange}
                   onPrimeAudio={primeRaceAudio}
                   onStart={handleStart}

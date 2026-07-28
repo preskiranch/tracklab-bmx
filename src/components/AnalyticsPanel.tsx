@@ -1,10 +1,10 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { Activity, Download, Gauge, ListFilter, Timer, Trophy, Zap } from 'lucide-react';
 import { buildRaceZoneResults, zoneRiderResult } from '../lib/raceReview';
 import { formatDistanceRangeMeters, formatReactionTime, formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
   DistanceUnit,
-  LeaderboardMetric,
+  GhostLap,
   MetricKey,
   PlayerSlot,
   RaceCapture,
@@ -23,14 +23,18 @@ type AnalyticsPanelProps = {
   raceSummary: RaceSummaryEntry[];
   selectedMetrics: MetricKey[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
-  leaderboardMetric: LeaderboardMetric;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
   activeZones: TrackZone[];
   raceCapture: RaceCapture | null;
+  ghostLaps: GhostLap[];
+  selectedGhostIds: string[];
+  currentProfileKey: string;
   onRaceCaptureJsonExport: () => void;
   onRaceCaptureCsvExport: () => void;
-  onLeaderboardMetricChange: (metric: LeaderboardMetric) => void;
+  onGhostToggle: (ghostId: string) => void;
+  onGhostClear: () => void;
+  onGhostAnalyticsSharingChange: (ghostId: string, analyticsPublic: boolean) => void;
 };
 
 const metricMeta: Record<MetricKey, { label: string; unit: string; icon: typeof Activity }> = {
@@ -40,10 +44,25 @@ const metricMeta: Record<MetricKey, { label: string; unit: string; icon: typeof 
   reaction: { label: 'Reaction', unit: 'RT', icon: Timer },
 };
 
-const leaderboardLabels: Record<LeaderboardMetric, string> = {
-  rpm: 'Best RPM',
-  speed: 'Top Speed',
-  watts: 'Most Watts',
+type GhostLeaderboardMetric =
+  | 'finish'
+  | 'thirtyFoot'
+  | 'topCadence'
+  | 'averageCadence'
+  | 'topSpeed'
+  | 'averageSpeed'
+  | 'topWatts'
+  | 'averageWatts';
+
+const ghostLeaderboardLabels: Record<GhostLeaderboardMetric, string> = {
+  finish: 'Fastest Lap',
+  thirtyFoot: 'Fastest 30 ft',
+  topCadence: 'Peak RPM',
+  averageCadence: 'Average RPM',
+  topSpeed: 'Top Speed',
+  averageSpeed: 'Average Speed',
+  topWatts: 'Peak Power',
+  averageWatts: 'Average Power',
 };
 
 function zoneTypeLabel(zone: TrackZone) {
@@ -58,13 +77,80 @@ function zoneTypeLabel(zone: TrackZone) {
   return 'Pedal Zone';
 }
 
-function leaderboardValue(value: number, metric: LeaderboardMetric, speedUnit: SpeedUnit) {
-  if (metric === 'speed') {
-    const speed = speedUnit === 'mph' ? value : value / 0.621371;
-    return `${speed.toFixed(1)} ${speedUnitLabel(speedUnit)}`;
+function formatGhostRaceTime(milliseconds: number) {
+  return `${(Math.max(0, milliseconds) / 1000).toFixed(2)}s`;
+}
+
+function ghostSourceLabel(ghost: GhostLap) {
+  if (ghost.source === 'friend') {
+    return 'Friend best';
   }
 
-  return `${Math.round(value)} ${metric === 'rpm' ? 'RPM' : 'W'}`;
+  if (ghost.source === 'top') {
+    return 'Top rider';
+  }
+
+  return 'My best';
+}
+
+function ghostMetricValue(ghost: GhostLap, metric: GhostLeaderboardMetric) {
+  switch (metric) {
+    case 'finish':
+      return ghost.finishTimeMs;
+    case 'thirtyFoot':
+      return ghost.thirtyFootTimeMs;
+    case 'topCadence':
+      return ghost.summary?.topCadence ?? null;
+    case 'averageCadence':
+      return ghost.summary?.averageCadence ?? null;
+    case 'topSpeed':
+      return ghost.summary?.topSpeedKph ?? null;
+    case 'averageSpeed':
+      return ghost.summary?.averageSpeedKph ?? null;
+    case 'topWatts':
+      return ghost.summary?.topWatts ?? null;
+    case 'averageWatts':
+      return ghost.summary?.averageWatts ?? null;
+  }
+}
+
+function formatGhostMetric(
+  ghost: GhostLap,
+  metric: GhostLeaderboardMetric,
+  speedUnit: SpeedUnit,
+) {
+  const value = ghostMetricValue(ghost, metric);
+  if (value == null || !Number.isFinite(value)) {
+    return '--';
+  }
+
+  if (metric === 'finish' || metric === 'thirtyFoot') {
+    return formatGhostRaceTime(value);
+  }
+
+  if (metric === 'topSpeed' || metric === 'averageSpeed') {
+    return `${formatSpeedFromKph(value, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+  }
+
+  return `${Math.round(value)} ${metric === 'topCadence' || metric === 'averageCadence' ? 'RPM' : 'W'}`;
+}
+
+function compareGhosts(left: GhostLap, right: GhostLap, metric: GhostLeaderboardMetric) {
+  const leftValue = ghostMetricValue(left, metric);
+  const rightValue = ghostMetricValue(right, metric);
+  if (leftValue == null && rightValue != null) {
+    return 1;
+  }
+  if (leftValue != null && rightValue == null) {
+    return -1;
+  }
+  if (leftValue != null && rightValue != null && leftValue !== rightValue) {
+    return metric === 'finish' || metric === 'thirtyFoot'
+      ? leftValue - rightValue
+      : rightValue - leftValue;
+  }
+
+  return left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt;
 }
 
 function zoneRiderNameParts(value: string) {
@@ -162,15 +248,20 @@ export function AnalyticsPanel({
   raceSummary,
   selectedMetrics,
   reactionTimesByPlayer,
-  leaderboardMetric,
   speedUnit,
   distanceUnit,
   activeZones,
   raceCapture,
+  ghostLaps,
+  selectedGhostIds,
+  currentProfileKey,
   onRaceCaptureJsonExport,
   onRaceCaptureCsvExport,
-  onLeaderboardMetricChange,
+  onGhostToggle,
+  onGhostClear,
+  onGhostAnalyticsSharingChange,
 }: AnalyticsPanelProps) {
+  const [ghostLeaderboardMetric, setGhostLeaderboardMetric] = useState<GhostLeaderboardMetric>('finish');
   const zonesToDisplay = activeZones.length > 0
     ? activeZones
     : track.routeStatus === 'user-mapped'
@@ -203,9 +294,139 @@ export function AnalyticsPanel({
     () => new Map(players.map((player) => [player.name.trim().toLocaleLowerCase(), player])),
     [players],
   );
-  const leaderboardEntries = track.leaderboards[leaderboardMetric].slice(0, 50);
-  const leaderboardPodium = leaderboardEntries.slice(0, 3);
-  const remainingLeaderboardEntries = leaderboardEntries.slice(3);
+  const rankedGhosts = useMemo(
+    () => [...ghostLaps]
+      .sort((left, right) => compareGhosts(left, right, ghostLeaderboardMetric))
+      .slice(0, 50),
+    [ghostLaps, ghostLeaderboardMetric],
+  );
+  const podiumGhosts = rankedGhosts.slice(0, 3);
+  const remainingGhosts = rankedGhosts.slice(3);
+  const selectedGhostCount = selectedGhostIds.filter((ghostId) => (
+    rankedGhosts.some((ghost) => ghost.id === ghostId)
+  )).length;
+  const selectedGhosts = rankedGhosts.filter((ghost) => selectedGhostIds.includes(ghost.id));
+  const renderGhostOption = (ghost: GhostLap, rank: number) => {
+    const selected = selectedGhostIds.includes(ghost.id);
+    const currentPlayer = playerByName.get(ghost.riderName.trim().toLocaleLowerCase());
+    const savedDate = new Date(ghost.savedAt).toLocaleDateString();
+
+    if (rank <= 3) {
+      return (
+        <button
+          className={`leaderboard-row leaderboard-podium-row ghost-option ghost-leaderboard-entry ${selected ? 'selected' : ''}`}
+          type="button"
+          onClick={() => onGhostToggle(ghost.id)}
+          aria-pressed={selected}
+          key={ghost.id}
+        >
+          <PodiumTrophy rank={rank} className="leaderboard-trophy" />
+          <div className="leaderboard-rider-heading">
+            <RiderAvatar
+              name={ghost.riderName}
+              photoUrl={ghost.photoUrl ?? currentPlayer?.photoUrl}
+              accent={ghost.accent}
+              className="leaderboard-rider-avatar"
+            />
+            <span className="leaderboard-rank">#{rank}</span>
+            <div>
+              <strong>{ghost.riderName}</strong>
+              <span>{selected ? 'Selected to race' : `${ghostSourceLabel(ghost)} • ${savedDate}`}</span>
+            </div>
+          </div>
+          <strong className="leaderboard-value">
+            {formatGhostMetric(ghost, ghostLeaderboardMetric, speedUnit)}
+          </strong>
+        </button>
+      );
+    }
+
+    return (
+      <button
+        className={`leaderboard-ranked-row ghost-option ghost-leaderboard-entry ${selected ? 'selected' : ''}`}
+        type="button"
+        onClick={() => onGhostToggle(ghost.id)}
+        aria-pressed={selected}
+        key={ghost.id}
+      >
+        <span className="leaderboard-rank">#{rank}</span>
+        <RiderAvatar
+          name={ghost.riderName}
+          photoUrl={ghost.photoUrl ?? currentPlayer?.photoUrl}
+          accent={ghost.accent}
+          className="leaderboard-rider-avatar"
+        />
+        <div>
+          <strong>{ghost.riderName}</strong>
+          <span>{selected ? 'Selected to race' : `${ghostSourceLabel(ghost)} • ${savedDate}`}</span>
+        </div>
+        <strong>{formatGhostMetric(ghost, ghostLeaderboardMetric, speedUnit)}</strong>
+      </button>
+    );
+  };
+  const renderSelectedGhostPerformance = (ghost: GhostLap) => {
+    const ownsGhost = ghost.ownerKey === currentProfileKey;
+    const riderZoneResults = ghost.zoneResults.flatMap((zone) => (
+      zone.riders[0] ? [{ zone, rider: zone.riders[0] }] : []
+    ));
+
+    return (
+      <details className="ghost-analytics ghost-option" key={ghost.id}>
+        <summary>{ghost.riderName} — recorded performance</summary>
+        <div className="ghost-overall-metrics">
+          <span>Lap {formatGhostRaceTime(ghost.finishTimeMs)}</span>
+          <span>30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}</span>
+          <span>{ghost.lapCount} {ghost.lapCount === 1 ? 'lap' : 'laps'}</span>
+          <span>
+            Cadence {formatNullableMetric(ghost.summary?.topCadence ?? null, 'RPM')} peak
+            {' / '}{formatNullableMetric(ghost.summary?.averageCadence ?? null, 'RPM')} avg
+          </span>
+          <span>
+            Speed {formatNullableSpeed(ghost.summary?.topSpeedKph ?? null, speedUnit)} peak
+            {' / '}{formatNullableSpeed(ghost.summary?.averageSpeedKph ?? null, speedUnit)} avg
+          </span>
+          <span>
+            Power {formatNullableMetric(ghost.summary?.topWatts ?? null, 'W')} peak
+            {' / '}{formatNullableMetric(ghost.summary?.averageWatts ?? null, 'W')} avg
+          </span>
+        </div>
+        <small>
+          {ghost.analyticsPublic
+            ? 'Replay and performance data public'
+            : ownsGhost
+              ? 'Replay public / your performance private'
+              : 'Replay public / performance private'}
+        </small>
+        {ownsGhost && (
+          <label className="ghost-share-toggle">
+            <input
+              type="checkbox"
+              checked={ghost.analyticsPublic}
+              onChange={(event) => onGhostAnalyticsSharingChange(ghost.id, event.target.checked)}
+            />
+            <span>Share performance and zone data with other racers</span>
+          </label>
+        )}
+        {riderZoneResults.map(({ zone, rider }) => (
+          <div className="ghost-zone-row" key={zone.zoneId}>
+            <strong>{zone.zoneName}</strong>
+            <span>
+              {formatNullableMetric(rider.topCadence, 'RPM')} peak
+              {' / '}{formatNullableMetric(rider.averageCadence, 'RPM')} avg
+            </span>
+            <span>
+              {formatNullableSpeed(rider.topSpeedKph, speedUnit)} peak
+              {' / '}{formatNullableSpeed(rider.averageSpeedKph, speedUnit)} avg
+            </span>
+            <span>
+              {formatNullableMetric(rider.topWatts, 'W')} peak
+              {' / '}{formatNullableMetric(rider.averageWatts, 'W')} avg
+            </span>
+          </div>
+        ))}
+      </details>
+    );
+  };
 
   return (
     <section className="analytics-panel">
@@ -418,91 +639,67 @@ export function AnalyticsPanel({
           </table>
         </div>
 
-        <div className="leaderboard-card">
+        <div className="leaderboard-card ghost-section">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Leaderboard</span>
+              <span className="eyebrow">Ghost Racer Leaderboard</span>
               <h3>{track.name}</h3>
             </div>
             <Trophy size={18} />
           </div>
 
           <div className="leaderboard-tabs">
-            {(Object.keys(leaderboardLabels) as LeaderboardMetric[]).map((metric) => (
+            {(Object.keys(ghostLeaderboardLabels) as GhostLeaderboardMetric[]).map((metric) => (
               <button
-                className={leaderboardMetric === metric ? 'selected' : ''}
+                className={ghostLeaderboardMetric === metric ? 'selected' : ''}
                 type="button"
-                onClick={() => onLeaderboardMetricChange(metric)}
+                onClick={() => setGhostLeaderboardMetric(metric)}
                 key={metric}
               >
-                {leaderboardLabels[metric]}
+                {ghostLeaderboardLabels[metric]}
               </button>
             ))}
           </div>
 
-          {leaderboardEntries.length === 0 ? (
-            <small className="leaderboard-empty">Complete a race on this track to set the first record.</small>
+          <div className="ghost-summary-row">
+            <span>{selectedGhostCount} selected to race</span>
+            <button type="button" onClick={onGhostClear} disabled={selectedGhostCount === 0}>
+              Clear
+            </button>
+          </div>
+
+          {rankedGhosts.length === 0 ? (
+            <small className="ghost-group-empty">
+              Complete a live Wattbike race on this track to create the first ranked ghost.
+            </small>
           ) : (
-            <>
-              <div className="leaderboard-list leaderboard-podium">
-                {leaderboardPodium.map((entry, index) => {
-                  const rank = index + 1;
-                  const currentPlayer = playerByName.get(entry.rider.trim().toLocaleLowerCase());
-                  return (
-                    <article className="leaderboard-row leaderboard-podium-row" key={`${entry.rider}-${entry.date}`}>
-                      <PodiumTrophy rank={rank} className="leaderboard-trophy" />
-                      <div className="leaderboard-rider-heading">
-                        <RiderAvatar
-                          name={entry.rider}
-                          photoUrl={entry.photoUrl ?? currentPlayer?.photoUrl}
-                          accent="#64748b"
-                          className="leaderboard-rider-avatar"
-                        />
-                        <span className="leaderboard-rank">#{rank}</span>
-                        <div>
-                          <strong>{entry.rider}</strong>
-                          <span>{entry.date}</span>
-                        </div>
-                      </div>
-                      <strong className="leaderboard-value">
-                        {leaderboardValue(entry.value, leaderboardMetric, speedUnit)}
-                      </strong>
-                    </article>
-                  );
-                })}
+            <div className="ghost-picker">
+              <div className="ghost-group">
+                <span>Top 3 — {ghostLeaderboardLabels[ghostLeaderboardMetric]}</span>
+                <div className="leaderboard-list leaderboard-podium">
+                  {podiumGhosts.map((ghost, index) => renderGhostOption(ghost, index + 1))}
+                </div>
               </div>
 
-              {remainingLeaderboardEntries.length > 0 && (
-                <details className="leaderboard-rank-dropdown">
+              {remainingGhosts.length > 0 && (
+                <details className="ghost-rank-dropdown">
                   <summary>
-                    <span>Ranks 4–{leaderboardEntries.length}</span>
-                    <small>View recorded laps</small>
+                    <span>Ranks 4–{rankedGhosts.length}</span>
+                    <small>Choose another ghost</small>
                   </summary>
-                  <div className="leaderboard-ranked-list">
-                    {remainingLeaderboardEntries.map((entry, index) => {
-                      const rank = index + 4;
-                      const currentPlayer = playerByName.get(entry.rider.trim().toLocaleLowerCase());
-                      return (
-                        <div className="leaderboard-ranked-row" key={`${entry.rider}-${entry.date}`}>
-                          <span className="leaderboard-rank">#{rank}</span>
-                          <RiderAvatar
-                            name={entry.rider}
-                            photoUrl={entry.photoUrl ?? currentPlayer?.photoUrl}
-                            accent="#64748b"
-                            className="leaderboard-rider-avatar"
-                          />
-                          <div>
-                            <strong>{entry.rider}</strong>
-                            <span>{entry.date}</span>
-                          </div>
-                          <strong>{leaderboardValue(entry.value, leaderboardMetric, speedUnit)}</strong>
-                        </div>
-                      );
-                    })}
+                  <div className="ghost-group ghost-ranked-list">
+                    {remainingGhosts.map((ghost, index) => renderGhostOption(ghost, index + 4))}
                   </div>
                 </details>
               )}
-            </>
+
+              {selectedGhosts.length > 0 && (
+                <div className="ghost-group">
+                  <span>Selected ghost performance</span>
+                  {selectedGhosts.map(renderSelectedGhostPerformance)}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

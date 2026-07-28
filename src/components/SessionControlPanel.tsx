@@ -3,8 +3,6 @@ import {
   Activity,
   Bike,
   Box,
-  CheckCircle2,
-  Circle,
   Compass,
   Download,
   Flag,
@@ -34,7 +32,6 @@ import { distanceBetweenTrackPoints, routeLengthMeters } from '../lib/trackMappi
 import type {
   DistanceUnit,
   DraftTrackSplit,
-  GhostLap,
   MappingEditMode,
   MetricKey,
   RaceCommentaryPreferences,
@@ -48,8 +45,6 @@ import type {
   TrackSplitSection,
   TrackZone,
 } from '../types';
-import { PodiumTrophy } from './PodiumTrophy';
-import { RiderAvatar } from './RiderAvatar';
 
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
@@ -109,7 +104,6 @@ type SessionControlPanelProps = {
   hasDualStartRoutes: boolean;
   isLoopTrack: boolean;
   lapCount: number;
-  currentProfileKey: string;
   isAdminProfile: boolean;
   raceState: RaceState;
   activeBikeCount: number;
@@ -140,8 +134,6 @@ type SessionControlPanelProps = {
   startGateActive: boolean;
   startGateLabel: string;
   startGateDetail: string;
-  ghostLaps: GhostLap[];
-  selectedGhostIds: string[];
   commentaryPreferences: RaceCommentaryPreferences;
   commentarySpeechStatus: 'checking' | 'ready' | 'quota-exhausted' | 'unavailable';
   onMetricToggle: (metric: MetricKey) => void;
@@ -185,9 +177,6 @@ type SessionControlPanelProps = {
   onMappingRemove: () => void;
   onMappingExport: () => void;
   onMappingImport: (file: File) => void;
-  onGhostToggle: (ghostId: string) => void;
-  onGhostClear: () => void;
-  onGhostAnalyticsSharingChange: (ghostId: string, analyticsPublic: boolean) => void;
   onCommentaryPreferencesChange: (preferences: RaceCommentaryPreferences) => void;
   onPrimeAudio: () => void;
   onStart: () => void;
@@ -201,22 +190,6 @@ const metricOptions: Array<{ key: MetricKey; label: string; icon: typeof Activit
   { key: 'power', label: 'Power', icon: Zap },
   { key: 'reaction', label: 'Reaction', icon: Timer },
 ];
-
-function formatGhostRaceTime(milliseconds: number) {
-  return `${(Math.max(0, milliseconds) / 1000).toFixed(2)}s`;
-}
-
-function ghostSourceLabel(ghost: GhostLap) {
-  if (ghost.source === 'friend') {
-    return 'Friend best';
-  }
-
-  if (ghost.source === 'top') {
-    return 'Top rider';
-  }
-
-  return 'My best';
-}
 
 export function SessionControlPanel({
   track,
@@ -242,7 +215,6 @@ export function SessionControlPanel({
   hasDualStartRoutes,
   isLoopTrack,
   lapCount,
-  currentProfileKey,
   isAdminProfile,
   raceState,
   activeBikeCount,
@@ -273,8 +245,6 @@ export function SessionControlPanel({
   startGateActive,
   startGateLabel,
   startGateDetail,
-  ghostLaps,
-  selectedGhostIds,
   commentaryPreferences,
   commentarySpeechStatus,
   onMetricToggle,
@@ -318,9 +288,6 @@ export function SessionControlPanel({
   onMappingRemove,
   onMappingExport,
   onMappingImport,
-  onGhostToggle,
-  onGhostClear,
-  onGhostAnalyticsSharingChange,
   onCommentaryPreferencesChange,
   onPrimeAudio,
   onStart,
@@ -400,14 +367,6 @@ export function SessionControlPanel({
       customRoute.country,
     ].some((value) => value?.toLowerCase().includes(filter));
   });
-  const rankedGhosts = [...ghostLaps]
-    .sort((left, right) => left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt)
-    .slice(0, 50);
-  const podiumGhosts = rankedGhosts.slice(0, 3);
-  const remainingGhosts = rankedGhosts.slice(3);
-  const selectedGhostCount = selectedGhostIds.filter((ghostId) => (
-    rankedGhosts.some((ghost) => ghost.id === ghostId)
-  )).length;
   const handleImportChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -433,86 +392,6 @@ export function SessionControlPanel({
     onMappingSplitBranchChange(branch);
     collapseMappingToolsIfNeeded();
   };
-  const renderGhostOption = (ghost: GhostLap, rank: number) => {
-    const selected = selectedGhostIds.includes(ghost.id);
-    const ownsGhost = ghost.ownerKey === currentProfileKey;
-    const currentPlayer = players.find((player) => (
-      player.name.trim().toLocaleLowerCase() === ghost.riderName.trim().toLocaleLowerCase()
-    ));
-    const riderZoneResults = ghost.zoneResults.flatMap((zone) => (
-      zone.riders[0] ? [{ zone, rider: zone.riders[0] }] : []
-    ));
-
-    return (
-      <div className={`ghost-option ${selected ? 'selected' : ''}`} key={ghost.id}>
-        <button
-          className="ghost-select-button"
-          type="button"
-          onClick={() => onGhostToggle(ghost.id)}
-          aria-pressed={selected}
-        >
-          <div className="ghost-name-row">
-            <PodiumTrophy rank={rank} className="ghost-podium-trophy" />
-            <RiderAvatar
-              name={ghost.riderName}
-              photoUrl={ghost.photoUrl ?? currentPlayer?.photoUrl}
-              accent={ghost.accent}
-              className="ghost-rider-avatar"
-            />
-            <span className={`ghost-rank-badge ${rank <= 3 ? `rank-${rank}` : ''}`}>#{rank}</span>
-            <strong>{ghost.riderName}</strong>
-          </div>
-          <small>
-            {ghostSourceLabel(ghost)} / {formatGhostRaceTime(ghost.finishTimeMs)}
-            {ghost.lapCount > 1 ? ` / ${ghost.lapCount} laps` : ''}
-            {' / '}30 ft {ghost.thirtyFootTimeMs == null ? '--' : formatGhostRaceTime(ghost.thirtyFootTimeMs)}
-          </small>
-          <small>
-            {ghost.analyticsPublic
-              ? 'Replay and zone data public'
-              : ownsGhost
-                ? 'Replay public / your zone data private'
-                : 'Replay public / performance private'}
-          </small>
-          <span className={`ghost-race-selection ${selected ? 'selected' : ''}`}>
-            {selected ? <CheckCircle2 size={16} /> : <Circle size={16} />}
-            {selected ? 'Selected to race' : 'Select this ghost'}
-          </span>
-        </button>
-        {ownsGhost && (
-          <label className="ghost-share-toggle">
-            <input
-              type="checkbox"
-              checked={ghost.analyticsPublic}
-              onChange={(event) => onGhostAnalyticsSharingChange(ghost.id, event.target.checked)}
-            />
-            <span>Share zone data with other racers</span>
-          </label>
-        )}
-        {(ghost.summary || riderZoneResults.length > 0) && (
-          <details className="ghost-analytics">
-            <summary>View performance</summary>
-            {ghost.summary && (
-              <div className="ghost-overall-metrics">
-                <span>Cadence {ghost.summary.topCadence == null ? '--' : `${Math.round(ghost.summary.topCadence)} RPM`}</span>
-                <span>Speed {ghost.summary.topSpeedKph == null ? '--' : `${(ghost.summary.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
-                <span>Power {ghost.summary.topWatts == null ? '--' : `${Math.round(ghost.summary.topWatts)} W`}</span>
-              </div>
-            )}
-            {riderZoneResults.map(({ zone, rider }) => (
-              <div className="ghost-zone-row" key={zone.zoneId}>
-                <strong>{zone.zoneName}</strong>
-                <span>{rider.topCadence == null ? '--' : `${Math.round(rider.topCadence)} RPM`}</span>
-                <span>{rider.topSpeedKph == null ? '--' : `${(rider.topSpeedKph * (speedUnit === 'mph' ? 0.621371 : 1)).toFixed(1)} ${speedUnit.toUpperCase()}`}</span>
-                <span>{rider.topWatts == null ? '--' : `${Math.round(rider.topWatts)} W`}</span>
-              </div>
-            ))}
-          </details>
-        )}
-      </div>
-    );
-  };
-
   useEffect(() => {
     if (!shouldCollapseMappingTools) {
       setMappingToolsCollapsed(false);
@@ -1396,46 +1275,6 @@ export function SessionControlPanel({
           <p className="loop-race-note">The finish is the start line. Pedal zones repeat on every lap.</p>
         </section>
       )}
-
-      <section className="panel-section ghost-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Ghost Racers</span>
-            <h3>Saved laps</h3>
-          </div>
-          <Bike size={18} />
-        </div>
-
-        <div className="ghost-summary-row">
-          <span>{selectedGhostCount} selected</span>
-          <button type="button" onClick={onGhostClear} disabled={selectedGhostCount === 0}>
-            Clear
-          </button>
-        </div>
-        <div className="ghost-picker">
-          {podiumGhosts.length === 0 ? (
-            <small className="ghost-group-empty">
-              Complete a live Wattbike race on this track to create the first ranked ghost.
-            </small>
-          ) : (
-            <div className="ghost-group ghost-podium">
-              <span>Top 3</span>
-              {podiumGhosts.map((ghost, index) => renderGhostOption(ghost, index + 1))}
-            </div>
-          )}
-          {remainingGhosts.length > 0 && (
-            <details className="ghost-rank-dropdown">
-              <summary>
-                <span>Ranks 4–{rankedGhosts.length}</span>
-                <small>Choose another ghost</small>
-              </summary>
-              <div className="ghost-group ghost-ranked-list">
-                {remainingGhosts.map((ghost, index) => renderGhostOption(ghost, index + 4))}
-              </div>
-            </details>
-          )}
-        </div>
-      </section>
 
       <section className="panel-section">
         <div className="section-heading">

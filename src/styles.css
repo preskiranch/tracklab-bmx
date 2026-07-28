@@ -4082,98 +4082,6 @@ input:focus {
   background: #ffffff;
 }
 
-.ghost-option.selected {
-  border-color: #83cb68;
-  background: #f0faea;
-  box-shadow: inset 3px 0 0 #4ade80;
-}
-
-.ghost-select-button {
-  display: grid;
-  width: 100%;
-  gap: 3px;
-  min-height: 52px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  text-align: left;
-}
-
-.ghost-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ghost-name-row strong {
-  flex: 1 1 auto;
-  color: #111827;
-  font-size: 13px;
-  font-weight: 900;
-  overflow-wrap: anywhere;
-}
-
-.ghost-podium-trophy {
-  flex: 0 0 48px;
-  width: 48px;
-  height: 48px;
-}
-
-.ghost-rider-avatar {
-  width: 38px;
-  height: 38px;
-  font-size: 12px;
-}
-
-.ghost-rank-badge {
-  display: inline-grid;
-  flex: 0 0 32px;
-  min-height: 25px;
-  place-items: center;
-  border-radius: 5px;
-  background: #e8edf3;
-  color: #344454;
-  font-size: 11px;
-  font-weight: 950;
-}
-
-.ghost-rank-badge.rank-1 {
-  background: #ffe59a;
-  color: #765000;
-}
-
-.ghost-rank-badge.rank-2 {
-  background: #dfe4e8;
-  color: #4d5964;
-}
-
-.ghost-rank-badge.rank-3 {
-  background: #f2c7a6;
-  color: #7b3f18;
-}
-
-.ghost-select-button small {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.ghost-race-selection {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  margin-top: 4px;
-  color: #405064;
-  font-size: 11px;
-  font-weight: 900;
-}
-
-.ghost-race-selection.selected {
-  color: #237a24;
-}
-
 .ghost-share-toggle {
   display: flex;
   align-items: center;
@@ -6481,6 +6389,27 @@ input:focus {
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #f8fafb;
+}
+
+.ghost-leaderboard-entry {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ghost-leaderboard-entry.leaderboard-ranked-row {
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+}
+
+.ghost-leaderboard-entry.selected {
+  border-color: #83cb68;
+  background: #f0faea;
+  box-shadow: inset 3px 0 0 #4ade80;
 }
 
 .leaderboard-podium-row {
