@@ -1010,10 +1010,10 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(pairingNameLayout.fitsHeight).toBe(true);
   const dashboardAvatarBounds = await page.locator('.rider-stat-avatar').first().boundingBox();
   const setupAvatarBounds = await page.locator('.pairing-rail .rider-photo-editor .rider-avatar').first().boundingBox();
-  expect(dashboardAvatarBounds?.width).toBe(88);
-  expect(dashboardAvatarBounds?.height).toBe(88);
-  expect(setupAvatarBounds?.width).toBe(88);
-  expect(setupAvatarBounds?.height).toBe(88);
+  expect(dashboardAvatarBounds?.width).toBe(44);
+  expect(dashboardAvatarBounds?.height).toBe(44);
+  expect(setupAvatarBounds?.width).toBe(44);
+  expect(setupAvatarBounds?.height).toBe(44);
 
   await expect(page.getByText('Developer ambient calibration')).toBeVisible();
   const ambientVolume = page.getByLabel('Ambient sound volume');
@@ -1051,8 +1051,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(fullscreenNameLayout.fitsWidth).toBe(true);
   expect(fullscreenNameLayout.fitsHeight).toBe(true);
   const fullscreenAvatarBounds = await riderPanel.locator('.race-rider-overlay-avatar').first().boundingBox();
-  expect(fullscreenAvatarBounds?.width).toBe(88);
-  expect(fullscreenAvatarBounds?.height).toBe(88);
+  expect(fullscreenAvatarBounds?.width).toBe(44);
+  expect(fullscreenAvatarBounds?.height).toBe(44);
   await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
@@ -1320,8 +1320,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(mobileRiderText.metrics).toBeGreaterThanOrEqual(12);
   expect(mobileRiderText.place).toBeGreaterThanOrEqual(34);
   const mobileAvatarBounds = await riderPanel.locator('.race-rider-overlay-avatar').first().boundingBox();
-  expect(mobileAvatarBounds?.width).toBe(88);
-  expect(mobileAvatarBounds?.height).toBe(88);
+  expect(mobileAvatarBounds?.width).toBe(44);
+  expect(mobileAvatarBounds?.height).toBe(44);
   const mobileCardsFit = await riderPanel.evaluate((panel) => {
     const panelBounds = panel.getBoundingClientRect();
     return [...panel.querySelectorAll('.race-rider-overlay-card')].every((card) => {
@@ -2018,8 +2018,8 @@ test('completed race finishes the active sentence and authoritative placements b
   const zoneTableFits = await zoneTableCard.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
   expect(zoneTableFits).toBe(true);
   const summaryAvatarBounds = await dashboardAnalysis.locator('.summary-rider-avatar').first().boundingBox();
-  expect(summaryAvatarBounds?.width).toBe(76);
-  expect(summaryAvatarBounds?.height).toBe(76);
+  expect(summaryAvatarBounds?.width).toBe(38);
+  expect(summaryAvatarBounds?.height).toBe(38);
   const zoneCardBounds = await zoneTableCard.boundingBox();
   const leaderboardBounds = await dashboardAnalysis.locator('.leaderboard-card').boundingBox();
   expect(zoneCardBounds).not.toBeNull();
@@ -2833,8 +2833,8 @@ test('studio rider roster syncs to the account and can be assigned to a connecte
     await expect(page.getByText(/1 entered \/ 1 connected/i)).toBeVisible();
     await expect(page.locator('.race-entry-rider-photo .rider-avatar img')).toBeVisible();
     const raceEntryAvatarBounds = await page.locator('.race-entry-rider-photo .rider-avatar').boundingBox();
-    expect(raceEntryAvatarBounds?.width).toBe(68);
-    expect(raceEntryAvatarBounds?.height).toBe(68);
+    expect(raceEntryAvatarBounds?.width).toBe(34);
+    expect(raceEntryAvatarBounds?.height).toBe(34);
 
     await page.reload();
     await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });

@@ -15,7 +15,7 @@ describe('race view preferences', () => {
   it('uses a larger two-axis rider panel by default', () => {
     expect(defaultRaceRiderOverlayLayout).toMatchObject({
       width: 940,
-      height: 340,
+      height: 220,
       locked: false,
     });
   });
@@ -31,7 +31,7 @@ describe('race view preferences', () => {
       xPct: 0,
       yPct: 1,
       width: 1800,
-      height: 280,
+      height: 190,
       locked: true,
     });
   });
@@ -51,7 +51,7 @@ describe('race view preferences', () => {
     expect(preferences.earthCamerasByTrack.north.heading).toBe(10);
     expect(preferences.riderOverlaysByTrack.north).toMatchObject({
       width: 1000,
-      height: 280,
+      height: 190,
       locked: true,
     });
     expect(preferences.commentary).toEqual(defaultRaceCommentaryPreferences);
@@ -121,7 +121,7 @@ describe('race view preferences', () => {
         north: { angle: 42, heading: 180, zoom: 20, updatedAt: 200 },
       },
       riderOverlaysByTrack: {
-        north: { xPct: 0.1, yPct: 0.7, width: 1100, height: 340, locked: true },
+        north: { xPct: 0.1, yPct: 0.7, width: 1100, height: 260, locked: true },
       },
       riderOverlayUpdatedAtByTrack: { north: 200 },
       demoRiderNames: { 1: 'Maya Torres', 2: 'Jordan Lee' },
@@ -153,7 +153,7 @@ describe('race view preferences', () => {
     expect(merged.cameraLocked).toBe(true);
     expect(merged.earthCamerasByTrack.north).toMatchObject({ angle: 42, heading: 180, zoom: 20 });
     expect(merged.earthCamerasByTrack.south).toMatchObject({ angle: 30, heading: 90, zoom: 19 });
-    expect(merged.riderOverlaysByTrack.north).toMatchObject({ width: 1100, height: 340, locked: true });
+    expect(merged.riderOverlaysByTrack.north).toMatchObject({ width: 1100, height: 260, locked: true });
     expect(merged.demoRiderNames).toEqual({ 1: 'Maya Torres', 2: 'Jordan Lee' });
     expect(merged.demoRiderPhotos).toEqual({ 1: 'data:image/jpeg;base64,QUJDRA==' });
     expect(merged.commentary.volume).toBe(0.9);

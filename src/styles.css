@@ -1055,16 +1055,14 @@ input:focus {
 
 .race-review-rider-heading {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
 }
 
 .race-review-rider-avatar {
-  grid-column: 1 / -1;
-  justify-self: center;
-  width: 88px;
-  height: 88px;
+  width: 48px;
+  height: 48px;
 }
 
 .race-review-rider-heading > div {
@@ -2175,8 +2173,8 @@ input:focus {
 }
 
 .race-entry-rider-photo .rider-avatar {
-  width: 68px;
-  height: 68px;
+  width: 34px;
+  height: 34px;
 }
 
 .sr-only {
@@ -2766,7 +2764,7 @@ input:focus {
   z-index: 1180;
   width: min(var(--overlay-width), calc(100% - 24px));
   height: min(var(--overlay-height), calc(100% - 24px));
-  min-height: min(280px, calc(100% - 24px));
+  min-height: 190px;
   max-width: calc(100% - 24px);
   max-height: calc(100% - 24px);
   display: grid;
@@ -2853,7 +2851,6 @@ input:focus {
   grid-auto-rows: minmax(130px, 1fr);
   gap: 8px;
   min-height: 0;
-  overflow: auto;
   padding: 9px;
 }
 
@@ -2900,19 +2897,17 @@ input:focus {
 
 .race-rider-overlay-summary {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: 9px;
   min-width: 0;
 }
 
 .race-rider-overlay-avatar {
-  grid-column: 1 / -1;
-  justify-self: center;
-  width: 88px;
-  height: 88px;
+  width: 50px;
+  height: 50px;
   border-width: 3px;
-  font-size: 26px;
+  font-size: 15px;
 }
 
 .race-rider-overlay-identity {
@@ -2991,7 +2986,7 @@ input:focus {
   .race-rider-overlay {
     width: min(var(--overlay-width), calc(100% - 16px));
     height: min(var(--overlay-height), calc(100% - 16px));
-    min-height: min(440px, calc(100% - 16px));
+    min-height: 230px;
   }
 
   .race-rider-overlay-grid {
@@ -3020,10 +3015,10 @@ input:focus {
   }
 
   .race-rider-overlay-avatar {
-    width: 88px;
-    height: 88px;
+    width: 38px;
+    height: 38px;
     border-width: 2px;
-    font-size: 26px;
+    font-size: 12px;
   }
 
   .race-rider-overlay-identity span {
@@ -3397,13 +3392,12 @@ input:focus {
   display: grid;
   grid-template-areas:
     "identity identity"
-    "avatar avatar"
-    "signal signal"
+    "avatar signal"
     "place place";
   grid-template-columns: auto minmax(0, 1fr);
   gap: 9px;
   min-width: 0;
-  min-height: 190px;
+  min-height: 146px;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--player-color) 55%, #273344);
   border-left: 4px solid var(--player-color);
@@ -3445,8 +3439,8 @@ input:focus {
 .rider-stat-live {
   grid-area: signal;
   align-self: center;
-  justify-self: center;
-  margin-left: 0;
+  justify-self: end;
+  margin-left: auto;
   gap: 4px;
   color: #aebdca;
   font-size: 10px;
@@ -3454,9 +3448,8 @@ input:focus {
 
 .rider-stat-avatar {
   grid-area: avatar;
-  justify-self: center;
-  width: 88px;
-  height: 88px;
+  width: 42px;
+  height: 42px;
 }
 
 .rider-card-place {
@@ -3495,8 +3488,8 @@ input:focus {
   position: relative;
   display: inline-grid;
   flex: 0 0 auto;
-  width: 88px;
-  height: 88px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   overflow: hidden;
   border: 2px solid var(--rider-avatar-accent);
@@ -3504,7 +3497,7 @@ input:focus {
   background: #253145;
   color: #ffffff;
   box-shadow: 0 2px 7px rgba(15, 23, 42, 0.18);
-  font-size: 26px;
+  font-size: 13px;
   font-weight: 950;
   letter-spacing: 0.02em;
   line-height: 1;
@@ -3519,7 +3512,7 @@ input:focus {
 
 .rider-photo-editor {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 5px 8px;
   align-items: center;
   min-width: 0;
@@ -3527,10 +3520,6 @@ input:focus {
   border: 1px solid #dce5ec;
   border-radius: 7px;
   background: #ffffff;
-}
-
-.rider-photo-editor .rider-avatar {
-  justify-self: center;
 }
 
 .rider-photo-actions {
@@ -6332,12 +6321,12 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-width: 240px;
+  min-width: 190px;
 }
 
 .summary-rider-avatar {
-  width: 76px;
-  height: 76px;
+  width: 38px;
+  height: 38px;
 }
 
 .summary-rider > div {
