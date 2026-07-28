@@ -1008,6 +1008,12 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(pairingNameLayout.wraps).toBe(true);
   expect(pairingNameLayout.fitsWidth).toBe(true);
   expect(pairingNameLayout.fitsHeight).toBe(true);
+  const dashboardAvatarBounds = await page.locator('.rider-stat-avatar').first().boundingBox();
+  const setupAvatarBounds = await page.locator('.pairing-rail .rider-photo-editor .rider-avatar').first().boundingBox();
+  expect(dashboardAvatarBounds?.width).toBe(132);
+  expect(dashboardAvatarBounds?.height).toBe(132);
+  expect(setupAvatarBounds?.width).toBe(132);
+  expect(setupAvatarBounds?.height).toBe(132);
 
   await expect(page.getByText('Developer ambient calibration')).toBeVisible();
   const ambientVolume = page.getByLabel('Ambient sound volume');
@@ -1044,6 +1050,9 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(fullscreenNameLayout.textOverflow).not.toBe('ellipsis');
   expect(fullscreenNameLayout.fitsWidth).toBe(true);
   expect(fullscreenNameLayout.fitsHeight).toBe(true);
+  const fullscreenAvatarBounds = await riderPanel.locator('.race-rider-overlay-avatar').first().boundingBox();
+  expect(fullscreenAvatarBounds?.width).toBe(132);
+  expect(fullscreenAvatarBounds?.height).toBe(132);
   await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
@@ -1310,6 +1319,9 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(mobileRiderText.name).toBeGreaterThanOrEqual(16);
   expect(mobileRiderText.metrics).toBeGreaterThanOrEqual(12);
   expect(mobileRiderText.place).toBeGreaterThanOrEqual(34);
+  const mobileAvatarBounds = await riderPanel.locator('.race-rider-overlay-avatar').first().boundingBox();
+  expect(mobileAvatarBounds?.width).toBe(132);
+  expect(mobileAvatarBounds?.height).toBe(132);
   const mobileCardsFit = await riderPanel.evaluate((panel) => {
     const panelBounds = panel.getBoundingClientRect();
     return [...panel.querySelectorAll('.race-rider-overlay-card')].every((card) => {
@@ -2005,6 +2017,9 @@ test('completed race finishes the active sentence and authoritative placements b
 
   const zoneTableFits = await zoneTableCard.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
   expect(zoneTableFits).toBe(true);
+  const summaryAvatarBounds = await dashboardAnalysis.locator('.summary-rider-avatar').first().boundingBox();
+  expect(summaryAvatarBounds?.width).toBe(114);
+  expect(summaryAvatarBounds?.height).toBe(114);
   const zoneCardBounds = await zoneTableCard.boundingBox();
   const leaderboardBounds = await dashboardAnalysis.locator('.leaderboard-card').boundingBox();
   expect(zoneCardBounds).not.toBeNull();
@@ -2817,6 +2832,9 @@ test('studio rider roster syncs to the account and can be assigned to a connecte
     await expect(studentSelect).toHaveValue(cloudStudioRiders[0].id);
     await expect(page.getByText(/1 entered \/ 1 connected/i)).toBeVisible();
     await expect(page.locator('.race-entry-rider-photo .rider-avatar img')).toBeVisible();
+    const raceEntryAvatarBounds = await page.locator('.race-entry-rider-photo .rider-avatar').boundingBox();
+    expect(raceEntryAvatarBounds?.width).toBe(102);
+    expect(raceEntryAvatarBounds?.height).toBe(102);
 
     await page.reload();
     await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
