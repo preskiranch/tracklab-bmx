@@ -1939,6 +1939,10 @@ test('completed race finishes the active sentence and authoritative placements b
   await page.goto('/?track=black-mountain-bmx');
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
+  await page.getByLabel('Name for player 1').fill('Rasheen "The Machine" Hicks');
+  await page.getByLabel('Name for player 2').fill('Thomas T');
+  await page.getByLabel('Name for player 3').fill('Spicy Bean');
+  await page.getByLabel('Name for player 4').fill('Wasabi');
   await expect(page.getByText(/1 pedal zone/i).first()).toBeVisible({ timeout: 15_000 });
 
   const startAction = page.locator('.workflow-step.primary-action');
@@ -2017,6 +2021,14 @@ test('completed race finishes the active sentence and authoritative placements b
   await expect(zoneTableCard).toBeVisible();
   await expect(zoneTableCard.locator('thead th')).toHaveCount(6);
   await expect(zoneTableCard.getByText('Reaction', { exact: false })).toHaveCount(0);
+  const zoneRiderHeaders = zoneTableCard.locator('.zone-rider-header');
+  await expect(zoneRiderHeaders).toHaveCount(4);
+  await expect(zoneRiderHeaders.nth(0).locator('strong')).toHaveText('Rasheen');
+  await expect(zoneRiderHeaders.nth(0).locator('em')).toHaveText('“The Machine”');
+  await expect(zoneRiderHeaders.nth(0).locator('span').last()).toHaveText('Hicks');
+  await expect(zoneRiderHeaders.nth(1).locator('strong')).toHaveText('Thomas');
+  await expect(zoneRiderHeaders.nth(1).locator('span').last()).toHaveText('T');
+  await expect(zoneRiderHeaders.nth(3).locator('strong')).toHaveText('Wasabi');
 
   const riderCells = zoneTableCard.locator('tbody tr').first().locator('.zone-rider-metrics');
   await expect(riderCells).toHaveCount(4);

@@ -4114,14 +4114,10 @@ input:focus {
   overflow-wrap: anywhere;
 }
 
-.podium-trophy {
-  object-fit: contain;
-}
-
 .ghost-podium-trophy {
   flex: 0 0 48px;
   width: 48px;
-  height: 56px;
+  height: 48px;
 }
 
 .ghost-rider-avatar {
@@ -6379,6 +6375,17 @@ input:focus {
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.zone-rider-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 5px;
+  text-transform: none;
+}
+
+.zone-rider-header .player-chip {
+  grid-row: 1 / 4;
 }
 
 .zone-table td {

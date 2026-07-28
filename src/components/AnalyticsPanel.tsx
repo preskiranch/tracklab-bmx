@@ -67,6 +67,20 @@ function leaderboardValue(value: number, metric: LeaderboardMetric, speedUnit: S
   return `${Math.round(value)} ${metric === 'rpm' ? 'RPM' : 'W'}`;
 }
 
+function zoneRiderNameParts(value: string) {
+  const enteredName = value.trim().replace(/\s+/g, ' ');
+  const nicknameMatch = enteredName.match(/^(.*?)\s*(?:["“]([^"”]+)["”]|\(([^()]+)\))\s*(.*)$/u);
+  const legalName = nicknameMatch
+    ? `${nicknameMatch[1]} ${nicknameMatch[4]}`.trim().replace(/\s+/g, ' ')
+    : enteredName;
+  const [firstName = 'Rider', ...lastNameParts] = legalName.split(' ').filter(Boolean);
+  return {
+    firstName,
+    nickname: nicknameMatch?.[2] ?? nicknameMatch?.[3] ?? '',
+    lastName: lastNameParts.join(' '),
+  };
+}
+
 function ordinal(rank: number) {
   const suffix = rank % 100 >= 11 && rank % 100 <= 13
     ? 'th'
@@ -346,7 +360,24 @@ export function AnalyticsPanel({
               <tr>
                 <th>Zone</th>
                 <th>Range</th>
-                {players.map((player) => <th key={player.id}>P{player.id}</th>)}
+                {players.map((player) => {
+                  const name = zoneRiderNameParts(player.name);
+                  return (
+                    <th key={player.id} aria-label={`P${player.id} ${player.name}`}>
+                      <div className="zone-rider-header">
+                        <span
+                          className="player-chip"
+                          style={{ '--player-color': player.accent } as CSSProperties}
+                        >
+                          P{player.id}
+                        </span>
+                        <strong>{name.firstName}</strong>
+                        {name.nickname && <em>“{name.nickname}”</em>}
+                        {name.lastName && <span>{name.lastName}</span>}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>

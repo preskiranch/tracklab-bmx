@@ -27,7 +27,6 @@ import {
   Usb,
   Users,
 } from 'lucide-react';
-import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { DiagnosticsPanel, type CloudUserDataStatus } from './components/DiagnosticsPanel';
 import { DeveloperToolsPanel } from './components/DeveloperToolsPanel';
 import { EarthTrackView } from './components/EarthTrackView';
@@ -248,6 +247,8 @@ import type {
 
 const SessionControlPanel = lazy(() => import('./components/SessionControlPanel')
   .then((module) => ({ default: module.SessionControlPanel })));
+const AnalyticsPanel = lazy(() => import('./components/AnalyticsPanel')
+  .then((module) => ({ default: module.AnalyticsPanel })));
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const customRouteInitialZoom = 18;
@@ -7103,21 +7104,23 @@ export default function App() {
                   />
                 </div>
 
-                <AnalyticsPanel
-                  track={effectiveTrack}
-                  players={racePlayers}
-                  raceSummary={raceSummary}
-                  selectedMetrics={selectedMetrics}
-                  reactionTimesByPlayer={reactionTimesByPlayer}
-                  leaderboardMetric={leaderboardMetric}
-                  speedUnit={speedUnit}
-                  distanceUnit={distanceUnit}
-                  activeZones={activeZones}
-                  raceCapture={raceCapture}
-                  onRaceCaptureJsonExport={exportRaceCaptureJson}
-                  onRaceCaptureCsvExport={exportRaceCaptureCsv}
-                  onLeaderboardMetricChange={setLeaderboardMetric}
-                />
+                <Suspense fallback={<div className="panel-section">Loading post-race analysis…</div>}>
+                  <AnalyticsPanel
+                    track={effectiveTrack}
+                    players={racePlayers}
+                    raceSummary={raceSummary}
+                    selectedMetrics={selectedMetrics}
+                    reactionTimesByPlayer={reactionTimesByPlayer}
+                    leaderboardMetric={leaderboardMetric}
+                    speedUnit={speedUnit}
+                    distanceUnit={distanceUnit}
+                    activeZones={activeZones}
+                    raceCapture={raceCapture}
+                    onRaceCaptureJsonExport={exportRaceCaptureJson}
+                    onRaceCaptureCsvExport={exportRaceCaptureCsv}
+                    onLeaderboardMetricChange={setLeaderboardMetric}
+                  />
+                </Suspense>
               </div>
 
               <div className="dashboard-secondary-column">
