@@ -6132,23 +6132,6 @@ export default function App() {
     setSelectedGhostIds([]);
   }, []);
 
-  const handleGhostAnalyticsSharingChange = useCallback((ghostId: string, analyticsPublic: boolean) => {
-    const existing = ghostLaps.find((ghost) => ghost.id === ghostId && ghost.ownerKey === cloudProfileKey);
-    if (!existing) {
-      return;
-    }
-
-    const updatedGhost = {
-      ...existing,
-      analyticsPublic,
-      savedAt: Date.now(),
-    };
-    setGhostLaps((current) => current.map((ghost) => (ghost.id === ghostId ? updatedGhost : ghost)));
-    void syncGhostLapToCloud(updatedGhost, cloudProfileKey).catch((error: Error) => {
-      console.warn(`Could not update TrackLab ghost privacy: ${error.message}`);
-    });
-  }, [cloudProfileKey, ghostLaps]);
-
   const handleStart = () => {
     const startingRacePlayers = racePlayers;
     if (
@@ -7064,12 +7047,11 @@ export default function App() {
                     raceCapture={raceCapture}
                     ghostLaps={availableGhostLaps}
                     selectedGhostIds={selectedGhostIds}
-                    currentProfileKey={cloudProfileKey}
+                    studioRiders={availableStudioRiders}
                     onRaceCaptureJsonExport={exportRaceCaptureJson}
                     onRaceCaptureCsvExport={exportRaceCaptureCsv}
                     onGhostToggle={toggleGhostLap}
                     onGhostClear={clearSelectedGhosts}
-                    onGhostAnalyticsSharingChange={handleGhostAnalyticsSharingChange}
                   />
                 </Suspense>
               </div>

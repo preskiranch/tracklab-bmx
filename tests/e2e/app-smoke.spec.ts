@@ -1685,7 +1685,7 @@ test.describe('mobile commentary playback', () => {
   });
 });
 
-test('loop races expose lap controls and privacy-safe ghost selection without a cadence card', async ({ page }, testInfo) => {
+test('loop races expose lap controls and ranked ghost selection without a cadence card', async ({ page }, testInfo) => {
   const authUser = {
     id: 'loop-ghost-racer',
     profileKey: 'user:loop-ghost-racer',
@@ -1811,14 +1811,11 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(page.getByRole('img', { name: 'First place gold cup' })).toBeVisible();
   await expect(page.getByRole('img', { name: 'Second place silver cup' })).toBeVisible();
   await expect(page.locator('.ghost-section .leaderboard-rider-avatar')).toHaveCount(2);
+  const loopLeaderboardAvatar = await page.locator('.ghost-section .leaderboard-rider-avatar').first().boundingBox();
+  expect(loopLeaderboardAvatar?.width).toBe(108);
+  expect(loopLeaderboardAvatar?.height).toBe(108);
   await expect(page.getByText('Gate start', { exact: false })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Countdown', exact: true })).toHaveCount(0);
-  const worldGhost = page.locator('.ghost-leaderboard-entry').filter({ hasText: 'World Leader' });
-  await worldGhost.click();
-  const worldGhostPerformance = page.locator('.ghost-analytics').filter({ hasText: 'World Leader' });
-  await worldGhostPerformance.locator('summary').click();
-  await expect(worldGhostPerformance).toContainText('Replay public / performance private');
-  await page.locator('.ghost-section .ghost-summary-row').getByRole('button', { name: 'Clear' }).click();
   const personalGhost = page.locator('.ghost-leaderboard-entry').filter({ hasText: 'Studio Bike One' });
   await personalGhost.click();
   await expect(personalGhost.getByText('Selected to race')).toBeVisible();
@@ -1877,7 +1874,7 @@ test('completed race finishes the active sentence and authoritative placements b
       trackName: 'Black Mountain BMX',
       routeVariantId: 'amateur',
       riderName,
-      photoUrl: leaderboardPhotoUrl,
+      ...(index === 3 ? {} : { photoUrl: leaderboardPhotoUrl }),
       ownerKey: index === 0 ? authUser.profileKey : `user:review-ghost-${index + 1}`,
       ownerName: riderName,
       colorName: ['lime', 'blue', 'red', 'yellow'][index],
@@ -1985,6 +1982,13 @@ test('completed race finishes the active sentence and authoritative placements b
         trackMappings: {},
         customRoutes: [],
         bikeProfiles: [],
+        studioRiders: [{
+          id: 'studio-taylor-smith',
+          name: 'Taylor Smith',
+          photoUrl: leaderboardPhotoUrl,
+          createdAt: Date.UTC(2026, 5, 1),
+          updatedAt: Date.UTC(2026, 6, 1),
+        }],
       }),
     });
   });
@@ -2106,7 +2110,8 @@ test('completed race finishes the active sentence and authoritative placements b
   expect(summaryAvatarBounds?.height).toBe(38);
   const leaderboardCard = dashboardAnalysis.locator('.leaderboard-card');
   await expect(leaderboardCard.getByText('Ghost Racer Leaderboard')).toBeVisible();
-  await expect(leaderboardCard.locator('.leaderboard-tabs button')).toHaveCount(8);
+  await expect(leaderboardCard.locator('.leaderboard-tabs')).toHaveCount(0);
+  await expect(leaderboardCard.getByText('Top 3 — Fastest Lap')).toBeVisible();
   await expect(leaderboardCard.locator('.leaderboard-podium-row')).toHaveCount(3);
   await expect(leaderboardCard.locator('.leaderboard-trophy')).toHaveCount(3);
   await expect(leaderboardCard.locator('.leaderboard-rider-avatar')).toHaveCount(4);
@@ -2117,19 +2122,18 @@ test('completed race finishes the active sentence and authoritative placements b
   await expect(leaderboardCard.getByRole('img', { name: 'Third place bronze cup' })).toBeVisible();
   const fourthLeaderboardRider = leaderboardCard.locator('.leaderboard-ranked-row').first();
   await expect(fourthLeaderboardRider).not.toBeVisible();
-  await leaderboardCard.getByRole('button', { name: 'Peak RPM' }).click();
-  await expect(leaderboardCard.locator('.leaderboard-podium-row').first()).toContainText('146 RPM');
   await leaderboardCard.locator('.ghost-rank-dropdown > summary').click();
   await expect(fourthLeaderboardRider).toBeVisible();
   await expect(fourthLeaderboardRider.locator('.leaderboard-rider-avatar')).toBeVisible();
+  const podiumLeaderboardAvatar = await leaderboardCard.locator('.leaderboard-podium-row .leaderboard-rider-avatar').first().boundingBox();
+  const rankedLeaderboardAvatar = await fourthLeaderboardRider.locator('.leaderboard-rider-avatar').boundingBox();
+  expect(podiumLeaderboardAvatar?.width).toBe(108);
+  expect(podiumLeaderboardAvatar?.height).toBe(108);
+  expect(rankedLeaderboardAvatar?.width).toBe(108);
+  expect(rankedLeaderboardAvatar?.height).toBe(108);
   const firstGhostCard = leaderboardCard.locator('.ghost-leaderboard-entry').filter({ hasText: 'Alex Rider' });
   await firstGhostCard.click();
   await expect(firstGhostCard).toContainText('Selected to race');
-  const selectedGhostPerformance = leaderboardCard.locator('.ghost-analytics').filter({ hasText: 'Alex Rider' });
-  await expect(selectedGhostPerformance).toBeVisible();
-  await selectedGhostPerformance.locator('summary').click();
-  await expect(selectedGhostPerformance).toContainText('146 RPM peak');
-  await expect(selectedGhostPerformance).toContainText('Pedal Zone 1');
   const zoneCardBounds = await zoneTableCard.boundingBox();
   const leaderboardBounds = await leaderboardCard.boundingBox();
   expect(zoneCardBounds).not.toBeNull();

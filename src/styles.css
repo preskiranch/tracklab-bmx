@@ -4082,53 +4082,6 @@ input:focus {
   background: #ffffff;
 }
 
-.ghost-share-toggle {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px 9px;
-  color: #344454;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.ghost-share-toggle input {
-  accent-color: #2e9a4b;
-}
-
-.ghost-analytics {
-  border-top: 1px solid var(--line);
-  padding: 8px 10px;
-  color: #344454;
-  font-size: 11px;
-}
-
-.ghost-analytics summary {
-  cursor: pointer;
-  font-weight: 900;
-}
-
-.ghost-overall-metrics,
-.ghost-zone-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
-  padding-top: 7px;
-}
-
-.ghost-zone-row {
-  grid-template-columns: minmax(74px, 1.25fr) repeat(3, minmax(0, 1fr));
-  border-top: 1px solid #edf0f2;
-  margin-top: 6px;
-}
-
-.ghost-zone-row strong,
-.ghost-zone-row span,
-.ghost-overall-metrics span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 .route-layout-card {
   display: grid;
   gap: 9px;
@@ -6356,31 +6309,6 @@ input:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.leaderboard-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #f5f7f9;
-}
-
-.leaderboard-tabs button {
-  min-height: 32px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: #4b5b69;
-  font-size: 11px;
-  font-weight: 850;
-}
-
-.leaderboard-tabs button.selected {
-  background: #111827;
-  color: #ffffff;
-}
-
 .leaderboard-row {
   justify-content: space-between;
   gap: 9px;
@@ -6431,6 +6359,15 @@ input:focus {
   gap: 6px;
 }
 
+.leaderboard-podium-row .leaderboard-rider-heading {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.leaderboard-podium-row .leaderboard-rider-avatar {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+
 .leaderboard-rider-heading > div,
 .leaderboard-ranked-row > div {
   display: grid;
@@ -6450,9 +6387,9 @@ input:focus {
 }
 
 .leaderboard-rider-avatar {
-  width: 36px;
-  height: 36px;
-  font-size: 11px;
+  width: 108px;
+  height: 108px;
+  font-size: 22px;
 }
 
 .leaderboard-rank {
