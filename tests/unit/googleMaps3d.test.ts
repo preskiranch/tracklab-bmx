@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   elevatedPath,
   isGoogleMaps3DSteadyEvent,
+  mapping3DCenterForTrack,
   previewRangeMeters,
   projectScreenPointToGround,
   terrainRelativeCamera,
@@ -17,6 +18,22 @@ describe('Google Maps 3D pedal-zone mapping helpers', () => {
   it('expands the camera range to include longer routes', () => {
     const distantPoint = { lat: center.lat + 0.004, lng: center.lng };
     expect(previewRangeMeters([center, distantPoint], center)).toBeGreaterThan(1_000);
+  });
+
+  it('keeps the 3D mapping camera on the selected track during a track switch', () => {
+    const antelopeBmxCenter = { lat: 41.0700999, lng: -112.0692826 };
+    const staleChulaVistaCenter = { lat: 32.6297455, lng: -116.9383327 };
+
+    expect(mapping3DCenterForTrack(
+      staleChulaVistaCenter,
+      antelopeBmxCenter,
+      299,
+    )).toEqual(antelopeBmxCenter);
+    expect(mapping3DCenterForTrack(
+      { lat: 41.0702, lng: -112.0691 },
+      antelopeBmxCenter,
+      299,
+    )).toEqual({ lat: 41.0702, lng: -112.0691 });
   });
 
   it('draws mapping paths just above terrain without changing coordinates', () => {

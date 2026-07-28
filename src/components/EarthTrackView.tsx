@@ -24,7 +24,8 @@ import {
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { RaceRiderOverlay } from './RaceRiderOverlay';
 import { RiderAvatar } from './RiderAvatar';
-import { hasGoogleMapsApiKey } from '../lib/googleMaps';
+import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
+import { mapping3DCenterForTrack } from '../lib/googleMaps3d';
 import { trackGoogleMapsUrl } from '../lib/mapLinks';
 import { formatDistanceMeters, formatReactionTime } from '../units';
 import type {
@@ -216,22 +217,34 @@ export function EarthTrackView({
     && mappingEditMode === 'zones'
     && mappingObstacleView3D
     && !raceViewFullscreen;
+  const mapping3DTrackCenter = trackCenter(track);
+  const mapping3DSafeCenter = mapping3DCenterForTrack(
+    earthCenter,
+    mapping3DTrackCenter,
+    track.lengthMeters,
+  );
   const [mapping3DCamera, setMapping3DCamera] = useState(() => ({
     angle: Math.max(55, earthAngle),
     heading: earthHeading,
-    center: earthCenter,
+    center: mapping3DSafeCenter,
     zoom: earthZoom,
   }));
   useEffect(() => {
     setMapping3DCamera({
       angle: Math.max(55, earthAngle),
       heading: earthHeading,
-      center: earthCenter,
+      center: mapping3DSafeCenter,
       zoom: earthZoom,
     });
-  // Keep this temporary camera isolated per track so the saved satellite race view never moves.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track.id]);
+  // Keep this temporary camera isolated so moving it never changes the saved satellite race view.
+  }, [
+    earthAngle,
+    earthHeading,
+    earthZoom,
+    mapping3DSafeCenter.lat,
+    mapping3DSafeCenter.lng,
+    track.id,
+  ]);
   const activeEarthAngle = showingPedalZone3D ? mapping3DCamera.angle : earthAngle;
   const activeEarthHeading = showingPedalZone3D ? mapping3DCamera.heading : earthHeading;
   const imageryLabel = showingPedalZone3D ? '3D obstacle view' : 'Google satellite view';

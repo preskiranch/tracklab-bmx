@@ -27,6 +27,21 @@ export function previewRangeMeters(points: TrackPoint[], center: TrackPoint) {
   ));
 }
 
+export function mapping3DCenterForTrack(
+  preferredCenter: TrackPoint | null,
+  trackCenter: TrackPoint,
+  trackLengthMeters: number,
+) {
+  if (!preferredCenter) {
+    return trackCenter;
+  }
+
+  const allowedOffsetMeters = Math.max(750, trackLengthMeters * 2.5);
+  return distanceBetweenTrackPoints(preferredCenter, trackCenter) <= allowedOffsetMeters
+    ? preferredCenter
+    : trackCenter;
+}
+
 export function terrainRelativeCamera(
   center: TrackPoint,
   heading: number,
