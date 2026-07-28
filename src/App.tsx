@@ -14,7 +14,6 @@ import {
   Bike,
   Bluetooth,
   Code2,
-  Database,
   Gauge,
   Globe2,
   MapPinned,
@@ -1508,6 +1507,11 @@ export default function App() {
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>('rpm');
   const [publicLeaderboards, setPublicLeaderboards] = useState<Record<LeaderboardMetric, LeaderboardEntry[]> | null>(null);
   const [chatDraft, setChatDraft] = useState('');
+  const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
+  const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
+  const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
+  const adminProfileActive = Boolean(authUser?.admin);
+  const developerRaceLayoutActive = isAdminAccountEmail(accountEmail);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: 1, author: 'Coach', text: 'Gate cadence looked strong through the first straight.', at: '10:24 AM' },
     { id: 2, author: 'System', text: "Private room opened for today's session.", at: '10:25 AM' },
@@ -1780,7 +1784,7 @@ export default function App() {
     setMappingSaveMessage(null);
   }, [selectedTrack.id]);
   const selectedTrackMapping = newestTrackMapping(
-    storedMappings[selectedTrack.id],
+    adminProfileActive ? storedMappings[selectedTrack.id] : undefined,
     publicTrackMappings[selectedTrack.id],
   );
   const selectedRouteVariants = useMemo(
@@ -1861,7 +1865,10 @@ export default function App() {
   }, [selectedTrack.id, raceRouteVariantId]);
   const multiplayerVoteCandidates = useMemo<MultiplayerTrackVoteCandidate[]>(() => {
     return catalogTracks.flatMap((track) => {
-      const mapping = newestTrackMapping(storedMappings[track.id], publicTrackMappings[track.id]);
+      const mapping = newestTrackMapping(
+        adminProfileActive ? storedMappings[track.id] : undefined,
+        publicTrackMappings[track.id],
+      );
       if (!mapping || mapping.centerline.length < 2) {
         return [];
       }
@@ -1883,7 +1890,7 @@ export default function App() {
           || routeVariants.some((variant) => (variant.splitSections?.length ?? 0) > 0),
       }];
     });
-  }, [catalogTracks, publicTrackMappings, storedMappings]);
+  }, [adminProfileActive, catalogTracks, publicTrackMappings, storedMappings]);
 
   useEffect(() => {
     if (!hasDualStartRoutes && raceRouteVariantId !== 'amateur') {
@@ -2387,10 +2394,6 @@ export default function App() {
       commentaryUpdatedAt: Date.now(),
     });
   }, [persistRaceViewPreferences]);
-  const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
-  const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
-  const adminProfileActive = Boolean(authUser?.admin);
-  const developerRaceLayoutActive = isAdminAccountEmail(accountEmail);
   const ghostRouteVariantId = effectiveTrack.activeRouteVariantId ?? (hasDualStartRoutes ? raceRouteVariantId : undefined);
   const availableGhostLaps = useMemo(
     () => ghostsForTrackRoute(ghostLaps, effectiveTrack.id, ghostRouteVariantId, isLoopTrack ? lapCount : 1)
@@ -3147,11 +3150,13 @@ export default function App() {
           return;
         }
 
-        setStoredMappings((current) => {
-          const next = mergeTrackMappingsBySavedAt(current, data.trackMappings);
-          writeStoredTrackMappings(next);
-          return next;
-        });
+        if (adminProfileActive) {
+          setStoredMappings((current) => {
+            const next = mergeTrackMappingsBySavedAt(current, data.trackMappings);
+            writeStoredTrackMappings(next);
+            return next;
+          });
+        }
         setCustomRoutes((current) => {
           const next = mergeCustomRoutes(current, data.customRoutes);
           writeStoredCustomRoutes(next);
@@ -3169,7 +3174,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [bridge.connection]);
+  }, [adminProfileActive, bridge.connection]);
 
   useEffect(() => {
     if (!cloudProfileKey) {
@@ -3203,11 +3208,13 @@ export default function App() {
             return;
           }
 
-          setStoredMappings((current) => {
-            const next = mergeTrackMappingsBySavedAt(current, data.trackMappings);
-            writeStoredTrackMappings(next);
-            return next;
-          });
+          if (adminProfileActive) {
+            setStoredMappings((current) => {
+              const next = mergeTrackMappingsBySavedAt(current, data.trackMappings);
+              writeStoredTrackMappings(next);
+              return next;
+            });
+          }
           setCustomRoutes((current) => {
             const next = mergeCustomRoutes(current, data.customRoutes);
             writeStoredCustomRoutes(next);
@@ -3265,7 +3272,7 @@ export default function App() {
           setCloudUserDataStatus('online');
           setCloudUserDataMessage('Bike names, the developer camera view, studio riders, custom routes, and track maps are syncing.');
 
-          if (authUser && mappingBackfillProfileRef.current !== cloudProfileKey) {
+          if (authUser && adminProfileActive && mappingBackfillProfileRef.current !== cloudProfileKey) {
             mappingBackfillProfileRef.current = cloudProfileKey;
             const unsyncedMappings = Object.values(storedMappingsRef.current).filter((localMapping) => {
               const cloudMapping = data.trackMappings[localMapping.trackId];
@@ -3332,7 +3339,7 @@ export default function App() {
       window.removeEventListener('focus', refreshCloudUserData);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [applyRaceViewPreferences, authUser, cloudProfileKey, developerRaceLayoutActive]);
+  }, [adminProfileActive, applyRaceViewPreferences, authUser, cloudProfileKey, developerRaceLayoutActive]);
 
   useEffect(() => {
     writeStoredBikeProfiles(bikeProfiles);
@@ -3441,14 +3448,14 @@ export default function App() {
 
   useEffect(() => {
     writeStoredTrackMappings(storedMappings);
-    if (bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
+    if (!adminProfileActive || bridge.connection !== 'open' || !bridgeUserDataLoadedRef.current) {
       return;
     }
 
     void queueBridgeUserDataPatch({ trackMappings: storedMappings }).catch((error: Error) => {
       console.warn(`Could not save track mappings to TrackLab bridge: ${error.message}`);
     });
-  }, [bridge.connection, storedMappings]);
+  }, [adminProfileActive, bridge.connection, storedMappings]);
 
   useEffect(() => {
     safeSetLocalStorage(speedUnitStorageKey, speedUnit);
@@ -4392,6 +4399,15 @@ export default function App() {
   }, [clearMappingHistory, selectedTrack.id]);
 
   useEffect(() => {
+    if (adminProfileActive) {
+      return;
+    }
+    setMappingMode(false);
+    setMappingFullscreen(false);
+    setMappingObstacleView3D(false);
+  }, [adminProfileActive]);
+
+  useEffect(() => {
     setDraftPoints(activeMappingRoute?.centerline ?? []);
     setDraftZoneBoundarySets(activeMappingRoute ? zoneBoundarySetsFromRouteVariant(activeMappingRoute) : []);
     setDraftSplitSections(activeMappingRoute?.splitSections ?? []);
@@ -4401,6 +4417,10 @@ export default function App() {
   }, [activeMappingRoute, clearMappingHistory]);
 
   const handleMappingModeChange = (enabled: boolean) => {
+    if (enabled && !adminProfileActive) {
+      return;
+    }
+
     if (enabled && draftPoints.length === 0 && activeMappingRoute) {
       setDraftPoints(activeMappingRoute.centerline);
       setDraftZoneBoundarySets(zoneBoundarySetsFromRouteVariant(activeMappingRoute));
@@ -4772,9 +4792,9 @@ export default function App() {
   };
 
   const persistTrackMapping = async (mapping: UserTrackMapping) => {
-    if (!authUser) {
+    if (!authUser || !adminProfileActive) {
       setMappingSaveStatus('error');
-      setMappingSaveMessage('Saved on this device only. Sign in to sync this track map across browsers.');
+      setMappingSaveMessage('Only the TrackLab developer can edit and publish track maps.');
       return;
     }
 
@@ -4817,7 +4837,7 @@ export default function App() {
   };
 
   const saveMapping = () => {
-    if (draftPoints.length < 2) {
+    if (!adminProfileActive || draftPoints.length < 2) {
       return;
     }
 
@@ -4865,6 +4885,10 @@ export default function App() {
   };
 
   const removeMapping = () => {
+    if (!adminProfileActive) {
+      return;
+    }
+
     setStoredMappings((current) => {
       const next = { ...current };
       delete next[selectedTrack.id];
@@ -4883,12 +4907,16 @@ export default function App() {
   };
 
   const exportMapping = () => {
-    if (selectedTrackMapping) {
+    if (adminProfileActive && selectedTrackMapping) {
       downloadTrackMapping(selectedTrackMapping);
     }
   };
 
   const importMapping = (file: File) => {
+    if (!adminProfileActive) {
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -6391,19 +6419,19 @@ export default function App() {
         setAppMode('race');
       },
     },
-    {
-      kind: 'action',
+    ...(adminProfileActive ? [{
+      kind: 'action' as const,
       label: 'Map Zones',
       detail: workflowMapReady
         ? `${effectiveTrack.zones.length} pedal zone${effectiveTrack.zones.length === 1 ? '' : 's'}`
         : 'Needs layout',
-      state: workflowMapReady ? 'complete' : 'next',
+      state: workflowMapReady ? 'complete' as const : 'next' as const,
       onClick: () => {
         setAppMode('race');
         handleMappingModeChange(true);
         setMappingEditMode(workflowMapReady ? 'zones' : 'draw');
       },
-    },
+    }] : []),
     ...(isLoopTrack ? [{
       kind: 'laps' as const,
       state: 'complete',
@@ -6733,37 +6761,29 @@ export default function App() {
         </section>
 
         <nav className="side-nav" aria-label="Primary">
-          <span className="nav-section-title">Workspace</span>
-          <button type="button" onClick={() => setShowMembershipLanding(true)}>
-            <Globe2 size={17} />
-            Community
-          </button>
-          <button type="button" onClick={openTrackLocator}>
-            <MapPinned size={17} />
-            Track Locator
-          </button>
-          <button className={appMode === 'race' ? 'selected' : ''} type="button" onClick={() => setAppMode('race')}>
+          <button className={appMode === 'race' && !mappingMode ? 'selected' : ''} type="button" onClick={() => setAppMode('race')}>
             <Activity size={17} />
-            Race Dashboard
-          </button>
-          <button className={appMode === 'monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('monitor')}>
-            <Gauge size={17} />
-            Live Monitor
-          </button>
-          <button className={appMode === 'diagnostics' ? 'selected' : ''} type="button" onClick={() => setAppMode('diagnostics')}>
-            <Settings size={17} />
-            Bike Check
+            Race
           </button>
           <button
-            className={mappingMode ? 'selected' : ''}
             type="button"
             onClick={() => {
               setAppMode('race');
-              handleMappingModeChange(true);
+              window.setTimeout(() => document.querySelector('.platform-topbar')?.scrollIntoView({ behavior: 'smooth' }), 0);
             }}
           >
-            <Route size={17} />
-            Tracks & Maps
+            <MapPinned size={17} />
+            Track
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAppMode('race');
+              window.setTimeout(() => document.querySelector('.pairing-rail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+            }}
+          >
+            <Users size={17} />
+            Riders
           </button>
           <button
             type="button"
@@ -6776,24 +6796,47 @@ export default function App() {
             Results
           </button>
           <button
+            className={sidebarMoreOpen ? 'selected' : ''}
             type="button"
-            onClick={() => {
-              window.setTimeout(() => document.querySelector('.pairing-rail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
-            }}
+            aria-expanded={sidebarMoreOpen}
+            onClick={() => setSidebarMoreOpen((open) => !open)}
           >
-            <Users size={17} />
-            Riders
+            <Settings size={17} />
+            More
           </button>
-          {adminProfileActive ? (
-            <button
-              className={appMode === 'developer' ? 'selected' : ''}
-              type="button"
-              onClick={() => setAppMode('developer')}
-            >
-              <Code2 size={17} />
-              Developer Tools
-            </button>
-          ) : null}
+          {sidebarMoreOpen && (
+            <div className="side-nav-more">
+              <button type="button" onClick={() => setShowMembershipLanding(true)}>
+                <Globe2 size={17} /> Community
+              </button>
+              <button type="button" onClick={openTrackLocator}>
+                <MapPinned size={17} /> Track Locator
+              </button>
+              <button className={appMode === 'monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('monitor')}>
+                <Gauge size={17} /> Live Monitor
+              </button>
+              <button className={appMode === 'diagnostics' ? 'selected' : ''} type="button" onClick={() => setAppMode('diagnostics')}>
+                <Settings size={17} /> Bike Check
+              </button>
+              {adminProfileActive && (
+                <>
+                  <button
+                    className={mappingMode ? 'selected' : ''}
+                    type="button"
+                    onClick={() => {
+                      setAppMode('race');
+                      handleMappingModeChange(true);
+                    }}
+                  >
+                    <Route size={17} /> Tracks & Maps
+                  </button>
+                  <button className={appMode === 'developer' ? 'selected' : ''} type="button" onClick={() => setAppMode('developer')}>
+                    <Code2 size={17} /> Developer Tools
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </nav>
 
         <section className="membership-mini-card">
@@ -6853,20 +6896,27 @@ export default function App() {
             </label>
           </div>
 
-          <button className="custom-location-shortcut" type="button" onClick={handleCustomLocationShortcut}>
-            <Plus size={16} />
-            <span>Custom Location</span>
-            <MapPinned size={16} />
-          </button>
+          {adminProfileActive && (
+            <button className="custom-location-shortcut" type="button" onClick={handleCustomLocationShortcut}>
+              <Plus size={16} />
+              <span>Custom Location</span>
+              <MapPinned size={16} />
+            </button>
+          )}
 
-          <div className="catalog-badge">
-            <Database size={16} />
-            <span>{catalogTracks.length} track locator records</span>
-          </div>
-
-          <div className="global-status">
-            <Globe2 size={16} />
-            <span>Provider-ready catalog / {selectedTrack.region}</span>
+          <div className="race-readiness-strip" aria-label="Race readiness">
+            <span>{connectedBikeDisplayCount} Bike{connectedBikeDisplayCount === 1 ? '' : 's'}</span>
+            <span className={workflowMapReady ? 'ready' : ''}>{workflowMapReady ? 'Track Ready' : 'Track Pending'}</span>
+            <span>{effectiveTrack.zones.length} Zones</span>
+            <span className={raceCommentaryPreferences.enabled ? 'ready' : ''}>
+              Commentary {raceCommentaryPreferences.enabled ? 'On' : 'Off'}
+            </span>
+            <button
+              type="button"
+              onClick={() => document.querySelector('.earth-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            >
+              Focus Map
+            </button>
           </div>
         </header>
 
@@ -6932,7 +6982,8 @@ export default function App() {
           <>
             <div className="dashboard-grid">
               <div className="dashboard-primary-column">
-                <EarthTrackView
+                <div className="race-canvas-shell">
+                  <EarthTrackView
                   track={effectiveTrack}
                   riders={stagedRiders}
                   ghostRiders={selectedGhostRiders}
@@ -6995,7 +7046,50 @@ export default function App() {
                   onMappingZonePointRemove={handleMappingZonePointRemove}
                   onMappingSplitPointAdd={handleMappingSplitPointAdd}
                   onMappingSplitDrawEnd={handleMappingSplitDrawEnd}
-                />
+                  />
+                  {!mappingMode && !raceViewFullscreen && (
+                    <aside className="race-control-dock" aria-label="Race control">
+                      <span className="eyebrow">Race Control</span>
+                      <strong>{workflowRaceReady ? 'Everything is ready' : 'Finish race setup'}</strong>
+                      <label>
+                        <span>Commentary</span>
+                        <input
+                          type="checkbox"
+                          checked={raceCommentaryPreferences.enabled}
+                          onChange={(event) => handleRaceCommentaryPreferencesChange({
+                            ...raceCommentaryPreferences,
+                            enabled: event.target.checked,
+                          })}
+                        />
+                      </label>
+                      <label>
+                        <span>Ambient sound</span>
+                        <input
+                          type="checkbox"
+                          checked={raceCommentaryPreferences.ambientEnabled}
+                          onChange={(event) => handleRaceCommentaryPreferencesChange({
+                            ...raceCommentaryPreferences,
+                            ambientEnabled: event.target.checked,
+                          })}
+                        />
+                      </label>
+                      <button
+                        className="race-control-start"
+                        type="button"
+                        disabled={!workflowRaceReady}
+                        onPointerDown={workflowRaceReady ? primeRaceAudio : undefined}
+                        onClick={() => void handleStart()}
+                      >
+                        {raceState === 'finished' ? 'Race Again' : 'Start Race'}
+                      </button>
+                      {canCancelRace && (
+                        <button className="race-control-cancel" type="button" onClick={handleCancel}>
+                          Cancel Race
+                        </button>
+                      )}
+                    </aside>
+                  )}
+                </div>
 
                 <AnalyticsPanel
                   track={effectiveTrack}

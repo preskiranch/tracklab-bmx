@@ -521,7 +521,9 @@ export function SessionControlPanel({
 
   return (
     <aside className={mappingToolsCollapsed ? 'control-panel mapping-tools-collapsed' : 'control-panel'}>
-      <section className="panel-section custom-route-section" id="custom-route-section">
+      {isAdminProfile && (
+        <>
+          <section className="panel-section custom-route-section" id="custom-route-section">
         <div className="section-heading">
           <div>
             <span className="eyebrow">Custom Route</span>
@@ -654,9 +656,9 @@ export function SessionControlPanel({
             {filteredCustomRoutes.length === 0 && <span className="empty-inline">No saved locations match</span>}
           </div>
         )}
-      </section>
+          </section>
 
-      <section className={mappingToolsCollapsed ? 'panel-section mapping-section collapsed' : 'panel-section mapping-section'}>
+          <section className={mappingToolsCollapsed ? 'panel-section mapping-section collapsed' : 'panel-section mapping-section'}>
         {mappingToolsCollapsed ? (
           <button
             className="mapping-tools-toggle-button"
@@ -1079,7 +1081,9 @@ export function SessionControlPanel({
             </div>
           </>
         )}
-      </section>
+          </section>
+        </>
+      )}
 
       <section className="panel-section">
         <div className="section-heading">

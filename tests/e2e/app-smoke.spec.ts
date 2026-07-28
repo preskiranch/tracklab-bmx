@@ -350,16 +350,18 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await page.getByLabel('Password').fill('playwright-pass-2026');
   await page.getByRole('button', { name: 'Create Account', exact: true }).click();
 
-  await expect(page.getByRole('button', { name: /Custom Location/i })).toBeVisible();
+  await expect(page.getByLabel('Race control')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Custom Location/i })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Demo/i }).first()).toBeVisible();
-  await expect(page.getByText(/Track Mapping|Trace route/i).first()).toBeVisible();
+  await expect(page.getByText(/Track Mapping|Trace route/i)).toHaveCount(0);
   await page.getByText('Loading Google imagery').waitFor({ state: 'hidden', timeout: 8_000 }).catch(() => undefined);
 
+  await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Track Locator', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Find a BMX racing track' })).toBeVisible();
   await expect(page.getByText('1,305 tracks', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Open App', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Race Dashboard', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Race', exact: true })).toBeVisible();
   await expect(page.getByText('Commentary brain', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('option', { name: /Fast|Balanced|Studio/i })).toHaveCount(0);
   await expect(page.getByLabel('Announcer voice')).toHaveCount(0);
@@ -579,6 +581,52 @@ test('track map save waits for account sync and shared publication', async ({ pa
   expect(savedMapping?.zones).toHaveLength(2);
 });
 
+test('regular racers can use published tracks but cannot access mapping tools', async ({ page }) => {
+  const authUser = {
+    id: 'regular-racer',
+    profileKey: 'user:regular-racer',
+    email: 'regular-racer@tracklab.test',
+    name: 'Regular Racer',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+  };
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/public-track-mappings', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { [mockPedalZoneMapping.trackId]: mockPedalZoneMapping },
+        count: 1,
+      }),
+    });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { [mockPedalZoneMapping.trackId]: mockPedalZoneMapping },
+        customRoutes: [],
+        bikeProfiles: [],
+      }),
+    });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  await page.getByRole('button', { name: 'Open App' }).click();
+
+  await expect(page.getByLabel('Race readiness')).toContainText('Track Ready');
+  await expect(page.getByLabel('Race control')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Custom Location' })).toHaveCount(0);
+  await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'More' }).click();
+  await expect(page.getByRole('button', { name: 'Tracks & Maps' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Developer Tools' })).toHaveCount(0);
+});
+
 test('pedal-zone mapping can temporarily use 3D while normal views stay satellite', async ({ page }) => {
   const authUser = {
     id: 'mapping-3d-admin',
@@ -663,7 +711,7 @@ test('advanced connector prompts racer accounts to open the Mac connector', asyn
   await page.goto('/');
 
   await page.getByRole('button', { name: 'Open App' }).click();
-  await expect(page.getByRole('button', { name: /Custom Location/i })).toBeVisible();
+  await expect(page.getByLabel('Race control')).toBeVisible();
   await page.getByRole('button', { name: 'Advanced Connector' }).click();
 
   await expect(page.getByRole('button', { name: 'Open Mac Connector' })).toBeVisible();
@@ -2028,7 +2076,7 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await expect(page.getByRole('button', { name: 'Rotate map left', exact: true })).toBeDisabled();
     await expect(page.locator('.race-staging-countdown strong')).toHaveText(/20|1[8-9]/);
     await expect(page.locator('.start-tree-light')).toHaveCount(0);
-    await expect(page.locator('.rider-stat.ghost')).toContainText('0% / ghost');
+    await expect(page.locator('.rider-stat.ghost')).toContainText('Ghost 1 / 0%');
     await page.waitForTimeout(8_500);
 
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
@@ -2621,7 +2669,11 @@ test('demo rider names and the last track view restore from the signed-in accoun
   await page.getByRole('button', { name: /Demo/i }).first().click();
   await expect(page.getByLabel('Name for player 1')).toHaveValue('Gate Master');
   await expect(page.getByLabel('Name for player 2')).toHaveValue('Rhythm Queen');
-  await expect(page.getByLabel('Gate Master profile picture').locator('img')).toBeVisible();
+  await expect(
+    page.getByRole('complementary', { name: 'Bike pairing' })
+      .getByLabel('Gate Master profile picture')
+      .locator('img'),
+  ).toBeVisible();
   await expect(page.getByText('Angle 52 deg', { exact: true })).toBeVisible();
   await expect(page.getByText('Heading 195 deg', { exact: true })).toBeVisible();
 });

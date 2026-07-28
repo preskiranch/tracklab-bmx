@@ -287,9 +287,7 @@ function membershipForAccount(user) {
 }
 
 function canPublishSharedTrackMappings(user) {
-  const allowRacerPublishing = process.env.TRACKLAB_ALLOW_RACER_MAP_PUBLISH === '1';
-  const membership = membershipForAccount(user);
-  return isAdminEmail(user?.email) || (allowRacerPublishing && membership.tier === 'racer');
+  return isAdminEmail(user?.email);
 }
 
 function shouldPublishSharedTrackMapping(mapping) {
@@ -4075,7 +4073,7 @@ async function serveStatic(request, response) {
       }
 
       if (!canPublishSharedTrackMappings(session.user)) {
-        writeJson(response, 403, { error: 'Only approved TrackLab publishers can update shared track maps.' });
+        writeJson(response, 403, { error: 'Only the TrackLab developer can edit and publish shared track maps.' });
         return;
       }
 
@@ -4107,6 +4105,10 @@ async function serveStatic(request, response) {
 
     const session = await requireAuthSession(request, response);
     if (!session) {
+      return;
+    }
+    if (!isAdminEmail(session.user.email)) {
+      writeJson(response, 403, { error: 'Only the TrackLab developer can edit track routes and pedal zones.' });
       return;
     }
 
@@ -4154,7 +4156,16 @@ async function serveStatic(request, response) {
     }
 
     if (request.method === 'PATCH' || request.method === 'POST') {
-      const patch = sanitizeUserDataPatch(await readJsonBody(request, 5_000_000));
+      const payload = await readJsonBody(request, 5_000_000);
+      if (
+        payload?.trackMappings
+        && typeof payload.trackMappings === 'object'
+        && !isAdminEmail(session.user.email)
+      ) {
+        writeJson(response, 403, { error: 'Only the TrackLab developer can edit track routes and pedal zones.' });
+        return;
+      }
+      const patch = sanitizeUserDataPatch(payload);
       const userData = await saveMergedUserData(profileKey, patch);
       if (!userData) {
         writeJson(response, 503, { error: 'Cloud profile storage is temporarily unavailable.' });

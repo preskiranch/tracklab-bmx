@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { RaceRiderOverlay } from './RaceRiderOverlay';
+import { RiderAvatar } from './RiderAvatar';
 import { hasGoogleMapsApiKey } from '../lib/googleMaps';
 import { trackGoogleMapsUrl } from '../lib/mapLinks';
 import { formatDistanceMeters, formatReactionTime } from '../units';
@@ -119,13 +120,9 @@ type EarthTrackViewProps = {
   onMappingSplitDrawEnd: () => void;
 };
 
-function formatElapsed(milliseconds: number | null) {
-  if (milliseconds == null) {
-    return '--';
-  }
-
-  const seconds = milliseconds / 1000;
-  return `${seconds.toFixed(2)}s`;
+function formatPlacement(rank: number) {
+  const suffix = rank === 1 ? 'ST' : rank === 2 ? 'ND' : rank === 3 ? 'RD' : 'TH';
+  return `${rank}${suffix}`;
 }
 
 const startTreeLamps = [
@@ -621,45 +618,52 @@ export function EarthTrackView({
 
             return (
               <div className="rider-stat" style={{ '--player-color': player?.accent ?? '#111827' } as CSSProperties} key={rider.playerId}>
-                <span className="player-chip">P{rider.playerId}</span>
+                <RiderAvatar
+                  name={player?.name ?? `Player ${rider.playerId}`}
+                  photoUrl={player?.photoUrl}
+                  accent={player?.accent}
+                  className="rider-stat-avatar"
+                />
                 <div>
                   <strong>{player?.name ?? `Player ${rider.playerId}`}</strong>
-                  <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank} / RT {formatReactionTime(reactionTime)}</span>
+                  <span>Gate P{rider.playerId} / {Math.round((rider.distance / track.lengthMeters) * 100)}% / RT {formatReactionTime(reactionTime)}</span>
                 </div>
                 <div className="rider-stat-live">
                   <Signal size={14} />
                   <span>{sample ? `${Math.round(sample.signal * 100)}%` : 'Waiting'}</span>
                 </div>
-                <strong>{formatElapsed(rider.finishedAt)}</strong>
+                <strong className={`rider-card-place ${raceState === 'ready' ? 'ready' : ''}`}>
+                  {raceState === 'ready' ? 'READY' : formatPlacement(rider.rank)}
+                </strong>
               </div>
             );
           })}
           {remoteRaceStates.flatMap((state) => state.riders.map((rider) => (
             <div className="rider-stat remote" style={{ '--player-color': rider.accent } as CSSProperties} key={`${state.clientId}-${rider.id}`}>
-              <span className="player-chip">R</span>
+              <RiderAvatar name={rider.name} photoUrl={rider.photoUrl} accent={rider.accent} className="rider-stat-avatar" />
               <div>
                 <strong>{rider.name}</strong>
-                <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / rank {rider.rank} / {state.raceState}</span>
+                <span>Remote / {Math.round((rider.distance / track.lengthMeters) * 100)}% / {state.raceState}</span>
               </div>
               <div className="rider-stat-live">
                 <Signal size={14} />
                 <span>{rider.sampleAt ? `${Math.round(rider.signal * 100)}%` : 'Remote'}</span>
               </div>
-              <strong>{formatElapsed(rider.finishedAt)}</strong>
+              <strong className="rider-card-place">{formatPlacement(rider.rank)}</strong>
             </div>
           )))}
           {ghostRiders.map((rider, index) => (
             <div className="rider-stat ghost" style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
-              <span className="player-chip">G{index + 1}</span>
+              <RiderAvatar name={rider.name} accent={rider.accent} className="rider-stat-avatar" />
               <div>
                 <strong>{rider.name}</strong>
-                <span>{Math.round((rider.distance / track.lengthMeters) * 100)}% / ghost</span>
+                <span>Ghost {index + 1} / {Math.round((rider.distance / track.lengthMeters) * 100)}%</span>
               </div>
               <div className="rider-stat-live">
                 <Signal size={14} />
                 <span>Replay</span>
               </div>
-              <strong>{formatElapsed(rider.finishedAt)}</strong>
+              <strong className="rider-card-place">{formatPlacement(rider.rank)}</strong>
             </div>
           ))}
         </div>

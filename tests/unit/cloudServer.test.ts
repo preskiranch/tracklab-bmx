@@ -607,25 +607,27 @@ describe('cloud API trust boundaries', () => {
     }
   });
 
-  it('saves one account mapping atomically and only publishes approved accounts', async () => {
+  it('restricts track mapping edits and publication to the developer account', async () => {
     const privateMapping = trackMapping('private-north-bay-map');
     const privateSave = await api('/api/user-data/track-mapping', {
       method: 'POST',
       body: JSON.stringify({ mapping: privateMapping }),
     });
-    expect(privateSave.status).toBe(200);
+    expect(privateSave.status).toBe(403);
     await expect(privateSave.json()).resolves.toMatchObject({
-      mapping: { trackId: privateMapping.trackId, zones: [{ startMeter: 0, endMeter: 45 }] },
-      published: false,
-      publicMapping: null,
+      error: 'Only the TrackLab developer can edit track routes and pedal zones.',
     });
 
     const privateProfile = await api('/api/user-data');
-    await expect(privateProfile.json()).resolves.toMatchObject({
-      trackMappings: {
-        [privateMapping.trackId]: { trackId: privateMapping.trackId },
-      },
+    const privateProfilePayload = await privateProfile.json() as { trackMappings: Record<string, unknown> };
+    expect(privateProfilePayload.trackMappings[privateMapping.trackId]).toBeUndefined();
+
+    const genericMappingPatch = await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({ trackMappings: { [privateMapping.trackId]: privateMapping } }),
     });
+    expect(genericMappingPatch.status).toBe(403);
+
     const publicBeforeAdmin = await api('/api/public-track-mappings');
     const publicBeforePayload = await publicBeforeAdmin.json() as { trackMappings: Record<string, unknown> };
     expect(publicBeforePayload.trackMappings[privateMapping.trackId]).toBeUndefined();
