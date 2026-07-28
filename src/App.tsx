@@ -3888,7 +3888,13 @@ export default function App() {
         sessionId,
         trackId: effectiveTrack.id,
         trackName: effectiveTrack.name,
-        summaries: raceCapture.summary,
+        summaries: raceCapture.summary.map((summary) => {
+          const photoUrl = racePlayers.find((player) => player.id === summary.playerId)?.photoUrl;
+          return {
+            ...summary,
+            ...(photoUrl ? { photoUrl } : {}),
+          };
+        }),
       }),
     }).then((response) => {
       if (!response.ok) {

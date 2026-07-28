@@ -1219,6 +1219,11 @@ export async function saveRaceResults(room, client, raceState) {
   raceState.summary.slice(0, 4).forEach((summary, index) => {
     const base = index * 17;
     const dedupeKey = `${raceState.sessionId}:${client.guestKey}:${summary.playerId}`;
+    const photoUrl = raceState.riders?.find((rider) => rider.playerId === summary.playerId)?.photoUrl;
+    const storedSummary = {
+      ...summary,
+      ...(photoUrl ? { photoUrl } : {}),
+    };
     values.push(
       dedupeKey,
       room.id,
@@ -1236,7 +1241,7 @@ export async function saveRaceResults(room, client, raceState) {
       summary.averageCadence,
       summary.topWatts,
       summary.averageWatts,
-      json(summary),
+      json(storedSummary),
     );
     placeholders.push(`(
       $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8},
@@ -1339,33 +1344,66 @@ export async function saveLocalRaceResults({
 
 export async function loadLeaderboards(trackId, limit = 10) {
   const safeLimit = Math.max(1, Math.min(50, Math.round(Number(limit) || 10)));
+  if (!pool) {
+    const metricDefinitions = {
+      rpm: { field: 'topCadence', unit: 'RPM', factor: 1 },
+      speed: { field: 'topSpeedKph', unit: 'MPH', factor: 0.621371 },
+      watts: { field: 'topWatts', unit: 'W', factor: 1 },
+    };
+    return Object.fromEntries(Object.entries(metricDefinitions).map(([metric, definition]) => {
+      const bestByRider = new Map();
+      [...memoryLocalRaceResults.values()]
+        .filter((entry) => entry.trackId === trackId)
+        .forEach((entry) => {
+          const rawValue = Number(entry[definition.field]);
+          if (!Number.isFinite(rawValue)) {
+            return;
+          }
+          const riderKey = `${entry.guestKey}:${entry.riderName.toLocaleLowerCase()}`;
+          const current = bestByRider.get(riderKey);
+          if (!current || rawValue > current.rawValue) {
+            bestByRider.set(riderKey, { entry, rawValue });
+          }
+        });
+      return [metric, [...bestByRider.values()]
+        .sort((left, right) => right.rawValue - left.rawValue)
+        .slice(0, safeLimit)
+        .map(({ entry, rawValue }) => ({
+          rider: entry.riderName,
+          ...(entry.summary?.photoUrl ? { photoUrl: entry.summary.photoUrl } : {}),
+          value: rawValue * definition.factor,
+          unit: definition.unit,
+          date: new Date(entry.createdAt).toISOString().slice(0, 10),
+        }))];
+    }));
+  }
   const result = await query(
     `WITH cadence_bests AS (
        SELECT DISTINCT ON (guest_key, rider_name)
-         rider_name, top_cadence AS value, created_at
+         rider_name, top_cadence AS value, created_at, summary->>'photoUrl' AS photo_url
        FROM ${schema}.race_results
        WHERE track_id = $1 AND top_cadence IS NOT NULL
        ORDER BY guest_key, rider_name, top_cadence DESC, created_at DESC
      ), speed_bests AS (
        SELECT DISTINCT ON (guest_key, rider_name)
-         rider_name, top_speed_kph AS value, created_at
+         rider_name, top_speed_kph AS value, created_at, summary->>'photoUrl' AS photo_url
        FROM ${schema}.race_results
        WHERE track_id = $1 AND top_speed_kph IS NOT NULL
        ORDER BY guest_key, rider_name, top_speed_kph DESC, created_at DESC
      ), watt_bests AS (
        SELECT DISTINCT ON (guest_key, rider_name)
-         rider_name, top_watts AS value, created_at
+         rider_name, top_watts AS value, created_at, summary->>'photoUrl' AS photo_url
        FROM ${schema}.race_results
        WHERE track_id = $1 AND top_watts IS NOT NULL
        ORDER BY guest_key, rider_name, top_watts DESC, created_at DESC
      )
-     SELECT 'rpm' AS metric, rider_name, value, created_at
+     SELECT 'rpm' AS metric, rider_name, value, created_at, photo_url
      FROM (SELECT * FROM cadence_bests ORDER BY value DESC LIMIT $2) AS cadence_leaders
      UNION ALL
-     SELECT 'speed' AS metric, rider_name, value, created_at
+     SELECT 'speed' AS metric, rider_name, value, created_at, photo_url
      FROM (SELECT * FROM speed_bests ORDER BY value DESC LIMIT $2) AS speed_leaders
      UNION ALL
-     SELECT 'watts' AS metric, rider_name, value, created_at
+     SELECT 'watts' AS metric, rider_name, value, created_at, photo_url
      FROM (SELECT * FROM watt_bests ORDER BY value DESC LIMIT $2) AS watt_leaders`,
     [trackId, safeLimit],
   );
@@ -1374,6 +1412,7 @@ export async function loadLeaderboards(trackId, limit = 10) {
   for (const row of result?.rows ?? []) {
     boards[row.metric]?.push({
       rider: row.rider_name,
+      ...(row.photo_url ? { photoUrl: row.photo_url } : {}),
       value: row.metric === 'speed' ? Number(row.value) * 0.621371 : Number(row.value),
       unit: row.metric === 'rpm' ? 'RPM' : row.metric === 'speed' ? 'MPH' : 'W',
       date: new Date(row.created_at).toISOString().slice(0, 10),
@@ -1609,6 +1648,7 @@ function routeKey(routeVariantId, lapCount = 1) {
 
 function ghostFromRow(row, source = 'top', includeAnalytics = false) {
   const medalRank = Number(row.medal_rank);
+  const storedSummary = fromJson(row.summary, null);
   return {
     version: 1,
     id: row.id,
@@ -1616,6 +1656,7 @@ function ghostFromRow(row, source = 'top', includeAnalytics = false) {
     trackName: row.track_name,
     ...(row.route_variant_id ? { routeVariantId: row.route_variant_id } : {}),
     riderName: row.rider_name,
+    ...(storedSummary?.photoUrl ? { photoUrl: storedSummary.photoUrl } : {}),
     ownerKey: row.owner_key,
     ownerName: row.owner_name,
     colorName: row.color_name,
@@ -1628,7 +1669,7 @@ function ghostFromRow(row, source = 'top', includeAnalytics = false) {
     savedAt: new Date(row.saved_at).getTime(),
     analyticsPublic: Boolean(row.analytics_public),
     medalRank: medalRank >= 1 && medalRank <= 3 ? medalRank : null,
-    summary: includeAnalytics ? fromJson(row.summary, null) : null,
+    summary: includeAnalytics ? storedSummary : null,
     zoneResults: includeAnalytics ? fromJson(row.zone_results, []) : [],
     points: fromJson(row.points, []),
   };
@@ -1685,7 +1726,10 @@ export async function saveGhostLap(ghost) {
       ghost.raceSource,
       lapCount,
       Boolean(ghost.analyticsPublic),
-      json(ghost.summary),
+      json({
+        ...(ghost.summary && typeof ghost.summary === 'object' ? ghost.summary : {}),
+        ...(ghost.photoUrl ? { photoUrl: ghost.photoUrl } : {}),
+      }),
       json(ghost.zoneResults ?? []),
       json(ghost.points),
       Math.round(Number(ghost.savedAt) || Date.now()),

@@ -14,6 +14,7 @@ import type {
   TrackRecord,
   TrackZone,
 } from '../types';
+import { PodiumTrophy } from './PodiumTrophy';
 import { RiderAvatar } from './RiderAvatar';
 
 type AnalyticsPanelProps = {
@@ -184,6 +185,13 @@ export function AnalyticsPanel({
     () => new Map(players.map((player) => [player.id, player])),
     [players],
   );
+  const playerByName = useMemo(
+    () => new Map(players.map((player) => [player.name.trim().toLocaleLowerCase(), player])),
+    [players],
+  );
+  const leaderboardEntries = track.leaderboards[leaderboardMetric].slice(0, 50);
+  const leaderboardPodium = leaderboardEntries.slice(0, 3);
+  const remainingLeaderboardEntries = leaderboardEntries.slice(3);
 
   return (
     <section className="analytics-panel">
@@ -401,18 +409,70 @@ export function AnalyticsPanel({
             ))}
           </div>
 
-          <div className="leaderboard-list">
-            {track.leaderboards[leaderboardMetric].map((entry, index) => (
-              <div className="leaderboard-row" key={`${entry.rider}-${entry.date}`}>
-                <span>{index + 1}</span>
-                <div>
-                  <strong>{entry.rider}</strong>
-                  <span>{entry.date}</span>
-                </div>
-                <strong>{leaderboardValue(entry.value, leaderboardMetric, speedUnit)}</strong>
+          {leaderboardEntries.length === 0 ? (
+            <small className="leaderboard-empty">Complete a race on this track to set the first record.</small>
+          ) : (
+            <>
+              <div className="leaderboard-list leaderboard-podium">
+                {leaderboardPodium.map((entry, index) => {
+                  const rank = index + 1;
+                  const currentPlayer = playerByName.get(entry.rider.trim().toLocaleLowerCase());
+                  return (
+                    <article className="leaderboard-row leaderboard-podium-row" key={`${entry.rider}-${entry.date}`}>
+                      <PodiumTrophy rank={rank} className="leaderboard-trophy" />
+                      <div className="leaderboard-rider-heading">
+                        <RiderAvatar
+                          name={entry.rider}
+                          photoUrl={entry.photoUrl ?? currentPlayer?.photoUrl}
+                          accent="#64748b"
+                          className="leaderboard-rider-avatar"
+                        />
+                        <span className="leaderboard-rank">#{rank}</span>
+                        <div>
+                          <strong>{entry.rider}</strong>
+                          <span>{entry.date}</span>
+                        </div>
+                      </div>
+                      <strong className="leaderboard-value">
+                        {leaderboardValue(entry.value, leaderboardMetric, speedUnit)}
+                      </strong>
+                    </article>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+
+              {remainingLeaderboardEntries.length > 0 && (
+                <details className="leaderboard-rank-dropdown">
+                  <summary>
+                    <span>Ranks 4–{leaderboardEntries.length}</span>
+                    <small>View recorded laps</small>
+                  </summary>
+                  <div className="leaderboard-ranked-list">
+                    {remainingLeaderboardEntries.map((entry, index) => {
+                      const rank = index + 4;
+                      const currentPlayer = playerByName.get(entry.rider.trim().toLocaleLowerCase());
+                      return (
+                        <div className="leaderboard-ranked-row" key={`${entry.rider}-${entry.date}`}>
+                          <span className="leaderboard-rank">#{rank}</span>
+                          <RiderAvatar
+                            name={entry.rider}
+                            photoUrl={entry.photoUrl ?? currentPlayer?.photoUrl}
+                            accent="#64748b"
+                            className="leaderboard-rider-avatar"
+                          />
+                          <div>
+                            <strong>{entry.rider}</strong>
+                            <span>{entry.date}</span>
+                          </div>
+                          <strong>{leaderboardValue(entry.value, leaderboardMetric, speedUnit)}</strong>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              )}
+            </>
+          )}
         </div>
       </div>
     </section>

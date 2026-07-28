@@ -73,6 +73,13 @@ describe('ghost lap categories and privacy metadata', () => {
     expect(mergeGhostLaps([], [demoGhost])).toEqual([]);
   });
 
+  it('preserves a safe rider photo for ranked ghost cards', () => {
+    const ghost = rawGhost(1) as ReturnType<typeof rawGhost> & { photoUrl?: string };
+    ghost.photoUrl = 'data:image/jpeg;base64,QUJDRA==';
+
+    expect(sanitizeGhostLap(ghost)?.photoUrl).toBe(ghost.photoUrl);
+  });
+
   it('ranks selectable ghosts by finish time regardless of ownership source', () => {
     const personal = rawGhost(1, 'Personal Rider');
     personal.finishTimeMs = 23_000;

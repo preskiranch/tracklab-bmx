@@ -10,6 +10,7 @@ import type {
   TrackRouteVariantId,
 } from '../types';
 import { safeSetLocalStorage } from './browserStorage';
+import { normalizeRiderPhotoDataUrl } from './riderPhotos';
 
 const maxStoredGhosts = 80;
 const maxGhostPoints = 900;
@@ -122,6 +123,7 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
   }
 
   const riderName = safeText(raw.riderName, 'Rider', 80);
+  const photoUrl = normalizeRiderPhotoDataUrl(raw.photoUrl);
 
   return {
     version: 1,
@@ -130,6 +132,7 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
     trackName: safeText(raw.trackName, 'Unknown track', 140),
     ...(raw.routeVariantId === 'amateur' || raw.routeVariantId === 'pro' ? { routeVariantId: raw.routeVariantId } : {}),
     riderName,
+    ...(photoUrl ? { photoUrl } : {}),
     ownerKey: safeText(raw.ownerKey, 'local', 180),
     ownerName: safeText(raw.ownerName, 'TrackLab rider', 80),
     colorName: raw.colorName === 'red' || raw.colorName === 'blue' || raw.colorName === 'yellow' ? raw.colorName : 'lime',
@@ -241,6 +244,7 @@ export function buildGhostLapFromRace(options: {
     trackName: options.trackName,
     ...(options.routeVariantId ? { routeVariantId: options.routeVariantId } : {}),
     riderName: options.summary.riderName,
+    ...(options.player?.photoUrl ? { photoUrl: options.player.photoUrl } : {}),
     ownerKey: options.ownerKey,
     ownerName: options.ownerName,
     colorName: options.player?.colorName ?? options.summary.colorName,

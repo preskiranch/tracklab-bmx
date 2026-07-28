@@ -510,6 +510,7 @@ export type GhostLap = {
   trackName: string;
   routeVariantId?: TrackRouteVariantId;
   riderName: string;
+  photoUrl?: string;
   ownerKey: string;
   ownerName: string;
   colorName: PlayerSlot['colorName'];
@@ -671,6 +672,7 @@ export type UserTrackMapping = {
 
 export type LeaderboardEntry = {
   rider: string;
+  photoUrl?: string;
   value: number;
   unit: string;
   date: string;

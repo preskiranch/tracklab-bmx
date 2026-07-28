@@ -11,7 +11,6 @@ import {
   Gauge,
   MapPinned,
   Maximize2,
-  Medal,
   Mic2,
   Minimize2,
   Minus,
@@ -49,6 +48,8 @@ import type {
   TrackSplitSection,
   TrackZone,
 } from '../types';
+import { PodiumTrophy } from './PodiumTrophy';
+import { RiderAvatar } from './RiderAvatar';
 
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
@@ -215,10 +216,6 @@ function ghostSourceLabel(ghost: GhostLap) {
   }
 
   return 'My best';
-}
-
-function ghostMedalLabel(rank: number) {
-  return rank === 1 ? 'Gold' : rank === 2 ? 'Silver' : rank === 3 ? 'Bronze' : null;
 }
 
 export function SessionControlPanel({
@@ -439,7 +436,9 @@ export function SessionControlPanel({
   const renderGhostOption = (ghost: GhostLap, rank: number) => {
     const selected = selectedGhostIds.includes(ghost.id);
     const ownsGhost = ghost.ownerKey === currentProfileKey;
-    const medalLabel = ghostMedalLabel(rank);
+    const currentPlayer = players.find((player) => (
+      player.name.trim().toLocaleLowerCase() === ghost.riderName.trim().toLocaleLowerCase()
+    ));
     const riderZoneResults = ghost.zoneResults.flatMap((zone) => (
       zone.riders[0] ? [{ zone, rider: zone.riders[0] }] : []
     ));
@@ -452,16 +451,17 @@ export function SessionControlPanel({
           onClick={() => onGhostToggle(ghost.id)}
           aria-pressed={selected}
         >
-          <span className="ghost-name-row">
+          <div className="ghost-name-row">
+            <PodiumTrophy rank={rank} className="ghost-podium-trophy" />
+            <RiderAvatar
+              name={ghost.riderName}
+              photoUrl={ghost.photoUrl ?? currentPlayer?.photoUrl}
+              accent={ghost.accent}
+              className="ghost-rider-avatar"
+            />
             <span className={`ghost-rank-badge ${rank <= 3 ? `rank-${rank}` : ''}`}>#{rank}</span>
             <strong>{ghost.riderName}</strong>
-            {medalLabel && (
-              <span className={`ghost-medal rank-${rank}`} title={`${medalLabel} course record`}>
-                <Medal size={16} />
-                {medalLabel}
-              </span>
-            )}
-          </span>
+          </div>
           <small>
             {ghostSourceLabel(ghost)} / {formatGhostRaceTime(ghost.finishTimeMs)}
             {ghost.lapCount > 1 ? ` / ${ghost.lapCount} laps` : ''}

@@ -310,7 +310,6 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
       updatedAt: Date.now(),
     },
   };
-
   page.on('console', (message) => {
     if (message.type() !== 'error') {
       return;
@@ -1809,7 +1808,9 @@ test('loop races expose lap controls and privacy-safe ghost selection without a 
   await expect(page.getByText('Studio Bike One')).toBeVisible();
   await expect(page.getByText('World Leader')).toBeVisible();
   await expect(page.locator('.ghost-rank-badge')).toHaveText(['#1', '#2']);
-  await expect(page.getByText('Gold')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'First place gold cup' })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Second place silver cup' })).toBeVisible();
+  await expect(page.locator('.ghost-rider-avatar')).toHaveCount(2);
   await expect(page.getByText('Replay public / performance private')).toBeVisible();
   await expect(page.getByText('Gate start', { exact: false })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Countdown', exact: true })).toHaveCount(0);
@@ -1856,6 +1857,7 @@ test('completed race finishes the active sentence and authoritative placements b
       updatedAt: Date.now(),
     },
   };
+  const leaderboardPhotoUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.route('**/api/auth/me', async (route) => {
@@ -1919,7 +1921,18 @@ test('completed race finishes the active sentence and authoritative placements b
   await page.route('**/api/multiplayer/leaderboards*', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+      body: JSON.stringify({
+        leaderboards: {
+          rpm: [
+            { rider: 'Alex Rider', photoUrl: leaderboardPhotoUrl, value: 146, unit: 'RPM', date: '2026-07-01' },
+            { rider: 'Sam Carter', photoUrl: leaderboardPhotoUrl, value: 142, unit: 'RPM', date: '2026-07-02' },
+            { rider: 'Jamie Lee', photoUrl: leaderboardPhotoUrl, value: 139, unit: 'RPM', date: '2026-07-03' },
+            { rider: 'Taylor Smith', photoUrl: leaderboardPhotoUrl, value: 136, unit: 'RPM', date: '2026-07-04' },
+          ],
+          speed: [],
+          watts: [],
+        },
+      }),
     });
   });
 
@@ -2020,8 +2033,21 @@ test('completed race finishes the active sentence and authoritative placements b
   const summaryAvatarBounds = await dashboardAnalysis.locator('.summary-rider-avatar').first().boundingBox();
   expect(summaryAvatarBounds?.width).toBe(38);
   expect(summaryAvatarBounds?.height).toBe(38);
+  const leaderboardCard = dashboardAnalysis.locator('.leaderboard-card');
+  await expect(leaderboardCard.locator('.leaderboard-podium-row')).toHaveCount(3);
+  await expect(leaderboardCard.locator('.leaderboard-trophy')).toHaveCount(3);
+  await expect(leaderboardCard.locator('.leaderboard-rider-avatar')).toHaveCount(4);
+  await expect(leaderboardCard.locator('.leaderboard-rider-avatar img')).toHaveCount(4);
+  await expect(leaderboardCard.getByRole('img', { name: 'First place gold cup' })).toBeVisible();
+  await expect(leaderboardCard.getByRole('img', { name: 'Second place silver cup' })).toBeVisible();
+  await expect(leaderboardCard.getByRole('img', { name: 'Third place bronze cup' })).toBeVisible();
+  const fourthLeaderboardRider = leaderboardCard.locator('.leaderboard-ranked-row').first();
+  await expect(fourthLeaderboardRider).not.toBeVisible();
+  await leaderboardCard.locator('.leaderboard-rank-dropdown > summary').click();
+  await expect(fourthLeaderboardRider).toBeVisible();
+  await expect(fourthLeaderboardRider.locator('.leaderboard-rider-avatar')).toBeVisible();
   const zoneCardBounds = await zoneTableCard.boundingBox();
-  const leaderboardBounds = await dashboardAnalysis.locator('.leaderboard-card').boundingBox();
+  const leaderboardBounds = await leaderboardCard.boundingBox();
   expect(zoneCardBounds).not.toBeNull();
   expect(leaderboardBounds).not.toBeNull();
   expect(leaderboardBounds!.y).toBeGreaterThan(zoneCardBounds!.y + zoneCardBounds!.height);

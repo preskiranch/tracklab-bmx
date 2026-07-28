@@ -633,9 +633,11 @@ function sanitizeLocalRaceResult(value, index) {
   const finishTimeMs = value.finishTimeMs == null
     ? null
     : Math.max(1, Math.min(3_600_000, Math.round(finiteNumber(value.finishTimeMs, 0))));
+  const photoUrl = sanitizeRiderPhotoDataUrl(value.photoUrl);
   return {
     playerId,
     riderName: sanitizeText(value.riderName, `Rider ${playerId}`, 64),
+    ...(photoUrl ? { photoUrl } : {}),
     rank,
     finishTimeMs,
     distanceMeters: Math.max(0, finiteNumber(value.distanceMeters, 0)),
@@ -2061,6 +2063,7 @@ function sanitizeGhostLapPayload(value, profileKey) {
     : /^demo rider\b/i.test(riderName)
       ? 'demo'
       : 'live';
+  const photoUrl = sanitizeRiderPhotoDataUrl(value.photoUrl);
 
   if (
     raceSource !== 'live'
@@ -2081,6 +2084,7 @@ function sanitizeGhostLapPayload(value, profileKey) {
     trackName: sanitizeText(value.trackName, 'Unknown track', 140),
     ...(value.routeVariantId === 'amateur' || value.routeVariantId === 'pro' ? { routeVariantId: value.routeVariantId } : {}),
     riderName,
+    ...(photoUrl ? { photoUrl } : {}),
     ownerKey,
     ownerName: sanitizeText(value.ownerName, 'TrackLab rider', 80),
     colorName: ['lime', 'red', 'blue', 'yellow'].includes(value.colorName) ? value.colorName : 'lime',
@@ -4309,7 +4313,7 @@ async function serveStatic(request, response) {
       writeJson(response, 403, { error: 'Racer access is required to save race history.' });
       return;
     }
-    const payload = await readJsonBody(request, 64_000);
+    const payload = await readJsonBody(request, 320_000);
     const sessionId = sanitizeText(payload?.sessionId, '', 160);
     const trackId = sanitizeText(payload?.trackId, '', 140);
     const trackName = sanitizeText(payload?.trackName, '', 140);
@@ -4363,7 +4367,7 @@ async function serveStatic(request, response) {
       return;
     }
 
-    const leaderboards = await persistence.loadLeaderboards(trackId, 10);
+    const leaderboards = await persistence.loadLeaderboards(trackId, 50);
     response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
     response.end(JSON.stringify({ trackId, persistence: persistence.persistenceEnabled(), leaderboards }));
     return;
