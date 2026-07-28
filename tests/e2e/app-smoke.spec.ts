@@ -353,7 +353,8 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByLabel('Race controls')).toBeVisible();
   await expect(page.locator('.race-control-dock')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Custom Location/i })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /Demo/i }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);
+  await expect(page.getByLabel('Bike source')).toHaveCount(0);
   await expect(page.getByText(/Track Mapping|Trace route/i)).toHaveCount(0);
   await page.getByText('Loading Google imagery').waitFor({ state: 'hidden', timeout: 8_000 }).catch(() => undefined);
 
@@ -583,15 +584,22 @@ test('track map save waits for account sync and shared publication', async ({ pa
 
   const regularPreview = page.getByLabel('Preview regular user interface');
   await expect(regularPreview).toBeVisible();
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  await expect(page.getByText('Demo race source online', { exact: true })).toBeVisible();
   await regularPreview.check();
   await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Custom Location' })).toHaveCount(0);
   await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);
+  await expect(page.getByLabel('Bike source')).toHaveCount(0);
+  await expect(page.getByText('Demo race source online', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'More' }).click();
   await expect(page.getByRole('button', { name: 'Tracks & Maps' })).toHaveCount(0);
   await regularPreview.uncheck();
   await expect(page.getByRole('button', { name: 'Edit map' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Tracks & Maps' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Demo/i }).first()).toBeVisible();
+  await expect(page.getByLabel('Bike source')).toBeVisible();
 });
 
 test('regular racers can use published tracks but cannot access mapping tools', async ({ page }) => {
@@ -637,6 +645,8 @@ test('regular racers can use published tracks but cannot access mapping tools', 
   await expect(page.getByRole('button', { name: 'Custom Location' })).toHaveCount(0);
   await expect(page.getByLabel('Preview regular user interface')).toHaveCount(0);
   await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);
+  await expect(page.getByLabel('Bike source')).toHaveCount(0);
   await page.getByRole('button', { name: 'More' }).click();
   await expect(page.getByRole('button', { name: 'Tracks & Maps' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Developer Tools' })).toHaveCount(0);
@@ -968,7 +978,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
 
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
-  const customDemoNames = ['Miles Power', 'Cadence Watts', 'Maya Torres', 'Jordan Lee'];
+  const customDemoNames = ['Miles Power', 'Rasheen "The Machine" Hicks', 'Maya Torres', 'Jordan Lee'];
   for (let index = 0; index < customDemoNames.length; index += 1) {
     const nameInput = page.getByLabel(`Name for player ${index + 1}`);
     await expect(nameInput).toHaveValue(`Demo Rider ${index + 1}`);
@@ -976,6 +986,28 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     await nameInput.press('Enter');
     await expect(nameInput).toHaveValue(customDemoNames[index]);
   }
+  const longDashboardName = page.locator('.rider-stat-identity strong')
+    .filter({ hasText: 'Rasheen "The Machine" Hicks' });
+  await expect(longDashboardName).toBeVisible();
+  const dashboardNameLayout = await longDashboardName.evaluate((name) => ({
+    whiteSpace: getComputedStyle(name).whiteSpace,
+    textOverflow: getComputedStyle(name).textOverflow,
+    fitsWidth: name.scrollWidth <= name.clientWidth + 1,
+    fitsHeight: name.scrollHeight <= name.clientHeight + 1,
+  }));
+  expect(dashboardNameLayout.whiteSpace).toBe('normal');
+  expect(dashboardNameLayout.textOverflow).not.toBe('ellipsis');
+  expect(dashboardNameLayout.fitsWidth).toBe(true);
+  expect(dashboardNameLayout.fitsHeight).toBe(true);
+  const longPairingName = page.getByLabel('Name for player 2');
+  const pairingNameLayout = await longPairingName.evaluate((name) => ({
+    wraps: getComputedStyle(name).whiteSpace === 'pre-wrap',
+    fitsWidth: name.scrollWidth <= name.clientWidth + 1,
+    fitsHeight: name.scrollHeight <= name.clientHeight + 1,
+  }));
+  expect(pairingNameLayout.wraps).toBe(true);
+  expect(pairingNameLayout.fitsWidth).toBe(true);
+  expect(pairingNameLayout.fitsHeight).toBe(true);
 
   await expect(page.getByText('Developer ambient calibration')).toBeVisible();
   const ambientVolume = page.getByLabel('Ambient sound volume');
@@ -1000,6 +1032,18 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   for (const customName of customDemoNames) {
     await expect(riderPanel.getByText(customName, { exact: true })).toBeVisible();
   }
+  const longFullscreenName = riderPanel.locator('.race-rider-overlay-identity strong')
+    .filter({ hasText: 'Rasheen "The Machine" Hicks' });
+  const fullscreenNameLayout = await longFullscreenName.evaluate((name) => ({
+    whiteSpace: getComputedStyle(name).whiteSpace,
+    textOverflow: getComputedStyle(name).textOverflow,
+    fitsWidth: name.scrollWidth <= name.clientWidth + 1,
+    fitsHeight: name.scrollHeight <= name.clientHeight + 1,
+  }));
+  expect(fullscreenNameLayout.whiteSpace).toBe('normal');
+  expect(fullscreenNameLayout.textOverflow).not.toBe('ellipsis');
+  expect(fullscreenNameLayout.fitsWidth).toBe(true);
+  expect(fullscreenNameLayout.fitsHeight).toBe(true);
   await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {

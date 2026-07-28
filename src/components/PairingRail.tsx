@@ -174,8 +174,9 @@ export function PairingRail({
                   {!onRename ? (
                     <h3>{player.name}</h3>
                   ) : (
-                    <input
+                    <textarea
                       className="player-name-input"
+                      rows={3}
                       value={nameDrafts[player.id] ?? player.name}
                       onFocus={() => {
                         setEditingPlayerId(player.id);
@@ -192,6 +193,7 @@ export function PairingRail({
                       onBlur={(event) => commitNameDraft(player, event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
+                          event.preventDefault();
                           event.currentTarget.blur();
                         }
                       }}

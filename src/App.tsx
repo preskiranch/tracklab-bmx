@@ -5756,6 +5756,10 @@ export default function App() {
   ]);
 
   const handleDemoModeChange = (enabled: boolean, nextSource: BikeConnectionSource = enabled ? 'demo' : 'bluetooth') => {
+    if (enabled && !adminProfileActive) {
+      return;
+    }
+
     clearStartGateSequence();
     setLockedRacePlayers(null);
     setBikeConnectionSource(nextSource);
@@ -5782,6 +5786,9 @@ export default function App() {
     }
 
     if (source === 'demo') {
+      if (!adminProfileActive) {
+        return;
+      }
       handleDemoModeChange(true, 'demo');
       return;
     }
@@ -5911,6 +5918,10 @@ export default function App() {
   }, [adminProfileActive, multiplayer, requireAccountProfile]);
 
   const startBenchmarkDemo = useCallback(() => {
+    if (!adminProfileActive) {
+      return;
+    }
+
     if (!requireAccountProfile('Create an account or sign in before starting demo mode.')) {
       return;
     }
@@ -5926,7 +5937,7 @@ export default function App() {
     handleDemoBikeCountChange(Math.min(4, maxPlayers));
     handleDemoModeChange(true, 'demo');
     setAppMode('race');
-  }, [membership, multiplayer, requireAccountProfile]);
+  }, [adminProfileActive, membership, multiplayer, requireAccountProfile]);
 
   const openRaceDashboard = useCallback(() => {
     if (!requireAccountProfile()) {
@@ -5992,6 +6003,10 @@ export default function App() {
   }, [checkoutBikeSeats, requireAccountProfile]);
 
   const prepareNoBikeDemoTest = useCallback(() => {
+    if (!adminProfileActive) {
+      return;
+    }
+
     clearStartGateSequence();
     setDemoMode(true);
     setDemoBikeCount(Math.min(maxPlayers, Math.max(4, demoBikeCount)));
@@ -6000,7 +6015,7 @@ export default function App() {
     setDemoSignalsStopped(false);
     resetRace();
     setAppMode('race');
-  }, [clearStartGateSequence, demoBikeCount, resetRace]);
+  }, [adminProfileActive, clearStartGateSequence, demoBikeCount, resetRace]);
 
   const enableMultiplayerTest = useCallback(() => {
     setPlayMode('multiplayer');
@@ -6555,7 +6570,10 @@ export default function App() {
             </div>
           </div>
           <p>{connectionStatus}</p>
-          <div className="connection-source-switch" aria-label="Connection method">
+          <div
+            className={`connection-source-switch${developerUiActive ? '' : ' live-only'}`}
+            aria-label="Connection method"
+          >
             <button
               className={bikeConnectionSource === 'bluetooth' && !demoMode ? 'selected' : ''}
               type="button"
@@ -6573,14 +6591,16 @@ export default function App() {
               <Usb size={15} />
               <span>Connector</span>
             </button>
-            <button
-              className={demoMode ? 'selected' : ''}
-              type="button"
-              onClick={() => handleBikeConnectionSourceChange('demo')}
-            >
-              <Bike size={15} />
-              <span>Demo</span>
-            </button>
+            {developerUiActive && (
+              <button
+                className={demoMode ? 'selected' : ''}
+                type="button"
+                onClick={() => handleBikeConnectionSourceChange('demo')}
+              >
+                <Bike size={15} />
+                <span>Demo</span>
+              </button>
+            )}
           </div>
           {bikeConnectionSource === 'bluetooth' && !demoMode && (
             <button
@@ -6844,7 +6864,7 @@ export default function App() {
         <section className="membership-mini-card">
           <span className="eyebrow">Membership</span>
           <strong>{membershipLabel}</strong>
-          <p>{membership.tier === 'racer' ? 'Live Wattbike racing unlocked.' : 'Demo and live viewing access.'}</p>
+          <p>{membership.tier === 'racer' ? 'Live Wattbike racing unlocked.' : 'Live viewing access.'}</p>
           <small>{authUser ? `${authUser.name} / ${authUser.email}` : 'Signed out'}</small>
           <button type="button" onClick={() => setShowMembershipLanding(true)}>
             {membership.tier === 'racer' ? 'Manage Access' : 'Upgrade'}
@@ -6906,6 +6926,9 @@ export default function App() {
                 checked={regularUserPreview}
                 onChange={(event) => {
                   const enabled = event.target.checked;
+                  if (enabled && demoMode) {
+                    handleDemoModeChange(false, 'bluetooth');
+                  }
                   setRegularUserPreview(enabled);
                   if (enabled) {
                     setAppMode('race');

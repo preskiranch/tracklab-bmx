@@ -624,7 +624,7 @@ export function EarthTrackView({
                   accent={player?.accent}
                   className="rider-stat-avatar"
                 />
-                <div>
+                <div className="rider-stat-identity">
                   <strong>{player?.name ?? `Player ${rider.playerId}`}</strong>
                   <span>Gate P{rider.playerId} / {Math.round((rider.distance / track.lengthMeters) * 100)}% / RT {formatReactionTime(reactionTime)}</span>
                 </div>
@@ -641,7 +641,7 @@ export function EarthTrackView({
           {remoteRaceStates.flatMap((state) => state.riders.map((rider) => (
             <div className="rider-stat remote" style={{ '--player-color': rider.accent } as CSSProperties} key={`${state.clientId}-${rider.id}`}>
               <RiderAvatar name={rider.name} photoUrl={rider.photoUrl} accent={rider.accent} className="rider-stat-avatar" />
-              <div>
+              <div className="rider-stat-identity">
                 <strong>{rider.name}</strong>
                 <span>Remote / {Math.round((rider.distance / track.lengthMeters) * 100)}% / {state.raceState}</span>
               </div>
@@ -655,7 +655,7 @@ export function EarthTrackView({
           {ghostRiders.map((rider, index) => (
             <div className="rider-stat ghost" style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
               <RiderAvatar name={rider.name} accent={rider.accent} className="rider-stat-avatar" />
-              <div>
+              <div className="rider-stat-identity">
                 <strong>{rider.name}</strong>
                 <span>Ghost {index + 1} / {Math.round((rider.distance / track.lengthMeters) * 100)}%</span>
               </div>

@@ -112,18 +112,20 @@ export function MembershipLanding({
           </span>
           <h2>BMX racers can watch, train, and race on real mapped tracks.</h2>
           <p>
-            Free members can view live sessions and run demo races. Racer members connect Wattbikes,
-            create private rooms, join challenges, and save performance data.
+            Free members can view live sessions and explore the track directory. Racer members connect
+            Wattbikes, create private rooms, join challenges, and save performance data.
           </p>
           <div className="membership-cta-row">
             <button className="primary-button" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>
               <Users size={17} />
               {profileComplete ? 'Join Free' : creatingAccount ? 'Create Free Account' : 'Sign In'}
             </button>
-            <button className="secondary-button" type="button" onClick={onStartDemo} disabled={!profileComplete}>
-              <Play size={17} />
-              Demo Race
-            </button>
+            {isAdminProfile && (
+              <button className="secondary-button" type="button" onClick={onStartDemo} disabled={!profileComplete}>
+                <Play size={17} />
+                Demo Race
+              </button>
+            )}
           </div>
         </div>
 
@@ -150,7 +152,7 @@ export function MembershipLanding({
           <span className="eyebrow">Login required</span>
           <h2>{profileComplete ? 'Account ready' : creatingAccount ? 'Create your free TrackLab account' : 'Sign in to TrackLab'}</h2>
           <p>
-            Every spectator and racer signs in before entering TrackLab. Free accounts can watch and run demo mode;
+            Every spectator and racer signs in before entering TrackLab. Free accounts can watch live sessions;
             racer accounts can connect Wattbikes and join private rooms.
           </p>
         </div>
@@ -242,11 +244,11 @@ export function MembershipLanding({
           <span className="eyebrow">Spectator</span>
           <h3>Free membership</h3>
           <p>
-            Watch live rooms, follow race activity, and use demo mode on the benchmark track without a paid bike seat.
+            Watch live rooms, follow race activity, and explore the public BMX track directory without a paid bike seat.
           </p>
           <ul>
             <li>Live race viewing</li>
-            <li>Benchmark demo races</li>
+            <li>Public track directory</li>
             <li>Community profile</li>
           </ul>
           <button className="secondary-button full-width" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>

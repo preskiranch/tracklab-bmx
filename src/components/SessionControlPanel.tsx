@@ -1085,59 +1085,61 @@ export function SessionControlPanel({
         </>
       )}
 
-      <section className="panel-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Input Mode</span>
-            <h3>Rider source</h3>
+      {isAdminProfile && (
+        <section className="panel-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Developer Input</span>
+              <h3>Rider source</h3>
+            </div>
+            <Bike size={18} />
           </div>
-          <Bike size={18} />
-        </div>
 
-        <div className="segmented-control compact" aria-label="Bike source">
-          <button
-            className={!demoMode ? 'selected' : ''}
-            type="button"
-            onClick={() => onDemoModeChange(false)}
-          >
-            Live Bikes
-          </button>
-          <button
-            className={demoMode ? 'selected' : ''}
-            type="button"
-            onClick={() => onDemoModeChange(true)}
-          >
-            Demo
-          </button>
-        </div>
-        <p className="panel-helper">
-          {demoMode
-            ? 'Demo generates race data for testing. Edit each simulated rider’s name in the Demo Riders cards.'
-            : 'Live Bikes uses connected Wattbikes for the same race engine and BMX rollout logic.'}
-        </p>
+          <div className="segmented-control compact" aria-label="Bike source">
+            <button
+              className={!demoMode ? 'selected' : ''}
+              type="button"
+              onClick={() => onDemoModeChange(false)}
+            >
+              Live Bikes
+            </button>
+            <button
+              className={demoMode ? 'selected' : ''}
+              type="button"
+              onClick={() => onDemoModeChange(true)}
+            >
+              Demo
+            </button>
+          </div>
+          <p className="panel-helper">
+            {demoMode
+              ? 'Demo generates race data for testing and social-media previews. Edit each simulated rider’s name in the Demo Riders cards.'
+              : 'Live Bikes uses connected Wattbikes for the same race engine and BMX rollout logic.'}
+          </p>
 
-        {demoMode && (
-          <>
-            <div className="demo-mode-row">
-              <span>Riders</span>
-              <strong>{demoBikeCount} / {maxPlayers}</strong>
-              <small>{demoVariableCount} race variables</small>
-            </div>
-            <div className="segmented-control compact four-way" aria-label="Demo rider count">
-              {Array.from({ length: maxPlayers }, (_, index) => index + 1).map((count) => (
-                <button
-                  className={demoBikeCount === count ? 'selected' : ''}
-                  type="button"
-                  onClick={() => onDemoBikeCountChange(count)}
-                  key={count}
-                >
-                  {count}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </section>
+          {demoMode && (
+            <>
+              <div className="demo-mode-row">
+                <span>Riders</span>
+                <strong>{demoBikeCount} / {maxPlayers}</strong>
+                <small>{demoVariableCount} race variables</small>
+              </div>
+              <div className="segmented-control compact four-way" aria-label="Demo rider count">
+                {Array.from({ length: maxPlayers }, (_, index) => index + 1).map((count) => (
+                  <button
+                    className={demoBikeCount === count ? 'selected' : ''}
+                    type="button"
+                    onClick={() => onDemoBikeCountChange(count)}
+                    key={count}
+                  >
+                    {count}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="panel-section race-announcer-section">
         <div className="section-heading">

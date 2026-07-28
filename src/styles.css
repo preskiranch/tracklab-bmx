@@ -2240,12 +2240,13 @@ input:focus {
 }
 
 .workflow-split-choice-rider strong {
-  overflow: hidden;
+  min-width: 0;
   color: #17212b;
   font-size: 11px;
   font-weight: 950;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .workflow-split-choice-buttons {
@@ -2916,12 +2917,12 @@ input:focus {
 }
 
 .race-rider-overlay-identity strong {
-  overflow: hidden;
+  min-width: 0;
   color: #ffffff;
   font-size: 18px;
   line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .race-rider-overlay-identity span {
@@ -3389,10 +3390,14 @@ input:focus {
 .rider-stat {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "identity identity"
+    "avatar signal"
+    "place place";
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 9px;
   min-width: 0;
-  min-height: 110px;
+  min-height: 146px;
   padding: 10px;
   border: 1px solid color-mix(in srgb, var(--player-color) 55%, #273344);
   border-left: 4px solid var(--player-color);
@@ -3419,15 +3424,22 @@ input:focus {
   min-width: 0;
 }
 
-.rider-stat > div > strong,
-.roster-row strong {
-  overflow: hidden;
+.rider-stat-identity {
+  grid-area: identity;
+  align-content: start;
+}
+
+.rider-stat-identity strong {
   font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .rider-stat-live {
+  grid-area: signal;
+  align-self: center;
+  justify-self: end;
   margin-left: auto;
   gap: 4px;
   color: #aebdca;
@@ -3435,12 +3447,13 @@ input:focus {
 }
 
 .rider-stat-avatar {
-  width: 50px;
-  height: 50px;
+  grid-area: avatar;
+  width: 42px;
+  height: 42px;
 }
 
 .rider-card-place {
-  grid-column: 1 / -1;
+  grid-area: place;
   align-self: end;
   padding-top: 5px;
   border-top: 1px solid #2e3a49;
@@ -3883,12 +3896,13 @@ input:focus {
 }
 
 .split-choice-rider strong {
-  overflow: hidden;
+  min-width: 0;
   color: #111827;
   font-size: 13px;
   font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .split-choice-row .segmented-control button {
@@ -5410,9 +5424,10 @@ input:focus {
 }
 
 .player-name-input {
+  display: block;
   width: 100%;
   min-width: 0;
-  height: 24px;
+  min-height: 50px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -5420,7 +5435,12 @@ input:focus {
   font: inherit;
   font-size: 13px;
   font-weight: 900;
+  line-height: 1.2;
   outline: none;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  resize: none;
+  white-space: pre-wrap;
 }
 
 .player-name-input:focus {
@@ -7614,6 +7634,10 @@ input:focus {
 
   .connection-source-switch {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .connection-source-switch.live-only {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .connection-card > p,
