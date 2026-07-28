@@ -2407,6 +2407,48 @@ input:focus {
   white-space: nowrap;
 }
 
+.developer-preview-toggle {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  min-height: 40px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.developer-preview-toggle.active {
+  border-color: #7ade36;
+  background: #f0faea;
+}
+
+.developer-preview-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #64cf26;
+}
+
+.developer-preview-toggle span {
+  display: grid;
+  line-height: 1.1;
+}
+
+.developer-preview-toggle strong {
+  font-size: 11px;
+}
+
+.developer-preview-toggle small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.developer-preview-toggle b {
+  color: #3a8b18;
+  font-size: 10px;
+}
+
 .custom-location-shortcut:hover {
   border-color: #bfd8ad;
   background: #f6fbf1;

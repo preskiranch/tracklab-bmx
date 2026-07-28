@@ -1508,9 +1508,11 @@ export default function App() {
   const [publicLeaderboards, setPublicLeaderboards] = useState<Record<LeaderboardMetric, LeaderboardEntry[]> | null>(null);
   const [chatDraft, setChatDraft] = useState('');
   const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
+  const [regularUserPreview, setRegularUserPreview] = useState(false);
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
   const adminProfileActive = Boolean(authUser?.admin);
+  const developerUiActive = adminProfileActive && !regularUserPreview;
   const developerRaceLayoutActive = isAdminAccountEmail(accountEmail);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: 1, author: 'Coach', text: 'Gate cadence looked strong through the first straight.', at: '10:24 AM' },
@@ -1784,7 +1786,7 @@ export default function App() {
     setMappingSaveMessage(null);
   }, [selectedTrack.id]);
   const selectedTrackMapping = newestTrackMapping(
-    adminProfileActive ? storedMappings[selectedTrack.id] : undefined,
+    developerUiActive ? storedMappings[selectedTrack.id] : undefined,
     publicTrackMappings[selectedTrack.id],
   );
   const selectedRouteVariants = useMemo(
@@ -1866,7 +1868,7 @@ export default function App() {
   const multiplayerVoteCandidates = useMemo<MultiplayerTrackVoteCandidate[]>(() => {
     return catalogTracks.flatMap((track) => {
       const mapping = newestTrackMapping(
-        adminProfileActive ? storedMappings[track.id] : undefined,
+        developerUiActive ? storedMappings[track.id] : undefined,
         publicTrackMappings[track.id],
       );
       if (!mapping || mapping.centerline.length < 2) {
@@ -1890,7 +1892,7 @@ export default function App() {
           || routeVariants.some((variant) => (variant.splitSections?.length ?? 0) > 0),
       }];
     });
-  }, [adminProfileActive, catalogTracks, publicTrackMappings, storedMappings]);
+  }, [catalogTracks, developerUiActive, publicTrackMappings, storedMappings]);
 
   useEffect(() => {
     if (!hasDualStartRoutes && raceRouteVariantId !== 'amateur') {
@@ -4399,13 +4401,13 @@ export default function App() {
   }, [clearMappingHistory, selectedTrack.id]);
 
   useEffect(() => {
-    if (adminProfileActive) {
+    if (developerUiActive) {
       return;
     }
     setMappingMode(false);
     setMappingFullscreen(false);
     setMappingObstacleView3D(false);
-  }, [adminProfileActive]);
+  }, [developerUiActive]);
 
   useEffect(() => {
     setDraftPoints(activeMappingRoute?.centerline ?? []);
@@ -4417,7 +4419,7 @@ export default function App() {
   }, [activeMappingRoute, clearMappingHistory]);
 
   const handleMappingModeChange = (enabled: boolean) => {
-    if (enabled && !adminProfileActive) {
+    if (enabled && !developerUiActive) {
       return;
     }
 
@@ -6419,7 +6421,7 @@ export default function App() {
         setAppMode('race');
       },
     },
-    ...(adminProfileActive ? [{
+    ...(developerUiActive ? [{
       kind: 'action' as const,
       label: 'Map Zones',
       detail: workflowMapReady
@@ -6818,7 +6820,7 @@ export default function App() {
               <button className={appMode === 'diagnostics' ? 'selected' : ''} type="button" onClick={() => setAppMode('diagnostics')}>
                 <Settings size={17} /> Bike Check
               </button>
-              {adminProfileActive && (
+              {developerUiActive && (
                 <>
                   <button
                     className={mappingMode ? 'selected' : ''}
@@ -6897,6 +6899,29 @@ export default function App() {
           </div>
 
           {adminProfileActive && (
+            <label className={`developer-preview-toggle${regularUserPreview ? ' active' : ''}`}>
+              <input
+                type="checkbox"
+                aria-label="Preview regular user interface"
+                checked={regularUserPreview}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  setRegularUserPreview(enabled);
+                  if (enabled) {
+                    setAppMode('race');
+                    setSidebarMoreOpen(false);
+                  }
+                }}
+              />
+              <span>
+                <strong>Regular user preview</strong>
+                <small>{regularUserPreview ? 'Developer tools hidden' : 'Developer view active'}</small>
+              </span>
+              <b>{regularUserPreview ? 'ON' : 'OFF'}</b>
+            </label>
+          )}
+
+          {developerUiActive && (
             <button className="custom-location-shortcut" type="button" onClick={handleCustomLocationShortcut}>
               <Plus size={16} />
               <span>Custom Location</span>
@@ -6976,7 +7001,7 @@ export default function App() {
             onOpenRace={() => setAppMode('race')}
             onOpenMonitor={() => setAppMode('monitor')}
           />
-        ) : appMode === 'developer' && adminProfileActive ? (
+        ) : appMode === 'developer' && developerUiActive ? (
           <DeveloperToolsPanel />
         ) : (
           <>
@@ -7009,7 +7034,7 @@ export default function App() {
                   earthCenter={earthCenter}
                   earthZoom={earthZoom}
                   raceCameraLocked={raceCameraLocked}
-                  canEditRaceLayout={developerRaceLayoutActive}
+                  canEditRaceLayout={developerRaceLayoutActive && !regularUserPreview}
                   riderOverlayPreference={riderOverlaysByTrack[effectiveTrack.id]}
                   activeZones={activeZones}
                   canCancelRace={canCancelRace}
@@ -7135,7 +7160,7 @@ export default function App() {
                   isLoopTrack={isLoopTrack}
                   lapCount={lapCount}
                   currentProfileKey={cloudProfileKey}
-                  isAdminProfile={adminProfileActive}
+                  isAdminProfile={developerUiActive}
                   raceState={raceState}
                   activeBikeCount={racePlayers.length}
                   maxPlayers={maxPlayers}

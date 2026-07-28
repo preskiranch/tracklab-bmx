@@ -579,6 +579,18 @@ test('track map save waits for account sync and shared publication', async ({ pa
   expect(savedMapping?.trackId).toBe('black-mountain-bmx');
   expect(savedMapping?.zones[0]).toMatchObject({ startMeter: 0, endMeter: 30 });
   expect(savedMapping?.zones).toHaveLength(2);
+
+  const regularPreview = page.getByLabel('Preview regular user interface');
+  await expect(regularPreview).toBeVisible();
+  await regularPreview.check();
+  await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Custom Location' })).toHaveCount(0);
+  await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'More' }).click();
+  await expect(page.getByRole('button', { name: 'Tracks & Maps' })).toHaveCount(0);
+  await regularPreview.uncheck();
+  await expect(page.getByRole('button', { name: 'Edit map' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Tracks & Maps' })).toBeVisible();
 });
 
 test('regular racers can use published tracks but cannot access mapping tools', async ({ page }) => {
@@ -621,6 +633,7 @@ test('regular racers can use published tracks but cannot access mapping tools', 
   await expect(page.getByLabel('Race control')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Custom Location' })).toHaveCount(0);
+  await expect(page.getByLabel('Preview regular user interface')).toHaveCount(0);
   await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'More' }).click();
   await expect(page.getByRole('button', { name: 'Tracks & Maps' })).toHaveCount(0);
