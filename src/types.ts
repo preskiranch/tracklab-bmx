@@ -650,6 +650,8 @@ export type TrackRouteVariant = {
   splitSections?: TrackSplitSection[];
 };
 
+export type TrackRaceViewMode = 'satellite' | '3d';
+
 export type UserTrackMapping = {
   version: 1;
   trackId: string;
@@ -668,6 +670,7 @@ export type UserTrackMapping = {
   zones: TrackZone[];
   splitSections?: TrackSplitSection[];
   routeVariants?: TrackRouteVariant[];
+  raceViewMode?: TrackRaceViewMode;
 };
 
 export type LeaderboardEntry = {

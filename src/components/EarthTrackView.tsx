@@ -44,6 +44,7 @@ import type {
   SplitBranchChoice,
   SpeedUnit,
   TrackPoint,
+  TrackRaceViewMode,
   TrackRecord,
   TrackRouteVariantId,
   TrackSplitSection,
@@ -85,6 +86,7 @@ type EarthTrackViewProps = {
   canEditRaceLayout: boolean;
   riderOverlayPreference?: RaceRiderOverlayLayout;
   activeZones: TrackZone[];
+  raceViewMode: TrackRaceViewMode;
   canCancelRace: boolean;
   mappingMode: boolean;
   mappingFullscreen: boolean;
@@ -176,6 +178,7 @@ export function EarthTrackView({
   canEditRaceLayout,
   riderOverlayPreference,
   activeZones,
+  raceViewMode,
   canCancelRace,
   mappingMode,
   mappingFullscreen,
@@ -213,10 +216,18 @@ export function EarthTrackView({
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const googleMapsUrl = trackGoogleMapsUrl(track);
+  const [race3DFallbackTrackId, setRace3DFallbackTrackId] = useState<string | null>(null);
+  useEffect(() => {
+    setRace3DFallbackTrackId(null);
+  }, [raceViewMode, track.id]);
   const showingPedalZone3D = mappingMode
     && mappingEditMode === 'zones'
     && mappingObstacleView3D
     && !raceViewFullscreen;
+  const showingRace3D = raceViewMode === '3d'
+    && !mappingMode
+    && race3DFallbackTrackId !== track.id;
+  const showingAny3D = showingPedalZone3D || showingRace3D;
   const mapping3DTrackCenter = trackCenter(track);
   const mapping3DSafeCenter = mapping3DCenterForTrack(
     earthCenter,
@@ -245,9 +256,20 @@ export function EarthTrackView({
     mapping3DSafeCenter.lng,
     track.id,
   ]);
-  const activeEarthAngle = showingPedalZone3D ? mapping3DCamera.angle : earthAngle;
-  const activeEarthHeading = showingPedalZone3D ? mapping3DCamera.heading : earthHeading;
-  const imageryLabel = showingPedalZone3D ? '3D obstacle view' : 'Google satellite view';
+  const race3DCamera = {
+    angle: Math.max(55, earthAngle),
+    heading: earthHeading,
+    center: mapping3DSafeCenter,
+    zoom: earthZoom,
+  };
+  const active3DCamera = showingPedalZone3D ? mapping3DCamera : race3DCamera;
+  const activeEarthAngle = showingAny3D ? active3DCamera.angle : earthAngle;
+  const activeEarthHeading = showingAny3D ? active3DCamera.heading : earthHeading;
+  const imageryLabel = showingPedalZone3D
+    ? '3D obstacle view'
+    : showingRace3D
+      ? 'Google 3D race view'
+      : 'Google satellite view';
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'
     : 'Needs manual mapping';
@@ -270,7 +292,7 @@ export function EarthTrackView({
       <div className="earth-header">
         <div>
           <div className="eyebrow">
-            {showingPedalZone3D ? <Box size={14} /> : <Satellite size={14} />}
+            {showingAny3D ? <Box size={14} /> : <Satellite size={14} />}
             {imageryLabel}
           </div>
           <h2>{track.name}</h2>
@@ -289,13 +311,15 @@ export function EarthTrackView({
 
       <div className="earth-stage google-enabled">
         {googleMapsConfigured ? (
-          showingPedalZone3D ? (
+          showingAny3D ? (
             <Suspense
               fallback={(
                 <div className="google-map-status loading" role="status">
                   <Box size={20} />
-                  <strong>Opening 3D obstacle view</strong>
-                  <span>Loading terrain tools only for this pedal-zone edit.</span>
+                  <strong>{showingPedalZone3D ? 'Opening 3D obstacle view' : 'Opening 3D race view'}</strong>
+                  <span>{showingPedalZone3D
+                    ? 'Loading terrain tools only for this pedal-zone edit.'
+                    : 'Loading this track’s saved route, pedal zones, and 3D terrain.'}</span>
                 </div>
               )}
             >
@@ -309,14 +333,15 @@ export function EarthTrackView({
                 samplesByDevice={samplesByDevice}
                 speedUnit={speedUnit}
                 cStartOffsetsByPlayer={cStartOffsetsByPlayer}
-                raceViewFullscreen={false}
+                raceViewFullscreen={showingRace3D ? raceViewFullscreen : false}
                 raceState={raceState}
-                earthAngle={mapping3DCamera.angle}
-                earthHeading={mapping3DCamera.heading}
-                earthCenter={mapping3DCamera.center}
-                earthZoom={mapping3DCamera.zoom}
-                mappingMode
-                mappingEditMode="zones"
+                earthAngle={active3DCamera.angle}
+                earthHeading={active3DCamera.heading}
+                earthCenter={active3DCamera.center}
+                earthZoom={active3DCamera.zoom}
+                cameraLocked={showingRace3D && raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
+                mappingMode={showingPedalZone3D}
+                mappingEditMode={showingPedalZone3D ? 'zones' : 'navigate'}
                 mappingRouteVariantId={mappingRouteVariantId}
                 mappingZoneBranchChoice={mappingZoneBranchChoice}
                 draftPoints={draftPoints}
@@ -329,17 +354,27 @@ export function EarthTrackView({
                 draftRouteSplitSections={draftRouteSplitSections}
                 draftSplitBuilder={draftSplitBuilder}
                 onEarthCameraChange={(camera) => {
-                  setMapping3DCamera((current) => ({
-                    angle: camera.angle ?? current.angle,
-                    heading: camera.heading ?? current.heading,
-                    center: camera.center ?? current.center,
-                    zoom: camera.zoom ?? current.zoom,
-                  }));
+                  if (showingPedalZone3D) {
+                    setMapping3DCamera((current) => ({
+                      angle: camera.angle ?? current.angle,
+                      heading: camera.heading ?? current.heading,
+                      center: camera.center ?? current.center,
+                      zoom: camera.zoom ?? current.zoom,
+                    }));
+                  } else {
+                    onEarthCameraChange(camera);
+                  }
                 }}
                 onMappingZonePointAdd={onMappingZonePointAdd}
                 onMappingZonePointMove={onMappingZonePointMove}
                 onMappingZonePointRemove={onMappingZonePointRemove}
-                onUseSatellite={() => onMappingObstacleView3DChange(false)}
+                onUseSatellite={() => {
+                  if (showingPedalZone3D) {
+                    onMappingObstacleView3DChange(false);
+                  } else {
+                    setRace3DFallbackTrackId(track.id);
+                  }
+                }}
               />
             </Suspense>
           ) : (
@@ -448,7 +483,7 @@ export function EarthTrackView({
         <div className="earth-overlay bottom-left">
           <span>Angle {activeEarthAngle} deg</span>
           <span>Heading {activeEarthHeading} deg</span>
-          <span>{showingPedalZone3D ? '3D obstacles' : 'Satellite'}</span>
+          <span>{showingPedalZone3D ? '3D obstacles' : showingRace3D ? '3D terrain' : 'Satellite'}</span>
           <span>
             {showMappingUi
               ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`

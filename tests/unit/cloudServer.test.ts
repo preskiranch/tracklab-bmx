@@ -643,22 +643,25 @@ describe('cloud API trust boundaries', () => {
     expect(adminRegistration.status).toBe(201);
     cookie = String(adminRegistration.headers.get('set-cookie')).split(';')[0];
 
-    const sharedMapping = trackMapping('shared-north-bay-map');
+    const sharedMapping = {
+      ...trackMapping('shared-north-bay-map'),
+      raceViewMode: '3d',
+    };
     const sharedSave = await api('/api/user-data/track-mapping', {
       method: 'POST',
       body: JSON.stringify({ mapping: sharedMapping }),
     });
     expect(sharedSave.status).toBe(200);
     await expect(sharedSave.json()).resolves.toMatchObject({
-      mapping: { trackId: sharedMapping.trackId },
+      mapping: { trackId: sharedMapping.trackId, raceViewMode: '3d' },
       published: true,
-      publicMapping: { trackId: sharedMapping.trackId },
+      publicMapping: { trackId: sharedMapping.trackId, raceViewMode: '3d' },
     });
 
     const publicAfterAdmin = await api('/api/public-track-mappings');
     await expect(publicAfterAdmin.json()).resolves.toMatchObject({
       trackMappings: {
-        [sharedMapping.trackId]: { trackId: sharedMapping.trackId },
+        [sharedMapping.trackId]: { trackId: sharedMapping.trackId, raceViewMode: '3d' },
       },
     });
   });

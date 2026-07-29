@@ -2,6 +2,7 @@ import type {
   SplitBranchChoice,
   TrackPoint,
   TrackRecord,
+  TrackRaceViewMode,
   TrackRouteVariant,
   TrackRouteVariantId,
   TrackSplitSection,
@@ -846,6 +847,7 @@ export function createUserTrackMapping(
   existingRouteVariants: TrackRouteVariant[] = [],
   zoneTypes: TrackZone['type'][] = [],
   zoneBoundarySets: TrackZoneBoundarySet[] = [],
+  raceViewMode: TrackRaceViewMode = 'satellite',
 ): UserTrackMapping {
   const primaryVariant = createTrackRouteVariant(
     track,
@@ -884,6 +886,7 @@ export function createUserTrackMapping(
     zoneBoundarySets: primaryVariant.zoneBoundarySets,
     zones: primaryVariant.zones,
     splitSections: primaryVariant.splitSections,
+    raceViewMode,
     ...(routeVariants.length > 0 ? { routeVariants } : {}),
   };
 }
@@ -1035,6 +1038,7 @@ export function parseUserTrackMapping(value: string): UserTrackMapping {
 
   return {
     ...parsed,
+    raceViewMode: parsed.raceViewMode === '3d' ? '3d' : 'satellite',
     splitSections: Array.isArray(parsed.splitSections)
       ? parsed.splitSections.map((section) => normalizeSplitSection(section))
       : [],

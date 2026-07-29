@@ -2550,6 +2550,10 @@ input:focus {
   min-height: 100%;
 }
 
+.google-map-3d-shell.camera-locked .google-map-3d-layer {
+  pointer-events: none;
+}
+
 .google-map-caption {
   position: absolute;
   right: 14px;
@@ -4244,6 +4248,23 @@ input:focus {
   border-color: #9edc86;
   background: #f0faea;
   color: #226212;
+}
+
+.mapping-race-view-card {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #a8b8c7;
+  border-radius: 8px;
+  background: #f6f8fa;
+}
+
+.mapping-race-view-card p {
+  margin: 0;
+  color: #526474;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .mapping-obstacle-view-toggle {

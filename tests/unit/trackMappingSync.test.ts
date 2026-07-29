@@ -4,6 +4,7 @@ import {
   appendProSetZoneBoundaryMeter,
   mergeTrackMappingsBySavedAt,
   newestTrackMapping,
+  parseUserTrackMapping,
   repeatTrackZonesForLaps,
   routeIsClosedLoop,
   trackMappingStorageKey,
@@ -57,6 +58,20 @@ describe('cross-browser track mapping resolution', () => {
 
     expect(merged['north-bay']).toBe(current);
     expect(merged['oak-creek']).toBe(otherTrack);
+  });
+
+  it('preserves a saved 3D race view and defaults older mappings to satellite', () => {
+    const saved3D = {
+      ...mapping('north-bay', '2026-07-10T12:00:00.000Z', 8),
+      raceViewMode: '3d' as const,
+    };
+
+    expect(parseUserTrackMapping(JSON.stringify(saved3D)).raceViewMode).toBe('3d');
+    expect(parseUserTrackMapping(JSON.stringify(mapping(
+      'oak-creek',
+      '2026-07-10T12:00:00.000Z',
+      5,
+    ))).raceViewMode).toBe('satellite');
   });
 
   it('keeps the app running when the browser track-map cache exceeds its quota', () => {

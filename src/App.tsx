@@ -233,6 +233,7 @@ import type {
   StudioRider,
   StudioRiderAssignments,
   TrackPoint,
+  TrackRaceViewMode,
   TrackRecord,
   TrackRouteVariantId,
   TrackZone,
@@ -1421,6 +1422,7 @@ export default function App() {
   });
   const [mappingHistoryVersion, setMappingHistoryVersion] = useState(0);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
+  const [mappingRaceViewMode, setMappingRaceViewMode] = useState<TrackRaceViewMode>('satellite');
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
   const [studioRiders, setStudioRiders] = useState<StudioRider[]>(readStoredStudioRiders);
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
@@ -4372,6 +4374,10 @@ export default function App() {
     clearMappingHistory();
   }, [activeMappingRoute, clearMappingHistory]);
 
+  useEffect(() => {
+    setMappingRaceViewMode(selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite');
+  }, [selectedTrack.id, selectedTrackMapping?.raceViewMode]);
+
   const handleMappingModeChange = (enabled: boolean) => {
     if (enabled && !developerUiActive) {
       return;
@@ -4821,6 +4827,7 @@ export default function App() {
       selectedTrackMapping ? routeVariantsFromMapping(selectedTrackMapping) : [],
       [],
       normalizedZoneBoundarySets,
+      mappingRaceViewMode,
     );
     setStoredMappings((current) => {
       const next = { ...current, [selectedTrack.id]: mapping };
@@ -4855,6 +4862,7 @@ export default function App() {
     setDraftZoneBoundarySets([]);
     setDraftSplitSections([]);
     setDraftSplitBuilder(null);
+    setMappingRaceViewMode('satellite');
     setPreservedZoneAnchorSets([]);
     clearMappingHistory();
     setDemoRaceStartedAt(null);
@@ -4906,6 +4914,7 @@ export default function App() {
         setPreservedZoneAnchorSets([]);
         clearMappingHistory();
         setMappingRestSeconds(importedRoute.restAfterSeconds);
+        setMappingRaceViewMode(mapping.raceViewMode === '3d' ? '3d' : 'satellite');
         setMappingEditMode('navigate');
         setMappingMode(true);
         setDemoRaceStartedAt(null);
@@ -7002,6 +7011,7 @@ export default function App() {
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
                   mappingObstacleView3D={mappingObstacleView3D}
+                  raceViewMode={selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite'}
                   mappingRouteVariantId={mappingRouteVariantId}
                   mappingZoneBranchChoice={mappingZoneBranchChoice}
                   draftPoints={draftPoints}
@@ -7093,6 +7103,7 @@ export default function App() {
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
                   mappingObstacleView3D={mappingObstacleView3D}
+                  mappingRaceViewMode={mappingRaceViewMode}
                   draftPointCount={draftPoints.length}
                   draftZonePinCount={draftZoneMeters.length}
                   draftZoneCount={allDraftZones.length}
@@ -7137,6 +7148,7 @@ export default function App() {
                   onMappingFullscreenChange={handleMappingFullscreenChange}
                   onMappingEditModeChange={handleMappingEditModeChange}
                   onMappingObstacleView3DChange={setMappingObstacleView3D}
+                  onMappingRaceViewModeChange={setMappingRaceViewMode}
                   onMappingSplitStart={startOrUpdateSplitBuilder}
                   onMappingSplitBranchChange={handleSplitBranchChange}
                   onMappingSplitSave={saveDraftSplit}

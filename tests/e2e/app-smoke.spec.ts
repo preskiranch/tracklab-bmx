@@ -574,12 +574,18 @@ test('track map save waits for account sync and shared publication', async ({ pa
   await page.goto('/?track=black-mountain-bmx');
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: 'Edit map' }).click();
+  const raceViewControl = page.getByLabel('Saved race view');
+  await expect(raceViewControl.getByRole('button', { name: 'Satellite' })).toHaveClass(/selected/);
+  await raceViewControl.getByRole('button', { name: '3D Terrain' }).click();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
 
   await expect(page.getByText('Saved and published across browsers.')).toBeVisible();
   expect(savedMapping?.trackId).toBe('black-mountain-bmx');
   expect(savedMapping?.zones[0]).toMatchObject({ startMeter: 0, endMeter: 30 });
   expect(savedMapping?.zones).toHaveLength(2);
+  expect((savedMapping as typeof mockPedalZoneMapping & { raceViewMode?: string } | null)?.raceViewMode).toBe('3d');
+  await page.locator('.mapping-section').getByRole('button', { name: 'View', exact: true }).click();
+  await expect(page.locator('.earth-header').getByText('Google 3D race view', { exact: true })).toBeVisible();
 
   const regularPreview = page.getByLabel('Preview regular user interface');
   await expect(regularPreview).toBeVisible();

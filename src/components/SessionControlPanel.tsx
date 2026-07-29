@@ -16,6 +16,7 @@ import {
   Redo2,
   RotateCcw,
   Route,
+  Satellite,
   Save,
   SlidersHorizontal,
   Timer,
@@ -39,6 +40,7 @@ import type {
   SpeedUnit,
   PlayerSlot,
   TrackPoint,
+  TrackRaceViewMode,
   TrackRecord,
   TrackRouteVariantId,
   TrackSplitBranch,
@@ -115,6 +117,7 @@ type SessionControlPanelProps = {
   mappingFullscreen: boolean;
   mappingEditMode: MappingEditMode;
   mappingObstacleView3D: boolean;
+  mappingRaceViewMode: TrackRaceViewMode;
   draftPointCount: number;
   draftZonePinCount: number;
   draftZoneCount: number;
@@ -158,6 +161,7 @@ type SessionControlPanelProps = {
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
   onMappingObstacleView3DChange: (enabled: boolean) => void;
+  onMappingRaceViewModeChange: (mode: TrackRaceViewMode) => void;
   onMappingSplitStart: (branch?: TrackSplitBranch['id']) => void;
   onMappingSplitBranchChange: (branch: TrackSplitBranch['id']) => void;
   onMappingSplitSave: () => void;
@@ -226,6 +230,7 @@ export function SessionControlPanel({
   mappingFullscreen,
   mappingEditMode,
   mappingObstacleView3D,
+  mappingRaceViewMode,
   draftPointCount,
   draftZonePinCount,
   draftZoneCount,
@@ -269,6 +274,7 @@ export function SessionControlPanel({
   onMappingFullscreenChange,
   onMappingEditModeChange,
   onMappingObstacleView3DChange,
+  onMappingRaceViewModeChange,
   onMappingSplitStart,
   onMappingSplitBranchChange,
   onMappingSplitSave,
@@ -663,6 +669,38 @@ export function SessionControlPanel({
               <span>{savedRouteVariantIds.includes(mappingRouteVariantId) ? 'Layout saved' : 'No layout saved'}</span>
             </div>
 
+            {mappingMode && (
+              <div className="mapping-race-view-card">
+                <div className="route-layout-heading">
+                  <span>Saved race view</span>
+                  <small>Published with this track for every racer and device</small>
+                </div>
+                <div className="segmented-control compact" aria-label="Saved race view">
+                  <button
+                    className={mappingRaceViewMode === 'satellite' ? 'selected' : ''}
+                    type="button"
+                    onClick={() => onMappingRaceViewModeChange('satellite')}
+                  >
+                    <Satellite size={14} />
+                    Satellite
+                  </button>
+                  <button
+                    className={mappingRaceViewMode === '3d' ? 'selected' : ''}
+                    type="button"
+                    onClick={() => onMappingRaceViewModeChange('3d')}
+                  >
+                    <Box size={14} />
+                    3D Terrain
+                  </button>
+                </div>
+                <p>
+                  {mappingRaceViewMode === '3d'
+                    ? 'Races on this track use 3D terrain with the same saved route, splits, and pedal zones.'
+                    : 'Races on this track use the reliable satellite view.'}
+                </p>
+              </div>
+            )}
+
             {splitDrawHint && <p className="mapping-hint">{splitDrawHint}</p>}
             {mappingMode && mappingEditMode === 'adjust' && (
               <p className="mapping-hint">
@@ -688,7 +726,9 @@ export function SessionControlPanel({
                     <small>
                       {mappingObstacleView3D
                         ? 'On — orbit the terrain to place pins around jump faces and landings.'
-                        : 'Use only while placing pedal-zone pins. Racing remains satellite.'}
+                        : mappingRaceViewMode === '3d'
+                          ? 'Use while placing pedal-zone pins. This track is also set to race in 3D.'
+                          : 'Use only while placing pedal-zone pins. Racing remains satellite.'}
                     </small>
                   </span>
                   <b>{mappingObstacleView3D ? 'ON' : 'OFF'}</b>

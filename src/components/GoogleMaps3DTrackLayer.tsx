@@ -67,6 +67,7 @@ type GoogleMaps3DTrackLayerProps = {
   speedUnit: SpeedUnit;
   cStartOffsetsByPlayer?: CStartOffsetsByPlayer;
   raceViewFullscreen?: boolean;
+  cameraLocked?: boolean;
   raceState: RaceState;
   earthAngle: number;
   earthHeading: number;
@@ -531,6 +532,7 @@ export function GoogleMaps3DTrackLayer({
   speedUnit,
   cStartOffsetsByPlayer = {},
   raceViewFullscreen = false,
+  cameraLocked = false,
   raceState,
   earthAngle,
   earthHeading,
@@ -1347,7 +1349,7 @@ export function GoogleMaps3DTrackLayer({
           : 'Tap terrain to add route points. Tap an existing point, then terrain, to move it.';
 
   return (
-    <div className="google-map-3d-shell">
+    <div className={`google-map-3d-shell${cameraLocked ? ' camera-locked' : ''}`}>
       <div className="google-map-layer google-map-3d-layer" ref={containerRef} />
       {isCurveDrawMode && (
         <div
