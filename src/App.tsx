@@ -14,6 +14,7 @@ import {
   Bike,
   Bluetooth,
   Code2,
+  Compass,
   Gauge,
   Globe2,
   MapPinned,
@@ -248,6 +249,8 @@ const SessionControlPanel = lazy(() => import('./components/SessionControlPanel'
   .then((module) => ({ default: module.SessionControlPanel })));
 const AnalyticsPanel = lazy(() => import('./components/AnalyticsPanel')
   .then((module) => ({ default: module.AnalyticsPanel })));
+const ExploreView = lazy(() => import('./components/ExploreView')
+  .then((module) => ({ default: module.ExploreView })));
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const customRouteInitialZoom = 18;
@@ -2241,6 +2244,14 @@ export default function App() {
     },
     [demoMode, demoPlayers, sessionPlayers],
   );
+  const explorePlayers = useMemo(
+    () => (
+      demoMode
+        ? activePlayers
+        : applyStudioRiderAssignments(activePlayers, studioRiders, studioRiderAssignments)
+    ),
+    [activePlayers, demoMode, studioRiderAssignments, studioRiders],
+  );
   const availableStudioRiders = useMemo(() => activeStudioRiders(studioRiders), [studioRiders]);
   const enteredRacePlayers = useMemo(() => {
     if (demoMode) {
@@ -2256,7 +2267,11 @@ export default function App() {
   const multiplayer = useMultiplayer({
     enabled: playMode === 'multiplayer',
     track: effectiveTrack,
-    bikeCount: demoMode ? activePlayers.length : enteredRacePlayers.length,
+    bikeCount: appMode === 'explore'
+      ? explorePlayers.length
+      : demoMode
+        ? activePlayers.length
+        : enteredRacePlayers.length,
   });
   const roomVoice = useRoomVoiceChat({
     currentRoom: multiplayer.currentRoom,
@@ -2278,6 +2293,26 @@ export default function App() {
     const assignedSeatCount = roomMember?.racerSeatCount ?? raceCandidateCount;
     return Math.max(0, Math.min(raceCandidateCount, assignedSeatCount));
   }, [activePlayers.length, demoMode, enteredRacePlayers.length, lockedRacePlayers?.length, multiplayer.clientId, multiplayer.currentRoom, playMode]);
+  const localExploreSeatLimit = useMemo(() => {
+    if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
+      return explorePlayers.length;
+    }
+
+    const roomMember = multiplayer.currentRoom.members.find(
+      (member) => member.id === multiplayer.clientId,
+    );
+    if (roomMember?.roomRole === 'spectator') {
+      return 0;
+    }
+
+    return Math.max(
+      0,
+      Math.min(
+        explorePlayers.length,
+        roomMember?.racerSeatCount ?? explorePlayers.length,
+      ),
+    );
+  }, [explorePlayers.length, multiplayer.clientId, multiplayer.currentRoom, playMode]);
   const raceCandidatePlayers = lockedRacePlayers ?? enteredRacePlayers;
   const racePlayers = useMemo(
     () => raceCandidatePlayers.slice(0, localRaceSeatLimit),
@@ -2544,6 +2579,13 @@ export default function App() {
     reactionTimesByPlayer,
     onRecentLinesChange: handleRaceCommentaryRecentLinesChange,
   });
+  useEffect(() => {
+    if (appMode === 'explore') {
+      raceCommentary.stop();
+      stopBmxEventAmbience();
+      stopRaceAudioKeepAlive();
+    }
+  }, [appMode, raceCommentary.stop]);
   const primeRaceAudio = raceCommentary.prime;
   const finishingAnnouncementsActive = (
     raceState === 'finished' && !raceCommentary.finishAnnouncementsComplete
@@ -2594,8 +2636,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (appMode === 'explore') {
+      return;
+    }
     updateBikeRaceAudio(raceState, riders);
-  }, [raceState, riders]);
+  }, [appMode, raceState, riders]);
 
   useEffect(() => () => {
     stopBikeRaceAudio();
@@ -6040,6 +6085,23 @@ export default function App() {
     });
   }, [multiplayer.inviteUrl]);
 
+  const handleExploreDemoRideStatusChange = useCallback((
+    status: 'ready' | 'riding' | 'paused' | 'finished',
+  ) => {
+    if (!demoMode) {
+      return;
+    }
+    if (status === 'riding') {
+      setDemoSignalsStopped(false);
+      setDemoRaceStartedAt((startedAt) => startedAt ?? Date.now());
+      return;
+    }
+    if (status === 'ready' || status === 'finished') {
+      setDemoRaceStartedAt(null);
+      setDemoSignalsStopped(false);
+    }
+  }, [demoMode]);
+
   const copyMultiplayerProfileKey = useCallback(() => {
     if (!cloudProfileKey) {
       return;
@@ -6601,6 +6663,37 @@ export default function App() {
           <div className="bridge-prompt">{bridgePrompt}</div>
         </section>
 
+        {appMode === 'explore' ? (
+          <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Explore setup workflow">
+            <div className="workflow-heading">
+              <span>Explore ride</span>
+              <small>Local or private multiplayer</small>
+            </div>
+            <div className="workflow-list">
+              <div className={`workflow-step ${activePlayers.length > 0 ? 'complete' : 'current'}`}>
+                <span className="workflow-index">1</span>
+                <span className="workflow-copy">
+                  <strong>Connect riders</strong>
+                  <small>{activePlayers.length} / {maxPlayers} ready</small>
+                </span>
+              </div>
+              <div className="workflow-step current">
+                <span className="workflow-index">2</span>
+                <span className="workflow-copy">
+                  <strong>Choose two places</strong>
+                  <small>Build a bicycle or car route</small>
+                </span>
+              </div>
+              <div className="workflow-step pending">
+                <span className="workflow-index">3</span>
+                <span className="workflow-copy">
+                  <strong>Pedal together</strong>
+                  <small>Maps split automatically</small>
+                </span>
+              </div>
+            </div>
+          </section>
+        ) : (
         <section className="sidebar-workflow" aria-label="Race setup workflow">
           <div className="workflow-heading">
             <span>Start Here</span>
@@ -6727,11 +6820,23 @@ export default function App() {
             </div>
           )}
         </section>
+        )}
 
         <nav className="side-nav" aria-label="Primary">
           <button className={appMode === 'race' && !mappingMode ? 'selected' : ''} type="button" onClick={() => setAppMode('race')}>
             <Activity size={17} />
             Race
+          </button>
+          <button
+            className={appMode === 'explore' ? 'selected' : ''}
+            type="button"
+            onClick={() => {
+              setMappingMode(false);
+              setAppMode('explore');
+            }}
+          >
+            <Compass size={17} />
+            Explore
           </button>
           <button
             type="button"
@@ -6843,6 +6948,15 @@ export default function App() {
 
       <main className="platform-main">
         <header className="platform-topbar">
+          {appMode === 'explore' ? (
+            <div className="explore-topbar-heading">
+              <Compass size={20} />
+              <span>
+                <strong>Explore</strong>
+                <small>Satellite routes powered by your Wattbike</small>
+              </span>
+            </div>
+          ) : (
           <div className="track-selectors">
             <label>
               <span>Country</span>
@@ -6863,6 +6977,7 @@ export default function App() {
               </select>
             </label>
           </div>
+          )}
 
           {adminProfileActive && (
             <label className={`developer-preview-toggle${regularUserPreview ? ' active' : ''}`}>
@@ -6890,7 +7005,7 @@ export default function App() {
             </label>
           )}
 
-          {developerUiActive && (
+          {developerUiActive && appMode !== 'explore' && (
             <button className="custom-location-shortcut" type="button" onClick={handleCustomLocationShortcut}>
               <Plus size={16} />
               <span>Custom Location</span>
@@ -6898,6 +7013,7 @@ export default function App() {
             </button>
           )}
 
+          {appMode !== 'explore' && (
           <div className="race-readiness-strip" aria-label="Race readiness">
             <span>{connectedBikeDisplayCount} Bike{connectedBikeDisplayCount === 1 ? '' : 's'}</span>
             <span className={workflowMapReady ? 'ready' : ''}>{workflowMapReady ? 'Track Ready' : 'Track Pending'}</span>
@@ -6912,9 +7028,35 @@ export default function App() {
               Focus Map
             </button>
           </div>
+          )}
         </header>
 
-        {appMode === 'monitor' ? (
+        {appMode === 'explore' ? (
+          <Suspense fallback={<div className="explore-loading">Loading Explore…</div>}>
+          <ExploreView
+            players={playMode === 'multiplayer'
+              ? explorePlayers.slice(0, localExploreSeatLimit)
+              : explorePlayers}
+            samplesByDevice={samplesByDevice}
+            speedUnit={speedUnit}
+            distanceUnit={distanceUnit}
+            playMode={playMode}
+            demoMode={demoMode}
+            multiplayerConnection={multiplayer.connection}
+            currentRoom={multiplayer.currentRoom}
+            currentUserId={multiplayer.clientId}
+            inviteUrl={multiplayer.inviteUrl}
+            remoteStates={multiplayer.roomExploreStates}
+            onPlayModeChange={setPlayMode}
+            onCreatePrivateRoom={multiplayer.createPrivateRoom}
+            onShareInvite={shareMultiplayerInvite}
+            onSyncRoute={multiplayer.syncExploreRoute}
+            onControlSession={multiplayer.controlExploreSession}
+            onSendState={multiplayer.sendExploreState}
+            onDemoRideStatusChange={handleExploreDemoRideStatusChange}
+          />
+          </Suspense>
+        ) : appMode === 'monitor' ? (
           <MonitorView
             players={activePlayers}
             samplesByDevice={samplesByDevice}

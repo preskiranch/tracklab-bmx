@@ -331,6 +331,7 @@ That capture should show the exact BLE write sent by Hub when Play is pressed. O
 
 - **Track locator database**: country, state/region, and track selectors load the generated database at `public/data/track-database.json`, including USA BMX/BMX Canada official locator records.
 - **Google Earth-style viewer**: Google Maps Platform satellite imagery with tilt/heading controls, route overlays, rider markers, and a Google Earth link. A Google Maps API key is required.
+- **Explore rides**: choose real or fictitious start and destination locations, follow a Google bicycle or driving route in satellite view, and advance up to four riders using TrackLab's 44/16 BMX rollout. Local bikes and private rooms are supported; maps automatically split when riders separate.
 - **Sprint mode**: full-track race distance based on the selected track length.
 - **Manual track mapping**: users can enter Edit map mode on the satellite view, drag to trace the real centerline through straights and turns, click sprint-zone split points along that traced route, then save a user-mapped ride line for that selected track.
 - **Interval mode**: auto-selected pedaling zones or manually chosen track zones. User-mapped routes generate sprint zones from the saved zone split points.
@@ -349,13 +350,15 @@ The app is intentionally Google-only. Without a Google key, the map panel shows 
 Required Google Cloud setup:
 
 1. Create or select a Google Cloud project with billing enabled.
-2. Enable **Maps JavaScript API**.
+2. Enable **Maps JavaScript API** and **Routes API**.
 3. Create an API key under Google Maps Platform credentials.
 4. Restrict the key by website referrer:
    - `https://tracklab-bmx.onrender.com/*`
    - `http://127.0.0.1:*/*`
    - `http://localhost:*/*`
-5. Restrict the key to **Maps JavaScript API**.
+5. Restrict the browser key to **Maps JavaScript API**.
+6. Create a second, server-only key restricted to **Routes API**. Do not add this
+   key to a `VITE_` variable.
 
 Create a local `.env` from `.env.example`:
 
@@ -367,9 +370,18 @@ Then set:
 
 ```text
 VITE_GOOGLE_MAPS_API_KEY=your_google_maps_key
+GOOGLE_ROUTES_API_KEY=your_server_routes_key
 ```
 
-For Render, add `VITE_GOOGLE_MAPS_API_KEY` as a static site environment variable and redeploy.
+For Render, add both keys as environment variables and redeploy. Explore route
+requests are proxied through the TrackLab server, require a Racer account, and are
+rate-limited. The Routes key is never sent to the browser.
+
+Explore uses satellite view for riding. Up to four local Wattbikes can share a
+route. In a private room the host chooses and starts the route for everyone. Riders
+within 70 meters share a map; separated rider clusters automatically receive their
+own two-, three-, or four-way map panels. Developer Demo uses the same movement
+engine with commentary disabled and pedaling/freewheel audio enabled.
 
 ## Track Data Status
 
@@ -416,6 +428,7 @@ Render environment variables:
 
 ```text
 VITE_GOOGLE_MAPS_API_KEY
+GOOGLE_ROUTES_API_KEY
 OPENAI_API_KEY
 VITE_WATTBIKE_BRIDGE_URL
 VITE_TRACKLAB_MULTIPLAYER_URL

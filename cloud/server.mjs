@@ -97,6 +97,7 @@ const scryptAsync = promisify(scryptCallback);
 const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const exploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
@@ -603,6 +604,77 @@ function sanitizeBranchChoice(value) {
 
 function openAiApiKey() {
   return String(process.env.OPENAI_API_KEY || '').trim();
+}
+
+function exploreRoutesApiKey() {
+  return String(process.env.GOOGLE_ROUTES_API_KEY || '').trim();
+}
+
+async function computeExploreRoute(payload, signal) {
+  const key = exploreRoutesApiKey();
+  if (!key) {
+    throw new HttpRequestError(503, 'Google Routes is not configured yet.');
+  }
+
+  const origin = sanitizeExplorePoint(payload?.origin);
+  const destination = sanitizeExplorePoint(payload?.destination);
+  if (!origin || !destination) {
+    throw new HttpRequestError(400, 'Choose a valid starting point and destination.');
+  }
+  const travelMode = payload?.travelMode === 'drive' ? 'drive' : 'bicycle';
+  const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': key,
+      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline',
+    },
+    body: JSON.stringify({
+      origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lng } } },
+      destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
+      travelMode: travelMode === 'drive' ? 'DRIVE' : 'BICYCLE',
+      polylineQuality: 'HIGH_QUALITY',
+      polylineEncoding: 'ENCODED_POLYLINE',
+      computeAlternativeRoutes: false,
+      units: 'IMPERIAL',
+    }),
+    signal,
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) {
+    const providerMessage = sanitizeText(result?.error?.message, '', 240);
+    throw new HttpRequestError(
+      response.status >= 500 ? 502 : 400,
+      providerMessage || 'Google could not calculate that route.',
+    );
+  }
+
+  const candidate = result?.routes?.[0];
+  const encodedPolyline = typeof candidate?.polyline?.encodedPolyline === 'string'
+    ? candidate.polyline.encodedPolyline
+    : '';
+  const distanceMeters = finiteNumber(candidate?.distanceMeters, 0);
+  const durationSeconds = Number.parseFloat(String(candidate?.duration ?? '').replace(/s$/, ''));
+  if (!encodedPolyline || distanceMeters <= 1) {
+    throw new HttpRequestError(404, 'No connected bicycle or driving route was found between those locations.');
+  }
+
+  const routeId = `EXPLORE-${createHash('sha256')
+    .update(`${travelMode}:${origin.lat}:${origin.lng}:${destination.lat}:${destination.lng}:${encodedPolyline}`)
+    .digest('hex')
+    .slice(0, 18)}`;
+  return sanitizeExploreRoute({
+    id: routeId,
+    origin,
+    destination,
+    originLabel: sanitizeText(payload?.originLabel, 'Selected start', 160),
+    destinationLabel: sanitizeText(payload?.destinationLabel, 'Selected destination', 160),
+    travelMode,
+    distanceMeters,
+    durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 1,
+    encodedPolyline,
+    createdAt: Date.now(),
+  });
 }
 
 function sanitizeCommentaryVoicePreset(_value) {
@@ -2159,6 +2231,96 @@ function finiteNumber(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function sanitizeExplorePoint(value) {
+  const lat = Number(value?.lat);
+  const lng = Number(value?.lng);
+  if (
+    !Number.isFinite(lat)
+    || !Number.isFinite(lng)
+    || Math.abs(lat) > 90
+    || Math.abs(lng) > 180
+  ) {
+    return null;
+  }
+  return { lat, lng };
+}
+
+function sanitizeExploreRoute(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const origin = sanitizeExplorePoint(value.origin);
+  const destination = sanitizeExplorePoint(value.destination);
+  const encodedPolyline = typeof value.encodedPolyline === 'string'
+    ? value.encodedPolyline.trim().slice(0, 120_000)
+    : '';
+  const distanceMeters = Math.max(1, Math.min(2_000_000, finiteNumber(value.distanceMeters, 0)));
+  if (!origin || !destination || !encodedPolyline || distanceMeters <= 1) {
+    return null;
+  }
+
+  return {
+    id: sanitizeText(value.id, randomId('EXPLORE', 12), 96),
+    origin,
+    destination,
+    originLabel: sanitizeText(value.originLabel, 'Selected start', 160),
+    destinationLabel: sanitizeText(value.destinationLabel, 'Selected destination', 160),
+    travelMode: value.travelMode === 'drive' ? 'drive' : 'bicycle',
+    distanceMeters,
+    durationSeconds: Math.max(1, Math.min(14 * 24 * 60 * 60, finiteNumber(value.durationSeconds, 0))),
+    encodedPolyline,
+    createdAt: Math.max(0, finiteNumber(value.createdAt, Date.now())),
+  };
+}
+
+function sanitizeExploreState(value, client, room) {
+  if (!value || typeof value !== 'object' || !room.exploreRoute) {
+    return null;
+  }
+  const routeId = sanitizeText(value.routeId, '', 96);
+  if (!routeId || routeId !== room.exploreRoute.id) {
+    return null;
+  }
+
+  const allowedRiderCount = roomRacerSeatCountForMember(room, client.id);
+  const routeDistanceMeters = room.exploreRoute.distanceMeters;
+  const riders = Array.isArray(value.riders)
+    ? value.riders.slice(0, allowedRiderCount).map((rider, index) => {
+      const colorName = ['lime', 'red', 'blue', 'yellow'].includes(rider?.colorName)
+        ? rider.colorName
+        : ['lime', 'red', 'blue', 'yellow'][index % 4];
+      const photoUrl = sanitizeRiderPhotoDataUrl(rider?.photoUrl);
+      return {
+        id: sanitizeText(rider?.id, `${client.id}:${index + 1}`, 120),
+        clientId: client.id,
+        playerId: Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(rider?.playerId, index + 1)))),
+        name: sanitizeText(rider?.name, `${client.name} ${index + 1}`, 64),
+        ...(photoUrl ? { photoUrl } : {}),
+        colorName,
+        accent: sanitizeText(rider?.accent, '#7ade36', 24),
+        distanceMeters: Math.max(0, Math.min(routeDistanceMeters, finiteNumber(rider?.distanceMeters, 0))),
+        velocityMps: Math.max(0, Math.min(60, finiteNumber(rider?.velocityMps, 0))),
+        cadence: rider?.cadence == null
+          ? null
+          : Math.max(0, Math.min(300, finiteNumber(rider.cadence, 0))),
+        watts: Math.max(0, Math.min(5_000, finiteNumber(rider?.watts, 0))),
+        signal: Math.max(0, Math.min(1, finiteNumber(rider?.signal, 0))),
+        finishedAt: nullableFiniteNumber(rider?.finishedAt),
+        at: Date.now(),
+      };
+    })
+    : [];
+
+  return {
+    sessionId: sanitizeText(value.sessionId, room.exploreSession?.id ?? `${room.id}:${routeId}`, 120),
+    clientId: client.id,
+    roomId: room.id,
+    routeId,
+    at: Date.now(),
+    riders,
+  };
+}
+
 function latencyQualityForMs(value) {
   const latencyMs = Number(value);
   if (!Number.isFinite(latencyMs) || latencyMs <= 0) {
@@ -2478,6 +2640,8 @@ function publicRoom(room) {
     maxLatencyMs: latencySummary.maxLatencyMs,
     latencyQuality: latencySummary.latencyQuality,
     spectatorCount: room.spectators?.size ?? 0,
+    exploreRoute: room.exploreRoute ?? null,
+    exploreSession: room.exploreSession ?? null,
   };
 }
 
@@ -2561,6 +2725,7 @@ function roomState(room) {
     room: publicRoom(room),
     messages: room.messages,
     raceStates: [...room.raceStates.values()],
+    exploreStates: [...(room.exploreStates?.values() ?? [])],
   };
 }
 
@@ -2713,6 +2878,7 @@ function leaveRoom(client, reason = 'left') {
 
   room.members.delete(client.id);
   room.raceStates.delete(client.id);
+  room.exploreStates?.delete(client.id);
   room.racers?.delete(client.id);
   room.spectators?.delete(client.id);
   room.racerSeatCounts?.delete(client.id);
@@ -2751,6 +2917,9 @@ function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1)
   }
   if (!room.racerSeatCounts) {
     room.racerSeatCounts = new Map();
+  }
+  if (!room.exploreStates) {
+    room.exploreStates = new Map();
   }
 
   if (!room.hostId && (room.members.size === 0 || room.hostGuestKey === client.guestKey)) {
@@ -2807,6 +2976,9 @@ function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
     spectators: new Set(),
     racerSeatCounts: new Map(),
     raceStates: new Map(),
+    exploreStates: new Map(),
+    exploreRoute: null,
+    exploreSession: null,
     messages: [{
       id: randomId('MSG', 10),
       author: 'TrackLab',
@@ -2973,6 +3145,9 @@ async function findRoom(roomId) {
   savedRoom.racers = savedRoom.racers ?? new Set();
   savedRoom.spectators = savedRoom.spectators ?? new Set();
   savedRoom.racerSeatCounts = savedRoom.racerSeatCounts ?? new Map();
+  savedRoom.exploreStates = new Map();
+  savedRoom.exploreRoute = null;
+  savedRoom.exploreSession = null;
   savedRoom.messages = savedRoom.messages.length > 0
     ? savedRoom.messages
     : [{
@@ -3047,7 +3222,12 @@ async function handleClientMessage(client, rawMessage) {
     if (!requireRacerClient(client)) {
       return;
     }
-    createRoom(client, message.track, message.private !== false);
+    createRoom(
+      client,
+      message.track,
+      message.private !== false,
+      sanitizeSeatCount(message.racerSeatCount ?? client.bikeCount),
+    );
     return;
   }
 
@@ -3059,13 +3239,91 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    joinRoom(client, room, clientHasRacerAccess(client) ? 'racer' : 'spectator');
+    joinRoom(
+      client,
+      room,
+      clientHasRacerAccess(client) ? 'racer' : 'spectator',
+      sanitizeSeatCount(client.bikeCount),
+    );
     return;
   }
 
   if (message.type === 'leave-room') {
     leaveRoom(client);
     broadcastLobby();
+    return;
+  }
+
+  if (message.type === 'room-explore-route') {
+    if (!client.roomId) {
+      return;
+    }
+    const room = rooms.get(client.roomId);
+    if (!room) {
+      return;
+    }
+    if (room.hostId !== client.id) {
+      send(client, { type: 'room-error', message: 'Only the room host can choose the Explore route.' });
+      return;
+    }
+    const route = sanitizeExploreRoute(message.route);
+    if (!route) {
+      send(client, { type: 'room-error', message: 'That Explore route is invalid.' });
+      return;
+    }
+    room.exploreRoute = route;
+    room.exploreSession = {
+      id: randomId('RIDE', 12),
+      routeId: route.id,
+      status: 'ready',
+      startedAt: null,
+      updatedAt: Date.now(),
+    };
+    room.exploreStates = new Map();
+    addRoomSystemMessage(room, `${client.name} selected an Explore ride to ${route.destinationLabel}.`);
+    broadcastRoom(room.id, roomState(room));
+    return;
+  }
+
+  if (message.type === 'room-explore-action') {
+    if (!client.roomId) {
+      return;
+    }
+    const room = rooms.get(client.roomId);
+    if (!room?.exploreRoute) {
+      return;
+    }
+    if (room.hostId !== client.id) {
+      send(client, { type: 'room-error', message: 'Only the room host can control the shared Explore ride.' });
+      return;
+    }
+    const action = sanitizeText(message.action, '', 24);
+    const now = Date.now();
+    if (action === 'start' || action === 'reset') {
+      room.exploreSession = {
+        id: randomId('RIDE', 12),
+        routeId: room.exploreRoute.id,
+        status: action === 'start' ? 'riding' : 'ready',
+        startedAt: action === 'start' ? now + 800 : null,
+        updatedAt: now,
+      };
+      room.exploreStates = new Map();
+    } else if (action === 'pause' && room.exploreSession) {
+      room.exploreSession = {
+        ...room.exploreSession,
+        status: 'paused',
+        updatedAt: now,
+      };
+    } else if (action === 'resume' && room.exploreSession) {
+      room.exploreSession = {
+        ...room.exploreSession,
+        status: 'riding',
+        updatedAt: now,
+      };
+    } else {
+      return;
+    }
+    broadcastRoom(room.id, roomState(room));
     return;
   }
 
@@ -3278,6 +3536,23 @@ async function handleClientMessage(client, rawMessage) {
     return;
   }
 
+  if (message.type === 'explore-sync') {
+    if (!client.roomId) {
+      return;
+    }
+    const room = rooms.get(client.roomId);
+    if (!room || !room.racers?.has(client.id) || !requireRacerClient(client)) {
+      return;
+    }
+    const exploreState = sanitizeExploreState(message.state, client, room);
+    if (!exploreState) {
+      return;
+    }
+    room.exploreStates.set(client.id, exploreState);
+    broadcastRoom(room.id, { type: 'explore-sync', state: exploreState });
+    return;
+  }
+
   if (message.type === 'voice-signal') {
     if (!client.roomId) {
       return;
@@ -3485,6 +3760,58 @@ async function serveStatic(request, response) {
       'Content-Length': Buffer.byteLength(body),
     });
     response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/explore/config') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const body = JSON.stringify({
+      routesConfigured: Boolean(exploreRoutesApiKey()),
+      supportedTravelModes: ['bicycle', 'drive'],
+      bicycleSafetyWarning: 'Bicycling routes may not always include clear bicycle paths. Use this route only for indoor virtual riding.',
+    });
+    response.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/explore/route') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    if (membershipForAccount(session.user).tier !== 'racer') {
+      writeJson(response, 403, { error: 'Racer access is required for Explore rides.' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, exploreRouteRateLimiter, 120, 'explore-route')) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, 16_000);
+    const route = await computeExploreRoute(
+      payload,
+      signalWithTimeout(requestAbortSignal(request, response), 15_000),
+    );
+    if (!route) {
+      writeJson(response, 502, { error: 'Google returned an invalid route.' });
+      return;
+    }
+    cloudTelemetry.increment('tracklab_explore_routes_created_total', {
+      travelMode: route.travelMode,
+    });
+    writeJson(response, 201, { route });
     return;
   }
 

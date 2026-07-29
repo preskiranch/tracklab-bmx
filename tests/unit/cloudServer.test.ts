@@ -148,6 +148,31 @@ describe('cloud API trust boundaries', () => {
     expect(JSON.stringify(config)).not.toContain('OPENAI_API_KEY');
   });
 
+  it('reports Explore capability without exposing its Google Routes key', async () => {
+    const response = await api('/api/explore/config');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    await expect(response.json()).resolves.toEqual({
+      routesConfigured: false,
+      supportedTravelModes: ['bicycle', 'drive'],
+      bicycleSafetyWarning: 'Bicycling routes may not always include clear bicycle paths. Use this route only for indoor virtual riding.',
+    });
+
+    const unauthorizedRoute = await fetch(`${baseUrl}/api/explore/route`, {
+      method: 'POST',
+      headers: {
+        Origin: baseUrl,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        origin: { lat: 38.5, lng: -120.2 },
+        destination: { lat: 38.6, lng: -120.1 },
+        travelMode: 'bicycle',
+      }),
+    });
+    expect(unauthorizedRoute.status).toBe(401);
+  });
+
   it('protects production metrics and exposes redacted process telemetry to operators', async () => {
     const unauthorized = await api('/api/metrics');
     expect(unauthorized.status).toBe(401);

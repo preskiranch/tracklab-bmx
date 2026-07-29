@@ -10,6 +10,8 @@ services:
         value: production
       - key: VITE_GOOGLE_MAPS_API_KEY
         sync: false
+      - key: GOOGLE_ROUTES_API_KEY
+        sync: false
       - key: VITE_WATTBIKE_BRIDGE_URL
         sync: false
       - key: VITE_TRACKLAB_MULTIPLAYER_URL

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  ExploreRoute,
   MultiplayerChallenge,
+  MultiplayerExploreState,
   MultiplayerLatencySnapshot,
   MultiplayerMatchInvite,
   MultiplayerRaceState,
@@ -206,6 +208,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
   const [currentRoom, setCurrentRoom] = useState<MultiplayerRoom | null>(null);
   const [roomMessages, setRoomMessages] = useState<MultiplayerRoomMessage[]>([]);
   const [roomRaceStates, setRoomRaceStates] = useState<MultiplayerRaceState[]>([]);
+  const [roomExploreStates, setRoomExploreStates] = useState<MultiplayerExploreState[]>([]);
   const [voiceSignals, setVoiceSignals] = useState<MultiplayerVoiceSignal[]>([]);
   const [incomingChallenges, setIncomingChallenges] = useState<IncomingChallenge[]>([]);
   const [incomingMatchInvites, setIncomingMatchInvites] = useState<IncomingMatchInvite[]>([]);
@@ -361,6 +364,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           setCurrentRoom(message.room ?? null);
           setRoomMessages(formatRoomMessages(Array.isArray(message.messages) ? message.messages : []));
           setRoomRaceStates(Array.isArray(message.raceStates) ? message.raceStates : []);
+          setRoomExploreStates(Array.isArray(message.exploreStates) ? message.exploreStates : []);
           if (message.room?.id) {
             const url = new URL(window.location.href);
             url.searchParams.set('room', message.room.id);
@@ -372,6 +376,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           setCurrentRoom(null);
           setRoomMessages([]);
           setRoomRaceStates([]);
+          setRoomExploreStates([]);
           setVoiceSignals([]);
           const url = new URL(window.location.href);
           url.searchParams.delete('room');
@@ -417,6 +422,14 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           ].slice(-32));
         }
 
+        if (message.type === 'explore-sync' && message.state) {
+          const nextState = message.state as MultiplayerExploreState;
+          setRoomExploreStates((current) => [
+            ...current.filter((state) => state.clientId !== nextState.clientId),
+            nextState,
+          ].slice(-32));
+        }
+
         if (message.type === 'voice-signal' && message.signal) {
           setVoiceSignals((current) => [
             ...current,
@@ -451,6 +464,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
         socketRef.current = null;
         setCurrentRoom(null);
         setIncomingMatchInvites([]);
+        setRoomExploreStates([]);
         setLatency(initialLatency);
         pendingPingRef.current.clear();
         if (pingTimerRef.current != null) {
@@ -493,13 +507,23 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
 
   const createPrivateRoom = useCallback(() => {
     setStatus('Opening private room.');
-    return send({ type: 'create-room', private: true, track: currentTrack });
-  }, [currentTrack, send]);
+    return send({
+      type: 'create-room',
+      private: true,
+      racerSeatCount: Math.max(1, bikeCount),
+      track: currentTrack,
+    });
+  }, [bikeCount, currentTrack, send]);
 
   const createPublicRoom = useCallback(() => {
     setStatus('Opening public lobby.');
-    return send({ type: 'create-room', private: false, track: currentTrack });
-  }, [currentTrack, send]);
+    return send({
+      type: 'create-room',
+      private: false,
+      racerSeatCount: Math.max(1, bikeCount),
+      track: currentTrack,
+    });
+  }, [bikeCount, currentTrack, send]);
 
   const createMatch = useCallback((targetIds: string[], localSeatCount = 1) => {
     setStatus('Sending match invites.');
@@ -568,6 +592,33 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     });
   }, [currentRoom, send]);
 
+  const syncExploreRoute = useCallback((route: ExploreRoute) => {
+    if (!currentRoom) {
+      return false;
+    }
+    return send({ type: 'room-explore-route', route });
+  }, [currentRoom, send]);
+
+  const controlExploreSession = useCallback((action: 'start' | 'pause' | 'resume' | 'reset') => {
+    if (!currentRoom) {
+      return false;
+    }
+    return send({ type: 'room-explore-action', action });
+  }, [currentRoom, send]);
+
+  const sendExploreState = useCallback((state: Omit<MultiplayerExploreState, 'clientId' | 'roomId' | 'at'>) => {
+    if (!currentRoom) {
+      return false;
+    }
+    return send({
+      type: 'explore-sync',
+      state: {
+        ...state,
+        roomId: currentRoom.id,
+      },
+    });
+  }, [currentRoom, send]);
+
   const challengeRider = useCallback((targetId: string) => {
     setStatus('Sending challenge.');
     return send({ type: 'challenge', targetId, track: currentTrack });
@@ -620,6 +671,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     challengeRider,
     chooseRoomRoute,
     clientId,
+    controlExploreSession,
     connection,
     createGroup,
     createMatch,
@@ -638,9 +690,11 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     quickMatch,
     respondToChallenge,
     roomMessages,
+    roomExploreStates,
     roomRaceStates,
     rooms,
     sendRaceState,
+    sendExploreState,
     sendRoomChat,
     sendVoiceSignal,
     setProfile,
@@ -648,6 +702,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     status,
     submitTrackVote,
     syncTrack,
+    syncExploreRoute,
     resetRoomFlow,
     voiceSignals,
     respondToFriendRequest,

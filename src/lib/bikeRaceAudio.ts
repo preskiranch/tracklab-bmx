@@ -1,4 +1,4 @@
-import type { RaceState, RiderState } from '../types';
+import type { ExploreRider, RaceState, RiderState } from '../types';
 import { getTrackLabAudioContext } from './audioCues';
 
 export const bmxBikeMechanicsUrl = '/assets/bmx-bike-mechanics.mp3';
@@ -245,11 +245,30 @@ export function updateBikeRaceAudio(
   raceState: RaceState,
   riders: RiderState[],
 ) {
+  updateBikeMechanicsAudio(
+    raceState,
+    riders.map((rider) => ({
+      playerId: rider.playerId,
+      driveAllowed: rider.driveAllowed,
+      finishedAt: rider.finishedAt,
+      lastRawCadence: rider.lastRawCadence,
+      velocity: rider.velocity,
+    })),
+  );
+}
+
+function updateBikeMechanicsAudio(
+  raceState: RaceState,
+  riders: Array<Pick<
+    RiderState,
+    'playerId' | 'driveAllowed' | 'finishedAt' | 'lastRawCadence' | 'velocity'
+  >>,
+) {
   if (!bikeAudioContext || bikeAudioChannels.size === 0) {
     if (raceState === 'racing') {
       void ensureBikeAudioChannels().then((ready) => {
         if (ready) {
-          updateBikeRaceAudio(raceState, riders);
+          updateBikeMechanicsAudio(raceState, riders);
         }
       });
     }
@@ -293,6 +312,37 @@ export function updateBikeRaceAudio(
     );
   });
   publishBikeAudioDebug(modes);
+}
+
+export function updateExploreBikeAudio(
+  status: 'ready' | 'riding' | 'paused' | 'finished',
+  riders: ExploreRider[],
+) {
+  updateBikeMechanicsAudio(
+    status === 'riding' ? 'racing' : 'ready',
+    riders.map((rider) => ({
+      playerId: rider.playerId,
+      driveAllowed: (rider.cadence ?? 0) >= 1,
+      finishedAt: rider.finishedAt,
+      lastRawCadence: rider.cadence ?? 0,
+      velocity: rider.velocityMps,
+    })),
+  );
+}
+
+export function exploreBikeAudioMode(
+  status: 'ready' | 'riding' | 'paused' | 'finished',
+  rider: Pick<ExploreRider, 'cadence' | 'finishedAt' | 'velocityMps'>,
+) {
+  return bikeRaceAudioMode(
+    status === 'riding' ? 'racing' : 'ready',
+    {
+      driveAllowed: (rider.cadence ?? 0) >= 1,
+      finishedAt: rider.finishedAt,
+      lastRawCadence: rider.cadence ?? 0,
+      velocity: rider.velocityMps,
+    },
+  );
 }
 
 export function stopBikeRaceAudio() {

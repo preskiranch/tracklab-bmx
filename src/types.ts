@@ -133,6 +133,55 @@ export type MultiplayerTrackVoteCandidate = MultiplayerTrackSummary & {
 
 export type MultiplayerRoomPhase = 'lobby' | 'voting' | 'route-select' | 'race';
 export type MultiplayerLatencyQuality = 'unknown' | 'good' | 'ok' | 'poor';
+export type ExploreTravelMode = 'bicycle' | 'drive';
+export type ExploreViewMode = 'satellite' | 'street';
+
+export type ExploreRoute = {
+  id: string;
+  origin: TrackPoint;
+  destination: TrackPoint;
+  originLabel: string;
+  destinationLabel: string;
+  travelMode: ExploreTravelMode;
+  distanceMeters: number;
+  durationSeconds: number;
+  encodedPolyline: string;
+  createdAt: number;
+};
+
+export type ExploreRider = {
+  id: string;
+  clientId: string;
+  playerId: PlayerSlot['id'];
+  name: string;
+  photoUrl?: string;
+  colorName: PlayerColorName;
+  accent: string;
+  distanceMeters: number;
+  velocityMps: number;
+  cadence: number | null;
+  watts: number;
+  signal: number;
+  finishedAt: number | null;
+  at: number;
+};
+
+export type ExploreSession = {
+  id: string;
+  routeId: string;
+  status: 'ready' | 'riding' | 'paused' | 'finished';
+  startedAt: number | null;
+  updatedAt: number;
+};
+
+export type MultiplayerExploreState = {
+  sessionId: string;
+  clientId: string;
+  roomId: string;
+  routeId: string;
+  at: number;
+  riders: ExploreRider[];
+};
 
 export type MultiplayerLatencySnapshot = {
   rttMs: number | null;
@@ -182,6 +231,8 @@ export type MultiplayerRoom = {
   maxLatencyMs?: number | null;
   latencyQuality?: MultiplayerLatencyQuality;
   spectatorCount?: number;
+  exploreRoute?: ExploreRoute | null;
+  exploreSession?: ExploreSession | null;
 };
 
 export type MultiplayerRoomMessage = {
@@ -321,7 +372,7 @@ export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
 
 export type RaceState = 'ready' | 'racing' | 'finished';
 
-export type AppMode = 'race' | 'monitor' | 'diagnostics' | 'developer';
+export type AppMode = 'race' | 'explore' | 'monitor' | 'diagnostics' | 'developer';
 
 export type RiderPhase = 'pedaling' | 'airborne' | 'landing';
 export type RiderDriveSource = 'cadence' | 'power' | 'speed' | 'coast' | 'blocked';

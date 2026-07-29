@@ -390,6 +390,115 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   expect(consoleErrors).toEqual([]);
 });
 
+test('developer Explore demo rides without commentary and keeps bike mechanics audio', async ({ page }, testInfo) => {
+  test.setTimeout(45_000);
+  const authUser = {
+    id: 'explore-developer',
+    profileKey: 'user:explore-developer',
+    email: 'preskiranch@gmail.com',
+    name: 'Explore Developer',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: Date.now(),
+    },
+  };
+  let commentaryRequestCount = 0;
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ user: authUser }),
+    });
+  });
+  await page.route('**/api/explore/route', async (route) => {
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        route: {
+          id: 'EXPLORE-playwright',
+          origin: { lat: 38.5, lng: -120.2 },
+          destination: { lat: 43.252, lng: -126.453 },
+          originLabel: 'Demo Start',
+          destinationLabel: 'Demo Finish',
+          travelMode: 'bicycle',
+          distanceMeters: 1_000,
+          durationSeconds: 300,
+          encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+          createdAt: Date.now(),
+        },
+      }),
+    });
+  });
+  await page.route('**/api/commentary/{line,speech,pre-race}', async (route) => {
+    commentaryRequestCount += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: '{"error":"Explore must not request commentary"}',
+    });
+  });
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  await page.getByRole('button', { name: 'Explore', exact: true }).click();
+
+  await expect(page.getByText('Developer Demo active', { exact: true })).toBeVisible();
+  await expect(page.getByText(/AI commentary is off/i)).toBeVisible();
+  await page.getByLabel('Starting location').fill('38.5, -120.2');
+  await page.getByLabel('Destination').fill('43.252, -126.453');
+  await page.getByRole('button', { name: 'Build Explore route' }).click();
+
+  await expect(page.getByText('Demo Finish', { exact: true })).toBeVisible();
+  await expect(page.locator('.explore-rider-strip article')).toHaveCount(4);
+  await page.getByRole('button', { name: 'Start Explore ride' }).click();
+  await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
+
+  await expect.poll(() => page.evaluate(() => {
+    const bikeAudio = (window as typeof window & {
+      __tracklabBikeRaceAudio?: {
+        ready: boolean;
+        seenModes: Record<number, string[]>;
+      };
+    }).__tracklabBikeRaceAudio;
+    return {
+      ready: bikeAudio?.ready ?? false,
+      modes: [...new Set(Object.values(bikeAudio?.seenModes ?? {}).flat())].sort(),
+    };
+  }), { timeout: 14_000 }).toEqual({
+    ready: true,
+    modes: ['freewheel', 'pedaling'],
+  });
+  expect(commentaryRequestCount).toBe(0);
+
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('explore-desktop.png'),
+  });
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await expect(page.getByRole('heading', { name: 'Explore', exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth
+  ))).toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('explore-tablet.png'),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('button', { name: 'Explore', exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth
+  ))).toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('explore-mobile.png'),
+  });
+});
+
 test('Windows Bluetooth pairing widens discovery and stays pending until TrackLab verifies a bike connection', async ({ page }) => {
   const authUser = {
     id: 'bluetooth-pairing-racer',
