@@ -1,6 +1,6 @@
 import { type CSSProperties, type FormEvent, useMemo, useState } from 'react';
 import { Trash2, UserPlus, Users } from 'lucide-react';
-import { distinctBikeDisplayName } from '../lib/bikeProfileIdentity';
+import { customBikeDisplayName, monitorIdLastThree } from '../lib/bikeProfileIdentity';
 import { normalizeStudioRiderName } from '../lib/studioRiders';
 import type { PlayerSlot, StudioRider, StudioRiderAssignments } from '../types';
 import { RiderAvatar, RiderPhotoEditor } from './RiderAvatar';
@@ -98,7 +98,11 @@ export function StudioRaceEntry({
           {players.map((player) => {
             const deviceId = player.deviceId;
             const entered = deviceId != null && enteredDeviceIds.includes(deviceId);
-            const displayName = distinctBikeDisplayName(player, players);
+            const monitorId = deviceId == null ? null : monitorIdLastThree(deviceId);
+            const customBikeName = customBikeDisplayName(player);
+            const entryLabel = monitorId == null
+              ? 'unassigned monitor'
+              : `monitor ID ${monitorId}${customBikeName ? `, ${customBikeName}` : ''}`;
             const assignedRiderId = deviceId == null ? '' : assignments[deviceId] ?? '';
             const assignedRider = assignedRiderId
               ? riders.find((rider) => rider.id === assignedRiderId)
@@ -116,7 +120,7 @@ export function StudioRaceEntry({
                   }}
                   disabled={!canEdit || deviceId == null}
                   aria-pressed={entered}
-                  aria-label={`${entered ? 'Remove' : 'Enter'} ${displayName} ${entered ? 'from' : 'in'} live race`}
+                  aria-label={`${entered ? 'Remove' : 'Enter'} ${entryLabel} ${entered ? 'from' : 'in'} live race`}
                 >
                   <span
                     className="player-chip"
@@ -125,8 +129,11 @@ export function StudioRaceEntry({
                     P{player.id}
                   </span>
                   <span className="race-entry-copy">
-                    <strong>{displayName}</strong>
-                    <small>{deviceId != null ? `Monitor ID ${deviceId}` : 'No monitor ID'}</small>
+                    {customBikeName && <small className="race-entry-bike-name">{customBikeName}</small>}
+                    <strong className="race-entry-monitor-id">
+                      <span>Monitor ID</span>
+                      <b>{monitorId ?? '—'}</b>
+                    </strong>
                   </span>
                   <span className={`race-entry-status ${entered ? 'entered' : ''}`}>
                     {entered ? 'Entered' : 'Standby'}
@@ -136,7 +143,7 @@ export function StudioRaceEntry({
                 <label className="race-entry-rider-select">
                   <span>Student</span>
                   <select
-                    aria-label={`Student riding ${displayName}`}
+                    aria-label={`Student assigned to ${entryLabel}`}
                     value={assignedRiderId}
                     disabled={!canEdit || deviceId == null}
                     onChange={(event) => {

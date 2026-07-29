@@ -70,3 +70,12 @@ export function distinctBikeDisplayName(bike: NamedBike, connectedBikes: NamedBi
     ? `${bike.deviceId} · ${bike.name}`
     : bike.name;
 }
+
+export function monitorIdLastThree(deviceId: number) {
+  return String(Math.max(0, Math.trunc(deviceId))).slice(-3).padStart(3, '0');
+}
+
+export function customBikeDisplayName(bike: NamedBike) {
+  const name = bike.name.trim().replace(/\s+/g, ' ');
+  return /^(?:bike|wattbike)\s*[-#:]?\s*\d+(?:watt)?$/i.test(name) ? null : name;
+}

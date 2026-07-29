@@ -1830,7 +1830,7 @@ input:focus {
 
 .workflow-race-entry-heading span {
   color: #17330d;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 950;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1839,7 +1839,7 @@ input:focus {
 .workflow-race-entry-heading small {
   overflow: hidden;
   color: #5f6f5a;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1891,8 +1891,8 @@ input:focus {
 }
 
 .race-entry-card .race-entry-row {
-  min-height: 36px;
-  padding: 3px 2px;
+  min-height: 46px;
+  padding: 4px 2px;
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -1913,36 +1913,53 @@ input:focus {
   min-width: 0;
 }
 
-.race-entry-copy strong,
-.race-entry-copy small {
+.race-entry-copy > strong,
+.race-entry-copy > small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.race-entry-copy strong {
-  color: #17212b;
+.race-entry-copy .race-entry-bike-name {
+  color: #4e5e6c;
   font-size: 11px;
-  font-weight: 950;
+  font-weight: 850;
 }
 
-.race-entry-copy small {
-  color: #62717f;
-  font-size: 10px;
-  font-weight: 780;
+.race-entry-monitor-id {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #17212b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.race-entry-monitor-id b {
+  color: #101827;
+  font-size: 18px;
+  font-weight: 1000;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.race-entry-card .player-chip {
+  min-width: 38px;
+  min-height: 38px;
+  font-size: 13px;
 }
 
 .race-entry-status {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 54px;
-  min-height: 22px;
+  min-width: 60px;
+  min-height: 26px;
   padding: 0 7px;
   border-radius: 999px;
   background: #edf2f7;
   color: #536270;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 950;
   text-transform: uppercase;
 }
@@ -1963,21 +1980,21 @@ input:focus {
 
 .race-entry-rider-select > span {
   color: #607080;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 900;
   text-transform: uppercase;
 }
 
 .race-entry-rider-select select {
   min-width: 0;
-  min-height: 30px;
+  min-height: 34px;
   padding: 0 24px 0 8px;
   border: 1px solid #d5dee6;
   border-radius: 6px;
   background: #ffffff;
   color: #17212b;
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 850;
 }
 

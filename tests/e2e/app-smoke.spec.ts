@@ -2550,7 +2550,7 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
     await expect(page.getByText(/0 entered \/ 2 connected/i)).toBeVisible();
 
     await expect(page.locator('.workflow-step').filter({ hasText: 'Race' })).toContainText('Choose racer');
-    await page.getByRole('button', { name: /Enter Bike 58701 in live race/i }).click();
+    await page.getByRole('button', { name: /Enter monitor ID 701 in live race/i }).click();
     await expect(page.getByText(/1 entered \/ 2 connected/i)).toBeVisible();
 
     const startAction = page.locator('.workflow-step.primary-action');
@@ -2665,8 +2665,11 @@ test('connected bike names remain bound to their monitor IDs after reload', asyn
 
     await expect(page.getByText(/2 connected bikes/i)).toBeVisible({ timeout: 15_000 });
     const raceEntry = page.locator('.workflow-race-entry');
-    await expect(raceEntry.getByText('Bike 43853', { exact: true })).toBeVisible();
-    await expect(raceEntry.getByText('Bike 58701Watt', { exact: true })).toBeVisible();
+    await expect(raceEntry.getByText('Bike 43853', { exact: true })).toHaveCount(0);
+    await expect(raceEntry.getByText('Bike 58701Watt', { exact: true })).toHaveCount(0);
+    await expect(raceEntry.getByText('853', { exact: true })).toBeVisible();
+    await expect(raceEntry.getByText('701', { exact: true })).toBeVisible();
+    await expect(raceEntry.getByText('853', { exact: true })).toHaveCSS('font-size', '18px');
 
     await page.getByLabel('Name for player 1').fill('Gate Trainer');
     await page.getByLabel('Name for player 2').fill('Rhythm Trainer');
@@ -2953,7 +2956,7 @@ test('studio rider roster syncs to the account and can be assigned to a connecte
     await expect.poll(() => cloudStudioRiders.find((rider) => !rider.deletedAt)?.photoUrl)
       .toMatch(/^data:image\/jpeg;base64,/);
 
-    const studentSelect = page.getByLabel(/Student riding Bike 58701/i);
+    const studentSelect = page.getByLabel(/Student assigned to monitor ID 701/i);
     await studentSelect.selectOption({ label: 'Jordan H' });
     await expect(studentSelect).toHaveValue(cloudStudioRiders[0].id);
     await expect(page.getByText(/1 entered \/ 1 connected/i)).toBeVisible();
