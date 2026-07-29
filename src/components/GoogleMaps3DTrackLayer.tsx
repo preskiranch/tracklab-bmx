@@ -53,6 +53,7 @@ import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGate
 import {
   riderAirPixelsToMeters,
   riderLaneOffsetsByPlayer,
+  riderMarkerDrawSize,
   uprightRiderOrientation,
 } from '../lib/riderPresentation';
 
@@ -419,12 +420,20 @@ function createRiderContent(
   const content = document.createElement('div');
   content.className = `map-3d-rider-marker map-3d-rider-marker-${appearance}`;
   content.style.setProperty('--rider-accent', appearance === 'ghost' ? '#22d3ee' : player.accent);
+  content.style.height = `${riderMarkerDrawSize}px`;
+  content.style.pointerEvents = 'none';
+  content.style.width = `${riderMarkerDrawSize}px`;
   content.title = label;
   content.setAttribute('aria-label', label);
   const image = document.createElement('img');
   image.className = 'map-3d-rider-image';
   image.alt = label;
   image.src = riderIconByColor[appearance === 'ghost' ? 'blue' : player.colorName];
+  image.style.display = 'block';
+  image.style.height = `${riderMarkerDrawSize}px`;
+  image.style.objectFit = 'fill';
+  image.style.transformOrigin = '50% 100%';
+  image.style.width = `${riderMarkerDrawSize}px`;
   content.append(image);
   return content;
 }
