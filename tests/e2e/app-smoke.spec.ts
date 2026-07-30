@@ -527,6 +527,18 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByRole('button', { name: 'Hide street names and landmarks' }))
     .toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Labeled satellite', { exact: true })).toHaveText('Labeled satellite');
+  const orbitCamera = page.getByRole('button', { name: 'Start 360 camera rotation' });
+  await orbitCamera.click();
+  const orbitSpeed = page.getByLabel('Camera rotation speed');
+  await expect(orbitSpeed).toHaveValue('12');
+  await orbitSpeed.fill('20');
+  await expect(page.getByRole('button', { name: 'Stop 360 camera rotation' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Stop 360 camera rotation' }).click();
+  await page.getByRole('button', { name: 'Use Street View' }).click();
+  await expect(page.getByRole('button', { name: 'Use satellite view' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Use satellite view' }).click();
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await expect(followZoom).toHaveValue('16');

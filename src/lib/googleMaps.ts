@@ -59,6 +59,45 @@ type GoogleMarker = {
   setTitle?: (title: string) => void;
 };
 
+export type GoogleStreetViewPov = {
+  heading: number;
+  pitch: number;
+};
+
+export type GoogleStreetViewPanorama = {
+  addListener: (eventName: string, handler: () => void) => GoogleMapsEventListener;
+  getPov?: () => GoogleStreetViewPov;
+  getStatus?: () => string;
+  setOptions: (options: Record<string, unknown>) => void;
+  setPosition: (position: LatLngLiteral) => void;
+  setPov: (pov: GoogleStreetViewPov) => void;
+  setVisible: (visible: boolean) => void;
+};
+
+export type GoogleStreetViewService = {
+  getPanorama: (request: Record<string, unknown>) => Promise<{
+    data?: {
+      location?: {
+        pano?: string;
+        latLng?: {
+          toJSON: () => LatLngLiteral;
+        };
+      };
+    };
+  }>;
+};
+
+type GoogleStreetViewLibrary = {
+  StreetViewPanorama?: new (
+    element: HTMLElement,
+    options: Record<string, unknown>,
+  ) => GoogleStreetViewPanorama;
+  StreetViewService?: new () => GoogleStreetViewService;
+  StreetViewSource?: {
+    OUTDOOR: unknown;
+  };
+};
+
 type GoogleMapCanvasProjection = {
   fromContainerPixelToLatLng: (point: unknown) => { toJSON: () => LatLngLiteral } | null;
   fromLatLngToDivPixel: (position: unknown) => { x: number; y: number } | null;
@@ -196,6 +235,9 @@ type GoogleMapsRuntime = {
     RenderingType?: {
       VECTOR: unknown;
     };
+    StreetViewPanorama?: GoogleStreetViewLibrary['StreetViewPanorama'];
+    StreetViewService?: GoogleStreetViewLibrary['StreetViewService'];
+    StreetViewSource?: GoogleStreetViewLibrary['StreetViewSource'];
     Size: new (width: number, height: number) => unknown;
     SymbolPath: {
       CIRCLE: unknown;
@@ -423,6 +465,22 @@ export function loadGoogleMaps() {
     });
 
   return window.__trackLabGoogleMapsPromise;
+}
+
+export async function loadGoogleStreetViewLibrary() {
+  const google = await loadGoogleMaps();
+  if ((!google.maps.StreetViewPanorama || !google.maps.StreetViewService) && google.maps.importLibrary) {
+    const library = await google.maps.importLibrary('streetView') as GoogleMapsLibraryImport;
+    mergeImportedGoogleLibrary(
+      google.maps as unknown as Record<string, unknown>,
+      library,
+    );
+  }
+
+  if (!google.maps.StreetViewPanorama || !google.maps.StreetViewService) {
+    throw new Error('Google Street View is unavailable for this Maps key.');
+  }
+  return google;
 }
 
 export async function loadGoogleMaps3DLibrary(): Promise<GoogleMaps3DLibrary> {

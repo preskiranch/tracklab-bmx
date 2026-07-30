@@ -8068,6 +8068,7 @@ input:focus {
 }
 
 .explore-stage {
+  position: relative;
   display: grid;
   align-content: start;
   gap: 12px;
@@ -8168,6 +8169,7 @@ input:focus {
 .explore-camera-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 5px;
 }
@@ -8229,6 +8231,10 @@ input:focus {
   accent-color: var(--lime);
 }
 
+.explore-camera-toolbar .explore-orbit-speed {
+  flex: 1 1 100%;
+}
+
 .explore-map-panel {
   position: relative;
   min-width: 0;
@@ -8240,6 +8246,21 @@ input:focus {
 .explore-map-canvas {
   position: absolute;
   inset: 0;
+}
+
+.explore-street-canvas {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.explore-street-canvas.active {
+  visibility: visible;
+  opacity: 1;
 }
 
 .explore-map-status {
@@ -8260,6 +8281,50 @@ input:focus {
 
 .explore-map-status.error {
   background: rgba(135, 35, 28, 0.9);
+}
+
+.explore-map-status.street-fallback {
+  top: auto;
+  bottom: 16px;
+  background: rgba(70, 48, 12, 0.9);
+  transform: translateX(-50%);
+}
+
+.explore-street-preload {
+  position: absolute;
+  z-index: 30;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: min(360px, calc(100% - 32px));
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 14px;
+  background: rgba(7, 13, 21, 0.94);
+  color: #ffffff;
+  text-align: center;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(10px);
+}
+
+.explore-street-preload strong {
+  color: var(--lime);
+  font-size: 46px;
+  line-height: 1;
+}
+
+.explore-street-preload span {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.explore-street-preload small {
+  color: #bdcbd6;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .explore-map-group-label {
@@ -8737,6 +8802,8 @@ input:focus {
 
   .explore-camera-toolbar .explore-camera-position-toggle,
   .explore-camera-toolbar .explore-map-labels-toggle,
+  .explore-camera-toolbar .explore-view-mode-toggle,
+  .explore-camera-toolbar .explore-orbit-toggle,
   .explore-camera-toolbar .explore-exit-fullscreen {
     width: 38px;
     padding-inline: 0;
@@ -8744,6 +8811,8 @@ input:focus {
 
   .explore-camera-toolbar .explore-camera-position-toggle span,
   .explore-camera-toolbar .explore-map-labels-toggle span,
+  .explore-camera-toolbar .explore-view-mode-toggle span,
+  .explore-camera-toolbar .explore-orbit-toggle span,
   .explore-camera-toolbar .explore-exit-fullscreen span {
     display: none;
   }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { loadGoogleMaps } from '../lib/googleMaps';
+import { loadGoogleMaps, loadGoogleStreetViewLibrary } from '../lib/googleMaps';
 import {
   exploreCameraOffsetMeters,
+  exploreRouteHeading,
   exploreRoutePoint,
   exploreRoutePoints,
   smoothExploreCameraPoint,
@@ -13,8 +14,9 @@ import type {
   GoogleMarker,
   GoogleMapsRuntime,
   GooglePolyline,
+  GoogleStreetViewPanorama,
 } from '../lib/googleMaps';
-import type { ExploreRoute as ExploreRouteModel, TrackPoint } from '../types';
+import type { ExploreRoute as ExploreRouteModel, ExploreViewMode, TrackPoint } from '../types';
 import { formatDistanceMeters } from '../units';
 
 type ExploreMapPanelProps = {
@@ -24,6 +26,9 @@ type ExploreMapPanelProps = {
   followZoom: number;
   cameraFollowPosition: ExploreCameraFollowPosition;
   showMapLabels: boolean;
+  viewMode: ExploreViewMode;
+  orbitEnabled: boolean;
+  orbitSpeedDps: number;
 };
 
 type ExploreMarkerRefs = Map<string, GoogleMarker>;
@@ -46,10 +51,19 @@ export function ExploreMapPanel({
   followZoom,
   cameraFollowPosition,
   showMapLabels,
+  viewMode,
+  orbitEnabled,
+  orbitSpeedDps,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const streetContainerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
+  const streetViewRef = useRef<GoogleStreetViewPanorama | null>(null);
+  const streetStatusListenerRef = useRef<{ remove: () => void } | null>(null);
+  const streetRouteHeadingRef = useRef(0);
+  const lastStreetDistanceRef = useRef<number | null>(null);
+  const lastStreetUpdateAtRef = useRef(0);
   const routeLineRef = useRef<GooglePolyline | null>(null);
   const markerRefs = useRef<ExploreMarkerRefs>(new Map());
   const endpointMarkerRefs = useRef<GoogleMarker[]>([]);
@@ -59,6 +73,7 @@ export function ExploreMapPanel({
   const initialFollowZoomRef = useRef(followZoom);
   const initialShowMapLabelsRef = useRef(showMapLabels);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [streetStatus, setStreetStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
   const [error, setError] = useState('');
   const routePoints = useMemo(() => exploreRoutePoints(route), [route]);
 
@@ -153,6 +168,12 @@ export function ExploreMapPanel({
       routeLineRef.current = null;
       endpointMarkerRefs.current = [];
       markerRefs.current.clear();
+      streetStatusListenerRef.current?.remove();
+      streetViewRef.current?.setVisible(false);
+      streetStatusListenerRef.current = null;
+      streetViewRef.current = null;
+      lastStreetDistanceRef.current = null;
+      lastStreetUpdateAtRef.current = 0;
       cameraCenterRef.current = null;
       cameraTargetRef.current = null;
       lastFollowZoomRef.current = null;
@@ -160,6 +181,63 @@ export function ExploreMapPanel({
       googleRef.current = null;
     };
   }, [route.id, route.destinationLabel, route.originLabel, routePoints]);
+
+  useEffect(() => {
+    if (status !== 'ready' || viewMode !== 'street') {
+      streetViewRef.current?.setVisible(false);
+      return;
+    }
+    let cancelled = false;
+    setStreetStatus('loading');
+    loadGoogleStreetViewLibrary()
+      .then((google) => {
+        const StreetViewPanorama = google.maps.StreetViewPanorama;
+        if (
+          cancelled
+          || !StreetViewPanorama
+          || !streetContainerRef.current
+          || routePoints.length === 0
+        ) {
+          return;
+        }
+        googleRef.current = google;
+        if (!streetViewRef.current) {
+          const panorama = new StreetViewPanorama(streetContainerRef.current, {
+            addressControl: false,
+            clickToGo: false,
+            disableDefaultUI: true,
+            fullscreenControl: false,
+            linksControl: false,
+            motionTracking: false,
+            panControl: false,
+            position: routePoints[0],
+            pov: {
+              heading: exploreRouteHeading(routePoints, 0, route.distanceMeters),
+              pitch: 0,
+            },
+            showRoadLabels: true,
+            visible: true,
+            zoomControl: false,
+          });
+          streetViewRef.current = panorama;
+          streetStatusListenerRef.current = panorama.addListener('status_changed', () => {
+            setStreetStatus(String(panorama.getStatus?.()) === 'OK' ? 'ready' : 'unavailable');
+          });
+        }
+        streetViewRef.current.setVisible(true);
+        setStreetStatus(
+          String(streetViewRef.current.getStatus?.()) === 'OK' ? 'ready' : 'loading',
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStreetStatus('error');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [route.distanceMeters, route.id, routePoints, status, viewMode]);
 
   useEffect(() => {
     if (status !== 'ready') {
@@ -232,6 +310,34 @@ export function ExploreMapPanel({
       (sum, { rider }) => sum + rider.distanceMeters / positions.length,
       0,
     );
+    const streetPosition = exploreRoutePoint(
+      routePoints,
+      averageDistanceMeters,
+      route.distanceMeters,
+    ) ?? riderCenter;
+    const routeHeading = exploreRouteHeading(routePoints, averageDistanceMeters, route.distanceMeters);
+    streetRouteHeadingRef.current = (
+      routeHeading + (cameraFollowPosition === 'behind' ? 180 : 0)
+    ) % 360;
+    const panorama = streetViewRef.current;
+    const now = window.performance.now();
+    const lastStreetDistance = lastStreetDistanceRef.current;
+    if (
+      viewMode === 'street'
+      && panorama
+      && (
+        lastStreetDistance == null
+        || Math.abs(averageDistanceMeters - lastStreetDistance) >= 4
+        || now - lastStreetUpdateAtRef.current >= 900
+      )
+    ) {
+      panorama.setPosition(streetPosition);
+      if (!orbitEnabled) {
+        panorama.setPov({ heading: streetRouteHeadingRef.current, pitch: 0 });
+      }
+      lastStreetDistanceRef.current = averageDistanceMeters;
+      lastStreetUpdateAtRef.current = now;
+    }
     const center = exploreRoutePoint(
       routePoints,
       averageDistanceMeters + exploreCameraOffsetMeters(cameraFollowPosition, followZoom),
@@ -251,7 +357,7 @@ export function ExploreMapPanel({
     if (zoomChanged) {
       lastFollowZoomRef.current = followZoom;
     }
-  }, [cameraFollowPosition, followZoom, group, route, routePoints, status]);
+  }, [cameraFollowPosition, followZoom, group, orbitEnabled, route, routePoints, status, viewMode]);
 
   useEffect(() => {
     if (status !== 'ready') {
@@ -266,7 +372,7 @@ export function ExploreMapPanel({
       const current = cameraCenterRef.current;
       const target = cameraTargetRef.current;
 
-      if (map && current && target && now - lastMapUpdateAt >= 32) {
+      if (viewMode === 'satellite' && map && current && target && now - lastMapUpdateAt >= 32) {
         const needsMovement = Math.abs(target.lat - current.lat) > 1e-8
           || Math.abs(target.lng - current.lng) > 1e-8;
         if (needsMovement) {
@@ -286,7 +392,49 @@ export function ExploreMapPanel({
 
     frameRequest = window.requestAnimationFrame(updateCamera);
     return () => window.cancelAnimationFrame(frameRequest);
-  }, [status]);
+  }, [status, viewMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (status !== 'ready' || !map) {
+      return;
+    }
+
+    if (!orbitEnabled) {
+      map.setHeading(0);
+      if (viewMode === 'street' && streetViewRef.current) {
+        streetViewRef.current.setPov({ heading: streetRouteHeadingRef.current, pitch: 0 });
+      }
+      return;
+    }
+
+    let frameRequest = 0;
+    let previousAt = window.performance.now();
+    let lastCameraUpdateAt = 0;
+    const rotateCamera = (now: number) => {
+      if (now - lastCameraUpdateAt >= 50) {
+        const elapsedSeconds = Math.min(0.25, Math.max(0, now - previousAt) / 1_000);
+        if (viewMode === 'street' && streetViewRef.current && streetStatus === 'ready') {
+          const current = streetViewRef.current.getPov?.() ?? {
+            heading: streetRouteHeadingRef.current,
+            pitch: 0,
+          };
+          streetViewRef.current.setPov({
+            heading: (current.heading + orbitSpeedDps * elapsedSeconds) % 360,
+            pitch: current.pitch,
+          });
+        } else {
+          map.setHeading(((map.getHeading?.() ?? 0) + orbitSpeedDps * elapsedSeconds) % 360);
+        }
+        previousAt = now;
+        lastCameraUpdateAt = now;
+      }
+      frameRequest = window.requestAnimationFrame(rotateCamera);
+    };
+
+    frameRequest = window.requestAnimationFrame(rotateCamera);
+    return () => window.cancelAnimationFrame(frameRequest);
+  }, [orbitEnabled, orbitSpeedDps, status, streetStatus, viewMode]);
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
 
@@ -298,8 +446,20 @@ export function ExploreMapPanel({
         : 'Explore route preview'}
     >
       <div className="explore-map-canvas" ref={containerRef} />
+      <div
+        className={`explore-street-canvas${viewMode === 'street' && !['error', 'unavailable'].includes(streetStatus) ? ' active' : ''}`}
+        ref={streetContainerRef}
+      />
       {status === 'loading' && <div className="explore-map-status">Loading satellite view…</div>}
       {status === 'error' && <div className="explore-map-status error">{error || 'Satellite view is unavailable.'}</div>}
+      {viewMode === 'street' && streetStatus === 'loading' && (
+        <div className="explore-map-status">Opening Street View…</div>
+      )}
+      {viewMode === 'street' && ['error', 'unavailable'].includes(streetStatus) && (
+        <div className="explore-map-status street-fallback">
+          Street View is unavailable here. Satellite view continues.
+        </div>
+      )}
       <div className="explore-map-group-label">
         <strong>
           {group.riders.length === 0
