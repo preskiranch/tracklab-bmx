@@ -4,6 +4,7 @@ import {
   exploreGridClass,
   exploreRoutePoint,
   groupExploreRiders,
+  smoothExploreCameraPoint,
 } from '../../src/lib/explore';
 import { exploreBikeAudioMode } from '../../src/lib/bikeRaceAudio';
 import type { ExploreRider } from '../../src/types';
@@ -81,6 +82,21 @@ describe('Explore automatic map layouts', () => {
     ]);
     expect(groups.map((group) => group.riders.length)).toEqual([1, 1, 1, 1]);
     expect(exploreGridClass(groups.length)).toBe('explore-map-grid four-way');
+  });
+});
+
+describe('Explore follow camera', () => {
+  it('eases toward live rider positions instead of jumping to each update', () => {
+    const current = { lat: 37.795, lng: -122.394 };
+    const target = { lat: 37.805, lng: -122.384 };
+    const firstFrame = smoothExploreCameraPoint(current, target, 16);
+    const laterFrame = smoothExploreCameraPoint(current, target, 180);
+
+    expect(firstFrame.lat).toBeGreaterThan(current.lat);
+    expect(firstFrame.lat).toBeLessThan(target.lat);
+    expect(laterFrame.lat).toBeGreaterThan(firstFrame.lat);
+    expect(laterFrame.lng).toBeGreaterThan(firstFrame.lng);
+    expect(smoothExploreCameraPoint(current, target, 0)).toEqual(current);
   });
 });
 

@@ -483,16 +483,18 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       },
     };
   });
-  await page.getByLabel('Starting location').fill('Ferry Build');
+  const originInput = page.getByRole('textbox', { name: 'Starting location', exact: true });
+  const destinationInput = page.getByRole('textbox', { name: 'Destination', exact: true });
+  await originInput.fill('Ferry Build');
   const originSuggestion = page.getByRole('option', { name: /Ferry Building.*San Francisco/i });
   await expect(originSuggestion).toBeVisible();
   await originSuggestion.click();
-  await expect(page.getByLabel('Starting location')).toHaveValue('Ferry Building, San Francisco, CA, USA');
-  await page.getByLabel('Destination').fill('Oracle Pa');
+  await expect(originInput).toHaveValue('Ferry Building, San Francisco, CA, USA');
+  await destinationInput.fill('Oracle Pa');
   const destinationSuggestion = page.getByRole('option', { name: /Oracle Park.*Willie Mays/i });
   await expect(destinationSuggestion).toBeVisible();
   await destinationSuggestion.click();
-  await expect(page.getByLabel('Destination')).toHaveValue(/Oracle Park/);
+  await expect(destinationInput).toHaveValue(/Oracle Park/);
   await page.evaluate(() => {
     delete (window as typeof window & {
       google?: unknown;
@@ -500,8 +502,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       __trackLabGoogleMapsBootstrapPromise?: unknown;
     }).google;
   });
-  await page.getByLabel('Starting location').fill('38.5, -120.2');
-  await page.getByLabel('Destination').fill('43.252, -126.453');
+  await originInput.fill('38.5, -120.2');
+  await destinationInput.fill('43.252, -126.453');
   await page.getByRole('button', { name: 'Build Explore route' }).click();
 
   await expect(page.getByText('Demo Finish', { exact: true })).toBeVisible();
@@ -512,6 +514,12 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const followZoom = page.getByLabel('Follow camera zoom');
   await expect(followZoom).toHaveValue('18');
+  const mapLabels = page.getByRole('button', { name: 'Show street names and landmarks' });
+  await expect(mapLabels).toHaveAttribute('aria-pressed', 'false');
+  await mapLabels.click();
+  await expect(page.getByRole('button', { name: 'Hide street names and landmarks' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Labeled satellite', { exact: true })).toHaveText('Labeled satellite');
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await expect(followZoom).toHaveValue('16');

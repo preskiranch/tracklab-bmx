@@ -3,6 +3,7 @@ import type { ExploreRider, ExploreRoute, TrackPoint } from '../types';
 
 export const exploreRiderGroupingGapMeters = 70;
 export const exploreRemoteStateFreshMs = 8_000;
+const exploreCameraEaseMs = 180;
 
 export type ExploreViewportGroup = {
   id: string;
@@ -10,6 +11,19 @@ export type ExploreViewportGroup = {
   startMeter: number;
   endMeter: number;
 };
+
+export function smoothExploreCameraPoint(
+  current: TrackPoint,
+  target: TrackPoint,
+  elapsedMs: number,
+) {
+  const safeElapsedMs = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0;
+  const progress = 1 - Math.exp(-safeElapsedMs / exploreCameraEaseMs);
+  return {
+    lat: current.lat + (target.lat - current.lat) * progress,
+    lng: current.lng + (target.lng - current.lng) * progress,
+  };
+}
 
 export function decodeGooglePolyline(encodedPolyline: string): TrackPoint[] {
   const points: TrackPoint[] = [];

@@ -8188,6 +8188,12 @@ input:focus {
   font-weight: 850;
 }
 
+.explore-camera-toolbar .explore-map-labels-toggle.active {
+  border-color: #65bc2d;
+  background: #e9fbdc;
+  color: #18310c;
+}
+
 .explore-camera-toolbar label {
   display: grid;
   grid-template-columns: auto minmax(110px, 180px) auto;
@@ -8620,6 +8626,12 @@ input:focus {
   color: #d5e0e8;
 }
 
+.explore-fullscreen .explore-camera-toolbar .explore-map-labels-toggle.active {
+  border-color: #92eb56;
+  background: #d8ffbd;
+  color: #17310a;
+}
+
 .explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
   padding-inline: 12px;
   background: #ffffff;
@@ -8703,5 +8715,18 @@ input:focus {
     right: 8px;
     bottom: 8px;
     left: 8px;
+  }
+}
+
+@media (max-width: 600px) {
+  .explore-camera-toolbar .explore-map-labels-toggle,
+  .explore-camera-toolbar .explore-exit-fullscreen {
+    width: 38px;
+    padding-inline: 0;
+  }
+
+  .explore-camera-toolbar .explore-map-labels-toggle span,
+  .explore-camera-toolbar .explore-exit-fullscreen span {
+    display: none;
   }
 }

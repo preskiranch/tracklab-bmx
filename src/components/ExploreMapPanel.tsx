@@ -3,6 +3,7 @@ import { loadGoogleMaps } from '../lib/googleMaps';
 import {
   exploreRoutePoint,
   exploreRoutePoints,
+  smoothExploreCameraPoint,
   type ExploreViewportGroup,
 } from '../lib/explore';
 import type {
@@ -19,6 +20,7 @@ type ExploreMapPanelProps = {
   route: ExploreRouteModel;
   distanceUnit: 'ft' | 'm';
   followZoom: number;
+  showMapLabels: boolean;
 };
 
 type ExploreMarkerRefs = Map<string, GoogleMarker>;
@@ -39,6 +41,7 @@ export function ExploreMapPanel({
   route,
   distanceUnit,
   followZoom,
+  showMapLabels,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
@@ -46,9 +49,11 @@ export function ExploreMapPanel({
   const routeLineRef = useRef<GooglePolyline | null>(null);
   const markerRefs = useRef<ExploreMarkerRefs>(new Map());
   const endpointMarkerRefs = useRef<GoogleMarker[]>([]);
-  const lastCameraAtRef = useRef(0);
+  const cameraCenterRef = useRef<TrackPoint | null>(null);
+  const cameraTargetRef = useRef<TrackPoint | null>(null);
   const lastFollowZoomRef = useRef<number | null>(null);
   const initialFollowZoomRef = useRef(followZoom);
+  const initialShowMapLabelsRef = useRef(showMapLabels);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
   const routePoints = useMemo(() => exploreRoutePoints(route), [route]);
@@ -73,7 +78,7 @@ export function ExploreMapPanel({
           gestureHandling: 'none',
           keyboardShortcuts: false,
           mapTypeControl: false,
-          mapTypeId: 'satellite',
+          mapTypeId: initialShowMapLabelsRef.current ? 'hybrid' : 'satellite',
           renderingType: google.maps.RenderingType?.VECTOR,
           rotateControl: false,
           scaleControl: true,
@@ -144,10 +149,23 @@ export function ExploreMapPanel({
       routeLineRef.current = null;
       endpointMarkerRefs.current = [];
       markerRefs.current.clear();
+      cameraCenterRef.current = null;
+      cameraTargetRef.current = null;
+      lastFollowZoomRef.current = null;
       mapRef.current = null;
       googleRef.current = null;
     };
   }, [route.id, route.destinationLabel, route.originLabel, routePoints]);
+
+  useEffect(() => {
+    if (status !== 'ready') {
+      return;
+    }
+    mapRef.current?.setOptions({
+      clickableIcons: false,
+      mapTypeId: showMapLabels ? 'hybrid' : 'satellite',
+    });
+  }, [showMapLabels, status]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -195,13 +213,10 @@ export function ExploreMapPanel({
       }
     });
 
-    const now = Date.now();
     const zoomChanged = lastFollowZoomRef.current !== followZoom;
-    if (positions.length === 0 || (!zoomChanged && now - lastCameraAtRef.current < 450)) {
+    if (positions.length === 0) {
       return;
     }
-    lastCameraAtRef.current = now;
-    lastFollowZoomRef.current = followZoom;
     const center = positions.reduce(
       (sum, { position }) => ({
         lat: sum.lat + position.lat / positions.length,
@@ -209,11 +224,56 @@ export function ExploreMapPanel({
       }),
       { lat: 0, lng: 0 },
     );
-    map.setCenter?.(center);
+    cameraTargetRef.current = center;
+    if (!cameraCenterRef.current) {
+      cameraCenterRef.current = center;
+      map.moveCamera?.({ center });
+      if (!map.moveCamera) {
+        map.setCenter?.(center);
+      }
+    }
     if (map.getZoom?.() !== followZoom) {
       map.setZoom?.(followZoom);
     }
+    if (zoomChanged) {
+      lastFollowZoomRef.current = followZoom;
+    }
   }, [followZoom, group, route, routePoints, status]);
+
+  useEffect(() => {
+    if (status !== 'ready') {
+      return;
+    }
+
+    let frameRequest = 0;
+    let previousAt = window.performance.now();
+    let lastMapUpdateAt = 0;
+    const updateCamera = (now: number) => {
+      const map = mapRef.current;
+      const current = cameraCenterRef.current;
+      const target = cameraTargetRef.current;
+
+      if (map && current && target && now - lastMapUpdateAt >= 32) {
+        const needsMovement = Math.abs(target.lat - current.lat) > 1e-8
+          || Math.abs(target.lng - current.lng) > 1e-8;
+        if (needsMovement) {
+          const elapsedMs = Math.min(250, Math.max(0, now - previousAt));
+          const next = smoothExploreCameraPoint(current, target, elapsedMs);
+          cameraCenterRef.current = next;
+          map.moveCamera?.({ center: next });
+          if (!map.moveCamera) {
+            map.setCenter?.(next);
+          }
+        }
+        previousAt = now;
+        lastMapUpdateAt = now;
+      }
+      frameRequest = window.requestAnimationFrame(updateCamera);
+    };
+
+    frameRequest = window.requestAnimationFrame(updateCamera);
+    return () => window.cancelAnimationFrame(frameRequest);
+  }, [status]);
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
 

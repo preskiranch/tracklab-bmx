@@ -2,6 +2,7 @@ import {
   Bike,
   Car,
   Flag,
+  Landmark,
   LocateFixed,
   MapPinned,
   Minimize2,
@@ -182,6 +183,7 @@ export function ExploreView({
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const [travelMode, setTravelMode] = useState<ExploreTravelMode>('bicycle');
   const [followZoom, setFollowZoom] = useState(18);
+  const [showMapLabels, setShowMapLabels] = useState(false);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
   const appliedRoomSessionRef = useRef<string | null>(null);
@@ -639,7 +641,7 @@ export function ExploreView({
                 <dl>
                   <div><dt>Route</dt><dd>{formatDistanceMeters(route.distanceMeters, distanceUnit)}</dd></div>
                   <div><dt>Google estimate</dt><dd>{formatDuration(route.durationSeconds)}</dd></div>
-                  <div><dt>View</dt><dd>Satellite</dd></div>
+                  <div><dt>View</dt><dd>{showMapLabels ? 'Labeled satellite' : 'Satellite'}</dd></div>
                   <div><dt>Maps</dt><dd>{groups.length || 1} screen{groups.length === 1 ? '' : 's'}</dd></div>
                 </dl>
               </header>
@@ -677,13 +679,30 @@ export function ExploreView({
                 >
                   <ZoomIn size={18} />
                 </button>
+                <button
+                  className={`explore-map-labels-toggle${showMapLabels ? ' active' : ''}`}
+                  type="button"
+                  aria-label={showMapLabels
+                    ? 'Hide street names and landmarks'
+                    : 'Show street names and landmarks'}
+                  aria-pressed={showMapLabels}
+                  title={showMapLabels
+                    ? 'Hide street names and landmarks'
+                    : 'Show street names and landmarks'}
+                  onClick={() => setShowMapLabels((visible) => !visible)}
+                >
+                  <Landmark size={18} />
+                  <span>{showMapLabels ? 'Labels on' : 'Street names'}</span>
+                </button>
                 {fullscreen && (
                   <button
                     className="explore-exit-fullscreen"
                     type="button"
+                    aria-label="Exit full screen"
                     onClick={() => onFullscreenChange(false)}
                   >
-                    <Minimize2 size={18} /> Exit full screen
+                    <Minimize2 size={18} />
+                    <span>Exit full screen</span>
                   </button>
                 )}
               </div>
@@ -700,6 +719,7 @@ export function ExploreView({
                     route={route}
                     distanceUnit={distanceUnit}
                     followZoom={followZoom}
+                    showMapLabels={showMapLabels}
                     key={group.id}
                   />
                 ))}
