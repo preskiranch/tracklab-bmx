@@ -109,10 +109,7 @@ type SessionControlPanelProps = {
   isAdminProfile: boolean;
   raceState: RaceState;
   activeBikeCount: number;
-  maxPlayers: number;
   demoMode: boolean;
-  demoBikeCount: number;
-  demoVariableCount: number;
   mappingMode: boolean;
   mappingFullscreen: boolean;
   mappingEditMode: MappingEditMode;
@@ -156,7 +153,6 @@ type SessionControlPanelProps = {
   onRaceRouteVariantChange: (variantId: TrackRouteVariantId) => void;
   onLapCountChange: (count: number) => void;
   onDemoModeChange: (enabled: boolean) => void;
-  onDemoBikeCountChange: (count: number) => void;
   onMappingModeChange: (enabled: boolean) => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
@@ -222,10 +218,7 @@ export function SessionControlPanel({
   isAdminProfile,
   raceState,
   activeBikeCount,
-  maxPlayers,
   demoMode,
-  demoBikeCount,
-  demoVariableCount,
   mappingMode,
   mappingFullscreen,
   mappingEditMode,
@@ -269,7 +262,6 @@ export function SessionControlPanel({
   onRaceRouteVariantChange,
   onLapCountChange,
   onDemoModeChange,
-  onDemoBikeCountChange,
   onMappingModeChange,
   onMappingFullscreenChange,
   onMappingEditModeChange,
@@ -1048,27 +1040,6 @@ export function SessionControlPanel({
               : 'Live Bikes uses connected Wattbikes for the same race engine and BMX rollout logic.'}
           </p>
 
-          {demoMode && (
-            <>
-              <div className="demo-mode-row">
-                <span>Riders</span>
-                <strong>{demoBikeCount} / {maxPlayers}</strong>
-                <small>{demoVariableCount} race variables</small>
-              </div>
-              <div className="segmented-control compact four-way" aria-label="Demo rider count">
-                {Array.from({ length: maxPlayers }, (_, index) => index + 1).map((count) => (
-                  <button
-                    className={demoBikeCount === count ? 'selected' : ''}
-                    type="button"
-                    onClick={() => onDemoBikeCountChange(count)}
-                    key={count}
-                  >
-                    {count}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
         </section>
       )}
 

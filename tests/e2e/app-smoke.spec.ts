@@ -445,6 +445,12 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.goto('/');
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
+  const demoRiderCount = page.getByRole('group', { name: 'Select demo rider count' });
+  await expect(demoRiderCount).toBeVisible();
+  await demoRiderCount.getByRole('button', { name: '2', exact: true }).click();
+  await expect(demoRiderCount.getByRole('button', { name: '2', exact: true }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('Bike pairing').locator('.pair-card')).toHaveCount(2);
   await page.getByRole('button', { name: 'Explore', exact: true }).click();
 
   await expect(page.getByText('Developer Demo active', { exact: true })).toBeVisible();
@@ -507,7 +513,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.getByRole('button', { name: 'Build Explore route' }).click();
 
   await expect(page.getByText('Demo Finish', { exact: true })).toBeVisible();
-  await expect(page.locator('.explore-rider-strip article')).toHaveCount(4);
+  await expect(page.locator('.explore-rider-strip article')).toHaveCount(2);
   await page.getByRole('button', { name: 'Start Explore ride' }).click();
   await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
@@ -532,20 +538,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByRole('button', { name: 'Hide street names and landmarks' }))
     .toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Labeled satellite', { exact: true })).toHaveText('Labeled satellite');
-  const orbitCamera = page.getByRole('button', { name: 'Start 360 camera rotation' });
-  await orbitCamera.click();
-  await expect(page.getByRole('button', { name: 'Follow direction of travel' }))
-    .toHaveAttribute('aria-pressed', 'false');
-  const orbitSpeed = page.getByLabel('Camera rotation speed');
-  await expect(orbitSpeed).toHaveValue('12');
-  await orbitSpeed.fill('20');
-  await expect(page.getByRole('button', { name: 'Stop 360 camera rotation' }))
-    .toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: 'Stop 360 camera rotation' }).click();
-  await page.getByRole('button', { name: 'Use Street View' }).click();
-  await expect(page.getByRole('button', { name: 'Use satellite view' }))
-    .toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: 'Use satellite view' }).click();
+  await expect(page.getByRole('button', { name: /Street View|360 camera rotation/i })).toHaveCount(0);
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await expect(followZoom).toHaveValue('16');

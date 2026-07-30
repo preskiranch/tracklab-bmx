@@ -9,11 +9,6 @@ import {
   smoothExploreHeading,
 } from '../../src/lib/explore';
 import { exploreBikeAudioMode } from '../../src/lib/bikeRaceAudio';
-import {
-  exploreStreetViewCheckpointLimit,
-  exploreStreetViewCountdownSeconds,
-  exploreStreetViewRouteCheckpoints,
-} from '../../src/lib/exploreStreetView';
 import type { ExploreRider } from '../../src/types';
 
 function rider(id: number, distanceMeters: number): ExploreRider {
@@ -152,30 +147,5 @@ describe('Explore bike mechanics audio', () => {
       velocityMps: 0,
       finishedAt: Date.now(),
     })).toBe('silent');
-  });
-});
-
-describe('Explore Street View preparation', () => {
-  it('uses a 30-second readiness window and checks a bounded sample across the route', () => {
-    const route = {
-      id: 'street-view-test',
-      origin: { lat: 38.5, lng: -120.2 },
-      destination: { lat: 43.252, lng: -126.453 },
-      originLabel: 'Start',
-      destinationLabel: 'Finish',
-      travelMode: 'bicycle' as const,
-      distanceMeters: 8_000,
-      durationSeconds: 1_800,
-      encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
-      createdAt: 1,
-    };
-    const checkpoints = exploreStreetViewRouteCheckpoints(route);
-
-    expect(exploreStreetViewCountdownSeconds).toBe(30);
-    expect(checkpoints).toHaveLength(exploreStreetViewCheckpointLimit);
-    expect(checkpoints[0]?.distanceMeters).toBe(0);
-    expect(checkpoints.at(-1)?.distanceMeters).toBe(route.distanceMeters);
-    expect(checkpoints[0]?.point).toEqual(route.origin);
-    expect(checkpoints.at(-1)?.point).toEqual(route.destination);
   });
 });

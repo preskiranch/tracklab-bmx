@@ -6019,7 +6019,7 @@ export default function App() {
 
     clearStartGateSequence();
     setDemoMode(true);
-    setDemoBikeCount(Math.min(maxPlayers, Math.max(4, demoBikeCount)));
+    setDemoBikeCount(Math.min(maxPlayers, Math.max(1, demoBikeCount)));
     setDemoRaceSeed(Date.now());
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
@@ -6961,6 +6961,8 @@ export default function App() {
           deviceLabel={demoMode ? 'Demo device' : pairingDeviceLabel}
           readOnly={demoMode}
           maxPlayers={maxPlayers}
+          demoRiderCount={demoMode ? demoBikeCount : undefined}
+          onDemoRiderCountChange={demoMode ? handleDemoBikeCountChange : undefined}
         />
       </aside>
 
@@ -7257,10 +7259,7 @@ export default function App() {
                   isAdminProfile={developerUiActive}
                   raceState={raceState}
                   activeBikeCount={racePlayers.length}
-                  maxPlayers={maxPlayers}
                   demoMode={demoMode}
-                  demoBikeCount={demoBikeCount}
-                  demoVariableCount={demo.variableCount}
                   mappingMode={mappingMode}
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
@@ -7305,7 +7304,6 @@ export default function App() {
                   onRaceRouteVariantChange={handleRaceRouteVariantChange}
                   onLapCountChange={(count) => setLapCount(Math.max(1, Math.min(20, Math.round(count))))}
                   onDemoModeChange={handleDemoModeChange}
-                  onDemoBikeCountChange={handleDemoBikeCountChange}
                   onMappingModeChange={handleMappingModeChange}
                   onMappingFullscreenChange={handleMappingFullscreenChange}
                   onMappingEditModeChange={handleMappingEditModeChange}

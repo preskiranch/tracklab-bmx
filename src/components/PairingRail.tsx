@@ -21,6 +21,8 @@ type PairingRailProps = {
   deviceLabel?: string;
   readOnly?: boolean;
   maxPlayers?: number;
+  demoRiderCount?: number;
+  onDemoRiderCountChange?: (count: number) => void;
 };
 
 function sampleDevice(sample: BikeSample): ConnectedBikeDevice {
@@ -68,6 +70,8 @@ export function PairingRail({
   deviceLabel = 'ANT device',
   readOnly = false,
   maxPlayers = 4,
+  demoRiderCount,
+  onDemoRiderCountChange,
 }: PairingRailProps) {
   const [nameDrafts, setNameDrafts] = useState<Partial<Record<PlayerSlot['id'], string>>>({});
   const [editingPlayerId, setEditingPlayerId] = useState<PlayerSlot['id'] | null>(null);
@@ -150,6 +154,28 @@ export function PairingRail({
           <span>{bluetoothStatus}</span>
           {bluetoothDeviceCount > 0 && <strong>{bluetoothDeviceCount}</strong>}
         </div>
+      )}
+
+      {demoRiderCount != null && onDemoRiderCountChange && (
+        <section className="demo-rider-count-control" aria-label="Demo riders">
+          <div>
+            <strong>Active demo riders</strong>
+            <span>{demoRiderCount} of {maxPlayers}</span>
+          </div>
+          <div className="segmented-control compact four-way" role="group" aria-label="Select demo rider count">
+            {Array.from({ length: maxPlayers }, (_, index) => index + 1).map((count) => (
+              <button
+                className={demoRiderCount === count ? 'selected' : ''}
+                type="button"
+                aria-pressed={demoRiderCount === count}
+                onClick={() => onDemoRiderCountChange(count)}
+                key={count}
+              >
+                {count}
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="pairing-list">

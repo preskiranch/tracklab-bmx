@@ -2,7 +2,6 @@ import {
   Bike,
   Car,
   Compass,
-  Eye,
   Flag,
   Landmark,
   LocateFixed,
@@ -13,7 +12,6 @@ import {
   Play,
   Radio,
   RotateCcw,
-  RotateCw,
   Share2,
   Users,
   ZoomIn,
@@ -35,11 +33,6 @@ import {
 } from '../lib/explore';
 import { fetchExploreRoute } from '../lib/exploreRoutes';
 import {
-  exploreStreetViewCountdownSeconds,
-  scanExploreStreetViewCoverage,
-  type ExploreStreetViewReadiness,
-} from '../lib/exploreStreetView';
-import {
   fetchLocationPredictions,
   resetPlaceAutocompleteSession,
   resolveLocationText,
@@ -53,7 +46,6 @@ import type {
   DistanceUnit,
   ExploreRoute,
   ExploreTravelMode,
-  ExploreViewMode,
   MultiplayerExploreState,
   MultiplayerRoom,
   PlayerSlot,
@@ -215,19 +207,11 @@ export function ExploreView({
   const [followZoom, setFollowZoom] = useState(18);
   const [cameraFollowPosition, setCameraFollowPosition] = useState<ExploreCameraFollowPosition>('center');
   const [showMapLabels, setShowMapLabels] = useState(false);
-  const [viewMode, setViewMode] = useState<ExploreViewMode>('satellite');
-  const [orbitEnabled, setOrbitEnabled] = useState(false);
-  const [orbitSpeedDps, setOrbitSpeedDps] = useState(12);
   const [followTravelHeading, setFollowTravelHeading] = useState(false);
-  const [streetViewCountdown, setStreetViewCountdown] = useState<number | null>(null);
-  const [streetViewReadiness, setStreetViewReadiness] = useState<ExploreStreetViewReadiness | null>(null);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
   const appliedRoomSessionRef = useRef<string | null>(null);
   const scheduledStartTimerRef = useRef<number | null>(null);
-  const streetViewCountdownIntervalRef = useRef<number | null>(null);
-  const streetViewCountdownTimerRef = useRef<number | null>(null);
-  const streetViewPreparationTokenRef = useRef(0);
   const latestRidersRef = useRef<ReturnType<typeof useExploreRide>['riders']>([]);
   const previousRideStatusRef = useRef<ReturnType<typeof useExploreRide>['status']>('ready');
   const route = playMode === 'multiplayer'
@@ -296,13 +280,6 @@ export function ExploreView({
     if (scheduledStartTimerRef.current != null) {
       window.clearTimeout(scheduledStartTimerRef.current);
     }
-    if (streetViewCountdownIntervalRef.current != null) {
-      window.clearInterval(streetViewCountdownIntervalRef.current);
-    }
-    if (streetViewCountdownTimerRef.current != null) {
-      window.clearTimeout(streetViewCountdownTimerRef.current);
-    }
-    streetViewPreparationTokenRef.current += 1;
   }, [onFullscreenChange]);
 
   useEffect(() => {
@@ -449,7 +426,7 @@ export function ExploreView({
     }
   };
 
-  const beginRide = () => {
+  const startOrResume = () => {
     void primeBikeRaceAudio();
     onFullscreenChange(true);
     if (playMode === 'multiplayer') {
@@ -466,67 +443,6 @@ export function ExploreView({
     }
   };
 
-  const clearStreetViewPreparation = () => {
-    streetViewPreparationTokenRef.current += 1;
-    if (streetViewCountdownIntervalRef.current != null) {
-      window.clearInterval(streetViewCountdownIntervalRef.current);
-      streetViewCountdownIntervalRef.current = null;
-    }
-    if (streetViewCountdownTimerRef.current != null) {
-      window.clearTimeout(streetViewCountdownTimerRef.current);
-      streetViewCountdownTimerRef.current = null;
-    }
-    setStreetViewCountdown(null);
-  };
-
-  const startOrResume = () => {
-    void primeBikeRaceAudio();
-    onFullscreenChange(true);
-    if (ride.status === 'paused' || viewMode !== 'street' || !route) {
-      beginRide();
-      return;
-    }
-    if (streetViewCountdown != null) {
-      return;
-    }
-
-    const token = streetViewPreparationTokenRef.current + 1;
-    streetViewPreparationTokenRef.current = token;
-    const countdownEndsAt = Date.now() + exploreStreetViewCountdownSeconds * 1_000;
-    setStreetViewReadiness(null);
-    setStreetViewCountdown(exploreStreetViewCountdownSeconds);
-    void scanExploreStreetViewCoverage(route)
-      .then((readiness) => {
-        if (streetViewPreparationTokenRef.current === token) {
-          setStreetViewReadiness(readiness);
-        }
-      })
-      .catch(() => {
-        if (streetViewPreparationTokenRef.current === token) {
-          setStreetViewReadiness({ available: 0, checked: 0, coverageRatio: 0 });
-        }
-      });
-
-    streetViewCountdownIntervalRef.current = window.setInterval(() => {
-      if (streetViewPreparationTokenRef.current !== token) {
-        return;
-      }
-      setStreetViewCountdown(Math.max(0, Math.ceil((countdownEndsAt - Date.now()) / 1_000)));
-    }, 200);
-    streetViewCountdownTimerRef.current = window.setTimeout(() => {
-      if (streetViewPreparationTokenRef.current !== token) {
-        return;
-      }
-      if (streetViewCountdownIntervalRef.current != null) {
-        window.clearInterval(streetViewCountdownIntervalRef.current);
-        streetViewCountdownIntervalRef.current = null;
-      }
-      streetViewCountdownTimerRef.current = null;
-      setStreetViewCountdown(null);
-      beginRide();
-    }, exploreStreetViewCountdownSeconds * 1_000);
-  };
-
   const pauseRide = () => {
     if (playMode === 'multiplayer') {
       if (roomHost) {
@@ -538,7 +454,6 @@ export function ExploreView({
   };
 
   const resetRide = () => {
-    clearStreetViewPreparation();
     onFullscreenChange(false);
     if (playMode === 'multiplayer') {
       if (roomHost) {
@@ -758,49 +673,45 @@ export function ExploreView({
                   <div><dt>Google estimate</dt><dd>{formatDuration(route.durationSeconds)}</dd></div>
                   <div>
                     <dt>View</dt>
-                    <dd>{viewMode === 'street' ? 'Street View' : showMapLabels ? 'Labeled satellite' : 'Satellite'}</dd>
+                    <dd>{showMapLabels ? 'Labeled satellite' : 'Satellite'}</dd>
                   </div>
                   <div><dt>Maps</dt><dd>{groups.length || 1} screen{groups.length === 1 ? '' : 's'}</dd></div>
                 </dl>
               </header>
 
               <div className="explore-camera-toolbar" aria-label="Explore camera controls">
-                {viewMode === 'satellite' && (
-                  <>
-                    <button
-                      type="button"
-                      aria-label="Show more of the route"
-                      title="Show more of the route"
-                      disabled={followZoom <= 12}
-                      onClick={() => setFollowZoom((zoom) => Math.max(12, zoom - 1))}
-                    >
-                      <ZoomOut size={18} />
-                    </button>
-                    <label>
-                      <span>Follow zoom</span>
-                      <input
-                        type="range"
-                        min="12"
-                        max="20"
-                        step="1"
-                        value={followZoom}
-                        aria-label="Follow camera zoom"
-                        aria-valuetext={`${followZoom}, ${followZoom <= 14 ? 'more route visible' : followZoom >= 19 ? 'closer rider view' : 'balanced rider view'}`}
-                        onChange={(event) => setFollowZoom(Number(event.target.value))}
-                      />
-                      <small>{followZoom <= 14 ? 'More route' : followZoom >= 19 ? 'Closer' : 'Balanced'}</small>
-                    </label>
-                    <button
-                      type="button"
-                      aria-label="Move closer to the riders"
-                      title="Move closer to the riders"
-                      disabled={followZoom >= 20}
-                      onClick={() => setFollowZoom((zoom) => Math.min(20, zoom + 1))}
-                    >
-                      <ZoomIn size={18} />
-                    </button>
-                  </>
-                )}
+                <button
+                  type="button"
+                  aria-label="Show more of the route"
+                  title="Show more of the route"
+                  disabled={followZoom <= 12}
+                  onClick={() => setFollowZoom((zoom) => Math.max(12, zoom - 1))}
+                >
+                  <ZoomOut size={18} />
+                </button>
+                <label>
+                  <span>Follow zoom</span>
+                  <input
+                    type="range"
+                    min="12"
+                    max="20"
+                    step="1"
+                    value={followZoom}
+                    aria-label="Follow camera zoom"
+                    aria-valuetext={`${followZoom}, ${followZoom <= 14 ? 'more route visible' : followZoom >= 19 ? 'closer rider view' : 'balanced rider view'}`}
+                    onChange={(event) => setFollowZoom(Number(event.target.value))}
+                  />
+                  <small>{followZoom <= 14 ? 'More route' : followZoom >= 19 ? 'Closer' : 'Balanced'}</small>
+                </label>
+                <button
+                  type="button"
+                  aria-label="Move closer to the riders"
+                  title="Move closer to the riders"
+                  disabled={followZoom >= 20}
+                  onClick={() => setFollowZoom((zoom) => Math.min(20, zoom + 1))}
+                >
+                  <ZoomIn size={18} />
+                </button>
                 <button
                   className={`explore-camera-position-toggle ${cameraFollowPosition}${cameraFollowPosition === 'center'
                     ? ''
@@ -830,79 +741,26 @@ export function ExploreView({
                   title={followTravelHeading
                     ? 'Return the map to north-up'
                     : 'Rotate the map so the direction of travel stays at the top'}
-                  onClick={() => setFollowTravelHeading((enabled) => {
-                    const nextEnabled = !enabled;
-                    if (nextEnabled) {
-                      setOrbitEnabled(false);
-                    }
-                    return nextEnabled;
-                  })}
+                  onClick={() => setFollowTravelHeading((enabled) => !enabled)}
                 >
                   <Compass size={18} />
                   <span>{followTravelHeading ? 'Direction up' : 'North up'}</span>
                 </button>
-                {viewMode === 'satellite' && (
-                  <button
-                    className={`explore-map-labels-toggle${showMapLabels ? ' active' : ''}`}
-                    type="button"
-                    aria-label={showMapLabels
-                      ? 'Hide street names and landmarks'
-                      : 'Show street names and landmarks'}
-                    aria-pressed={showMapLabels}
-                    title={showMapLabels
-                      ? 'Hide street names and landmarks'
-                      : 'Show street names and landmarks'}
-                    onClick={() => setShowMapLabels((visible) => !visible)}
-                  >
-                    <Landmark size={18} />
-                    <span>{showMapLabels ? 'Labels on' : 'Street names'}</span>
-                  </button>
-                )}
                 <button
-                  className={`explore-map-labels-toggle explore-view-mode-toggle${viewMode === 'street' ? ' active' : ''}`}
+                  className={`explore-map-labels-toggle${showMapLabels ? ' active' : ''}`}
                   type="button"
-                  aria-label={viewMode === 'street' ? 'Use satellite view' : 'Use Street View'}
-                  aria-pressed={viewMode === 'street'}
-                  title={viewMode === 'street' ? 'Return to satellite view' : 'Use Google Street View where coverage exists'}
-                  disabled={streetViewCountdown != null}
-                  onClick={() => setViewMode((mode) => mode === 'street' ? 'satellite' : 'street')}
+                  aria-label={showMapLabels
+                    ? 'Hide street names and landmarks'
+                    : 'Show street names and landmarks'}
+                  aria-pressed={showMapLabels}
+                  title={showMapLabels
+                    ? 'Hide street names and landmarks'
+                    : 'Show street names and landmarks'}
+                  onClick={() => setShowMapLabels((visible) => !visible)}
                 >
-                  <Eye size={18} />
-                  <span>{viewMode === 'street' ? 'Street View' : 'Satellite'}</span>
+                  <Landmark size={18} />
+                  <span>{showMapLabels ? 'Labels on' : 'Street names'}</span>
                 </button>
-                <button
-                  className={`explore-map-labels-toggle explore-orbit-toggle${orbitEnabled ? ' active' : ''}`}
-                  type="button"
-                  aria-label={orbitEnabled ? 'Stop 360 camera rotation' : 'Start 360 camera rotation'}
-                  aria-pressed={orbitEnabled}
-                  title={orbitEnabled ? 'Stop rotating the camera' : 'Rotate the camera continuously through 360 degrees'}
-                  onClick={() => setOrbitEnabled((enabled) => {
-                    const nextEnabled = !enabled;
-                    if (nextEnabled) {
-                      setFollowTravelHeading(false);
-                    }
-                    return nextEnabled;
-                  })}
-                >
-                  <RotateCw size={18} />
-                  <span>360°</span>
-                </button>
-                {orbitEnabled && (
-                  <label className="explore-orbit-speed">
-                    <span>Rotation speed</span>
-                    <input
-                      type="range"
-                      min="4"
-                      max="36"
-                      step="2"
-                      value={orbitSpeedDps}
-                      aria-label="Camera rotation speed"
-                      aria-valuetext={`${orbitSpeedDps} degrees per second`}
-                      onChange={(event) => setOrbitSpeedDps(Number(event.target.value))}
-                    />
-                    <small>{orbitSpeedDps}°/s</small>
-                  </label>
-                )}
                 {fullscreen && (
                   <button
                     className="explore-exit-fullscreen"
@@ -915,20 +773,6 @@ export function ExploreView({
                   </button>
                 )}
               </div>
-
-              {streetViewCountdown != null && (
-                <div className="explore-street-preload" role="status" aria-live="polite">
-                  <strong>{streetViewCountdown}</strong>
-                  <span>Preparing Street View route</span>
-                  <small>
-                    {streetViewReadiness
-                      ? streetViewReadiness.checked > 0
-                        ? `${streetViewReadiness.available} of ${streetViewReadiness.checked} route checks have Street View`
-                        : 'Coverage could not be verified. Satellite fallback is ready.'
-                      : 'Checking panorama coverage and opening the first live view…'}
-                  </small>
-                </div>
-              )}
 
               <div className={exploreGridClass(groups.length)}>
                 {(groups.length > 0 ? groups : [{
@@ -944,9 +788,6 @@ export function ExploreView({
                     followZoom={followZoom}
                     cameraFollowPosition={cameraFollowPosition}
                     showMapLabels={showMapLabels}
-                    viewMode={viewMode}
-                    orbitEnabled={orbitEnabled}
-                    orbitSpeedDps={orbitSpeedDps}
                     followTravelHeading={followTravelHeading}
                     key={group.id}
                   />
@@ -985,18 +826,15 @@ export function ExploreView({
                     onClick={startOrResume}
                     disabled={
                       players.length === 0
-                      || streetViewCountdown != null
                       || (playMode === 'multiplayer' && (!currentRoom || !roomHost))
                     }
                   >
                     <Play size={18} />
-                    {streetViewCountdown != null
-                      ? 'Preparing Street View…'
-                      : ride.status === 'paused'
-                        ? 'Resume ride'
-                        : ride.status === 'finished'
-                          ? 'Ride again'
-                          : 'Start Explore ride'}
+                    {ride.status === 'paused'
+                      ? 'Resume ride'
+                      : ride.status === 'finished'
+                        ? 'Ride again'
+                        : 'Start Explore ride'}
                   </button>
                 )}
                 <button type="button" onClick={resetRide} disabled={playMode === 'multiplayer' && !roomHost}>
