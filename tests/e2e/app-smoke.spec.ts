@@ -514,6 +514,13 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const followZoom = page.getByLabel('Follow camera zoom');
   await expect(followZoom).toHaveValue('18');
+  const centeredCamera = page.getByRole('button', { name: 'Camera follow position: centered' });
+  await expect(centeredCamera).toBeVisible();
+  await centeredCamera.click();
+  const aheadCamera = page.getByRole('button', { name: 'Camera follow position: ahead' });
+  await expect(aheadCamera).toBeVisible();
+  await aheadCamera.click();
+  await expect(page.getByRole('button', { name: 'Camera follow position: behind' })).toBeVisible();
   const mapLabels = page.getByRole('button', { name: 'Show street names and landmarks' });
   await expect(mapLabels).toHaveAttribute('aria-pressed', 'false');
   await mapLabels.click();

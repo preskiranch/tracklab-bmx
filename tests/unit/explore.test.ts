@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decodeGooglePolyline,
+  exploreCameraOffsetMeters,
   exploreGridClass,
   exploreRoutePoint,
   groupExploreRiders,
@@ -97,6 +98,14 @@ describe('Explore follow camera', () => {
     expect(laterFrame.lat).toBeGreaterThan(firstFrame.lat);
     expect(laterFrame.lng).toBeGreaterThan(firstFrame.lng);
     expect(smoothExploreCameraPoint(current, target, 0)).toEqual(current);
+  });
+
+  it('frames ahead or behind while keeping close zoom offsets on-screen', () => {
+    expect(exploreCameraOffsetMeters('center', 18)).toBe(0);
+    expect(exploreCameraOffsetMeters('ahead', 18)).toBe(60);
+    expect(exploreCameraOffsetMeters('behind', 18)).toBe(-60);
+    expect(exploreCameraOffsetMeters('ahead', 20)).toBe(18);
+    expect(exploreCameraOffsetMeters('behind', 12)).toBe(-400);
   });
 });
 

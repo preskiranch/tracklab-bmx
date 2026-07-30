@@ -4,6 +4,9 @@ import type { ExploreRider, ExploreRoute, TrackPoint } from '../types';
 export const exploreRiderGroupingGapMeters = 70;
 export const exploreRemoteStateFreshMs = 8_000;
 const exploreCameraEaseMs = 180;
+const exploreCameraBaseOffsetMeters = 60;
+
+export type ExploreCameraFollowPosition = 'behind' | 'center' | 'ahead';
 
 export type ExploreViewportGroup = {
   id: string;
@@ -23,6 +26,23 @@ export function smoothExploreCameraPoint(
     lat: current.lat + (target.lat - current.lat) * progress,
     lng: current.lng + (target.lng - current.lng) * progress,
   };
+}
+
+export function exploreCameraOffsetMeters(
+  position: ExploreCameraFollowPosition,
+  followZoom: number,
+) {
+  if (position === 'center') {
+    return 0;
+  }
+  const safeZoom = Number.isFinite(followZoom)
+    ? Math.max(12, Math.min(20, followZoom))
+    : 18;
+  const zoomAdjustedOffset = Math.max(
+    18,
+    Math.min(400, exploreCameraBaseOffsetMeters * (2 ** (18 - safeZoom))),
+  );
+  return position === 'behind' ? -zoomAdjustedOffset : zoomAdjustedOffset;
 }
 
 export function decodeGooglePolyline(encodedPolyline: string): TrackPoint[] {

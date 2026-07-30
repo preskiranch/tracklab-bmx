@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps';
 import {
+  exploreCameraOffsetMeters,
   exploreRoutePoint,
   exploreRoutePoints,
   smoothExploreCameraPoint,
+  type ExploreCameraFollowPosition,
   type ExploreViewportGroup,
 } from '../lib/explore';
 import type {
@@ -20,6 +22,7 @@ type ExploreMapPanelProps = {
   route: ExploreRouteModel;
   distanceUnit: 'ft' | 'm';
   followZoom: number;
+  cameraFollowPosition: ExploreCameraFollowPosition;
   showMapLabels: boolean;
 };
 
@@ -41,6 +44,7 @@ export function ExploreMapPanel({
   route,
   distanceUnit,
   followZoom,
+  cameraFollowPosition,
   showMapLabels,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -217,13 +221,22 @@ export function ExploreMapPanel({
     if (positions.length === 0) {
       return;
     }
-    const center = positions.reduce(
+    const riderCenter = positions.reduce(
       (sum, { position }) => ({
         lat: sum.lat + position.lat / positions.length,
         lng: sum.lng + position.lng / positions.length,
       }),
       { lat: 0, lng: 0 },
     );
+    const averageDistanceMeters = positions.reduce(
+      (sum, { rider }) => sum + rider.distanceMeters / positions.length,
+      0,
+    );
+    const center = exploreRoutePoint(
+      routePoints,
+      averageDistanceMeters + exploreCameraOffsetMeters(cameraFollowPosition, followZoom),
+      route.distanceMeters,
+    ) ?? riderCenter;
     cameraTargetRef.current = center;
     if (!cameraCenterRef.current) {
       cameraCenterRef.current = center;
@@ -238,7 +251,7 @@ export function ExploreMapPanel({
     if (zoomChanged) {
       lastFollowZoomRef.current = followZoom;
     }
-  }, [followZoom, group, route, routePoints, status]);
+  }, [cameraFollowPosition, followZoom, group, route, routePoints, status]);
 
   useEffect(() => {
     if (status !== 'ready') {

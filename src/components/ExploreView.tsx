@@ -6,6 +6,7 @@ import {
   LocateFixed,
   MapPinned,
   Minimize2,
+  Navigation2,
   Pause,
   Play,
   Radio,
@@ -23,7 +24,12 @@ import {
   useState,
 } from 'react';
 import { primeBikeRaceAudio, stopBikeRaceAudio, updateExploreBikeAudio } from '../lib/bikeRaceAudio';
-import { groupExploreRiders, exploreGridClass, exploreRemoteStateFreshMs } from '../lib/explore';
+import {
+  groupExploreRiders,
+  exploreGridClass,
+  exploreRemoteStateFreshMs,
+  type ExploreCameraFollowPosition,
+} from '../lib/explore';
 import { fetchExploreRoute } from '../lib/exploreRoutes';
 import {
   fetchLocationPredictions,
@@ -93,6 +99,21 @@ function profileInitials(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('') || '?';
+}
+
+const exploreCameraFollowLabels: Record<ExploreCameraFollowPosition, string> = {
+  behind: 'Behind',
+  center: 'Centered',
+  ahead: 'Ahead',
+};
+
+function nextExploreCameraFollowPosition(
+  position: ExploreCameraFollowPosition,
+): ExploreCameraFollowPosition {
+  if (position === 'center') {
+    return 'ahead';
+  }
+  return position === 'ahead' ? 'behind' : 'center';
 }
 
 function exploreAutocompleteError(error: unknown) {
@@ -183,6 +204,7 @@ export function ExploreView({
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const [travelMode, setTravelMode] = useState<ExploreTravelMode>('bicycle');
   const [followZoom, setFollowZoom] = useState(18);
+  const [cameraFollowPosition, setCameraFollowPosition] = useState<ExploreCameraFollowPosition>('center');
   const [showMapLabels, setShowMapLabels] = useState(false);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
@@ -680,6 +702,27 @@ export function ExploreView({
                   <ZoomIn size={18} />
                 </button>
                 <button
+                  className={`explore-camera-position-toggle ${cameraFollowPosition}${cameraFollowPosition === 'center'
+                    ? ''
+                    : ' explore-map-labels-toggle active'}`}
+                  type="button"
+                  aria-label={`Camera follow position: ${exploreCameraFollowLabels[cameraFollowPosition].toLowerCase()}`}
+                  title={`Camera focus: ${exploreCameraFollowLabels[cameraFollowPosition]}. Select to change.`}
+                  onClick={() => setCameraFollowPosition((position) => (
+                    nextExploreCameraFollowPosition(position)
+                  ))}
+                >
+                  {cameraFollowPosition === 'center'
+                    ? <LocateFixed size={18} />
+                    : (
+                      <Navigation2
+                        className={cameraFollowPosition}
+                        size={18}
+                      />
+                    )}
+                  <span>{exploreCameraFollowLabels[cameraFollowPosition]}</span>
+                </button>
+                <button
                   className={`explore-map-labels-toggle${showMapLabels ? ' active' : ''}`}
                   type="button"
                   aria-label={showMapLabels
@@ -719,6 +762,7 @@ export function ExploreView({
                     route={route}
                     distanceUnit={distanceUnit}
                     followZoom={followZoom}
+                    cameraFollowPosition={cameraFollowPosition}
                     showMapLabels={showMapLabels}
                     key={group.id}
                   />

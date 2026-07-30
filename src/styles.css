@@ -8194,6 +8194,10 @@ input:focus {
   color: #18310c;
 }
 
+.explore-camera-position-toggle svg.behind {
+  transform: rotate(180deg);
+}
+
 .explore-camera-toolbar label {
   display: grid;
   grid-template-columns: auto minmax(110px, 180px) auto;
@@ -8719,12 +8723,26 @@ input:focus {
 }
 
 @media (max-width: 600px) {
+  .explore-camera-toolbar label {
+    flex: 1;
+    grid-template-columns: minmax(64px, 1fr);
+    min-width: 0;
+    padding-inline: 7px;
+  }
+
+  .explore-camera-toolbar label span,
+  .explore-camera-toolbar label small {
+    display: none;
+  }
+
+  .explore-camera-toolbar .explore-camera-position-toggle,
   .explore-camera-toolbar .explore-map-labels-toggle,
   .explore-camera-toolbar .explore-exit-fullscreen {
     width: 38px;
     padding-inline: 0;
   }
 
+  .explore-camera-toolbar .explore-camera-position-toggle span,
   .explore-camera-toolbar .explore-map-labels-toggle span,
   .explore-camera-toolbar .explore-exit-fullscreen span {
     display: none;
