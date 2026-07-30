@@ -499,13 +499,81 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
         }], 'OK');
       }
     }
+    class MockPlace {
+      displayName = 'Lagoon Valley Park';
+      formattedAddress = '1 Pena Adobe Road, Vacaville, CA 95688';
+      googleMapsURI = 'https://www.google.com/maps/place/Lagoon+Valley+Park';
+      nationalPhoneNumber = '(707) 449-5658';
+      primaryTypeDisplayName = 'Park';
+      rating = 4.7;
+      userRatingCount = 1_284;
+      websiteURI = 'https://www.ci.vacaville.ca.us/government/parks-and-recreation';
+
+      constructor(_options: { id: string }) {}
+
+      async fetchFields(_request: { fields: string[] }) {}
+    }
+    type MockMapClickHandler = (event: {
+      placeId?: string;
+      stop?: () => void;
+    }) => void;
+    class MockMap {
+      private heading = 0;
+      private zoom = 18;
+
+      constructor(_element: HTMLElement, options: { zoom?: number }) {
+        this.zoom = options.zoom ?? 18;
+      }
+
+      addListener(eventName: string, handler: MockMapClickHandler) {
+        const testWindow = window as typeof window & {
+          __tracklabExploreMapClickHandlers?: MockMapClickHandler[];
+        };
+        if (eventName === 'click') {
+          testWindow.__tracklabExploreMapClickHandlers ??= [];
+          testWindow.__tracklabExploreMapClickHandlers.push(handler);
+        }
+        return {
+          remove: () => {
+            testWindow.__tracklabExploreMapClickHandlers = (
+              testWindow.__tracklabExploreMapClickHandlers ?? []
+            ).filter((candidate) => candidate !== handler);
+          },
+        };
+      }
+
+      fitBounds() {}
+      getHeading() { return this.heading; }
+      getZoom() { return this.zoom; }
+      moveCamera() {}
+      setHeading(heading: number) { this.heading = heading; }
+      setOptions() {}
+      setTilt() {}
+      setZoom(zoom: number) { this.zoom = zoom; }
+    }
+    class MockMarker {
+      setMap() {}
+      setPosition() {}
+      setTitle() {}
+    }
+    class MockPolyline {
+      setMap() {}
+    }
+    class MockLatLngBounds {
+      extend() {}
+    }
     const places = {
       AutocompleteSessionToken: MockAutocompleteSessionToken,
       AutocompleteService: MockAutocompleteService,
+      Place: MockPlace,
     };
     (window as typeof window & { google?: unknown }).google = {
       maps: {
-        Map: class {},
+        LatLngBounds: MockLatLngBounds,
+        Map: MockMap,
+        Marker: MockMarker,
+        Polyline: MockPolyline,
+        SymbolPath: { CIRCLE: 'circle' },
         places,
         importLibrary: async (name: string) => (name === 'places' ? places : {}),
       },
@@ -523,13 +591,6 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(destinationSuggestion).toBeVisible();
   await destinationSuggestion.click();
   await expect(destinationInput).toHaveValue(/Oracle Park/);
-  await page.evaluate(() => {
-    delete (window as typeof window & {
-      google?: unknown;
-      __trackLabGoogleMapsPromise?: unknown;
-      __trackLabGoogleMapsBootstrapPromise?: unknown;
-    }).google;
-  });
   await originInput.fill('38.5, -120.2');
   await destinationInput.fill('43.252, -126.453');
   await page.getByRole('button', { name: 'Build Explore route' }).click();
@@ -569,6 +630,44 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByRole('button', { name: 'Hide street names and landmarks' }))
     .toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Labeled satellite', { exact: true })).toHaveText('Labeled satellite');
+  await expect(page.getByText(/Landmarks are interactive/i)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabExploreMapClickHandlers?: unknown[];
+    }).__tracklabExploreMapClickHandlers?.length ?? 0
+  ))).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __tracklabExploreMapClickHandlers?: Array<(event: {
+        placeId: string;
+        stop: () => void;
+      }) => void>;
+      __tracklabLandmarkClickStopped?: boolean;
+    };
+    testWindow.__tracklabExploreMapClickHandlers?.[0]?.({
+      placeId: 'lagoon-valley-park',
+      stop: () => {
+        testWindow.__tracklabLandmarkClickStopped = true;
+      },
+    });
+  });
+  const landmarkDialog = page.getByRole('dialog', { name: 'Landmark information' });
+  await expect(landmarkDialog).toBeVisible();
+  await expect(landmarkDialog.getByRole('heading', { name: 'Lagoon Valley Park' })).toBeVisible();
+  await expect(landmarkDialog).toContainText('1 Pena Adobe Road');
+  await expect(landmarkDialog).toContainText('4.7');
+  await expect(landmarkDialog.getByRole('link', { name: /Open in Google Maps/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
+  expect(await page.evaluate(() => (
+    (window as typeof window & { __tracklabLandmarkClickStopped?: boolean })
+      .__tracklabLandmarkClickStopped
+  ))).toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('explore-landmark-live.png'),
+  });
+  await landmarkDialog.getByRole('button', { name: 'Close landmark information' }).click();
+  await expect(landmarkDialog).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Street View|360 camera rotation/i })).toHaveCount(0);
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await page.getByRole('button', { name: 'Show more of the route' }).click();

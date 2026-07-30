@@ -27,6 +27,7 @@ type ExploreMapPanelProps = {
   cameraFollowPosition: ExploreCameraFollowPosition;
   showMapLabels: boolean;
   followTravelHeading: boolean;
+  onLandmarkSelect: (placeId: string) => void;
 };
 
 type ExploreMarkerRefs = Map<string, GoogleMarker>;
@@ -50,6 +51,7 @@ export function ExploreMapPanel({
   cameraFollowPosition,
   showMapLabels,
   followTravelHeading,
+  onLandmarkSelect,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
@@ -170,11 +172,26 @@ export function ExploreMapPanel({
     if (status !== 'ready') {
       return;
     }
-    mapRef.current?.setOptions({
-      clickableIcons: false,
+    const map = mapRef.current;
+    map?.setOptions({
+      clickableIcons: showMapLabels,
       mapTypeId: showMapLabels ? 'hybrid' : 'satellite',
     });
-  }, [showMapLabels, status]);
+    if (!map || !showMapLabels) {
+      return undefined;
+    }
+
+    const landmarkListener = map.addListener('click', (event) => {
+      const placeId = event?.placeId?.trim();
+      if (!placeId) {
+        return;
+      }
+      event?.stop?.();
+      onLandmarkSelect(placeId);
+    });
+
+    return () => landmarkListener.remove();
+  }, [onLandmarkSelect, showMapLabels, status]);
 
   useEffect(() => {
     const google = googleRef.current;

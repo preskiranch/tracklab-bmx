@@ -35,6 +35,8 @@ type GoogleMapClickEvent = {
   latLng?: {
     toJSON: () => LatLngLiteral;
   };
+  placeId?: string;
+  stop?: () => void;
 };
 
 type GoogleMapsEventListener = {
@@ -100,9 +102,15 @@ type GooglePlaceTextValue = string | {
 type GooglePlace = {
   displayName?: string;
   formattedAddress?: string;
+  googleMapsURI?: string;
   location?: {
     toJSON: () => LatLngLiteral;
   };
+  nationalPhoneNumber?: string;
+  primaryTypeDisplayName?: string;
+  rating?: number;
+  userRatingCount?: number;
+  websiteURI?: string;
   fetchFields: (request: { fields: string[] }) => Promise<void>;
 };
 
@@ -138,7 +146,18 @@ type GoogleLegacyAutocompleteService = {
 
 type GoogleLegacyPlaceResult = {
   formatted_address?: string;
+  formatted_phone_number?: string;
   name?: string;
+  opening_hours?: {
+    isOpen?: () => boolean;
+    open_now?: boolean;
+    weekday_text?: string[];
+  };
+  rating?: number;
+  types?: string[];
+  url?: string;
+  user_ratings_total?: number;
+  website?: string;
   geometry?: {
     location?: {
       toJSON: () => LatLngLiteral;
@@ -166,6 +185,7 @@ type GooglePlacesLibrary = {
     }) => Promise<{ suggestions?: GoogleAutocompleteSuggestion[] }>;
   };
   AutocompleteService?: new () => GoogleLegacyAutocompleteService;
+  Place?: new (options: { id: string }) => GooglePlace;
   PlacesService?: new (element: HTMLElement) => GoogleLegacyPlacesService;
 };
 
@@ -261,6 +281,19 @@ export type PlacePredictionOption = {
       source: 'legacy';
     }
 );
+
+export type GoogleLandmarkDetails = {
+  address: string;
+  category: string;
+  googleMapsUrl: string;
+  name: string;
+  openNow?: boolean;
+  phoneNumber: string;
+  placeId: string;
+  rating?: number;
+  userRatingCount?: number;
+  websiteUrl: string;
+};
 
 declare global {
   interface Window {
@@ -545,6 +578,7 @@ async function getPlacesLibrary(google: GoogleMapsRuntime): Promise<GooglePlaces
     places.AutocompleteSessionToken = places.AutocompleteSessionToken ?? imported.AutocompleteSessionToken;
     places.AutocompleteSuggestion = places.AutocompleteSuggestion ?? imported.AutocompleteSuggestion;
     places.AutocompleteService = places.AutocompleteService ?? imported.AutocompleteService;
+    places.Place = places.Place ?? imported.Place;
     places.PlacesService = places.PlacesService ?? imported.PlacesService;
   }
 
@@ -712,6 +746,7 @@ function getLegacyPlacesService(places: GooglePlacesLibrary) {
 function getLegacyPlaceDetails(
   service: GoogleLegacyPlacesService,
   placeId: string,
+  fields: string[] = ['formatted_address', 'geometry', 'name'],
 ): Promise<GoogleLegacyPlaceResult> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -724,7 +759,7 @@ function getLegacyPlaceDetails(
 
     const request = {
       placeId,
-      fields: ['formatted_address', 'geometry', 'name'],
+      fields,
       sessionToken: placeAutocompleteSessionToken ?? undefined,
     };
     const response = service.getDetails(request, (place, status) => {
@@ -749,6 +784,102 @@ function getLegacyPlaceDetails(
         .catch((error: unknown) => settle(() => reject(error)));
     }
   });
+}
+
+function readableGooglePlaceType(value: string | undefined) {
+  if (!value) {
+    return '';
+  }
+
+  return value
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function googleMapsPlaceUrl(placeId: string, name: string) {
+  const query = encodeURIComponent(name || placeId);
+  const encodedPlaceId = encodeURIComponent(placeId);
+  return `https://www.google.com/maps/search/?api=1&query=${query}&query_place_id=${encodedPlaceId}`;
+}
+
+export async function fetchGoogleLandmarkDetails(placeId: string): Promise<GoogleLandmarkDetails> {
+  const trimmedPlaceId = placeId.trim();
+  if (!trimmedPlaceId) {
+    throw new Error('That landmark does not include a Google place ID.');
+  }
+
+  const google = await loadGoogleMaps();
+  const places = await getPlacesLibrary(google);
+  let modernError: unknown = null;
+
+  if (places.Place) {
+    try {
+      const place = new places.Place({ id: trimmedPlaceId });
+      await place.fetchFields({
+        fields: [
+          'displayName',
+          'formattedAddress',
+          'googleMapsURI',
+          'nationalPhoneNumber',
+          'primaryTypeDisplayName',
+          'rating',
+          'userRatingCount',
+          'websiteURI',
+        ],
+      });
+      const name = place.displayName?.trim() || 'Selected landmark';
+      return {
+        address: place.formattedAddress?.trim() ?? '',
+        category: place.primaryTypeDisplayName?.trim() ?? '',
+        googleMapsUrl: place.googleMapsURI?.trim() || googleMapsPlaceUrl(trimmedPlaceId, name),
+        name,
+        phoneNumber: place.nationalPhoneNumber?.trim() ?? '',
+        placeId: trimmedPlaceId,
+        rating: place.rating,
+        userRatingCount: place.userRatingCount,
+        websiteUrl: place.websiteURI?.trim() ?? '',
+      };
+    } catch (error) {
+      modernError = error;
+    }
+  }
+
+  try {
+    const service = getLegacyPlacesService(places);
+    const place = await getLegacyPlaceDetails(service, trimmedPlaceId, [
+      'formatted_address',
+      'formatted_phone_number',
+      'name',
+      'opening_hours',
+      'rating',
+      'types',
+      'url',
+      'user_ratings_total',
+      'website',
+    ]);
+    const name = place.name?.trim() || 'Selected landmark';
+    const openNow = place.opening_hours?.isOpen?.() ?? place.opening_hours?.open_now;
+    return {
+      address: place.formatted_address?.trim() ?? '',
+      category: readableGooglePlaceType(place.types?.[0]),
+      googleMapsUrl: place.url?.trim() || googleMapsPlaceUrl(trimmedPlaceId, name),
+      name,
+      openNow,
+      phoneNumber: place.formatted_phone_number?.trim() ?? '',
+      placeId: trimmedPlaceId,
+      rating: place.rating,
+      userRatingCount: place.user_ratings_total,
+      websiteUrl: place.website?.trim() ?? '',
+    };
+  } catch (legacyError) {
+    if (modernError instanceof Error) {
+      throw modernError;
+    }
+    if (legacyError instanceof Error) {
+      throw legacyError;
+    }
+    throw new Error('Google could not load details for that landmark.');
+  }
 }
 
 export async function resolvePlacePrediction(

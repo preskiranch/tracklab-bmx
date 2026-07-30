@@ -12,8 +12,8 @@ function budgetFromEnvironment(name, fallback) {
 const budgets = {
   javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 600_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
-  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 126_000),
-  cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 19_000),
+  cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 131_000),
+  cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 19_500),
   initialBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_INITIAL_BR_BYTES', 195_000),
 };
 

@@ -3,6 +3,7 @@ import {
   Bike,
   Car,
   Compass,
+  ExternalLink,
   Flag,
   Landmark,
   LocateFixed,
@@ -15,12 +16,15 @@ import {
   Radio,
   RotateCcw,
   Share2,
+  Star,
   Users,
+  X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 import {
   type CSSProperties,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -35,10 +39,12 @@ import {
 } from '../lib/explore';
 import { fetchExploreRoute } from '../lib/exploreRoutes';
 import {
+  fetchGoogleLandmarkDetails,
   fetchLocationPredictions,
   resetPlaceAutocompleteSession,
   resolveLocationText,
   resolvePlacePrediction,
+  type GoogleLandmarkDetails,
   type PlacePredictionOption,
 } from '../lib/googleMaps';
 import { useExploreRide } from '../hooks/useExploreRide';
@@ -86,6 +92,13 @@ type ExploreOrigin = {
   label: string;
 };
 
+type ExploreLandmarkPopup = {
+  details: GoogleLandmarkDetails | null;
+  error: string;
+  placeId: string;
+  status: 'loading' | 'ready' | 'error';
+};
+
 function formatDuration(seconds: number) {
   const roundedMinutes = Math.max(1, Math.round(seconds / 60));
   if (roundedMinutes < 60) {
@@ -103,6 +116,15 @@ function profileInitials(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('') || '?';
+}
+
+function safeExternalHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
 }
 
 const exploreCameraFollowLabels: Record<ExploreCameraFollowPosition, string> = {
@@ -216,7 +238,9 @@ export function ExploreView({
   const [followTravelHeading, setFollowTravelHeading] = useState(false);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
+  const [selectedLandmark, setSelectedLandmark] = useState<ExploreLandmarkPopup | null>(null);
   const appliedRoomSessionRef = useRef<string | null>(null);
+  const landmarkRequestRef = useRef(0);
   const scheduledStartTimerRef = useRef<number | null>(null);
   const destinationInputRef = useRef<HTMLInputElement | null>(null);
   const latestRidersRef = useRef<ReturnType<typeof useExploreRide>['riders']>([]);
@@ -270,6 +294,55 @@ export function ExploreView({
     selectedDestinationPrediction,
     canChooseRoute,
   );
+
+  const closeLandmark = useCallback(() => {
+    landmarkRequestRef.current += 1;
+    setSelectedLandmark(null);
+  }, []);
+
+  const selectLandmark = useCallback((placeId: string) => {
+    const requestId = landmarkRequestRef.current + 1;
+    landmarkRequestRef.current = requestId;
+    setSelectedLandmark({
+      details: null,
+      error: '',
+      placeId,
+      status: 'loading',
+    });
+    void fetchGoogleLandmarkDetails(placeId)
+      .then((details) => {
+        if (landmarkRequestRef.current !== requestId) {
+          return;
+        }
+        setSelectedLandmark({
+          details,
+          error: '',
+          placeId,
+          status: 'ready',
+        });
+      })
+      .catch((error: unknown) => {
+        if (landmarkRequestRef.current !== requestId) {
+          return;
+        }
+        setSelectedLandmark({
+          details: null,
+          error: error instanceof Error ? error.message : 'Google could not load that landmark.',
+          placeId,
+          status: 'error',
+        });
+      });
+  }, []);
+
+  useEffect(() => {
+    closeLandmark();
+  }, [closeLandmark, route?.id]);
+
+  useEffect(() => {
+    if (!showMapLabels) {
+      closeLandmark();
+    }
+  }, [closeLandmark, showMapLabels]);
 
   useEffect(() => {
     updateExploreBikeAudio(ride.status, ride.riders);
@@ -865,6 +938,13 @@ export function ExploreView({
                 )}
               </div>
 
+              {showMapLabels && !selectedLandmark && (
+                <div className="explore-landmark-hint" role="status">
+                  <Landmark size={16} />
+                  <span><strong>Landmarks are interactive.</strong> Tap an icon for details—the ride keeps moving.</span>
+                </div>
+              )}
+
               <div className={exploreGridClass(groups.length)}>
                 {(groups.length > 0 ? groups : [{
                   id: 'route-preview',
@@ -880,10 +960,91 @@ export function ExploreView({
                     cameraFollowPosition={cameraFollowPosition}
                     showMapLabels={showMapLabels}
                     followTravelHeading={followTravelHeading}
+                    onLandmarkSelect={selectLandmark}
                     key={group.id}
                   />
                 ))}
               </div>
+
+              {selectedLandmark && (
+                <div className="explore-landmark-dialog-layer">
+                  <section
+                    className="explore-landmark-dialog"
+                    role="dialog"
+                    aria-label="Landmark information"
+                    aria-modal="false"
+                  >
+                    <header>
+                      <span><Landmark size={19} /> Google landmark</span>
+                      <button type="button" aria-label="Close landmark information" onClick={closeLandmark}>
+                        <X size={20} />
+                      </button>
+                    </header>
+                    {selectedLandmark.status === 'loading' && (
+                      <div className="explore-landmark-loading" aria-live="polite">
+                        <span className="explore-landmark-spinner" aria-hidden="true" />
+                        <strong>Loading place information…</strong>
+                      </div>
+                    )}
+                    {selectedLandmark.status === 'error' && (
+                      <div className="explore-landmark-error" role="alert">
+                        <strong>Place details unavailable</strong>
+                        <p>{selectedLandmark.error}</p>
+                        <button type="button" onClick={() => selectLandmark(selectedLandmark.placeId)}>
+                          Try again
+                        </button>
+                      </div>
+                    )}
+                    {selectedLandmark.status === 'ready' && selectedLandmark.details && (
+                      <div className="explore-landmark-details">
+                        <div className="explore-landmark-title">
+                          <span>{selectedLandmark.details.category || 'Point of interest'}</span>
+                          <h3>{selectedLandmark.details.name}</h3>
+                          {selectedLandmark.details.address && <p>{selectedLandmark.details.address}</p>}
+                        </div>
+                        <div className="explore-landmark-facts">
+                          {typeof selectedLandmark.details.rating === 'number' && (
+                            <span>
+                              <Star size={16} fill="currentColor" />
+                              <strong>{selectedLandmark.details.rating.toFixed(1)}</strong>
+                              {typeof selectedLandmark.details.userRatingCount === 'number'
+                                ? ` (${selectedLandmark.details.userRatingCount.toLocaleString()} reviews)`
+                                : ''}
+                            </span>
+                          )}
+                          {typeof selectedLandmark.details.openNow === 'boolean' && (
+                            <span className={selectedLandmark.details.openNow ? 'open' : 'closed'}>
+                              {selectedLandmark.details.openNow ? 'Open now' : 'Closed now'}
+                            </span>
+                          )}
+                          {selectedLandmark.details.phoneNumber && (
+                            <span>{selectedLandmark.details.phoneNumber}</span>
+                          )}
+                        </div>
+                        <div className="explore-landmark-actions">
+                          {safeExternalHttpUrl(selectedLandmark.details.websiteUrl) && (
+                            <a
+                              href={safeExternalHttpUrl(selectedLandmark.details.websiteUrl)}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Visit website <ExternalLink size={15} />
+                            </a>
+                          )}
+                          <a
+                            href={safeExternalHttpUrl(selectedLandmark.details.googleMapsUrl)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open in Google Maps <ExternalLink size={15} />
+                          </a>
+                        </div>
+                        <small>Place details provided by Google. Your Explore ride continues while this card is open.</small>
+                      </div>
+                    )}
+                  </section>
+                </div>
+              )}
 
               <section className="explore-rider-strip" aria-label="Explore riders">
                 {visibleRiders.length > 0 ? visibleRiders.map((rider) => (
