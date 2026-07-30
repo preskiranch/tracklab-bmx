@@ -8675,12 +8675,21 @@ input:focus {
 .explore-fullscreen .explore-camera-toolbar {
   top: 12px;
   right: 12px;
+  left: 270px;
   padding: 5px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 10px;
   background: rgba(7, 13, 21, 0.88);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(8px);
+}
+
+.explore-fullscreen .explore-camera-toolbar label {
+  grid-template-columns: minmax(110px, 160px) auto;
+}
+
+.explore-fullscreen .explore-camera-toolbar label span {
+  display: none;
 }
 
 .explore-fullscreen .explore-camera-toolbar button,

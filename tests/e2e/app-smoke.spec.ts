@@ -521,6 +521,11 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(aheadCamera).toBeVisible();
   await aheadCamera.click();
   await expect(page.getByRole('button', { name: 'Camera follow position: behind' })).toBeVisible();
+  const directionUp = page.getByRole('button', { name: 'Follow direction of travel' });
+  await expect(directionUp).toHaveAttribute('aria-pressed', 'false');
+  await directionUp.click();
+  await expect(page.getByRole('button', { name: 'Keep map north up' }))
+    .toHaveAttribute('aria-pressed', 'true');
   const mapLabels = page.getByRole('button', { name: 'Show street names and landmarks' });
   await expect(mapLabels).toHaveAttribute('aria-pressed', 'false');
   await mapLabels.click();
@@ -529,6 +534,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByText('Labeled satellite', { exact: true })).toHaveText('Labeled satellite');
   const orbitCamera = page.getByRole('button', { name: 'Start 360 camera rotation' });
   await orbitCamera.click();
+  await expect(page.getByRole('button', { name: 'Follow direction of travel' }))
+    .toHaveAttribute('aria-pressed', 'false');
   const orbitSpeed = page.getByLabel('Camera rotation speed');
   await expect(orbitSpeed).toHaveValue('12');
   await orbitSpeed.fill('20');

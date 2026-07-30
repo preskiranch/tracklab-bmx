@@ -4,6 +4,7 @@ import type { ExploreRider, ExploreRoute, TrackPoint } from '../types';
 export const exploreRiderGroupingGapMeters = 70;
 export const exploreRemoteStateFreshMs = 8_000;
 const exploreCameraEaseMs = 180;
+const exploreHeadingEaseMs = 240;
 const exploreCameraBaseOffsetMeters = 60;
 
 export type ExploreCameraFollowPosition = 'behind' | 'center' | 'ahead';
@@ -26,6 +27,19 @@ export function smoothExploreCameraPoint(
     lat: current.lat + (target.lat - current.lat) * progress,
     lng: current.lng + (target.lng - current.lng) * progress,
   };
+}
+
+export function smoothExploreHeading(
+  currentHeading: number,
+  targetHeading: number,
+  elapsedMs: number,
+) {
+  const current = ((currentHeading % 360) + 360) % 360;
+  const target = ((targetHeading % 360) + 360) % 360;
+  const shortestTurn = ((target - current + 540) % 360) - 180;
+  const safeElapsedMs = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0;
+  const progress = 1 - Math.exp(-safeElapsedMs / exploreHeadingEaseMs);
+  return (current + shortestTurn * progress + 360) % 360;
 }
 
 export function exploreCameraOffsetMeters(

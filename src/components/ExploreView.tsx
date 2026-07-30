@@ -1,6 +1,7 @@
 import {
   Bike,
   Car,
+  Compass,
   Eye,
   Flag,
   Landmark,
@@ -217,6 +218,7 @@ export function ExploreView({
   const [viewMode, setViewMode] = useState<ExploreViewMode>('satellite');
   const [orbitEnabled, setOrbitEnabled] = useState(false);
   const [orbitSpeedDps, setOrbitSpeedDps] = useState(12);
+  const [followTravelHeading, setFollowTravelHeading] = useState(false);
   const [streetViewCountdown, setStreetViewCountdown] = useState<number | null>(null);
   const [streetViewReadiness, setStreetViewReadiness] = useState<ExploreStreetViewReadiness | null>(null);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
@@ -820,6 +822,25 @@ export function ExploreView({
                     )}
                   <span>{exploreCameraFollowLabels[cameraFollowPosition]}</span>
                 </button>
+                <button
+                  className={`explore-map-labels-toggle explore-direction-toggle${followTravelHeading ? ' active' : ''}`}
+                  type="button"
+                  aria-label={followTravelHeading ? 'Keep map north up' : 'Follow direction of travel'}
+                  aria-pressed={followTravelHeading}
+                  title={followTravelHeading
+                    ? 'Return the map to north-up'
+                    : 'Rotate the map so the direction of travel stays at the top'}
+                  onClick={() => setFollowTravelHeading((enabled) => {
+                    const nextEnabled = !enabled;
+                    if (nextEnabled) {
+                      setOrbitEnabled(false);
+                    }
+                    return nextEnabled;
+                  })}
+                >
+                  <Compass size={18} />
+                  <span>{followTravelHeading ? 'Direction up' : 'North up'}</span>
+                </button>
                 {viewMode === 'satellite' && (
                   <button
                     className={`explore-map-labels-toggle${showMapLabels ? ' active' : ''}`}
@@ -855,7 +876,13 @@ export function ExploreView({
                   aria-label={orbitEnabled ? 'Stop 360 camera rotation' : 'Start 360 camera rotation'}
                   aria-pressed={orbitEnabled}
                   title={orbitEnabled ? 'Stop rotating the camera' : 'Rotate the camera continuously through 360 degrees'}
-                  onClick={() => setOrbitEnabled((enabled) => !enabled)}
+                  onClick={() => setOrbitEnabled((enabled) => {
+                    const nextEnabled = !enabled;
+                    if (nextEnabled) {
+                      setFollowTravelHeading(false);
+                    }
+                    return nextEnabled;
+                  })}
                 >
                   <RotateCw size={18} />
                   <span>360°</span>
@@ -920,6 +947,7 @@ export function ExploreView({
                     viewMode={viewMode}
                     orbitEnabled={orbitEnabled}
                     orbitSpeedDps={orbitSpeedDps}
+                    followTravelHeading={followTravelHeading}
                     key={group.id}
                   />
                 ))}

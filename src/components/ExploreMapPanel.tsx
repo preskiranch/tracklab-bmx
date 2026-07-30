@@ -6,6 +6,7 @@ import {
   exploreRoutePoint,
   exploreRoutePoints,
   smoothExploreCameraPoint,
+  smoothExploreHeading,
   type ExploreCameraFollowPosition,
   type ExploreViewportGroup,
 } from '../lib/explore';
@@ -29,6 +30,7 @@ type ExploreMapPanelProps = {
   viewMode: ExploreViewMode;
   orbitEnabled: boolean;
   orbitSpeedDps: number;
+  followTravelHeading: boolean;
 };
 
 type ExploreMarkerRefs = Map<string, GoogleMarker>;
@@ -54,6 +56,7 @@ export function ExploreMapPanel({
   viewMode,
   orbitEnabled,
   orbitSpeedDps,
+  followTravelHeading,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const streetContainerRef = useRef<HTMLDivElement | null>(null);
@@ -212,7 +215,9 @@ export function ExploreMapPanel({
             panControl: false,
             position: routePoints[0],
             pov: {
-              heading: exploreRouteHeading(routePoints, 0, route.distanceMeters),
+              heading: followTravelHeading
+                ? exploreRouteHeading(routePoints, 0, route.distanceMeters)
+                : 0,
               pitch: 0,
             },
             showRoadLabels: true,
@@ -237,7 +242,7 @@ export function ExploreMapPanel({
     return () => {
       cancelled = true;
     };
-  }, [route.distanceMeters, route.id, routePoints, status, viewMode]);
+  }, [followTravelHeading, route.distanceMeters, route.id, routePoints, status, viewMode]);
 
   useEffect(() => {
     if (status !== 'ready') {
@@ -316,9 +321,7 @@ export function ExploreMapPanel({
       route.distanceMeters,
     ) ?? riderCenter;
     const routeHeading = exploreRouteHeading(routePoints, averageDistanceMeters, route.distanceMeters);
-    streetRouteHeadingRef.current = (
-      routeHeading + (cameraFollowPosition === 'behind' ? 180 : 0)
-    ) % 360;
+    streetRouteHeadingRef.current = routeHeading;
     const panorama = streetViewRef.current;
     const now = window.performance.now();
     const lastStreetDistance = lastStreetDistanceRef.current;
@@ -333,7 +336,10 @@ export function ExploreMapPanel({
     ) {
       panorama.setPosition(streetPosition);
       if (!orbitEnabled) {
-        panorama.setPov({ heading: streetRouteHeadingRef.current, pitch: 0 });
+        panorama.setPov({
+          heading: followTravelHeading ? streetRouteHeadingRef.current : 0,
+          pitch: 0,
+        });
       }
       lastStreetDistanceRef.current = averageDistanceMeters;
       lastStreetUpdateAtRef.current = now;
@@ -357,7 +363,17 @@ export function ExploreMapPanel({
     if (zoomChanged) {
       lastFollowZoomRef.current = followZoom;
     }
-  }, [cameraFollowPosition, followZoom, group, orbitEnabled, route, routePoints, status, viewMode]);
+  }, [
+    cameraFollowPosition,
+    followTravelHeading,
+    followZoom,
+    group,
+    orbitEnabled,
+    route,
+    routePoints,
+    status,
+    viewMode,
+  ]);
 
   useEffect(() => {
     if (status !== 'ready') {
@@ -400,14 +416,6 @@ export function ExploreMapPanel({
       return;
     }
 
-    if (!orbitEnabled) {
-      map.setHeading(0);
-      if (viewMode === 'street' && streetViewRef.current) {
-        streetViewRef.current.setPov({ heading: streetRouteHeadingRef.current, pitch: 0 });
-      }
-      return;
-    }
-
     let frameRequest = 0;
     let previousAt = window.performance.now();
     let lastCameraUpdateAt = 0;
@@ -416,15 +424,28 @@ export function ExploreMapPanel({
         const elapsedSeconds = Math.min(0.25, Math.max(0, now - previousAt) / 1_000);
         if (viewMode === 'street' && streetViewRef.current && streetStatus === 'ready') {
           const current = streetViewRef.current.getPov?.() ?? {
-            heading: streetRouteHeadingRef.current,
+            heading: followTravelHeading ? streetRouteHeadingRef.current : 0,
             pitch: 0,
           };
           streetViewRef.current.setPov({
-            heading: (current.heading + orbitSpeedDps * elapsedSeconds) % 360,
+            heading: orbitEnabled
+              ? (current.heading + orbitSpeedDps * elapsedSeconds) % 360
+              : smoothExploreHeading(
+                current.heading,
+                followTravelHeading ? streetRouteHeadingRef.current : 0,
+                elapsedSeconds * 1_000,
+              ),
             pitch: current.pitch,
           });
         } else {
-          map.setHeading(((map.getHeading?.() ?? 0) + orbitSpeedDps * elapsedSeconds) % 360);
+          const current = map.getHeading?.() ?? 0;
+          map.setHeading(orbitEnabled
+            ? (current + orbitSpeedDps * elapsedSeconds) % 360
+            : smoothExploreHeading(
+              current,
+              followTravelHeading ? streetRouteHeadingRef.current : 0,
+              elapsedSeconds * 1_000,
+            ));
         }
         previousAt = now;
         lastCameraUpdateAt = now;
@@ -434,7 +455,7 @@ export function ExploreMapPanel({
 
     frameRequest = window.requestAnimationFrame(rotateCamera);
     return () => window.cancelAnimationFrame(frameRequest);
-  }, [orbitEnabled, orbitSpeedDps, status, streetStatus, viewMode]);
+  }, [followTravelHeading, orbitEnabled, orbitSpeedDps, status, streetStatus, viewMode]);
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
 

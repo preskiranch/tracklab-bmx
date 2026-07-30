@@ -6,6 +6,7 @@ import {
   exploreRoutePoint,
   groupExploreRiders,
   smoothExploreCameraPoint,
+  smoothExploreHeading,
 } from '../../src/lib/explore';
 import { exploreBikeAudioMode } from '../../src/lib/bikeRaceAudio';
 import {
@@ -111,6 +112,13 @@ describe('Explore follow camera', () => {
     expect(exploreCameraOffsetMeters('behind', 18)).toBe(-60);
     expect(exploreCameraOffsetMeters('ahead', 20)).toBe(18);
     expect(exploreCameraOffsetMeters('behind', 12)).toBe(-400);
+  });
+
+  it('turns direction-up camera headings along the shortest arc', () => {
+    const next = smoothExploreHeading(350, 10, 120);
+    expect(next).toBeGreaterThan(350);
+    expect(smoothExploreHeading(20, 340, 120)).toBeLessThan(20);
+    expect(smoothExploreHeading(90, 270, 0)).toBe(90);
   });
 });
 
