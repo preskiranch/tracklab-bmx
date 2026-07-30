@@ -754,12 +754,28 @@ function getLegacyPlaceDetails(
 export async function resolvePlacePrediction(
   prediction: PlacePredictionOption,
 ): Promise<{ point: LatLngLiteral; label?: string }> {
-  if (prediction.source === 'legacy') {
-    const google = await loadGoogleMaps();
-    const places = await getPlacesLibrary(google);
-    const service = getLegacyPlacesService(places);
-    const place = await getLegacyPlaceDetails(service, prediction.placeId);
-    const point = place.geometry?.location?.toJSON();
+  try {
+    if (prediction.source === 'legacy') {
+      const google = await loadGoogleMaps();
+      const places = await getPlacesLibrary(google);
+      const service = getLegacyPlacesService(places);
+      const place = await getLegacyPlaceDetails(service, prediction.placeId);
+      const point = place.geometry?.location?.toJSON();
+      resetPlaceAutocompleteSession();
+
+      if (!point) {
+        throw new Error('Google could not resolve that selected address.');
+      }
+
+      return {
+        point,
+        label: place.formatted_address ?? place.name ?? prediction.label,
+      };
+    }
+
+    const place = prediction.placePrediction.toPlace();
+    await place.fetchFields({ fields: ['displayName', 'formattedAddress', 'location'] });
+    const point = place.location?.toJSON();
     resetPlaceAutocompleteSession();
 
     if (!point) {
@@ -768,23 +784,16 @@ export async function resolvePlacePrediction(
 
     return {
       point,
-      label: place.formatted_address ?? place.name ?? prediction.label,
+      label: place.formattedAddress ?? place.displayName ?? prediction.label,
+    };
+  } catch {
+    resetPlaceAutocompleteSession();
+    const resolved = await resolveLocationText(prediction.label);
+    return {
+      point: resolved.point,
+      label: resolved.label ?? prediction.label,
     };
   }
-
-  const place = prediction.placePrediction.toPlace();
-  await place.fetchFields({ fields: ['displayName', 'formattedAddress', 'location'] });
-  const point = place.location?.toJSON();
-  resetPlaceAutocompleteSession();
-
-  if (!point) {
-    throw new Error('Google could not resolve that selected address.');
-  }
-
-  return {
-    point,
-    label: place.formattedAddress ?? place.displayName ?? prediction.label,
-  };
 }
 
 export function hasUserMappedRoute(track: TrackRecord) {
