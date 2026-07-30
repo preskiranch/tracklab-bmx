@@ -1,10 +1,12 @@
 import {
+  ArrowLeftRight,
   Bike,
   Car,
   Compass,
   Flag,
   Landmark,
   LocateFixed,
+  MapPin,
   MapPinned,
   Minimize2,
   Navigation2,
@@ -40,10 +42,11 @@ import {
   type PlacePredictionOption,
 } from '../lib/googleMaps';
 import { useExploreRide } from '../hooks/useExploreRide';
-import { formatDistanceMeters, formatSpeedFromKph } from '../units';
+import { formatExploreDistanceMeters, formatSpeedFromKph } from '../units';
 import type {
   BikeSample,
   DistanceUnit,
+  ExploreDistanceUnit,
   ExploreRoute,
   ExploreTravelMode,
   MultiplayerExploreState,
@@ -204,6 +207,9 @@ export function ExploreView({
   const [selectedOriginPrediction, setSelectedOriginPrediction] = useState<PlacePredictionOption | null>(null);
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const [travelMode, setTravelMode] = useState<ExploreTravelMode>('bicycle');
+  const [exploreDistanceUnit, setExploreDistanceUnit] = useState<ExploreDistanceUnit>(
+    distanceUnit === 'm' ? 'km' : 'mi',
+  );
   const [followZoom, setFollowZoom] = useState(18);
   const [cameraFollowPosition, setCameraFollowPosition] = useState<ExploreCameraFollowPosition>('center');
   const [showMapLabels, setShowMapLabels] = useState(false);
@@ -212,6 +218,7 @@ export function ExploreView({
   const [routeMessage, setRouteMessage] = useState('');
   const appliedRoomSessionRef = useRef<string | null>(null);
   const scheduledStartTimerRef = useRef<number | null>(null);
+  const destinationInputRef = useRef<HTMLInputElement | null>(null);
   const latestRidersRef = useRef<ReturnType<typeof useExploreRide>['riders']>([]);
   const previousRideStatusRef = useRef<ReturnType<typeof useExploreRide>['status']>('ready');
   const route = playMode === 'multiplayer'
@@ -382,6 +389,15 @@ export function ExploreView({
     );
   };
 
+  const applyExploreRoute = (nextRoute: ExploreRoute) => {
+    setLocalRoute(nextRoute);
+    if (playMode === 'multiplayer') {
+      onSyncRoute(nextRoute);
+    }
+    setRouteStatus('idle');
+    setRouteMessage('');
+  };
+
   const createRoute = async () => {
     if (!canChooseRoute) {
       return;
@@ -414,16 +430,57 @@ export function ExploreView({
         destinationLabel: destination.label || destinationText.trim(),
         travelMode,
       });
-      setLocalRoute(nextRoute);
-      if (playMode === 'multiplayer') {
-        onSyncRoute(nextRoute);
-      }
-      setRouteStatus('idle');
-      setRouteMessage('');
+      applyExploreRoute(nextRoute);
     } catch (error) {
       setRouteStatus('error');
       setRouteMessage(error instanceof Error ? error.message : 'The route could not be created.');
     }
+  };
+
+  const reverseCompletedRoute = async () => {
+    if (!route || !canChooseRoute || routeStatus === 'loading') {
+      return;
+    }
+
+    setRouteStatus('loading');
+    setRouteMessage('Google is reversing the completed route…');
+    try {
+      const nextRoute = await fetchExploreRoute({
+        origin: route.destination,
+        destination: route.origin,
+        originLabel: route.destinationLabel,
+        destinationLabel: route.originLabel,
+        travelMode: route.travelMode,
+      });
+      setSelectedOrigin({ point: route.destination, label: route.destinationLabel });
+      setSelectedOriginPrediction(null);
+      setOriginText(route.destinationLabel);
+      setSelectedDestinationPrediction(null);
+      setDestinationText(route.originLabel);
+      setTravelMode(route.travelMode);
+      resetPlaceAutocompleteSession();
+      applyExploreRoute(nextRoute);
+    } catch (error) {
+      setRouteStatus('error');
+      setRouteMessage(error instanceof Error ? error.message : 'The reverse route could not be created.');
+    }
+  };
+
+  const chooseNewDestination = () => {
+    if (!route || !canChooseRoute) {
+      return;
+    }
+
+    setSelectedOrigin({ point: route.destination, label: route.destinationLabel });
+    setSelectedOriginPrediction(null);
+    setOriginText(route.destinationLabel);
+    setSelectedDestinationPrediction(null);
+    setDestinationText('');
+    setTravelMode(route.travelMode);
+    setRouteStatus('idle');
+    setRouteMessage(`Starting from ${route.destinationLabel}. Choose your next destination.`);
+    resetPlaceAutocompleteSession();
+    window.setTimeout(() => destinationInputRef.current?.focus(), 0);
   };
 
   const startOrResume = () => {
@@ -582,6 +639,7 @@ export function ExploreView({
               <label>
                 <span>Destination</span>
                 <input
+                  ref={destinationInputRef}
                   type="text"
                   value={destinationText}
                   placeholder="Where do you want to ride?"
@@ -669,7 +727,7 @@ export function ExploreView({
                   <strong><Flag size={16} /> {route.destinationLabel}</strong>
                 </div>
                 <dl>
-                  <div><dt>Route</dt><dd>{formatDistanceMeters(route.distanceMeters, distanceUnit)}</dd></div>
+                  <div><dt>Route</dt><dd>{formatExploreDistanceMeters(route.distanceMeters, exploreDistanceUnit)}</dd></div>
                   <div><dt>Google estimate</dt><dd>{formatDuration(route.durationSeconds)}</dd></div>
                   <div>
                     <dt>View</dt>
@@ -733,19 +791,52 @@ export function ExploreView({
                     )}
                   <span>{exploreCameraFollowLabels[cameraFollowPosition]}</span>
                 </button>
-                <button
-                  className={`explore-map-labels-toggle explore-direction-toggle${followTravelHeading ? ' active' : ''}`}
-                  type="button"
-                  aria-label={followTravelHeading ? 'Keep map north up' : 'Follow direction of travel'}
-                  aria-pressed={followTravelHeading}
-                  title={followTravelHeading
-                    ? 'Return the map to north-up'
-                    : 'Rotate the map so the direction of travel stays at the top'}
-                  onClick={() => setFollowTravelHeading((enabled) => !enabled)}
-                >
-                  <Compass size={18} />
-                  <span>{followTravelHeading ? 'Direction up' : 'North up'}</span>
-                </button>
+                <div className="explore-toolbar-toggle" role="group" aria-label="Map orientation">
+                  <button
+                    className={!followTravelHeading ? 'active' : ''}
+                    type="button"
+                    aria-label="North up"
+                    aria-pressed={!followTravelHeading}
+                    title="Keep north at the top of the map"
+                    onClick={() => setFollowTravelHeading(false)}
+                  >
+                    <Compass size={18} />
+                    <span>North up</span>
+                  </button>
+                  <button
+                    className={followTravelHeading ? 'active' : ''}
+                    type="button"
+                    aria-label="Direction of travel up"
+                    aria-pressed={followTravelHeading}
+                    title="Keep the direction of travel at the top of the map"
+                    onClick={() => setFollowTravelHeading(true)}
+                  >
+                    <Navigation2 size={18} />
+                    <span>Travel up</span>
+                  </button>
+                </div>
+                <div className="explore-toolbar-toggle distance" role="group" aria-label="Explore distance unit">
+                  <button
+                    className={exploreDistanceUnit === 'mi' ? 'active' : ''}
+                    type="button"
+                    aria-label="Show distances in miles"
+                    aria-pressed={exploreDistanceUnit === 'mi'}
+                    onClick={() => setExploreDistanceUnit('mi')}
+                  >
+                    <span className="distance-long">Miles</span>
+                    <span className="distance-short">mi</span>
+                  </button>
+                  <button
+                    className={exploreDistanceUnit === 'km' ? 'active' : ''}
+                    type="button"
+                    aria-label="Show distances in kilometers"
+                    aria-pressed={exploreDistanceUnit === 'km'}
+                    onClick={() => setExploreDistanceUnit('km')}
+                  >
+                    <span className="distance-long">Kilometers</span>
+                    <span className="distance-short">km</span>
+                  </button>
+                </div>
                 <button
                   className={`explore-map-labels-toggle${showMapLabels ? ' active' : ''}`}
                   type="button"
@@ -784,7 +875,7 @@ export function ExploreView({
                   <ExploreMapPanel
                     group={group}
                     route={route}
-                    distanceUnit={distanceUnit}
+                    distanceUnit={exploreDistanceUnit}
                     followZoom={followZoom}
                     cameraFollowPosition={cameraFollowPosition}
                     showMapLabels={showMapLabels}
@@ -803,7 +894,7 @@ export function ExploreView({
                     <div>
                       <strong>{rider.name}</strong>
                       <span>
-                        {formatDistanceMeters(rider.distanceMeters, distanceUnit)}
+                        {formatExploreDistanceMeters(rider.distanceMeters, exploreDistanceUnit)}
                         {' · '}
                         {formatSpeedFromKph(rider.velocityMps * 3.6, speedUnit)}
                       </span>
@@ -812,6 +903,35 @@ export function ExploreView({
                   </article>
                 )) : <p>Connect at least one Wattbike to begin.</p>}
               </section>
+
+              {ride.status === 'finished' && (
+                <section className="explore-completion-actions" aria-label="Completed route options">
+                  <div>
+                    <Flag size={20} />
+                    <span>
+                      <strong>Route complete</strong>
+                      <small>Continue from {route.destinationLabel}.</small>
+                    </span>
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      disabled={!canChooseRoute || routeStatus === 'loading'}
+                      onClick={() => { void reverseCompletedRoute(); }}
+                    >
+                      <ArrowLeftRight size={17} />
+                      {routeStatus === 'loading' ? 'Reversing…' : 'Reverse route'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canChooseRoute || routeStatus === 'loading'}
+                      onClick={chooseNewDestination}
+                    >
+                      <MapPin size={17} /> New destination
+                    </button>
+                  </div>
+                </section>
+              )}
 
               <div className="explore-controls">
                 {ride.status === 'riding' ? (

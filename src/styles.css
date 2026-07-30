@@ -8192,7 +8192,32 @@ input:focus {
   font-weight: 850;
 }
 
-.explore-camera-toolbar .explore-map-labels-toggle.active {
+.explore-toolbar-toggle {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f2f5f7;
+}
+
+.explore-camera-toolbar .explore-toolbar-toggle button {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+}
+
+.explore-camera-toolbar .explore-toolbar-toggle.distance button {
+  min-width: 48px;
+  padding-inline: 8px;
+}
+
+.explore-toolbar-toggle .distance-short {
+  display: none;
+}
+
+.explore-camera-toolbar .explore-map-labels-toggle.active,
+.explore-camera-toolbar .explore-toolbar-toggle button.active {
   border-color: #65bc2d;
   background: #e9fbdc;
   color: #18310c;
@@ -8365,6 +8390,61 @@ input:focus {
   gap: 8px;
 }
 
+.explore-completion-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid #a9dd8a;
+  border-radius: 10px;
+  background: #f0fbe9;
+}
+
+.explore-completion-actions > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.explore-completion-actions > div:first-child {
+  color: #275714;
+}
+
+.explore-completion-actions span {
+  display: grid;
+  gap: 2px;
+}
+
+.explore-completion-actions strong {
+  font-size: 14px;
+}
+
+.explore-completion-actions small {
+  color: #547147;
+  font-size: 10px;
+}
+
+.explore-completion-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #82be61;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1c3e0d;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.explore-completion-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .explore-empty-state {
   display: grid;
   place-items: center;
@@ -8487,6 +8567,16 @@ input:focus {
   }
 
   .explore-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .explore-completion-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .explore-completion-actions > div:last-child {
     display: grid;
     grid-template-columns: 1fr 1fr;
   }
@@ -8632,7 +8722,8 @@ input:focus {
 }
 
 .explore-fullscreen .explore-camera-toolbar button,
-.explore-fullscreen .explore-camera-toolbar label {
+.explore-fullscreen .explore-camera-toolbar label,
+.explore-fullscreen .explore-toolbar-toggle {
   border-color: rgba(255, 255, 255, 0.18);
   background: rgba(28, 40, 53, 0.94);
   color: #ffffff;
@@ -8645,6 +8736,11 @@ input:focus {
 
 .explore-fullscreen .explore-camera-toolbar .explore-map-labels-toggle.active {
   border-color: #92eb56;
+  background: #d8ffbd;
+  color: #17310a;
+}
+
+.explore-fullscreen .explore-camera-toolbar .explore-toolbar-toggle button.active {
   background: #d8ffbd;
   color: #17310a;
 }
@@ -8725,7 +8821,7 @@ input:focus {
   }
 
   .explore-fullscreen .explore-map-group-label {
-    top: 110px;
+    top: 160px;
   }
 
   .explore-fullscreen .explore-rider-strip {
@@ -8757,7 +8853,22 @@ input:focus {
 
   .explore-camera-toolbar .explore-camera-position-toggle span,
   .explore-camera-toolbar .explore-map-labels-toggle span,
+  .explore-camera-toolbar .explore-toolbar-toggle span,
   .explore-camera-toolbar .explore-exit-fullscreen span {
     display: none;
+  }
+
+  .explore-camera-toolbar .explore-toolbar-toggle button {
+    width: 34px;
+    min-width: 34px;
+    padding-inline: 0;
+  }
+
+  .explore-camera-toolbar .explore-toolbar-toggle.distance button {
+    min-width: 38px;
+  }
+
+  .explore-camera-toolbar .explore-toolbar-toggle.distance .distance-short {
+    display: inline;
   }
 }

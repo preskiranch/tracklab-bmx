@@ -134,6 +134,7 @@ export type MultiplayerTrackVoteCandidate = MultiplayerTrackSummary & {
 export type MultiplayerRoomPhase = 'lobby' | 'voting' | 'route-select' | 'race';
 export type MultiplayerLatencyQuality = 'unknown' | 'good' | 'ok' | 'poor';
 export type ExploreTravelMode = 'bicycle' | 'drive';
+export type ExploreDistanceUnit = 'mi' | 'km';
 
 export type ExploreRoute = {
   id: string;

@@ -1,4 +1,4 @@
-import type { DistanceUnit, SpeedUnit } from './types';
+import type { DistanceUnit, ExploreDistanceUnit, SpeedUnit } from './types';
 
 export function formatSpeedFromMps(speedMps: number, unit: SpeedUnit) {
   const value = unit === 'mph' ? speedMps * 2.236936 : speedMps * 3.6;
@@ -28,6 +28,19 @@ export function formatDistanceMeters(meters: number | null | undefined, unit: Di
   }
 
   return `${Math.round(meters * 3.28084).toLocaleString()} ft`;
+}
+
+export function formatExploreDistanceMeters(
+  meters: number | null | undefined,
+  unit: ExploreDistanceUnit,
+) {
+  if (meters == null || !Number.isFinite(meters)) {
+    return unit === 'km' ? '-- km' : '-- mi';
+  }
+
+  const distance = unit === 'km' ? meters / 1_000 : meters / 1_609.344;
+  const precision = distance < 10 ? 2 : distance < 100 ? 1 : 0;
+  return `${distance.toFixed(precision)} ${unit}`;
 }
 
 export function formatDistanceRangeMeters(startMeters: number, endMeters: number, unit: DistanceUnit) {

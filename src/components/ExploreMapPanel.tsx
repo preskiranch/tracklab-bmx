@@ -16,13 +16,13 @@ import type {
   GoogleMapsRuntime,
   GooglePolyline,
 } from '../lib/googleMaps';
-import type { ExploreRoute as ExploreRouteModel, TrackPoint } from '../types';
-import { formatDistanceMeters } from '../units';
+import type { ExploreDistanceUnit, ExploreRoute as ExploreRouteModel, TrackPoint } from '../types';
+import { formatExploreDistanceMeters } from '../units';
 
 type ExploreMapPanelProps = {
   group: ExploreViewportGroup;
   route: ExploreRouteModel;
-  distanceUnit: 'ft' | 'm';
+  distanceUnit: ExploreDistanceUnit;
   followZoom: number;
   cameraFollowPosition: ExploreCameraFollowPosition;
   showMapLabels: boolean;
@@ -356,7 +356,7 @@ export function ExploreMapPanel({
         <span>
           {group.riders.length === 0
             ? 'Connect a Wattbike to place a rider'
-            : `${formatDistanceMeters(leadRider?.distanceMeters ?? 0, distanceUnit)} ridden`}
+            : `${formatExploreDistanceMeters(leadRider?.distanceMeters ?? 0, distanceUnit)} ridden`}
         </span>
       </div>
     </section>

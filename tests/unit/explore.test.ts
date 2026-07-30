@@ -9,6 +9,7 @@ import {
   smoothExploreHeading,
 } from '../../src/lib/explore';
 import { exploreBikeAudioMode } from '../../src/lib/bikeRaceAudio';
+import { formatExploreDistanceMeters } from '../../src/units';
 import type { ExploreRider } from '../../src/types';
 
 function rider(id: number, distanceMeters: number): ExploreRider {
@@ -40,6 +41,14 @@ describe('Explore route geometry', () => {
 
     expect(exploreRoutePoint(points, 0, 1_000)).toEqual(points[0]);
     expect(exploreRoutePoint(points, 1_000, 1_000)).toEqual(points[2]);
+  });
+});
+
+describe('Explore mileage display', () => {
+  it('always uses miles or kilometers instead of short-distance feet or meters', () => {
+    expect(formatExploreDistanceMeters(1_000, 'mi')).toBe('0.62 mi');
+    expect(formatExploreDistanceMeters(1_000, 'km')).toBe('1.00 km');
+    expect(formatExploreDistanceMeters(16_093.44, 'mi')).toBe('10.0 mi');
   });
 });
 

@@ -391,7 +391,7 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
 });
 
 test('developer Explore demo rides without commentary and keeps bike mechanics audio', async ({ page }, testInfo) => {
-  test.setTimeout(45_000);
+  test.setTimeout(90_000);
   const authUser = {
     id: 'explore-developer',
     profileKey: 'user:explore-developer',
@@ -405,6 +405,14 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     },
   };
   let commentaryRequestCount = 0;
+  let quickRoute = false;
+  const exploreRouteRequests: Array<{
+    origin: { lat: number; lng: number };
+    destination: { lat: number; lng: number };
+    originLabel: string;
+    destinationLabel: string;
+    travelMode: 'bicycle' | 'drive';
+  }> = [];
 
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
@@ -413,19 +421,33 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     });
   });
   await page.route('**/api/explore/route', async (route) => {
+    const request = route.request().postDataJSON() as typeof exploreRouteRequests[number];
+    exploreRouteRequests.push(request);
+    const requestNumber = exploreRouteRequests.length;
+    const firstRoute = requestNumber === 1;
+    const originLabel = firstRoute
+      ? 'Demo Start'
+      : request.originLabel === 'Quick Finish' || request.originLabel === 'Quick Start'
+        ? request.originLabel
+        : 'Quick Start';
+    const destinationLabel = firstRoute
+      ? 'Demo Finish'
+      : request.destinationLabel === 'Quick Finish' || request.destinationLabel === 'Quick Start'
+        ? request.destinationLabel
+        : 'Quick Finish';
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
       body: JSON.stringify({
         route: {
-          id: 'EXPLORE-playwright',
-          origin: { lat: 38.5, lng: -120.2 },
-          destination: { lat: 43.252, lng: -126.453 },
-          originLabel: 'Demo Start',
-          destinationLabel: 'Demo Finish',
-          travelMode: 'bicycle',
-          distanceMeters: 1_000,
-          durationSeconds: 300,
+          id: `EXPLORE-playwright-${requestNumber}`,
+          origin: request.origin,
+          destination: request.destination,
+          originLabel,
+          destinationLabel,
+          travelMode: request.travelMode,
+          distanceMeters: quickRoute ? 2 : 1_000,
+          durationSeconds: quickRoute ? 1 : 300,
           encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
           createdAt: Date.now(),
         },
@@ -513,6 +535,13 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.getByRole('button', { name: 'Build Explore route' }).click();
 
   await expect(page.getByText('Demo Finish', { exact: true })).toBeVisible();
+  await expect(page.getByText('0.62 mi', { exact: true })).toBeVisible();
+  const distanceUnits = page.getByRole('group', { name: 'Explore distance unit' });
+  await expect(distanceUnits.getByRole('button', { name: 'Show distances in miles' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await distanceUnits.getByRole('button', { name: 'Show distances in kilometers' }).click();
+  await expect(page.getByText('1.00 km', { exact: true })).toBeVisible();
+  await distanceUnits.getByRole('button', { name: 'Show distances in miles' }).click();
   await expect(page.locator('.explore-rider-strip article')).toHaveCount(2);
   await page.getByRole('button', { name: 'Start Explore ride' }).click();
   await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
@@ -527,11 +556,13 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(aheadCamera).toBeVisible();
   await aheadCamera.click();
   await expect(page.getByRole('button', { name: 'Camera follow position: behind' })).toBeVisible();
-  const directionUp = page.getByRole('button', { name: 'Follow direction of travel' });
+  const northUp = page.getByRole('button', { name: 'North up' });
+  const directionUp = page.getByRole('button', { name: 'Direction of travel up' });
+  await expect(northUp).toHaveAttribute('aria-pressed', 'true');
   await expect(directionUp).toHaveAttribute('aria-pressed', 'false');
   await directionUp.click();
-  await expect(page.getByRole('button', { name: 'Keep map north up' }))
-    .toHaveAttribute('aria-pressed', 'true');
+  await expect(directionUp).toHaveAttribute('aria-pressed', 'true');
+  await expect(northUp).toHaveAttribute('aria-pressed', 'false');
   const mapLabels = page.getByRole('button', { name: 'Show street names and landmarks' });
   await expect(mapLabels).toHaveAttribute('aria-pressed', 'false');
   await mapLabels.click();
@@ -591,6 +622,29 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.getByRole('button', { name: 'Exit full screen' }).click();
   await expect(page.locator('.platform-shell')).not.toHaveClass(/explore-fullscreen/);
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  quickRoute = true;
+  await originInput.fill('38.5, -120.2');
+  await destinationInput.fill('43.252, -126.453');
+  await page.getByRole('button', { name: 'Build Explore route' }).click();
+  await expect(page.getByText('Quick Finish', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Explore ride' }).click();
+  const completedRouteOptions = page.getByRole('region', { name: 'Completed route options' });
+  await expect(completedRouteOptions).toBeVisible({ timeout: 10_000 });
+  await completedRouteOptions.getByRole('button', { name: 'Reverse route' }).click();
+  await expect.poll(() => exploreRouteRequests.at(-1)).toMatchObject({
+    originLabel: 'Quick Finish',
+    destinationLabel: 'Quick Start',
+  });
+  await expect(page.locator('.explore-route-summary > div strong')).toContainText('Quick Start');
+
+  await page.getByRole('button', { name: 'Start Explore ride' }).click();
+  await expect(completedRouteOptions).toBeVisible({ timeout: 10_000 });
+  await completedRouteOptions.getByRole('button', { name: 'New destination' }).click();
+  await expect(originInput).toHaveValue('Quick Start');
+  await expect(destinationInput).toHaveValue('');
+  await expect(destinationInput).toBeFocused();
 });
 
 test('Windows Bluetooth pairing widens discovery and stays pending until TrackLab verifies a bike connection', async ({ page }) => {
