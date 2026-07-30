@@ -8016,6 +8016,16 @@ input:focus {
   padding: 0 11px;
 }
 
+.explore-location-field {
+  position: relative;
+}
+
+.explore-location-field .location-suggestions {
+  position: relative;
+  z-index: 12;
+  max-height: 210px;
+}
+
 .explore-travel-mode {
   border: 1px solid var(--line);
   background: #f4f7f8;
@@ -8153,6 +8163,60 @@ input:focus {
 
 .explore-map-grid.three-way .explore-map-panel:first-child {
   grid-row: 1 / -1;
+}
+
+.explore-camera-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.explore-camera-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #152333;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.explore-camera-toolbar label {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 180px) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.explore-camera-toolbar label span,
+.explore-camera-toolbar label small {
+  color: #41515e;
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.explore-camera-toolbar label small {
+  min-width: 52px;
+  color: #687987;
+  text-align: right;
+}
+
+.explore-camera-toolbar input {
+  min-width: 0;
+  accent-color: var(--lime);
 }
 
 .explore-map-panel {
@@ -8438,5 +8502,206 @@ input:focus {
 
   .explore-rider-strip {
     grid-template-columns: 1fr;
+  }
+}
+
+.platform-shell.explore-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 2147480000;
+  display: block;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: #05080c;
+}
+
+.explore-fullscreen .sidebar,
+.explore-fullscreen .platform-topbar,
+.explore-fullscreen .explore-hero,
+.explore-fullscreen .explore-demo-banner,
+.explore-fullscreen .explore-setup-card,
+.explore-fullscreen .explore-route-summary {
+  display: none;
+}
+
+.explore-fullscreen .platform-main,
+.explore-fullscreen .explore-view,
+.explore-fullscreen .explore-layout,
+.explore-fullscreen .explore-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.explore-fullscreen .platform-main {
+  padding: 0;
+  overflow: hidden;
+}
+
+.explore-fullscreen .explore-view,
+.explore-fullscreen .explore-layout {
+  display: block;
+}
+
+.explore-fullscreen .explore-stage {
+  position: relative;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #05080c;
+  box-shadow: none;
+}
+
+.explore-fullscreen .explore-map-grid,
+.explore-fullscreen .explore-map-grid.single,
+.explore-fullscreen .explore-map-grid.split,
+.explore-fullscreen .explore-map-grid.three-way,
+.explore-fullscreen .explore-map-grid.four-way {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.explore-fullscreen .explore-map-grid.single {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.explore-fullscreen .explore-map-grid.split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.explore-fullscreen .explore-map-grid.three-way,
+.explore-fullscreen .explore-map-grid.four-way {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.explore-fullscreen .explore-map-grid.split .explore-map-panel,
+.explore-fullscreen .explore-map-grid.three-way .explore-map-panel:first-child {
+  min-height: 0;
+}
+
+.explore-fullscreen .explore-camera-toolbar,
+.explore-fullscreen .explore-controls,
+.explore-fullscreen .explore-rider-strip {
+  position: absolute;
+  z-index: 20;
+}
+
+.explore-fullscreen .explore-camera-toolbar {
+  top: 12px;
+  right: 12px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(7, 13, 21, 0.88);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+}
+
+.explore-fullscreen .explore-camera-toolbar button,
+.explore-fullscreen .explore-camera-toolbar label {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(28, 40, 53, 0.94);
+  color: #ffffff;
+}
+
+.explore-fullscreen .explore-camera-toolbar label span,
+.explore-fullscreen .explore-camera-toolbar label small {
+  color: #d5e0e8;
+}
+
+.explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
+  padding-inline: 12px;
+  background: #ffffff;
+  color: #101823;
+  white-space: nowrap;
+}
+
+.explore-fullscreen .explore-controls {
+  top: 12px;
+  left: 12px;
+  display: flex;
+}
+
+.explore-fullscreen .explore-controls button {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(9, 16, 25, 0.9);
+  color: #ffffff;
+  backdrop-filter: blur(8px);
+}
+
+.explore-fullscreen .explore-map-group-label {
+  top: 64px;
+}
+
+.explore-fullscreen .explore-rider-strip {
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  padding: 7px;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.19);
+  border-radius: 10px;
+  background: rgba(7, 13, 21, 0.88);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.explore-fullscreen .explore-rider-strip article {
+  border-color: rgba(255, 255, 255, 0.14);
+  border-left-color: var(--player-color);
+  background: rgba(22, 33, 46, 0.96);
+  color: #ffffff;
+}
+
+.explore-fullscreen .explore-rider-strip article span {
+  color: #bdcbd6;
+}
+
+@media (max-width: 1000px) {
+  .explore-fullscreen .explore-camera-toolbar {
+    top: 58px;
+    right: 8px;
+    left: 8px;
+  }
+
+  .explore-fullscreen .explore-camera-toolbar label {
+    flex: 1;
+    grid-template-columns: minmax(90px, 1fr) auto;
+  }
+
+  .explore-fullscreen .explore-camera-toolbar label span {
+    display: none;
+  }
+
+  .explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
+    padding-inline: 9px;
+  }
+
+  .explore-fullscreen .explore-controls {
+    top: 8px;
+    left: 8px;
+    display: flex;
+  }
+
+  .explore-fullscreen .explore-map-group-label {
+    top: 110px;
+  }
+
+  .explore-fullscreen .explore-rider-strip {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
   }
 }

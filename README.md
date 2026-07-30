@@ -350,13 +350,15 @@ The app is intentionally Google-only. Without a Google key, the map panel shows 
 Required Google Cloud setup:
 
 1. Create or select a Google Cloud project with billing enabled.
-2. Enable **Maps JavaScript API** and **Routes API**.
+2. Enable **Maps JavaScript API**, **Places API (New)**, **Geocoding API**, and
+   **Routes API**.
 3. Create an API key under Google Maps Platform credentials.
 4. Restrict the key by website referrer:
    - `https://tracklab-bmx.onrender.com/*`
    - `http://127.0.0.1:*/*`
    - `http://localhost:*/*`
-5. Restrict the browser key to **Maps JavaScript API**.
+5. Restrict the browser key to **Maps JavaScript API**, **Places API (New)**,
+   and **Geocoding API**.
 6. Create a second, server-only key restricted to **Routes API**. Do not add this
    key to a `VITE_` variable.
 
@@ -381,7 +383,10 @@ Explore uses satellite view for riding. Up to four local Wattbikes can share a
 route. In a private room the host chooses and starts the route for everyone. Riders
 within 70 meters share a map; separated rider clusters automatically receive their
 own two-, three-, or four-way map panels. Developer Demo uses the same movement
-engine with commentary disabled and pedaling/freewheel audio enabled.
+engine with commentary disabled and pedaling/freewheel audio enabled. Starting an
+Explore ride opens the full-screen map; the follow-zoom control changes how much of
+the route remains visible while the camera tracks each rider group. Both location
+fields use Google address suggestions while typing.
 
 ## Track Data Status
 

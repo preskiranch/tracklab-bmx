@@ -4,12 +4,15 @@ import {
   Flag,
   LocateFixed,
   MapPinned,
+  Minimize2,
   Pause,
   Play,
   Radio,
   RotateCcw,
   Share2,
   Users,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import {
   type CSSProperties,
@@ -21,7 +24,13 @@ import {
 import { primeBikeRaceAudio, stopBikeRaceAudio, updateExploreBikeAudio } from '../lib/bikeRaceAudio';
 import { groupExploreRiders, exploreGridClass, exploreRemoteStateFreshMs } from '../lib/explore';
 import { fetchExploreRoute } from '../lib/exploreRoutes';
-import { resolveLocationText } from '../lib/googleMaps';
+import {
+  fetchLocationPredictions,
+  resetPlaceAutocompleteSession,
+  resolveLocationText,
+  resolvePlacePrediction,
+  type PlacePredictionOption,
+} from '../lib/googleMaps';
 import { useExploreRide } from '../hooks/useExploreRide';
 import { formatDistanceMeters, formatSpeedFromKph } from '../units';
 import type {
@@ -57,6 +66,8 @@ type ExploreViewProps = {
   onControlSession: (action: 'start' | 'pause' | 'resume' | 'reset') => boolean;
   onSendState: (state: Omit<MultiplayerExploreState, 'clientId' | 'roomId' | 'at'>) => boolean;
   onDemoRideStatusChange?: (status: 'ready' | 'riding' | 'paused' | 'finished') => void;
+  fullscreen: boolean;
+  onFullscreenChange: (enabled: boolean) => void;
 };
 
 type ExploreOrigin = {
@@ -83,6 +94,64 @@ function profileInitials(name: string) {
     .join('') || '?';
 }
 
+function exploreAutocompleteError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/REQUEST_DENIED|blocked|not allowed|not authorized|places\.googleapis\.com/i.test(message)) {
+    return 'Google address suggestions are not enabled for this Maps key. Coordinates still work.';
+  }
+  return `${message} Coordinates still work.`;
+}
+
+function useLocationSuggestions(
+  value: string,
+  selectedPrediction: PlacePredictionOption | null,
+  enabled: boolean,
+) {
+  const [predictions, setPredictions] = useState<PlacePredictionOption[]>([]);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    const input = value.trim();
+    if (!enabled || (selectedPrediction && selectedPrediction.label === input)) {
+      setPredictions([]);
+      setStatus('');
+      return;
+    }
+    if (input.length < 3) {
+      setPredictions([]);
+      setStatus('');
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setStatus('Searching Google addresses…');
+      fetchLocationPredictions(input)
+        .then((nextPredictions) => {
+          if (cancelled) {
+            return;
+          }
+          setPredictions(nextPredictions);
+          setStatus(nextPredictions.length > 0 ? '' : 'No nearby address suggestions found. Coordinates still work.');
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
+          setPredictions([]);
+          setStatus(exploreAutocompleteError(error));
+        });
+    }, 320);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [enabled, selectedPrediction, value]);
+
+  return { predictions, status };
+}
+
 export function ExploreView({
   players,
   samplesByDevice,
@@ -102,12 +171,17 @@ export function ExploreView({
   onControlSession,
   onSendState,
   onDemoRideStatusChange,
+  fullscreen,
+  onFullscreenChange,
 }: ExploreViewProps) {
   const [localRoute, setLocalRoute] = useState<ExploreRoute | null>(null);
   const [originText, setOriginText] = useState('');
   const [destinationText, setDestinationText] = useState('');
   const [selectedOrigin, setSelectedOrigin] = useState<ExploreOrigin | null>(null);
+  const [selectedOriginPrediction, setSelectedOriginPrediction] = useState<PlacePredictionOption | null>(null);
+  const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const [travelMode, setTravelMode] = useState<ExploreTravelMode>('bicycle');
+  const [followZoom, setFollowZoom] = useState(18);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
   const appliedRoomSessionRef = useRef<string | null>(null);
@@ -152,6 +226,16 @@ export function ExploreView({
     [activeRemoteRiders, ride.riders],
   );
   const groups = useMemo(() => groupExploreRiders(visibleRiders), [visibleRiders]);
+  const originSuggestions = useLocationSuggestions(
+    originText,
+    selectedOriginPrediction,
+    canChooseRoute && !selectedOrigin,
+  );
+  const destinationSuggestions = useLocationSuggestions(
+    destinationText,
+    selectedDestinationPrediction,
+    canChooseRoute,
+  );
 
   useEffect(() => {
     updateExploreBikeAudio(ride.status, ride.riders);
@@ -165,10 +249,11 @@ export function ExploreView({
 
   useEffect(() => () => {
     stopBikeRaceAudio();
+    onFullscreenChange(false);
     if (scheduledStartTimerRef.current != null) {
       window.clearTimeout(scheduledStartTimerRef.current);
     }
-  }, []);
+  }, [onFullscreenChange]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !currentRoom?.exploreSession) {
@@ -182,6 +267,7 @@ export function ExploreView({
     if (session.status === 'ready') {
       appliedRoomSessionRef.current = session.id;
       resetLocalRide();
+      onFullscreenChange(false);
       return;
     }
     if (session.status === 'paused') {
@@ -189,6 +275,7 @@ export function ExploreView({
       return;
     }
     if (session.status === 'riding') {
+      onFullscreenChange(true);
       if (appliedRoomSessionRef.current === session.id) {
         resumeLocalRide();
         return;
@@ -207,12 +294,19 @@ export function ExploreView({
   }, [
     currentRoom?.exploreSession,
     pauseLocalRide,
+    onFullscreenChange,
     playMode,
     resetLocalRide,
     resumeLocalRide,
     route?.id,
     startLocalRide,
   ]);
+
+  useEffect(() => {
+    if (ride.status === 'finished' && fullscreen) {
+      onFullscreenChange(false);
+    }
+  }, [fullscreen, onFullscreenChange, ride.status]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !currentRoom || !route) {
@@ -243,6 +337,7 @@ export function ExploreView({
           lng: position.coords.longitude,
         };
         setSelectedOrigin({ point, label: 'My current location' });
+        setSelectedOriginPrediction(null);
         setOriginText('My current location');
         setRouteStatus('idle');
         setRouteMessage('');
@@ -273,8 +368,13 @@ export function ExploreView({
     setRouteStatus('loading');
     setRouteMessage('Google is calculating the route…');
     try {
-      const origin = selectedOrigin ?? await resolveLocationText(originText);
-      const destination = await resolveLocationText(destinationText);
+      const origin = selectedOrigin
+        ?? (selectedOriginPrediction
+          ? await resolvePlacePrediction(selectedOriginPrediction)
+          : await resolveLocationText(originText));
+      const destination = selectedDestinationPrediction
+        ? await resolvePlacePrediction(selectedDestinationPrediction)
+        : await resolveLocationText(destinationText);
       const nextRoute = await fetchExploreRoute({
         origin: origin.point,
         destination: destination.point,
@@ -296,6 +396,7 @@ export function ExploreView({
 
   const startOrResume = () => {
     void primeBikeRaceAudio();
+    onFullscreenChange(true);
     if (playMode === 'multiplayer') {
       if (!roomHost) {
         return;
@@ -321,6 +422,7 @@ export function ExploreView({
   };
 
   const resetRide = () => {
+    onFullscreenChange(false);
     if (playMode === 'multiplayer') {
       if (roomHost) {
         onControlSession('reset');
@@ -391,32 +493,107 @@ export function ExploreView({
 
           <section className="explore-route-builder">
             <span className="eyebrow">Route</span>
-            <label>
-              <span>Starting location</span>
-              <input
-                type="text"
-                value={originText}
-                placeholder="Address, landmark, city, or coordinates"
-                disabled={!canChooseRoute}
-                onChange={(event) => {
-                  setOriginText(event.target.value);
-                  setSelectedOrigin(null);
-                }}
-              />
-            </label>
+            <div className="location-field explore-location-field">
+              <label>
+                <span>Starting location</span>
+                <input
+                  type="text"
+                  value={originText}
+                  placeholder="Address, landmark, city, or coordinates"
+                  autoComplete="off"
+                  aria-autocomplete="list"
+                  aria-expanded={originSuggestions.predictions.length > 0}
+                  aria-controls="explore-origin-suggestions"
+                  disabled={!canChooseRoute}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (selectedOriginPrediction && selectedOriginPrediction.label !== value) {
+                      resetPlaceAutocompleteSession();
+                    }
+                    setOriginText(value);
+                    setSelectedOrigin(null);
+                    setSelectedOriginPrediction(null);
+                  }}
+                />
+              </label>
+              {originSuggestions.predictions.length > 0 && (
+                <div
+                  className="location-suggestions"
+                  id="explore-origin-suggestions"
+                  role="listbox"
+                  aria-label="Starting location suggestions"
+                >
+                  {originSuggestions.predictions.map((prediction) => (
+                    <button
+                      key={prediction.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selectedOriginPrediction?.id === prediction.id}
+                      onClick={() => {
+                        setSelectedOrigin(null);
+                        setSelectedOriginPrediction(prediction);
+                        setOriginText(prediction.label);
+                      }}
+                    >
+                      <strong>{prediction.mainText}</strong>
+                      {prediction.secondaryText && <small>{prediction.secondaryText}</small>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {originSuggestions.status && <p className="autocomplete-status">{originSuggestions.status}</p>}
+            </div>
             <button type="button" onClick={useCurrentLocation} disabled={!canChooseRoute || routeStatus === 'loading'}>
               <LocateFixed size={15} /> Use my current location
             </button>
-            <label>
-              <span>Destination</span>
-              <input
-                type="text"
-                value={destinationText}
-                placeholder="Where do you want to ride?"
-                disabled={!canChooseRoute}
-                onChange={(event) => setDestinationText(event.target.value)}
-              />
-            </label>
+            <div className="location-field explore-location-field">
+              <label>
+                <span>Destination</span>
+                <input
+                  type="text"
+                  value={destinationText}
+                  placeholder="Where do you want to ride?"
+                  autoComplete="off"
+                  aria-autocomplete="list"
+                  aria-expanded={destinationSuggestions.predictions.length > 0}
+                  aria-controls="explore-destination-suggestions"
+                  disabled={!canChooseRoute}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (selectedDestinationPrediction && selectedDestinationPrediction.label !== value) {
+                      resetPlaceAutocompleteSession();
+                    }
+                    setDestinationText(value);
+                    setSelectedDestinationPrediction(null);
+                  }}
+                />
+              </label>
+              {destinationSuggestions.predictions.length > 0 && (
+                <div
+                  className="location-suggestions"
+                  id="explore-destination-suggestions"
+                  role="listbox"
+                  aria-label="Destination suggestions"
+                >
+                  {destinationSuggestions.predictions.map((prediction) => (
+                    <button
+                      key={prediction.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selectedDestinationPrediction?.id === prediction.id}
+                      onClick={() => {
+                        setSelectedDestinationPrediction(prediction);
+                        setDestinationText(prediction.label);
+                      }}
+                    >
+                      <strong>{prediction.mainText}</strong>
+                      {prediction.secondaryText && <small>{prediction.secondaryText}</small>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {destinationSuggestions.status && <p className="autocomplete-status">{destinationSuggestions.status}</p>}
+            </div>
             <div className="explore-travel-mode" aria-label="Google route type">
               <button
                 className={travelMode === 'bicycle' ? 'selected' : ''}
@@ -467,6 +644,50 @@ export function ExploreView({
                 </dl>
               </header>
 
+              <div className="explore-camera-toolbar" aria-label="Explore camera controls">
+                <button
+                  type="button"
+                  aria-label="Show more of the route"
+                  title="Show more of the route"
+                  disabled={followZoom <= 12}
+                  onClick={() => setFollowZoom((zoom) => Math.max(12, zoom - 1))}
+                >
+                  <ZoomOut size={18} />
+                </button>
+                <label>
+                  <span>Follow zoom</span>
+                  <input
+                    type="range"
+                    min="12"
+                    max="20"
+                    step="1"
+                    value={followZoom}
+                    aria-label="Follow camera zoom"
+                    aria-valuetext={`${followZoom}, ${followZoom <= 14 ? 'more route visible' : followZoom >= 19 ? 'closer rider view' : 'balanced rider view'}`}
+                    onChange={(event) => setFollowZoom(Number(event.target.value))}
+                  />
+                  <small>{followZoom <= 14 ? 'More route' : followZoom >= 19 ? 'Closer' : 'Balanced'}</small>
+                </label>
+                <button
+                  type="button"
+                  aria-label="Move closer to the riders"
+                  title="Move closer to the riders"
+                  disabled={followZoom >= 20}
+                  onClick={() => setFollowZoom((zoom) => Math.min(20, zoom + 1))}
+                >
+                  <ZoomIn size={18} />
+                </button>
+                {fullscreen && (
+                  <button
+                    className="explore-exit-fullscreen"
+                    type="button"
+                    onClick={() => onFullscreenChange(false)}
+                  >
+                    <Minimize2 size={18} /> Exit full screen
+                  </button>
+                )}
+              </div>
+
               <div className={exploreGridClass(groups.length)}>
                 {(groups.length > 0 ? groups : [{
                   id: 'route-preview',
@@ -474,7 +695,13 @@ export function ExploreView({
                   startMeter: 0,
                   endMeter: 0,
                 }]).map((group) => (
-                  <ExploreMapPanel group={group} route={route} distanceUnit={distanceUnit} key={group.id} />
+                  <ExploreMapPanel
+                    group={group}
+                    route={route}
+                    distanceUnit={distanceUnit}
+                    followZoom={followZoom}
+                    key={group.id}
+                  />
                 ))}
               </div>
 

@@ -1407,6 +1407,7 @@ export default function App() {
   const [mappingSaveMessage, setMappingSaveMessage] = useState<string | null>(null);
   const [mappingMode, setMappingMode] = useState(false);
   const [mappingFullscreen, setMappingFullscreen] = useState(false);
+  const [exploreRideFullscreen, setExploreRideFullscreen] = useState(false);
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
   const [mappingObstacleView3D, setMappingObstacleView3D] = useState(false);
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
@@ -2657,13 +2658,14 @@ export default function App() {
   }, [raceViewFullscreen]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('tracklab-race-active', raceViewFullscreen);
-    document.body.classList.toggle('tracklab-race-active', raceViewFullscreen);
+    const fullscreenActive = raceViewFullscreen || exploreRideFullscreen;
+    document.documentElement.classList.toggle('tracklab-race-active', fullscreenActive);
+    document.body.classList.toggle('tracklab-race-active', fullscreenActive);
     return () => {
       document.documentElement.classList.remove('tracklab-race-active');
       document.body.classList.remove('tracklab-race-active');
     };
-  }, [raceViewFullscreen]);
+  }, [exploreRideFullscreen, raceViewFullscreen]);
 
   const cancelStartGateSequence = useCallback(() => {
     startGateSequenceIdRef.current += 1;
@@ -6102,6 +6104,22 @@ export default function App() {
     }
   }, [demoMode]);
 
+  const handleExploreFullscreenChange = useCallback((enabled: boolean) => {
+    setExploreRideFullscreen(enabled);
+    if (enabled) {
+      requestBrowserFullscreen(raceShellRef.current);
+    } else {
+      releaseBrowserFullscreen();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (appMode !== 'explore' && exploreRideFullscreen) {
+      setExploreRideFullscreen(false);
+      releaseBrowserFullscreen();
+    }
+  }, [appMode, exploreRideFullscreen]);
+
   const copyMultiplayerProfileKey = useCallback(() => {
     if (!cloudProfileKey) {
       return;
@@ -6555,7 +6573,7 @@ export default function App() {
 
   return (
     <div
-      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}`}
+      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}`}
       ref={raceShellRef}
     >
       <aside className="sidebar">
@@ -7054,6 +7072,8 @@ export default function App() {
             onControlSession={multiplayer.controlExploreSession}
             onSendState={multiplayer.sendExploreState}
             onDemoRideStatusChange={handleExploreDemoRideStatusChange}
+            fullscreen={exploreRideFullscreen}
+            onFullscreenChange={handleExploreFullscreenChange}
           />
           </Suspense>
         ) : appMode === 'monitor' ? (

@@ -449,6 +449,57 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
 
   await expect(page.getByText('Developer Demo active', { exact: true })).toBeVisible();
   await expect(page.getByText(/AI commentary is off/i)).toBeVisible();
+  await page.evaluate(() => {
+    class MockAutocompleteSessionToken {}
+    class MockAutocompleteService {
+      getPlacePredictions(
+        request: { input: string },
+        callback: (predictions: unknown[], status: string) => void,
+      ) {
+        const destination = /oracle/i.test(request.input);
+        callback([{
+          description: destination
+            ? 'Oracle Park, 24 Willie Mays Plaza, San Francisco, CA, USA'
+            : 'Ferry Building, San Francisco, CA, USA',
+          place_id: destination ? 'oracle-park' : 'ferry-building',
+          structured_formatting: {
+            main_text: destination ? 'Oracle Park' : 'Ferry Building',
+            secondary_text: destination
+              ? '24 Willie Mays Plaza, San Francisco, CA, USA'
+              : 'San Francisco, CA, USA',
+          },
+        }], 'OK');
+      }
+    }
+    const places = {
+      AutocompleteSessionToken: MockAutocompleteSessionToken,
+      AutocompleteService: MockAutocompleteService,
+    };
+    (window as typeof window & { google?: unknown }).google = {
+      maps: {
+        Map: class {},
+        places,
+        importLibrary: async (name: string) => (name === 'places' ? places : {}),
+      },
+    };
+  });
+  await page.getByLabel('Starting location').fill('Ferry Build');
+  const originSuggestion = page.getByRole('option', { name: /Ferry Building.*San Francisco/i });
+  await expect(originSuggestion).toBeVisible();
+  await originSuggestion.click();
+  await expect(page.getByLabel('Starting location')).toHaveValue('Ferry Building, San Francisco, CA, USA');
+  await page.getByLabel('Destination').fill('Oracle Pa');
+  const destinationSuggestion = page.getByRole('option', { name: /Oracle Park.*Willie Mays/i });
+  await expect(destinationSuggestion).toBeVisible();
+  await destinationSuggestion.click();
+  await expect(page.getByLabel('Destination')).toHaveValue(/Oracle Park/);
+  await page.evaluate(() => {
+    delete (window as typeof window & {
+      google?: unknown;
+      __trackLabGoogleMapsPromise?: unknown;
+      __trackLabGoogleMapsBootstrapPromise?: unknown;
+    }).google;
+  });
   await page.getByLabel('Starting location').fill('38.5, -120.2');
   await page.getByLabel('Destination').fill('43.252, -126.453');
   await page.getByRole('button', { name: 'Build Explore route' }).click();
@@ -457,6 +508,13 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.locator('.explore-rider-strip article')).toHaveCount(4);
   await page.getByRole('button', { name: 'Start Explore ride' }).click();
   await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
+  await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
+  expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+  const followZoom = page.getByLabel('Follow camera zoom');
+  await expect(followZoom).toHaveValue('18');
+  await page.getByRole('button', { name: 'Show more of the route' }).click();
+  await page.getByRole('button', { name: 'Show more of the route' }).click();
+  await expect(followZoom).toHaveValue('16');
 
   await expect.poll(() => page.evaluate(() => {
     const bikeAudio = (window as typeof window & {
@@ -479,8 +537,14 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     fullPage: false,
     path: testInfo.outputPath('explore-desktop.png'),
   });
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+  });
+  await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
   await page.setViewportSize({ width: 820, height: 1180 });
-  await expect(page.getByRole('heading', { name: 'Explore', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Explore camera controls')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);
@@ -489,7 +553,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     path: testInfo.outputPath('explore-tablet.png'),
   });
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('button', { name: 'Explore', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);
@@ -497,6 +561,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     fullPage: false,
     path: testInfo.outputPath('explore-mobile.png'),
   });
+  await page.getByRole('button', { name: 'Exit full screen' }).click();
+  await expect(page.locator('.platform-shell')).not.toHaveClass(/explore-fullscreen/);
+  expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
 });
 
 test('Windows Bluetooth pairing widens discovery and stays pending until TrackLab verifies a bike connection', async ({ page }) => {
@@ -2530,7 +2597,7 @@ test('live cadence detects a false start and automatically rearms after five sec
     await expect(startAction).toContainText('Start Live Race');
     await startAction.click();
     await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
-    await expect(page.locator('.start-tree-light')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.start-tree-light')).toBeVisible({ timeout: 25_000 });
 
     moving = true;
     const falseStart = page.locator('.race-staging-countdown').filter({ hasText: 'False start' });

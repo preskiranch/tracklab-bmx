@@ -18,6 +18,7 @@ type ExploreMapPanelProps = {
   group: ExploreViewportGroup;
   route: ExploreRouteModel;
   distanceUnit: 'ft' | 'm';
+  followZoom: number;
 };
 
 type ExploreMarkerRefs = Map<string, GoogleMarker>;
@@ -33,7 +34,12 @@ function groupPositions(
   });
 }
 
-export function ExploreMapPanel({ group, route, distanceUnit }: ExploreMapPanelProps) {
+export function ExploreMapPanel({
+  group,
+  route,
+  distanceUnit,
+  followZoom,
+}: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
@@ -41,6 +47,8 @@ export function ExploreMapPanel({ group, route, distanceUnit }: ExploreMapPanelP
   const markerRefs = useRef<ExploreMarkerRefs>(new Map());
   const endpointMarkerRefs = useRef<GoogleMarker[]>([]);
   const lastCameraAtRef = useRef(0);
+  const lastFollowZoomRef = useRef<number | null>(null);
+  const initialFollowZoomRef = useRef(followZoom);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
   const routePoints = useMemo(() => exploreRoutePoints(route), [route]);
@@ -62,7 +70,7 @@ export function ExploreMapPanel({ group, route, distanceUnit }: ExploreMapPanelP
           controlSize: 26,
           disableDefaultUI: true,
           fullscreenControl: false,
-          gestureHandling: 'greedy',
+          gestureHandling: 'none',
           keyboardShortcuts: false,
           mapTypeControl: false,
           mapTypeId: 'satellite',
@@ -71,8 +79,8 @@ export function ExploreMapPanel({ group, route, distanceUnit }: ExploreMapPanelP
           scaleControl: true,
           streetViewControl: false,
           tilt: 0,
-          zoom: 18,
-          zoomControl: true,
+          zoom: initialFollowZoomRef.current,
+          zoomControl: false,
         });
         mapRef.current = map;
         routeLineRef.current = new google.maps.Polyline({
@@ -116,6 +124,9 @@ export function ExploreMapPanel({ group, route, distanceUnit }: ExploreMapPanelP
             zIndex: 250,
           }),
         ];
+        const routeBounds = new google.maps.LatLngBounds();
+        routePoints.forEach((point) => routeBounds.extend(point));
+        map.fitBounds(routeBounds, 70);
         setStatus('ready');
       })
       .catch((loadError: Error) => {
@@ -185,19 +196,24 @@ export function ExploreMapPanel({ group, route, distanceUnit }: ExploreMapPanelP
     });
 
     const now = Date.now();
-    if (positions.length === 0 || now - lastCameraAtRef.current < 450) {
+    const zoomChanged = lastFollowZoomRef.current !== followZoom;
+    if (positions.length === 0 || (!zoomChanged && now - lastCameraAtRef.current < 450)) {
       return;
     }
     lastCameraAtRef.current = now;
-    if (positions.length === 1) {
-      map.setCenter?.(positions[0].position);
-      map.setZoom?.(18);
-      return;
+    lastFollowZoomRef.current = followZoom;
+    const center = positions.reduce(
+      (sum, { position }) => ({
+        lat: sum.lat + position.lat / positions.length,
+        lng: sum.lng + position.lng / positions.length,
+      }),
+      { lat: 0, lng: 0 },
+    );
+    map.setCenter?.(center);
+    if (map.getZoom?.() !== followZoom) {
+      map.setZoom?.(followZoom);
     }
-    const bounds = new google.maps.LatLngBounds();
-    positions.forEach(({ position }) => bounds.extend(position));
-    map.fitBounds(bounds, 90);
-  }, [group, route, routePoints, status]);
+  }, [followZoom, group, route, routePoints, status]);
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
 
