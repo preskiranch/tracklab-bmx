@@ -9127,7 +9127,6 @@ input:focus {
 
 .explore-fullscreen .explore-camera-toolbar,
 .explore-fullscreen .explore-controls,
-.explore-fullscreen .explore-destination-overlay,
 .explore-fullscreen .explore-rider-strip,
 .explore-fullscreen .explore-landmark-hint {
   position: absolute;
@@ -9198,12 +9197,12 @@ input:focus {
 }
 
 .explore-fullscreen .explore-destination-overlay {
-  top: 23px;
-  right: 180px;
-  left: 180px;
   display: flex;
-  justify-content: center;
+  align-items: center;
+  flex: 1 1 220px;
   gap: 7px;
+  min-width: 0;
+  margin-right: auto;
   color: #ffffff;
   pointer-events: none;
 }
@@ -9297,12 +9296,6 @@ input:focus {
     display: flex;
   }
 
-  .explore-fullscreen .explore-destination-overlay {
-    top: 21px;
-    right: 160px;
-    left: 160px;
-  }
-
   .explore-fullscreen .explore-map-group-label {
     top: 160px;
   }
@@ -9346,11 +9339,6 @@ input:focus {
 
   .explore-fullscreen .explore-controls .explore-exit-fullscreen span {
     display: none;
-  }
-
-  .explore-fullscreen .explore-destination-overlay {
-    right: 56px;
-    left: 126px;
   }
 
   .explore-camera-toolbar .explore-toolbar-toggle button {

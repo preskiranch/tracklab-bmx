@@ -671,8 +671,16 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.getByRole('button', { name: 'Start Explore ride' }).click();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
-  await expect(page.getByLabel('Destination: San Francisco Ferry Building, San Francisco, CA, USA'))
-    .toBeVisible();
+  const cameraControls = page.getByLabel('Explore camera controls');
+  const destinationInCameraBar = cameraControls.getByLabel(
+    'Destination: San Francisco Ferry Building, San Francisco, CA, USA',
+  );
+  await expect(destinationInCameraBar).toBeVisible();
+  const destinationBox = await destinationInCameraBar.boundingBox();
+  const zoomOutBox = await page.getByRole('button', { name: 'Show more of the route' }).boundingBox();
+  expect(destinationBox).not.toBeNull();
+  expect(zoomOutBox).not.toBeNull();
+  expect(destinationBox?.x ?? 0).toBeLessThan(zoomOutBox?.x ?? 0);
   await expect(page.getByRole('button', { name: 'Reset', exact: true })).toBeHidden();
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const followZoom = page.getByLabel('Follow camera zoom');
@@ -814,6 +822,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
+  await expect(destinationInCameraBar).toBeVisible();
   const mobilePauseBox = await page.getByRole('button', { name: 'Pause ride' }).boundingBox();
   const mobileExitBox = await page.getByRole('button', { name: 'Exit full screen' }).boundingBox();
   expect(mobilePauseBox).not.toBeNull();

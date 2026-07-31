@@ -927,16 +927,15 @@ export function ExploreView({
                 </dl>
               </header>
 
-              <div
-                className="explore-destination-overlay"
-                aria-label={`Destination: ${route.destinationLabel}`}
-              >
-                <Flag size={17} />
-                <small>Riding to</small>
-                <strong>{route.destinationLabel}</strong>
-              </div>
-
               <div className="explore-camera-toolbar" aria-label="Explore camera controls">
+                <div
+                  className="explore-destination-overlay"
+                  aria-label={`Destination: ${route.destinationLabel}`}
+                >
+                  <Flag size={17} />
+                  <small>Destination</small>
+                  <strong>{route.destinationLabel}</strong>
+                </div>
                 <button
                   type="button"
                   aria-label="Show more of the route"
