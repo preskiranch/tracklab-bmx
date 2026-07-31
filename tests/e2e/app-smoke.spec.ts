@@ -554,7 +554,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.getByRole('button', { name: 'Explore', exact: true }).click();
 
   await expect(page.getByText('Developer Demo active', { exact: true })).toBeVisible();
-  await expect(page.getByText(/44\/16 rollout.*12–18 MPH averages/i)).toBeVisible();
+  await expect(page.getByText(/54\/17 road rollout.*6\.9 m.*12–18 MPH averages/i)).toBeVisible();
   const mapRenderer = page.getByRole('group', { name: 'Explore map renderer' });
   await expect(mapRenderer).toBeVisible();
   await expect(mapRenderer.getByRole('button')).toHaveCount(3);

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  bmxCadenceRpmFromVelocityMps,
-  bmxVelocityMpsFromCadence,
-} from '../game/bmxRollout';
+  exploreCadenceRpmFromVelocityMps,
+  exploreVelocityMpsFromCadence,
+} from '../game/exploreRollout';
 import {
   exploreDemoRiderMotion,
   exploreLiveDriveActive,
@@ -141,14 +141,14 @@ export function useExploreRide({
           ? exploreDemoRiderMotion(rider.playerId, exploreElapsedSeconds)
           : null;
         const demoTargetVelocityMps = (demoMotion?.speedMph ?? 0) * 0.44704;
-        const demoTargetCadence = bmxCadenceRpmFromVelocityMps(demoTargetVelocityMps);
+        const demoTargetCadence = exploreCadenceRpmFromVelocityMps(demoTargetVelocityMps);
         const liveCadence = sampleIsFresh ? Math.max(0, sample?.cadence ?? 0) : 0;
         const liveWatts = sampleIsFresh ? Math.max(0, sample?.watts ?? 0) : 0;
         const liveDriveActive = sampleIsFresh && exploreLiveDriveActive(liveCadence, liveWatts);
         const cadence = demoMotion
           ? (demoMotion.pedaling ? demoTargetCadence : 0)
           : liveDriveActive ? liveCadence : 0;
-        const pedalingVelocityMps = bmxVelocityMpsFromCadence(cadence);
+        const pedalingVelocityMps = exploreVelocityMpsFromCadence(cadence);
         const velocityMps = demoMotion
           ? (demoMotion.pedaling ? pedalingVelocityMps : rider.velocityMps)
           : stepExploreLiveVelocity(

@@ -113,7 +113,7 @@ describe('Explore live Wattbike physics', () => {
     expect(exploreLiveDriveActive(0, 400)).toBe(false);
   });
 
-  it('accelerates naturally toward 44/16 rollout speed', () => {
+  it('accelerates naturally toward the Explore road rollout speed', () => {
     const firstFrame = stepExploreLiveVelocity(0, 8, true, 0.1);
     const nextFrame = stepExploreLiveVelocity(firstFrame, 8, true, 0.1);
     expect(firstFrame).toBeGreaterThan(0);

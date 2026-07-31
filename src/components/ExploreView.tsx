@@ -749,7 +749,7 @@ export function ExploreView({
         <div className="explore-demo-banner">
           <Radio size={17} />
           <strong>Developer Demo active</strong>
-          <span>44/16 rollout · natural launch · 12–18 MPH averages. Commentary is off; bike sounds remain on.</span>
+          <span>54/17 road rollout · 6.9 m (22.6 ft) per crank · natural launch · 12–18 MPH averages. Commentary is off; bike sounds remain on.</span>
         </div>
       )}
 
