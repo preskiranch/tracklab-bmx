@@ -48,6 +48,10 @@ import {
   type ExploreElevationProfile,
 } from '../lib/exploreRoutes';
 import {
+  loadRecentExploreRoutes,
+  rememberRecentExploreRoute,
+} from '../lib/exploreRecentRoutes';
+import {
   exploreElevationAtMeter,
   exploreGradeAtMeter,
   exploreSlopeDirection,
@@ -82,6 +86,7 @@ import type {
   TrackPoint,
 } from '../types';
 import { ExploreMapPanel } from './ExploreMapPanel';
+import { ExploreRouteMapPicker } from './ExploreRouteMapPicker';
 import { ExploreStreetViewOverlay } from './ExploreStreetViewOverlay';
 import { RiderAvatar } from './RiderAvatar';
 
@@ -171,6 +176,10 @@ function profileInitials(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('') || '?';
+}
+
+function mapPointLabel(prefix: string, point: TrackPoint) {
+  return `${prefix} · ${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
 }
 
 function safeExternalHttpUrl(value: string) {
@@ -290,10 +299,12 @@ export function ExploreView({
   fullscreen,
   onFullscreenChange,
 }: ExploreViewProps) {
+  const recentProfileKey = currentUserId ?? 'local';
   const [localRoute, setLocalRoute] = useState<ExploreRoute | null>(null);
   const [originText, setOriginText] = useState('');
   const [destinationText, setDestinationText] = useState('');
   const [selectedOrigin, setSelectedOrigin] = useState<ExploreOrigin | null>(null);
+  const [selectedDestination, setSelectedDestination] = useState<ExploreOrigin | null>(null);
   const [selectedOriginPrediction, setSelectedOriginPrediction] = useState<PlacePredictionOption | null>(null);
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const [travelMode, setTravelMode] = useState<ExploreTravelMode>('bicycle');
@@ -307,6 +318,10 @@ export function ExploreView({
   const [mapRenderer, setMapRenderer] = useState<ExploreMapRenderer>(savedExploreMapRenderer);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
+  const [mapPickerOpen, setMapPickerOpen] = useState(false);
+  const [recentRoutes, setRecentRoutes] = useState<ExploreRoute[]>(() => (
+    loadRecentExploreRoutes(recentProfileKey)
+  ));
   const [elevationRecoveryStatus, setElevationRecoveryStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [recoveredElevation, setRecoveredElevation] = useState<RecoveredExploreElevation | null>(null);
   const [selectedLandmark, setSelectedLandmark] = useState<ExploreLandmarkPopup | null>(null);
@@ -386,8 +401,12 @@ export function ExploreView({
   const destinationSuggestions = useLocationSuggestions(
     destinationText,
     selectedDestinationPrediction,
-    canChooseRoute,
+    canChooseRoute && !selectedDestination,
   );
+
+  useEffect(() => {
+    setRecentRoutes(loadRecentExploreRoutes(recentProfileKey));
+  }, [recentProfileKey]);
 
   const closeLandmark = useCallback(() => {
     landmarkRequestRef.current += 1;
@@ -468,6 +487,7 @@ export function ExploreView({
         setElevationRecoveryStatus('ready');
         if (playMode === 'local') {
           setLocalRoute(enrichedRoute);
+          setRecentRoutes(rememberRecentExploreRoute(recentProfileKey, enrichedRoute));
         } else if (roomHost) {
           onSyncRoute(enrichedRoute);
         }
@@ -483,6 +503,7 @@ export function ExploreView({
   }, [
     onSyncRoute,
     playMode,
+    recentProfileKey,
     roomHost,
     sourceRoute?.distanceMeters,
     sourceRoute?.elevationSamples?.length,
@@ -635,13 +656,56 @@ export function ExploreView({
     );
   };
 
-  const applyExploreRoute = (nextRoute: ExploreRoute) => {
+  const applyExploreRoute = (nextRoute: ExploreRoute, message = '') => {
     setLocalRoute(nextRoute);
     if (playMode === 'multiplayer') {
       onSyncRoute(nextRoute);
     }
+    setRecentRoutes(rememberRecentExploreRoute(recentProfileKey, nextRoute));
     setRouteStatus('idle');
-    setRouteMessage('');
+    setRouteMessage(message);
+  };
+
+  const applyMapPoints = (origin: TrackPoint, destination: TrackPoint) => {
+    const nextOrigin = {
+      point: origin,
+      label: mapPointLabel('Map start', origin),
+    };
+    const nextDestination = {
+      point: destination,
+      label: mapPointLabel('Map destination', destination),
+    };
+    routeRequestRef.current += 1;
+    setSelectedOrigin(nextOrigin);
+    setSelectedOriginPrediction(null);
+    setOriginText(nextOrigin.label);
+    setSelectedDestination(nextDestination);
+    setSelectedDestinationPrediction(null);
+    setDestinationText(nextDestination.label);
+    setRouteStatus('idle');
+    setRouteMessage('Map points selected. Choose Bicycle or Car route, then build your ride.');
+    setMapPickerOpen(false);
+    resetPlaceAutocompleteSession();
+  };
+
+  const applyRecentRoute = (routeId: string) => {
+    const recentRoute = recentRoutes.find((candidate) => candidate.id === routeId);
+    if (!recentRoute || !canChooseRoute) {
+      return;
+    }
+    setSelectedOrigin({ point: recentRoute.origin, label: recentRoute.originLabel });
+    setSelectedOriginPrediction(null);
+    setOriginText(recentRoute.originLabel);
+    setSelectedDestination({ point: recentRoute.destination, label: recentRoute.destinationLabel });
+    setSelectedDestinationPrediction(null);
+    setDestinationText(recentRoute.destinationLabel);
+    setTravelMode(recentRoute.travelMode);
+    resetPlaceAutocompleteSession();
+    resetLocalRide();
+    applyExploreRoute(
+      recentRoute,
+      `Recent route loaded: ${recentRoute.originLabel} to ${recentRoute.destinationLabel}.`,
+    );
   };
 
   const markRouteInputsChanged = () => {
@@ -676,9 +740,10 @@ export function ExploreView({
         ?? (selectedOriginPrediction
           ? await resolvePlacePrediction(selectedOriginPrediction)
           : await resolveLocationText(originText));
-      const destination = selectedDestinationPrediction
-        ? await resolvePlacePrediction(selectedDestinationPrediction)
-        : await resolveLocationText(destinationText);
+      const destination = selectedDestination
+        ?? (selectedDestinationPrediction
+          ? await resolvePlacePrediction(selectedDestinationPrediction)
+          : await resolveLocationText(destinationText));
       const nextRoute = await fetchExploreRoute({
         origin: origin.point,
         destination: destination.point,
@@ -686,7 +751,8 @@ export function ExploreView({
           || selectedOriginPrediction?.label
           || origin.label
           || originText.trim(),
-        destinationLabel: selectedDestinationPrediction?.label
+        destinationLabel: selectedDestination?.label
+          || selectedDestinationPrediction?.label
           || destination.label
           || destinationText.trim(),
         travelMode,
@@ -728,6 +794,7 @@ export function ExploreView({
       setSelectedOriginPrediction(null);
       setOriginText(route.destinationLabel);
       setSelectedDestinationPrediction(null);
+      setSelectedDestination({ point: route.origin, label: route.originLabel });
       setDestinationText(route.originLabel);
       setTravelMode(route.travelMode);
       resetPlaceAutocompleteSession();
@@ -751,6 +818,7 @@ export function ExploreView({
     setSelectedOriginPrediction(null);
     setOriginText(route.destinationLabel);
     setSelectedDestinationPrediction(null);
+    setSelectedDestination(null);
     setDestinationText('');
     setTravelMode(route.travelMode);
     setRouteStatus('idle');
@@ -1034,6 +1102,33 @@ export function ExploreView({
 
           <section className="explore-route-builder">
             <span className="eyebrow">Route</span>
+            <label className="explore-recent-route-field">
+              <span>Recent routes</span>
+              <select
+                aria-label="Recent Explore routes"
+                value=""
+                disabled={!canChooseRoute || recentRoutes.length === 0}
+                onChange={(event) => applyRecentRoute(event.target.value)}
+              >
+                <option value="">
+                  {recentRoutes.length > 0 ? 'Choose a recent route…' : 'No recent routes yet'}
+                </option>
+                {recentRoutes.map((recentRoute) => (
+                  <option key={recentRoute.id} value={recentRoute.id}>
+                    {recentRoute.originLabel} → {recentRoute.destinationLabel}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="explore-map-route-button"
+              type="button"
+              disabled={!canChooseRoute || routeStatus === 'loading'}
+              onClick={() => setMapPickerOpen(true)}
+            >
+              <MapPin size={16} /> Choose start and destination on map
+            </button>
+            <div className="explore-route-method-divider"><span>or enter locations</span></div>
             <div className="location-field explore-location-field">
               <label>
                 <span>Starting location</span>
@@ -1109,6 +1204,7 @@ export function ExploreView({
                       resetPlaceAutocompleteSession();
                     }
                     setDestinationText(value);
+                    setSelectedDestination(null);
                     setSelectedDestinationPrediction(null);
                   }}
                 />
@@ -1128,6 +1224,7 @@ export function ExploreView({
                       aria-selected={selectedDestinationPrediction?.id === prediction.id}
                       onClick={() => {
                         markRouteInputsChanged();
+                        setSelectedDestination(null);
                         setSelectedDestinationPrediction(prediction);
                         setDestinationText(prediction.label);
                       }}
@@ -1701,6 +1798,14 @@ export function ExploreView({
           )}
         </div>
       </div>
+      {mapPickerOpen && (
+        <ExploreRouteMapPicker
+          initialOrigin={selectedOrigin?.point ?? route?.origin ?? null}
+          initialDestination={selectedDestination?.point ?? route?.destination ?? null}
+          onApply={applyMapPoints}
+          onClose={() => setMapPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

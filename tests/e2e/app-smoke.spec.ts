@@ -638,6 +638,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       async fetchFields(_request: { fields: string[] }) {}
     }
     type MockMapClickHandler = (event: {
+      latLng?: { toJSON: () => { lat: number; lng: number } };
       placeId?: string;
       stop?: () => void;
     }) => void;
@@ -776,6 +777,62 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   });
   const originInput = page.getByRole('textbox', { name: 'Starting location', exact: true });
   const destinationInput = page.getByRole('textbox', { name: 'Destination', exact: true });
+  const recentRoutes = page.getByRole('combobox', { name: 'Recent Explore routes' });
+  await expect(recentRoutes).toBeDisabled();
+  await page.getByRole('button', { name: 'Choose start and destination on map' }).click();
+  const mapPicker = page.getByRole('dialog', { name: 'Select your route endpoints' });
+  await expect(mapPicker).toBeVisible();
+  await expect(mapPicker.getByRole('button', { name: 'Set start' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabExploreMapClickHandlers?: unknown[] })
+      .__tracklabExploreMapClickHandlers?.length ?? 0
+  ))).toBeGreaterThan(0);
+  await page.evaluate(() => {
+    const handler = (window as typeof window & {
+      __tracklabExploreMapClickHandlers?: Array<(event: {
+        latLng: { toJSON: () => { lat: number; lng: number } };
+      }) => void>;
+    }).__tracklabExploreMapClickHandlers?.[0];
+    handler?.({ latLng: { toJSON: () => ({ lat: 37.7749, lng: -122.4194 }) } });
+  });
+  await expect(mapPicker.getByRole('button', { name: 'Set destination' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await page.evaluate(() => {
+    const handler = (window as typeof window & {
+      __tracklabExploreMapClickHandlers?: Array<(event: {
+        latLng: { toJSON: () => { lat: number; lng: number } };
+      }) => void>;
+    }).__tracklabExploreMapClickHandlers?.[0];
+    handler?.({ latLng: { toJSON: () => ({ lat: 37.7955, lng: -122.3937 }) } });
+  });
+  await expect(mapPicker).toContainText('37.77490, -122.41940');
+  await expect(mapPicker).toContainText('37.79550, -122.39370');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => (
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth
+  ))).toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('explore-map-picker-mobile.png'),
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await mapPicker.getByRole('button', { name: 'Use these map points' }).click();
+  await expect(mapPicker).toHaveCount(0);
+  await expect(originInput).toHaveValue('Map start · 37.77490, -122.41940');
+  await expect(destinationInput).toHaveValue('Map destination · 37.79550, -122.39370');
+  await page.getByRole('button', { name: 'Build Explore the World route' }).click();
+  await expect(page.locator('.explore-route-summary')).toBeVisible();
+  await expect.poll(() => exploreRouteRequests.at(-1)).toMatchObject({
+    origin: { lat: 37.7749, lng: -122.4194 },
+    destination: { lat: 37.7955, lng: -122.3937 },
+  });
+  await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
+  await expect(recentRoutes).toBeEnabled();
+  await expect(recentRoutes.locator('option')).toHaveCount(2);
+  const requestCountBeforeRecentRestore = exploreRouteRequests.length;
+  await recentRoutes.selectOption({ index: 1 });
+  await expect(page.getByText(/Recent route loaded:/)).toBeVisible();
+  expect(exploreRouteRequests).toHaveLength(requestCountBeforeRecentRestore);
   await originInput.fill('Ferry Build');
   const originSuggestion = page.getByRole('option', { name: /Ferry Building.*San Francisco/i });
   await expect(originSuggestion).toBeVisible();
@@ -788,19 +845,20 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(destinationInput).toHaveValue(/Oracle Park/);
   await originInput.fill('37.7879, -122.4075');
   await destinationInput.fill('33.985, -118.469');
+  const staleRouteRequestCount = exploreRouteRequests.length;
   await page.getByRole('button', { name: 'Build Explore the World route' }).click();
-  await expect.poll(() => exploreRouteRequests.length).toBe(1);
+  await expect.poll(() => exploreRouteRequests.length).toBe(staleRouteRequestCount + 1);
   await destinationInput.fill('37.7955, -122.3937');
   await expect(page.getByText('Location changed. Select Build Explore the World route to update the map.'))
     .toBeVisible();
   releaseStaleRoute?.();
   await expect.poll(() => staleRouteFulfilled).toBe(true);
-  await expect(page.locator('.explore-route-summary')).toHaveCount(0);
+  await expect(page.locator('.explore-route-summary > div strong')).toHaveText('Quick Finish');
   await page.getByRole('button', { name: 'Build Explore the World route' }).click();
 
   await expect(page.locator('.explore-route-summary > div strong'))
     .toHaveText('San Francisco Ferry Building, San Francisco, CA, USA');
-  await expect.poll(() => elevationRecoveryRequests).toBe(1);
+  await expect.poll(() => elevationRecoveryRequests).toBe(2);
   await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
   await expect(page.locator('.explore-route-summary')).toContainText('Descent16 ft');
   await expect(page.getByLabel(/Climbing, grade \+2\.0%/).first()).toBeVisible();
