@@ -406,6 +406,11 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   };
   let commentaryRequestCount = 0;
   let quickRoute = false;
+  let staleRouteFulfilled = false;
+  let releaseStaleRoute: (() => void) | null = null;
+  const staleRouteGate = new Promise<void>((resolve) => {
+    releaseStaleRoute = resolve;
+  });
   const exploreRouteRequests: Array<{
     origin: { lat: number; lng: number };
     destination: { lat: number; lng: number };
@@ -427,14 +432,18 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     const request = route.request().postDataJSON() as typeof exploreRouteRequests[number];
     exploreRouteRequests.push(request);
     const requestNumber = exploreRouteRequests.length;
-    const firstRoute = requestNumber === 1;
-    const originLabel = firstRoute
-      ? 'Demo Start'
+    const staleVeniceRoute = request.destinationLabel === '33.985, -118.469';
+    const sanFranciscoRoute = request.destinationLabel === '37.7955, -122.3937';
+    if (staleVeniceRoute) {
+      await staleRouteGate;
+    }
+    const originLabel = sanFranciscoRoute
+      ? 'Union Square, San Francisco, CA, USA'
       : request.originLabel === 'Quick Finish' || request.originLabel === 'Quick Start'
         ? request.originLabel
         : 'Quick Start';
-    const destinationLabel = firstRoute
-      ? 'Demo Finish'
+    const destinationLabel = sanFranciscoRoute
+      ? 'San Francisco Ferry Building, San Francisco, CA, USA'
       : request.destinationLabel === 'Quick Finish' || request.destinationLabel === 'Quick Start'
         ? request.destinationLabel
         : 'Quick Finish';
@@ -456,6 +465,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
         },
       }),
     });
+    if (staleVeniceRoute) {
+      staleRouteFulfilled = true;
+    }
   });
   await page.route('**/api/commentary/{line,speech,pre-race}', async (route) => {
     commentaryRequestCount += 1;
@@ -634,11 +646,20 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(destinationSuggestion).toBeVisible();
   await destinationSuggestion.click();
   await expect(destinationInput).toHaveValue(/Oracle Park/);
-  await originInput.fill('38.5, -120.2');
-  await destinationInput.fill('43.252, -126.453');
+  await originInput.fill('37.7879, -122.4075');
+  await destinationInput.fill('33.985, -118.469');
+  await page.getByRole('button', { name: 'Build Explore route' }).click();
+  await expect.poll(() => exploreRouteRequests.length).toBe(1);
+  await destinationInput.fill('37.7955, -122.3937');
+  await expect(page.getByText('Location changed. Select Build Explore route to update the map.'))
+    .toBeVisible();
+  releaseStaleRoute?.();
+  await expect.poll(() => staleRouteFulfilled).toBe(true);
+  await expect(page.locator('.explore-route-summary')).toHaveCount(0);
   await page.getByRole('button', { name: 'Build Explore route' }).click();
 
-  await expect(page.locator('.explore-route-summary > div strong')).toHaveText('Demo Finish');
+  await expect(page.locator('.explore-route-summary > div strong'))
+    .toHaveText('San Francisco Ferry Building, San Francisco, CA, USA');
   await expect(page.getByText('0.62 mi', { exact: true })).toBeVisible();
   const distanceUnits = page.getByRole('group', { name: 'Explore distance unit' });
   await expect(distanceUnits.getByRole('button', { name: 'Show distances in miles' }))
@@ -650,7 +671,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.getByRole('button', { name: 'Start Explore ride' }).click();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
-  await expect(page.getByLabel('Destination: Demo Finish')).toBeVisible();
+  await expect(page.getByLabel('Destination: San Francisco Ferry Building, San Francisco, CA, USA'))
+    .toBeVisible();
   await expect(page.getByRole('button', { name: 'Reset', exact: true })).toBeHidden();
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const followZoom = page.getByLabel('Follow camera zoom');

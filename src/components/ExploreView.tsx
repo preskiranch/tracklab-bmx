@@ -250,6 +250,7 @@ export function ExploreView({
   const [streetViewLandmark, setStreetViewLandmark] = useState<GoogleLandmarkDetails | null>(null);
   const appliedRoomSessionRef = useRef<string | null>(null);
   const landmarkRequestRef = useRef(0);
+  const routeRequestRef = useRef(0);
   const scheduledStartTimerRef = useRef<number | null>(null);
   const destinationInputRef = useRef<HTMLInputElement | null>(null);
   const latestRidersRef = useRef<ReturnType<typeof useExploreRide>['riders']>([]);
@@ -376,6 +377,7 @@ export function ExploreView({
   }, [demoMode, onDemoRideStatusChange, ride.status]);
 
   useEffect(() => () => {
+    routeRequestRef.current += 1;
     stopBikeRaceAudio();
     onFullscreenChange(false);
     if (scheduledStartTimerRef.current != null) {
@@ -461,6 +463,7 @@ export function ExploreView({
       setRouteMessage('This browser does not provide current location.');
       return;
     }
+    routeRequestRef.current += 1;
     setRouteStatus('loading');
     setRouteMessage('Finding your current location…');
     navigator.geolocation.getCurrentPosition(
@@ -492,6 +495,14 @@ export function ExploreView({
     setRouteMessage('');
   };
 
+  const markRouteInputsChanged = () => {
+    routeRequestRef.current += 1;
+    if (routeStatus === 'loading' || route) {
+      setRouteStatus('idle');
+      setRouteMessage('Location changed. Select Build Explore route to update the map.');
+    }
+  };
+
   const createRoute = async () => {
     if (!canChooseRoute) {
       return;
@@ -507,6 +518,8 @@ export function ExploreView({
       return;
     }
 
+    const requestId = routeRequestRef.current + 1;
+    routeRequestRef.current = requestId;
     setRouteStatus('loading');
     setRouteMessage('Google is calculating the route…');
     try {
@@ -520,12 +533,23 @@ export function ExploreView({
       const nextRoute = await fetchExploreRoute({
         origin: origin.point,
         destination: destination.point,
-        originLabel: selectedOrigin?.label || origin.label || originText.trim(),
-        destinationLabel: destination.label || destinationText.trim(),
+        originLabel: selectedOrigin?.label
+          || selectedOriginPrediction?.label
+          || origin.label
+          || originText.trim(),
+        destinationLabel: selectedDestinationPrediction?.label
+          || destination.label
+          || destinationText.trim(),
         travelMode,
       });
+      if (routeRequestRef.current !== requestId) {
+        return;
+      }
       applyExploreRoute(nextRoute);
     } catch (error) {
+      if (routeRequestRef.current !== requestId) {
+        return;
+      }
       setRouteStatus('error');
       setRouteMessage(error instanceof Error ? error.message : 'The route could not be created.');
     }
@@ -536,6 +560,8 @@ export function ExploreView({
       return;
     }
 
+    const requestId = routeRequestRef.current + 1;
+    routeRequestRef.current = requestId;
     setRouteStatus('loading');
     setRouteMessage('Google is reversing the completed route…');
     try {
@@ -546,6 +572,9 @@ export function ExploreView({
         destinationLabel: route.originLabel,
         travelMode: route.travelMode,
       });
+      if (routeRequestRef.current !== requestId) {
+        return;
+      }
       setSelectedOrigin({ point: route.destination, label: route.destinationLabel });
       setSelectedOriginPrediction(null);
       setOriginText(route.destinationLabel);
@@ -555,6 +584,9 @@ export function ExploreView({
       resetPlaceAutocompleteSession();
       applyExploreRoute(nextRoute);
     } catch (error) {
+      if (routeRequestRef.current !== requestId) {
+        return;
+      }
       setRouteStatus('error');
       setRouteMessage(error instanceof Error ? error.message : 'The reverse route could not be created.');
     }
@@ -565,6 +597,7 @@ export function ExploreView({
       return;
     }
 
+    routeRequestRef.current += 1;
     setSelectedOrigin({ point: route.destination, label: route.destinationLabel });
     setSelectedOriginPrediction(null);
     setOriginText(route.destinationLabel);
@@ -739,6 +772,7 @@ export function ExploreView({
                   disabled={!canChooseRoute}
                   onChange={(event) => {
                     const value = event.target.value;
+                    markRouteInputsChanged();
                     if (selectedOriginPrediction && selectedOriginPrediction.label !== value) {
                       resetPlaceAutocompleteSession();
                     }
@@ -762,6 +796,7 @@ export function ExploreView({
                       role="option"
                       aria-selected={selectedOriginPrediction?.id === prediction.id}
                       onClick={() => {
+                        markRouteInputsChanged();
                         setSelectedOrigin(null);
                         setSelectedOriginPrediction(prediction);
                         setOriginText(prediction.label);
@@ -793,6 +828,7 @@ export function ExploreView({
                   disabled={!canChooseRoute}
                   onChange={(event) => {
                     const value = event.target.value;
+                    markRouteInputsChanged();
                     if (selectedDestinationPrediction && selectedDestinationPrediction.label !== value) {
                       resetPlaceAutocompleteSession();
                     }
@@ -815,6 +851,7 @@ export function ExploreView({
                       role="option"
                       aria-selected={selectedDestinationPrediction?.id === prediction.id}
                       onClick={() => {
+                        markRouteInputsChanged();
                         setSelectedDestinationPrediction(prediction);
                         setDestinationText(prediction.label);
                       }}
@@ -832,7 +869,12 @@ export function ExploreView({
                 className={travelMode === 'bicycle' ? 'selected' : ''}
                 type="button"
                 disabled={!canChooseRoute}
-                onClick={() => setTravelMode('bicycle')}
+                onClick={() => {
+                  if (travelMode !== 'bicycle') {
+                    markRouteInputsChanged();
+                    setTravelMode('bicycle');
+                  }
+                }}
               >
                 <Bike size={16} /> Bicycle
               </button>
@@ -840,7 +882,12 @@ export function ExploreView({
                 className={travelMode === 'drive' ? 'selected' : ''}
                 type="button"
                 disabled={!canChooseRoute}
-                onClick={() => setTravelMode('drive')}
+                onClick={() => {
+                  if (travelMode !== 'drive') {
+                    markRouteInputsChanged();
+                    setTravelMode('drive');
+                  }
+                }}
               >
                 <Car size={16} /> Car route
               </button>
