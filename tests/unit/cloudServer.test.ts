@@ -172,6 +172,19 @@ describe('cloud API trust boundaries', () => {
       }),
     });
     expect(unauthorizedRoute.status).toBe(401);
+
+    const unauthorizedElevation = await fetch(`${baseUrl}/api/explore/elevation`, {
+      method: 'POST',
+      headers: {
+        Origin: baseUrl,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+        distanceMeters: 1_000,
+      }),
+    });
+    expect(unauthorizedElevation.status).toBe(401);
   });
 
   it('protects production metrics and exposes redacted process telemetry to operators', async () => {

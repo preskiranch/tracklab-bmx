@@ -643,7 +643,7 @@ async function exploreElevationForRoute(encodedPolyline, distanceMeters, signal)
     const status = sanitizeText(error?.code, 'unavailable', 32);
     exploreElevationCache.set(cacheKey, {
       profile: null,
-      expiresAt: Date.now() + 5 * 60 * 1000,
+      expiresAt: Date.now() + 15 * 1000,
     });
     cloudTelemetry.increment('tracklab_explore_elevation_requests_total', { status });
     console.warn(`Explore elevation unavailable (${status}).`);
@@ -3918,6 +3918,52 @@ async function serveStatic(request, response) {
       travelMode: route.travelMode,
     });
     writeJson(response, 201, { route });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/explore/elevation') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    if (membershipForAccount(session.user).tier !== 'racer') {
+      writeJson(response, 403, { error: 'Racer access is required for Explore rides.' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, exploreRouteRateLimiter, 120, 'explore-elevation')) {
+      return;
+    }
+
+    const payload = await readJsonBody(request, 130_000);
+    const encodedPolyline = typeof payload?.encodedPolyline === 'string'
+      ? payload.encodedPolyline.trim().slice(0, 120_000)
+      : '';
+    const distanceMeters = finiteNumber(payload?.distanceMeters, 0);
+    if (!encodedPolyline || distanceMeters <= 1 || distanceMeters > 2_000_000) {
+      writeJson(response, 400, { error: 'A valid Explore route is required for elevation recovery.' });
+      return;
+    }
+
+    const profile = await exploreElevationForRoute(
+      encodedPolyline,
+      distanceMeters,
+      signalWithTimeout(requestAbortSignal(request, response), 15_000),
+    );
+    if (!profile?.samples || profile.samples.length < 2) {
+      writeJson(response, 503, { error: 'Route elevation is temporarily unavailable. Level-ground physics remain active.' });
+      return;
+    }
+    writeJson(response, 200, {
+      elevation: {
+        elevationSamples: profile.samples,
+        elevationGainMeters: profile.gainMeters,
+        elevationLossMeters: profile.lossMeters,
+      },
+    });
     return;
   }
 

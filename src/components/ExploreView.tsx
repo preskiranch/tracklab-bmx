@@ -42,7 +42,11 @@ import {
   exploreRemoteStateFreshMs,
   type ExploreCameraFollowPosition,
 } from '../lib/explore';
-import { fetchExploreRoute } from '../lib/exploreRoutes';
+import {
+  fetchExploreElevationProfile,
+  fetchExploreRoute,
+  type ExploreElevationProfile,
+} from '../lib/exploreRoutes';
 import {
   exploreElevationAtMeter,
   exploreGradeAtMeter,
@@ -144,6 +148,10 @@ type ExploreLandmarkPopup = {
   error: string;
   placeId: string;
   status: 'loading' | 'ready' | 'error';
+};
+
+type RecoveredExploreElevation = ExploreElevationProfile & {
+  routeId: string;
 };
 
 function formatDuration(seconds: number) {
@@ -299,6 +307,8 @@ export function ExploreView({
   const [mapRenderer, setMapRenderer] = useState<ExploreMapRenderer>(savedExploreMapRenderer);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
+  const [elevationRecoveryStatus, setElevationRecoveryStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [recoveredElevation, setRecoveredElevation] = useState<RecoveredExploreElevation | null>(null);
   const [selectedLandmark, setSelectedLandmark] = useState<ExploreLandmarkPopup | null>(null);
   const [streetViewLandmark, setStreetViewLandmark] = useState<GoogleLandmarkDetails | null>(null);
   const appliedRoomSessionRef = useRef<string | null>(null);
@@ -308,9 +318,20 @@ export function ExploreView({
   const destinationInputRef = useRef<HTMLInputElement | null>(null);
   const latestRidersRef = useRef<ReturnType<typeof useExploreRide>['riders']>([]);
   const previousRideStatusRef = useRef<ReturnType<typeof useExploreRide>['status']>('ready');
-  const route = playMode === 'multiplayer'
+  const sourceRoute = playMode === 'multiplayer'
     ? currentRoom?.exploreRoute ?? null
     : localRoute;
+  const route = useMemo(() => {
+    if (!sourceRoute || recoveredElevation?.routeId !== sourceRoute.id) {
+      return sourceRoute;
+    }
+    return {
+      ...sourceRoute,
+      elevationSamples: recoveredElevation.elevationSamples,
+      elevationGainMeters: recoveredElevation.elevationGainMeters,
+      elevationLossMeters: recoveredElevation.elevationLossMeters,
+    };
+  }, [recoveredElevation, sourceRoute]);
   const effectiveMapRenderer = developerMode ? mapRenderer : 'google-satellite';
   const localClientId = currentUserId ?? 'local';
   const ride = useExploreRide({
@@ -349,8 +370,7 @@ export function ExploreView({
     [activeRemoteRiders, ride.riders],
   );
   const groups = useMemo(() => groupExploreRiders(visibleRiders), [visibleRiders]);
-  const elevationAvailable = (route?.elevationSamples?.length ?? 0) >= 2
-    && effectiveMapRenderer !== 'apple-satellite';
+  const elevationAvailable = (route?.elevationSamples?.length ?? 0) >= 2;
   const liveDeviceByRider = useMemo(() => {
     const next = new Map<string, number>();
     Object.entries(liveRiderAssignments).forEach(([deviceId, riderId]) => {
@@ -421,6 +441,54 @@ export function ExploreView({
     closeLandmark();
     closeStreetView();
   }, [closeLandmark, closeStreetView, route?.id]);
+
+  useEffect(() => {
+    if (!sourceRoute) {
+      setRecoveredElevation(null);
+      setElevationRecoveryStatus('idle');
+      return undefined;
+    }
+    if ((sourceRoute.elevationSamples?.length ?? 0) >= 2) {
+      setRecoveredElevation(null);
+      setElevationRecoveryStatus('ready');
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    setRecoveredElevation(null);
+    setElevationRecoveryStatus('loading');
+    void fetchExploreElevationProfile(sourceRoute, controller.signal)
+      .then((profile) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        const recovered = { ...profile, routeId: sourceRoute.id };
+        const enrichedRoute = { ...sourceRoute, ...profile };
+        setRecoveredElevation(recovered);
+        setElevationRecoveryStatus('ready');
+        if (playMode === 'local') {
+          setLocalRoute(enrichedRoute);
+        } else if (roomHost) {
+          onSyncRoute(enrichedRoute);
+        }
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+          return;
+        }
+        setElevationRecoveryStatus('error');
+      });
+
+    return () => controller.abort();
+  }, [
+    onSyncRoute,
+    playMode,
+    roomHost,
+    sourceRoute?.distanceMeters,
+    sourceRoute?.elevationSamples?.length,
+    sourceRoute?.encodedPolyline,
+    sourceRoute?.id,
+  ]);
 
   useEffect(() => {
     if (effectiveMapRenderer !== 'google-satellite') {
@@ -1131,13 +1199,13 @@ export function ExploreView({
                     <dt>Elevation gain</dt>
                     <dd>{elevationAvailable
                       ? formatExploreElevation(route.elevationGainMeters ?? 0, exploreDistanceUnit)
-                      : 'Unavailable'}</dd>
+                      : elevationRecoveryStatus === 'loading' ? 'Loading…' : 'Unavailable'}</dd>
                   </div>
                   <div>
                     <dt>Descent</dt>
                     <dd>{elevationAvailable
                       ? formatExploreElevation(route.elevationLossMeters ?? 0, exploreDistanceUnit)
-                      : 'Unavailable'}</dd>
+                      : elevationRecoveryStatus === 'loading' ? 'Loading…' : 'Unavailable'}</dd>
                   </div>
                   <div>
                     <dt>View</dt>
@@ -1495,11 +1563,19 @@ export function ExploreView({
                   const slopeLabel = slopeDirection === 'climb'
                     ? 'Climbing'
                     : slopeDirection === 'descent' ? 'Descending' : 'Level';
-                  const recommendedAirSetting = rider.recommendedAirSetting
-                    ?? recommendedExploreAirSetting(gradePercent);
-                  const airInstruction = recommendedAirSetting === 1
-                    ? 'Set air lever to minimum'
-                    : `Set air lever to ${recommendedAirSetting}`;
+                  const recommendedAirSetting = elevationAvailable
+                    ? recommendedExploreAirSetting(gradePercent)
+                    : 1;
+                  const airInstruction = elevationAvailable
+                    ? recommendedAirSetting === 1
+                      ? 'Set air lever to minimum'
+                      : `Set air lever to ${recommendedAirSetting}`
+                    : elevationRecoveryStatus === 'loading'
+                      ? 'Calculating route grade'
+                      : 'Set air lever to minimum';
+                  const gradeStatus = elevationRecoveryStatus === 'loading'
+                    ? 'Grade loading…'
+                    : 'Grade unavailable · Level-ground physics';
                   return (
                     <article style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
                       {rider.photoUrl
@@ -1515,25 +1591,25 @@ export function ExploreView({
                           {speedUnitLabel(speedUnit)}
                         </span>
                         <span>Avg {exploreAverageSpeedMph(rider.distanceMeters, ride.elapsedMs).toFixed(1)} MPH</span>
-                        {elevationMeters != null && (
-                          <>
-                            <span
-                              role="status"
-                              aria-live="polite"
-                              aria-label={`Recommended Wattbike air setting ${recommendedAirSetting}. ${airInstruction}.`}
-                            >
-                              <strong style={{ color: rider.accent, fontSize: 16 }}>
-                                AIR {recommendedAirSetting}
-                              </strong>
-                              {' · '}
-                              {airInstruction}
-                            </span>
-                            <span aria-label={`${slopeLabel}, grade ${formatExploreGrade(gradePercent)}`}>
-                              {formatExploreElevation(elevationMeters, exploreDistanceUnit)}
-                              {' · '}
-                              {formatExploreGrade(gradePercent)} {slopeLabel}
-                            </span>
-                          </>
+                        <span
+                          role="status"
+                          aria-live="polite"
+                          aria-label={`Recommended Wattbike air setting ${recommendedAirSetting}. ${airInstruction}.`}
+                        >
+                          <strong style={{ color: rider.accent, fontSize: 16 }}>
+                            AIR {recommendedAirSetting}
+                          </strong>
+                          {' · '}
+                          {airInstruction}
+                        </span>
+                        {elevationMeters != null ? (
+                          <span aria-label={`${slopeLabel}, grade ${formatExploreGrade(gradePercent)}`}>
+                            {formatExploreElevation(elevationMeters, exploreDistanceUnit)}
+                            {' · '}
+                            {formatExploreGrade(gradePercent)} {slopeLabel}
+                          </span>
+                        ) : (
+                          <span aria-label={gradeStatus}>{gradeStatus}</span>
                         )}
                       </div>
                       <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>

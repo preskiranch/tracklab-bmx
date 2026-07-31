@@ -407,6 +407,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   let commentaryRequestCount = 0;
   let quickRoute = false;
   let appleMapConfigured = false;
+  let elevationRecoveryRequests = 0;
   let staleRouteFulfilled = false;
   let releaseStaleRoute: (() => void) | null = null;
   const staleRouteGate = new Promise<void>((resolve) => {
@@ -427,6 +428,28 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ user: authUser }),
+    });
+  });
+  await page.route('**/api/explore/elevation', async (route) => {
+    const request = route.request().postDataJSON() as {
+      distanceMeters: number;
+      encodedPolyline: string;
+    };
+    elevationRecoveryRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        elevation: {
+          elevationSamples: [
+            { distanceMeters: 0, elevationMeters: 10 },
+            { distanceMeters: request.distanceMeters / 2, elevationMeters: 20 },
+            { distanceMeters: request.distanceMeters, elevationMeters: 15 },
+          ],
+          elevationGainMeters: 10,
+          elevationLossMeters: 5,
+        },
+      }),
     });
   });
   await page.route('**/api/explore/route', async (route) => {
@@ -463,18 +486,14 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
           distanceMeters: routeDistanceMeters,
           durationSeconds: quickRoute ? 1 : 300,
           encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
-          elevationSamples: quickRoute
-            ? [
+          ...(quickRoute ? {
+            elevationSamples: [
               { distanceMeters: 0, elevationMeters: 10 },
               { distanceMeters: routeDistanceMeters, elevationMeters: 10 },
-            ]
-            : [
-              { distanceMeters: 0, elevationMeters: 10 },
-              { distanceMeters: routeDistanceMeters / 2, elevationMeters: 20 },
-              { distanceMeters: routeDistanceMeters, elevationMeters: 15 },
             ],
-          elevationGainMeters: quickRoute ? 0 : 10,
-          elevationLossMeters: quickRoute ? 0 : 5,
+            elevationGainMeters: 0,
+            elevationLossMeters: 0,
+          } : {}),
           createdAt: Date.now(),
         },
       }),
@@ -781,6 +800,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
 
   await expect(page.locator('.explore-route-summary > div strong'))
     .toHaveText('San Francisco Ferry Building, San Francisco, CA, USA');
+  await expect.poll(() => elevationRecoveryRequests).toBe(1);
   await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
   await expect(page.locator('.explore-route-summary')).toContainText('Descent16 ft');
   await expect(page.getByLabel(/Climbing, grade \+2\.0%/).first()).toBeVisible();
@@ -790,7 +810,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await mapRenderer.getByRole('button', { name: 'Apple Satellite' }).click();
   await expect(page.getByText(/Apple Satellite is not configured yet/i)).toBeVisible();
   await expect(page.locator('.explore-route-summary')).toContainText('Apple satellite');
-  await expect(page.locator('.explore-route-summary')).toContainText('Elevation gainUnavailable');
+  await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
   appleMapConfigured = true;
   await mapRenderer.getByRole('button', { name: 'Google Satellite' }).click();
   await expect(page.locator('.explore-route-summary')).toContainText('Google satellite');
