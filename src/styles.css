@@ -8683,11 +8683,11 @@ input:focus {
 
 .explore-rider-strip article {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  min-height: 58px;
-  padding: 8px;
+  gap: 9px;
+  min-height: 88px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-left: 4px solid var(--player-color);
   border-radius: 8px;
@@ -8698,38 +8698,38 @@ input:focus {
 .explore-rider-initials {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border: 2px solid var(--player-color);
   border-radius: 50%;
   background: #101823;
   color: #ffffff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
   object-fit: cover;
 }
 
 .explore-rider-strip article > div {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
 .explore-rider-strip article strong {
-  overflow: hidden;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  font-size: 14px;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .explore-rider-strip article span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .explore-rider-strip article > b {
   color: var(--player-color);
-  font-size: 14px;
+  font-size: 18px;
 }
 
 .explore-rider-strip > p {
@@ -8993,13 +8993,13 @@ input:focus {
   }
 
   .explore-rider-strip article {
-    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
   }
 
   .explore-rider-strip img,
   .explore-rider-initials {
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
   }
 
   .explore-controls {
@@ -9260,7 +9260,7 @@ input:focus {
   right: 12px;
   bottom: 12px;
   left: 12px;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: repeat(4, minmax(190px, 1fr));
   padding: 7px;
   overflow-x: auto;
   border: 1px solid rgba(255, 255, 255, 0.19);

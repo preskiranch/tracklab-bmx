@@ -1522,7 +1522,7 @@ export function ExploreView({
                               aria-live="polite"
                               aria-label={`Recommended Wattbike air setting ${recommendedAirSetting}. ${airInstruction}.`}
                             >
-                              <strong style={{ color: rider.accent, fontSize: 14 }}>
+                              <strong style={{ color: rider.accent, fontSize: 16 }}>
                                 AIR {recommendedAirSetting}
                               </strong>
                               {' · '}
