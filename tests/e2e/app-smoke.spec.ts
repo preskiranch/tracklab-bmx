@@ -882,7 +882,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect.poll(() => page.evaluate(() => Boolean(
     (window as typeof window & { __tracklabAppleMapCreated?: boolean }).__tracklabAppleMapCreated,
   ))).toBe(true);
-  await mapRenderer.getByRole('button', { name: 'Google Satellite' }).click();
+  await mapRenderer.getByRole('button', { name: 'Google 3D' }).click();
+  await expect(page.locator('.explore-route-summary')).toContainText('Google 3D');
   await expect(page.getByText('0.62 mi', { exact: true })).toBeVisible();
   const distanceUnits = page.getByRole('group', { name: 'Explore distance unit' });
   await expect(distanceUnits.getByRole('button', { name: 'Show distances in miles' }))
@@ -936,7 +937,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByRole('button', { name: 'Hide street names and landmarks' }))
     .toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Labeled satellite', { exact: true })).toHaveText('Labeled satellite');
-  await expect(page.getByText(/Landmarks are interactive/i)).toBeVisible();
+  await expect(page.getByText(/Landmarks are interactive.*Street View.*official website/i)).toBeVisible();
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
       __tracklabExploreMapClickHandlers?: unknown[];
@@ -962,6 +963,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(landmarkDialog.getByRole('heading', { name: 'Lagoon Valley Park' })).toBeVisible();
   await expect(landmarkDialog).toContainText('1 Pena Adobe Road');
   await expect(landmarkDialog).toContainText('4.7');
+  await expect(landmarkDialog.getByRole('link', { name: /Official website/i }))
+    .toHaveAttribute('href', 'https://www.ci.vacaville.ca.us/government/parks-and-recreation');
   await expect(landmarkDialog.getByRole('link', { name: /Open in Google Maps/i })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   expect(await page.evaluate(() => (

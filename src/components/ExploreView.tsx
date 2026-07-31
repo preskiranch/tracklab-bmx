@@ -422,6 +422,14 @@ export function ExploreView({
     setStreetViewLandmark(landmark);
   }, [closeLandmark]);
 
+  const toggleInteractiveLandmarks = useCallback(() => {
+    const nextVisible = !showMapLabels;
+    if (nextVisible && developerMode && mapRenderer !== 'google-satellite') {
+      setMapRenderer('google-satellite');
+    }
+    setShowMapLabels(nextVisible);
+  }, [developerMode, mapRenderer, showMapLabels]);
+
   const selectLandmark = useCallback((placeId: string) => {
     const requestId = landmarkRequestRef.current + 1;
     landmarkRequestRef.current = requestId;
@@ -1462,7 +1470,7 @@ export function ExploreView({
                   title={showMapLabels
                     ? 'Hide street names and landmarks'
                     : 'Show street names and landmarks'}
-                  onClick={() => setShowMapLabels((visible) => !visible)}
+                  onClick={toggleInteractiveLandmarks}
                 >
                   <Landmark size={18} />
                   <span>{showMapLabels ? 'Labels on' : 'Street names'}</span>
@@ -1500,7 +1508,7 @@ export function ExploreView({
                 && !streetViewLandmark && (
                 <div className="explore-landmark-hint" role="status">
                   <Landmark size={16} />
-                  <span><strong>Landmarks are interactive.</strong> Tap an icon for details—the ride keeps moving.</span>
+                  <span><strong>Landmarks are interactive.</strong> Tap an icon for Street View, its official website, and details—the ride keeps moving.</span>
                 </div>
               )}
 
@@ -1623,7 +1631,7 @@ export function ExploreView({
                               target="_blank"
                               rel="noreferrer"
                             >
-                              Visit website <ExternalLink size={15} />
+                              Official website <ExternalLink size={15} />
                             </a>
                           )}
                           <a
