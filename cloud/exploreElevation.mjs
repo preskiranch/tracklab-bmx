@@ -1,5 +1,5 @@
 const maximumElevationSamples = 256;
-const targetElevationSpacingMeters = 50;
+const targetElevationSpacingMeters = 20;
 const maximumEncodedPathLength = 12_000;
 const maximumFallbackPathPoints = 128;
 

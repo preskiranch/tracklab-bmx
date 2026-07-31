@@ -2,6 +2,22 @@ import type { ExploreElevationSample } from '../types';
 
 export type ExploreSlopeDirection = 'climb' | 'descent' | 'level';
 
+// Market-like level terrain anchors air 1; Bradford Street-scale climbing reaches air 10.
+const exploreAirSettingMinimumGrades = [
+  Number.NEGATIVE_INFINITY,
+  1,
+  3,
+  5,
+  7,
+  9,
+  11,
+  13,
+  15,
+  20,
+] as const;
+
+export const exploreAirSettingHysteresisPercent = 0.3;
+
 function sortedElevationSamples(samples: ExploreElevationSample[] | null | undefined) {
   return [...(samples ?? [])]
     .filter((sample) => Number.isFinite(sample.distanceMeters) && Number.isFinite(sample.elevationMeters))
@@ -64,6 +80,36 @@ export function exploreSlopeDirection(gradePercent: number): ExploreSlopeDirecti
     return 'descent';
   }
   return 'level';
+}
+
+export function recommendedExploreAirSetting(gradePercent: number) {
+  const safeGrade = Number.isFinite(gradePercent) ? gradePercent : 0;
+  for (let index = exploreAirSettingMinimumGrades.length - 1; index >= 1; index -= 1) {
+    if (safeGrade >= exploreAirSettingMinimumGrades[index]) {
+      return index + 1;
+    }
+  }
+  return 1;
+}
+
+export function stabilizeExploreAirSetting(
+  currentSetting: number,
+  gradePercent: number,
+  hysteresisPercent = exploreAirSettingHysteresisPercent,
+) {
+  const current = Math.max(1, Math.min(10, Math.round(
+    Number.isFinite(currentSetting) ? currentSetting : 1,
+  )));
+  const safeGrade = Number.isFinite(gradePercent) ? gradePercent : 0;
+  const target = recommendedExploreAirSetting(safeGrade);
+  const buffer = Math.max(0, Number.isFinite(hysteresisPercent) ? hysteresisPercent : 0);
+  if (target > current) {
+    return Math.max(current, recommendedExploreAirSetting(safeGrade - buffer));
+  }
+  if (target < current) {
+    return Math.min(current, recommendedExploreAirSetting(safeGrade + buffer));
+  }
+  return current;
 }
 
 export function formatExploreElevation(meters: number, unit: 'mi' | 'km') {

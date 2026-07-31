@@ -779,6 +779,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
   await expect(page.locator('.explore-route-summary')).toContainText('Descent16 ft');
   await expect(page.getByLabel(/Climbing, grade \+2\.0%/).first()).toBeVisible();
+  await expect(page.getByLabel(
+    'Recommended Wattbike air setting 2. Set air lever to 2.',
+  ).first()).toBeVisible();
   await mapRenderer.getByRole('button', { name: 'Apple Satellite' }).click();
   await expect(page.getByText(/Apple Satellite is not configured yet/i)).toBeVisible();
   await expect(page.locator('.explore-route-summary')).toContainText('Apple satellite');

@@ -9,7 +9,7 @@ import {
 describe('cloud Explore elevation sampling', () => {
   it('uses route-sized sampling within Google limits', () => {
     expect(exploreElevationSampleCount(1)).toBe(2);
-    expect(exploreElevationSampleCount(1_000)).toBe(21);
+    expect(exploreElevationSampleCount(1_000)).toBe(51);
     expect(exploreElevationSampleCount(1_000_000)).toBe(256);
     expect(exploreElevationPathParameter('_p~iF~ps|U')).toBe('enc:_p~iF~ps|U');
   });
@@ -44,7 +44,7 @@ describe('cloud Explore elevation sampling', () => {
 
     const requestedUrl = String(fetchImpl.mock.calls[0]?.[0]);
     expect(requestedUrl).toContain('path=enc%3A_p%7EiF%7Eps%7CU');
-    expect(requestedUrl).toContain('samples=3');
+    expect(requestedUrl).toContain('samples=6');
     expect(requestedUrl).toContain('key=server-secret-key');
     expect(JSON.stringify(profile)).not.toContain('server-secret-key');
   });

@@ -170,6 +170,7 @@ export type ExploreRider = {
   cadence: number | null;
   watts: number;
   signal: number;
+  recommendedAirSetting?: number;
   finishedAt: number | null;
   at: number;
 };

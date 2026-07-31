@@ -8,7 +8,11 @@ import {
   exploreLiveDriveActive,
   stepExploreLiveVelocity,
 } from '../lib/explore';
-import { exploreGradeAtMeter } from '../lib/exploreElevation';
+import {
+  exploreGradeAtMeter,
+  recommendedExploreAirSetting,
+  stabilizeExploreAirSetting,
+} from '../lib/exploreElevation';
 import type {
   BikeSample,
   ExploreRider,
@@ -28,8 +32,16 @@ type UseExploreRideOptions = {
 
 const exploreSampleFreshMs = 3_000;
 
-function initialExploreRiders(clientId: string, players: PlayerSlot[]): ExploreRider[] {
+function initialExploreRiders(
+  clientId: string,
+  players: PlayerSlot[],
+  route?: ExploreRoute | null,
+): ExploreRider[] {
   const at = Date.now();
+  const initialAirSetting = recommendedExploreAirSetting(exploreGradeAtMeter(
+    route?.elevationSamples,
+    0,
+  ));
   return players.map((player) => ({
     id: `${clientId}:${player.id}`,
     clientId,
@@ -43,6 +55,7 @@ function initialExploreRiders(clientId: string, players: PlayerSlot[]): ExploreR
     cadence: null,
     watts: 0,
     signal: 0,
+    recommendedAirSetting: initialAirSetting,
     finishedAt: null,
     at,
   }));
@@ -56,7 +69,7 @@ export function useExploreRide({
   demoMode = false,
 }: UseExploreRideOptions) {
   const [status, setStatus] = useState<ExploreRideStatus>('ready');
-  const [riders, setRiders] = useState<ExploreRider[]>(() => initialExploreRiders(clientId, players));
+  const [riders, setRiders] = useState<ExploreRider[]>(() => initialExploreRiders(clientId, players, route));
   const statusRef = useRef(status);
   const playersRef = useRef(players);
   const samplesRef = useRef(samplesByDevice);
@@ -81,7 +94,7 @@ export function useExploreRide({
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = 0;
     activeElapsedMsRef.current = 0;
-    setRiders(initialExploreRiders(clientId, playersRef.current));
+    setRiders(initialExploreRiders(clientId, playersRef.current, routeRef.current));
     setStatus('ready');
   }, [clientId]);
 
@@ -92,7 +105,7 @@ export function useExploreRide({
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = performance.now();
     activeElapsedMsRef.current = Math.max(0, Date.now() - startedAt);
-    setRiders(initialExploreRiders(clientId, playersRef.current));
+    setRiders(initialExploreRiders(clientId, playersRef.current, routeRef.current));
     setStatus('riding');
     return true;
   }, [clientId]);
@@ -154,6 +167,10 @@ export function useExploreRide({
           currentRoute.elevationSamples,
           rider.distanceMeters,
         );
+        const recommendedAirSetting = stabilizeExploreAirSetting(
+          rider.recommendedAirSetting ?? 1,
+          gradePercent,
+        );
         const velocityMps = demoMotion
           ? (demoMotion.pedaling ? pedalingVelocityMps : rider.velocityMps)
           : stepExploreLiveVelocity(
@@ -181,6 +198,7 @@ export function useExploreRide({
           signal: demoMotion
             ? 0.96
             : sampleIsFresh ? Math.max(0, Math.min(1, sample?.signal ?? 0)) : 0,
+          recommendedAirSetting,
           finishedAt: finished ? rider.finishedAt ?? now : null,
           at: now,
         };

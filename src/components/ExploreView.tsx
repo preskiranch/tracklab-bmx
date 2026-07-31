@@ -49,6 +49,7 @@ import {
   exploreSlopeDirection,
   formatExploreElevation,
   formatExploreGrade,
+  recommendedExploreAirSetting,
 } from '../lib/exploreElevation';
 import {
   fetchGoogleLandmarkDetails,
@@ -1494,6 +1495,11 @@ export function ExploreView({
                   const slopeLabel = slopeDirection === 'climb'
                     ? 'Climbing'
                     : slopeDirection === 'descent' ? 'Descending' : 'Level';
+                  const recommendedAirSetting = rider.recommendedAirSetting
+                    ?? recommendedExploreAirSetting(gradePercent);
+                  const airInstruction = recommendedAirSetting === 1
+                    ? 'Set air lever to minimum'
+                    : `Set air lever to ${recommendedAirSetting}`;
                   return (
                     <article style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
                       {rider.photoUrl
@@ -1510,11 +1516,24 @@ export function ExploreView({
                         </span>
                         <span>Avg {exploreAverageSpeedMph(rider.distanceMeters, ride.elapsedMs).toFixed(1)} MPH</span>
                         {elevationMeters != null && (
-                          <span aria-label={`${slopeLabel}, grade ${formatExploreGrade(gradePercent)}`}>
-                            {formatExploreElevation(elevationMeters, exploreDistanceUnit)}
-                            {' · '}
-                            {formatExploreGrade(gradePercent)} {slopeLabel}
-                          </span>
+                          <>
+                            <span
+                              role="status"
+                              aria-live="polite"
+                              aria-label={`Recommended Wattbike air setting ${recommendedAirSetting}. ${airInstruction}.`}
+                            >
+                              <strong style={{ color: rider.accent, fontSize: 14 }}>
+                                AIR {recommendedAirSetting}
+                              </strong>
+                              {' · '}
+                              {airInstruction}
+                            </span>
+                            <span aria-label={`${slopeLabel}, grade ${formatExploreGrade(gradePercent)}`}>
+                              {formatExploreElevation(elevationMeters, exploreDistanceUnit)}
+                              {' · '}
+                              {formatExploreGrade(gradePercent)} {slopeLabel}
+                            </span>
+                          </>
                         )}
                       </div>
                       <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>

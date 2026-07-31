@@ -2404,6 +2404,10 @@ function sanitizeExploreState(value, client, room) {
           : Math.max(0, Math.min(300, finiteNumber(rider.cadence, 0))),
         watts: Math.max(0, Math.min(5_000, finiteNumber(rider?.watts, 0))),
         signal: Math.max(0, Math.min(1, finiteNumber(rider?.signal, 0))),
+        recommendedAirSetting: Math.max(
+          1,
+          Math.min(10, Math.round(finiteNumber(rider?.recommendedAirSetting, 1))),
+        ),
         finishedAt: nullableFiniteNumber(rider?.finishedAt),
         at: Date.now(),
       };
