@@ -78,7 +78,6 @@ import type {
   TrackPoint,
 } from '../types';
 import { ExploreMapPanel } from './ExploreMapPanel';
-import { ExploreRoadCyclist } from './ExploreRoadCyclist';
 import { ExploreStreetViewOverlay } from './ExploreStreetViewOverlay';
 import { RiderAvatar } from './RiderAvatar';
 
@@ -1506,7 +1505,7 @@ export function ExploreView({
                       {rider.photoUrl
                         ? <img src={rider.photoUrl} alt={`${rider.name} profile`} />
                         : <span className="explore-rider-initials">{profileInitials(rider.name)}</span>}
-                      <div className="explore-rider-details" style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                      <div>
                         <strong>{rider.name}</strong>
                         <span>
                           {formatExploreDistanceMeters(rider.distanceMeters, exploreDistanceUnit)}
@@ -1538,15 +1537,6 @@ export function ExploreView({
                         )}
                       </div>
                       <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>
-                      <ExploreRoadCyclist
-                        accent={rider.accent}
-                        cadenceRpm={rider.cadence ?? 0}
-                        distanceMeters={rider.distanceMeters}
-                        gradePercent={gradePercent}
-                        name={rider.name}
-                        pedalPhase={rider.pedalPhase ?? 0}
-                        riding={ride.status === 'riding' && rider.finishedAt == null}
-                      />
                     </article>
                   );
                 }) : <p>Connect at least one Wattbike to begin.</p>}

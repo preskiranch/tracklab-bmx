@@ -168,7 +168,6 @@ export type ExploreRider = {
   distanceMeters: number;
   velocityMps: number;
   cadence: number | null;
-  pedalPhase?: number;
   watts: number;
   signal: number;
   recommendedAirSetting?: number;

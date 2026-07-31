@@ -53,7 +53,6 @@ function initialExploreRiders(
     distanceMeters: 0,
     velocityMps: 0,
     cadence: null,
-    pedalPhase: 0,
     watts: 0,
     signal: 0,
     recommendedAirSetting: initialAirSetting,
@@ -179,10 +178,6 @@ export function useExploreRide({
           deltaSeconds,
           gradePercent,
         );
-        const pedaling = demoMotion ? demoMotion.pedaling : liveDriveActive;
-        const pedalPhase = pedaling
-          ? ((rider.pedalPhase ?? 0) + (cadence / 60) * deltaSeconds) % 1
-          : 0;
         const distanceMeters = Math.min(
           currentRoute.distanceMeters,
           rider.distanceMeters + velocityMps * deltaSeconds,
@@ -195,7 +190,6 @@ export function useExploreRide({
           distanceMeters,
           velocityMps: finished ? 0 : velocityMps,
           cadence: demoMotion || sampleIsFresh ? cadence : null,
-          pedalPhase: finished ? 0 : pedalPhase,
           watts: demoMotion
             ? (demoMotion.pedaling ? Math.round(95 + demoMotion.speedMph * 6.5) : 0)
             : liveWatts,

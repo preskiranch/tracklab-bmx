@@ -813,15 +813,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByText('1.00 km', { exact: true })).toBeVisible();
   await distanceUnits.getByRole('button', { name: 'Show distances in miles' }).click();
   await expect(page.locator('.explore-rider-strip article')).toHaveCount(2);
-  const firstRoadCyclist = page.locator('.explore-road-cyclist').first();
-  await expect(firstRoadCyclist).toBeVisible();
-  await expect(firstRoadCyclist).toHaveAttribute('data-pedaling', 'false');
-  await expect(firstRoadCyclist.locator('.explore-road-grade-badge')).toHaveText('+2.0%');
-  await expect(firstRoadCyclist).toHaveClass(/climb/);
   await page.getByRole('button', { name: 'Start Explore the World ride' }).click();
-  await expect(firstRoadCyclist).toHaveAttribute('data-pedaling', 'true');
-  const initialCrankStep = await firstRoadCyclist.getAttribute('data-crank-step');
-  await expect.poll(() => firstRoadCyclist.getAttribute('data-crank-step')).not.toBe(initialCrankStep);
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
   const cameraControls = page.getByLabel('Explore camera controls');

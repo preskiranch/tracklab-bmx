@@ -8709,6 +8709,12 @@ input:focus {
   object-fit: cover;
 }
 
+.explore-rider-strip article > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 .explore-rider-strip article strong {
   overflow: visible;
   font-size: 14px;
