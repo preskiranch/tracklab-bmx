@@ -88,6 +88,7 @@ beforeAll(async () => {
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
+      APPLE_MAPKIT_JS_TOKEN: 'test-domain-restricted-mapkit-token',
       OPENAI_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -598,6 +599,8 @@ describe('cloud API trust boundaries', () => {
 
     const forbidden = await api('/api/admin/map-3d-usage');
     expect(forbidden.status).toBe(403);
+    const appleForbidden = await api('/api/admin/apple-map-config');
+    expect(appleForbidden.status).toBe(403);
 
     const regularCookie = cookie;
     const adminRegistration = await api('/api/auth/register', {
@@ -626,6 +629,13 @@ describe('cloud API trust boundaries', () => {
           trackName: 'North Bay BMX - Napa Valley',
           count: 1,
         }],
+      });
+      const appleConfigResponse = await api('/api/admin/apple-map-config');
+      expect(appleConfigResponse.status).toBe(200);
+      expect(appleConfigResponse.headers.get('cache-control')).toBe('no-store');
+      await expect(appleConfigResponse.json()).resolves.toEqual({
+        configured: true,
+        token: 'test-domain-restricted-mapkit-token',
       });
     } finally {
       cookie = regularCookie;

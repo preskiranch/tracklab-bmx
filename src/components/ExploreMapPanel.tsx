@@ -19,7 +19,7 @@ import type {
 import type { ExploreDistanceUnit, ExploreRoute as ExploreRouteModel, TrackPoint } from '../types';
 import { formatExploreDistanceMeters } from '../units';
 
-type ExploreMapPanelProps = {
+export type ExploreMapPanelProps = {
   group: ExploreViewportGroup;
   route: ExploreRouteModel;
   distanceUnit: ExploreDistanceUnit;
@@ -32,7 +32,7 @@ type ExploreMapPanelProps = {
 
 type ExploreMarkerRefs = Map<string, GoogleMarker>;
 
-function groupPositions(
+export function exploreGroupPositions(
   group: ExploreViewportGroup,
   route: ExploreRouteModel,
   points: TrackPoint[],
@@ -218,7 +218,7 @@ export function ExploreMapPanel({
       }
     });
 
-    const positions = groupPositions(group, route, routePoints);
+    const positions = exploreGroupPositions(group, route, routePoints);
     positions.forEach(({ rider, position }) => {
       let marker = markerRefs.current.get(rider.id);
       if (!marker) {

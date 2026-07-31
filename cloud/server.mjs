@@ -610,6 +610,10 @@ function exploreRoutesApiKey() {
   return String(process.env.GOOGLE_ROUTES_API_KEY || '').trim();
 }
 
+function appleMapKitJsToken() {
+  return String(process.env.APPLE_MAPKIT_JS_TOKEN || '').trim();
+}
+
 async function computeExploreRoute(payload, signal) {
   const key = exploreRoutesApiKey();
   if (!key) {
@@ -4238,6 +4242,29 @@ async function serveStatic(request, response) {
     );
     const usage = await persistence.loadMap3DUsage({ monthlyAllowance });
     writeJson(response, 200, usage, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/admin/apple-map-config') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    if (!session.user.admin && !isAdminEmail(session.user.email)) {
+      writeJson(response, 403, { error: 'Developer access is required.' });
+      return;
+    }
+
+    const token = appleMapKitJsToken();
+    writeJson(response, 200, {
+      configured: Boolean(token),
+      token: token || null,
+    }, { 'Cache-Control': 'no-store' });
     return;
   }
 

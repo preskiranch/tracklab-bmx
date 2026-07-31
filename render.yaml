@@ -12,6 +12,8 @@ services:
         sync: false
       - key: GOOGLE_ROUTES_API_KEY
         sync: false
+      - key: APPLE_MAPKIT_JS_TOKEN
+        sync: false
       - key: VITE_WATTBIKE_BRIDGE_URL
         sync: false
       - key: VITE_TRACKLAB_MULTIPLAYER_URL

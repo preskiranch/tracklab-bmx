@@ -7085,6 +7085,7 @@ export default function App() {
         {appMode === 'explore' ? (
           <Suspense fallback={<div className="explore-loading">Loading Explore…</div>}>
           <ExploreView
+            developerMode={developerUiActive}
             players={playMode === 'multiplayer'
               ? explorePlayers.slice(0, localExploreSeatLimit)
               : explorePlayers}
