@@ -5,9 +5,14 @@ export const exploreRiderGroupingGapMeters = 70;
 export const exploreRemoteStateFreshMs = 8_000;
 export const exploreDemoMinimumCruiseMph = 12;
 export const exploreDemoMaximumCruiseMph = 18;
+export const exploreLiveMinimumDriveWatts = 8;
 const exploreCameraEaseMs = 180;
 const exploreHeadingEaseMs = 240;
 const exploreCameraBaseOffsetMeters = 60;
+const exploreLiveAccelerationMps2 = 2;
+const exploreLivePedalingSlowdownMps2 = 1.2;
+const exploreLiveRollingResistanceMps2 = 0.32;
+const exploreLiveAeroResistance = 0.012;
 
 export type ExploreCameraFollowPosition = 'behind' | 'center' | 'ahead';
 
@@ -57,6 +62,42 @@ export function exploreDemoRiderMotion(
     pedaling,
     speedMph,
   };
+}
+
+export function exploreLiveDriveActive(cadence: number, watts: number) {
+  return Number.isFinite(cadence)
+    && Number.isFinite(watts)
+    && cadence >= 1
+    && watts >= exploreLiveMinimumDriveWatts;
+}
+
+export function stepExploreLiveVelocity(
+  currentVelocityMps: number,
+  targetVelocityMps: number,
+  driveActive: boolean,
+  deltaSeconds: number,
+) {
+  const current = Number.isFinite(currentVelocityMps) ? Math.max(0, currentVelocityMps) : 0;
+  const target = Number.isFinite(targetVelocityMps) ? Math.max(0, targetVelocityMps) : 0;
+  const elapsed = Number.isFinite(deltaSeconds) ? Math.max(0, Math.min(0.25, deltaSeconds)) : 0;
+  if (elapsed === 0) {
+    return current;
+  }
+
+  if (driveActive) {
+    const difference = target - current;
+    const maximumChange = (difference >= 0
+      ? exploreLiveAccelerationMps2
+      : exploreLivePedalingSlowdownMps2) * elapsed;
+    return Math.abs(difference) <= maximumChange
+      ? target
+      : Math.max(0, current + Math.sign(difference) * maximumChange);
+  }
+
+  const resistance = exploreLiveRollingResistanceMps2
+    + exploreLiveAeroResistance * current * current;
+  const next = Math.max(0, current - resistance * elapsed);
+  return next < 0.08 ? 0 : next;
 }
 
 export function smoothExploreCameraPoint(

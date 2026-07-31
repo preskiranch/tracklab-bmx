@@ -7090,6 +7090,8 @@ export default function App() {
               : explorePlayers}
             demoPlayerOptions={exploreDemoCandidates}
             selectedDemoPlayerIds={exploreDemoPlayerIds}
+            liveRiderProfiles={availableStudioRiders}
+            liveRiderAssignments={studioRiderAssignments}
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
             distanceUnit={distanceUnit}
@@ -7111,6 +7113,7 @@ export default function App() {
             onControlSession={multiplayer.controlExploreSession}
             onSendState={multiplayer.sendExploreState}
             onDemoPlayerSelectionChange={handleExploreDemoPlayerSelectionChange}
+            onLiveRiderAssignment={handleStudioRiderAssignment}
             onVoiceStart={roomVoice.start}
             onVoiceStop={roomVoice.stop}
             onDemoRideStatusChange={handleExploreDemoRideStatusChange}

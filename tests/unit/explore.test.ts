@@ -7,10 +7,12 @@ import {
   exploreDemoMinimumCruiseMph,
   exploreDemoRiderMotion,
   exploreGridClass,
+  exploreLiveDriveActive,
   exploreRoutePoint,
   groupExploreRiders,
   smoothExploreCameraPoint,
   smoothExploreHeading,
+  stepExploreLiveVelocity,
 } from '../../src/lib/explore';
 import { exploreBikeAudioMode } from '../../src/lib/bikeRaceAudio';
 import { formatExploreDistanceMeters } from '../../src/units';
@@ -101,6 +103,36 @@ describe('Explore demo rider pacing', () => {
 
     expect(motions.some((motion) => motion.pedaling)).toBe(true);
     expect(motions.some((motion) => !motion.pedaling)).toBe(true);
+  });
+});
+
+describe('Explore live Wattbike physics', () => {
+  it('requires rider power as well as cadence before the Wattbike propels the rider', () => {
+    expect(exploreLiveDriveActive(92, 400)).toBe(true);
+    expect(exploreLiveDriveActive(92, 0)).toBe(false);
+    expect(exploreLiveDriveActive(0, 400)).toBe(false);
+  });
+
+  it('accelerates naturally toward 44/16 rollout speed', () => {
+    const firstFrame = stepExploreLiveVelocity(0, 8, true, 0.1);
+    const nextFrame = stepExploreLiveVelocity(firstFrame, 8, true, 0.1);
+    expect(firstFrame).toBeGreaterThan(0);
+    expect(firstFrame).toBeLessThan(8);
+    expect(nextFrame).toBeGreaterThan(firstFrame);
+  });
+
+  it('gradually coasts to a complete stop after pedaling ends', () => {
+    const firstCoastFrame = stepExploreLiveVelocity(8, 0, false, 0.1);
+    expect(firstCoastFrame).toBeGreaterThan(0);
+    expect(firstCoastFrame).toBeLessThan(8);
+
+    let velocity = firstCoastFrame;
+    for (let step = 0; step < 250; step += 1) {
+      const next = stepExploreLiveVelocity(velocity, 0, false, 0.1);
+      expect(next).toBeLessThanOrEqual(velocity);
+      velocity = next;
+    }
+    expect(velocity).toBe(0);
   });
 });
 

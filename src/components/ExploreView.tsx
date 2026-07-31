@@ -63,15 +63,20 @@ import type {
   PlayerSlot,
   PlayMode,
   SpeedUnit,
+  StudioRider,
+  StudioRiderAssignments,
   TrackPoint,
 } from '../types';
 import { ExploreMapPanel } from './ExploreMapPanel';
 import { ExploreStreetViewOverlay } from './ExploreStreetViewOverlay';
+import { RiderAvatar } from './RiderAvatar';
 
 type ExploreViewProps = {
   players: PlayerSlot[];
   demoPlayerOptions: PlayerSlot[];
   selectedDemoPlayerIds: PlayerSlot['id'][];
+  liveRiderProfiles: StudioRider[];
+  liveRiderAssignments: StudioRiderAssignments;
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
@@ -93,6 +98,7 @@ type ExploreViewProps = {
   onControlSession: (action: 'start' | 'pause' | 'resume' | 'reset') => boolean;
   onSendState: (state: Omit<MultiplayerExploreState, 'clientId' | 'roomId' | 'at'>) => boolean;
   onDemoPlayerSelectionChange: (playerIds: PlayerSlot['id'][]) => void;
+  onLiveRiderAssignment: (deviceId: number, riderId: string | null) => void;
   onVoiceStart: () => void;
   onVoiceStop: () => void;
   onDemoRideStatusChange?: (status: 'ready' | 'riding' | 'paused' | 'finished') => void;
@@ -217,6 +223,8 @@ export function ExploreView({
   players,
   demoPlayerOptions,
   selectedDemoPlayerIds,
+  liveRiderProfiles,
+  liveRiderAssignments,
   samplesByDevice,
   speedUnit,
   distanceUnit,
@@ -238,6 +246,7 @@ export function ExploreView({
   onControlSession,
   onSendState,
   onDemoPlayerSelectionChange,
+  onLiveRiderAssignment,
   onVoiceStart,
   onVoiceStop,
   onDemoRideStatusChange,
@@ -309,6 +318,13 @@ export function ExploreView({
     [activeRemoteRiders, ride.riders],
   );
   const groups = useMemo(() => groupExploreRiders(visibleRiders), [visibleRiders]);
+  const liveDeviceByRider = useMemo(() => {
+    const next = new Map<string, number>();
+    Object.entries(liveRiderAssignments).forEach(([deviceId, riderId]) => {
+      next.set(riderId, Number(deviceId));
+    });
+    return next;
+  }, [liveRiderAssignments]);
   const originSuggestions = useLocationSuggestions(
     originText,
     selectedOriginPrediction,
@@ -744,6 +760,88 @@ export function ExploreView({
                   );
                 })}
               </div>
+            </section>
+          )}
+
+          {!demoMode && players.length > 0 && (
+            <section className="workflow-race-entry" aria-label="Explore rider profiles">
+              <div className="workflow-race-entry-heading">
+                <span>Explore Riders</span>
+                <small>{players.length} connected</small>
+              </div>
+              <div className="workflow-race-entry-list">
+                {players.map((player) => {
+                  const deviceId = player.deviceId;
+                  const assignedRiderId = deviceId == null
+                    ? ''
+                    : liveRiderAssignments[deviceId] ?? player.riderId ?? '';
+                  const assignedRider = liveRiderProfiles.find((profile) => (
+                    profile.id === assignedRiderId
+                  ));
+                  const selectionLocked = ride.status === 'riding' || ride.status === 'paused';
+                  return (
+                    <div className={`race-entry-card${assignedRider ? ' entered' : ''}`} key={deviceId ?? player.id}>
+                      <div className={`race-entry-row${assignedRider ? ' entered' : ''}`}>
+                        <span
+                          className="player-chip"
+                          style={{ '--player-color': player.accent } as CSSProperties}
+                        >
+                          P{player.id}
+                        </span>
+                        <span className="race-entry-copy">
+                          <small className="race-entry-bike-name">
+                            {player.bikeName ?? player.deviceLabel ?? 'Connected Wattbike'}
+                          </small>
+                          <strong>{assignedRider?.name ?? 'Choose your rider profile'}</strong>
+                        </span>
+                        <span className={`race-entry-status${assignedRider ? ' entered' : ''}`}>
+                          {assignedRider ? 'Ready' : 'Profile'}
+                        </span>
+                      </div>
+                      <label className="race-entry-rider-select">
+                        <span>Rider</span>
+                        <select
+                          aria-label={`Rider profile for P${player.id}`}
+                          value={assignedRiderId}
+                          disabled={selectionLocked || deviceId == null}
+                          onChange={(event) => {
+                            if (deviceId != null) {
+                              onLiveRiderAssignment(deviceId, event.target.value || null);
+                            }
+                          }}
+                        >
+                          <option value="">Use Wattbike name</option>
+                          {liveRiderProfiles.map((profile) => {
+                            const assignedDeviceId = liveDeviceByRider.get(profile.id);
+                            return (
+                              <option
+                                value={profile.id}
+                                disabled={assignedDeviceId != null && assignedDeviceId !== deviceId}
+                                key={profile.id}
+                              >
+                                {profile.name}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </label>
+                      {assignedRider && (
+                        <div className="race-entry-rider-photo">
+                          <RiderAvatar
+                            name={assignedRider.name}
+                            photoUrl={assignedRider.photoUrl}
+                            accent={player.accent}
+                          />
+                          <span>Connected rider profile</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {liveRiderProfiles.length === 0 && (
+                <p className="race-entry-empty">Add a saved profile from Riders, then select it here.</p>
+              )}
             </section>
           )}
 

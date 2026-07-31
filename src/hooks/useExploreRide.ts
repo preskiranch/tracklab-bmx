@@ -3,7 +3,11 @@ import {
   bmxCadenceRpmFromVelocityMps,
   bmxVelocityMpsFromCadence,
 } from '../game/bmxRollout';
-import { exploreDemoRiderMotion } from '../lib/explore';
+import {
+  exploreDemoRiderMotion,
+  exploreLiveDriveActive,
+  stepExploreLiveVelocity,
+} from '../lib/explore';
 import type {
   BikeSample,
   ExploreRider,
@@ -22,7 +26,6 @@ type UseExploreRideOptions = {
 };
 
 const exploreSampleFreshMs = 3_000;
-const exploreCoastSlowdownMps2 = 0.42;
 
 function initialExploreRiders(clientId: string, players: PlayerSlot[]): ExploreRider[] {
   const at = Date.now();
@@ -139,17 +142,21 @@ export function useExploreRide({
           : null;
         const demoTargetVelocityMps = (demoMotion?.speedMph ?? 0) * 0.44704;
         const demoTargetCadence = bmxCadenceRpmFromVelocityMps(demoTargetVelocityMps);
+        const liveCadence = sampleIsFresh ? Math.max(0, sample?.cadence ?? 0) : 0;
+        const liveWatts = sampleIsFresh ? Math.max(0, sample?.watts ?? 0) : 0;
+        const liveDriveActive = sampleIsFresh && exploreLiveDriveActive(liveCadence, liveWatts);
         const cadence = demoMotion
           ? (demoMotion.pedaling ? demoTargetCadence : 0)
-          : sampleIsFresh
-            ? Math.max(0, sample?.cadence ?? 0)
-            : 0;
+          : liveDriveActive ? liveCadence : 0;
         const pedalingVelocityMps = bmxVelocityMpsFromCadence(cadence);
         const velocityMps = demoMotion
           ? (demoMotion.pedaling ? pedalingVelocityMps : rider.velocityMps)
-          : cadence >= 1
-            ? pedalingVelocityMps
-            : Math.max(0, rider.velocityMps - exploreCoastSlowdownMps2 * deltaSeconds);
+          : stepExploreLiveVelocity(
+            rider.velocityMps,
+            pedalingVelocityMps,
+            liveDriveActive,
+            deltaSeconds,
+          );
         const distanceMeters = Math.min(
           currentRoute.distanceMeters,
           rider.distanceMeters + velocityMps * deltaSeconds,
@@ -164,7 +171,7 @@ export function useExploreRide({
           cadence: demoMotion || sampleIsFresh ? cadence : null,
           watts: demoMotion
             ? (demoMotion.pedaling ? Math.round(95 + demoMotion.speedMph * 6.5) : 0)
-            : sampleIsFresh ? Math.max(0, sample?.watts ?? 0) : 0,
+            : liveWatts,
           signal: demoMotion
             ? 0.96
             : sampleIsFresh ? Math.max(0, Math.min(1, sample?.signal ?? 0)) : 0,

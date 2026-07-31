@@ -65,9 +65,16 @@ export function ExploreMapPanel({
   const lastFollowZoomRef = useRef<number | null>(null);
   const initialFollowZoomRef = useRef(followZoom);
   const initialShowMapLabelsRef = useRef(showMapLabels);
+  const initialHasRidersRef = useRef(group.riders.length > 0);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
-  const routePoints = useMemo(() => exploreRoutePoints(route), [route]);
+  initialFollowZoomRef.current = followZoom;
+  initialShowMapLabelsRef.current = showMapLabels;
+  initialHasRidersRef.current = group.riders.length > 0;
+  const routePoints = useMemo(
+    () => exploreRoutePoints(route),
+    [route.encodedPolyline, route.id],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -142,7 +149,10 @@ export function ExploreMapPanel({
         ];
         const routeBounds = new google.maps.LatLngBounds();
         routePoints.forEach((point) => routeBounds.extend(point));
-        map.fitBounds(routeBounds, 70);
+        if (!initialHasRidersRef.current) {
+          map.fitBounds(routeBounds, 70);
+        }
+        lastFollowZoomRef.current = initialFollowZoomRef.current;
         setStatus('ready');
       })
       .catch((loadError: Error) => {
@@ -239,7 +249,6 @@ export function ExploreMapPanel({
       }
     });
 
-    const zoomChanged = lastFollowZoomRef.current !== followZoom;
     if (positions.length === 0) {
       return;
     }
@@ -272,12 +281,6 @@ export function ExploreMapPanel({
         map.setCenter?.(center);
       }
     }
-    if (map.getZoom?.() !== followZoom) {
-      map.setZoom?.(followZoom);
-    }
-    if (zoomChanged) {
-      lastFollowZoomRef.current = followZoom;
-    }
   }, [
     cameraFollowPosition,
     followZoom,
@@ -286,6 +289,15 @@ export function ExploreMapPanel({
     routePoints,
     status,
   ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (status !== 'ready' || !map || lastFollowZoomRef.current === followZoom) {
+      return;
+    }
+    lastFollowZoomRef.current = followZoom;
+    map.setZoom?.(followZoom);
+  }, [followZoom, status]);
 
   useEffect(() => {
     if (status !== 'ready') {
