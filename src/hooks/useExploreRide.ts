@@ -171,15 +171,13 @@ export function useExploreRide({
           rider.recommendedAirSetting ?? 1,
           gradePercent,
         );
-        const velocityMps = demoMotion
-          ? (demoMotion.pedaling ? pedalingVelocityMps : rider.velocityMps)
-          : stepExploreLiveVelocity(
-            rider.velocityMps,
-            pedalingVelocityMps,
-            liveDriveActive,
-            deltaSeconds,
-            gradePercent,
-          );
+        const velocityMps = stepExploreLiveVelocity(
+          rider.velocityMps,
+          pedalingVelocityMps,
+          demoMotion ? demoMotion.pedaling : liveDriveActive,
+          deltaSeconds,
+          gradePercent,
+        );
         const distanceMeters = Math.min(
           currentRoute.distanceMeters,
           rider.distanceMeters + velocityMps * deltaSeconds,

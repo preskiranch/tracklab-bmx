@@ -127,7 +127,7 @@ describe('Explore live Wattbike physics', () => {
     expect(firstCoastFrame).toBeLessThan(8);
 
     let velocity = firstCoastFrame;
-    for (let step = 0; step < 250; step += 1) {
+    for (let step = 0; step < 1_200; step += 1) {
       const next = stepExploreLiveVelocity(velocity, 0, false, 0.1);
       expect(next).toBeLessThanOrEqual(velocity);
       velocity = next;
@@ -143,6 +143,37 @@ describe('Explore live Wattbike physics', () => {
 
     expect(climbing).toBeLessThan(flatPedaling);
     expect(descending).toBeGreaterThan(flatCoasting);
+  });
+
+  it('loses uphill momentum faster and can roll from rest on a descent', () => {
+    const flatCoasting = stepExploreLiveVelocity(8, 0, false, 0.1, 0);
+    const climbing = stepExploreLiveVelocity(8, 0, false, 0.1, 6);
+    const descendingFromRest = stepExploreLiveVelocity(0, 0, false, 0.1, -6);
+
+    expect(climbing).toBeLessThan(flatCoasting);
+    expect(descendingFromRest).toBeGreaterThan(0);
+  });
+
+  it('builds downhill speed, then sheds it gradually after returning to level ground', () => {
+    let downhillVelocity = 8;
+    for (let step = 0; step < 50; step += 1) {
+      downhillVelocity = stepExploreLiveVelocity(downhillVelocity, 0, false, 0.1, -8);
+    }
+    expect(downhillVelocity).toBeGreaterThan(8);
+
+    const firstFlatFrame = stepExploreLiveVelocity(downhillVelocity, 0, false, 0.1, 0);
+    const secondFlatFrame = stepExploreLiveVelocity(firstFlatFrame, 0, false, 0.1, 0);
+    expect(firstFlatFrame).toBeLessThan(downhillVelocity);
+    expect(firstFlatFrame).toBeGreaterThan(0);
+    expect(secondFlatFrame).toBeLessThan(firstFlatFrame);
+  });
+
+  it('keeps long descents within a safe road-bike speed ceiling', () => {
+    let velocity = 0;
+    for (let step = 0; step < 4_000; step += 1) {
+      velocity = stepExploreLiveVelocity(velocity, 0, false, 0.1, -30);
+    }
+    expect(velocity).toBeLessThanOrEqual(25);
   });
 });
 

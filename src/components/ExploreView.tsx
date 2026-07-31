@@ -580,7 +580,7 @@ export function ExploreView({
     routeRequestRef.current += 1;
     if (routeStatus === 'loading' || route) {
       setRouteStatus('idle');
-      setRouteMessage('Location changed. Select Build Explore route to update the map.');
+      setRouteMessage('Location changed. Select Build Explore the World route to update the map.');
     }
   };
 
@@ -734,10 +734,10 @@ export function ExploreView({
       <header className="explore-hero">
         <div>
           <span className="eyebrow">Wattbike virtual travel</span>
-          <h2>Explore</h2>
+          <h2>Explore the World</h2>
           <p>Choose two real places, then pedal the Google route in satellite view.</p>
         </div>
-        <div className="explore-mode-switch" aria-label="Explore session type">
+        <div className="explore-mode-switch" aria-label="Explore the World session type">
           <button
             className={playMode === 'local' ? 'selected' : ''}
             type="button"
@@ -768,10 +768,10 @@ export function ExploreView({
           {demoMode && (
             <section className="explore-demo-rider-picker">
               <div>
-                <span className="eyebrow">Explore demo riders</span>
+                <span className="eyebrow">Explore the World demo riders</span>
                 <small>Choose the exact riders for this route.</small>
               </div>
-              <div role="group" aria-label="Choose Explore demo riders">
+              <div role="group" aria-label="Choose Explore the World demo riders">
                 {demoPlayerOptions.map((player) => {
                   const selected = selectedDemoPlayerIds.includes(player.id);
                   const lastSelected = selected && selectedDemoPlayerIds.length === 1;
@@ -815,9 +815,9 @@ export function ExploreView({
           )}
 
           {!demoMode && players.length > 0 && (
-            <section className="workflow-race-entry" aria-label="Explore rider profiles">
+            <section className="workflow-race-entry" aria-label="Explore the World rider profiles">
               <div className="workflow-race-entry-heading">
-                <span>Explore Riders</span>
+                <span>Explore the World Riders</span>
                 <small>{players.length} connected</small>
               </div>
               <div className="workflow-race-entry-list">
@@ -959,7 +959,7 @@ export function ExploreView({
                 </button>
               </div>
               <small className="explore-route-warning">
-                Developer testing only. Riders always use the same route and Explore physics.
+                Developer testing only. Riders always use the same route and Explore the World physics.
               </small>
             </section>
           )}
@@ -1107,7 +1107,7 @@ export function ExploreView({
               onClick={createRoute}
             >
               <MapPinned size={16} />
-              {routeStatus === 'loading' ? 'Building route…' : 'Build Explore route'}
+              {routeStatus === 'loading' ? 'Building route…' : 'Build Explore the World route'}
             </button>
             {routeMessage && <p className={`explore-route-message ${routeStatus}`}>{routeMessage}</p>}
             <small className="explore-route-warning">
@@ -1469,7 +1469,7 @@ export function ExploreView({
                             Open in Google Maps <ExternalLink size={15} />
                           </a>
                         </div>
-                        <small>Place details provided by Google. Your Explore ride continues while this card is open.</small>
+                        <small>Place details provided by Google. Your Explore the World ride continues while this card is open.</small>
                       </div>
                     )}
                   </section>
@@ -1483,7 +1483,7 @@ export function ExploreView({
                 />
               )}
 
-              <section className="explore-rider-strip" aria-label="Explore riders">
+              <section className="explore-rider-strip" aria-label="Explore the World riders">
                 {visibleRiders.length > 0 ? visibleRiders.map((rider) => {
                   const elevationMeters = elevationAvailable
                     ? exploreElevationAtMeter(route.elevationSamples, rider.distanceMeters)
@@ -1599,7 +1599,7 @@ export function ExploreView({
                       ? 'Resume ride'
                       : ride.status === 'finished'
                         ? 'Ride again'
-                        : 'Start Explore ride'}
+                        : 'Start Explore the World ride'}
                   </button>
                 )}
                 <button

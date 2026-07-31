@@ -463,13 +463,18 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
           distanceMeters: routeDistanceMeters,
           durationSeconds: quickRoute ? 1 : 300,
           encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
-          elevationSamples: [
-            { distanceMeters: 0, elevationMeters: 10 },
-            { distanceMeters: routeDistanceMeters / 2, elevationMeters: 20 },
-            { distanceMeters: routeDistanceMeters, elevationMeters: 15 },
-          ],
-          elevationGainMeters: 10,
-          elevationLossMeters: 5,
+          elevationSamples: quickRoute
+            ? [
+              { distanceMeters: 0, elevationMeters: 10 },
+              { distanceMeters: routeDistanceMeters, elevationMeters: 10 },
+            ]
+            : [
+              { distanceMeters: 0, elevationMeters: 10 },
+              { distanceMeters: routeDistanceMeters / 2, elevationMeters: 20 },
+              { distanceMeters: routeDistanceMeters, elevationMeters: 15 },
+            ],
+          elevationGainMeters: quickRoute ? 0 : 10,
+          elevationLossMeters: quickRoute ? 0 : 5,
           createdAt: Date.now(),
         },
       }),
@@ -559,14 +564,14 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(demoRiderCount.getByRole('button', { name: '2', exact: true }))
     .toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('Bike pairing').locator('.pair-card')).toHaveCount(2);
-  await page.getByRole('button', { name: 'Explore', exact: true }).click();
+  await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
 
   await expect(page.getByText('Developer Demo active', { exact: true })).toBeVisible();
   await expect(page.getByText(/54\/17 road rollout.*6\.9 m.*12–18 MPH averages/i)).toBeVisible();
   const mapRenderer = page.getByRole('group', { name: 'Explore map renderer' });
   await expect(mapRenderer).toBeVisible();
   await expect(mapRenderer.getByRole('button')).toHaveCount(3);
-  const exploreDemoRiders = page.getByRole('group', { name: 'Choose Explore demo riders' });
+  const exploreDemoRiders = page.getByRole('group', { name: 'Choose Explore the World demo riders' });
   const exploreDemoRiderButtons = exploreDemoRiders.getByRole('button');
   await expect(exploreDemoRiderButtons).toHaveCount(4);
   await expect(exploreDemoRiderButtons.nth(0)).toHaveAttribute('aria-pressed', 'true');
@@ -764,15 +769,15 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(destinationInput).toHaveValue(/Oracle Park/);
   await originInput.fill('37.7879, -122.4075');
   await destinationInput.fill('33.985, -118.469');
-  await page.getByRole('button', { name: 'Build Explore route' }).click();
+  await page.getByRole('button', { name: 'Build Explore the World route' }).click();
   await expect.poll(() => exploreRouteRequests.length).toBe(1);
   await destinationInput.fill('37.7955, -122.3937');
-  await expect(page.getByText('Location changed. Select Build Explore route to update the map.'))
+  await expect(page.getByText('Location changed. Select Build Explore the World route to update the map.'))
     .toBeVisible();
   releaseStaleRoute?.();
   await expect.poll(() => staleRouteFulfilled).toBe(true);
   await expect(page.locator('.explore-route-summary')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Build Explore route' }).click();
+  await page.getByRole('button', { name: 'Build Explore the World route' }).click();
 
   await expect(page.locator('.explore-route-summary > div strong'))
     .toHaveText('San Francisco Ferry Building, San Francisco, CA, USA');
@@ -808,7 +813,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByText('1.00 km', { exact: true })).toBeVisible();
   await distanceUnits.getByRole('button', { name: 'Show distances in miles' }).click();
   await expect(page.locator('.explore-rider-strip article')).toHaveCount(2);
-  await page.getByRole('button', { name: 'Start Explore ride' }).click();
+  await page.getByRole('button', { name: 'Start Explore the World ride' }).click();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
   const cameraControls = page.getByLabel('Explore camera controls');
@@ -1001,9 +1006,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   quickRoute = true;
   await originInput.fill('38.5, -120.2');
   await destinationInput.fill('43.252, -126.453');
-  await page.getByRole('button', { name: 'Build Explore route' }).click();
+  await page.getByRole('button', { name: 'Build Explore the World route' }).click();
   await expect(page.locator('.explore-route-summary > div strong')).toHaveText('Quick Finish');
-  await page.getByRole('button', { name: 'Start Explore ride' }).click();
+  await page.getByRole('button', { name: 'Start Explore the World ride' }).click();
   const completedRouteOptions = page.getByRole('region', { name: 'Completed route options' });
   await expect(completedRouteOptions).toBeVisible({ timeout: 10_000 });
   await completedRouteOptions.getByRole('button', { name: 'Reverse route' }).click();
@@ -1013,7 +1018,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   });
   await expect(page.locator('.explore-route-summary > div strong')).toContainText('Quick Start');
 
-  await page.getByRole('button', { name: 'Start Explore ride' }).click();
+  await page.getByRole('button', { name: 'Start Explore the World ride' }).click();
   await expect(completedRouteOptions).toBeVisible({ timeout: 10_000 });
   await completedRouteOptions.getByRole('button', { name: 'New destination' }).click();
   await expect(originInput).toHaveValue('Quick Start');

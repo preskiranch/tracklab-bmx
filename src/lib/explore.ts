@@ -11,8 +11,11 @@ const exploreHeadingEaseMs = 240;
 const exploreCameraBaseOffsetMeters = 60;
 const exploreLiveAccelerationMps2 = 2;
 const exploreLivePedalingSlowdownMps2 = 1.2;
-const exploreLiveRollingResistanceMps2 = 0.32;
-const exploreLiveAeroResistance = 0.012;
+// Explore uses road-bike coasting forces. Rolling resistance is nearly constant,
+// while aerodynamic drag grows with the square of the rider's speed.
+const exploreLiveRollingResistanceMps2 = 0.055;
+const exploreLiveAeroResistancePerVelocitySquared = 0.004;
+const exploreLiveMaximumVelocityMps = 25;
 
 export type ExploreCameraFollowPosition = 'behind' | 'center' | 'ahead';
 
@@ -88,7 +91,7 @@ export function stepExploreLiveVelocity(
   const safeGradePercent = Number.isFinite(gradePercent)
     ? Math.max(-30, Math.min(30, gradePercent))
     : 0;
-  const gradeAccelerationMps2 = 9.80665 * Math.sin(Math.atan(safeGradePercent / 100));
+  const uphillGravityMps2 = 9.80665 * Math.sin(Math.atan(safeGradePercent / 100));
 
   if (driveActive) {
     const difference = target - current;
@@ -98,14 +101,22 @@ export function stepExploreLiveVelocity(
     const cadenceDrivenVelocity = Math.abs(difference) <= maximumChange
       ? target
       : Math.max(0, current + Math.sign(difference) * maximumChange);
-    return Math.max(0, cadenceDrivenVelocity - gradeAccelerationMps2 * elapsed);
+    return Math.max(0, Math.min(
+      exploreLiveMaximumVelocityMps,
+      cadenceDrivenVelocity - uphillGravityMps2 * elapsed,
+    ));
   }
 
-  const resistance = exploreLiveRollingResistanceMps2
-    + exploreLiveAeroResistance * current * current
-    + gradeAccelerationMps2;
-  const next = Math.max(0, current - resistance * elapsed);
-  return next < 0.08 ? 0 : next;
+  const downhillGravityMps2 = -uphillGravityMps2;
+  const aerodynamicResistanceMps2 = exploreLiveAeroResistancePerVelocitySquared
+    * current * current;
+  const netAccelerationMps2 = downhillGravityMps2
+    - exploreLiveRollingResistanceMps2
+    - aerodynamicResistanceMps2;
+  return Math.max(0, Math.min(
+    exploreLiveMaximumVelocityMps,
+    current + netAccelerationMps2 * elapsed,
+  ));
 }
 
 export function smoothExploreCameraPoint(

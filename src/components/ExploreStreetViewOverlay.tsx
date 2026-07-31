@@ -75,7 +75,7 @@ export function ExploreStreetViewOverlay({
         <div>
           <span>Google Street View</span>
           <strong>{landmark.name}</strong>
-          <small>Your Explore ride continues in the background.</small>
+          <small>Your Explore the World ride continues in the background.</small>
         </div>
       </header>
       {status === 'loading' && (

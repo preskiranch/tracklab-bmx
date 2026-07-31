@@ -6713,9 +6713,9 @@ export default function App() {
         </section>
 
         {appMode === 'explore' ? (
-          <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Explore setup workflow">
+          <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Explore the World setup workflow">
             <div className="workflow-heading">
-              <span>Explore ride</span>
+              <span>Explore the World</span>
               <small>Local or private multiplayer</small>
             </div>
             <div className="workflow-list">
@@ -6885,7 +6885,7 @@ export default function App() {
             }}
           >
             <Compass size={17} />
-            Explore
+            Explore the World
           </button>
           <button
             type="button"
@@ -7003,7 +7003,7 @@ export default function App() {
             <div className="explore-topbar-heading">
               <Compass size={20} />
               <span>
-                <strong>Explore</strong>
+                <strong>Explore the World</strong>
                 <small>Satellite routes powered by your Wattbike</small>
               </span>
             </div>
@@ -7083,7 +7083,7 @@ export default function App() {
         </header>
 
         {appMode === 'explore' ? (
-          <Suspense fallback={<div className="explore-loading">Loading Explore…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading Explore the World…</div>}>
           <ExploreView
             developerMode={developerUiActive}
             players={playMode === 'multiplayer'
