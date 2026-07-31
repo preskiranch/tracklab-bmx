@@ -18,6 +18,18 @@ export type ExploreViewportGroup = {
   endMeter: number;
 };
 
+export function exploreAverageSpeedMph(distanceMeters: number, elapsedMs: number) {
+  if (
+    !Number.isFinite(distanceMeters)
+    || !Number.isFinite(elapsedMs)
+    || distanceMeters <= 0
+    || elapsedMs <= 0
+  ) {
+    return 0;
+  }
+  return distanceMeters / (elapsedMs / 1_000) * 2.236936;
+}
+
 export function exploreDemoRiderMotion(
   playerId: ExploreRider['playerId'],
   elapsedSeconds: number,

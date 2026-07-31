@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decodeGooglePolyline,
+  exploreAverageSpeedMph,
   exploreCameraOffsetMeters,
   exploreDemoMaximumCruiseMph,
   exploreDemoMinimumCruiseMph,
@@ -52,6 +53,12 @@ describe('Explore mileage display', () => {
     expect(formatExploreDistanceMeters(1_000, 'mi')).toBe('0.62 mi');
     expect(formatExploreDistanceMeters(1_000, 'km')).toBe('1.00 km');
     expect(formatExploreDistanceMeters(16_093.44, 'mi')).toBe('10.0 mi');
+  });
+
+  it('calculates average MPH from active riding time', () => {
+    expect(exploreAverageSpeedMph(1_609.344, 60 * 60 * 1_000)).toBeCloseTo(1, 5);
+    expect(exploreAverageSpeedMph(0, 1_000)).toBe(0);
+    expect(exploreAverageSpeedMph(100, 0)).toBe(0);
   });
 });
 

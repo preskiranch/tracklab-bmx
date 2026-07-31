@@ -638,7 +638,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await destinationInput.fill('43.252, -126.453');
   await page.getByRole('button', { name: 'Build Explore route' }).click();
 
-  await expect(page.getByText('Demo Finish', { exact: true })).toBeVisible();
+  await expect(page.locator('.explore-route-summary > div strong')).toHaveText('Demo Finish');
   await expect(page.getByText('0.62 mi', { exact: true })).toBeVisible();
   const distanceUnits = page.getByRole('group', { name: 'Explore distance unit' });
   await expect(distanceUnits.getByRole('button', { name: 'Show distances in miles' }))
@@ -648,8 +648,10 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await distanceUnits.getByRole('button', { name: 'Show distances in miles' }).click();
   await expect(page.locator('.explore-rider-strip article')).toHaveCount(2);
   await page.getByRole('button', { name: 'Start Explore ride' }).click();
-  await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
+  await expect(page.getByLabel('Destination: Demo Finish')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reset', exact: true })).toBeHidden();
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const followZoom = page.getByLabel('Follow camera zoom');
   await expect(followZoom).toHaveValue('18');
@@ -700,7 +702,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(landmarkDialog).toContainText('1 Pena Adobe Road');
   await expect(landmarkDialog).toContainText('4.7');
   await expect(landmarkDialog.getByRole('link', { name: /Open in Google Maps/i })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   expect(await page.evaluate(() => (
     (window as typeof window & { __tracklabLandmarkClickStopped?: boolean })
       .__tracklabLandmarkClickStopped
@@ -715,7 +717,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(streetViewDialog).toBeVisible();
   await expect(streetViewDialog).toContainText('Lagoon Valley Park entrance');
   await expect(streetViewDialog).toContainText('Imagery 2026-06');
-  await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   expect(await page.evaluate(() => (
     (window as typeof window & { __tracklabStreetViewCreated?: boolean })
       .__tracklabStreetViewCreated
@@ -741,7 +743,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.setViewportSize({ width: 1280, height: 720 });
   await streetViewDialog.getByRole('button', { name: 'Back to map' }).click();
   await expect(streetViewDialog).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Street View|360 camera rotation/i })).toHaveCount(0);
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await page.getByRole('button', { name: 'Show more of the route' }).click();
@@ -763,8 +765,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     modes: ['freewheel', 'pedaling'],
   });
   await expect.poll(async () => (
-    page.locator('.explore-rider-strip article').first().locator('div > span').textContent()
+    page.locator('.explore-rider-strip article').first().locator('div > span').first().textContent()
   ), { timeout: 14_000 }).toMatch(/ · (?:1[2-7](?:\.\d)?|18(?:\.0)?) MPH/);
+  await expect(page.locator('.explore-rider-strip article').first()).toContainText(/Avg \d+\.\d MPH/);
   expect(commentaryRequestCount).toBe(0);
 
   await page.screenshot({
@@ -788,6 +791,12 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
+  const mobilePauseBox = await page.getByRole('button', { name: 'Pause ride' }).boundingBox();
+  const mobileExitBox = await page.getByRole('button', { name: 'Exit full screen' }).boundingBox();
+  expect(mobilePauseBox).not.toBeNull();
+  expect(mobileExitBox).not.toBeNull();
+  expect((mobilePauseBox?.x ?? 0) + (mobilePauseBox?.width ?? 0)).toBeLessThan(mobileExitBox?.x ?? 0);
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);
@@ -804,7 +813,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await originInput.fill('38.5, -120.2');
   await destinationInput.fill('43.252, -126.453');
   await page.getByRole('button', { name: 'Build Explore route' }).click();
-  await expect(page.getByText('Quick Finish', { exact: true })).toBeVisible();
+  await expect(page.locator('.explore-route-summary > div strong')).toHaveText('Quick Finish');
   await page.getByRole('button', { name: 'Start Explore ride' }).click();
   const completedRouteOptions = page.getByRole('region', { name: 'Completed route options' });
   await expect(completedRouteOptions).toBeVisible({ timeout: 10_000 });

@@ -32,6 +32,7 @@ import {
 } from 'react';
 import { primeBikeRaceAudio, stopBikeRaceAudio, updateExploreBikeAudio } from '../lib/bikeRaceAudio';
 import {
+  exploreAverageSpeedMph,
   groupExploreRiders,
   exploreGridClass,
   exploreRemoteStateFreshMs,
@@ -879,6 +880,15 @@ export function ExploreView({
                 </dl>
               </header>
 
+              <div
+                className="explore-destination-overlay"
+                aria-label={`Destination: ${route.destinationLabel}`}
+              >
+                <Flag size={17} />
+                <small>Riding to</small>
+                <strong>{route.destinationLabel}</strong>
+              </div>
+
               <div className="explore-camera-toolbar" aria-label="Explore camera controls">
                 <button
                   type="button"
@@ -994,17 +1004,6 @@ export function ExploreView({
                   <Landmark size={18} />
                   <span>{showMapLabels ? 'Labels on' : 'Street names'}</span>
                 </button>
-                {fullscreen && (
-                  <button
-                    className="explore-exit-fullscreen"
-                    type="button"
-                    aria-label="Exit full screen"
-                    onClick={() => onFullscreenChange(false)}
-                  >
-                    <Minimize2 size={18} />
-                    <span>Exit full screen</span>
-                  </button>
-                )}
               </div>
 
               {showMapLabels && !selectedLandmark && !streetViewLandmark && (
@@ -1145,6 +1144,7 @@ export function ExploreView({
                         {' '}
                         {speedUnitLabel(speedUnit)}
                       </span>
+                      <span>Avg {exploreAverageSpeedMph(rider.distanceMeters, ride.elapsedMs).toFixed(1)} MPH</span>
                     </div>
                     <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>
                   </article>
@@ -1182,8 +1182,15 @@ export function ExploreView({
 
               <div className="explore-controls">
                 {ride.status === 'riding' ? (
-                  <button type="button" onClick={pauseRide} disabled={playMode === 'multiplayer' && !roomHost}>
-                    <Pause size={18} /> Pause everyone
+                  <button
+                    className="explore-pause-ride"
+                    type="button"
+                    aria-label={playMode === 'multiplayer' ? 'Pause everyone' : 'Pause ride'}
+                    onClick={pauseRide}
+                    disabled={playMode === 'multiplayer' && !roomHost}
+                  >
+                    <Pause size={18} />
+                    <span>Pause</span>
                   </button>
                 ) : (
                   <button
@@ -1204,9 +1211,25 @@ export function ExploreView({
                         : 'Start Explore ride'}
                   </button>
                 )}
-                <button type="button" onClick={resetRide} disabled={playMode === 'multiplayer' && !roomHost}>
+                <button
+                  className="explore-reset-ride"
+                  type="button"
+                  onClick={resetRide}
+                  disabled={playMode === 'multiplayer' && !roomHost}
+                >
                   <RotateCcw size={18} /> Reset
                 </button>
+                {fullscreen && (
+                  <button
+                    className="explore-exit-fullscreen"
+                    type="button"
+                    aria-label="Exit full screen"
+                    onClick={() => onFullscreenChange(false)}
+                  >
+                    <Minimize2 size={18} />
+                    <span>Exit full screen</span>
+                  </button>
+                )}
               </div>
             </>
           ) : (

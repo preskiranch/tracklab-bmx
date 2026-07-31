@@ -60,7 +60,7 @@ export function useExploreRide({
   const demoModeRef = useRef(demoMode);
   const frameRef = useRef(0);
   const lastFrameRef = useRef(0);
-  const startedAtRef = useRef<number | null>(null);
+  const activeElapsedMsRef = useRef(0);
 
   const playerSignature = useMemo(
     () => players.map((player) => `${player.id}:${player.deviceId ?? 'none'}:${player.name}:${player.photoUrl ?? ''}`).join('|'),
@@ -76,7 +76,7 @@ export function useExploreRide({
   const reset = useCallback(() => {
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = 0;
-    startedAtRef.current = null;
+    activeElapsedMsRef.current = 0;
     setRiders(initialExploreRiders(clientId, playersRef.current));
     setStatus('ready');
   }, [clientId]);
@@ -87,7 +87,7 @@ export function useExploreRide({
     }
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = performance.now();
-    startedAtRef.current = startedAt;
+    activeElapsedMsRef.current = Math.max(0, Date.now() - startedAt);
     setRiders(initialExploreRiders(clientId, playersRef.current));
     setStatus('riding');
     return true;
@@ -126,10 +126,9 @@ export function useExploreRide({
       const previousFrame = lastFrameRef.current || frameTime;
       const deltaSeconds = Math.max(0.001, Math.min(0.1, (frameTime - previousFrame) / 1000));
       lastFrameRef.current = frameTime;
+      activeElapsedMsRef.current += deltaSeconds * 1_000;
       const now = Date.now();
-      const exploreElapsedSeconds = startedAtRef.current == null
-        ? 0
-        : Math.max(0, (now - startedAtRef.current) / 1_000);
+      const exploreElapsedSeconds = activeElapsedMsRef.current / 1_000;
 
       setRiders((current) => current.map((rider) => {
         const player = playersRef.current.find((item) => item.id === rider.playerId);
@@ -192,7 +191,7 @@ export function useExploreRide({
     }
   }, [riders, route, status]);
 
-  const elapsedMs = startedAtRef.current == null ? 0 : Math.max(0, Date.now() - startedAtRef.current);
+  const elapsedMs = activeElapsedMsRef.current;
 
   return {
     elapsedMs,
