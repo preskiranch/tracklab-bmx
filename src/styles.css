@@ -8515,7 +8515,8 @@ input:focus {
   gap: 8px;
 }
 
-.explore-landmark-actions a {
+.explore-landmark-actions a,
+.explore-landmark-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8531,6 +8532,12 @@ input:focus {
   text-decoration: none;
 }
 
+.explore-landmark-actions button {
+  border-color: #172431;
+  background: #172431;
+  color: #ffffff;
+}
+
 .explore-landmark-actions a:last-child {
   border-color: #cbd6df;
   background: #ffffff;
@@ -8540,6 +8547,123 @@ input:focus {
 .explore-landmark-details > small {
   color: #71808c;
   font-size: 10px;
+}
+
+.explore-street-view-overlay {
+  position: absolute;
+  z-index: 60;
+  inset: 0;
+  overflow: hidden;
+  background: #111923;
+}
+
+.explore-street-view-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.explore-street-view-overlay > header {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 24px);
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+  background: rgba(7, 13, 21, 0.9);
+  color: #ffffff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(9px);
+}
+
+.explore-street-view-overlay > header button,
+.explore-street-view-status button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #142231;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.explore-street-view-overlay > header > div {
+  display: grid;
+  min-width: 0;
+}
+
+.explore-street-view-overlay > header span,
+.explore-street-view-overlay > header small {
+  color: #bdcad5;
+  font-size: 9px;
+}
+
+.explore-street-view-overlay > header strong {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explore-street-view-status {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  width: min(430px, calc(100% - 28px));
+  padding: 24px;
+  border-radius: 13px;
+  background: rgba(8, 15, 23, 0.92);
+  color: #ffffff;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.explore-street-view-status p {
+  margin: 0;
+  color: #c2ced7;
+  font-size: 12px;
+}
+
+.explore-street-view-status > div {
+  display: flex;
+  gap: 8px;
+}
+
+.explore-street-view-overlay > footer {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  gap: 2px;
+  max-width: calc(100% - 24px);
+  padding: 8px 11px;
+  border-radius: 8px;
+  background: rgba(7, 13, 21, 0.82);
+  color: #ffffff;
+  font-size: 10px;
+  text-align: right;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+.explore-street-view-overlay > footer span {
+  color: #c1ced8;
+  font-size: 9px;
 }
 
 .explore-rider-strip {
@@ -9130,6 +9254,21 @@ input:focus {
 
   .explore-landmark-actions a {
     width: 100%;
+  }
+
+  .explore-landmark-actions button {
+    width: 100%;
+  }
+
+  .explore-street-view-overlay > header {
+    right: 8px;
+    top: 8px;
+    left: 8px;
+    max-width: none;
+  }
+
+  .explore-street-view-overlay > header small {
+    display: none;
   }
 
   .explore-fullscreen .explore-landmark-hint {

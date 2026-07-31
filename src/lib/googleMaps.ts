@@ -189,6 +189,35 @@ type GooglePlacesLibrary = {
   PlacesService?: new (element: HTMLElement) => GoogleLegacyPlacesService;
 };
 
+type GoogleStreetViewPanoramaData = {
+  copyright?: string;
+  imageDate?: string;
+  location?: {
+    description?: string;
+    pano?: string;
+    shortDescription?: string;
+  };
+};
+
+type GoogleStreetViewPanorama = {
+  focus?: () => void;
+  setVisible: (visible: boolean) => void;
+};
+
+type GoogleStreetViewLibrary = {
+  StreetViewPanorama?: new (
+    element: HTMLElement,
+    options?: Record<string, unknown>,
+  ) => GoogleStreetViewPanorama;
+  StreetViewService?: new () => {
+    getPanorama: (request: {
+      location: LatLngLiteral;
+      preference?: string;
+      radius?: number;
+    }) => Promise<{ data: GoogleStreetViewPanoramaData }>;
+  };
+};
+
 type GoogleMapConstructor = {
   new (element: HTMLElement, options: Record<string, unknown>): GoogleMap;
 };
@@ -290,9 +319,17 @@ export type GoogleLandmarkDetails = {
   openNow?: boolean;
   phoneNumber: string;
   placeId: string;
+  point: LatLngLiteral | null;
   rating?: number;
   userRatingCount?: number;
   websiteUrl: string;
+};
+
+export type GoogleStreetViewSession = {
+  copyright: string;
+  description: string;
+  destroy: () => void;
+  imageDate: string;
 };
 
 declare global {
@@ -820,6 +857,7 @@ export async function fetchGoogleLandmarkDetails(placeId: string): Promise<Googl
           'displayName',
           'formattedAddress',
           'googleMapsURI',
+          'location',
           'nationalPhoneNumber',
           'primaryTypeDisplayName',
           'rating',
@@ -835,6 +873,7 @@ export async function fetchGoogleLandmarkDetails(placeId: string): Promise<Googl
         name,
         phoneNumber: place.nationalPhoneNumber?.trim() ?? '',
         placeId: trimmedPlaceId,
+        point: place.location?.toJSON() ?? null,
         rating: place.rating,
         userRatingCount: place.userRatingCount,
         websiteUrl: place.websiteURI?.trim() ?? '',
@@ -849,6 +888,7 @@ export async function fetchGoogleLandmarkDetails(placeId: string): Promise<Googl
     const place = await getLegacyPlaceDetails(service, trimmedPlaceId, [
       'formatted_address',
       'formatted_phone_number',
+      'geometry',
       'name',
       'opening_hours',
       'rating',
@@ -867,6 +907,7 @@ export async function fetchGoogleLandmarkDetails(placeId: string): Promise<Googl
       openNow,
       phoneNumber: place.formatted_phone_number?.trim() ?? '',
       placeId: trimmedPlaceId,
+      point: place.geometry?.location?.toJSON() ?? null,
       rating: place.rating,
       userRatingCount: place.user_ratings_total,
       websiteUrl: place.website?.trim() ?? '',
@@ -880,6 +921,66 @@ export async function fetchGoogleLandmarkDetails(placeId: string): Promise<Googl
     }
     throw new Error('Google could not load details for that landmark.');
   }
+}
+
+export async function createGoogleStreetViewSession(
+  element: HTMLElement,
+  point: LatLngLiteral,
+): Promise<GoogleStreetViewSession> {
+  const google = await loadGoogleMaps();
+  const imported = google.maps.importLibrary
+    ? await google.maps.importLibrary('streetView') as GoogleStreetViewLibrary
+    : {};
+  const StreetViewService = imported.StreetViewService;
+  const StreetViewPanorama = imported.StreetViewPanorama;
+
+  if (!StreetViewService || !StreetViewPanorama) {
+    throw new Error('Google Street View is unavailable for this Maps key.');
+  }
+
+  let response: { data: GoogleStreetViewPanoramaData };
+  try {
+    response = await new StreetViewService().getPanorama({
+      location: point,
+      preference: 'best',
+      radius: 120,
+    });
+  } catch {
+    throw new Error('No Street View imagery was found near this landmark.');
+  }
+
+  const pano = response.data.location?.pano;
+  if (!pano) {
+    throw new Error('No Street View imagery was found near this landmark.');
+  }
+
+  const panorama = new StreetViewPanorama(element, {
+    addressControl: true,
+    clickToGo: true,
+    disableDefaultUI: false,
+    enableCloseButton: false,
+    fullscreenControl: false,
+    linksControl: true,
+    motionTracking: false,
+    motionTrackingControl: false,
+    pano,
+    panControl: true,
+    visible: true,
+    zoomControl: true,
+  });
+  window.requestAnimationFrame(() => {
+    google.maps.event?.trigger(panorama, 'resize');
+    panorama.focus?.();
+  });
+
+  return {
+    copyright: response.data.copyright?.trim() ?? '',
+    description: response.data.location?.description?.trim()
+      || response.data.location?.shortDescription?.trim()
+      || '',
+    destroy: () => panorama.setVisible(false),
+    imageDate: response.data.imageDate?.trim() ?? '',
+  };
 }
 
 export async function resolvePlacePrediction(

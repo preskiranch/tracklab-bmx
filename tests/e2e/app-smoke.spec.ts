@@ -503,6 +503,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       displayName = 'Lagoon Valley Park';
       formattedAddress = '1 Pena Adobe Road, Vacaville, CA 95688';
       googleMapsURI = 'https://www.google.com/maps/place/Lagoon+Valley+Park';
+      location = { toJSON: () => ({ lat: 38.33, lng: -122.02 }) };
       nationalPhoneNumber = '(707) 449-5658';
       primaryTypeDisplayName = 'Park';
       rating = 4.7;
@@ -562,10 +563,37 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     class MockLatLngBounds {
       extend() {}
     }
+    class MockStreetViewService {
+      async getPanorama() {
+        return {
+          data: {
+            copyright: 'Imagery © Google',
+            imageDate: '2026-06',
+            location: {
+              description: 'Lagoon Valley Park entrance',
+              pano: 'lagoon-valley-panorama',
+            },
+          },
+        };
+      }
+    }
+    class MockStreetViewPanorama {
+      constructor(_element: HTMLElement, _options: Record<string, unknown>) {
+        (window as typeof window & { __tracklabStreetViewCreated?: boolean })
+          .__tracklabStreetViewCreated = true;
+      }
+
+      focus() {}
+      setVisible() {}
+    }
     const places = {
       AutocompleteSessionToken: MockAutocompleteSessionToken,
       AutocompleteService: MockAutocompleteService,
       Place: MockPlace,
+    };
+    const streetView = {
+      StreetViewPanorama: MockStreetViewPanorama,
+      StreetViewService: MockStreetViewService,
     };
     (window as typeof window & { google?: unknown }).google = {
       maps: {
@@ -575,7 +603,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
         Polyline: MockPolyline,
         SymbolPath: { CIRCLE: 'circle' },
         places,
-        importLibrary: async (name: string) => (name === 'places' ? places : {}),
+        importLibrary: async (name: string) => (
+          name === 'places' ? places : name === 'streetView' ? streetView : {}
+        ),
       },
     };
   });
@@ -666,8 +696,39 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     fullPage: false,
     path: testInfo.outputPath('explore-landmark-live.png'),
   });
-  await landmarkDialog.getByRole('button', { name: 'Close landmark information' }).click();
+  await landmarkDialog.getByRole('button', { name: 'View Street View' }).click();
   await expect(landmarkDialog).toHaveCount(0);
+  const streetViewDialog = page.getByRole('dialog', { name: 'Street View: Lagoon Valley Park' });
+  await expect(streetViewDialog).toBeVisible();
+  await expect(streetViewDialog).toContainText('Lagoon Valley Park entrance');
+  await expect(streetViewDialog).toContainText('Imagery 2026-06');
+  await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
+  expect(await page.evaluate(() => (
+    (window as typeof window & { __tracklabStreetViewCreated?: boolean })
+      .__tracklabStreetViewCreated
+  ))).toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('explore-street-view-live.png'),
+  });
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(streetViewDialog.getByRole('button', { name: 'Back to map' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth
+  ))).toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('explore-street-view-mobile.png'),
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await streetViewDialog.getByRole('button', { name: 'Back to map' }).click();
+  await expect(streetViewDialog).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Pause everyone' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Street View|360 camera rotation/i })).toHaveCount(0);
   await page.getByRole('button', { name: 'Show more of the route' }).click();
   await page.getByRole('button', { name: 'Show more of the route' }).click();

@@ -63,6 +63,7 @@ import type {
   TrackPoint,
 } from '../types';
 import { ExploreMapPanel } from './ExploreMapPanel';
+import { ExploreStreetViewOverlay } from './ExploreStreetViewOverlay';
 
 type ExploreViewProps = {
   players: PlayerSlot[];
@@ -239,6 +240,7 @@ export function ExploreView({
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
   const [selectedLandmark, setSelectedLandmark] = useState<ExploreLandmarkPopup | null>(null);
+  const [streetViewLandmark, setStreetViewLandmark] = useState<GoogleLandmarkDetails | null>(null);
   const appliedRoomSessionRef = useRef<string | null>(null);
   const landmarkRequestRef = useRef(0);
   const scheduledStartTimerRef = useRef<number | null>(null);
@@ -300,6 +302,15 @@ export function ExploreView({
     setSelectedLandmark(null);
   }, []);
 
+  const closeStreetView = useCallback(() => {
+    setStreetViewLandmark(null);
+  }, []);
+
+  const openStreetView = useCallback((landmark: GoogleLandmarkDetails) => {
+    closeLandmark();
+    setStreetViewLandmark(landmark);
+  }, [closeLandmark]);
+
   const selectLandmark = useCallback((placeId: string) => {
     const requestId = landmarkRequestRef.current + 1;
     landmarkRequestRef.current = requestId;
@@ -336,13 +347,15 @@ export function ExploreView({
 
   useEffect(() => {
     closeLandmark();
-  }, [closeLandmark, route?.id]);
+    closeStreetView();
+  }, [closeLandmark, closeStreetView, route?.id]);
 
   useEffect(() => {
     if (!showMapLabels) {
       closeLandmark();
+      closeStreetView();
     }
-  }, [closeLandmark, showMapLabels]);
+  }, [closeLandmark, closeStreetView, showMapLabels]);
 
   useEffect(() => {
     updateExploreBikeAudio(ride.status, ride.riders);
@@ -938,7 +951,7 @@ export function ExploreView({
                 )}
               </div>
 
-              {showMapLabels && !selectedLandmark && (
+              {showMapLabels && !selectedLandmark && !streetViewLandmark && (
                 <div className="explore-landmark-hint" role="status">
                   <Landmark size={16} />
                   <span><strong>Landmarks are interactive.</strong> Tap an icon for details—the ride keeps moving.</span>
@@ -1022,6 +1035,14 @@ export function ExploreView({
                           )}
                         </div>
                         <div className="explore-landmark-actions">
+                          {selectedLandmark.details.point && (
+                            <button
+                              type="button"
+                              onClick={() => openStreetView(selectedLandmark.details as GoogleLandmarkDetails)}
+                            >
+                              <MapPinned size={15} /> View Street View
+                            </button>
+                          )}
                           {safeExternalHttpUrl(selectedLandmark.details.websiteUrl) && (
                             <a
                               href={safeExternalHttpUrl(selectedLandmark.details.websiteUrl)}
@@ -1044,6 +1065,13 @@ export function ExploreView({
                     )}
                   </section>
                 </div>
+              )}
+
+              {streetViewLandmark && (
+                <ExploreStreetViewOverlay
+                  landmark={streetViewLandmark}
+                  onClose={closeStreetView}
+                />
               )}
 
               <section className="explore-rider-strip" aria-label="Explore riders">
