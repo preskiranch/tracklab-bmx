@@ -678,7 +678,9 @@ async function computeExploreRoute(payload, signal) {
       origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lng } } },
       destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
       travelMode: travelMode === 'drive' ? 'DRIVE' : 'BICYCLE',
-      polylineQuality: 'HIGH_QUALITY',
+      // Overview geometry follows the routed roads without the lane- and
+      // crosswalk-level offsets that look like lateral wobble in a tilted map.
+      polylineQuality: 'OVERVIEW',
       polylineEncoding: 'ENCODED_POLYLINE',
       computeAlternativeRoutes: false,
       units: 'IMPERIAL',

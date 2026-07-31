@@ -9,6 +9,7 @@ export const exploreLiveMinimumDriveWatts = 8;
 const exploreCameraEaseMs = 180;
 const exploreHeadingEaseMs = 240;
 const exploreCameraBaseOffsetMeters = 60;
+const exploreRouteSimplificationToleranceMeters = 2.5;
 const exploreLiveAccelerationMps2 = 2;
 const exploreLivePedalingSlowdownMps2 = 1.2;
 // Explore uses road-bike coasting forces. Rolling resistance is nearly constant,
@@ -197,13 +198,85 @@ export function decodeGooglePolyline(encodedPolyline: string): TrackPoint[] {
   return points;
 }
 
+function wrappedLongitudeDelta(value: number) {
+  return ((value + 540) % 360) - 180;
+}
+
+function pointToSegmentDistanceMeters(
+  point: TrackPoint,
+  start: TrackPoint,
+  end: TrackPoint,
+) {
+  const latitudeRadians = point.lat * Math.PI / 180;
+  const metersPerLatitudeDegree = 111_320;
+  const metersPerLongitudeDegree = Math.max(
+    1,
+    Math.cos(latitudeRadians) * metersPerLatitudeDegree,
+  );
+  const startX = wrappedLongitudeDelta(start.lng - point.lng) * metersPerLongitudeDegree;
+  const startY = (start.lat - point.lat) * metersPerLatitudeDegree;
+  const endX = wrappedLongitudeDelta(end.lng - point.lng) * metersPerLongitudeDegree;
+  const endY = (end.lat - point.lat) * metersPerLatitudeDegree;
+  const segmentX = endX - startX;
+  const segmentY = endY - startY;
+  const segmentLengthSquared = segmentX ** 2 + segmentY ** 2;
+  if (segmentLengthSquared <= 0.0001) {
+    return Math.hypot(startX, startY);
+  }
+  const projection = Math.max(
+    0,
+    Math.min(1, -(startX * segmentX + startY * segmentY) / segmentLengthSquared),
+  );
+  return Math.hypot(
+    startX + projection * segmentX,
+    startY + projection * segmentY,
+  );
+}
+
+export function simplifyExploreRoutePoints(
+  points: TrackPoint[],
+  toleranceMeters = exploreRouteSimplificationToleranceMeters,
+) {
+  if (points.length <= 2 || toleranceMeters <= 0) {
+    return [...points];
+  }
+
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  const segments: Array<[number, number]> = [[0, points.length - 1]];
+
+  while (segments.length > 0) {
+    const [startIndex, endIndex] = segments.pop() as [number, number];
+    let farthestIndex = -1;
+    let farthestDistance = toleranceMeters;
+    for (let index = startIndex + 1; index < endIndex; index += 1) {
+      const distance = pointToSegmentDistanceMeters(
+        points[index],
+        points[startIndex],
+        points[endIndex],
+      );
+      if (distance > farthestDistance) {
+        farthestDistance = distance;
+        farthestIndex = index;
+      }
+    }
+    if (farthestIndex > startIndex && farthestIndex < endIndex) {
+      keep[farthestIndex] = 1;
+      segments.push([startIndex, farthestIndex], [farthestIndex, endIndex]);
+    }
+  }
+
+  return points.filter((_, index) => keep[index] === 1);
+}
+
 export function exploreRoutePoints(route: ExploreRoute | null | undefined) {
   if (!route?.encodedPolyline) {
     return [];
   }
 
   try {
-    return decodeGooglePolyline(route.encodedPolyline);
+    return simplifyExploreRoutePoints(decodeGooglePolyline(route.encodedPolyline));
   } catch {
     return [];
   }

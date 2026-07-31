@@ -10,6 +10,7 @@ import {
   exploreLiveDriveActive,
   exploreRoutePoint,
   groupExploreRiders,
+  simplifyExploreRoutePoints,
   smoothExploreCameraPoint,
   smoothExploreHeading,
   stepExploreLiveVelocity,
@@ -47,6 +48,26 @@ describe('Explore route geometry', () => {
 
     expect(exploreRoutePoint(points, 0, 1_000)).toEqual(points[0]);
     expect(exploreRoutePoint(points, 1_000, 1_000)).toEqual(points[2]);
+  });
+
+  it('straightens road-width wobble without removing real corners', () => {
+    const origin = { lat: 38.5, lng: -122.5 };
+    const latitudeMeter = 1 / 111_320;
+    const longitudeMeter = 1 / (111_320 * Math.cos(origin.lat * Math.PI / 180));
+    const points = [
+      origin,
+      { lat: origin.lat + latitudeMeter * 1.2, lng: origin.lng + longitudeMeter * 10 },
+      { lat: origin.lat - latitudeMeter * 1.4, lng: origin.lng + longitudeMeter * 20 },
+      { lat: origin.lat, lng: origin.lng + longitudeMeter * 30 },
+      { lat: origin.lat + latitudeMeter * 10, lng: origin.lng + longitudeMeter * 30 },
+      { lat: origin.lat + latitudeMeter * 20, lng: origin.lng + longitudeMeter * 30 },
+    ];
+
+    expect(simplifyExploreRoutePoints(points)).toEqual([
+      origin,
+      points[3],
+      points[5],
+    ]);
   });
 });
 
