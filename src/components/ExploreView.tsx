@@ -48,7 +48,7 @@ import {
   type PlacePredictionOption,
 } from '../lib/googleMaps';
 import { useExploreRide } from '../hooks/useExploreRide';
-import { formatExploreDistanceMeters, formatSpeedFromKph } from '../units';
+import { formatExploreDistanceMeters, formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
   BikeSample,
   DistanceUnit,
@@ -67,6 +67,8 @@ import { ExploreStreetViewOverlay } from './ExploreStreetViewOverlay';
 
 type ExploreViewProps = {
   players: PlayerSlot[];
+  demoPlayerOptions: PlayerSlot[];
+  selectedDemoPlayerIds: PlayerSlot['id'][];
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
@@ -83,6 +85,7 @@ type ExploreViewProps = {
   onSyncRoute: (route: ExploreRoute) => boolean;
   onControlSession: (action: 'start' | 'pause' | 'resume' | 'reset') => boolean;
   onSendState: (state: Omit<MultiplayerExploreState, 'clientId' | 'roomId' | 'at'>) => boolean;
+  onDemoPlayerSelectionChange: (playerIds: PlayerSlot['id'][]) => void;
   onDemoRideStatusChange?: (status: 'ready' | 'riding' | 'paused' | 'finished') => void;
   fullscreen: boolean;
   onFullscreenChange: (enabled: boolean) => void;
@@ -203,6 +206,8 @@ function useLocationSuggestions(
 
 export function ExploreView({
   players,
+  demoPlayerOptions,
+  selectedDemoPlayerIds,
   samplesByDevice,
   speedUnit,
   distanceUnit,
@@ -219,6 +224,7 @@ export function ExploreView({
   onSyncRoute,
   onControlSession,
   onSendState,
+  onDemoPlayerSelectionChange,
   onDemoRideStatusChange,
   fullscreen,
   onFullscreenChange,
@@ -256,6 +262,7 @@ export function ExploreView({
     players,
     route,
     samplesByDevice,
+    demoMode,
   });
   const {
     pause: pauseLocalRide,
@@ -637,12 +644,61 @@ export function ExploreView({
         <div className="explore-demo-banner">
           <Radio size={17} />
           <strong>Developer Demo active</strong>
-          <span>AI commentary is off. Pedaling and freewheel sounds remain on.</span>
+          <span>44/16 rollout · natural launch · 12–18 MPH averages. Commentary is off; bike sounds remain on.</span>
         </div>
       )}
 
       <div className="explore-layout">
         <aside className="explore-setup-card">
+          {demoMode && (
+            <section className="explore-demo-rider-picker">
+              <div>
+                <span className="eyebrow">Explore demo riders</span>
+                <small>Choose the exact riders for this route.</small>
+              </div>
+              <div role="group" aria-label="Choose Explore demo riders">
+                {demoPlayerOptions.map((player) => {
+                  const selected = selectedDemoPlayerIds.includes(player.id);
+                  const lastSelected = selected && selectedDemoPlayerIds.length === 1;
+                  const selectionLocked = ride.status === 'riding' || ride.status === 'paused';
+                  return (
+                    <button
+                      key={player.id}
+                      type="button"
+                      className={selected ? 'selected' : ''}
+                      style={{ '--player-color': player.accent } as CSSProperties}
+                      aria-pressed={selected}
+                      disabled={selectionLocked || lastSelected}
+                      onClick={() => {
+                        const requestedIds = selected
+                          ? selectedDemoPlayerIds.filter((playerId) => playerId !== player.id)
+                          : [...selectedDemoPlayerIds, player.id];
+                        onDemoPlayerSelectionChange(
+                          demoPlayerOptions
+                            .map((option) => option.id)
+                            .filter((playerId) => requestedIds.includes(playerId)),
+                        );
+                      }}
+                    >
+                      {player.photoUrl
+                        ? <img src={player.photoUrl} alt="" />
+                        : (
+                          <span className="explore-demo-rider-initials">
+                            {profileInitials(player.name)}
+                          </span>
+                        )}
+                      <span>
+                        <small>P{player.id}</small>
+                        <strong>{player.name}</strong>
+                      </span>
+                      <b>{selected ? 'Selected' : 'Use'}</b>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {playMode === 'multiplayer' && (
             <section className="explore-room-card">
               <span className="eyebrow">Private multiplayer</span>
@@ -1086,6 +1142,8 @@ export function ExploreView({
                         {formatExploreDistanceMeters(rider.distanceMeters, exploreDistanceUnit)}
                         {' · '}
                         {formatSpeedFromKph(rider.velocityMps * 3.6, speedUnit)}
+                        {' '}
+                        {speedUnitLabel(speedUnit)}
                       </span>
                     </div>
                     <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>

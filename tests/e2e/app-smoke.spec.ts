@@ -414,6 +414,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     travelMode: 'bicycle' | 'drive';
   }> = [];
 
+  await page.addInitScript(() => {
+    window.localStorage.setItem('wattbike-bmx-speed-unit-v1', 'mph');
+  });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -476,7 +479,17 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.getByRole('button', { name: 'Explore', exact: true }).click();
 
   await expect(page.getByText('Developer Demo active', { exact: true })).toBeVisible();
-  await expect(page.getByText(/AI commentary is off/i)).toBeVisible();
+  await expect(page.getByText(/44\/16 rollout.*12–18 MPH averages/i)).toBeVisible();
+  const exploreDemoRiders = page.getByRole('group', { name: 'Choose Explore demo riders' });
+  const exploreDemoRiderButtons = exploreDemoRiders.getByRole('button');
+  await expect(exploreDemoRiderButtons).toHaveCount(4);
+  await expect(exploreDemoRiderButtons.nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(exploreDemoRiderButtons.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await exploreDemoRiderButtons.nth(0).click();
+  await exploreDemoRiderButtons.nth(3).click();
+  await expect(exploreDemoRiderButtons.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await expect(exploreDemoRiderButtons.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(exploreDemoRiderButtons.nth(3)).toHaveAttribute('aria-pressed', 'true');
   await page.evaluate(() => {
     class MockAutocompleteSessionToken {}
     class MockAutocompleteService {
@@ -749,6 +762,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     ready: true,
     modes: ['freewheel', 'pedaling'],
   });
+  await expect.poll(async () => (
+    page.locator('.explore-rider-strip article').first().locator('div > span').textContent()
+  ), { timeout: 14_000 }).toMatch(/ · (?:1[2-7](?:\.\d)?|18(?:\.0)?) MPH/);
   expect(commentaryRequestCount).toBe(0);
 
   await page.screenshot({

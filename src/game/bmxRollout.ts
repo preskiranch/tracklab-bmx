@@ -20,6 +20,10 @@ export function bmxVelocityMpsFromCadence(cadenceRpm: number | null | undefined)
   return Math.max(0, cadenceRpm ?? 0) / 60 * bmxRolloutMetersPerCrankRevolution;
 }
 
+export function bmxCadenceRpmFromVelocityMps(velocityMps: number | null | undefined) {
+  return Math.max(0, velocityMps ?? 0) / bmxRolloutMetersPerCrankRevolution * 60;
+}
+
 export function bmxSpeedKphFromCadence(cadenceRpm: number | null | undefined) {
   return bmxVelocityMpsFromCadence(cadenceRpm) * 3.6;
 }

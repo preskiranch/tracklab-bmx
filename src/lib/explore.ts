@@ -3,6 +3,8 @@ import type { ExploreRider, ExploreRoute, TrackPoint } from '../types';
 
 export const exploreRiderGroupingGapMeters = 70;
 export const exploreRemoteStateFreshMs = 8_000;
+export const exploreDemoMinimumCruiseMph = 12;
+export const exploreDemoMaximumCruiseMph = 18;
 const exploreCameraEaseMs = 180;
 const exploreHeadingEaseMs = 240;
 const exploreCameraBaseOffsetMeters = 60;
@@ -15,6 +17,35 @@ export type ExploreViewportGroup = {
   startMeter: number;
   endMeter: number;
 };
+
+export function exploreDemoRiderMotion(
+  playerId: ExploreRider['playerId'],
+  elapsedSeconds: number,
+) {
+  const elapsed = Number.isFinite(elapsedSeconds) ? Math.max(0, elapsedSeconds) : 0;
+  const riderIndex = Math.max(0, Math.min(3, playerId - 1));
+  const phase = playerId * 1.41;
+  const averageCruiseMph = 13.4 + riderIndex * 1.05;
+  const changingCruiseMph = averageCruiseMph
+    + Math.sin(elapsed * 0.18 + phase) * 0.9
+    + Math.sin(elapsed * 0.43 + phase * 0.57) * 0.35;
+  const cruiseMph = Math.max(
+    exploreDemoMinimumCruiseMph,
+    Math.min(exploreDemoMaximumCruiseMph, changingCruiseMph),
+  );
+  const rampSeconds = 7.2 + riderIndex * 0.55;
+  const rampProgress = Math.max(0, Math.min(1, elapsed / rampSeconds));
+  const launchEase = 1 - ((1 - rampProgress) ** 3);
+  const speedMph = cruiseMph * launchEase;
+  const coastPhase = (elapsed + playerId * 1.35) % 11.5;
+  const pedaling = elapsed < rampSeconds || coastPhase < 8.7;
+
+  return {
+    averageCruiseMph,
+    pedaling,
+    speedMph,
+  };
+}
 
 export function smoothExploreCameraPoint(
   current: TrackPoint,

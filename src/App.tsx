@@ -1434,6 +1434,9 @@ export default function App() {
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
+  const [exploreDemoPlayerIds, setExploreDemoPlayerIds] = useState<PlayerSlot['id'][]>(
+    () => defaultPlayerSlots.slice(0, maxPlayers).map((player) => player.id),
+  );
   const [demoRiderNames, setDemoRiderNames] = useState<DemoRiderNames>({});
   const [demoRiderPhotos, setDemoRiderPhotos] = useState<DemoRiderPhotos>({});
   const [demoRaceSeed, setDemoRaceSeed] = useState(() => Date.now());
@@ -2169,6 +2172,10 @@ export default function App() {
     () => createDemoPlayers(demoBikeCount, demoRiderNames, demoRiderPhotos),
     [demoBikeCount, demoRiderNames, demoRiderPhotos],
   );
+  const exploreDemoCandidates = useMemo(
+    () => createDemoPlayers(maxPlayers, demoRiderNames, demoRiderPhotos),
+    [demoRiderNames, demoRiderPhotos],
+  );
   const connectedBikeSamples = useMemo(() => {
     const next = new Map(bridge.samplesByDevice);
     bluetooth.samplesByDevice.forEach((sample, deviceId) => {
@@ -2248,10 +2255,17 @@ export default function App() {
   const explorePlayers = useMemo(
     () => (
       demoMode
-        ? activePlayers
+        ? exploreDemoCandidates.filter((player) => exploreDemoPlayerIds.includes(player.id))
         : applyStudioRiderAssignments(activePlayers, studioRiders, studioRiderAssignments)
     ),
-    [activePlayers, demoMode, studioRiderAssignments, studioRiders],
+    [
+      activePlayers,
+      demoMode,
+      exploreDemoCandidates,
+      exploreDemoPlayerIds,
+      studioRiderAssignments,
+      studioRiders,
+    ],
   );
   const availableStudioRiders = useMemo(() => activeStudioRiders(studioRiders), [studioRiders]);
   const enteredRacePlayers = useMemo(() => {
@@ -5813,13 +5827,30 @@ export default function App() {
   };
 
   const handleDemoBikeCountChange = (count: number) => {
+    const nextCount = Math.max(1, Math.min(maxPlayers, Math.round(count)));
     clearStartGateSequence();
     setLockedRacePlayers(null);
-    setDemoBikeCount(Math.max(1, Math.min(maxPlayers, Math.round(count))));
+    setDemoBikeCount(nextCount);
+    setExploreDemoPlayerIds(defaultPlayerSlots.slice(0, nextCount).map((player) => player.id));
     setDemoRaceSeed(Date.now() + count);
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     resetRace();
+  };
+
+  const handleExploreDemoPlayerSelectionChange = (playerIds: PlayerSlot['id'][]) => {
+    const requestedIds = new Set(playerIds);
+    const nextIds = defaultPlayerSlots
+      .map((player) => player.id)
+      .filter((playerId) => requestedIds.has(playerId));
+    if (nextIds.length === 0) {
+      return;
+    }
+    setExploreDemoPlayerIds(nextIds);
+    setDemoBikeCount(nextIds.length);
+    setDemoRaceSeed(Date.now() + nextIds.reduce((total, playerId) => total + playerId, 0));
+    setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(false);
   };
 
   const requireAccountProfile = useCallback((message = 'Create an account or sign in before entering TrackLab.') => {
@@ -7057,6 +7088,8 @@ export default function App() {
             players={playMode === 'multiplayer'
               ? explorePlayers.slice(0, localExploreSeatLimit)
               : explorePlayers}
+            demoPlayerOptions={exploreDemoCandidates}
+            selectedDemoPlayerIds={exploreDemoPlayerIds}
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
             distanceUnit={distanceUnit}
@@ -7073,6 +7106,7 @@ export default function App() {
             onSyncRoute={multiplayer.syncExploreRoute}
             onControlSession={multiplayer.controlExploreSession}
             onSendState={multiplayer.sendExploreState}
+            onDemoPlayerSelectionChange={handleExploreDemoPlayerSelectionChange}
             onDemoRideStatusChange={handleExploreDemoRideStatusChange}
             fullscreen={exploreRideFullscreen}
             onFullscreenChange={handleExploreFullscreenChange}

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   decodeGooglePolyline,
   exploreCameraOffsetMeters,
+  exploreDemoMaximumCruiseMph,
+  exploreDemoMinimumCruiseMph,
+  exploreDemoRiderMotion,
   exploreGridClass,
   exploreRoutePoint,
   groupExploreRiders,
@@ -49,6 +52,48 @@ describe('Explore mileage display', () => {
     expect(formatExploreDistanceMeters(1_000, 'mi')).toBe('0.62 mi');
     expect(formatExploreDistanceMeters(1_000, 'km')).toBe('1.00 km');
     expect(formatExploreDistanceMeters(16_093.44, 'mi')).toBe('10.0 mi');
+  });
+});
+
+describe('Explore demo rider pacing', () => {
+  it('launches naturally from zero before reaching a controlled cruise', () => {
+    const stopped = exploreDemoRiderMotion(1, 0);
+    const rolling = exploreDemoRiderMotion(1, 2);
+    const accelerating = exploreDemoRiderMotion(1, 5);
+
+    expect(stopped.speedMph).toBe(0);
+    expect(rolling.speedMph).toBeGreaterThan(0);
+    expect(accelerating.speedMph).toBeGreaterThan(rolling.speedMph);
+  });
+
+  it('keeps every rider within a distinct 12 to 18 MPH average cruise profile', () => {
+    const averages = [1, 2, 3, 4].map((playerId) => {
+      const samples = Array.from(
+        { length: 181 },
+        (_, index) => exploreDemoRiderMotion(playerId as 1 | 2 | 3 | 4, index + 20).speedMph,
+      );
+      samples.forEach((speedMph) => {
+        expect(speedMph).toBeGreaterThanOrEqual(exploreDemoMinimumCruiseMph);
+        expect(speedMph).toBeLessThanOrEqual(exploreDemoMaximumCruiseMph);
+      });
+      return samples.reduce((total, speedMph) => total + speedMph, 0) / samples.length;
+    });
+
+    averages.forEach((averageMph) => {
+      expect(averageMph).toBeGreaterThanOrEqual(exploreDemoMinimumCruiseMph);
+      expect(averageMph).toBeLessThanOrEqual(exploreDemoMaximumCruiseMph);
+    });
+    expect(new Set(averages.map((averageMph) => averageMph.toFixed(2))).size).toBe(4);
+  });
+
+  it('includes repeatable coasting windows for bike mechanics audio', () => {
+    const motions = Array.from(
+      { length: 24 },
+      (_, index) => exploreDemoRiderMotion(3, index + 10),
+    );
+
+    expect(motions.some((motion) => motion.pedaling)).toBe(true);
+    expect(motions.some((motion) => !motion.pedaling)).toBe(true);
   });
 });
 

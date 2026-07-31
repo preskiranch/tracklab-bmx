@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bmxCadenceRpmFromVelocityMps,
   bmxGearInches,
   bmxGearRatio,
   bmxRolloutInchesPerCrankRevolution,
@@ -18,5 +19,12 @@ describe('44/16 BMX rollout', () => {
   it('converts cadence into deterministic road speed', () => {
     expect(bmxSpeedKphFromCadence(0)).toBe(0);
     expect(bmxSpeedKphFromCadence(100)).toBeCloseTo(26.3328, 4);
+  });
+
+  it('converts a target velocity back to the cadence required by the same rollout', () => {
+    const cadence = bmxCadenceRpmFromVelocityMps(15 * 0.44704);
+
+    expect(cadence).toBeCloseTo(91.67, 1);
+    expect(bmxSpeedKphFromCadence(cadence) / 1.609344).toBeCloseTo(15, 5);
   });
 });

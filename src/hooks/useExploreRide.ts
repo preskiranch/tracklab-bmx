@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { bmxVelocityMpsFromCadence } from '../game/bmxRollout';
+import {
+  bmxCadenceRpmFromVelocityMps,
+  bmxVelocityMpsFromCadence,
+} from '../game/bmxRollout';
+import { exploreDemoRiderMotion } from '../lib/explore';
 import type {
   BikeSample,
   ExploreRider,
@@ -14,6 +18,7 @@ type UseExploreRideOptions = {
   players: PlayerSlot[];
   route: ExploreRoute | null;
   samplesByDevice: Map<number, BikeSample>;
+  demoMode?: boolean;
 };
 
 const exploreSampleFreshMs = 3_000;
@@ -44,6 +49,7 @@ export function useExploreRide({
   players,
   route,
   samplesByDevice,
+  demoMode = false,
 }: UseExploreRideOptions) {
   const [status, setStatus] = useState<ExploreRideStatus>('ready');
   const [riders, setRiders] = useState<ExploreRider[]>(() => initialExploreRiders(clientId, players));
@@ -51,6 +57,7 @@ export function useExploreRide({
   const playersRef = useRef(players);
   const samplesRef = useRef(samplesByDevice);
   const routeRef = useRef(route);
+  const demoModeRef = useRef(demoMode);
   const frameRef = useRef(0);
   const lastFrameRef = useRef(0);
   const startedAtRef = useRef<number | null>(null);
@@ -64,6 +71,7 @@ export function useExploreRide({
   playersRef.current = players;
   samplesRef.current = samplesByDevice;
   routeRef.current = route;
+  demoModeRef.current = demoMode;
 
   const reset = useCallback(() => {
     window.cancelAnimationFrame(frameRef.current);
@@ -127,15 +135,22 @@ export function useExploreRide({
         const player = playersRef.current.find((item) => item.id === rider.playerId);
         const sample = player?.deviceId == null ? undefined : samplesRef.current.get(player.deviceId);
         const sampleIsFresh = Boolean(sample && now - sample.at <= exploreSampleFreshMs);
-        const demoCoasting = sample?.source === 'demo'
-          && (exploreElapsedSeconds + rider.playerId * 0.7) % 8.5 >= 6.2;
-        const cadence = sampleIsFresh && !demoCoasting
-          ? Math.max(0, sample?.cadence ?? 0)
-          : 0;
+        const demoMotion = demoModeRef.current
+          ? exploreDemoRiderMotion(rider.playerId, exploreElapsedSeconds)
+          : null;
+        const demoTargetVelocityMps = (demoMotion?.speedMph ?? 0) * 0.44704;
+        const demoTargetCadence = bmxCadenceRpmFromVelocityMps(demoTargetVelocityMps);
+        const cadence = demoMotion
+          ? (demoMotion.pedaling ? demoTargetCadence : 0)
+          : sampleIsFresh
+            ? Math.max(0, sample?.cadence ?? 0)
+            : 0;
         const pedalingVelocityMps = bmxVelocityMpsFromCadence(cadence);
-        const velocityMps = cadence >= 1
-          ? pedalingVelocityMps
-          : Math.max(0, rider.velocityMps - exploreCoastSlowdownMps2 * deltaSeconds);
+        const velocityMps = demoMotion
+          ? (demoMotion.pedaling ? pedalingVelocityMps : rider.velocityMps)
+          : cadence >= 1
+            ? pedalingVelocityMps
+            : Math.max(0, rider.velocityMps - exploreCoastSlowdownMps2 * deltaSeconds);
         const distanceMeters = Math.min(
           currentRoute.distanceMeters,
           rider.distanceMeters + velocityMps * deltaSeconds,
@@ -147,9 +162,13 @@ export function useExploreRide({
           ...(player?.photoUrl ? { photoUrl: player.photoUrl } : {}),
           distanceMeters,
           velocityMps: finished ? 0 : velocityMps,
-          cadence: sampleIsFresh ? cadence : null,
-          watts: sampleIsFresh ? Math.max(0, sample?.watts ?? 0) : 0,
-          signal: sampleIsFresh ? Math.max(0, Math.min(1, sample?.signal ?? 0)) : 0,
+          cadence: demoMotion || sampleIsFresh ? cadence : null,
+          watts: demoMotion
+            ? (demoMotion.pedaling ? Math.round(95 + demoMotion.speedMph * 6.5) : 0)
+            : sampleIsFresh ? Math.max(0, sample?.watts ?? 0) : 0,
+          signal: demoMotion
+            ? 0.96
+            : sampleIsFresh ? Math.max(0, Math.min(1, sample?.signal ?? 0)) : 0,
           finishedAt: finished ? rider.finishedAt ?? now : null,
           at: now,
         };
