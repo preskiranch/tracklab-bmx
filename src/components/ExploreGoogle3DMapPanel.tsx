@@ -74,7 +74,8 @@ export function ExploreGoogle3DMapPanel({
         libraryRef.current = library;
         map = new library.Map3DElement({
           center: { ...routePoints[0], altitude: 0 },
-          gestureHandling: 'NONE',
+          defaultUIHidden: true,
+          gestureHandling: 'COOPERATIVE',
           heading: 0,
           mode: showMapLabels ? 'HYBRID' : 'SATELLITE',
           range: explore3DRange(followZoom),

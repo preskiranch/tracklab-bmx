@@ -266,7 +266,7 @@ export type GoogleMap3DElement = HTMLElement & {
     durationMillis?: number;
   }) => Promise<void> | void;
   fov?: number;
-  gestureHandling?: 'AUTO' | 'COOPERATIVE' | 'GREEDY' | 'NONE' | string;
+  gestureHandling?: 'AUTO' | 'COOPERATIVE' | 'GREEDY' | string;
   heading?: number;
   mode?: string;
   range?: number;

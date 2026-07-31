@@ -794,7 +794,7 @@ export function GoogleMaps3DTrackLayer({
       return;
     }
 
-    map.gestureHandling = isCurveDrawMode || isSplitBranchDrawMode ? 'NONE' : 'AUTO';
+    map.gestureHandling = isCurveDrawMode || isSplitBranchDrawMode ? 'COOPERATIVE' : 'AUTO';
   }, [isCurveDrawMode, isSplitBranchDrawMode]);
 
   useEffect(() => {
