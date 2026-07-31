@@ -42,7 +42,8 @@ describe('Explore elevation display', () => {
     expect(recommendedExploreAirSetting(8.5)).toBe(5);
     expect(recommendedExploreAirSetting(12)).toBe(7);
     expect(recommendedExploreAirSetting(15)).toBe(9);
-    expect(recommendedExploreAirSetting(20)).toBe(10);
+    expect(recommendedExploreAirSetting(17.9)).toBe(9);
+    expect(recommendedExploreAirSetting(18)).toBe(10);
     expect(recommendedExploreAirSetting(24)).toBe(10);
   });
 

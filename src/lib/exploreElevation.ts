@@ -13,7 +13,7 @@ const exploreAirSettingMinimumGrades = [
   11,
   13,
   15,
-  20,
+  18,
 ] as const;
 
 export const exploreAirSettingHysteresisPercent = 0.3;
