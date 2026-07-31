@@ -549,7 +549,10 @@ export function MultiplayerPanel({
               {voiceEnabled ? <MicOff size={15} /> : <Mic size={15} />}
               {voiceEnabled ? 'Mute voice' : 'Enable voice'}
             </button>
-            <span>{voiceStatus} {voiceEnabled ? `/ ${voiceRemoteCount} connected` : ''}</span>
+            <span>
+              {voiceStatus} {voiceEnabled ? `/ ${voiceRemoteCount} connected. ` : ''}
+              Off by default. TrackLab does not record room audio.
+            </span>
           </div>
         </section>
       )}

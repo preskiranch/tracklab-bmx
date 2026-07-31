@@ -3559,7 +3559,10 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     const room = rooms.get(client.roomId);
-    if (!room) {
+    if (!room || !room.racers?.has(client.id) || !requireRacerClient(
+      client,
+      'Voice chat is available to the four room racers.',
+    )) {
       return;
     }
 
@@ -3581,13 +3584,13 @@ async function handleClientMessage(client, rawMessage) {
     };
 
     if (targetId) {
-      if (room.members.has(targetId)) {
+      if (room.racers.has(targetId)) {
         send(clients.get(targetId), payload);
       }
       return;
     }
 
-    room.members.forEach((memberId) => {
+    room.racers.forEach((memberId) => {
       if (memberId !== client.id) {
         send(clients.get(memberId), payload);
       }

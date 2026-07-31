@@ -574,9 +574,13 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     return send({ type: 'room-reset-lobby' });
   }, [send]);
 
+  const currentRoomId = currentRoom?.id ?? null;
   const sendVoiceSignal = useCallback((targetId: string | null, signal: MultiplayerVoiceSignalPayload) => {
+    if (!currentRoomId) {
+      return false;
+    }
     return send({ type: 'voice-signal', targetId, signal });
-  }, [send]);
+  }, [currentRoomId, send]);
 
   const sendRaceState = useCallback((state: Omit<MultiplayerRaceState, 'clientId' | 'riderName' | 'roomId' | 'at'>) => {
     if (!currentRoom) {

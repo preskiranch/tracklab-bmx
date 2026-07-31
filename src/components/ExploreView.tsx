@@ -9,6 +9,8 @@ import {
   LocateFixed,
   MapPin,
   MapPinned,
+  Mic,
+  MicOff,
   Minimize2,
   Navigation2,
   Pause,
@@ -80,6 +82,10 @@ type ExploreViewProps = {
   currentUserId: string | null;
   inviteUrl: string;
   remoteStates: MultiplayerExploreState[];
+  voiceEnabled: boolean;
+  voiceSupported: boolean;
+  voiceStatus: string;
+  voiceRemoteCount: number;
   onPlayModeChange: (mode: PlayMode) => void;
   onCreatePrivateRoom: () => boolean;
   onShareInvite: () => void;
@@ -87,6 +93,8 @@ type ExploreViewProps = {
   onControlSession: (action: 'start' | 'pause' | 'resume' | 'reset') => boolean;
   onSendState: (state: Omit<MultiplayerExploreState, 'clientId' | 'roomId' | 'at'>) => boolean;
   onDemoPlayerSelectionChange: (playerIds: PlayerSlot['id'][]) => void;
+  onVoiceStart: () => void;
+  onVoiceStop: () => void;
   onDemoRideStatusChange?: (status: 'ready' | 'riding' | 'paused' | 'finished') => void;
   fullscreen: boolean;
   onFullscreenChange: (enabled: boolean) => void;
@@ -219,6 +227,10 @@ export function ExploreView({
   currentUserId,
   inviteUrl,
   remoteStates,
+  voiceEnabled,
+  voiceSupported,
+  voiceStatus,
+  voiceRemoteCount,
   onPlayModeChange,
   onCreatePrivateRoom,
   onShareInvite,
@@ -226,6 +238,8 @@ export function ExploreView({
   onControlSession,
   onSendState,
   onDemoPlayerSelectionChange,
+  onVoiceStart,
+  onVoiceStop,
   onDemoRideStatusChange,
   fullscreen,
   onFullscreenChange,
@@ -743,6 +757,19 @@ export function ExploreView({
                   <button type="button" onClick={onShareInvite} disabled={!inviteUrl}>
                     <Share2 size={15} /> Share room link
                   </button>
+                  <button
+                    type="button"
+                    disabled={!voiceSupported}
+                    aria-pressed={voiceEnabled}
+                    onClick={voiceEnabled ? onVoiceStop : onVoiceStart}
+                  >
+                    {voiceEnabled ? <MicOff size={15} /> : <Mic size={15} />}
+                    {voiceEnabled ? 'Mute microphone' : 'Enable microphone'}
+                  </button>
+                  <small aria-live="polite">
+                    {voiceStatus}{voiceEnabled ? ` ${voiceRemoteCount} rider${voiceRemoteCount === 1 ? '' : 's'} connected.` : ''}
+                    {' '}Off by default. TrackLab does not record room audio.
+                  </small>
                   {!roomHost && <p>The room host chooses and controls the shared route.</p>}
                 </>
               ) : (
@@ -1050,6 +1077,20 @@ export function ExploreView({
                   <Landmark size={18} />
                   <span>{showMapLabels ? 'Labels on' : 'Street names'}</span>
                 </button>
+                {playMode === 'multiplayer' && currentRoom && (
+                  <button
+                    className={`explore-map-labels-toggle${voiceEnabled ? ' active' : ''}`}
+                    type="button"
+                    disabled={!voiceSupported}
+                    aria-label={voiceEnabled ? 'Mute room microphone' : 'Enable room microphone'}
+                    aria-pressed={voiceEnabled}
+                    title={`${voiceStatus}${voiceEnabled ? ` ${voiceRemoteCount} connected.` : ''}`}
+                    onClick={voiceEnabled ? onVoiceStop : onVoiceStart}
+                  >
+                    {voiceEnabled ? <Mic size={18} /> : <MicOff size={18} />}
+                    <span>{voiceEnabled ? 'Mic on' : 'Mic off'}</span>
+                  </button>
+                )}
               </div>
 
               {showMapLabels && !selectedLandmark && !streetViewLandmark && (

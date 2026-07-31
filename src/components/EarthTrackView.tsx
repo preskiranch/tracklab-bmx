@@ -10,6 +10,8 @@ import {
   Map as MapIcon,
   MapPinned,
   Maximize2,
+  Mic,
+  MicOff,
   Minimize2,
   Pause,
   Play,
@@ -75,6 +77,11 @@ type EarthTrackViewProps = {
   startGateLightIndex: 0 | 1 | 2 | 3 | null;
   startCountdownPaused: boolean;
   canPauseStartCountdown: boolean;
+  roomVoiceVisible: boolean;
+  voiceEnabled: boolean;
+  voiceSupported: boolean;
+  voiceStatus: string;
+  voiceRemoteCount: number;
   cStartOffsetsByPlayer: CStartOffsetsByPlayer;
   finishCountdownSeconds: number | null;
   reactionTimesByPlayer: ReactionTimesByPlayer;
@@ -110,6 +117,8 @@ type EarthTrackViewProps = {
   onRiderOverlayPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onRaceFullscreenInteraction: () => void;
   onStartCountdownPauseToggle: () => void;
+  onVoiceStart: () => void;
+  onVoiceStop: () => void;
   onCancelRace: () => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingObstacleView3DChange: (enabled: boolean) => void;
@@ -167,6 +176,11 @@ export function EarthTrackView({
   startGateLightIndex,
   startCountdownPaused,
   canPauseStartCountdown,
+  roomVoiceVisible,
+  voiceEnabled,
+  voiceSupported,
+  voiceStatus,
+  voiceRemoteCount,
   cStartOffsetsByPlayer,
   finishCountdownSeconds,
   reactionTimesByPlayer,
@@ -202,6 +216,8 @@ export function EarthTrackView({
   onRiderOverlayPreferenceChange,
   onRaceFullscreenInteraction,
   onStartCountdownPauseToggle,
+  onVoiceStart,
+  onVoiceStop,
   onCancelRace,
   onMappingFullscreenChange,
   onMappingObstacleView3DChange,
@@ -454,6 +470,21 @@ export function EarthTrackView({
           >
             {startCountdownPaused ? <Play size={18} /> : <Pause size={18} />}
             {startCountdownPaused ? 'Resume Countdown' : 'Pause Countdown'}
+          </button>
+        )}
+
+        {raceViewFullscreen && roomVoiceVisible && (
+          <button
+            className={`race-countdown-pause-overlay race-room-voice-overlay${voiceEnabled ? ' paused' : ''}`}
+            type="button"
+            disabled={!voiceSupported}
+            onClick={voiceEnabled ? onVoiceStop : onVoiceStart}
+            aria-label={voiceEnabled ? 'Mute room microphone' : 'Enable room microphone'}
+            aria-pressed={voiceEnabled}
+            title={`${voiceStatus}${voiceEnabled ? ` ${voiceRemoteCount} connected.` : ''}`}
+          >
+            {voiceEnabled ? <Mic size={18} /> : <MicOff size={18} />}
+            {voiceEnabled ? 'Mic On' : 'Mic Off'}
           </button>
         )}
 

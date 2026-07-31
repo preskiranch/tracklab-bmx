@@ -1238,6 +1238,11 @@ input:focus {
   left: max(14px, calc(env(safe-area-inset-left, 0px) + 14px));
 }
 
+.race-room-voice-overlay {
+  left: auto;
+  right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
+}
+
 .race-countdown-pause-overlay:hover,
 .race-countdown-pause-overlay.paused {
   border-color: rgba(255, 216, 61, 0.82);

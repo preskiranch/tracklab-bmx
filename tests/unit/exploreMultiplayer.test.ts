@@ -172,6 +172,17 @@ describe('Explore private multiplayer', () => {
     });
     expect((joined.room as { racerSeatCount: number }).racerSeatCount).toBe(4);
 
+    guest.socket.send(JSON.stringify({
+      type: 'voice-signal',
+      targetId: null,
+      signal: { type: 'ready' },
+    }));
+    const voiceReady = await host.waitFor((message) => {
+      const voiceSignal = message.signal as { signal?: { type?: string } } | undefined;
+      return message.type === 'voice-signal' && voiceSignal?.signal?.type === 'ready';
+    });
+    expect((voiceReady.signal as { targetId: string | null }).targetId).toBeNull();
+
     const route = {
       id: 'EXPLORE-shared-test',
       origin: { lat: 38.5, lng: -120.2 },
@@ -193,6 +204,13 @@ describe('Explore private multiplayer', () => {
     expect((routeState.room as {
       exploreSession: { status: string };
     }).exploreSession.status).toBe('ready');
+
+    guest.socket.send(JSON.stringify({ type: 'room-explore-action', action: 'pause' }));
+    const hostOnlyError = await guest.waitFor((message) => (
+      message.type === 'room-error'
+      && String(message.message).includes('Only the room host')
+    ));
+    expect(hostOnlyError.message).toContain('control the shared Explore ride');
 
     host.socket.send(JSON.stringify({ type: 'room-explore-action', action: 'start' }));
     const ridingState = await guest.waitFor((message) => {

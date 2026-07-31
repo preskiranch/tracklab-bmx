@@ -7100,6 +7100,10 @@ export default function App() {
             currentUserId={multiplayer.clientId}
             inviteUrl={multiplayer.inviteUrl}
             remoteStates={multiplayer.roomExploreStates}
+            voiceEnabled={roomVoice.enabled}
+            voiceSupported={roomVoice.supported}
+            voiceStatus={roomVoice.status}
+            voiceRemoteCount={roomVoice.remoteCount}
             onPlayModeChange={setPlayMode}
             onCreatePrivateRoom={multiplayer.createPrivateRoom}
             onShareInvite={shareMultiplayerInvite}
@@ -7107,6 +7111,8 @@ export default function App() {
             onControlSession={multiplayer.controlExploreSession}
             onSendState={multiplayer.sendExploreState}
             onDemoPlayerSelectionChange={handleExploreDemoPlayerSelectionChange}
+            onVoiceStart={roomVoice.start}
+            onVoiceStop={roomVoice.stop}
             onDemoRideStatusChange={handleExploreDemoRideStatusChange}
             fullscreen={exploreRideFullscreen}
             onFullscreenChange={handleExploreFullscreenChange}
@@ -7193,6 +7199,11 @@ export default function App() {
                   startGateLightIndex={startGateStatus.lightIndex}
                   startCountdownPaused={startCountdownPaused}
                   canPauseStartCountdown={playMode === 'local' && startGateStatus.active && startGateStatus.phase === 'staging'}
+                  roomVoiceVisible={playMode === 'multiplayer' && Boolean(multiplayer.currentRoom)}
+                  voiceEnabled={roomVoice.enabled}
+                  voiceSupported={roomVoice.supported}
+                  voiceStatus={roomVoice.status}
+                  voiceRemoteCount={roomVoice.remoteCount}
                   cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                   finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
@@ -7228,6 +7239,8 @@ export default function App() {
                   onRiderOverlayPreferenceChange={handleRiderOverlayPreferenceChange}
                   onRaceFullscreenInteraction={requestRaceFullscreen}
                   onStartCountdownPauseToggle={handleStartCountdownPauseToggle}
+                  onVoiceStart={roomVoice.start}
+                  onVoiceStop={roomVoice.stop}
                   onCancelRace={handleCancel}
                   onMappingFullscreenChange={handleMappingFullscreenChange}
                   onMappingObstacleView3DChange={setMappingObstacleView3D}

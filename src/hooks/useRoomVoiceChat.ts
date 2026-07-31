@@ -18,6 +18,16 @@ function supportsVoiceChat() {
     && typeof RTCPeerConnection !== 'undefined';
 }
 
+export function roomVoiceRacerIds(
+  currentRoom: MultiplayerRoom | null,
+  currentUserId: string | null,
+) {
+  return (currentRoom?.members ?? [])
+    .filter((member) => member.roomRole === 'racer' && member.id !== currentUserId)
+    .map((member) => member.id)
+    .slice(0, 3);
+}
+
 export function useRoomVoiceChat({
   currentRoom,
   currentUserId,
@@ -35,10 +45,11 @@ export function useRoomVoiceChat({
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
   const roomId = currentRoom?.id ?? null;
+  const localRacer = Boolean(currentRoom?.members.some(
+    (member) => member.id === currentUserId && member.roomRole === 'racer',
+  ));
   const remoteMemberIds = useMemo(
-    () => (currentRoom?.members ?? [])
-      .map((member) => member.id)
-      .filter((memberId) => memberId !== currentUserId),
+    () => roomVoiceRacerIds(currentRoom, currentUserId),
     [currentRoom?.members, currentUserId],
   );
 
@@ -75,6 +86,7 @@ export function useRoomVoiceChat({
     audioElementsRef.current.clear();
     pendingCandidatesRef.current.clear();
     offeredPeersRef.current.clear();
+    processedSignalsRef.current.clear();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
     setRemoteCount(0);
@@ -140,7 +152,7 @@ export function useRoomVoiceChat({
     });
 
     peer.addEventListener('connectionstatechange', () => {
-      if (peer.connectionState === 'failed' || peer.connectionState === 'closed' || peer.connectionState === 'disconnected') {
+      if (peer.connectionState === 'failed' || peer.connectionState === 'closed') {
         closePeer(remoteId);
       }
     });
@@ -174,6 +186,11 @@ export function useRoomVoiceChat({
       return;
     }
 
+    if (!localRacer) {
+      setStatus('Voice chat is available to the four room racers.');
+      return;
+    }
+
     if (!supportsVoiceChat()) {
       setStatus('Voice chat is not supported in this browser.');
       return;
@@ -186,10 +203,12 @@ export function useRoomVoiceChat({
       setStatus('Voice on.');
       sendVoiceSignal(null, { type: 'ready' });
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Microphone access failed.');
+      setStatus(error instanceof DOMException && error.name === 'NotAllowedError'
+        ? 'Microphone permission was not granted.'
+        : 'Microphone access failed.');
       setEnabled(false);
     }
-  }, [currentRoom, currentUserId, ensureLocalStream, sendVoiceSignal]);
+  }, [currentRoom, currentUserId, ensureLocalStream, localRacer, sendVoiceSignal]);
 
   useEffect(() => {
     if (!roomId && enabled) {
@@ -227,6 +246,7 @@ export function useRoomVoiceChat({
         processedSignalsRef.current.has(voiceSignal.id)
         || voiceSignal.fromId === currentUserId
         || (voiceSignal.targetId && voiceSignal.targetId !== currentUserId)
+        || !remoteMemberIds.includes(voiceSignal.fromId)
       ) {
         return;
       }
@@ -295,7 +315,7 @@ export function useRoomVoiceChat({
         closePeer(remoteId);
       });
     });
-  }, [closePeer, createOffer, currentUserId, enabled, ensurePeer, sendVoiceSignal, voiceSignals]);
+  }, [closePeer, createOffer, currentUserId, enabled, ensurePeer, remoteMemberIds, sendVoiceSignal, voiceSignals]);
 
   return {
     enabled,
@@ -303,6 +323,6 @@ export function useRoomVoiceChat({
     start,
     status,
     stop,
-    supported: supportsVoiceChat(),
+    supported: supportsVoiceChat() && localRacer,
   };
 }
