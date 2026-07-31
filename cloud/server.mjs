@@ -65,6 +65,7 @@ import {
   requestClientIp,
   staticCacheControl,
 } from './httpSecurity.mjs';
+import { fetchExploreElevationProfile } from './exploreElevation.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(__dirname, '..');
@@ -81,6 +82,7 @@ const persistedRaceResultKeys = new Map();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const userDataWriteChains = new Map();
+const exploreElevationCache = new Map();
 const globalRaceViewProfileKey = 'global:developer-race-view';
 let commentarySpeechProviderStatus = 'unknown';
 let commentarySpeechProviderRetryAt = 0;
@@ -610,6 +612,45 @@ function exploreRoutesApiKey() {
   return String(process.env.GOOGLE_ROUTES_API_KEY || '').trim();
 }
 
+async function exploreElevationForRoute(encodedPolyline, distanceMeters, signal) {
+  const key = exploreRoutesApiKey();
+  if (!key || !encodedPolyline) {
+    return null;
+  }
+  const cacheKey = createHash('sha256').update(encodedPolyline).digest('hex').slice(0, 24);
+  const cached = exploreElevationCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.profile;
+  }
+
+  try {
+    const profile = await fetchExploreElevationProfile({
+      apiKey: key,
+      distanceMeters,
+      encodedPolyline,
+      signal,
+    });
+    exploreElevationCache.set(cacheKey, {
+      profile,
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+    });
+    if (exploreElevationCache.size > 200) {
+      exploreElevationCache.delete(exploreElevationCache.keys().next().value);
+    }
+    cloudTelemetry.increment('tracklab_explore_elevation_requests_total', { status: 'ready' });
+    return profile;
+  } catch (error) {
+    const status = sanitizeText(error?.code, 'unavailable', 32);
+    exploreElevationCache.set(cacheKey, {
+      profile: null,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+    });
+    cloudTelemetry.increment('tracklab_explore_elevation_requests_total', { status });
+    console.warn(`Explore elevation unavailable (${status}).`);
+    return null;
+  }
+}
+
 function appleMapKitJsToken() {
   return String(process.env.APPLE_MAPKIT_JS_TOKEN || '').trim();
 }
@@ -663,6 +704,12 @@ async function computeExploreRoute(payload, signal) {
     throw new HttpRequestError(404, 'No connected bicycle or driving route was found between those locations.');
   }
 
+  const elevationProfile = await exploreElevationForRoute(
+    encodedPolyline,
+    distanceMeters,
+    signal,
+  );
+
   const routeId = `EXPLORE-${createHash('sha256')
     .update(`${travelMode}:${origin.lat}:${origin.lng}:${destination.lat}:${destination.lng}:${encodedPolyline}`)
     .digest('hex')
@@ -677,6 +724,11 @@ async function computeExploreRoute(payload, signal) {
     distanceMeters,
     durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 1,
     encodedPolyline,
+    ...(elevationProfile ? {
+      elevationSamples: elevationProfile.samples,
+      elevationGainMeters: elevationProfile.gainMeters,
+      elevationLossMeters: elevationProfile.lossMeters,
+    } : {}),
     createdAt: Date.now(),
   });
 }
@@ -2249,6 +2301,42 @@ function sanitizeExplorePoint(value) {
   return { lat, lng };
 }
 
+function sanitizeExploreElevationSamples(value, routeDistanceMeters) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .slice(0, 256)
+    .map((sample) => {
+      const distanceMeters = Number(sample?.distanceMeters);
+      const elevationMeters = Number(sample?.elevationMeters);
+      if (!Number.isFinite(distanceMeters) || !Number.isFinite(elevationMeters)) {
+        return null;
+      }
+      return {
+        distanceMeters: Math.max(0, Math.min(routeDistanceMeters, distanceMeters)),
+        elevationMeters: Math.max(-500, Math.min(9_000, elevationMeters)),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.distanceMeters - right.distanceMeters)
+    .filter((sample, index, samples) => index === 0 || sample.distanceMeters > samples[index - 1].distanceMeters);
+}
+
+function summarizeExploreElevation(samples) {
+  let gainMeters = 0;
+  let lossMeters = 0;
+  for (let index = 1; index < samples.length; index += 1) {
+    const delta = samples[index].elevationMeters - samples[index - 1].elevationMeters;
+    if (delta > 0) {
+      gainMeters += delta;
+    } else {
+      lossMeters += Math.abs(delta);
+    }
+  }
+  return { gainMeters, lossMeters };
+}
+
 function sanitizeExploreRoute(value) {
   if (!value || typeof value !== 'object') {
     return null;
@@ -2262,6 +2350,8 @@ function sanitizeExploreRoute(value) {
   if (!origin || !destination || !encodedPolyline || distanceMeters <= 1) {
     return null;
   }
+  const elevationSamples = sanitizeExploreElevationSamples(value.elevationSamples, distanceMeters);
+  const elevationSummary = summarizeExploreElevation(elevationSamples);
 
   return {
     id: sanitizeText(value.id, randomId('EXPLORE', 12), 96),
@@ -2273,6 +2363,11 @@ function sanitizeExploreRoute(value) {
     distanceMeters,
     durationSeconds: Math.max(1, Math.min(14 * 24 * 60 * 60, finiteNumber(value.durationSeconds, 0))),
     encodedPolyline,
+    ...(elevationSamples.length >= 2 ? {
+      elevationSamples,
+      elevationGainMeters: elevationSummary.gainMeters,
+      elevationLossMeters: elevationSummary.lossMeters,
+    } : {}),
     createdAt: Math.max(0, finiteNumber(value.createdAt, Date.now())),
   };
 }

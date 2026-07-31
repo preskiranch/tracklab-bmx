@@ -8,6 +8,7 @@ import {
   exploreLiveDriveActive,
   stepExploreLiveVelocity,
 } from '../lib/explore';
+import { exploreGradeAtMeter } from '../lib/exploreElevation';
 import type {
   BikeSample,
   ExploreRider,
@@ -149,6 +150,10 @@ export function useExploreRide({
           ? (demoMotion.pedaling ? demoTargetCadence : 0)
           : liveDriveActive ? liveCadence : 0;
         const pedalingVelocityMps = exploreVelocityMpsFromCadence(cadence);
+        const gradePercent = exploreGradeAtMeter(
+          currentRoute.elevationSamples,
+          rider.distanceMeters,
+        );
         const velocityMps = demoMotion
           ? (demoMotion.pedaling ? pedalingVelocityMps : rider.velocityMps)
           : stepExploreLiveVelocity(
@@ -156,6 +161,7 @@ export function useExploreRide({
             pedalingVelocityMps,
             liveDriveActive,
             deltaSeconds,
+            gradePercent,
           );
         const distanceMeters = Math.min(
           currentRoute.distanceMeters,

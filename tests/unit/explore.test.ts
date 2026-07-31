@@ -134,6 +134,16 @@ describe('Explore live Wattbike physics', () => {
     }
     expect(velocity).toBe(0);
   });
+
+  it('slows climbing riders and carries descending riders farther', () => {
+    const flatPedaling = stepExploreLiveVelocity(5, 8, true, 0.1, 0);
+    const climbing = stepExploreLiveVelocity(5, 8, true, 0.1, 6);
+    const flatCoasting = stepExploreLiveVelocity(8, 0, false, 0.1, 0);
+    const descending = stepExploreLiveVelocity(8, 0, false, 0.1, -6);
+
+    expect(climbing).toBeLessThan(flatPedaling);
+    expect(descending).toBeGreaterThan(flatCoasting);
+  });
 });
 
 describe('Explore automatic map layouts', () => {

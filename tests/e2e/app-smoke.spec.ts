@@ -448,6 +448,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       : request.destinationLabel === 'Quick Finish' || request.destinationLabel === 'Quick Start'
         ? request.destinationLabel
         : 'Quick Finish';
+    const routeDistanceMeters = quickRoute ? 2 : 1_000;
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
@@ -459,9 +460,16 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
           originLabel,
           destinationLabel,
           travelMode: request.travelMode,
-          distanceMeters: quickRoute ? 2 : 1_000,
+          distanceMeters: routeDistanceMeters,
           durationSeconds: quickRoute ? 1 : 300,
           encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+          elevationSamples: [
+            { distanceMeters: 0, elevationMeters: 10 },
+            { distanceMeters: routeDistanceMeters / 2, elevationMeters: 20 },
+            { distanceMeters: routeDistanceMeters, elevationMeters: 15 },
+          ],
+          elevationGainMeters: 10,
+          elevationLossMeters: 5,
           createdAt: Date.now(),
         },
       }),
@@ -768,9 +776,13 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
 
   await expect(page.locator('.explore-route-summary > div strong'))
     .toHaveText('San Francisco Ferry Building, San Francisco, CA, USA');
+  await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
+  await expect(page.locator('.explore-route-summary')).toContainText('Descent16 ft');
+  await expect(page.getByLabel(/Climbing, grade \+2\.0%/).first()).toBeVisible();
   await mapRenderer.getByRole('button', { name: 'Apple Satellite' }).click();
   await expect(page.getByText(/Apple Satellite is not configured yet/i)).toBeVisible();
   await expect(page.locator('.explore-route-summary')).toContainText('Apple satellite');
+  await expect(page.locator('.explore-route-summary')).toContainText('Elevation gainUnavailable');
   appleMapConfigured = true;
   await mapRenderer.getByRole('button', { name: 'Google Satellite' }).click();
   await expect(page.locator('.explore-route-summary')).toContainText('Google satellite');

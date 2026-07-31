@@ -44,6 +44,13 @@ import {
 } from '../lib/explore';
 import { fetchExploreRoute } from '../lib/exploreRoutes';
 import {
+  exploreElevationAtMeter,
+  exploreGradeAtMeter,
+  exploreSlopeDirection,
+  formatExploreElevation,
+  formatExploreGrade,
+} from '../lib/exploreElevation';
+import {
   fetchGoogleLandmarkDetails,
   fetchLocationPredictions,
   resetPlaceAutocompleteSession,
@@ -341,6 +348,8 @@ export function ExploreView({
     [activeRemoteRiders, ride.riders],
   );
   const groups = useMemo(() => groupExploreRiders(visibleRiders), [visibleRiders]);
+  const elevationAvailable = (route?.elevationSamples?.length ?? 0) >= 2
+    && effectiveMapRenderer !== 'apple-satellite';
   const liveDeviceByRider = useMemo(() => {
     const next = new Map<string, number>();
     Object.entries(liveRiderAssignments).forEach(([deviceId, riderId]) => {
@@ -1118,6 +1127,18 @@ export function ExploreView({
                   <div><dt>Route</dt><dd>{formatExploreDistanceMeters(route.distanceMeters, exploreDistanceUnit)}</dd></div>
                   <div><dt>Google estimate</dt><dd>{formatDuration(route.durationSeconds)}</dd></div>
                   <div>
+                    <dt>Elevation gain</dt>
+                    <dd>{elevationAvailable
+                      ? formatExploreElevation(route.elevationGainMeters ?? 0, exploreDistanceUnit)
+                      : 'Unavailable'}</dd>
+                  </div>
+                  <div>
+                    <dt>Descent</dt>
+                    <dd>{elevationAvailable
+                      ? formatExploreElevation(route.elevationLossMeters ?? 0, exploreDistanceUnit)
+                      : 'Unavailable'}</dd>
+                  </div>
+                  <div>
                     <dt>View</dt>
                     <dd>
                       {effectiveMapRenderer === 'google-3d'
@@ -1462,25 +1483,44 @@ export function ExploreView({
               )}
 
               <section className="explore-rider-strip" aria-label="Explore riders">
-                {visibleRiders.length > 0 ? visibleRiders.map((rider) => (
-                  <article style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
-                    {rider.photoUrl
-                      ? <img src={rider.photoUrl} alt={`${rider.name} profile`} />
-                      : <span className="explore-rider-initials">{profileInitials(rider.name)}</span>}
-                    <div>
-                      <strong>{rider.name}</strong>
-                      <span>
-                        {formatExploreDistanceMeters(rider.distanceMeters, exploreDistanceUnit)}
-                        {' · '}
-                        {formatSpeedFromKph(rider.velocityMps * 3.6, speedUnit)}
-                        {' '}
-                        {speedUnitLabel(speedUnit)}
-                      </span>
-                      <span>Avg {exploreAverageSpeedMph(rider.distanceMeters, ride.elapsedMs).toFixed(1)} MPH</span>
-                    </div>
-                    <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>
-                  </article>
-                )) : <p>Connect at least one Wattbike to begin.</p>}
+                {visibleRiders.length > 0 ? visibleRiders.map((rider) => {
+                  const elevationMeters = elevationAvailable
+                    ? exploreElevationAtMeter(route.elevationSamples, rider.distanceMeters)
+                    : null;
+                  const gradePercent = elevationAvailable
+                    ? exploreGradeAtMeter(route.elevationSamples, rider.distanceMeters)
+                    : 0;
+                  const slopeDirection = exploreSlopeDirection(gradePercent);
+                  const slopeLabel = slopeDirection === 'climb'
+                    ? 'Climbing'
+                    : slopeDirection === 'descent' ? 'Descending' : 'Level';
+                  return (
+                    <article style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
+                      {rider.photoUrl
+                        ? <img src={rider.photoUrl} alt={`${rider.name} profile`} />
+                        : <span className="explore-rider-initials">{profileInitials(rider.name)}</span>}
+                      <div>
+                        <strong>{rider.name}</strong>
+                        <span>
+                          {formatExploreDistanceMeters(rider.distanceMeters, exploreDistanceUnit)}
+                          {' · '}
+                          {formatSpeedFromKph(rider.velocityMps * 3.6, speedUnit)}
+                          {' '}
+                          {speedUnitLabel(speedUnit)}
+                        </span>
+                        <span>Avg {exploreAverageSpeedMph(rider.distanceMeters, ride.elapsedMs).toFixed(1)} MPH</span>
+                        {elevationMeters != null && (
+                          <span aria-label={`${slopeLabel}, grade ${formatExploreGrade(gradePercent)}`}>
+                            {formatExploreElevation(elevationMeters, exploreDistanceUnit)}
+                            {' · '}
+                            {formatExploreGrade(gradePercent)} {slopeLabel}
+                          </span>
+                        )}
+                      </div>
+                      <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>
+                    </article>
+                  );
+                }) : <p>Connect at least one Wattbike to begin.</p>}
               </section>
 
               {ride.status === 'finished' && (

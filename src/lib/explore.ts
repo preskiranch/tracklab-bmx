@@ -76,6 +76,7 @@ export function stepExploreLiveVelocity(
   targetVelocityMps: number,
   driveActive: boolean,
   deltaSeconds: number,
+  gradePercent = 0,
 ) {
   const current = Number.isFinite(currentVelocityMps) ? Math.max(0, currentVelocityMps) : 0;
   const target = Number.isFinite(targetVelocityMps) ? Math.max(0, targetVelocityMps) : 0;
@@ -84,18 +85,25 @@ export function stepExploreLiveVelocity(
     return current;
   }
 
+  const safeGradePercent = Number.isFinite(gradePercent)
+    ? Math.max(-30, Math.min(30, gradePercent))
+    : 0;
+  const gradeAccelerationMps2 = 9.80665 * Math.sin(Math.atan(safeGradePercent / 100));
+
   if (driveActive) {
     const difference = target - current;
     const maximumChange = (difference >= 0
       ? exploreLiveAccelerationMps2
       : exploreLivePedalingSlowdownMps2) * elapsed;
-    return Math.abs(difference) <= maximumChange
+    const cadenceDrivenVelocity = Math.abs(difference) <= maximumChange
       ? target
       : Math.max(0, current + Math.sign(difference) * maximumChange);
+    return Math.max(0, cadenceDrivenVelocity - gradeAccelerationMps2 * elapsed);
   }
 
   const resistance = exploreLiveRollingResistanceMps2
-    + exploreLiveAeroResistance * current * current;
+    + exploreLiveAeroResistance * current * current
+    + gradeAccelerationMps2;
   const next = Math.max(0, current - resistance * elapsed);
   return next < 0.08 ? 0 : next;
 }

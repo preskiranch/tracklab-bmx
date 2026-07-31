@@ -136,6 +136,11 @@ export type MultiplayerLatencyQuality = 'unknown' | 'good' | 'ok' | 'poor';
 export type ExploreTravelMode = 'bicycle' | 'drive';
 export type ExploreDistanceUnit = 'mi' | 'km';
 
+export type ExploreElevationSample = {
+  distanceMeters: number;
+  elevationMeters: number;
+};
+
 export type ExploreRoute = {
   id: string;
   origin: TrackPoint;
@@ -146,6 +151,9 @@ export type ExploreRoute = {
   distanceMeters: number;
   durationSeconds: number;
   encodedPolyline: string;
+  elevationSamples?: ExploreElevationSample[];
+  elevationGainMeters?: number;
+  elevationLossMeters?: number;
   createdAt: number;
 };
 
