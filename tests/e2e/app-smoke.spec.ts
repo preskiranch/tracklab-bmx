@@ -676,8 +676,13 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     'Destination: San Francisco Ferry Building, San Francisco, CA, USA',
   );
   await expect(destinationInCameraBar).toBeVisible();
+  const cameraBarBox = await cameraControls.boundingBox();
   const destinationBox = await destinationInCameraBar.boundingBox();
   const zoomOutBox = await page.getByRole('button', { name: 'Show more of the route' }).boundingBox();
+  expect(cameraBarBox).not.toBeNull();
+  expect(cameraBarBox?.x).toBe(0);
+  expect(cameraBarBox?.y).toBe(0);
+  expect(cameraBarBox?.width ?? 0).toBeGreaterThanOrEqual(1_278);
   expect(destinationBox).not.toBeNull();
   expect(zoomOutBox).not.toBeNull();
   expect(destinationBox?.x ?? 0).toBeLessThan(zoomOutBox?.x ?? 0);
@@ -823,6 +828,16 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(destinationInCameraBar).toBeVisible();
+  const mobileCameraBarBox = await cameraControls.boundingBox();
+  const mobileGroupLabelBox = await page.locator('.explore-map-group-label').boundingBox();
+  expect(mobileCameraBarBox).not.toBeNull();
+  expect(mobileCameraBarBox?.x).toBe(0);
+  expect(mobileCameraBarBox?.y).toBe(0);
+  expect(mobileCameraBarBox?.width ?? 0).toBeGreaterThanOrEqual(388);
+  expect(mobileGroupLabelBox).not.toBeNull();
+  expect(mobileGroupLabelBox?.y ?? 0).toBeGreaterThanOrEqual(
+    (mobileCameraBarBox?.y ?? 0) + (mobileCameraBarBox?.height ?? 0),
+  );
   const mobilePauseBox = await page.getByRole('button', { name: 'Pause ride' }).boundingBox();
   const mobileExitBox = await page.getByRole('button', { name: 'Exit full screen' }).boundingBox();
   expect(mobilePauseBox).not.toBeNull();
