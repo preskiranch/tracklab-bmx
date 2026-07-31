@@ -9131,7 +9131,6 @@ input:focus {
 }
 
 .explore-fullscreen .explore-camera-toolbar,
-.explore-fullscreen .explore-controls,
 .explore-fullscreen .explore-rider-strip,
 .explore-fullscreen .explore-landmark-hint {
   position: absolute;
@@ -9142,7 +9141,10 @@ input:focus {
   top: 0;
   right: 0;
   left: 0;
-  padding: 64px 12px 5px;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  padding: 6px 8px;
+  overflow-x: auto;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 0;
   background: rgba(7, 13, 21, 0.88);
@@ -9182,7 +9184,11 @@ input:focus {
   color: #17310a;
 }
 
-.explore-fullscreen .explore-controls .explore-exit-fullscreen {
+.explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  flex: 0 0 auto;
   margin-left: auto;
   padding-inline: 12px;
   background: #ffffff;
@@ -9191,22 +9197,30 @@ input:focus {
 }
 
 .explore-fullscreen .explore-controls {
-  top: 12px;
-  right: 12px;
-  left: 12px;
-  display: flex;
+  display: none;
 }
 
-.explore-fullscreen .explore-controls .explore-reset-ride {
-  display: none;
+.explore-fullscreen .explore-camera-toolbar > .explore-pause-ride,
+.explore-fullscreen .explore-camera-toolbar > .explore-resume-ride {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+}
+
+.explore-fullscreen .explore-camera-toolbar > .explore-resume-ride {
+  border-color: #78dc40;
+  background: #c9ffab;
+  color: #17310a;
 }
 
 .explore-fullscreen .explore-destination-overlay {
   display: flex;
   align-items: center;
-  flex: 1 1 220px;
+  flex: 1 1 180px;
   gap: 7px;
-  min-width: 0;
+  min-width: 140px;
+  max-width: 340px;
   margin-right: auto;
   color: #ffffff;
   pointer-events: none;
@@ -9224,15 +9238,8 @@ input:focus {
   white-space: nowrap;
 }
 
-.explore-fullscreen .explore-controls button {
-  border-color: rgba(255, 255, 255, 0.25);
-  background: rgba(9, 16, 25, 0.9);
-  color: #ffffff;
-  backdrop-filter: blur(8px);
-}
-
 .explore-fullscreen .explore-map-group-label {
-  top: 124px;
+  top: 56px;
 }
 
 .explore-fullscreen .explore-landmark-hint {
@@ -9276,10 +9283,7 @@ input:focus {
 
 @media (max-width: 1000px) {
   .explore-fullscreen .explore-camera-toolbar {
-    top: 0;
-    right: 0;
-    left: 0;
-    padding: 56px 8px 5px;
+    padding: 5px 6px;
   }
 
   .explore-fullscreen .explore-camera-toolbar label {
@@ -9291,19 +9295,12 @@ input:focus {
     display: none;
   }
 
-  .explore-fullscreen .explore-controls .explore-exit-fullscreen {
+  .explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
     padding-inline: 9px;
   }
 
-  .explore-fullscreen .explore-controls {
-    top: 8px;
-    right: 8px;
-    left: 8px;
-    display: flex;
-  }
-
   .explore-fullscreen .explore-map-group-label {
-    top: 160px;
+    top: 52px;
   }
 
   .explore-fullscreen .explore-rider-strip {
@@ -9338,12 +9335,12 @@ input:focus {
     display: none;
   }
 
-  .explore-fullscreen .explore-controls .explore-exit-fullscreen {
+  .explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
     width: 42px;
     padding-inline: 0;
   }
 
-  .explore-fullscreen .explore-controls .explore-exit-fullscreen span {
+  .explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen span {
     display: none;
   }
 

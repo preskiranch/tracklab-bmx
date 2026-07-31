@@ -672,6 +672,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
   const cameraControls = page.getByLabel('Explore camera controls');
+  await expect(cameraControls.getByRole('button', { name: 'Pause ride' })).toBeVisible();
+  await expect(cameraControls.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
   const destinationInCameraBar = cameraControls.getByLabel(
     'Destination: San Francisco Ferry Building, San Francisco, CA, USA',
   );
@@ -683,6 +685,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   expect(cameraBarBox?.x).toBe(0);
   expect(cameraBarBox?.y).toBe(0);
   expect(cameraBarBox?.width ?? 0).toBeGreaterThanOrEqual(1_278);
+  expect(cameraBarBox?.height ?? Infinity).toBeLessThanOrEqual(56);
   expect(destinationBox).not.toBeNull();
   expect(zoomOutBox).not.toBeNull();
   expect(destinationBox?.x ?? 0).toBeLessThan(zoomOutBox?.x ?? 0);
