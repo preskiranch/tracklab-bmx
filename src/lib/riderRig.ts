@@ -32,8 +32,8 @@ export function riderCrankPedalPositions(crankAngleRadians: number) {
 export function riderLegKnee(
   hip: RiderRigPoint,
   pedal: RiderRigPoint,
-  thighLength = riderRigGeometry.thighLength,
-  shinLength = riderRigGeometry.shinLength,
+  thighLength: number = riderRigGeometry.thighLength,
+  shinLength: number = riderRigGeometry.shinLength,
 ) {
   const dx = pedal.x - hip.x;
   const dy = pedal.y - hip.y;
