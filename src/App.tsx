@@ -7101,6 +7101,7 @@ export default function App() {
             multiplayerConnection={multiplayer.connection}
             currentRoom={multiplayer.currentRoom}
             currentUserId={multiplayer.clientId}
+            accountProfileKey={cloudProfileKey}
             inviteUrl={multiplayer.inviteUrl}
             remoteStates={multiplayer.roomExploreStates}
             voiceEnabled={roomVoice.enabled}

@@ -318,6 +318,13 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ON ${schema}.track_briefings (researched_at DESC)`,
       ],
     },
+    {
+      version: 7,
+      name: 'save personal Explore route history per account',
+      statements: [
+        `ALTER TABLE ${schema}.user_data ADD COLUMN IF NOT EXISTS explore_routes JSONB NOT NULL DEFAULT '[]'::jsonb`,
+      ],
+    },
   ];
 }
 

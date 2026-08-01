@@ -52,8 +52,11 @@ import {
 } from '../lib/exploreRoutes';
 import {
   loadRecentExploreRoutes,
+  mergeRecentExploreRoutes,
   rememberRecentExploreRoute,
+  writeRecentExploreRoutes,
 } from '../lib/exploreRecentRoutes';
+import { loadCloudExploreRoutes, saveCloudExploreRoutes } from '../lib/cloudExploreRoutes';
 import {
   exploreElevationAtMeter,
   exploreGradeAtMeter,
@@ -108,6 +111,7 @@ type ExploreViewProps = {
   multiplayerConnection: string;
   currentRoom: MultiplayerRoom | null;
   currentUserId: string | null;
+  accountProfileKey: string;
   inviteUrl: string;
   remoteStates: MultiplayerExploreState[];
   voiceEnabled: boolean;
@@ -278,6 +282,7 @@ export function ExploreView({
   multiplayerConnection,
   currentRoom,
   currentUserId,
+  accountProfileKey,
   inviteUrl,
   remoteStates,
   voiceEnabled,
@@ -298,7 +303,7 @@ export function ExploreView({
   fullscreen,
   onFullscreenChange,
 }: ExploreViewProps) {
-  const recentProfileKey = currentUserId ?? 'local';
+  const recentProfileKey = accountProfileKey || 'local';
   const [localRoute, setLocalRoute] = useState<ExploreRoute | null>(null);
   const [originText, setOriginText] = useState('');
   const [destinationText, setDestinationText] = useState('');
@@ -333,6 +338,8 @@ export function ExploreView({
   const appliedRoomSessionRef = useRef<string | null>(null);
   const landmarkRequestRef = useRef(0);
   const routeRequestRef = useRef(0);
+  const recentRouteProfileRef = useRef(recentProfileKey);
+  const recentRouteSaveSequenceRef = useRef(0);
   const scheduledStartTimerRef = useRef<number | null>(null);
   const destinationInputRef = useRef<HTMLInputElement | null>(null);
   const latestRidersRef = useRef<ReturnType<typeof useExploreRide>['riders']>([]);
@@ -408,9 +415,69 @@ export function ExploreView({
     canChooseRoute && !selectedDestination,
   );
 
+  recentRouteProfileRef.current = recentProfileKey;
+
   useEffect(() => {
-    setRecentRoutes(loadRecentExploreRoutes(recentProfileKey));
-  }, [recentProfileKey]);
+    let cancelled = false;
+    const cachedRoutes = loadRecentExploreRoutes(recentProfileKey);
+    setRecentRoutes(cachedRoutes);
+
+    if (!accountProfileKey) {
+      return undefined;
+    }
+
+    void loadCloudExploreRoutes()
+      .then(async (cloudRoutes) => {
+        if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
+          return;
+        }
+        const mergedRoutes = mergeRecentExploreRoutes(cloudRoutes, cachedRoutes);
+        writeRecentExploreRoutes(recentProfileKey, mergedRoutes);
+        setRecentRoutes(mergedRoutes);
+
+        const cloudIds = cloudRoutes.map((route) => route.id).join('|');
+        const mergedIds = mergedRoutes.map((route) => route.id).join('|');
+        if (cloudIds !== mergedIds) {
+          const savedRoutes = await saveCloudExploreRoutes(mergedRoutes);
+          if (!cancelled && recentRouteProfileRef.current === recentProfileKey) {
+            const synchronizedRoutes = writeRecentExploreRoutes(recentProfileKey, savedRoutes);
+            setRecentRoutes(synchronizedRoutes);
+          }
+        }
+      })
+      .catch((error: Error) => {
+        console.warn(`Could not load personal Explore routes from TrackLab cloud: ${error.message}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountProfileKey, recentProfileKey]);
+
+  const rememberExploreRoute = useCallback((nextRoute: ExploreRoute) => {
+    const cachedRoutes = rememberRecentExploreRoute(recentProfileKey, nextRoute);
+    setRecentRoutes(cachedRoutes);
+    if (!accountProfileKey) {
+      return;
+    }
+
+    const saveSequence = recentRouteSaveSequenceRef.current + 1;
+    recentRouteSaveSequenceRef.current = saveSequence;
+    void saveCloudExploreRoutes([nextRoute])
+      .then((cloudRoutes) => {
+        if (
+          saveSequence !== recentRouteSaveSequenceRef.current
+          || recentRouteProfileRef.current !== recentProfileKey
+        ) {
+          return;
+        }
+        const synchronizedRoutes = writeRecentExploreRoutes(recentProfileKey, cloudRoutes);
+        setRecentRoutes(synchronizedRoutes);
+      })
+      .catch((error: Error) => {
+        console.warn(`Could not save this personal Explore route to TrackLab cloud: ${error.message}`);
+      });
+  }, [accountProfileKey, recentProfileKey]);
 
   const closeLandmark = useCallback(() => {
     landmarkRequestRef.current += 1;
@@ -499,7 +566,7 @@ export function ExploreView({
         setElevationRecoveryStatus('ready');
         if (playMode === 'local') {
           setLocalRoute(enrichedRoute);
-          setRecentRoutes(rememberRecentExploreRoute(recentProfileKey, enrichedRoute));
+          rememberExploreRoute(enrichedRoute);
         } else if (roomHost) {
           onSyncRoute(enrichedRoute);
         }
@@ -515,7 +582,7 @@ export function ExploreView({
   }, [
     onSyncRoute,
     playMode,
-    recentProfileKey,
+    rememberExploreRoute,
     roomHost,
     sourceRoute?.distanceMeters,
     sourceRoute?.elevationSamples?.length,
@@ -673,7 +740,7 @@ export function ExploreView({
     if (playMode === 'multiplayer') {
       onSyncRoute(nextRoute);
     }
-    setRecentRoutes(rememberRecentExploreRoute(recentProfileKey, nextRoute));
+    rememberExploreRoute(nextRoute);
     setRouteStatus('idle');
     setRouteMessage(message);
   };

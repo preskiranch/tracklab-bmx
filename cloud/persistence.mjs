@@ -620,6 +620,7 @@ export async function loadUserData(guestKey) {
       customRoutes: [],
       bikeProfiles: [],
       studioRiders: [],
+      exploreRoutes: [],
       raceViewPreferences: null,
     };
     const stored = cloneJson(memoryUserDataByGuestKey.get(guestKey), fallback);
@@ -627,6 +628,7 @@ export async function loadUserData(guestKey) {
       ...fallback,
       ...stored,
       studioRiders: Array.isArray(stored?.studioRiders) ? stored.studioRiders : [],
+      exploreRoutes: Array.isArray(stored?.exploreRoutes) ? stored.exploreRoutes : [],
       raceViewPreferences: stored?.raceViewPreferences && typeof stored.raceViewPreferences === 'object'
         ? stored.raceViewPreferences
         : null,
@@ -634,7 +636,7 @@ export async function loadUserData(guestKey) {
   }
 
   const result = await query(
-    `SELECT track_mappings, custom_routes, bike_profiles, studio_riders, race_view_preferences FROM ${schema}.user_data WHERE guest_key = $1`,
+    `SELECT track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, race_view_preferences FROM ${schema}.user_data WHERE guest_key = $1`,
     [guestKey],
   );
   const row = result?.rows?.[0];
@@ -644,6 +646,7 @@ export async function loadUserData(guestKey) {
     customRoutes: fromJson(row?.custom_routes, []),
     bikeProfiles: fromJson(row?.bike_profiles, []),
     studioRiders: fromJson(row?.studio_riders, []),
+    exploreRoutes: fromJson(row?.explore_routes, []),
     raceViewPreferences: fromJson(row?.race_view_preferences, null),
   };
 }
@@ -655,6 +658,7 @@ export async function saveUserData(guestKey, patch) {
   const customRoutes = Array.isArray(patch.customRoutes) ? patch.customRoutes : null;
   const bikeProfiles = Array.isArray(patch.bikeProfiles) ? patch.bikeProfiles : null;
   const studioRiders = Array.isArray(patch.studioRiders) ? patch.studioRiders : null;
+  const exploreRoutes = Array.isArray(patch.exploreRoutes) ? patch.exploreRoutes : null;
   const raceViewPreferences = patch.raceViewPreferences && typeof patch.raceViewPreferences === 'object'
     ? patch.raceViewPreferences
     : null;
@@ -666,6 +670,7 @@ export async function saveUserData(guestKey, patch) {
       customRoutes: customRoutes ?? current.customRoutes,
       bikeProfiles: bikeProfiles ?? current.bikeProfiles,
       studioRiders: studioRiders ?? current.studioRiders,
+      exploreRoutes: exploreRoutes ?? current.exploreRoutes,
       raceViewPreferences: raceViewPreferences ?? current.raceViewPreferences,
     };
     memoryUserDataByGuestKey.set(guestKey, cloneJson(next, next));
@@ -673,14 +678,15 @@ export async function saveUserData(guestKey, patch) {
   }
 
   const result = await query(
-    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, studio_riders, race_view_preferences, updated_at)
+    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, race_view_preferences, updated_at)
      VALUES (
        $1,
        COALESCE($2::jsonb, '{}'::jsonb),
        COALESCE($3::jsonb, '[]'::jsonb),
        COALESCE($4::jsonb, '[]'::jsonb),
        COALESCE($5::jsonb, '[]'::jsonb),
-       $6::jsonb,
+       COALESCE($6::jsonb, '[]'::jsonb),
+       $7::jsonb,
        now()
      )
      ON CONFLICT (guest_key) DO UPDATE SET
@@ -688,15 +694,17 @@ export async function saveUserData(guestKey, patch) {
        custom_routes = COALESCE($3::jsonb, ${schema}.user_data.custom_routes),
        bike_profiles = COALESCE($4::jsonb, ${schema}.user_data.bike_profiles),
        studio_riders = COALESCE($5::jsonb, ${schema}.user_data.studio_riders),
-       race_view_preferences = COALESCE($6::jsonb, ${schema}.user_data.race_view_preferences),
+       explore_routes = COALESCE($6::jsonb, ${schema}.user_data.explore_routes),
+       race_view_preferences = COALESCE($7::jsonb, ${schema}.user_data.race_view_preferences),
        updated_at = now()
-     RETURNING track_mappings, custom_routes, bike_profiles, studio_riders, race_view_preferences`,
+     RETURNING track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, race_view_preferences`,
     [
       guestKey,
       trackMappings == null ? null : json(trackMappings),
       customRoutes == null ? null : json(customRoutes),
       bikeProfiles == null ? null : json(bikeProfiles),
       studioRiders == null ? null : json(studioRiders),
+      exploreRoutes == null ? null : json(exploreRoutes),
       raceViewPreferences == null ? null : json(raceViewPreferences),
     ],
   );
@@ -710,6 +718,7 @@ export async function saveUserData(guestKey, patch) {
     customRoutes: fromJson(row.custom_routes, []),
     bikeProfiles: fromJson(row.bike_profiles, []),
     studioRiders: fromJson(row.studio_riders, []),
+    exploreRoutes: fromJson(row.explore_routes, []),
     raceViewPreferences: fromJson(row.race_view_preferences, null),
   };
 }

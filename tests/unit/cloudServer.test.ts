@@ -75,6 +75,22 @@ function trackMapping(trackId: string) {
   };
 }
 
+function exploreRoute(id: string) {
+  return {
+    id,
+    name: 'My San Francisco ride',
+    origin: { lat: 37.7749, lng: -122.4194 },
+    destination: { lat: 37.8024, lng: -122.4058 },
+    originLabel: 'Market Street, San Francisco, CA',
+    destinationLabel: 'Fisherman’s Wharf, San Francisco, CA',
+    travelMode: 'bicycle',
+    distanceMeters: 5_200,
+    durationSeconds: 1_320,
+    encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+    createdAt: Date.now(),
+  };
+}
+
 beforeAll(async () => {
   const port = await availablePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -212,6 +228,9 @@ describe('cloud API trust boundaries', () => {
       headers: { Origin: baseUrl },
     });
     expect(mappingSave.status).toBe(401);
+
+    const personalRoutes = await fetch(`${baseUrl}/api/explore/recent-routes`);
+    expect(personalRoutes.status).toBe(401);
 
     const commentary = await fetch(`${baseUrl}/api/commentary/line`, {
       method: 'POST',
@@ -407,6 +426,38 @@ describe('cloud API trust boundaries', () => {
         volume: 0.6,
         recentLines: ['A newer commentary preference.'],
       },
+    });
+
+    const savedRoute = await api('/api/explore/recent-routes?profileKey=user:someone-else', {
+      method: 'POST',
+      body: JSON.stringify({ routes: [exploreRoute('EXPLORE-PERSONAL-1')] }),
+    });
+    expect(savedRoute.status).toBe(200);
+    await expect(savedRoute.json()).resolves.toMatchObject({
+      routes: [{ id: 'EXPLORE-PERSONAL-1', name: 'My San Francisco ride' }],
+    });
+
+    const firstAccountCookie = cookie;
+    const secondRegistration = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'Other Rider',
+        email: `other-${Date.now()}@tracklab.test`,
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(secondRegistration.status).toBe(201);
+    cookie = String(secondRegistration.headers.get('set-cookie')).split(';')[0];
+
+    const otherAccountRoutes = await api('/api/explore/recent-routes?profileKey=user:someone-else');
+    expect(otherAccountRoutes.status).toBe(200);
+    await expect(otherAccountRoutes.json()).resolves.toEqual({ routes: [] });
+
+    cookie = firstAccountCookie;
+    const restoredAfterBrowserReset = await api('/api/explore/recent-routes');
+    expect(restoredAfterBrowserReset.status).toBe(200);
+    await expect(restoredAfterBrowserReset.json()).resolves.toMatchObject({
+      routes: [{ id: 'EXPLORE-PERSONAL-1' }],
     });
   });
 

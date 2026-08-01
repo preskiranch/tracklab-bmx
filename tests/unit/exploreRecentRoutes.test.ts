@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   loadRecentExploreRoutes,
+  mergeRecentExploreRoutes,
   rememberRecentExploreRoute,
 } from '../../src/lib/exploreRecentRoutes';
 import type { ExploreRoute } from '../../src/types';
@@ -80,5 +81,16 @@ describe('recent Explore routes', () => {
 
     expect(loadRecentExploreRoutes('rider@example.com').map((candidate) => candidate.id))
       .toEqual(['EXPLORE-1']);
+  });
+
+  it('merges cloud history with unsynced local routes without mixing duplicates', () => {
+    expect(mergeRecentExploreRoutes(
+      [route(7), route(6)],
+      [route(6), route(5)],
+    ).map((candidate) => candidate.id)).toEqual([
+      'EXPLORE-7',
+      'EXPLORE-6',
+      'EXPLORE-5',
+    ]);
   });
 });

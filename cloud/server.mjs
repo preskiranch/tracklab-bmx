@@ -1813,14 +1813,19 @@ function saveMergedUserData(profileKey, patch) {
     .catch(() => undefined)
     .then(async () => {
       let mergedPatch = patch;
-      if (patch.raceViewPreferences) {
+      if (patch.raceViewPreferences || patch.exploreRoutes) {
         const current = await persistence.loadUserData(profileKey);
         mergedPatch = {
           ...patch,
-          raceViewPreferences: mergeSavedRaceViewPreferences(
-            current?.raceViewPreferences,
-            patch.raceViewPreferences,
-          ),
+          ...(patch.raceViewPreferences ? {
+            raceViewPreferences: mergeSavedRaceViewPreferences(
+              current?.raceViewPreferences,
+              patch.raceViewPreferences,
+            ),
+          } : {}),
+          ...(patch.exploreRoutes ? {
+            exploreRoutes: mergeExploreRouteHistory(patch.exploreRoutes, current?.exploreRoutes),
+          } : {}),
         };
       }
       return persistence.saveUserData(profileKey, mergedPatch);
@@ -2398,6 +2403,30 @@ function sanitizeExploreRoute(value) {
     } : {}),
     createdAt: Math.max(0, finiteNumber(value.createdAt, Date.now())),
   };
+}
+
+function sanitizeExploreRouteHistory(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set();
+  return value
+    .flatMap((candidate) => {
+      const route = sanitizeExploreRoute(candidate);
+      if (!route || seen.has(route.id)) {
+        return [];
+      }
+      seen.add(route.id);
+      return [route];
+    })
+    .slice(0, 8);
+}
+
+function mergeExploreRouteHistory(preferred, fallback) {
+  return sanitizeExploreRouteHistory([
+    ...(Array.isArray(preferred) ? preferred : []),
+    ...(Array.isArray(fallback) ? fallback : []),
+  ]);
 }
 
 function sanitizeExploreState(value, client, room) {
@@ -3917,6 +3946,46 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/explore/recent-routes') {
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    const profileKey = authProfileKey(session.user);
+
+    if (request.method === 'GET') {
+      const userData = await persistence.loadUserData(profileKey);
+      writeJson(response, 200, {
+        routes: sanitizeExploreRouteHistory(userData?.exploreRoutes),
+      });
+      return;
+    }
+
+    if (request.method === 'POST') {
+      if (!enforceRateLimit(request, response, exploreRouteRateLimiter, 120, 'explore-route-history')) {
+        return;
+      }
+      const payload = await readJsonBody(request, 1_100_000);
+      const routes = sanitizeExploreRouteHistory(payload?.routes);
+      if (routes.length === 0) {
+        writeJson(response, 400, { error: 'At least one valid Explore route is required.' });
+        return;
+      }
+      const userData = await saveMergedUserData(profileKey, { exploreRoutes: routes });
+      if (!userData) {
+        writeJson(response, 503, { error: 'Personal Explore route storage is temporarily unavailable.' });
+        return;
+      }
+      writeJson(response, 200, {
+        routes: sanitizeExploreRouteHistory(userData.exploreRoutes),
+      });
+      return;
+    }
+
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/explore/smart-route') {
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' });
@@ -4722,8 +4791,9 @@ async function serveStatic(request, response) {
 
     if (request.method === 'GET') {
       const userData = await persistence.loadUserData(profileKey);
+      const { exploreRoutes: _exploreRoutes, ...profileData } = userData;
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-      response.end(JSON.stringify(userData));
+      response.end(JSON.stringify(profileData));
       return;
     }
 
@@ -4743,8 +4813,9 @@ async function serveStatic(request, response) {
         writeJson(response, 503, { error: 'Cloud profile storage is temporarily unavailable.' });
         return;
       }
+      const { exploreRoutes: _exploreRoutes, ...profileData } = userData;
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-      response.end(JSON.stringify(userData));
+      response.end(JSON.stringify(profileData));
       return;
     }
 

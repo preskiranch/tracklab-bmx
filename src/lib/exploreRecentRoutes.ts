@@ -45,7 +45,7 @@ function sanitizeElevationSamples(value: unknown, distanceMeters: number) {
     .slice(0, 256);
 }
 
-function sanitizeRecentRoute(value: unknown): ExploreRoute | null {
+export function sanitizeRecentExploreRoute(value: unknown): ExploreRoute | null {
   const route = value as Partial<ExploreRoute> | null;
   const distanceMeters = Number(route?.distanceMeters);
   const durationSeconds = Number(route?.durationSeconds);
@@ -107,7 +107,7 @@ export function loadRecentExploreRoutes(profileKey: string) {
     }
     return parsed
       .flatMap((route) => {
-        const sanitized = sanitizeRecentRoute(route);
+        const sanitized = sanitizeRecentExploreRoute(route);
         return sanitized ? [sanitized] : [];
       })
       .slice(0, recentExploreRouteLimit);
@@ -117,7 +117,7 @@ export function loadRecentExploreRoutes(profileKey: string) {
 }
 
 export function rememberRecentExploreRoute(profileKey: string, route: ExploreRoute) {
-  const sanitized = sanitizeRecentRoute(route);
+  const sanitized = sanitizeRecentExploreRoute(route);
   if (!sanitized) {
     return loadRecentExploreRoutes(profileKey);
   }
@@ -129,6 +129,40 @@ export function rememberRecentExploreRoute(profileKey: string, route: ExploreRou
     window.localStorage.setItem(storageKey(profileKey), JSON.stringify(nextRoutes));
   } catch {
     // Private browsing or storage pressure can disable recent-route persistence.
+  }
+  return nextRoutes;
+}
+
+export function sanitizeRecentExploreRoutes(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return value
+    .flatMap((route) => {
+      const sanitized = sanitizeRecentExploreRoute(route);
+      if (!sanitized || seen.has(sanitized.id)) {
+        return [];
+      }
+      seen.add(sanitized.id);
+      return [sanitized];
+    })
+    .slice(0, recentExploreRouteLimit);
+}
+
+export function mergeRecentExploreRoutes(
+  preferred: readonly ExploreRoute[],
+  fallback: readonly ExploreRoute[],
+) {
+  return sanitizeRecentExploreRoutes([...preferred, ...fallback]);
+}
+
+export function writeRecentExploreRoutes(profileKey: string, routes: readonly ExploreRoute[]) {
+  const nextRoutes = sanitizeRecentExploreRoutes(routes);
+  try {
+    window.localStorage.setItem(storageKey(profileKey), JSON.stringify(nextRoutes));
+  } catch {
+    // Private browsing or storage pressure can disable the offline cache.
   }
   return nextRoutes;
 }
