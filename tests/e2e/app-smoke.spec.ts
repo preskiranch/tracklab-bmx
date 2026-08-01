@@ -945,7 +945,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
   appleMapConfigured = true;
   await mapRenderer.getByRole('button', { name: 'Google Satellite' }).click();
-  await expect(page.locator('.explore-route-summary')).toContainText('Google satellite');
+  await expect(page.locator('.explore-route-summary')).toContainText('Labeled satellite');
   await mapRenderer.getByRole('button', { name: 'Google 3D' }).click();
   await expect(page.getByLabel('Google photorealistic 3D Explore map')).toBeVisible();
   await expect(page.getByText('Loading Google 3D…')).toHaveCount(0);
@@ -1005,9 +1005,12 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await directionUp.click();
   await expect(directionUp).toHaveAttribute('aria-pressed', 'true');
   await expect(northUp).toHaveAttribute('aria-pressed', 'false');
-  const mapLabels = page.getByRole('button', { name: 'Show street names and landmarks' });
-  await expect(mapLabels).toHaveAttribute('aria-pressed', 'false');
+  const mapLabels = page.getByRole('button', { name: 'Hide street names and landmarks' });
+  await expect(mapLabels).toHaveAttribute('aria-pressed', 'true');
   await mapLabels.click();
+  const labelsOff = page.getByRole('button', { name: 'Show street names and landmarks' });
+  await expect(labelsOff).toHaveAttribute('aria-pressed', 'false');
+  await labelsOff.click();
   await expect(page.getByRole('button', { name: 'Hide street names and landmarks' }))
     .toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Labeled satellite', { exact: true })).toHaveText('Labeled satellite');

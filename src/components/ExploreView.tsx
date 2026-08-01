@@ -315,7 +315,9 @@ export function ExploreView({
   );
   const [followZoom, setFollowZoom] = useState(18);
   const [cameraFollowPosition, setCameraFollowPosition] = useState<ExploreCameraFollowPosition>('center');
-  const [showMapLabels, setShowMapLabels] = useState(false);
+  // This remains a per-browser rider preference and is intentionally not
+  // included in multiplayer state, so every rider controls their own map.
+  const [showMapLabels, setShowMapLabels] = useState(true);
   const [followTravelHeading, setFollowTravelHeading] = useState(false);
   const [mapRenderer, setMapRenderer] = useState<ExploreMapRenderer>(savedExploreMapRenderer);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
