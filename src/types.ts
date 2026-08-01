@@ -141,8 +141,14 @@ export type ExploreElevationSample = {
   elevationMeters: number;
 };
 
+export type ExploreRouteWaypoint = {
+  point: TrackPoint;
+  label: string;
+};
+
 export type ExploreRoute = {
   id: string;
+  name?: string;
   origin: TrackPoint;
   destination: TrackPoint;
   originLabel: string;
@@ -151,6 +157,7 @@ export type ExploreRoute = {
   distanceMeters: number;
   durationSeconds: number;
   encodedPolyline: string;
+  waypoints?: ExploreRouteWaypoint[];
   elevationSamples?: ExploreElevationSample[];
   elevationGainMeters?: number;
   elevationLossMeters?: number;

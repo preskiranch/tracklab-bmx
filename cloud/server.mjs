@@ -66,6 +66,7 @@ import {
   staticCacheControl,
 } from './httpSecurity.mjs';
 import { fetchExploreElevationProfile } from './exploreElevation.mjs';
+import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(__dirname, '..');
@@ -100,6 +101,7 @@ const authRateLimiter = createRateLimiter();
 const billingRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const exploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const smartExploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
@@ -667,6 +669,15 @@ async function computeExploreRoute(payload, signal) {
     throw new HttpRequestError(400, 'Choose a valid starting point and destination.');
   }
   const travelMode = payload?.travelMode === 'drive' ? 'drive' : 'bicycle';
+  const waypoints = Array.isArray(payload?.waypoints)
+    ? payload.waypoints.flatMap((value) => {
+      const point = sanitizeExplorePoint(value?.point);
+      return point ? [{
+        point,
+        label: sanitizeText(value?.label, 'Route waypoint', 160),
+      }] : [];
+    }).slice(0, 10)
+    : [];
   const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
     method: 'POST',
     headers: {
@@ -677,6 +688,11 @@ async function computeExploreRoute(payload, signal) {
     body: JSON.stringify({
       origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lng } } },
       destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
+      ...(waypoints.length > 0 ? {
+        intermediates: waypoints.map(({ point }) => ({
+          location: { latLng: { latitude: point.lat, longitude: point.lng } },
+        })),
+      } : {}),
       travelMode: travelMode === 'drive' ? 'DRIVE' : 'BICYCLE',
       // Overview geometry follows the routed roads without the lane- and
       // crosswalk-level offsets that look like lateral wobble in a tilted map.
@@ -713,11 +729,12 @@ async function computeExploreRoute(payload, signal) {
   );
 
   const routeId = `EXPLORE-${createHash('sha256')
-    .update(`${travelMode}:${origin.lat}:${origin.lng}:${destination.lat}:${destination.lng}:${encodedPolyline}`)
+    .update(`${travelMode}:${origin.lat}:${origin.lng}:${destination.lat}:${destination.lng}:${JSON.stringify(waypoints)}:${encodedPolyline}`)
     .digest('hex')
     .slice(0, 18)}`;
   return sanitizeExploreRoute({
     id: routeId,
+    name: sanitizeText(payload?.routeName, '', 80),
     origin,
     destination,
     originLabel: sanitizeText(payload?.originLabel, 'Selected start', 160),
@@ -726,6 +743,7 @@ async function computeExploreRoute(payload, signal) {
     distanceMeters,
     durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 1,
     encodedPolyline,
+    ...(waypoints.length > 0 ? { waypoints } : {}),
     ...(elevationProfile ? {
       elevationSamples: elevationProfile.samples,
       elevationGainMeters: elevationProfile.gainMeters,
@@ -2354,9 +2372,16 @@ function sanitizeExploreRoute(value) {
   }
   const elevationSamples = sanitizeExploreElevationSamples(value.elevationSamples, distanceMeters);
   const elevationSummary = summarizeExploreElevation(elevationSamples);
+  const waypoints = Array.isArray(value.waypoints)
+    ? value.waypoints.flatMap((waypoint) => {
+      const point = sanitizeExplorePoint(waypoint?.point);
+      return point ? [{ point, label: sanitizeText(waypoint?.label, 'Route waypoint', 160) }] : [];
+    }).slice(0, 10)
+    : [];
 
   return {
     id: sanitizeText(value.id, randomId('EXPLORE', 12), 96),
+    ...(sanitizeText(value.name, '', 80) ? { name: sanitizeText(value.name, '', 80) } : {}),
     origin,
     destination,
     originLabel: sanitizeText(value.originLabel, 'Selected start', 160),
@@ -2365,6 +2390,7 @@ function sanitizeExploreRoute(value) {
     distanceMeters,
     durationSeconds: Math.max(1, Math.min(14 * 24 * 60 * 60, finiteNumber(value.durationSeconds, 0))),
     encodedPolyline,
+    ...(waypoints.length > 0 ? { waypoints } : {}),
     ...(elevationSamples.length >= 2 ? {
       elevationSamples,
       elevationGainMeters: elevationSummary.gainMeters,
@@ -3878,6 +3904,7 @@ async function serveStatic(request, response) {
     }
     const body = JSON.stringify({
       routesConfigured: Boolean(exploreRoutesApiKey()),
+      smartRoutesConfigured: Boolean(openAiApiKey()),
       supportedTravelModes: ['bicycle', 'drive'],
       bicycleSafetyWarning: 'Bicycling routes may not always include clear bicycle paths. Use this route only for indoor virtual riding.',
     });
@@ -3887,6 +3914,42 @@ async function serveStatic(request, response) {
       'Content-Length': Buffer.byteLength(body),
     });
     response.end(request.method === 'HEAD' ? undefined : body);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/explore/smart-route') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    if (membershipForAccount(session.user).tier !== 'racer') {
+      writeJson(response, 403, { error: 'Racer access is required for Smart Routes.' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, smartExploreRouteRateLimiter, 12, 'smart-explore-route')) {
+      return;
+    }
+    const payload = await readJsonBody(request, 4_000);
+    try {
+      const plan = await generateSmartExplorePlan({
+        description: payload?.description,
+        apiKey: openAiApiKey(),
+        model: commentaryEngineModel,
+      });
+      cloudTelemetry.increment('tracklab_smart_explore_routes_total', {
+        routeKind: plan.routeKind,
+      });
+      writeJson(response, 200, { plan });
+    } catch (error) {
+      throw new HttpRequestError(
+        Math.max(400, Math.min(503, Number(error?.statusCode) || 502)),
+        error instanceof Error ? error.message : 'Smart Route could not build that plan.',
+      );
+    }
     return;
   }
 

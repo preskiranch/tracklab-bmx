@@ -155,6 +155,7 @@ describe('cloud API trust boundaries', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     await expect(response.json()).resolves.toEqual({
       routesConfigured: false,
+      smartRoutesConfigured: false,
       supportedTravelModes: ['bicycle', 'drive'],
       bicycleSafetyWarning: 'Bicycling routes may not always include clear bicycle paths. Use this route only for indoor virtual riding.',
     });

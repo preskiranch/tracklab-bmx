@@ -18,6 +18,7 @@ import {
   Radio,
   RotateCcw,
   Share2,
+  Sparkles,
   Star,
   Users,
   X,
@@ -45,7 +46,9 @@ import {
 import {
   fetchExploreElevationProfile,
   fetchExploreRoute,
+  fetchSmartExploreRoutePlan,
   type ExploreElevationProfile,
+  type ExploreSmartRoutePlan,
 } from '../lib/exploreRoutes';
 import {
   loadRecentExploreRoutes,
@@ -178,10 +181,6 @@ function profileInitials(name: string) {
     .join('') || '?';
 }
 
-function mapPointLabel(prefix: string, point: TrackPoint) {
-  return `${prefix} · ${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
-}
-
 function safeExternalHttpUrl(value: string) {
   try {
     const url = new URL(value);
@@ -303,6 +302,9 @@ export function ExploreView({
   const [localRoute, setLocalRoute] = useState<ExploreRoute | null>(null);
   const [originText, setOriginText] = useState('');
   const [destinationText, setDestinationText] = useState('');
+  const [routeName, setRouteName] = useState('');
+  const [smartRoutePrompt, setSmartRoutePrompt] = useState('');
+  const [smartRoutePlan, setSmartRoutePlan] = useState<ExploreSmartRoutePlan | null>(null);
   const [selectedOrigin, setSelectedOrigin] = useState<ExploreOrigin | null>(null);
   const [selectedDestination, setSelectedDestination] = useState<ExploreOrigin | null>(null);
   const [selectedOriginPrediction, setSelectedOriginPrediction] = useState<PlacePredictionOption | null>(null);
@@ -674,16 +676,12 @@ export function ExploreView({
     setRouteMessage(message);
   };
 
-  const applyMapPoints = (origin: TrackPoint, destination: TrackPoint) => {
-    const nextOrigin = {
-      point: origin,
-      label: mapPointLabel('Map start', origin),
-    };
-    const nextDestination = {
-      point: destination,
-      label: mapPointLabel('Map destination', destination),
-    };
+  const applyMapPoints = (
+    nextOrigin: { point: TrackPoint; label: string },
+    nextDestination: { point: TrackPoint; label: string },
+  ) => {
     routeRequestRef.current += 1;
+    setSmartRoutePlan(null);
     setSelectedOrigin(nextOrigin);
     setSelectedOriginPrediction(null);
     setOriginText(nextOrigin.label);
@@ -708,6 +706,8 @@ export function ExploreView({
     setSelectedDestinationPrediction(null);
     setDestinationText(recentRoute.destinationLabel);
     setTravelMode(recentRoute.travelMode);
+    setRouteName(recentRoute.name ?? '');
+    setSmartRoutePlan(null);
     resetPlaceAutocompleteSession();
     resetLocalRide();
     applyExploreRoute(
@@ -718,6 +718,7 @@ export function ExploreView({
 
   const markRouteInputsChanged = () => {
     routeRequestRef.current += 1;
+    setSmartRoutePlan(null);
     if (routeStatus === 'loading' || route) {
       setRouteStatus('idle');
       setRouteMessage('Location changed. Select Build Explore the World route to update the map.');
@@ -764,6 +765,7 @@ export function ExploreView({
           || destination.label
           || destinationText.trim(),
         travelMode,
+        routeName: routeName.trim(),
       });
       if (routeRequestRef.current !== requestId) {
         return;
@@ -775,6 +777,65 @@ export function ExploreView({
       }
       setRouteStatus('error');
       setRouteMessage(error instanceof Error ? error.message : 'The route could not be created.');
+    }
+  };
+
+  const createSmartRoute = async () => {
+    if (!canChooseRoute || routeStatus === 'loading') {
+      return;
+    }
+    if (smartRoutePrompt.trim().length < 8) {
+      setRouteStatus('error');
+      setRouteMessage('Describe the ride you want in a little more detail.');
+      return;
+    }
+    const requestId = routeRequestRef.current + 1;
+    routeRequestRef.current = requestId;
+    setRouteStatus('loading');
+    setRouteMessage('Smart Route is researching locations and matching your ride…');
+    setSmartRoutePlan(null);
+    try {
+      const plan = await fetchSmartExploreRoutePlan(smartRoutePrompt.trim());
+      const origin = await resolveLocationText(plan.originQuery);
+      const waypointLocations = [];
+      for (const query of plan.waypointQueries) {
+        const resolved = await resolveLocationText(query);
+        waypointLocations.push({ point: resolved.point, label: resolved.label ?? query });
+      }
+      const destination = await resolveLocationText(plan.destinationQuery);
+      const nextRoute = await fetchExploreRoute({
+        origin: origin.point,
+        destination: destination.point,
+        originLabel: origin.label ?? plan.originQuery,
+        destinationLabel: destination.label ?? plan.destinationQuery,
+        travelMode: 'bicycle',
+        routeName: plan.name,
+        waypoints: waypointLocations,
+      });
+      if (routeRequestRef.current !== requestId) {
+        return;
+      }
+      setSelectedOrigin({ point: origin.point, label: origin.label ?? plan.originQuery });
+      setSelectedOriginPrediction(null);
+      setOriginText(origin.label ?? plan.originQuery);
+      setSelectedDestination({
+        point: destination.point,
+        label: destination.label ?? plan.destinationQuery,
+      });
+      setSelectedDestinationPrediction(null);
+      setDestinationText(destination.label ?? plan.destinationQuery);
+      setTravelMode('bicycle');
+      setRouteName(plan.name);
+      setSmartRoutePlan(plan);
+      resetPlaceAutocompleteSession();
+      resetLocalRide();
+      applyExploreRoute(nextRoute, plan.summary);
+    } catch (error) {
+      if (routeRequestRef.current !== requestId) {
+        return;
+      }
+      setRouteStatus('error');
+      setRouteMessage(error instanceof Error ? error.message : 'Smart Route could not build that ride.');
     }
   };
 
@@ -794,6 +855,8 @@ export function ExploreView({
         originLabel: route.destinationLabel,
         destinationLabel: route.originLabel,
         travelMode: route.travelMode,
+        routeName: route.name ? `${route.name} — Reverse` : '',
+        waypoints: [...(route.waypoints ?? [])].reverse(),
       });
       if (routeRequestRef.current !== requestId) {
         return;
@@ -805,6 +868,8 @@ export function ExploreView({
       setSelectedDestination({ point: route.origin, label: route.originLabel });
       setDestinationText(route.originLabel);
       setTravelMode(route.travelMode);
+      setRouteName(nextRoute.name ?? '');
+      setSmartRoutePlan(null);
       resetPlaceAutocompleteSession();
       applyExploreRoute(nextRoute);
     } catch (error) {
@@ -828,6 +893,8 @@ export function ExploreView({
     setSelectedDestinationPrediction(null);
     setSelectedDestination(null);
     setDestinationText('');
+    setRouteName('');
+    setSmartRoutePlan(null);
     setTravelMode(route.travelMode);
     setRouteStatus('idle');
     setRouteMessage(`Starting from ${route.destinationLabel}. Choose your next destination.`);
@@ -1123,11 +1190,33 @@ export function ExploreView({
                 </option>
                 {recentRoutes.map((recentRoute) => (
                   <option key={recentRoute.id} value={recentRoute.id}>
-                    {recentRoute.originLabel} → {recentRoute.destinationLabel}
+                    {recentRoute.name || `${recentRoute.originLabel} → ${recentRoute.destinationLabel}`}
                   </option>
                 ))}
               </select>
             </label>
+            <section className="explore-smart-route">
+              <div>
+                <Sparkles size={17} />
+                <span><strong>Smart Route</strong><small>Describe the experience you want</small></span>
+              </div>
+              <textarea
+                value={smartRoutePrompt}
+                aria-label="Describe your Smart Route"
+                placeholder="Example: A 10-mile coastal ride in Malibu with ocean views, or stage 3 of the 2026 Tour de France"
+                disabled={!canChooseRoute || routeStatus === 'loading'}
+                maxLength={600}
+                onChange={(event) => setSmartRoutePrompt(event.target.value)}
+              />
+              <button
+                type="button"
+                disabled={!canChooseRoute || routeStatus === 'loading' || smartRoutePrompt.trim().length < 8}
+                onClick={createSmartRoute}
+              >
+                <Sparkles size={16} /> Find and build this ride
+              </button>
+            </section>
+            <div className="explore-route-method-divider"><span>or choose your own route</span></div>
             <button
               className="explore-map-route-button"
               type="button"
@@ -1245,6 +1334,17 @@ export function ExploreView({
               )}
               {destinationSuggestions.status && <p className="autocomplete-status">{destinationSuggestions.status}</p>}
             </div>
+            <label>
+              <span>Route name <small>(optional)</small></span>
+              <input
+                type="text"
+                value={routeName}
+                maxLength={80}
+                placeholder="Example: Saturday Malibu coast ride"
+                disabled={!canChooseRoute}
+                onChange={(event) => setRouteName(event.target.value)}
+              />
+            </label>
             <div className="explore-travel-mode" aria-label="Google route type">
               <button
                 className={travelMode === 'bicycle' ? 'selected' : ''}
@@ -1283,6 +1383,22 @@ export function ExploreView({
               {routeStatus === 'loading' ? 'Building route…' : 'Build Explore the World route'}
             </button>
             {routeMessage && <p className={`explore-route-message ${routeStatus}`}>{routeMessage}</p>}
+            {smartRoutePlan && (
+              <section className="explore-smart-route-result" aria-label="Smart Route research">
+                <strong>{smartRoutePlan.name}</strong>
+                <p>{smartRoutePlan.disclaimer}</p>
+                {smartRoutePlan.sources.length > 0 && (
+                  <div>
+                    <span>Research sources</span>
+                    {smartRoutePlan.sources.slice(0, 4).map((source) => (
+                      <a key={source.url} href={safeExternalHttpUrl(source.url)} target="_blank" rel="noreferrer">
+                        {source.title} <ExternalLink size={12} />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
             <small className="explore-route-warning">
               Bicycle directions can contain roads or paths without clear cycling facilities. This is an indoor virtual ride—not outdoor navigation.
             </small>
@@ -1294,6 +1410,7 @@ export function ExploreView({
             <>
               <header className="explore-route-summary">
                 <div>
+                  {route.name && <small>{route.name}</small>}
                   <span>{route.originLabel}</span>
                   <strong><Flag size={16} /> {route.destinationLabel}</strong>
                 </div>
@@ -1809,7 +1926,9 @@ export function ExploreView({
       {mapPickerOpen && (
         <ExploreRouteMapPicker
           initialOrigin={selectedOrigin?.point ?? route?.origin ?? null}
+          initialOriginLabel={selectedOrigin?.label ?? route?.originLabel}
           initialDestination={selectedDestination?.point ?? route?.destination ?? null}
+          initialDestinationLabel={selectedDestination?.label ?? route?.destinationLabel}
           onApply={applyMapPoints}
           onClose={() => setMapPickerOpen(false)}
         />

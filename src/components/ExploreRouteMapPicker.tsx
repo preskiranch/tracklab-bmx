@@ -2,6 +2,7 @@ import { Flag, MapPin, RotateCcw, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   loadGoogleMaps,
+  reverseGeocodeGooglePoint,
   type GoogleMap,
   type GoogleMarker,
   type GooglePolyline,
@@ -11,20 +12,27 @@ import './ExploreRouteMapPicker.css';
 
 type ExploreRouteMapPickerProps = {
   initialOrigin: TrackPoint | null;
+  initialOriginLabel?: string;
   initialDestination: TrackPoint | null;
-  onApply: (origin: TrackPoint, destination: TrackPoint) => void;
+  initialDestinationLabel?: string;
+  onApply: (
+    origin: { point: TrackPoint; label: string },
+    destination: { point: TrackPoint; label: string },
+  ) => void;
   onClose: () => void;
 };
 
 type SelectionMode = 'origin' | 'destination';
 
-function pointLabel(point: TrackPoint | null) {
-  return point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` : 'Not selected';
+function coordinateFallback(point: TrackPoint) {
+  return `Selected map point near ${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
 }
 
 export function ExploreRouteMapPicker({
   initialOrigin,
+  initialOriginLabel,
   initialDestination,
+  initialDestinationLabel,
   onApply,
   onClose,
 }: ExploreRouteMapPickerProps) {
@@ -34,12 +42,49 @@ export function ExploreRouteMapPicker({
   const destinationMarkerRef = useRef<GoogleMarker | null>(null);
   const connectorRef = useRef<GooglePolyline | null>(null);
   const modeRef = useRef<SelectionMode>('origin');
+  const geocodeRequestRef = useRef({ origin: 0, destination: 0 });
   const [origin, setOrigin] = useState<TrackPoint | null>(initialOrigin);
   const [destination, setDestination] = useState<TrackPoint | null>(initialDestination);
+  const [originLabel, setOriginLabel] = useState(initialOriginLabel ?? 'Not selected');
+  const [destinationLabel, setDestinationLabel] = useState(initialDestinationLabel ?? 'Not selected');
   const [selectionMode, setSelectionMode] = useState<SelectionMode>(modeRef.current);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
   modeRef.current = selectionMode;
+
+  const selectPoint = (mode: SelectionMode, point: TrackPoint) => {
+    const requestId = geocodeRequestRef.current[mode] + 1;
+    geocodeRequestRef.current[mode] = requestId;
+    if (mode === 'origin') {
+      setOrigin(point);
+      setOriginLabel('Finding street address…');
+      setSelectionMode('destination');
+    } else {
+      setDestination(point);
+      setDestinationLabel('Finding street address…');
+    }
+    void reverseGeocodeGooglePoint(point)
+      .then(({ label }) => {
+        if (geocodeRequestRef.current[mode] !== requestId) {
+          return;
+        }
+        if (mode === 'origin') {
+          setOriginLabel(label);
+        } else {
+          setDestinationLabel(label);
+        }
+      })
+      .catch(() => {
+        if (geocodeRequestRef.current[mode] !== requestId) {
+          return;
+        }
+        if (mode === 'origin') {
+          setOriginLabel(coordinateFallback(point));
+        } else {
+          setDestinationLabel(coordinateFallback(point));
+        }
+      });
+  };
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -112,12 +157,7 @@ export function ExploreRouteMapPicker({
           if (!point) {
             return;
           }
-          if (modeRef.current === 'origin') {
-            setOrigin(point);
-            setSelectionMode('destination');
-          } else {
-            setDestination(point);
-          }
+          selectPoint(modeRef.current, point);
         });
         setStatus('ready');
       })
@@ -184,8 +224,12 @@ export function ExploreRouteMapPicker({
   }, [destination, origin, status]);
 
   const resetSelection = () => {
+    geocodeRequestRef.current.origin += 1;
+    geocodeRequestRef.current.destination += 1;
     setOrigin(null);
     setDestination(null);
+    setOriginLabel('Not selected');
+    setDestinationLabel('Not selected');
     setSelectionMode('origin');
   };
 
@@ -223,18 +267,26 @@ export function ExploreRouteMapPicker({
         {status === 'loading' && <div className="explore-map-picker-status">Loading satellite map…</div>}
         {status === 'error' && <div className="explore-map-picker-status error">{error || 'The satellite map could not load.'}</div>}
         <div className="explore-map-picker-points">
-          <div><MapPin size={17} /><span><small>Start</small><strong>{pointLabel(origin)}</strong></span></div>
-          <div><Flag size={17} /><span><small>Destination</small><strong>{pointLabel(destination)}</strong></span></div>
+          <div><MapPin size={17} /><span><small>Start address</small><strong>{originLabel}</strong></span></div>
+          <div><Flag size={17} /><span><small>Destination address</small><strong>{destinationLabel}</strong></span></div>
         </div>
         <footer>
           <button type="button" onClick={resetSelection}><RotateCcw size={16} /> Start over</button>
           <button
             className="primary"
             type="button"
-            disabled={!origin || !destination}
+            disabled={
+              !origin
+              || !destination
+              || originLabel === 'Finding street address…'
+              || destinationLabel === 'Finding street address…'
+            }
             onClick={() => {
               if (origin && destination) {
-                onApply(origin, destination);
+                onApply(
+                  { point: origin, label: originLabel || coordinateFallback(origin) },
+                  { point: destination, label: destinationLabel || coordinateFallback(destination) },
+                );
               }
             }}
           >

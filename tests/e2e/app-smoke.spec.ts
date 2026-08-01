@@ -419,6 +419,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     originLabel: string;
     destinationLabel: string;
     travelMode: 'bicycle' | 'drive';
+    routeName?: string;
+    waypoints?: Array<{ point: { lat: number; lng: number }; label: string }>;
   }> = [];
 
   await page.addInitScript(() => {
@@ -452,6 +454,25 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       }),
     });
   });
+  await page.route('**/api/explore/smart-route', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        plan: {
+          name: 'Malibu Ocean View Ten',
+          summary: 'A researched coastal ride through recognizable Malibu landmarks.',
+          originQuery: 'Malibu Pier, Malibu, CA',
+          destinationQuery: 'Zuma Beach, Malibu, CA',
+          waypointQueries: ['Point Dume, Malibu, CA'],
+          targetDistanceMiles: 10,
+          routeKind: 'point-to-point',
+          disclaimer: 'Google determines the final course and displayed mileage.',
+          sources: [{ title: 'Visit Malibu', url: 'https://www.malibucity.org/' }],
+        },
+      }),
+    });
+  });
   await page.route('**/api/explore/route', async (route) => {
     const request = route.request().postDataJSON() as typeof exploreRouteRequests[number];
     exploreRouteRequests.push(request);
@@ -478,6 +499,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       body: JSON.stringify({
         route: {
           id: `EXPLORE-playwright-${requestNumber}`,
+          ...(request.routeName ? { name: request.routeName } : {}),
           origin: request.origin,
           destination: request.destination,
           originLabel,
@@ -486,6 +508,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
           distanceMeters: routeDistanceMeters,
           durationSeconds: quickRoute ? 1 : 300,
           encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+          ...(request.waypoints?.length ? { waypoints: request.waypoints } : {}),
           ...(quickRoute ? {
             elevationSamples: [
               { distanceMeters: 0, elevationMeters: 10 },
@@ -637,6 +660,37 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
 
       async fetchFields(_request: { fields: string[] }) {}
     }
+    class MockGeocoder {
+      async geocode(request: {
+        address?: string;
+        location?: { lat: number; lng: number };
+      }) {
+        const address = request.address ?? '';
+        const point = request.location
+          ?? (/point dume/i.test(address)
+            ? { lat: 34.0029, lng: -118.8067 }
+            : /zuma beach/i.test(address)
+              ? { lat: 34.0218, lng: -118.8312 }
+              : { lat: 34.0356, lng: -118.6767 });
+        const formattedAddress = request.location?.lat === 37.7749
+          ? 'Union Square, San Francisco, CA 94108, USA'
+          : request.location?.lat === 37.7955
+            ? 'Ferry Building, San Francisco, CA 94111, USA'
+            : /point dume/i.test(address)
+              ? 'Point Dume, Malibu, CA 90265, USA'
+              : /zuma beach/i.test(address)
+                ? 'Zuma Beach, Malibu, CA 90265, USA'
+                : /malibu pier/i.test(address)
+                  ? 'Malibu Pier, Malibu, CA 90265, USA'
+                  : address || 'Selected address';
+        return {
+          results: [{
+            formatted_address: formattedAddress,
+            geometry: { location: { toJSON: () => point } },
+          }],
+        };
+      }
+    }
     type MockMapClickHandler = (event: {
       latLng?: { toJSON: () => { lat: number; lng: number } };
       placeId?: string;
@@ -759,6 +813,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     };
     (window as typeof window & { google?: unknown }).google = {
       maps: {
+        Geocoder: MockGeocoder,
         LatLngBounds: MockLatLngBounds,
         Map: MockMap,
         Marker: MockMarker,
@@ -805,8 +860,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     }).__tracklabExploreMapClickHandlers?.[0];
     handler?.({ latLng: { toJSON: () => ({ lat: 37.7955, lng: -122.3937 }) } });
   });
-  await expect(mapPicker).toContainText('37.77490, -122.41940');
-  await expect(mapPicker).toContainText('37.79550, -122.39370');
+  await expect(mapPicker).toContainText('Union Square, San Francisco, CA 94108, USA');
+  await expect(mapPicker).toContainText('Ferry Building, San Francisco, CA 94111, USA');
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
@@ -818,14 +873,20 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.setViewportSize({ width: 1280, height: 720 });
   await mapPicker.getByRole('button', { name: 'Use these map points' }).click();
   await expect(mapPicker).toHaveCount(0);
-  await expect(originInput).toHaveValue('Map start · 37.77490, -122.41940');
-  await expect(destinationInput).toHaveValue('Map destination · 37.79550, -122.39370');
+  await expect(originInput).toHaveValue('Union Square, San Francisco, CA 94108, USA');
+  await expect(destinationInput).toHaveValue('Ferry Building, San Francisco, CA 94111, USA');
+  const routeNameInput = page.getByRole('textbox', { name: /Route name/i });
+  await routeNameInput.fill('San Francisco warm-up');
   await page.getByRole('button', { name: 'Build Explore the World route' }).click();
   await expect(page.locator('.explore-route-summary')).toBeVisible();
   await expect.poll(() => exploreRouteRequests.at(-1)).toMatchObject({
     origin: { lat: 37.7749, lng: -122.4194 },
     destination: { lat: 37.7955, lng: -122.3937 },
+    originLabel: 'Union Square, San Francisco, CA 94108, USA',
+    destinationLabel: 'Ferry Building, San Francisco, CA 94111, USA',
+    routeName: 'San Francisco warm-up',
   });
+  await expect(page.locator('.explore-route-summary')).toContainText('San Francisco warm-up');
   await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
   await expect(recentRoutes).toBeEnabled();
   await expect(recentRoutes.locator('option')).toHaveCount(2);
@@ -833,6 +894,19 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await recentRoutes.selectOption({ index: 1 });
   await expect(page.getByText(/Recent route loaded:/)).toBeVisible();
   expect(exploreRouteRequests).toHaveLength(requestCountBeforeRecentRestore);
+  const smartPrompt = page.getByRole('textbox', { name: 'Describe your Smart Route' });
+  await smartPrompt.fill('A 10 mile coastal ride in Malibu with ocean views');
+  await page.getByRole('button', { name: 'Find and build this ride' }).click();
+  await expect(page.locator('.explore-route-summary')).toContainText('Malibu Ocean View Ten');
+  await expect(page.getByRole('region', { name: 'Smart Route research' })).toContainText(
+    'Google determines the final course and displayed mileage.',
+  );
+  await expect.poll(() => exploreRouteRequests.at(-1)).toMatchObject({
+    routeName: 'Malibu Ocean View Ten',
+    originLabel: 'Malibu Pier, Malibu, CA 90265, USA',
+    destinationLabel: 'Zuma Beach, Malibu, CA 90265, USA',
+    waypoints: [{ label: 'Point Dume, Malibu, CA 90265, USA' }],
+  });
   await originInput.fill('Ferry Build');
   const originSuggestion = page.getByRole('option', { name: /Ferry Building.*San Francisco/i });
   await expect(originSuggestion).toBeVisible();
@@ -858,7 +932,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
 
   await expect(page.locator('.explore-route-summary > div strong'))
     .toHaveText('San Francisco Ferry Building, San Francisco, CA, USA');
-  await expect.poll(() => elevationRecoveryRequests).toBe(2);
+  await expect.poll(() => elevationRecoveryRequests).toBe(3);
   await expect(page.locator('.explore-route-summary')).toContainText('Elevation gain33 ft');
   await expect(page.locator('.explore-route-summary')).toContainText('Descent16 ft');
   await expect(page.getByLabel(/Climbing, grade \+2\.0%/).first()).toBeVisible();

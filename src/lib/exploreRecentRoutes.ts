@@ -1,4 +1,9 @@
-import type { ExploreElevationSample, ExploreRoute, TrackPoint } from '../types';
+import type {
+  ExploreElevationSample,
+  ExploreRoute,
+  ExploreRouteWaypoint,
+  TrackPoint,
+} from '../types';
 
 const recentExploreRouteLimit = 8;
 const recentExploreRoutesStoragePrefix = 'tracklab-explore-recent-routes-v1';
@@ -64,8 +69,18 @@ function sanitizeRecentRoute(value: unknown): ExploreRoute | null {
   }
 
   const elevationSamples = sanitizeElevationSamples(route.elevationSamples, distanceMeters);
+  const waypoints = Array.isArray(route.waypoints)
+    ? route.waypoints.flatMap((value): ExploreRouteWaypoint[] => {
+      const waypoint = value as Partial<ExploreRouteWaypoint> | null;
+      if (!waypoint || !validPoint(waypoint.point)) {
+        return [];
+      }
+      return [{ point: waypoint.point, label: String(waypoint.label || 'Route waypoint').slice(0, 160) }];
+    }).slice(0, 10)
+    : [];
   return {
     id: route.id.slice(0, 96),
+    ...(route.name ? { name: String(route.name).slice(0, 80) } : {}),
     origin: route.origin,
     destination: route.destination,
     originLabel: String(route.originLabel || 'Selected start').slice(0, 160),
@@ -74,6 +89,7 @@ function sanitizeRecentRoute(value: unknown): ExploreRoute | null {
     distanceMeters,
     durationSeconds,
     encodedPolyline,
+    ...(waypoints.length > 0 ? { waypoints } : {}),
     ...(elevationSamples.length >= 2 ? {
       elevationSamples,
       elevationGainMeters: Math.max(0, Number(route.elevationGainMeters) || 0),

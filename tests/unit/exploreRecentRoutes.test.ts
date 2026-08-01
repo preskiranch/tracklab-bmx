@@ -8,6 +8,7 @@ import type { ExploreRoute } from '../../src/types';
 function route(index: number): ExploreRoute {
   return {
     id: `EXPLORE-${index}`,
+    name: `Route ${index}`,
     origin: { lat: 38.5 + index / 1_000, lng: -121.5 },
     destination: { lat: 38.6 + index / 1_000, lng: -121.4 },
     originLabel: `Start ${index}`,
@@ -16,6 +17,10 @@ function route(index: number): ExploreRoute {
     distanceMeters: 1_000 + index,
     durationSeconds: 300 + index,
     encodedPolyline: `_p~iF~ps|U_ulLnnqC_mqNvxq${index}`,
+    waypoints: [{
+      point: { lat: 38.55 + index / 1_000, lng: -121.45 },
+      label: `Waypoint ${index}`,
+    }],
     elevationSamples: [
       { distanceMeters: 0, elevationMeters: 10 },
       { distanceMeters: 1_000 + index, elevationMeters: 20 },
@@ -55,6 +60,10 @@ describe('recent Explore routes', () => {
       'EXPLORE-3',
       'EXPLORE-2',
     ]);
+    expect(recent[0]).toMatchObject({
+      name: 'Route 9',
+      waypoints: [{ label: 'Waypoint 9' }],
+    });
 
     rememberRecentExploreRoute('rider@example.com', route(5));
     expect(loadRecentExploreRoutes('rider@example.com')[0].id).toBe('EXPLORE-5');

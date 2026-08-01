@@ -82,7 +82,7 @@ type GoogleOverlayView = {
 };
 
 type GoogleGeocoder = {
-  geocode: (request: { address: string }) => Promise<{
+  geocode: (request: { address?: string; location?: LatLngLiteral }) => Promise<{
     results?: Array<{
       formatted_address?: string;
       geometry?: {
@@ -549,6 +549,22 @@ export async function resolveLocationText(value: string): Promise<{ point: LatLn
     point,
     label: result.formatted_address,
   };
+}
+
+export async function reverseGeocodeGooglePoint(
+  point: LatLngLiteral,
+): Promise<{ point: LatLngLiteral; label: string }> {
+  const google = await loadGoogleMaps();
+  if (!google.maps.Geocoder) {
+    throw new Error('Google reverse geocoding is unavailable for this Maps key.');
+  }
+  const geocoder = new google.maps.Geocoder();
+  const response = await geocoder.geocode({ location: point });
+  const label = response.results?.[0]?.formatted_address?.trim();
+  if (!label) {
+    throw new Error('No street address was found for that map point.');
+  }
+  return { point, label };
 }
 
 function isFiniteCoordinate(value: unknown): value is number {
