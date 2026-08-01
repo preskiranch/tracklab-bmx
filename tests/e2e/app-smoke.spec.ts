@@ -649,7 +649,6 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       displayName = 'Lagoon Valley Park';
       formattedAddress = '1 Pena Adobe Road, Vacaville, CA 95688';
       googleMapsURI = 'https://www.google.com/maps/place/Lagoon+Valley+Park';
-      location = { toJSON: () => ({ lat: 38.33, lng: -122.02 }) };
       nationalPhoneNumber = '(707) 449-5658';
       primaryTypeDisplayName = 'Park';
       rating = 4.7;

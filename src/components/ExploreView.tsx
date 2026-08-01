@@ -490,7 +490,27 @@ export function ExploreView({
 
   const openStreetView = useCallback((landmark: GoogleLandmarkDetails) => {
     closeLandmark();
-    setStreetViewLandmark(landmark);
+    const requestId = landmarkRequestRef.current;
+    if (landmark.point || !landmark.address) {
+      setStreetViewLandmark(landmark);
+      return;
+    }
+
+    void resolveLocationText(landmark.address)
+      .then((resolved) => {
+        if (landmarkRequestRef.current !== requestId) {
+          return;
+        }
+        setStreetViewLandmark({
+          ...landmark,
+          point: resolved.point,
+        });
+      })
+      .catch(() => {
+        if (landmarkRequestRef.current === requestId) {
+          setStreetViewLandmark(landmark);
+        }
+      });
   }, [closeLandmark]);
 
   const toggleInteractiveLandmarks = useCallback(() => {
@@ -1694,7 +1714,7 @@ export function ExploreView({
                 && !streetViewLandmark && (
                 <div className="explore-landmark-hint" role="status">
                   <Landmark size={16} />
-                  <span><strong>Landmarks are interactive.</strong> Tap an icon for Street View, its official website, and details—the ride keeps moving.</span>
+                  <span><strong>Landmarks are interactive.</strong> Every landmark card includes Street View, its official website, and details—the ride keeps moving.</span>
                 </div>
               )}
 
@@ -1803,14 +1823,12 @@ export function ExploreView({
                           )}
                         </div>
                         <div className="explore-landmark-actions">
-                          {selectedLandmark.details.point && (
-                            <button
-                              type="button"
-                              onClick={() => openStreetView(selectedLandmark.details as GoogleLandmarkDetails)}
-                            >
-                              <MapPinned size={15} /> View Street View
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => openStreetView(selectedLandmark.details as GoogleLandmarkDetails)}
+                          >
+                            <MapPinned size={15} /> View Street View
+                          </button>
                           {safeExternalHttpUrl(selectedLandmark.details.websiteUrl) && (
                             <a
                               href={safeExternalHttpUrl(selectedLandmark.details.websiteUrl)}
