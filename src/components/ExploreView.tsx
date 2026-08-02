@@ -515,7 +515,7 @@ export function ExploreView({
 
   const toggleInteractiveLandmarks = useCallback(() => {
     const nextVisible = !showMapLabels;
-    if (nextVisible && developerMode && mapRenderer !== 'google-satellite') {
+    if (nextVisible && developerMode && mapRenderer === 'apple-satellite') {
       setMapRenderer('google-satellite');
     }
     setShowMapLabels(nextVisible);
@@ -1709,7 +1709,7 @@ export function ExploreView({
               </div>
 
               {showMapLabels
-                && effectiveMapRenderer === 'google-satellite'
+                && effectiveMapRenderer !== 'apple-satellite'
                 && !selectedLandmark
                 && !streetViewLandmark && (
                 <div className="explore-landmark-hint" role="status">

@@ -750,9 +750,22 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       }
 
       connectedCallback() {
+        const testWindow = window as typeof window & {
+          __tracklabExplore3DMaps?: MockMap3DElement[];
+        };
+        testWindow.__tracklabExplore3DMaps ??= [];
+        testWindow.__tracklabExplore3DMaps.push(this);
         const event = new Event('gmp-steadychange');
         Object.defineProperty(event, 'isSteady', { value: true });
         queueMicrotask(() => this.dispatchEvent(event));
+      }
+
+      disconnectedCallback() {
+        const testWindow = window as typeof window & {
+          __tracklabExplore3DMaps?: MockMap3DElement[];
+        };
+        testWindow.__tracklabExplore3DMaps = (testWindow.__tracklabExplore3DMaps ?? [])
+          .filter((map) => map !== this);
       }
     }
     class MockPolyline3DElement extends HTMLElement {}
@@ -964,7 +977,10 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await distanceUnits.getByRole('button', { name: 'Show distances in kilometers' }).click();
   await expect(page.getByText('1.00 km', { exact: true })).toBeVisible();
   await distanceUnits.getByRole('button', { name: 'Show distances in miles' }).click();
-  await expect(page.locator('.explore-rider-strip article')).toHaveCount(2);
+  await exploreDemoRiderButtons.nth(0).click();
+  await exploreDemoRiderButtons.nth(2).click();
+  await expect(page.locator('.explore-rider-strip article')).toHaveCount(4);
+  await mapRenderer.getByRole('button', { name: 'Google 3D' }).click();
   await page.getByRole('button', { name: 'Start Explore the World ride' }).click();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
@@ -1012,27 +1028,21 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await labelsOff.click();
   await expect(page.getByRole('button', { name: 'Hide street names and landmarks' }))
     .toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('Labeled satellite', { exact: true })).toHaveText('Labeled satellite');
   await expect(page.getByText(/Landmarks are interactive.*Street View.*official website/i)).toBeVisible();
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
-      __tracklabExploreMapClickHandlers?: unknown[];
-    }).__tracklabExploreMapClickHandlers?.length ?? 0
+      __tracklabExplore3DMaps?: unknown[];
+    }).__tracklabExplore3DMaps?.length ?? 0
   ))).toBeGreaterThan(0);
   await page.evaluate(() => {
     const testWindow = window as typeof window & {
-      __tracklabExploreMapClickHandlers?: Array<(event: {
-        placeId: string;
-        stop: () => void;
-      }) => void>;
-      __tracklabLandmarkClickStopped?: boolean;
+      __tracklabExplore3DMaps?: HTMLElement[];
+      __tracklabLandmarkClickPrevented?: boolean;
     };
-    testWindow.__tracklabExploreMapClickHandlers?.[0]?.({
-      placeId: 'lagoon-valley-park',
-      stop: () => {
-        testWindow.__tracklabLandmarkClickStopped = true;
-      },
-    });
+    const event = new Event('gmp-click', { cancelable: true });
+    Object.defineProperty(event, 'placeId', { value: 'lagoon-valley-park' });
+    testWindow.__tracklabExplore3DMaps?.[0]?.dispatchEvent(event);
+    testWindow.__tracklabLandmarkClickPrevented = event.defaultPrevented;
   });
   const landmarkDialog = page.getByRole('dialog', { name: 'Landmark information' });
   await expect(landmarkDialog).toBeVisible();
@@ -1044,8 +1054,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(landmarkDialog.getByRole('link', { name: /Open in Google Maps/i })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
   expect(await page.evaluate(() => (
-    (window as typeof window & { __tracklabLandmarkClickStopped?: boolean })
-      .__tracklabLandmarkClickStopped
+    (window as typeof window & { __tracklabLandmarkClickPrevented?: boolean })
+      .__tracklabLandmarkClickPrevented
   ))).toBe(true);
   await page.screenshot({
     fullPage: false,

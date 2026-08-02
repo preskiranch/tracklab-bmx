@@ -41,6 +41,7 @@ export function ExploreGoogle3DMapPanel({
   cameraFollowPosition,
   showMapLabels,
   followTravelHeading,
+  onLandmarkSelect,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap3DElement | null>(null);
@@ -51,12 +52,19 @@ export function ExploreGoogle3DMapPanel({
   const cameraCenterRef = useRef<{ lat: number; lng: number } | null>(null);
   const cameraTargetRef = useRef<{ lat: number; lng: number } | null>(null);
   const travelHeadingRef = useRef(0);
+  const showMapLabelsRef = useRef(showMapLabels);
+  const onLandmarkSelectRef = useRef(onLandmarkSelect);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
   const routePoints = useMemo(
     () => exploreRoutePoints(route),
     [route.encodedPolyline, route.id],
   );
+
+  useEffect(() => {
+    showMapLabelsRef.current = showMapLabels;
+    onLandmarkSelectRef.current = onLandmarkSelect;
+  }, [onLandmarkSelect, showMapLabels]);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,11 +101,21 @@ export function ExploreGoogle3DMapPanel({
           setError('Google photorealistic 3D could not render this route.');
           setStatus('error');
         };
+        const placeClickListener: EventListener = (event) => {
+          const placeId = (event as Event & { placeId?: string }).placeId?.trim();
+          if (!placeId || !showMapLabelsRef.current) {
+            return;
+          }
+          event.preventDefault();
+          onLandmarkSelectRef.current(placeId);
+        };
         map.addEventListener('gmp-steadychange', steadyListener);
         map.addEventListener('gmp-error', errorListener);
+        map.addEventListener('gmp-click', placeClickListener);
         listeners.push(
           { name: 'gmp-steadychange', listener: steadyListener },
           { name: 'gmp-error', listener: errorListener },
+          { name: 'gmp-click', listener: placeClickListener },
         );
         containerRef.current.replaceChildren(map);
         mapRef.current = map;
