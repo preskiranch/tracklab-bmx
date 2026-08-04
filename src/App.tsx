@@ -6730,7 +6730,7 @@ export default function App() {
                 <span className="workflow-index">2</span>
                 <span className="workflow-copy">
                   <strong>Choose two places</strong>
-                  <small>Build a bicycle or car route</small>
+                  <small>Build a real-world road route</small>
                 </span>
               </div>
               <div className="workflow-step pending">

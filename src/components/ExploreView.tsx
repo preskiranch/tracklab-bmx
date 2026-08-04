@@ -1,7 +1,6 @@
 import {
   ArrowLeftRight,
   Bike,
-  Car,
   Compass,
   ExternalLink,
   Flag,
@@ -81,7 +80,6 @@ import type {
   DistanceUnit,
   ExploreDistanceUnit,
   ExploreRoute,
-  ExploreTravelMode,
   MultiplayerExploreState,
   MultiplayerRoom,
   PlayerSlot,
@@ -134,6 +132,7 @@ type ExploreViewProps = {
 };
 
 type ExploreMapRenderer = 'google-satellite' | 'google-3d' | 'apple-satellite';
+const exploreTravelMode = 'drive' as const;
 
 const ExploreGoogle3DMapPanel = lazy(() => import('./ExploreGoogle3DMapPanel')
   .then((module) => ({ default: module.ExploreGoogle3DMapPanel })));
@@ -314,7 +313,6 @@ export function ExploreView({
   const [selectedDestination, setSelectedDestination] = useState<ExploreOrigin | null>(null);
   const [selectedOriginPrediction, setSelectedOriginPrediction] = useState<PlacePredictionOption | null>(null);
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
-  const [travelMode, setTravelMode] = useState<ExploreTravelMode>('bicycle');
   const [exploreDistanceUnit, setExploreDistanceUnit] = useState<ExploreDistanceUnit>(
     distanceUnit === 'm' ? 'km' : 'mi',
   );
@@ -778,7 +776,7 @@ export function ExploreView({
     setSelectedDestinationPrediction(null);
     setDestinationText(nextDestination.label);
     setRouteStatus('idle');
-    setRouteMessage('Map points selected. Choose Bicycle or Car route, then build your ride.');
+    setRouteMessage('Map points selected. Build your road route when ready.');
     setMapPickerOpen(false);
     resetPlaceAutocompleteSession();
   };
@@ -794,7 +792,6 @@ export function ExploreView({
     setSelectedDestination({ point: recentRoute.destination, label: recentRoute.destinationLabel });
     setSelectedDestinationPrediction(null);
     setDestinationText(recentRoute.destinationLabel);
-    setTravelMode(recentRoute.travelMode);
     setRouteName(recentRoute.name ?? '');
     setSmartRoutePlan(null);
     resetPlaceAutocompleteSession();
@@ -853,7 +850,7 @@ export function ExploreView({
           || selectedDestinationPrediction?.label
           || destination.label
           || destinationText.trim(),
-        travelMode,
+        travelMode: exploreTravelMode,
         routeName: routeName.trim(),
       });
       if (routeRequestRef.current !== requestId) {
@@ -897,7 +894,7 @@ export function ExploreView({
         destination: destination.point,
         originLabel: origin.label ?? plan.originQuery,
         destinationLabel: destination.label ?? plan.destinationQuery,
-        travelMode: 'bicycle',
+        travelMode: exploreTravelMode,
         routeName: plan.name,
         waypoints: waypointLocations,
       });
@@ -913,7 +910,6 @@ export function ExploreView({
       });
       setSelectedDestinationPrediction(null);
       setDestinationText(destination.label ?? plan.destinationQuery);
-      setTravelMode('bicycle');
       setRouteName(plan.name);
       setSmartRoutePlan(plan);
       resetPlaceAutocompleteSession();
@@ -943,7 +939,7 @@ export function ExploreView({
         destination: route.origin,
         originLabel: route.destinationLabel,
         destinationLabel: route.originLabel,
-        travelMode: route.travelMode,
+        travelMode: exploreTravelMode,
         routeName: route.name ? `${route.name} — Reverse` : '',
         waypoints: [...(route.waypoints ?? [])].reverse(),
       });
@@ -956,7 +952,6 @@ export function ExploreView({
       setSelectedDestinationPrediction(null);
       setSelectedDestination({ point: route.origin, label: route.originLabel });
       setDestinationText(route.originLabel);
-      setTravelMode(route.travelMode);
       setRouteName(nextRoute.name ?? '');
       setSmartRoutePlan(null);
       resetPlaceAutocompleteSession();
@@ -984,7 +979,6 @@ export function ExploreView({
     setDestinationText('');
     setRouteName('');
     setSmartRoutePlan(null);
-    setTravelMode(route.travelMode);
     setRouteStatus('idle');
     setRouteMessage(`Starting from ${route.destinationLabel}. Choose your next destination.`);
     resetPlaceAutocompleteSession();
@@ -1434,34 +1428,6 @@ export function ExploreView({
                 onChange={(event) => setRouteName(event.target.value)}
               />
             </label>
-            <div className="explore-travel-mode" aria-label="Google route type">
-              <button
-                className={travelMode === 'bicycle' ? 'selected' : ''}
-                type="button"
-                disabled={!canChooseRoute}
-                onClick={() => {
-                  if (travelMode !== 'bicycle') {
-                    markRouteInputsChanged();
-                    setTravelMode('bicycle');
-                  }
-                }}
-              >
-                <Bike size={16} /> Bicycle
-              </button>
-              <button
-                className={travelMode === 'drive' ? 'selected' : ''}
-                type="button"
-                disabled={!canChooseRoute}
-                onClick={() => {
-                  if (travelMode !== 'drive') {
-                    markRouteInputsChanged();
-                    setTravelMode('drive');
-                  }
-                }}
-              >
-                <Car size={16} /> Car route
-              </button>
-            </div>
             <button
               className="explore-create-route"
               type="button"
@@ -1489,7 +1455,7 @@ export function ExploreView({
               </section>
             )}
             <small className="explore-route-warning">
-              Bicycle directions can contain roads or paths without clear cycling facilities. This is an indoor virtual ride—not outdoor navigation.
+              Routes follow drivable roads for more consistent road and elevation data. This is an indoor virtual ride—not outdoor navigation.
             </small>
           </section>
         </aside>

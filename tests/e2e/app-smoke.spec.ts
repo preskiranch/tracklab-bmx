@@ -861,6 +861,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   const originInput = page.getByRole('textbox', { name: 'Starting location', exact: true });
   const destinationInput = page.getByRole('textbox', { name: 'Destination', exact: true });
   const recentRoutes = page.getByRole('combobox', { name: 'Recent Explore routes' });
+  await expect(page.getByRole('button', { name: 'Bicycle', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Car route', exact: true })).toHaveCount(0);
   await expect(recentRoutes).toBeDisabled();
   await page.getByRole('button', { name: 'Choose start and destination on map' }).click();
   const mapPicker = page.getByRole('dialog', { name: 'Select your route endpoints' });
@@ -912,6 +914,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     destination: { lat: 37.7955, lng: -122.3937 },
     originLabel: 'Union Square, San Francisco, CA 94108, USA',
     destinationLabel: 'Ferry Building, San Francisco, CA 94111, USA',
+    travelMode: 'drive',
     routeName: 'San Francisco warm-up',
   });
   await expect(page.locator('.explore-route-summary')).toContainText('San Francisco warm-up');
@@ -933,6 +936,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     routeName: 'Malibu Ocean View Ten',
     originLabel: 'Malibu Pier, Malibu, CA 90265, USA',
     destinationLabel: 'Zuma Beach, Malibu, CA 90265, USA',
+    travelMode: 'drive',
     waypoints: [{ label: 'Point Dume, Malibu, CA 90265, USA' }],
   });
   await originInput.fill('Ferry Build');
@@ -1212,6 +1216,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect.poll(() => exploreRouteRequests.at(-1)).toMatchObject({
     originLabel: 'Quick Finish',
     destinationLabel: 'Quick Start',
+    travelMode: 'drive',
   });
   await expect(page.locator('.explore-route-summary > div strong')).toContainText('Quick Start');
 
