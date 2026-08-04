@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps';
 import {
   closestExploreScreenRotation,
@@ -45,6 +45,58 @@ type ExploreRiderMarker = {
 type ExploreMarkerRefs = Map<string, ExploreRiderMarker>;
 
 export const exploreRoadCyclistMarkerSizePx = 24;
+
+export function useExploreCameraInteraction(onCameraInteraction: () => void) {
+  const interactionActiveRef = useRef(false);
+  const activePointerIdsRef = useRef(new Set<number>());
+  const releaseTimerRef = useRef(0);
+
+  const scheduleRelease = useCallback((delayMs = 350) => {
+    window.clearTimeout(releaseTimerRef.current);
+    releaseTimerRef.current = window.setTimeout(() => {
+      interactionActiveRef.current = false;
+    }, delayMs);
+  }, []);
+
+  const beginPointerInteraction = useCallback((pointerId: number) => {
+    window.clearTimeout(releaseTimerRef.current);
+    activePointerIdsRef.current.add(pointerId);
+    interactionActiveRef.current = true;
+    onCameraInteraction();
+  }, [onCameraInteraction]);
+
+  const endPointerInteraction = useCallback((pointerId: number) => {
+    activePointerIdsRef.current.delete(pointerId);
+    if (activePointerIdsRef.current.size === 0) {
+      scheduleRelease();
+    }
+  }, [scheduleRelease]);
+
+  const beginWheelInteraction = useCallback(() => {
+    interactionActiveRef.current = true;
+    onCameraInteraction();
+    scheduleRelease(250);
+  }, [onCameraInteraction, scheduleRelease]);
+
+  useEffect(() => {
+    const finishPointerInteraction = (event: PointerEvent) => {
+      endPointerInteraction(event.pointerId);
+    };
+    window.addEventListener('pointerup', finishPointerInteraction, true);
+    window.addEventListener('pointercancel', finishPointerInteraction, true);
+    return () => {
+      window.clearTimeout(releaseTimerRef.current);
+      window.removeEventListener('pointerup', finishPointerInteraction, true);
+      window.removeEventListener('pointercancel', finishPointerInteraction, true);
+    };
+  }, [endPointerInteraction]);
+
+  return {
+    beginPointerInteraction,
+    beginWheelInteraction,
+    interactionActiveRef,
+  };
+}
 
 export function exploreRoadCyclistIconUrl(playerId: number) {
   return `/assets/explore/road-cyclist-p${Math.max(1, Math.min(4, Math.round(playerId)))}.png`;
@@ -217,6 +269,11 @@ export function ExploreMapPanel({
     () => exploreRoutePoints(route),
     [route.encodedPolyline, route.id],
   );
+  const {
+    beginPointerInteraction,
+    beginWheelInteraction,
+    interactionActiveRef,
+  } = useExploreCameraInteraction(onCameraInteraction);
 
   useEffect(() => {
     let cancelled = false;
@@ -479,7 +536,14 @@ export function ExploreMapPanel({
       const current = cameraCenterRef.current;
       const target = cameraTargetRef.current;
 
-      if (map && current && target && now - lastMapUpdateAt >= 32) {
+      if (map && interactionActiveRef.current) {
+        const interactiveCenter = map.getCenter?.()?.toJSON();
+        if (interactiveCenter) {
+          cameraCenterRef.current = interactiveCenter;
+        }
+        previousAt = now;
+        lastMapUpdateAt = now;
+      } else if (map && current && target && now - lastMapUpdateAt >= 32) {
         const needsMovement = Math.abs(target.lat - current.lat) > 1e-8
           || Math.abs(target.lng - current.lng) > 1e-8;
         if (needsMovement) {
@@ -537,8 +601,8 @@ export function ExploreMapPanel({
       aria-label={group.riders.length > 0
         ? `Explore map for ${group.riders.map((rider) => rider.name).join(', ')}`
         : 'Explore route preview'}
-      onPointerDownCapture={onCameraInteraction}
-      onWheelCapture={onCameraInteraction}
+      onPointerDownCapture={(event) => beginPointerInteraction(event.pointerId)}
+      onWheelCapture={beginWheelInteraction}
     >
       <div className="explore-map-canvas" ref={containerRef} />
       {status === 'loading' && <div className="explore-map-status">Loading satellite view…</div>}

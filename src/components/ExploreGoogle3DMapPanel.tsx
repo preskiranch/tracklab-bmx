@@ -21,9 +21,11 @@ import { formatExploreDistanceMeters } from '../units';
 import {
   exploreGroupPositions,
   exploreRoadCyclistIconUrl,
-  exploreRoadCyclistMarkerSizePx,
   type ExploreMapPanelProps,
+  useExploreCameraInteraction,
 } from './ExploreMapPanel';
+
+const exploreRoadCyclist3DMarkerSizePx = 84;
 
 function explore3DRange(followZoom: number) {
   return Math.max(80, Math.min(25_000, 320 * (2 ** (18 - followZoom))));
@@ -69,6 +71,11 @@ export function ExploreGoogle3DMapPanel({
     () => exploreRoutePoints(route),
     [route.encodedPolyline, route.id],
   );
+  const {
+    beginPointerInteraction,
+    beginWheelInteraction,
+    interactionActiveRef,
+  } = useExploreCameraInteraction(onCameraInteraction);
 
   const updateRiderRotations = useCallback(() => {
     const mapHeading = mapRef.current?.heading ?? 0;
@@ -269,7 +276,7 @@ export function ExploreGoogle3DMapPanel({
         marker.style.zIndex = String(500 + rider.playerId);
         const cyclistImage = document.createElement('img');
         cyclistImage.alt = '';
-        cyclistImage.height = exploreRoadCyclistMarkerSizePx;
+        cyclistImage.height = exploreRoadCyclist3DMarkerSizePx;
         cyclistImage.src = exploreRoadCyclistIconUrl(rider.playerId);
         const initialRotation = exploreCyclistScreenRotation(
           routeHeading,
@@ -279,7 +286,7 @@ export function ExploreGoogle3DMapPanel({
         cyclistImage.style.transformOrigin = 'center';
         cyclistImage.style.transition = 'transform 90ms linear';
         cyclistImage.style.willChange = 'transform';
-        cyclistImage.width = exploreRoadCyclistMarkerSizePx;
+        cyclistImage.width = exploreRoadCyclist3DMarkerSizePx;
         if (library.MarkerElement) {
           marker.append(cyclistImage);
         } else {
@@ -359,7 +366,13 @@ export function ExploreGoogle3DMapPanel({
       const map = mapRef.current;
       const current = cameraCenterRef.current;
       const target = cameraTargetRef.current;
-      if (map && current && target && now - lastUpdateAt >= 32) {
+      if (map && interactionActiveRef.current) {
+        if (map.center) {
+          cameraCenterRef.current = { lat: map.center.lat, lng: map.center.lng };
+        }
+        previousAt = now;
+        lastUpdateAt = now;
+      } else if (map && current && target && now - lastUpdateAt >= 32) {
         const elapsedMs = Math.min(250, Math.max(0, now - previousAt));
         const next = smoothExploreCameraPoint(current, target, elapsedMs);
         cameraCenterRef.current = next;
@@ -386,8 +399,8 @@ export function ExploreGoogle3DMapPanel({
     <section
       className={`explore-map-panel${group.riders.length === 0 ? ' preview' : ''}`}
       aria-label="Google photorealistic 3D Explore map"
-      onPointerDownCapture={onCameraInteraction}
-      onWheelCapture={onCameraInteraction}
+      onPointerDownCapture={(event) => beginPointerInteraction(event.pointerId)}
+      onWheelCapture={beginWheelInteraction}
     >
       <div className="explore-map-canvas" ref={containerRef} />
       {status === 'loading' && <div className="explore-map-status">Loading Google 3D…</div>}

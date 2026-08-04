@@ -1083,6 +1083,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   const freeCamera = page.getByRole('button', { name: 'Enable free camera' });
   await expect(freeCamera).toHaveAttribute('aria-pressed', 'false');
   await page.getByLabel('Google photorealistic 3D Explore map').dispatchEvent('pointerdown', {
+    pointerId: 17,
     pointerType: 'touch',
   });
   const resumeAutomaticCamera = page.getByRole('button', { name: 'Resume automatic camera' });
@@ -1096,6 +1097,16 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     }).__tracklabExplore3DMaps?.[0];
     map!.heading = 73;
     return { ...map!.center! };
+  });
+  await page.waitForTimeout(200);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabExplore3DMaps?: Array<{ heading?: number }>;
+    }).__tracklabExplore3DMaps?.[0]?.heading
+  ))).toBe(73);
+  await page.getByLabel('Google photorealistic 3D Explore map').dispatchEvent('pointerup', {
+    pointerId: 17,
+    pointerType: 'touch',
   });
   await expect.poll(() => page.evaluate((startCenter) => {
     const currentCenter = (window as typeof window & {
@@ -1126,7 +1137,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       .every((marker) => {
         const cyclist = marker
           .querySelector<HTMLImageElement>('img[src*="/assets/explore/road-cyclist-p"]');
-        return cyclist?.width === 24 && cyclist.height === 24;
+        return cyclist?.width === 84 && cyclist.height === 84;
       })
   ))).toBe(true);
   await expect.poll(() => page.evaluate(() => (

@@ -18,6 +18,7 @@ import { formatExploreDistanceMeters } from '../units';
 import {
   exploreGroupPositions,
   type ExploreMapPanelProps,
+  useExploreCameraInteraction,
 } from './ExploreMapPanel';
 
 function exploreAppleCameraDistance(followZoom: number) {
@@ -50,6 +51,11 @@ export function ExploreAppleMapPanel({
     () => exploreRoutePoints(route),
     [route.encodedPolyline, route.id],
   );
+  const {
+    beginPointerInteraction,
+    beginWheelInteraction,
+    interactionActiveRef,
+  } = useExploreCameraInteraction(onCameraInteraction);
 
   useEffect(() => {
     let cancelled = false;
@@ -251,7 +257,13 @@ export function ExploreAppleMapPanel({
       const map = mapRef.current;
       const current = cameraCenterRef.current;
       const target = cameraTargetRef.current;
-      if (map && current && target && now - lastUpdateAt >= 32) {
+      if (map && interactionActiveRef.current) {
+        if (map.center) {
+          cameraCenterRef.current = map.center;
+        }
+        previousAt = now;
+        lastUpdateAt = now;
+      } else if (map && current && target && now - lastUpdateAt >= 32) {
         const elapsedMs = Math.min(250, Math.max(0, now - previousAt));
         const next = smoothExploreCameraPoint(current, target, elapsedMs);
         cameraCenterRef.current = next;
@@ -280,8 +292,8 @@ export function ExploreAppleMapPanel({
     <section
       className={`explore-map-panel${group.riders.length === 0 ? ' preview' : ''}`}
       aria-label="Apple Satellite Explore map"
-      onPointerDownCapture={onCameraInteraction}
-      onWheelCapture={onCameraInteraction}
+      onPointerDownCapture={(event) => beginPointerInteraction(event.pointerId)}
+      onWheelCapture={beginWheelInteraction}
     >
       <div className="explore-map-canvas" ref={containerRef} />
       {status === 'loading' && <div className="explore-map-status">Loading Apple Satellite…</div>}
