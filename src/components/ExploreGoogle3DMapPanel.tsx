@@ -21,6 +21,7 @@ import { formatExploreDistanceMeters } from '../units';
 import {
   exploreGroupPositions,
   exploreRoadCyclistIconUrl,
+  exploreRoadCyclistMarkerSizePx,
   type ExploreMapPanelProps,
 } from './ExploreMapPanel';
 
@@ -252,13 +253,13 @@ export function ExploreGoogle3DMapPanel({
         });
         const cyclistImage = document.createElement('img');
         cyclistImage.alt = '';
-        cyclistImage.height = 56;
+        cyclistImage.height = exploreRoadCyclistMarkerSizePx;
         cyclistImage.src = exploreRoadCyclistIconUrl(rider.playerId);
         cyclistImage.style.transform = 'rotate(var(--tracklab-explore-cyclist-rotation, 0deg))';
         cyclistImage.style.transformOrigin = 'center';
         cyclistImage.style.transition = 'transform 90ms linear';
         cyclistImage.style.willChange = 'transform';
-        cyclistImage.width = 56;
+        cyclistImage.width = exploreRoadCyclistMarkerSizePx;
         const cyclistTemplate = document.createElement('template');
         cyclistTemplate.content.append(cyclistImage);
         marker.append(cyclistTemplate);

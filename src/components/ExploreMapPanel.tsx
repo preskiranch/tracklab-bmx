@@ -44,6 +44,8 @@ type ExploreRiderMarker = {
 
 type ExploreMarkerRefs = Map<string, ExploreRiderMarker>;
 
+export const exploreRoadCyclistMarkerSizePx = 44;
+
 export function exploreRoadCyclistIconUrl(playerId: number) {
   return `/assets/explore/road-cyclist-p${Math.max(1, Math.min(4, Math.round(playerId)))}.png`;
 }
@@ -67,12 +69,14 @@ function createExploreRiderMarker(
   title: string,
   zIndex: number,
 ): ExploreRiderMarker {
+  const markerSize = exploreRoadCyclistMarkerSizePx;
+  const markerCenter = markerSize / 2;
   if (!google.maps.OverlayView) {
     const marker = new google.maps.Marker({
       icon: {
-        anchor: new google.maps.Point(28, 49),
-        labelOrigin: new google.maps.Point(28, 55),
-        scaledSize: new google.maps.Size(56, 56),
+        anchor: new google.maps.Point(markerCenter, markerSize * 0.875),
+        labelOrigin: new google.maps.Point(markerCenter, markerSize),
+        scaledSize: new google.maps.Size(markerSize, markerSize),
         url: exploreRoadCyclistIconUrl(playerId),
       },
       label: {
@@ -100,21 +104,21 @@ function createExploreRiderMarker(
   const image = document.createElement('img');
   const label = document.createElement('span');
   element.title = title;
-  element.style.height = '56px';
+  element.style.height = `${markerSize}px`;
   element.style.pointerEvents = 'none';
   element.style.position = 'absolute';
   element.style.transform = 'translate3d(-50%, -50%, 0)';
-  element.style.width = '56px';
+  element.style.width = `${markerSize}px`;
   element.style.zIndex = String(zIndex);
   image.alt = '';
   image.draggable = false;
-  image.height = 56;
+  image.height = markerSize;
   image.src = exploreRoadCyclistIconUrl(playerId);
   image.style.display = 'block';
   image.style.transformOrigin = 'center';
   image.style.transition = 'transform 90ms linear';
   image.style.willChange = 'transform';
-  image.width = 56;
+  image.width = markerSize;
   label.textContent = `P${playerId}`;
   label.style.background = 'rgba(8, 15, 24, 0.82)';
   label.style.borderRadius = '4px';

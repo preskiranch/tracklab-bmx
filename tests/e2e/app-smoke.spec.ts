@@ -1093,6 +1093,16 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
         .querySelector('img[src*="/assets/explore/road-cyclist-p"]')).length
   ))).toBe(4);
   await expect.poll(() => page.evaluate(() => (
+    [...document.querySelectorAll('tracklab-mock-marker-3d')]
+      .filter((marker) => marker.querySelector('template')?.content
+        .querySelector('img[src*="/assets/explore/road-cyclist-p"]'))
+      .every((marker) => {
+        const cyclist = marker.querySelector('template')?.content
+          .querySelector<HTMLImageElement>('img[src*="/assets/explore/road-cyclist-p"]');
+        return cyclist?.width === 44 && cyclist.height === 44;
+      })
+  ))).toBe(true);
+  await expect.poll(() => page.evaluate(() => (
     [...document.querySelectorAll<HTMLElement>('tracklab-mock-marker-3d')]
       .filter((marker) => marker.querySelector('template')?.content
         .querySelector('img[src*="/assets/explore/road-cyclist-p"]'))
