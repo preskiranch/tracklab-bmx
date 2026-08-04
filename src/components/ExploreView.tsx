@@ -839,7 +839,7 @@ export function ExploreView({
     setSelectedDestinationPrediction(null);
     setDestinationText(nextDestination.label);
     setRouteStatus('idle');
-    setRouteMessage('Map points selected. Build your road route when ready.');
+    setRouteMessage('Map points selected. Build your bicycle route when ready.');
     setMapPickerOpen(false);
     resetPlaceAutocompleteSession();
   };
