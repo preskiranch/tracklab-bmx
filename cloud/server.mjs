@@ -668,7 +668,7 @@ async function computeExploreRoute(payload, signal) {
   if (!origin || !destination) {
     throw new HttpRequestError(400, 'Choose a valid starting point and destination.');
   }
-  const travelMode = 'drive';
+  const travelMode = 'bicycle';
   const waypoints = Array.isArray(payload?.waypoints)
     ? payload.waypoints.flatMap((value) => {
       const point = sanitizeExplorePoint(value?.point);
@@ -693,7 +693,7 @@ async function computeExploreRoute(payload, signal) {
           location: { latLng: { latitude: point.lat, longitude: point.lng } },
         })),
       } : {}),
-      travelMode: 'DRIVE',
+      travelMode: 'BICYCLE',
       // Overview geometry follows the routed roads without the lane- and
       // crosswalk-level offsets that look like lateral wobble in a tilted map.
       polylineQuality: 'OVERVIEW',
@@ -719,7 +719,7 @@ async function computeExploreRoute(payload, signal) {
   const distanceMeters = finiteNumber(candidate?.distanceMeters, 0);
   const durationSeconds = Number.parseFloat(String(candidate?.duration ?? '').replace(/s$/, ''));
   if (!encodedPolyline || distanceMeters <= 1) {
-    throw new HttpRequestError(404, 'No connected bicycle or driving route was found between those locations.');
+    throw new HttpRequestError(404, 'No connected bicycle route was found between those locations.');
   }
 
   const elevationProfile = await exploreElevationForRoute(
@@ -3934,8 +3934,8 @@ async function serveStatic(request, response) {
     const body = JSON.stringify({
       routesConfigured: Boolean(exploreRoutesApiKey()),
       smartRoutesConfigured: Boolean(openAiApiKey()),
-      supportedTravelModes: ['drive'],
-      routeNotice: 'Explore routes follow drivable roads for consistent road, elevation, and grade data.',
+      supportedTravelModes: ['bicycle'],
+      routeNotice: 'Explore routes favor bicycle-accessible roads and paths and avoid major interstates.',
     });
     response.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',

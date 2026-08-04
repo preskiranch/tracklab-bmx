@@ -46,7 +46,7 @@ import {
   fetchExploreElevationProfile,
   fetchExploreRoute,
   fetchSmartExploreRoutePlan,
-  upgradeExploreRoutesToDrivingRoads,
+  upgradeExploreRoutesToBicycleRoads,
   type ExploreElevationProfile,
   type ExploreSmartRoutePlan,
 } from '../lib/exploreRoutes';
@@ -133,7 +133,7 @@ type ExploreViewProps = {
 };
 
 type ExploreMapRenderer = 'google-satellite' | 'google-3d' | 'apple-satellite';
-const exploreTravelMode = 'drive' as const;
+const exploreTravelMode = 'bicycle' as const;
 
 const ExploreGoogle3DMapPanel = lazy(() => import('./ExploreGoogle3DMapPanel')
   .then((module) => ({ default: module.ExploreGoogle3DMapPanel })));
@@ -423,7 +423,29 @@ export function ExploreView({
     setRecentRoutes(cachedRoutes);
 
     if (!accountProfileKey) {
-      return undefined;
+      void upgradeExploreRoutesToBicycleRoads(cachedRoutes)
+        .then((migration) => {
+          if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
+            return;
+          }
+          const nextRoutes = writeRecentExploreRoutes(recentProfileKey, migration.routes);
+          setRecentRoutes(nextRoutes);
+          if (migration.upgradedCount > 0 || migration.failedCount > 0) {
+            setRouteMessage(
+              `${migration.upgradedCount > 0
+                ? `${migration.upgradedCount} saved route${migration.upgradedCount === 1 ? '' : 's'} updated to follow bicycle-safe roads and paths.`
+                : ''}${migration.failedCount > 0
+                ? ` ${migration.failedCount} saved route${migration.failedCount === 1 ? '' : 's'} will retry when Google Routes is available.`
+                : ''}`.trim(),
+            );
+          }
+        })
+        .catch((error: Error) => {
+          console.warn(`Could not update local Explore routes: ${error.message}`);
+        });
+      return () => {
+        cancelled = true;
+      };
     }
 
     void loadCloudExploreRoutes()
@@ -432,7 +454,7 @@ export function ExploreView({
           return;
         }
         const mergedRoutes = mergeRecentExploreRoutes(cloudRoutes, cachedRoutes);
-        const migration = await upgradeExploreRoutesToDrivingRoads(mergedRoutes);
+        const migration = await upgradeExploreRoutesToBicycleRoads(mergedRoutes);
         if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
           return;
         }
@@ -451,7 +473,7 @@ export function ExploreView({
         if (migration.upgradedCount > 0 || migration.failedCount > 0) {
           setRouteMessage(
             `${migration.upgradedCount > 0
-              ? `${migration.upgradedCount} saved route${migration.upgradedCount === 1 ? '' : 's'} updated to follow drivable roads.`
+              ? `${migration.upgradedCount} saved route${migration.upgradedCount === 1 ? '' : 's'} updated to follow bicycle-safe roads and paths.`
               : ''}${migration.failedCount > 0
               ? ` ${migration.failedCount} saved route${migration.failedCount === 1 ? '' : 's'} will retry when Google Routes is available.`
               : ''}`.trim(),
@@ -589,33 +611,55 @@ export function ExploreView({
       return undefined;
     }
 
-    const controller = new AbortController();
+    let controller: AbortController | null = null;
+    let retryTimer: number | null = null;
+    let retryDelayMs = 20_000;
+    let cancelled = false;
     setRecoveredElevation(null);
-    setElevationRecoveryStatus('loading');
-    void fetchExploreElevationProfile(sourceRoute, controller.signal)
-      .then((profile) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-        const recovered = { ...profile, routeId: sourceRoute.id };
-        const enrichedRoute = { ...sourceRoute, ...profile };
-        setRecoveredElevation(recovered);
-        setElevationRecoveryStatus('ready');
-        if (playMode === 'local') {
-          setLocalRoute(enrichedRoute);
-          rememberExploreRoute(enrichedRoute);
-        } else if (roomHost) {
-          onSyncRoute(enrichedRoute);
-        }
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
-          return;
-        }
-        setElevationRecoveryStatus('error');
-      });
+    const recoverElevation = () => {
+      controller = new AbortController();
+      setElevationRecoveryStatus('loading');
+      void fetchExploreElevationProfile(sourceRoute, controller.signal)
+        .then((profile) => {
+          if (cancelled || controller?.signal.aborted) {
+            return;
+          }
+          const recovered = { ...profile, routeId: sourceRoute.id };
+          const enrichedRoute = { ...sourceRoute, ...profile };
+          setRecoveredElevation(recovered);
+          setElevationRecoveryStatus('ready');
+          if (playMode === 'local') {
+            setLocalRoute(enrichedRoute);
+            rememberExploreRoute(enrichedRoute);
+          } else if (roomHost) {
+            onSyncRoute(enrichedRoute);
+          }
+        })
+        .catch((error: unknown) => {
+          if (
+            cancelled
+            || controller?.signal.aborted
+            || (error instanceof DOMException && error.name === 'AbortError')
+          ) {
+            return;
+          }
+          setElevationRecoveryStatus('error');
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            retryDelayMs = Math.min(60_000, retryDelayMs * 2);
+            recoverElevation();
+          }, retryDelayMs);
+        });
+    };
+    recoverElevation();
 
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer);
+      }
+    };
   }, [
     onSyncRoute,
     playMode,
@@ -1474,7 +1518,7 @@ export function ExploreView({
               </section>
             )}
             <small className="explore-route-warning">
-              Routes follow drivable roads for more consistent road and elevation data. This is an indoor virtual ride—not outdoor navigation.
+              Routes favor bicycle-accessible roads and paths and avoid major interstates. This is an indoor virtual ride—not outdoor navigation.
             </small>
           </section>
         </aside>
@@ -1908,7 +1952,7 @@ export function ExploreView({
                       : 'Set air lever to minimum';
                   const gradeStatus = elevationRecoveryStatus === 'loading'
                     ? 'Grade loading…'
-                    : 'Grade unavailable · Level-ground physics';
+                    : 'Grade unavailable · Retrying automatically';
                   return (
                     <article style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
                       {rider.photoUrl

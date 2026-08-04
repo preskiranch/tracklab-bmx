@@ -172,8 +172,8 @@ describe('cloud API trust boundaries', () => {
     await expect(response.json()).resolves.toEqual({
       routesConfigured: false,
       smartRoutesConfigured: false,
-      supportedTravelModes: ['drive'],
-      routeNotice: 'Explore routes follow drivable roads for consistent road, elevation, and grade data.',
+      supportedTravelModes: ['bicycle'],
+      routeNotice: 'Explore routes favor bicycle-accessible roads and paths and avoid major interstates.',
     });
 
     const unauthorizedRoute = await fetch(`${baseUrl}/api/explore/route`, {

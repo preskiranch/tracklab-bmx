@@ -26,6 +26,9 @@ import {
 } from './ExploreMapPanel';
 
 const exploreRoadCyclist3DMarkerSizePx = 72;
+const exploreRoadCyclist3DAnchorLeft = '-52%';
+const exploreRoadCyclist3DAnchorTop = '-60%';
+const exploreRoadCyclist3DAltitudeMeters = 0.15;
 
 function explore3DRange(followZoom: number) {
   return Math.max(80, Math.min(25_000, 320 * (2 ** (18 - followZoom))));
@@ -266,14 +269,16 @@ export function ExploreGoogle3DMapPanel({
       let marker = riderMarkersRef.current.get(rider.id);
       if (!marker && Marker) {
         marker = new Marker(library.MarkerElement ? {
+          anchorLeft: exploreRoadCyclist3DAnchorLeft,
+          anchorTop: exploreRoadCyclist3DAnchorTop,
           altitudeMode: 'RELATIVE_TO_GROUND',
-          position: { ...position, altitude: 1.5 },
+          position: { ...position, altitude: exploreRoadCyclist3DAltitudeMeters },
           title: rider.name,
         } : {
           altitudeMode: 'RELATIVE_TO_GROUND',
           drawsWhenOccluded: true,
           label: `P${rider.playerId}`,
-          position: { ...position, altitude: 1.5 },
+          position: { ...position, altitude: exploreRoadCyclist3DAltitudeMeters },
           sizePreserved: false,
           title: rider.name,
           zIndex: 500 + rider.playerId,
@@ -289,7 +294,7 @@ export function ExploreGoogle3DMapPanel({
           map.tilt ?? 0,
         );
         cyclistImage.style.transform = `rotate(${initialRotation}deg)`;
-        cyclistImage.style.transformOrigin = 'center';
+        cyclistImage.style.transformOrigin = '52% 60%';
         cyclistImage.style.transition = 'transform 90ms linear';
         cyclistImage.style.willChange = 'transform';
         cyclistImage.width = exploreRoadCyclist3DMarkerSizePx;
@@ -305,7 +310,7 @@ export function ExploreGoogle3DMapPanel({
         riderImagesRef.current.set(rider.id, cyclistImage);
         riderRotationsRef.current.set(rider.id, initialRotation);
       } else if (marker) {
-        marker.position = { ...position, altitude: 1.5 };
+        marker.position = { ...position, altitude: exploreRoadCyclist3DAltitudeMeters };
         marker.title = rider.name;
       }
       riderBearingsRef.current.set(rider.id, routeHeading);

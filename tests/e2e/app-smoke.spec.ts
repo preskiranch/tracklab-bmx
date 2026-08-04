@@ -919,7 +919,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     destination: { lat: 37.7955, lng: -122.3937 },
     originLabel: 'Union Square, San Francisco, CA 94108, USA',
     destinationLabel: 'Ferry Building, San Francisco, CA 94111, USA',
-    travelMode: 'drive',
+    travelMode: 'bicycle',
     routeName: 'San Francisco warm-up',
   });
   await expect(page.locator('.explore-route-summary')).toContainText('San Francisco warm-up');
@@ -941,7 +941,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     routeName: 'Malibu Ocean View Ten',
     originLabel: 'Malibu Pier, Malibu, CA 90265, USA',
     destinationLabel: 'Zuma Beach, Malibu, CA 90265, USA',
-    travelMode: 'drive',
+    travelMode: 'bicycle',
     waypoints: [{ label: 'Point Dume, Malibu, CA 90265, USA' }],
   });
   await originInput.fill('Ferry Build');
@@ -1150,7 +1150,17 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       .every((marker) => {
         const cyclist = marker
           .querySelector<HTMLImageElement>('img[src*="/assets/explore/road-cyclist-p"]');
-        return cyclist?.width === 72 && cyclist.height === 72;
+        const markerWithAnchor = marker as HTMLElement & {
+          anchorLeft?: string;
+          anchorTop?: string;
+          position?: { altitude?: number };
+        };
+        return cyclist?.width === 72
+          && cyclist.height === 72
+          && cyclist.style.transformOrigin === '52% 60%'
+          && markerWithAnchor.anchorLeft === '-52%'
+          && markerWithAnchor.anchorTop === '-60%'
+          && markerWithAnchor.position?.altitude === 0.15;
       })
   ))).toBe(true);
   await expect.poll(() => page.evaluate(() => (
@@ -1311,7 +1321,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect.poll(() => exploreRouteRequests.at(-1)).toMatchObject({
     originLabel: 'Quick Finish',
     destinationLabel: 'Quick Start',
-    travelMode: 'drive',
+    travelMode: 'bicycle',
   });
   await expect(page.locator('.explore-route-summary > div strong')).toContainText('Quick Start');
 

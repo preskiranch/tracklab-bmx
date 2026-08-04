@@ -63,7 +63,7 @@ export async function fetchExploreRoute(request: ExploreRouteRequest) {
   return payload.route;
 }
 
-export async function upgradeExploreRoutesToDrivingRoads(
+export async function upgradeExploreRoutesToBicycleRoads(
   routes: readonly ExploreRoute[],
   rebuildRoute: ExploreRouteBuilder = fetchExploreRoute,
 ): Promise<ExploreRouteUpgradeResult> {
@@ -72,7 +72,7 @@ export async function upgradeExploreRoutesToDrivingRoads(
   let failedCount = 0;
 
   for (const route of routes) {
-    if (route.travelMode === 'drive') {
+    if (route.travelMode === 'bicycle') {
       upgradedRoutes.push(route);
       continue;
     }
@@ -82,14 +82,14 @@ export async function upgradeExploreRoutesToDrivingRoads(
         destination: route.destination,
         originLabel: route.originLabel,
         destinationLabel: route.destinationLabel,
-        travelMode: 'drive',
+        travelMode: 'bicycle',
         routeName: route.name,
         waypoints: route.waypoints,
       });
       upgradedRoutes.push({
         ...rebuilt,
-        // Keep the saved-route identity and date so the road version replaces
-        // the legacy bicycle geometry instead of appearing as a duplicate.
+        // Keep the saved-route identity and date so the bicycle-safe version
+        // replaces the driving geometry instead of appearing as a duplicate.
         id: route.id,
         createdAt: route.createdAt,
       });

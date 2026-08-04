@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { upgradeExploreRoutesToDrivingRoads } from '../../src/lib/exploreRoutes';
+import { upgradeExploreRoutesToBicycleRoads } from '../../src/lib/exploreRoutes';
 import type { ExploreRoute } from '../../src/types';
 
 function savedRoute(id: string, travelMode: ExploreRoute['travelMode']): ExploreRoute {
@@ -26,20 +26,20 @@ function savedRoute(id: string, travelMode: ExploreRoute['travelMode']): Explore
 }
 
 describe('saved Explore route upgrades', () => {
-  it('rebuilds bicycle geometry on driving roads without duplicating the saved route', async () => {
-    const legacy = savedRoute('saved-malibu', 'bicycle');
-    const existingDrive = savedRoute('saved-sf', 'drive');
+  it('rebuilds driving geometry as a bicycle route without duplicating the saved route', async () => {
+    const legacy = savedRoute('saved-malibu', 'drive');
+    const existingBicycle = savedRoute('saved-sf', 'bicycle');
     const rebuild = vi.fn(async (request) => ({
       ...legacy,
-      id: 'generated-driving-id',
+      id: 'generated-bicycle-id',
       travelMode: request.travelMode,
       distanceMeters: 11_200,
-      encodedPolyline: 'driving-road-polyline',
+      encodedPolyline: 'bicycle-road-polyline',
       elevationGainMeters: 27,
       createdAt: Date.now(),
     }));
 
-    const result = await upgradeExploreRoutesToDrivingRoads([legacy, existingDrive], rebuild);
+    const result = await upgradeExploreRoutesToBicycleRoads([legacy, existingBicycle], rebuild);
 
     expect(rebuild).toHaveBeenCalledOnce();
     expect(rebuild).toHaveBeenCalledWith(expect.objectContaining({
@@ -48,7 +48,7 @@ describe('saved Explore route upgrades', () => {
       originLabel: legacy.originLabel,
       destinationLabel: legacy.destinationLabel,
       routeName: legacy.name,
-      travelMode: 'drive',
+      travelMode: 'bicycle',
       waypoints: legacy.waypoints,
     }));
     expect(result).toMatchObject({ upgradedCount: 1, failedCount: 0 });
@@ -56,16 +56,17 @@ describe('saved Explore route upgrades', () => {
     expect(result.routes[0]).toMatchObject({
       id: legacy.id,
       createdAt: legacy.createdAt,
-      travelMode: 'drive',
-      encodedPolyline: 'driving-road-polyline',
+      name: legacy.name,
+      travelMode: 'bicycle',
+      encodedPolyline: 'bicycle-road-polyline',
       elevationGainMeters: 27,
     });
-    expect(result.routes[1]).toBe(existingDrive);
+    expect(result.routes[1]).toBe(existingBicycle);
   });
 
   it('keeps a legacy route intact when Google cannot rebuild it so it can retry later', async () => {
-    const legacy = savedRoute('saved-retry', 'bicycle');
-    const result = await upgradeExploreRoutesToDrivingRoads(
+    const legacy = savedRoute('saved-retry', 'drive');
+    const result = await upgradeExploreRoutesToBicycleRoads(
       [legacy],
       vi.fn().mockRejectedValue(new Error('Routes unavailable')),
     );
