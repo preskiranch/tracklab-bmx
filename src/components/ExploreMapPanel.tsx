@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps';
 import {
-  closestExploreScreenRotation,
   exploreCameraOffsetMeters,
-  exploreCyclistScreenRotation,
   exploreRouteHeading,
   exploreRoutePoint,
   exploreRoutePoints,
@@ -18,7 +16,12 @@ import type {
   GoogleMapsRuntime,
   GooglePolyline,
 } from '../lib/googleMaps';
-import type { ExploreDistanceUnit, ExploreRoute as ExploreRouteModel, TrackPoint } from '../types';
+import type {
+  ExploreDistanceUnit,
+  ExploreRider,
+  ExploreRoute as ExploreRouteModel,
+  TrackPoint,
+} from '../types';
 import { formatExploreDistanceMeters } from '../units';
 
 export type ExploreMapPanelProps = {
@@ -36,15 +39,19 @@ export type ExploreMapPanelProps = {
 
 type ExploreRiderMarker = {
   setMap: (map: GoogleMap | null) => void;
-  setMapHeading: (heading: number) => void;
   setPosition: (position: TrackPoint) => void;
-  setRouteHeading: (heading: number) => void;
-  setTitle: (title: string) => void;
+  setRider: (rider: ExploreRider) => void;
 };
 
 type ExploreMarkerRefs = Map<string, ExploreRiderMarker>;
 
-export const exploreRoadCyclistMarkerSizePx = 24;
+export type ExploreRiderPinPresentation = {
+  element: HTMLDivElement;
+  update: (rider: ExploreRider) => void;
+};
+
+const exploreRiderPinWidthPx = 32;
+const exploreRiderPinHeightPx = 40;
 
 export function useExploreCameraInteraction(onCameraInteraction: () => void) {
   const interactionActiveRef = useRef(false);
@@ -98,8 +105,74 @@ export function useExploreCameraInteraction(onCameraInteraction: () => void) {
   };
 }
 
-export function exploreRoadCyclistIconUrl(playerId: number) {
-  return `/assets/explore/road-cyclist-p${Math.max(1, Math.min(4, Math.round(playerId)))}.png`;
+function exploreRiderInitials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('') || '?';
+}
+
+function safeRiderAccent(accent: string) {
+  return /^#[0-9a-f]{3,8}$/i.test(accent.trim()) ? accent.trim() : '#7ade36';
+}
+
+function exploreRiderPinSvg(accent: string, playerId: number) {
+  const color = safeRiderAccent(accent);
+  const label = `P${Math.max(1, Math.min(4, Math.round(playerId)))}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${exploreRiderPinWidthPx}" height="${exploreRiderPinHeightPx}" viewBox="0 0 32 40" style="display:block;width:100%;height:100%"><path d="M16 1C7.7 1 1 7.7 1 16c0 11.4 15 23 15 23s15-11.6 15-23C31 7.7 24.3 1 16 1Z" fill="${color}" stroke="#fff" stroke-width="2"/><circle cx="16" cy="15.5" r="8" fill="#fff" fill-opacity=".94"/><text x="16" y="18.7" text-anchor="middle" font-family="Arial,sans-serif" font-size="8" font-weight="900" fill="#101823">${label}</text></svg>`;
+}
+
+function exploreRiderPinDataUrl(accent: string, playerId: number) {
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(exploreRiderPinSvg(accent, playerId))}`;
+}
+
+export function createExploreRiderPinElement(rider: ExploreRider): ExploreRiderPinPresentation {
+  const element = document.createElement('div');
+  element.className = 'explore-map-rider-marker';
+  element.style.cssText = 'display:flex;flex-direction:column;align-items:center;width:52px;pointer-events:none;filter:drop-shadow(0 3px 4px rgba(0,0,0,.48))';
+  let signature = '';
+
+  const update = (nextRider: ExploreRider) => {
+    const nextSignature = [
+      nextRider.name,
+      nextRider.photoUrl ?? '',
+      nextRider.accent,
+      nextRider.playerId,
+    ].join('|');
+    if (nextSignature === signature) {
+      return;
+    }
+    signature = nextSignature;
+    element.title = nextRider.name;
+    element.setAttribute('aria-label', `${nextRider.name} map position`);
+    element.style.setProperty('--player-color', safeRiderAccent(nextRider.accent));
+
+    const avatar = nextRider.photoUrl
+      ? document.createElement('img')
+      : document.createElement('span');
+    const avatarSizePx = window.matchMedia('(max-width: 720px)').matches ? 40 : 44;
+    avatar.className = 'explore-map-rider-avatar';
+    avatar.style.cssText = `position:relative;z-index:2;display:grid;place-items:center;width:${avatarSizePx}px;height:${avatarSizePx}px;overflow:hidden;border:2px solid ${safeRiderAccent(nextRider.accent)};border-radius:50%;background:#101823;color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.92);font-size:12px;font-weight:900;line-height:1;object-fit:cover`;
+    if (avatar instanceof HTMLImageElement) {
+      avatar.alt = '';
+      avatar.draggable = false;
+      avatar.src = nextRider.photoUrl ?? '';
+    } else {
+      avatar.textContent = exploreRiderInitials(nextRider.name);
+    }
+
+    const pin = document.createElement('span');
+    pin.className = 'explore-map-rider-pin';
+    pin.style.cssText = 'position:relative;z-index:1;display:block;width:32px;height:40px;margin-top:-3px';
+    pin.setAttribute('aria-hidden', 'true');
+    pin.innerHTML = exploreRiderPinSvg(nextRider.accent, nextRider.playerId);
+    element.replaceChildren(avatar, pin);
+  };
+
+  update(rider);
+  return { element, update };
 }
 
 export function exploreGroupPositions(
@@ -117,85 +190,49 @@ function createExploreRiderMarker(
   google: GoogleMapsRuntime,
   map: GoogleMap,
   position: TrackPoint,
-  playerId: number,
-  title: string,
+  rider: ExploreRider,
   zIndex: number,
 ): ExploreRiderMarker {
-  const markerSize = exploreRoadCyclistMarkerSizePx;
-  const markerCenter = markerSize / 2;
   if (!google.maps.OverlayView) {
+    let appearanceSignature = `${rider.name}|${rider.accent}|${rider.playerId}`;
     const marker = new google.maps.Marker({
       icon: {
-        anchor: new google.maps.Point(markerCenter, markerSize * 0.875),
-        labelOrigin: new google.maps.Point(markerCenter, markerSize),
-        scaledSize: new google.maps.Size(markerSize, markerSize),
-        url: exploreRoadCyclistIconUrl(playerId),
-      },
-      label: {
-        color: '#ffffff',
-        fontSize: '10px',
-        fontWeight: '900',
-        text: `P${playerId}`,
+        anchor: new google.maps.Point(exploreRiderPinWidthPx / 2, exploreRiderPinHeightPx),
+        scaledSize: new google.maps.Size(exploreRiderPinWidthPx, exploreRiderPinHeightPx),
+        url: exploreRiderPinDataUrl(rider.accent, rider.playerId),
       },
       map,
       position,
-      title,
+      title: rider.name,
       zIndex,
     });
     return {
       setMap: (nextMap) => marker.setMap(nextMap),
-      setMapHeading: () => undefined,
       setPosition: (nextPosition) => marker.setPosition(nextPosition),
-      setRouteHeading: () => undefined,
-      setTitle: (nextTitle) => marker.setTitle?.(nextTitle),
+      setRider: (nextRider) => {
+        const nextSignature = `${nextRider.name}|${nextRider.accent}|${nextRider.playerId}`;
+        if (nextSignature === appearanceSignature) {
+          return;
+        }
+        appearanceSignature = nextSignature;
+        marker.setTitle?.(nextRider.name);
+        marker.setIcon({
+          anchor: new google.maps.Point(exploreRiderPinWidthPx / 2, exploreRiderPinHeightPx),
+          scaledSize: new google.maps.Size(exploreRiderPinWidthPx, exploreRiderPinHeightPx),
+          url: exploreRiderPinDataUrl(nextRider.accent, nextRider.playerId),
+        });
+      },
     };
   }
 
   const overlay = new google.maps.OverlayView();
-  const element = document.createElement('div');
-  const image = document.createElement('img');
-  const label = document.createElement('span');
-  element.title = title;
-  element.style.height = `${markerSize}px`;
-  element.style.pointerEvents = 'none';
+  const presentation = createExploreRiderPinElement(rider);
+  const { element } = presentation;
   element.style.position = 'absolute';
-  element.style.transform = 'translate3d(-50%, -50%, 0)';
-  element.style.width = `${markerSize}px`;
+  element.style.transform = 'translate3d(-50%, -100%, 0)';
   element.style.zIndex = String(zIndex);
-  image.alt = '';
-  image.draggable = false;
-  image.height = markerSize;
-  image.src = exploreRoadCyclistIconUrl(playerId);
-  image.style.display = 'block';
-  image.style.transformOrigin = 'center';
-  image.style.transition = 'transform 90ms linear';
-  image.style.willChange = 'transform';
-  image.width = markerSize;
-  label.textContent = `P${playerId}`;
-  label.style.background = 'rgba(8, 15, 24, 0.82)';
-  label.style.borderRadius = '4px';
-  label.style.bottom = '-5px';
-  label.style.color = '#ffffff';
-  label.style.fontSize = '10px';
-  label.style.fontWeight = '900';
-  label.style.left = '50%';
-  label.style.lineHeight = '14px';
-  label.style.padding = '0 3px';
-  label.style.position = 'absolute';
-  label.style.transform = 'translateX(-50%)';
-  element.append(image, label);
 
   let markerPosition = position;
-  let routeHeading = 0;
-  let mapHeading = 0;
-  let screenRotation: number | null = null;
-  const applyRotation = () => {
-    const targetRotation = exploreCyclistScreenRotation(routeHeading, mapHeading);
-    screenRotation = screenRotation == null
-      ? targetRotation
-      : closestExploreScreenRotation(screenRotation, targetRotation);
-    image.style.transform = `rotate(${screenRotation}deg)`;
-  };
   const draw = () => {
     const pixel = overlay.getProjection()?.fromLatLngToDivPixel(
       new google.maps.LatLng(markerPosition.lat, markerPosition.lng),
@@ -217,21 +254,11 @@ function createExploreRiderMarker(
 
   return {
     setMap: (nextMap) => overlay.setMap(nextMap),
-    setMapHeading: (nextHeading) => {
-      mapHeading = nextHeading;
-      applyRotation();
-    },
     setPosition: (nextPosition) => {
       markerPosition = nextPosition;
       draw();
     },
-    setRouteHeading: (nextHeading) => {
-      routeHeading = nextHeading;
-      applyRotation();
-    },
-    setTitle: (nextTitle) => {
-      element.title = nextTitle;
-    },
+    setRider: presentation.update,
   };
 }
 
@@ -405,20 +432,6 @@ export function ExploreMapPanel({
   }, [onLandmarkSelect, showMapLabels, status]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || status !== 'ready') {
-      return;
-    }
-    const syncMarkerHeadings = () => {
-      const mapHeading = map.getHeading?.() ?? 0;
-      markerRefs.current.forEach((marker) => marker.setMapHeading(mapHeading));
-    };
-    const headingListener = map.addListener('heading_changed', syncMarkerHeadings);
-    syncMarkerHeadings();
-    return () => headingListener.remove();
-  }, [status]);
-
-  useEffect(() => {
     const google = googleRef.current;
     const map = mapRef.current;
     if (!google || !map || status !== 'ready') {
@@ -441,21 +454,14 @@ export function ExploreMapPanel({
           google,
           map,
           position,
-          rider.playerId,
-          rider.name,
+          rider,
           500 + rider.playerId,
         );
         markerRefs.current.set(rider.id, marker);
       } else {
         marker.setPosition(position);
-        marker.setTitle(rider.name);
       }
-      marker.setRouteHeading(exploreRouteHeading(
-        routePoints,
-        rider.distanceMeters,
-        route.distanceMeters,
-      ));
-      marker.setMapHeading(map.getHeading?.() ?? 0);
+      marker.setRider(rider);
     });
 
     if (positions.length === 0) {

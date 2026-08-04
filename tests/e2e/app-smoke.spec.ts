@@ -741,6 +741,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       }
 
       setMap() {}
+      setIcon() {}
       setPosition() {}
       setTitle() {}
     }
@@ -1017,7 +1018,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     new Set((window as typeof window & {
       __tracklabExploreMarkerOptions?: Array<{ icon?: { url?: string } }>;
     }).__tracklabExploreMarkerOptions
-      ?.flatMap((options) => options.icon?.url?.includes('/assets/explore/road-cyclist-p')
+      ?.flatMap((options) => options.icon?.url?.startsWith('data:image/svg+xml')
         ? [options.icon.url]
         : []) ?? []).size
   ))).toBe(2);
@@ -1095,15 +1096,11 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
         heading?: number;
       }>;
     }).__tracklabExplore3DMaps?.[0];
-    const cyclist = document.querySelector<HTMLImageElement>(
-      'tracklab-mock-marker-html img[src*="/assets/explore/road-cyclist-p"]',
-    );
     const desiredHeading = ((map?.heading ?? 0) + 83) % 360;
     map!.heading = desiredHeading;
     return {
       center: { ...map!.center! },
       desiredHeading,
-      initialCyclistTransform: cyclist?.style.transform ?? '',
     };
   });
   await page.waitForTimeout(200);
@@ -1112,11 +1109,6 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       __tracklabExplore3DMaps?: Array<{ heading?: number }>;
     }).__tracklabExplore3DMaps?.[0]?.heading
   ))).toBe(freeCameraState.desiredHeading);
-  await expect.poll(() => page.evaluate((initialTransform) => (
-    document.querySelector<HTMLImageElement>(
-      'tracklab-mock-marker-html img[src*="/assets/explore/road-cyclist-p"]',
-    )?.style.transform !== initialTransform
-  ), freeCameraState.initialCyclistTransform)).toBe(true);
   await page.getByLabel('Google photorealistic 3D Explore map').dispatchEvent('pointerup', {
     pointerId: 17,
     pointerType: 'touch',
@@ -1140,37 +1132,31 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     .toHaveAttribute('aria-pressed', 'false');
   await expect.poll(() => page.evaluate(() => (
     [...document.querySelectorAll('tracklab-mock-marker-html')]
-      .filter((marker) => marker
-        .querySelector('img[src*="/assets/explore/road-cyclist-p"]')).length
+      .filter((marker) => marker.querySelector('.explore-map-rider-marker')).length
   ))).toBe(4);
   await expect.poll(() => page.evaluate(() => (
     [...document.querySelectorAll('tracklab-mock-marker-html')]
-      .filter((marker) => marker
-        .querySelector('img[src*="/assets/explore/road-cyclist-p"]'))
+      .filter((marker) => marker.querySelector('.explore-map-rider-marker'))
       .every((marker) => {
-        const cyclist = marker
-          .querySelector<HTMLImageElement>('img[src*="/assets/explore/road-cyclist-p"]');
+        const presentation = marker.querySelector<HTMLElement>('.explore-map-rider-marker');
+        const avatar = marker.querySelector<HTMLElement>('.explore-map-rider-avatar');
+        const pin = marker.querySelector<HTMLElement>('.explore-map-rider-pin');
         const markerWithAnchor = marker as HTMLElement & {
           anchorLeft?: string;
           anchorTop?: string;
           position?: { altitude?: number };
         };
-        return cyclist?.width === 72
-          && cyclist.height === 72
-          && cyclist.style.transformOrigin === '52% 60%'
-          && markerWithAnchor.anchorLeft === '-52%'
-          && markerWithAnchor.anchorTop === '-60%'
+        const avatarStyle = avatar ? window.getComputedStyle(avatar) : null;
+        return Boolean(presentation)
+          && Boolean(pin?.querySelector('svg'))
+          && !marker.querySelector('img[src*="/assets/explore/road-cyclist-p"]')
+          && avatarStyle?.width === '44px'
+          && avatarStyle.height === '44px'
+          && Boolean(presentation?.style.getPropertyValue('--player-color'))
+          && markerWithAnchor.anchorLeft === '-50%'
+          && markerWithAnchor.anchorTop === '-100%'
           && markerWithAnchor.position?.altitude === 0.15;
       })
-  ))).toBe(true);
-  await expect.poll(() => page.evaluate(() => (
-    [...document.querySelectorAll<HTMLElement>('tracklab-mock-marker-html')]
-      .flatMap((marker) => {
-        const cyclist = marker
-          .querySelector<HTMLImageElement>('img[src*="/assets/explore/road-cyclist-p"]');
-        return cyclist ? [cyclist] : [];
-      })
-      .every((cyclist) => /^rotate\(-?\d+(?:\.\d+)?deg\)$/.test(cyclist.style.transform))
   ))).toBe(true);
   await page.evaluate(() => {
     const testWindow = window as typeof window & {
