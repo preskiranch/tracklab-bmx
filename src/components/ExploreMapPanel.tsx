@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadGoogleMaps } from '../lib/googleMaps';
 import {
+  closestExploreScreenRotation,
   exploreCameraOffsetMeters,
+  exploreCyclistScreenRotation,
   exploreRouteHeading,
   exploreRoutePoint,
   exploreRoutePoints,
@@ -32,7 +34,15 @@ export type ExploreMapPanelProps = {
   onCameraInteraction: () => void;
 };
 
-type ExploreMarkerRefs = Map<string, GoogleMarker>;
+type ExploreRiderMarker = {
+  setMap: (map: GoogleMap | null) => void;
+  setMapHeading: (heading: number) => void;
+  setPosition: (position: TrackPoint) => void;
+  setRouteHeading: (heading: number) => void;
+  setTitle: (title: string) => void;
+};
+
+type ExploreMarkerRefs = Map<string, ExploreRiderMarker>;
 
 export function exploreRoadCyclistIconUrl(playerId: number) {
   return `/assets/explore/road-cyclist-p${Math.max(1, Math.min(4, Math.round(playerId)))}.png`;
@@ -47,6 +57,126 @@ export function exploreGroupPositions(
     const position = exploreRoutePoint(points, rider.distanceMeters, route.distanceMeters);
     return position ? [{ rider, position }] : [];
   });
+}
+
+function createExploreRiderMarker(
+  google: GoogleMapsRuntime,
+  map: GoogleMap,
+  position: TrackPoint,
+  playerId: number,
+  title: string,
+  zIndex: number,
+): ExploreRiderMarker {
+  if (!google.maps.OverlayView) {
+    const marker = new google.maps.Marker({
+      icon: {
+        anchor: new google.maps.Point(28, 49),
+        labelOrigin: new google.maps.Point(28, 55),
+        scaledSize: new google.maps.Size(56, 56),
+        url: exploreRoadCyclistIconUrl(playerId),
+      },
+      label: {
+        color: '#ffffff',
+        fontSize: '10px',
+        fontWeight: '900',
+        text: `P${playerId}`,
+      },
+      map,
+      position,
+      title,
+      zIndex,
+    });
+    return {
+      setMap: (nextMap) => marker.setMap(nextMap),
+      setMapHeading: () => undefined,
+      setPosition: (nextPosition) => marker.setPosition(nextPosition),
+      setRouteHeading: () => undefined,
+      setTitle: (nextTitle) => marker.setTitle?.(nextTitle),
+    };
+  }
+
+  const overlay = new google.maps.OverlayView();
+  const element = document.createElement('div');
+  const image = document.createElement('img');
+  const label = document.createElement('span');
+  element.title = title;
+  element.style.height = '56px';
+  element.style.pointerEvents = 'none';
+  element.style.position = 'absolute';
+  element.style.transform = 'translate3d(-50%, -50%, 0)';
+  element.style.width = '56px';
+  element.style.zIndex = String(zIndex);
+  image.alt = '';
+  image.draggable = false;
+  image.height = 56;
+  image.src = exploreRoadCyclistIconUrl(playerId);
+  image.style.display = 'block';
+  image.style.transformOrigin = 'center';
+  image.style.transition = 'transform 90ms linear';
+  image.style.willChange = 'transform';
+  image.width = 56;
+  label.textContent = `P${playerId}`;
+  label.style.background = 'rgba(8, 15, 24, 0.82)';
+  label.style.borderRadius = '4px';
+  label.style.bottom = '-5px';
+  label.style.color = '#ffffff';
+  label.style.fontSize = '10px';
+  label.style.fontWeight = '900';
+  label.style.left = '50%';
+  label.style.lineHeight = '14px';
+  label.style.padding = '0 3px';
+  label.style.position = 'absolute';
+  label.style.transform = 'translateX(-50%)';
+  element.append(image, label);
+
+  let markerPosition = position;
+  let routeHeading = 0;
+  let mapHeading = 0;
+  let screenRotation: number | null = null;
+  const applyRotation = () => {
+    const targetRotation = exploreCyclistScreenRotation(routeHeading, mapHeading);
+    screenRotation = screenRotation == null
+      ? targetRotation
+      : closestExploreScreenRotation(screenRotation, targetRotation);
+    image.style.transform = `rotate(${screenRotation}deg)`;
+  };
+  const draw = () => {
+    const pixel = overlay.getProjection()?.fromLatLngToDivPixel(
+      new google.maps.LatLng(markerPosition.lat, markerPosition.lng),
+    );
+    if (!pixel) {
+      return;
+    }
+    element.style.left = `${pixel.x}px`;
+    element.style.top = `${pixel.y}px`;
+  };
+  overlay.onAdd = () => {
+    const panes = overlay.getPanes();
+    (panes?.overlayMouseTarget ?? panes?.floatPane ?? panes?.overlayLayer)?.appendChild(element);
+    draw();
+  };
+  overlay.draw = draw;
+  overlay.onRemove = () => element.remove();
+  overlay.setMap(map);
+
+  return {
+    setMap: (nextMap) => overlay.setMap(nextMap),
+    setMapHeading: (nextHeading) => {
+      mapHeading = nextHeading;
+      applyRotation();
+    },
+    setPosition: (nextPosition) => {
+      markerPosition = nextPosition;
+      draw();
+    },
+    setRouteHeading: (nextHeading) => {
+      routeHeading = nextHeading;
+      applyRotation();
+    },
+    setTitle: (nextTitle) => {
+      element.title = nextTitle;
+    },
+  };
 }
 
 export function ExploreMapPanel({
@@ -214,6 +344,20 @@ export function ExploreMapPanel({
   }, [onLandmarkSelect, showMapLabels, status]);
 
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== 'ready') {
+      return;
+    }
+    const syncMarkerHeadings = () => {
+      const mapHeading = map.getHeading?.() ?? 0;
+      markerRefs.current.forEach((marker) => marker.setMapHeading(mapHeading));
+    };
+    const headingListener = map.addListener('heading_changed', syncMarkerHeadings);
+    syncMarkerHeadings();
+    return () => headingListener.remove();
+  }, [status]);
+
+  useEffect(() => {
     const google = googleRef.current;
     const map = mapRef.current;
     if (!google || !map || status !== 'ready') {
@@ -232,29 +376,25 @@ export function ExploreMapPanel({
     positions.forEach(({ rider, position }) => {
       let marker = markerRefs.current.get(rider.id);
       if (!marker) {
-        marker = new google.maps.Marker({
-          icon: {
-            anchor: new google.maps.Point(28, 49),
-            labelOrigin: new google.maps.Point(28, 55),
-            scaledSize: new google.maps.Size(56, 56),
-            url: exploreRoadCyclistIconUrl(rider.playerId),
-          },
-          label: {
-            color: '#ffffff',
-            fontSize: '10px',
-            fontWeight: '900',
-            text: `P${rider.playerId}`,
-          },
+        marker = createExploreRiderMarker(
+          google,
           map,
           position,
-          title: rider.name,
-          zIndex: 500 + rider.playerId,
-        });
+          rider.playerId,
+          rider.name,
+          500 + rider.playerId,
+        );
         markerRefs.current.set(rider.id, marker);
       } else {
         marker.setPosition(position);
-        marker.setTitle?.(rider.name);
+        marker.setTitle(rider.name);
       }
+      marker.setRouteHeading(exploreRouteHeading(
+        routePoints,
+        rider.distanceMeters,
+        route.distanceMeters,
+      ));
+      marker.setMapHeading(map.getHeading?.() ?? 0);
     });
 
     if (positions.length === 0) {

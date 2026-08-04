@@ -1092,6 +1092,13 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       .filter((marker) => marker.querySelector('template')?.content
         .querySelector('img[src*="/assets/explore/road-cyclist-p"]')).length
   ))).toBe(4);
+  await expect.poll(() => page.evaluate(() => (
+    [...document.querySelectorAll<HTMLElement>('tracklab-mock-marker-3d')]
+      .filter((marker) => marker.querySelector('template')?.content
+        .querySelector('img[src*="/assets/explore/road-cyclist-p"]'))
+      .every((marker) => /deg$/.test(marker.style
+        .getPropertyValue('--tracklab-explore-cyclist-rotation')))
+  ))).toBe(true);
   await page.evaluate(() => {
     const testWindow = window as typeof window & {
       __tracklabExplore3DMaps?: HTMLElement[];

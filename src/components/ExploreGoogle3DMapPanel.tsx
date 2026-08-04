@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  closestExploreScreenRotation,
   exploreCameraOffsetMeters,
+  exploreCyclistScreenRotation,
   exploreRouteHeading,
   exploreRoutePoint,
   exploreRoutePoints,
@@ -52,6 +54,8 @@ export function ExploreGoogle3DMapPanel({
   const routeLineRef = useRef<GooglePolyline3DElement | null>(null);
   const endpointMarkersRef = useRef<GoogleMarker3DElement[]>([]);
   const riderMarkersRef = useRef(new Map<string, GoogleMarker3DElement>());
+  const riderBearingsRef = useRef(new Map<string, number>());
+  const riderRotationsRef = useRef(new Map<string, number>());
   const cameraCenterRef = useRef<{ lat: number; lng: number } | null>(null);
   const cameraTargetRef = useRef<{ lat: number; lng: number } | null>(null);
   const travelHeadingRef = useRef(0);
@@ -63,6 +67,22 @@ export function ExploreGoogle3DMapPanel({
     () => exploreRoutePoints(route),
     [route.encodedPolyline, route.id],
   );
+
+  const updateRiderRotations = useCallback(() => {
+    const mapHeading = mapRef.current?.heading ?? 0;
+    riderBearingsRef.current.forEach((routeHeading, riderId) => {
+      const targetRotation = exploreCyclistScreenRotation(routeHeading, mapHeading);
+      const currentRotation = riderRotationsRef.current.get(riderId);
+      const nextRotation = currentRotation == null
+        ? targetRotation
+        : closestExploreScreenRotation(currentRotation, targetRotation);
+      riderRotationsRef.current.set(riderId, nextRotation);
+      riderMarkersRef.current.get(riderId)?.style.setProperty(
+        '--tracklab-explore-cyclist-rotation',
+        `${nextRotation}deg`,
+      );
+    });
+  }, []);
 
   useEffect(() => {
     showMapLabelsRef.current = showMapLabels;
@@ -94,6 +114,7 @@ export function ExploreGoogle3DMapPanel({
         });
         map.style.cssText = 'display:block;height:100%;width:100%';
         const steadyListener: EventListener = (event) => {
+          updateRiderRotations();
           if ((event as Event & { isSteady?: boolean }).isSteady !== false) {
             window.clearTimeout(readinessTimer);
             setStatus('ready');
@@ -145,6 +166,8 @@ export function ExploreGoogle3DMapPanel({
       riderMarkersRef.current.forEach(removeSceneElement);
       endpointMarkersRef.current = [];
       riderMarkersRef.current.clear();
+      riderBearingsRef.current.clear();
+      riderRotationsRef.current.clear();
       routeLineRef.current = null;
       cameraCenterRef.current = null;
       cameraTargetRef.current = null;
@@ -152,7 +175,7 @@ export function ExploreGoogle3DMapPanel({
       libraryRef.current = null;
       containerRef.current?.replaceChildren();
     };
-  }, [route.id, routePoints]);
+  }, [route.id, routePoints, updateRiderRotations]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -209,6 +232,8 @@ export function ExploreGoogle3DMapPanel({
       if (!visible.has(riderId)) {
         removeSceneElement(marker);
         riderMarkersRef.current.delete(riderId);
+        riderBearingsRef.current.delete(riderId);
+        riderRotationsRef.current.delete(riderId);
       }
     });
     const Marker = library.Marker3DElement ?? library.MarkerElement;
@@ -229,6 +254,10 @@ export function ExploreGoogle3DMapPanel({
         cyclistImage.alt = '';
         cyclistImage.height = 56;
         cyclistImage.src = exploreRoadCyclistIconUrl(rider.playerId);
+        cyclistImage.style.transform = 'rotate(var(--tracklab-explore-cyclist-rotation, 0deg))';
+        cyclistImage.style.transformOrigin = 'center';
+        cyclistImage.style.transition = 'transform 90ms linear';
+        cyclistImage.style.willChange = 'transform';
         cyclistImage.width = 56;
         const cyclistTemplate = document.createElement('template');
         cyclistTemplate.content.append(cyclistImage);
@@ -239,7 +268,13 @@ export function ExploreGoogle3DMapPanel({
         marker.position = { ...position, altitude: 1.5 };
         marker.title = rider.name;
       }
+      riderBearingsRef.current.set(rider.id, exploreRouteHeading(
+        routePoints,
+        rider.distanceMeters,
+        route.distanceMeters,
+      ));
     });
+    updateRiderRotations();
     if (positions.length === 0) {
       if (cameraFollowEnabled) {
         const center = routePoints[Math.floor(routePoints.length / 2)] ?? routePoints[0];
@@ -280,6 +315,7 @@ export function ExploreGoogle3DMapPanel({
     routePoints,
     showMapLabels,
     status,
+    updateRiderRotations,
   ]);
 
   useEffect(() => {
@@ -313,6 +349,7 @@ export function ExploreGoogle3DMapPanel({
           followTravelHeading ? travelHeadingRef.current : 0,
           elapsedMs,
         );
+        updateRiderRotations();
         previousAt = now;
         lastUpdateAt = now;
       }
@@ -320,7 +357,7 @@ export function ExploreGoogle3DMapPanel({
     };
     frameRequest = requestAnimationFrame(updateCamera);
     return () => cancelAnimationFrame(frameRequest);
-  }, [cameraFollowEnabled, followTravelHeading, status]);
+  }, [cameraFollowEnabled, followTravelHeading, status, updateRiderRotations]);
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
   return (

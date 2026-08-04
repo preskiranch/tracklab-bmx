@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  closestExploreScreenRotation,
   decodeGooglePolyline,
   exploreAverageSpeedMph,
   exploreCameraOffsetMeters,
+  exploreCyclistScreenRotation,
   exploreDemoMaximumCruiseMph,
   exploreDemoMinimumCruiseMph,
   exploreDemoRiderMotion,
@@ -68,6 +70,15 @@ describe('Explore route geometry', () => {
       points[3],
       points[5],
     ]);
+  });
+
+  it('points cyclist artwork into the route bearing as the camera turns', () => {
+    expect(exploreCyclistScreenRotation(0, 0)).toBe(135);
+    expect(exploreCyclistScreenRotation(90, 0)).toBe(225);
+    expect(exploreCyclistScreenRotation(90, 90)).toBe(135);
+    expect(exploreCyclistScreenRotation(0, 90)).toBe(45);
+    expect(closestExploreScreenRotation(359, 1)).toBe(361);
+    expect(closestExploreScreenRotation(1, 359)).toBe(-1);
   });
 });
 
