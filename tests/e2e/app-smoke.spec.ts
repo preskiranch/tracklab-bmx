@@ -425,6 +425,32 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
 
   await page.addInitScript(() => {
     window.localStorage.setItem('wattbike-bmx-speed-unit-v1', 'mph');
+    window.localStorage.setItem('tracklab-bmx-last-race-capture-v1', JSON.stringify({
+      version: 1,
+      sessionId: 'interrupted-demo-race',
+      createdAt: Date.now() - 60_000,
+      startedAt: Date.now() - 55_000,
+      endedAt: null,
+      status: 'racing',
+      source: 'demo',
+      track: {
+        id: 'black-mountain-bmx',
+        name: 'Black Mountain BMX',
+        country: 'United States',
+        state: 'Arizona',
+        lengthMeters: 120,
+        routeLengthMeters: 120,
+      },
+      sessionMode: 'sprint',
+      selectedMetrics: ['cadence', 'speed', 'power', 'reaction'],
+      players: [],
+      zones: [],
+      events: [],
+      samples: [],
+      frames: [],
+      reactionTimesByPlayer: {},
+      summary: [],
+    }));
   });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
@@ -600,6 +626,10 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.goto('/');
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: /Demo/i }).first().click();
+  await expect(page.getByText('Race capture', { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    window.localStorage.getItem('tracklab-bmx-last-race-capture-v1')
+  ))).toBeNull();
   const demoRiderCount = page.getByRole('group', { name: 'Select demo rider count' });
   await expect(demoRiderCount).toBeVisible();
   await demoRiderCount.getByRole('button', { name: '2', exact: true }).click();
@@ -2006,6 +2036,18 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   await expect(page.locator('.race-staging-countdown')).toBeVisible();
   await expect(page.locator('.race-staging-countdown strong')).toHaveText(/20|1[8-9]/);
+  const captureDuringStaging = async () => page.evaluate(() => {
+    const capture = (window as typeof window & {
+      __tracklabLastRaceCapture?: { status?: string; samples?: unknown[] } | null;
+    }).__tracklabLastRaceCapture;
+    return {
+      samples: capture?.samples?.length ?? -1,
+      status: capture?.status ?? 'missing',
+    };
+  });
+  await expect.poll(captureDuringStaging).toEqual({ samples: 0, status: 'armed' });
+  await page.waitForTimeout(800);
+  expect(await captureDuringStaging()).toEqual({ samples: 0, status: 'armed' });
   await expect(page.locator('.start-tree-light')).toHaveCount(0);
   const riderPanel = page.locator('.race-rider-overlay');
   await expect(riderPanel).toBeVisible();
@@ -2236,6 +2278,12 @@ test('start here race action enters fullscreen race view', async ({ page }, test
     audibleLayerCount: 2,
   });
   await expect(riderPanel.locator('.race-rider-overlay-place')).toHaveCount(4, { timeout: 5_000 });
+  await expect.poll(() => page.evaluate(() => {
+    const capture = (window as typeof window & {
+      __tracklabLastRaceCapture?: { status?: string; samples?: unknown[] } | null;
+    }).__tracklabLastRaceCapture;
+    return capture?.status === 'racing' && (capture.samples?.length ?? 0) > 0;
+  }), { timeout: 5_000 }).toBe(true);
   await expect.poll(
     () => commentarySpeechPayloads.some((payload) => (
       payload.eventKind !== 'pre-race'

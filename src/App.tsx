@@ -1168,7 +1168,19 @@ function readStoredRaceCapture(): RaceCapture | null {
     }
 
     const parsed = JSON.parse(stored) as RaceCapture;
-    return parsed?.version === 1 ? parsed : null;
+    if (parsed?.version !== 1) {
+      return null;
+    }
+
+    // A browser refresh cannot resume the original race clock or gate state.
+    // Never restore an interrupted capture as live, otherwise standby demo or
+    // bike telemetry will make the dashboard sample count continue climbing.
+    if (parsed.status === 'armed' || parsed.status === 'racing') {
+      window.localStorage.removeItem(raceCaptureStorageKey);
+      return null;
+    }
+
+    return parsed;
   } catch {
     return null;
   }
@@ -3480,6 +3492,8 @@ export default function App() {
 
   useEffect(() => {
     if (!raceCapture) {
+      window.localStorage.removeItem(raceCaptureStorageKey);
+      (window as typeof window & { __tracklabLastRaceCapture?: RaceCapture | null }).__tracklabLastRaceCapture = null;
       return;
     }
 
@@ -3620,7 +3634,12 @@ export default function App() {
   }, [raceCapture?.startedAt, raceState, selectedGhostLaps, startGateStatus.active]);
 
   useEffect(() => {
-    if (!raceCapture || (raceCapture.status !== 'armed' && raceCapture.status !== 'racing')) {
+    if (
+      !raceCapture
+      || raceCapture.status !== 'racing'
+      || raceState !== 'racing'
+      || activeRaceSessionIdRef.current !== raceCapture.sessionId
+    ) {
       return;
     }
 
@@ -3687,10 +3706,15 @@ export default function App() {
         samples: [...current.samples, ...capturedSamples],
       };
     });
-  }, [raceCapture, racePlayers, riders, samplesByDevice]);
+  }, [raceCapture, racePlayers, raceState, riders, samplesByDevice]);
 
   useEffect(() => {
-    if (!raceCapture || (raceCapture.status !== 'armed' && raceCapture.status !== 'racing')) {
+    if (
+      !raceCapture
+      || raceCapture.status !== 'racing'
+      || raceState !== 'racing'
+      || activeRaceSessionIdRef.current !== raceCapture.sessionId
+    ) {
       return;
     }
 
