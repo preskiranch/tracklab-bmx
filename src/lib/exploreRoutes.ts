@@ -16,6 +16,14 @@ type ExploreRouteRequest = {
   waypoints?: ExploreRouteWaypoint[];
 };
 
+type ExploreRouteBuilder = (request: ExploreRouteRequest) => Promise<ExploreRoute>;
+
+export type ExploreRouteUpgradeResult = {
+  routes: ExploreRoute[];
+  upgradedCount: number;
+  failedCount: number;
+};
+
 export type ExploreSmartRoutePlan = {
   name: string;
   summary: string;
@@ -53,6 +61,46 @@ export async function fetchExploreRoute(request: ExploreRouteRequest) {
   }
 
   return payload.route;
+}
+
+export async function upgradeExploreRoutesToDrivingRoads(
+  routes: readonly ExploreRoute[],
+  rebuildRoute: ExploreRouteBuilder = fetchExploreRoute,
+): Promise<ExploreRouteUpgradeResult> {
+  const upgradedRoutes: ExploreRoute[] = [];
+  let upgradedCount = 0;
+  let failedCount = 0;
+
+  for (const route of routes) {
+    if (route.travelMode === 'drive') {
+      upgradedRoutes.push(route);
+      continue;
+    }
+    try {
+      const rebuilt = await rebuildRoute({
+        origin: route.origin,
+        destination: route.destination,
+        originLabel: route.originLabel,
+        destinationLabel: route.destinationLabel,
+        travelMode: 'drive',
+        routeName: route.name,
+        waypoints: route.waypoints,
+      });
+      upgradedRoutes.push({
+        ...rebuilt,
+        // Keep the saved-route identity and date so the road version replaces
+        // the legacy bicycle geometry instead of appearing as a duplicate.
+        id: route.id,
+        createdAt: route.createdAt,
+      });
+      upgradedCount += 1;
+    } catch {
+      upgradedRoutes.push(route);
+      failedCount += 1;
+    }
+  }
+
+  return { routes: upgradedRoutes, upgradedCount, failedCount };
 }
 
 export async function fetchSmartExploreRoutePlan(description: string) {

@@ -668,7 +668,7 @@ async function computeExploreRoute(payload, signal) {
   if (!origin || !destination) {
     throw new HttpRequestError(400, 'Choose a valid starting point and destination.');
   }
-  const travelMode = payload?.travelMode === 'drive' ? 'drive' : 'bicycle';
+  const travelMode = 'drive';
   const waypoints = Array.isArray(payload?.waypoints)
     ? payload.waypoints.flatMap((value) => {
       const point = sanitizeExplorePoint(value?.point);
@@ -693,7 +693,7 @@ async function computeExploreRoute(payload, signal) {
           location: { latLng: { latitude: point.lat, longitude: point.lng } },
         })),
       } : {}),
-      travelMode: travelMode === 'drive' ? 'DRIVE' : 'BICYCLE',
+      travelMode: 'DRIVE',
       // Overview geometry follows the routed roads without the lane- and
       // crosswalk-level offsets that look like lateral wobble in a tilted map.
       polylineQuality: 'OVERVIEW',
@@ -3934,8 +3934,8 @@ async function serveStatic(request, response) {
     const body = JSON.stringify({
       routesConfigured: Boolean(exploreRoutesApiKey()),
       smartRoutesConfigured: Boolean(openAiApiKey()),
-      supportedTravelModes: ['bicycle', 'drive'],
-      bicycleSafetyWarning: 'Bicycling routes may not always include clear bicycle paths. Use this route only for indoor virtual riding.',
+      supportedTravelModes: ['drive'],
+      routeNotice: 'Explore routes follow drivable roads for consistent road, elevation, and grade data.',
     });
     response.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',

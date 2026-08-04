@@ -46,6 +46,7 @@ import {
   fetchExploreElevationProfile,
   fetchExploreRoute,
   fetchSmartExploreRoutePlan,
+  upgradeExploreRoutesToDrivingRoads,
   type ExploreElevationProfile,
   type ExploreSmartRoutePlan,
 } from '../lib/exploreRoutes';
@@ -431,17 +432,30 @@ export function ExploreView({
           return;
         }
         const mergedRoutes = mergeRecentExploreRoutes(cloudRoutes, cachedRoutes);
-        writeRecentExploreRoutes(recentProfileKey, mergedRoutes);
-        setRecentRoutes(mergedRoutes);
+        const migration = await upgradeExploreRoutesToDrivingRoads(mergedRoutes);
+        if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
+          return;
+        }
+        const nextRoutes = writeRecentExploreRoutes(recentProfileKey, migration.routes);
+        setRecentRoutes(nextRoutes);
 
         const cloudIds = cloudRoutes.map((route) => route.id).join('|');
-        const mergedIds = mergedRoutes.map((route) => route.id).join('|');
-        if (cloudIds !== mergedIds) {
-          const savedRoutes = await saveCloudExploreRoutes(mergedRoutes);
+        const nextIds = nextRoutes.map((route) => route.id).join('|');
+        if (migration.upgradedCount > 0 || cloudIds !== nextIds) {
+          const savedRoutes = await saveCloudExploreRoutes(nextRoutes);
           if (!cancelled && recentRouteProfileRef.current === recentProfileKey) {
             const synchronizedRoutes = writeRecentExploreRoutes(recentProfileKey, savedRoutes);
             setRecentRoutes(synchronizedRoutes);
           }
+        }
+        if (migration.upgradedCount > 0 || migration.failedCount > 0) {
+          setRouteMessage(
+            `${migration.upgradedCount > 0
+              ? `${migration.upgradedCount} saved route${migration.upgradedCount === 1 ? '' : 's'} updated to follow drivable roads.`
+              : ''}${migration.failedCount > 0
+              ? ` ${migration.failedCount} saved route${migration.failedCount === 1 ? '' : 's'} will retry when Google Routes is available.`
+              : ''}`.trim(),
+          );
         }
       })
       .catch((error: Error) => {
