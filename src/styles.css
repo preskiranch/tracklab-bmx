@@ -9185,12 +9185,18 @@ input:focus {
   color: #17310a;
 }
 
-.explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
+.explore-fullscreen .explore-session-actions {
   position: sticky;
   right: 0;
   z-index: 2;
-  flex: 0 0 auto;
+  display: flex;
+  gap: 5px;
+  flex: none;
   margin-left: auto;
+  background: #070d15;
+}
+
+.explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen {
   padding-inline: 12px;
   background: #ffffff;
   color: #101823;
@@ -9201,15 +9207,7 @@ input:focus {
   display: none;
 }
 
-.explore-fullscreen .explore-camera-toolbar > .explore-pause-ride,
-.explore-fullscreen .explore-camera-toolbar > .explore-resume-ride {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  flex: 0 0 auto;
-}
-
-.explore-fullscreen .explore-camera-toolbar > .explore-resume-ride {
+.explore-fullscreen .explore-session-actions > .explore-resume-ride {
   border-color: #78dc40;
   background: #c9ffab;
   color: #17310a;
@@ -9342,6 +9340,15 @@ input:focus {
   }
 
   .explore-fullscreen .explore-camera-toolbar .explore-exit-fullscreen span {
+    display: none;
+  }
+
+  .explore-fullscreen .explore-session-actions button {
+    width: 42px;
+    padding-inline: 0;
+  }
+
+  .explore-fullscreen .explore-session-actions span {
     display: none;
   }
 

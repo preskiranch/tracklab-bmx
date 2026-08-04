@@ -730,6 +730,14 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       setZoom(zoom: number) { this.zoom = zoom; }
     }
     class MockMarker {
+      constructor(options: Record<string, unknown> = {}) {
+        const testWindow = window as typeof window & {
+          __tracklabExploreMarkerOptions?: Record<string, unknown>[];
+        };
+        testWindow.__tracklabExploreMarkerOptions ??= [];
+        testWindow.__tracklabExploreMarkerOptions.push(options);
+      }
+
       setMap() {}
       setPosition() {}
       setTitle() {}
@@ -791,6 +799,12 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     class MockLatLngBounds {
       extend() {}
     }
+    class MockPoint {
+      constructor(public x: number, public y: number) {}
+    }
+    class MockSize {
+      constructor(public width: number, public height: number) {}
+    }
     class MockStreetViewService {
       async getPanorama() {
         return {
@@ -829,7 +843,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
         LatLngBounds: MockLatLngBounds,
         Map: MockMap,
         Marker: MockMarker,
+        Point: MockPoint,
         Polyline: MockPolyline,
+        Size: MockSize,
         SymbolPath: { CIRCLE: 'circle' },
         places,
         importLibrary: async (name: string) => (
@@ -980,6 +996,14 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await exploreDemoRiderButtons.nth(0).click();
   await exploreDemoRiderButtons.nth(2).click();
   await expect(page.locator('.explore-rider-strip article')).toHaveCount(4);
+  await expect.poll(() => page.evaluate(() => (
+    new Set((window as typeof window & {
+      __tracklabExploreMarkerOptions?: Array<{ icon?: { url?: string } }>;
+    }).__tracklabExploreMarkerOptions
+      ?.flatMap((options) => options.icon?.url?.includes('/assets/explore/road-cyclist-p')
+        ? [options.icon.url]
+        : []) ?? []).size
+  ))).toBe(2);
   await mapRenderer.getByRole('button', { name: 'Google 3D' }).click();
   await page.getByRole('button', { name: 'Start Explore the World ride' }).click();
   await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
@@ -1034,6 +1058,11 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       __tracklabExplore3DMaps?: unknown[];
     }).__tracklabExplore3DMaps?.length ?? 0
   ))).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (
+    [...document.querySelectorAll('tracklab-mock-marker-3d')]
+      .filter((marker) => marker.querySelector('template')?.content
+        .querySelector('img[src*="/assets/explore/road-cyclist-p"]')).length
+  ))).toBe(4);
   await page.evaluate(() => {
     const testWindow = window as typeof window & {
       __tracklabExplore3DMaps?: HTMLElement[];
@@ -1157,7 +1186,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   const mobileExitBox = await page.getByRole('button', { name: 'Exit full screen' }).boundingBox();
   expect(mobilePauseBox).not.toBeNull();
   expect(mobileExitBox).not.toBeNull();
-  expect((mobilePauseBox?.x ?? 0) + (mobilePauseBox?.width ?? 0)).toBeLessThan(mobileExitBox?.x ?? 0);
+  expect(mobilePauseBox?.x ?? 0).toBeGreaterThan(250);
+  expect((mobilePauseBox?.x ?? 0) + (mobilePauseBox?.width ?? 0)).toBeLessThanOrEqual(mobileExitBox?.x ?? 0);
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);

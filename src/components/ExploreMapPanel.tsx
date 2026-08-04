@@ -32,6 +32,10 @@ export type ExploreMapPanelProps = {
 
 type ExploreMarkerRefs = Map<string, GoogleMarker>;
 
+export function exploreRoadCyclistIconUrl(playerId: number) {
+  return `/assets/explore/road-cyclist-p${Math.max(1, Math.min(4, Math.round(playerId)))}.png`;
+}
+
 export function exploreGroupPositions(
   group: ExploreViewportGroup,
   route: ExploreRouteModel,
@@ -224,16 +228,14 @@ export function ExploreMapPanel({
       if (!marker) {
         marker = new google.maps.Marker({
           icon: {
-            fillColor: rider.accent,
-            fillOpacity: 1,
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 13,
-            strokeColor: '#ffffff',
-            strokeWeight: 4,
+            anchor: new google.maps.Point(28, 49),
+            labelOrigin: new google.maps.Point(28, 55),
+            scaledSize: new google.maps.Size(56, 56),
+            url: exploreRoadCyclistIconUrl(rider.playerId),
           },
           label: {
-            color: '#07111f',
-            fontSize: '11px',
+            color: '#ffffff',
+            fontSize: '10px',
             fontWeight: '900',
             text: `P${rider.playerId}`,
           },

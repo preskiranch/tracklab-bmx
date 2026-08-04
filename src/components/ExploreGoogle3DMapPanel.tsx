@@ -18,6 +18,7 @@ import { elevatedPath } from '../lib/googleMaps3d';
 import { formatExploreDistanceMeters } from '../units';
 import {
   exploreGroupPositions,
+  exploreRoadCyclistIconUrl,
   type ExploreMapPanelProps,
 } from './ExploreMapPanel';
 
@@ -220,6 +221,14 @@ export function ExploreGoogle3DMapPanel({
           title: rider.name,
           zIndex: 500 + rider.playerId,
         });
+        const cyclistImage = document.createElement('img');
+        cyclistImage.alt = '';
+        cyclistImage.height = 56;
+        cyclistImage.src = exploreRoadCyclistIconUrl(rider.playerId);
+        cyclistImage.width = 56;
+        const cyclistTemplate = document.createElement('template');
+        cyclistTemplate.content.append(cyclistImage);
+        marker.append(cyclistTemplate);
         map.append(marker);
         riderMarkersRef.current.set(rider.id, marker);
       } else if (marker) {

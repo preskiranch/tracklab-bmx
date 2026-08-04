@@ -1533,32 +1533,6 @@ export function ExploreView({
               </header>
 
               <div className="explore-camera-toolbar" aria-label="Explore camera controls">
-                {fullscreen && (ride.status === 'riding' ? (
-                  <button
-                    className="explore-pause-ride"
-                    type="button"
-                    aria-label={playMode === 'multiplayer' ? 'Pause everyone' : 'Pause ride'}
-                    onClick={pauseRide}
-                    disabled={playMode === 'multiplayer' && !roomHost}
-                  >
-                    <Pause size={18} />
-                    <span>Pause</span>
-                  </button>
-                ) : (
-                  <button
-                    className="explore-resume-ride"
-                    type="button"
-                    onPointerDown={() => { void primeBikeRaceAudio(); }}
-                    onClick={startOrResume}
-                    disabled={
-                      players.length === 0
-                      || (playMode === 'multiplayer' && (!currentRoom || !roomHost))
-                    }
-                  >
-                    <Play size={18} />
-                    <span>{ride.status === 'paused' ? 'Resume' : 'Start'}</span>
-                  </button>
-                ))}
                 <div
                   className="explore-destination-overlay"
                   aria-label={`Destination: ${route.destinationLabel}`}
@@ -1696,15 +1670,43 @@ export function ExploreView({
                   </button>
                 )}
                 {fullscreen && (
-                  <button
-                    className="explore-exit-fullscreen"
-                    type="button"
-                    aria-label="Exit full screen"
-                    onClick={() => onFullscreenChange(false)}
-                  >
-                    <Minimize2 size={18} />
-                    <span>Exit full screen</span>
-                  </button>
+                  <div className="explore-session-actions">
+                    {ride.status === 'riding' ? (
+                      <button
+                        className="explore-pause-ride"
+                        type="button"
+                        aria-label={playMode === 'multiplayer' ? 'Pause everyone' : 'Pause ride'}
+                        onClick={pauseRide}
+                        disabled={playMode === 'multiplayer' && !roomHost}
+                      >
+                        <Pause size={18} />
+                        <span>Pause</span>
+                      </button>
+                    ) : (
+                      <button
+                        className="explore-resume-ride"
+                        type="button"
+                        onPointerDown={() => { void primeBikeRaceAudio(); }}
+                        onClick={startOrResume}
+                        disabled={
+                          players.length === 0
+                          || (playMode === 'multiplayer' && (!currentRoom || !roomHost))
+                        }
+                      >
+                        <Play size={18} />
+                        <span>{ride.status === 'paused' ? 'Resume' : 'Start'}</span>
+                      </button>
+                    )}
+                    <button
+                      className="explore-exit-fullscreen"
+                      type="button"
+                      aria-label="Exit full screen"
+                      onClick={() => onFullscreenChange(false)}
+                    >
+                      <Minimize2 size={18} />
+                      <span>Exit full screen</span>
+                    </button>
+                  </div>
                 )}
               </div>
 
