@@ -4,6 +4,7 @@ import {
   decodeGooglePolyline,
   exploreAverageSpeedMph,
   exploreCameraOffsetMeters,
+  exploreCyclist3DScreenRotation,
   exploreCyclistScreenRotation,
   exploreDemoMaximumCruiseMph,
   exploreDemoMinimumCruiseMph,
@@ -73,10 +74,14 @@ describe('Explore route geometry', () => {
   });
 
   it('points cyclist artwork into the route bearing as the camera turns', () => {
-    expect(exploreCyclistScreenRotation(0, 0)).toBe(135);
-    expect(exploreCyclistScreenRotation(90, 0)).toBe(225);
-    expect(exploreCyclistScreenRotation(90, 90)).toBe(135);
-    expect(exploreCyclistScreenRotation(0, 90)).toBe(45);
+    expect(exploreCyclistScreenRotation(0, 0)).toBe(111);
+    expect(exploreCyclistScreenRotation(90, 0)).toBe(201);
+    expect(exploreCyclistScreenRotation(90, 90)).toBe(111);
+    expect(exploreCyclistScreenRotation(0, 90)).toBe(21);
+    expect(exploreCyclist3DScreenRotation(0, 0, 55)).toBe(111);
+    expect(exploreCyclist3DScreenRotation(90, 0, 55)).toBe(201);
+    expect(exploreCyclist3DScreenRotation(45, 0, 0)).toBe(156);
+    expect(exploreCyclist3DScreenRotation(45, 0, 55)).toBeCloseTo(171.15, 1);
     expect(closestExploreScreenRotation(359, 1)).toBe(361);
     expect(closestExploreScreenRotation(1, 359)).toBe(-1);
   });

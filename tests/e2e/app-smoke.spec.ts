@@ -1088,22 +1088,35 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   });
   const resumeAutomaticCamera = page.getByRole('button', { name: 'Resume automatic camera' });
   await expect(resumeAutomaticCamera).toHaveAttribute('aria-pressed', 'true');
-  const freeCameraStartCenter = await page.evaluate(() => {
+  const freeCameraState = await page.evaluate(() => {
     const map = (window as typeof window & {
       __tracklabExplore3DMaps?: Array<{
         center?: { lat: number; lng: number };
         heading?: number;
       }>;
     }).__tracklabExplore3DMaps?.[0];
-    map!.heading = 73;
-    return { ...map!.center! };
+    const cyclist = document.querySelector<HTMLImageElement>(
+      'tracklab-mock-marker-html img[src*="/assets/explore/road-cyclist-p"]',
+    );
+    const desiredHeading = ((map?.heading ?? 0) + 83) % 360;
+    map!.heading = desiredHeading;
+    return {
+      center: { ...map!.center! },
+      desiredHeading,
+      initialCyclistTransform: cyclist?.style.transform ?? '',
+    };
   });
   await page.waitForTimeout(200);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
       __tracklabExplore3DMaps?: Array<{ heading?: number }>;
     }).__tracklabExplore3DMaps?.[0]?.heading
-  ))).toBe(73);
+  ))).toBe(freeCameraState.desiredHeading);
+  await expect.poll(() => page.evaluate((initialTransform) => (
+    document.querySelector<HTMLImageElement>(
+      'tracklab-mock-marker-html img[src*="/assets/explore/road-cyclist-p"]',
+    )?.style.transform !== initialTransform
+  ), freeCameraState.initialCyclistTransform)).toBe(true);
   await page.getByLabel('Google photorealistic 3D Explore map').dispatchEvent('pointerup', {
     pointerId: 17,
     pointerType: 'touch',
@@ -1116,12 +1129,12 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       Math.abs(currentCenter.lat - startCenter.lat) > 1e-8
       || Math.abs(currentCenter.lng - startCenter.lng) > 1e-8
     ));
-  }, freeCameraStartCenter), { timeout: 4_000 }).toBe(true);
+  }, freeCameraState.center), { timeout: 4_000 }).toBe(true);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
       __tracklabExplore3DMaps?: Array<{ heading?: number }>;
     }).__tracklabExplore3DMaps?.[0]?.heading
-  ))).toBe(73);
+  ))).toBe(freeCameraState.desiredHeading);
   await resumeAutomaticCamera.click();
   await expect(page.getByRole('button', { name: 'Enable free camera' }))
     .toHaveAttribute('aria-pressed', 'false');
@@ -1137,7 +1150,7 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       .every((marker) => {
         const cyclist = marker
           .querySelector<HTMLImageElement>('img[src*="/assets/explore/road-cyclist-p"]');
-        return cyclist?.width === 84 && cyclist.height === 84;
+        return cyclist?.width === 72 && cyclist.height === 72;
       })
   ))).toBe(true);
   await expect.poll(() => page.evaluate(() => (

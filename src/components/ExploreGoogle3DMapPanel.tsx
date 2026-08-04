@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   closestExploreScreenRotation,
   exploreCameraOffsetMeters,
-  exploreCyclistScreenRotation,
+  exploreCyclist3DScreenRotation,
   exploreRouteHeading,
   exploreRoutePoint,
   exploreRoutePoints,
@@ -25,7 +25,7 @@ import {
   useExploreCameraInteraction,
 } from './ExploreMapPanel';
 
-const exploreRoadCyclist3DMarkerSizePx = 84;
+const exploreRoadCyclist3DMarkerSizePx = 72;
 
 function explore3DRange(followZoom: number) {
   return Math.max(80, Math.min(25_000, 320 * (2 ** (18 - followZoom))));
@@ -79,8 +79,13 @@ export function ExploreGoogle3DMapPanel({
 
   const updateRiderRotations = useCallback(() => {
     const mapHeading = mapRef.current?.heading ?? 0;
+    const mapTilt = mapRef.current?.tilt ?? 0;
     riderBearingsRef.current.forEach((routeHeading, riderId) => {
-      const targetRotation = exploreCyclistScreenRotation(routeHeading, mapHeading);
+      const targetRotation = exploreCyclist3DScreenRotation(
+        routeHeading,
+        mapHeading,
+        mapTilt,
+      );
       const currentRotation = riderRotationsRef.current.get(riderId);
       const nextRotation = currentRotation == null
         ? targetRotation
@@ -278,9 +283,10 @@ export function ExploreGoogle3DMapPanel({
         cyclistImage.alt = '';
         cyclistImage.height = exploreRoadCyclist3DMarkerSizePx;
         cyclistImage.src = exploreRoadCyclistIconUrl(rider.playerId);
-        const initialRotation = exploreCyclistScreenRotation(
+        const initialRotation = exploreCyclist3DScreenRotation(
           routeHeading,
           map.heading ?? 0,
+          map.tilt ?? 0,
         );
         cyclistImage.style.transform = `rotate(${initialRotation}deg)`;
         cyclistImage.style.transformOrigin = 'center';
@@ -370,6 +376,7 @@ export function ExploreGoogle3DMapPanel({
         if (map.center) {
           cameraCenterRef.current = { lat: map.center.lat, lng: map.center.lng };
         }
+        updateRiderRotations();
         previousAt = now;
         lastUpdateAt = now;
       } else if (map && current && target && now - lastUpdateAt >= 32) {

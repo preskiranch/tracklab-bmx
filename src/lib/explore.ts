@@ -146,13 +146,34 @@ export function smoothExploreHeading(
   return (current + shortestTurn * progress + 360) % 360;
 }
 
-// The transparent road-cyclist artwork points toward the lower-left at 225°.
-// Rotate that front wheel into the route bearing, then subtract the map heading
-// so it continues to point down the road when the camera turns.
+// The wheel-to-wheel axis of the transparent cyclist artwork points at about
+// 249° on screen. A 111° correction aligns both tire contact points with a
+// northbound road instead of aligning only the center of the image.
+const exploreCyclistArtworkCorrectionDegrees = 111;
+
 export function exploreCyclistScreenRotation(routeHeading: number, mapHeading: number) {
   const route = Number.isFinite(routeHeading) ? routeHeading : 0;
   const camera = Number.isFinite(mapHeading) ? mapHeading : 0;
-  return ((route - camera + 135) % 360 + 360) % 360;
+  return ((route - camera + exploreCyclistArtworkCorrectionDegrees) % 360 + 360) % 360;
+}
+
+export function exploreCyclist3DScreenRotation(
+  routeHeading: number,
+  mapHeading: number,
+  mapTilt: number,
+) {
+  const route = Number.isFinite(routeHeading) ? routeHeading : 0;
+  const camera = Number.isFinite(mapHeading) ? mapHeading : 0;
+  const tilt = Number.isFinite(mapTilt) ? Math.max(0, Math.min(85, mapTilt)) : 0;
+  const relativeRadians = (route - camera) * Math.PI / 180;
+  // Tilting the camera compresses the road's north/south screen component.
+  // Project the ground bearing through that compression before rotating the
+  // billboard artwork, so both wheels remain on diagonal roads as well.
+  const projectedBearing = Math.atan2(
+    Math.sin(relativeRadians),
+    Math.cos(relativeRadians) * Math.cos(tilt * Math.PI / 180),
+  ) * 180 / Math.PI;
+  return ((projectedBearing + exploreCyclistArtworkCorrectionDegrees) % 360 + 360) % 360;
 }
 
 export function closestExploreScreenRotation(currentRotation: number, targetRotation: number) {
