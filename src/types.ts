@@ -388,7 +388,7 @@ export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
 
 export type RaceState = 'ready' | 'racing' | 'finished';
 
-export type AppMode = 'race' | 'explore' | 'monitor' | 'diagnostics' | 'developer';
+export type AppMode = 'race' | 'explore' | 'straight-sprint' | 'monitor' | 'diagnostics' | 'developer';
 
 export type RiderPhase = 'pedaling' | 'airborne' | 'landing';
 export type RiderDriveSource = 'cadence' | 'power' | 'speed' | 'coast' | 'blocked';

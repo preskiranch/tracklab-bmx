@@ -107,6 +107,8 @@ type SessionControlPanelProps = {
   isLoopTrack: boolean;
   lapCount: number;
   isAdminProfile: boolean;
+  showCustomRoutes: boolean;
+  sessionTrackAvailable: boolean;
   raceState: RaceState;
   activeBikeCount: number;
   demoMode: boolean;
@@ -216,6 +218,8 @@ export function SessionControlPanel({
   isLoopTrack,
   lapCount,
   isAdminProfile,
+  showCustomRoutes,
+  sessionTrackAvailable,
   raceState,
   activeBikeCount,
   demoMode,
@@ -296,7 +300,11 @@ export function SessionControlPanel({
   const [customRouteFilter, setCustomRouteFilter] = useState('');
   const [mappingToolsCollapsed, setMappingToolsCollapsed] = useState(false);
   const hasMappedRoute = track.routeStatus === 'user-mapped';
-  const canStart = !startGateActive && raceState !== 'racing' && activeBikeCount > 0 && hasMappedRoute;
+  const canStart = sessionTrackAvailable
+    && !startGateActive
+    && raceState !== 'racing'
+    && activeBikeCount > 0
+    && hasMappedRoute;
   const canCancel = startGateActive || raceState === 'racing';
   const canSaveMapping = draftPointCount >= 2;
   const activeMappingToolLabel = mappingEditMode === 'navigate'
@@ -398,13 +406,12 @@ export function SessionControlPanel({
 
   return (
     <aside className={mappingToolsCollapsed ? 'control-panel mapping-tools-collapsed' : 'control-panel'}>
-      {isAdminProfile && (
-        <>
+      {isAdminProfile && showCustomRoutes && (
           <section className="panel-section custom-route-section" id="custom-route-section">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">Custom Route</span>
-            <h3>Create location</h3>
+            <span className="eyebrow">Straight Sprint</span>
+            <h3>Create sprint location</h3>
           </div>
           <MapPinned size={18} />
         </div>
@@ -465,7 +472,7 @@ export function SessionControlPanel({
 
         <button className="mapping-fullscreen-button" type="button" onClick={onCustomRouteCreate}>
           <Plus size={15} />
-          Add Custom Route
+          Add Straight Sprint
         </button>
 
         {customRoutes.length > 0 && (
@@ -534,7 +541,9 @@ export function SessionControlPanel({
           </div>
         )}
           </section>
+      )}
 
+      {isAdminProfile && (!showCustomRoutes || sessionTrackAvailable) && (
           <section className={mappingToolsCollapsed ? 'panel-section mapping-section collapsed' : 'panel-section mapping-section'}>
         {mappingToolsCollapsed ? (
           <button
@@ -1005,7 +1014,6 @@ export function SessionControlPanel({
           </>
         )}
           </section>
-        </>
       )}
 
       {isAdminProfile && (
@@ -1150,7 +1158,9 @@ export function SessionControlPanel({
             disabled={!canStart}
           >
             <Flag size={18} />
-            {!hasMappedRoute
+            {!sessionTrackAvailable
+              ? 'Create Sprint First'
+              : !hasMappedRoute
               ? 'Map Route First'
               : activeBikeCount === 0
                 ? (demoMode ? 'Choose Demo Riders' : 'Connect Bikes First')

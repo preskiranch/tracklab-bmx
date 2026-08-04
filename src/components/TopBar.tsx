@@ -29,7 +29,8 @@ export function TopBar({
   onReset,
 }: TopBarProps) {
   const statusLabel = connection === 'open' ? `${mode.toUpperCase()} bridge online` : 'Bridge offline';
-  const canStart = appMode === 'race' && raceState !== 'racing' && activeBikeCount > 0;
+  const raceWorkspaceActive = appMode === 'race' || appMode === 'straight-sprint';
+  const canStart = raceWorkspaceActive && raceState !== 'racing' && activeBikeCount > 0;
 
   return (
     <header className="top-bar">
@@ -55,7 +56,15 @@ export function TopBar({
           onClick={() => onModeChange('race')}
         >
           <Activity size={16} />
-          <span>Race</span>
+          <span>BMX Race Intervals</span>
+        </button>
+        <button
+          className={appMode === 'straight-sprint' ? 'selected' : ''}
+          type="button"
+          onClick={() => onModeChange('straight-sprint')}
+        >
+          <Flag size={16} />
+          <span>Straight Sprint</span>
         </button>
         <button
           className={appMode === 'monitor' ? 'selected' : ''}
@@ -84,7 +93,7 @@ export function TopBar({
         </button>
       </div>
 
-      {appMode === 'race' ? (
+      {raceWorkspaceActive ? (
         <div className="race-actions">
           <button className="icon-button secondary" type="button" onClick={onReset} aria-label="Reset race">
             <RotateCcw size={18} />

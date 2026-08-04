@@ -1409,6 +1409,10 @@ export default function App() {
   const [initialUrlTrackPending, setInitialUrlTrackPending] = useState(initialRequestedTrackId !== null);
   const [initialTrack] = useState(() => findInitialTrack(initialRequestedTrackId, initialCustomRoutes));
   const selectedTrackIdRef = useRef(initialTrack.id);
+  const lastBmxTrackIdRef = useRef(initialTrack.countryCode === 'CUSTOM' ? defaultTrack.id : initialTrack.id);
+  const lastStraightSprintTrackIdRef = useRef<string | null>(
+    initialTrack.countryCode === 'CUSTOM' ? initialTrack.id : null,
+  );
   const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [catalogDatabaseReady, setCatalogDatabaseReady] = useState(false);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(initialCustomRoutes);
@@ -1463,7 +1467,9 @@ export default function App() {
   const [raceCommentaryPreferences, setRaceCommentaryPreferences] = useState<RaceCommentaryPreferences>(
     () => raceViewPreferencesRef.current.commentary,
   );
-  const [appMode, setAppMode] = useState<AppMode>('race');
+  const [appMode, setAppMode] = useState<AppMode>(
+    initialTrack.countryCode === 'CUSTOM' ? 'straight-sprint' : 'race',
+  );
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
   const [showMembershipLanding, setShowMembershipLanding] = useState(() => initialMembershipRef.current?.tier === 'visitor');
   const [checkoutBikeSeats, setCheckoutBikeSeats] = useState(() => Math.max(1, Math.min(maxPlayers, initialMembershipRef.current?.bikeSeats ?? 1)));
@@ -1741,6 +1747,9 @@ export default function App() {
       if (requestedTrack) {
         pendingInitialTrackIdRef.current = null;
         setInitialUrlTrackPending(false);
+        if (requestedTrack.countryCode === 'CUSTOM') {
+          setAppMode('straight-sprint');
+        }
 
         if (
           requestedTrack.id !== selectedTrackId
@@ -1786,11 +1795,11 @@ export default function App() {
     window.history.replaceState(null, '', url);
   }, [initialUrlTrackPending, selectedTrackId]);
 
-  const countries = useMemo(() => countriesForCatalog(catalogTracks), [catalogTracks]);
-  const states = useMemo(() => statesForCountry(selectedCountry, catalogTracks), [catalogTracks, selectedCountry]);
+  const countries = useMemo(() => countriesForCatalog(baseCatalogTracks), [baseCatalogTracks]);
+  const states = useMemo(() => statesForCountry(selectedCountry, baseCatalogTracks), [baseCatalogTracks, selectedCountry]);
   const availableTracks = useMemo(
-    () => tracksForLocation(selectedCountry, selectedState, catalogTracks),
-    [catalogTracks, selectedCountry, selectedState],
+    () => tracksForLocation(selectedCountry, selectedState, baseCatalogTracks),
+    [baseCatalogTracks, selectedCountry, selectedState],
   );
   const selectedTrack = useMemo(
     () => catalogTracks.find((track) => track.id === selectedTrackId) ?? availableTracks[0] ?? defaultTrack,
@@ -1798,7 +1807,14 @@ export default function App() {
   );
   useEffect(() => {
     selectedTrackIdRef.current = selectedTrack.id;
-  }, [selectedTrack.id]);
+    if (selectedTrack.countryCode === 'CUSTOM') {
+      if (!isCustomRoutePreviewId(selectedTrack.id)) {
+        lastStraightSprintTrackIdRef.current = selectedTrack.id;
+      }
+    } else {
+      lastBmxTrackIdRef.current = selectedTrack.id;
+    }
+  }, [selectedTrack.countryCode, selectedTrack.id]);
   useEffect(() => {
     setMappingSaveStatus('idle');
     setMappingSaveMessage(null);
@@ -4108,8 +4124,8 @@ export default function App() {
   }, [persistRaceViewPreferences]);
 
   const handleCountryChange = (country: string) => {
-    const nextState = statesForCountry(country, persistentCatalogTracks)[0];
-    const nextTrack = tracksForLocation(country, nextState, persistentCatalogTracks)[0];
+    const nextState = statesForCountry(country, baseCatalogTracks)[0];
+    const nextTrack = tracksForLocation(country, nextState, baseCatalogTracks)[0];
     if (!nextTrack) {
       return;
     }
@@ -4122,7 +4138,7 @@ export default function App() {
   };
 
   const handleStateChange = (state: string) => {
-    const nextTrack = tracksForLocation(selectedCountry, state, persistentCatalogTracks)[0];
+    const nextTrack = tracksForLocation(selectedCountry, state, baseCatalogTracks)[0];
     if (!nextTrack) {
       return;
     }
@@ -4146,12 +4162,32 @@ export default function App() {
     setSelectedTrackId(nextTrack.id);
   };
 
-  const handleCustomLocationShortcut = () => {
+  const openBmxRaceIntervals = () => {
+    setMappingMode(false);
     setAppMode('race');
-    setCustomRouteStatus((current) => current ?? 'Enter a route name and location to create a custom ride.');
+
+    if (selectedTrack.countryCode === 'CUSTOM' || isCustomRoutePreviewId(selectedTrack.id)) {
+      const nextTrack = baseCatalogTracks.find((track) => track.id === lastBmxTrackIdRef.current)
+        ?? baseCatalogTracks[0]
+        ?? defaultTrack;
+      handleTrackChange(nextTrack.id);
+    }
+  };
+
+  const openStraightSprint = () => {
+    setMappingMode(false);
+    setAppMode('straight-sprint');
+    setCustomRouteStatus((current) => current ?? 'Create a custom location or choose a saved sprint route.');
+
+    if (selectedTrack.countryCode !== 'CUSTOM') {
+      const nextTrack = customRoutes.find((track) => track.id === lastStraightSprintTrackIdRef.current)
+        ?? customRoutes[0];
+      if (nextTrack) {
+        handleTrackChange(nextTrack.id);
+      }
+    }
 
     window.setTimeout(() => {
-      document.getElementById('custom-route-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       document.getElementById('custom-route-location-input')?.focus();
     }, 80);
   };
@@ -6487,8 +6523,10 @@ export default function App() {
   const connectedBikeDisplayCount = demoMode ? demoBikeCount : activePlayers.length;
   const workflowConnectionReady = demoMode || activePlayers.length > 0;
   const workflowRaceEntryReady = demoMode || racePlayers.length > 0;
-  const workflowMapReady = effectiveTrack.routeStatus === 'user-mapped';
+  const sessionTrackAvailable = appMode !== 'straight-sprint' || selectedTrack.countryCode === 'CUSTOM';
+  const workflowMapReady = sessionTrackAvailable && effectiveTrack.routeStatus === 'user-mapped';
   const workflowRaceReady = workflowConnectionReady && workflowRaceEntryReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
+  const raceWorkspaceMode: AppMode = appMode === 'straight-sprint' ? 'straight-sprint' : 'race';
   const hasStartHereSplitChoices = racePlayers.length > 0 && (effectiveTrack.splitSections?.length ?? 0) > 0;
   const canChooseStartHereSplitLine = raceState !== 'racing' && !startGateStatus.active;
   const canEditLiveRaceEntry = !demoMode && raceState !== 'racing' && !startGateStatus.active;
@@ -6505,19 +6543,24 @@ export default function App() {
             : 'Pair bike',
       state: workflowConnectionReady ? 'complete' : 'next',
       onClick: () => {
-        setAppMode('race');
+        setAppMode(raceWorkspaceMode);
       },
     },
     {
       kind: 'action',
-      label: 'Pick Track',
-      detail: selectedTrack.name,
-      state: 'complete',
+      label: appMode === 'straight-sprint' ? 'Pick Sprint' : 'Pick Track',
+      detail: sessionTrackAvailable ? selectedTrack.name : 'Create a custom location',
+      state: sessionTrackAvailable ? 'complete' : 'next',
       onClick: () => {
-        setAppMode('race');
+        setAppMode(raceWorkspaceMode);
+        if (!sessionTrackAvailable) {
+          window.setTimeout(() => {
+            document.getElementById('custom-route-location-input')?.focus();
+          }, 0);
+        }
       },
     },
-    ...(developerUiActive ? [{
+    ...(developerUiActive && sessionTrackAvailable ? [{
       kind: 'action' as const,
       label: 'Map Zones',
       detail: workflowMapReady
@@ -6525,16 +6568,16 @@ export default function App() {
         : 'Needs layout',
       state: workflowMapReady ? 'complete' as const : 'next' as const,
       onClick: () => {
-        setAppMode('race');
+        setAppMode(raceWorkspaceMode);
         handleMappingModeChange(true);
         setMappingEditMode(workflowMapReady ? 'zones' : 'draw');
       },
     }] : []),
-    ...(isLoopTrack ? [{
+    ...(sessionTrackAvailable && isLoopTrack ? [{
       kind: 'laps' as const,
       state: 'complete',
     }] : []),
-    {
+    ...(sessionTrackAvailable ? [{
       kind: 'action',
       label: 'Ghost',
       detail: selectedGhostLaps.length > 0
@@ -6544,22 +6587,26 @@ export default function App() {
           : 'Saved after first finish',
       state: selectedGhostLaps.length > 0 ? 'complete ghost-selected' : 'idle',
       onClick: () => {
-        setAppMode('race');
+        setAppMode(raceWorkspaceMode);
         window.setTimeout(() => {
           document.querySelector('.ghost-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 0);
       },
-    },
+    } as RaceWorkflowStep] : []),
     {
       kind: 'action',
       label: workflowRaceReady
         ? raceState === 'finished'
-          ? 'Race Again'
-          : demoMode ? 'Start Demo Race' : 'Start Live Race'
-        : 'Race',
+          ? appMode === 'straight-sprint' ? 'Sprint Again' : 'Race Again'
+          : appMode === 'straight-sprint'
+            ? demoMode ? 'Start Demo Sprint' : 'Start Live Sprint'
+            : demoMode ? 'Start Demo Race' : 'Start Live Race'
+        : appMode === 'straight-sprint' ? 'Sprint' : 'Race',
       detail: workflowRaceReady
         ? 'Ready'
-        : !workflowMapReady
+        : !sessionTrackAvailable
+          ? 'Create sprint first'
+          : !workflowMapReady
           ? 'Map first'
           : !workflowConnectionReady
             ? 'Connect bike'
@@ -6572,7 +6619,7 @@ export default function App() {
       primaryAction: workflowRaceReady,
       onPointerDown: workflowRaceReady ? primeRaceAudio : undefined,
       onClick: () => {
-        setAppMode('race');
+        setAppMode(raceWorkspaceMode);
         if (workflowRaceReady) {
           void handleStart();
         }
@@ -6767,10 +6814,15 @@ export default function App() {
             </div>
           </section>
         ) : (
-        <section className="sidebar-workflow" aria-label="Race setup workflow">
+        <section
+          className="sidebar-workflow"
+          aria-label={appMode === 'straight-sprint'
+            ? 'Straight Sprint setup workflow'
+            : 'BMX Race Intervals setup workflow'}
+        >
           <div className="workflow-heading">
-            <span>Start Here</span>
-            <small>Normal session order</small>
+            <span>{appMode === 'straight-sprint' ? 'Straight Sprint' : 'BMX Race Intervals'}</span>
+            <small>{appMode === 'straight-sprint' ? 'Custom sprint course' : 'Normal session order'}</small>
           </div>
           <div className="workflow-list">
             {workflowSteps.map((step, index) => {
@@ -6896,9 +6948,13 @@ export default function App() {
         )}
 
         <nav className="side-nav" aria-label="Primary">
-          <button className={appMode === 'race' && !mappingMode ? 'selected' : ''} type="button" onClick={() => setAppMode('race')}>
+          <button
+            className={appMode === 'race' && !mappingMode ? 'selected' : ''}
+            type="button"
+            onClick={openBmxRaceIntervals}
+          >
             <Activity size={17} />
-            Race
+            BMX Race Intervals
           </button>
           <button
             className={appMode === 'explore' ? 'selected' : ''}
@@ -6911,10 +6967,20 @@ export default function App() {
             <Compass size={17} />
             Explore the World
           </button>
+          {developerUiActive && (
+            <button
+              className={appMode === 'straight-sprint' && !mappingMode ? 'selected' : ''}
+              type="button"
+              onClick={openStraightSprint}
+            >
+              <Route size={17} />
+              Straight Sprint
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
-              setAppMode('race');
+              setAppMode(raceWorkspaceMode);
               window.setTimeout(() => document.querySelector('.platform-topbar')?.scrollIntoView({ behavior: 'smooth' }), 0);
             }}
           >
@@ -6924,7 +6990,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setAppMode('race');
+              setAppMode(raceWorkspaceMode);
               window.setTimeout(() => document.querySelector('.pairing-rail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
             }}
           >
@@ -6934,7 +7000,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setAppMode('race');
+              setAppMode(raceWorkspaceMode);
               window.setTimeout(() => document.querySelector('.analytics-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
             }}
           >
@@ -6970,7 +7036,7 @@ export default function App() {
                     className={mappingMode ? 'selected' : ''}
                     type="button"
                     onClick={() => {
-                      setAppMode('race');
+                      setAppMode(raceWorkspaceMode);
                       handleMappingModeChange(true);
                     }}
                   >
@@ -7031,6 +7097,14 @@ export default function App() {
                 <small>Satellite routes powered by your Wattbike</small>
               </span>
             </div>
+          ) : appMode === 'straight-sprint' ? (
+            <div className="explore-topbar-heading">
+              <Route size={20} />
+              <span>
+                <strong>Straight Sprint</strong>
+                <small>Custom locations and saved sprint routes</small>
+              </span>
+            </div>
           ) : (
           <div className="track-selectors">
             <label>
@@ -7067,7 +7141,7 @@ export default function App() {
                   }
                   setRegularUserPreview(enabled);
                   if (enabled) {
-                    setAppMode('race');
+                    openBmxRaceIntervals();
                     setSidebarMoreOpen(false);
                   }
                 }}
@@ -7080,18 +7154,17 @@ export default function App() {
             </label>
           )}
 
-          {developerUiActive && appMode !== 'explore' && (
-            <button className="custom-location-shortcut" type="button" onClick={handleCustomLocationShortcut}>
-              <Plus size={16} />
-              <span>Custom Location</span>
-              <MapPinned size={16} />
-            </button>
-          )}
-
           {appMode !== 'explore' && (
-          <div className="race-readiness-strip" aria-label="Race readiness">
+          <div
+            className="race-readiness-strip"
+            aria-label={appMode === 'straight-sprint' ? 'Straight Sprint readiness' : 'Race readiness'}
+          >
             <span>{connectedBikeDisplayCount} Bike{connectedBikeDisplayCount === 1 ? '' : 's'}</span>
-            <span className={workflowMapReady ? 'ready' : ''}>{workflowMapReady ? 'Track Ready' : 'Track Pending'}</span>
+            <span className={workflowMapReady ? 'ready' : ''}>
+              {appMode === 'straight-sprint'
+                ? workflowMapReady ? 'Sprint Ready' : 'Sprint Pending'
+                : workflowMapReady ? 'Track Ready' : 'Track Pending'}
+            </span>
             <span>{effectiveTrack.zones.length} Zones</span>
             <span className={raceCommentaryPreferences.enabled ? 'ready' : ''}>
               Commentary {raceCommentaryPreferences.enabled ? 'On' : 'Off'}
@@ -7333,6 +7406,8 @@ export default function App() {
                   isLoopTrack={isLoopTrack}
                   lapCount={lapCount}
                   isAdminProfile={developerUiActive}
+                  showCustomRoutes={appMode === 'straight-sprint'}
+                  sessionTrackAvailable={sessionTrackAvailable}
                   raceState={raceState}
                   activeBikeCount={racePlayers.length}
                   demoMode={demoMode}

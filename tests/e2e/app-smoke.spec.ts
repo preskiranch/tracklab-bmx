@@ -351,7 +351,7 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
 
   await expect(page.getByLabel('Race controls')).toBeVisible();
   await expect(page.locator('.race-control-dock')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /Custom Location/i })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);
   await expect(page.getByLabel('Bike source')).toHaveCount(0);
   await expect(page.getByText(/Track Mapping|Trace route/i)).toHaveCount(0);
@@ -362,7 +362,7 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByRole('heading', { name: 'Find a BMX racing track' })).toBeVisible();
   await expect(page.getByText('1,305 tracks', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Open App', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Race', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'BMX Race Intervals', exact: true })).toBeVisible();
   await expect(page.getByText('Commentary brain', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('option', { name: /Fast|Balanced|Studio/i })).toHaveCount(0);
   await expect(page.getByLabel('Announcer voice')).toHaveCount(0);
@@ -370,7 +370,7 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await expect(page.getByText('Adaptive memory', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Preview selected voice' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Race type' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Intervals' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Intervals', exact: true })).toHaveCount(0);
   const ambientSound = page.getByLabel('Ambient track sound');
   await expect(ambientSound).toBeVisible();
   await expect(ambientSound).toBeChecked();
@@ -1566,6 +1566,19 @@ test('track map save waits for account sync and shared publication', async ({ pa
 
   await page.goto('/?track=black-mountain-bmx');
   await page.getByRole('button', { name: 'Open App' }).click();
+  await expect(page.getByRole('button', { name: 'BMX Race Intervals', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toBeVisible();
+  await expect(page.locator('#custom-route-section')).toHaveCount(0);
+  await expect(page.getByLabel('Country').locator('option', { hasText: 'Custom Routes' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Straight Sprint', exact: true }).click();
+  await expect(page.locator('.platform-topbar').getByText('Straight Sprint', { exact: true })).toBeVisible();
+  await expect(page.locator('#custom-route-section')).toBeVisible();
+  await expect(page.getByLabel('Country')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'BMX Race Intervals', exact: true }).click();
+  await expect(page.locator('#custom-route-section')).toHaveCount(0);
+  await expect(page.getByLabel('Country')).toBeVisible();
   await page.getByRole('button', { name: 'Edit map' }).click();
   const raceViewControl = page.getByLabel('Saved race view');
   await expect(raceViewControl.getByRole('button', { name: 'Satellite' })).toHaveClass(/selected/);
@@ -1586,7 +1599,7 @@ test('track map save waits for account sync and shared publication', async ({ pa
   await expect(page.getByText('Demo race source online', { exact: true })).toBeVisible();
   await regularPreview.check();
   await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Custom Location' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toHaveCount(0);
   await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);
   await expect(page.getByLabel('Bike source')).toHaveCount(0);
@@ -1640,7 +1653,7 @@ test('regular racers can use published tracks but cannot access mapping tools', 
   await expect(page.getByLabel('Race controls')).toBeVisible();
   await expect(page.locator('.race-control-dock')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Custom Location' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Preview regular user interface')).toHaveCount(0);
   await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);
@@ -3266,7 +3279,7 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await page.goto('/?track=black-mountain-bmx');
     await page.getByRole('button', { name: 'Open App' }).click();
 
-    await expect(page.getByRole('button', { name: /Custom Location/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toBeVisible();
     await expect(page.getByText(/1 connected bike/i).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/2 pedal zones/i).first()).toBeVisible({ timeout: 15_000 });
     const ghostOption = page.locator('.ghost-leaderboard-entry').filter({ hasText: 'Cyan Ghost' });
@@ -3556,7 +3569,7 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
     await page.goto('/?track=black-mountain-bmx');
     await page.getByRole('button', { name: 'Open App' }).click();
 
-    await expect(page.getByRole('button', { name: /Custom Location/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toBeVisible();
     await expect(page.getByText(/2 connected bikes/i).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/0 entered \/ 2 connected/i)).toBeVisible();
 
