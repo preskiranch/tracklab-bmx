@@ -30,8 +30,10 @@ export function ExploreAppleMapPanel({
   distanceUnit,
   followZoom,
   cameraFollowPosition,
+  cameraFollowEnabled,
   showMapLabels,
   followTravelHeading,
+  onCameraInteraction,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<AppleMapKitMap | null>(null);
@@ -64,9 +66,9 @@ export function ExploreAppleMapPanel({
         map = new runtime.Map(containerRef.current, {
           cameraDistance: exploreAppleCameraDistance(followZoom),
           center: routePoints[0],
-          isRotationEnabled: false,
-          isScrollEnabled: false,
-          isZoomEnabled: false,
+          isRotationEnabled: true,
+          isScrollEnabled: true,
+          isZoomEnabled: true,
           mapType: showMapLabels ? runtime.MapType.Hybrid : runtime.MapType.Satellite,
           rotation: 0,
           showsCompass: false,
@@ -147,9 +149,11 @@ export function ExploreAppleMapPanel({
     map.mapType = showMapLabels ? runtime.MapType.Hybrid : runtime.MapType.Satellite;
     map.showsPointsOfInterest = showMapLabels;
     const cameraDistance = exploreAppleCameraDistance(followZoom);
-    map.setCameraDistanceAnimated?.(cameraDistance, false);
-    if (!map.setCameraDistanceAnimated) {
-      map.cameraDistance = cameraDistance;
+    if (cameraFollowEnabled) {
+      map.setCameraDistanceAnimated?.(cameraDistance, false);
+      if (!map.setCameraDistanceAnimated) {
+        map.cameraDistance = cameraDistance;
+      }
     }
     const visible = new Set(group.riders.map((rider) => rider.id));
     const removed: AppleMapKitAnnotation[] = [];
@@ -179,15 +183,17 @@ export function ExploreAppleMapPanel({
       }
     });
     if (positions.length === 0) {
-      const center = routePoints[Math.floor(routePoints.length / 2)] ?? routePoints[0];
-      const routeDistance = Math.max(cameraDistance, route.distanceMeters * 1.25);
-      map.setCenterAnimated?.(center, false);
-      if (!map.setCenterAnimated) {
-        map.center = center;
-      }
-      map.setCameraDistanceAnimated?.(routeDistance, false);
-      if (!map.setCameraDistanceAnimated) {
-        map.cameraDistance = routeDistance;
+      if (cameraFollowEnabled) {
+        const center = routePoints[Math.floor(routePoints.length / 2)] ?? routePoints[0];
+        const routeDistance = Math.max(cameraDistance, route.distanceMeters * 1.25);
+        map.setCenterAnimated?.(center, false);
+        if (!map.setCenterAnimated) {
+          map.center = center;
+        }
+        map.setCameraDistanceAnimated?.(routeDistance, false);
+        if (!map.setCameraDistanceAnimated) {
+          map.cameraDistance = routeDistance;
+        }
       }
       return;
     }
@@ -206,6 +212,9 @@ export function ExploreAppleMapPanel({
       route.distanceMeters,
     ) ?? positions[0].position;
     cameraTargetRef.current = center;
+    if (!cameraFollowEnabled) {
+      return;
+    }
     if (!cameraCenterRef.current) {
       cameraCenterRef.current = center;
       map.setCenterAnimated?.(center, false);
@@ -215,6 +224,7 @@ export function ExploreAppleMapPanel({
     }
   }, [
     cameraFollowPosition,
+    cameraFollowEnabled,
     followZoom,
     group,
     route,
@@ -224,7 +234,17 @@ export function ExploreAppleMapPanel({
   ]);
 
   useEffect(() => {
-    if (status !== 'ready') {
+    if (!cameraFollowEnabled || status !== 'ready') {
+      return;
+    }
+    const center = mapRef.current?.center;
+    if (center) {
+      cameraCenterRef.current = center;
+    }
+  }, [cameraFollowEnabled, status]);
+
+  useEffect(() => {
+    if (!cameraFollowEnabled || status !== 'ready') {
       return;
     }
     let frameRequest = 0;
@@ -254,13 +274,15 @@ export function ExploreAppleMapPanel({
     };
     frameRequest = requestAnimationFrame(updateCamera);
     return () => cancelAnimationFrame(frameRequest);
-  }, [followTravelHeading, status]);
+  }, [cameraFollowEnabled, followTravelHeading, status]);
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
   return (
     <section
       className={`explore-map-panel${group.riders.length === 0 ? ' preview' : ''}`}
       aria-label="Apple Satellite Explore map"
+      onPointerDownCapture={onCameraInteraction}
+      onWheelCapture={onCameraInteraction}
     >
       <div className="explore-map-canvas" ref={containerRef} />
       {status === 'loading' && <div className="explore-map-status">Loading Apple Satellite…</div>}

@@ -25,9 +25,11 @@ export type ExploreMapPanelProps = {
   distanceUnit: ExploreDistanceUnit;
   followZoom: number;
   cameraFollowPosition: ExploreCameraFollowPosition;
+  cameraFollowEnabled: boolean;
   showMapLabels: boolean;
   followTravelHeading: boolean;
   onLandmarkSelect: (placeId: string) => void;
+  onCameraInteraction: () => void;
 };
 
 type ExploreMarkerRefs = Map<string, GoogleMarker>;
@@ -53,9 +55,11 @@ export function ExploreMapPanel({
   distanceUnit,
   followZoom,
   cameraFollowPosition,
+  cameraFollowEnabled,
   showMapLabels,
   followTravelHeading,
   onLandmarkSelect,
+  onCameraInteraction,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
@@ -97,8 +101,9 @@ export function ExploreMapPanel({
           controlSize: 26,
           disableDefaultUI: true,
           fullscreenControl: false,
-          gestureHandling: 'none',
-          keyboardShortcuts: false,
+          gestureHandling: 'greedy',
+          headingInteractionEnabled: true,
+          keyboardShortcuts: true,
           mapTypeControl: false,
           mapTypeId: initialShowMapLabelsRef.current ? 'hybrid' : 'satellite',
           renderingType: google.maps.RenderingType?.VECTOR,
@@ -106,6 +111,7 @@ export function ExploreMapPanel({
           scaleControl: true,
           streetViewControl: false,
           tilt: 0,
+          tiltInteractionEnabled: true,
           zoom: initialFollowZoomRef.current,
           zoomControl: false,
         });
@@ -276,6 +282,9 @@ export function ExploreMapPanel({
       route.distanceMeters,
     ) ?? riderCenter;
     cameraTargetRef.current = center;
+    if (!cameraFollowEnabled) {
+      return;
+    }
     if (!cameraCenterRef.current) {
       cameraCenterRef.current = center;
       map.moveCamera?.({ center });
@@ -285,6 +294,7 @@ export function ExploreMapPanel({
     }
   }, [
     cameraFollowPosition,
+    cameraFollowEnabled,
     followZoom,
     group,
     route,
@@ -294,15 +304,29 @@ export function ExploreMapPanel({
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!cameraFollowEnabled) {
+      lastFollowZoomRef.current = null;
+      return;
+    }
     if (status !== 'ready' || !map || lastFollowZoomRef.current === followZoom) {
       return;
     }
     lastFollowZoomRef.current = followZoom;
     map.setZoom?.(followZoom);
-  }, [followZoom, status]);
+  }, [cameraFollowEnabled, followZoom, status]);
 
   useEffect(() => {
-    if (status !== 'ready') {
+    if (!cameraFollowEnabled || status !== 'ready') {
+      return;
+    }
+    const center = mapRef.current?.getCenter?.()?.toJSON();
+    if (center) {
+      cameraCenterRef.current = center;
+    }
+  }, [cameraFollowEnabled, status]);
+
+  useEffect(() => {
+    if (!cameraFollowEnabled || status !== 'ready') {
       return;
     }
 
@@ -334,11 +358,11 @@ export function ExploreMapPanel({
 
     frameRequest = window.requestAnimationFrame(updateCamera);
     return () => window.cancelAnimationFrame(frameRequest);
-  }, [status]);
+  }, [cameraFollowEnabled, status]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (status !== 'ready' || !map) {
+    if (!cameraFollowEnabled || status !== 'ready' || !map) {
       return;
     }
 
@@ -362,7 +386,7 @@ export function ExploreMapPanel({
 
     frameRequest = window.requestAnimationFrame(alignCamera);
     return () => window.cancelAnimationFrame(frameRequest);
-  }, [followTravelHeading, status]);
+  }, [cameraFollowEnabled, followTravelHeading, status]);
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
 
@@ -372,6 +396,8 @@ export function ExploreMapPanel({
       aria-label={group.riders.length > 0
         ? `Explore map for ${group.riders.map((rider) => rider.name).join(', ')}`
         : 'Explore route preview'}
+      onPointerDownCapture={onCameraInteraction}
+      onWheelCapture={onCameraInteraction}
     >
       <div className="explore-map-canvas" ref={containerRef} />
       {status === 'loading' && <div className="explore-map-status">Loading satellite view…</div>}

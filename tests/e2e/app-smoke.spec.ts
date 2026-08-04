@@ -699,8 +699,10 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       private heading = 0;
       private zoom = 18;
 
-      constructor(_element: HTMLElement, options: { zoom?: number }) {
+      constructor(_element: HTMLElement, options: Record<string, unknown> & { zoom?: number }) {
         this.zoom = options.zoom ?? 18;
+        (window as typeof window & { __tracklabExploreMapOptions?: Record<string, unknown> })
+          .__tracklabExploreMapOptions = options;
       }
 
       addListener(eventName: string, handler: MockMapClickHandler) {
@@ -1001,6 +1003,14 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await exploreDemoRiderButtons.nth(2).click();
   await expect(page.locator('.explore-rider-strip article')).toHaveCount(4);
   await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabExploreMapOptions?: Record<string, unknown> })
+      .__tracklabExploreMapOptions
+  ))).toMatchObject({
+    gestureHandling: 'greedy',
+    headingInteractionEnabled: true,
+    tiltInteractionEnabled: true,
+  });
+  await expect.poll(() => page.evaluate(() => (
     new Set((window as typeof window & {
       __tracklabExploreMarkerOptions?: Array<{ icon?: { url?: string } }>;
     }).__tracklabExploreMarkerOptions
@@ -1062,6 +1072,21 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
       __tracklabExplore3DMaps?: unknown[];
     }).__tracklabExplore3DMaps?.length ?? 0
   ))).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabExplore3DMaps?: Array<{ gestureHandling?: string }>;
+    }).__tracklabExplore3DMaps?.[0]?.gestureHandling
+  ))).toBe('GREEDY');
+  const freeCamera = page.getByRole('button', { name: 'Enable free camera' });
+  await expect(freeCamera).toHaveAttribute('aria-pressed', 'false');
+  await page.getByLabel('Google photorealistic 3D Explore map').dispatchEvent('pointerdown', {
+    pointerType: 'touch',
+  });
+  const resumeRiderFollow = page.getByRole('button', { name: 'Resume rider follow' });
+  await expect(resumeRiderFollow).toHaveAttribute('aria-pressed', 'true');
+  await resumeRiderFollow.click();
+  await expect(page.getByRole('button', { name: 'Enable free camera' }))
+    .toHaveAttribute('aria-pressed', 'false');
   await expect.poll(() => page.evaluate(() => (
     [...document.querySelectorAll('tracklab-mock-marker-3d')]
       .filter((marker) => marker.querySelector('template')?.content

@@ -318,6 +318,7 @@ export function ExploreView({
   );
   const [followZoom, setFollowZoom] = useState(18);
   const [cameraFollowPosition, setCameraFollowPosition] = useState<ExploreCameraFollowPosition>('center');
+  const [cameraFollowEnabled, setCameraFollowEnabled] = useState(true);
   // This remains a per-browser rider preference and is intentionally not
   // included in multiplayer state, so every rider controls their own map.
   const [showMapLabels, setShowMapLabels] = useState(true);
@@ -484,6 +485,10 @@ export function ExploreView({
 
   const closeStreetView = useCallback(() => {
     setStreetViewLandmark(null);
+  }, []);
+
+  const useFreeCamera = useCallback(() => {
+    setCameraFollowEnabled(false);
   }, []);
 
   const openStreetView = useCallback((landmark: GoogleLandmarkDetails) => {
@@ -1512,7 +1517,10 @@ export function ExploreView({
                   aria-label="Show more of the route"
                   title="Show more of the route"
                   disabled={followZoom <= 12}
-                  onClick={() => setFollowZoom((zoom) => Math.max(12, zoom - 1))}
+                  onClick={() => {
+                    setCameraFollowEnabled(true);
+                    setFollowZoom((zoom) => Math.max(12, zoom - 1));
+                  }}
                 >
                   <ZoomOut size={18} />
                 </button>
@@ -1526,7 +1534,10 @@ export function ExploreView({
                     value={followZoom}
                     aria-label="Follow camera zoom"
                     aria-valuetext={`${followZoom}, ${followZoom <= 14 ? 'more route visible' : followZoom >= 19 ? 'closer rider view' : 'balanced rider view'}`}
-                    onChange={(event) => setFollowZoom(Number(event.target.value))}
+                    onChange={(event) => {
+                      setCameraFollowEnabled(true);
+                      setFollowZoom(Number(event.target.value));
+                    }}
                   />
                   <small>{followZoom <= 14 ? 'More route' : followZoom >= 19 ? 'Closer' : 'Balanced'}</small>
                 </label>
@@ -1535,7 +1546,10 @@ export function ExploreView({
                   aria-label="Move closer to the riders"
                   title="Move closer to the riders"
                   disabled={followZoom >= 20}
-                  onClick={() => setFollowZoom((zoom) => Math.min(20, zoom + 1))}
+                  onClick={() => {
+                    setCameraFollowEnabled(true);
+                    setFollowZoom((zoom) => Math.min(20, zoom + 1));
+                  }}
                 >
                   <ZoomIn size={18} />
                 </button>
@@ -1546,9 +1560,12 @@ export function ExploreView({
                   type="button"
                   aria-label={`Camera follow position: ${exploreCameraFollowLabels[cameraFollowPosition].toLowerCase()}`}
                   title={`Camera focus: ${exploreCameraFollowLabels[cameraFollowPosition]}. Select to change.`}
-                  onClick={() => setCameraFollowPosition((position) => (
-                    nextExploreCameraFollowPosition(position)
-                  ))}
+                  onClick={() => {
+                    setCameraFollowEnabled(true);
+                    setCameraFollowPosition((position) => (
+                      nextExploreCameraFollowPosition(position)
+                    ));
+                  }}
                 >
                   {cameraFollowPosition === 'center'
                     ? <LocateFixed size={18} />
@@ -1560,6 +1577,19 @@ export function ExploreView({
                     )}
                   <span>{exploreCameraFollowLabels[cameraFollowPosition]}</span>
                 </button>
+                <button
+                  className={`explore-map-labels-toggle${cameraFollowEnabled ? '' : ' active'}`}
+                  type="button"
+                  aria-label={cameraFollowEnabled ? 'Enable free camera' : 'Resume rider follow'}
+                  aria-pressed={!cameraFollowEnabled}
+                  title={cameraFollowEnabled
+                    ? 'Drag to pan, pinch to zoom, and twist to turn the map'
+                    : 'Return the camera to automatic rider follow'}
+                  onClick={() => setCameraFollowEnabled((enabled) => !enabled)}
+                >
+                  <Compass size={18} />
+                  <span>{cameraFollowEnabled ? 'Free camera' : 'Follow riders'}</span>
+                </button>
                 <div className="explore-toolbar-toggle" role="group" aria-label="Map orientation">
                   <button
                     className={!followTravelHeading ? 'active' : ''}
@@ -1567,7 +1597,10 @@ export function ExploreView({
                     aria-label="North up"
                     aria-pressed={!followTravelHeading}
                     title="Keep north at the top of the map"
-                    onClick={() => setFollowTravelHeading(false)}
+                    onClick={() => {
+                      setCameraFollowEnabled(true);
+                      setFollowTravelHeading(false);
+                    }}
                   >
                     <Compass size={18} />
                     <span>North up</span>
@@ -1578,7 +1611,10 @@ export function ExploreView({
                     aria-label="Direction of travel up"
                     aria-pressed={followTravelHeading}
                     title="Keep the direction of travel at the top of the map"
-                    onClick={() => setFollowTravelHeading(true)}
+                    onClick={() => {
+                      setCameraFollowEnabled(true);
+                      setFollowTravelHeading(true);
+                    }}
                   >
                     <Navigation2 size={18} />
                     <span>Travel up</span>
@@ -1704,8 +1740,10 @@ export function ExploreView({
                         distanceUnit={exploreDistanceUnit}
                         followZoom={followZoom}
                         cameraFollowPosition={cameraFollowPosition}
+                        cameraFollowEnabled={cameraFollowEnabled}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
+                        onCameraInteraction={useFreeCamera}
                         onLandmarkSelect={selectLandmark}
                       />
                     ) : effectiveMapRenderer === 'apple-satellite' ? (
@@ -1715,8 +1753,10 @@ export function ExploreView({
                         distanceUnit={exploreDistanceUnit}
                         followZoom={followZoom}
                         cameraFollowPosition={cameraFollowPosition}
+                        cameraFollowEnabled={cameraFollowEnabled}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
+                        onCameraInteraction={useFreeCamera}
                         onLandmarkSelect={selectLandmark}
                       />
                     ) : (
@@ -1726,8 +1766,10 @@ export function ExploreView({
                         distanceUnit={exploreDistanceUnit}
                         followZoom={followZoom}
                         cameraFollowPosition={cameraFollowPosition}
+                        cameraFollowEnabled={cameraFollowEnabled}
                         showMapLabels={showMapLabels}
                         followTravelHeading={followTravelHeading}
+                        onCameraInteraction={useFreeCamera}
                         onLandmarkSelect={selectLandmark}
                       />
                     )}

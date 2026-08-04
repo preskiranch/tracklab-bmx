@@ -40,9 +40,11 @@ export function ExploreGoogle3DMapPanel({
   distanceUnit,
   followZoom,
   cameraFollowPosition,
+  cameraFollowEnabled,
   showMapLabels,
   followTravelHeading,
   onLandmarkSelect,
+  onCameraInteraction,
 }: ExploreMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap3DElement | null>(null);
@@ -84,7 +86,7 @@ export function ExploreGoogle3DMapPanel({
         map = new library.Map3DElement({
           center: { ...routePoints[0], altitude: 0 },
           defaultUIHidden: true,
-          gestureHandling: 'COOPERATIVE',
+          gestureHandling: 'GREEDY',
           heading: 0,
           mode: showMapLabels ? 'HYBRID' : 'SATELLITE',
           range: explore3DRange(followZoom),
@@ -199,7 +201,9 @@ export function ExploreGoogle3DMapPanel({
       return;
     }
     map.mode = showMapLabels ? 'HYBRID' : 'SATELLITE';
-    map.range = explore3DRange(followZoom);
+    if (cameraFollowEnabled) {
+      map.range = explore3DRange(followZoom);
+    }
     const visible = new Set(group.riders.map((rider) => rider.id));
     riderMarkersRef.current.forEach((marker, riderId) => {
       if (!visible.has(riderId)) {
@@ -237,9 +241,11 @@ export function ExploreGoogle3DMapPanel({
       }
     });
     if (positions.length === 0) {
-      const center = routePoints[Math.floor(routePoints.length / 2)] ?? routePoints[0];
-      map.center = { ...center, altitude: 0 };
-      map.range = Math.max(explore3DRange(followZoom), route.distanceMeters * 1.35);
+      if (cameraFollowEnabled) {
+        const center = routePoints[Math.floor(routePoints.length / 2)] ?? routePoints[0];
+        map.center = { ...center, altitude: 0 };
+        map.range = Math.max(explore3DRange(followZoom), route.distanceMeters * 1.35);
+      }
       return;
     }
     const averageDistanceMeters = positions.reduce(
@@ -257,12 +263,16 @@ export function ExploreGoogle3DMapPanel({
       route.distanceMeters,
     ) ?? positions[0].position;
     cameraTargetRef.current = center;
+    if (!cameraFollowEnabled) {
+      return;
+    }
     if (!cameraCenterRef.current) {
       cameraCenterRef.current = center;
       map.center = { ...center, altitude: 0 };
     }
   }, [
     cameraFollowPosition,
+    cameraFollowEnabled,
     followTravelHeading,
     followZoom,
     group,
@@ -273,7 +283,17 @@ export function ExploreGoogle3DMapPanel({
   ]);
 
   useEffect(() => {
-    if (status !== 'ready') {
+    if (!cameraFollowEnabled || status !== 'ready') {
+      return;
+    }
+    const center = mapRef.current?.center;
+    if (center) {
+      cameraCenterRef.current = { lat: center.lat, lng: center.lng };
+    }
+  }, [cameraFollowEnabled, status]);
+
+  useEffect(() => {
+    if (!cameraFollowEnabled || status !== 'ready') {
       return;
     }
     let frameRequest = 0;
@@ -300,13 +320,15 @@ export function ExploreGoogle3DMapPanel({
     };
     frameRequest = requestAnimationFrame(updateCamera);
     return () => cancelAnimationFrame(frameRequest);
-  }, [followTravelHeading, status]);
+  }, [cameraFollowEnabled, followTravelHeading, status]);
 
   const leadRider = [...group.riders].sort((a, b) => b.distanceMeters - a.distanceMeters)[0];
   return (
     <section
       className={`explore-map-panel${group.riders.length === 0 ? ' preview' : ''}`}
       aria-label="Google photorealistic 3D Explore map"
+      onPointerDownCapture={onCameraInteraction}
+      onWheelCapture={onCameraInteraction}
     >
       <div className="explore-map-canvas" ref={containerRef} />
       {status === 'loading' && <div className="explore-map-status">Loading Google 3D…</div>}
