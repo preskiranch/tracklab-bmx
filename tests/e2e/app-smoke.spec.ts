@@ -788,14 +788,17 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
         Object.assign(this, options);
       }
     }
+    class MockMarkerElement extends MockMarker3DElement {}
     if (!customElements.get('tracklab-mock-map-3d')) {
       customElements.define('tracklab-mock-map-3d', MockMap3DElement);
       customElements.define('tracklab-mock-polyline-3d', MockPolyline3DElement);
       customElements.define('tracklab-mock-marker-3d', MockMarker3DElement);
+      customElements.define('tracklab-mock-marker-html', MockMarkerElement);
     }
     const maps3d = {
       Map3DElement: customElements.get('tracklab-mock-map-3d'),
       Marker3DElement: customElements.get('tracklab-mock-marker-3d'),
+      MarkerElement: customElements.get('tracklab-mock-marker-html'),
       Polyline3DElement: customElements.get('tracklab-mock-polyline-3d'),
     };
     class MockLatLngBounds {
@@ -1082,32 +1085,58 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await page.getByLabel('Google photorealistic 3D Explore map').dispatchEvent('pointerdown', {
     pointerType: 'touch',
   });
-  const resumeRiderFollow = page.getByRole('button', { name: 'Resume rider follow' });
-  await expect(resumeRiderFollow).toHaveAttribute('aria-pressed', 'true');
-  await resumeRiderFollow.click();
+  const resumeAutomaticCamera = page.getByRole('button', { name: 'Resume automatic camera' });
+  await expect(resumeAutomaticCamera).toHaveAttribute('aria-pressed', 'true');
+  const freeCameraStartCenter = await page.evaluate(() => {
+    const map = (window as typeof window & {
+      __tracklabExplore3DMaps?: Array<{
+        center?: { lat: number; lng: number };
+        heading?: number;
+      }>;
+    }).__tracklabExplore3DMaps?.[0];
+    map!.heading = 73;
+    return { ...map!.center! };
+  });
+  await expect.poll(() => page.evaluate((startCenter) => {
+    const currentCenter = (window as typeof window & {
+      __tracklabExplore3DMaps?: Array<{ center?: { lat: number; lng: number } }>;
+    }).__tracklabExplore3DMaps?.[0]?.center;
+    return Boolean(currentCenter && (
+      Math.abs(currentCenter.lat - startCenter.lat) > 1e-8
+      || Math.abs(currentCenter.lng - startCenter.lng) > 1e-8
+    ));
+  }, freeCameraStartCenter), { timeout: 4_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & {
+      __tracklabExplore3DMaps?: Array<{ heading?: number }>;
+    }).__tracklabExplore3DMaps?.[0]?.heading
+  ))).toBe(73);
+  await resumeAutomaticCamera.click();
   await expect(page.getByRole('button', { name: 'Enable free camera' }))
     .toHaveAttribute('aria-pressed', 'false');
   await expect.poll(() => page.evaluate(() => (
-    [...document.querySelectorAll('tracklab-mock-marker-3d')]
-      .filter((marker) => marker.querySelector('template')?.content
+    [...document.querySelectorAll('tracklab-mock-marker-html')]
+      .filter((marker) => marker
         .querySelector('img[src*="/assets/explore/road-cyclist-p"]')).length
   ))).toBe(4);
   await expect.poll(() => page.evaluate(() => (
-    [...document.querySelectorAll('tracklab-mock-marker-3d')]
-      .filter((marker) => marker.querySelector('template')?.content
+    [...document.querySelectorAll('tracklab-mock-marker-html')]
+      .filter((marker) => marker
         .querySelector('img[src*="/assets/explore/road-cyclist-p"]'))
       .every((marker) => {
-        const cyclist = marker.querySelector('template')?.content
+        const cyclist = marker
           .querySelector<HTMLImageElement>('img[src*="/assets/explore/road-cyclist-p"]');
-        return cyclist?.width === 44 && cyclist.height === 44;
+        return cyclist?.width === 24 && cyclist.height === 24;
       })
   ))).toBe(true);
   await expect.poll(() => page.evaluate(() => (
-    [...document.querySelectorAll<HTMLElement>('tracklab-mock-marker-3d')]
-      .filter((marker) => marker.querySelector('template')?.content
-        .querySelector('img[src*="/assets/explore/road-cyclist-p"]'))
-      .every((marker) => /deg$/.test(marker.style
-        .getPropertyValue('--tracklab-explore-cyclist-rotation')))
+    [...document.querySelectorAll<HTMLElement>('tracklab-mock-marker-html')]
+      .flatMap((marker) => {
+        const cyclist = marker
+          .querySelector<HTMLImageElement>('img[src*="/assets/explore/road-cyclist-p"]');
+        return cyclist ? [cyclist] : [];
+      })
+      .every((cyclist) => /^rotate\(-?\d+(?:\.\d+)?deg\)$/.test(cyclist.style.transform))
   ))).toBe(true);
   await page.evaluate(() => {
     const testWindow = window as typeof window & {

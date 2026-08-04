@@ -55,6 +55,7 @@ export function ExploreGoogle3DMapPanel({
   const routeLineRef = useRef<GooglePolyline3DElement | null>(null);
   const endpointMarkersRef = useRef<GoogleMarker3DElement[]>([]);
   const riderMarkersRef = useRef(new Map<string, GoogleMarker3DElement>());
+  const riderImagesRef = useRef(new Map<string, HTMLImageElement>());
   const riderBearingsRef = useRef(new Map<string, number>());
   const riderRotationsRef = useRef(new Map<string, number>());
   const cameraCenterRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -78,6 +79,10 @@ export function ExploreGoogle3DMapPanel({
         ? targetRotation
         : closestExploreScreenRotation(currentRotation, targetRotation);
       riderRotationsRef.current.set(riderId, nextRotation);
+      const cyclistImage = riderImagesRef.current.get(riderId);
+      if (cyclistImage) {
+        cyclistImage.style.transform = `rotate(${nextRotation}deg)`;
+      }
       riderMarkersRef.current.get(riderId)?.style.setProperty(
         '--tracklab-explore-cyclist-rotation',
         `${nextRotation}deg`,
@@ -233,47 +238,64 @@ export function ExploreGoogle3DMapPanel({
       if (!visible.has(riderId)) {
         removeSceneElement(marker);
         riderMarkersRef.current.delete(riderId);
+        riderImagesRef.current.delete(riderId);
         riderBearingsRef.current.delete(riderId);
         riderRotationsRef.current.delete(riderId);
       }
     });
-    const Marker = library.Marker3DElement ?? library.MarkerElement;
+    const Marker = library.MarkerElement ?? library.Marker3DElement;
     const positions = exploreGroupPositions(group, route, routePoints);
     positions.forEach(({ rider, position }) => {
+      const routeHeading = exploreRouteHeading(
+        routePoints,
+        rider.distanceMeters,
+        route.distanceMeters,
+      );
       let marker = riderMarkersRef.current.get(rider.id);
       if (!marker && Marker) {
-        marker = new Marker({
+        marker = new Marker(library.MarkerElement ? {
+          altitudeMode: 'RELATIVE_TO_GROUND',
+          position: { ...position, altitude: 1.5 },
+          title: rider.name,
+        } : {
           altitudeMode: 'RELATIVE_TO_GROUND',
           drawsWhenOccluded: true,
           label: `P${rider.playerId}`,
           position: { ...position, altitude: 1.5 },
-          sizePreserved: true,
+          sizePreserved: false,
           title: rider.name,
           zIndex: 500 + rider.playerId,
         });
+        marker.style.zIndex = String(500 + rider.playerId);
         const cyclistImage = document.createElement('img');
         cyclistImage.alt = '';
         cyclistImage.height = exploreRoadCyclistMarkerSizePx;
         cyclistImage.src = exploreRoadCyclistIconUrl(rider.playerId);
-        cyclistImage.style.transform = 'rotate(var(--tracklab-explore-cyclist-rotation, 0deg))';
+        const initialRotation = exploreCyclistScreenRotation(
+          routeHeading,
+          map.heading ?? 0,
+        );
+        cyclistImage.style.transform = `rotate(${initialRotation}deg)`;
         cyclistImage.style.transformOrigin = 'center';
         cyclistImage.style.transition = 'transform 90ms linear';
         cyclistImage.style.willChange = 'transform';
         cyclistImage.width = exploreRoadCyclistMarkerSizePx;
-        const cyclistTemplate = document.createElement('template');
-        cyclistTemplate.content.append(cyclistImage);
-        marker.append(cyclistTemplate);
+        if (library.MarkerElement) {
+          marker.append(cyclistImage);
+        } else {
+          const cyclistTemplate = document.createElement('template');
+          cyclistTemplate.content.append(cyclistImage);
+          marker.append(cyclistTemplate);
+        }
         map.append(marker);
         riderMarkersRef.current.set(rider.id, marker);
+        riderImagesRef.current.set(rider.id, cyclistImage);
+        riderRotationsRef.current.set(rider.id, initialRotation);
       } else if (marker) {
         marker.position = { ...position, altitude: 1.5 };
         marker.title = rider.name;
       }
-      riderBearingsRef.current.set(rider.id, exploreRouteHeading(
-        routePoints,
-        rider.distanceMeters,
-        route.distanceMeters,
-      ));
+      riderBearingsRef.current.set(rider.id, routeHeading);
     });
     updateRiderRotations();
     if (positions.length === 0) {
@@ -299,9 +321,6 @@ export function ExploreGoogle3DMapPanel({
       route.distanceMeters,
     ) ?? positions[0].position;
     cameraTargetRef.current = center;
-    if (!cameraFollowEnabled) {
-      return;
-    }
     if (!cameraCenterRef.current) {
       cameraCenterRef.current = center;
       map.center = { ...center, altitude: 0 };
@@ -320,7 +339,7 @@ export function ExploreGoogle3DMapPanel({
   ]);
 
   useEffect(() => {
-    if (!cameraFollowEnabled || status !== 'ready') {
+    if (status !== 'ready') {
       return;
     }
     const center = mapRef.current?.center;
@@ -330,7 +349,7 @@ export function ExploreGoogle3DMapPanel({
   }, [cameraFollowEnabled, status]);
 
   useEffect(() => {
-    if (!cameraFollowEnabled || status !== 'ready') {
+    if (status !== 'ready') {
       return;
     }
     let frameRequest = 0;
@@ -345,11 +364,13 @@ export function ExploreGoogle3DMapPanel({
         const next = smoothExploreCameraPoint(current, target, elapsedMs);
         cameraCenterRef.current = next;
         map.center = { ...next, altitude: 0 };
-        map.heading = smoothExploreHeading(
-          map.heading ?? 0,
-          followTravelHeading ? travelHeadingRef.current : 0,
-          elapsedMs,
-        );
+        if (cameraFollowEnabled) {
+          map.heading = smoothExploreHeading(
+            map.heading ?? 0,
+            followTravelHeading ? travelHeadingRef.current : 0,
+            elapsedMs,
+          );
+        }
         updateRiderRotations();
         previousAt = now;
         lastUpdateAt = now;

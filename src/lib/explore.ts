@@ -147,8 +147,8 @@ export function smoothExploreHeading(
 }
 
 // The transparent road-cyclist artwork points toward the lower-left at 225°.
-// Rotate that artwork into the route bearing, then subtract the map heading so
-// the front wheel continues to point down the road when the camera turns.
+// Rotate that front wheel into the route bearing, then subtract the map heading
+// so it continues to point down the road when the camera turns.
 export function exploreCyclistScreenRotation(routeHeading: number, mapHeading: number) {
   const route = Number.isFinite(routeHeading) ? routeHeading : 0;
   const camera = Number.isFinite(mapHeading) ? mapHeading : 0;

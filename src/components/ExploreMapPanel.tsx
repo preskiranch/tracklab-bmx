@@ -44,7 +44,7 @@ type ExploreRiderMarker = {
 
 type ExploreMarkerRefs = Map<string, ExploreRiderMarker>;
 
-export const exploreRoadCyclistMarkerSizePx = 44;
+export const exploreRoadCyclistMarkerSizePx = 24;
 
 export function exploreRoadCyclistIconUrl(playerId: number) {
   return `/assets/explore/road-cyclist-p${Math.max(1, Math.min(4, Math.round(playerId)))}.png`;
@@ -426,9 +426,6 @@ export function ExploreMapPanel({
       route.distanceMeters,
     ) ?? riderCenter;
     cameraTargetRef.current = center;
-    if (!cameraFollowEnabled) {
-      return;
-    }
     if (!cameraCenterRef.current) {
       cameraCenterRef.current = center;
       map.moveCamera?.({ center });
@@ -460,7 +457,7 @@ export function ExploreMapPanel({
   }, [cameraFollowEnabled, followZoom, status]);
 
   useEffect(() => {
-    if (!cameraFollowEnabled || status !== 'ready') {
+    if (status !== 'ready') {
       return;
     }
     const center = mapRef.current?.getCenter?.()?.toJSON();
@@ -470,7 +467,7 @@ export function ExploreMapPanel({
   }, [cameraFollowEnabled, status]);
 
   useEffect(() => {
-    if (!cameraFollowEnabled || status !== 'ready') {
+    if (status !== 'ready') {
       return;
     }
 
@@ -502,7 +499,7 @@ export function ExploreMapPanel({
 
     frameRequest = window.requestAnimationFrame(updateCamera);
     return () => window.cancelAnimationFrame(frameRequest);
-  }, [cameraFollowEnabled, status]);
+  }, [status]);
 
   useEffect(() => {
     const map = mapRef.current;

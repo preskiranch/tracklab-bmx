@@ -212,9 +212,6 @@ export function ExploreAppleMapPanel({
       route.distanceMeters,
     ) ?? positions[0].position;
     cameraTargetRef.current = center;
-    if (!cameraFollowEnabled) {
-      return;
-    }
     if (!cameraCenterRef.current) {
       cameraCenterRef.current = center;
       map.setCenterAnimated?.(center, false);
@@ -234,7 +231,7 @@ export function ExploreAppleMapPanel({
   ]);
 
   useEffect(() => {
-    if (!cameraFollowEnabled || status !== 'ready') {
+    if (status !== 'ready') {
       return;
     }
     const center = mapRef.current?.center;
@@ -244,7 +241,7 @@ export function ExploreAppleMapPanel({
   }, [cameraFollowEnabled, status]);
 
   useEffect(() => {
-    if (!cameraFollowEnabled || status !== 'ready') {
+    if (status !== 'ready') {
       return;
     }
     let frameRequest = 0;
@@ -262,11 +259,13 @@ export function ExploreAppleMapPanel({
         if (!map.setCenterAnimated) {
           map.center = next;
         }
-        map.rotation = smoothExploreHeading(
-          map.rotation ?? 0,
-          followTravelHeading ? travelHeadingRef.current : 0,
-          elapsedMs,
-        );
+        if (cameraFollowEnabled) {
+          map.rotation = smoothExploreHeading(
+            map.rotation ?? 0,
+            followTravelHeading ? travelHeadingRef.current : 0,
+            elapsedMs,
+          );
+        }
         previousAt = now;
         lastUpdateAt = now;
       }

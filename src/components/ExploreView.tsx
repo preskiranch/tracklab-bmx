@@ -1594,15 +1594,15 @@ export function ExploreView({
                 <button
                   className={`explore-map-labels-toggle${cameraFollowEnabled ? '' : ' active'}`}
                   type="button"
-                  aria-label={cameraFollowEnabled ? 'Enable free camera' : 'Resume rider follow'}
+                  aria-label={cameraFollowEnabled ? 'Enable free camera' : 'Resume automatic camera'}
                   aria-pressed={!cameraFollowEnabled}
                   title={cameraFollowEnabled
-                    ? 'Drag to pan, pinch to zoom, and twist to turn the map'
-                    : 'Return the camera to automatic rider follow'}
+                    ? 'Adjust zoom, tilt, and heading while the camera keeps following the riders'
+                    : 'Return zoom and heading to automatic rider tracking'}
                   onClick={() => setCameraFollowEnabled((enabled) => !enabled)}
                 >
                   <Compass size={18} />
-                  <span>{cameraFollowEnabled ? 'Free camera' : 'Follow riders'}</span>
+                  <span>{cameraFollowEnabled ? 'Free camera' : 'Auto camera'}</span>
                 </button>
                 <div className="explore-toolbar-toggle" role="group" aria-label="Map orientation">
                   <button
