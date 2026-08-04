@@ -645,10 +645,10 @@ async function exploreElevationForRoute(encodedPolyline, distanceMeters, signal)
     const status = sanitizeText(error?.code, 'unavailable', 32);
     exploreElevationCache.set(cacheKey, {
       profile: null,
-      expiresAt: Date.now() + 15 * 1000,
+      expiresAt: Date.now() + 10 * 1000,
     });
     cloudTelemetry.increment('tracklab_explore_elevation_requests_total', { status });
-    console.warn(`Explore elevation unavailable (${status}).`);
+    console.warn(`Explore elevation unavailable (${status}): ${sanitizeText(error?.message, 'Unknown provider error', 220)}`);
     return null;
   }
 }

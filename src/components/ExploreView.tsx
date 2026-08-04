@@ -94,6 +94,7 @@ import { ExploreMapPanel } from './ExploreMapPanel';
 import { ExploreRouteMapPicker } from './ExploreRouteMapPicker';
 import { ExploreStreetViewOverlay } from './ExploreStreetViewOverlay';
 import { RiderAvatar } from './RiderAvatar';
+import './ExploreView.css';
 
 type ExploreViewProps = {
   developerMode: boolean;
@@ -613,7 +614,6 @@ export function ExploreView({
 
     let controller: AbortController | null = null;
     let retryTimer: number | null = null;
-    let retryDelayMs = 20_000;
     let cancelled = false;
     setRecoveredElevation(null);
     const recoverElevation = () => {
@@ -646,9 +646,8 @@ export function ExploreView({
           setElevationRecoveryStatus('error');
           retryTimer = window.setTimeout(() => {
             retryTimer = null;
-            retryDelayMs = Math.min(60_000, retryDelayMs * 2);
             recoverElevation();
-          }, retryDelayMs);
+          }, 15_000);
         });
     };
     recoverElevation();
@@ -1952,7 +1951,7 @@ export function ExploreView({
                       : 'Set air lever to minimum';
                   const gradeStatus = elevationRecoveryStatus === 'loading'
                     ? 'Grade loading…'
-                    : 'Grade unavailable · Retrying automatically';
+                    : 'Grade unavailable · Retrying every 15s';
                   return (
                     <article style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
                       {rider.photoUrl

@@ -11,7 +11,9 @@ describe('cloud Explore elevation sampling', () => {
     expect(exploreElevationSampleCount(1)).toBe(2);
     expect(exploreElevationSampleCount(1_000)).toBe(51);
     expect(exploreElevationSampleCount(1_000_000)).toBe(256);
-    expect(exploreElevationPathParameter('_p~iF~ps|U')).toBe('enc:_p~iF~ps|U');
+    expect(exploreElevationPathParameter('_p~iF~ps|U_ulLnnqC_mqNvxq`@')).toBe(
+      '38.50000,-120.20000|40.70000,-120.95000|43.25200,-126.45300',
+    );
   });
 
   it('normalizes an evenly spaced, smoothed route profile', () => {
@@ -38,12 +40,14 @@ describe('cloud Explore elevation sampling', () => {
     const profile = await fetchExploreElevationProfile({
       apiKey: 'server-secret-key',
       distanceMeters: 100,
-      encodedPolyline: '_p~iF~ps|U',
+      encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
       fetchImpl,
     });
 
     const requestedUrl = String(fetchImpl.mock.calls[0]?.[0]);
-    expect(requestedUrl).toContain('path=enc%3A_p%7EiF%7Eps%7CU');
+    expect(decodeURIComponent(requestedUrl)).toContain(
+      'path=38.50000,-120.20000|40.70000,-120.95000|43.25200,-126.45300',
+    );
     expect(requestedUrl).toContain('samples=6');
     expect(requestedUrl).toContain('key=server-secret-key');
     expect(JSON.stringify(profile)).not.toContain('server-secret-key');

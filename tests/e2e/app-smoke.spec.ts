@@ -1044,6 +1044,40 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   expect(destinationBox).not.toBeNull();
   expect(zoomOutBox).not.toBeNull();
   expect(destinationBox?.x ?? 0).toBeLessThan(zoomOutBox?.x ?? 0);
+  const fourWayLayout = await page.evaluate(() => {
+    const grid = document.querySelector<HTMLElement>('.explore-map-grid');
+    const toolbar = document.querySelector<HTMLElement>('.explore-camera-toolbar')
+      ?.getBoundingClientRect();
+    const riderStrip = document.querySelector<HTMLElement>('.explore-rider-strip')
+      ?.getBoundingClientRect();
+    if (!grid) {
+      throw new Error('Explore map grid was not rendered.');
+    }
+    const mapGrid = grid.getBoundingClientRect();
+    grid.classList.add('four-way');
+    const fourWayStyle = window.getComputedStyle(grid);
+    const columns = fourWayStyle.gridTemplateColumns.split(' ').map(Number.parseFloat);
+    const rows = fourWayStyle.gridTemplateRows.split(' ').map(Number.parseFloat);
+    grid.classList.remove('four-way');
+    return {
+      columns,
+      rows,
+      mapBottom: mapGrid.bottom,
+      mapTop: mapGrid.top,
+      riderStripHeight: riderStrip?.height ?? 0,
+      riderStripTop: riderStrip?.top ?? 0,
+      toolbarBottom: toolbar?.bottom ?? 0,
+    };
+  });
+  expect(fourWayLayout.columns).toHaveLength(2);
+  expect(fourWayLayout.rows).toHaveLength(2);
+  expect(Math.max(...fourWayLayout.columns) - Math.min(...fourWayLayout.columns))
+    .toBeLessThanOrEqual(1);
+  expect(Math.max(...fourWayLayout.rows) - Math.min(...fourWayLayout.rows))
+    .toBeLessThanOrEqual(1);
+  expect(fourWayLayout.mapTop).toBeGreaterThanOrEqual(fourWayLayout.toolbarBottom - 2);
+  expect(fourWayLayout.mapBottom).toBeLessThanOrEqual(fourWayLayout.riderStripTop);
+  expect(fourWayLayout.riderStripHeight).toBeLessThanOrEqual(96);
   await expect(page.getByRole('button', { name: 'Reset', exact: true })).toBeHidden();
   expect(await page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   const followZoom = page.getByLabel('Follow camera zoom');

@@ -1,7 +1,6 @@
 const maximumElevationSamples = 256;
 const targetElevationSpacingMeters = 20;
-const maximumEncodedPathLength = 12_000;
-const maximumFallbackPathPoints = 128;
+const maximumElevationPathPoints = 128;
 
 export function exploreElevationSampleCount(distanceMeters) {
   const distance = Number.isFinite(distanceMeters) ? Math.max(1, distanceMeters) : 1;
@@ -41,21 +40,21 @@ export function decodeExplorePolyline(encodedPolyline) {
   return points;
 }
 
-function fallbackElevationPath(encodedPolyline) {
+function sampledElevationPath(encodedPolyline) {
   const points = decodeExplorePolyline(encodedPolyline);
-  if (points.length <= maximumFallbackPathPoints) {
+  if (points.length <= maximumElevationPathPoints) {
     return points;
   }
-  return Array.from({ length: maximumFallbackPathPoints }, (_, index) => (
-    points[Math.round(index / (maximumFallbackPathPoints - 1) * (points.length - 1))]
+  return Array.from({ length: maximumElevationPathPoints }, (_, index) => (
+    points[Math.round(index / (maximumElevationPathPoints - 1) * (points.length - 1))]
   ));
 }
 
 export function exploreElevationPathParameter(encodedPolyline) {
-  if (encodedPolyline.length <= maximumEncodedPathLength) {
-    return `enc:${encodedPolyline}`;
-  }
-  return fallbackElevationPath(encodedPolyline)
+  // Google Routes polylines can contain URL-sensitive characters or enough
+  // detail to make an encoded Elevation API path fail with HTTP 400. A bounded
+  // coordinate path is accepted by the same API and preserves the road shape.
+  return sampledElevationPath(encodedPolyline)
     .map((point) => `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`)
     .join('|');
 }
@@ -122,7 +121,10 @@ export async function fetchExploreElevationProfile({
   const payload = await response.json().catch(() => null);
   if (!response.ok || payload?.status !== 'OK') {
     const status = typeof payload?.status === 'string' ? payload.status : `HTTP_${response.status}`;
-    const error = new Error(`Google Elevation request failed (${status}).`);
+    const providerMessage = typeof payload?.error_message === 'string'
+      ? ` ${payload.error_message}`
+      : '';
+    const error = new Error(`Google Elevation request failed (${status}).${providerMessage}`);
     error.code = status;
     throw error;
   }
