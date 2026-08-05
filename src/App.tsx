@@ -166,7 +166,11 @@ import {
   readStoredRaceViewPreferences,
   writeStoredRaceViewPreferences,
 } from './lib/raceViewPreferences';
-import { monitorBikeName, reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
+import {
+  customBikeDisplayName,
+  monitorBikeName,
+  reconcileClonedBikeProfileNames,
+} from './lib/bikeProfileIdentity';
 import {
   bikeSampleIsLive,
   connectedDeviceFromBikeSample,
@@ -2262,14 +2266,16 @@ export default function App() {
       const profile = profileByDevice.get(deviceId);
       const connectedDevice = connectedBikeDeviceById.get(deviceId);
       const sample = connectedBikeSamples.get(deviceId);
+      const deviceLabel = connectedDevice?.label ?? sample?.label;
+      const customProfileName = profile && customBikeDisplayName(profile);
 
       return {
         id: visual.id,
-        name: profile?.name ?? defaultBikeName(deviceId),
+        name: customProfileName ?? monitorBikeName(deviceId, deviceLabel),
         colorName: visual.colorName,
         accent: visual.accent,
         deviceId,
-        deviceLabel: connectedDevice?.label ?? sample?.label,
+        deviceLabel,
         deviceSource: connectedDevice?.source ?? sample?.source,
       };
     }),

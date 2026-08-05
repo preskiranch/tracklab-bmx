@@ -1,6 +1,6 @@
 import { type CSSProperties, type FormEvent, useMemo, useState } from 'react';
 import { Trash2, UserPlus, Users } from 'lucide-react';
-import { customBikeDisplayName, monitorIdLastThree } from '../lib/bikeProfileIdentity';
+import { customBikeDisplayName, wattbikeMonitorLastThree } from '../lib/bikeProfileIdentity';
 import { normalizeStudioRiderName } from '../lib/studioRiders';
 import type { PlayerSlot, StudioRider, StudioRiderAssignments } from '../types';
 import { RiderAvatar, RiderPhotoEditor } from './RiderAvatar';
@@ -98,7 +98,9 @@ export function StudioRaceEntry({
           {players.map((player) => {
             const deviceId = player.deviceId;
             const entered = deviceId != null && enteredDeviceIds.includes(deviceId);
-            const monitorId = deviceId == null ? null : monitorIdLastThree(deviceId);
+            const monitorId = deviceId == null
+              ? null
+              : wattbikeMonitorLastThree(player.deviceLabel, deviceId);
             const customBikeName = customBikeDisplayName(player);
             const entryLabel = monitorId == null
               ? 'unassigned monitor'

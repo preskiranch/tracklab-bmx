@@ -10,8 +10,8 @@ function defaultBikeName(deviceId: number) {
   return monitorBikeName(deviceId);
 }
 
-export function monitorBikeName(deviceId: number) {
-  return `Bike ${monitorIdLastThree(deviceId)}`;
+export function monitorBikeName(deviceId: number, deviceLabel?: string) {
+  return `Bike ${wattbikeMonitorLastThree(deviceLabel, deviceId)}`;
 }
 
 export function reconcileClonedBikeProfileNames(
@@ -77,6 +77,13 @@ export function distinctBikeDisplayName(bike: NamedBike, connectedBikes: NamedBi
 
 export function monitorIdLastThree(deviceId: number) {
   return String(Math.max(0, Math.trunc(deviceId))).slice(-3).padStart(3, '0');
+}
+
+export function wattbikeMonitorLastThree(deviceLabel: string | undefined, fallbackDeviceId: number) {
+  const pmDigits = deviceLabel?.match(/(?:wattbike\s*pm|\bpm)\D*(\d{3,})/i)?.[1];
+  return pmDigits
+    ? pmDigits.slice(-3).padStart(3, '0')
+    : monitorIdLastThree(fallbackDeviceId);
 }
 
 export function customBikeDisplayName(bike: NamedBike) {

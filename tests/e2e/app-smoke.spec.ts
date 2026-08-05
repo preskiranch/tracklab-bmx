@@ -3625,11 +3625,13 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
 
 test('connected bike names remain bound to their monitor IDs after reload', async ({ page }) => {
   const deviceIds = [43853, 58701];
+  const wattbikePmLabels = ['WattbikePM25043950', 'WattbikePM25043851'];
   const bridge = await createMockBikeBridge(deviceIds);
   const sampleTimer = setInterval(() => {
     deviceIds.forEach((deviceId, index) => {
       bridge.broadcast(mockBikeSample({
         deviceId,
+        label: wattbikePmLabels[index],
         watts: 180 + index * 20,
         cadence: 64 + index * 4,
         speedKph: 0,
@@ -3691,13 +3693,13 @@ test('connected bike names remain bound to their monitor IDs after reload', asyn
     const raceEntry = page.locator('.workflow-race-entry');
     await expect(raceEntry.getByText('Bike 43853', { exact: true })).toHaveCount(0);
     await expect(raceEntry.getByText('Bike 58701Watt', { exact: true })).toHaveCount(0);
-    await expect(raceEntry.getByText('853', { exact: true })).toBeVisible();
-    await expect(raceEntry.getByText('701', { exact: true })).toBeVisible();
-    await expect(raceEntry.getByText('853', { exact: true })).toHaveCSS('font-size', '18px');
+    await expect(raceEntry.getByText('950', { exact: true })).toBeVisible();
+    await expect(raceEntry.getByText('851', { exact: true })).toBeVisible();
+    await expect(raceEntry.getByText('950', { exact: true })).toHaveCSS('font-size', '18px');
     await expect(raceEntry.locator('.race-entry-monitor-id').first()).toHaveCSS('display', 'grid');
 
-    await page.getByRole('button', { name: /Enter monitor ID 853 in live race/i }).click();
-    await expect(page.locator('.rider-strip .rider-stat').filter({ hasText: 'Bike 853' })).toBeVisible();
+    await page.getByRole('button', { name: /Enter monitor ID 950 in live race/i }).click();
+    await expect(page.locator('.rider-strip .rider-stat').filter({ hasText: 'Bike 950' })).toBeVisible();
 
     await page.getByLabel('Name for player 1').fill('Gate Trainer');
     await page.getByLabel('Name for player 2').fill('Rhythm Trainer');

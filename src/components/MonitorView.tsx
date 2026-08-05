@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Bike, Gauge, RadioTower, Signal, Zap } from 'lucide-react';
 import { liveBikeTimeoutMs } from '../data';
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
+import { wattbikeMonitorLastThree } from '../lib/bikeProfileIdentity';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type { BikeSample, PlayerSlot, SpeedUnit } from '../types';
 
@@ -218,6 +219,9 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
             const metrics = monitorMetrics(sample, now);
             const sprintResult = player.deviceId == null ? undefined : sprintResults[player.deviceId];
             const deviceLabel = player.deviceLabel ?? sample?.label ?? 'Wattbike monitor';
+            const monitorId = player.deviceId == null
+              ? null
+              : wattbikeMonitorLastThree(deviceLabel, player.deviceId);
 
             return (
               <section
@@ -231,7 +235,7 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
                   </span>
                   <div>
                     <h3>{player.name}</h3>
-                    <p className="monitor-bike-id">{player.deviceId ? `Monitor ID ${player.deviceId}` : 'Unassigned'}</p>
+                    <p className="monitor-bike-id">{monitorId ? `Monitor ID ${monitorId}` : 'Unassigned'}</p>
                     <small>{deviceLabel}</small>
                   </div>
                   <span className="monitor-live">

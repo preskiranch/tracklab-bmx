@@ -5,6 +5,7 @@ import {
   monitorBikeName,
   monitorIdLastThree,
   reconcileClonedBikeProfileNames,
+  wattbikeMonitorLastThree,
 } from '../../src/lib/bikeProfileIdentity';
 import type { BikeProfile } from '../../src/types';
 
@@ -53,6 +54,13 @@ describe('bike profile identity', () => {
     expect(monitorIdLastThree(58701)).toBe('701');
     expect(monitorIdLastThree(7)).toBe('007');
     expect(monitorBikeName(701262)).toBe('Bike 262');
+  });
+
+  it('uses the physical Wattbike PM identity instead of the connector device ID', () => {
+    expect(wattbikeMonitorLastThree('WattbikePM25043950', 733112)).toBe('950');
+    expect(wattbikeMonitorLastThree('Wattbike PM #25043950', 733112)).toBe('950');
+    expect(wattbikeMonitorLastThree('Connected Wattbike', 733112)).toBe('112');
+    expect(monitorBikeName(733112, 'WattbikePM25043950')).toBe('Bike 950');
   });
 
   it('hides generated bike-number names but preserves intentional names', () => {
