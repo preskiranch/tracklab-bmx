@@ -7,7 +7,11 @@ function normalizedName(value: string) {
 }
 
 function defaultBikeName(deviceId: number) {
-  return `Bike ${deviceId}`;
+  return monitorBikeName(deviceId);
+}
+
+export function monitorBikeName(deviceId: number) {
+  return `Bike ${monitorIdLastThree(deviceId)}`;
 }
 
 export function reconcileClonedBikeProfileNames(
@@ -67,7 +71,7 @@ export function distinctBikeDisplayName(bike: NamedBike, connectedBikes: NamedBi
   ).length;
 
   return duplicateCount > 1 && bike.deviceId != null
-    ? `${bike.deviceId} · ${bike.name}`
+    ? `${monitorIdLastThree(bike.deviceId)} · ${bike.name}`
     : bike.name;
 }
 

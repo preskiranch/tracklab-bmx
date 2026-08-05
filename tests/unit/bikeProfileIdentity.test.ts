@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   customBikeDisplayName,
   distinctBikeDisplayName,
+  monitorBikeName,
   monitorIdLastThree,
   reconcileClonedBikeProfileNames,
 } from '../../src/lib/bikeProfileIdentity';
@@ -24,7 +25,7 @@ describe('bike profile identity', () => {
       profile(58701, 'Bike 58701Watt'),
     ], [43853, 58701]);
 
-    expect(repaired.find((item) => item.deviceId === 43853)?.name).toBe('Bike 43853');
+    expect(repaired.find((item) => item.deviceId === 43853)?.name).toBe('Bike 853');
     expect(repaired.find((item) => item.deviceId === 58701)?.name).toBe('Bike 58701Watt');
   });
 
@@ -43,14 +44,15 @@ describe('bike profile identity', () => {
       { deviceId: 58701, name: 'Studio Bike' },
     ];
 
-    expect(distinctBikeDisplayName(bikes[0], bikes)).toBe('43853 · Studio Bike');
-    expect(distinctBikeDisplayName(bikes[1], bikes)).toBe('58701 · Studio Bike');
+    expect(distinctBikeDisplayName(bikes[0], bikes)).toBe('853 · Studio Bike');
+    expect(distinctBikeDisplayName(bikes[1], bikes)).toBe('701 · Studio Bike');
   });
 
   it('uses only the last three monitor digits in compact Race Entry cards', () => {
     expect(monitorIdLastThree(701262)).toBe('262');
     expect(monitorIdLastThree(58701)).toBe('701');
     expect(monitorIdLastThree(7)).toBe('007');
+    expect(monitorBikeName(701262)).toBe('Bike 262');
   });
 
   it('hides generated bike-number names but preserves intentional names', () => {

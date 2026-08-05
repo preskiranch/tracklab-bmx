@@ -166,7 +166,7 @@ import {
   readStoredRaceViewPreferences,
   writeStoredRaceViewPreferences,
 } from './lib/raceViewPreferences';
-import { reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
+import { monitorBikeName, reconcileClonedBikeProfileNames } from './lib/bikeProfileIdentity';
 import {
   bikeSampleIsLive,
   connectedDeviceFromBikeSample,
@@ -990,7 +990,7 @@ function isPlayerColorName(value: unknown): value is PlayerSlot['colorName'] {
 }
 
 function defaultBikeName(deviceId: number) {
-  return `Bike ${deviceId}`;
+  return monitorBikeName(deviceId);
 }
 
 function normalizeBikeName(value: unknown) {
@@ -998,7 +998,9 @@ function normalizeBikeName(value: unknown) {
 }
 
 function isDefaultBikeProfileName(profile: Pick<BikeProfile, 'deviceId' | 'name'>) {
-  return normalizeBikeName(profile.name).toLowerCase() === defaultBikeName(profile.deviceId).toLowerCase();
+  const name = normalizeBikeName(profile.name).toLowerCase();
+  return name === defaultBikeName(profile.deviceId).toLowerCase()
+    || name === `bike ${profile.deviceId}`.toLowerCase();
 }
 
 function createBikeProfile(deviceId: number, index: number, name = defaultBikeName(deviceId)): BikeProfile {
@@ -1024,7 +1026,10 @@ function normalizeBikeProfile(value: unknown, index: number): BikeProfile | null
   }
 
   const visual = profileVisual(index);
-  const name = normalizeBikeName(profile.name) || defaultBikeName(deviceId);
+  const storedName = normalizeBikeName(profile.name);
+  const name = !storedName || isDefaultBikeProfileName({ deviceId, name: storedName })
+    ? defaultBikeName(deviceId)
+    : storedName;
 
   return {
     deviceId,

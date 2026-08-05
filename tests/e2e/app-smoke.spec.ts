@@ -3694,6 +3694,10 @@ test('connected bike names remain bound to their monitor IDs after reload', asyn
     await expect(raceEntry.getByText('853', { exact: true })).toBeVisible();
     await expect(raceEntry.getByText('701', { exact: true })).toBeVisible();
     await expect(raceEntry.getByText('853', { exact: true })).toHaveCSS('font-size', '18px');
+    await expect(raceEntry.locator('.race-entry-monitor-id').first()).toHaveCSS('display', 'grid');
+
+    await page.getByRole('button', { name: /Enter monitor ID 853 in live race/i }).click();
+    await expect(page.locator('.rider-strip .rider-stat').filter({ hasText: 'Bike 853' })).toBeVisible();
 
     await page.getByLabel('Name for player 1').fill('Gate Trainer');
     await page.getByLabel('Name for player 2').fill('Rhythm Trainer');
