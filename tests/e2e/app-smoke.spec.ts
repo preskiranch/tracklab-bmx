@@ -1383,6 +1383,112 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(destinationInput).toBeFocused();
 });
 
+test('live Explore ride survives a temporary Wattbike sample gap', async ({ page }) => {
+  const deviceId = 733112;
+  const bridge = await createMockBikeBridge([deviceId]);
+  const authUser = {
+    id: 'live-explore-racer',
+    profileKey: 'user:live-explore-racer',
+    email: 'live-explore@tracklab.test',
+    name: 'Live Explore Rider',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 1, updatedAt: Date.now() },
+  };
+  let sampleTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+    bridge.broadcast(mockBikeSample({
+      deviceId,
+      label: 'WattbikePM25043950',
+      watts: 260,
+      cadence: 84,
+      speedKph: 0,
+    }));
+  }, 120);
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/explore/route', async (route) => {
+      const request = route.request().postDataJSON() as {
+        origin: { lat: number; lng: number };
+        destination: { lat: number; lng: number };
+        originLabel: string;
+        destinationLabel: string;
+      };
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          route: {
+            id: 'EXPLORE-live-sample-gap',
+            origin: request.origin,
+            destination: request.destination,
+            originLabel: request.originLabel,
+            destinationLabel: request.destinationLabel,
+            travelMode: 'bicycle',
+            distanceMeters: 10_000,
+            durationSeconds: 1_800,
+            encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+            elevationSamples: [
+              { distanceMeters: 0, elevationMeters: 10 },
+              { distanceMeters: 10_000, elevationMeters: 10 },
+            ],
+            elevationGainMeters: 0,
+            elevationLossMeters: 0,
+            createdAt: Date.now(),
+          },
+        }),
+      });
+    });
+    await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Open App' }).click();
+    await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Starting location', exact: true }).fill('38.5, -120.2');
+    await page.getByRole('textbox', { name: 'Destination', exact: true }).fill('43.252, -126.453');
+    await page.getByRole('button', { name: 'Build Explore the World route' }).click();
+    await expect(page.locator('.explore-route-summary')).toBeVisible();
+    await page.getByRole('button', { name: 'Start Explore the World ride' }).click();
+    await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
+    await expect(page.locator('.explore-rider-strip article')).toHaveCount(1);
+
+    clearInterval(sampleTimer);
+    sampleTimer = null;
+    await page.waitForTimeout(5_500);
+
+    await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
+    await expect(page.locator('.explore-rider-strip article')).toHaveCount(1);
+    await expect(page.locator('.platform-shell')).toHaveClass(/explore-fullscreen/);
+
+    sampleTimer = setInterval(() => {
+      bridge.broadcast(mockBikeSample({
+        deviceId,
+        label: 'WattbikePM25043950',
+        watts: 260,
+        cadence: 84,
+        speedKph: 0,
+      }));
+    }, 120);
+    await expect.poll(async () => (
+      page.locator('.explore-rider-strip article').first().textContent()
+    ), { timeout: 8_000 }).toMatch(/[1-9]\d*(?:\.\d)? MPH/);
+    await expect(page.getByRole('button', { name: 'Pause ride' })).toBeVisible();
+  } finally {
+    if (sampleTimer) {
+      clearInterval(sampleTimer);
+    }
+    await bridge.close();
+  }
+});
+
 test('Windows Bluetooth pairing widens discovery and stays pending until TrackLab verifies a bike connection', async ({ page }) => {
   const authUser = {
     id: 'bluetooth-pairing-racer',

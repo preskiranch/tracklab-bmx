@@ -72,6 +72,7 @@ export function useExploreRide({
   const [riders, setRiders] = useState<ExploreRider[]>(() => initialExploreRiders(clientId, players, route));
   const statusRef = useRef(status);
   const playersRef = useRef(players);
+  const ridePlayersRef = useRef(players);
   const samplesRef = useRef(samplesByDevice);
   const routeRef = useRef(route);
   const demoModeRef = useRef(demoMode);
@@ -94,7 +95,8 @@ export function useExploreRide({
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = 0;
     activeElapsedMsRef.current = 0;
-    setRiders(initialExploreRiders(clientId, playersRef.current, routeRef.current));
+    ridePlayersRef.current = playersRef.current;
+    setRiders(initialExploreRiders(clientId, ridePlayersRef.current, routeRef.current));
     setStatus('ready');
   }, [clientId]);
 
@@ -105,7 +107,8 @@ export function useExploreRide({
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = performance.now();
     activeElapsedMsRef.current = Math.max(0, Date.now() - startedAt);
-    setRiders(initialExploreRiders(clientId, playersRef.current, routeRef.current));
+    ridePlayersRef.current = playersRef.current;
+    setRiders(initialExploreRiders(clientId, ridePlayersRef.current, routeRef.current));
     setStatus('riding');
     return true;
   }, [clientId]);
@@ -125,7 +128,15 @@ export function useExploreRide({
 
   useEffect(() => {
     reset();
-  }, [playerSignature, reset, route?.id]);
+  }, [reset, route?.id]);
+
+  useEffect(() => {
+    if (statusRef.current !== 'ready') {
+      return;
+    }
+    ridePlayersRef.current = playersRef.current;
+    setRiders(initialExploreRiders(clientId, ridePlayersRef.current, routeRef.current));
+  }, [clientId, playerSignature]);
 
   useEffect(() => {
     if (status !== 'riding') {
@@ -148,7 +159,7 @@ export function useExploreRide({
       const exploreElapsedSeconds = activeElapsedMsRef.current / 1_000;
 
       setRiders((current) => current.map((rider) => {
-        const player = playersRef.current.find((item) => item.id === rider.playerId);
+        const player = ridePlayersRef.current.find((item) => item.id === rider.playerId);
         const sample = player?.deviceId == null ? undefined : samplesRef.current.get(player.deviceId);
         const sampleIsFresh = Boolean(sample && now - sample.at <= exploreSampleFreshMs);
         const demoMotion = demoModeRef.current
