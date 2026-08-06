@@ -438,4 +438,43 @@ describe('race physics input gating', () => {
     )[0];
     expect(result).toEqual(riders[0]);
   });
+
+  it('finishes only when the front tire reaches the exact finish distance', () => {
+    const beforeLine = {
+      ...createInitialRiders([player])[0],
+      distance: 399.3,
+      velocity: 1,
+    };
+    const staged = stepRiders(
+      [beforeLine],
+      [player],
+      new Map(),
+      0.1,
+      9_000,
+      400,
+      {},
+      [],
+      [],
+      10_000,
+    )[0];
+
+    expect(staged.distance).toBeLessThan(400);
+    expect(staged.finishedAt).toBeNull();
+
+    const touchingLine = stepRiders(
+      [{ ...staged, distance: 399.95, velocity: 1 }],
+      [player],
+      new Map(),
+      0.1,
+      9_100,
+      400,
+      {},
+      [],
+      [],
+      10_100,
+    )[0];
+
+    expect(touchingLine.distance).toBe(400);
+    expect(touchingLine.finishedAt).not.toBeNull();
+  });
 });

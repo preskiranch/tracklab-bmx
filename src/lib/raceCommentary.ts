@@ -74,6 +74,7 @@ export type RaceCommentaryEvent = {
   battleState: RaceCommentaryBattleState;
   closeBattles: RaceCommentaryCloseBattleFact[];
   pedalReferenceAllowed: boolean;
+  straightSprint?: boolean;
   riders: RaceCommentaryRiderFact[];
 };
 
@@ -121,6 +122,7 @@ export type RaceCommentarySnapshot = {
   riders: RiderState[];
   zones: TrackZone[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
+  straightSprint: boolean;
 };
 
 export type RaceCommentaryTracker = {
@@ -249,6 +251,7 @@ function eventFor(
     battleState: battleStateForFacts(facts),
     closeBattles: closeBattlesForFacts(facts),
     pedalReferenceAllowed: false,
+    straightSprint: snapshot.straightSprint,
     riders: facts,
     ...extra,
   };
@@ -1146,7 +1149,7 @@ function localCommentaryCandidates(
   const focusedBattleChaser = focusedBattle
     ? event.riders.find((rider) => rider.playerId === focusedBattle.behindPlayerId)
     : undefined;
-  const phaseOptions = phasePhrases[event.coursePhase];
+  const phaseOptions = phasePhrases[event.straightSprint ? 'last-straight' : event.coursePhase];
 
   return Array.from({ length: 72 }, (_, variant) => {
     const phase = commentaryChoice(
@@ -1277,7 +1280,7 @@ function localCommentaryCandidates(
       line = `${leader.name} ${action}${second ? `; ${second.name} ${commentaryChoice(chaseActions, event, recentLines, raceLines, variant, 'pro-chase')}` : ''}.`;
     } else if (event.kind === 'final-push' && leader) {
       const finalHook = commentaryChoice(
-        ['Final charge', 'The stripe is coming', 'The race turns for home', 'Everything to the line'],
+        ['Final charge', 'The stripe is coming', 'One last drive', 'Everything to the line'],
         event,
         recentLines,
         raceLines,

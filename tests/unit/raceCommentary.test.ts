@@ -68,6 +68,7 @@ function snapshot(riders: RiderState[], raceState: RaceCommentarySnapshot['raceS
       type: 'pedal' as const,
     }],
     reactionTimesByPlayer: {},
+    straightSprint: false,
   };
 }
 
@@ -575,6 +576,30 @@ describe('race commentary event detection', () => {
       coursePhase: 'turn-one',
       pedalReferenceAllowed: false,
     });
+  });
+
+  it('uses obstacle-free play-by-play throughout a straight sprint', () => {
+    const tracker = createRaceCommentaryTracker();
+    const sprintSnapshot = (distance: number): RaceCommentarySnapshot => ({
+      ...snapshot([rider(1, distance), rider(2, Math.max(0, distance - 0.5))]),
+      trackName: 'New Hampshire Drag Strip',
+      zones: [],
+      straightSprint: true,
+    });
+    const events = [
+      ...detectRaceCommentaryEvents(tracker, sprintSnapshot(0), 1_000),
+      ...detectRaceCommentaryEvents(tracker, sprintSnapshot(1), 1_100),
+      ...detectRaceCommentaryEvents(tracker, sprintSnapshot(70), 2_000),
+      ...detectRaceCommentaryEvents(tracker, sprintSnapshot(170), 3_000),
+      ...detectRaceCommentaryEvents(tracker, sprintSnapshot(260), 4_000),
+    ];
+    const lines = events.map((event) => localCommentaryLine(event));
+
+    expect(events.every((event) => event.straightSprint)).toBe(true);
+    expect(lines.join(' ')).toMatch(/sprint|drag strip|line|stripe/i);
+    expect(lines.join(' ')).not.toMatch(
+      /first straight|turn|corner|berm|rhythm|rollers?|obstacles?|pedal zones?|pro set/i,
+    );
   });
 
   it('fills quiet stretches with current live race updates and resets after real action', () => {

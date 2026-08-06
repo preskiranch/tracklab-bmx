@@ -32,7 +32,6 @@ const thirtyFootSplitMeters = 30 * 0.3048;
 const metersPerSecondPerMph = 0.44704;
 const proSplitMinimumMps = proSplitMinimumMph * metersPerSecondPerMph;
 const proSplitPenaltyMps = 1 * metersPerSecondPerMph;
-const finishToleranceMeters = 0.75;
 
 export type BranchChoicesByPlayer = Partial<Record<PlayerSlot['id'], SplitBranchChoice>>;
 
@@ -367,10 +366,8 @@ export function stepRiders(
 
     const nextDistance = previousDistance + settledVelocity * dt;
     const crossedFinish = previousDistance < raceLengthMeters
-      && nextDistance >= raceLengthMeters - finishToleranceMeters;
-    const distance = crossedFinish || nextDistance >= raceLengthMeters
-      ? raceLengthMeters
-      : Math.min(raceLengthMeters, nextDistance);
+      && nextDistance >= raceLengthMeters;
+    const distance = nextDistance >= raceLengthMeters ? raceLengthMeters : nextDistance;
     const endZoneContext = zoneDriveContext(
       trackZones,
       distance,
@@ -446,7 +443,7 @@ export function stepRiders(
     }
 
     const finishedAt = crossedFinish
-      ? interpolateSplitTimeMs(previousDistance, Math.max(nextDistance, raceLengthMeters), raceLengthMeters, dt, elapsedMs)
+      ? interpolateSplitTimeMs(previousDistance, nextDistance, raceLengthMeters, dt, elapsedMs)
       : distance >= raceLengthMeters
         ? elapsedMs
         : null;

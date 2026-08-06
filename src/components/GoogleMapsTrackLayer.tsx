@@ -149,7 +149,7 @@ const riderRigBaseByColor: Record<PlayerSlot['colorName'], string> = {
   blue: '/assets/rider-blue-rig-base.png',
   yellow: '/assets/rider-yellow-rig-base.png',
 };
-const riderFrontTireInset = 1;
+const riderFrontTireInset = 2.5;
 const riderGroundContactInset = 1;
 const riderLaneSpacingMeters = 1.1;
 const riderLaneMaxSpreadMeters = 4.4;

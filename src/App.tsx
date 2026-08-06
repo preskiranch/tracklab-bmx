@@ -2674,6 +2674,7 @@ export default function App() {
     ghostLaps: availableGhostLaps,
     lapCount: isLoopTrack ? lapCount : 1,
     reactionTimesByPlayer,
+    straightSprint: appMode === 'straight-sprint',
     onRecentLinesChange: handleRaceCommentaryRecentLinesChange,
   });
   useEffect(() => {

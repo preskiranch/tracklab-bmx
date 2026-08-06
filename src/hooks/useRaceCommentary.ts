@@ -92,6 +92,7 @@ type UseRaceCommentaryOptions = {
   ghostLaps: GhostLap[];
   lapCount: number;
   reactionTimesByPlayer: ReactionTimesByPlayer;
+  straightSprint: boolean;
   onRecentLinesChange: (lines: string[]) => void;
 };
 
@@ -656,6 +657,7 @@ export function useRaceCommentary({
   ghostLaps,
   lapCount,
   reactionTimesByPlayer,
+  straightSprint,
   onRecentLinesChange,
 }: UseRaceCommentaryOptions) {
   const [serviceMode, setServiceMode] = useState<CommentaryServiceMode>('checking');
@@ -1623,6 +1625,7 @@ export function useRaceCommentary({
       riders,
       zones,
       reactionTimesByPlayer,
+      straightSprint,
     });
     if (raceStateStopsCommentary(raceState)) {
       raceLinesRef.current = [];

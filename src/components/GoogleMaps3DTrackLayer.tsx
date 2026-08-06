@@ -510,6 +510,12 @@ function updateDynamicRiderMarker(
   const image = dynamic.content.querySelector<HTMLImageElement>('.map-3d-rider-image');
   if (image) {
     const orientation = uprightRiderOrientation(bearing - mapHeading - 90);
+    const radians = (orientation.leanDegrees * Math.PI) / 180;
+    const tireX = riderMarkerDrawSize * 0.465 * (orientation.mirrored ? -1 : 1);
+    const tireY = -riderMarkerDrawSize * 0.04;
+    const anchorX = tireX * Math.cos(radians) - tireY * Math.sin(radians);
+    const anchorY = tireX * Math.sin(radians) + tireY * Math.cos(radians);
+    dynamic.content.style.transform = `translate(${-anchorX}px, ${-anchorY}px)`;
     image.style.transform = `rotate(${orientation.leanDegrees}deg) scaleX(${orientation.mirrored ? -1 : 1})`;
   }
 }
