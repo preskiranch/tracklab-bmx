@@ -295,11 +295,16 @@ function canPublishSharedTrackMappings(user) {
   return isAdminEmail(user?.email);
 }
 
-function shouldPublishSharedTrackMapping(mapping) {
-  return mapping?.routeStatus === 'user-mapped'
-    && !mapping.trackId.startsWith('custom-')
-    && !mapping.trackId.startsWith('custom-preview-')
-    && mapping.country !== 'Custom Routes';
+function shouldPublishSharedTrackMapping(mapping, customRoute = null) {
+  if (mapping?.routeStatus !== 'user-mapped' || mapping.trackId.startsWith('custom-preview-')) {
+    return false;
+  }
+
+  if (mapping.trackId.startsWith('custom-') || mapping.country === 'Custom Routes') {
+    return customRoute?.id === mapping.trackId;
+  }
+
+  return true;
 }
 
 function publicAuthUser(user) {
@@ -2131,6 +2136,47 @@ function sanitizePublicTrackMappingsPayload(value) {
       .filter(Boolean)
       .map((mapping) => [mapping.trackId, mapping]),
   );
+}
+
+function sanitizePublicCustomRoute(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const id = sanitizeText(value.id, '', 140);
+  const center = sanitizeTrackPoint({ lat: value.latitude, lng: value.longitude });
+  if (!id.startsWith('custom-') || id.startsWith('custom-preview-') || !center) {
+    return null;
+  }
+
+  const outline = sanitizeTrackPoints(value.outline, 100);
+  return {
+    id,
+    name: sanitizeText(value.name, 'Custom sprint', 140),
+    country: 'Custom Routes',
+    countryCode: 'CUSTOM',
+    state: sanitizeText(value.state, 'Published', 80),
+    region: sanitizeText(value.region, 'Published', 80),
+    source: 'Custom',
+    sourceUrl: 'local://custom-route',
+    sourceType: 'manual',
+    verificationStatus: 'unverified',
+    addressStatus: value.address ? 'provider-address' : 'coordinates-only',
+    address: sanitizeText(value.address, '', 240) || undefined,
+    city: sanitizeText(value.city, '', 100) || undefined,
+    postalCode: sanitizeText(value.postalCode, '', 24) || undefined,
+    latitude: center.lat,
+    longitude: center.lng,
+    coordinateSource: 'TrackLab developer mapping',
+    coordinateAccuracy: 'developer-confirmed',
+    lengthMeters: Math.max(1, finiteNumber(value.lengthMeters, 1000)),
+    elevationMeters: finiteNumber(value.elevationMeters, 0),
+    surface: sanitizeText(value.surface, 'Custom sprint route', 100),
+    outline: outline.length >= 2 ? outline : [center],
+    routeStatus: 'locator-only',
+    zones: [],
+    leaderboards: { rpm: [], speed: [], watts: [] },
+  };
 }
 
 function sanitizeGhostPoint(value) {
@@ -4713,10 +4759,14 @@ async function serveStatic(request, response) {
 
   if (requestUrl.pathname === '/api/public-track-mappings') {
     if (request.method === 'GET') {
-      const trackMappings = await persistence.loadPublicTrackMappings();
+      const [trackMappings, customRoutes] = await Promise.all([
+        persistence.loadPublicTrackMappings(),
+        persistence.loadPublicCustomRoutes(),
+      ]);
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
       response.end(JSON.stringify({
         trackMappings,
+        customRoutes,
         count: Object.keys(trackMappings).length,
         persistence: persistence.persistenceEnabled(),
       }));
@@ -4753,6 +4803,23 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/public-custom-routes') {
+    if (request.method !== 'GET') {
+      response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'Method not allowed' }));
+      return;
+    }
+
+    const customRoutes = await persistence.loadPublicCustomRoutes();
+    response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+    response.end(JSON.stringify({
+      customRoutes,
+      count: customRoutes.length,
+      persistence: persistence.persistenceEnabled(),
+    }));
+    return;
+  }
+
   if (requestUrl.pathname === '/api/user-data/track-mapping') {
     if (request.method !== 'POST' && request.method !== 'PATCH') {
       response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -4777,12 +4844,14 @@ async function serveStatic(request, response) {
       return;
     }
 
+    const customRoute = sanitizePublicCustomRoute(payload?.track);
     const profileKey = authProfileKey(session.user);
     const publish = canPublishSharedTrackMappings(session.user)
-      && shouldPublishSharedTrackMapping(mapping);
+      && shouldPublishSharedTrackMapping(mapping, customRoute);
     const saved = await persistence.saveUserTrackMapping(profileKey, mapping, {
       publish,
       publishedBy: profileKey,
+      customRoute,
     });
     if (!saved?.mapping) {
       writeJson(response, 503, { error: 'Track mapping storage is temporarily unavailable.' });
@@ -4793,6 +4862,7 @@ async function serveStatic(request, response) {
       mapping: saved.mapping,
       published: Boolean(saved.publicMapping),
       publicMapping: saved.publicMapping,
+      publicCustomRoute: publish ? customRoute : null,
       persistence: persistence.persistenceEnabled(),
     });
     return;

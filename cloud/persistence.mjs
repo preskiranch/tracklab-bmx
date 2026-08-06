@@ -22,6 +22,7 @@ let pool = databaseUrl
 let readyPromise = null;
 let persistenceReady = false;
 const publicTrackMappingsFallback = new Map();
+const publicCustomRoutesFallback = new Map();
 const memoryUserDataByGuestKey = new Map();
 const memoryAuthUsersById = new Map();
 const memoryAuthUserIdByEmail = new Map();
@@ -726,7 +727,7 @@ export async function saveUserData(guestKey, patch) {
 export async function saveUserTrackMapping(
   guestKey,
   mapping,
-  { publish = false, publishedBy = null } = {},
+  { publish = false, publishedBy = null, customRoute = null } = {},
 ) {
   if (!mapping?.trackId) {
     return null;
@@ -747,6 +748,9 @@ export async function saveUserTrackMapping(
     if (publish) {
       publicMapping = newestMappingBySavedAt(publicTrackMappingsFallback.get(mapping.trackId), savedMapping);
       publicTrackMappingsFallback.set(mapping.trackId, cloneJson(publicMapping, publicMapping));
+      if (customRoute?.id === mapping.trackId) {
+        publicCustomRoutesFallback.set(customRoute.id, cloneJson(customRoute, customRoute));
+      }
     }
     return {
       mapping: cloneJson(savedMapping, savedMapping),
@@ -829,11 +833,31 @@ export async function saveUserTrackMapping(
         );
         publicMapping = fromJson(existingPublic.rows?.[0]?.mapping, savedMapping);
       }
+
+      if (customRoute?.id === savedMapping.trackId) {
+        await client.query(
+          `INSERT INTO ${schema}.public_custom_routes AS target (
+             track_id,
+             route,
+             published_by,
+             updated_at
+           )
+           VALUES ($1, $2::jsonb, $3, now())
+           ON CONFLICT (track_id) DO UPDATE SET
+             route = EXCLUDED.route,
+             published_by = EXCLUDED.published_by,
+             updated_at = now()`,
+          [customRoute.id, json(customRoute), publishedBy],
+        );
+      }
     }
 
     await client.query('COMMIT');
     if (publish && publicMapping) {
       publicTrackMappingsFallback.set(savedMapping.trackId, cloneJson(publicMapping, publicMapping));
+      if (customRoute?.id === savedMapping.trackId) {
+        publicCustomRoutesFallback.set(customRoute.id, cloneJson(customRoute, customRoute));
+      }
     }
     cloudTelemetry.increment('tracklab_track_mapping_saves_total', {
       outcome: 'success',
@@ -851,6 +875,22 @@ export async function saveUserTrackMapping(
   } finally {
     client?.release();
   }
+}
+
+export async function loadPublicCustomRoutes() {
+  const result = await query(
+    `SELECT track_id, route FROM ${schema}.public_custom_routes ORDER BY updated_at DESC`,
+  );
+
+  if (!result) {
+    return [...publicCustomRoutesFallback.values()].map((route) => cloneJson(route, route));
+  }
+
+  const routes = (result.rows ?? [])
+    .map((row) => fromJson(row.route, null))
+    .filter(Boolean);
+  routes.forEach((route) => publicCustomRoutesFallback.set(route.id, cloneJson(route, route)));
+  return routes;
 }
 
 export async function loadPublicTrackMappings() {

@@ -1,14 +1,19 @@
+import type { TrackRecord } from '../types';
 import type { StoredTrackMappings } from './trackMapping';
 
 type PublicTrackMappingsPayload = {
   trackMappings?: StoredTrackMappings;
+  customRoutes?: TrackRecord[];
 };
 
 function normalizePublicTrackMappings(value: PublicTrackMappingsPayload | null | undefined): StoredTrackMappings {
   return value?.trackMappings && typeof value.trackMappings === 'object' ? value.trackMappings : {};
 }
 
-export async function readPublicTrackMappings(): Promise<StoredTrackMappings> {
+export async function readPublicTrackCatalog(): Promise<{
+  trackMappings: StoredTrackMappings;
+  customRoutes: TrackRecord[];
+}> {
   const response = await fetch('/api/public-track-mappings', {
     cache: 'no-store',
     headers: { Accept: 'application/json' },
@@ -18,7 +23,11 @@ export async function readPublicTrackMappings(): Promise<StoredTrackMappings> {
     throw new Error(`Public track maps returned ${response.status}`);
   }
 
-  return normalizePublicTrackMappings(await response.json() as PublicTrackMappingsPayload);
+  const payload = await response.json() as PublicTrackMappingsPayload;
+  return {
+    trackMappings: normalizePublicTrackMappings(payload),
+    customRoutes: Array.isArray(payload.customRoutes) ? payload.customRoutes : [],
+  };
 }
 
 export async function publishPublicTrackMappings(

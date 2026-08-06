@@ -76,14 +76,17 @@ export async function patchCloudUserData(profileKey: string, patch: CloudUserDat
   return normalizeCloudUserData(payload);
 }
 
-export async function saveCloudTrackMapping(mapping: UserTrackMapping): Promise<CloudTrackMappingSaveResult> {
+export async function saveCloudTrackMapping(
+  mapping: UserTrackMapping,
+  track?: TrackRecord | null,
+): Promise<CloudTrackMappingSaveResult> {
   const response = await fetch('/api/user-data/track-mapping', {
     method: 'POST',
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ mapping }),
+    body: JSON.stringify({ mapping, track }),
   });
 
   if (!response.ok) {

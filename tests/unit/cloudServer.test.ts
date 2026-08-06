@@ -75,6 +75,39 @@ function trackMapping(trackId: string) {
   };
 }
 
+function customSprintTrack(id: string) {
+  return {
+    id,
+    name: 'Drag Strip',
+    country: 'Custom Routes',
+    countryCode: 'CUSTOM',
+    state: 'New Hampshire',
+    region: 'New Hampshire',
+    source: 'Custom',
+    sourceUrl: 'local://custom-route',
+    sourceType: 'manual',
+    verificationStatus: 'unverified',
+    addressStatus: 'provider-address',
+    address: 'Drag Strip, Epping, NH 03042, USA',
+    city: 'Epping',
+    postalCode: '03042',
+    latitude: 43.031,
+    longitude: -71.077,
+    coordinateSource: 'TrackLab developer mapping',
+    coordinateAccuracy: 'developer-confirmed',
+    lengthMeters: 457.2,
+    elevationMeters: 0,
+    surface: 'Custom sprint route',
+    outline: [
+      { lat: 43.031, lng: -71.077 },
+      { lat: 43.032, lng: -71.076 },
+    ],
+    routeStatus: 'locator-only',
+    zones: [],
+    leaderboards: { rpm: [], speed: [], watts: [] },
+  };
+}
+
 function exploreRoute(id: string) {
   return {
     id,
@@ -763,6 +796,37 @@ describe('cloud API trust boundaries', () => {
       trackMappings: {
         [sharedMapping.trackId]: { trackId: sharedMapping.trackId, raceViewMode: '3d' },
       },
+    });
+
+    const customTrack = customSprintTrack(`custom-drag-strip-${Date.now()}`);
+    const customMapping = {
+      ...trackMapping(customTrack.id),
+      trackName: customTrack.name,
+      country: customTrack.country,
+      state: customTrack.state,
+      lengthMeters: customTrack.lengthMeters,
+    };
+    const customSave = await api('/api/user-data/track-mapping', {
+      method: 'POST',
+      body: JSON.stringify({ mapping: customMapping, track: customTrack }),
+    });
+    expect(customSave.status).toBe(200);
+    await expect(customSave.json()).resolves.toMatchObject({
+      mapping: { trackId: customTrack.id },
+      published: true,
+      publicMapping: { trackId: customTrack.id },
+      publicCustomRoute: {
+        id: customTrack.id,
+        name: 'Drag Strip',
+        state: 'New Hampshire',
+        address: 'Drag Strip, Epping, NH 03042, USA',
+      },
+    });
+
+    const publicCustomRoutes = await api('/api/public-custom-routes');
+    await expect(publicCustomRoutes.json()).resolves.toMatchObject({
+      customRoutes: [{ id: customTrack.id, name: 'Drag Strip', state: 'New Hampshire' }],
+      count: 1,
     });
   });
 

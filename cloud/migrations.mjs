@@ -325,6 +325,80 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
         `ALTER TABLE ${schema}.user_data ADD COLUMN IF NOT EXISTS explore_routes JSONB NOT NULL DEFAULT '[]'::jsonb`,
       ],
     },
+    {
+      version: 8,
+      name: 'publish developer custom sprint locations',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.public_custom_routes (
+          track_id TEXT PRIMARY KEY,
+          route JSONB NOT NULL,
+          published_by TEXT,
+          published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_public_custom_routes_updated
+          ON ${schema}.public_custom_routes (updated_at DESC)`,
+        `INSERT INTO ${schema}.public_custom_routes (
+           track_id,
+           route,
+           published_by,
+           published_at,
+           updated_at
+         )
+         SELECT
+           route ->> 'id',
+           route,
+           data.guest_key,
+           now(),
+           now()
+         FROM ${schema}.user_data AS data
+         JOIN ${schema}.auth_users AS users
+           ON data.guest_key = 'user:' || users.id
+         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(data.custom_routes, '[]'::jsonb)) AS custom_route(route)
+         WHERE users.admin = true
+           AND route ->> 'id' LIKE 'custom-%'
+           AND route ->> 'id' NOT LIKE 'custom-preview-%'
+           AND COALESCE(data.track_mappings, '{}'::jsonb) ? (route ->> 'id')
+           AND data.track_mappings -> (route ->> 'id') ->> 'routeStatus' = 'user-mapped'
+         ON CONFLICT (track_id) DO UPDATE SET
+           route = EXCLUDED.route,
+           published_by = EXCLUDED.published_by,
+           updated_at = now()`,
+        `INSERT INTO ${schema}.public_track_mappings (
+           track_id,
+           track_name,
+           country,
+           state,
+           mapping,
+           published_by,
+           published_at,
+           updated_at
+         )
+         SELECT
+           mapping.key,
+           COALESCE(mapping.value ->> 'trackName', 'Custom sprint'),
+           COALESCE(mapping.value ->> 'country', 'Custom Routes'),
+           COALESCE(mapping.value ->> 'state', 'Published'),
+           mapping.value,
+           data.guest_key,
+           now(),
+           now()
+         FROM ${schema}.user_data AS data
+         JOIN ${schema}.auth_users AS users
+           ON data.guest_key = 'user:' || users.id
+         CROSS JOIN LATERAL jsonb_each(COALESCE(data.track_mappings, '{}'::jsonb)) AS mapping
+         JOIN ${schema}.public_custom_routes AS route ON route.track_id = mapping.key
+         WHERE users.admin = true
+           AND mapping.value ->> 'routeStatus' = 'user-mapped'
+         ON CONFLICT (track_id) DO UPDATE SET
+           track_name = EXCLUDED.track_name,
+           country = EXCLUDED.country,
+           state = EXCLUDED.state,
+           mapping = EXCLUDED.mapping,
+           published_by = EXCLUDED.published_by,
+           updated_at = now()`,
+      ],
+    },
   ];
 }
 

@@ -141,7 +141,7 @@ import {
   syncGhostLapToCloud,
   writeStoredGhostLaps,
 } from './lib/ghosts';
-import { readPublicTrackMappings } from './lib/publicTrackMappings';
+import { readPublicTrackCatalog } from './lib/publicTrackMappings';
 import {
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
@@ -1431,6 +1431,7 @@ export default function App() {
   const [baseCatalogTracks, setBaseCatalogTracks] = useState<TrackRecord[]>(trackCatalog);
   const [catalogDatabaseReady, setCatalogDatabaseReady] = useState(false);
   const [customRoutes, setCustomRoutes] = useState<TrackRecord[]>(initialCustomRoutes);
+  const [publicCustomRoutes, setPublicCustomRoutes] = useState<TrackRecord[]>([]);
   const [storedMappings, setStoredMappings] = useState<StoredTrackMappings>(readStoredTrackMappings);
   const storedMappingsRef = useRef(storedMappings);
   const [publicTrackMappings, setPublicTrackMappings] = useState<StoredTrackMappings>({});
@@ -1658,10 +1659,11 @@ export default function App() {
       }
 
       loading = true;
-      void readPublicTrackMappings()
-        .then((mappings) => {
+      void readPublicTrackCatalog()
+        .then(({ trackMappings: mappings, customRoutes: routes }) => {
           if (!cancelled) {
             setPublicTrackMappings((current) => mergeTrackMappingsBySavedAt(current, mappings));
+            setPublicCustomRoutes((current) => mergeCustomRoutes(current, routes));
           }
         })
         .catch((error: Error) => {
@@ -1745,9 +1747,13 @@ export default function App() {
     bumpMappingHistoryVersion();
   }, [bumpMappingHistoryVersion, createMappingSnapshot]);
 
+  const availableCustomRoutes = useMemo(
+    () => mergeCustomRoutes(publicCustomRoutes, customRoutes),
+    [customRoutes, publicCustomRoutes],
+  );
   const persistentCatalogTracks = useMemo(
-    () => [...baseCatalogTracks, ...customRoutes],
-    [baseCatalogTracks, customRoutes],
+    () => [...baseCatalogTracks, ...availableCustomRoutes],
+    [availableCustomRoutes, baseCatalogTracks],
   );
   const catalogTracks = useMemo(
     () => {
@@ -3377,14 +3383,23 @@ export default function App() {
 
           if (authUser && adminProfileActive && mappingBackfillProfileRef.current !== cloudProfileKey) {
             mappingBackfillProfileRef.current = cloudProfileKey;
-            const unsyncedMappings = Object.values(storedMappingsRef.current).filter((localMapping) => {
+            const recoverableRoutes = mergeCustomRoutes(readStoredCustomRoutes(), data.customRoutes);
+            const recoverableRouteById = new Map(recoverableRoutes.map((route) => [route.id, route]));
+            const profileMappings = mergeTrackMappingsBySavedAt(storedMappingsRef.current, data.trackMappings);
+            const unsyncedMappings = Object.values(profileMappings).filter((localMapping) => {
               const cloudMapping = data.trackMappings[localMapping.trackId];
+              if (recoverableRouteById.has(localMapping.trackId)) {
+                return true;
+              }
               return newestTrackMapping(cloudMapping, localMapping) === localMapping
                 && localMapping.savedAt !== cloudMapping?.savedAt;
             });
 
             if (unsyncedMappings.length > 0) {
-              void Promise.allSettled(unsyncedMappings.map(saveCloudTrackMapping)).then((results) => {
+              void Promise.allSettled(unsyncedMappings.map((mapping) => saveCloudTrackMapping(
+                mapping,
+                recoverableRouteById.get(mapping.trackId),
+              ))).then((results) => {
                 if (cancelled) {
                   return;
                 }
@@ -4273,8 +4288,8 @@ export default function App() {
     setCustomRouteStatus((current) => current ?? 'Create a custom location or choose a saved sprint route.');
 
     if (selectedTrack.countryCode !== 'CUSTOM') {
-      const nextTrack = customRoutes.find((track) => track.id === lastStraightSprintTrackIdRef.current)
-        ?? customRoutes[0];
+      const nextTrack = availableCustomRoutes.find((track) => track.id === lastStraightSprintTrackIdRef.current)
+        ?? availableCustomRoutes[0];
       if (nextTrack) {
         handleTrackChange(nextTrack.id);
       }
@@ -4977,7 +4992,7 @@ export default function App() {
     setMappingSaveStatus('saving');
     setMappingSaveMessage('Saving this track map to your account.');
     try {
-      const saved = await saveCloudTrackMapping(mapping);
+      const saved = await saveCloudTrackMapping(mapping, selectedTrack);
       setStoredMappings((current) => {
         const next = {
           ...current,
@@ -7349,7 +7364,7 @@ export default function App() {
             onlineRiderCount={multiplayer.onlineRiders.length}
             track={effectiveTrack}
             hasSavedMapping={Boolean(selectedTrackMapping)}
-            customRouteCount={customRoutes.length}
+            customRouteCount={availableCustomRoutes.length}
             catalogTrackCount={catalogTracks.length}
             players={activePlayers}
             samplesByDevice={samplesByDevice}
@@ -7496,7 +7511,7 @@ export default function App() {
                   customRoutePredictions={customRoutePredictions}
                   customRoutePredictionStatus={customRoutePredictionStatus}
                   selectedCustomRoutePredictionId={selectedCustomRoutePrediction?.id ?? null}
-                  customRoutes={customRoutes}
+                  customRoutes={availableCustomRoutes}
                   selectedTrackId={selectedTrack.id}
                   players={racePlayers}
                   branchChoicesByPlayer={activeBranchChoicesByPlayer}
