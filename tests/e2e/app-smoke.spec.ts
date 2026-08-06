@@ -2522,6 +2522,7 @@ test.describe('mobile commentary playback', () => {
       voicePreset?: string;
       line?: string;
     }> = [];
+    let injectedLiveSpeechFailure = false;
     let preRaceReportReleased = false;
     let releasePreRaceReport = () => {};
     const preRaceReportGate = new Promise<void>((resolve) => {
@@ -2560,6 +2561,21 @@ test.describe('mobile commentary playback', () => {
       speechEventKinds.push(payload.eventKind ?? '');
       if (payload.eventKind === 'pre-race' && !preRaceReportReleased) {
         preRaceStudioVoiceStartedBeforeReport = true;
+      }
+      const liveRaceCall = payload.eventKind !== 'preview'
+        && payload.eventKind !== 'pre-race'
+        && payload.eventKind !== 'race-start';
+      if (liveRaceCall && !injectedLiveSpeechFailure) {
+        injectedLiveSpeechFailure = true;
+        await route.fulfill({
+          status: 504,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'Temporary natural speech timeout.',
+            code: 'speech_unavailable',
+          }),
+        });
+        return;
       }
       await new Promise((resolve) => setTimeout(resolve, 650));
       await route.fulfill({
@@ -2611,7 +2627,40 @@ test.describe('mobile commentary playback', () => {
         __tracklabBufferPlaybackCount?: number;
         __tracklabCadenceMediaPlayCount?: number;
         __tracklabAmbienceMediaPlayCount?: number;
+        __tracklabBrowserFallbackCount?: number;
       };
+      class MockSpeechSynthesisUtterance {
+        lang = '';
+        onend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        pitch = 1;
+        rate = 1;
+        text: string;
+        voice: SpeechSynthesisVoice | null = null;
+        volume = 1;
+
+        constructor(text: string) {
+          this.text = text;
+        }
+      }
+      Object.defineProperty(window, 'SpeechSynthesisUtterance', {
+        configurable: true,
+        value: MockSpeechSynthesisUtterance,
+      });
+      Object.defineProperty(window, 'speechSynthesis', {
+        configurable: true,
+        value: {
+          cancel() {},
+          getVoices: () => [],
+          resume() {},
+          speak(utterance: MockSpeechSynthesisUtterance) {
+            audioWindow.__tracklabBrowserFallbackCount = (
+              audioWindow.__tracklabBrowserFallbackCount ?? 0
+            ) + 1;
+            window.setTimeout(() => utterance.onend?.(), 0);
+          },
+        },
+      });
       HTMLMediaElement.prototype.play = function () {
         const source = String(this.currentSrc || this.src || '');
         if (source.includes('/assets/uci-random-start.mp3')) {
@@ -2693,6 +2742,12 @@ test.describe('mobile commentary playback', () => {
       )),
       { timeout: 35_000 },
     ).toBe(true);
+    expect(injectedLiveSpeechFailure).toBe(true);
+    expect(await page.evaluate(() => (
+      (window as typeof window & {
+        __tracklabBrowserFallbackCount?: number;
+      }).__tracklabBrowserFallbackCount ?? 0
+    ))).toBe(0);
     await expect(page.getByLabel('Race commentary')).toBeAttached();
   });
 

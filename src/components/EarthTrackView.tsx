@@ -511,6 +511,12 @@ export function EarthTrackView({
           </div>
         )}
 
+        {raceViewFullscreen && raceDistanceMeters != null && raceState !== 'ready' && (
+          <div className="race-countdown-pause-overlay">
+            {formatDistanceMeters(raceDistanceMeters, distanceUnit)} Sprint
+          </div>
+        )}
+
         <div className="earth-overlay top-left">
           <span className={`race-dot ${raceState}`} />
           <strong>{raceState === 'racing' ? 'Live Race' : raceState === 'finished' ? 'Session Complete' : 'Ready'}</strong>

@@ -549,34 +549,16 @@ function browserCommentaryVoice() {
   if (!browserSpeechAvailable()) {
     return null;
   }
-  const preferredMaleNames = [
-    'aaron',
-    'alex',
-    'reed',
-    'fred',
-    'guy',
-    'christopher',
-    'andrew',
-    'eric',
-    'david',
-    'mark',
-  ];
-  return [...window.speechSynthesis.getVoices()]
-    .filter((voice) => /^en(?:-|_)/i.test(voice.lang))
-    .sort((a, b) => {
-      const score = (voice: SpeechSynthesisVoice) => {
-        const name = voice.name.toLowerCase();
-        const malePreference = preferredMaleNames.findIndex((item) => name.includes(item));
-        return (
-          (/^en-US$/i.test(voice.lang) ? 100 : 0)
-          + (malePreference >= 0 ? 80 - malePreference : 0)
-          + (/natural|premium|enhanced|neural|online/i.test(name) ? 40 : 0)
-          + (voice.localService ? 10 : 0)
-          + (voice.default ? 5 : 0)
-        );
-      };
-      return score(b) - score(a);
-    })[0] ?? null;
+  const voices = [...window.speechSynthesis.getVoices()]
+    .filter((voice) => /^en(?:-|_)/i.test(voice.lang));
+  const isPreferredMale = (voice: SpeechSynthesisVoice) => (
+    /aaron|alex|reed|fred|guy|andrew|eric|david|mark/i.test(voice.name)
+  );
+  return voices.find((voice) => voice.lang === 'en-US' && isPreferredMale(voice))
+    ?? voices.find(isPreferredMale)
+    ?? voices.find((voice) => voice.lang === 'en-US')
+    ?? voices[0]
+    ?? null;
 }
 
 async function playBrowserSpeech(
@@ -695,6 +677,7 @@ export function useRaceCommentary({
   const [preRaceReport, setPreRaceReport] = useState<PreRaceReport | null>(null);
   const serviceModeRef = useRef<CommentaryServiceMode>('checking');
   const speechStatusRef = useRef<CommentarySpeechStatus>('checking');
+  const naturalVoicePinnedRef = useRef(false);
 
   const trackName = track.name;
   const riderNamesKey = players.map((player) => `${player.id}:${player.name}`).join('|');
@@ -766,6 +749,7 @@ export function useRaceCommentary({
     if (
       nextStatus
       && serviceModeRef.current === 'ai'
+      && !naturalVoicePinnedRef.current
       && browserSpeechAvailable()
     ) {
       serviceModeRef.current = 'local';
@@ -787,7 +771,7 @@ export function useRaceCommentary({
     onStart: () => void,
     signal?: AbortSignal,
   ) => {
-    if (serviceModeRef.current === 'ai') {
+    if (naturalVoicePinnedRef.current || serviceModeRef.current === 'ai') {
       try {
         const played = await playAiSpeech(
           line,
@@ -806,7 +790,11 @@ export function useRaceCommentary({
         return played;
       } catch (error) {
         const failureStatus = recordSpeechFailure(error);
-        if (!failureStatus || !shouldContinue()) {
+        if (
+          naturalVoicePinnedRef.current
+          || !failureStatus
+          || !shouldContinue()
+        ) {
           throw error;
         }
       }
@@ -1606,8 +1594,12 @@ export function useRaceCommentary({
     const previousRaceState = previousRaceStateRef.current;
     previousRaceStateRef.current = raceState;
     if (raceState === 'racing' && previousRaceState !== 'racing') {
+      naturalVoicePinnedRef.current = serviceModeRef.current === 'ai';
       raceLinesRef.current = [];
       setFinishAnnouncementsComplete(true);
+    }
+    if (raceState === 'ready' && !startGateActive) {
+      naturalVoicePinnedRef.current = false;
     }
     if (!preferences.enabled) {
       raceLinesRef.current = [];
