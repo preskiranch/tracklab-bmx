@@ -145,6 +145,7 @@ import { readPublicTrackCatalog } from './lib/publicTrackMappings';
 import {
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
+  straightSprintCameraPreferenceKey,
   straightSprintFeetToMeters,
   straightSprintMaximumFeet,
 } from './lib/straightSprint';
@@ -1828,6 +1829,9 @@ export default function App() {
     () => catalogTracks.find((track) => track.id === selectedTrackId) ?? availableTracks[0] ?? defaultTrack,
     [availableTracks, catalogTracks, selectedTrackId],
   );
+  const raceCameraPreferenceKey = appMode === 'straight-sprint'
+    ? straightSprintCameraPreferenceKey(selectedTrack.id, straightSprintDistanceFeet)
+    : selectedTrack.id;
   useEffect(() => {
     selectedTrackIdRef.current = selectedTrack.id;
     if (selectedTrack.countryCode === 'CUSTOM') {
@@ -1868,7 +1872,8 @@ export default function App() {
     [mappingRouteVariantId, selectedTrackMapping],
   );
   useEffect(() => {
-    const savedCamera = earthCamerasByTrack[selectedTrack.id];
+    const savedCamera = earthCamerasByTrack[raceCameraPreferenceKey]
+      ?? earthCamerasByTrack[selectedTrack.id];
     const isCustomRoute = selectedTrack.countryCode === 'CUSTOM';
     const fallbackCenter = isCustomRoute ? trackCenter(selectedTrack) : null;
     const fallbackZoom = isCustomRoute ? customRouteInitialZoom : null;
@@ -1878,6 +1883,7 @@ export default function App() {
     setEarthZoom(savedCamera?.zoom ?? fallbackZoom);
   }, [
     earthCamerasByTrack,
+    raceCameraPreferenceKey,
     selectedTrack.countryCode,
     selectedTrack.id,
     selectedTrack.latitude,
@@ -5464,13 +5470,13 @@ export default function App() {
         return current;
       }
 
-      if (earthCamerasMatch(current[selectedTrack.id], safeCamera)) {
+      if (earthCamerasMatch(current[raceCameraPreferenceKey], safeCamera)) {
         return current;
       }
 
       const next = {
         ...current,
-        [selectedTrack.id]: safeCamera,
+        [raceCameraPreferenceKey]: safeCamera,
       };
       persistRaceViewPreferences({
         ...raceViewPreferencesRef.current,
@@ -5488,7 +5494,7 @@ export default function App() {
     earthZoom,
     effectiveTrack,
     persistRaceViewPreferences,
-    selectedTrack.id,
+    raceCameraPreferenceKey,
   ]);
 
   const handleEarthAngleChange = useCallback((angle: number) => {

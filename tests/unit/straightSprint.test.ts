@@ -3,6 +3,7 @@ import {
   clipRouteAtMeter,
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
+  straightSprintCameraPreferenceKey,
   straightSprintDistanceOptions,
   straightSprintFeetToMeters,
 } from '../../src/lib/straightSprint';
@@ -34,5 +35,12 @@ describe('straight sprint configurations', () => {
 
     expect(routeLengthMeters(clipped)).toBeCloseTo(selectedMeters, 4);
     expect(distanceBetweenTrackPoints(route[0], clipped[clipped.length - 1])).toBeCloseTo(selectedMeters, 4);
+  });
+
+  it('keeps a separate saved camera key for every sprint distance', () => {
+    expect(straightSprintCameraPreferenceKey('custom-drag-strip', 100))
+      .toBe('custom-drag-strip:sprint:100ft');
+    expect(straightSprintCameraPreferenceKey('custom-drag-strip', 500))
+      .toBe('custom-drag-strip:sprint:500ft');
   });
 });

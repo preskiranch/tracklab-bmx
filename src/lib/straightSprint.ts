@@ -25,6 +25,10 @@ export function straightSprintFeetToMeters(feet: number) {
   return feet * 0.3048;
 }
 
+export function straightSprintCameraPreferenceKey(trackId: string, distanceFeet: number) {
+  return `${trackId}:sprint:${normalizeStraightSprintDistance(distanceFeet)}ft`;
+}
+
 export function straightSprintConfigurationKey(distanceFeet: number, airSetting: number) {
   return `sprint:${normalizeStraightSprintDistance(distanceFeet)}ft:air:${normalizeStraightSprintAirSetting(airSetting)}`;
 }

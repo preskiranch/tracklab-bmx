@@ -1719,6 +1719,139 @@ test('track map save waits for account sync and shared publication', async ({ pa
   await expect(page.getByLabel('Bike source')).toBeVisible();
 });
 
+test('straight sprint restores and saves a separate camera for each distance', async ({ page }) => {
+  const trackId = 'custom-camera-distance-sprint';
+  const customTrack = {
+    id: trackId,
+    name: 'Camera Distance Sprint',
+    country: 'Custom Routes',
+    countryCode: 'CUSTOM',
+    state: 'New Hampshire',
+    region: 'New Hampshire',
+    source: 'Custom',
+    sourceUrl: 'local://custom-route',
+    address: 'Epping, NH, USA',
+    latitude: 43.03,
+    longitude: -71.08,
+    lengthMeters: 500,
+    elevationMeters: 0,
+    surface: 'Custom sprint route',
+    outline: [
+      { lat: 43.03, lng: -71.08 },
+      { lat: 43.035, lng: -71.08 },
+    ],
+    routeStatus: 'user-mapped',
+    zones: [],
+    leaderboards: { rpm: [], speed: [], watts: [] },
+  };
+  const mapping = {
+    ...mockNoPedalZoneMapping,
+    trackId,
+    trackName: customTrack.name,
+    country: customTrack.country,
+    state: customTrack.state,
+    lengthMeters: 500,
+    centerline: [
+      { lat: 43.03, lng: -71.08 },
+      { lat: 43.035, lng: -71.08 },
+    ],
+    startGate: { lat: 43.03, lng: -71.08 },
+    finishLine: { lat: 43.035, lng: -71.08 },
+  };
+  let preferences = {
+    cameraLocked: false,
+    cameraLockedUpdatedAt: 1,
+    earthCamerasByTrack: {
+      [`${trackId}:sprint:100ft`]: {
+        angle: 10,
+        heading: 20,
+        center: { lat: 43.0302, lng: -71.08 },
+        zoom: 19,
+        updatedAt: 10,
+      },
+      [`${trackId}:sprint:500ft`]: {
+        angle: 50,
+        heading: 200,
+        center: { lat: 43.0308, lng: -71.08 },
+        zoom: 18,
+        updatedAt: 20,
+      },
+    },
+  };
+  const authUser = {
+    id: 'sprint-camera-admin',
+    profileKey: 'user:sprint-camera-admin',
+    email: 'preskiranch@gmail.com',
+    name: 'Sprint Camera Admin',
+    admin: true,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+  };
+
+  await page.addInitScript(({ storedTrack, storedMapping }) => {
+    window.localStorage.setItem('tracklab-bmx-custom-routes-v1', JSON.stringify([storedTrack]));
+    window.localStorage.setItem('tracklab:user-track-mappings:v1', JSON.stringify({
+      [storedTrack.id]: storedMapping,
+    }));
+  }, { storedTrack: customTrack, storedMapping: mapping });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const patch = route.request().postDataJSON() as { raceViewPreferences?: typeof preferences };
+      if (patch.raceViewPreferences) {
+        preferences = patch.raceViewPreferences;
+      }
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { [trackId]: mapping },
+        customRoutes: [customTrack],
+        bikeProfiles: [],
+        studioRiders: [],
+        raceViewPreferences: preferences,
+      }),
+    });
+  });
+  await page.route('**/api/public-track-mappings', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ trackMappings: { [trackId]: mapping }, count: 1 }),
+    });
+  });
+  await page.route('**/api/public-custom-routes', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ customRoutes: [customTrack], count: 1 }),
+    });
+  });
+  await page.route('**/api/global-race-view', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ raceViewPreferences: null }),
+    });
+  });
+
+  await page.goto(`/?track=${trackId}`);
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await page.getByRole('button', { name: 'Straight Sprint', exact: true }).click();
+  await expect(page.locator('.platform-topbar').getByText('Straight Sprint', { exact: true })).toBeVisible();
+  await expect(page.getByText('Angle 10 deg', { exact: true })).toBeVisible();
+  await expect(page.getByText('Heading 20 deg', { exact: true })).toBeVisible();
+
+  await page.getByLabel('Sprint distance').selectOption('500');
+  await expect(page.getByText('Angle 50 deg', { exact: true })).toBeVisible();
+  await expect(page.getByText('Heading 200 deg', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Tilt map up', exact: true }).click();
+  await expect.poll(() => preferences.earthCamerasByTrack[`${trackId}:sprint:500ft`]?.angle).toBe(55);
+  expect(preferences.earthCamerasByTrack[`${trackId}:sprint:100ft`]?.angle).toBe(10);
+
+  await page.getByLabel('Sprint distance').selectOption('100');
+  await expect(page.getByText('Angle 10 deg', { exact: true })).toBeVisible();
+  await expect(page.getByText('Heading 20 deg', { exact: true })).toBeVisible();
+});
+
 test('regular racers can use published tracks but cannot access mapping tools', async ({ page }) => {
   const authUser = {
     id: 'regular-racer',

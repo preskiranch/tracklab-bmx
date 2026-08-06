@@ -549,14 +549,8 @@ function browserCommentaryVoice() {
   if (!browserSpeechAvailable()) {
     return null;
   }
-  const voices = [...window.speechSynthesis.getVoices()]
-    .filter((voice) => /^en(?:-|_)/i.test(voice.lang));
-  const isPreferredMale = (voice: SpeechSynthesisVoice) => (
-    /alex|fred/i.test(voice.name)
-  );
-  return voices.find(isPreferredMale)
-    ?? voices.find((voice) => voice.lang === 'en-US')
-    ?? voices[0];
+  return window.speechSynthesis.getVoices()
+    .find((voice) => voice.lang === 'en-US') ?? null;
 }
 
 async function playBrowserSpeech(
