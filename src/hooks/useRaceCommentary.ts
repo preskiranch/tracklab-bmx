@@ -552,13 +552,11 @@ function browserCommentaryVoice() {
   const voices = [...window.speechSynthesis.getVoices()]
     .filter((voice) => /^en(?:-|_)/i.test(voice.lang));
   const isPreferredMale = (voice: SpeechSynthesisVoice) => (
-    /aaron|alex|reed|fred|guy|andrew|eric|david|mark/i.test(voice.name)
+    /alex|fred/i.test(voice.name)
   );
-  return voices.find((voice) => voice.lang === 'en-US' && isPreferredMale(voice))
-    ?? voices.find(isPreferredMale)
+  return voices.find(isPreferredMale)
     ?? voices.find((voice) => voice.lang === 'en-US')
-    ?? voices[0]
-    ?? null;
+    ?? voices[0];
 }
 
 async function playBrowserSpeech(
