@@ -424,12 +424,12 @@ function refreshSatelliteTiles(google: GoogleMapsRuntime, map: GoogleMap, camera
   }, track));
 }
 
-function distanceLabelIcon(text: string, color = '#111827') {
-  const width = Math.max(86, text.length * 8 + 22);
+function distanceLabelIcon(text: string) {
+  const width = 168;
   const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="26" viewBox="0 0 ${width} 26">
-      <rect x="1" y="1" width="${width - 2}" height="24" rx="6" fill="${color}" fill-opacity="0.92" stroke="#ffffff" stroke-width="1.4"/>
-      <text x="${width / 2}" y="17" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="800" fill="#ffffff">${text}</text>
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="40" viewBox="0 0 ${width} 40">
+      <rect x="1" y="1" width="${width - 2}" height="38" rx="8" fill="#05070b" stroke="#ffffff" stroke-width="2"/>
+      <text x="${width / 2}" y="26" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="900" fill="#ffffff">${text}</text>
     </svg>
   `;
 
@@ -1544,8 +1544,8 @@ export function GoogleMapsTrackLayer({
     if (routeMidpoint && !hideRaceRoute) {
       distanceLabelRefs.current.push(new google.maps.Marker({
         icon: {
-          anchor: new google.maps.Point(54, 34),
-          scaledSize: new google.maps.Size(108, 26),
+          anchor: new google.maps.Point(84, 50),
+          scaledSize: new google.maps.Size(168, 40),
           url: distanceLabelIcon(`Track ${formatDistanceMeters(track.lengthMeters, distanceUnit)}`),
         },
         map,
@@ -1817,9 +1817,9 @@ export function GoogleMapsTrackLayer({
     const draftDistanceMarkers = showMappingDraft && draftPoints.length > 1 ? [
       new google.maps.Marker({
         icon: {
-          anchor: new google.maps.Point(54, 34),
-          scaledSize: new google.maps.Size(108, 26),
-          url: distanceLabelIcon(`Track ${formatDistanceMeters(draftLengthMeters, distanceUnit)}`, draftRouteColor),
+          anchor: new google.maps.Point(84, 50),
+          scaledSize: new google.maps.Size(168, 40),
+          url: distanceLabelIcon(`Track ${formatDistanceMeters(draftLengthMeters, distanceUnit)}`),
         },
         map,
         optimized: false,
@@ -1862,9 +1862,9 @@ export function GoogleMapsTrackLayer({
             ?? previewPoints[Math.floor(previewPoints.length / 2)],
         );
         distanceMarker.setIcon({
-          anchor: new google.maps.Point(54, 34),
-          scaledSize: new google.maps.Size(108, 26),
-          url: distanceLabelIcon(`Track ${formattedDistance}`, draftRouteColor),
+          anchor: new google.maps.Point(84, 50),
+          scaledSize: new google.maps.Size(168, 40),
+          url: distanceLabelIcon(`Track ${formattedDistance}`),
         });
         distanceMarker.setTitle?.(`Draft track distance ${formattedDistance}`);
       }
