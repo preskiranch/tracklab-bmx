@@ -353,6 +353,11 @@ function pointAtBearingDistance(point: TrackPoint, bearingDegrees: number, dista
   };
 }
 
+function raceLinePath(position: TrackPoint, bearingDegrees: number) {
+  const crossBearing = normalizeHeading(bearingDegrees + 90);
+  return [-4.5, 4.5].map((meters) => pointAtBearingDistance(position, crossBearing, meters));
+}
+
 function branchWithSplitAndMerge(points: TrackPoint[], splitPoint: TrackPoint, mergePoint: TrackPoint) {
   const next = [...points];
   const firstPoint = next[0];
@@ -949,6 +954,20 @@ export function GoogleMaps3DTrackLayer({
       : raceDistanceMeters != null
         ? pointAtRouteMeter(savedRoute, Math.min(routeLengthMeters(savedRoute), raceDistanceMeters))
         : trackFinishPoint(track);
+    if (!mappingMode) {
+      const finishDistance = Math.min(routeLengthMeters(savedRoute), raceDistanceMeters ?? Number.POSITIVE_INFINITY);
+      const raceLines = [
+        { color: '#d8ff3e', pose: riderRoutePose(track, 0) },
+        { color: '#ffffff', pose: riderRoutePose(track, finishDistance) },
+      ];
+      raceLines.forEach(({ color, pose }) => {
+        if (!pose) return;
+        const line = appendPolyline(map, library.Polyline3DElement, raceLinePath(pose.position, pose.bearing), {
+          outerColor: '#111827', outerWidth: 0.75, strokeColor: color, strokeWidth: 14,
+        });
+        if (line) elements.push(line);
+      });
+    }
     if (start) {
       const marker = appendMarker(map, library, start, {
         className: 'map-3d-landmark-marker start', label: 'START', title: 'Start line', zIndex: 850,

@@ -1501,7 +1501,7 @@ export function GoogleMapsTrackLayer({
     }
 
     const hideRaceRoute = mappingMode || raceViewFullscreen || raceState === 'racing' || raceState === 'finished';
-    const showRaceStart = !mappingMode && !raceViewFullscreen && raceState !== 'racing';
+    const showRaceStart = !mappingMode;
 
     if (!hideRaceRoute) {
       trackLineRefs.current = mappedTrackRouteSegments(track)
