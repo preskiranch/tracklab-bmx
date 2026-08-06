@@ -792,7 +792,7 @@ export function SessionControlPanel({
             {splitDrawHint && <p className="mapping-hint">{splitDrawHint}</p>}
             {mappingMode && mappingEditMode === 'adjust' && (
               <p className="mapping-hint">
-                Tap a route point, then tap its new location—or drag it directly. Use S for the start and F for the finish.
+                Tap a route point, then tap its new location—or press and drag it directly. The route line and exact length update while you move it. Use S for the start and F for the finish.
               </p>
             )}
             {mappingMode && mappingEditMode === 'zones' && (

@@ -436,6 +436,23 @@ function distanceLabelIcon(text: string, color = '#111827') {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
+function routePointHandleIcon(label: string, color: string, selected: boolean) {
+  const outerStroke = selected ? '#fbbf24' : '#ffffff';
+  const ringWidth = selected ? 4 : 3;
+  const radius = selected ? 16 : 14;
+  const fontSize = label.length > 1 ? 11 : 13;
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+      <circle cx="24" cy="24" r="23" fill="#ffffff" fill-opacity="0.01"/>
+      <circle cx="24" cy="24" r="${radius + 3}" fill="#111827" fill-opacity="0.34"/>
+      <circle cx="24" cy="24" r="${radius}" fill="${color}" fill-opacity="0.98" stroke="${outerStroke}" stroke-width="${ringWidth}"/>
+      <text x="24" y="29" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${fontSize}" font-weight="900" fill="#111827">${label}</text>
+    </svg>
+  `;
+
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
 function pedalZoneNumberIcon(zoneNumber: number) {
   const text = String(zoneNumber);
   const fontSize = text.length > 1 ? 11 : 13;
@@ -1216,10 +1233,15 @@ export function GoogleMapsTrackLayer({
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState('');
   const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
+  const [dragMeasurement, setDragMeasurement] = useState<{
+    pointLabel: string;
+    distanceMeters: number;
+  } | null>(null);
   const draftRouteColor = routeVariantColors[mappingRouteVariantId];
 
   useEffect(() => {
     setSelectedPathPointIndex(null);
+    setDragMeasurement(null);
   }, [mappingEditMode, mappingMode, track.id]);
 
   useEffect(() => {
@@ -1737,10 +1759,12 @@ export function GoogleMapsTrackLayer({
     const activeDraftRouteSplitSections = draftRouteSplitSections ?? draftSplitSections;
     const draftRoute = routeWithDefaultSplitBranches(draftPoints, activeDraftRouteSplitSections);
     const draftSharedSegments = splitSharedRouteSegments(draftPoints, activeDraftRouteSplitSections);
+    const visibleDraftSharedSegments = draftSharedSegments
+      .filter((segment) => segment.length > 1);
+    const draftSharedLinePairs: GooglePolyline[][] = [];
     if (showMappingDraft && draftPoints.length > 1) {
-      draftLineRefs.current = draftSharedSegments
-        .filter((segment) => segment.length > 1)
-        .flatMap((segment) => [
+      draftSharedLinePairs.push(...visibleDraftSharedSegments
+        .map((segment) => [
           new google.maps.Polyline({
             clickable: false,
             map,
@@ -1759,13 +1783,14 @@ export function GoogleMapsTrackLayer({
             strokeWeight: mappingRouteCoreStrokeWeight,
             zIndex: 531,
           }),
-        ]);
+        ]));
+      draftLineRefs.current = draftSharedLinePairs.flat();
     }
 
     const draftStartStripe = showMappingDraft && draftRoute.length > 1 ? startStripePath(draftRoute) : null;
+    const draftStartStripeLines: GooglePolyline[] = [];
     if (draftStartStripe) {
-      draftLineRefs.current = [
-        ...draftLineRefs.current,
+      draftStartStripeLines.push(
         new google.maps.Polyline({
           clickable: false,
           map,
@@ -1784,7 +1809,8 @@ export function GoogleMapsTrackLayer({
           strokeWeight: finishStripeCoreStrokeWeight,
           zIndex: 901,
         }),
-      ];
+      );
+      draftLineRefs.current = [...draftLineRefs.current, ...draftStartStripeLines];
     }
 
     const draftLengthMeters = routeLengthWithDefaultSplitBranches(draftPoints, activeDraftRouteSplitSections);
@@ -1802,6 +1828,54 @@ export function GoogleMapsTrackLayer({
         zIndex: 540,
       }),
     ] : [];
+
+    const updateDraftDragPreview = (pointIndex: number, nextPoint: TrackPoint) => {
+      const previewPoints = draftPoints.map((draftPoint, index) => (
+        index === pointIndex ? nextPoint : draftPoint
+      ));
+      const previewRoute = routeWithDefaultSplitBranches(previewPoints, activeDraftRouteSplitSections);
+      const previewSegments = splitSharedRouteSegments(previewPoints, activeDraftRouteSplitSections)
+        .filter((segment) => segment.length > 1);
+      const previewLengthMeters = routeLengthWithDefaultSplitBranches(
+        previewPoints,
+        activeDraftRouteSplitSections,
+      );
+
+      draftSharedLinePairs.forEach((linePair, segmentIndex) => {
+        const segment = previewSegments[segmentIndex];
+        if (!segment) {
+          return;
+        }
+        linePair.forEach((line) => line.setPath?.(segment));
+      });
+
+      const previewStartStripe = startStripePath(previewRoute);
+      if (previewStartStripe) {
+        draftStartStripeLines.forEach((line) => line.setPath?.(previewStartStripe));
+      }
+
+      const distanceMarker = draftDistanceMarkers[0];
+      const formattedDistance = formatDistanceMeters(previewLengthMeters, distanceUnit);
+      if (distanceMarker && previewRoute.length > 1) {
+        distanceMarker.setPosition(
+          pointAtRouteMeter(previewRoute, previewLengthMeters / 2)
+            ?? previewPoints[Math.floor(previewPoints.length / 2)],
+        );
+        distanceMarker.setIcon({
+          anchor: new google.maps.Point(54, 34),
+          scaledSize: new google.maps.Size(108, 26),
+          url: distanceLabelIcon(`Track ${formattedDistance}`, draftRouteColor),
+        });
+        distanceMarker.setTitle?.(`Draft track distance ${formattedDistance}`);
+      }
+
+      const isStart = pointIndex === 0;
+      const isFinish = pointIndex === draftPoints.length - 1;
+      setDragMeasurement({
+        pointLabel: isStart ? 'Start' : isFinish ? 'Finish' : `Point ${pointIndex + 1}`,
+        distanceMeters: previewLengthMeters,
+      });
+    };
 
     const activeDraftZoneRoute = draftZoneRoutePoints.length > 1 ? draftZoneRoutePoints : draftRoute;
     const activeDraftZoneLengthMeters = routeLengthMeters(activeDraftZoneRoute);
@@ -1883,27 +1957,39 @@ export function GoogleMapsTrackLayer({
       const isStart = index === 0;
       const isFinish = index === draftPoints.length - 1 && draftPoints.length > 1;
       const isSelected = mappingEditMode === 'adjust' && selectedPathPointIndex === index;
+      const pointText = isStart ? 'S' : isFinish ? 'F' : String(index + 1);
       const pointLabel = isStart && mappingEditMode !== 'adjust' ? null : {
         color: '#111827',
         fontSize: '11px',
         fontWeight: '900',
-        text: isStart ? 'S' : isFinish ? 'F' : String(index + 1),
+        text: pointText,
       };
       const marker = new google.maps.Marker({
         clickable: true,
         cursor: canMovePathPoints ? 'grab' : canUseRoutePointAsZoneBoundary ? 'pointer' : undefined,
+        crossOnDrag: false,
         draggable: canMovePathPoints,
-        icon: {
-          fillColor: isSelected ? '#fbbf24' : isStart || isFinish ? draftRouteColor : '#ffffff',
-          fillOpacity: isStart ? 0.82 : 1,
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: isSelected ? 12 : isStart ? 6 : isFinish ? 14 : 8,
-          strokeColor: '#111827',
-          strokeWeight: isSelected ? 4 : isStart ? 2 : isFinish ? 3 : 2,
-        },
-        ...(pointLabel ? { label: pointLabel } : {}),
+        icon: canMovePathPoints
+          ? {
+              anchor: new google.maps.Point(24, 24),
+              scaledSize: new google.maps.Size(48, 48),
+              url: routePointHandleIcon(
+                pointText,
+                isSelected ? '#fbbf24' : isStart || isFinish ? draftRouteColor : '#ffffff',
+                isSelected,
+              ),
+            }
+          : {
+              fillColor: isSelected ? '#fbbf24' : isStart || isFinish ? draftRouteColor : '#ffffff',
+              fillOpacity: isStart ? 0.82 : 1,
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: isSelected ? 12 : isStart ? 6 : isFinish ? 14 : 8,
+              strokeColor: '#111827',
+              strokeWeight: isSelected ? 4 : isStart ? 2 : isFinish ? 3 : 2,
+            },
+        ...(!canMovePathPoints && pointLabel ? { label: pointLabel } : {}),
         map,
-        optimized: !(isFinish),
+        optimized: canMovePathPoints ? false : !(isFinish),
         position: point,
         title: mappingEditMode === 'adjust'
           ? `${isStart ? 'Start point' : isFinish ? 'Finish point' : `Route point ${index + 1}`} — tap or drag to move`
@@ -1920,18 +2006,35 @@ export function GoogleMapsTrackLayer({
       }
 
       if (canMovePathPoints && onMappingPathPointMove) {
+        let suppressClickUntil = 0;
         draftMarkerListenerRefs.current.push(marker.addListener('dragstart', () => {
-          isDrawingRef.current = false;
-          lastDrawPointRef.current = null;
+          suppressClickUntil = Number.POSITIVE_INFINITY;
+          suppressNextMapEditEvent();
+          updateDraftDragPreview(index, point);
+        }));
+        draftMarkerListenerRefs.current.push(marker.addListener('drag', (event) => {
+          const nextPoint = event?.latLng?.toJSON();
+          if (nextPoint) {
+            updateDraftDragPreview(index, nextPoint);
+          }
         }));
         draftMarkerListenerRefs.current.push(marker.addListener('dragend', (event) => {
           const nextPoint = event?.latLng?.toJSON();
           if (nextPoint) {
+            updateDraftDragPreview(index, nextPoint);
             onMappingPathPointMove(index, nextPoint);
           }
+          suppressClickUntil = Date.now() + 350;
+          window.setTimeout(() => {
+            suppressNextMapEditEventRef.current = false;
+          }, 350);
           setSelectedPathPointIndex(null);
+          setDragMeasurement(null);
         }));
         draftMarkerListenerRefs.current.push(marker.addListener('click', () => {
+          if (Date.now() < suppressClickUntil) {
+            return;
+          }
           setSelectedPathPointIndex((current) => current === index ? null : index);
         }));
       }
@@ -2772,6 +2875,17 @@ export function GoogleMapsTrackLayer({
   return (
     <>
       <div className="google-map-layer" ref={containerRef} />
+      {dragMeasurement && (
+        <output
+          className="earth-overlay map-adjust-measurement"
+          aria-live="polite"
+          style={{ left: '50%', top: 14, zIndex: 12, padding: '7px 12px', pointerEvents: 'none', transform: 'translateX(-50%)' }}
+        >
+          <span>{dragMeasurement.pointLabel}</span>
+          <strong>{formatDistanceMeters(dragMeasurement.distanceMeters, distanceUnit)}</strong>
+          <small>Live route length</small>
+        </output>
+      )}
       {status !== 'ready' && (
         <div className="google-map-status">
           <strong>{status === 'loading' ? 'Loading Google imagery' : 'Google imagery unavailable'}</strong>
