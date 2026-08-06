@@ -95,6 +95,7 @@ type GoogleMapsTrackLayerProps = {
   raceViewFullscreen?: boolean;
   cameraLocked?: boolean;
   raceState: RaceState;
+  raceDistanceMeters?: number;
   earthAngle: number;
   earthHeading: number;
   earthCenter: TrackPoint | null;
@@ -1138,6 +1139,7 @@ export function GoogleMapsTrackLayer({
   raceViewFullscreen = false,
   cameraLocked = false,
   raceState,
+  raceDistanceMeters,
   earthAngle,
   earthHeading,
   earthCenter,
@@ -1624,7 +1626,10 @@ export function GoogleMapsTrackLayer({
     });
 
     const showRaceFinish = !mappingMode || raceViewFullscreen || raceState === 'racing' || raceState === 'finished';
-    const finishStripe = showRaceFinish ? finishStripePath(savedRoute) : null;
+    const finishRoute = !mappingMode && raceDistanceMeters != null
+      ? routePathBetweenMeters(savedRoute, 0, Math.min(routeLengthMeters(savedRoute), raceDistanceMeters))
+      : savedRoute;
+    const finishStripe = showRaceFinish ? finishStripePath(finishRoute) : null;
     if (finishStripe) {
       finishLineRefs.current = [
         new google.maps.Polyline({
@@ -1648,7 +1653,7 @@ export function GoogleMapsTrackLayer({
       ];
     }
 
-    const finishLabelPoint = showRaceFinish ? finishLabelPosition(savedRoute) : null;
+    const finishLabelPoint = showRaceFinish ? finishLabelPosition(finishRoute) : null;
     if (finishLabelPoint && showRaceFinish) {
       finishMarkerRef.current = new google.maps.Marker({
         icon: {
@@ -1663,7 +1668,7 @@ export function GoogleMapsTrackLayer({
         zIndex: 920,
       });
     }
-  }, [activeZones, distanceUnit, mappingMode, raceState, raceViewFullscreen, status, track]);
+  }, [activeZones, distanceUnit, mappingMode, raceDistanceMeters, raceState, raceViewFullscreen, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;

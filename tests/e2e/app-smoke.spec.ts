@@ -351,7 +351,7 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
 
   await expect(page.getByLabel('Race controls')).toBeVisible();
   await expect(page.locator('.race-control-dock')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);
   await expect(page.getByLabel('Bike source')).toHaveCount(0);
   await expect(page.getByText(/Track Mapping|Trace route/i)).toHaveCount(0);
@@ -1705,7 +1705,7 @@ test('track map save waits for account sync and shared publication', async ({ pa
   await expect(page.getByText('Demo race source online', { exact: true })).toBeVisible();
   await regularPreview.check();
   await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toBeVisible();
   await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);
   await expect(page.getByLabel('Bike source')).toHaveCount(0);
@@ -1759,7 +1759,7 @@ test('regular racers can use published tracks but cannot access mapping tools', 
   await expect(page.getByLabel('Race controls')).toBeVisible();
   await expect(page.locator('.race-control-dock')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Edit map' })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toBeVisible();
   await expect(page.getByLabel('Preview regular user interface')).toHaveCount(0);
   await expect(page.getByText('Map Zones', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Demo/i })).toHaveCount(0);

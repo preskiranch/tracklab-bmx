@@ -69,6 +69,7 @@ type EarthTrackViewProps = {
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
   raceState: RaceState;
+  raceDistanceMeters?: number;
   raceViewFullscreen: boolean;
   startGateActive: boolean;
   startGatePhase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
@@ -168,6 +169,7 @@ export function EarthTrackView({
   speedUnit,
   distanceUnit,
   raceState,
+  raceDistanceMeters,
   raceViewFullscreen,
   startGateActive,
   startGatePhase,
@@ -351,6 +353,7 @@ export function EarthTrackView({
                 cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                 raceViewFullscreen={showingRace3D ? raceViewFullscreen : false}
                 raceState={raceState}
+                raceDistanceMeters={raceDistanceMeters}
                 earthAngle={active3DCamera.angle}
                 earthHeading={active3DCamera.heading}
                 earthCenter={active3DCamera.center}
@@ -407,6 +410,7 @@ export function EarthTrackView({
               raceViewFullscreen={raceViewFullscreen}
               cameraLocked={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
               raceState={raceState}
+              raceDistanceMeters={raceDistanceMeters}
               earthAngle={earthAngle}
               earthHeading={earthHeading}
               earthCenter={earthCenter}

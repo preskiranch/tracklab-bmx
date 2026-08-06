@@ -11,6 +11,11 @@ import type {
 } from '../types';
 import { safeSetLocalStorage } from './browserStorage';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
+import {
+  normalizeStraightSprintAirSetting,
+  normalizeStraightSprintDistance,
+  straightSprintConfigurationKey,
+} from './straightSprint';
 
 const maxStoredGhosts = 80;
 const maxGhostPoints = 900;
@@ -44,26 +49,40 @@ function safeLapCount(value: unknown) {
   return Math.max(1, Math.min(20, Math.round(finiteNumber(value, 1))));
 }
 
-function routeKey(routeVariantId?: TrackRouteVariantId, lapCount = 1) {
+function routeKey(
+  routeVariantId?: TrackRouteVariantId,
+  lapCount = 1,
+  sprintDistanceFeet?: number,
+  sprintAirSetting?: number,
+) {
   const variant = routeVariantId ?? 'default';
-  return lapCount > 1 ? `${variant}:laps:${safeLapCount(lapCount)}` : variant;
+  const base = lapCount > 1 ? `${variant}:laps:${safeLapCount(lapCount)}` : variant;
+  return sprintDistanceFeet != null && sprintAirSetting != null
+    ? `${base}:${straightSprintConfigurationKey(sprintDistanceFeet, sprintAirSetting)}`
+    : base;
 }
 
 function riderKey(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-export function ghostIdentityKey(ghost: Pick<GhostLap, 'trackId' | 'routeVariantId' | 'lapCount' | 'ownerKey' | 'riderName'>) {
+export function ghostIdentityKey(ghost: Pick<GhostLap, 'trackId' | 'routeVariantId' | 'lapCount' | 'sprintDistanceFeet' | 'sprintAirSetting' | 'ownerKey' | 'riderName'>) {
   return [
     ghost.trackId,
-    routeKey(ghost.routeVariantId, ghost.lapCount),
+    routeKey(ghost.routeVariantId, ghost.lapCount, ghost.sprintDistanceFeet, ghost.sprintAirSetting),
     ghost.ownerKey,
     riderKey(ghost.riderName),
   ].join('|');
 }
 
-export function ghostRouteKey(trackId: string, routeVariantId?: TrackRouteVariantId, lapCount = 1) {
-  return `${trackId}|${routeKey(routeVariantId, lapCount)}`;
+export function ghostRouteKey(
+  trackId: string,
+  routeVariantId?: TrackRouteVariantId,
+  lapCount = 1,
+  sprintDistanceFeet?: number,
+  sprintAirSetting?: number,
+) {
+  return `${trackId}|${routeKey(routeVariantId, lapCount, sprintDistanceFeet, sprintAirSetting)}`;
 }
 
 function sanitizeGhostZoneResults(value: unknown): RaceZoneResult[] {
@@ -124,6 +143,7 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
 
   const riderName = safeText(raw.riderName, 'Rider', 80);
   const photoUrl = normalizeRiderPhotoDataUrl(raw.photoUrl);
+  const hasSprintConfiguration = raw.sprintDistanceFeet != null && raw.sprintAirSetting != null;
 
   return {
     version: 1,
@@ -131,6 +151,10 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
     trackId: safeText(raw.trackId, 'unknown-track', 140),
     trackName: safeText(raw.trackName, 'Unknown track', 140),
     ...(raw.routeVariantId === 'amateur' || raw.routeVariantId === 'pro' ? { routeVariantId: raw.routeVariantId } : {}),
+    ...(hasSprintConfiguration ? {
+      sprintDistanceFeet: normalizeStraightSprintDistance(raw.sprintDistanceFeet),
+      sprintAirSetting: normalizeStraightSprintAirSetting(raw.sprintAirSetting),
+    } : {}),
     riderName,
     ...(photoUrl ? { photoUrl } : {}),
     ownerKey: safeText(raw.ownerKey, 'local', 180),
@@ -199,7 +223,8 @@ export function mergeGhostLaps(currentGhosts: GhostLap[], incomingGhosts: GhostL
   return [...byIdentity.values()]
     .sort((left, right) => (
       left.trackId.localeCompare(right.trackId)
-      || routeKey(left.routeVariantId, left.lapCount).localeCompare(routeKey(right.routeVariantId, right.lapCount))
+      || routeKey(left.routeVariantId, left.lapCount, left.sprintDistanceFeet, left.sprintAirSetting)
+        .localeCompare(routeKey(right.routeVariantId, right.lapCount, right.sprintDistanceFeet, right.sprintAirSetting))
       || left.finishTimeMs - right.finishTimeMs
       || right.savedAt - left.savedAt
     ))
@@ -212,6 +237,8 @@ export function buildGhostLapFromRace(options: {
   trackId: string;
   trackName: string;
   routeVariantId?: TrackRouteVariantId;
+  sprintDistanceFeet?: number;
+  sprintAirSetting?: number;
   lapCount?: number;
   zoneResults?: RaceZoneResult[];
   ownerKey: string;
@@ -236,13 +263,17 @@ export function buildGhostLapFromRace(options: {
     id: [
       'ghost',
       options.trackId,
-      routeKey(options.routeVariantId, lapCount),
+      routeKey(options.routeVariantId, lapCount, options.sprintDistanceFeet, options.sprintAirSetting),
       options.ownerKey,
       riderKey(options.summary.riderName),
     ].join('-').replace(/[^a-zA-Z0-9:._-]/g, '-'),
     trackId: options.trackId,
     trackName: options.trackName,
     ...(options.routeVariantId ? { routeVariantId: options.routeVariantId } : {}),
+    ...(options.sprintDistanceFeet != null && options.sprintAirSetting != null ? {
+      sprintDistanceFeet: normalizeStraightSprintDistance(options.sprintDistanceFeet),
+      sprintAirSetting: normalizeStraightSprintAirSetting(options.sprintAirSetting),
+    } : {}),
     riderName: options.summary.riderName,
     ...(options.player?.photoUrl ? { photoUrl: options.player.photoUrl } : {}),
     ownerKey: options.ownerKey,
@@ -270,10 +301,18 @@ export function ghostsForTrackRoute(
   trackId: string,
   routeVariantId?: TrackRouteVariantId,
   lapCount = 1,
+  sprintDistanceFeet?: number,
+  sprintAirSetting?: number,
 ) {
-  const activeRouteKey = ghostRouteKey(trackId, routeVariantId, lapCount);
+  const activeRouteKey = ghostRouteKey(trackId, routeVariantId, lapCount, sprintDistanceFeet, sprintAirSetting);
   return ghosts
-    .filter((ghost) => ghostRouteKey(ghost.trackId, ghost.routeVariantId, ghost.lapCount) === activeRouteKey)
+    .filter((ghost) => ghostRouteKey(
+      ghost.trackId,
+      ghost.routeVariantId,
+      ghost.lapCount,
+      ghost.sprintDistanceFeet,
+      ghost.sprintAirSetting,
+    ) === activeRouteKey)
     .sort((left, right) => left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt);
 }
 
@@ -361,10 +400,19 @@ export function playbackGhostLap(ghost: GhostLap, elapsedMs: number, index: numb
   };
 }
 
-export async function loadGhostLapsFromCloud(trackId: string, profileKey: string, friendKeys: string[]) {
+export async function loadGhostLapsFromCloud(
+  trackId: string,
+  profileKey: string,
+  friendKeys: string[],
+  sprintConfiguration?: { distanceFeet: number; airSetting: number },
+) {
   const params = new URLSearchParams({ trackId, profileKey });
   if (friendKeys.length > 0) {
     params.set('friendKeys', friendKeys.join(','));
+  }
+  if (sprintConfiguration) {
+    params.set('sprintDistanceFeet', String(normalizeStraightSprintDistance(sprintConfiguration.distanceFeet)));
+    params.set('sprintAirSetting', String(normalizeStraightSprintAirSetting(sprintConfiguration.airSetting)));
   }
 
   const response = await fetch(`/api/ghosts?${params.toString()}`);

@@ -1649,10 +1649,23 @@ function safeLapCount(value) {
   return Math.max(1, Math.min(20, Math.round(Number(value) || 1)));
 }
 
-function routeKey(routeVariantId, lapCount = 1) {
+function sprintDistanceFeet(value) {
+  const numeric = Math.round(Number(value));
+  return numeric === 30 || (numeric >= 100 && numeric <= 1500 && numeric % 100 === 0) ? numeric : null;
+}
+
+function sprintAirSetting(value) {
+  const numeric = Math.round(Number(value));
+  return numeric >= 1 && numeric <= 10 ? numeric : null;
+}
+
+function routeKey(routeVariantId, lapCount = 1, distanceFeet, airSetting) {
   const variant = routeVariantId === 'amateur' || routeVariantId === 'pro' ? routeVariantId : 'default';
   const laps = safeLapCount(lapCount);
-  return laps > 1 ? `${variant}:laps:${laps}` : variant;
+  const base = laps > 1 ? `${variant}:laps:${laps}` : variant;
+  const distance = sprintDistanceFeet(distanceFeet);
+  const air = sprintAirSetting(airSetting);
+  return distance != null && air != null ? `${base}:sprint:${distance}ft:air:${air}` : base;
 }
 
 function ghostFromRow(row, source = 'top', includeAnalytics = false) {
@@ -1664,6 +1677,11 @@ function ghostFromRow(row, source = 'top', includeAnalytics = false) {
     trackId: row.track_id,
     trackName: row.track_name,
     ...(row.route_variant_id ? { routeVariantId: row.route_variant_id } : {}),
+    ...(sprintDistanceFeet(storedSummary?.sprintDistanceFeet) != null
+      && sprintAirSetting(storedSummary?.sprintAirSetting) != null ? {
+        sprintDistanceFeet: sprintDistanceFeet(storedSummary.sprintDistanceFeet),
+        sprintAirSetting: sprintAirSetting(storedSummary.sprintAirSetting),
+      } : {}),
     riderName: row.rider_name,
     ...(storedSummary?.photoUrl ? { photoUrl: storedSummary.photoUrl } : {}),
     ownerKey: row.owner_key,
@@ -1690,7 +1708,12 @@ export async function saveGhostLap(ghost) {
   }
 
   const lapCount = safeLapCount(ghost.lapCount);
-  const safeRouteKey = routeKey(ghost.routeVariantId, lapCount);
+  const safeRouteKey = routeKey(
+    ghost.routeVariantId,
+    lapCount,
+    ghost.sprintDistanceFeet,
+    ghost.sprintAirSetting,
+  );
   return query(
     `INSERT INTO ${schema}.ghost_laps (
       id, owner_key, owner_name, rider_name, track_id, track_name, route_variant_id, route_key,
@@ -1738,6 +1761,11 @@ export async function saveGhostLap(ghost) {
       json({
         ...(ghost.summary && typeof ghost.summary === 'object' ? ghost.summary : {}),
         ...(ghost.photoUrl ? { photoUrl: ghost.photoUrl } : {}),
+        ...(sprintDistanceFeet(ghost.sprintDistanceFeet) != null
+          && sprintAirSetting(ghost.sprintAirSetting) != null ? {
+            sprintDistanceFeet: sprintDistanceFeet(ghost.sprintDistanceFeet),
+            sprintAirSetting: sprintAirSetting(ghost.sprintAirSetting),
+          } : {}),
       }),
       json(ghost.zoneResults ?? []),
       json(ghost.points),
@@ -1746,7 +1774,10 @@ export async function saveGhostLap(ghost) {
   );
 }
 
-export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], limit = 30) {
+export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], limit = 30, sprintConfiguration = null) {
+  const requestedSprintRouteSuffix = sprintConfiguration
+    ? `%:sprint:${sprintDistanceFeet(sprintConfiguration.distanceFeet)}ft:air:${sprintAirSetting(sprintConfiguration.airSetting)}`
+    : null;
   const result = await query(
     `SELECT ranked.*
      FROM (
@@ -1754,12 +1785,13 @@ export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], l
          DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
        FROM ${schema}.ghost_laps AS ghost_laps
        WHERE track_id = $1 AND race_source = 'live'
+         AND ($3::text IS NULL OR route_key LIKE $3)
      ) AS ranked
      ORDER BY
        finish_time_ms ASC,
        saved_at DESC
      LIMIT $2`,
-    [trackId, Math.max(1, Math.min(60, Math.round(Number(limit) || 30)))],
+    [trackId, Math.max(1, Math.min(60, Math.round(Number(limit) || 30))), requestedSprintRouteSuffix],
   );
 
   const friends = new Set(friendKeys);

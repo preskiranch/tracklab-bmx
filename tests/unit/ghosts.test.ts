@@ -41,6 +41,34 @@ describe('ghost lap categories and privacy metadata', () => {
     expect(ghostsForTrackRoute(ghosts, 'lasalle-loop', undefined, 3).map((ghost) => ghost.id)).toEqual([threeLaps!.id]);
   });
 
+  it('keeps straight-sprint records separate by distance and Air setting', () => {
+    const airFive = sanitizeGhostLap({
+      ...rawGhost(1, 'Sprint Rider'),
+      sprintDistanceFeet: 500,
+      sprintAirSetting: 5,
+    });
+    const airSix = sanitizeGhostLap({
+      ...rawGhost(1, 'Sprint Rider'),
+      id: 'ghost-air-six',
+      sprintDistanceFeet: 500,
+      sprintAirSetting: 6,
+    });
+    const sixHundredFeet = sanitizeGhostLap({
+      ...rawGhost(1, 'Sprint Rider'),
+      id: 'ghost-six-hundred',
+      sprintDistanceFeet: 600,
+      sprintAirSetting: 5,
+    });
+
+    const ghosts = [airFive!, airSix!, sixHundredFeet!];
+    expect(ghostsForTrackRoute(ghosts, 'lasalle-loop', undefined, 1, 500, 5))
+      .toEqual([airFive]);
+    expect(ghostsForTrackRoute(ghosts, 'lasalle-loop', undefined, 1, 500, 6))
+      .toEqual([airSix]);
+    expect(ghostsForTrackRoute(ghosts, 'lasalle-loop', undefined, 1, 600, 5))
+      .toEqual([sixHundredFeet]);
+  });
+
   it('defaults legacy ghosts to one lap with private analytics and no medal', () => {
     const legacy = rawGhost(1) as Record<string, unknown>;
     delete legacy.lapCount;

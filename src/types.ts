@@ -538,6 +538,8 @@ export type RaceCapture = {
     state: string;
     lengthMeters: number;
     routeLengthMeters?: number;
+    sprintDistanceFeet?: number;
+    sprintAirSetting?: number;
   };
   sessionMode: SessionMode;
   selectedMetrics: MetricKey[];
@@ -576,6 +578,8 @@ export type GhostLap = {
   trackId: string;
   trackName: string;
   routeVariantId?: TrackRouteVariantId;
+  sprintDistanceFeet?: number;
+  sprintAirSetting?: number;
   riderName: string;
   photoUrl?: string;
   ownerKey: string;

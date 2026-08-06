@@ -782,10 +782,18 @@ function sanitizeLocalRaceResult(value, index) {
     ? null
     : Math.max(1, Math.min(3_600_000, Math.round(finiteNumber(value.finishTimeMs, 0))));
   const photoUrl = sanitizeRiderPhotoDataUrl(value.photoUrl);
+  const sprintDistanceFeet = Math.round(finiteNumber(value.sprintDistanceFeet, 0));
+  const sprintAirSetting = Math.round(finiteNumber(value.sprintAirSetting, 0));
+  const hasSprintConfiguration = (
+    (sprintDistanceFeet === 30 || (sprintDistanceFeet >= 100 && sprintDistanceFeet <= 1500 && sprintDistanceFeet % 100 === 0))
+    && sprintAirSetting >= 1
+    && sprintAirSetting <= 10
+  );
   return {
     playerId,
     riderName: sanitizeText(value.riderName, `Rider ${playerId}`, 64),
     ...(photoUrl ? { photoUrl } : {}),
+    ...(hasSprintConfiguration ? { sprintDistanceFeet, sprintAirSetting } : {}),
     rank,
     finishTimeMs,
     distanceMeters: Math.max(0, finiteNumber(value.distanceMeters, 0)),
@@ -2218,6 +2226,13 @@ function sanitizeGhostLapPayload(value, profileKey) {
       ? 'demo'
       : 'live';
   const photoUrl = sanitizeRiderPhotoDataUrl(value.photoUrl);
+  const sprintDistanceFeet = Math.round(finiteNumber(value.sprintDistanceFeet, 0));
+  const sprintAirSetting = Math.round(finiteNumber(value.sprintAirSetting, 0));
+  const hasSprintConfiguration = (
+    (sprintDistanceFeet === 30 || (sprintDistanceFeet >= 100 && sprintDistanceFeet <= 1500 && sprintDistanceFeet % 100 === 0))
+    && sprintAirSetting >= 1
+    && sprintAirSetting <= 10
+  );
 
   if (
     raceSource !== 'live'
@@ -2237,6 +2252,7 @@ function sanitizeGhostLapPayload(value, profileKey) {
     trackId,
     trackName: sanitizeText(value.trackName, 'Unknown track', 140),
     ...(value.routeVariantId === 'amateur' || value.routeVariantId === 'pro' ? { routeVariantId: value.routeVariantId } : {}),
+    ...(hasSprintConfiguration ? { sprintDistanceFeet, sprintAirSetting } : {}),
     riderName,
     ...(photoUrl ? { photoUrl } : {}),
     ownerKey,
@@ -4899,7 +4915,14 @@ async function serveStatic(request, response) {
       const session = await currentAuthSession(request);
       const profileKey = session?.user ? authProfileKey(session.user) : '';
       const friendKeys = profileKey ? await persistence.loadFriendKeys(profileKey) : [];
-      const ghosts = await persistence.loadGhostLaps(trackId, profileKey, friendKeys, 50);
+      const requestedDistanceFeet = Math.round(finiteNumber(requestUrl.searchParams.get('sprintDistanceFeet'), 0));
+      const requestedAirSetting = Math.round(finiteNumber(requestUrl.searchParams.get('sprintAirSetting'), 0));
+      const sprintConfiguration = (
+        (requestedDistanceFeet === 30 || (requestedDistanceFeet >= 100 && requestedDistanceFeet <= 1500 && requestedDistanceFeet % 100 === 0))
+        && requestedAirSetting >= 1
+        && requestedAirSetting <= 10
+      ) ? { distanceFeet: requestedDistanceFeet, airSetting: requestedAirSetting } : null;
+      const ghosts = await persistence.loadGhostLaps(trackId, profileKey, friendKeys, 50, sprintConfiguration);
       writeJson(response, 200, {
         trackId,
         persistence: persistence.persistenceEnabled(),

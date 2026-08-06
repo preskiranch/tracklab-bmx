@@ -31,6 +31,7 @@ type AnalyticsPanelProps = {
   ghostLaps: GhostLap[];
   selectedGhostIds: string[];
   studioRiders: StudioRider[];
+  sprintConfiguration?: { distanceFeet: number; airSetting: number };
   onRaceCaptureJsonExport: () => void;
   onRaceCaptureCsvExport: () => void;
   onGhostToggle: (ghostId: string) => void;
@@ -174,6 +175,7 @@ export function AnalyticsPanel({
   ghostLaps,
   selectedGhostIds,
   studioRiders,
+  sprintConfiguration,
   onRaceCaptureJsonExport,
   onRaceCaptureCsvExport,
   onGhostToggle,
@@ -507,6 +509,11 @@ export function AnalyticsPanel({
             <div>
               <span className="eyebrow">Ghost Racer Leaderboard</span>
               <h3>{track.name}</h3>
+              {sprintConfiguration && (
+                <small className="leaderboard-configuration">
+                  {sprintConfiguration.distanceFeet.toLocaleString()} ft sprint • Wattbike Air {sprintConfiguration.airSetting}
+                </small>
+              )}
             </div>
             <Trophy size={18} />
           </div>
@@ -520,7 +527,9 @@ export function AnalyticsPanel({
 
           {rankedGhosts.length === 0 ? (
             <small className="ghost-group-empty">
-              Complete a live Wattbike race on this track to create the first ranked ghost.
+              {sprintConfiguration
+                ? `Complete a live ${sprintConfiguration.distanceFeet.toLocaleString()} ft sprint at Air ${sprintConfiguration.airSetting} to create this configuration’s first record.`
+                : 'Complete a live Wattbike race on this track to create the first ranked ghost.'}
             </small>
           ) : (
             <div className="ghost-picker">

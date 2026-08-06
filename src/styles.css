@@ -3657,6 +3657,16 @@ input:focus {
     #ffffff;
 }
 
+.straight-sprint-air-picker > div {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.straight-sprint-air-picker button.selected {
+  background: #7ade36;
+}
+
 .announcer-enable-row,
 .announcer-volume-row {
   display: flex;

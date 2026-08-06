@@ -30,6 +30,11 @@ import {
 import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
 import type { PlacePredictionOption } from '../lib/googleMaps';
 import { distanceBetweenTrackPoints, routeLengthMeters } from '../lib/trackMapping';
+import {
+  straightSprintAirSettings,
+  straightSprintDistanceOptions,
+  straightSprintMaximumFeet,
+} from '../lib/straightSprint';
 import type {
   DistanceUnit,
   DraftTrackSplit,
@@ -106,6 +111,10 @@ type SessionControlPanelProps = {
   hasDualStartRoutes: boolean;
   isLoopTrack: boolean;
   lapCount: number;
+  straightSprintDistanceFeet: number;
+  straightSprintAirSetting: number;
+  straightSprintMappedFeet: number;
+  straightSprintMaximumRouteReady: boolean;
   isAdminProfile: boolean;
   showCustomRoutes: boolean;
   sessionTrackAvailable: boolean;
@@ -154,6 +163,8 @@ type SessionControlPanelProps = {
   onMappingZoneBranchChange: (branch: TrackSplitBranch['id']) => void;
   onRaceRouteVariantChange: (variantId: TrackRouteVariantId) => void;
   onLapCountChange: (count: number) => void;
+  onStraightSprintDistanceChange: (feet: number) => void;
+  onStraightSprintAirSettingChange: (setting: number) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onMappingModeChange: (enabled: boolean) => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
@@ -217,6 +228,10 @@ export function SessionControlPanel({
   hasDualStartRoutes,
   isLoopTrack,
   lapCount,
+  straightSprintDistanceFeet,
+  straightSprintAirSetting,
+  straightSprintMappedFeet,
+  straightSprintMaximumRouteReady,
   isAdminProfile,
   showCustomRoutes,
   sessionTrackAvailable,
@@ -265,6 +280,8 @@ export function SessionControlPanel({
   onMappingZoneBranchChange,
   onRaceRouteVariantChange,
   onLapCountChange,
+  onStraightSprintDistanceChange,
+  onStraightSprintAirSettingChange,
   onDemoModeChange,
   onMappingModeChange,
   onMappingFullscreenChange,
@@ -304,7 +321,8 @@ export function SessionControlPanel({
     && !startGateActive
     && raceState !== 'racing'
     && activeBikeCount > 0
-    && hasMappedRoute;
+    && hasMappedRoute
+    && (!showCustomRoutes || straightSprintMappedFeet >= straightSprintDistanceFeet);
   const canCancel = startGateActive || raceState === 'racing';
   const canSaveMapping = draftPointCount >= 2;
   const activeMappingToolLabel = mappingEditMode === 'navigate'
@@ -543,6 +561,69 @@ export function SessionControlPanel({
           </section>
       )}
 
+      {showCustomRoutes && sessionTrackAvailable && (
+        <section className="panel-section straight-sprint-setup-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Sprint Setup</span>
+              <h3>Distance and Wattbike Air</h3>
+            </div>
+            <Zap size={18} />
+          </div>
+
+          <label className="text-field straight-sprint-distance-field">
+            <span>Sprint distance</span>
+            <select
+              value={straightSprintDistanceFeet}
+              disabled={startGateActive || raceState === 'racing'}
+              onChange={(event) => onStraightSprintDistanceChange(Number(event.target.value))}
+            >
+              {straightSprintDistanceOptions.map((feet) => (
+                <option key={feet} value={feet}>{feet.toLocaleString()} ft sprint</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="straight-sprint-air-picker">
+            <span>Wattbike Air setting</span>
+            <div role="group" aria-label="Wattbike Air setting">
+              {straightSprintAirSettings.map((setting) => (
+                <button
+                  key={setting}
+                  className={straightSprintAirSetting === setting ? 'selected' : ''}
+                  type="button"
+                  aria-pressed={straightSprintAirSetting === setting}
+                  disabled={startGateActive || raceState === 'racing'}
+                  onClick={() => onStraightSprintAirSettingChange(setting)}
+                >
+                  {setting}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={`mapping-hint${straightSprintMaximumRouteReady ? ' pedal-zone' : ''}`}>
+            <strong>{straightSprintMappedFeet.toLocaleString()} / {straightSprintMaximumFeet.toLocaleString()} ft mapped</strong>
+            <br />
+            <span>
+              {straightSprintMaximumRouteReady
+                ? 'Full drag-strip course ready. Only the selected distance finish line appears during the sprint.'
+                : `Map the straight course to ${straightSprintMaximumFeet.toLocaleString()} ft to unlock every sprint distance.`}
+            </span>
+          </div>
+
+          {straightSprintMappedFeet < straightSprintDistanceFeet && (
+            <p className="mapping-hint warning" role="status">
+              This route needs {(straightSprintDistanceFeet - straightSprintMappedFeet).toLocaleString()} more ft before the selected sprint can start.
+            </p>
+          )}
+
+          <p className="panel-helper">
+            Records and ghost rankings below are filtered to exactly {straightSprintDistanceFeet.toLocaleString()} ft at Air {straightSprintAirSetting}.
+          </p>
+        </section>
+      )}
+
       {isAdminProfile && (!showCustomRoutes || sessionTrackAvailable) && (
           <section className={mappingToolsCollapsed ? 'panel-section mapping-section collapsed' : 'panel-section mapping-section'}>
         {mappingToolsCollapsed ? (
@@ -584,6 +665,12 @@ export function SessionControlPanel({
                 Edit map
               </button>
             </div>
+
+            {showCustomRoutes && (
+              <p className={`mapping-hint${(mappingMode ? draftLengthMeters / 0.3048 : straightSprintMappedFeet) >= straightSprintMaximumFeet ? ' pedal-zone' : ''}`}>
+                Drag-strip target: {Math.round(mappingMode ? draftLengthMeters / 0.3048 : straightSprintMappedFeet).toLocaleString()} / {straightSprintMaximumFeet.toLocaleString()} ft. Draw one continuous start-to-finish line; sprint finish markers are placed automatically.
+              </p>
+            )}
 
             {mappingMode && (
               <div className="route-layout-card">
@@ -1162,15 +1249,19 @@ export function SessionControlPanel({
               ? 'Create Sprint First'
               : !hasMappedRoute
               ? 'Map Route First'
+              : showCustomRoutes && straightSprintMappedFeet < straightSprintDistanceFeet
+              ? `Map ${straightSprintDistanceFeet.toLocaleString()} ft First`
               : activeBikeCount === 0
                 ? (demoMode ? 'Choose Demo Riders' : 'Connect Bikes First')
                 : startGateActive
                   ? startGateLabel || 'Gate Sequence'
                 : raceState === 'finished'
-                  ? 'Race Again'
+                  ? showCustomRoutes ? 'Sprint Again' : 'Race Again'
                 : raceState === 'racing'
-                  ? 'Racing'
-                  : demoMode ? 'Start Demo Race' : 'Start Live Race'}
+                  ? showCustomRoutes ? 'Sprinting' : 'Racing'
+                  : showCustomRoutes
+                    ? demoMode ? 'Start Demo Sprint' : 'Start Live Sprint'
+                    : demoMode ? 'Start Demo Race' : 'Start Live Race'}
           </button>
           {canCancel && (
             <button className="action-button danger" type="button" onClick={onCancel}>

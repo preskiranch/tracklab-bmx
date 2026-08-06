@@ -142,6 +142,12 @@ import {
   writeStoredGhostLaps,
 } from './lib/ghosts';
 import { readPublicTrackMappings } from './lib/publicTrackMappings';
+import {
+  normalizeStraightSprintAirSetting,
+  normalizeStraightSprintDistance,
+  straightSprintFeetToMeters,
+  straightSprintMaximumFeet,
+} from './lib/straightSprint';
 import { buildRaceZoneResults, raceSummaryWithCapturedMetrics } from './lib/raceReview';
 import {
   countdownSeconds,
@@ -1536,6 +1542,8 @@ export default function App() {
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
   const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
   const [lapCount, setLapCount] = useState(1);
+  const [straightSprintDistanceFeet, setStraightSprintDistanceFeet] = useState(100);
+  const [straightSprintAirSetting, setStraightSprintAirSetting] = useState(1);
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [cloudUserDataStatus, setCloudUserDataStatus] = useState<CloudUserDataStatus>('loading');
   const [cloudUserDataMessage, setCloudUserDataMessage] = useState('Loading cloud profile data.');
@@ -1889,7 +1897,18 @@ export default function App() {
     () => routeIsClosedLoop(effectiveTrack.centerline ?? []),
     [effectiveTrack.centerline],
   );
-  const effectiveRouteLengthMeters = baseRouteLengthMeters * (isLoopTrack ? lapCount : 1);
+  const straightSprintMappedRouteLengthMeters = effectiveTrack.centerline && effectiveTrack.centerline.length >= 2
+    ? baseRouteLengthMeters
+    : 0;
+  const straightSprintMappedFeet = Math.round(straightSprintMappedRouteLengthMeters / 0.3048);
+  const straightSprintDistanceMeters = straightSprintFeetToMeters(straightSprintDistanceFeet);
+  const straightSprintRouteReady = appMode !== 'straight-sprint'
+    || straightSprintMappedRouteLengthMeters + 0.5 >= straightSprintDistanceMeters;
+  const straightSprintMaximumRouteReady = appMode !== 'straight-sprint'
+    || straightSprintMappedRouteLengthMeters + 0.5 >= straightSprintFeetToMeters(straightSprintMaximumFeet);
+  const effectiveRouteLengthMeters = appMode === 'straight-sprint'
+    ? straightSprintDistanceMeters
+    : baseRouteLengthMeters * (isLoopTrack ? lapCount : 1);
 
   useEffect(() => {
     setLapCount(1);
@@ -2436,8 +2455,17 @@ export default function App() {
     });
   }, [persistRaceViewPreferences]);
   const ghostRouteVariantId = effectiveTrack.activeRouteVariantId ?? (hasDualStartRoutes ? raceRouteVariantId : undefined);
+  const activeSprintDistanceFeet = appMode === 'straight-sprint' ? straightSprintDistanceFeet : undefined;
+  const activeSprintAirSetting = appMode === 'straight-sprint' ? straightSprintAirSetting : undefined;
   const availableGhostLaps = useMemo(
-    () => ghostsForTrackRoute(ghostLaps, effectiveTrack.id, ghostRouteVariantId, isLoopTrack ? lapCount : 1)
+    () => ghostsForTrackRoute(
+      ghostLaps,
+      effectiveTrack.id,
+      ghostRouteVariantId,
+      isLoopTrack ? lapCount : 1,
+      activeSprintDistanceFeet,
+      activeSprintAirSetting,
+    )
       .filter((ghost) => (
         ghost.raceSource === 'live'
         && (
@@ -2448,7 +2476,16 @@ export default function App() {
       ))
       .sort((left, right) => left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt)
       .slice(0, 50),
-    [cloudProfileKey, effectiveTrack.id, ghostLaps, ghostRouteVariantId, isLoopTrack, lapCount],
+    [
+      activeSprintAirSetting,
+      activeSprintDistanceFeet,
+      cloudProfileKey,
+      effectiveTrack.id,
+      ghostLaps,
+      ghostRouteVariantId,
+      isLoopTrack,
+      lapCount,
+    ],
   );
   const selectedGhostLaps = useMemo(
     () => availableGhostLaps.filter((ghost) => selectedGhostIds.includes(ghost.id)),
@@ -2961,6 +2998,10 @@ export default function App() {
         state: effectiveTrack.state,
         lengthMeters: effectiveTrack.lengthMeters,
         routeLengthMeters: effectiveRouteLengthMeters,
+        ...(appMode === 'straight-sprint' ? {
+          sprintDistanceFeet: straightSprintDistanceFeet,
+          sprintAirSetting: straightSprintAirSetting,
+        } : {}),
       },
       sessionMode: 'sprint',
       selectedMetrics,
@@ -2986,7 +3027,17 @@ export default function App() {
     };
 
     setRaceCapture(capture);
-  }, [demoMode, effectiveRouteLengthMeters, effectiveTrack, racePlayers, raceZones, selectedMetrics]);
+  }, [
+    appMode,
+    demoMode,
+    effectiveRouteLengthMeters,
+    effectiveTrack,
+    racePlayers,
+    raceZones,
+    selectedMetrics,
+    straightSprintAirSetting,
+    straightSprintDistanceFeet,
+  ]);
 
   const appendRaceCaptureEvent = useCallback((type: RaceCapture['events'][number]['type'], label: string, at = Date.now()) => {
     setRaceCapture((current) => {
@@ -3611,7 +3662,14 @@ export default function App() {
       ? friendGhostKeySignature.split(',').filter(Boolean)
       : [];
 
-    loadGhostLapsFromCloud(selectedTrack.id, cloudProfileKey, friendKeys)
+    loadGhostLapsFromCloud(
+      selectedTrack.id,
+      cloudProfileKey,
+      friendKeys,
+      appMode === 'straight-sprint'
+        ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
+        : undefined,
+    )
       .then((cloudGhosts) => {
         if (cancelled || cloudGhosts.length === 0) {
           return;
@@ -3626,7 +3684,14 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [cloudProfileKey, friendGhostKeySignature, selectedTrack.id]);
+  }, [
+    appMode,
+    cloudProfileKey,
+    friendGhostKeySignature,
+    selectedTrack.id,
+    straightSprintAirSetting,
+    straightSprintDistanceFeet,
+  ]);
 
   useEffect(() => {
     if (startGateStatus.active && raceState !== 'racing') {
@@ -3920,6 +3985,8 @@ export default function App() {
           trackId: effectiveTrack.id,
           trackName: effectiveTrack.name,
           routeVariantId: ghostRouteVariantId,
+          sprintDistanceFeet: activeSprintDistanceFeet,
+          sprintAirSetting: activeSprintAirSetting,
           lapCount: isLoopTrack ? lapCount : 1,
           zoneResults: (raceCapture?.zoneResults ?? []).map((zone) => ({
             ...zone,
@@ -3955,6 +4022,10 @@ export default function App() {
           return {
             ...summary,
             ...(photoUrl ? { photoUrl } : {}),
+            ...(activeSprintDistanceFeet != null && activeSprintAirSetting != null ? {
+              sprintDistanceFeet: activeSprintDistanceFeet,
+              sprintAirSetting: activeSprintAirSetting,
+            } : {}),
           };
         }),
       }),
@@ -3972,6 +4043,8 @@ export default function App() {
     });
   }, [
     authUser?.name,
+    activeSprintAirSetting,
+    activeSprintDistanceFeet,
     cloudProfileKey,
     effectiveTrack.id,
     effectiveTrack.name,
@@ -3995,7 +4068,16 @@ export default function App() {
     setDemoSignalsStopped(false);
     setReactionStartAt(null);
     setReactionTimesByPlayer({});
-  }, [effectiveTrack.activeRouteVariantId, effectiveTrack.id, mappedZones, raceState, resetRace, startGateStatus.active]);
+  }, [
+    effectiveTrack.activeRouteVariantId,
+    effectiveTrack.id,
+    mappedZones,
+    raceState,
+    resetRace,
+    startGateStatus.active,
+    straightSprintAirSetting,
+    straightSprintDistanceFeet,
+  ]);
 
   const renamePlayer = useCallback((playerId: PlayerSlot['id'], name: string) => {
     const player = sessionPlayers.find((item) => item.id === playerId);
@@ -6327,6 +6409,7 @@ export default function App() {
     const startingRacePlayers = racePlayers;
     if (
       effectiveTrack.routeStatus !== 'user-mapped'
+      || !straightSprintRouteReady
       || startingRacePlayers.length === 0
       || startGateStatus.active
       || raceState === 'racing'
@@ -6535,7 +6618,9 @@ export default function App() {
   const workflowConnectionReady = demoMode || activePlayers.length > 0;
   const workflowRaceEntryReady = demoMode || racePlayers.length > 0;
   const sessionTrackAvailable = appMode !== 'straight-sprint' || selectedTrack.countryCode === 'CUSTOM';
-  const workflowMapReady = sessionTrackAvailable && effectiveTrack.routeStatus === 'user-mapped';
+  const workflowMapReady = sessionTrackAvailable
+    && effectiveTrack.routeStatus === 'user-mapped'
+    && straightSprintRouteReady;
   const workflowRaceReady = workflowConnectionReady && workflowRaceEntryReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
   const raceWorkspaceMode: AppMode = appMode === 'straight-sprint' ? 'straight-sprint' : 'race';
   const hasStartHereSplitChoices = racePlayers.length > 0 && (effectiveTrack.splitSections?.length ?? 0) > 0;
@@ -6575,7 +6660,9 @@ export default function App() {
       kind: 'action' as const,
       label: 'Map Zones',
       detail: workflowMapReady
-        ? `${effectiveTrack.zones.length} pedal zone${effectiveTrack.zones.length === 1 ? '' : 's'}`
+        ? appMode === 'straight-sprint'
+          ? `${straightSprintMappedFeet.toLocaleString()} ft mapped`
+          : `${effectiveTrack.zones.length} pedal zone${effectiveTrack.zones.length === 1 ? '' : 's'}`
         : 'Needs layout',
       state: workflowMapReady ? 'complete' as const : 'next' as const,
       onClick: () => {
@@ -6618,7 +6705,9 @@ export default function App() {
         : !sessionTrackAvailable
           ? 'Create sprint first'
           : !workflowMapReady
-          ? 'Map first'
+          ? appMode === 'straight-sprint' && effectiveTrack.routeStatus === 'user-mapped'
+            ? `Map at least ${straightSprintDistanceFeet.toLocaleString()} ft`
+            : 'Map first'
           : !workflowConnectionReady
             ? 'Connect bike'
             : !workflowRaceEntryReady
@@ -6978,16 +7067,14 @@ export default function App() {
             <Compass size={17} />
             Explore the World
           </button>
-          {developerUiActive && (
-            <button
-              className={appMode === 'straight-sprint' && !mappingMode ? 'selected' : ''}
-              type="button"
-              onClick={openStraightSprint}
-            >
-              <Route size={17} />
-              Straight Sprint
-            </button>
-          )}
+          <button
+            className={appMode === 'straight-sprint' && !mappingMode ? 'selected' : ''}
+            type="button"
+            onClick={openStraightSprint}
+          >
+            <Route size={17} />
+            Straight Sprint
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -7304,6 +7391,7 @@ export default function App() {
                   speedUnit={speedUnit}
                   distanceUnit={distanceUnit}
                   raceState={raceState}
+                  raceDistanceMeters={appMode === 'straight-sprint' ? straightSprintDistanceMeters : undefined}
                   raceViewFullscreen={raceViewFullscreen}
                   startGateActive={startGateStatus.active}
                   startGatePhase={startGateStatus.phase}
@@ -7382,6 +7470,9 @@ export default function App() {
                     ghostLaps={availableGhostLaps}
                     selectedGhostIds={selectedGhostIds}
                     studioRiders={availableStudioRiders}
+                    sprintConfiguration={appMode === 'straight-sprint'
+                      ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
+                      : undefined}
                     onRaceCaptureJsonExport={exportRaceCaptureJson}
                     onRaceCaptureCsvExport={exportRaceCaptureCsv}
                     onGhostToggle={toggleGhostLap}
@@ -7416,6 +7507,10 @@ export default function App() {
                   hasDualStartRoutes={hasDualStartRoutes}
                   isLoopTrack={isLoopTrack}
                   lapCount={lapCount}
+                  straightSprintDistanceFeet={straightSprintDistanceFeet}
+                  straightSprintAirSetting={straightSprintAirSetting}
+                  straightSprintMappedFeet={straightSprintMappedFeet}
+                  straightSprintMaximumRouteReady={straightSprintMaximumRouteReady}
                   isAdminProfile={developerUiActive}
                   showCustomRoutes={appMode === 'straight-sprint'}
                   sessionTrackAvailable={sessionTrackAvailable}
@@ -7465,6 +7560,14 @@ export default function App() {
                   onMappingZoneBranchChange={setMappingZoneBranchChoice}
                   onRaceRouteVariantChange={handleRaceRouteVariantChange}
                   onLapCountChange={(count) => setLapCount(Math.max(1, Math.min(20, Math.round(count))))}
+                  onStraightSprintDistanceChange={(feet) => {
+                    setStraightSprintDistanceFeet(normalizeStraightSprintDistance(feet));
+                    setSelectedGhostIds([]);
+                  }}
+                  onStraightSprintAirSettingChange={(setting) => {
+                    setStraightSprintAirSetting(normalizeStraightSprintAirSetting(setting));
+                    setSelectedGhostIds([]);
+                  }}
                   onDemoModeChange={handleDemoModeChange}
                   onMappingModeChange={handleMappingModeChange}
                   onMappingFullscreenChange={handleMappingFullscreenChange}

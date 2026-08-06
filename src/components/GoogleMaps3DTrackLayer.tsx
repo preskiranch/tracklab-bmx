@@ -70,6 +70,7 @@ type GoogleMaps3DTrackLayerProps = {
   raceViewFullscreen?: boolean;
   cameraLocked?: boolean;
   raceState: RaceState;
+  raceDistanceMeters?: number;
   earthAngle: number;
   earthHeading: number;
   earthCenter: TrackPoint | null;
@@ -543,6 +544,7 @@ export function GoogleMaps3DTrackLayer({
   raceViewFullscreen = false,
   cameraLocked = false,
   raceState,
+  raceDistanceMeters,
   earthAngle,
   earthHeading,
   earthCenter,
@@ -942,7 +944,11 @@ export function GoogleMaps3DTrackLayer({
     }
 
     const start = mappingMode ? draftPoints[0] : trackStartPoint(track);
-    const finish = mappingMode ? draftPoints[draftPoints.length - 1] : trackFinishPoint(track);
+    const finish = mappingMode
+      ? draftPoints[draftPoints.length - 1]
+      : raceDistanceMeters != null
+        ? pointAtRouteMeter(savedRoute, Math.min(routeLengthMeters(savedRoute), raceDistanceMeters))
+        : trackFinishPoint(track);
     if (start) {
       const marker = appendMarker(map, library, start, {
         className: 'map-3d-landmark-marker start', label: 'START', title: 'Start line', zIndex: 850,
@@ -997,7 +1003,7 @@ export function GoogleMaps3DTrackLayer({
     }
 
     return () => removeElements(elements);
-  }, [activeDraftZoneRoute, activeZones, draftPoints, draftReferenceZones, draftRoute, draftRouteSplitSections, draftSplitBuilder, draftSplitSections, draftZoneMeters, draftZonePoints, draftZoneSectionId, isProSetZoneMapping, mappingEditMode, mappingMode, mappingRouteVariantId, onMappingPathPointAdd, onMappingSplitPointAdd, onMappingZonePointAdd, raceState, raceViewFullscreen, savedRoute, sceneVersion, selectedEditPoint, track]);
+  }, [activeDraftZoneRoute, activeZones, draftPoints, draftReferenceZones, draftRoute, draftRouteSplitSections, draftSplitBuilder, draftSplitSections, draftZoneMeters, draftZonePoints, draftZoneSectionId, isProSetZoneMapping, mappingEditMode, mappingMode, mappingRouteVariantId, onMappingPathPointAdd, onMappingSplitPointAdd, onMappingZonePointAdd, raceDistanceMeters, raceState, raceViewFullscreen, savedRoute, sceneVersion, selectedEditPoint, track]);
 
   useEffect(() => {
     const map = mapRef.current;
