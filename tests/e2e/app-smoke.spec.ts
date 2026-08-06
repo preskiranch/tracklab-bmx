@@ -1870,6 +1870,12 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect(page.getByLabel('Bike pairing').locator('.pair-card')).toHaveCount(2);
   await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 2');
   await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 4');
+  await page.getByRole('group', { name: 'Wattbike Air setting' })
+    .getByRole('button', { name: '5', exact: true }).click();
+  await page.getByRole('button', { name: 'Start Demo Sprint', exact: true }).click();
+  const sprintSetupBadge = page.locator('.race-countdown-pause-overlay').filter({ hasText: '100 ft Sprint' });
+  await expect(sprintSetupBadge).toContainText('Wattbike Air 5', { timeout: 35_000 });
+  await page.getByRole('button', { name: 'Cancel Race', exact: true }).click();
 });
 
 test('regular racers can use published tracks but cannot access mapping tools', async ({ page }) => {

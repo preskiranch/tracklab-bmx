@@ -7404,6 +7404,7 @@ export default function App() {
                   distanceUnit={distanceUnit}
                   raceState={raceState}
                   raceDistanceMeters={appMode === 'straight-sprint' ? straightSprintDistanceMeters : undefined}
+                  raceAirSetting={straightSprintAirSetting}
                   raceViewFullscreen={raceViewFullscreen}
                   startGateActive={startGateStatus.active}
                   startGatePhase={startGateStatus.phase}

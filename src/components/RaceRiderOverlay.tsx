@@ -59,6 +59,10 @@ function ordinal(value: number) {
   return `${value}${suffix}`;
 }
 
+export function raceProgressPercent(distanceMeters: number, raceLengthMeters: number) {
+  return Math.round(Math.max(0, Math.min(100, (distanceMeters / Math.max(1, raceLengthMeters)) * 100)));
+}
+
 function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | null) {
   if (!container) {
     return layout;
@@ -147,7 +151,7 @@ export function RaceRiderOverlay({
         photoUrl: player.photoUrl,
         accent: player.accent,
         rank: rider.rank,
-        progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
+        progressPct: raceProgressPercent(rider.distance, trackLengthMeters),
         speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
         distanceMeters: rider.distance,
         finishedAt: rider.finishedAt,
@@ -162,7 +166,7 @@ export function RaceRiderOverlay({
       photoUrl: undefined,
       accent: '#22d3ee',
       rank: rider.rank,
-      progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
+      progressPct: raceProgressPercent(rider.distance, trackLengthMeters),
       speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
       distanceMeters: rider.distance,
       finishedAt: rider.finishedAt,
@@ -176,7 +180,7 @@ export function RaceRiderOverlay({
       photoUrl: rider.photoUrl,
       accent: rider.accent,
       rank: rider.rank,
-      progressPct: Math.max(0, Math.min(100, (rider.distance / Math.max(1, trackLengthMeters)) * 100)),
+      progressPct: raceProgressPercent(rider.distance, trackLengthMeters),
       speedKph: rider.speedKph ?? (rider.velocity > 0 ? rider.velocity * 3.6 : null),
       distanceMeters: rider.distance,
       finishedAt: rider.finishedAt,
@@ -362,7 +366,7 @@ export function RaceRiderOverlay({
               <div className="race-rider-overlay-identity">
                 <strong>{entry.name}</strong>
                 <span>
-                  {Math.round(entry.progressPct)}% track / {formatSpeedFromKph(entry.speedKph, speedUnit)} {speedUnitLabel(speedUnit)}
+                  {entry.progressPct}% track / {formatSpeedFromKph(entry.speedKph, speedUnit)} {speedUnitLabel(speedUnit)}
                 </span>
               </div>
             </div>

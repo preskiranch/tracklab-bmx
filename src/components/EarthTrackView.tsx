@@ -24,7 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
-import { RaceRiderOverlay } from './RaceRiderOverlay';
+import { RaceRiderOverlay, raceProgressPercent } from './RaceRiderOverlay';
 import { RiderAvatar } from './RiderAvatar';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
 import { mapping3DCenterForTrack } from '../lib/googleMaps3d';
@@ -70,6 +70,7 @@ type EarthTrackViewProps = {
   distanceUnit: DistanceUnit;
   raceState: RaceState;
   raceDistanceMeters?: number;
+  raceAirSetting?: number;
   raceViewFullscreen: boolean;
   startGateActive: boolean;
   startGatePhase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
@@ -170,6 +171,7 @@ export function EarthTrackView({
   distanceUnit,
   raceState,
   raceDistanceMeters,
+  raceAirSetting,
   raceViewFullscreen,
   startGateActive,
   startGatePhase,
@@ -304,6 +306,7 @@ export function EarthTrackView({
   const mapRiders = mappingMode ? [] : riders;
   const mapGhostRiders = mappingMode ? [] : ghostRiders;
   const mapRemoteRaceStates = mappingMode ? [] : remoteRaceStates;
+  const progressLengthMeters = raceDistanceMeters ?? track.lengthMeters;
 
   return (
     <section className="earth-panel">
@@ -513,7 +516,11 @@ export function EarthTrackView({
 
         {raceViewFullscreen && raceDistanceMeters != null && raceState !== 'ready' && (
           <div className="race-countdown-pause-overlay">
-            {formatDistanceMeters(raceDistanceMeters, distanceUnit)} Sprint
+            <span>
+              {formatDistanceMeters(raceDistanceMeters, distanceUnit)} Sprint
+              <br />
+              <small>Wattbike Air {raceAirSetting}</small>
+            </span>
           </div>
         )}
 
@@ -579,7 +586,7 @@ export function EarthTrackView({
           raceState={raceState}
           visible={raceViewFullscreen && !mappingMode}
           speedUnit={speedUnit}
-          trackLengthMeters={track.lengthMeters}
+          trackLengthMeters={progressLengthMeters}
           preference={riderOverlayPreference}
           canEditLayout={canEditRaceLayout}
           onPreferenceChange={onRiderOverlayPreferenceChange}
@@ -719,7 +726,7 @@ export function EarthTrackView({
                 />
                 <div className="rider-stat-identity">
                   <strong>{player?.name ?? `Player ${rider.playerId}`}</strong>
-                  <span>Gate P{rider.playerId} / {Math.round((rider.distance / track.lengthMeters) * 100)}% / RT {formatReactionTime(reactionTime)}</span>
+                  <span>Gate P{rider.playerId} / {raceProgressPercent(rider.distance, progressLengthMeters)}% / RT {formatReactionTime(reactionTime)}</span>
                 </div>
                 <div className="rider-stat-live">
                   <Signal size={14} />
@@ -736,7 +743,7 @@ export function EarthTrackView({
               <RiderAvatar name={rider.name} photoUrl={rider.photoUrl} accent={rider.accent} className="rider-stat-avatar" />
               <div className="rider-stat-identity">
                 <strong>{rider.name}</strong>
-                <span>Remote / {Math.round((rider.distance / track.lengthMeters) * 100)}% / {state.raceState}</span>
+                <span>Remote / {raceProgressPercent(rider.distance, progressLengthMeters)}% / {state.raceState}</span>
               </div>
               <div className="rider-stat-live">
                 <Signal size={14} />
@@ -750,7 +757,7 @@ export function EarthTrackView({
               <RiderAvatar name={rider.name} accent={rider.accent} className="rider-stat-avatar" />
               <div className="rider-stat-identity">
                 <strong>{rider.name}</strong>
-                <span>Ghost {index + 1} / {Math.round((rider.distance / track.lengthMeters) * 100)}%</span>
+                <span>Ghost {index + 1} / {raceProgressPercent(rider.distance, progressLengthMeters)}%</span>
               </div>
               <div className="rider-stat-live">
                 <Signal size={14} />
