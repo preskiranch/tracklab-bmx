@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  databaseMigrations,
   migrationChecksum,
   runDatabaseMigrations,
 } from '../../cloud/migrations.mjs';
@@ -49,6 +50,18 @@ function fakeDatabase(options: {
 }
 
 describe('database migration runner', () => {
+  it('includes recovery for custom sprint maps saved while the location was still a preview', () => {
+    const recoveryMigration = databaseMigrations().at(-1);
+
+    expect(recoveryMigration).toMatchObject({
+      version: 9,
+      name: 'recover custom sprint maps saved from location previews',
+    });
+    expect(recoveryMigration?.statements.join('\n')).toContain('custom-preview-%');
+    expect(recoveryMigration?.statements.join('\n')).toContain('public_custom_routes');
+    expect(recoveryMigration?.statements.join('\n')).toContain('public_track_mappings');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();

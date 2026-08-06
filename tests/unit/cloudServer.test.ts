@@ -828,6 +828,38 @@ describe('cloud API trust boundaries', () => {
       customRoutes: [{ id: customTrack.id, name: 'Drag Strip', state: 'New Hampshire' }],
       count: 1,
     });
+
+    const previewTrack = customSprintTrack(`custom-preview-drag-strip-${Date.now()}`);
+    const permanentPreviewTrackId = previewTrack.id.replace('custom-preview-', 'custom-');
+    const previewMapping = {
+      ...trackMapping(previewTrack.id),
+      trackName: previewTrack.name,
+      country: previewTrack.country,
+      state: previewTrack.state,
+      lengthMeters: previewTrack.lengthMeters,
+    };
+    const previewSave = await api('/api/user-data/track-mapping', {
+      method: 'POST',
+      body: JSON.stringify({ mapping: previewMapping, track: previewTrack }),
+    });
+    expect(previewSave.status).toBe(200);
+    await expect(previewSave.json()).resolves.toMatchObject({
+      mapping: { trackId: permanentPreviewTrackId },
+      published: true,
+      publicMapping: { trackId: permanentPreviewTrackId },
+      publicCustomRoute: { id: permanentPreviewTrackId, name: 'Drag Strip' },
+    });
+
+    const publicAfterPreviewRecovery = await api('/api/public-track-mappings');
+    const publicAfterPreviewPayload = await publicAfterPreviewRecovery.json() as {
+      customRoutes: Array<{ id: string }>;
+      trackMappings: Record<string, unknown>;
+    };
+    expect(publicAfterPreviewPayload.trackMappings[permanentPreviewTrackId]).toBeDefined();
+    expect(publicAfterPreviewPayload.trackMappings[previewTrack.id]).toBeUndefined();
+    expect(publicAfterPreviewPayload.customRoutes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: permanentPreviewTrackId }),
+    ]));
   });
 
   it('rejects cross-site mutations and does not cache mutable manifests immutably', async () => {

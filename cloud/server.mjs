@@ -307,6 +307,12 @@ function shouldPublishSharedTrackMapping(mapping, customRoute = null) {
   return true;
 }
 
+function permanentCustomRouteId(trackId) {
+  return trackId.startsWith('custom-preview-')
+    ? `custom-${trackId.slice('custom-preview-'.length)}`
+    : trackId;
+}
+
 function publicAuthUser(user) {
   if (!user) {
     return null;
@@ -4838,13 +4844,44 @@ async function serveStatic(request, response) {
 
     const payload = await readJsonBody(request, 5_000_000);
     const trackMappings = sanitizePublicTrackMappingsPayload(payload);
-    const mapping = Object.values(trackMappings)[0];
+    const submittedMapping = Object.values(trackMappings)[0];
+    let mapping = submittedMapping;
     if (!mapping) {
       writeJson(response, 400, { error: 'A valid track mapping is required.' });
       return;
     }
 
-    const customRoute = sanitizePublicCustomRoute(payload?.track);
+    let submittedTrack = payload?.track;
+    if (mapping.trackId.startsWith('custom-preview-')) {
+      const permanentTrackId = permanentCustomRouteId(mapping.trackId);
+      const routeCenter = mapping.centerline[0];
+      mapping = {
+        ...mapping,
+        trackId: permanentTrackId,
+      };
+      submittedTrack = {
+        ...(submittedTrack && typeof submittedTrack === 'object' ? submittedTrack : {}),
+        id: permanentTrackId,
+        name: mapping.trackName,
+        country: 'Custom Routes',
+        countryCode: 'CUSTOM',
+        state: sanitizeText(submittedTrack?.state, 'Personal', 80),
+        region: sanitizeText(submittedTrack?.region, 'Personal', 80),
+        source: 'Custom',
+        sourceUrl: 'local://custom-route',
+        latitude: finiteNumber(submittedTrack?.latitude, routeCenter.lat),
+        longitude: finiteNumber(submittedTrack?.longitude, routeCenter.lng),
+        lengthMeters: mapping.lengthMeters,
+        elevationMeters: finiteNumber(submittedTrack?.elevationMeters, 0),
+        surface: sanitizeText(submittedTrack?.surface, 'Custom sprint route', 100),
+        outline: mapping.centerline,
+        routeStatus: 'locator-only',
+        zones: [],
+        leaderboards: { rpm: [], speed: [], watts: [] },
+      };
+    }
+
+    const customRoute = sanitizePublicCustomRoute(submittedTrack);
     const profileKey = authProfileKey(session.user);
     const publish = canPublishSharedTrackMappings(session.user)
       && shouldPublishSharedTrackMapping(mapping, customRoute);

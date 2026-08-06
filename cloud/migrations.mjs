@@ -399,6 +399,165 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
            updated_at = now()`,
       ],
     },
+    {
+      version: 9,
+      name: 'recover custom sprint maps saved from location previews',
+      statements: [
+        `WITH previews AS (
+           SELECT
+             data.guest_key,
+             mapping.key AS preview_id,
+             regexp_replace(mapping.key, '^custom-preview-', 'custom-') AS track_id,
+             mapping.value AS mapping
+           FROM ${schema}.user_data AS data
+           JOIN ${schema}.auth_users AS users
+             ON data.guest_key = 'user:' || users.id
+           CROSS JOIN LATERAL jsonb_each(COALESCE(data.track_mappings, '{}'::jsonb)) AS mapping
+           WHERE users.admin = true
+             AND mapping.key LIKE 'custom-preview-%'
+             AND mapping.value ->> 'routeStatus' = 'user-mapped'
+             AND jsonb_array_length(COALESCE(mapping.value -> 'centerline', '[]'::jsonb)) >= 2
+         )
+         INSERT INTO ${schema}.public_custom_routes (
+           track_id,
+           route,
+           published_by,
+           published_at,
+           updated_at
+         )
+         SELECT
+           preview.track_id,
+           jsonb_build_object(
+             'id', preview.track_id,
+             'name', COALESCE(preview.mapping ->> 'trackName', 'Recovered custom sprint'),
+             'country', 'Custom Routes',
+             'countryCode', 'CUSTOM',
+             'state', 'Personal',
+             'region', 'Personal',
+             'source', 'Custom',
+             'sourceUrl', 'local://custom-route',
+             'sourceType', 'manual',
+             'verificationStatus', 'unverified',
+             'addressStatus', 'coordinates-only',
+             'address', CASE
+               WHEN lower(COALESCE(preview.mapping ->> 'trackName', '')) LIKE '%drag strip%'
+                 THEN 'Drag Strip, Epping, NH 03042, USA'
+               ELSE COALESCE(preview.mapping ->> 'trackName', 'Recovered custom sprint')
+             END,
+             'latitude', preview.mapping -> 'centerline' -> 0 -> 'lat',
+             'longitude', preview.mapping -> 'centerline' -> 0 -> 'lng',
+             'coordinateSource', 'Recovered TrackLab developer mapping',
+             'coordinateAccuracy', 'developer-confirmed',
+             'lengthMeters', COALESCE(preview.mapping -> 'lengthMeters', '1000'::jsonb),
+             'elevationMeters', 0,
+             'surface', 'Custom sprint route',
+             'outline', preview.mapping -> 'centerline',
+             'routeStatus', 'locator-only',
+             'zones', '[]'::jsonb,
+             'leaderboards', jsonb_build_object('rpm', '[]'::jsonb, 'speed', '[]'::jsonb, 'watts', '[]'::jsonb)
+           ),
+           preview.guest_key,
+           now(),
+           now()
+         FROM previews AS preview
+         ON CONFLICT (track_id) DO UPDATE SET
+           route = EXCLUDED.route,
+           published_by = EXCLUDED.published_by,
+           updated_at = now()`,
+        `WITH previews AS (
+           SELECT
+             data.guest_key,
+             regexp_replace(mapping.key, '^custom-preview-', 'custom-') AS track_id,
+             mapping.value || jsonb_build_object(
+               'trackId', regexp_replace(mapping.key, '^custom-preview-', 'custom-'),
+               'country', 'Custom Routes',
+               'state', 'Personal'
+             ) AS mapping
+           FROM ${schema}.user_data AS data
+           JOIN ${schema}.auth_users AS users
+             ON data.guest_key = 'user:' || users.id
+           CROSS JOIN LATERAL jsonb_each(COALESCE(data.track_mappings, '{}'::jsonb)) AS mapping
+           WHERE users.admin = true
+             AND mapping.key LIKE 'custom-preview-%'
+             AND mapping.value ->> 'routeStatus' = 'user-mapped'
+             AND jsonb_array_length(COALESCE(mapping.value -> 'centerline', '[]'::jsonb)) >= 2
+         )
+         INSERT INTO ${schema}.public_track_mappings (
+           track_id,
+           track_name,
+           country,
+           state,
+           mapping,
+           published_by,
+           published_at,
+           updated_at
+         )
+         SELECT
+           preview.track_id,
+           COALESCE(preview.mapping ->> 'trackName', 'Recovered custom sprint'),
+           'Custom Routes',
+           'Personal',
+           preview.mapping,
+           preview.guest_key,
+           now(),
+           now()
+         FROM previews AS preview
+         ON CONFLICT (track_id) DO UPDATE SET
+           track_name = EXCLUDED.track_name,
+           country = EXCLUDED.country,
+           state = EXCLUDED.state,
+           mapping = EXCLUDED.mapping,
+           published_by = EXCLUDED.published_by,
+           updated_at = now()`,
+        `UPDATE ${schema}.user_data AS data
+         SET
+           custom_routes = COALESCE(data.custom_routes, '[]'::jsonb) || COALESCE((
+             SELECT jsonb_agg(public_route.route)
+             FROM jsonb_each(COALESCE(data.track_mappings, '{}'::jsonb)) AS preview
+             JOIN ${schema}.public_custom_routes AS public_route
+               ON public_route.track_id = regexp_replace(preview.key, '^custom-preview-', 'custom-')
+             WHERE preview.key LIKE 'custom-preview-%'
+               AND preview.value ->> 'routeStatus' = 'user-mapped'
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM jsonb_array_elements(COALESCE(data.custom_routes, '[]'::jsonb)) AS existing(route)
+                 WHERE existing.route ->> 'id' = public_route.track_id
+               )
+           ), '[]'::jsonb),
+           track_mappings = (
+             COALESCE(data.track_mappings, '{}'::jsonb) - ARRAY(
+               SELECT preview.key
+               FROM jsonb_each(COALESCE(data.track_mappings, '{}'::jsonb)) AS preview
+               WHERE preview.key LIKE 'custom-preview-%'
+                 AND preview.value ->> 'routeStatus' = 'user-mapped'
+             )
+           ) || COALESCE((
+             SELECT jsonb_object_agg(
+               regexp_replace(preview.key, '^custom-preview-', 'custom-'),
+               preview.value || jsonb_build_object(
+                 'trackId', regexp_replace(preview.key, '^custom-preview-', 'custom-'),
+                 'country', 'Custom Routes',
+                 'state', 'Personal'
+               )
+             )
+             FROM jsonb_each(COALESCE(data.track_mappings, '{}'::jsonb)) AS preview
+             WHERE preview.key LIKE 'custom-preview-%'
+               AND preview.value ->> 'routeStatus' = 'user-mapped'
+           ), '{}'::jsonb),
+           updated_at = now()
+         WHERE data.guest_key IN (
+           SELECT 'user:' || users.id
+           FROM ${schema}.auth_users AS users
+           WHERE users.admin = true
+         )
+           AND EXISTS (
+             SELECT 1
+             FROM jsonb_each(COALESCE(data.track_mappings, '{}'::jsonb)) AS preview
+             WHERE preview.key LIKE 'custom-preview-%'
+               AND preview.value ->> 'routeStatus' = 'user-mapped'
+           )`,
+      ],
+    },
   ];
 }
 
