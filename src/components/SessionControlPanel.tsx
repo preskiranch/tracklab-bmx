@@ -103,6 +103,8 @@ type SessionControlPanelProps = {
   customRoutes: TrackRecord[];
   selectedTrackId: string;
   players: PlayerSlot[];
+  demoPlayerOptions: PlayerSlot[];
+  selectedDemoPlayerIds: PlayerSlot['id'][];
   branchChoicesByPlayer: Partial<Record<PlayerSlot['id'], TrackSplitBranch['id']>>;
   mappingRouteVariantId: TrackRouteVariantId;
   mappingZoneBranchChoice: TrackSplitBranch['id'];
@@ -166,6 +168,7 @@ type SessionControlPanelProps = {
   onStraightSprintDistanceChange: (feet: number) => void;
   onStraightSprintAirSettingChange: (setting: number) => void;
   onDemoModeChange: (enabled: boolean) => void;
+  onDemoPlayerSelectionChange: (playerIds: PlayerSlot['id'][]) => void;
   onMappingModeChange: (enabled: boolean) => void;
   onMappingFullscreenChange: (enabled: boolean) => void;
   onMappingEditModeChange: (mode: MappingEditMode) => void;
@@ -204,6 +207,10 @@ const metricOptions: Array<{ key: MetricKey; label: string; icon: typeof Activit
   { key: 'reaction', label: 'Reaction', icon: Timer },
 ];
 
+function riderInitials(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+}
+
 export function SessionControlPanel({
   track,
   selectedMetrics,
@@ -220,6 +227,8 @@ export function SessionControlPanel({
   customRoutes,
   selectedTrackId,
   players,
+  demoPlayerOptions,
+  selectedDemoPlayerIds,
   branchChoicesByPlayer,
   mappingRouteVariantId,
   mappingZoneBranchChoice,
@@ -283,6 +292,7 @@ export function SessionControlPanel({
   onStraightSprintDistanceChange,
   onStraightSprintAirSettingChange,
   onDemoModeChange,
+  onDemoPlayerSelectionChange,
   onMappingModeChange,
   onMappingFullscreenChange,
   onMappingEditModeChange,
@@ -1134,6 +1144,50 @@ export function SessionControlPanel({
               ? 'Demo generates race data for testing and social-media previews. Edit each simulated rider’s name in the Demo Riders cards.'
               : 'Live Bikes uses connected Wattbikes for the same race engine and BMX rollout logic.'}
           </p>
+
+          {demoMode && (
+            <section className="explore-demo-rider-picker">
+              <div>
+                <span className="eyebrow">Demo riders</span>
+                <small>Choose the exact riders entering this session.</small>
+              </div>
+              <div role="group" aria-label="Choose demo riders">
+                {demoPlayerOptions.map((player) => {
+                  const selected = selectedDemoPlayerIds.includes(player.id);
+                  const lastSelected = selected && selectedDemoPlayerIds.length === 1;
+                  return (
+                    <button
+                      key={player.id}
+                      type="button"
+                      className={selected ? 'selected' : ''}
+                      style={{ '--player-color': player.accent } as CSSProperties}
+                      aria-pressed={selected}
+                      disabled={startGateActive || raceState === 'racing' || lastSelected}
+                      onClick={() => {
+                        const requestedIds = selected
+                          ? selectedDemoPlayerIds.filter((playerId) => playerId !== player.id)
+                          : [...selectedDemoPlayerIds, player.id];
+                        onDemoPlayerSelectionChange(
+                          demoPlayerOptions
+                            .map((option) => option.id)
+                            .filter((playerId) => requestedIds.includes(playerId)),
+                        );
+                      }}
+                    >
+                      {player.photoUrl
+                        ? <img src={player.photoUrl} alt="" />
+                        : <span className="explore-demo-rider-initials">{riderInitials(player.name)}</span>}
+                      <span>
+                        <small>P{player.id}</small>
+                        <strong>{player.name}</strong>
+                      </span>
+                      <b>{selected ? 'Selected' : 'Use'}</b>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
         </section>
       )}

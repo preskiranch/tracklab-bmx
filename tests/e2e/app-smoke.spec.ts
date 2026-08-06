@@ -636,6 +636,16 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(demoRiderCount.getByRole('button', { name: '2', exact: true }))
     .toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('Bike pairing').locator('.pair-card')).toHaveCount(2);
+  const raceDemoRiders = page.getByRole('group', { name: 'Choose demo riders' });
+  const raceDemoRiderButtons = raceDemoRiders.getByRole('button');
+  await expect(raceDemoRiderButtons).toHaveCount(4);
+  await raceDemoRiderButtons.nth(0).click();
+  await raceDemoRiderButtons.nth(3).click();
+  await expect(raceDemoRiderButtons.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await expect(raceDemoRiderButtons.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(raceDemoRiderButtons.nth(3)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 2');
+  await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 4');
   await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
 
   await expect(page.getByText('Developer Demo active', { exact: true })).toBeVisible();
@@ -643,13 +653,9 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   const mapRenderer = page.getByRole('group', { name: 'Explore map renderer' });
   await expect(mapRenderer).toBeVisible();
   await expect(mapRenderer.getByRole('button')).toHaveCount(3);
-  const exploreDemoRiders = page.getByRole('group', { name: 'Choose Explore the World demo riders' });
+  const exploreDemoRiders = page.getByRole('group', { name: 'Choose demo riders' });
   const exploreDemoRiderButtons = exploreDemoRiders.getByRole('button');
   await expect(exploreDemoRiderButtons).toHaveCount(4);
-  await expect(exploreDemoRiderButtons.nth(0)).toHaveAttribute('aria-pressed', 'true');
-  await expect(exploreDemoRiderButtons.nth(1)).toHaveAttribute('aria-pressed', 'true');
-  await exploreDemoRiderButtons.nth(0).click();
-  await exploreDemoRiderButtons.nth(3).click();
   await expect(exploreDemoRiderButtons.nth(0)).toHaveAttribute('aria-pressed', 'false');
   await expect(exploreDemoRiderButtons.nth(1)).toHaveAttribute('aria-pressed', 'true');
   await expect(exploreDemoRiderButtons.nth(3)).toHaveAttribute('aria-pressed', 'true');
@@ -1850,6 +1856,20 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await page.getByLabel('Sprint distance').selectOption('100');
   await expect(page.getByText('Angle 10 deg', { exact: true })).toBeVisible();
   await expect(page.getByText('Heading 20 deg', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  const sprintDemoRacers = page.getByRole('group', { name: 'Choose demo riders' });
+  const sprintDemoRacerButtons = sprintDemoRacers.getByRole('button');
+  await expect(sprintDemoRacerButtons).toHaveCount(4);
+  await sprintDemoRacerButtons.nth(0).click();
+  await sprintDemoRacerButtons.nth(2).click();
+  await expect(sprintDemoRacerButtons.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await expect(sprintDemoRacerButtons.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(sprintDemoRacerButtons.nth(2)).toHaveAttribute('aria-pressed', 'false');
+  await expect(sprintDemoRacerButtons.nth(3)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('Bike pairing').locator('.pair-card')).toHaveCount(2);
+  await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 2');
+  await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 4');
 });
 
 test('regular racers can use published tracks but cannot access mapping tools', async ({ page }) => {

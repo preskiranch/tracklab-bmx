@@ -1467,7 +1467,7 @@ export default function App() {
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
-  const [exploreDemoPlayerIds, setExploreDemoPlayerIds] = useState<PlayerSlot['id'][]>(
+  const [selectedDemoPlayerIds, setSelectedDemoPlayerIds] = useState<PlayerSlot['id'][]>(
     () => defaultPlayerSlots.slice(0, maxPlayers).map((player) => player.id),
   );
   const [demoRiderNames, setDemoRiderNames] = useState<DemoRiderNames>({});
@@ -1563,7 +1563,7 @@ export default function App() {
   ]);
   const demo = useDemoBikes({
     enabled: demoMode,
-    bikeCount: demoBikeCount,
+    bikeCount: maxPlayers,
     raceSeed: demoRaceSeed,
     raceStartedAt: demoRaceStartedAt,
     signalState: demoSignalsStopped ? 'stopped' : demoRaceStartedAt == null ? 'ready' : 'racing',
@@ -2236,14 +2236,11 @@ export default function App() {
     () => Boolean(draftSplitBuilder && splitSectionFromDraft(draftSplitBuilder)),
     [draftSplitBuilder],
   );
-  const demoPlayers = useMemo(
-    () => createDemoPlayers(demoBikeCount, demoRiderNames, demoRiderPhotos),
-    [demoBikeCount, demoRiderNames, demoRiderPhotos],
-  );
   const exploreDemoCandidates = useMemo(
     () => createDemoPlayers(maxPlayers, demoRiderNames, demoRiderPhotos),
     [demoRiderNames, demoRiderPhotos],
   );
+  const demoPlayers = exploreDemoCandidates.filter((player) => selectedDemoPlayerIds.includes(player.id));
   const connectedBikeSamples = useMemo(() => {
     const next = new Map(bridge.samplesByDevice);
     bluetooth.samplesByDevice.forEach((sample, deviceId) => {
@@ -2312,27 +2309,17 @@ export default function App() {
     }),
     [connectedBikeDeviceById, connectedBikeSamples, connectedDeviceIds, profileByDevice],
   );
-  const activePlayers = useMemo(
-    () => {
-      if (demoMode) {
-        return demoPlayers.slice(0, maxPlayers);
-      }
-
-      return sessionPlayers;
-    },
-    [demoMode, demoPlayers, sessionPlayers],
-  );
+  const activePlayers = demoMode ? demoPlayers : sessionPlayers;
   const explorePlayers = useMemo(
     () => (
       demoMode
-        ? exploreDemoCandidates.filter((player) => exploreDemoPlayerIds.includes(player.id))
+        ? demoPlayers
         : applyStudioRiderAssignments(activePlayers, studioRiders, studioRiderAssignments)
     ),
     [
       activePlayers,
       demoMode,
-      exploreDemoCandidates,
-      exploreDemoPlayerIds,
+      demoPlayers,
       studioRiderAssignments,
       studioRiders,
     ],
@@ -6006,14 +5993,14 @@ export default function App() {
     clearStartGateSequence();
     setLockedRacePlayers(null);
     setDemoBikeCount(nextCount);
-    setExploreDemoPlayerIds(defaultPlayerSlots.slice(0, nextCount).map((player) => player.id));
+    setSelectedDemoPlayerIds(defaultPlayerSlots.slice(0, nextCount).map((player) => player.id));
     setDemoRaceSeed(Date.now() + count);
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     resetRace();
   };
 
-  const handleExploreDemoPlayerSelectionChange = (playerIds: PlayerSlot['id'][]) => {
+  const handleDemoPlayerSelectionChange = (playerIds: PlayerSlot['id'][]) => {
     const requestedIds = new Set(playerIds);
     const nextIds = defaultPlayerSlots
       .map((player) => player.id)
@@ -6021,11 +6008,14 @@ export default function App() {
     if (nextIds.length === 0) {
       return;
     }
-    setExploreDemoPlayerIds(nextIds);
+    clearStartGateSequence();
+    setLockedRacePlayers(null);
+    setSelectedDemoPlayerIds(nextIds);
     setDemoBikeCount(nextIds.length);
     setDemoRaceSeed(Date.now() + nextIds.reduce((total, playerId) => total + playerId, 0));
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
+    resetRace();
   };
 
   const requireAccountProfile = useCallback((message = 'Create an account or sign in before entering TrackLab.') => {
@@ -7307,7 +7297,7 @@ export default function App() {
               ? explorePlayers.slice(0, localExploreSeatLimit)
               : explorePlayers}
             demoPlayerOptions={exploreDemoCandidates}
-            selectedDemoPlayerIds={exploreDemoPlayerIds}
+            selectedDemoPlayerIds={selectedDemoPlayerIds}
             liveRiderProfiles={availableStudioRiders}
             liveRiderAssignments={studioRiderAssignments}
             samplesByDevice={samplesByDevice}
@@ -7331,7 +7321,7 @@ export default function App() {
             onSyncRoute={multiplayer.syncExploreRoute}
             onControlSession={multiplayer.controlExploreSession}
             onSendState={multiplayer.sendExploreState}
-            onDemoPlayerSelectionChange={handleExploreDemoPlayerSelectionChange}
+            onDemoPlayerSelectionChange={handleDemoPlayerSelectionChange}
             onLiveRiderAssignment={handleStudioRiderAssignment}
             onVoiceStart={roomVoice.start}
             onVoiceStop={roomVoice.stop}
@@ -7521,6 +7511,8 @@ export default function App() {
                   customRoutes={availableCustomRoutes}
                   selectedTrackId={selectedTrack.id}
                   players={racePlayers}
+                  demoPlayerOptions={exploreDemoCandidates}
+                  selectedDemoPlayerIds={selectedDemoPlayerIds}
                   branchChoicesByPlayer={activeBranchChoicesByPlayer}
                   mappingRouteVariantId={mappingRouteVariantId}
                   mappingZoneBranchChoice={mappingZoneBranchChoice}
@@ -7591,6 +7583,7 @@ export default function App() {
                     setSelectedGhostIds([]);
                   }}
                   onDemoModeChange={handleDemoModeChange}
+                  onDemoPlayerSelectionChange={handleDemoPlayerSelectionChange}
                   onMappingModeChange={handleMappingModeChange}
                   onMappingFullscreenChange={handleMappingFullscreenChange}
                   onMappingEditModeChange={handleMappingEditModeChange}

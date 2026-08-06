@@ -1124,10 +1124,10 @@ export function ExploreView({
           {demoMode && (
             <section className="explore-demo-rider-picker">
               <div>
-                <span className="eyebrow">Explore the World demo riders</span>
-                <small>Choose the exact riders for this route.</small>
+                <span className="eyebrow">Demo riders</span>
+                <small>Choose the exact riders entering this session.</small>
               </div>
-              <div role="group" aria-label="Choose Explore the World demo riders">
+              <div role="group" aria-label="Choose demo riders">
                 {demoPlayerOptions.map((player) => {
                   const selected = selectedDemoPlayerIds.includes(player.id);
                   const lastSelected = selected && selectedDemoPlayerIds.length === 1;
