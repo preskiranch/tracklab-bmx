@@ -2329,7 +2329,7 @@ export function GoogleMapsTrackLayer({
       tiltInteractionEnabled: !raceCameraInputLocked && isNavigateMode,
       zoomControl: !raceCameraInputLocked,
     });
-    if (isCurveDrawMode && container) {
+    if ((isCurveDrawMode || isAdjustMode) && container) {
       container.style.touchAction = 'none';
     }
 

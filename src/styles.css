@@ -2546,6 +2546,7 @@ input:focus {
 .google-map-layer {
   position: absolute;
   inset: 0;
+  -webkit-touch-callout: none;
 }
 
 .google-map-3d-shell {
