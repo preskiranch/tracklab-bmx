@@ -3138,7 +3138,7 @@ test.describe('mobile commentary playback', () => {
     await expect(page.getByLabel('Race commentary')).toBeAttached();
   });
 
-  test('switches to one local announcer after quota failure without repeated paid retries', async ({ page }) => {
+  test('never switches to robotic browser speech after natural voice quota failure', async ({ page }) => {
     test.setTimeout(35_000);
     let hostedSpeechAttempts = 0;
     const authUser = {
@@ -3255,13 +3255,14 @@ test.describe('mobile commentary playback', () => {
     await expect(startAction).toContainText('Start Demo Race');
     await startAction.click();
 
-    await expect.poll(() => page.evaluate(() => (
+    await expect.poll(() => hostedSpeechAttempts, { timeout: 5_000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(500);
+    expect(await page.evaluate(() => (
       (window as typeof window & {
         __tracklabBrowserFallbackCalls?: Array<{ line: string; voice: string }>;
       }).__tracklabBrowserFallbackCalls ?? []
-    )), { timeout: 5_000 }).not.toHaveLength(0);
-    await expect.poll(() => hostedSpeechAttempts, { timeout: 5_000 }).toBeGreaterThan(0);
-    await expect(page.getByText('Device announcer active')).toBeAttached();
+    ))).toHaveLength(0);
+    await expect(page.getByText('Natural voice paused')).toBeAttached();
     await page.waitForTimeout(1_000);
     const attemptsAfterCircuitOpened = hostedSpeechAttempts;
     await page.waitForTimeout(21_000);

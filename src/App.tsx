@@ -5700,7 +5700,7 @@ export default function App() {
       active: true,
       phase: 'cadence',
       label: 'OK RIDERS',
-      detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback random start voice',
+      detail: voiceStart.source === 'audio' ? 'UCI random start voice' : 'Fallback start tone',
       lightIndex: null,
     });
 

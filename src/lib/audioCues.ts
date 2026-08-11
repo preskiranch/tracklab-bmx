@@ -660,18 +660,6 @@ export function playStartGateTone(kind: StartGateToneKind) {
   });
 }
 
-export function speakStartGatePhrase(text: string) {
-  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
-    return;
-  }
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.03;
-  utterance.pitch = 0.82;
-  utterance.volume = 0.9;
-  window.speechSynthesis.speak(utterance);
-}
-
 export function stopStartGateAudio() {
   if (activeStartGateBufferSource) {
     try {
@@ -773,6 +761,5 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
   }
 
   playStartGateTone('tick');
-  speakStartGatePhrase('OK riders, random start. Riders ready. Watch the gate.');
   return { startedAt: Date.now(), source: 'fallback' };
 }

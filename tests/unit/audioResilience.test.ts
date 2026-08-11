@@ -83,12 +83,21 @@ describe('race audio resilience', () => {
   });
 
   it('falls back when the UCI media element never reports playback', async () => {
+    const speak = vi.fn();
+    Object.defineProperty(window, 'speechSynthesis', {
+      configurable: true,
+      value: {
+        cancel: vi.fn(),
+        speak,
+      },
+    });
     const { playUciRandomStartVoice } = await import('../../src/lib/audioCues');
     const voiceStart = playUciRandomStartVoice(100);
 
     await vi.advanceTimersByTimeAsync(101);
 
     await expect(voiceStart).resolves.toMatchObject({ source: 'fallback' });
+    expect(speak).not.toHaveBeenCalled();
   });
 
   it('uses the primed media cadence when playback is available', async () => {

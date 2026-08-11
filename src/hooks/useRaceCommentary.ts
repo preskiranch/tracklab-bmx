@@ -40,7 +40,7 @@ import type {
   TrackZone,
 } from '../types';
 
-type CommentaryServiceMode = 'checking' | 'ai' | 'local' | 'unavailable';
+type CommentaryServiceMode = 'checking' | 'ai' | 'unavailable';
 export type CommentarySpeechStatus = 'checking' | 'ready' | 'quota-exhausted' | 'unavailable';
 type CommentaryPlaybackPhase = RaceCommentaryPlaybackPhase;
 type CommentarySpeechEventKind = RaceCommentaryEventKind | 'pre-race' | 'preview';
@@ -537,87 +537,6 @@ async function playAiSpeech(
   return true;
 }
 
-function browserSpeechAvailable() {
-  return (
-    'speechSynthesis' in window
-    && 'SpeechSynthesisUtterance' in window
-    && typeof window.speechSynthesis?.speak === 'function'
-  );
-}
-
-function browserCommentaryVoice() {
-  if (!browserSpeechAvailable()) {
-    return null;
-  }
-  return window.speechSynthesis.getVoices()
-    .find((voice) => voice.lang === 'en-US') ?? null;
-}
-
-async function playBrowserSpeech(
-  line: string,
-  preferences: RaceCommentaryPreferences,
-  eventKind: CommentarySpeechEventKind,
-  activePlaybackCancelRef: ActivePlaybackCancelRef,
-  shouldContinue: () => boolean,
-  onStart: () => void,
-) {
-  if (!browserSpeechAvailable() || !shouldContinue()) {
-    return false;
-  }
-
-  return await new Promise<boolean>((resolve) => {
-    const synthesis = window.speechSynthesis;
-    const utterance = new SpeechSynthesisUtterance(line);
-    const selectedVoice = browserCommentaryVoice();
-    let settled = false;
-    let watchdogId: number | null = null;
-
-    utterance.lang = selectedVoice?.lang || 'en-US';
-    utterance.voice = selectedVoice;
-    utterance.volume = preferences.volume;
-    utterance.pitch = 0.88;
-    utterance.rate = eventKind === 'pre-race'
-      ? 0.96
-      : eventKind === 'finish' || eventKind === 'rider-finish'
-        ? 1.04
-        : 1;
-
-    const release = (played: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (watchdogId != null) {
-        window.clearTimeout(watchdogId);
-      }
-      utterance.onend = null;
-      utterance.onerror = null;
-      if (activePlaybackCancelRef.current === cancel) {
-        activePlaybackCancelRef.current = null;
-      }
-      resolve(played);
-    };
-    const cancel = () => {
-      synthesis.cancel();
-      release(false);
-    };
-    utterance.onend = () => release(true);
-    utterance.onerror = () => release(false);
-    activePlaybackCancelRef.current = cancel;
-    try {
-      synthesis.resume();
-      synthesis.speak(utterance);
-      onStart();
-      watchdogId = window.setTimeout(
-        cancel,
-        browserSpeechWatchdogMs(line),
-      );
-    } catch {
-      release(false);
-    }
-  });
-}
-
 export function useRaceCommentary({
   preferences,
   raceState,
@@ -669,7 +588,6 @@ export function useRaceCommentary({
   const [preRaceReport, setPreRaceReport] = useState<PreRaceReport | null>(null);
   const serviceModeRef = useRef<CommentaryServiceMode>('checking');
   const speechStatusRef = useRef<CommentarySpeechStatus>('checking');
-  const naturalVoicePinnedRef = useRef(false);
 
   const trackName = track.name;
   const riderNamesKey = players.map((player) => `${player.id}:${player.name}`).join('|');
@@ -738,14 +656,9 @@ export function useRaceCommentary({
       speechStatusRef.current = nextStatus;
       setSpeechStatus(nextStatus);
     }
-    if (
-      nextStatus
-      && serviceModeRef.current === 'ai'
-      && !naturalVoicePinnedRef.current
-      && browserSpeechAvailable()
-    ) {
-      serviceModeRef.current = 'local';
-      setServiceMode('local');
+    if (nextStatus && serviceModeRef.current === 'ai') {
+      serviceModeRef.current = 'unavailable';
+      setServiceMode('unavailable');
     }
     return nextStatus;
   }, []);
@@ -763,47 +676,30 @@ export function useRaceCommentary({
     onStart: () => void,
     signal?: AbortSignal,
   ) => {
-    if (naturalVoicePinnedRef.current || serviceModeRef.current === 'ai') {
-      try {
-        const played = await playAiSpeech(
-          line,
-          activePreferences,
-          eventKind,
-          riderNames,
-          deliveryStyle,
-          activeAudio,
-          activeBufferSource,
-          activePlaybackCancel,
-          shouldContinue,
-          onStart,
-          signal,
-        );
-        recordSpeechReady();
-        return played;
-      } catch (error) {
-        const failureStatus = recordSpeechFailure(error);
-        if (
-          naturalVoicePinnedRef.current
-          || !failureStatus
-          || !shouldContinue()
-        ) {
-          throw error;
-        }
-      }
+    if (serviceModeRef.current !== 'ai') {
+      throw new Error('Natural commentary voice is unavailable.');
     }
 
-    const played = await playBrowserSpeech(
-      line,
-      activePreferences,
-      eventKind,
-      activePlaybackCancel,
-      shouldContinue,
-      onStart,
-    );
-    if (!played && shouldContinue()) {
-      throw new Error('Device commentary audio did not start.');
+    try {
+      const played = await playAiSpeech(
+        line,
+        activePreferences,
+        eventKind,
+        riderNames,
+        deliveryStyle,
+        activeAudio,
+        activeBufferSource,
+        activePlaybackCancel,
+        shouldContinue,
+        onStart,
+        signal,
+      );
+      recordSpeechReady();
+      return played;
+    } catch (error) {
+      recordSpeechFailure(error);
+      throw error;
     }
-    return played;
   }, [recordSpeechFailure, recordSpeechReady]);
 
   const disposePreparedStartSpeech = useCallback(() => {
@@ -850,9 +746,7 @@ export function useRaceCommentary({
                 : 'unavailable';
           const nextMode = config.aiAvailable && nextStatus !== 'quota-exhausted'
             ? 'ai'
-            : browserSpeechAvailable()
-              ? 'local'
-              : 'unavailable';
+            : 'unavailable';
           serviceModeRef.current = nextMode;
           speechStatusRef.current = nextStatus;
           setServiceMode(nextMode);
@@ -861,10 +755,9 @@ export function useRaceCommentary({
       })
       .catch(() => {
         if (!cancelled) {
-          const nextMode = browserSpeechAvailable() ? 'local' : 'unavailable';
-          serviceModeRef.current = nextMode;
+          serviceModeRef.current = 'unavailable';
           speechStatusRef.current = 'unavailable';
-          setServiceMode(nextMode);
+          setServiceMode('unavailable');
           setSpeechStatus('unavailable');
         }
       });
@@ -1586,12 +1479,8 @@ export function useRaceCommentary({
     const previousRaceState = previousRaceStateRef.current;
     previousRaceStateRef.current = raceState;
     if (raceState === 'racing' && previousRaceState !== 'racing') {
-      naturalVoicePinnedRef.current = serviceModeRef.current === 'ai';
       raceLinesRef.current = [];
       setFinishAnnouncementsComplete(true);
-    }
-    if (raceState === 'ready' && !startGateActive) {
-      naturalVoicePinnedRef.current = false;
     }
     if (!preferences.enabled) {
       raceLinesRef.current = [];
