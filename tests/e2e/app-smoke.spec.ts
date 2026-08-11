@@ -1783,6 +1783,15 @@ test('straight sprint restores and saves a separate camera for each distance', a
         updatedAt: 20,
       },
     },
+    riderOverlaysByTrack: {
+      [trackId]: {
+        xPct: 0.02,
+        yPct: 0.7,
+        width: 1500,
+        height: 220,
+        locked: true,
+      },
+    },
   };
   const authUser = {
     id: 'sprint-camera-admin',
@@ -1839,6 +1848,7 @@ test('straight sprint restores and saves a separate camera for each distance', a
     });
   });
 
+  await page.setViewportSize({ width: 1600, height: 900 });
   await page.goto(`/?track=${trackId}`);
   await page.getByRole('button', { name: 'Open App' }).click();
   await page.getByRole('button', { name: 'Straight Sprint', exact: true }).click();
@@ -1861,25 +1871,45 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect(sprintRaceView.getByRole('button', { name: 'Game Arena', exact: true })).toBeVisible();
   await sprintRaceView.getByRole('button', { name: 'Game Arena', exact: true }).click();
   await expect(page.getByLabel('Drag Strip Game Arena', { exact: true })).toBeVisible();
+  await page.getByLabel('Sprint distance').selectOption('500');
 
   await page.getByRole('button', { name: /Demo/i }).first().click();
   const sprintDemoRacers = page.getByRole('group', { name: 'Choose demo riders' });
   const sprintDemoRacerButtons = sprintDemoRacers.getByRole('button');
   await expect(sprintDemoRacerButtons).toHaveCount(4);
-  await sprintDemoRacerButtons.nth(0).click();
-  await sprintDemoRacerButtons.nth(2).click();
-  await expect(sprintDemoRacerButtons.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await expect(sprintDemoRacerButtons.nth(0)).toHaveAttribute('aria-pressed', 'true');
   await expect(sprintDemoRacerButtons.nth(1)).toHaveAttribute('aria-pressed', 'true');
-  await expect(sprintDemoRacerButtons.nth(2)).toHaveAttribute('aria-pressed', 'false');
+  await expect(sprintDemoRacerButtons.nth(2)).toHaveAttribute('aria-pressed', 'true');
   await expect(sprintDemoRacerButtons.nth(3)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByLabel('Bike pairing').locator('.pair-card')).toHaveCount(2);
+  await expect(page.getByLabel('Bike pairing').locator('.pair-card')).toHaveCount(4);
+  await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 1');
   await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 2');
+  await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 3');
   await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 4');
   await page.getByRole('group', { name: 'Wattbike Air setting' })
     .getByRole('button', { name: '5', exact: true }).click();
   await page.getByRole('button', { name: 'Start Demo Sprint', exact: true }).click();
-  const sprintSetupBadge = page.locator('.race-countdown-pause-overlay').filter({ hasText: '100 ft Sprint' });
+  const sprintSetupBadge = page.locator('.race-countdown-pause-overlay').filter({ hasText: '500 ft Sprint' });
   await expect(sprintSetupBadge).toContainText('Wattbike Air 5', { timeout: 35_000 });
+  const arena = page.getByLabel('Drag Strip Game Arena', { exact: true });
+  await expect(arena.getByLabel(/Demo Rider 1 arena rider/)).toBeVisible();
+  await expect(arena.getByLabel(/Demo Rider 2 arena rider/)).toBeVisible();
+  await expect(arena.getByLabel(/Demo Rider 3 arena rider/)).toBeVisible();
+  await expect(arena.getByLabel(/Demo Rider 4 arena rider/)).toBeVisible();
+  const riderPanel = arena.getByLabel('Game arena rider data', { exact: true });
+  await expect(riderPanel.locator('.game-arena-hud-card')).toHaveCount(4);
+  await expect(page.getByLabel('Race rider positions', { exact: true })).toHaveCount(0);
+  await expect(riderPanel).toContainText('Demo Rider 1');
+  await expect(riderPanel).toContainText('Demo Rider 2');
+  await expect(riderPanel).toContainText('Demo Rider 3');
+  await expect(riderPanel).toContainText('Demo Rider 4');
+  await expect(riderPanel).toContainText('% track');
+  await expect(riderPanel).toContainText(/(?:MPH|KPH)/);
+  await expect(page.locator('.earth-overlay.top-left')).toContainText('Live Race', { timeout: 60_000 });
+  await page.waitForTimeout(1_200);
+  if (process.env.TRACKLAB_GAME_ARENA_SCREENSHOT) {
+    await page.screenshot({ path: process.env.TRACKLAB_GAME_ARENA_SCREENSHOT });
+  }
   await page.getByRole('button', { name: 'Cancel Race', exact: true }).click();
 });
 

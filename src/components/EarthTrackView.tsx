@@ -355,6 +355,8 @@ export function EarthTrackView({
               samplesByDevice={samplesByDevice}
               raceState={raceState}
               raceDistanceMeters={progressLengthMeters}
+              speedUnit={speedUnit}
+              showHud={raceViewFullscreen && !mappingMode}
             />
           </Suspense>
         ) : googleMapsConfigured ? (
@@ -603,23 +605,25 @@ export function EarthTrackView({
           </div>
         )}
 
-        <Suspense fallback={null}>
-          <RaceRiderOverlay
-            trackId={track.id}
-            riders={riders}
-            ghostRiders={ghostRiders}
-            remoteRaceStates={remoteRaceStates}
-            players={players}
-            raceState={raceState}
-            visible={raceViewFullscreen && !mappingMode}
-            speedUnit={speedUnit}
-            trackLengthMeters={progressLengthMeters}
-            preference={riderOverlayPreference}
-            canEditLayout={canEditRaceLayout}
-            onPreferenceChange={onRiderOverlayPreferenceChange}
-            onFullscreenInteraction={onRaceFullscreenInteraction}
-          />
-        </Suspense>
+        {!showingGameArena && (
+          <Suspense fallback={null}>
+            <RaceRiderOverlay
+              trackId={track.id}
+              riders={riders}
+              ghostRiders={ghostRiders}
+              remoteRaceStates={remoteRaceStates}
+              players={players}
+              raceState={raceState}
+              visible={raceViewFullscreen && !mappingMode}
+              speedUnit={speedUnit}
+              trackLengthMeters={progressLengthMeters}
+              preference={riderOverlayPreference}
+              canEditLayout={canEditRaceLayout}
+              onPreferenceChange={onRiderOverlayPreferenceChange}
+              onFullscreenInteraction={onRaceFullscreenInteraction}
+            />
+          </Suspense>
+        )}
 
         {showMappingUi && (
           <div className="map-edit-toolbar" aria-label="Map edit view controls">

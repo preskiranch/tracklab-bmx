@@ -1,6 +1,9 @@
 import { useMemo, type CSSProperties } from 'react';
 import { exploreGridClass, groupExploreRiders, type ExploreViewportGroup } from '../lib/explore';
+import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { riderAnimationState, riderCrankStepCount } from '../lib/riderAnimation';
+import { formatSpeedFromKph, speedUnitLabel } from '../units';
+import { RiderAvatar } from './RiderAvatar';
 import type {
   BikeSample,
   ExploreRider,
@@ -9,6 +12,7 @@ import type {
   PlayerSlot,
   RaceState,
   RiderState,
+  SpeedUnit,
 } from '../types';
 
 type ArenaRider = {
@@ -17,7 +21,11 @@ type ArenaRider = {
   name: string;
   colorName: PlayerSlot['colorName'];
   accent: string;
+  photoUrl?: string;
   distanceMeters: number;
+  rank: number;
+  speedKph: number | null;
+  finishedAt: number | null;
   frame: number;
   ghost: boolean;
 };
@@ -30,6 +38,8 @@ type DragStripGameArenaLayerProps = {
   samplesByDevice: Map<number, BikeSample>;
   raceState: RaceState;
   raceDistanceMeters: number;
+  speedUnit: SpeedUnit;
+  showHud: boolean;
 };
 
 const arenaWorldWidth = 310;
@@ -65,6 +75,178 @@ function panelSpanStyle(groupCount: number, index: number): CSSProperties | unde
 
 function riderFrame(crankStep: number) {
   return Math.min(8, Math.floor(crankStep / riderCrankStepCount * 9));
+}
+
+function ordinal(value: number) {
+  return `${value}${value === 1 ? 'st' : value === 2 ? 'nd' : value === 3 ? 'rd' : 'th'}`;
+}
+
+function GameArenaHud({
+  riders,
+  raceState,
+  raceDistanceMeters,
+  speedUnit,
+}: {
+  riders: ArenaRider[];
+  raceState: RaceState;
+  raceDistanceMeters: number;
+  speedUnit: SpeedUnit;
+}) {
+  const entries = [...riders]
+    .sort((left, right) => left.rank - right.rank || right.distanceMeters - left.distanceMeters)
+    .slice(0, 4);
+  const positionsEstablished = racePositionsAreEstablished(raceState, entries);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <section
+      aria-label="Game arena rider data"
+      style={{
+        position: 'absolute',
+        zIndex: 1200,
+        right: 'clamp(10px, 2vw, 30px)',
+        bottom: 'clamp(10px, 1.8vh, 22px)',
+        left: 'clamp(10px, 2vw, 30px)',
+        minHeight: 'clamp(150px, 20vh, 218px)',
+        padding: 'clamp(8px, 1vw, 13px)',
+        overflow: 'hidden',
+        border: '2px solid rgba(214, 224, 235, .78)',
+        borderRadius: '10px',
+        background: 'linear-gradient(180deg, rgba(18, 25, 34, .96), rgba(4, 8, 13, .97))',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.28), inset 0 -3px 0 #080b10, 0 14px 34px rgba(0,0,0,.58)',
+        color: '#ffffff',
+      }}
+    >
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        opacity: 0.18,
+        pointerEvents: 'none',
+        backgroundImage: 'linear-gradient(115deg, transparent 0 35%, rgba(255,255,255,.18) 45%, transparent 55% 100%), repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 7px)',
+      }} />
+      <header style={{
+        position: 'relative',
+        zIndex: 1,
+        display: 'flex',
+        minHeight: '25px',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '10px',
+        padding: '0 4px 7px',
+        color: 'rgba(255,255,255,.78)',
+        fontSize: 'clamp(9px, .8vw, 12px)',
+        fontWeight: 900,
+        letterSpacing: '.14em',
+        textTransform: 'uppercase',
+      }}>
+        <span>TrackLab Live Timing</span>
+        <span>{Math.round(raceDistanceMeters * 3.28084).toLocaleString()} ft sprint</span>
+      </header>
+      <div style={{
+        position: 'relative',
+        zIndex: 1,
+        display: 'grid',
+        gridTemplateColumns: `repeat(${Math.min(4, entries.length)}, minmax(0, 1fr))`,
+        gap: 'clamp(6px, .7vw, 12px)',
+        minHeight: 'clamp(112px, 15vh, 166px)',
+      }}>
+        {entries.map((rider) => {
+          const progress = Math.round(Math.max(0, Math.min(1, rider.distanceMeters / Math.max(1, raceDistanceMeters))) * 100);
+          return (
+            <article
+              key={rider.id}
+              className="game-arena-hud-card"
+              style={{
+                display: 'grid',
+                gridTemplateRows: 'auto minmax(52px, 1fr)',
+                minWidth: 0,
+                overflow: 'hidden',
+                border: `1px solid ${rider.accent}`,
+                borderTop: `4px solid ${rider.accent}`,
+                borderRadius: '7px',
+                background: 'linear-gradient(145deg, rgba(35,45,58,.96), rgba(10,15,22,.98))',
+                boxShadow: `inset 0 0 18px ${rider.accent}20, 0 5px 12px rgba(0,0,0,.34)`,
+              }}
+            >
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'auto auto minmax(0, 1fr)',
+                minWidth: 0,
+                alignItems: 'center',
+                gap: 'clamp(5px, .6vw, 9px)',
+                padding: 'clamp(5px, .6vw, 9px)',
+              }}>
+                <RiderAvatar
+                  name={rider.name}
+                  photoUrl={rider.photoUrl}
+                  accent={rider.accent}
+                />
+                <strong style={{
+                  display: 'grid',
+                  width: 'clamp(34px, 3vw, 46px)',
+                  height: 'clamp(30px, 2.8vw, 42px)',
+                  placeItems: 'center',
+                  borderRadius: '6px',
+                  background: rider.accent,
+                  color: '#07101b',
+                  fontSize: 'clamp(13px, 1.2vw, 18px)',
+                  fontWeight: 1000,
+                }}>P{rider.playerId}</strong>
+                <div style={{ display: 'grid', minWidth: 0, gap: '2px' }}>
+                  <strong style={{
+                    overflow: 'hidden',
+                    fontSize: 'clamp(13px, 1.3vw, 20px)',
+                    lineHeight: 1.05,
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>{rider.name}</strong>
+                  <span style={{
+                    overflow: 'hidden',
+                    color: 'rgba(255,255,255,.82)',
+                    fontSize: 'clamp(10px, .85vw, 14px)',
+                    fontWeight: 800,
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {progress}% track · {formatSpeedFromKph(rider.speedKph, speedUnit)} {speedUnitLabel(speedUnit)}
+                  </span>
+                </div>
+              </div>
+              <div style={{
+                display: 'flex',
+                minHeight: 0,
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                margin: '0 clamp(5px, .6vw, 9px) clamp(5px, .6vw, 9px)',
+                borderRadius: '5px',
+                background: positionsEstablished ? rider.accent : 'rgba(255,255,255,.08)',
+                color: positionsEstablished ? '#07101b' : 'rgba(255,255,255,.72)',
+                textTransform: 'uppercase',
+              }}>
+                {positionsEstablished ? (
+                  <>
+                    <strong style={{
+                      fontSize: 'clamp(34px, 4.3vw, 68px)',
+                      fontWeight: 1000,
+                      letterSpacing: '-.06em',
+                      lineHeight: .88,
+                    }}>{ordinal(rider.rank)}</strong>
+                    <span style={{ fontSize: 'clamp(9px, .8vw, 13px)', fontWeight: 950, letterSpacing: '.1em' }}>Place</span>
+                  </>
+                ) : (
+                  <span style={{ fontSize: 'clamp(11px, 1vw, 15px)', fontWeight: 900, letterSpacing: '.14em' }}>At the gate</span>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function ArenaPanel({
@@ -208,6 +390,8 @@ export function DragStripGameArenaLayer({
   samplesByDevice,
   raceState,
   raceDistanceMeters,
+  speedUnit,
+  showHud,
 }: DragStripGameArenaLayerProps) {
   const arenaRiders = useMemo<ArenaRider[]>(() => {
     const local = riders.flatMap((rider) => {
@@ -231,7 +415,11 @@ export function DragStripGameArenaLayer({
         name: player.name,
         colorName: player.colorName,
         accent: player.accent,
+        photoUrl: player.photoUrl,
         distanceMeters: rider.distance,
+        rank: rider.rank,
+        speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
+        finishedAt: rider.finishedAt,
         frame: animation.pedaling ? riderFrame(animation.crankStep) : 0,
         ghost: false,
       }];
@@ -242,7 +430,11 @@ export function DragStripGameArenaLayer({
       name: rider.name,
       colorName: rider.colorName,
       accent: rider.accent,
+      photoUrl: rider.photoUrl,
       distanceMeters: rider.distance,
+      rank: rider.rank,
+      speedKph: rider.speedKph ?? (rider.velocity > 0 ? rider.velocity * 3.6 : null),
+      finishedAt: rider.finishedAt,
       frame: raceState === 'racing' && (rider.cadence ?? 0) >= 1
         ? Math.floor(Math.max(0, rider.distance) * 1.7) % 9
         : 0,
@@ -254,7 +446,11 @@ export function DragStripGameArenaLayer({
       name: rider.name,
       colorName: rider.colorName,
       accent: rider.accent,
+      photoUrl: undefined,
       distanceMeters: rider.distance,
+      rank: rider.rank,
+      speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,
+      finishedAt: rider.finishedAt,
       frame: raceState === 'racing' ? Math.floor(Math.max(0, rider.distance) * 1.7) % 9 : 0,
       ghost: true,
     }));
@@ -286,29 +482,45 @@ export function DragStripGameArenaLayer({
 
   return (
     <div
-      className={exploreGridClass(visibleGroups.length)}
       aria-label="Drag Strip Game Arena"
       style={{
         position: 'absolute',
         inset: 0,
         height: '100%',
         minHeight: 0,
+        overflow: 'hidden',
+      }}
+    >
+      <div className={exploreGridClass(visibleGroups.length)} style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'grid',
+        height: '100%',
+        minHeight: 0,
         gap: '4px',
         borderRadius: 0,
         ...gridStyle(visibleGroups.length),
-      }}
-    >
-      {visibleGroups.map((group, index) => (
-        <div key={group.id} style={{
-          position: 'relative',
-          minWidth: 0,
-          minHeight: 0,
-          overflow: 'hidden',
-          ...panelSpanStyle(visibleGroups.length, index),
-        }}>
-          <ArenaPanel group={group} riders={arenaRiders} raceDistanceMeters={raceDistanceMeters} />
-        </div>
-      ))}
+      }}>
+        {visibleGroups.map((group, index) => (
+          <div key={group.id} style={{
+            position: 'relative',
+            minWidth: 0,
+            minHeight: 0,
+            overflow: 'hidden',
+            ...panelSpanStyle(visibleGroups.length, index),
+          }}>
+            <ArenaPanel group={group} riders={arenaRiders} raceDistanceMeters={raceDistanceMeters} />
+          </div>
+        ))}
+      </div>
+      {showHud && (
+        <GameArenaHud
+          riders={arenaRiders}
+          raceState={raceState}
+          raceDistanceMeters={raceDistanceMeters}
+          speedUnit={speedUnit}
+        />
+      )}
     </div>
   );
 }
