@@ -1890,15 +1890,21 @@ test('straight sprint restores and saves a separate camera for each distance', a
     .getByRole('button', { name: '5', exact: true }).click();
   const arena = page.getByLabel('Drag Strip Game Arena', { exact: true });
   const distanceMarkers = arena.locator('[data-arena-distance-markers]').first().locator('[data-distance-feet]');
-  await expect(distanceMarkers).toHaveCount(6);
+  await expect(distanceMarkers).toHaveCount(16);
   await expect.poll(() => distanceMarkers.evaluateAll((markers) => (
     markers.map((marker) => Number(marker.getAttribute('data-distance-feet')))
-  ))).toEqual([30, 100, 200, 300, 400, 500]);
+  ))).toEqual([
+    30,
+    100, 200, 300, 400, 500, 600, 700, 800,
+    900, 1000, 1100, 1200, 1300, 1400, 1500,
+  ]);
+  await expect(arena.locator('[data-distance-feet="500"][data-active-finish="true"]').first()).toBeAttached();
   await page.getByLabel('Sprint distance').selectOption('1500');
   await expect(distanceMarkers).toHaveCount(16);
-  await expect(distanceMarkers.last()).toHaveAttribute('data-distance-feet', '1500');
+  await expect(arena.locator('[data-distance-feet="1500"][data-active-finish="true"]').first()).toBeAttached();
   await page.getByLabel('Sprint distance').selectOption('500');
-  await expect(distanceMarkers).toHaveCount(6);
+  await expect(distanceMarkers).toHaveCount(16);
+  await expect(arena.locator('[data-distance-feet="500"][data-active-finish="true"]').first()).toBeAttached();
   const bmxStartGate = arena.getByLabel('BMX start gate', { exact: true }).first();
   await expect(bmxStartGate).toBeVisible();
   await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');
@@ -2011,8 +2017,9 @@ test('straight sprint restores and saves a separate camera for each distance', a
     expect(box!.x).toBeGreaterThanOrEqual(arenaBox!.x - box!.width * 0.25);
     expect(box!.x + box!.width).toBeLessThanOrEqual(arenaBox!.x + arenaBox!.width + box!.width * 0.25);
   });
-  expect(Number(await arena.locator('[data-arena-world]').getAttribute('data-camera-scroll-percent')))
-    .toBeGreaterThan(0);
+  await expect.poll(async () => (
+    Number(await arena.locator('[data-arena-world]').getAttribute('data-camera-scroll-percent'))
+  )).toBeGreaterThan(0);
   if (process.env.TRACKLAB_GAME_ARENA_SCREENSHOT) {
     await page.screenshot({ path: process.env.TRACKLAB_GAME_ARENA_SCREENSHOT });
   }

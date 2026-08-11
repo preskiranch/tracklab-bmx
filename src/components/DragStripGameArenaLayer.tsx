@@ -2,7 +2,11 @@ import { useMemo, type CSSProperties } from 'react';
 import { exploreGridClass, groupExploreRiders, type ExploreViewportGroup } from '../lib/explore';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { riderAnimationState, riderCrankStepCount } from '../lib/riderAnimation';
-import { straightSprintDistanceOptions, straightSprintFeetToMeters } from '../lib/straightSprint';
+import {
+  straightSprintDistanceOptions,
+  straightSprintFeetToMeters,
+  straightSprintMaximumFeet,
+} from '../lib/straightSprint';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
 import type {
@@ -52,6 +56,7 @@ const arenaFinishPercent = 96;
 const arenaTrackTopPercent = 48;
 const arenaTrackBottomPercent = 69;
 const arenaLaneHeightPercent = (arenaTrackBottomPercent - arenaTrackTopPercent) / 4;
+const arenaCourseDistanceMeters = straightSprintFeetToMeters(straightSprintMaximumFeet);
 const arenaLaneCenters = [0, 1, 2, 3].map(
   (laneIndex) => arenaTrackTopPercent + arenaLaneHeightPercent * (laneIndex + 0.5),
 );
@@ -167,60 +172,66 @@ function progressToWorldPercent(distanceMeters: number, raceDistanceMeters: numb
 }
 
 function SprintDistanceMarkers({ raceDistanceMeters }: { raceDistanceMeters: number }) {
-  const raceDistanceFeet = raceDistanceMeters / 0.3048;
-  const visibleMarkers = straightSprintDistanceOptions.filter(
-    (distanceFeet) => distanceFeet <= raceDistanceFeet + 0.5,
-  );
-
   return (
     <div aria-label="Trackside marker posts" data-arena-distance-markers>
-      {visibleMarkers.map((distanceFeet) => (
-        <div
-          key={`arena-distance-marker-${distanceFeet}`}
-          aria-label={`${distanceFeet.toLocaleString()} foot marker`}
-          data-distance-feet={distanceFeet}
-          style={{
-            position: 'absolute',
-            zIndex: 8,
-            top: `${arenaTrackTopPercent - 0.8}%`,
-            left: `${progressToWorldPercent(straightSprintFeetToMeters(distanceFeet), raceDistanceMeters)}%`,
-            pointerEvents: 'none',
-            transform: 'translate(-50%, -100%)',
-          }}
-        >
-          <div style={{
-            display: 'grid',
-            minWidth: 'clamp(32px, 3vw, 48px)',
-            minHeight: 'clamp(23px, 2.7vh, 34px)',
-            padding: '2px 5px',
-            placeItems: 'center',
-            border: '2px solid #d8ff3e',
-            borderRadius: '5px',
-            background: 'linear-gradient(180deg, #202a34, #080d13)',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,.22), 0 3px 8px rgba(0,0,0,.62)',
-            color: '#ffffff',
-            fontSize: 'clamp(9px, .85vw, 13px)',
-            fontWeight: 1000,
-            letterSpacing: '.02em',
-            lineHeight: 1,
-            whiteSpace: 'nowrap',
-          }}>
-            {distanceFeet.toLocaleString()}′
+      {straightSprintDistanceOptions.map((distanceFeet) => {
+        const isActiveFinish = Math.abs(
+          straightSprintFeetToMeters(distanceFeet) - raceDistanceMeters,
+        ) < 0.2;
+        return (
+          <div
+            key={`arena-distance-marker-${distanceFeet}`}
+            aria-label={`${distanceFeet.toLocaleString()} foot marker`}
+            data-active-finish={isActiveFinish ? 'true' : 'false'}
+            data-distance-feet={distanceFeet}
+            style={{
+              position: 'absolute',
+              zIndex: 8,
+              top: `${arenaTrackTopPercent - 0.8}%`,
+              left: `${progressToWorldPercent(straightSprintFeetToMeters(distanceFeet), arenaCourseDistanceMeters)}%`,
+              pointerEvents: 'none',
+              transform: 'translate(-50%, -100%)',
+            }}
+          >
+            <div style={{
+              display: 'grid',
+              minWidth: 'clamp(32px, 3vw, 48px)',
+              minHeight: 'clamp(23px, 2.7vh, 34px)',
+              padding: '2px 5px',
+              placeItems: 'center',
+              border: `2px solid ${isActiveFinish ? '#ffffff' : '#d8ff3e'}`,
+              borderRadius: '5px',
+              background: isActiveFinish
+                ? 'linear-gradient(180deg, #35414d, #0b1118)'
+                : 'linear-gradient(180deg, #202a34, #080d13)',
+              boxShadow: isActiveFinish
+                ? 'inset 0 1px 0 rgba(255,255,255,.3), 0 0 10px rgba(255,255,255,.58)'
+                : 'inset 0 1px 0 rgba(255,255,255,.22), 0 3px 8px rgba(0,0,0,.62)',
+              color: '#ffffff',
+              fontSize: 'clamp(9px, .85vw, 13px)',
+              fontWeight: 1000,
+              letterSpacing: '.02em',
+              lineHeight: 1,
+              whiteSpace: 'nowrap',
+              transform: isActiveFinish ? 'translateX(62%)' : undefined,
+            }}>
+              {distanceFeet.toLocaleString()}′
+            </div>
+            <div aria-hidden="true" style={{
+              position: 'absolute',
+              top: '100%',
+              left: '50%',
+              width: '3px',
+              height: 'clamp(7px, 1.1vh, 14px)',
+              border: '1px solid rgba(230,236,241,.72)',
+              borderTop: 0,
+              background: 'linear-gradient(90deg, #4a555f, #d2d8dd 50%, #46515b)',
+              boxShadow: '1px 2px 3px rgba(0,0,0,.5)',
+              transform: 'translateX(-50%)',
+            }} />
           </div>
-          <div aria-hidden="true" style={{
-            position: 'absolute',
-            top: '100%',
-            left: '50%',
-            width: '3px',
-            height: 'clamp(7px, 1.1vh, 14px)',
-            border: '1px solid rgba(230,236,241,.72)',
-            borderTop: 0,
-            background: 'linear-gradient(90deg, #4a555f, #d2d8dd 50%, #46515b)',
-            boxShadow: '1px 2px 3px rgba(0,0,0,.5)',
-            transform: 'translateX(-50%)',
-          }} />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -440,7 +451,7 @@ function ArenaPanel({
   const centerMeter = group.riders.length > 0
     ? group.riders.reduce((sum, rider) => sum + rider.distanceMeters, 0) / group.riders.length
     : 0;
-  const centerPercent = progressToWorldPercent(centerMeter, raceDistanceMeters);
+  const centerPercent = progressToWorldPercent(centerMeter, arenaCourseDistanceMeters);
   const scrollPercent = clamp(
     centerPercent - arenaViewportWidth / 2,
     0,
@@ -510,7 +521,7 @@ function ArenaPanel({
           zIndex: 5,
           top: `${arenaTrackTopPercent}%`,
           bottom: `${100 - arenaTrackBottomPercent}%`,
-          left: `${arenaFinishPercent}%`,
+          left: `${progressToWorldPercent(raceDistanceMeters, arenaCourseDistanceMeters)}%`,
           width: '5px',
           background: '#ffffff',
           boxShadow: '0 0 0 2px #111827, 0 0 12px rgba(255,255,255,.8)',
@@ -534,7 +545,7 @@ function ArenaPanel({
           position: 'absolute',
           zIndex: 6,
           top: `${arenaTrackTopPercent - 5}%`,
-          left: `${arenaFinishPercent}%`,
+          left: `${progressToWorldPercent(raceDistanceMeters, arenaCourseDistanceMeters)}%`,
           padding: '4px 8px',
           border: '2px solid #ffffff',
           borderRadius: '5px',
@@ -573,7 +584,7 @@ function ArenaPanel({
           );
         })}
         {visibleRiders.map((rider) => {
-          const left = progressToWorldPercent(rider.distanceMeters, raceDistanceMeters);
+          const left = progressToWorldPercent(rider.distanceMeters, arenaCourseDistanceMeters);
           const laneCenter = arenaLaneCenters[rider.playerId - 1];
           return (
             <div
