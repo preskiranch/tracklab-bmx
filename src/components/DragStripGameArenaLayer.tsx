@@ -73,7 +73,10 @@ function BmxStartGate({
 }) {
   // App sets phase="go" only after the UCI green tone (the fourth beep), so
   // the visual plate and the race-input release share the same gate-drop edge.
-  const dropped = phase === 'go' || raceState === 'racing' || raceState === 'finished';
+  const rearming = phase === 'staging' || phase === 'cadence' || phase === 'false-start';
+  const dropped = !rearming && (
+    phase === 'go' || raceState === 'racing' || raceState === 'finished'
+  );
   const falseStart = phase === 'false-start';
 
   return (
@@ -93,54 +96,71 @@ function BmxStartGate({
         transform: 'translateX(-50%)',
       }}
     >
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          zIndex: 0,
-          top: 0,
-          right: '42%',
-          bottom: 0,
-          width: '190%',
-          border: '1px solid rgba(208, 217, 226, .72)',
-          borderRight: 0,
-          background: 'repeating-linear-gradient(90deg, rgba(225,232,238,.28) 0 2px, rgba(72,82,92,.35) 2px 8px), linear-gradient(180deg, #4b5560, #202830)',
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,.5), inset 0 -3px 0 rgba(4,7,10,.58), 0 4px 8px rgba(0,0,0,.45)',
-          clipPath: 'polygon(0 12%, 100% 0, 100% 100%, 0 88%)',
-          opacity: .96,
-        }}
-      />
       {arenaLaneCenters.map((laneCenter, laneIndex) => {
         const laneTop = arenaTrackTopPercent + arenaLaneHeightPercent * laneIndex;
         const localLaneCenter = ((laneCenter - arenaTrackTopPercent) / (arenaTrackBottomPercent - arenaTrackTopPercent)) * 100;
         const localLaneBottom = ((laneTop + arenaLaneHeightPercent - arenaTrackTopPercent)
           / (arenaTrackBottomPercent - arenaTrackTopPercent)) * 100;
         return (
-          <div
-            key={`start-gate-lane-${laneIndex + 1}`}
-            data-start-gate-lane={laneIndex + 1}
-            style={{
+          <div key={`start-gate-lane-${laneIndex + 1}`}>
+            <div
+              aria-hidden="true"
+              data-start-platform-lane={laneIndex + 1}
+              style={{
+                position: 'absolute',
+                zIndex: 0,
+                top: `${localLaneCenter}%`,
+                right: '50%',
+                width: 'clamp(42px, 4.8vw, 76px)',
+                height: 'clamp(6px, .7vh, 10px)',
+                borderTop: '1px solid rgba(230,236,241,.72)',
+                borderBottom: '2px solid rgba(5,8,11,.76)',
+                background: 'linear-gradient(180deg, #aab3ba 0 20%, #4e5962 21% 58%, #202830 59% 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,.42), 0 3px 5px rgba(0,0,0,.42)',
+                clipPath: 'polygon(0 45%, 100% 0, 100% 100%, 0 82%)',
+                transform: 'translateY(-18%)',
+              }}
+            />
+            <div
+              data-start-gate-lane={laneIndex + 1}
+              style={{
+                position: 'absolute',
+                zIndex: 2,
+                top: `${localLaneCenter}%`,
+                left: '50%',
+                width: 'clamp(7px, .65vw, 11px)',
+                height: `${Math.max(48, localLaneBottom - localLaneCenter + 42)}%`,
+                maxHeight: 'clamp(23px, 3.1vh, 38px)',
+                border: `1px solid ${falseStart ? '#ff4d4d' : dropped ? '#d8ff3e' : '#d7dde3'}`,
+                borderRadius: '2px 2px 1px 1px',
+                backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,.34) 0 1px, transparent 1px 5px), linear-gradient(90deg, #626c75, #d3d9de 48%, #59636c)',
+                boxShadow: falseStart
+                  ? '0 0 8px rgba(255,77,77,.78), inset 0 0 0 1px rgba(255,255,255,.28)'
+                  : '0 2px 5px rgba(0,0,0,.58), inset 0 0 0 1px rgba(255,255,255,.28)',
+                transformOrigin: '0 100%',
+                transform: dropped
+                  ? 'translate(0, -100%) rotate(86deg)'
+                  : 'translate(0, -100%) rotate(0deg)',
+                transition: dropped
+                  ? 'transform 210ms cubic-bezier(.55,.02,.92,.42), border-color 120ms linear'
+                  : 'transform 360ms cubic-bezier(.2,.72,.28,1), border-color 120ms linear',
+                willChange: 'transform',
+              }}
+            />
+            <div aria-hidden="true" style={{
               position: 'absolute',
-              zIndex: 2,
+              zIndex: 4,
               top: `${localLaneCenter}%`,
               left: '50%',
-              width: 'clamp(7px, .65vw, 11px)',
-              height: `${Math.max(48, localLaneBottom - localLaneCenter + 42)}%`,
-              maxHeight: 'clamp(23px, 3.1vh, 38px)',
-              border: `1px solid ${falseStart ? '#ff4d4d' : dropped ? '#d8ff3e' : '#d7dde3'}`,
-              borderRadius: '2px 2px 1px 1px',
-              backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,.34) 0 1px, transparent 1px 5px), linear-gradient(90deg, #626c75, #d3d9de 48%, #59636c)',
-              boxShadow: falseStart
-                ? '0 0 8px rgba(255,77,77,.78), inset 0 0 0 1px rgba(255,255,255,.28)'
-                : '0 2px 5px rgba(0,0,0,.58), inset 0 0 0 1px rgba(255,255,255,.28)',
-              transformOrigin: '50% 100%',
-              transform: dropped
-                ? 'translate(-50%, -100%) rotate(82deg)'
-                : 'translate(-50%, -100%) rotate(-4deg)',
-              transition: 'transform 210ms cubic-bezier(.55,.02,.92,.42), border-color 120ms linear',
-              willChange: 'transform',
-            }}
-          />
+              width: 'clamp(7px, .65vw, 10px)',
+              aspectRatio: '1',
+              border: '1px solid rgba(232,237,241,.9)',
+              borderRadius: '50%',
+              background: 'radial-gradient(circle at 38% 32%, #e7ecef 0 14%, #75818a 18% 48%, #222a31 52% 100%)',
+              boxShadow: '0 1px 3px rgba(0,0,0,.65)',
+              transform: 'translate(-50%, -50%)',
+            }} />
+          </div>
         );
       })}
       <div
@@ -148,14 +168,14 @@ function BmxStartGate({
         style={{
           position: 'absolute',
           zIndex: 3,
-          top: '-3%',
-          bottom: '-3%',
-          left: '43%',
-          width: 'clamp(4px, .35vw, 7px)',
-          border: '1px solid rgba(232,237,241,.85)',
-          borderRadius: '2px',
-          background: 'linear-gradient(90deg, #263039, #c5ccd1 45%, #4f5b65)',
-          boxShadow: '2px 2px 5px rgba(0,0,0,.58)',
+          top: 0,
+          bottom: 0,
+          left: '50%',
+          width: '3px',
+          borderRadius: '1px',
+          background: 'linear-gradient(90deg, #313a42, #aeb7be 52%, #3e4850)',
+          boxShadow: '1px 1px 3px rgba(0,0,0,.48)',
+          transform: 'translateX(-50%)',
         }}
       />
     </div>

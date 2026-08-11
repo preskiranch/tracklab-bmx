@@ -1909,14 +1909,20 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect(bmxStartGate).toBeVisible();
   await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');
   await expect(bmxStartGate.locator('[data-start-gate-lane]')).toHaveCount(4);
+  await expect(bmxStartGate.locator('[data-start-platform-lane]')).toHaveCount(4);
   const previewStartLineBox = await arena.locator('[data-arena-start-line]').boundingBox();
   const frontTireBox = await arena.getByLabel(/Demo Rider 1 arena rider/)
     .locator('[data-arena-wheel="front"]')
     .boundingBox();
+  const uprightGatePlateBox = await bmxStartGate.locator('[data-start-gate-lane="1"]').boundingBox();
   expect(previewStartLineBox).not.toBeNull();
   expect(frontTireBox).not.toBeNull();
+  expect(uprightGatePlateBox).not.toBeNull();
   expect(Math.abs(
     (frontTireBox!.x + frontTireBox!.width) - previewStartLineBox!.x,
+  )).toBeLessThanOrEqual(2);
+  expect(Math.abs(
+    (frontTireBox!.x + frontTireBox!.width) - uprightGatePlateBox!.x,
   )).toBeLessThanOrEqual(2);
   await page.getByRole('button', { name: 'Start Demo Sprint', exact: true }).click();
   const startTree = page.getByLabel('BMX start tree light', { exact: true });
@@ -2023,6 +2029,13 @@ test('straight sprint restores and saves a separate camera for each distance', a
   if (process.env.TRACKLAB_GAME_ARENA_SCREENSHOT) {
     await page.screenshot({ path: process.env.TRACKLAB_GAME_ARENA_SCREENSHOT });
   }
+  await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'dropped');
+  await page.getByRole('button', { name: 'Cancel Race', exact: true }).click();
+  const restartSprintButton = page.getByRole('button', { name: 'Start Demo Sprint', exact: true });
+  await expect(restartSprintButton).toBeVisible();
+  await restartSprintButton.click();
+  await expect(bmxStartGate).toHaveAttribute('data-gate-phase', 'staging');
+  await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');
   await page.getByRole('button', { name: 'Cancel Race', exact: true }).click();
 });
 
