@@ -1896,6 +1896,15 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect(arena.getByLabel(/Demo Rider 2 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 3 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 4 arena rider/)).toBeVisible();
+  const arenaRiderBoxes = await Promise.all([1, 2, 3, 4].map(async (playerId) => {
+    const arenaRider = arena.getByLabel(new RegExp(`Demo Rider ${playerId} arena rider`));
+    await expect(arenaRider).toHaveAttribute('data-lane', String(playerId));
+    return arenaRider.boundingBox();
+  }));
+  arenaRiderBoxes.forEach((box) => expect(box).not.toBeNull());
+  for (let index = 1; index < arenaRiderBoxes.length; index += 1) {
+    expect(arenaRiderBoxes[index]!.y - arenaRiderBoxes[index - 1]!.y).toBeGreaterThan(20);
+  }
   const riderPanel = arena.getByLabel('Game arena rider data', { exact: true });
   await expect(riderPanel.locator('.game-arena-hud-card')).toHaveCount(4);
   await expect(page.getByLabel('Race rider positions', { exact: true })).toHaveCount(0);

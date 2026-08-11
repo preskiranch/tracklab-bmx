@@ -46,6 +46,7 @@ const arenaWorldWidth = 310;
 const arenaViewportWidth = 100 / (arenaWorldWidth / 100);
 const arenaStartPercent = 4;
 const arenaFinishPercent = 96;
+const arenaLaneCenters = [54.95, 57.85, 61.65, 65.85] as const;
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -342,29 +343,66 @@ function ArenaPanel({
           fontWeight: 950,
           transform: 'translateX(-50%)',
         }}>FINISH</div>
+        {arenaLaneCenters.map((laneCenter, laneIndex) => {
+          const player = riders.find((rider) => rider.playerId === laneIndex + 1);
+          return (
+            <div
+              key={`arena-lane-${laneIndex + 1}`}
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                zIndex: 8,
+                top: `${laneCenter}%`,
+                left: `${arenaStartPercent + 1.15}%`,
+                minWidth: 'clamp(22px, 2vw, 30px)',
+                padding: '2px 5px',
+                border: `1px solid ${player?.accent ?? 'rgba(255,255,255,.6)'}`,
+                borderRadius: '999px',
+                background: 'rgba(8, 13, 20, .82)',
+                boxShadow: '0 2px 6px rgba(0,0,0,.42)',
+                color: '#ffffff',
+                fontSize: 'clamp(7px, .65vw, 10px)',
+                fontWeight: 950,
+                lineHeight: 1.1,
+                textAlign: 'center',
+                transform: 'translateY(-50%)',
+              }}
+            >P{laneIndex + 1}</div>
+          );
+        })}
         {visibleRiders.map((rider) => {
           const left = progressToWorldPercent(rider.distanceMeters, raceDistanceMeters);
-          const laneBottom = 56.8 + (rider.playerId - 1) * 3.85;
+          const laneCenter = arenaLaneCenters[rider.playerId - 1];
           return (
             <div
               key={rider.id}
               aria-label={`${rider.name} arena rider`}
+              data-lane={rider.playerId}
+              data-lane-center={laneCenter}
               style={{
                 position: 'absolute',
                 zIndex: 20 + rider.playerId,
-                top: `${laneBottom}%`,
+                top: `${laneCenter}%`,
                 left: `${left}%`,
-                width: 'clamp(70px, 7.5vw, 118px)',
+                width: 'clamp(62px, 5.2vw, 84px)',
                 aspectRatio: '1',
                 opacity: rider.ghost ? 0.6 : 1,
-                backgroundImage: `url(/assets/rider-${rider.colorName}-animated.png)`,
-                backgroundPosition: `${rider.frame * 12.5}% 0`,
-                backgroundRepeat: 'no-repeat',
-                backgroundSize: '900% 100%',
-                filter: `drop-shadow(0 4px 3px rgba(0,0,0,.55)) drop-shadow(0 0 2px ${rider.accent})`,
-                transform: 'translate(-88%, -84%)',
+                transform: 'translate(-88%, -75%)',
               }}
-            />
+            >
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  inset: '4%',
+                  backgroundImage: `url(/assets/rider-${rider.colorName}-animated.png)`,
+                  backgroundPosition: `${rider.frame * 12.5}% 0`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundSize: '900% 100%',
+                  filter: `drop-shadow(0 4px 3px rgba(0,0,0,.55)) drop-shadow(0 0 2px ${rider.accent})`,
+                }}
+              />
+            </div>
           );
         })}
       </div>
