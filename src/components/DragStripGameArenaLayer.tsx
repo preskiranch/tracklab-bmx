@@ -1,5 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
-import { exploreGridClass, groupExploreRiders, type ExploreViewportGroup } from '../lib/explore';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { riderAnimationState, riderCrankStepCount } from '../lib/riderAnimation';
 import {
@@ -7,11 +6,11 @@ import {
   straightSprintFeetToMeters,
   straightSprintMaximumFeet,
 } from '../lib/straightSprint';
-import { formatSpeedFromKph, speedUnitLabel } from '../units';
+import { formatDistanceMeters, formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
 import type {
   BikeSample,
-  ExploreRider,
+  DistanceUnit,
   GhostPlaybackRider,
   MultiplayerRaceState,
   PlayerSlot,
@@ -46,7 +45,13 @@ type DragStripGameArenaLayerProps = {
   startGatePhase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
   raceDistanceMeters: number;
   speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
   showHud: boolean;
+};
+
+type ArenaViewport = {
+  id: string;
+  riders: ArenaRider[];
 };
 
 // Keep the short-sprint scale readable: the start line remains near the left
@@ -78,14 +83,23 @@ const arenaLaneCenters = [0, 1, 2, 3].map(
 // The route-distance coordinate represents the leading edge of the front tire.
 // The wheel is 61.5% across the inner 92%-wide sprite box and is 33.5% wide.
 const arenaFrontTireAnchorPercent = 4 + (0.92 * (61.5 + 33.5));
-const arenaCameraEaseMs = 115;
+const arenaCameraEaseMs = 180;
+const arenaCameraRiderPaddingRatio = 0.16;
 
-function applyArenaWorldScroll(element: HTMLDivElement, scrollPercent: number) {
+function applyArenaWorldCamera(
+  element: HTMLDivElement,
+  scrollPercent: number,
+  viewportPercent: number,
+) {
   const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
-  const offsetPixels = element.offsetWidth * scrollPercent / 100;
+  const viewportWidthPixels = element.parentElement?.clientWidth ?? window.innerWidth;
+  const cameraScale = arenaViewportWidth / viewportPercent;
+  const offsetPixels = viewportWidthPixels * scrollPercent / viewportPercent;
   const pixelAlignedOffset = Math.round(offsetPixels * devicePixelRatio) / devicePixelRatio;
-  element.style.transform = `translate3d(-${pixelAlignedOffset}px, 0, 0)`;
+  element.style.transform = `translate3d(-${pixelAlignedOffset}px, 0, 0) scaleX(${cameraScale})`;
+  element.style.setProperty('--arena-camera-inverse-scale', String(1 / cameraScale));
   element.dataset.cameraScrollPercent = scrollPercent.toFixed(3);
+  element.dataset.cameraViewportPercent = viewportPercent.toFixed(3);
 }
 
 function BmxStartGate({
@@ -210,67 +224,107 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
+export function dragStripAdaptiveCameraWindow(riderWorldPositions: number[]) {
+  const safePositions = riderWorldPositions.filter(Number.isFinite).map((position) => (
+    clamp(position, 0, 100)
+  ));
+  const minimumRiderWorldPercent = safePositions.length > 0
+    ? Math.min(...safePositions)
+    : arenaStartPercent;
+  const maximumRiderWorldPercent = safePositions.length > 0
+    ? Math.max(...safePositions)
+    : arenaStartPercent;
+  const riderWorldSpreadPercent = maximumRiderWorldPercent - minimumRiderWorldPercent;
+  const viewportPercent = clamp(
+    Math.max(
+      arenaViewportWidth,
+      riderWorldSpreadPercent / (1 - arenaCameraRiderPaddingRatio * 2),
+    ),
+    arenaViewportWidth,
+    100,
+  );
+  const riderCenterPercent = (minimumRiderWorldPercent + maximumRiderWorldPercent) / 2;
+  return {
+    scrollPercent: clamp(
+      riderCenterPercent - viewportPercent / 2,
+      0,
+      100 - viewportPercent,
+    ),
+    viewportPercent,
+  };
+}
+
 function progressToWorldPercent(distanceMeters: number, raceDistanceMeters: number) {
   const progress = clamp(distanceMeters / Math.max(1, raceDistanceMeters), 0, 1);
   return arenaStartPercent + progress * (arenaFinishPercent - arenaStartPercent);
 }
 
-function SprintDistanceMarkers({ raceDistanceMeters }: { raceDistanceMeters: number }) {
+function SprintDistanceMarkers({
+  raceDistanceMeters,
+  distanceUnit,
+}: {
+  raceDistanceMeters: number;
+  distanceUnit: DistanceUnit;
+}) {
   return (
     <div aria-label="Trackside marker posts" data-arena-distance-markers>
       {straightSprintDistanceOptions.map((distanceFeet) => {
+        const distanceMeters = straightSprintFeetToMeters(distanceFeet);
+        const markerLabel = distanceUnit === 'm'
+          ? `${Math.round(distanceMeters).toLocaleString()} m`
+          : `${distanceFeet.toLocaleString()}′`;
         const isActiveFinish = Math.abs(
-          straightSprintFeetToMeters(distanceFeet) - raceDistanceMeters,
+          distanceMeters - raceDistanceMeters,
         ) < 0.2;
         return (
           <div
             key={`arena-distance-marker-${distanceFeet}`}
-            aria-label={`${distanceFeet.toLocaleString()} foot marker`}
+            aria-label={`${markerLabel} marker`}
             data-active-finish={isActiveFinish ? 'true' : 'false'}
             data-distance-feet={distanceFeet}
+            data-distance-meters={distanceMeters.toFixed(3)}
             data-world-percent={progressToWorldPercent(
-              straightSprintFeetToMeters(distanceFeet),
+              distanceMeters,
               arenaCourseDistanceMeters,
             ).toFixed(4)}
             style={{
               position: 'absolute',
               zIndex: 8,
               top: `${arenaTrackTopPercent - 0.8}%`,
-              left: `${progressToWorldPercent(straightSprintFeetToMeters(distanceFeet), arenaCourseDistanceMeters)}%`,
+              left: `${progressToWorldPercent(distanceMeters, arenaCourseDistanceMeters)}%`,
               pointerEvents: 'none',
               transform: 'translate(-50%, -100%)',
             }}
           >
-            <div style={{
+            <div data-arena-marker-label style={{
               display: 'grid',
-              minWidth: 'clamp(32px, 3vw, 48px)',
-              minHeight: 'clamp(23px, 2.7vh, 34px)',
-              padding: '2px 5px',
+              minWidth: 'clamp(48px, 4.3vw, 72px)',
+              minHeight: 'clamp(30px, 3.5vh, 44px)',
+              padding: '4px 8px',
               placeItems: 'center',
-              border: `2px solid ${isActiveFinish ? '#ffffff' : '#d8ff3e'}`,
-              borderRadius: '5px',
-              background: isActiveFinish
-                ? 'linear-gradient(180deg, #35414d, #0b1118)'
-                : 'linear-gradient(180deg, #202a34, #080d13)',
+              border: `3px solid ${isActiveFinish ? '#ffffff' : '#d8ff3e'}`,
+              borderRadius: '7px',
+              background: '#05080c',
               boxShadow: isActiveFinish
-                ? 'inset 0 1px 0 rgba(255,255,255,.3), 0 0 10px rgba(255,255,255,.58)'
-                : 'inset 0 1px 0 rgba(255,255,255,.22), 0 3px 8px rgba(0,0,0,.62)',
+                ? 'inset 0 0 0 1px rgba(255,255,255,.28), 0 0 10px rgba(255,255,255,.58)'
+                : 'inset 0 0 0 1px rgba(255,255,255,.16), 0 4px 10px rgba(0,0,0,.72)',
               color: '#ffffff',
-              fontSize: 'clamp(9px, .85vw, 13px)',
+              fontSize: 'clamp(13px, 1.15vw, 18px)',
               fontWeight: 1000,
-              letterSpacing: '.02em',
+              letterSpacing: '.01em',
               lineHeight: 1,
+              textShadow: '0 1px 2px #000000',
               whiteSpace: 'nowrap',
-              transform: isActiveFinish ? 'translateX(62%)' : undefined,
+              transform: `${isActiveFinish ? 'translateX(62%) ' : ''}scaleX(var(--arena-camera-inverse-scale, 1))`,
             }}>
-              {distanceFeet.toLocaleString()}′
+              {markerLabel}
             </div>
             <div aria-hidden="true" style={{
               position: 'absolute',
               top: '100%',
               left: '50%',
-              width: '3px',
-              height: 'clamp(7px, 1.1vh, 14px)',
+              width: '4px',
+              height: 'clamp(9px, 1.4vh, 17px)',
               border: '1px solid rgba(230,236,241,.72)',
               borderTop: 0,
               background: 'linear-gradient(90deg, #4a555f, #d2d8dd 50%, #46515b)',
@@ -282,23 +336,6 @@ function SprintDistanceMarkers({ raceDistanceMeters }: { raceDistanceMeters: num
       })}
     </div>
   );
-}
-
-function gridStyle(groupCount: number): CSSProperties {
-  if (groupCount <= 1) {
-    return { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' };
-  }
-  if (groupCount === 2) {
-    return { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridTemplateRows: 'minmax(0, 1fr)' };
-  }
-  return {
-    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-    gridTemplateRows: 'repeat(2, minmax(0, 1fr))',
-  };
-}
-
-function panelSpanStyle(groupCount: number, index: number): CSSProperties | undefined {
-  return groupCount === 3 && index === 0 ? { gridRow: '1 / -1' } : undefined;
 }
 
 function riderFrame(crankStep: number) {
@@ -314,11 +351,13 @@ function GameArenaHud({
   raceState,
   raceDistanceMeters,
   speedUnit,
+  distanceUnit,
 }: {
   riders: ArenaRider[];
   raceState: RaceState;
   raceDistanceMeters: number;
   speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
 }) {
   const entries = [...riders]
     .sort((left, right) => left.rank - right.rank || right.distanceMeters - left.distanceMeters)
@@ -371,7 +410,7 @@ function GameArenaHud({
         textTransform: 'uppercase',
       }}>
         <span>TrackLab Live Timing</span>
-        <span>{Math.round(raceDistanceMeters * 3.28084).toLocaleString()} ft sprint</span>
+        <span>{formatDistanceMeters(raceDistanceMeters, distanceUnit)} sprint</span>
       </header>
       <div style={{
         position: 'relative',
@@ -483,38 +522,36 @@ function ArenaPanel({
   raceDistanceMeters,
   raceState,
   startGatePhase,
+  distanceUnit,
 }: {
-  group: ExploreViewportGroup;
+  group: ArenaViewport;
   riders: ArenaRider[];
   raceDistanceMeters: number;
   raceState: RaceState;
   startGatePhase: DragStripGameArenaLayerProps['startGatePhase'];
+  distanceUnit: DistanceUnit;
 }) {
-  const groupRiders = riders.filter((rider) => group.riders.some((member) => member.id === rider.id));
-  const nearbyGhosts = riders.filter((rider) => rider.ghost && (
-    rider.distanceMeters >= group.startMeter - 70
-    && rider.distanceMeters <= group.endMeter + 70
+  const visibleRiders = riders;
+  const riderWorldPositions = visibleRiders.map((rider) => (
+    progressToWorldPercent(rider.distanceMeters, arenaCourseDistanceMeters)
   ));
-  const visibleRiders = [...groupRiders, ...nearbyGhosts];
-  const centerMeter = group.riders.length > 0
-    ? group.riders.reduce((sum, rider) => sum + rider.distanceMeters, 0) / group.riders.length
-    : 0;
-  const centerPercent = progressToWorldPercent(centerMeter, arenaCourseDistanceMeters);
-  const scrollPercent = clamp(
-    centerPercent - arenaViewportWidth / 2,
-    0,
-    100 - arenaViewportWidth,
-  );
+  const {
+    scrollPercent,
+    viewportPercent: cameraViewportPercent,
+  } = dragStripAdaptiveCameraWindow(riderWorldPositions);
   const leadRider = [...group.riders].sort((left, right) => right.distanceMeters - left.distanceMeters)[0];
   const worldRef = useRef<HTMLDivElement>(null);
   const cameraScrollRef = useRef(scrollPercent);
+  const cameraViewportRef = useRef(cameraViewportPercent);
   const cameraTargetRef = useRef(scrollPercent);
+  const cameraViewportTargetRef = useRef(cameraViewportPercent);
   const cameraFrameRef = useRef<number | null>(null);
   const cameraFrameTimeRef = useRef(0);
   const smoothCamera = raceState === 'racing' || raceState === 'finished';
 
   useLayoutEffect(() => {
     cameraTargetRef.current = scrollPercent;
+    cameraViewportTargetRef.current = cameraViewportPercent;
     const world = worldRef.current;
     if (!world) {
       return;
@@ -526,7 +563,8 @@ function ArenaPanel({
         cameraFrameRef.current = null;
       }
       cameraScrollRef.current = scrollPercent;
-      applyArenaWorldScroll(world, scrollPercent);
+      cameraViewportRef.current = cameraViewportPercent;
+      applyArenaWorldCamera(world, scrollPercent, cameraViewportPercent);
       return;
     }
 
@@ -540,23 +578,37 @@ function ArenaPanel({
       cameraFrameTimeRef.current = now;
       const current = cameraScrollRef.current;
       const target = cameraTargetRef.current;
+      const currentViewport = cameraViewportRef.current;
+      const targetViewport = cameraViewportTargetRef.current;
       const ease = 1 - Math.exp(-elapsedMs / arenaCameraEaseMs);
       const next = Math.abs(target - current) < 0.0001
         ? target
         : current + (target - current) * ease;
+      const nextViewport = Math.abs(targetViewport - currentViewport) < 0.0001
+        ? targetViewport
+        : currentViewport + (targetViewport - currentViewport) * ease;
       cameraScrollRef.current = next;
-      applyArenaWorldScroll(world, next);
+      cameraViewportRef.current = nextViewport;
+      applyArenaWorldCamera(world, next, nextViewport);
 
-      if (Math.abs(cameraTargetRef.current - next) < 0.0001) {
+      if (
+        Math.abs(cameraTargetRef.current - next) < 0.0001
+        && Math.abs(cameraViewportTargetRef.current - nextViewport) < 0.0001
+      ) {
         cameraScrollRef.current = cameraTargetRef.current;
-        applyArenaWorldScroll(world, cameraTargetRef.current);
+        cameraViewportRef.current = cameraViewportTargetRef.current;
+        applyArenaWorldCamera(
+          world,
+          cameraTargetRef.current,
+          cameraViewportTargetRef.current,
+        );
         cameraFrameRef.current = null;
         return;
       }
       cameraFrameRef.current = window.requestAnimationFrame(updateCamera);
     };
     cameraFrameRef.current = window.requestAnimationFrame(updateCamera);
-  }, [scrollPercent, smoothCamera]);
+  }, [cameraViewportPercent, scrollPercent, smoothCamera]);
 
   useLayoutEffect(() => () => {
     if (cameraFrameRef.current != null) {
@@ -575,7 +627,9 @@ function ArenaPanel({
       <div
         ref={worldRef}
         data-arena-world
+        data-camera-layout="adaptive-single"
         data-camera-scroll-percent={scrollPercent.toFixed(3)}
+        data-camera-viewport-percent={cameraViewportPercent.toFixed(3)}
         style={{
           position: 'absolute',
           inset: 0,
@@ -583,6 +637,7 @@ function ArenaPanel({
           overflow: 'hidden',
           background: '#121820',
           transform: 'translate3d(0, 0, 0)',
+          transformOrigin: 'left top',
           willChange: 'transform',
           backfaceVisibility: 'hidden',
         }}
@@ -662,7 +717,10 @@ function ArenaPanel({
           background: '#ffffff',
           boxShadow: '0 0 0 2px #111827, 0 0 12px rgba(255,255,255,.8)',
         }} />
-        <SprintDistanceMarkers raceDistanceMeters={raceDistanceMeters} />
+        <SprintDistanceMarkers
+          raceDistanceMeters={raceDistanceMeters}
+          distanceUnit={distanceUnit}
+        />
         <div style={{
           position: 'absolute',
           zIndex: 6,
@@ -675,7 +733,7 @@ function ArenaPanel({
           color: '#ffffff',
           fontSize: 'clamp(8px, .8vw, 12px)',
           fontWeight: 950,
-          transform: 'translateX(-50%)',
+          transform: 'translateX(-50%) scaleX(var(--arena-camera-inverse-scale, 1))',
         }}>START</div>
         <div style={{
           position: 'absolute',
@@ -689,7 +747,7 @@ function ArenaPanel({
           color: '#ffffff',
           fontSize: 'clamp(8px, .8vw, 12px)',
           fontWeight: 950,
-          transform: 'translateX(-50%)',
+          transform: 'translateX(-50%) scaleX(var(--arena-camera-inverse-scale, 1))',
         }}>FINISH</div>
         {arenaLaneCenters.map((laneCenter, laneIndex) => {
           const player = riders.find((rider) => rider.playerId === laneIndex + 1);
@@ -714,7 +772,7 @@ function ArenaPanel({
                 fontWeight: 950,
                 lineHeight: 1.1,
                 textAlign: 'center',
-                transform: 'translateY(-50%)',
+                transform: 'translateY(-50%) scaleX(var(--arena-camera-inverse-scale, 1))',
               }}
             >P{laneIndex + 1}</div>
           );
@@ -748,6 +806,7 @@ function ArenaPanel({
                   position: 'absolute',
                   inset: '4%',
                   filter: 'brightness(1.04) contrast(1.08) drop-shadow(0 3px 2px rgba(0,0,0,.48))',
+                  transform: 'scaleX(var(--arena-camera-inverse-scale, 1))',
                 }}
               >
                 {[6.2, 61.5].map((wheelLeft, wheelIndex) => (
@@ -792,7 +851,7 @@ function ArenaPanel({
               ? leadRider?.name
               : `${group.riders.length} riders together`}
         </strong>
-        <span>{Math.round(leadRider?.distanceMeters ?? 0)} m down the strip</span>
+        <span>{formatDistanceMeters(leadRider?.distanceMeters ?? 0, distanceUnit)} down the strip</span>
       </div>
     </section>
   );
@@ -809,6 +868,7 @@ export function DragStripGameArenaLayer({
   startGatePhase,
   raceDistanceMeters,
   speedUnit,
+  distanceUnit,
   showHud,
 }: DragStripGameArenaLayerProps) {
   const arenaRiders = useMemo<ArenaRider[]>(() => {
@@ -875,28 +935,10 @@ export function DragStripGameArenaLayer({
     return [...local, ...remote, ...ghosts];
   }, [ghostRiders, players, raceState, remoteRaceStates, riders, samplesByDevice]);
   const activeRiders = arenaRiders.filter((rider) => !rider.ghost);
-  const exploreRiders = activeRiders.map<ExploreRider>((rider) => ({
-    id: rider.id,
-    clientId: rider.id,
-    playerId: rider.playerId,
-    name: rider.name,
-    colorName: rider.colorName,
-    accent: rider.accent,
-    distanceMeters: rider.distanceMeters,
-    velocityMps: 0,
-    cadence: null,
-    watts: 0,
-    signal: 1,
-    finishedAt: null,
-    at: 0,
-  }));
-  const groups = groupExploreRiders(exploreRiders);
-  const visibleGroups = groups.length > 0 ? groups : [{
-    id: 'drag-strip-preview',
-    riders: [],
-    startMeter: 0,
-    endMeter: 0,
-  }];
+  const arenaViewport: ArenaViewport = {
+    id: 'drag-strip-adaptive-viewport',
+    riders: activeRiders,
+  };
 
   return (
     <div
@@ -911,33 +953,22 @@ export function DragStripGameArenaLayer({
         overflow: 'hidden',
       }}
     >
-      <div className={exploreGridClass(visibleGroups.length)} style={{
+      <div data-arena-adaptive-viewport style={{
         position: 'absolute',
         inset: 0,
-        display: 'grid',
         height: '100%',
         minHeight: 0,
-        gap: '4px',
         borderRadius: 0,
-        ...gridStyle(visibleGroups.length),
+        overflow: 'hidden',
       }}>
-        {visibleGroups.map((group, index) => (
-          <div key={group.id} style={{
-            position: 'relative',
-            minWidth: 0,
-            minHeight: 0,
-            overflow: 'hidden',
-            ...panelSpanStyle(visibleGroups.length, index),
-          }}>
-            <ArenaPanel
-              group={group}
-              riders={arenaRiders}
-              raceDistanceMeters={raceDistanceMeters}
-              raceState={raceState}
-              startGatePhase={startGatePhase}
-            />
-          </div>
-        ))}
+        <ArenaPanel
+          group={arenaViewport}
+          riders={arenaRiders}
+          raceDistanceMeters={raceDistanceMeters}
+          raceState={raceState}
+          startGatePhase={startGatePhase}
+          distanceUnit={distanceUnit}
+        />
       </div>
       {showHud && (
         <GameArenaHud
@@ -945,6 +976,7 @@ export function DragStripGameArenaLayer({
           raceState={raceState}
           raceDistanceMeters={raceDistanceMeters}
           speedUnit={speedUnit}
+          distanceUnit={distanceUnit}
         />
       )}
     </div>

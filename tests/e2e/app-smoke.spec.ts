@@ -1889,6 +1889,8 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await page.getByRole('group', { name: 'Wattbike Air setting' })
     .getByRole('button', { name: '5', exact: true }).click();
   const arena = page.getByLabel('Drag Strip Game Arena', { exact: true });
+  await expect(arena.locator('[data-arena-adaptive-viewport]')).toHaveCount(1);
+  await expect(arena.locator('[data-arena-world]')).toHaveAttribute('data-camera-layout', 'adaptive-single');
   const distanceMarkers = arena.locator('[data-arena-distance-markers]').first().locator('[data-distance-feet]');
   await expect(distanceMarkers).toHaveCount(16);
   await expect.poll(() => distanceMarkers.evaluateAll((markers) => (
@@ -1899,6 +1901,12 @@ test('straight sprint restores and saves a separate camera for each distance', a
     900, 1000, 1100, 1200, 1300, 1400, 1500,
   ]);
   await expect(arena.locator('[data-distance-feet="500"][data-active-finish="true"]').first()).toBeAttached();
+  const distanceUnitControl = page.getByRole('group', { name: 'Distance unit' });
+  await distanceUnitControl.getByRole('button', { name: 'Meters', exact: true }).click();
+  await expect(arena.locator('[data-distance-feet="30"]').first()).toContainText('9 m');
+  await expect(arena.locator('[data-distance-feet="1500"]').first()).toContainText('457 m');
+  await distanceUnitControl.getByRole('button', { name: 'Feet', exact: true }).click();
+  await expect(arena.locator('[data-distance-feet="30"]').first()).toContainText('30′');
   await page.getByLabel('Sprint distance').selectOption('1500');
   await expect(distanceMarkers).toHaveCount(16);
   await expect(arena.locator('[data-distance-feet="1500"][data-active-finish="true"]').first()).toBeAttached();
@@ -2084,6 +2092,7 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect.poll(async () => (
     Number(await arena.locator('[data-arena-world]').getAttribute('data-camera-scroll-percent'))
   )).toBeGreaterThan(0);
+  await expect(arena.locator('[data-arena-adaptive-viewport]')).toHaveCount(1);
   if (process.env.TRACKLAB_GAME_ARENA_SCREENSHOT) {
     await page.screenshot({ path: process.env.TRACKLAB_GAME_ARENA_SCREENSHOT });
   }

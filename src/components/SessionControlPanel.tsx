@@ -937,7 +937,7 @@ export function SessionControlPanel({
               </>
             )}
 
-            <div className="segmented-control compact" aria-label="Distance unit">
+            <div className="segmented-control compact" role="group" aria-label="Distance unit">
               <button
                 className={distanceUnit === 'ft' ? 'selected' : ''}
                 type="button"

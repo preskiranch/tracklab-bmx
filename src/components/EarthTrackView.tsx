@@ -371,6 +371,7 @@ export function EarthTrackView({
               startGatePhase={startGatePhase}
               raceDistanceMeters={progressLengthMeters}
               speedUnit={speedUnit}
+              distanceUnit={distanceUnit}
               showHud={raceViewFullscreen && !mappingMode}
             />
           </Suspense>
