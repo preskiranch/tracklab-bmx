@@ -1038,7 +1038,9 @@ export function parseUserTrackMapping(value: string): UserTrackMapping {
 
   return {
     ...parsed,
-    raceViewMode: parsed.raceViewMode === '3d' ? '3d' : 'satellite',
+    raceViewMode: parsed.raceViewMode === '3d' || parsed.raceViewMode === 'game'
+      ? parsed.raceViewMode
+      : 'satellite',
     splitSections: Array.isArray(parsed.splitSections)
       ? parsed.splitSections.map((section) => normalizeSplitSection(section))
       : [],

@@ -6,6 +6,7 @@ import {
   Compass,
   Download,
   Flag,
+  Gamepad2,
   Gauge,
   MapPinned,
   Maximize2,
@@ -117,6 +118,8 @@ type SessionControlPanelProps = {
   straightSprintAirSetting: number;
   straightSprintMappedFeet: number;
   straightSprintMaximumRouteReady: boolean;
+  straightSprintViewMode: TrackRaceViewMode;
+  straightSprintGameArenaAvailable: boolean;
   isAdminProfile: boolean;
   showCustomRoutes: boolean;
   sessionTrackAvailable: boolean;
@@ -167,6 +170,7 @@ type SessionControlPanelProps = {
   onLapCountChange: (count: number) => void;
   onStraightSprintDistanceChange: (feet: number) => void;
   onStraightSprintAirSettingChange: (setting: number) => void;
+  onStraightSprintViewModeChange: (mode: TrackRaceViewMode) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoPlayerSelectionChange: (playerIds: PlayerSlot['id'][]) => void;
   onMappingModeChange: (enabled: boolean) => void;
@@ -241,6 +245,8 @@ export function SessionControlPanel({
   straightSprintAirSetting,
   straightSprintMappedFeet,
   straightSprintMaximumRouteReady,
+  straightSprintViewMode,
+  straightSprintGameArenaAvailable,
   isAdminProfile,
   showCustomRoutes,
   sessionTrackAvailable,
@@ -291,6 +297,7 @@ export function SessionControlPanel({
   onLapCountChange,
   onStraightSprintDistanceChange,
   onStraightSprintAirSettingChange,
+  onStraightSprintViewModeChange,
   onDemoModeChange,
   onDemoPlayerSelectionChange,
   onMappingModeChange,
@@ -611,6 +618,48 @@ export function SessionControlPanel({
               ))}
             </div>
           </div>
+
+          {straightSprintGameArenaAvailable && (
+            <div className="mapping-race-view-card">
+              <div className="route-layout-heading">
+                <span>Race view</span>
+                <small>Choose how this Drag Strip appears</small>
+              </div>
+              <div className="segmented-control compact three-way" role="group" aria-label="Straight Sprint race view">
+                <button
+                  className={straightSprintViewMode === 'satellite' ? 'selected' : ''}
+                  type="button"
+                  disabled={startGateActive || raceState === 'racing'}
+                  aria-pressed={straightSprintViewMode === 'satellite'}
+                  onClick={() => onStraightSprintViewModeChange('satellite')}
+                >
+                  <Satellite size={14} />
+                  Satellite
+                </button>
+                <button
+                  className={straightSprintViewMode === '3d' ? 'selected' : ''}
+                  type="button"
+                  disabled={startGateActive || raceState === 'racing'}
+                  aria-pressed={straightSprintViewMode === '3d'}
+                  onClick={() => onStraightSprintViewModeChange('3d')}
+                >
+                  <Box size={14} />
+                  3D Terrain
+                </button>
+                <button
+                  className={straightSprintViewMode === 'game' ? 'selected' : ''}
+                  type="button"
+                  disabled={startGateActive || raceState === 'racing'}
+                  aria-pressed={straightSprintViewMode === 'game'}
+                  onClick={() => onStraightSprintViewModeChange('game')}
+                >
+                  <Gamepad2 size={14} />
+                  Game Arena
+                </button>
+              </div>
+              <p>Game Arena scrolls left-to-right and automatically splits when riders separate.</p>
+            </div>
+          )}
 
           <div className={`mapping-hint${straightSprintMaximumRouteReady ? ' pedal-zone' : ''}`}>
             <strong>{straightSprintMappedFeet.toLocaleString()} / {straightSprintMaximumFeet.toLocaleString()} ft mapped</strong>

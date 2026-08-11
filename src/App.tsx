@@ -67,6 +67,7 @@ import {
   updateBikeRaceAudio,
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
+import { supportsDragStripGameArena } from './lib/dragStripGameArena';
 import {
   bikeSampleHasDriveSignalSince,
   bmxCStartBackoffMeters,
@@ -1460,6 +1461,7 @@ export default function App() {
   const [mappingHistoryVersion, setMappingHistoryVersion] = useState(0);
   const [mappingRestSeconds, setMappingRestSeconds] = useState(1);
   const [mappingRaceViewMode, setMappingRaceViewMode] = useState<TrackRaceViewMode>('satellite');
+  const [straightSprintViewMode, setStraightSprintViewMode] = useState<TrackRaceViewMode>('satellite');
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
   const [studioRiders, setStudioRiders] = useState<StudioRider[]>(readStoredStudioRiders);
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
@@ -1895,6 +1897,10 @@ export default function App() {
       : selectedTrack),
     [hasDualStartRoutes, raceRouteVariantId, selectedTrack, selectedTrackMapping],
   );
+  const straightSprintGameArenaAvailable = supportsDragStripGameArena(effectiveTrack);
+  useEffect(() => {
+    setStraightSprintViewMode(selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite');
+  }, [selectedTrack.id, selectedTrackMapping?.raceViewMode]);
   const baseRouteLengthMeters = useMemo(() => {
     if (!effectiveTrack.centerline || effectiveTrack.centerline.length < 2) {
       return effectiveTrack.lengthMeters;
@@ -7434,7 +7440,9 @@ export default function App() {
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
                   mappingObstacleView3D={mappingObstacleView3D}
-                  raceViewMode={selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite'}
+                  raceViewMode={appMode === 'straight-sprint' && straightSprintGameArenaAvailable
+                    ? straightSprintViewMode
+                    : selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite'}
                   mappingRouteVariantId={mappingRouteVariantId}
                   mappingZoneBranchChoice={mappingZoneBranchChoice}
                   draftPoints={draftPoints}
@@ -7526,6 +7534,8 @@ export default function App() {
                   straightSprintAirSetting={straightSprintAirSetting}
                   straightSprintMappedFeet={straightSprintMappedFeet}
                   straightSprintMaximumRouteReady={straightSprintMaximumRouteReady}
+                  straightSprintViewMode={straightSprintViewMode}
+                  straightSprintGameArenaAvailable={straightSprintGameArenaAvailable}
                   isAdminProfile={developerUiActive}
                   showCustomRoutes={appMode === 'straight-sprint'}
                   sessionTrackAvailable={sessionTrackAvailable}
@@ -7583,6 +7593,7 @@ export default function App() {
                     setStraightSprintAirSetting(normalizeStraightSprintAirSetting(setting));
                     setSelectedGhostIds([]);
                   }}
+                  onStraightSprintViewModeChange={setStraightSprintViewMode}
                   onDemoModeChange={handleDemoModeChange}
                   onDemoPlayerSelectionChange={handleDemoPlayerSelectionChange}
                   onMappingModeChange={handleMappingModeChange}

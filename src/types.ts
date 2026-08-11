@@ -721,7 +721,7 @@ export type TrackRouteVariant = {
   splitSections?: TrackSplitSection[];
 };
 
-export type TrackRaceViewMode = 'satellite' | '3d';
+export type TrackRaceViewMode = 'satellite' | '3d' | 'game';
 
 export type UserTrackMapping = {
   version: 1;

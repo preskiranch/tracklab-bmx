@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { raceProgressPercent } from '../../src/components/RaceRiderOverlay';
+import { raceProgressPercent } from '../../src/lib/raceProgress';
 
 describe('race progress percentage', () => {
   it('uses the selected sprint distance as 100 percent', () => {

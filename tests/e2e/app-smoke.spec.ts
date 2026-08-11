@@ -1729,7 +1729,7 @@ test('straight sprint restores and saves a separate camera for each distance', a
   const trackId = 'custom-camera-distance-sprint';
   const customTrack = {
     id: trackId,
-    name: 'Camera Distance Sprint',
+    name: 'Drag Strip',
     country: 'Custom Routes',
     countryCode: 'CUSTOM',
     state: 'New Hampshire',
@@ -1856,6 +1856,11 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await page.getByLabel('Sprint distance').selectOption('100');
   await expect(page.getByText('Angle 10 deg', { exact: true })).toBeVisible();
   await expect(page.getByText('Heading 20 deg', { exact: true })).toBeVisible();
+
+  const sprintRaceView = page.getByRole('group', { name: 'Straight Sprint race view' });
+  await expect(sprintRaceView.getByRole('button', { name: 'Game Arena', exact: true })).toBeVisible();
+  await sprintRaceView.getByRole('button', { name: 'Game Arena', exact: true }).click();
+  await expect(page.getByLabel('Drag Strip Game Arena', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: /Demo/i }).first().click();
   const sprintDemoRacers = page.getByRole('group', { name: 'Choose demo riders' });

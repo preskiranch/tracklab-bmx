@@ -6,6 +6,7 @@ import {
   Compass,
   ExternalLink,
   Flag,
+  Gamepad2,
   Lock,
   Map as MapIcon,
   MapPinned,
@@ -24,11 +25,11 @@ import {
   X,
 } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
-import { RaceRiderOverlay, raceProgressPercent } from './RaceRiderOverlay';
 import { RiderAvatar } from './RiderAvatar';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
 import { mapping3DCenterForTrack } from '../lib/googleMaps3d';
 import { trackGoogleMapsUrl } from '../lib/mapLinks';
+import { raceProgressPercent } from '../lib/raceProgress';
 import { formatDistanceMeters, formatReactionTime } from '../units';
 import type {
   BikeSample,
@@ -57,6 +58,16 @@ import type { CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 const GoogleMaps3DTrackLayer = lazy(async () => {
   const module = await import('./GoogleMaps3DTrackLayer');
   return { default: module.GoogleMaps3DTrackLayer };
+});
+
+const DragStripGameArenaLayer = lazy(async () => {
+  const module = await import('./DragStripGameArenaLayer');
+  return { default: module.DragStripGameArenaLayer };
+});
+
+const RaceRiderOverlay = lazy(async () => {
+  const module = await import('./RaceRiderOverlay');
+  return { default: module.RaceRiderOverlay };
 });
 
 type EarthTrackViewProps = {
@@ -247,6 +258,7 @@ export function EarthTrackView({
   const showingRace3D = raceViewMode === '3d'
     && !mappingMode
     && race3DFallbackTrackId !== track.id;
+  const showingGameArena = raceViewMode === 'game' && !mappingMode;
   const showingAny3D = showingPedalZone3D || showingRace3D;
   const mapping3DTrackCenter = trackCenter(track);
   const mapping3DSafeCenter = mapping3DCenterForTrack(
@@ -289,6 +301,8 @@ export function EarthTrackView({
     ? '3D obstacle view'
     : showingRace3D
       ? 'Google 3D race view'
+      : showingGameArena
+        ? 'BMX game arena'
       : 'Google satellite view';
   const routeStatusLabel = track.routeStatus === 'user-mapped'
     ? 'User-mapped ride line'
@@ -313,7 +327,7 @@ export function EarthTrackView({
       <div className="earth-header">
         <div>
           <div className="eyebrow">
-            {showingAny3D ? <Box size={14} /> : <Satellite size={14} />}
+            {showingGameArena ? <Gamepad2 size={14} /> : showingAny3D ? <Box size={14} /> : <Satellite size={14} />}
             {imageryLabel}
           </div>
           <h2>{track.name}</h2>
@@ -331,7 +345,19 @@ export function EarthTrackView({
       </div>
 
       <div className="earth-stage google-enabled">
-        {googleMapsConfigured ? (
+        {showingGameArena ? (
+          <Suspense fallback={<div className="google-map-status loading">Loading Drag Strip game arena…</div>}>
+            <DragStripGameArenaLayer
+              riders={mapRiders}
+              ghostRiders={mapGhostRiders}
+              remoteRaceStates={mapRemoteRaceStates}
+              players={players}
+              samplesByDevice={samplesByDevice}
+              raceState={raceState}
+              raceDistanceMeters={progressLengthMeters}
+            />
+          </Suspense>
+        ) : googleMapsConfigured ? (
           showingAny3D ? (
             <Suspense
               fallback={(
@@ -495,7 +521,7 @@ export function EarthTrackView({
           </button>
         )}
 
-        {raceViewFullscreen && canEditRaceLayout && (
+        {raceViewFullscreen && canEditRaceLayout && !showingGameArena && (
           <button
             className={`race-camera-lock-overlay${raceCameraLocked ? ' locked' : ''}`}
             type="button"
@@ -507,7 +533,7 @@ export function EarthTrackView({
             {raceCameraLocked ? 'View Locked' : 'Lock View'}
           </button>
         )}
-        {raceViewFullscreen && !canEditRaceLayout && (
+        {raceViewFullscreen && !canEditRaceLayout && !showingGameArena && (
           <div className="race-camera-lock-overlay locked" aria-label="Race layout locked">
             <Lock size={17} />
             Layout Locked
@@ -531,7 +557,7 @@ export function EarthTrackView({
         <div className="earth-overlay bottom-left">
           <span>Angle {activeEarthAngle} deg</span>
           <span>Heading {activeEarthHeading} deg</span>
-          <span>{showingPedalZone3D ? '3D obstacles' : showingRace3D ? '3D terrain' : 'Satellite'}</span>
+          <span>{showingPedalZone3D ? '3D obstacles' : showingRace3D ? '3D terrain' : showingGameArena ? 'Game arena' : 'Satellite'}</span>
           <span>
             {showMappingUi
               ? `${draftPoints.length} route pt${draftPoints.length === 1 ? '' : 's'}`
@@ -577,21 +603,23 @@ export function EarthTrackView({
           </div>
         )}
 
-        <RaceRiderOverlay
-          trackId={track.id}
-          riders={riders}
-          ghostRiders={ghostRiders}
-          remoteRaceStates={remoteRaceStates}
-          players={players}
-          raceState={raceState}
-          visible={raceViewFullscreen && !mappingMode}
-          speedUnit={speedUnit}
-          trackLengthMeters={progressLengthMeters}
-          preference={riderOverlayPreference}
-          canEditLayout={canEditRaceLayout}
-          onPreferenceChange={onRiderOverlayPreferenceChange}
-          onFullscreenInteraction={onRaceFullscreenInteraction}
-        />
+        <Suspense fallback={null}>
+          <RaceRiderOverlay
+            trackId={track.id}
+            riders={riders}
+            ghostRiders={ghostRiders}
+            remoteRaceStates={remoteRaceStates}
+            players={players}
+            raceState={raceState}
+            visible={raceViewFullscreen && !mappingMode}
+            speedUnit={speedUnit}
+            trackLengthMeters={progressLengthMeters}
+            preference={riderOverlayPreference}
+            canEditLayout={canEditRaceLayout}
+            onPreferenceChange={onRiderOverlayPreferenceChange}
+            onFullscreenInteraction={onRaceFullscreenInteraction}
+          />
+        </Suspense>
 
         {showMappingUi && (
           <div className="map-edit-toolbar" aria-label="Map edit view controls">
@@ -620,7 +648,7 @@ export function EarthTrackView({
           </div>
         )}
 
-        <div
+        {!showingGameArena && <div
           className={`map-camera-pad${raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked) ? ' locked' : ''}`}
           aria-label="Map camera controls"
         >
@@ -703,7 +731,7 @@ export function EarthTrackView({
           >
             <RotateCw size={16} />
           </button>
-        </div>
+        </div>}
 
       </div>
 

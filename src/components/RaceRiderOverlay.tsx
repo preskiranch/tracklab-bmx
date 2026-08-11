@@ -3,6 +3,7 @@ import { GripHorizontal, Lock, Unlock } from 'lucide-react';
 import type { GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RaceRiderOverlayLayout, RaceState, RiderState, SpeedUnit } from '../types';
 import { defaultRaceRiderOverlayLayout, normalizeRaceRiderOverlayLayout } from '../lib/raceViewPreferences';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
+import { raceProgressPercent } from '../lib/raceProgress';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
 
@@ -57,10 +58,6 @@ type RaceRiderOverlayProps = {
 function ordinal(value: number) {
   const suffix = value === 1 ? 'st' : value === 2 ? 'nd' : value === 3 ? 'rd' : 'th';
   return `${value}${suffix}`;
-}
-
-export function raceProgressPercent(distanceMeters: number, raceLengthMeters: number) {
-  return Math.round(Math.max(0, Math.min(100, (distanceMeters / Math.max(1, raceLengthMeters)) * 100)));
 }
 
 function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | null) {
