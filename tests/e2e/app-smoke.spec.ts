@@ -1942,10 +1942,38 @@ test('straight sprint restores and saves a separate camera for each distance', a
     (frontTireBox!.x + frontTireBox!.width) - uprightGatePlateBox!.x,
   )).toBeLessThanOrEqual(2);
   await page.getByRole('button', { name: 'Start Demo Sprint', exact: true }).click();
+  const raceControls = page.getByLabel('Fullscreen race controls', { exact: true });
+  await expect(raceControls).toBeVisible();
+  await expect(raceControls.getByRole('button', { name: 'Cancel Race', exact: true })).toBeVisible();
+  await expect(raceControls.getByRole('button', { name: 'Pause Countdown', exact: true })).toBeVisible();
+  const forceStartButton = raceControls.getByRole('button', { name: 'Force Start', exact: true });
+  await expect(forceStartButton).toBeVisible();
+  const controlBoxes = await raceControls.locator('button, .race-sprint-info-overlay, .earth-overlay').evaluateAll((controls) => (
+    controls.map((control) => {
+      const bounds = control.getBoundingClientRect();
+      return { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom };
+    })
+  ));
+  for (let leftIndex = 0; leftIndex < controlBoxes.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < controlBoxes.length; rightIndex += 1) {
+      const left = controlBoxes[leftIndex];
+      const right = controlBoxes[rightIndex];
+      const overlaps = left.left < right.right
+        && left.right > right.left
+        && left.top < right.bottom
+        && left.bottom > right.top;
+      expect(overlaps).toBe(false);
+    }
+  }
+  if (process.env.TRACKLAB_RACE_CONTROLS_SCREENSHOT) {
+    await page.screenshot({ path: process.env.TRACKLAB_RACE_CONTROLS_SCREENSHOT });
+  }
+  await forceStartButton.click();
   const startTree = page.getByLabel('BMX start tree light', { exact: true });
-  await expect(startTree).toBeVisible({ timeout: 35_000 });
+  await expect(startTree).toBeVisible({ timeout: 20_000 });
   await expect(bmxStartGate).toHaveAttribute('data-gate-phase', 'cadence');
   await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');
+  await expect(forceStartButton).toHaveCount(0);
   await expect(page.locator('.earth-overlay.top-left')).toContainText('Live Race', { timeout: 15_000 });
   await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'dropped');
   const sprintSetupBadge = page.locator('.race-countdown-pause-overlay').filter({ hasText: '500 ft Sprint' });

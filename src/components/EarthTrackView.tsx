@@ -130,6 +130,7 @@ type EarthTrackViewProps = {
   onRiderOverlayPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onRaceFullscreenInteraction: () => void;
   onStartCountdownPauseToggle: () => void;
+  onStartCountdownForceStart: () => void;
   onVoiceStart: () => void;
   onVoiceStop: () => void;
   onCancelRace: () => void;
@@ -156,6 +157,17 @@ const startTreeLamps = [
   { className: 'yellow', label: 'Yellow two' },
   { className: 'green', label: 'Green' },
 ] as const;
+
+const inlineRaceControlStyle: CSSProperties = {
+  position: 'static',
+  top: 'auto',
+  right: 'auto',
+  bottom: 'auto',
+  left: 'auto',
+  margin: 0,
+  transform: 'none',
+  pointerEvents: 'auto',
+};
 
 function StartTreeLight({ activeIndex }: { activeIndex: 0 | 1 | 2 | 3 | null }) {
   return (
@@ -231,6 +243,7 @@ export function EarthTrackView({
   onRiderOverlayPreferenceChange,
   onRaceFullscreenInteraction,
   onStartCountdownPauseToggle,
+  onStartCountdownForceStart,
   onVoiceStart,
   onVoiceStop,
   onCancelRace,
@@ -491,23 +504,97 @@ export function EarthTrackView({
           {track.routeStatus === 'user-mapped' ? `${imageryLabel} with saved ride line` : imageryLabel}
         </div>
 
-        {canCancelRace && (
-          <button className="race-cancel-overlay" type="button" onClick={onCancelRace}>
-            <X size={18} />
-            Cancel Race
-          </button>
-        )}
-
-        {canPauseStartCountdown && (
-          <button
-            className={`race-countdown-pause-overlay${startCountdownPaused ? ' paused' : ''}`}
-            type="button"
-            onClick={onStartCountdownPauseToggle}
-            aria-pressed={startCountdownPaused}
+        {raceViewFullscreen && (
+          <div
+            className="race-top-left-controls"
+            aria-label="Fullscreen race controls"
+            style={{
+              position: 'fixed',
+              zIndex: 2147483000,
+              top: 'max(14px, calc(env(safe-area-inset-top, 0px) + 14px))',
+              left: 'max(14px, calc(env(safe-area-inset-left, 0px) + 14px))',
+              display: 'grid',
+              maxWidth: 'min(520px, calc(100vw - 28px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)))',
+              gap: '8px',
+              justifyItems: 'start',
+              pointerEvents: 'none',
+            }}
           >
-            {startCountdownPaused ? <Play size={18} /> : <Pause size={18} />}
-            {startCountdownPaused ? 'Resume Countdown' : 'Pause Countdown'}
-          </button>
+            <div className="race-top-left-header" style={{
+              display: 'flex',
+              maxWidth: '100%',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '8px',
+              pointerEvents: 'none',
+            }}>
+              <div className="earth-overlay top-left" style={{
+                ...inlineRaceControlStyle,
+                minHeight: '42px',
+                background: 'rgba(255, 255, 255, 0.9)',
+              }}>
+                <span className={`race-dot ${raceState}`} />
+                <strong>{raceState === 'racing' ? 'Live Race' : raceState === 'finished' ? 'Session Complete' : 'Ready'}</strong>
+              </div>
+              {canCancelRace && (
+                <button className="race-cancel-overlay" style={inlineRaceControlStyle} type="button" onClick={onCancelRace}>
+                  <X size={18} />
+                  Cancel Race
+                </button>
+              )}
+            </div>
+
+            {canPauseStartCountdown && (
+              <div className="race-top-left-actions" style={{
+                display: 'flex',
+                maxWidth: '100%',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '8px',
+                pointerEvents: 'none',
+              }}>
+                <button
+                  className={`race-countdown-pause-overlay${startCountdownPaused ? ' paused' : ''}`}
+                  style={inlineRaceControlStyle}
+                  type="button"
+                  onClick={onStartCountdownPauseToggle}
+                  aria-pressed={startCountdownPaused}
+                >
+                  {startCountdownPaused ? <Play size={18} /> : <Pause size={18} />}
+                  {startCountdownPaused ? 'Resume Countdown' : 'Pause Countdown'}
+                </button>
+                <button
+                  className="race-countdown-pause-overlay race-force-start-overlay"
+                  style={{
+                    ...inlineRaceControlStyle,
+                    borderColor: 'rgba(216, 255, 62, 0.88)',
+                    background: 'rgba(35, 76, 23, 0.94)',
+                  }}
+                  type="button"
+                  onClick={onStartCountdownForceStart}
+                >
+                  <Flag size={18} />
+                  Force Start
+                </button>
+              </div>
+            )}
+
+            {raceDistanceMeters != null && raceState !== 'ready' && (
+              <div className="race-countdown-pause-overlay race-sprint-info-overlay" style={{
+                ...inlineRaceControlStyle,
+                minWidth: '126px',
+                justifyContent: 'flex-start',
+                textAlign: 'left',
+                pointerEvents: 'none',
+              }}>
+                <span>
+                  {formatDistanceMeters(raceDistanceMeters, distanceUnit)} Sprint
+                  <br />
+                  <small>Wattbike Air {raceAirSetting}</small>
+                </span>
+              </div>
+            )}
+          </div>
         )}
 
         {raceViewFullscreen && roomVoiceVisible && (
@@ -544,20 +631,12 @@ export function EarthTrackView({
           </div>
         )}
 
-        {raceViewFullscreen && raceDistanceMeters != null && raceState !== 'ready' && (
-          <div className="race-countdown-pause-overlay">
-            <span>
-              {formatDistanceMeters(raceDistanceMeters, distanceUnit)} Sprint
-              <br />
-              <small>Wattbike Air {raceAirSetting}</small>
-            </span>
+        {!raceViewFullscreen && (
+          <div className="earth-overlay top-left">
+            <span className={`race-dot ${raceState}`} />
+            <strong>{raceState === 'racing' ? 'Live Race' : raceState === 'finished' ? 'Session Complete' : 'Ready'}</strong>
           </div>
         )}
-
-        <div className="earth-overlay top-left">
-          <span className={`race-dot ${raceState}`} />
-          <strong>{raceState === 'racing' ? 'Live Race' : raceState === 'finished' ? 'Session Complete' : 'Ready'}</strong>
-        </div>
         <div className="earth-overlay bottom-left">
           <span>Angle {activeEarthAngle} deg</span>
           <span>Heading {activeEarthHeading} deg</span>

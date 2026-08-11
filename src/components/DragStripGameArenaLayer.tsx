@@ -686,7 +686,7 @@ function ArenaPanel({
           );
         })}
       </div>
-      <div className="explore-map-group-label">
+      <div className="explore-map-group-label" style={{ left: 'auto', right: '12px' }}>
         <strong>
           {group.riders.length === 0
             ? 'Drag Strip preview'

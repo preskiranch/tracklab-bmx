@@ -5841,6 +5841,25 @@ export default function App() {
       : current);
   }, [playMode, scheduleStagingCountdown, startCountdownPaused, startGateStatus.active, startGateStatus.phase]);
 
+  const handleStartCountdownForceStart = useCallback(() => {
+    if (playMode !== 'local' || !startGateStatus.active || startGateStatus.phase !== 'staging') {
+      return;
+    }
+
+    const startingTrackId = stagingCountdownTrackIdRef.current;
+    if (!startingTrackId) {
+      return;
+    }
+
+    startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    startGateTimeoutsRef.current = [];
+    stagingCountdownEndsAtRef.current = 0;
+    stagingCountdownRemainingMsRef.current = 0;
+    stagingCountdownTrackIdRef.current = null;
+    setStartCountdownPaused(false);
+    void startConfiguredCadence(startingTrackId, startGateSequenceIdRef.current);
+  }, [playMode, startConfiguredCadence, startGateStatus.active, startGateStatus.phase]);
+
   const handleFalseStart = useCallback((detection: FalseStartDetection) => {
     if (falseStartActiveRef.current || raceState === 'racing') {
       return;
@@ -7461,6 +7480,7 @@ export default function App() {
                   onRiderOverlayPreferenceChange={handleRiderOverlayPreferenceChange}
                   onRaceFullscreenInteraction={requestRaceFullscreen}
                   onStartCountdownPauseToggle={handleStartCountdownPauseToggle}
+                  onStartCountdownForceStart={handleStartCountdownForceStart}
                   onVoiceStart={roomVoice.start}
                   onVoiceStop={roomVoice.stop}
                   onCancelRace={handleCancel}
