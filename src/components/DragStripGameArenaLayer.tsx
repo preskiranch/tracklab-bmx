@@ -46,7 +46,12 @@ const arenaWorldWidth = 310;
 const arenaViewportWidth = 100 / (arenaWorldWidth / 100);
 const arenaStartPercent = 4;
 const arenaFinishPercent = 96;
-const arenaLaneCenters = [54.95, 57.85, 61.65, 65.85] as const;
+const arenaTrackTopPercent = 48;
+const arenaTrackBottomPercent = 69;
+const arenaLaneHeightPercent = (arenaTrackBottomPercent - arenaTrackTopPercent) / 4;
+const arenaLaneCenters = [0, 1, 2, 3].map(
+  (laneIndex) => arenaTrackTopPercent + arenaLaneHeightPercent * (laneIndex + 0.5),
+);
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -299,10 +304,32 @@ function ArenaPanel({
           willChange: 'transform',
         }}
       >
+        {arenaLaneCenters.map((_, laneIndex) => (
+          <div
+            key={`arena-lane-band-${laneIndex + 1}`}
+            aria-hidden="true"
+            data-arena-lane-band={laneIndex + 1}
+            style={{
+              position: 'absolute',
+              zIndex: 1,
+              top: `${arenaTrackTopPercent + arenaLaneHeightPercent * laneIndex}%`,
+              left: 0,
+              width: '100%',
+              height: `${arenaLaneHeightPercent}%`,
+              borderTop: '1px solid rgba(218, 224, 232, .66)',
+              borderBottom: laneIndex === 3 ? '2px solid rgba(218, 224, 232, .84)' : undefined,
+              background: laneIndex % 2 === 0
+                ? 'linear-gradient(180deg, rgba(46,49,55,.98), rgba(31,34,40,.98))'
+                : 'linear-gradient(180deg, rgba(42,45,51,.98), rgba(27,30,36,.98))',
+              boxShadow: laneIndex === 0 ? 'inset 0 2px 0 rgba(255,255,255,.12)' : undefined,
+            }}
+          />
+        ))}
         <div style={{
           position: 'absolute',
-          top: '52.5%',
-          bottom: '29.5%',
+          zIndex: 5,
+          top: `${arenaTrackTopPercent}%`,
+          bottom: `${100 - arenaTrackBottomPercent}%`,
           left: `${arenaStartPercent}%`,
           width: '4px',
           background: '#d8ff3e',
@@ -310,8 +337,9 @@ function ArenaPanel({
         }} />
         <div style={{
           position: 'absolute',
-          top: '52.5%',
-          bottom: '29.5%',
+          zIndex: 5,
+          top: `${arenaTrackTopPercent}%`,
+          bottom: `${100 - arenaTrackBottomPercent}%`,
           left: `${arenaFinishPercent}%`,
           width: '5px',
           background: '#ffffff',
@@ -319,7 +347,8 @@ function ArenaPanel({
         }} />
         <div style={{
           position: 'absolute',
-          top: '47.5%',
+          zIndex: 6,
+          top: `${arenaTrackTopPercent - 5}%`,
           left: `${arenaStartPercent}%`,
           padding: '4px 8px',
           border: '2px solid #d8ff3e',
@@ -332,7 +361,8 @@ function ArenaPanel({
         }}>START</div>
         <div style={{
           position: 'absolute',
-          top: '47.5%',
+          zIndex: 6,
+          top: `${arenaTrackTopPercent - 5}%`,
           left: `${arenaFinishPercent}%`,
           padding: '4px 8px',
           border: '2px solid #ffffff',
@@ -399,7 +429,7 @@ function ArenaPanel({
                   backgroundPosition: `${rider.frame * 12.5}% 0`,
                   backgroundRepeat: 'no-repeat',
                   backgroundSize: '900% 100%',
-                  filter: `drop-shadow(0 4px 3px rgba(0,0,0,.55)) drop-shadow(0 0 2px ${rider.accent})`,
+                  filter: `brightness(1.06) contrast(1.06) drop-shadow(0 0 1px rgba(255,255,255,.95)) drop-shadow(0 0 3px ${rider.accent}) drop-shadow(0 4px 3px rgba(0,0,0,.58))`,
                 }}
               />
             </div>
