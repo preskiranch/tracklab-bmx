@@ -293,6 +293,7 @@ function ArenaPanel({
       style={{ width: '100%', height: '100%', background: '#121820' }}
     >
       <div
+        data-arena-world
         style={{
           position: 'absolute',
           inset: 0,
@@ -303,7 +304,7 @@ function ArenaPanel({
           backgroundRepeat: 'repeat-x',
           backgroundSize: `${100 / (arenaWorldWidth / 100)}% 100%`,
           transform: `translate3d(-${scrollPercent}%, 0, 0)`,
-          transition: 'transform 180ms linear',
+          transition: 'transform 320ms cubic-bezier(.2, .72, .25, 1)',
           willChange: 'transform',
         }}
       >
@@ -423,6 +424,8 @@ function ArenaPanel({
                 aspectRatio: '1',
                 opacity: rider.ghost ? 0.6 : 1,
                 transform: `translate(-${arenaFrontTireAnchorPercent}%, -75%)`,
+                transition: 'left 100ms linear',
+                willChange: 'left',
               }}
             >
               <div
@@ -581,6 +584,7 @@ export function DragStripGameArenaLayer({
   return (
     <div
       aria-label="Drag Strip Game Arena"
+      data-race-distance-meters={raceDistanceMeters.toFixed(3)}
       style={{
         position: 'absolute',
         inset: 0,

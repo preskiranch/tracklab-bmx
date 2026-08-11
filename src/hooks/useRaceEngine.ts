@@ -145,6 +145,7 @@ export function useRaceEngine(
   const lastFrameRef = useRef(0);
   const playersRef = useRef(players);
   const samplesRef = useRef(samplesByDevice);
+  const configuredRaceLengthRef = useRef(raceLengthMeters);
   const raceLengthRef = useRef(raceLengthMeters);
   const branchChoicesRef = useRef(branchChoicesByPlayer);
   const splitDecisionPointsRef = useRef(splitDecisionPoints);
@@ -154,7 +155,10 @@ export function useRaceEngine(
   // effects adds an avoidable frame between a live Wattbike packet and rider motion.
   playersRef.current = players;
   samplesRef.current = samplesByDevice;
-  raceLengthRef.current = raceLengthMeters;
+  configuredRaceLengthRef.current = raceLengthMeters;
+  if (raceStartedAtRef.current === 0) {
+    raceLengthRef.current = raceLengthMeters;
+  }
   branchChoicesRef.current = branchChoicesByPlayer;
   splitDecisionPointsRef.current = splitDecisionPoints;
   trackZonesRef.current = trackZones;
@@ -162,6 +166,7 @@ export function useRaceEngine(
   const resetRace = useCallback(() => {
     window.cancelAnimationFrame(frameRef.current);
     raceStartedAtRef.current = 0;
+    raceLengthRef.current = configuredRaceLengthRef.current;
     inputAllowedAtRef.current = 0;
     finishWindowEndsAtRef.current = null;
     raceStatsRef.current = new Map();
@@ -180,6 +185,9 @@ export function useRaceEngine(
     setRaceSummary([]);
     setFinishWindowEndsAt(null);
     setRiders(createInitialRiders(racePlayers, branchChoicesRef.current));
+    // Freeze the configured distance at the gate. View changes and unrelated
+    // dashboard rerenders must never shorten or lengthen an active race.
+    raceLengthRef.current = configuredRaceLengthRef.current;
     raceStartedAtRef.current = startedAt;
     inputAllowedAtRef.current = inputAllowedAt;
     lastFrameRef.current = performance.now();

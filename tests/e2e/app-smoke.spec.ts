@@ -1896,6 +1896,7 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect(arena.getByLabel(/Demo Rider 2 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 3 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 4 arena rider/)).toBeVisible();
+  await expect(arena).toHaveAttribute('data-race-distance-meters', '152.400');
   const startLineBox = await arena.locator('[data-arena-start-line]').boundingBox();
   const frontTireBox = await arena.getByLabel(/Demo Rider 1 arena rider/)
     .locator('[data-arena-wheel="front"]')
@@ -1905,6 +1906,29 @@ test('straight sprint restores and saves a separate camera for each distance', a
   expect(Math.abs(
     (frontTireBox!.x + frontTireBox!.width) - startLineBox!.x,
   )).toBeLessThanOrEqual(2);
+  const laneLabelsAreUnobstructed = await arena.locator('[data-arena-lane-label]').evaluateAll((labels) => labels.map((label) => {
+    const bounds = label.getBoundingClientRect();
+    const topElement = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    return topElement === label || label.contains(topElement);
+  }));
+  expect(laneLabelsAreUnobstructed).toEqual([true, true, true, true]);
+  await expect(page.locator('.earth-overlay.top-left')).toContainText('Live Race', { timeout: 60_000 });
+  await page.waitForTimeout(1_200);
+  const earlyRaceDebug = await page.evaluate(() => (window as typeof window & {
+    __tracklabLiveDebug?: {
+      raceState?: string;
+      routeLengthMeters?: number;
+      players?: Array<{
+        riderDistanceMeters?: number | null;
+        finishedAt?: number | null;
+      }>;
+    };
+  }).__tracklabLiveDebug);
+  expect(earlyRaceDebug?.raceState).toBe('racing');
+  expect(earlyRaceDebug?.routeLengthMeters).toBeCloseTo(152.4, 3);
+  expect(Math.max(...(earlyRaceDebug?.players ?? []).map((player) => player.riderDistanceMeters ?? 0)))
+    .toBeLessThan(22);
+  expect((earlyRaceDebug?.players ?? []).every((player) => player.finishedAt == null)).toBe(true);
   const arenaRiderBoxes = await Promise.all([1, 2, 3, 4].map(async (playerId) => {
     const arenaRider = arena.getByLabel(new RegExp(`Demo Rider ${playerId} arena rider`));
     await expect(arenaRider).toHaveAttribute('data-lane', String(playerId));
@@ -1925,12 +1949,6 @@ test('straight sprint restores and saves a separate camera for each distance', a
   for (let index = 1; index < laneBandBoxes.length; index += 1) {
     expect(Math.abs(laneBandBoxes[index].top - laneBandBoxes[index - 1].top - laneBandBoxes[0].height)).toBeLessThanOrEqual(1);
   }
-  const laneLabelsAreUnobstructed = await arena.locator('[data-arena-lane-label]').evaluateAll((labels) => labels.map((label) => {
-    const bounds = label.getBoundingClientRect();
-    const topElement = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
-    return topElement === label || label.contains(topElement);
-  }));
-  expect(laneLabelsAreUnobstructed).toEqual([true, true, true, true]);
   await expect(arena.locator('[data-arena-wheel="rear"]')).toHaveCount(4);
   await expect(arena.locator('[data-arena-wheel="front"]')).toHaveCount(4);
   const riderPanel = arena.getByLabel('Game arena rider data', { exact: true });
@@ -1942,8 +1960,17 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect(riderPanel).toContainText('Demo Rider 4');
   await expect(riderPanel).toContainText('% track');
   await expect(riderPanel).toContainText(/(?:MPH|KPH)/);
-  await expect(page.locator('.earth-overlay.top-left')).toContainText('Live Race', { timeout: 60_000 });
-  await page.waitForTimeout(1_200);
+  const arenaMotionStyles = await arena.locator('[data-arena-world]').evaluate((world) => {
+    const style = window.getComputedStyle(world);
+    return {
+      duration: style.transitionDuration,
+      timing: style.transitionTimingFunction,
+      willChange: style.willChange,
+    };
+  });
+  expect(arenaMotionStyles.duration).toBe('0.32s');
+  expect(arenaMotionStyles.timing).not.toBe('steps(1)');
+  expect(arenaMotionStyles.willChange).toContain('transform');
   if (process.env.TRACKLAB_GAME_ARENA_SCREENSHOT) {
     await page.screenshot({ path: process.env.TRACKLAB_GAME_ARENA_SCREENSHOT });
   }
