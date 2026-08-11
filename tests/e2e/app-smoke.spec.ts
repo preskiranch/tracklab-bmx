@@ -1896,6 +1896,15 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect(arena.getByLabel(/Demo Rider 2 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 3 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 4 arena rider/)).toBeVisible();
+  const startLineBox = await arena.locator('[data-arena-start-line]').boundingBox();
+  const frontTireBox = await arena.getByLabel(/Demo Rider 1 arena rider/)
+    .locator('[data-arena-wheel="front"]')
+    .boundingBox();
+  expect(startLineBox).not.toBeNull();
+  expect(frontTireBox).not.toBeNull();
+  expect(Math.abs(
+    (frontTireBox!.x + frontTireBox!.width) - startLineBox!.x,
+  )).toBeLessThanOrEqual(2);
   const arenaRiderBoxes = await Promise.all([1, 2, 3, 4].map(async (playerId) => {
     const arenaRider = arena.getByLabel(new RegExp(`Demo Rider ${playerId} arena rider`));
     await expect(arenaRider).toHaveAttribute('data-lane', String(playerId));
@@ -1916,6 +1925,12 @@ test('straight sprint restores and saves a separate camera for each distance', a
   for (let index = 1; index < laneBandBoxes.length; index += 1) {
     expect(Math.abs(laneBandBoxes[index].top - laneBandBoxes[index - 1].top - laneBandBoxes[0].height)).toBeLessThanOrEqual(1);
   }
+  const laneLabelsAreUnobstructed = await arena.locator('[data-arena-lane-label]').evaluateAll((labels) => labels.map((label) => {
+    const bounds = label.getBoundingClientRect();
+    const topElement = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    return topElement === label || label.contains(topElement);
+  }));
+  expect(laneLabelsAreUnobstructed).toEqual([true, true, true, true]);
   await expect(arena.locator('[data-arena-wheel="rear"]')).toHaveCount(4);
   await expect(arena.locator('[data-arena-wheel="front"]')).toHaveCount(4);
   const riderPanel = arena.getByLabel('Game arena rider data', { exact: true });

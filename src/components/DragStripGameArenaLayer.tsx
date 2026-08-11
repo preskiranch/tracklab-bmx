@@ -52,6 +52,9 @@ const arenaLaneHeightPercent = (arenaTrackBottomPercent - arenaTrackTopPercent) 
 const arenaLaneCenters = [0, 1, 2, 3].map(
   (laneIndex) => arenaTrackTopPercent + arenaLaneHeightPercent * (laneIndex + 0.5),
 );
+// The route-distance coordinate represents the leading edge of the front tire.
+// The wheel is 61.5% across the inner 92%-wide sprite box and is 33.5% wide.
+const arenaFrontTireAnchorPercent = 4 + (0.92 * (61.5 + 33.5));
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -326,7 +329,7 @@ function ArenaPanel({
             }}
           />
         ))}
-        <div style={{
+        <div data-arena-start-line style={{
           position: 'absolute',
           zIndex: 5,
           top: `${arenaTrackTopPercent}%`,
@@ -336,7 +339,7 @@ function ArenaPanel({
           background: '#d8ff3e',
           boxShadow: '0 0 0 2px #111827, 0 0 12px rgba(216,255,62,.8)',
         }} />
-        <div style={{
+        <div data-arena-finish-line style={{
           position: 'absolute',
           zIndex: 5,
           top: `${arenaTrackTopPercent}%`,
@@ -380,9 +383,10 @@ function ArenaPanel({
             <div
               key={`arena-lane-${laneIndex + 1}`}
               aria-hidden="true"
+              data-arena-lane-label={laneIndex + 1}
               style={{
                 position: 'absolute',
-                zIndex: 8,
+                zIndex: 80,
                 top: `${laneCenter}%`,
                 left: `${arenaStartPercent + 1.15}%`,
                 minWidth: 'clamp(22px, 2vw, 30px)',
@@ -418,7 +422,7 @@ function ArenaPanel({
                 width: 'clamp(62px, 5.2vw, 84px)',
                 aspectRatio: '1',
                 opacity: rider.ghost ? 0.6 : 1,
-                transform: 'translate(-88%, -75%)',
+                transform: `translate(-${arenaFrontTireAnchorPercent}%, -75%)`,
               }}
             >
               <div
