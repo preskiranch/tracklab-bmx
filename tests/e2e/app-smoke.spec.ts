@@ -1929,6 +1929,16 @@ test('straight sprint restores and saves a separate camera for each distance', a
   expect(Math.max(...(earlyRaceDebug?.players ?? []).map((player) => player.riderDistanceMeters ?? 0)))
     .toBeLessThan(22);
   expect((earlyRaceDebug?.players ?? []).every((player) => player.finishedAt == null)).toBe(true);
+  const firstArenaRider = arena.getByLabel(/Demo Rider 1 arena rider/);
+  await expect.poll(async () => Number(await firstArenaRider.getAttribute('data-progress')))
+    .toBeGreaterThan(0.01);
+  const movingRiderBox = await firstArenaRider.boundingBox();
+  const arenaBox = await arena.boundingBox();
+  expect(movingRiderBox).not.toBeNull();
+  expect(arenaBox).not.toBeNull();
+  expect(movingRiderBox!.x + movingRiderBox!.width).toBeGreaterThan(startLineBox!.x + 10);
+  expect(movingRiderBox!.x).toBeGreaterThanOrEqual(arenaBox!.x - movingRiderBox!.width * 0.25);
+  expect(movingRiderBox!.x + movingRiderBox!.width).toBeLessThanOrEqual(arenaBox!.x + arenaBox!.width + movingRiderBox!.width * 0.25);
   const arenaRiderBoxes = await Promise.all([1, 2, 3, 4].map(async (playerId) => {
     const arenaRider = arena.getByLabel(new RegExp(`Demo Rider ${playerId} arena rider`));
     await expect(arenaRider).toHaveAttribute('data-lane', String(playerId));
@@ -1968,9 +1978,20 @@ test('straight sprint restores and saves a separate camera for each distance', a
       willChange: style.willChange,
     };
   });
-  expect(arenaMotionStyles.duration).toBe('0.32s');
-  expect(arenaMotionStyles.timing).not.toBe('steps(1)');
+  expect(arenaMotionStyles.duration).toBe('0s');
   expect(arenaMotionStyles.willChange).toContain('transform');
+  await expect.poll(async () => Number(await firstArenaRider.getAttribute('data-progress')))
+    .toBeGreaterThan(0.25);
+  const midRaceRiderBoxes = await Promise.all([1, 2, 3, 4].map((playerId) => (
+    arena.getByLabel(new RegExp(`Demo Rider ${playerId} arena rider`)).boundingBox()
+  )));
+  midRaceRiderBoxes.forEach((box) => {
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(arenaBox!.x - box!.width * 0.25);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(arenaBox!.x + arenaBox!.width + box!.width * 0.25);
+  });
+  expect(Number(await arena.locator('[data-arena-world]').getAttribute('data-camera-scroll-percent')))
+    .toBeGreaterThan(0);
   if (process.env.TRACKLAB_GAME_ARENA_SCREENSHOT) {
     await page.screenshot({ path: process.env.TRACKLAB_GAME_ARENA_SCREENSHOT });
   }

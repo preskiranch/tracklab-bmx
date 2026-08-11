@@ -294,6 +294,7 @@ function ArenaPanel({
     >
       <div
         data-arena-world
+        data-camera-scroll-percent={scrollPercent.toFixed(3)}
         style={{
           position: 'absolute',
           inset: 0,
@@ -304,7 +305,6 @@ function ArenaPanel({
           backgroundRepeat: 'repeat-x',
           backgroundSize: `${100 / (arenaWorldWidth / 100)}% 100%`,
           transform: `translate3d(-${scrollPercent}%, 0, 0)`,
-          transition: 'transform 320ms cubic-bezier(.2, .72, .25, 1)',
           willChange: 'transform',
         }}
       >
@@ -415,6 +415,8 @@ function ArenaPanel({
               aria-label={`${rider.name} arena rider`}
               data-lane={rider.playerId}
               data-lane-center={laneCenter}
+              data-distance-meters={rider.distanceMeters.toFixed(3)}
+              data-progress={(rider.distanceMeters / Math.max(1, raceDistanceMeters)).toFixed(4)}
               style={{
                 position: 'absolute',
                 zIndex: 20 + rider.playerId,
@@ -423,9 +425,8 @@ function ArenaPanel({
                 width: 'clamp(62px, 5.2vw, 84px)',
                 aspectRatio: '1',
                 opacity: rider.ghost ? 0.6 : 1,
-                transform: `translate(-${arenaFrontTireAnchorPercent}%, -75%)`,
-                transition: 'left 100ms linear',
-                willChange: 'left',
+                transform: `translate3d(-${arenaFrontTireAnchorPercent}%, -75%, 0)`,
+                willChange: 'left, transform',
               }}
             >
               <div
@@ -447,6 +448,7 @@ function ArenaPanel({
                       left: `${wheelLeft}%`,
                       width: '33.5%',
                       aspectRatio: '1',
+                      boxSizing: 'border-box',
                       border: '2px solid #07090b',
                       borderRadius: '50%',
                       boxShadow: 'inset 0 0 0 1px rgba(225,230,235,.22)',
