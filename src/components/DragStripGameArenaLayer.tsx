@@ -2,6 +2,7 @@ import { useMemo, type CSSProperties } from 'react';
 import { exploreGridClass, groupExploreRiders, type ExploreViewportGroup } from '../lib/explore';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { riderAnimationState, riderCrankStepCount } from '../lib/riderAnimation';
+import { straightSprintDistanceOptions, straightSprintFeetToMeters } from '../lib/straightSprint';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
 import type {
@@ -163,6 +164,65 @@ function clamp(value: number, minimum: number, maximum: number) {
 function progressToWorldPercent(distanceMeters: number, raceDistanceMeters: number) {
   const progress = clamp(distanceMeters / Math.max(1, raceDistanceMeters), 0, 1);
   return arenaStartPercent + progress * (arenaFinishPercent - arenaStartPercent);
+}
+
+function SprintDistanceMarkers({ raceDistanceMeters }: { raceDistanceMeters: number }) {
+  const raceDistanceFeet = raceDistanceMeters / 0.3048;
+  const visibleMarkers = straightSprintDistanceOptions.filter(
+    (distanceFeet) => distanceFeet <= raceDistanceFeet + 0.5,
+  );
+
+  return (
+    <div aria-label="Trackside marker posts" data-arena-distance-markers>
+      {visibleMarkers.map((distanceFeet) => (
+        <div
+          key={`arena-distance-marker-${distanceFeet}`}
+          aria-label={`${distanceFeet.toLocaleString()} foot marker`}
+          data-distance-feet={distanceFeet}
+          style={{
+            position: 'absolute',
+            zIndex: 8,
+            top: `${arenaTrackTopPercent - 0.8}%`,
+            left: `${progressToWorldPercent(straightSprintFeetToMeters(distanceFeet), raceDistanceMeters)}%`,
+            pointerEvents: 'none',
+            transform: 'translate(-50%, -100%)',
+          }}
+        >
+          <div style={{
+            display: 'grid',
+            minWidth: 'clamp(32px, 3vw, 48px)',
+            minHeight: 'clamp(23px, 2.7vh, 34px)',
+            padding: '2px 5px',
+            placeItems: 'center',
+            border: '2px solid #d8ff3e',
+            borderRadius: '5px',
+            background: 'linear-gradient(180deg, #202a34, #080d13)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,.22), 0 3px 8px rgba(0,0,0,.62)',
+            color: '#ffffff',
+            fontSize: 'clamp(9px, .85vw, 13px)',
+            fontWeight: 1000,
+            letterSpacing: '.02em',
+            lineHeight: 1,
+            whiteSpace: 'nowrap',
+          }}>
+            {distanceFeet.toLocaleString()}′
+          </div>
+          <div aria-hidden="true" style={{
+            position: 'absolute',
+            top: '100%',
+            left: '50%',
+            width: '3px',
+            height: 'clamp(7px, 1.1vh, 14px)',
+            border: '1px solid rgba(230,236,241,.72)',
+            borderTop: 0,
+            background: 'linear-gradient(90deg, #4a555f, #d2d8dd 50%, #46515b)',
+            boxShadow: '1px 2px 3px rgba(0,0,0,.5)',
+            transform: 'translateX(-50%)',
+          }} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function gridStyle(groupCount: number): CSSProperties {
@@ -455,6 +515,7 @@ function ArenaPanel({
           background: '#ffffff',
           boxShadow: '0 0 0 2px #111827, 0 0 12px rgba(255,255,255,.8)',
         }} />
+        <SprintDistanceMarkers raceDistanceMeters={raceDistanceMeters} />
         <div style={{
           position: 'absolute',
           zIndex: 6,

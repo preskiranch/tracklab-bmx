@@ -1889,6 +1889,16 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await page.getByRole('group', { name: 'Wattbike Air setting' })
     .getByRole('button', { name: '5', exact: true }).click();
   const arena = page.getByLabel('Drag Strip Game Arena', { exact: true });
+  const distanceMarkers = arena.locator('[data-arena-distance-markers]').first().locator('[data-distance-feet]');
+  await expect(distanceMarkers).toHaveCount(6);
+  await expect.poll(() => distanceMarkers.evaluateAll((markers) => (
+    markers.map((marker) => Number(marker.getAttribute('data-distance-feet')))
+  ))).toEqual([30, 100, 200, 300, 400, 500]);
+  await page.getByLabel('Sprint distance').selectOption('1500');
+  await expect(distanceMarkers).toHaveCount(16);
+  await expect(distanceMarkers.last()).toHaveAttribute('data-distance-feet', '1500');
+  await page.getByLabel('Sprint distance').selectOption('500');
+  await expect(distanceMarkers).toHaveCount(6);
   const bmxStartGate = arena.getByLabel('BMX start gate', { exact: true }).first();
   await expect(bmxStartGate).toBeVisible();
   await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');
