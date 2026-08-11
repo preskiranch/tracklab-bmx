@@ -318,13 +318,10 @@ function ArenaPanel({
               height: `${arenaLaneHeightPercent}%`,
               borderTop: '1px solid rgba(218, 224, 232, .66)',
               borderBottom: laneIndex === 3 ? '2px solid rgba(218, 224, 232, .84)' : undefined,
-              backgroundColor: laneIndex % 2 === 0 ? '#191c20' : '#16191d',
-              backgroundImage: [
-                'radial-gradient(circle at 18% 28%, rgba(255,255,255,.10) 0 .7px, transparent 1.15px)',
-                'radial-gradient(circle at 72% 66%, rgba(0,0,0,.34) 0 .8px, transparent 1.35px)',
-                'linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.14))',
-              ].join(', '),
-              backgroundSize: '13px 11px, 19px 17px, 100% 100%',
+              backgroundColor: '#17191c',
+              backgroundImage: 'linear-gradient(180deg, rgba(4,6,8,.15), rgba(0,0,0,.28)), url(/assets/drag-strip-asphalt.jpg)',
+              backgroundPosition: `center, ${laneIndex * 67}px ${laneIndex * 83}px`,
+              backgroundSize: '100% 100%, 420px 420px',
               boxShadow: laneIndex === 0 ? 'inset 0 2px 0 rgba(255,255,255,.12)' : undefined,
             }}
           />
@@ -429,7 +426,7 @@ function ArenaPanel({
                 style={{
                   position: 'absolute',
                   inset: '4%',
-                  filter: `brightness(1.06) contrast(1.06) drop-shadow(0 0 1px rgba(255,255,255,.95)) drop-shadow(0 0 3px ${rider.accent}) drop-shadow(0 4px 3px rgba(0,0,0,.58))`,
+                  filter: 'brightness(1.04) contrast(1.08) drop-shadow(0 3px 2px rgba(0,0,0,.48))',
                 }}
               >
                 {[6.2, 61.5].map((wheelLeft, wheelIndex) => (
@@ -438,14 +435,14 @@ function ArenaPanel({
                     data-arena-wheel={wheelIndex === 0 ? 'rear' : 'front'}
                     style={{
                       position: 'absolute',
-                      zIndex: 0,
+                      zIndex: 2,
                       top: '60.2%',
                       left: `${wheelLeft}%`,
                       width: '33.5%',
                       aspectRatio: '1',
-                      border: '2px solid rgba(7, 10, 13, .98)',
+                      border: '2px solid #07090b',
                       borderRadius: '50%',
-                      boxShadow: `0 0 0 1px ${rider.accent}, 0 0 5px ${rider.accent}`,
+                      boxShadow: 'inset 0 0 0 1px rgba(225,230,235,.22)',
                     }}
                   />
                 ))}
