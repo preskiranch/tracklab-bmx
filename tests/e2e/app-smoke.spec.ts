@@ -1905,6 +1905,23 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await page.getByLabel('Sprint distance').selectOption('500');
   await expect(distanceMarkers).toHaveCount(16);
   await expect(arena.locator('[data-distance-feet="500"][data-active-finish="true"]').first()).toBeAttached();
+  const initialArenaBox = await arena.boundingBox();
+  const thirtyFootMarkerBox = await arena.locator('[data-distance-feet="30"]').first().boundingBox();
+  expect(initialArenaBox).not.toBeNull();
+  expect(thirtyFootMarkerBox).not.toBeNull();
+  expect(Math.abs(
+    (thirtyFootMarkerBox!.x + thirtyFootMarkerBox!.width / 2)
+      - (initialArenaBox!.x + initialArenaBox!.width / 2),
+  )).toBeLessThanOrEqual(4);
+  const markerWorldPercents = await distanceMarkers.evaluateAll((markers) => (
+    markers.map((marker) => Number(marker.getAttribute('data-world-percent')))
+  ));
+  for (let index = 2; index < markerWorldPercents.length; index += 1) {
+    expect(Math.abs(
+      (markerWorldPercents[index] - markerWorldPercents[index - 1])
+        - (markerWorldPercents[2] - markerWorldPercents[1]),
+    )).toBeLessThanOrEqual(0.0002);
+  }
   const bmxStartGate = arena.getByLabel('BMX start gate', { exact: true }).first();
   await expect(bmxStartGate).toBeVisible();
   await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');

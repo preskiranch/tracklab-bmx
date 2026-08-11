@@ -49,10 +49,24 @@ type DragStripGameArenaLayerProps = {
   showHud: boolean;
 };
 
-const arenaWorldWidth = 310;
+// Keep the short-sprint scale readable: the start line remains near the left
+// edge and the 30-foot marker lands halfway across the initial viewport. The
+// full 1,500-foot course then continues at that exact scale as the camera
+// scrolls, without changing race distance, timing, or rollout physics.
+const arenaStartViewportPercent = 12;
+const arenaThirtyFootViewportPercent = 50;
+const arenaFinishViewportPaddingPercent = 12;
+const arenaThirtyFootSpanViewportPercent = arenaThirtyFootViewportPercent - arenaStartViewportPercent;
+const arenaCourseViewportPercent = straightSprintMaximumFeet / 30 * arenaThirtyFootSpanViewportPercent;
+const arenaWorldWidth = (
+  arenaStartViewportPercent
+  + arenaCourseViewportPercent
+  + arenaFinishViewportPaddingPercent
+);
+const arenaWorldScale = arenaWorldWidth / 100;
 const arenaViewportWidth = 100 / (arenaWorldWidth / 100);
-const arenaStartPercent = 4;
-const arenaFinishPercent = 96;
+const arenaStartPercent = arenaStartViewportPercent / arenaWorldScale;
+const arenaFinishPercent = 100 - arenaFinishViewportPaddingPercent / arenaWorldScale;
 const arenaTrackTopPercent = 48;
 const arenaTrackBottomPercent = 69;
 const arenaLaneHeightPercent = (arenaTrackBottomPercent - arenaTrackTopPercent) / 4;
@@ -204,6 +218,10 @@ function SprintDistanceMarkers({ raceDistanceMeters }: { raceDistanceMeters: num
             aria-label={`${distanceFeet.toLocaleString()} foot marker`}
             data-active-finish={isActiveFinish ? 'true' : 'false'}
             data-distance-feet={distanceFeet}
+            data-world-percent={progressToWorldPercent(
+              straightSprintFeetToMeters(distanceFeet),
+              arenaCourseDistanceMeters,
+            ).toFixed(4)}
             style={{
               position: 'absolute',
               zIndex: 8,
