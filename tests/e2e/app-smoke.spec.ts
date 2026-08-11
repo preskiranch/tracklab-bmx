@@ -1916,6 +1916,8 @@ test('straight sprint restores and saves a separate camera for each distance', a
   for (let index = 1; index < laneBandBoxes.length; index += 1) {
     expect(Math.abs(laneBandBoxes[index].top - laneBandBoxes[index - 1].top - laneBandBoxes[0].height)).toBeLessThanOrEqual(1);
   }
+  await expect(arena.locator('[data-arena-wheel="rear"]')).toHaveCount(4);
+  await expect(arena.locator('[data-arena-wheel="front"]')).toHaveCount(4);
   const riderPanel = arena.getByLabel('Game arena rider data', { exact: true });
   await expect(riderPanel.locator('.game-arena-hud-card')).toHaveCount(4);
   await expect(page.getByLabel('Race rider positions', { exact: true })).toHaveCount(0);

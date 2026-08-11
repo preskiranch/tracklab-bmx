@@ -318,9 +318,13 @@ function ArenaPanel({
               height: `${arenaLaneHeightPercent}%`,
               borderTop: '1px solid rgba(218, 224, 232, .66)',
               borderBottom: laneIndex === 3 ? '2px solid rgba(218, 224, 232, .84)' : undefined,
-              background: laneIndex % 2 === 0
-                ? 'linear-gradient(180deg, rgba(46,49,55,.98), rgba(31,34,40,.98))'
-                : 'linear-gradient(180deg, rgba(42,45,51,.98), rgba(27,30,36,.98))',
+              backgroundColor: laneIndex % 2 === 0 ? '#191c20' : '#16191d',
+              backgroundImage: [
+                'radial-gradient(circle at 18% 28%, rgba(255,255,255,.10) 0 .7px, transparent 1.15px)',
+                'radial-gradient(circle at 72% 66%, rgba(0,0,0,.34) 0 .8px, transparent 1.35px)',
+                'linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.14))',
+              ].join(', '),
+              backgroundSize: '13px 11px, 19px 17px, 100% 100%',
               boxShadow: laneIndex === 0 ? 'inset 0 2px 0 rgba(255,255,255,.12)' : undefined,
             }}
           />
@@ -425,13 +429,38 @@ function ArenaPanel({
                 style={{
                   position: 'absolute',
                   inset: '4%',
+                  filter: `brightness(1.06) contrast(1.06) drop-shadow(0 0 1px rgba(255,255,255,.95)) drop-shadow(0 0 3px ${rider.accent}) drop-shadow(0 4px 3px rgba(0,0,0,.58))`,
+                }}
+              >
+                {[6.2, 61.5].map((wheelLeft, wheelIndex) => (
+                  <div
+                    key={`${rider.id}-wheel-${wheelIndex}`}
+                    data-arena-wheel={wheelIndex === 0 ? 'rear' : 'front'}
+                    style={{
+                      position: 'absolute',
+                      zIndex: 0,
+                      top: '60.2%',
+                      left: `${wheelLeft}%`,
+                      width: '33.5%',
+                      aspectRatio: '1',
+                      border: '2px solid rgba(7, 10, 13, .98)',
+                      borderRadius: '50%',
+                      boxShadow: `0 0 0 1px ${rider.accent}, 0 0 5px ${rider.accent}`,
+                    }}
+                  />
+                ))}
+                <div
+                  style={{
+                    position: 'absolute',
+                    zIndex: 1,
+                    inset: 0,
                   backgroundImage: `url(/assets/rider-${rider.colorName}-animated.png)`,
                   backgroundPosition: `${rider.frame * 12.5}% 0`,
                   backgroundRepeat: 'no-repeat',
                   backgroundSize: '900% 100%',
-                  filter: `brightness(1.06) contrast(1.06) drop-shadow(0 0 1px rgba(255,255,255,.95)) drop-shadow(0 0 3px ${rider.accent}) drop-shadow(0 4px 3px rgba(0,0,0,.58))`,
-                }}
-              />
+                  }}
+                />
+              </div>
             </div>
           );
         })}
