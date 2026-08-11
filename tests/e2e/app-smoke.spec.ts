@@ -2058,6 +2058,19 @@ test('straight sprint restores and saves a separate camera for each distance', a
   });
   expect(arenaMotionStyles.duration).toBe('0s');
   expect(arenaMotionStyles.willChange).toContain('transform');
+  const arenaBackgroundTiles = arena.locator('[data-arena-background-tile]');
+  expect(await arenaBackgroundTiles.count()).toBeGreaterThan(2);
+  await expect(arenaBackgroundTiles.nth(0)).toHaveAttribute('data-tile-mirrored', 'false');
+  await expect(arenaBackgroundTiles.nth(1)).toHaveAttribute('data-tile-mirrored', 'true');
+  const backgroundTileGaps = await arenaBackgroundTiles.evaluateAll((tiles) => tiles.slice(1).map((tile, index) => {
+    const previous = tiles[index].getBoundingClientRect();
+    const current = tile.getBoundingClientRect();
+    return current.left - previous.right;
+  }));
+  backgroundTileGaps.forEach((gap) => {
+    expect(gap).toBeLessThanOrEqual(0.1);
+    expect(gap).toBeGreaterThanOrEqual(-3);
+  });
   await expect.poll(async () => Number(await firstArenaRider.getAttribute('data-progress')))
     .toBeGreaterThan(0.25);
   const midRaceRiderBoxes = await Promise.all([1, 2, 3, 4].map((playerId) => (

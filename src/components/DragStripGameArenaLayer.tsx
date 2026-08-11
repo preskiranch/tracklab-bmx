@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { exploreGridClass, groupExploreRiders, type ExploreViewportGroup } from '../lib/explore';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { riderAnimationState, riderCrankStepCount } from '../lib/riderAnimation';
@@ -65,6 +65,7 @@ const arenaWorldWidth = (
 );
 const arenaWorldScale = arenaWorldWidth / 100;
 const arenaViewportWidth = 100 / (arenaWorldWidth / 100);
+const arenaBackgroundTileCount = Math.ceil(100 / arenaViewportWidth);
 const arenaStartPercent = arenaStartViewportPercent / arenaWorldScale;
 const arenaFinishPercent = 100 - arenaFinishViewportPaddingPercent / arenaWorldScale;
 const arenaTrackTopPercent = 48;
@@ -77,6 +78,15 @@ const arenaLaneCenters = [0, 1, 2, 3].map(
 // The route-distance coordinate represents the leading edge of the front tire.
 // The wheel is 61.5% across the inner 92%-wide sprite box and is 33.5% wide.
 const arenaFrontTireAnchorPercent = 4 + (0.92 * (61.5 + 33.5));
+const arenaCameraEaseMs = 115;
+
+function applyArenaWorldScroll(element: HTMLDivElement, scrollPercent: number) {
+  const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
+  const offsetPixels = element.offsetWidth * scrollPercent / 100;
+  const pixelAlignedOffset = Math.round(offsetPixels * devicePixelRatio) / devicePixelRatio;
+  element.style.transform = `translate3d(-${pixelAlignedOffset}px, 0, 0)`;
+  element.dataset.cameraScrollPercent = scrollPercent.toFixed(3);
+}
 
 function BmxStartGate({
   phase,
@@ -496,6 +506,63 @@ function ArenaPanel({
     100 - arenaViewportWidth,
   );
   const leadRider = [...group.riders].sort((left, right) => right.distanceMeters - left.distanceMeters)[0];
+  const worldRef = useRef<HTMLDivElement>(null);
+  const cameraScrollRef = useRef(scrollPercent);
+  const cameraTargetRef = useRef(scrollPercent);
+  const cameraFrameRef = useRef<number | null>(null);
+  const cameraFrameTimeRef = useRef(0);
+  const smoothCamera = raceState === 'racing' || raceState === 'finished';
+
+  useLayoutEffect(() => {
+    cameraTargetRef.current = scrollPercent;
+    const world = worldRef.current;
+    if (!world) {
+      return;
+    }
+
+    if (!smoothCamera) {
+      if (cameraFrameRef.current != null) {
+        window.cancelAnimationFrame(cameraFrameRef.current);
+        cameraFrameRef.current = null;
+      }
+      cameraScrollRef.current = scrollPercent;
+      applyArenaWorldScroll(world, scrollPercent);
+      return;
+    }
+
+    if (cameraFrameRef.current != null) {
+      return;
+    }
+
+    cameraFrameTimeRef.current = window.performance.now();
+    const updateCamera = (now: number) => {
+      const elapsedMs = Math.min(64, Math.max(0, now - cameraFrameTimeRef.current));
+      cameraFrameTimeRef.current = now;
+      const current = cameraScrollRef.current;
+      const target = cameraTargetRef.current;
+      const ease = 1 - Math.exp(-elapsedMs / arenaCameraEaseMs);
+      const next = Math.abs(target - current) < 0.0001
+        ? target
+        : current + (target - current) * ease;
+      cameraScrollRef.current = next;
+      applyArenaWorldScroll(world, next);
+
+      if (Math.abs(cameraTargetRef.current - next) < 0.0001) {
+        cameraScrollRef.current = cameraTargetRef.current;
+        applyArenaWorldScroll(world, cameraTargetRef.current);
+        cameraFrameRef.current = null;
+        return;
+      }
+      cameraFrameRef.current = window.requestAnimationFrame(updateCamera);
+    };
+    cameraFrameRef.current = window.requestAnimationFrame(updateCamera);
+  }, [scrollPercent, smoothCamera]);
+
+  useLayoutEffect(() => () => {
+    if (cameraFrameRef.current != null) {
+      window.cancelAnimationFrame(cameraFrameRef.current);
+    }
+  }, []);
 
   return (
     <section
@@ -506,6 +573,7 @@ function ArenaPanel({
       style={{ width: '100%', height: '100%', background: '#121820' }}
     >
       <div
+        ref={worldRef}
         data-arena-world
         data-camera-scroll-percent={scrollPercent.toFixed(3)}
         style={{
@@ -513,14 +581,44 @@ function ArenaPanel({
           inset: 0,
           width: `${arenaWorldWidth}%`,
           overflow: 'hidden',
-          backgroundImage: 'linear-gradient(rgba(5, 10, 16, 0.02), rgba(5, 10, 16, 0.22)), url(/assets/drag-strip-game-arena.jpg)',
-          backgroundPosition: 'left center',
-          backgroundRepeat: 'repeat-x',
-          backgroundSize: `${100 / (arenaWorldWidth / 100)}% 100%`,
-          transform: `translate3d(-${scrollPercent}%, 0, 0)`,
+          background: '#121820',
+          transform: 'translate3d(0, 0, 0)',
           willChange: 'transform',
+          backfaceVisibility: 'hidden',
         }}
       >
+        <div
+          aria-hidden="true"
+          data-arena-background
+          style={{ position: 'absolute', zIndex: 0, inset: 0, overflow: 'hidden' }}
+        >
+          {Array.from({ length: arenaBackgroundTileCount }, (_, tileIndex) => (
+            <div
+              key={`arena-background-tile-${tileIndex}`}
+              data-arena-background-tile={tileIndex}
+              data-tile-mirrored={tileIndex % 2 === 1 ? 'true' : 'false'}
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: `calc(${tileIndex * arenaViewportWidth}% - 1px)`,
+                width: `calc(${arenaViewportWidth}% + 2px)`,
+                overflow: 'hidden',
+              }}
+            >
+              <div style={{
+                position: 'absolute',
+                inset: '-1px',
+                backgroundImage: 'linear-gradient(rgba(5, 10, 16, 0.02), rgba(5, 10, 16, 0.22)), url(/assets/drag-strip-game-arena.jpg)',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                backgroundSize: 'cover',
+                transform: tileIndex % 2 === 1 ? 'scaleX(-1)' : 'none',
+                backfaceVisibility: 'hidden',
+              }} />
+            </div>
+          ))}
+        </div>
         {arenaLaneCenters.map((_, laneIndex) => (
           <div
             key={`arena-lane-band-${laneIndex + 1}`}
