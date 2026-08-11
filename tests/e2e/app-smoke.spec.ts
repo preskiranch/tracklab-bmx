@@ -1888,31 +1888,42 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 4');
   await page.getByRole('group', { name: 'Wattbike Air setting' })
     .getByRole('button', { name: '5', exact: true }).click();
+  const arena = page.getByLabel('Drag Strip Game Arena', { exact: true });
+  const bmxStartGate = arena.getByLabel('BMX start gate', { exact: true }).first();
+  await expect(bmxStartGate).toBeVisible();
+  await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');
+  await expect(bmxStartGate.locator('[data-start-gate-lane]')).toHaveCount(4);
+  const previewStartLineBox = await arena.locator('[data-arena-start-line]').boundingBox();
+  const frontTireBox = await arena.getByLabel(/Demo Rider 1 arena rider/)
+    .locator('[data-arena-wheel="front"]')
+    .boundingBox();
+  expect(previewStartLineBox).not.toBeNull();
+  expect(frontTireBox).not.toBeNull();
+  expect(Math.abs(
+    (frontTireBox!.x + frontTireBox!.width) - previewStartLineBox!.x,
+  )).toBeLessThanOrEqual(2);
   await page.getByRole('button', { name: 'Start Demo Sprint', exact: true }).click();
+  const startTree = page.getByLabel('BMX start tree light', { exact: true });
+  await expect(startTree).toBeVisible({ timeout: 35_000 });
+  await expect(bmxStartGate).toHaveAttribute('data-gate-phase', 'cadence');
+  await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');
+  await expect(page.locator('.earth-overlay.top-left')).toContainText('Live Race', { timeout: 15_000 });
+  await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'dropped');
   const sprintSetupBadge = page.locator('.race-countdown-pause-overlay').filter({ hasText: '500 ft Sprint' });
   await expect(sprintSetupBadge).toContainText('Wattbike Air 5', { timeout: 35_000 });
-  const arena = page.getByLabel('Drag Strip Game Arena', { exact: true });
   await expect(arena.getByLabel(/Demo Rider 1 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 2 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 3 arena rider/)).toBeVisible();
   await expect(arena.getByLabel(/Demo Rider 4 arena rider/)).toBeVisible();
   await expect(arena).toHaveAttribute('data-race-distance-meters', '152.400');
-  const startLineBox = await arena.locator('[data-arena-start-line]').boundingBox();
-  const frontTireBox = await arena.getByLabel(/Demo Rider 1 arena rider/)
-    .locator('[data-arena-wheel="front"]')
-    .boundingBox();
-  expect(startLineBox).not.toBeNull();
-  expect(frontTireBox).not.toBeNull();
-  expect(Math.abs(
-    (frontTireBox!.x + frontTireBox!.width) - startLineBox!.x,
-  )).toBeLessThanOrEqual(2);
+  const liveStartLineBox = await arena.locator('[data-arena-start-line]').boundingBox();
+  expect(liveStartLineBox).not.toBeNull();
   const laneLabelsAreUnobstructed = await arena.locator('[data-arena-lane-label]').evaluateAll((labels) => labels.map((label) => {
     const bounds = label.getBoundingClientRect();
     const topElement = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
     return topElement === label || label.contains(topElement);
   }));
   expect(laneLabelsAreUnobstructed).toEqual([true, true, true, true]);
-  await expect(page.locator('.earth-overlay.top-left')).toContainText('Live Race', { timeout: 60_000 });
   await page.waitForTimeout(1_200);
   const earlyRaceDebug = await page.evaluate(() => (window as typeof window & {
     __tracklabLiveDebug?: {
@@ -1936,7 +1947,7 @@ test('straight sprint restores and saves a separate camera for each distance', a
   const arenaBox = await arena.boundingBox();
   expect(movingRiderBox).not.toBeNull();
   expect(arenaBox).not.toBeNull();
-  expect(movingRiderBox!.x + movingRiderBox!.width).toBeGreaterThan(startLineBox!.x + 10);
+  expect(movingRiderBox!.x + movingRiderBox!.width).toBeGreaterThan(liveStartLineBox!.x + 10);
   expect(movingRiderBox!.x).toBeGreaterThanOrEqual(arenaBox!.x - movingRiderBox!.width * 0.25);
   expect(movingRiderBox!.x + movingRiderBox!.width).toBeLessThanOrEqual(arenaBox!.x + arenaBox!.width + movingRiderBox!.width * 0.25);
   const arenaRiderBoxes = await Promise.all([1, 2, 3, 4].map(async (playerId) => {

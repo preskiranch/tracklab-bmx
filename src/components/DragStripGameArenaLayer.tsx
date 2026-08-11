@@ -37,6 +37,8 @@ type DragStripGameArenaLayerProps = {
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
   raceState: RaceState;
+  startGateActive: boolean;
+  startGatePhase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
   raceDistanceMeters: number;
   speedUnit: SpeedUnit;
   showHud: boolean;
@@ -55,6 +57,104 @@ const arenaLaneCenters = [0, 1, 2, 3].map(
 // The route-distance coordinate represents the leading edge of the front tire.
 // The wheel is 61.5% across the inner 92%-wide sprite box and is 33.5% wide.
 const arenaFrontTireAnchorPercent = 4 + (0.92 * (61.5 + 33.5));
+
+function BmxStartGate({
+  phase,
+  raceState,
+}: {
+  phase: DragStripGameArenaLayerProps['startGatePhase'];
+  raceState: RaceState;
+}) {
+  // App sets phase="go" only after the UCI green tone (the fourth beep), so
+  // the visual plate and the race-input release share the same gate-drop edge.
+  const dropped = phase === 'go' || raceState === 'racing' || raceState === 'finished';
+  const falseStart = phase === 'false-start';
+
+  return (
+    <div
+      aria-label="BMX start gate"
+      data-arena-start-gate
+      data-gate-phase={phase}
+      data-gate-state={dropped ? 'dropped' : 'upright'}
+      style={{
+        position: 'absolute',
+        zIndex: 12,
+        top: `${arenaTrackTopPercent}%`,
+        left: `${arenaStartPercent}%`,
+        width: 'clamp(18px, 1.7vw, 29px)',
+        height: `${arenaTrackBottomPercent - arenaTrackTopPercent}%`,
+        pointerEvents: 'none',
+        transform: 'translateX(-50%)',
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          zIndex: 0,
+          top: 0,
+          right: '42%',
+          bottom: 0,
+          width: '190%',
+          border: '1px solid rgba(208, 217, 226, .72)',
+          borderRight: 0,
+          background: 'repeating-linear-gradient(90deg, rgba(225,232,238,.28) 0 2px, rgba(72,82,92,.35) 2px 8px), linear-gradient(180deg, #4b5560, #202830)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,.5), inset 0 -3px 0 rgba(4,7,10,.58), 0 4px 8px rgba(0,0,0,.45)',
+          clipPath: 'polygon(0 12%, 100% 0, 100% 100%, 0 88%)',
+          opacity: .96,
+        }}
+      />
+      {arenaLaneCenters.map((laneCenter, laneIndex) => {
+        const laneTop = arenaTrackTopPercent + arenaLaneHeightPercent * laneIndex;
+        const localLaneCenter = ((laneCenter - arenaTrackTopPercent) / (arenaTrackBottomPercent - arenaTrackTopPercent)) * 100;
+        const localLaneBottom = ((laneTop + arenaLaneHeightPercent - arenaTrackTopPercent)
+          / (arenaTrackBottomPercent - arenaTrackTopPercent)) * 100;
+        return (
+          <div
+            key={`start-gate-lane-${laneIndex + 1}`}
+            data-start-gate-lane={laneIndex + 1}
+            style={{
+              position: 'absolute',
+              zIndex: 2,
+              top: `${localLaneCenter}%`,
+              left: '50%',
+              width: 'clamp(7px, .65vw, 11px)',
+              height: `${Math.max(48, localLaneBottom - localLaneCenter + 42)}%`,
+              maxHeight: 'clamp(23px, 3.1vh, 38px)',
+              border: `1px solid ${falseStart ? '#ff4d4d' : dropped ? '#d8ff3e' : '#d7dde3'}`,
+              borderRadius: '2px 2px 1px 1px',
+              backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,.34) 0 1px, transparent 1px 5px), linear-gradient(90deg, #626c75, #d3d9de 48%, #59636c)',
+              boxShadow: falseStart
+                ? '0 0 8px rgba(255,77,77,.78), inset 0 0 0 1px rgba(255,255,255,.28)'
+                : '0 2px 5px rgba(0,0,0,.58), inset 0 0 0 1px rgba(255,255,255,.28)',
+              transformOrigin: '50% 100%',
+              transform: dropped
+                ? 'translate(-50%, -100%) rotate(82deg)'
+                : 'translate(-50%, -100%) rotate(-4deg)',
+              transition: 'transform 210ms cubic-bezier(.55,.02,.92,.42), border-color 120ms linear',
+              willChange: 'transform',
+            }}
+          />
+        );
+      })}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          zIndex: 3,
+          top: '-3%',
+          bottom: '-3%',
+          left: '43%',
+          width: 'clamp(4px, .35vw, 7px)',
+          border: '1px solid rgba(232,237,241,.85)',
+          borderRadius: '2px',
+          background: 'linear-gradient(90deg, #263039, #c5ccd1 45%, #4f5b65)',
+          boxShadow: '2px 2px 5px rgba(0,0,0,.58)',
+        }}
+      />
+    </div>
+  );
+}
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -262,10 +362,14 @@ function ArenaPanel({
   group,
   riders,
   raceDistanceMeters,
+  raceState,
+  startGatePhase,
 }: {
   group: ExploreViewportGroup;
   riders: ArenaRider[];
   raceDistanceMeters: number;
+  raceState: RaceState;
+  startGatePhase: DragStripGameArenaLayerProps['startGatePhase'];
 }) {
   const groupRiders = riders.filter((rider) => group.riders.some((member) => member.id === rider.id));
   const nearbyGhosts = riders.filter((rider) => rider.ghost && (
@@ -340,6 +444,7 @@ function ArenaPanel({
           background: '#d8ff3e',
           boxShadow: '0 0 0 2px #111827, 0 0 12px rgba(216,255,62,.8)',
         }} />
+        <BmxStartGate phase={startGatePhase} raceState={raceState} />
         <div data-arena-finish-line style={{
           position: 'absolute',
           zIndex: 5,
@@ -492,6 +597,8 @@ export function DragStripGameArenaLayer({
   players,
   samplesByDevice,
   raceState,
+  startGateActive,
+  startGatePhase,
   raceDistanceMeters,
   speedUnit,
   showHud,
@@ -587,6 +694,7 @@ export function DragStripGameArenaLayer({
     <div
       aria-label="Drag Strip Game Arena"
       data-race-distance-meters={raceDistanceMeters.toFixed(3)}
+      data-start-gate-active={startGateActive ? 'true' : 'false'}
       style={{
         position: 'absolute',
         inset: 0,
@@ -613,7 +721,13 @@ export function DragStripGameArenaLayer({
             overflow: 'hidden',
             ...panelSpanStyle(visibleGroups.length, index),
           }}>
-            <ArenaPanel group={group} riders={arenaRiders} raceDistanceMeters={raceDistanceMeters} />
+            <ArenaPanel
+              group={group}
+              riders={arenaRiders}
+              raceDistanceMeters={raceDistanceMeters}
+              raceState={raceState}
+              startGatePhase={startGatePhase}
+            />
           </div>
         ))}
       </div>

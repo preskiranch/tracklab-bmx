@@ -354,6 +354,8 @@ export function EarthTrackView({
               players={players}
               samplesByDevice={samplesByDevice}
               raceState={raceState}
+              startGateActive={startGateActive}
+              startGatePhase={startGatePhase}
               raceDistanceMeters={progressLengthMeters}
               speedUnit={speedUnit}
               showHud={raceViewFullscreen && !mappingMode}
