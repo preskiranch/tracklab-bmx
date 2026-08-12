@@ -70,7 +70,11 @@ const arenaWorldWidth = (
 );
 const arenaWorldScale = arenaWorldWidth / 100;
 const arenaViewportWidth = 100 / (arenaWorldWidth / 100);
-const arenaBackgroundTileCount = Math.ceil(100 / arenaViewportWidth);
+// The course is much wider than the viewport so 30 feet can occupy half the
+// screen. Do not paint a full-size photo into every course segment: that made
+// laptop browsers composite roughly twenty 1,600px-wide photos every frame.
+// Four viewport-sized tiles are enough for an endlessly recycled backdrop.
+const arenaBackgroundTileCount = 4;
 const arenaStartPercent = arenaStartViewportPercent / arenaWorldScale;
 const arenaFinishPercent = 100 - arenaFinishViewportPaddingPercent / arenaWorldScale;
 const arenaTrackTopPercent = 48;
@@ -90,6 +94,7 @@ function applyArenaWorldCamera(
   element: HTMLDivElement,
   scrollPercent: number,
   viewportPercent: number,
+  backgroundStrip?: HTMLDivElement | null,
 ) {
   const devicePixelRatio = Math.max(1, window.devicePixelRatio || 1);
   const viewportWidthPixels = element.parentElement?.clientWidth ?? window.innerWidth;
@@ -97,9 +102,18 @@ function applyArenaWorldCamera(
   const offsetPixels = viewportWidthPixels * scrollPercent / viewportPercent;
   const pixelAlignedOffset = Math.round(offsetPixels * devicePixelRatio) / devicePixelRatio;
   element.style.transform = `translate3d(-${pixelAlignedOffset}px, 0, 0) scaleX(${cameraScale})`;
-  element.style.setProperty('--arena-camera-inverse-scale', String(1 / cameraScale));
+  const inverseScale = String(1 / cameraScale);
+  if (element.style.getPropertyValue('--arena-camera-inverse-scale') !== inverseScale) {
+    element.style.setProperty('--arena-camera-inverse-scale', inverseScale);
+  }
   element.dataset.cameraScrollPercent = scrollPercent.toFixed(3);
   element.dataset.cameraViewportPercent = viewportPercent.toFixed(3);
+  if (backgroundStrip) {
+    const backgroundCyclePixels = Math.max(1, viewportWidthPixels * 2);
+    const backgroundOffset = ((pixelAlignedOffset % backgroundCyclePixels) + backgroundCyclePixels)
+      % backgroundCyclePixels;
+    backgroundStrip.style.transform = `translate3d(-${backgroundOffset}px, 0, 0)`;
+  }
 }
 
 function BmxStartGate({
@@ -541,6 +555,7 @@ function ArenaPanel({
   } = dragStripAdaptiveCameraWindow(riderWorldPositions);
   const leadRider = [...group.riders].sort((left, right) => right.distanceMeters - left.distanceMeters)[0];
   const worldRef = useRef<HTMLDivElement>(null);
+  const backgroundStripRef = useRef<HTMLDivElement>(null);
   const cameraScrollRef = useRef(scrollPercent);
   const cameraViewportRef = useRef(cameraViewportPercent);
   const cameraTargetRef = useRef(scrollPercent);
@@ -564,7 +579,7 @@ function ArenaPanel({
       }
       cameraScrollRef.current = scrollPercent;
       cameraViewportRef.current = cameraViewportPercent;
-      applyArenaWorldCamera(world, scrollPercent, cameraViewportPercent);
+      applyArenaWorldCamera(world, scrollPercent, cameraViewportPercent, backgroundStripRef.current);
       return;
     }
 
@@ -589,7 +604,7 @@ function ArenaPanel({
         : currentViewport + (targetViewport - currentViewport) * ease;
       cameraScrollRef.current = next;
       cameraViewportRef.current = nextViewport;
-      applyArenaWorldCamera(world, next, nextViewport);
+      applyArenaWorldCamera(world, next, nextViewport, backgroundStripRef.current);
 
       if (
         Math.abs(cameraTargetRef.current - next) < 0.0001
@@ -601,6 +616,7 @@ function ArenaPanel({
           world,
           cameraTargetRef.current,
           cameraViewportTargetRef.current,
+          backgroundStripRef.current,
         );
         cameraFrameRef.current = null;
         return;
@@ -625,27 +641,20 @@ function ArenaPanel({
       style={{ width: '100%', height: '100%', background: '#121820' }}
     >
       <div
-        ref={worldRef}
-        data-arena-world
-        data-camera-layout="adaptive-single"
-        data-camera-scroll-percent={scrollPercent.toFixed(3)}
-        data-camera-viewport-percent={cameraViewportPercent.toFixed(3)}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: `${arenaWorldWidth}%`,
-          overflow: 'hidden',
-          background: '#121820',
-          transform: 'translate3d(0, 0, 0)',
-          transformOrigin: 'left top',
-          willChange: 'transform',
-          backfaceVisibility: 'hidden',
-        }}
+        aria-hidden="true"
+        data-arena-background
+        style={{ position: 'absolute', zIndex: 0, inset: 0, overflow: 'hidden' }}
       >
         <div
-          aria-hidden="true"
-          data-arena-background
-          style={{ position: 'absolute', zIndex: 0, inset: 0, overflow: 'hidden' }}
+          ref={backgroundStripRef}
+          data-arena-background-strip
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '400%',
+            willChange: 'transform',
+            backfaceVisibility: 'hidden',
+          }}
         >
           {Array.from({ length: arenaBackgroundTileCount }, (_, tileIndex) => (
             <div
@@ -654,10 +663,9 @@ function ArenaPanel({
               data-tile-mirrored={tileIndex % 2 === 1 ? 'true' : 'false'}
               style={{
                 position: 'absolute',
-                top: 0,
-                bottom: 0,
-                left: `calc(${tileIndex * arenaViewportWidth}% - 1px)`,
-                width: `calc(${arenaViewportWidth}% + 2px)`,
+                insetBlock: 0,
+                left: `${tileIndex * 25}%`,
+                width: '25%',
                 overflow: 'hidden',
               }}
             >
@@ -674,28 +682,48 @@ function ArenaPanel({
             </div>
           ))}
         </div>
-        {arenaLaneCenters.map((_, laneIndex) => (
-          <div
-            key={`arena-lane-band-${laneIndex + 1}`}
-            aria-hidden="true"
-            data-arena-lane-band={laneIndex + 1}
-            style={{
-              position: 'absolute',
-              zIndex: 1,
-              top: `${arenaTrackTopPercent + arenaLaneHeightPercent * laneIndex}%`,
-              left: 0,
-              width: '100%',
-              height: `${arenaLaneHeightPercent}%`,
-              borderTop: '1px solid rgba(218, 224, 232, .66)',
-              borderBottom: laneIndex === 3 ? '2px solid rgba(218, 224, 232, .84)' : undefined,
-              backgroundColor: '#17191c',
-              backgroundImage: 'linear-gradient(180deg, rgba(4,6,8,.15), rgba(0,0,0,.28)), url(/assets/drag-strip-asphalt.jpg)',
-              backgroundPosition: `center, ${laneIndex * 67}px ${laneIndex * 83}px`,
-              backgroundSize: '100% 100%, 420px 420px',
-              boxShadow: laneIndex === 0 ? 'inset 0 2px 0 rgba(255,255,255,.12)' : undefined,
-            }}
-          />
-        ))}
+      </div>
+      {arenaLaneCenters.map((_, laneIndex) => (
+        <div
+          key={`arena-lane-band-${laneIndex + 1}`}
+          aria-hidden="true"
+          data-arena-lane-band={laneIndex + 1}
+          style={{
+            position: 'absolute',
+            zIndex: 1,
+            top: `${arenaTrackTopPercent + arenaLaneHeightPercent * laneIndex}%`,
+            left: 0,
+            width: '100%',
+            height: `${arenaLaneHeightPercent}%`,
+            borderTop: '1px solid rgba(218, 224, 232, .66)',
+            borderBottom: laneIndex === 3 ? '2px solid rgba(218, 224, 232, .84)' : undefined,
+            backgroundColor: '#17191c',
+            backgroundImage: 'linear-gradient(180deg, rgba(4,6,8,.15), rgba(0,0,0,.28)), url(/assets/drag-strip-asphalt.jpg)',
+            backgroundPosition: `center, ${laneIndex * 67}px ${laneIndex * 83}px`,
+            backgroundSize: '100% 100%, 420px 420px',
+            boxShadow: laneIndex === 0 ? 'inset 0 2px 0 rgba(255,255,255,.12)' : undefined,
+          }}
+        />
+      ))}
+      <div
+        ref={worldRef}
+        data-arena-world
+        data-camera-layout="adaptive-single"
+        data-camera-scroll-percent={scrollPercent.toFixed(3)}
+        data-camera-viewport-percent={cameraViewportPercent.toFixed(3)}
+        style={{
+          position: 'absolute',
+          zIndex: 2,
+          inset: 0,
+          width: `${arenaWorldWidth}%`,
+          overflow: 'hidden',
+          background: 'transparent',
+          transform: 'translate3d(0, 0, 0)',
+          transformOrigin: 'left top',
+          willChange: 'transform',
+          backfaceVisibility: 'hidden',
+        }}
+      >
         <div data-arena-start-line style={{
           position: 'absolute',
           zIndex: 5,

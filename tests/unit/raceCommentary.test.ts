@@ -716,7 +716,7 @@ describe('race commentary event detection', () => {
     expect(selectLiveRaceCommentaryEvent(events)?.kind).toBe('race-start');
   });
 
-  it('drops race calls that are no longer live', () => {
+  it('keeps a cold-start voice call live briefly, then drops it', () => {
     const tracker = createRaceCommentaryTracker();
     const [startEvent] = detectRaceCommentaryEvents(
       tracker,
@@ -724,8 +724,8 @@ describe('race commentary event detection', () => {
       1_000,
     );
 
-    expect(raceCommentaryEventIsFresh(startEvent, 3_500)).toBe(true);
-    expect(raceCommentaryEventIsFresh(startEvent, 3_501)).toBe(false);
+    expect(raceCommentaryEventIsFresh(startEvent, 9_000)).toBe(true);
+    expect(raceCommentaryEventIsFresh(startEvent, 9_001)).toBe(false);
   });
 
   it('keeps a buffered race update live long enough to bridge consecutive calls', () => {

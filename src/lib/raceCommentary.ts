@@ -80,7 +80,10 @@ export type RaceCommentaryEvent = {
 
 export function maximumRaceCommentaryEventAgeMs(kind: RaceCommentaryEventKind) {
   if (kind === 'race-start') {
-    return 2_500;
+    // Natural voice generation can take several seconds on a cold request.
+    // Keep the opening call valid long enough to begin during short sprints;
+    // a completed-field finish event still supersedes it before playback.
+    return 8_000;
   }
   if (kind === 'lead-change' || kind === 'position-change') {
     return 2_750;

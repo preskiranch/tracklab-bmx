@@ -1726,6 +1726,7 @@ test('track map save waits for account sync and shared publication', async ({ pa
 });
 
 test('straight sprint restores and saves a separate camera for each distance', async ({ page }) => {
+  test.setTimeout(75_000);
   const trackId = 'custom-camera-distance-sprint';
   const customTrack = {
     id: trackId,
@@ -1801,6 +1802,7 @@ test('straight sprint restores and saves a separate camera for each distance', a
     admin: true,
     membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
   };
+  const commentarySpeechKinds: string[] = [];
 
   await page.addInitScript(({ storedTrack, storedMapping }) => {
     window.localStorage.setItem('tracklab-bmx-custom-routes-v1', JSON.stringify([storedTrack]));
@@ -1845,6 +1847,34 @@ test('straight sprint restores and saves a separate camera for each distance', a
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ raceViewPreferences: null }),
+    });
+  });
+  await page.route('**/api/commentary/config', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ aiAvailable: true, speechStatus: 'ready' }),
+    });
+  });
+  await page.route('**/api/commentary/pre-race', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        line: 'Four riders are set for a flat-out drag strip sprint.',
+        source: 'local',
+        generatedAt: new Date().toISOString(),
+        variableCount: 12,
+        supportedVariableCount: 73,
+        sources: [],
+        weather: { available: false },
+      }),
+    });
+  });
+  await page.route('**/api/commentary/speech', async (route) => {
+    const payload = route.request().postDataJSON() as { eventKind?: string };
+    commentarySpeechKinds.push(payload.eventKind ?? '');
+    await route.fulfill({
+      contentType: 'audio/mpeg',
+      path: 'public/assets/uci-random-start.mp3',
     });
   });
 
@@ -2067,7 +2097,7 @@ test('straight sprint restores and saves a separate camera for each distance', a
   expect(arenaMotionStyles.duration).toBe('0s');
   expect(arenaMotionStyles.willChange).toContain('transform');
   const arenaBackgroundTiles = arena.locator('[data-arena-background-tile]');
-  expect(await arenaBackgroundTiles.count()).toBeGreaterThan(2);
+  expect(await arenaBackgroundTiles.count()).toBe(4);
   await expect(arenaBackgroundTiles.nth(0)).toHaveAttribute('data-tile-mirrored', 'false');
   await expect(arenaBackgroundTiles.nth(1)).toHaveAttribute('data-tile-mirrored', 'true');
   const backgroundTileGaps = await arenaBackgroundTiles.evaluateAll((tiles) => tiles.slice(1).map((tile, index) => {
@@ -2098,11 +2128,60 @@ test('straight sprint restores and saves a separate camera for each distance', a
   }
   await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'dropped');
   await page.getByRole('button', { name: 'Cancel Race', exact: true }).click();
+  commentarySpeechKinds.length = 0;
+  await page.getByLabel('Sprint distance').selectOption('300');
   const restartSprintButton = page.getByRole('button', { name: 'Start Demo Sprint', exact: true });
   await expect(restartSprintButton).toBeVisible();
   await restartSprintButton.click();
   await expect(bmxStartGate).toHaveAttribute('data-gate-phase', 'staging');
   await expect(bmxStartGate).toHaveAttribute('data-gate-state', 'upright');
+  await page.getByRole('button', { name: 'Force Start', exact: true }).click();
+  await expect(page.locator('.earth-overlay.top-left')).toContainText('Live Race', { timeout: 15_000 });
+  await expect(arena).toHaveAttribute('data-race-distance-meters', '91.440');
+  await expect.poll(
+    () => commentarySpeechKinds.includes('race-start'),
+    { timeout: 8_000 },
+  ).toBe(true);
+  const frameTiming = await arena.evaluate(async (arenaElement) => await new Promise<{
+    frameCount: number;
+    p95GapMs: number;
+    maximumGapMs: number;
+    cameraPositions: number;
+  }>((resolve) => {
+    const gaps: number[] = [];
+    const cameraPositions = new Set<string>();
+    let frameCount = 0;
+    let startedAt = 0;
+    let previousAt = 0;
+    const collect = (now: number) => {
+      if (startedAt === 0) {
+        startedAt = now;
+        previousAt = now;
+      } else {
+        gaps.push(now - previousAt);
+        previousAt = now;
+      }
+      frameCount += 1;
+      const cameraWorld = arenaElement.querySelector<HTMLElement>('[data-arena-world]');
+      cameraPositions.add(cameraWorld?.dataset.cameraScrollPercent ?? '');
+      if (now - startedAt < 1_800) {
+        requestAnimationFrame(collect);
+        return;
+      }
+      const sortedGaps = [...gaps].sort((left, right) => left - right);
+      resolve({
+        frameCount,
+        p95GapMs: sortedGaps[Math.floor(sortedGaps.length * 0.95)] ?? 0,
+        maximumGapMs: sortedGaps.at(-1) ?? 0,
+        cameraPositions: cameraPositions.size,
+      });
+    };
+    requestAnimationFrame(collect);
+  }));
+  expect(frameTiming.frameCount).toBeGreaterThan(30);
+  expect(frameTiming.p95GapMs).toBeLessThan(70);
+  expect(frameTiming.maximumGapMs).toBeLessThan(350);
+  expect(frameTiming.cameraPositions).toBeGreaterThan(2);
   await page.getByRole('button', { name: 'Cancel Race', exact: true }).click();
 });
 
@@ -3130,6 +3209,14 @@ test.describe('mobile commentary playback', () => {
       { timeout: 35_000 },
     ).toBe(true);
     expect(injectedLiveSpeechFailure).toBe(true);
+    await expect.poll(
+      () => speechEventKinds.filter((kind) => (
+        kind !== 'preview'
+        && kind !== 'pre-race'
+        && kind !== 'race-start'
+      )).length,
+      { timeout: 35_000 },
+    ).toBeGreaterThanOrEqual(2);
     expect(await page.evaluate(() => (
       (window as typeof window & {
         __tracklabBrowserFallbackCount?: number;
