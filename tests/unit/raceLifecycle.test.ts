@@ -5,6 +5,7 @@ import {
   falseStartSpeedThresholdKph,
   nextRaceFinishDeadline,
   raceFinishCountdownMs,
+  shouldHoldStraightSprintForGhost,
 } from '../../src/lib/raceLifecycle';
 import type { BikeSample, PlayerSlot, RiderState } from '../../src/types';
 
@@ -84,6 +85,14 @@ describe('race lifecycle timing', () => {
     expect(countdownSeconds(30_000, 21_001)).toBe(9);
     expect(countdownSeconds(30_000, 29_999)).toBe(1);
     expect(countdownSeconds(30_000, 30_000)).toBe(0);
+  });
+
+  it('holds a finished straight sprint until the selected ghost reaches its finish time', () => {
+    expect(shouldHoldStraightSprintForGhost('straight-sprint', 'finished', 30_000, 18_000)).toBe(true);
+    expect(shouldHoldStraightSprintForGhost('straight-sprint', 'finished', 30_000, 30_000)).toBe(false);
+    expect(shouldHoldStraightSprintForGhost('straight-sprint', 'racing', 30_000, 18_000)).toBe(false);
+    expect(shouldHoldStraightSprintForGhost('race', 'finished', 30_000, 18_000)).toBe(false);
+    expect(shouldHoldStraightSprintForGhost('straight-sprint', 'finished', 0, 0)).toBe(false);
   });
 });
 

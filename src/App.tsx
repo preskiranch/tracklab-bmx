@@ -156,6 +156,7 @@ import {
   detectFalseStart,
   falseStartResetCountdownMs,
   raceFinishCountdownMs,
+  shouldHoldStraightSprintForGhost,
   type FalseStartDetection,
 } from './lib/raceLifecycle';
 import {
@@ -2660,6 +2661,19 @@ export default function App() {
     splitDecisionPoints,
     raceZones,
   );
+  const selectedGhostFinishMs = useMemo(
+    () => selectedGhostLaps.reduce(
+      (latestFinishMs, ghost) => Math.max(latestFinishMs, ghost.finishTimeMs),
+      0,
+    ),
+    [selectedGhostLaps],
+  );
+  const straightSprintGhostFinishPending = shouldHoldStraightSprintForGhost(
+    appMode,
+    raceState,
+    selectedGhostFinishMs,
+    ghostPlaybackMs,
+  );
   const raceCommentary = useRaceCommentary({
     preferences: raceCommentaryPreferences,
     raceState,
@@ -2688,10 +2702,16 @@ export default function App() {
     raceState === 'finished' && !raceCommentary.finishAnnouncementsComplete
   );
   const raceAmbienceActive = (
-    startGateStatus.active || raceState === 'racing' || finishingAnnouncementsActive
+    startGateStatus.active
+    || raceState === 'racing'
+    || finishingAnnouncementsActive
+    || straightSprintGhostFinishPending
   );
   const raceViewFullscreen = (
-    startGateStatus.active || raceState === 'racing' || finishingAnnouncementsActive
+    startGateStatus.active
+    || raceState === 'racing'
+    || finishingAnnouncementsActive
+    || straightSprintGhostFinishPending
   );
   const finishCountdownSeconds = finishWindowEndsAt != null && raceState === 'racing'
     ? Math.min(raceFinishCountdownMs / 1000, Math.max(1, countdownSeconds(finishWindowEndsAt, now)))
@@ -3109,13 +3129,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (raceState === 'finished' && raceCommentary.finishAnnouncementsComplete) {
+    if (
+      raceState === 'finished'
+      && raceCommentary.finishAnnouncementsComplete
+      && !straightSprintGhostFinishPending
+    ) {
       releaseRaceFullscreen();
     }
   }, [
     raceCommentary.finishAnnouncementsComplete,
     raceState,
     releaseRaceFullscreen,
+    straightSprintGhostFinishPending,
   ]);
 
   const sendRoomReadyState = useCallback((sessionId: string) => {
@@ -3719,26 +3744,44 @@ export default function App() {
       return undefined;
     }
 
-    if (raceState === 'finished') {
-      const maxFinishMs = selectedGhostLaps.reduce((maxMs, ghost) => Math.max(maxMs, ghost.finishTimeMs), 0);
-      setGhostPlaybackMs(maxFinishMs);
+    const continueFinishedStraightSprintGhost = (
+      raceState === 'finished'
+      && appMode === 'straight-sprint'
+      && selectedGhostFinishMs > 0
+    );
+
+    if (raceState === 'finished' && !continueFinishedStraightSprintGhost) {
+      setGhostPlaybackMs(selectedGhostFinishMs);
       return undefined;
     }
 
-    if (raceState !== 'racing') {
+    if (raceState !== 'racing' && !continueFinishedStraightSprintGhost) {
       return undefined;
     }
 
     let frameId = 0;
     const tick = () => {
       const startedAt = ghostRaceStartedAtRef.current ?? raceCapture?.startedAt ?? Date.now();
-      setGhostPlaybackMs(Math.max(0, Date.now() - startedAt));
+      const elapsedMs = Math.max(0, Date.now() - startedAt);
+      const playbackMs = continueFinishedStraightSprintGhost
+        ? Math.min(elapsedMs, selectedGhostFinishMs)
+        : elapsedMs;
+      setGhostPlaybackMs(playbackMs);
+      if (continueFinishedStraightSprintGhost && playbackMs >= selectedGhostFinishMs) {
+        return;
+      }
       frameId = window.requestAnimationFrame(tick);
     };
 
     tick();
     return () => window.cancelAnimationFrame(frameId);
-  }, [raceCapture?.startedAt, raceState, selectedGhostLaps, startGateStatus.active]);
+  }, [
+    appMode,
+    raceCapture?.startedAt,
+    raceState,
+    selectedGhostFinishMs,
+    startGateStatus.active,
+  ]);
 
   useEffect(() => {
     if (

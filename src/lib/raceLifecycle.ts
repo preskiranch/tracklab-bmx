@@ -1,5 +1,5 @@
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
-import type { BikeSample, PlayerSlot, RiderState } from '../types';
+import type { AppMode, BikeSample, PlayerSlot, RaceState, RiderState } from '../types';
 
 export const raceFinishCountdownMs = 10_000;
 export const falseStartResetCountdownMs = 5000;
@@ -99,4 +99,16 @@ export function nextRaceFinishDeadline(
 
 export function countdownSeconds(deadline: number, now = Date.now()) {
   return Math.max(0, Math.ceil((deadline - now) / 1000));
+}
+
+export function shouldHoldStraightSprintForGhost(
+  appMode: AppMode,
+  raceState: RaceState,
+  latestGhostFinishMs: number,
+  ghostPlaybackMs: number,
+) {
+  return appMode === 'straight-sprint'
+    && raceState === 'finished'
+    && latestGhostFinishMs > 0
+    && ghostPlaybackMs < latestGhostFinishMs;
 }

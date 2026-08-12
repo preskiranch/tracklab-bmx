@@ -1726,7 +1726,7 @@ test('track map save waits for account sync and shared publication', async ({ pa
 });
 
 test('straight sprint restores and saves a separate camera for each distance', async ({ page }) => {
-  test.setTimeout(75_000);
+  test.setTimeout(110_000);
   const trackId = 'custom-camera-distance-sprint';
   const customTrack = {
     id: trackId,
@@ -1847,6 +1847,42 @@ test('straight sprint restores and saves a separate camera for each distance', a
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ raceViewPreferences: null }),
+    });
+  });
+  await page.route('**/api/ghosts*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ghosts: [{
+          version: 1,
+          id: 'slower-300-foot-sprint-ghost',
+          trackId,
+          trackName: customTrack.name,
+          routeVariantId: 'amateur',
+          riderName: 'Patient Ghost',
+          ownerKey: authUser.profileKey,
+          ownerName: authUser.name,
+          colorName: 'blue',
+          accent: '#2aa8ff',
+          source: 'personal',
+          raceSource: 'live',
+          lapCount: 1,
+          sprintDistanceFeet: 300,
+          sprintAirSetting: 5,
+          finishTimeMs: 25_000,
+          thirtyFootTimeMs: 2_200,
+          savedAt: Date.now(),
+          analyticsPublic: false,
+          medalRank: null,
+          summary: null,
+          zoneResults: [],
+          points: [
+            { elapsedMs: 0, distanceMeters: 0, velocityMps: 0, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+            { elapsedMs: 12_500, distanceMeters: 45.72, velocityMps: 4, phase: 'pedaling', pitch: 0, rank: 1, actualBranches: {} },
+            { elapsedMs: 25_000, distanceMeters: 91.44, velocityMps: 0, phase: 'finished', pitch: 0, rank: 1, actualBranches: {}, finishedAt: 25_000 },
+          ],
+        }],
+      }),
     });
   });
   await page.route('**/api/commentary/config', async (route) => {
@@ -2130,6 +2166,10 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await page.getByRole('button', { name: 'Cancel Race', exact: true }).click();
   commentarySpeechKinds.length = 0;
   await page.getByLabel('Sprint distance').selectOption('300');
+  const slowerSprintGhost = page.locator('.ghost-leaderboard-entry').filter({ hasText: 'Patient Ghost' });
+  await expect(slowerSprintGhost).toBeVisible();
+  await slowerSprintGhost.click();
+  await expect(slowerSprintGhost).toContainText('Selected to race');
   const restartSprintButton = page.getByRole('button', { name: 'Start Demo Sprint', exact: true });
   await expect(restartSprintButton).toBeVisible();
   await restartSprintButton.click();
@@ -2182,7 +2222,12 @@ test('straight sprint restores and saves a separate camera for each distance', a
   expect(frameTiming.p95GapMs).toBeLessThan(70);
   expect(frameTiming.maximumGapMs).toBeLessThan(350);
   expect(frameTiming.cameraPositions).toBeGreaterThan(2);
-  await page.getByRole('button', { name: 'Cancel Race', exact: true }).click();
+  await expect.poll(async () => page.evaluate(() => (
+    (window as typeof window & { __tracklabLiveDebug?: { raceState?: string } })
+      .__tracklabLiveDebug?.raceState
+  )), { timeout: 20_000 }).toBe('finished');
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+  await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/, { timeout: 25_000 });
 });
 
 test('regular racers can use published tracks but cannot access mapping tools', async ({ page }) => {
