@@ -50,6 +50,7 @@ import type {
   TrackPoint,
   TrackRaceViewMode,
   TrackRecord,
+  TrackRouteVariant,
   TrackRouteVariantId,
   TrackSplitSection,
   TrackZone,
@@ -115,6 +116,7 @@ type EarthTrackViewProps = {
   riderOverlayPreference?: RaceRiderOverlayLayout;
   activeZones: TrackZone[];
   raceViewMode: TrackRaceViewMode;
+  gameRoute?: TrackRouteVariant;
   canCancelRace: boolean;
   mappingMode: boolean;
   mappingFullscreen: boolean;
@@ -229,6 +231,7 @@ export function EarthTrackView({
   riderOverlayPreference,
   activeZones,
   raceViewMode,
+  gameRoute,
   canCancelRace,
   mappingMode,
   mappingFullscreen,
@@ -280,7 +283,7 @@ export function EarthTrackView({
   const showingRace3D = raceViewMode === '3d'
     && !mappingMode
     && race3DFallbackTrackId !== track.id;
-  const showingGameArena = raceViewMode === 'game' && !mappingMode;
+  const showingGameArena = raceViewMode === 'game' && (!mappingMode || supportsBmxGameArena(track));
   const showingNorthBayGameArena = showingGameArena && supportsBmxGameArena(track);
   const showingAny3D = showingPedalZone3D || showingRace3D;
   const mapping3DTrackCenter = trackCenter(track);
@@ -382,6 +385,20 @@ export function EarthTrackView({
                 activeZones={activeZones}
                 speedUnit={speedUnit}
                 showHud={raceViewFullscreen && !mappingMode}
+                gameRoute={gameRoute}
+                mappingMode={mappingMode}
+                mappingEditMode={mappingEditMode}
+                draftPoints={draftPoints}
+                draftZonePoints={draftZonePoints}
+                draftZoneMeters={draftZoneMeters}
+                onMappingPathPointAdd={onMappingPathPointAdd}
+                onMappingPathPointMove={onMappingPathPointMove}
+                onMappingPathPointRemove={onMappingPathPointRemove}
+                onMappingZonePointAdd={onMappingZonePointAdd}
+                onMappingZonePointMove={onMappingZonePointMove}
+                onMappingZonePointRemove={onMappingZonePointRemove}
+                onMappingSplitPointAdd={onMappingSplitPointAdd}
+                onMappingSplitDrawEnd={onMappingSplitDrawEnd}
               />
             ) : (
               <DragStripGameArenaLayer

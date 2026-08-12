@@ -802,6 +802,18 @@ describe('cloud API trust boundaries', () => {
       ...trackMapping('north-bay-bmx-napa-valley'),
       trackName: 'North Bay BMX - Napa Valley',
       raceViewMode: 'game',
+      gameRoute: {
+        id: 'amateur',
+        name: 'Game Track',
+        restAfterSeconds: 1,
+        lengthMeters: 380,
+        centerline: [{ lat: -0.0001, lng: 0.0002 }, { lat: -0.0004, lng: 0.001 }],
+        startGate: { lat: -0.0001, lng: 0.0002 },
+        finishLine: { lat: -0.0004, lng: 0.001 },
+        zoneBoundaryMeters: [0, 45],
+        zones: [{ id: 'game-pedal-1', name: 'Pedal Zone 1', startMeter: 0, endMeter: 45, type: 'pedal' }],
+        splitSections: [],
+      },
     };
     const gameSave = await api('/api/user-data/track-mapping', {
       method: 'POST',
@@ -809,21 +821,21 @@ describe('cloud API trust boundaries', () => {
     });
     expect(gameSave.status).toBe(200);
     await expect(gameSave.json()).resolves.toMatchObject({
-      mapping: { trackId: gameMapping.trackId, raceViewMode: 'game' },
+      mapping: { trackId: gameMapping.trackId, raceViewMode: 'game', gameRoute: { name: 'Game Track', lengthMeters: 380 } },
       published: true,
-      publicMapping: { trackId: gameMapping.trackId, raceViewMode: 'game' },
+      publicMapping: { trackId: gameMapping.trackId, raceViewMode: 'game', gameRoute: { name: 'Game Track', lengthMeters: 380 } },
     });
 
     const gameProfile = await api('/api/user-data');
     await expect(gameProfile.json()).resolves.toMatchObject({
       trackMappings: {
-        [gameMapping.trackId]: { trackId: gameMapping.trackId, raceViewMode: 'game' },
+        [gameMapping.trackId]: { trackId: gameMapping.trackId, raceViewMode: 'game', gameRoute: { name: 'Game Track', lengthMeters: 380 } },
       },
     });
     const publicAfterGameSave = await api('/api/public-track-mappings');
     await expect(publicAfterGameSave.json()).resolves.toMatchObject({
       trackMappings: {
-        [gameMapping.trackId]: { trackId: gameMapping.trackId, raceViewMode: 'game' },
+        [gameMapping.trackId]: { trackId: gameMapping.trackId, raceViewMode: 'game', gameRoute: { name: 'Game Track', lengthMeters: 380 } },
       },
     });
 

@@ -1856,6 +1856,36 @@ test('North Bay game track keeps the full mapped course and pedal zones on one s
       endMeter,
       type: 'pedal' as const,
     })),
+    gameRoute: {
+      id: 'amateur' as const,
+      name: 'Game Track',
+      restAfterSeconds: 1,
+      lengthMeters: 373,
+      centerline: [
+        { lat: -0.00014, lng: 0.0003 },
+        { lat: -0.00026, lng: 0.00086 },
+        { lat: -0.00054, lng: 0.00114 },
+        { lat: -0.00066, lng: 0.00035 },
+        { lat: -0.00044, lng: 0.00083 },
+        { lat: -0.00025, lng: 0.00043 },
+      ],
+      startGate: { lat: -0.00014, lng: 0.0003 },
+      finishLine: { lat: -0.00025, lng: 0.00043 },
+      zoneBoundaryMeters: northBayZoneRanges.flat(),
+      zoneBoundarySets: [{
+        id: 'default-pedal-zones',
+        name: 'Default pedal zones',
+        boundaryMeters: northBayZoneRanges.flat(),
+      }],
+      zones: northBayZoneRanges.map(([startMeter, endMeter], index) => ({
+        id: `game-pedal-zone-${index + 1}`,
+        name: `Pedal Zone ${index + 1}`,
+        startMeter,
+        endMeter,
+        type: 'pedal' as const,
+      })),
+      splitSections: [],
+    },
     raceViewMode: 'game' as const,
   };
 
@@ -1892,11 +1922,18 @@ test('North Bay game track keeps the full mapped course and pedal zones on one s
   const arena = page.getByLabel('North Bay BMX fixed full-course game view');
   await expect(arena).toBeVisible();
   await expect(page.locator('.earth-header').getByText('BMX game arena', { exact: true })).toBeVisible();
-  await expect(arena.locator('image[href="/assets/north-bay-game-arena.jpg"]')).toHaveCount(1);
+  await expect(arena.locator('image[href="/assets/north-bay-game-arena-wide-v2.jpg"]')).toHaveCount(1);
   const renderedPedalZones = arena.locator('.north-bay-game-pedal-zone');
   await expect(renderedPedalZones.first()).toBeVisible();
   expect(await renderedPedalZones.count()).toBeGreaterThanOrEqual(10);
   await expect(arena.locator('[data-arena-world]')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Edit map' }).click();
+  await expect(page.getByLabel('Saved race view').getByRole('button', { name: 'Game Track' })).toHaveClass(/selected/);
+  await expect(page.getByRole('img', { name: 'North Bay BMX Game Track mapping canvas' })).toBeVisible();
+  await page.getByRole('button', { name: 'Adjust points' }).click();
+  await expect(arena.locator('.north-bay-game-map-point')).toHaveCount(northBayMapping.gameRoute.centerline.length);
+  await page.locator('.mapping-section').getByRole('button', { name: 'View', exact: true }).click();
 
   const stageBounds = await page.locator('.earth-stage').boundingBox();
   const arenaBounds = await arena.boundingBox();

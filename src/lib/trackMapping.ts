@@ -664,7 +664,7 @@ function normalizeSplitSection(section: TrackSplitSection): TrackSplitSection {
   };
 }
 
-function createTrackRouteVariant(
+export function createTrackRouteVariant(
   track: TrackRecord,
   variantId: TrackRouteVariantId,
   points: TrackPoint[],
@@ -915,6 +915,23 @@ export function applyUserTrackMapping(
   };
 }
 
+export function applyTrackRouteVariant(track: TrackRecord, route: TrackRouteVariant): TrackRecord {
+  const normalized = normalizeRouteVariant(route);
+  return {
+    ...track,
+    lengthMeters: normalized.lengthMeters,
+    outline: normalized.centerline,
+    centerline: normalized.centerline,
+    startGate: normalized.startGate,
+    finishLine: normalized.finishLine,
+    routeStatus: 'user-mapped',
+    zones: normalized.zones,
+    splitSections: normalized.splitSections ?? [],
+    activeRouteVariantId: normalized.id,
+    activeRouteVariantName: normalized.name,
+  };
+}
+
 export function readStoredTrackMappings(): StoredTrackMappings {
   try {
     const stored = window.localStorage.getItem(trackMappingStorageKey);
@@ -1046,6 +1063,9 @@ export function parseUserTrackMapping(value: string): UserTrackMapping {
       : [],
     routeVariants: Array.isArray(parsed.routeVariants)
       ? routeVariantsFromMapping(parsed as UserTrackMapping)
+      : undefined,
+    gameRoute: parsed.gameRoute?.centerline && parsed.gameRoute.centerline.length >= 2
+      ? normalizeRouteVariant(parsed.gameRoute)
       : undefined,
   } as UserTrackMapping;
 }

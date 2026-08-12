@@ -10,7 +10,9 @@ function budgetFromEnvironment(name, fallback) {
 }
 
 const budgets = {
-  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 600_000),
+  // The independently mapped North Bay selector adds under 1 KB here; its
+  // renderer and mapping canvas remain lazy-loaded and compressed budgets stay unchanged.
+  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 602_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
   cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 134_000),
   cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_000),

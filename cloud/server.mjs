@@ -2063,6 +2063,7 @@ function sanitizePublicTrackMapping(value) {
       .map((variant, index) => sanitizeRouteVariant(variant, index === 1 ? 'pro' : 'amateur'))
       .filter(Boolean)
     : [];
+  const gameRoute = sanitizeRouteVariant(value.gameRoute, 'amateur');
   const topLevelRoute = sanitizeRouteVariant(value);
 
   if (!topLevelRoute && routeVariants.length === 0) {
@@ -2120,6 +2121,13 @@ function sanitizePublicTrackMapping(value) {
 
   if (routeVariants.length > 0) {
     mapping.routeVariants = routeVariants;
+  }
+
+  if (gameRoute) {
+    mapping.gameRoute = {
+      ...gameRoute,
+      name: 'Game Track',
+    };
   }
 
   return mapping;

@@ -1,21 +1,32 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  arenaPointToTrackPoint,
+  northBayGameArenaHeight as viewHeight,
+  northBayGameArenaWidth as viewWidth,
+  trackPointToArenaPoint,
+} from '../lib/northBayGameArenaCoordinates';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { riderAnimationState, riderCrankStepCount } from '../lib/riderAnimation';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
 import './NorthBayGameArenaLayer.css';
+import './NorthBayGameArenaMapping.css';
 import type {
   BikeSample,
   GhostPlaybackRider,
+  MappingEditMode,
   MultiplayerRaceState,
   PlayerSlot,
   RaceState,
   RiderState,
   SpeedUnit,
+  TrackPoint,
+  TrackRouteVariant,
   TrackZone,
 } from '../types';
 
 type ArenaPoint = { x: number; y: number };
+type CoursePoint = ArenaPoint & { dx: number; dy: number };
 
 type ArenaRider = {
   id: string;
@@ -43,128 +54,76 @@ type NorthBayGameArenaLayerProps = {
   activeZones: TrackZone[];
   speedUnit: SpeedUnit;
   showHud: boolean;
+  gameRoute?: TrackRouteVariant;
+  mappingMode?: boolean;
+  mappingEditMode?: MappingEditMode;
+  draftPoints?: TrackPoint[];
+  draftZonePoints?: TrackPoint[];
+  draftZoneMeters?: number[];
+  onMappingPathPointAdd?: (point: TrackPoint) => void;
+  onMappingPathPointMove?: (index: number, point: TrackPoint) => void;
+  onMappingPathPointRemove?: (index: number) => void;
+  onMappingZonePointAdd?: (point: TrackPoint) => void;
+  onMappingZonePointMove?: (index: number, point: TrackPoint) => void;
+  onMappingZonePointRemove?: (index: number) => void;
+  onMappingSplitPointAdd?: (point: TrackPoint) => void;
+  onMappingSplitDrawEnd?: () => void;
 };
 
-const viewWidth = 1586;
-const viewHeight = 992;
-
-// This full-course path is registered to the North Bay illustration. Its only
-// scale is the saved TrackLab route length, so rider timing and pedal-zone
-// boundaries remain driven by the published mapping rather than the artwork.
-const courseControlPoints: ArenaPoint[] = [
-  { x: 470, y: 180 },
-  { x: 720, y: 224 },
-  { x: 1000, y: 286 },
-  { x: 1290, y: 350 },
-  { x: 1470, y: 392 },
-  { x: 1540, y: 424 },
-  { x: 1570, y: 470 },
-  { x: 1552, y: 520 },
-  { x: 1490, y: 570 },
-  { x: 1320, y: 620 },
-  { x: 1050, y: 684 },
-  { x: 760, y: 730 },
-  { x: 470, y: 770 },
-  { x: 255, y: 780 },
-  { x: 130, y: 760 },
-  { x: 72, y: 712 },
-  { x: 92, y: 660 },
-  { x: 170, y: 615 },
-  { x: 350, y: 582 },
-  { x: 620, y: 552 },
-  { x: 930, y: 526 },
-  { x: 1220, y: 528 },
-  { x: 1400, y: 558 },
-  { x: 1460, y: 544 },
-  { x: 1490, y: 506 },
-  { x: 1470, y: 470 },
-  { x: 1410, y: 444 },
-  { x: 1280, y: 422 },
-  { x: 1100, y: 405 },
-  { x: 900, y: 382 },
-  { x: 720, y: 354 },
-  { x: 600, y: 332 },
-  { x: 520, y: 310 },
-];
-
-function catmullRomPoint(
-  previous: ArenaPoint,
-  current: ArenaPoint,
-  next: ArenaPoint,
-  afterNext: ArenaPoint,
-  amount: number,
-): ArenaPoint {
-  const squared = amount * amount;
-  const cubed = squared * amount;
+function buildCourse(points: TrackPoint[]) {
+  const arenaPoints = points.map(trackPointToArenaPoint);
+  const lengths = arenaPoints.reduce<number[]>((result, point, index) => {
+    if (index === 0) return [0];
+    const previous = arenaPoints[index - 1];
+    return [...result, result[index - 1] + Math.hypot(point.x - previous.x, point.y - previous.y)];
+  }, []);
   return {
-    x: 0.5 * ((2 * current.x)
-      + (-previous.x + next.x) * amount
-      + (2 * previous.x - 5 * current.x + 4 * next.x - afterNext.x) * squared
-      + (-previous.x + 3 * current.x - 3 * next.x + afterNext.x) * cubed),
-    y: 0.5 * ((2 * current.y)
-      + (-previous.y + next.y) * amount
-      + (2 * previous.y - 5 * current.y + 4 * next.y - afterNext.y) * squared
-      + (-previous.y + 3 * current.y - 3 * next.y + afterNext.y) * cubed),
+    points: arenaPoints,
+    lengths,
+    pixelLength: lengths[lengths.length - 1] ?? 0,
+    path: arenaPoints.length > 1
+      ? `M ${arenaPoints.map((point) => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' L ')}`
+      : '',
   };
 }
 
-function smoothCourse(points: ArenaPoint[], samplesPerSection = 10) {
-  const samples: ArenaPoint[] = [];
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const previous = points[Math.max(0, index - 1)];
-    const current = points[index];
-    const next = points[index + 1];
-    const afterNext = points[Math.min(points.length - 1, index + 2)];
-    for (let sample = 0; sample < samplesPerSection; sample += 1) {
-      samples.push(catmullRomPoint(previous, current, next, afterNext, sample / samplesPerSection));
-    }
+function coursePointAtProgress(course: ReturnType<typeof buildCourse>, progress: number): CoursePoint {
+  if (course.points.length < 2 || course.pixelLength <= 0) {
+    const point = course.points[0] ?? { x: 0, y: 0 };
+    return { ...point, dx: 1, dy: 0 };
   }
-  samples.push(points[points.length - 1]);
-  return samples;
-}
-
-const coursePoints = smoothCourse(courseControlPoints);
-const courseLengths = coursePoints.reduce<number[]>((lengths, point, index) => {
-  if (index === 0) {
-    return [0];
-  }
-  const previous = coursePoints[index - 1];
-  return [...lengths, lengths[index - 1] + Math.hypot(point.x - previous.x, point.y - previous.y)];
-}, []);
-const coursePixelLength = courseLengths[courseLengths.length - 1];
-const coursePath = `M ${coursePoints.map((point) => `${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' L ')}`;
-
-function coursePointAtProgress(progress: number) {
-  const targetLength = Math.max(0, Math.min(1, progress)) * coursePixelLength;
-  let upperIndex = courseLengths.findIndex((length) => length >= targetLength);
-  if (upperIndex <= 0) {
-    upperIndex = 1;
-  }
+  const targetLength = Math.max(0, Math.min(1, progress)) * course.pixelLength;
+  let upperIndex = course.lengths.findIndex((length) => length >= targetLength);
+  if (upperIndex <= 0) upperIndex = 1;
   const lowerIndex = upperIndex - 1;
-  const lowerLength = courseLengths[lowerIndex];
-  const upperLength = courseLengths[upperIndex];
+  const lowerLength = course.lengths[lowerIndex];
+  const upperLength = course.lengths[upperIndex];
   const amount = upperLength === lowerLength ? 0 : (targetLength - lowerLength) / (upperLength - lowerLength);
-  const lower = coursePoints[lowerIndex];
-  const upper = coursePoints[upperIndex];
-  const point = {
+  const lower = course.points[lowerIndex];
+  const upper = course.points[upperIndex];
+  const before = course.points[Math.max(0, lowerIndex - 1)];
+  const after = course.points[Math.min(course.points.length - 1, upperIndex + 1)];
+  return {
     x: lower.x + (upper.x - lower.x) * amount,
     y: lower.y + (upper.y - lower.y) * amount,
-  };
-  const before = coursePoints[Math.max(0, lowerIndex - 1)];
-  const after = coursePoints[Math.min(coursePoints.length - 1, upperIndex + 1)];
-  return {
-    ...point,
     dx: after.x - before.x,
     dy: after.y - before.y,
   };
 }
 
-function courseSlicePath(startMeter: number, endMeter: number, trackLengthMeters: number) {
+function courseSlicePath(
+  course: ReturnType<typeof buildCourse>,
+  startMeter: number,
+  endMeter: number,
+  trackLengthMeters: number,
+) {
+  if (course.points.length < 2) return '';
   const points: ArenaPoint[] = [];
   const span = Math.max(0, endMeter - startMeter);
   const sampleCount = Math.max(2, Math.ceil(span / 2));
   for (let index = 0; index <= sampleCount; index += 1) {
     points.push(coursePointAtProgress(
+      course,
       (startMeter + span * index / sampleCount) / Math.max(1, trackLengthMeters),
     ));
   }
@@ -179,12 +138,7 @@ function ordinal(rank: number) {
   return `${rank}${rank === 1 ? 'ST' : rank === 2 ? 'ND' : rank === 3 ? 'RD' : 'TH'}`;
 }
 
-function NorthBayHud({
-  riders,
-  raceState,
-  trackLengthMeters,
-  speedUnit,
-}: {
+function NorthBayHud({ riders, raceState, trackLengthMeters, speedUnit }: {
   riders: ArenaRider[];
   raceState: RaceState;
   trackLengthMeters: number;
@@ -195,9 +149,7 @@ function NorthBayHud({
     .sort((left, right) => left.rank - right.rank || right.distanceMeters - left.distanceMeters)
     .slice(0, 4);
   const positionsEstablished = racePositionsAreEstablished(raceState, entries);
-  if (entries.length === 0) {
-    return null;
-  }
+  if (entries.length === 0) return null;
   return (
     <section className="north-bay-game-hud" aria-label="North Bay BMX live timing">
       <header><span>TrackLab North Bay Live</span><span>Full course</span></header>
@@ -233,7 +185,33 @@ export function NorthBayGameArenaLayer({
   activeZones,
   speedUnit,
   showHud,
+  gameRoute,
+  mappingMode = false,
+  mappingEditMode = 'navigate',
+  draftPoints = [],
+  draftZonePoints = [],
+  draftZoneMeters = [],
+  onMappingPathPointAdd,
+  onMappingPathPointMove,
+  onMappingPathPointRemove,
+  onMappingZonePointAdd,
+  onMappingZonePointMove,
+  onMappingZonePointRemove,
+  onMappingSplitPointAdd,
+  onMappingSplitDrawEnd,
 }: NorthBayGameArenaLayerProps) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const drawingRef = useRef(false);
+  const lastDrawPointRef = useRef<ArenaPoint | null>(null);
+  const [dragRouteIndex, setDragRouteIndex] = useState<number | null>(null);
+  const [dragZoneIndex, setDragZoneIndex] = useState<number | null>(null);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState<number | null>(null);
+  const routePoints = mappingMode ? draftPoints : gameRoute?.centerline ?? [];
+  const course = useMemo(() => buildCourse(routePoints), [routePoints]);
+  const visibleTrackLengthMeters = mappingMode
+    ? Math.max(1, course.pixelLength * 0.085)
+    : Math.max(1, trackLengthMeters);
+
   const arenaRiders = useMemo<ArenaRider[]>(() => {
     const local = riders.flatMap((rider) => {
       const player = players.find((candidate) => candidate.id === rider.playerId);
@@ -296,39 +274,165 @@ export function NorthBayGameArenaLayer({
     return [...local, ...remote, ...ghosts];
   }, [ghostRiders, players, raceState, remoteRaceStates, riders, samplesByDevice]);
 
-  const start = coursePointAtProgress(0);
-  const finish = coursePointAtProgress(1);
+  const eventPoint = (event: { clientX: number; clientY: number }) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const scale = Math.min(rect.width / viewWidth, rect.height / viewHeight);
+    const offsetX = (rect.width - viewWidth * scale) / 2;
+    const offsetY = (rect.height - viewHeight * scale) / 2;
+    return {
+      x: Math.max(0, Math.min(viewWidth, (event.clientX - rect.left - offsetX) / scale)),
+      y: Math.max(0, Math.min(viewHeight, (event.clientY - rect.top - offsetY) / scale)),
+    };
+  };
+  const asTrackPoint = (event: { clientX: number; clientY: number }) => {
+    const point = eventPoint(event);
+    return point ? arenaPointToTrackPoint(point.x, point.y) : null;
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (!mappingMode || mappingEditMode === 'navigate') return;
+    const point = asTrackPoint(event);
+    const arenaPoint = eventPoint(event);
+    if (!point || !arenaPoint) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (mappingEditMode === 'draw' || mappingEditMode === 'curve') {
+      drawingRef.current = true;
+      lastDrawPointRef.current = arenaPoint;
+      onMappingPathPointAdd?.(point);
+    } else if (mappingEditMode === 'zones') {
+      onMappingZonePointAdd?.(point);
+    } else if (mappingEditMode === 'split') {
+      drawingRef.current = true;
+      onMappingSplitPointAdd?.(point);
+    } else if (mappingEditMode === 'adjust' && selectedRouteIndex != null) {
+      onMappingPathPointMove?.(selectedRouteIndex, point);
+      setSelectedRouteIndex(null);
+    }
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (!mappingMode) return;
+    const point = asTrackPoint(event);
+    const arenaPoint = eventPoint(event);
+    if (!point || !arenaPoint) return;
+    if (dragRouteIndex != null) {
+      event.preventDefault();
+      onMappingPathPointMove?.(dragRouteIndex, point);
+      return;
+    }
+    if (dragZoneIndex != null) {
+      event.preventDefault();
+      onMappingZonePointMove?.(dragZoneIndex, point);
+      return;
+    }
+    if (!drawingRef.current) return;
+    if (mappingEditMode === 'draw' || mappingEditMode === 'curve') {
+      const last = lastDrawPointRef.current;
+      if (!last || Math.hypot(arenaPoint.x - last.x, arenaPoint.y - last.y) >= 12) {
+        lastDrawPointRef.current = arenaPoint;
+        onMappingPathPointAdd?.(point);
+      }
+    } else if (mappingEditMode === 'split') {
+      onMappingSplitPointAdd?.(point);
+    }
+  };
+
+  const handlePointerEnd = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (drawingRef.current && mappingEditMode === 'split') onMappingSplitDrawEnd?.();
+    drawingRef.current = false;
+    lastDrawPointRef.current = null;
+    setDragRouteIndex(null);
+    setDragZoneIndex(null);
+  };
+
+  const start = coursePointAtProgress(course, 0);
+  const finish = coursePointAtProgress(course, 1);
+  const routeReady = course.points.length >= 2;
   return (
-    <div className="north-bay-game-arena" aria-label="North Bay BMX fixed full-course game view">
-      <svg viewBox={`0 0 ${viewWidth} ${viewHeight}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="North Bay BMX course and racers">
-        <image href="/assets/north-bay-game-arena.jpg" width={viewWidth} height={viewHeight} />
-        <path className="north-bay-game-route-shadow" d={coursePath} />
-        <path className="north-bay-game-route" d={coursePath} />
-        {activeZones.filter((zone) => zone.type === 'pedal').map((zone, index) => (
-          <path
-            key={zone.id}
-            className="north-bay-game-pedal-zone"
-            d={courseSlicePath(zone.startMeter, zone.endMeter, trackLengthMeters)}
-          >
+    <div className={`north-bay-game-arena${mappingMode ? ' mapping' : ''}`} aria-label="North Bay BMX fixed full-course game view">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label={mappingMode ? 'North Bay BMX Game Track mapping canvas' : 'North Bay BMX course and racers'}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onContextMenu={(event) => mappingMode && event.preventDefault()}
+      >
+        <image href="/assets/north-bay-game-arena-wide-v2.jpg" width={viewWidth} height={viewHeight} />
+        {routeReady && <path className="north-bay-game-route-shadow" d={course.path} />}
+        {routeReady && <path className="north-bay-game-route" d={course.path} />}
+        {!mappingMode && activeZones.filter((zone) => zone.type === 'pedal').map((zone, index) => (
+          <path key={zone.id} className="north-bay-game-pedal-zone" d={courseSlicePath(course, zone.startMeter, zone.endMeter, visibleTrackLengthMeters)}>
             <title>{`Pedal Zone ${index + 1}: ${Math.round(zone.startMeter)}–${Math.round(zone.endMeter)} m`}</title>
           </path>
         ))}
-        <g className="north-bay-game-line" transform={`translate(${start.x} ${start.y}) rotate(${Math.atan2(start.dy, start.dx) * 180 / Math.PI + 90})`}>
-          <line x1="-28" y1="0" x2="28" y2="0" />
-        </g>
-        <g className="north-bay-game-line-label" transform={`translate(${start.x} ${start.y - 42})`}>
-          <rect x="-42" y="-14" width="84" height="28" rx="7" />
-          <text x="0" y="6">START</text>
-        </g>
-        <g className="north-bay-game-line finish" transform={`translate(${finish.x} ${finish.y}) rotate(${Math.atan2(finish.dy, finish.dx) * 180 / Math.PI + 90})`}>
-          <line x1="-28" y1="0" x2="28" y2="0" />
-        </g>
-        <g className="north-bay-game-line-label finish" transform={`translate(${finish.x} ${finish.y - 42})`}>
-          <rect x="-45" y="-14" width="90" height="28" rx="7" />
-          <text x="0" y="6">FINISH</text>
-        </g>
-        {arenaRiders.map((rider) => {
-          const position = coursePointAtProgress(rider.distanceMeters / Math.max(1, trackLengthMeters));
+        {mappingMode && draftZoneMeters.map((meter, index) => {
+          if (index % 2 !== 0 || draftZoneMeters[index + 1] == null) return null;
+          return <path key={`draft-zone-${index}`} className="north-bay-game-pedal-zone" d={courseSlicePath(course, meter, draftZoneMeters[index + 1], visibleTrackLengthMeters)} />;
+        })}
+        {routeReady && (
+          <>
+            <g className="north-bay-game-line" transform={`translate(${start.x} ${start.y}) rotate(${Math.atan2(start.dy, start.dx) * 180 / Math.PI + 90})`}><line x1="-28" y1="0" x2="28" y2="0" /></g>
+            <g className="north-bay-game-line-label" transform={`translate(${start.x} ${start.y - 42})`}><rect x="-42" y="-14" width="84" height="28" rx="7" /><text x="0" y="6">START</text></g>
+            <g className="north-bay-game-line finish" transform={`translate(${finish.x} ${finish.y}) rotate(${Math.atan2(finish.dy, finish.dx) * 180 / Math.PI + 90})`}><line x1="-28" y1="0" x2="28" y2="0" /></g>
+            <g className="north-bay-game-line-label finish" transform={`translate(${finish.x} ${finish.y - 42})`}><rect x="-45" y="-14" width="90" height="28" rx="7" /><text x="0" y="6">FINISH</text></g>
+          </>
+        )}
+        {mappingMode && mappingEditMode === 'adjust' && course.points.map((point, index) => (
+          <g key={`route-point-${index}`} className={`north-bay-game-map-point${selectedRouteIndex === index ? ' selected' : ''}`}>
+            <circle
+              cx={point.x}
+              cy={point.y}
+              r={index === 0 || index === course.points.length - 1 ? 13 : 9}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setSelectedRouteIndex(index);
+                setDragRouteIndex(index);
+                svgRef.current?.setPointerCapture(event.pointerId);
+              }}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                onMappingPathPointRemove?.(index);
+              }}
+            />
+            {(index === 0 || index === course.points.length - 1) && <text x={point.x} y={point.y + 5}>{index === 0 ? 'S' : 'F'}</text>}
+          </g>
+        ))}
+        {mappingMode && mappingEditMode === 'zones' && draftZonePoints.map((point, index) => {
+          const arena = trackPointToArenaPoint(point);
+          return (
+            <g key={`zone-point-${index}`} className="north-bay-game-zone-point">
+              <circle
+                cx={arena.x}
+                cy={arena.y}
+                r="12"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDragZoneIndex(index);
+                  svgRef.current?.setPointerCapture(event.pointerId);
+                }}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  onMappingZonePointRemove?.(index);
+                }}
+              />
+              <text x={arena.x} y={arena.y + 5}>{index + 1}</text>
+            </g>
+          );
+        })}
+        {!mappingMode && routeReady && arenaRiders.map((rider) => {
+          const position = coursePointAtProgress(course, rider.distanceMeters / Math.max(1, visibleTrackLengthMeters));
           const tangentLength = Math.max(1, Math.hypot(position.dx, position.dy));
           const normalX = -position.dy / tangentLength;
           const normalY = position.dx / tangentLength;
@@ -338,36 +442,16 @@ export function NorthBayGameArenaLayer({
           const facesLeft = position.dx < 0;
           const lean = Math.max(-7, Math.min(7, Math.atan2(position.dy, Math.abs(position.dx)) * 180 / Math.PI));
           return (
-            <foreignObject
-              key={rider.id}
-              x={facesLeft ? x - 12 : x - 58}
-              y={y - 54}
-              width="70"
-              height="70"
-              opacity={rider.ghost ? 0.55 : 1}
-              className="north-bay-game-rider-object"
-            >
-              <div
-                className="north-bay-game-rider"
-                style={{
-                  backgroundImage: `url(/assets/rider-${rider.colorName}-animated.png)`,
-                  backgroundPosition: `${rider.frame * 12.5}% 0`,
-                  transform: `rotate(${lean}deg) scaleX(${facesLeft ? -1 : 1})`,
-                }}
-                title={rider.name}
-              />
+            <foreignObject key={rider.id} x={facesLeft ? x - 12 : x - 58} y={y - 54} width="70" height="70" opacity={rider.ghost ? 0.55 : 1} className="north-bay-game-rider-object">
+              <div className="north-bay-game-rider" style={{ backgroundImage: `url(/assets/rider-${rider.colorName}-animated.png)`, backgroundPosition: `${rider.frame * 12.5}% 0`, transform: `rotate(${lean}deg) scaleX(${facesLeft ? -1 : 1})` }} title={rider.name} />
             </foreignObject>
           );
         })}
       </svg>
-      {showHud && (
-        <NorthBayHud
-          riders={arenaRiders}
-          raceState={raceState}
-          trackLengthMeters={trackLengthMeters}
-          speedUnit={speedUnit}
-        />
+      {mappingMode && routePoints.length < 2 && (
+        <div className="north-bay-game-map-empty"><b>Draw the Game Track</b><span>Choose Draw path, then trace the center of the illustrated course from start to finish.</span></div>
       )}
+      {showHud && !mappingMode && <NorthBayHud riders={arenaRiders} raceState={raceState} trackLengthMeters={visibleTrackLengthMeters} speedUnit={speedUnit} />}
     </div>
   );
 }

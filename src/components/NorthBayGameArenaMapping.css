@@ -1,0 +1,56 @@
+.north-bay-game-arena.mapping > svg {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.north-bay-game-map-point circle {
+  fill: #d8ff3e;
+  stroke: #08111c;
+  stroke-width: 4;
+  cursor: grab;
+  pointer-events: all;
+}
+
+.north-bay-game-map-point.selected circle {
+  fill: #fff;
+  stroke: #d8ff3e;
+}
+
+.north-bay-game-map-point text,
+.north-bay-game-zone-point text {
+  fill: #07101b;
+  font-size: 12px;
+  font-weight: 1000;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.north-bay-game-zone-point circle {
+  fill: #52ed82;
+  stroke: #fff;
+  stroke-width: 4;
+  cursor: grab;
+  pointer-events: all;
+}
+
+.north-bay-game-map-empty {
+  position: absolute;
+  z-index: 8;
+  top: 18px;
+  left: 50%;
+  display: grid;
+  max-width: min(580px, 80%);
+  gap: 4px;
+  padding: 12px 18px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(216, 255, 62, .85);
+  border-radius: 8px;
+  background: rgba(7, 16, 27, .92);
+  color: #fff;
+  text-align: center;
+  pointer-events: none;
+}
+
+.north-bay-game-map-empty b { font-size: 16px; }
+.north-bay-game-map-empty span { color: rgba(255, 255, 255, .8); font-size: 12px; }
