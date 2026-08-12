@@ -386,6 +386,7 @@ export function EarthTrackView({
                 speedUnit={speedUnit}
                 showHud={raceViewFullscreen && !mappingMode}
                 gameRoute={gameRoute}
+                cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                 mappingMode={mappingMode}
                 mappingEditMode={mappingEditMode}
                 draftPoints={draftPoints}

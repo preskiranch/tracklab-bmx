@@ -1948,7 +1948,27 @@ test('North Bay game track keeps the full mapped course and pedal zones on one s
   await startAction.click();
   await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
   await expect(page.getByLabel('North Bay BMX live timing')).toBeVisible();
-  await expect(arena.locator('.north-bay-game-rider-object')).toHaveCount(4);
+  const gameRiders = arena.locator('.north-bay-game-rider-object');
+  await expect(gameRiders).toHaveCount(4);
+  await expect(arena.locator('image.north-bay-game-rider-frame')).toHaveCount(4);
+  await expect(arena.locator('foreignObject')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Force Start' }).click();
+  await expect(page.getByText('Live Race', { exact: true })).toBeVisible();
+  await expect.poll(async () => Number(await gameRiders.first().getAttribute('data-distance-meters')), {
+    timeout: 15_000,
+  }).toBeGreaterThan(45);
+
+  const liveArenaBounds = await arena.boundingBox();
+  expect(liveArenaBounds).not.toBeNull();
+  for (let index = 0; index < 4; index += 1) {
+    const riderBounds = await gameRiders.nth(index).boundingBox();
+    expect(riderBounds).not.toBeNull();
+    expect(riderBounds!.x).toBeGreaterThanOrEqual(liveArenaBounds!.x);
+    expect(riderBounds!.y).toBeGreaterThanOrEqual(liveArenaBounds!.y);
+    expect(riderBounds!.x + riderBounds!.width).toBeLessThanOrEqual(liveArenaBounds!.x + liveArenaBounds!.width);
+    expect(riderBounds!.y + riderBounds!.height).toBeLessThanOrEqual(liveArenaBounds!.y + liveArenaBounds!.height);
+  }
 
   await page.screenshot({
     fullPage: false,

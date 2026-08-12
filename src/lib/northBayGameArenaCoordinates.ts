@@ -8,6 +8,10 @@ export const northBayGameArenaHeight = 992;
 const metersPerPixel = 0.085;
 const metersPerDegree = 111_320;
 
+export function northBayGameArenaPixelsForMeters(meters: number) {
+  return meters / metersPerPixel;
+}
+
 export function arenaPointToTrackPoint(x: number, y: number): TrackPoint {
   return { lat: -y * metersPerPixel / metersPerDegree, lng: x * metersPerPixel / metersPerDegree };
 }

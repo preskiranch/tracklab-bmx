@@ -2,11 +2,14 @@ import { useMemo, useRef, useState, type CSSProperties, type PointerEvent as Rea
 import {
   arenaPointToTrackPoint,
   northBayGameArenaHeight as viewHeight,
+  northBayGameArenaPixelsForMeters,
   northBayGameArenaWidth as viewWidth,
   trackPointToArenaPoint,
 } from '../lib/northBayGameArenaCoordinates';
+import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { riderAnimationState, riderCrankStepCount } from '../lib/riderAnimation';
+import { riderLaneOffsetsByPlayer } from '../lib/riderPresentation';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
 import './NorthBayGameArenaLayer.css';
@@ -55,6 +58,7 @@ type NorthBayGameArenaLayerProps = {
   speedUnit: SpeedUnit;
   showHud: boolean;
   gameRoute?: TrackRouteVariant;
+  cStartOffsetsByPlayer?: CStartOffsetsByPlayer;
   mappingMode?: boolean;
   mappingEditMode?: MappingEditMode;
   draftPoints?: TrackPoint[];
@@ -186,6 +190,7 @@ export function NorthBayGameArenaLayer({
   speedUnit,
   showHud,
   gameRoute,
+  cStartOffsetsByPlayer = {},
   mappingMode = false,
   mappingEditMode = 'navigate',
   draftPoints = [],
@@ -273,6 +278,39 @@ export function NorthBayGameArenaLayer({
     }));
     return [...local, ...remote, ...ghosts];
   }, [ghostRiders, players, raceState, remoteRaceStates, riders, samplesByDevice]);
+
+  const riderPoses = useMemo(() => {
+    const laneOffsets = riderLaneOffsetsByPlayer(players);
+    return arenaRiders.map((rider) => {
+      const visualDistance = Math.max(0, cStartVisualDistance(
+        rider.distanceMeters,
+        rider.ghost ? 0 : cStartOffsetsByPlayer[rider.playerId] ?? 0,
+      ));
+      const position = coursePointAtProgress(
+        course,
+        visualDistance / Math.max(1, visibleTrackLengthMeters),
+      );
+      const tangentLength = Math.max(1, Math.hypot(position.dx, position.dy));
+      // Match the satellite renderer's real-world lane spacing. The old game
+      // view used a much larger fixed screen offset, which pushed riders off
+      // the mapped centerline and made them crowd/cross on turns.
+      const laneOffset = northBayGameArenaPixelsForMeters(
+        laneOffsets.get(rider.playerId) ?? 0,
+      );
+      const normalX = -position.dy / tangentLength;
+      const normalY = position.dx / tangentLength;
+      return {
+        rider,
+        x: position.x + normalX * laneOffset,
+        y: position.y + normalY * laneOffset,
+        facesLeft: position.dx < 0,
+        lean: Math.max(-7, Math.min(
+          7,
+          Math.atan2(position.dy, Math.abs(position.dx)) * 180 / Math.PI,
+        )),
+      };
+    }).sort((left, right) => left.y - right.y || left.rider.playerId - right.rider.playerId);
+  }, [arenaRiders, cStartOffsetsByPlayer, course, players, visibleTrackLengthMeters]);
 
   const eventPoint = (event: { clientX: number; clientY: number }) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -431,20 +469,43 @@ export function NorthBayGameArenaLayer({
             </g>
           );
         })}
-        {!mappingMode && routeReady && arenaRiders.map((rider) => {
-          const position = coursePointAtProgress(course, rider.distanceMeters / Math.max(1, visibleTrackLengthMeters));
-          const tangentLength = Math.max(1, Math.hypot(position.dx, position.dy));
-          const normalX = -position.dy / tangentLength;
-          const normalY = position.dx / tangentLength;
-          const laneOffset = (rider.playerId - 2.5) * 10;
-          const x = position.x + normalX * laneOffset;
-          const y = position.y + normalY * laneOffset;
-          const facesLeft = position.dx < 0;
-          const lean = Math.max(-7, Math.min(7, Math.atan2(position.dy, Math.abs(position.dx)) * 180 / Math.PI));
+        {!mappingMode && routeReady && riderPoses.map(({ rider, x, y, facesLeft, lean }) => {
+          const frameSize = 192;
+          const drawSize = 70;
+          // The native rider sheet has transparent padding. Anchor the leading
+          // edge of the front tire and the tire contact patch to the route
+          // point, just as the satellite marker renderer does.
+          const frontTireAnchor = drawSize * (183 / frameSize);
+          const groundAnchor = drawSize * (183 / frameSize);
+          const clipId = `north-bay-rider-clip-${rider.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
           return (
-            <foreignObject key={rider.id} x={facesLeft ? x - 12 : x - 58} y={y - 54} width="70" height="70" opacity={rider.ghost ? 0.55 : 1} className="north-bay-game-rider-object">
-              <div className="north-bay-game-rider" style={{ backgroundImage: `url(/assets/rider-${rider.colorName}-animated.png)`, backgroundPosition: `${rider.frame * 12.5}% 0`, transform: `rotate(${lean}deg) scaleX(${facesLeft ? -1 : 1})` }} title={rider.name} />
-            </foreignObject>
+            <g
+              key={rider.id}
+              className="north-bay-game-rider-object"
+              data-player-id={rider.playerId}
+              data-distance-meters={rider.distanceMeters.toFixed(2)}
+              data-route-x={x.toFixed(2)}
+              data-route-y={y.toFixed(2)}
+              opacity={rider.ghost ? 0.55 : 1}
+              transform={`translate(${x} ${y}) rotate(${lean}) scale(${facesLeft ? -1 : 1} 1)`}
+            >
+              <title>{rider.name}</title>
+              <defs>
+                <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+                  <rect x={-frontTireAnchor} y={-groundAnchor} width={drawSize} height={drawSize} />
+                </clipPath>
+              </defs>
+              <image
+                className="north-bay-game-rider-frame"
+                href={`/assets/rider-${rider.colorName}-animated.png`}
+                x={-frontTireAnchor - rider.frame * drawSize}
+                y={-groundAnchor}
+                width={drawSize * 9}
+                height={drawSize}
+                preserveAspectRatio="none"
+                clipPath={`url(#${clipId})`}
+              />
+            </g>
           );
         })}
       </svg>
