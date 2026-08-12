@@ -120,6 +120,7 @@ type SessionControlPanelProps = {
   straightSprintMaximumRouteReady: boolean;
   straightSprintViewMode: TrackRaceViewMode;
   straightSprintGameArenaAvailable: boolean;
+  bmxGameArenaAvailable: boolean;
   isAdminProfile: boolean;
   showCustomRoutes: boolean;
   sessionTrackAvailable: boolean;
@@ -247,6 +248,7 @@ export function SessionControlPanel({
   straightSprintMaximumRouteReady,
   straightSprintViewMode,
   straightSprintGameArenaAvailable,
+  bmxGameArenaAvailable,
   isAdminProfile,
   showCustomRoutes,
   sessionTrackAvailable,
@@ -822,7 +824,7 @@ export function SessionControlPanel({
                   <span>Saved race view</span>
                   <small>Published with this track for every racer and device</small>
                 </div>
-                <div className="segmented-control compact" aria-label="Saved race view">
+                <div className={`segmented-control compact${bmxGameArenaAvailable ? ' three-way' : ''}`} aria-label="Saved race view">
                   <button
                     className={mappingRaceViewMode === 'satellite' ? 'selected' : ''}
                     type="button"
@@ -839,9 +841,21 @@ export function SessionControlPanel({
                     <Box size={14} />
                     3D Terrain
                   </button>
+                  {bmxGameArenaAvailable && (
+                    <button
+                      className={mappingRaceViewMode === 'game' ? 'selected' : ''}
+                      type="button"
+                      onClick={() => onMappingRaceViewModeChange('game')}
+                    >
+                      <Gamepad2 size={14} />
+                      Game Track
+                    </button>
+                  )}
                 </div>
                 <p>
-                  {mappingRaceViewMode === '3d'
+                  {mappingRaceViewMode === 'game'
+                    ? 'North Bay uses one fixed full-course game view. The saved route, pedal zones, and every rider stay visible without scrolling.'
+                    : mappingRaceViewMode === '3d'
                     ? 'Races on this track use 3D terrain with the same saved route, splits, and pedal zones.'
                     : 'Races on this track use the reliable satellite view.'}
                 </p>

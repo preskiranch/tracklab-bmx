@@ -68,6 +68,7 @@ import {
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
 import { supportsDragStripGameArena } from './lib/dragStripGameArena';
+import { supportsBmxGameArena } from './lib/bmxGameArena';
 import {
   bikeSampleHasDriveSignalSince,
   bmxCStartBackoffMeters,
@@ -1910,6 +1911,7 @@ export default function App() {
     [hasDualStartRoutes, raceRouteVariantId, selectedTrack, selectedTrackMapping],
   );
   const straightSprintGameArenaAvailable = supportsDragStripGameArena(effectiveTrack);
+  const bmxGameArenaAvailable = supportsBmxGameArena(effectiveTrack);
   useEffect(() => {
     setStraightSprintViewMode(selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite');
   }, [selectedTrack.id, selectedTrackMapping?.raceViewMode]);
@@ -4673,7 +4675,11 @@ export default function App() {
   }, [activeMappingRoute, clearMappingHistory]);
 
   useEffect(() => {
-    setMappingRaceViewMode(selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite');
+    setMappingRaceViewMode(
+      selectedTrackMapping?.raceViewMode === 'game' && supportsBmxGameArena(selectedTrack)
+        ? 'game'
+        : selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite',
+    );
   }, [selectedTrack.id, selectedTrackMapping?.raceViewMode]);
 
   const handleMappingModeChange = (enabled: boolean) => {
@@ -5212,7 +5218,11 @@ export default function App() {
         setPreservedZoneAnchorSets([]);
         clearMappingHistory();
         setMappingRestSeconds(importedRoute.restAfterSeconds);
-        setMappingRaceViewMode(mapping.raceViewMode === '3d' ? '3d' : 'satellite');
+        setMappingRaceViewMode(
+          mapping.raceViewMode === 'game' && supportsBmxGameArena(importedTrack ?? selectedTrack)
+            ? 'game'
+            : mapping.raceViewMode === '3d' ? '3d' : 'satellite',
+        );
         setMappingEditMode('navigate');
         setMappingMode(true);
         setDemoRaceStartedAt(null);
@@ -7550,7 +7560,9 @@ export default function App() {
                   mappingObstacleView3D={mappingObstacleView3D}
                   raceViewMode={appMode === 'straight-sprint' && straightSprintGameArenaAvailable
                     ? straightSprintViewMode
-                    : selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite'}
+                    : selectedTrackMapping?.raceViewMode === 'game' && bmxGameArenaAvailable
+                      ? 'game'
+                      : selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite'}
                   mappingRouteVariantId={mappingRouteVariantId}
                   mappingZoneBranchChoice={mappingZoneBranchChoice}
                   draftPoints={draftPoints}
@@ -7646,6 +7658,7 @@ export default function App() {
                   straightSprintMaximumRouteReady={straightSprintMaximumRouteReady}
                   straightSprintViewMode={straightSprintViewMode}
                   straightSprintGameArenaAvailable={straightSprintGameArenaAvailable}
+                  bmxGameArenaAvailable={bmxGameArenaAvailable}
                   isAdminProfile={developerUiActive}
                   showCustomRoutes={appMode === 'straight-sprint'}
                   sessionTrackAvailable={sessionTrackAvailable}

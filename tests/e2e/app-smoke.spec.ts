@@ -1816,6 +1816,111 @@ test('track map save waits for account sync and shared publication', async ({ pa
   await expect(page.getByLabel('Bike source')).toBeVisible();
 });
 
+test('North Bay game track keeps the full mapped course and pedal zones on one screen', async ({ page }, testInfo) => {
+  const authUser = {
+    id: 'north-bay-game-admin',
+    profileKey: 'user:north-bay-game-admin',
+    email: 'preskiranch@gmail.com',
+    name: 'North Bay Game Admin',
+    admin: true,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+  };
+  const northBayZoneRanges = [
+    [0, 24], [35, 49], [66, 78], [88, 137], [147, 161], [167, 179], [190, 197],
+    [203, 209], [216, 260], [274, 284], [316, 346], [351, 354], [363, 373],
+  ];
+  const northBayMapping = {
+    ...mockPedalZoneMapping,
+    trackId: 'north-bay-bmx-napa-valley',
+    trackName: 'North Bay BMX - Napa Valley',
+    lengthMeters: 373,
+    centerline: [
+      { lat: 38.2619697, lng: -122.2822171 },
+      { lat: 38.2626822, lng: -122.2815695 },
+      { lat: 38.2616165, lng: -122.2814663 },
+      { lat: 38.262435, lng: -122.2816265 },
+      { lat: 38.2621174, lng: -122.2818629 },
+    ],
+    startGate: { lat: 38.2619697, lng: -122.2822171 },
+    finishLine: { lat: 38.2621174, lng: -122.2818629 },
+    zoneBoundaryMeters: northBayZoneRanges.flat(),
+    zoneBoundarySets: [{
+      id: 'default-pedal-zones',
+      name: 'Default pedal zones',
+      boundaryMeters: northBayZoneRanges.flat(),
+    }],
+    zones: northBayZoneRanges.map(([startMeter, endMeter], index) => ({
+      id: `pedal-zone-${index + 1}`,
+      name: `Pedal Zone ${index + 1}`,
+      startMeter,
+      endMeter,
+      type: 'pedal' as const,
+    })),
+    raceViewMode: 'game' as const,
+  };
+
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/public-track-mappings', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { [northBayMapping.trackId]: northBayMapping },
+        count: 1,
+      }),
+    });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { [northBayMapping.trackId]: northBayMapping },
+        customRoutes: [],
+        bikeProfiles: [],
+      }),
+    });
+  });
+  await page.route('**/api/ghosts*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ghosts: [] }) });
+  });
+
+  await page.goto('/?track=north-bay-bmx-napa-valley');
+  await page.getByRole('button', { name: 'Open App' }).click();
+
+  const arena = page.getByLabel('North Bay BMX fixed full-course game view');
+  await expect(arena).toBeVisible();
+  await expect(page.locator('.earth-header').getByText('BMX game arena', { exact: true })).toBeVisible();
+  await expect(arena.locator('image[href="/assets/north-bay-game-arena.jpg"]')).toHaveCount(1);
+  const renderedPedalZones = arena.locator('.north-bay-game-pedal-zone');
+  await expect(renderedPedalZones.first()).toBeVisible();
+  expect(await renderedPedalZones.count()).toBeGreaterThanOrEqual(10);
+  await expect(arena.locator('[data-arena-world]')).toHaveCount(0);
+
+  const stageBounds = await page.locator('.earth-stage').boundingBox();
+  const arenaBounds = await arena.boundingBox();
+  expect(stageBounds).not.toBeNull();
+  expect(arenaBounds).not.toBeNull();
+  expect(Math.abs(arenaBounds!.width - stageBounds!.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(arenaBounds!.height - stageBounds!.height)).toBeLessThanOrEqual(1);
+
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  const startAction = page.locator('.workflow-step.primary-action');
+  await expect(startAction).toContainText('Start Demo Race');
+  await startAction.click();
+  await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+  await expect(page.getByLabel('North Bay BMX live timing')).toBeVisible();
+  await expect(arena.locator('.north-bay-game-rider-object')).toHaveCount(4);
+
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('north-bay-fixed-game-track.png'),
+  });
+
+  await expect(page.getByLabel('North Bay BMX live timing')).toBeVisible();
+});
+
 test('straight sprint restores and saves a separate camera for each distance', async ({ page }) => {
   test.setTimeout(110_000);
   const trackId = 'custom-camera-distance-sprint';

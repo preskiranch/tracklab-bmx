@@ -30,6 +30,7 @@ import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
 import { mapping3DCenterForTrack } from '../lib/googleMaps3d';
 import { trackGoogleMapsUrl } from '../lib/mapLinks';
 import { raceProgressPercent } from '../lib/raceProgress';
+import { supportsBmxGameArena } from '../lib/bmxGameArena';
 import { formatDistanceMeters, formatReactionTime } from '../units';
 import type {
   BikeSample,
@@ -64,6 +65,11 @@ const GoogleMaps3DTrackLayer = lazy(async () => {
 const DragStripGameArenaLayer = lazy(async () => {
   const module = await import('./DragStripGameArenaLayer');
   return { default: module.DragStripGameArenaLayer };
+});
+
+const NorthBayGameArenaLayer = lazy(async () => {
+  const module = await import('./NorthBayGameArenaLayer');
+  return { default: module.NorthBayGameArenaLayer };
 });
 
 const RaceRiderOverlay = lazy(async () => {
@@ -275,6 +281,7 @@ export function EarthTrackView({
     && !mappingMode
     && race3DFallbackTrackId !== track.id;
   const showingGameArena = raceViewMode === 'game' && !mappingMode;
+  const showingNorthBayGameArena = showingGameArena && supportsBmxGameArena(track);
   const showingAny3D = showingPedalZone3D || showingRace3D;
   const mapping3DTrackCenter = trackCenter(track);
   const mapping3DSafeCenter = mapping3DCenterForTrack(
@@ -362,22 +369,37 @@ export function EarthTrackView({
 
       <div className="earth-stage google-enabled">
         {showingGameArena ? (
-          <Suspense fallback={<div className="google-map-status loading">Loading Drag Strip game arena…</div>}>
-            <DragStripGameArenaLayer
-              riders={mapRiders}
-              ghostRiders={mapGhostRiders}
-              remoteRaceStates={mapRemoteRaceStates}
-              players={players}
-              samplesByDevice={samplesByDevice}
-              raceState={raceState}
-              startGateActive={startGateActive}
-              startGatePhase={startGatePhase}
-              raceDistanceMeters={progressLengthMeters}
-              speedUnit={speedUnit}
-              distanceUnit={distanceUnit}
-              newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
-              showHud={raceViewFullscreen && !mappingMode}
-            />
+          <Suspense fallback={<div className="google-map-status loading">Loading BMX game arena…</div>}>
+            {showingNorthBayGameArena ? (
+              <NorthBayGameArenaLayer
+                riders={mapRiders}
+                ghostRiders={mapGhostRiders}
+                remoteRaceStates={mapRemoteRaceStates}
+                players={players}
+                samplesByDevice={samplesByDevice}
+                raceState={raceState}
+                trackLengthMeters={progressLengthMeters}
+                activeZones={activeZones}
+                speedUnit={speedUnit}
+                showHud={raceViewFullscreen && !mappingMode}
+              />
+            ) : (
+              <DragStripGameArenaLayer
+                riders={mapRiders}
+                ghostRiders={mapGhostRiders}
+                remoteRaceStates={mapRemoteRaceStates}
+                players={players}
+                samplesByDevice={samplesByDevice}
+                raceState={raceState}
+                startGateActive={startGateActive}
+                startGatePhase={startGatePhase}
+                raceDistanceMeters={progressLengthMeters}
+                speedUnit={speedUnit}
+                distanceUnit={distanceUnit}
+                newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
+                showHud={raceViewFullscreen && !mappingMode}
+              />
+            )}
           </Suspense>
         ) : googleMapsConfigured ? (
           showingAny3D ? (
