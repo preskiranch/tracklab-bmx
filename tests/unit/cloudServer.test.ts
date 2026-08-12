@@ -798,6 +798,35 @@ describe('cloud API trust boundaries', () => {
       },
     });
 
+    const gameMapping = {
+      ...trackMapping('north-bay-bmx-napa-valley'),
+      trackName: 'North Bay BMX - Napa Valley',
+      raceViewMode: 'game',
+    };
+    const gameSave = await api('/api/user-data/track-mapping', {
+      method: 'POST',
+      body: JSON.stringify({ mapping: gameMapping }),
+    });
+    expect(gameSave.status).toBe(200);
+    await expect(gameSave.json()).resolves.toMatchObject({
+      mapping: { trackId: gameMapping.trackId, raceViewMode: 'game' },
+      published: true,
+      publicMapping: { trackId: gameMapping.trackId, raceViewMode: 'game' },
+    });
+
+    const gameProfile = await api('/api/user-data');
+    await expect(gameProfile.json()).resolves.toMatchObject({
+      trackMappings: {
+        [gameMapping.trackId]: { trackId: gameMapping.trackId, raceViewMode: 'game' },
+      },
+    });
+    const publicAfterGameSave = await api('/api/public-track-mappings');
+    await expect(publicAfterGameSave.json()).resolves.toMatchObject({
+      trackMappings: {
+        [gameMapping.trackId]: { trackId: gameMapping.trackId, raceViewMode: 'game' },
+      },
+    });
+
     const customTrack = customSprintTrack(`custom-drag-strip-${Date.now()}`);
     const customMapping = {
       ...trackMapping(customTrack.id),

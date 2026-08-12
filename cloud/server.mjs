@@ -2109,7 +2109,9 @@ function sanitizePublicTrackMapping(value) {
         .filter(Boolean)
       : primaryRoute.zoneBoundarySets,
     splitSections,
-    raceViewMode: value.raceViewMode === '3d' ? '3d' : 'satellite',
+    raceViewMode: value.raceViewMode === '3d' || value.raceViewMode === 'game'
+      ? value.raceViewMode
+      : 'satellite',
   };
 
   if (!mapping.trackId || mapping.centerline.length < 2) {
