@@ -142,6 +142,11 @@ import {
   syncGhostLapToCloud,
   writeStoredGhostLaps,
 } from './lib/ghosts';
+import {
+  personalRecordAchievements,
+  previousPersonalBestTimes,
+  type PreviousPersonalBestTimes,
+} from './lib/personalRecords';
 import { readPublicTrackCatalog } from './lib/publicTrackMappings';
 import {
   normalizeStraightSprintAirSetting,
@@ -1546,6 +1551,7 @@ export default function App() {
   const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
   const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
+  const [previousRaceBestTimes, setPreviousRaceBestTimes] = useState<PreviousPersonalBestTimes>({});
   const [lapCount, setLapCount] = useState(1);
   const [straightSprintDistanceFeet, setStraightSprintDistanceFeet] = useState(100);
   const [straightSprintAirSetting, setStraightSprintAirSetting] = useState(1);
@@ -2463,7 +2469,7 @@ export default function App() {
   const ghostRouteVariantId = effectiveTrack.activeRouteVariantId ?? (hasDualStartRoutes ? raceRouteVariantId : undefined);
   const activeSprintDistanceFeet = appMode === 'straight-sprint' ? straightSprintDistanceFeet : undefined;
   const activeSprintAirSetting = appMode === 'straight-sprint' ? straightSprintAirSetting : undefined;
-  const availableGhostLaps = useMemo(
+  const eventGhostLaps = useMemo(
     () => ghostsForTrackRoute(
       ghostLaps,
       effectiveTrack.id,
@@ -2471,8 +2477,19 @@ export default function App() {
       isLoopTrack ? lapCount : 1,
       activeSprintDistanceFeet,
       activeSprintAirSetting,
-    )
-      .filter((ghost) => (
+    ),
+    [
+      activeSprintAirSetting,
+      activeSprintDistanceFeet,
+      effectiveTrack.id,
+      ghostLaps,
+      ghostRouteVariantId,
+      isLoopTrack,
+      lapCount,
+    ],
+  );
+  const availableGhostLaps = useMemo(
+    () => eventGhostLaps.filter((ghost) => (
         ghost.raceSource === 'live'
         && (
           ghost.ownerKey === cloudProfileKey
@@ -2483,14 +2500,8 @@ export default function App() {
       .sort((left, right) => left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt)
       .slice(0, 50),
     [
-      activeSprintAirSetting,
-      activeSprintDistanceFeet,
       cloudProfileKey,
-      effectiveTrack.id,
-      ghostLaps,
-      ghostRouteVariantId,
-      isLoopTrack,
-      lapCount,
+      eventGhostLaps,
     ],
   );
   const selectedGhostLaps = useMemo(
@@ -2660,6 +2671,16 @@ export default function App() {
     activeBranchChoicesByPlayer,
     splitDecisionPoints,
     raceZones,
+  );
+  const newPersonalRecordsByPlayer = useMemo(
+    () => personalRecordAchievements(
+      riders.map((rider) => ({
+        playerId: rider.playerId,
+        finishTimeMs: rider.finishedAt,
+      })),
+      previousRaceBestTimes,
+    ),
+    [previousRaceBestTimes, riders],
   );
   const selectedGhostFinishMs = useMemo(
     () => selectedGhostLaps.reduce(
@@ -5672,6 +5693,9 @@ export default function App() {
     ghostRaceStartedAtRef.current = gateDropAt;
     ghostTraceRef.current = new Map();
     ghostTraceLastSampleAtRef.current = new Map();
+    setPreviousRaceBestTimes(demoMode
+      ? {}
+      : previousPersonalBestTimes(racePlayers, eventGhostLaps, cloudProfileKey));
     if (demoMode) {
       setDemoRaceSeed((seed) => seed + 104729);
       setDemoRaceStartedAt(gateDropAt);
@@ -5695,7 +5719,7 @@ export default function App() {
       redLightAtRef.current = 0;
       setStartGateStatus(idleStartGateStatus);
     });
-  }, [appendRaceCaptureEvent, bridge, demoMode, releaseCStartPlayers, scheduleStartGateStep, startRace]);
+  }, [appendRaceCaptureEvent, bridge, cloudProfileKey, demoMode, eventGhostLaps, racePlayers, releaseCStartPlayers, scheduleStartGateStep, startRace]);
 
   const startConfiguredCadence = useCallback(async (startingTrackId: string, sequenceId: number) => {
     if (
@@ -7489,6 +7513,7 @@ export default function App() {
                   cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                   finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
+                  newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
                   earthAngle={earthAngle}
                   earthHeading={earthHeading}
                   earthCenter={earthCenter}
@@ -7557,6 +7582,7 @@ export default function App() {
                     sprintConfiguration={appMode === 'straight-sprint'
                       ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
                       : undefined}
+                    newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
                     onRaceCaptureJsonExport={exportRaceCaptureJson}
                     onRaceCaptureCsvExport={exportRaceCaptureCsv}
                     onGhostToggle={toggleGhostLap}

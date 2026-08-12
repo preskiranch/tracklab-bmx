@@ -17,6 +17,8 @@ import type {
 } from '../types';
 import { PodiumTrophy } from './PodiumTrophy';
 import { RiderAvatar } from './RiderAvatar';
+import { NewRecordBadge } from './NewRecordBadge';
+import type { PersonalRecordAchievements } from '../lib/personalRecords';
 
 type AnalyticsPanelProps = {
   track: TrackRecord;
@@ -32,6 +34,7 @@ type AnalyticsPanelProps = {
   selectedGhostIds: string[];
   studioRiders: StudioRider[];
   sprintConfiguration?: { distanceFeet: number; airSetting: number };
+  newPersonalRecordsByPlayer: PersonalRecordAchievements;
   onRaceCaptureJsonExport: () => void;
   onRaceCaptureCsvExport: () => void;
   onGhostToggle: (ghostId: string) => void;
@@ -176,6 +179,7 @@ export function AnalyticsPanel({
   selectedGhostIds,
   studioRiders,
   sprintConfiguration,
+  newPersonalRecordsByPlayer,
   onRaceCaptureJsonExport,
   onRaceCaptureCsvExport,
   onGhostToggle,
@@ -421,7 +425,16 @@ export function AnalyticsPanel({
                         </div>
                       </div>
                     </td>
-                    <td>{formatFinishTime(summary.finishTimeMs)}</td>
+                    <td style={newPersonalRecordsByPlayer[summary.playerId] ? {
+                      background: '#fee2e2',
+                      color: '#b91c1c',
+                      fontWeight: 900,
+                    } : undefined}>
+                      <span className="race-result-time">{formatFinishTime(summary.finishTimeMs)}</span>
+                      {newPersonalRecordsByPlayer[summary.playerId] && (
+                        <NewRecordBadge style={{ marginLeft: '6px' }} />
+                      )}
+                    </td>
                     <td>{formatSplitTime(summary.thirtyFootTimeMs)}</td>
                     {showReactionSummary && <td>{formatReactionTime(reactionTimesByPlayer[summary.playerId])}</td>}
                     {showSpeedSummary && <td>{formatNullableSpeed(summary.topSpeedKph, speedUnit)}</td>}

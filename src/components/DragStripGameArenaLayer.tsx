@@ -8,6 +8,7 @@ import {
 } from '../lib/straightSprint';
 import { formatDistanceMeters, formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
+import { NewRecordBadge } from './NewRecordBadge';
 import type {
   BikeSample,
   DistanceUnit,
@@ -18,6 +19,7 @@ import type {
   RiderState,
   SpeedUnit,
 } from '../types';
+import type { PersonalRecordAchievements } from '../lib/personalRecords';
 
 type ArenaRider = {
   id: string;
@@ -32,6 +34,7 @@ type ArenaRider = {
   finishedAt: number | null;
   frame: number;
   ghost: boolean;
+  local: boolean;
 };
 
 type DragStripGameArenaLayerProps = {
@@ -47,6 +50,7 @@ type DragStripGameArenaLayerProps = {
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
   showHud: boolean;
+  newPersonalRecordsByPlayer: PersonalRecordAchievements;
 };
 
 type ArenaViewport = {
@@ -366,12 +370,14 @@ function GameArenaHud({
   raceDistanceMeters,
   speedUnit,
   distanceUnit,
+  newPersonalRecordsByPlayer,
 }: {
   riders: ArenaRider[];
   raceState: RaceState;
   raceDistanceMeters: number;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
+  newPersonalRecordsByPlayer: PersonalRecordAchievements;
 }) {
   const entries = [...riders]
     .sort((left, right) => left.rank - right.rank || right.distanceMeters - left.distanceMeters)
@@ -486,14 +492,19 @@ function GameArenaHud({
                   }}>{rider.name}</strong>
                   <span style={{
                     overflow: 'hidden',
-                    color: 'rgba(255,255,255,.82)',
+                    color: newPersonalRecordsByPlayer[rider.playerId] && rider.local ? '#f87171' : 'rgba(255,255,255,.82)',
                     fontSize: 'clamp(10px, .85vw, 14px)',
-                    fontWeight: 800,
+                    fontWeight: newPersonalRecordsByPlayer[rider.playerId] && rider.local ? 1000 : 800,
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                   }}>
-                    {progress}% track · {formatSpeedFromKph(rider.speedKph, speedUnit)} {speedUnitLabel(speedUnit)}
+                    {newPersonalRecordsByPlayer[rider.playerId] && rider.local
+                      ? `${((rider.finishedAt ?? 0) / 1000).toFixed(2)}s finish`
+                      : `${progress}% track · ${formatSpeedFromKph(rider.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`}
                   </span>
+                  {newPersonalRecordsByPlayer[rider.playerId] && rider.local && (
+                    <NewRecordBadge />
+                  )}
                 </div>
               </div>
               <div style={{
@@ -898,6 +909,7 @@ export function DragStripGameArenaLayer({
   speedUnit,
   distanceUnit,
   showHud,
+  newPersonalRecordsByPlayer,
 }: DragStripGameArenaLayerProps) {
   const arenaRiders = useMemo<ArenaRider[]>(() => {
     const local = riders.flatMap((rider) => {
@@ -928,6 +940,7 @@ export function DragStripGameArenaLayer({
         finishedAt: rider.finishedAt,
         frame: animation.pedaling ? riderFrame(animation.crankStep) : 0,
         ghost: false,
+        local: true,
       }];
     });
     const remote = remoteRaceStates.flatMap((state) => state.riders.map((rider) => ({
@@ -945,6 +958,7 @@ export function DragStripGameArenaLayer({
         ? Math.floor(Math.max(0, rider.distance) * 1.7) % 9
         : 0,
       ghost: false,
+      local: false,
     })));
     const ghosts = ghostRiders.map((rider, index) => ({
       id: `ghost-${rider.id}`,
@@ -959,6 +973,7 @@ export function DragStripGameArenaLayer({
       finishedAt: rider.finishedAt,
       frame: raceState === 'racing' ? Math.floor(Math.max(0, rider.distance) * 1.7) % 9 : 0,
       ghost: true,
+      local: false,
     }));
     return [...local, ...remote, ...ghosts];
   }, [ghostRiders, players, raceState, remoteRaceStates, riders, samplesByDevice]);
@@ -1005,6 +1020,7 @@ export function DragStripGameArenaLayer({
           raceDistanceMeters={raceDistanceMeters}
           speedUnit={speedUnit}
           distanceUnit={distanceUnit}
+          newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
         />
       )}
     </div>

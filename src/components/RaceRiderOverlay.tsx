@@ -6,6 +6,8 @@ import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { raceProgressPercent } from '../lib/raceProgress';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
+import { NewRecordBadge } from './NewRecordBadge';
+import type { PersonalRecordAchievements } from '../lib/personalRecords';
 
 type DragState =
   | {
@@ -27,6 +29,7 @@ type DragState =
 
 type OverlayEntry = {
   id: string;
+  playerId: PlayerSlot['id'] | null;
   badge: string;
   name: string;
   photoUrl?: string;
@@ -53,6 +56,7 @@ type RaceRiderOverlayProps = {
   canEditLayout: boolean;
   onPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onFullscreenInteraction: () => void;
+  newPersonalRecordsByPlayer: PersonalRecordAchievements;
 };
 
 function ordinal(value: number) {
@@ -96,6 +100,7 @@ export function RaceRiderOverlay({
   canEditLayout,
   onPreferenceChange,
   onFullscreenInteraction,
+  newPersonalRecordsByPlayer,
 }: RaceRiderOverlayProps) {
   const [layout, setLayout] = useState<RaceRiderOverlayLayout>(
     () => normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout),
@@ -143,6 +148,7 @@ export function RaceRiderOverlay({
 
       return [{
         id: `local-${player.id}`,
+        playerId: player.id,
         badge: `P${player.id}`,
         name: player.name,
         photoUrl: player.photoUrl,
@@ -158,6 +164,7 @@ export function RaceRiderOverlay({
 
     const ghostEntries = ghostRiders.map((rider, index) => ({
       id: `ghost-${rider.id}`,
+      playerId: null,
       badge: `G${index + 1}`,
       name: rider.name,
       photoUrl: undefined,
@@ -172,6 +179,7 @@ export function RaceRiderOverlay({
 
     const remoteEntries = remoteRaceStates.flatMap((state) => state.riders.map((rider, index) => ({
       id: `remote-${state.clientId}-${rider.id}`,
+      playerId: rider.playerId,
       badge: `R${index + 1}`,
       name: rider.name,
       photoUrl: rider.photoUrl,
@@ -363,8 +371,13 @@ export function RaceRiderOverlay({
               <div className="race-rider-overlay-identity">
                 <strong>{entry.name}</strong>
                 <span>
-                  {entry.progressPct}% track / {formatSpeedFromKph(entry.speedKph, speedUnit)} {speedUnitLabel(speedUnit)}
+                  {entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId]
+                    ? `${((entry.finishedAt ?? 0) / 1000).toFixed(2)}s finish`
+                    : `${entry.progressPct}% track / ${formatSpeedFromKph(entry.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`}
                 </span>
+                {entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId] && (
+                  <NewRecordBadge />
+                )}
               </div>
             </div>
             {positionsEstablished && (
