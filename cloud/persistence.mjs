@@ -1691,7 +1691,7 @@ function safeLapCount(value) {
 
 function sprintDistanceFeet(value) {
   const numeric = Math.round(Number(value));
-  return numeric === 30 || (numeric >= 100 && numeric <= 1500 && numeric % 100 === 0) ? numeric : null;
+  return numeric === 30 || numeric === 145 || (numeric >= 100 && numeric <= 1500 && numeric % 100 === 0) ? numeric : null;
 }
 
 function sprintAirSetting(value) {

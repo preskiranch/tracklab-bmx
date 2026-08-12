@@ -796,7 +796,7 @@ function sanitizeLocalRaceResult(value, index) {
   const sprintDistanceFeet = Math.round(finiteNumber(value.sprintDistanceFeet, 0));
   const sprintAirSetting = Math.round(finiteNumber(value.sprintAirSetting, 0));
   const hasSprintConfiguration = (
-    (sprintDistanceFeet === 30 || (sprintDistanceFeet >= 100 && sprintDistanceFeet <= 1500 && sprintDistanceFeet % 100 === 0))
+    (sprintDistanceFeet === 30 || sprintDistanceFeet === 145 || (sprintDistanceFeet >= 100 && sprintDistanceFeet <= 1500 && sprintDistanceFeet % 100 === 0))
     && sprintAirSetting >= 1
     && sprintAirSetting <= 10
   );
@@ -2281,7 +2281,7 @@ function sanitizeGhostLapPayload(value, profileKey) {
   const sprintDistanceFeet = Math.round(finiteNumber(value.sprintDistanceFeet, 0));
   const sprintAirSetting = Math.round(finiteNumber(value.sprintAirSetting, 0));
   const hasSprintConfiguration = (
-    (sprintDistanceFeet === 30 || (sprintDistanceFeet >= 100 && sprintDistanceFeet <= 1500 && sprintDistanceFeet % 100 === 0))
+    (sprintDistanceFeet === 30 || sprintDistanceFeet === 145 || (sprintDistanceFeet >= 100 && sprintDistanceFeet <= 1500 && sprintDistanceFeet % 100 === 0))
     && sprintAirSetting >= 1
     && sprintAirSetting <= 10
   );
@@ -5025,7 +5025,7 @@ async function serveStatic(request, response) {
       const requestedDistanceFeet = Math.round(finiteNumber(requestUrl.searchParams.get('sprintDistanceFeet'), 0));
       const requestedAirSetting = Math.round(finiteNumber(requestUrl.searchParams.get('sprintAirSetting'), 0));
       const sprintConfiguration = (
-        (requestedDistanceFeet === 30 || (requestedDistanceFeet >= 100 && requestedDistanceFeet <= 1500 && requestedDistanceFeet % 100 === 0))
+        (requestedDistanceFeet === 30 || requestedDistanceFeet === 145 || (requestedDistanceFeet >= 100 && requestedDistanceFeet <= 1500 && requestedDistanceFeet % 100 === 0))
         && requestedAirSetting >= 1
         && requestedAirSetting <= 10
       ) ? { distanceFeet: requestedDistanceFeet, airSetting: requestedAirSetting } : null;

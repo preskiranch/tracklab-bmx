@@ -10,16 +10,16 @@ import {
 import { distanceBetweenTrackPoints, routeLengthMeters } from '../../src/lib/trackMapping';
 
 describe('straight sprint configurations', () => {
-  it('offers 30 ft and every 100 ft distance through 1,500 ft', () => {
+  it('offers 30 ft, 145 ft, and every 100 ft distance through 1,500 ft', () => {
     expect(straightSprintDistanceOptions).toEqual([
-      30,
-      100, 200, 300, 400, 500, 600, 700, 800,
+      30, 100, 145, 200, 300, 400, 500, 600, 700, 800,
       900, 1000, 1100, 1200, 1300, 1400, 1500,
     ]);
   });
 
   it('normalizes unsupported choices and keeps Air within 1 through 10', () => {
     expect(normalizeStraightSprintDistance(500)).toBe(500);
+    expect(normalizeStraightSprintDistance(145)).toBe(145);
     expect(normalizeStraightSprintDistance(550)).toBe(100);
     expect(normalizeStraightSprintAirSetting(0)).toBe(1);
     expect(normalizeStraightSprintAirSetting(11)).toBe(10);
@@ -40,6 +40,8 @@ describe('straight sprint configurations', () => {
   it('keeps a separate saved camera key for every sprint distance', () => {
     expect(straightSprintCameraPreferenceKey('custom-drag-strip', 100))
       .toBe('custom-drag-strip:sprint:100ft');
+    expect(straightSprintCameraPreferenceKey('custom-drag-strip', 145))
+      .toBe('custom-drag-strip:sprint:145ft');
     expect(straightSprintCameraPreferenceKey('custom-drag-strip', 500))
       .toBe('custom-drag-strip:sprint:500ft');
   });

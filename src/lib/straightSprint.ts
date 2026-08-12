@@ -5,7 +5,9 @@ export const straightSprintMaximumFeet = 1500;
 
 export const straightSprintDistanceOptions = [
   30,
-  ...Array.from({ length: 15 }, (_, index) => (index + 1) * 100),
+  100,
+  145,
+  ...Array.from({ length: 14 }, (_, index) => (index + 2) * 100),
 ] as const;
 
 export const straightSprintAirSettings = Array.from({ length: 10 }, (_, index) => index + 1);
