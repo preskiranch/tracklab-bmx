@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isLikelyWattbikeBluetoothName,
+  shouldReconnectWattbikeBluetoothDevice,
   wattbikeBluetoothFilters,
   wattbikeBluetoothRequestOptions,
   wattbikeBluetoothServices,
@@ -22,5 +24,24 @@ describe('Bluetooth device discovery', () => {
       filters: wattbikeBluetoothFilters,
       optionalServices: Object.values(wattbikeBluetoothServices),
     });
+  });
+
+  it('recognizes Wattbike PM-only monitor names after a browser refresh', () => {
+    expect(isLikelyWattbikeBluetoothName('PM25043950')).toBe(true);
+    expect(isLikelyWattbikeBluetoothName('PM-25043851')).toBe(true);
+    expect(isLikelyWattbikeBluetoothName('Nearby headphones')).toBe(false);
+  });
+
+  it('restores a previously connected browser device even if its advertised name changes', () => {
+    expect(shouldReconnectWattbikeBluetoothDevice(
+      'saved-browser-bike-id',
+      'PM Monitor',
+      new Set(['saved-browser-bike-id']),
+    )).toBe(true);
+    expect(shouldReconnectWattbikeBluetoothDevice(
+      'unknown-browser-device',
+      'PM Monitor',
+      new Set(['saved-browser-bike-id']),
+    )).toBe(false);
   });
 });

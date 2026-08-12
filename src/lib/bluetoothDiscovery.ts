@@ -30,6 +30,25 @@ export function isWindowsBluetoothPlatform(userAgent: string) {
   return /\bWindows\b/i.test(userAgent);
 }
 
+export function isLikelyWattbikeBluetoothName(name: string | null | undefined) {
+  const normalized = name?.trim().toLowerCase() ?? '';
+  return normalized.length === 0
+    || normalized.includes('wattbike')
+    || /^pm[\s#:_-]*\d{5,}$/.test(normalized);
+}
+
+export function shouldReconnectWattbikeBluetoothDevice(
+  browserDeviceId: string,
+  name: string | null | undefined,
+  savedBrowserDeviceIds: ReadonlySet<string>,
+) {
+  // Some Wattbike Model B monitors expose only a PM serial after a refresh.
+  // A device TrackLab connected before is always safe to restore, even when
+  // its current advertisement omits the Wattbike brand name entirely.
+  return savedBrowserDeviceIds.has(browserDeviceId)
+    || isLikelyWattbikeBluetoothName(name);
+}
+
 export function wattbikeBluetoothRequestOptions(userAgent: string): BluetoothRequestDeviceOptions {
   const optionalServices = Object.values(wattbikeBluetoothServices);
   if (isWindowsBluetoothPlatform(userAgent)) {

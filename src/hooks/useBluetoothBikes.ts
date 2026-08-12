@@ -16,6 +16,7 @@ import { KeyedCleanupRegistry } from '../lib/keyedCleanupRegistry';
 import { removeBikeSample, upsertBoundedBikeSample } from '../lib/liveBikeRegistry';
 import {
   isWindowsBluetoothPlatform,
+  shouldReconnectWattbikeBluetoothDevice,
   wattbikeBluetoothRequestOptions,
   wattbikeBluetoothServices,
   type BluetoothRequestDeviceOptions,
@@ -28,12 +29,14 @@ type BluetoothConnectionState = 'unsupported' | 'idle' | 'connecting' | 'open' |
 type BluetoothBikeDevice = ConnectedBikeDevice;
 
 type BluetoothBikeSnapshot = {
-  connectBike: () => Promise<void>;
+  authorizedCount: number;
+  connectBike: () => Promise<boolean>;
   connection: BluetoothConnectionState;
   connectedCount: number;
   devices: BluetoothBikeDevice[];
   error: string | null;
   samplesByDevice: Map<number, BikeSample>;
+  reconnectSavedBikes: () => Promise<number>;
   status: string;
   supported: boolean;
 };
@@ -112,11 +115,6 @@ function unsupportedBluetoothMessage() {
   return isAppleMobileBrowser()
     ? unsupportedTabletBluetoothMessage
     : 'This browser does not support direct Bluetooth bike pairing. Use a desktop Chrome/Edge browser, Android Chrome with Web Bluetooth, or Advanced Connector on the Mac/PC near the bikes.';
-}
-
-function isLikelyWattbikeBluetoothDevice(device: BluetoothDeviceLike) {
-  const label = device.name?.trim().toLowerCase() ?? '';
-  return !label || label.includes('wattbike') || label.includes('wattbikepm');
 }
 
 function readStoredBluetoothBikeIdentities() {
@@ -344,6 +342,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   const [connection, setConnection] = useState<BluetoothConnectionState>(() => (
     (navigator as BluetoothNavigator).bluetooth ? 'idle' : 'unsupported'
   ));
+  const [authorizedCount, setAuthorizedCount] = useState(0);
   const [devices, setDevices] = useState<BluetoothBikeDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [samplesByDevice, setSamplesByDevice] = useState<Map<number, BikeSample>>(new Map());
@@ -547,15 +546,19 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
   const reconnectSavedBikes = useCallback(async () => {
     const bluetooth = (navigator as BluetoothNavigator).bluetooth;
     if (!bluetooth?.getDevices || reconnectInFlightRef.current) {
-      return;
+      return connectedBrowserDeviceIdsRef.current.size;
     }
 
     reconnectInFlightRef.current = true;
     try {
       const grantedDevices = await bluetooth.getDevices();
-      const savedBikeDevices = grantedDevices.filter(isLikelyWattbikeBluetoothDevice);
+      const savedBrowserDeviceIds = new Set(deviceIdsRef.current.keys());
+      const savedBikeDevices = grantedDevices.filter((device) => (
+        shouldReconnectWattbikeBluetoothDevice(device.id, device.name, savedBrowserDeviceIds)
+      ));
+      setAuthorizedCount(Math.min(4, savedBikeDevices.length));
       if (savedBikeDevices.length === 0) {
-        return;
+        return connectedBrowserDeviceIdsRef.current.size;
       }
 
       setConnection((current) => (current === 'open' ? current : 'connecting'));
@@ -572,11 +575,13 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
       }
 
       setConnection(connected > 0 || connectedBrowserDeviceIdsRef.current.size > 0 ? 'open' : 'idle');
+      return connectedBrowserDeviceIdsRef.current.size;
     } catch (reconnectError) {
       if (!isBluetoothChooserCancel(reconnectError)) {
         setError(reconnectError instanceof Error ? reconnectError.message : 'Could not reconnect saved Bluetooth bikes.');
       }
       setConnection((current) => (current === 'open' ? 'open' : 'idle'));
+      return connectedBrowserDeviceIdsRef.current.size;
     } finally {
       reconnectInFlightRef.current = false;
     }
@@ -615,7 +620,7 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
     if (!bluetooth) {
       setConnection('unsupported');
       setError(unsupportedBluetoothMessage());
-      return;
+      return false;
     }
 
     setConnection('connecting');
@@ -626,16 +631,22 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
         ...wattbikeBluetoothRequestOptions(navigator.userAgent || ''),
       });
       await connectBluetoothDevice(device);
+      setAuthorizedCount((current) => Math.min(
+        4,
+        Math.max(current, connectedBrowserDeviceIdsRef.current.size),
+      ));
       setConnection('open');
+      return true;
     } catch (connectError) {
       if (isBluetoothChooserCancel(connectError)) {
-        setConnection('idle');
+        setConnection(connectedBrowserDeviceIdsRef.current.size > 0 ? 'open' : 'idle');
         setError('Bluetooth pairing was cancelled. Click Pair Wattbike when the bike is ready, choose the Wattbike, then pedal in Just Ride.');
-        return;
+        return false;
       }
 
-      setConnection('error');
+      setConnection(connectedBrowserDeviceIdsRef.current.size > 0 ? 'open' : 'error');
       setError(connectError instanceof Error ? connectError.message : 'Bluetooth pairing failed.');
+      return false;
     }
   }, [connectBluetoothDevice]);
 
@@ -658,14 +669,16 @@ export function useBluetoothBikes(): BluetoothBikeSnapshot {
                 : 'Bluetooth is ready. Saved bikes reconnect automatically; click Pair Wattbike only for first-time pairing.';
 
     return {
+      authorizedCount,
       connectBike,
       connectedCount,
       connection,
       devices,
       error,
       samplesByDevice,
+      reconnectSavedBikes,
       status,
       supported,
     };
-  }, [connectBike, connection, devices, error, now, samplesByDevice, supported]);
+  }, [authorizedCount, connectBike, connection, devices, error, now, reconnectSavedBikes, samplesByDevice, supported]);
 }

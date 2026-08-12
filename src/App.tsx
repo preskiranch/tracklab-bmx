@@ -263,6 +263,10 @@ import type {
   UserTrackMapping,
 } from './types';
 
+const BluetoothPairingDialog = lazy(() => import('./components/BluetoothPairingDialog').then((module) => ({
+  default: module.BluetoothPairingDialog,
+})));
+
 const SessionControlPanel = lazy(() => import('./components/SessionControlPanel')
   .then((module) => ({ default: module.SessionControlPanel })));
 const AnalyticsPanel = lazy(() => import('./components/AnalyticsPanel')
@@ -1474,6 +1478,7 @@ export default function App() {
   const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>(readStoredBikeConnectionSource);
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
+  const [bluetoothPairingOpen, setBluetoothPairingOpen] = useState(false);
   const [demoBikeCount, setDemoBikeCount] = useState(Math.min(4, maxPlayers));
   const [selectedDemoPlayerIds, setSelectedDemoPlayerIds] = useState<PlayerSlot['id'][]>(
     () => defaultPlayerSlots.slice(0, maxPlayers).map((player) => player.id),
@@ -6882,6 +6887,22 @@ export default function App() {
       className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}`}
       ref={raceShellRef}
     >
+      {bluetoothPairingOpen && showBluetoothPairing && !liveBikeAccessLocked && (
+        <Suspense fallback={null}>
+          <BluetoothPairingDialog
+            authorizedCount={bluetooth.authorizedCount}
+            busy={bluetooth.connection === 'connecting'}
+            connectedDevices={bluetooth.devices}
+            liveCount={bluetooth.connectedCount}
+            maxPlayers={maxPlayers}
+            onClose={() => setBluetoothPairingOpen(false)}
+            onPairBike={bluetooth.connectBike}
+            onReconnectSaved={bluetooth.reconnectSavedBikes}
+            open
+            status={bluetooth.status}
+          />
+        </Suspense>
+      )}
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark">
@@ -6938,7 +6959,7 @@ export default function App() {
             <button
               className="bluetooth-connect-button"
               type="button"
-              onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : bluetooth.connectBike}
+              onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : () => setBluetoothPairingOpen(true)}
               disabled={!bluetooth.supported || bluetooth.connection === 'connecting'}
             >
               <Bluetooth size={16} />
@@ -7274,7 +7295,7 @@ export default function App() {
           onAutoAssign={demoMode ? () => undefined : autoAssign}
           onRename={demoMode ? renameDemoPlayer : renamePlayer}
           onPhotoChange={demoMode ? handleDemoRiderPhotoChange : undefined}
-          onBluetoothConnect={showBluetoothPairing && !liveBikeAccessLocked ? bluetooth.connectBike : undefined}
+          onBluetoothConnect={showBluetoothPairing && !liveBikeAccessLocked ? () => setBluetoothPairingOpen(true) : undefined}
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}
           bluetoothDeviceCount={bluetooth.connectedCount}

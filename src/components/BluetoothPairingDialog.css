@@ -1,0 +1,161 @@
+.bluetooth-pairing-backdrop {
+  position: fixed;
+  z-index: 12000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(8, 14, 23, 0.68);
+  backdrop-filter: blur(5px);
+}
+
+.bluetooth-pairing-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(620px, 100%);
+  max-height: min(760px, calc(100dvh - 36px));
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.38);
+}
+
+.bluetooth-pairing-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.bluetooth-pairing-dialog h2 {
+  margin-top: 3px;
+  font-size: clamp(21px, 3vw, 27px);
+  line-height: 1.08;
+}
+
+.bluetooth-pairing-explainer {
+  margin: 0;
+  color: #4b5a6b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bluetooth-pairing-progress {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid #b8e296;
+  border-radius: 9px;
+  background: #f2fbe9;
+  color: #264713;
+}
+
+.bluetooth-pairing-progress span {
+  color: #506344;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.bluetooth-pairing-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.bluetooth-pairing-slots article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 68px;
+  padding: 10px;
+  border: 1px dashed #c8d0d9;
+  border-radius: 9px;
+  background: #f7f9fb;
+}
+
+.bluetooth-pairing-slots article.saved {
+  border-style: solid;
+  border-color: #aacff7;
+  background: #f1f7ff;
+}
+
+.bluetooth-pairing-slots article.connected {
+  border-style: solid;
+  border-color: #83ce52;
+  background: #f3fcec;
+}
+
+.bluetooth-pairing-slots article > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.bluetooth-pairing-slots strong,
+.bluetooth-pairing-slots small {
+  overflow-wrap: anywhere;
+}
+
+.bluetooth-pairing-slots small {
+  color: #647286;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.bluetooth-slot-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #101827;
+  color: #ffffff;
+  font-weight: 950;
+}
+
+.bluetooth-pairing-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.bluetooth-pairing-done {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  font-weight: 900;
+}
+
+@media (max-width: 620px) {
+  .bluetooth-pairing-backdrop {
+    align-items: end;
+    padding: 8px;
+  }
+
+  .bluetooth-pairing-dialog {
+    max-height: calc(100dvh - 16px);
+    padding: 15px;
+    border-radius: 14px 14px 8px 8px;
+  }
+
+  .bluetooth-pairing-slots,
+  .bluetooth-pairing-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .bluetooth-pairing-progress {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .bluetooth-pairing-progress span {
+    grid-column: 1 / -1;
+  }
+}

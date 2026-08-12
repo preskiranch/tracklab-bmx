@@ -1545,6 +1545,10 @@ test('Windows Bluetooth pairing widens discovery and stays pending until TrackLa
   const pairButton = page.getByRole('button', { name: 'Pair Wattbike', exact: true });
   await expect(pairButton).toBeVisible();
   await pairButton.click();
+  const pairingDialog = page.getByRole('dialog', { name: 'Connect Wattbikes' });
+  await expect(pairingDialog).toBeVisible();
+  await expect(pairingDialog.locator('.bluetooth-pairing-slots article')).toHaveCount(4);
+  await pairingDialog.getByRole('button', { name: 'Choose first Wattbike' }).click();
   await expect(page.getByRole('button', { name: 'Pairing...', exact: true })).toBeDisabled();
   await expect(page.getByText('Pairing with the selected Wattbike and verifying its live data service.').first()).toBeVisible();
   await expect(page.getByText(/connected \/ 0 detected/)).toBeVisible();
@@ -1564,6 +1568,93 @@ test('Windows Bluetooth pairing widens discovery and stays pending until TrackLa
       '00001826-0000-1000-8000-00805f9b34fb',
     ]),
   });
+});
+
+test('Bluetooth pairing stays open for multiple Wattbikes and restores approved bikes after refresh', async ({ page }) => {
+  const authUser = {
+    id: 'bluetooth-multi-racer',
+    profileKey: 'user:bluetooth-multi-racer',
+    email: 'bluetooth-multi@tracklab.test',
+    name: 'Bluetooth Multi Rider',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+  };
+
+  await page.addInitScript(() => {
+    const makeDevice = (index: number) => {
+      const characteristic = Object.assign(new EventTarget(), {
+        startNotifications: async () => characteristic,
+        stopNotifications: async () => characteristic,
+      });
+      const server = {
+        connected: true,
+        disconnect: () => undefined,
+        getPrimaryService: async (uuid: string) => {
+          if (!uuid.startsWith('00001826')) {
+            throw new Error('Service unavailable in test device.');
+          }
+          return { getCharacteristic: async () => characteristic };
+        },
+      };
+      return Object.assign(new EventTarget(), {
+        id: `browser-wattbike-${index}`,
+        name: `PM2504395${index}`,
+        gatt: {
+          connected: true,
+          connect: async () => server,
+        },
+      });
+    };
+    const authorizedStorageKey = 'tracklab-test-authorized-wattbikes';
+    const authorizedCount = () => Number(window.localStorage.getItem(authorizedStorageKey) ?? 0);
+    Object.defineProperty(navigator, 'bluetooth', {
+      configurable: true,
+      value: {
+        getDevices: async () => Array.from({ length: authorizedCount() }, (_, index) => makeDevice(index + 1)),
+        requestDevice: async () => {
+          const nextCount = Math.min(4, authorizedCount() + 1);
+          window.localStorage.setItem(authorizedStorageKey, String(nextCount));
+          return makeDevice(nextCount);
+        },
+      },
+    });
+  });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/public-track-mappings', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ trackMappings: {}, count: 0 }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ trackMappings: {}, customRoutes: [], bikeProfiles: [] }),
+    });
+  });
+  await page.route('**/api/ghosts*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ghosts: [] }) });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  await page.getByRole('button', { name: 'Open App' }).click();
+  await page.getByRole('button', { name: 'Pair Wattbike', exact: true }).click();
+  let pairingDialog = page.getByRole('dialog', { name: 'Connect Wattbikes' });
+  await pairingDialog.getByRole('button', { name: 'Choose first Wattbike' }).click();
+  await expect(pairingDialog.locator('.bluetooth-pairing-slots article.connected')).toHaveCount(1);
+  await expect(pairingDialog).toBeVisible();
+  await pairingDialog.getByRole('button', { name: 'Choose another Wattbike' }).click();
+  await expect(pairingDialog.locator('.bluetooth-pairing-slots article.connected')).toHaveCount(2);
+  await expect(pairingDialog).toBeVisible();
+
+  await page.reload();
+  const openApp = page.getByRole('button', { name: 'Open App' });
+  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await openApp.click();
+  }
+  await expect(page.getByText('Bluetooth Direct paired')).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Pair Wattbike', exact: true }).click();
+  pairingDialog = page.getByRole('dialog', { name: 'Connect Wattbikes' });
+  await expect(pairingDialog.locator('.bluetooth-pairing-slots article.connected')).toHaveCount(2);
 });
 
 test('dashboard analysis follows the map without a blank grid row', async ({ page }, testInfo) => {
