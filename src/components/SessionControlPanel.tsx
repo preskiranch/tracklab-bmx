@@ -120,9 +120,6 @@ type SessionControlPanelProps = {
   straightSprintMaximumRouteReady: boolean;
   straightSprintViewMode: TrackRaceViewMode;
   straightSprintGameArenaAvailable: boolean;
-  bmxGameArenaAvailable: boolean;
-  bmxGameRouteReady: boolean;
-  bmxRaceViewMode: TrackRaceViewMode;
   isAdminProfile: boolean;
   showCustomRoutes: boolean;
   sessionTrackAvailable: boolean;
@@ -174,7 +171,6 @@ type SessionControlPanelProps = {
   onStraightSprintDistanceChange: (feet: number) => void;
   onStraightSprintAirSettingChange: (setting: number) => void;
   onStraightSprintViewModeChange: (mode: TrackRaceViewMode) => void;
-  onBmxRaceViewModeChange: (mode: TrackRaceViewMode) => void;
   onDemoModeChange: (enabled: boolean) => void;
   onDemoPlayerSelectionChange: (playerIds: PlayerSlot['id'][]) => void;
   onMappingModeChange: (enabled: boolean) => void;
@@ -251,9 +247,6 @@ export function SessionControlPanel({
   straightSprintMaximumRouteReady,
   straightSprintViewMode,
   straightSprintGameArenaAvailable,
-  bmxGameArenaAvailable,
-  bmxGameRouteReady,
-  bmxRaceViewMode,
   isAdminProfile,
   showCustomRoutes,
   sessionTrackAvailable,
@@ -305,7 +298,6 @@ export function SessionControlPanel({
   onStraightSprintDistanceChange,
   onStraightSprintAirSettingChange,
   onStraightSprintViewModeChange,
-  onBmxRaceViewModeChange,
   onDemoModeChange,
   onDemoPlayerSelectionChange,
   onMappingModeChange,
@@ -691,48 +683,6 @@ export function SessionControlPanel({
         </section>
       )}
 
-      {!showCustomRoutes && sessionTrackAvailable && bmxGameArenaAvailable && (
-        <section className="panel-section">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Race View</span>
-              <h3>North Bay BMX</h3>
-            </div>
-            <Gamepad2 size={18} />
-          </div>
-          <div className="mapping-race-view-card">
-            <div className="route-layout-heading">
-              <span>Choose your view</span>
-              <small>Same race engine; independently mapped visuals and pedal zones</small>
-            </div>
-            <div className="segmented-control compact" role="group" aria-label="North Bay race view">
-              <button
-                className={bmxRaceViewMode !== 'game' ? 'selected' : ''}
-                type="button"
-                disabled={startGateActive || raceState === 'racing'}
-                onClick={() => onBmxRaceViewModeChange('satellite')}
-              >
-                <Satellite size={14} />
-                Satellite
-              </button>
-              <button
-                className={bmxRaceViewMode === 'game' ? 'selected' : ''}
-                type="button"
-                disabled={!bmxGameRouteReady || startGateActive || raceState === 'racing'}
-                title={bmxGameRouteReady ? 'Use the mapped illustrated track' : 'The developer must map and save the Game Track first'}
-                onClick={() => onBmxRaceViewModeChange('game')}
-              >
-                <Gamepad2 size={14} />
-                Game Track
-              </button>
-            </div>
-            <p>{bmxGameRouteReady
-              ? 'The complete illustrated course stays on one fixed screen.'
-              : 'Game Track unlocks after the developer traces its route and pedal zones.'}</p>
-          </div>
-        </section>
-      )}
-
       {isAdminProfile && (!showCustomRoutes || sessionTrackAvailable) && (
           <section className={mappingToolsCollapsed ? 'panel-section mapping-section collapsed' : 'panel-section mapping-section'}>
         {mappingToolsCollapsed ? (
@@ -781,7 +731,7 @@ export function SessionControlPanel({
               </p>
             )}
 
-            {mappingMode && mappingRaceViewMode !== 'game' && (
+            {mappingMode && (
               <div className="route-layout-card">
                 <div className="route-layout-heading">
                   <span>Route layout</span>
@@ -872,7 +822,7 @@ export function SessionControlPanel({
                   <span>Saved race view</span>
                   <small>Published with this track for every racer and device</small>
                 </div>
-                <div className={`segmented-control compact${bmxGameArenaAvailable ? ' three-way' : ''}`} aria-label="Saved race view">
+                <div className="segmented-control compact" aria-label="Saved race view">
                   <button
                     className={mappingRaceViewMode === 'satellite' ? 'selected' : ''}
                     type="button"
@@ -889,23 +839,9 @@ export function SessionControlPanel({
                     <Box size={14} />
                     3D Terrain
                   </button>
-                  {bmxGameArenaAvailable && (
-                    <button
-                      className={mappingRaceViewMode === 'game' ? 'selected' : ''}
-                      type="button"
-                      onClick={() => onMappingRaceViewModeChange('game')}
-                    >
-                      <Gamepad2 size={14} />
-                      Game Track
-                    </button>
-                  )}
                 </div>
                 <p>
-                  {mappingRaceViewMode === 'game'
-                    ? bmxGameRouteReady
-                      ? 'Game Track has its own saved route and pedal zones. Edit them directly on the illustrated course; racing keeps the entire track on one fixed screen.'
-                      : 'Choose Draw path and trace the illustrated course from start to finish, then add its pedal zones and Save.'
-                    : mappingRaceViewMode === '3d'
+                  {mappingRaceViewMode === '3d'
                     ? 'Races on this track use 3D terrain with the same saved route, splits, and pedal zones.'
                     : 'Races on this track use the reliable satellite view.'}
                 </p>

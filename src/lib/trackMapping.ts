@@ -54,6 +54,19 @@ function mappingSavedAtMs(mapping: UserTrackMapping | null | undefined) {
   return Number.isFinite(savedAt) ? savedAt : 0;
 }
 
+function withoutLegacyGameRoute(mapping: UserTrackMapping): UserTrackMapping {
+  if (mapping.raceViewMode !== 'game' && !Object.prototype.hasOwnProperty.call(mapping, 'gameRoute')) {
+    return mapping;
+  }
+  const { gameRoute: _legacyGameRoute, ...standardMapping } = mapping as UserTrackMapping & {
+    gameRoute?: unknown;
+  };
+  return {
+    ...standardMapping,
+    raceViewMode: mapping.raceViewMode === '3d' ? '3d' : 'satellite',
+  };
+}
+
 export function newestTrackMapping(
   preferred: UserTrackMapping | null | undefined,
   candidate: UserTrackMapping | null | undefined,
@@ -74,7 +87,7 @@ export function mergeTrackMappingsBySavedAt(
 ) {
   const merged = { ...current };
   Object.entries(incoming).forEach(([trackId, mapping]) => {
-    merged[trackId] = newestTrackMapping(merged[trackId], mapping) ?? mapping;
+    merged[trackId] = withoutLegacyGameRoute(newestTrackMapping(merged[trackId], mapping) ?? mapping);
   });
   return merged;
 }
@@ -940,14 +953,23 @@ export function readStoredTrackMappings(): StoredTrackMappings {
     }
 
     const parsed = JSON.parse(stored) as StoredTrackMappings;
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    return parsed && typeof parsed === 'object'
+      ? Object.fromEntries(Object.entries(parsed).map(([trackId, mapping]) => [
+        trackId,
+        withoutLegacyGameRoute(mapping),
+      ]))
+      : {};
   } catch {
     return {};
   }
 }
 
 export function writeStoredTrackMappings(mappings: StoredTrackMappings) {
-  return safeSetLocalStorage(trackMappingStorageKey, JSON.stringify(mappings));
+  const standardMappings = Object.fromEntries(Object.entries(mappings).map(([trackId, mapping]) => [
+    trackId,
+    withoutLegacyGameRoute(mapping),
+  ]));
+  return safeSetLocalStorage(trackMappingStorageKey, JSON.stringify(standardMappings));
 }
 
 export function zoneBoundariesFromMapping(mapping: UserTrackMapping) {
@@ -1040,7 +1062,7 @@ export function nearestRouteMeter(points: TrackPoint[], target: TrackPoint) {
 }
 
 export function parseUserTrackMapping(value: string): UserTrackMapping {
-  const parsed = JSON.parse(value) as Partial<UserTrackMapping>;
+  const parsed = JSON.parse(value) as Partial<UserTrackMapping> & { gameRoute?: unknown };
 
   if (
     parsed.version !== 1
@@ -1053,19 +1075,15 @@ export function parseUserTrackMapping(value: string): UserTrackMapping {
     throw new Error('Mapping file is not a TrackLab BMX mapping.');
   }
 
+  const { gameRoute: _legacyGameRoute, ...standardMapping } = parsed;
   return {
-    ...parsed,
-    raceViewMode: parsed.raceViewMode === '3d' || parsed.raceViewMode === 'game'
-      ? parsed.raceViewMode
-      : 'satellite',
+    ...standardMapping,
+    raceViewMode: parsed.raceViewMode === '3d' ? '3d' : 'satellite',
     splitSections: Array.isArray(parsed.splitSections)
       ? parsed.splitSections.map((section) => normalizeSplitSection(section))
       : [],
     routeVariants: Array.isArray(parsed.routeVariants)
       ? routeVariantsFromMapping(parsed as UserTrackMapping)
-      : undefined,
-    gameRoute: parsed.gameRoute?.centerline && parsed.gameRoute.centerline.length >= 2
-      ? normalizeRouteVariant(parsed.gameRoute)
       : undefined,
   } as UserTrackMapping;
 }

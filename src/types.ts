@@ -741,7 +741,6 @@ export type UserTrackMapping = {
   zones: TrackZone[];
   splitSections?: TrackSplitSection[];
   routeVariants?: TrackRouteVariant[];
-  gameRoute?: TrackRouteVariant;
   raceViewMode?: TrackRaceViewMode;
 };
 

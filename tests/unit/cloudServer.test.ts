@@ -798,7 +798,7 @@ describe('cloud API trust boundaries', () => {
       },
     });
 
-    const gameMapping = {
+    const legacyGameMapping = {
       ...trackMapping('north-bay-bmx-napa-valley'),
       trackName: 'North Bay BMX - Napa Valley',
       raceViewMode: 'game',
@@ -817,27 +817,29 @@ describe('cloud API trust boundaries', () => {
     };
     const gameSave = await api('/api/user-data/track-mapping', {
       method: 'POST',
-      body: JSON.stringify({ mapping: gameMapping }),
+      body: JSON.stringify({ mapping: legacyGameMapping }),
     });
     expect(gameSave.status).toBe(200);
     await expect(gameSave.json()).resolves.toMatchObject({
-      mapping: { trackId: gameMapping.trackId, raceViewMode: 'game', gameRoute: { name: 'Game Track', lengthMeters: 380 } },
+      mapping: { trackId: legacyGameMapping.trackId, raceViewMode: 'satellite' },
       published: true,
-      publicMapping: { trackId: gameMapping.trackId, raceViewMode: 'game', gameRoute: { name: 'Game Track', lengthMeters: 380 } },
+      publicMapping: { trackId: legacyGameMapping.trackId, raceViewMode: 'satellite' },
     });
 
     const gameProfile = await api('/api/user-data');
-    await expect(gameProfile.json()).resolves.toMatchObject({
-      trackMappings: {
-        [gameMapping.trackId]: { trackId: gameMapping.trackId, raceViewMode: 'game', gameRoute: { name: 'Game Track', lengthMeters: 380 } },
-      },
+    const gameProfilePayload = await gameProfile.json() as { trackMappings: Record<string, Record<string, unknown>> };
+    expect(gameProfilePayload.trackMappings[legacyGameMapping.trackId]).toMatchObject({
+      trackId: legacyGameMapping.trackId,
+      raceViewMode: 'satellite',
     });
+    expect(gameProfilePayload.trackMappings[legacyGameMapping.trackId].gameRoute).toBeUndefined();
     const publicAfterGameSave = await api('/api/public-track-mappings');
-    await expect(publicAfterGameSave.json()).resolves.toMatchObject({
-      trackMappings: {
-        [gameMapping.trackId]: { trackId: gameMapping.trackId, raceViewMode: 'game', gameRoute: { name: 'Game Track', lengthMeters: 380 } },
-      },
+    const publicAfterGameSavePayload = await publicAfterGameSave.json() as { trackMappings: Record<string, Record<string, unknown>> };
+    expect(publicAfterGameSavePayload.trackMappings[legacyGameMapping.trackId]).toMatchObject({
+      trackId: legacyGameMapping.trackId,
+      raceViewMode: 'satellite',
     });
+    expect(publicAfterGameSavePayload.trackMappings[legacyGameMapping.trackId].gameRoute).toBeUndefined();
 
     const customTrack = customSprintTrack(`custom-drag-strip-${Date.now()}`);
     const customMapping = {
