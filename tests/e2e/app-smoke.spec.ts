@@ -1926,11 +1926,14 @@ test('North Bay game track keeps the full mapped course and pedal zones on one s
   const renderedPedalZones = arena.locator('.north-bay-game-pedal-zone');
   await expect(renderedPedalZones.first()).toBeVisible();
   expect(await renderedPedalZones.count()).toBeGreaterThanOrEqual(10);
+  await expect(arena.locator('.north-bay-game-route-shadow, .north-bay-game-route')).toHaveCount(0);
   await expect(arena.locator('[data-arena-world]')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Edit map' }).click();
   await expect(page.getByLabel('Saved race view').getByRole('button', { name: 'Game Track' })).toHaveClass(/selected/);
   await expect(page.getByRole('img', { name: 'North Bay BMX Game Track mapping canvas' })).toBeVisible();
+  await expect(arena.locator('.north-bay-game-route-shadow')).toHaveCount(1);
+  await expect(arena.locator('.north-bay-game-route')).toHaveCount(1);
   await page.getByRole('button', { name: 'Adjust points' }).click();
   await expect(arena.locator('.north-bay-game-map-point')).toHaveCount(northBayMapping.gameRoute.centerline.length);
   await page.locator('.mapping-section').getByRole('button', { name: 'View', exact: true }).click();

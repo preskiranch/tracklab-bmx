@@ -406,8 +406,8 @@ export function NorthBayGameArenaLayer({
         onContextMenu={(event) => mappingMode && event.preventDefault()}
       >
         <image href="/assets/north-bay-game-arena-wide-v2.jpg" width={viewWidth} height={viewHeight} />
-        {routeReady && <path className="north-bay-game-route-shadow" d={course.path} />}
-        {routeReady && <path className="north-bay-game-route" d={course.path} />}
+        {mappingMode && routeReady && <path className="north-bay-game-route-shadow" d={course.path} />}
+        {mappingMode && routeReady && <path className="north-bay-game-route" d={course.path} />}
         {!mappingMode && activeZones.filter((zone) => zone.type === 'pedal').map((zone, index) => (
           <path key={zone.id} className="north-bay-game-pedal-zone" d={courseSlicePath(course, zone.startMeter, zone.endMeter, visibleTrackLengthMeters)}>
             <title>{`Pedal Zone ${index + 1}: ${Math.round(zone.startMeter)}–${Math.round(zone.endMeter)} m`}</title>
