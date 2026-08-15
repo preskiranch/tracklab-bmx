@@ -31,6 +31,7 @@ const memoryBillingCheckoutsByState = new Map();
 const memoryMap3DLoadEvents = new Map();
 const memoryTrackBriefings = new Map();
 const memoryLocalRaceResults = new Map();
+const memoryTrainingSessions = new Map();
 let memoryRaceResultSequence = 0;
 
 function json(value) {
@@ -622,6 +623,7 @@ export async function loadUserData(guestKey) {
       bikeProfiles: [],
       studioRiders: [],
       exploreRoutes: [],
+      accountProfile: {},
       raceViewPreferences: null,
     };
     const stored = cloneJson(memoryUserDataByGuestKey.get(guestKey), fallback);
@@ -630,6 +632,9 @@ export async function loadUserData(guestKey) {
       ...stored,
       studioRiders: Array.isArray(stored?.studioRiders) ? stored.studioRiders : [],
       exploreRoutes: Array.isArray(stored?.exploreRoutes) ? stored.exploreRoutes : [],
+      accountProfile: stored?.accountProfile && typeof stored.accountProfile === 'object'
+        ? stored.accountProfile
+        : {},
       raceViewPreferences: stored?.raceViewPreferences && typeof stored.raceViewPreferences === 'object'
         ? stored.raceViewPreferences
         : null,
@@ -637,7 +642,7 @@ export async function loadUserData(guestKey) {
   }
 
   const result = await query(
-    `SELECT track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, race_view_preferences FROM ${schema}.user_data WHERE guest_key = $1`,
+    `SELECT track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences FROM ${schema}.user_data WHERE guest_key = $1`,
     [guestKey],
   );
   const row = result?.rows?.[0];
@@ -648,6 +653,7 @@ export async function loadUserData(guestKey) {
     bikeProfiles: fromJson(row?.bike_profiles, []),
     studioRiders: fromJson(row?.studio_riders, []),
     exploreRoutes: fromJson(row?.explore_routes, []),
+    accountProfile: fromJson(row?.account_profile, {}),
     raceViewPreferences: fromJson(row?.race_view_preferences, null),
   };
 }
@@ -660,6 +666,9 @@ export async function saveUserData(guestKey, patch) {
   const bikeProfiles = Array.isArray(patch.bikeProfiles) ? patch.bikeProfiles : null;
   const studioRiders = Array.isArray(patch.studioRiders) ? patch.studioRiders : null;
   const exploreRoutes = Array.isArray(patch.exploreRoutes) ? patch.exploreRoutes : null;
+  const accountProfile = patch.accountProfile && typeof patch.accountProfile === 'object'
+    ? patch.accountProfile
+    : null;
   const raceViewPreferences = patch.raceViewPreferences && typeof patch.raceViewPreferences === 'object'
     ? patch.raceViewPreferences
     : null;
@@ -672,6 +681,7 @@ export async function saveUserData(guestKey, patch) {
       bikeProfiles: bikeProfiles ?? current.bikeProfiles,
       studioRiders: studioRiders ?? current.studioRiders,
       exploreRoutes: exploreRoutes ?? current.exploreRoutes,
+      accountProfile: accountProfile ?? current.accountProfile,
       raceViewPreferences: raceViewPreferences ?? current.raceViewPreferences,
     };
     memoryUserDataByGuestKey.set(guestKey, cloneJson(next, next));
@@ -679,7 +689,7 @@ export async function saveUserData(guestKey, patch) {
   }
 
   const result = await query(
-    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, race_view_preferences, updated_at)
+    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences, updated_at)
      VALUES (
        $1,
        COALESCE($2::jsonb, '{}'::jsonb),
@@ -687,7 +697,8 @@ export async function saveUserData(guestKey, patch) {
        COALESCE($4::jsonb, '[]'::jsonb),
        COALESCE($5::jsonb, '[]'::jsonb),
        COALESCE($6::jsonb, '[]'::jsonb),
-       $7::jsonb,
+       COALESCE($7::jsonb, '{}'::jsonb),
+       $8::jsonb,
        now()
      )
      ON CONFLICT (guest_key) DO UPDATE SET
@@ -696,9 +707,10 @@ export async function saveUserData(guestKey, patch) {
        bike_profiles = COALESCE($4::jsonb, ${schema}.user_data.bike_profiles),
        studio_riders = COALESCE($5::jsonb, ${schema}.user_data.studio_riders),
        explore_routes = COALESCE($6::jsonb, ${schema}.user_data.explore_routes),
-       race_view_preferences = COALESCE($7::jsonb, ${schema}.user_data.race_view_preferences),
+       account_profile = COALESCE($7::jsonb, ${schema}.user_data.account_profile),
+       race_view_preferences = COALESCE($8::jsonb, ${schema}.user_data.race_view_preferences),
        updated_at = now()
-     RETURNING track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, race_view_preferences`,
+     RETURNING track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences`,
     [
       guestKey,
       trackMappings == null ? null : json(trackMappings),
@@ -706,6 +718,7 @@ export async function saveUserData(guestKey, patch) {
       bikeProfiles == null ? null : json(bikeProfiles),
       studioRiders == null ? null : json(studioRiders),
       exploreRoutes == null ? null : json(exploreRoutes),
+      accountProfile == null ? null : json(accountProfile),
       raceViewPreferences == null ? null : json(raceViewPreferences),
     ],
   );
@@ -720,8 +733,172 @@ export async function saveUserData(guestKey, patch) {
     bikeProfiles: fromJson(row.bike_profiles, []),
     studioRiders: fromJson(row.studio_riders, []),
     exploreRoutes: fromJson(row.explore_routes, []),
+    accountProfile: fromJson(row.account_profile, {}),
     raceViewPreferences: fromJson(row.race_view_preferences, null),
   };
+}
+
+function trainingSessionFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    activityType: row.activity_type,
+    title: row.title,
+    startedAt: new Date(row.started_at).getTime(),
+    endedAt: new Date(row.ended_at).getTime(),
+    durationMs: Number(row.duration_ms) || 0,
+    distanceMeters: Number(row.distance_meters) || 0,
+    ...(row.track_id ? { trackId: row.track_id } : {}),
+    ...(row.track_name ? { trackName: row.track_name } : {}),
+    source: row.source === 'imported' ? 'imported' : 'live',
+    details: fromJson(row.details, {}),
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+  };
+}
+
+export async function saveTrainingSession(profileKey, session) {
+  const saved = {
+    ...cloneJson(session, session),
+    createdAt: Number(session.createdAt) || Date.now(),
+    updatedAt: Date.now(),
+  };
+  if (!pool) {
+    memoryTrainingSessions.set(`${profileKey}:${session.id}`, saved);
+    return cloneJson(saved, saved);
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.training_sessions (
+       profile_key, id, activity_type, title, started_at, ended_at, duration_ms,
+       distance_meters, track_id, track_name, source, details, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0), to_timestamp($6 / 1000.0), $7,
+       $8, $9, $10, $11, $12::jsonb, to_timestamp($13 / 1000.0), now())
+     ON CONFLICT (profile_key, id) DO UPDATE SET
+       activity_type = EXCLUDED.activity_type,
+       title = EXCLUDED.title,
+       started_at = EXCLUDED.started_at,
+       ended_at = EXCLUDED.ended_at,
+       duration_ms = EXCLUDED.duration_ms,
+       distance_meters = EXCLUDED.distance_meters,
+       track_id = EXCLUDED.track_id,
+       track_name = EXCLUDED.track_name,
+       source = EXCLUDED.source,
+       details = EXCLUDED.details,
+       updated_at = now()
+     RETURNING *`,
+    [
+      profileKey,
+      session.id,
+      session.activityType,
+      session.title,
+      session.startedAt,
+      session.endedAt,
+      session.durationMs,
+      session.distanceMeters,
+      session.trackId ?? null,
+      session.trackName ?? null,
+      session.source,
+      json(session.details),
+      saved.createdAt,
+    ],
+  );
+  return trainingSessionFromRow(result?.rows?.[0]);
+}
+
+function legacyRaceSessionId(entry, profileKey) {
+  const suffix = `:${profileKey}:${entry.playerId}`;
+  const raw = String(entry.dedupeKey || '');
+  return (raw.endsWith(suffix) ? raw.slice(0, -suffix.length) : raw).replace(/^local:/, '');
+}
+
+function legacyRaceSessions(entries, profileKey) {
+  const groups = new Map();
+  entries.forEach((entry) => {
+    const id = legacyRaceSessionId(entry, profileKey);
+    groups.set(id, [...(groups.get(id) ?? []), entry]);
+  });
+  return [...groups.entries()].map(([id, results]) => {
+    const first = results[0];
+    const summaries = results.map((result) => result.summary ?? {});
+    const sprint = summaries.find((summary) => Number(summary.sprintDistanceFeet) > 0);
+    const startedAt = Date.parse(first.createdAt) || Date.now();
+    const durationMs = Math.max(0, ...results.map((result) => Number(result.finishTimeMs) || 0));
+    const distanceMeters = Math.max(0, ...results.map((result) => Number(result.distanceMeters) || 0));
+    const activityType = sprint ? 'straight-sprint' : 'bmx-race';
+    return {
+      id,
+      activityType,
+      title: sprint ? `${Number(sprint.sprintDistanceFeet)} ft at ${first.trackName}` : first.trackName,
+      startedAt,
+      endedAt: startedAt + durationMs,
+      durationMs,
+      distanceMeters,
+      trackId: first.trackId,
+      trackName: first.trackName,
+      source: 'imported',
+      details: {
+        summaries,
+        ...(sprint ? {
+          sprintDistanceFeet: Number(sprint.sprintDistanceFeet),
+          sprintAirSetting: Number(sprint.sprintAirSetting) || undefined,
+        } : {}),
+      },
+      createdAt: startedAt,
+      updatedAt: startedAt,
+    };
+  });
+}
+
+export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now(), limit = 1000 } = {}) {
+  const safeLimit = Math.max(1, Math.min(2000, Math.round(Number(limit) || 1000)));
+  let sessions;
+  let raceEntries;
+  if (!pool) {
+    sessions = [...memoryTrainingSessions.entries()]
+      .filter(([key, session]) => key.startsWith(`${profileKey}:`) && session.startedAt >= from && session.startedAt <= to)
+      .map(([, session]) => cloneJson(session, session));
+    raceEntries = [...memoryLocalRaceResults.values()]
+      .filter((entry) => entry.guestKey === profileKey && Date.parse(entry.createdAt) >= from && Date.parse(entry.createdAt) <= to);
+  } else {
+    const [sessionResult, raceResult] = await Promise.all([
+      query(
+        `SELECT * FROM ${schema}.training_sessions
+         WHERE profile_key = $1 AND started_at >= to_timestamp($2 / 1000.0) AND started_at <= to_timestamp($3 / 1000.0)
+         ORDER BY started_at DESC LIMIT $4`,
+        [profileKey, from, to, safeLimit],
+      ),
+      query(
+        `SELECT dedupe_key, guest_key, rider_name, player_id, track_id, track_name, rank,
+           finish_time_ms, distance_meters, top_speed_kph, average_speed_kph, top_cadence,
+           average_cadence, top_watts, average_watts, summary, created_at
+         FROM ${schema}.race_results
+         WHERE guest_key = $1 AND created_at >= to_timestamp($2 / 1000.0) AND created_at <= to_timestamp($3 / 1000.0)
+         ORDER BY created_at DESC LIMIT $4`,
+        [profileKey, from, to, safeLimit * 4],
+      ),
+    ]);
+    sessions = (sessionResult?.rows ?? []).map(trainingSessionFromRow).filter(Boolean);
+    raceEntries = (raceResult?.rows ?? []).map((row) => ({
+      dedupeKey: row.dedupe_key,
+      guestKey: row.guest_key,
+      riderName: row.rider_name,
+      playerId: Number(row.player_id),
+      trackId: row.track_id,
+      trackName: row.track_name,
+      rank: Number(row.rank),
+      finishTimeMs: row.finish_time_ms == null ? null : Number(row.finish_time_ms),
+      distanceMeters: Number(row.distance_meters) || 0,
+      summary: fromJson(row.summary, {}),
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+  }
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  legacyRaceSessions(raceEntries, profileKey).forEach((session) => {
+    if (!byId.has(session.id)) byId.set(session.id, session);
+  });
+  return [...byId.values()]
+    .sort((left, right) => right.startedAt - left.startedAt)
+    .slice(0, safeLimit);
 }
 
 export async function saveUserTrackMapping(

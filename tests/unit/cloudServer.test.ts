@@ -284,6 +284,10 @@ describe('cloud API trust boundaries', () => {
     const saved = await api('/api/user-data?profileKey=user:someone-else', {
       method: 'PATCH',
       body: JSON.stringify({
+        accountProfile: {
+          photoUrl: 'data:image/png;base64,QUJDRA==',
+          updatedAt: 210,
+        },
         bikeProfiles: [{ deviceId: 58701, name: 'Studio One' }],
         studioRiders: [{
           id: 'rider-jordan',
@@ -342,6 +346,10 @@ describe('cloud API trust boundaries', () => {
     expect(loaded.status).toBe(200);
     const loadedPayload = await loaded.json();
     expect(loadedPayload).toMatchObject({
+      accountProfile: {
+        photoUrl: 'data:image/png;base64,QUJDRA==',
+        updatedAt: 210,
+      },
       bikeProfiles: [{ deviceId: 58701, name: 'Studio One' }],
       studioRiders: [{
         id: 'rider-jordan',
@@ -470,6 +478,41 @@ describe('cloud API trust boundaries', () => {
       routes: [{ id: 'EXPLORE-PERSONAL-1', name: 'My San Francisco ride' }],
     });
 
+    const trainingStartedAt = Date.now() - 20_000;
+    for (const [index, activityType] of ['bmx-race', 'straight-sprint', 'explore'].entries()) {
+      const trainingSave = await api('/api/training-sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          session: {
+            id: `training-${activityType}-${trainingStartedAt}`,
+            activityType,
+            title: `${activityType} training`,
+            startedAt: trainingStartedAt + index * 1_000,
+            endedAt: trainingStartedAt + index * 1_000 + 8_000,
+            durationMs: 8_000,
+            distanceMeters: activityType === 'explore' ? 3_218.688 : 320,
+            trackId: 'north-bay-bmx',
+            trackName: 'North Bay BMX',
+            details: { riderName: 'Review Rider', attempt: index + 1 },
+          },
+        }),
+      });
+      expect(trainingSave.status).toBe(201);
+    }
+
+    const trainingHistory = await api(`/api/training-sessions?from=${trainingStartedAt - 1_000}&to=${Date.now()}&limit=20`);
+    expect(trainingHistory.status).toBe(200);
+    await expect(trainingHistory.json()).resolves.toMatchObject({
+      totals: {
+        sessions: 3,
+        bmxRaces: 1,
+        straightSprints: 1,
+        exploreRides: 1,
+        distanceMeters: 3_858.688,
+        durationMs: 24_000,
+      },
+    });
+
     const firstAccountCookie = cookie;
     const secondRegistration = await api('/api/auth/register', {
       method: 'POST',
@@ -485,6 +528,10 @@ describe('cloud API trust boundaries', () => {
     const otherAccountRoutes = await api('/api/explore/recent-routes?profileKey=user:someone-else');
     expect(otherAccountRoutes.status).toBe(200);
     await expect(otherAccountRoutes.json()).resolves.toEqual({ routes: [] });
+
+    const otherAccountTraining = await api(`/api/training-sessions?from=${trainingStartedAt - 1_000}&to=${Date.now()}`);
+    expect(otherAccountTraining.status).toBe(200);
+    await expect(otherAccountTraining.json()).resolves.toMatchObject({ sessions: [], totals: { sessions: 0 } });
 
     cookie = firstAccountCookie;
     const restoredAfterBrowserReset = await api('/api/explore/recent-routes');

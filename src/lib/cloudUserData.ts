@@ -1,5 +1,6 @@
-import type { BikeProfile, RaceViewPreferences, StudioRider, TrackRecord, UserTrackMapping } from '../types';
+import type { AccountProfile, BikeProfile, RaceViewPreferences, StudioRider, TrackRecord, UserTrackMapping } from '../types';
 import { normalizeRaceViewPreferences } from './raceViewPreferences';
+import { normalizeRiderPhotoDataUrl } from './riderPhotos';
 import type { StoredTrackMappings } from './trackMapping';
 import { createPatchBatcher } from './patchBatcher';
 
@@ -8,6 +9,7 @@ export type CloudUserData = {
   customRoutes: TrackRecord[];
   bikeProfiles: BikeProfile[];
   studioRiders: StudioRider[];
+  accountProfile: AccountProfile;
   raceViewPreferences: RaceViewPreferences | null;
 };
 
@@ -24,6 +26,7 @@ const emptyCloudUserData: CloudUserData = {
   customRoutes: [],
   bikeProfiles: [],
   studioRiders: [],
+  accountProfile: { updatedAt: 0 },
   raceViewPreferences: null,
 };
 
@@ -38,6 +41,14 @@ function normalizeCloudUserData(value: Partial<CloudUserData> | null | undefined
     customRoutes: Array.isArray(value?.customRoutes) ? value.customRoutes : [],
     bikeProfiles: Array.isArray(value?.bikeProfiles) ? value.bikeProfiles : [],
     studioRiders: Array.isArray(value?.studioRiders) ? value.studioRiders : [],
+    accountProfile: value?.accountProfile && typeof value.accountProfile === 'object'
+      ? {
+        ...(normalizeRiderPhotoDataUrl(value.accountProfile.photoUrl)
+          ? { photoUrl: normalizeRiderPhotoDataUrl(value.accountProfile.photoUrl) }
+          : {}),
+        updatedAt: Math.max(0, Number(value.accountProfile.updatedAt) || 0),
+      }
+      : { updatedAt: 0 },
     raceViewPreferences: value?.raceViewPreferences && typeof value.raceViewPreferences === 'object'
       ? normalizeRaceViewPreferences(value.raceViewPreferences)
       : null,
@@ -137,6 +148,7 @@ export function createEmptyCloudUserData(): CloudUserData {
     customRoutes: emptyCloudUserData.customRoutes,
     bikeProfiles: emptyCloudUserData.bikeProfiles,
     studioRiders: emptyCloudUserData.studioRiders,
+    accountProfile: emptyCloudUserData.accountProfile,
     raceViewPreferences: emptyCloudUserData.raceViewPreferences,
   };
 }

@@ -558,6 +558,35 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
            )`,
       ],
     },
+    {
+      version: 10,
+      name: 'add account profiles and unified training history',
+      statements: [
+        `ALTER TABLE ${schema}.user_data
+          ADD COLUMN IF NOT EXISTS account_profile JSONB NOT NULL DEFAULT '{}'::jsonb`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.training_sessions (
+          profile_key TEXT NOT NULL,
+          id TEXT NOT NULL,
+          activity_type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          started_at TIMESTAMPTZ NOT NULL,
+          ended_at TIMESTAMPTZ NOT NULL,
+          duration_ms BIGINT NOT NULL DEFAULT 0,
+          distance_meters DOUBLE PRECISION NOT NULL DEFAULT 0,
+          track_id TEXT,
+          track_name TEXT,
+          source TEXT NOT NULL DEFAULT 'live',
+          details JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (profile_key, id)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_training_sessions_profile_date
+          ON ${schema}.training_sessions (profile_key, started_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_training_sessions_profile_type
+          ON ${schema}.training_sessions (profile_key, activity_type, started_at DESC)`,
+      ],
+    },
   ];
 }
 

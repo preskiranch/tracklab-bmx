@@ -26,16 +26,17 @@ import {
   Settings,
   StopCircle,
   Usb,
+  UserCircle,
   Users,
 } from 'lucide-react';
-import { DiagnosticsPanel, type CloudUserDataStatus } from './components/DiagnosticsPanel';
-import { DeveloperToolsPanel } from './components/DeveloperToolsPanel';
+import type { CloudUserDataStatus } from './components/DiagnosticsPanel';
 import { EarthTrackView } from './components/EarthTrackView';
 import { MembershipLanding } from './components/MembershipLanding';
 import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
 import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { StudioRaceEntry } from './components/StudioRaceEntry';
+import { RiderAvatar } from './components/RiderAvatar';
 import {
   bikeConnectionSourceStorageKey,
   bikeProfilesStorageKey,
@@ -200,6 +201,7 @@ import {
   renameStudioRider,
   updateStudioRiderPhoto,
 } from './lib/studioRiders';
+import { normalizeRiderPhotoDataUrl } from './lib/riderPhotos';
 import {
   claimBillingReturn,
   loginAuthUser,
@@ -227,6 +229,7 @@ import { useMultiplayer } from './hooks/useMultiplayer';
 import { useRoomVoiceChat } from './hooks/useRoomVoiceChat';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import type {
+  AccountProfile,
   AppMode,
   BikeProfile,
   ConnectedBikeDevice,
@@ -235,6 +238,8 @@ import type {
   DistanceUnit,
   DraftTrackSplit,
   EarthCamera,
+  ExploreRider,
+  ExploreRoute,
   GhostLapPoint,
   MappingEditMode,
   MetricKey,
@@ -273,6 +278,12 @@ const AnalyticsPanel = lazy(() => import('./components/AnalyticsPanel')
   .then((module) => ({ default: module.AnalyticsPanel })));
 const ExploreView = lazy(() => import('./components/ExploreView')
   .then((module) => ({ default: module.ExploreView })));
+const AccountProfileView = lazy(() => import('./components/AccountProfileView')
+  .then((module) => ({ default: module.AccountProfileView })));
+const DiagnosticsPanel = lazy(() => import('./components/DiagnosticsPanel')
+  .then((module) => ({ default: module.DiagnosticsPanel })));
+const DeveloperToolsPanel = lazy(() => import('./components/DeveloperToolsPanel')
+  .then((module) => ({ default: module.DeveloperToolsPanel })));
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const customRouteInitialZoom = 18;
@@ -1474,6 +1485,8 @@ export default function App() {
   const [straightSprintViewMode, setStraightSprintViewMode] = useState<TrackRaceViewMode>('satellite');
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
   const [studioRiders, setStudioRiders] = useState<StudioRider[]>(readStoredStudioRiders);
+  const [accountProfile, setAccountProfile] = useState<AccountProfile>({ updatedAt: 0 });
+  const [trainingHistoryRevision, setTrainingHistoryRevision] = useState(0);
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
   const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>(readStoredBikeConnectionSource);
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
@@ -2332,21 +2345,38 @@ export default function App() {
     [connectedBikeDeviceById, connectedBikeSamples, connectedDeviceIds, profileByDevice],
   );
   const activePlayers = demoMode ? demoPlayers : sessionPlayers;
+  const accountRider = useMemo<StudioRider | null>(() => (
+    authUser
+      ? {
+        id: `account:${authUser.id}`,
+        name: authUser.name,
+        ...(accountProfile.photoUrl ? { photoUrl: accountProfile.photoUrl } : {}),
+        createdAt: 1,
+        updatedAt: accountProfile.updatedAt,
+      }
+      : null
+  ), [accountProfile.photoUrl, accountProfile.updatedAt, authUser]);
+  const availableStudioRiders = useMemo(
+    () => [
+      ...(accountRider ? [accountRider] : []),
+      ...activeStudioRiders(studioRiders).filter((rider) => rider.id !== accountRider?.id),
+    ],
+    [accountRider, studioRiders],
+  );
   const explorePlayers = useMemo(
     () => (
       demoMode
         ? demoPlayers
-        : applyStudioRiderAssignments(activePlayers, studioRiders, studioRiderAssignments)
+        : applyStudioRiderAssignments(activePlayers, availableStudioRiders, studioRiderAssignments)
     ),
     [
       activePlayers,
       demoMode,
       demoPlayers,
       studioRiderAssignments,
-      studioRiders,
+      availableStudioRiders,
     ],
   );
-  const availableStudioRiders = useMemo(() => activeStudioRiders(studioRiders), [studioRiders]);
   const enteredRacePlayers = useMemo(() => {
     if (demoMode) {
       return activePlayers;
@@ -2356,8 +2386,8 @@ export default function App() {
     const enteredPlayers = activePlayers.filter(
       (player) => player.deviceId != null && readyDeviceIds.has(player.deviceId),
     );
-    return applyStudioRiderAssignments(enteredPlayers, studioRiders, studioRiderAssignments);
-  }, [activePlayers, demoMode, liveRaceReadyDeviceIds, studioRiderAssignments, studioRiders]);
+    return applyStudioRiderAssignments(enteredPlayers, availableStudioRiders, studioRiderAssignments);
+  }, [activePlayers, availableStudioRiders, demoMode, liveRaceReadyDeviceIds, studioRiderAssignments]);
   const multiplayer = useMultiplayer({
     enabled: playMode === 'multiplayer',
     track: effectiveTrack,
@@ -3386,6 +3416,9 @@ export default function App() {
           });
           setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
           setStudioRiders((current) => mergeStudioRiders(current, data.studioRiders));
+          setAccountProfile((current) => (
+            data.accountProfile.updatedAt >= current.updatedAt ? data.accountProfile : current
+          ));
           const localRaceViewPreferences = readStoredRaceViewPreferences(
             cloudProfileKey,
             readStoredEarthCameras(),
@@ -4124,6 +4157,44 @@ export default function App() {
     }).catch((error: Error) => {
       console.warn(`Could not save TrackLab race history: ${error.message}`);
     });
+    const trainingStartedAt = raceCapture.startedAt ?? raceCapture.createdAt;
+    const trainingEndedAt = raceCapture.endedAt ?? savedAt;
+    const trainingSummaries = raceCapture.summary.map((summary) => {
+      const photoUrl = racePlayers.find((player) => player.id === summary.playerId)?.photoUrl;
+      return {
+        ...summary,
+        ...(photoUrl ? { photoUrl } : {}),
+      };
+    });
+    void import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
+      id: sessionId,
+      activityType: appMode === 'straight-sprint' ? 'straight-sprint' : 'bmx-race',
+      title: appMode === 'straight-sprint' && activeSprintDistanceFeet != null
+        ? `${activeSprintDistanceFeet.toLocaleString()} ft sprint at ${effectiveTrack.name}`
+        : `${effectiveTrack.name} BMX race`,
+      startedAt: trainingStartedAt,
+      endedAt: trainingEndedAt,
+      durationMs: Math.max(0, trainingEndedAt - trainingStartedAt),
+      distanceMeters: Math.max(0, ...raceCapture.summary.map((summary) => summary.distanceMeters)),
+      trackId: effectiveTrack.id,
+      trackName: effectiveTrack.name,
+      details: {
+        summaries: trainingSummaries,
+        zoneResults: raceCapture.zoneResults ?? [],
+        events: raceCapture.events,
+        selectedMetrics: raceCapture.selectedMetrics,
+        lapCount: isLoopTrack ? lapCount : 1,
+        routeVariantId: ghostRouteVariantId,
+        ...(activeSprintDistanceFeet != null && activeSprintAirSetting != null ? {
+          sprintDistanceFeet: activeSprintDistanceFeet,
+          sprintAirSetting: activeSprintAirSetting,
+        } : {}),
+      },
+    })).then(() => {
+      setTrainingHistoryRevision((revision) => revision + 1);
+    }).catch((error: Error) => {
+      console.warn(`Could not save TrackLab training session: ${error.message}`);
+    });
     nextGhosts.forEach((ghost) => {
       void syncGhostLapToCloud(ghost, ownerKey).catch((error: Error) => {
         console.warn(`Could not sync TrackLab ghost: ${error.message}`);
@@ -4134,6 +4205,7 @@ export default function App() {
     activeSprintAirSetting,
     activeSprintDistanceFeet,
     cloudProfileKey,
+    appMode,
     effectiveTrack.id,
     effectiveTrack.name,
     ghostRouteVariantId,
@@ -5445,6 +5517,27 @@ export default function App() {
     ))));
   }, []);
 
+  const handleAccountPhotoChange = useCallback((photoUrl: string | undefined) => {
+    const normalizedPhotoUrl = normalizeRiderPhotoDataUrl(photoUrl);
+    const nextProfile: AccountProfile = {
+      ...(normalizedPhotoUrl ? { photoUrl: normalizedPhotoUrl } : {}),
+      updatedAt: Date.now(),
+    };
+    setLockedRacePlayers(null);
+    setAccountProfile(nextProfile);
+    if (cloudProfileKey) {
+      void queueCloudUserDataPatch(cloudProfileKey, { accountProfile: nextProfile })
+        .then(() => {
+          setCloudUserDataStatus('online');
+          setCloudUserDataMessage('Your account photo is saved across devices.');
+        })
+        .catch((error: Error) => {
+          setCloudUserDataStatus('offline');
+          setCloudUserDataMessage(`Could not save your account photo. ${error.message}`);
+        });
+    }
+  }, [cloudProfileKey]);
+
   const handleStudioRiderRemove = useCallback((riderId: string) => {
     setLockedRacePlayers(null);
     setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
@@ -6405,6 +6498,49 @@ export default function App() {
     }
   }, [demoMode]);
 
+  const handleExploreRideComplete = useCallback((result: {
+    route: ExploreRoute;
+    riders: ExploreRider[];
+    startedAt: number;
+    endedAt: number;
+    durationMs: number;
+  }) => {
+    if (demoMode || !authUser) {
+      return;
+    }
+    const durationHours = Math.max(1, result.durationMs) / 3_600_000;
+    const distanceMeters = Math.max(0, ...result.riders.map((rider) => rider.distanceMeters));
+    void import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
+      id: `explore:${result.route.id}:${Math.round(result.startedAt)}`,
+      activityType: 'explore',
+      title: result.route.name || `${result.route.originLabel} to ${result.route.destinationLabel}`,
+      startedAt: result.startedAt,
+      endedAt: result.endedAt,
+      durationMs: result.durationMs,
+      distanceMeters,
+      trackId: result.route.id,
+      trackName: result.route.name || result.route.destinationLabel,
+      details: {
+        originLabel: result.route.originLabel,
+        destinationLabel: result.route.destinationLabel,
+        travelMode: result.route.travelMode,
+        elevationGainMeters: result.route.elevationGainMeters ?? 0,
+        elevationLossMeters: result.route.elevationLossMeters ?? 0,
+        riders: result.riders.map((rider) => ({
+          playerId: rider.playerId,
+          name: rider.name,
+          ...(rider.photoUrl ? { photoUrl: rider.photoUrl } : {}),
+          distanceMeters: rider.distanceMeters,
+          averageSpeedMph: (rider.distanceMeters / 1609.344) / durationHours,
+        })),
+      },
+    })).then(() => {
+      setTrainingHistoryRevision((revision) => revision + 1);
+    }).catch((error: Error) => {
+      console.warn(`Could not save Explore the World history: ${error.message}`);
+    });
+  }, [authUser, demoMode]);
+
   const handleExploreFullscreenChange = useCallback((enabled: boolean) => {
     setExploreRideFullscreen(enabled);
     if (enabled) {
@@ -7016,7 +7152,24 @@ export default function App() {
           <div className="bridge-prompt">{bridgePrompt}</div>
         </section>
 
-        {appMode === 'explore' ? (
+        {appMode === 'profile' ? (
+          <section className="sidebar-workflow profile-sidebar-workflow" aria-label="My Profile summary">
+            <div className="workflow-heading">
+              <span>My Profile</span>
+              <small>Photo and training history</small>
+            </div>
+            <div className="workflow-list">
+              <div className="workflow-step complete">
+                <span className="workflow-index">1</span>
+                <span className="workflow-copy"><strong>Account photo</strong><small>Used on rider cards and results</small></span>
+              </div>
+              <div className="workflow-step complete">
+                <span className="workflow-index">2</span>
+                <span className="workflow-copy"><strong>Training calendar</strong><small>Review and download every session</small></span>
+              </div>
+            </div>
+          </section>
+        ) : appMode === 'explore' ? (
           <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Explore the World setup workflow">
             <div className="workflow-heading">
               <span>Explore the World</span>
@@ -7121,6 +7274,7 @@ export default function App() {
               players={activePlayers}
               enteredDeviceIds={liveRaceReadyDeviceIds}
               riders={availableStudioRiders}
+              accountRiderId={accountRider?.id}
               assignments={studioRiderAssignments}
               canEdit={canEditLiveRaceEntry}
               onToggleEntry={toggleLiveRaceEntry}
@@ -7181,6 +7335,17 @@ export default function App() {
         )}
 
         <nav className="side-nav" aria-label="Primary">
+          <button
+            className={appMode === 'profile' ? 'selected' : ''}
+            type="button"
+            onClick={() => {
+              setMappingMode(false);
+              setAppMode('profile');
+            }}
+          >
+            <UserCircle size={17} />
+            My Profile
+          </button>
           <button
             className={appMode === 'race' && !mappingMode ? 'selected' : ''}
             type="button"
@@ -7283,6 +7448,11 @@ export default function App() {
         </nav>
 
         <section className="membership-mini-card">
+          <RiderAvatar
+            name={authUser?.name ?? 'TrackLab rider'}
+            photoUrl={accountProfile.photoUrl}
+            accent="#7ade36"
+          />
           <span className="eyebrow">Membership</span>
           <strong>{membershipLabel}</strong>
           <p>{membership.tier === 'racer' ? 'Live Wattbike racing unlocked.' : 'Live viewing access.'}</p>
@@ -7320,7 +7490,15 @@ export default function App() {
 
       <main className="platform-main">
         <header className="platform-topbar">
-          {appMode === 'explore' ? (
+          {appMode === 'profile' ? (
+            <div className="explore-topbar-heading">
+              <UserCircle size={20} />
+              <span>
+                <strong>My Profile</strong>
+                <small>Your photo, calendar, sessions, and downloads</small>
+              </span>
+            </div>
+          ) : appMode === 'explore' ? (
             <div className="explore-topbar-heading">
               <Compass size={20} />
               <span>
@@ -7385,7 +7563,7 @@ export default function App() {
             </label>
           )}
 
-          {appMode !== 'explore' && (
+          {(appMode === 'race' || appMode === 'straight-sprint') && (
           <div
             className="race-readiness-strip"
             aria-label={appMode === 'straight-sprint' ? 'Straight Sprint readiness' : 'Race readiness'}
@@ -7410,7 +7588,18 @@ export default function App() {
           )}
         </header>
 
-        {appMode === 'explore' ? (
+        {appMode === 'profile' && authUser ? (
+          <Suspense fallback={<div className="explore-loading">Loading your profile and training history…</div>}>
+          <AccountProfileView
+            name={authUser.name}
+            email={authUser.email}
+            membershipLabel={membershipLabel}
+            profile={accountProfile}
+            historyRevision={trainingHistoryRevision}
+            onPhotoChange={handleAccountPhotoChange}
+          />
+          </Suspense>
+        ) : appMode === 'explore' ? (
           <Suspense fallback={<div className="explore-loading">Loading Explore the World…</div>}>
           <ExploreView
             developerMode={developerUiActive}
@@ -7447,6 +7636,7 @@ export default function App() {
             onVoiceStart={roomVoice.start}
             onVoiceStop={roomVoice.stop}
             onDemoRideStatusChange={handleExploreDemoRideStatusChange}
+            onRideComplete={handleExploreRideComplete}
             fullscreen={exploreRideFullscreen}
             onFullscreenChange={handleExploreFullscreenChange}
           />
@@ -7458,7 +7648,8 @@ export default function App() {
             speedUnit={speedUnit}
           />
         ) : appMode === 'diagnostics' ? (
-          <DiagnosticsPanel
+          <Suspense fallback={<div className="explore-loading">Loading diagnostics…</div>}>
+            <DiagnosticsPanel
             bridgeConnection={bridge.connection}
             bridgeMode={bridge.mode}
             bridgeSourceState={bridge.sourceState}
@@ -7505,10 +7696,13 @@ export default function App() {
             onCopyInvite={shareMultiplayerInvite}
             onCopyProfileKey={copyMultiplayerProfileKey}
             onOpenRace={() => setAppMode('race')}
-            onOpenMonitor={() => setAppMode('monitor')}
-          />
+              onOpenMonitor={() => setAppMode('monitor')}
+            />
+          </Suspense>
         ) : appMode === 'developer' && developerUiActive ? (
-          <DeveloperToolsPanel />
+          <Suspense fallback={<div className="explore-loading">Loading developer tools…</div>}>
+            <DeveloperToolsPanel />
+          </Suspense>
         ) : (
           <>
             <div className="dashboard-grid">

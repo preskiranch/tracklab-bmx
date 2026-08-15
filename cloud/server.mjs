@@ -1819,11 +1819,50 @@ function sanitizeUserDataPatch(value) {
       })
       .slice(0, 250);
   }
+  if (value.accountProfile && typeof value.accountProfile === 'object') {
+    const photoUrl = sanitizeRiderPhotoDataUrl(value.accountProfile.photoUrl);
+    patch.accountProfile = {
+      ...(photoUrl ? { photoUrl } : {}),
+      updatedAt: Math.max(0, Math.round(finiteNumber(value.accountProfile.updatedAt, Date.now()))),
+    };
+  }
   const raceViewPreferences = sanitizeRaceViewPreferences(value.raceViewPreferences);
   if (raceViewPreferences) {
     patch.raceViewPreferences = raceViewPreferences;
   }
   return patch;
+}
+
+function sanitizeTrainingSession(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const id = sanitizeText(value.id, '', 160).replace(/[^a-zA-Z0-9:._-]/g, '-');
+  const activityType = ['bmx-race', 'straight-sprint', 'explore'].includes(value.activityType)
+    ? value.activityType
+    : '';
+  const startedAt = Math.max(1, Math.round(finiteNumber(value.startedAt, 0)));
+  const endedAt = Math.max(startedAt, Math.round(finiteNumber(value.endedAt, startedAt)));
+  if (!id || !activityType || startedAt <= 1 || endedAt > Date.now() + 10 * 60 * 1000) {
+    return null;
+  }
+  const details = value.details && typeof value.details === 'object' && !Array.isArray(value.details)
+    ? value.details
+    : {};
+  return {
+    id,
+    activityType,
+    title: sanitizeText(value.title, activityType === 'explore' ? 'Explore the World ride' : 'TrackLab training', 160),
+    startedAt,
+    endedAt,
+    durationMs: Math.min(7 * 24 * 60 * 60 * 1000, Math.max(0, Math.round(finiteNumber(value.durationMs, endedAt - startedAt)))),
+    distanceMeters: Math.min(2_000_000, Math.max(0, finiteNumber(value.distanceMeters, 0))),
+    ...(sanitizeText(value.trackId, '', 140) ? { trackId: sanitizeText(value.trackId, '', 140) } : {}),
+    ...(sanitizeText(value.trackName, '', 140) ? { trackName: sanitizeText(value.trackName, '', 140) } : {}),
+    source: 'live',
+    details,
+    createdAt: Math.max(1, Math.round(finiteNumber(value.createdAt, startedAt))),
+  };
 }
 
 function saveMergedUserData(profileKey, patch) {
@@ -4944,6 +4983,53 @@ async function serveStatic(request, response) {
 
     response.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify({ error: 'Method not allowed' }));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/training-sessions') {
+    const session = await requireAuthSession(request, response);
+    if (!session) {
+      return;
+    }
+    const profileKey = authProfileKey(session.user);
+
+    if (request.method === 'GET') {
+      const from = Math.max(0, finiteNumber(requestUrl.searchParams.get('from'), 0));
+      const to = Math.max(from, finiteNumber(requestUrl.searchParams.get('to'), Date.now()));
+      const limit = Math.max(1, Math.min(2000, Math.round(finiteNumber(requestUrl.searchParams.get('limit'), 1000))));
+      const sessions = await persistence.loadTrainingSessions(profileKey, { from, to, limit });
+      writeJson(response, 200, {
+        sessions,
+        totals: {
+          sessions: sessions.length,
+          bmxRaces: sessions.filter((item) => item.activityType === 'bmx-race').length,
+          straightSprints: sessions.filter((item) => item.activityType === 'straight-sprint').length,
+          exploreRides: sessions.filter((item) => item.activityType === 'explore').length,
+          distanceMeters: sessions.reduce((total, item) => total + finiteNumber(item.distanceMeters, 0), 0),
+          durationMs: sessions.reduce((total, item) => total + finiteNumber(item.durationMs, 0), 0),
+        },
+        persistence: persistence.persistenceEnabled(),
+      });
+      return;
+    }
+
+    if (request.method === 'POST') {
+      const payload = await readJsonBody(request, 900_000);
+      const trainingSession = sanitizeTrainingSession(payload?.session);
+      if (!trainingSession) {
+        writeJson(response, 400, { error: 'A valid TrackLab training session is required.' });
+        return;
+      }
+      const saved = await persistence.saveTrainingSession(profileKey, trainingSession);
+      if (!saved) {
+        writeJson(response, 503, { error: 'Training history storage is temporarily unavailable.' });
+        return;
+      }
+      writeJson(response, 201, { session: saved, persistence: persistence.persistenceEnabled() });
+      return;
+    }
+
+    writeJson(response, 405, { error: 'Method not allowed' });
     return;
   }
 

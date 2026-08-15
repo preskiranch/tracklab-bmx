@@ -10,6 +10,7 @@ type StudioRaceEntryProps = {
   enteredDeviceIds: number[];
   riders: StudioRider[];
   assignments: StudioRiderAssignments;
+  accountRiderId?: string;
   canEdit: boolean;
   onToggleEntry: (deviceId: number) => void;
   onEnterAll: () => void;
@@ -26,6 +27,7 @@ export function StudioRaceEntry({
   enteredDeviceIds,
   riders,
   assignments,
+  accountRiderId,
   canEdit,
   onToggleEntry,
   onEnterAll,
@@ -39,7 +41,11 @@ export function StudioRaceEntry({
   const [newRiderName, setNewRiderName] = useState('');
   const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [managerOpen, setManagerOpen] = useState(riders.length === 0);
+  const managedRiders = useMemo(
+    () => riders.filter((rider) => rider.id !== accountRiderId),
+    [accountRiderId, riders],
+  );
+  const [managerOpen, setManagerOpen] = useState(managedRiders.length === 0);
   const assignedDeviceByRider = useMemo(() => {
     const next = new Map<string, number>();
     Object.entries(assignments).forEach(([deviceId, riderId]) => {
@@ -161,7 +167,7 @@ export function StudioRaceEntry({
                       const assignedPlayer = assignedDeviceId == null ? undefined : playerByDevice.get(assignedDeviceId);
                       return (
                         <option value={rider.id} disabled={assignedElsewhere} key={rider.id}>
-                          {rider.name}{assignedElsewhere && assignedPlayer ? ` - P${assignedPlayer.id}` : ''}
+                          {rider.name}{rider.id === accountRiderId ? ' (My profile)' : ''}{assignedElsewhere && assignedPlayer ? ` - P${assignedPlayer.id}` : ''}
                         </option>
                       );
                     })}
@@ -203,7 +209,7 @@ export function StudioRaceEntry({
       >
         <summary>
           <span><Users size={14} /> Studio riders</span>
-          <b>{riders.length}</b>
+          <b>{managedRiders.length}</b>
         </summary>
         <div className="studio-rider-manager-body">
           <form className="studio-rider-add" onSubmit={submitNewRider}>
@@ -227,9 +233,9 @@ export function StudioRaceEntry({
           </form>
           {formError && <p className="studio-rider-error" role="alert">{formError}</p>}
 
-          {riders.length > 0 ? (
+          {managedRiders.length > 0 ? (
             <div className="studio-rider-list">
-              {riders.map((rider) => {
+              {managedRiders.map((rider) => {
                 const assignedDeviceId = assignedDeviceByRider.get(rider.id);
                 const assignedPlayer = assignedDeviceId == null ? undefined : playerByDevice.get(assignedDeviceId);
                 return (

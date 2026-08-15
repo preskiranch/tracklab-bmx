@@ -51,7 +51,7 @@ function fakeDatabase(options: {
 
 describe('database migration runner', () => {
   it('includes recovery for custom sprint maps saved while the location was still a preview', () => {
-    const recoveryMigration = databaseMigrations().at(-1);
+    const recoveryMigration = databaseMigrations().find((candidate) => candidate.version === 9);
 
     expect(recoveryMigration).toMatchObject({
       version: 9,
@@ -60,6 +60,18 @@ describe('database migration runner', () => {
     expect(recoveryMigration?.statements.join('\n')).toContain('custom-preview-%');
     expect(recoveryMigration?.statements.join('\n')).toContain('public_custom_routes');
     expect(recoveryMigration?.statements.join('\n')).toContain('public_track_mappings');
+  });
+
+  it('adds account profiles and durable training history', () => {
+    const trainingHistoryMigration = databaseMigrations().find((candidate) => candidate.version === 10);
+
+    expect(trainingHistoryMigration).toMatchObject({
+      version: 10,
+      name: 'add account profiles and unified training history',
+    });
+    expect(trainingHistoryMigration?.statements.join('\n')).toContain('account_profile');
+    expect(trainingHistoryMigration?.statements.join('\n')).toContain('training_sessions');
+    expect(trainingHistoryMigration?.statements.join('\n')).toContain('profile_key');
   });
 
   it('serializes and commits each pending migration exactly once', async () => {

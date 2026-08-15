@@ -80,6 +80,7 @@ import type {
   BikeSample,
   DistanceUnit,
   ExploreDistanceUnit,
+  ExploreRider,
   ExploreRoute,
   MultiplayerExploreState,
   MultiplayerRoom,
@@ -129,6 +130,13 @@ type ExploreViewProps = {
   onVoiceStart: () => void;
   onVoiceStop: () => void;
   onDemoRideStatusChange?: (status: 'ready' | 'riding' | 'paused' | 'finished') => void;
+  onRideComplete?: (result: {
+    route: ExploreRoute;
+    riders: ExploreRider[];
+    startedAt: number;
+    endedAt: number;
+    durationMs: number;
+  }) => void;
   fullscreen: boolean;
   onFullscreenChange: (enabled: boolean) => void;
 };
@@ -301,6 +309,7 @@ export function ExploreView({
   onVoiceStart,
   onVoiceStop,
   onDemoRideStatusChange,
+  onRideComplete,
   fullscreen,
   onFullscreenChange,
 }: ExploreViewProps) {
@@ -765,12 +774,23 @@ export function ExploreView({
     if (
       ride.status === 'finished'
       && previousRideStatusRef.current !== 'finished'
-      && fullscreen
     ) {
-      onFullscreenChange(false);
+      const endedAt = Math.max(Date.now(), ...ride.riders.map((rider) => rider.finishedAt ?? 0));
+      if (route) {
+        onRideComplete?.({
+          route,
+          riders: ride.riders,
+          startedAt: Math.max(1, endedAt - ride.elapsedMs),
+          endedAt,
+          durationMs: ride.elapsedMs,
+        });
+      }
+      if (fullscreen) {
+        onFullscreenChange(false);
+      }
     }
     previousRideStatusRef.current = ride.status;
-  }, [fullscreen, onFullscreenChange, ride.status]);
+  }, [fullscreen, onFullscreenChange, onRideComplete, ride.elapsedMs, ride.riders, ride.status, route]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !currentRoom || !route) {
