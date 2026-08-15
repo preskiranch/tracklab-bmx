@@ -1,3 +1,7 @@
+import type { AccountProfile } from '../types';
+import type { AuthUser } from './auth';
+import { normalizeRiderPhotoDataUrl } from './riderPhotos';
+
 export type ClubConnectMember = {
   studioRiderId: string;
   riderName: string;
@@ -30,6 +34,17 @@ export type ClubInvite = {
   expiresAt: number;
   clubName: string;
   riderName: string;
+};
+
+export type ClubClaimProfile = {
+  fullName: string;
+  nickname: string;
+  photoUrl?: string;
+};
+
+export type ClubClaimResult = ClubConnectState & {
+  user: AuthUser;
+  accountProfile: AccountProfile;
 };
 
 const emptyClubConnectState: ClubConnectState = { ownedClub: null, memberships: [] };
@@ -71,11 +86,29 @@ export async function createClubInvite(studioRiderId: string) {
   }) as Promise<ClubInvite>;
 }
 
-export async function claimClubInvite(token: string) {
-  return normalizeState(await clubFetch('/api/club-connect/claim', {
+export async function claimClubInvite(token: string, profile: ClubClaimProfile) {
+  const payload = await clubFetch('/api/club-connect/claim', {
     method: 'POST',
-    body: JSON.stringify({ token }),
-  }));
+    body: JSON.stringify({
+      token,
+      fullName: profile.fullName,
+      nickname: profile.nickname,
+      photoUrl: profile.photoUrl ?? null,
+    }),
+  }) as Partial<ClubClaimResult>;
+  const state = normalizeState(payload);
+  if (!payload.user || !payload.accountProfile) {
+    throw new Error('TrackLab connected the invitation but could not finish the athlete profile. Refresh and try again.');
+  }
+  const photoUrl = normalizeRiderPhotoDataUrl(payload.accountProfile.photoUrl);
+  return {
+    ...state,
+    user: payload.user,
+    accountProfile: {
+      ...(photoUrl ? { photoUrl } : {}),
+      updatedAt: Math.max(0, Number(payload.accountProfile.updatedAt) || 0),
+    },
+  } as ClubClaimResult;
 }
 
 export async function revokeClubMember(studioRiderId: string) {

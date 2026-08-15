@@ -5549,6 +5549,18 @@ export default function App() {
     }
   }, [cloudProfileKey]);
 
+  const handleClubProfileComplete = useCallback((user: AuthUser, profile: AccountProfile) => {
+    setAuthUser(user);
+    setProfileNameDraft(user.name);
+    setProfileEmailDraft(user.email);
+    setMembership(user.membership);
+    setCheckoutBikeSeats(user.membership.bikeSeats);
+    setAccountProfile(profile);
+    setLockedRacePlayers(null);
+    setCloudUserDataStatus('online');
+    setCloudUserDataMessage('Your Club Athlete name and photo are saved across devices.');
+  }, []);
+
   const handleStudioRiderRemove = useCallback((riderId: string) => {
     setLockedRacePlayers(null);
     setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
@@ -7610,6 +7622,7 @@ export default function App() {
             studioRiders={activeStudioRiders(studioRiders)}
             historyRevision={trainingHistoryRevision}
             onPhotoChange={handleAccountPhotoChange}
+            onClubProfileComplete={handleClubProfileComplete}
           />
           </Suspense>
         ) : appMode === 'explore' ? (

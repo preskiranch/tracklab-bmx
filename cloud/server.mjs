@@ -398,6 +398,23 @@ function validateAccountPayload(payload, { requireName }) {
   return { email, password, name };
 }
 
+function clubAthleteDisplayName(fullNameValue, nicknameValue, fallbackName) {
+  const fullName = sanitizeText(fullNameValue, '', 64).replace(/\s+/g, ' ').trim();
+  const nickname = sanitizeText(nicknameValue, '', 28)
+    .replace(/[()"“”]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!fullName) {
+    return sanitizeText(fallbackName, 'Club athlete', 64);
+  }
+  if (!nickname) {
+    return fullName;
+  }
+  const suffix = ` (${nickname})`;
+  const availableNameLength = Math.max(1, 64 - suffix.length);
+  return `${fullName.slice(0, availableNameLength).trim()}${suffix}`;
+}
+
 async function createSignedInResponse(request, response, user, statusCode = 200) {
   const token = createSessionToken();
   const expiresAt = new Date(Date.now() + authSessionMaxAgeSeconds * 1000).toISOString();
@@ -5158,16 +5175,46 @@ async function serveStatic(request, response) {
       return;
     }
     const profileKey = authProfileKey(session.user);
+    const displayName = clubAthleteDisplayName(payload?.fullName, payload?.nickname, session.user.displayName);
+    const photoWasSubmitted = Object.prototype.hasOwnProperty.call(payload ?? {}, 'photoUrl');
+    const photoUrl = sanitizeRiderPhotoDataUrl(payload?.photoUrl);
+    if (photoWasSubmitted && payload?.photoUrl && !photoUrl) {
+      writeJson(response, 400, { error: 'That profile picture could not be saved. Choose another JPG, PNG, or WebP image.' });
+      return;
+    }
     const claimed = await persistence.claimClubInvite(
       tokenHash(token),
       profileKey,
-      sanitizeText(session.user.displayName, 'Club athlete', 120),
+      displayName,
     );
     if (!claimed) {
       writeJson(response, 409, { error: 'This invitation expired, was already used, or belongs to another account.' });
       return;
     }
-    writeJson(response, 200, publicClubConnectState(await persistence.loadClubConnectState(profileKey)));
+    const updatedUser = await persistence.updateAuthUserDisplayName(session.user.id, displayName) ?? {
+      ...session.user,
+      displayName,
+    };
+    const storedAccountProfile = (await persistence.loadUserData(profileKey)).accountProfile ?? {};
+    let accountProfile = {
+      ...(sanitizeRiderPhotoDataUrl(storedAccountProfile.photoUrl)
+        ? { photoUrl: sanitizeRiderPhotoDataUrl(storedAccountProfile.photoUrl) }
+        : {}),
+      updatedAt: Math.max(0, Math.round(finiteNumber(storedAccountProfile.updatedAt, 0))),
+    };
+    if (photoWasSubmitted) {
+      accountProfile = {
+        ...(photoUrl ? { photoUrl } : {}),
+        updatedAt: Date.now(),
+      };
+      const savedUserData = await persistence.saveUserData(profileKey, { accountProfile });
+      accountProfile = savedUserData?.accountProfile ?? accountProfile;
+    }
+    writeJson(response, 200, {
+      ...publicClubConnectState(await persistence.loadClubConnectState(profileKey)),
+      user: publicAuthUser(updatedUser),
+      accountProfile,
+    });
     return;
   }
 

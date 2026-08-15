@@ -31,6 +31,7 @@ import {
   loadTrainingHistory,
   type TrainingHistoryResponse,
 } from '../lib/trainingHistory';
+import type { AuthUser } from '../lib/auth';
 import { RiderAvatar, RiderPhotoEditor } from './RiderAvatar';
 import './AccountProfileView.css';
 
@@ -42,6 +43,7 @@ type AccountProfileViewProps = {
   studioRiders: StudioRider[];
   historyRevision: number;
   onPhotoChange: (photoUrl: string | undefined) => void;
+  onClubProfileComplete: (user: AuthUser, profile: AccountProfile) => void;
 };
 
 const emptyHistory: TrainingHistoryResponse = {
@@ -122,6 +124,20 @@ function summarizeSession(session: TrainingSession) {
   return [sprint, result].filter(Boolean).join(' · ');
 }
 
+function editableAccountName(value: string) {
+  const match = value.trim().match(/^(.+?)\s*\(([^()]+)\)$/u);
+  return {
+    fullName: (match?.[1] ?? value).trim(),
+    nickname: (match?.[2] ?? '').trim(),
+  };
+}
+
+function completedAccountName(fullName: string, nickname: string) {
+  const cleanName = fullName.trim().replace(/\s+/g, ' ');
+  const cleanNickname = nickname.trim().replace(/[()"“”]/g, '').replace(/\s+/g, ' ');
+  return cleanNickname ? `${cleanName} (${cleanNickname})` : cleanName;
+}
+
 export function AccountProfileView({
   name,
   email,
@@ -130,7 +146,9 @@ export function AccountProfileView({
   studioRiders,
   historyRevision,
   onPhotoChange,
+  onClubProfileComplete,
 }: AccountProfileViewProps) {
+  const initialAccountName = useMemo(() => editableAccountName(name), [name]);
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(() => localDateKey(Date.now()));
   const [history, setHistory] = useState<TrainingHistoryResponse>(emptyHistory);
@@ -140,6 +158,9 @@ export function AccountProfileView({
   const [clubStatus, setClubStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [clubMessage, setClubMessage] = useState('Loading Club Connect…');
   const [clubInviteToken, setClubInviteToken] = useState(clubInviteTokenFromUrl);
+  const [clubFullNameDraft, setClubFullNameDraft] = useState(initialAccountName.fullName);
+  const [clubNicknameDraft, setClubNicknameDraft] = useState(initialAccountName.nickname);
+  const [clubPhotoDraft, setClubPhotoDraft] = useState(profile.photoUrl);
   const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
   const [clubBusyId, setClubBusyId] = useState<string | null>(null);
 
@@ -212,19 +233,29 @@ export function AccountProfileView({
 
   const acceptInvitation = useCallback(() => {
     if (!clubInviteToken) return;
+    const fullName = clubFullNameDraft.trim().replace(/\s+/g, ' ');
+    if (!fullName) {
+      setClubMessage('Enter the athlete’s full name before connecting the studio record.');
+      return;
+    }
     setClubBusyId('claim');
-    setClubMessage('Connecting your account to your studio record…');
-    void claimClubInvite(clubInviteToken)
-      .then((state) => {
-        setClubState(state);
+    setClubMessage('Saving your Club Athlete profile and connecting your studio history…');
+    void claimClubInvite(clubInviteToken, {
+      fullName,
+      nickname: clubNicknameDraft,
+      photoUrl: clubPhotoDraft,
+    })
+      .then((result) => {
+        setClubState(result);
+        onClubProfileComplete(result.user, result.accountProfile);
         setClubInviteToken('');
         clearClubInviteFromUrl();
-        setClubMessage('Club connected. Your studio training history is now available in this calendar.');
+        setClubMessage('Profile complete. Your studio training history is now available in this calendar.');
         refresh();
       })
       .catch((error: Error) => setClubMessage(error.message))
       .finally(() => setClubBusyId(null));
-  }, [clubInviteToken, refresh]);
+  }, [clubFullNameDraft, clubInviteToken, clubNicknameDraft, clubPhotoDraft, onClubProfileComplete, refresh]);
 
   const disconnectRider = useCallback((rider: StudioRider) => {
     if (!window.confirm(`Remove ${rider.name}'s access to this studio record? Their TrackLab account will remain active.`)) return;
@@ -293,10 +324,45 @@ export function AccountProfileView({
           </header>
 
           {clubInviteToken && (
-            <div className="club-claim-card">
-              <div><strong>You have a private club invitation</strong><p>Accept it to attach this account to your exact studio rider record and training history.</p></div>
-              <button type="button" disabled={clubBusyId === 'claim'} onClick={acceptInvitation}>
-                <UserPlus size={17} /> {clubBusyId === 'claim' ? 'Connecting…' : 'Accept invitation'}
+            <div className="club-profile-setup">
+              <div className="club-profile-setup-copy">
+                <strong>Complete your Club Athlete profile</strong>
+                <p>Add the name and photo you want displayed throughout TrackLab. This will not change or disconnect your studio records.</p>
+              </div>
+              <div className="club-profile-setup-form">
+                <RiderPhotoEditor
+                  name={completedAccountName(clubFullNameDraft, clubNicknameDraft) || 'Club athlete'}
+                  photoUrl={clubPhotoDraft}
+                  disabled={clubBusyId === 'claim'}
+                  onPhotoChange={setClubPhotoDraft}
+                />
+                <div className="club-profile-fields">
+                  <label>
+                    <span>Full name</span>
+                    <input
+                      autoComplete="name"
+                      disabled={clubBusyId === 'claim'}
+                      maxLength={64}
+                      onChange={(event) => setClubFullNameDraft(event.target.value)}
+                      placeholder="First and last name"
+                      value={clubFullNameDraft}
+                    />
+                  </label>
+                  <label>
+                    <span>Nickname <small>optional</small></span>
+                    <input
+                      disabled={clubBusyId === 'claim'}
+                      maxLength={28}
+                      onChange={(event) => setClubNicknameDraft(event.target.value)}
+                      placeholder="The Machine"
+                      value={clubNicknameDraft}
+                    />
+                  </label>
+                  <p>Race display: <strong>{completedAccountName(clubFullNameDraft, clubNicknameDraft) || 'Enter your name'}</strong></p>
+                </div>
+              </div>
+              <button className="club-profile-complete" type="button" disabled={clubBusyId === 'claim' || !clubFullNameDraft.trim()} onClick={acceptInvitation}>
+                <UserPlus size={17} /> {clubBusyId === 'claim' ? 'Connecting…' : 'Complete profile and connect'}
               </button>
             </div>
           )}

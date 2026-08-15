@@ -288,6 +288,27 @@ export async function touchAuthUserLogin(userId) {
   return authUserFromRow(result?.rows?.[0]);
 }
 
+export async function updateAuthUserDisplayName(userId, displayName) {
+  if (!pool) {
+    const memoryUser = memoryAuthUsersById.get(userId);
+    if (!memoryUser) {
+      return null;
+    }
+    memoryUser.displayName = displayName;
+    memoryUser.updatedAt = new Date().toISOString();
+    return cloneAuthUser(memoryUser);
+  }
+
+  const result = await query(
+    `UPDATE ${schema}.auth_users
+     SET display_name = $2, updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [userId, displayName],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
 export async function updateAuthUserMembership(userId, membershipTier, bikeSeats) {
   if (!pool) {
     const memoryUser = memoryAuthUsersById.get(userId);

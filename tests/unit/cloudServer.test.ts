@@ -597,10 +597,17 @@ describe('cloud API trust boundaries', () => {
 
     const claim = await api('/api/club-connect/claim', {
       method: 'POST',
-      body: JSON.stringify({ token: invite.token }),
+      body: JSON.stringify({
+        token: invite.token,
+        fullName: 'Maya Alexandria Torres',
+        nickname: 'Rocket',
+        photoUrl: 'data:image/png;base64,aGVsbG8=',
+      }),
     });
     expect(claim.status).toBe(200);
     await expect(claim.json()).resolves.toMatchObject({
+      user: { name: 'Maya Alexandria Torres (Rocket)', membership: { tier: 'spectator' } },
+      accountProfile: { photoUrl: 'data:image/png;base64,aGVsbG8=' },
       memberships: [{ clubName: 'Review Rider', studioRiderId: 'studio-maya', riderName: 'Maya Torres' }],
     });
 
@@ -617,9 +624,26 @@ describe('cloud API trust boundaries', () => {
     expect(athleteHistoryPayload.sessions[0].details.events).toEqual([]);
 
     const membership = await api('/api/auth/me');
-    await expect(membership.json()).resolves.toMatchObject({ user: { membership: { tier: 'spectator' } } });
+    await expect(membership.json()).resolves.toMatchObject({
+      user: { name: 'Maya Alexandria Torres (Rocket)', membership: { tier: 'spectator' } },
+    });
+    const athleteProfile = await api('/api/user-data');
+    await expect(athleteProfile.json()).resolves.toMatchObject({
+      accountProfile: { photoUrl: 'data:image/png;base64,aGVsbG8=' },
+    });
 
     cookie = ownerCookie;
+    const connectedRoster = await api('/api/club-connect');
+    await expect(connectedRoster.json()).resolves.toMatchObject({
+      ownedClub: {
+        members: [expect.objectContaining({
+          studioRiderId: 'studio-maya',
+          athleteName: 'Maya Alexandria Torres (Rocket)',
+          status: 'claimed',
+        })],
+      },
+    });
+
     const reusedClaim = await api('/api/club-connect/claim', {
       method: 'POST',
       body: JSON.stringify({ token: invite.token }),
