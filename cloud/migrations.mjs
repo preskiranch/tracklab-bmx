@@ -629,6 +629,22 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ON ${schema}.club_invites (club_id, studio_rider_id, expires_at DESC)`,
       ],
     },
+    {
+      version: 12,
+      name: 'attribute athlete training sessions to clubs',
+      statements: [
+        `ALTER TABLE ${schema}.training_sessions
+          ADD COLUMN IF NOT EXISTS club_id TEXT`,
+        `ALTER TABLE ${schema}.training_sessions
+          ADD COLUMN IF NOT EXISTS studio_rider_id TEXT`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_training_sessions_club_date
+          ON ${schema}.training_sessions (club_id, started_at DESC)
+          WHERE club_id IS NOT NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_training_sessions_club_rider_date
+          ON ${schema}.training_sessions (club_id, studio_rider_id, started_at DESC)
+          WHERE club_id IS NOT NULL`,
+      ],
+    },
   ];
 }
 

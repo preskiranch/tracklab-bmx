@@ -16,6 +16,11 @@ export type TrainingSessionInput = Omit<TrainingSession, 'createdAt' | 'updatedA
   source?: TrainingSession['source'];
 };
 
+export type ClubTrainingSelection = {
+  clubId: string;
+  studioRiderId: string;
+};
+
 function trainingHistoryUrl(from?: number, to?: number) {
   const params = new URLSearchParams();
   if (Number.isFinite(from)) params.set('from', String(from));
@@ -44,6 +49,7 @@ function normalizeTrainingSession(value: Partial<TrainingSession>): TrainingSess
     ...(typeof value.trackId === 'string' && value.trackId ? { trackId: value.trackId } : {}),
     ...(typeof value.trackName === 'string' && value.trackName ? { trackName: value.trackName } : {}),
     source: value.source === 'imported' ? 'imported' : 'live',
+    ...(value.club && typeof value.club === 'object' ? { club: value.club } : {}),
     details: value.details && typeof value.details === 'object' ? value.details : {},
     createdAt: Number(value.createdAt) || startedAt,
     updatedAt: Number(value.updatedAt) || endedAt,
@@ -76,11 +82,11 @@ export async function loadTrainingHistory(from?: number, to?: number): Promise<T
   };
 }
 
-export async function saveTrainingSession(session: TrainingSessionInput) {
+export async function saveTrainingSession(session: TrainingSessionInput, clubSession?: ClubTrainingSelection | null) {
   const response = await fetch('/api/training-sessions', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session }),
+    body: JSON.stringify({ session, ...(clubSession ? { clubSession } : {}) }),
   });
   if (!response.ok) throw new Error(`Training history save returned ${response.status}`);
   const payload = await response.json() as { session?: Partial<TrainingSession> };
@@ -119,6 +125,7 @@ export function downloadTrainingSession(session: TrainingSession, format: 'json'
     ['Duration seconds', Math.round(session.durationMs / 1_000)],
     ['Distance meters', Number(session.distanceMeters.toFixed(2))],
     ['Track', session.trackName ?? ''],
+    ['Training owner', session.club ? `${session.club.name} / ${session.club.riderName}` : 'Personal'],
     ['Details', session.details],
   ];
   downloadFile(`${base}.csv`, 'text/csv;charset=utf-8', `Field,Value\n${rows.map((row) => row.map(csvCell).join(',')).join('\n')}\n`);

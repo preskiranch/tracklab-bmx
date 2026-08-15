@@ -87,6 +87,18 @@ describe('database migration runner', () => {
     expect(clubConnectMigration?.statements.join('\n')).toContain('athlete_profile_key');
   });
 
+  it('attributes one canonical athlete session to both the athlete and club', () => {
+    const clubSessionMigration = databaseMigrations().find((candidate) => candidate.version === 12);
+
+    expect(clubSessionMigration).toMatchObject({
+      version: 12,
+      name: 'attribute athlete training sessions to clubs',
+    });
+    expect(clubSessionMigration?.statements.join('\n')).toContain('club_id');
+    expect(clubSessionMigration?.statements.join('\n')).toContain('studio_rider_id');
+    expect(clubSessionMigration?.statements.join('\n')).toContain('idx_tracklab_training_sessions_club_date');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();

@@ -370,7 +370,7 @@ export function AccountProfileView({
           {clubState.memberships.map((membership) => (
             <div className="club-athlete-access" key={`${membership.clubId}:${membership.studioRiderId}`}>
               <ShieldCheck size={21} />
-              <div><strong>Connected to {membership.clubName}</strong><p>Studio rider: {membership.riderName}. Viewing and downloading your studio data is free.</p></div>
+              <div><strong>Connected to {membership.clubName}</strong><p>Studio rider: {membership.riderName}. Viewing and downloading your studio data is free. Choose “Training at {membership.clubName}” before a workout to share that session with the club.</p></div>
               <span>Club Athlete</span>
             </div>
           ))}
@@ -464,6 +464,13 @@ export function AccountProfileView({
                   {new Date(session.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                   {' · '}{formatDuration(session.durationMs)}{' · '}{formatDistance(session.distanceMeters)}
                 </small>
+                {session.club && (
+                  <small>
+                    {session.club.role === 'owner'
+                      ? `${session.club.riderName} · Training at ${session.club.name}`
+                      : `Training at ${session.club.name}`}
+                  </small>
+                )}
                 {summarizeSession(session) && <p>{summarizeSession(session)}</p>}
               </div>
               <div className="training-session-downloads">

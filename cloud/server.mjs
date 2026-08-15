@@ -1864,9 +1864,10 @@ function sanitizeTrainingSession(value) {
   if (!id || !activityType || startedAt <= 1 || endedAt > Date.now() + 10 * 60 * 1000) {
     return null;
   }
-  const details = value.details && typeof value.details === 'object' && !Array.isArray(value.details)
+  const submittedDetails = value.details && typeof value.details === 'object' && !Array.isArray(value.details)
     ? value.details
     : {};
+  const { club: _untrustedClubDetails, ...details } = submittedDetails;
   return {
     id,
     activityType,
@@ -1883,11 +1884,41 @@ function sanitizeTrainingSession(value) {
   };
 }
 
+function publicTrainingSession(session, clubRole) {
+  if (!session) return null;
+  const {
+    _profileKey,
+    _clubId,
+    _clubName,
+    _studioRiderId,
+    _clubRiderName,
+    ...publicSession
+  } = session;
+  if (!_clubId || !_studioRiderId) return publicSession;
+  const club = {
+    id: _clubId,
+    name: _clubName || 'Connected club',
+    studioRiderId: _studioRiderId,
+    riderName: _clubRiderName || 'Club athlete',
+    role: clubRole === 'owner' ? 'owner' : 'athlete',
+  };
+  return {
+    ...publicSession,
+    club,
+    details: {
+      ...(publicSession.details ?? {}),
+      club,
+    },
+  };
+}
+
 function normalizedRiderClaimName(value) {
   return sanitizeText(value, '', 120).replace(/\s+/g, ' ').trim().toLocaleLowerCase();
 }
 
 function projectClubTrainingSession(session, membership) {
+  const visibleSession = publicTrainingSession(session);
+  if (!visibleSession) return null;
   const details = session?.details && typeof session.details === 'object' ? session.details : {};
   const riderId = membership.studioRiderId;
   const legacyName = normalizedRiderClaimName(membership.riderName);
@@ -1902,9 +1933,16 @@ function projectClubTrainingSession(session, membership) {
     if (riders.length === 0) return null;
     const distanceMeters = Math.max(0, ...riders.map((rider) => finiteNumber(rider.distanceMeters, 0)));
     return {
-      ...session,
+      ...visibleSession,
       id: `club:${membership.clubId}:${session.id}`,
       distanceMeters,
+      club: {
+        id: membership.clubId,
+        name: membership.clubName,
+        studioRiderId: membership.studioRiderId,
+        riderName: membership.riderName,
+        role: 'athlete',
+      },
       details: {
         ...details,
         riders,
@@ -1927,10 +1965,17 @@ function projectClubTrainingSession(session, membership) {
   const distanceMeters = Math.max(0, ...summaries.map((summary) => finiteNumber(summary.distanceMeters, 0)));
   const finishTimeMs = Math.max(0, ...summaries.map((summary) => finiteNumber(summary.finishTimeMs, 0)));
   return {
-    ...session,
+    ...visibleSession,
     id: `club:${membership.clubId}:${session.id}`,
     distanceMeters,
     durationMs: finishTimeMs || session.durationMs,
+    club: {
+      id: membership.clubId,
+      name: membership.clubName,
+      studioRiderId: membership.studioRiderId,
+      riderName: membership.riderName,
+      role: 'athlete',
+    },
     details: {
       ...details,
       summaries,
@@ -1942,8 +1987,13 @@ function projectClubTrainingSession(session, membership) {
 }
 
 async function loadTrainingSessionsForAccount(profileKey, options) {
-  const ownSessions = await persistence.loadTrainingSessions(profileKey, options);
   const clubState = await persistence.loadClubConnectState(profileKey);
+  const ownSessions = (await persistence.loadTrainingSessions(profileKey, options))
+    .map((session) => publicTrainingSession(
+      session,
+      clubState.ownedClub?.id === session?._clubId ? 'owner' : 'athlete',
+    ))
+    .filter(Boolean);
   const clubSessions = (await Promise.all(clubState.memberships.map(async (membership) => {
     const sessions = await persistence.loadTrainingSessions(membership.ownerProfileKey, options);
     return sessions.flatMap((session) => {
@@ -1951,7 +2001,16 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
       return projected ? [projected] : [];
     });
   }))).flat();
-  const byId = new Map([...ownSessions, ...clubSessions].map((session) => [session.id, session]));
+  const ownedClubSessions = clubState.ownedClub
+    ? (await persistence.loadClubTrainingSessions(profileKey, options)).flatMap((session) => {
+      const projected = publicTrainingSession({
+        ...session,
+        id: `club-owner:${session._clubId}:${session._studioRiderId}:${session.id}`,
+      }, 'owner');
+      return projected ? [projected] : [];
+    })
+    : [];
+  const byId = new Map([...ownSessions, ...clubSessions, ...ownedClubSessions].map((session) => [session.id, session]));
   return [...byId.values()]
     .sort((left, right) => right.startedAt - left.startedAt)
     .slice(0, options.limit);
@@ -5246,7 +5305,10 @@ async function serveStatic(request, response) {
     if (request.method === 'GET') {
       const from = Math.max(0, finiteNumber(requestUrl.searchParams.get('from'), 0));
       const to = Math.max(from, finiteNumber(requestUrl.searchParams.get('to'), Date.now()));
-      const limit = Math.max(1, Math.min(2000, Math.round(finiteNumber(requestUrl.searchParams.get('limit'), 1000))));
+      const requestedLimit = requestUrl.searchParams.get('limit');
+      const limit = Math.max(1, Math.min(2000, Math.round(
+        requestedLimit == null ? 1000 : finiteNumber(requestedLimit, 1000),
+      )));
       const sessions = await loadTrainingSessionsForAccount(profileKey, { from, to, limit });
       writeJson(response, 200, {
         sessions,
@@ -5270,12 +5332,38 @@ async function serveStatic(request, response) {
         writeJson(response, 400, { error: 'A valid TrackLab training session is required.' });
         return;
       }
-      const saved = await persistence.saveTrainingSession(profileKey, trainingSession);
+      const requestedClubId = sanitizeText(payload?.clubSession?.clubId, '', 160);
+      const requestedStudioRiderId = sanitizeText(payload?.clubSession?.studioRiderId, '', 160);
+      let clubAttribution = {};
+      if (requestedClubId || requestedStudioRiderId) {
+        const clubState = await persistence.loadClubConnectState(profileKey);
+        const membership = clubState.memberships.find((candidate) => (
+          candidate.clubId === requestedClubId
+          && candidate.studioRiderId === requestedStudioRiderId
+        ));
+        if (!membership) {
+          writeJson(response, 403, { error: 'Choose an active Club Connect membership before saving this as club training.' });
+          return;
+        }
+        clubAttribution = {
+          _clubId: membership.clubId,
+          _clubName: membership.clubName,
+          _studioRiderId: membership.studioRiderId,
+          _clubRiderName: membership.riderName,
+        };
+      }
+      const saved = await persistence.saveTrainingSession(profileKey, {
+        ...trainingSession,
+        ...clubAttribution,
+      });
       if (!saved) {
         writeJson(response, 503, { error: 'Training history storage is temporarily unavailable.' });
         return;
       }
-      writeJson(response, 201, { session: saved, persistence: persistence.persistenceEnabled() });
+      writeJson(response, 201, {
+        session: publicTrainingSession(saved, requestedClubId ? 'athlete' : undefined),
+        persistence: persistence.persistenceEnabled(),
+      });
       return;
     }
 

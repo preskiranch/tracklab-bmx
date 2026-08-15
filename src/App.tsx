@@ -203,6 +203,11 @@ import {
 } from './lib/studioRiders';
 import { normalizeRiderPhotoDataUrl } from './lib/riderPhotos';
 import {
+  loadClubConnect,
+  type ClubAthleteMembership,
+} from './lib/clubConnect';
+import type { ClubTrainingSelection } from './lib/trainingHistory';
+import {
   claimBillingReturn,
   loginAuthUser,
   logoutAuthUser,
@@ -1487,6 +1492,9 @@ export default function App() {
   const [studioRiders, setStudioRiders] = useState<StudioRider[]>(readStoredStudioRiders);
   const [accountProfile, setAccountProfile] = useState<AccountProfile>({ updatedAt: 0 });
   const [trainingHistoryRevision, setTrainingHistoryRevision] = useState(0);
+  const [clubTrainingMemberships, setClubTrainingMemberships] = useState<ClubAthleteMembership[]>([]);
+  const [clubTrainingSelection, setClubTrainingSelection] = useState<ClubTrainingSelection | null>(null);
+  const [clubTrainingStatus, setClubTrainingStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
   const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>(readStoredBikeConnectionSource);
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
@@ -1604,6 +1612,38 @@ export default function App() {
   useEffect(() => {
     storedMappingsRef.current = storedMappings;
   }, [storedMappings]);
+
+  const refreshClubTrainingMemberships = useCallback(async () => {
+    if (!authUser) {
+      setClubTrainingMemberships([]);
+      setClubTrainingSelection(null);
+      setClubTrainingStatus('idle');
+      return;
+    }
+    setClubTrainingStatus('loading');
+    try {
+      const state = await loadClubConnect();
+      setClubTrainingMemberships(state.memberships);
+      setClubTrainingSelection((current) => (
+        current && state.memberships.some((membership) => (
+          membership.clubId === current.clubId
+          && membership.studioRiderId === current.studioRiderId
+        ))
+          ? current
+          : null
+      ));
+      setClubTrainingStatus('ready');
+    } catch (error) {
+      console.warn(`Could not load Club Session choices: ${error instanceof Error ? error.message : error}`);
+      setClubTrainingMemberships([]);
+      setClubTrainingSelection(null);
+      setClubTrainingStatus('error');
+    }
+  }, [authUser]);
+
+  useEffect(() => {
+    void refreshClubTrainingMemberships();
+  }, [refreshClubTrainingMemberships]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4201,7 +4241,7 @@ export default function App() {
           sprintAirSetting: activeSprintAirSetting,
         } : {}),
       },
-    })).then(() => {
+    }, clubTrainingSelection)).then(() => {
       setTrainingHistoryRevision((revision) => revision + 1);
     }).catch((error: Error) => {
       console.warn(`Could not save TrackLab training session: ${error.message}`);
@@ -4217,6 +4257,7 @@ export default function App() {
     activeSprintDistanceFeet,
     cloudProfileKey,
     appMode,
+    clubTrainingSelection,
     effectiveTrack.id,
     effectiveTrack.name,
     ghostRouteVariantId,
@@ -5559,7 +5600,10 @@ export default function App() {
     setLockedRacePlayers(null);
     setCloudUserDataStatus('online');
     setCloudUserDataMessage('Your Club Athlete name and photo are saved across devices.');
-  }, []);
+    window.setTimeout(() => {
+      void refreshClubTrainingMemberships();
+    }, 0);
+  }, [refreshClubTrainingMemberships]);
 
   const handleStudioRiderRemove = useCallback((riderId: string) => {
     setLockedRacePlayers(null);
@@ -6558,12 +6602,12 @@ export default function App() {
           averageSpeedMph: (rider.distanceMeters / 1609.344) / durationHours,
         })),
       },
-    })).then(() => {
+    }, clubTrainingSelection)).then(() => {
       setTrainingHistoryRevision((revision) => revision + 1);
     }).catch((error: Error) => {
       console.warn(`Could not save Explore the World history: ${error.message}`);
     });
-  }, [authUser, demoMode]);
+  }, [authUser, clubTrainingSelection, demoMode]);
 
   const handleExploreFullscreenChange = useCallback((enabled: boolean) => {
     setExploreRideFullscreen(enabled);
@@ -7175,6 +7219,54 @@ export default function App() {
           )}
           <div className="bridge-prompt">{bridgePrompt}</div>
         </section>
+
+        {clubTrainingMemberships.length > 0 && (
+          <section className="connection-card" aria-label="Training ownership">
+            <div className="connection-row">
+              <Users size={19} />
+              <div>
+                <strong>Save this session to</strong>
+                <span>Choose before you begin training.</span>
+              </div>
+            </div>
+            <div className="connection-source-switch">
+              <button
+                className={clubTrainingSelection == null ? 'selected' : ''}
+                type="button"
+                disabled={startGateStatus.active || raceState === 'racing'}
+                onClick={() => setClubTrainingSelection(null)}
+              >
+                Personal · private to my account
+              </button>
+              {clubTrainingMemberships.map((club) => {
+                const selected = clubTrainingSelection?.clubId === club.clubId
+                  && clubTrainingSelection.studioRiderId === club.studioRiderId;
+                return (
+                  <button
+                    className={selected ? 'selected club' : 'club'}
+                    type="button"
+                    disabled={startGateStatus.active || raceState === 'racing'}
+                    onClick={() => setClubTrainingSelection({
+                      clubId: club.clubId,
+                      studioRiderId: club.studioRiderId,
+                    })}
+                    key={`${club.clubId}:${club.studioRiderId}`}
+                  >
+                    Training at {club.clubName} · {club.riderName}
+                  </button>
+                );
+              })}
+            </div>
+            <p>
+              {clubTrainingSelection
+                ? 'One session record will appear in both your calendar and the club dashboard.'
+                : 'Personal training stays private and is not shared with a club.'}
+            </p>
+          </section>
+        )}
+        {clubTrainingStatus === 'error' && (
+          <p className="bridge-prompt">Club Session choices are temporarily unavailable.</p>
+        )}
 
         {appMode === 'profile' ? (
           <section className="sidebar-workflow profile-sidebar-workflow" aria-label="My Profile summary">

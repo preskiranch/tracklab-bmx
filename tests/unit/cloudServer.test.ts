@@ -605,11 +605,13 @@ describe('cloud API trust boundaries', () => {
       }),
     });
     expect(claim.status).toBe(200);
-    await expect(claim.json()).resolves.toMatchObject({
+    const claimPayload = await claim.json();
+    expect(claimPayload).toMatchObject({
       user: { name: 'Maya Alexandria Torres (Rocket)', membership: { tier: 'spectator' } },
       accountProfile: { photoUrl: 'data:image/png;base64,aGVsbG8=' },
       memberships: [{ clubName: 'Review Rider', studioRiderId: 'studio-maya', riderName: 'Maya Torres' }],
     });
+    const claimedMembership = claimPayload.memberships[0];
 
     const athleteHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
     expect(athleteHistory.status).toBe(200);
@@ -622,6 +624,75 @@ describe('cloud API trust boundaries', () => {
       expect.objectContaining({ playerId: 1, topWatts: 900 }),
     ]);
     expect(athleteHistoryPayload.sessions[0].details.events).toEqual([]);
+
+    const athleteClubSessionId = `athlete-club-sprint-${now}`;
+    const athleteClubSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        clubSession: {
+          clubId: claimedMembership.clubId,
+          studioRiderId: claimedMembership.studioRiderId,
+        },
+        session: {
+          id: athleteClubSessionId,
+          activityType: 'straight-sprint',
+          title: '300 ft club sprint',
+          startedAt: now - 800,
+          endedAt: now - 200,
+          durationMs: 600,
+          distanceMeters: 91.44,
+          trackId: 'club-drag-strip',
+          trackName: 'Club Drag Strip',
+          details: { sprintDistanceFeet: 300, sprintAirSetting: 4 },
+        },
+      }),
+    });
+    expect(athleteClubSave.status).toBe(201);
+    await expect(athleteClubSave.json()).resolves.toMatchObject({
+      session: {
+        id: athleteClubSessionId,
+        club: {
+          id: claimedMembership.clubId,
+          studioRiderId: 'studio-maya',
+          riderName: 'Maya Torres',
+          role: 'athlete',
+        },
+      },
+    });
+    const athleteClubHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
+    const athleteClubHistoryPayload = await athleteClubHistory.json();
+    expect(athleteClubHistoryPayload.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: athleteClubSessionId, club: expect.objectContaining({ role: 'athlete' }) }),
+    ]));
+    const athleteIdentityBeforePersonal = await api('/api/auth/me').then((response) => response.json());
+
+    const athletePersonalSessionId = `athlete-personal-ride-${now}`;
+    const athletePersonalSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: athletePersonalSessionId,
+          activityType: 'explore',
+          title: 'Private home ride',
+          startedAt: now - 700,
+          endedAt: now - 100,
+          durationMs: 600,
+          distanceMeters: 1_000,
+          details: { destinationLabel: 'Private destination' },
+        },
+      }),
+    });
+    expect(athletePersonalSave.status).toBe(201);
+    const athleteIdentityAfterPersonal = await api('/api/auth/me').then((response) => response.json());
+    expect(athleteIdentityAfterPersonal.user.id).toBe(athleteIdentityBeforePersonal.user.id);
+
+    const athleteCombinedHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
+    const athleteCombinedPayload = await athleteCombinedHistory.json();
+    expect(athleteCombinedPayload.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: athleteClubSessionId, club: expect.objectContaining({ role: 'athlete' }) }),
+      expect.objectContaining({ id: athletePersonalSessionId }),
+    ]));
+    expect(athleteCombinedPayload.sessions.find((session: { id: string }) => session.id === athletePersonalSessionId)).not.toHaveProperty('club');
 
     const membership = await api('/api/auth/me');
     await expect(membership.json()).resolves.toMatchObject({
@@ -644,6 +715,16 @@ describe('cloud API trust boundaries', () => {
       },
     });
 
+    const ownerCombinedHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
+    const ownerCombinedPayload = await ownerCombinedHistory.json();
+    expect(ownerCombinedPayload.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: `club-owner:${claimedMembership.clubId}:studio-maya:${athleteClubSessionId}`,
+        club: expect.objectContaining({ role: 'owner', riderName: 'Maya Torres' }),
+      }),
+    ]));
+    expect(ownerCombinedPayload.sessions.some((session: { id: string }) => session.id.includes(athletePersonalSessionId))).toBe(false);
+
     const reusedClaim = await api('/api/club-connect/claim', {
       method: 'POST',
       body: JSON.stringify({ token: invite.token }),
@@ -658,7 +739,33 @@ describe('cloud API trust boundaries', () => {
 
     cookie = athleteCookie;
     const revokedHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
-    await expect(revokedHistory.json()).resolves.toMatchObject({ sessions: [], totals: { sessions: 0 } });
+    const revokedHistoryPayload = await revokedHistory.json();
+    expect(revokedHistoryPayload.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: athleteClubSessionId }),
+      expect.objectContaining({ id: athletePersonalSessionId }),
+    ]));
+    expect(revokedHistoryPayload.sessions.some((session: { id: string }) => session.id.startsWith('club:'))).toBe(false);
+
+    const revokedClubSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        clubSession: {
+          clubId: claimedMembership.clubId,
+          studioRiderId: claimedMembership.studioRiderId,
+        },
+        session: {
+          id: `revoked-club-session-${now}`,
+          activityType: 'bmx-race',
+          title: 'Revoked club session',
+          startedAt: now - 500,
+          endedAt: now - 50,
+          durationMs: 450,
+          distanceMeters: 100,
+          details: {},
+        },
+      }),
+    });
+    expect(revokedClubSave.status).toBe(403);
   });
 
   it('publishes one developer-locked camera view for every account and device', async () => {

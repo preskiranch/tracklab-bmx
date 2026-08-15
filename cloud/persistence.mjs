@@ -779,25 +779,43 @@ function trainingSessionFromRow(row) {
     details: fromJson(row.details, {}),
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
+    ...(row.profile_key ? { _profileKey: row.profile_key } : {}),
+    ...(row.club_id ? { _clubId: row.club_id } : {}),
+    ...(row.club_name ? { _clubName: row.club_name } : {}),
+    ...(row.studio_rider_id ? { _studioRiderId: row.studio_rider_id } : {}),
+    ...(row.club_rider_name ? { _clubRiderName: row.club_rider_name } : {}),
+  };
+}
+
+function enrichMemoryClubTrainingSession(session) {
+  if (!session?._clubId || !session?._studioRiderId) return session;
+  const club = memoryClubsById.get(session._clubId);
+  const member = memoryClubMembers.get(clubMemberKey(session._clubId, session._studioRiderId));
+  return {
+    ...session,
+    ...(club?.name ? { _clubName: club.name } : {}),
+    ...(member?.riderName ? { _clubRiderName: member.riderName } : {}),
   };
 }
 
 export async function saveTrainingSession(profileKey, session) {
   const saved = {
     ...cloneJson(session, session),
+    _profileKey: profileKey,
     createdAt: Number(session.createdAt) || Date.now(),
     updatedAt: Date.now(),
   };
   if (!pool) {
     memoryTrainingSessions.set(`${profileKey}:${session.id}`, saved);
-    return cloneJson(saved, saved);
+    return cloneJson(enrichMemoryClubTrainingSession(saved), saved);
   }
   const result = await query(
     `INSERT INTO ${schema}.training_sessions (
        profile_key, id, activity_type, title, started_at, ended_at, duration_ms,
-       distance_meters, track_id, track_name, source, details, created_at, updated_at
+       distance_meters, track_id, track_name, source, details, club_id, studio_rider_id,
+       created_at, updated_at
      ) VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0), to_timestamp($6 / 1000.0), $7,
-       $8, $9, $10, $11, $12::jsonb, to_timestamp($13 / 1000.0), now())
+       $8, $9, $10, $11, $12::jsonb, $13, $14, to_timestamp($15 / 1000.0), now())
      ON CONFLICT (profile_key, id) DO UPDATE SET
        activity_type = EXCLUDED.activity_type,
        title = EXCLUDED.title,
@@ -809,6 +827,8 @@ export async function saveTrainingSession(profileKey, session) {
        track_name = EXCLUDED.track_name,
        source = EXCLUDED.source,
        details = EXCLUDED.details,
+       club_id = EXCLUDED.club_id,
+       studio_rider_id = EXCLUDED.studio_rider_id,
        updated_at = now()
      RETURNING *`,
     [
@@ -824,10 +844,18 @@ export async function saveTrainingSession(profileKey, session) {
       session.trackName ?? null,
       session.source,
       json(session.details),
+      session._clubId ?? null,
+      session._studioRiderId ?? null,
       saved.createdAt,
     ],
   );
-  return trainingSessionFromRow(result?.rows?.[0]);
+  const stored = trainingSessionFromRow(result?.rows?.[0]);
+  if (!stored) return null;
+  return {
+    ...stored,
+    ...(session._clubName ? { _clubName: session._clubName } : {}),
+    ...(session._clubRiderName ? { _clubRiderName: session._clubRiderName } : {}),
+  };
 }
 
 function legacyRaceSessionId(entry, profileKey) {
@@ -881,15 +909,21 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
   if (!pool) {
     sessions = [...memoryTrainingSessions.entries()]
       .filter(([key, session]) => key.startsWith(`${profileKey}:`) && session.startedAt >= from && session.startedAt <= to)
-      .map(([, session]) => cloneJson(session, session));
+      .map(([, session]) => cloneJson(enrichMemoryClubTrainingSession(session), session));
     raceEntries = [...memoryLocalRaceResults.values()]
       .filter((entry) => entry.guestKey === profileKey && Date.parse(entry.createdAt) >= from && Date.parse(entry.createdAt) <= to);
   } else {
     const [sessionResult, raceResult] = await Promise.all([
       query(
-        `SELECT * FROM ${schema}.training_sessions
-         WHERE profile_key = $1 AND started_at >= to_timestamp($2 / 1000.0) AND started_at <= to_timestamp($3 / 1000.0)
-         ORDER BY started_at DESC LIMIT $4`,
+        `SELECT sessions.*, clubs.name AS club_name, members.rider_name AS club_rider_name
+         FROM ${schema}.training_sessions AS sessions
+         LEFT JOIN ${schema}.clubs AS clubs ON clubs.id = sessions.club_id
+         LEFT JOIN ${schema}.club_members AS members
+           ON members.club_id = sessions.club_id AND members.studio_rider_id = sessions.studio_rider_id
+         WHERE sessions.profile_key = $1
+           AND sessions.started_at >= to_timestamp($2 / 1000.0)
+           AND sessions.started_at <= to_timestamp($3 / 1000.0)
+         ORDER BY sessions.started_at DESC LIMIT $4`,
         [profileKey, from, to, safeLimit],
       ),
       query(
@@ -924,6 +958,38 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
   return [...byId.values()]
     .sort((left, right) => right.startedAt - left.startedAt)
     .slice(0, safeLimit);
+}
+
+export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to = Date.now(), limit = 1000 } = {}) {
+  const safeLimit = Math.max(1, Math.min(2000, Math.round(Number(limit) || 1000)));
+  if (!pool) {
+    const ownedClubId = memoryClubIdByOwner.get(ownerProfileKey);
+    if (!ownedClubId) return [];
+    return [...memoryTrainingSessions.values()]
+      .filter((session) => (
+        session._clubId === ownedClubId
+        && session._profileKey !== ownerProfileKey
+        && session.startedAt >= from
+        && session.startedAt <= to
+      ))
+      .map((session) => cloneJson(enrichMemoryClubTrainingSession(session), session))
+      .sort((left, right) => right.startedAt - left.startedAt)
+      .slice(0, safeLimit);
+  }
+  const result = await query(
+    `SELECT sessions.*, clubs.name AS club_name, members.rider_name AS club_rider_name
+     FROM ${schema}.training_sessions AS sessions
+     JOIN ${schema}.clubs AS clubs ON clubs.id = sessions.club_id
+     LEFT JOIN ${schema}.club_members AS members
+       ON members.club_id = sessions.club_id AND members.studio_rider_id = sessions.studio_rider_id
+     WHERE clubs.owner_profile_key = $1
+       AND sessions.profile_key <> $1
+       AND sessions.started_at >= to_timestamp($2 / 1000.0)
+       AND sessions.started_at <= to_timestamp($3 / 1000.0)
+     ORDER BY sessions.started_at DESC LIMIT $4`,
+    [ownerProfileKey, from, to, safeLimit],
+  );
+  return (result?.rows ?? []).map(trainingSessionFromRow).filter(Boolean);
 }
 
 function clubMemberKey(clubId, studioRiderId) {

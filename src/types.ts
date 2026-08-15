@@ -398,6 +398,14 @@ export type AccountProfile = {
 
 export type TrainingActivityType = 'bmx-race' | 'straight-sprint' | 'explore';
 
+export type TrainingSessionClub = {
+  id: string;
+  name: string;
+  studioRiderId: string;
+  riderName: string;
+  role: 'athlete' | 'owner';
+};
+
 export type TrainingSession = {
   id: string;
   activityType: TrainingActivityType;
@@ -409,6 +417,7 @@ export type TrainingSession = {
   trackId?: string;
   trackName?: string;
   source: 'live' | 'imported';
+  club?: TrainingSessionClub;
   details: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
