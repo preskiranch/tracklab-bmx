@@ -587,6 +587,48 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ON ${schema}.training_sessions (profile_key, activity_type, started_at DESC)`,
       ],
     },
+    {
+      version: 11,
+      name: 'add secure club connect athlete claims',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.clubs (
+          id TEXT PRIMARY KEY,
+          owner_profile_key TEXT UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_members (
+          club_id TEXT NOT NULL REFERENCES ${schema}.clubs(id) ON DELETE CASCADE,
+          studio_rider_id TEXT NOT NULL,
+          rider_name TEXT NOT NULL,
+          athlete_profile_key TEXT,
+          status TEXT NOT NULL DEFAULT 'unclaimed',
+          claimed_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (club_id, studio_rider_id)
+        )`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_invites (
+          id TEXT PRIMARY KEY,
+          club_id TEXT NOT NULL,
+          studio_rider_id TEXT NOT NULL,
+          token_hash TEXT UNIQUE NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          claimed_at TIMESTAMPTZ,
+          claimed_by_profile_key TEXT,
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          FOREIGN KEY (club_id, studio_rider_id)
+            REFERENCES ${schema}.club_members(club_id, studio_rider_id) ON DELETE CASCADE
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_club_members_athlete
+          ON ${schema}.club_members (athlete_profile_key, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_club_invites_member
+          ON ${schema}.club_invites (club_id, studio_rider_id, expires_at DESC)`,
+      ],
+    },
   ];
 }
 

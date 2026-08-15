@@ -74,6 +74,19 @@ describe('database migration runner', () => {
     expect(trainingHistoryMigration?.statements.join('\n')).toContain('profile_key');
   });
 
+  it('adds private one-time club athlete claims', () => {
+    const clubConnectMigration = databaseMigrations().find((candidate) => candidate.version === 11);
+
+    expect(clubConnectMigration).toMatchObject({
+      version: 11,
+      name: 'add secure club connect athlete claims',
+    });
+    expect(clubConnectMigration?.statements.join('\n')).toContain('club_members');
+    expect(clubConnectMigration?.statements.join('\n')).toContain('club_invites');
+    expect(clubConnectMigration?.statements.join('\n')).toContain('token_hash');
+    expect(clubConnectMigration?.statements.join('\n')).toContain('athlete_profile_key');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();

@@ -168,6 +168,7 @@ export type ExploreRider = {
   id: string;
   clientId: string;
   playerId: PlayerSlot['id'];
+  riderId?: string;
   name: string;
   photoUrl?: string;
   colorName: PlayerColorName;
@@ -444,6 +445,7 @@ export type RiderState = {
 
 export type RaceSummaryEntry = {
   playerId: PlayerSlot['id'];
+  riderId?: string;
   riderName: string;
   colorName: PlayerSlot['colorName'];
   accent: string;

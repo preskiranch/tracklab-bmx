@@ -104,6 +104,7 @@ function buildRaceSummary(
 
       return {
         playerId: rider.playerId,
+        ...(player?.riderId ? { riderId: player.riderId } : {}),
         riderName: player?.name ?? `Rider ${rider.playerId}`,
         colorName: player?.colorName ?? 'lime',
         accent: player?.accent ?? '#84e047',

@@ -46,6 +46,7 @@ function initialExploreRiders(
     id: `${clientId}:${player.id}`,
     clientId,
     playerId: player.id,
+    ...(player.riderId ? { riderId: player.riderId } : {}),
     name: player.name,
     ...(player.photoUrl ? { photoUrl: player.photoUrl } : {}),
     colorName: player.colorName,
@@ -81,7 +82,7 @@ export function useExploreRide({
   const activeElapsedMsRef = useRef(0);
 
   const playerSignature = useMemo(
-    () => players.map((player) => `${player.id}:${player.deviceId ?? 'none'}:${player.name}:${player.photoUrl ?? ''}`).join('|'),
+    () => players.map((player) => `${player.id}:${player.deviceId ?? 'none'}:${player.riderId ?? ''}:${player.name}:${player.photoUrl ?? ''}`).join('|'),
     [players],
   );
 

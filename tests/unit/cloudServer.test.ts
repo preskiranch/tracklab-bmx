@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 let child: ChildProcess;
 let baseUrl = '';
 let cookie = '';
+let secondaryCookie = '';
 
 async function availablePort() {
   return new Promise<number>((resolve, reject) => {
@@ -524,6 +525,7 @@ describe('cloud API trust boundaries', () => {
     });
     expect(secondRegistration.status).toBe(201);
     cookie = String(secondRegistration.headers.get('set-cookie')).split(';')[0];
+    secondaryCookie = cookie;
 
     const otherAccountRoutes = await api('/api/explore/recent-routes?profileKey=user:someone-else');
     expect(otherAccountRoutes.status).toBe(200);
@@ -539,6 +541,100 @@ describe('cloud API trust boundaries', () => {
     await expect(restoredAfterBrowserReset.json()).resolves.toMatchObject({
       routes: [{ id: 'EXPLORE-PERSONAL-1' }],
     });
+  });
+
+  it('lets a student privately claim only their studio training record', async () => {
+    const now = Date.now();
+    const ownerCookie = cookie;
+
+    const rosterSave = await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        studioRiders: [
+          { id: 'studio-maya', name: 'Maya Torres', createdAt: now, updatedAt: now },
+          { id: 'studio-jordan', name: 'Jordan Lee', createdAt: now, updatedAt: now },
+        ],
+      }),
+    });
+    expect(rosterSave.status).toBe(200);
+
+    const trainingSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: `club-race-${now}`,
+          activityType: 'bmx-race',
+          title: 'North Bay BMX race',
+          startedAt: now - 10_000,
+          endedAt: now - 1_000,
+          durationMs: 9_000,
+          distanceMeters: 320,
+          trackId: 'north-bay-bmx',
+          trackName: 'North Bay BMX',
+          details: {
+            summaries: [
+              { playerId: 1, riderId: 'studio-maya', riderName: 'Maya Torres', rank: 1, finishTimeMs: 8_100, distanceMeters: 320 },
+              { playerId: 2, riderId: 'studio-jordan', riderName: 'Jordan Lee', rank: 2, finishTimeMs: 8_500, distanceMeters: 320 },
+            ],
+            zoneResults: [{ zoneId: 'zone-1', riders: [{ playerId: 1, topWatts: 900 }, { playerId: 2, topWatts: 850 }] }],
+            events: [{ label: 'Maya Torres leads Jordan Lee' }],
+          },
+        },
+      }),
+    });
+    expect(trainingSave.status).toBe(201);
+
+    const inviteResponse = await api('/api/club-connect/invites', {
+      method: 'POST',
+      body: JSON.stringify({ studioRiderId: 'studio-maya' }),
+    });
+    expect(inviteResponse.status).toBe(201);
+    const invite = await inviteResponse.json();
+    expect(invite.token).toHaveLength(43);
+
+    cookie = secondaryCookie;
+    const athleteCookie = cookie;
+
+    const claim = await api('/api/club-connect/claim', {
+      method: 'POST',
+      body: JSON.stringify({ token: invite.token }),
+    });
+    expect(claim.status).toBe(200);
+    await expect(claim.json()).resolves.toMatchObject({
+      memberships: [{ clubName: 'Review Rider', studioRiderId: 'studio-maya', riderName: 'Maya Torres' }],
+    });
+
+    const athleteHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
+    expect(athleteHistory.status).toBe(200);
+    const athleteHistoryPayload = await athleteHistory.json();
+    expect(athleteHistoryPayload.sessions).toHaveLength(1);
+    expect(athleteHistoryPayload.sessions[0].details.summaries).toEqual([
+      expect.objectContaining({ riderId: 'studio-maya', riderName: 'Maya Torres' }),
+    ]);
+    expect(athleteHistoryPayload.sessions[0].details.zoneResults[0].riders).toEqual([
+      expect.objectContaining({ playerId: 1, topWatts: 900 }),
+    ]);
+    expect(athleteHistoryPayload.sessions[0].details.events).toEqual([]);
+
+    const membership = await api('/api/auth/me');
+    await expect(membership.json()).resolves.toMatchObject({ user: { membership: { tier: 'spectator' } } });
+
+    cookie = ownerCookie;
+    const reusedClaim = await api('/api/club-connect/claim', {
+      method: 'POST',
+      body: JSON.stringify({ token: invite.token }),
+    });
+    expect(reusedClaim.status).toBe(409);
+
+    const revoked = await api('/api/club-connect/revoke', {
+      method: 'POST',
+      body: JSON.stringify({ studioRiderId: 'studio-maya' }),
+    });
+    expect(revoked.status).toBe(200);
+
+    cookie = athleteCookie;
+    const revokedHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
+    await expect(revokedHistory.json()).resolves.toMatchObject({ sessions: [], totals: { sessions: 0 } });
   });
 
   it('publishes one developer-locked camera view for every account and device', async () => {

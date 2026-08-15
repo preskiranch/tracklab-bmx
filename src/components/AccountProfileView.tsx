@@ -6,11 +6,26 @@ import {
   ChevronLeft,
   ChevronRight,
   Compass,
+  Copy,
   Download,
+  Link2,
   RefreshCw,
+  ShieldCheck,
   Timer,
+  UserPlus,
+  X,
 } from 'lucide-react';
-import type { AccountProfile, TrainingActivityType, TrainingSession } from '../types';
+import type { AccountProfile, StudioRider, TrainingActivityType, TrainingSession } from '../types';
+import {
+  claimClubInvite,
+  clearClubInviteFromUrl,
+  clubInviteTokenFromUrl,
+  clubInviteUrl,
+  createClubInvite,
+  loadClubConnect,
+  revokeClubMember,
+  type ClubConnectState,
+} from '../lib/clubConnect';
 import {
   downloadTrainingSession,
   loadTrainingHistory,
@@ -24,6 +39,7 @@ type AccountProfileViewProps = {
   email: string;
   membershipLabel: string;
   profile: AccountProfile;
+  studioRiders: StudioRider[];
   historyRevision: number;
   onPhotoChange: (photoUrl: string | undefined) => void;
 };
@@ -32,6 +48,7 @@ const emptyHistory: TrainingHistoryResponse = {
   sessions: [],
   totals: { sessions: 0, bmxRaces: 0, straightSprints: 0, exploreRides: 0, distanceMeters: 0, durationMs: 0 },
 };
+const emptyClubState: ClubConnectState = { ownedClub: null, memberships: [] };
 
 const activityLabels: Record<TrainingActivityType, string> = {
   'bmx-race': 'BMX Race Interval',
@@ -110,6 +127,7 @@ export function AccountProfileView({
   email,
   membershipLabel,
   profile,
+  studioRiders,
   historyRevision,
   onPhotoChange,
 }: AccountProfileViewProps) {
@@ -118,6 +136,12 @@ export function AccountProfileView({
   const [history, setHistory] = useState<TrainingHistoryResponse>(emptyHistory);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [message, setMessage] = useState('Loading your training history…');
+  const [clubState, setClubState] = useState<ClubConnectState>(emptyClubState);
+  const [clubStatus, setClubStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [clubMessage, setClubMessage] = useState('Loading Club Connect…');
+  const [clubInviteToken, setClubInviteToken] = useState(clubInviteTokenFromUrl);
+  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
+  const [clubBusyId, setClubBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     const range = monthRange(month);
@@ -136,6 +160,88 @@ export function AccountProfileView({
   }, [month]);
 
   useEffect(() => refresh(), [historyRevision, refresh]);
+
+  const refreshClub = useCallback(() => {
+    setClubStatus('loading');
+    void loadClubConnect()
+      .then((state) => {
+        setClubState(state);
+        setClubStatus('ready');
+        setClubMessage('');
+      })
+      .catch((error: Error) => {
+        setClubStatus('error');
+        setClubMessage(`Club Connect is temporarily unavailable. ${error.message}`);
+      });
+  }, []);
+
+  useEffect(() => refreshClub(), [refreshClub]);
+
+  const memberByRiderId = useMemo(() => new Map(
+    (clubState.ownedClub?.members ?? []).map((member) => [member.studioRiderId, member]),
+  ), [clubState.ownedClub?.members]);
+  const visibleStudioRiders = useMemo(
+    () => studioRiders.filter((rider) => !rider.deletedAt).sort((left, right) => left.name.localeCompare(right.name)),
+    [studioRiders],
+  );
+  const effectiveMembershipLabel = clubState.memberships.length > 0
+    ? 'Club Athlete / free studio data access'
+    : membershipLabel;
+
+  const copyInvitation = useCallback((link: string) => {
+    void navigator.clipboard?.writeText(link).then(() => {
+      setClubMessage('Private invitation copied. Send it only to this athlete or their parent/guardian.');
+    }).catch(() => {
+      window.prompt('Copy this private Club Connect invitation:', link);
+    });
+  }, []);
+
+  const inviteRider = useCallback((rider: StudioRider) => {
+    setClubBusyId(rider.id);
+    setClubMessage(`Creating a private invitation for ${rider.name}…`);
+    void createClubInvite(rider.id)
+      .then((invite) => {
+        const link = clubInviteUrl(invite.token);
+        setInviteLinks((current) => ({ ...current, [rider.id]: link }));
+        copyInvitation(link);
+        refreshClub();
+      })
+      .catch((error: Error) => setClubMessage(error.message))
+      .finally(() => setClubBusyId(null));
+  }, [copyInvitation, refreshClub]);
+
+  const acceptInvitation = useCallback(() => {
+    if (!clubInviteToken) return;
+    setClubBusyId('claim');
+    setClubMessage('Connecting your account to your studio record…');
+    void claimClubInvite(clubInviteToken)
+      .then((state) => {
+        setClubState(state);
+        setClubInviteToken('');
+        clearClubInviteFromUrl();
+        setClubMessage('Club connected. Your studio training history is now available in this calendar.');
+        refresh();
+      })
+      .catch((error: Error) => setClubMessage(error.message))
+      .finally(() => setClubBusyId(null));
+  }, [clubInviteToken, refresh]);
+
+  const disconnectRider = useCallback((rider: StudioRider) => {
+    if (!window.confirm(`Remove ${rider.name}'s access to this studio record? Their TrackLab account will remain active.`)) return;
+    setClubBusyId(rider.id);
+    void revokeClubMember(rider.id)
+      .then((state) => {
+        setClubState(state);
+        setInviteLinks((current) => {
+          const next = { ...current };
+          delete next[rider.id];
+          return next;
+        });
+        setClubMessage(`${rider.name}'s club access was removed. Studio records were not deleted.`);
+      })
+      .catch((error: Error) => setClubMessage(error.message))
+      .finally(() => setClubBusyId(null));
+  }, []);
 
   const sessionsByDay = useMemo(() => {
     const grouped = new Map<string, TrainingSession[]>();
@@ -163,7 +269,7 @@ export function AccountProfileView({
             <span className="eyebrow">My TrackLab profile</span>
             <h1>{name}</h1>
             <p>{email}</p>
-            <b>{membershipLabel}</b>
+            <b>{effectiveMembershipLabel}</b>
           </div>
         </div>
         <RiderPhotoEditor
@@ -175,6 +281,63 @@ export function AccountProfileView({
           This is your account rider photo. It follows your profile across devices and is available in race entry, rider cards, results, and saved sessions.
         </p>
       </section>
+
+      {(clubInviteToken || clubState.memberships.length > 0 || visibleStudioRiders.length > 0) && (
+        <section className="club-connect-panel" aria-label="Club Connect">
+          <header>
+            <div className="club-connect-title">
+              <span className="club-connect-icon"><Link2 size={21} /></span>
+              <div><span className="eyebrow">Club Connect</span><h2>Studio data, one athlete at a time</h2></div>
+            </div>
+            <span className="club-connect-security"><ShieldCheck size={16} /> Private claims</span>
+          </header>
+
+          {clubInviteToken && (
+            <div className="club-claim-card">
+              <div><strong>You have a private club invitation</strong><p>Accept it to attach this account to your exact studio rider record and training history.</p></div>
+              <button type="button" disabled={clubBusyId === 'claim'} onClick={acceptInvitation}>
+                <UserPlus size={17} /> {clubBusyId === 'claim' ? 'Connecting…' : 'Accept invitation'}
+              </button>
+            </div>
+          )}
+
+          {clubState.memberships.map((membership) => (
+            <div className="club-athlete-access" key={`${membership.clubId}:${membership.studioRiderId}`}>
+              <ShieldCheck size={21} />
+              <div><strong>Connected to {membership.clubName}</strong><p>Studio rider: {membership.riderName}. Viewing and downloading your studio data is free.</p></div>
+              <span>Club Athlete</span>
+            </div>
+          ))}
+
+          {visibleStudioRiders.length > 0 && (
+            <div className="club-owner-roster">
+              <div className="club-owner-intro">
+                <div><strong>{clubState.ownedClub?.name ?? name}</strong><p>Invite each athlete privately. A claim grants only that rider's records—not the rest of your studio roster.</p></div>
+                <small>Personal Wattbike pairing at home still requires Racer membership.</small>
+              </div>
+              <div className="club-roster-list">
+                {visibleStudioRiders.map((rider) => {
+                  const member = memberByRiderId.get(rider.id);
+                  const inviteLink = inviteLinks[rider.id];
+                  const claimed = member?.status === 'claimed';
+                  return (
+                    <article key={rider.id}>
+                      <RiderAvatar name={rider.name} photoUrl={rider.photoUrl} />
+                      <div className="club-roster-name"><strong>{rider.name}</strong><small>{claimed ? `Connected${member.athleteName ? ` to ${member.athleteName}` : ''}` : inviteLink ? 'Invitation ready' : 'Not claimed'}</small></div>
+                      <div className="club-roster-actions">
+                        {inviteLink && !claimed && <button type="button" onClick={() => copyInvitation(inviteLink)}><Copy size={15} /> Copy link</button>}
+                        {!claimed && <button className="primary" type="button" disabled={clubBusyId === rider.id} onClick={() => inviteRider(rider)}><UserPlus size={15} /> {inviteLink ? 'New link' : 'Invite'}</button>}
+                        {claimed && <button className="danger" type="button" disabled={clubBusyId === rider.id} onClick={() => disconnectRider(rider)}><X size={15} /> Remove access</button>}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {(clubMessage || clubStatus === 'loading') && <p className={`club-connect-message ${clubStatus}`}>{clubMessage || 'Loading Club Connect…'}</p>}
+        </section>
+      )}
 
       <section className="account-profile-summary" aria-label="Monthly training totals">
         <article><Activity size={20} /><span><b>{history.totals.sessions}</b><small>Sessions this month</small></span></article>

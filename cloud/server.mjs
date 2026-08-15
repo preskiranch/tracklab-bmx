@@ -103,6 +103,7 @@ const map3DLoadRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const exploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const smartExploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const clubConnectRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
@@ -1862,6 +1863,103 @@ function sanitizeTrainingSession(value) {
     source: 'live',
     details,
     createdAt: Math.max(1, Math.round(finiteNumber(value.createdAt, startedAt))),
+  };
+}
+
+function normalizedRiderClaimName(value) {
+  return sanitizeText(value, '', 120).replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+}
+
+function projectClubTrainingSession(session, membership) {
+  const details = session?.details && typeof session.details === 'object' ? session.details : {};
+  const riderId = membership.studioRiderId;
+  const legacyName = normalizedRiderClaimName(membership.riderName);
+  const matchesRider = (entry) => {
+    const entryRiderId = sanitizeText(entry?.riderId ?? entry?.studioRiderId, '', 160);
+    if (entryRiderId) return entryRiderId === riderId;
+    return Boolean(legacyName) && normalizedRiderClaimName(entry?.riderName ?? entry?.name) === legacyName;
+  };
+
+  if (session.activityType === 'explore') {
+    const riders = Array.isArray(details.riders) ? details.riders.filter(matchesRider) : [];
+    if (riders.length === 0) return null;
+    const distanceMeters = Math.max(0, ...riders.map((rider) => finiteNumber(rider.distanceMeters, 0)));
+    return {
+      ...session,
+      id: `club:${membership.clubId}:${session.id}`,
+      distanceMeters,
+      details: {
+        ...details,
+        riders,
+        club: { id: membership.clubId, name: membership.clubName, role: 'athlete' },
+      },
+    };
+  }
+
+  const summaries = Array.isArray(details.summaries) ? details.summaries.filter(matchesRider) : [];
+  if (summaries.length === 0) return null;
+  const playerIds = new Set(summaries.map((summary) => Number(summary.playerId)).filter(Number.isFinite));
+  const zoneResults = Array.isArray(details.zoneResults)
+    ? details.zoneResults.map((zone) => ({
+      ...zone,
+      riders: Array.isArray(zone?.riders)
+        ? zone.riders.filter((rider) => playerIds.has(Number(rider?.playerId)))
+        : [],
+    }))
+    : [];
+  const distanceMeters = Math.max(0, ...summaries.map((summary) => finiteNumber(summary.distanceMeters, 0)));
+  const finishTimeMs = Math.max(0, ...summaries.map((summary) => finiteNumber(summary.finishTimeMs, 0)));
+  return {
+    ...session,
+    id: `club:${membership.clubId}:${session.id}`,
+    distanceMeters,
+    durationMs: finishTimeMs || session.durationMs,
+    details: {
+      ...details,
+      summaries,
+      zoneResults,
+      events: [],
+      club: { id: membership.clubId, name: membership.clubName, role: 'athlete' },
+    },
+  };
+}
+
+async function loadTrainingSessionsForAccount(profileKey, options) {
+  const ownSessions = await persistence.loadTrainingSessions(profileKey, options);
+  const clubState = await persistence.loadClubConnectState(profileKey);
+  const clubSessions = (await Promise.all(clubState.memberships.map(async (membership) => {
+    const sessions = await persistence.loadTrainingSessions(membership.ownerProfileKey, options);
+    return sessions.flatMap((session) => {
+      const projected = projectClubTrainingSession(session, membership);
+      return projected ? [projected] : [];
+    });
+  }))).flat();
+  const byId = new Map([...ownSessions, ...clubSessions].map((session) => [session.id, session]));
+  return [...byId.values()]
+    .sort((left, right) => right.startedAt - left.startedAt)
+    .slice(0, options.limit);
+}
+
+function publicClubConnectState(state) {
+  return {
+    ownedClub: state?.ownedClub ? {
+      id: state.ownedClub.id,
+      name: state.ownedClub.name,
+      members: (state.ownedClub.members ?? []).map((member) => ({
+        studioRiderId: member.studioRiderId,
+        riderName: member.riderName,
+        athleteName: member.athleteName ?? null,
+        status: member.status,
+        claimedAt: member.claimedAt ?? null,
+      })),
+    } : null,
+    memberships: (state?.memberships ?? []).map((membership) => ({
+      clubId: membership.clubId,
+      clubName: membership.clubName,
+      studioRiderId: membership.studioRiderId,
+      riderName: membership.riderName,
+      claimedAt: membership.claimedAt ?? null,
+    })),
   };
 }
 
@@ -4986,6 +5084,111 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/club-connect') {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const profileKey = authProfileKey(session.user);
+    const state = await persistence.loadClubConnectState(profileKey);
+    writeJson(response, 200, publicClubConnectState(state));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-connect/invites') {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, clubConnectRateLimiter, 40, 'club-connect-invite')) return;
+    const payload = await readJsonBody(request, 100_000);
+    const studioRiderId = sanitizeText(payload?.studioRiderId, '', 160);
+    const profileKey = authProfileKey(session.user);
+    const userData = await persistence.loadUserData(profileKey);
+    const studioRider = (Array.isArray(userData?.studioRiders) ? userData.studioRiders : []).find((rider) => (
+      rider?.id === studioRiderId && !rider?.deletedAt
+    ));
+    if (!studioRider) {
+      writeJson(response, 404, { error: 'That active studio rider could not be found in your account.' });
+      return;
+    }
+    const club = await persistence.ensureClub(
+      profileKey,
+      sanitizeText(session.user.displayName, 'TrackLab Club', 120),
+      `club-${randomUUID()}`,
+    );
+    if (!club) {
+      writeJson(response, 503, { error: 'Club Connect storage is temporarily unavailable.' });
+      return;
+    }
+    const token = createSessionToken();
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    const invite = await persistence.saveClubInvite({
+      club,
+      studioRiderId,
+      riderName: sanitizeText(studioRider.name, 'Club athlete', 120),
+      inviteId: randomUUID(),
+      tokenHash: tokenHash(token),
+      expiresAt,
+    });
+    if (!invite) {
+      writeJson(response, 503, { error: 'Club Connect could not create the invitation.' });
+      return;
+    }
+    writeJson(response, 201, { token, expiresAt: invite.expiresAt, clubName: club.name, riderName: studioRider.name });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-connect/claim') {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, clubConnectRateLimiter, 30, 'club-connect-claim')) return;
+    const payload = await readJsonBody(request, 100_000);
+    const token = sanitizeText(payload?.token, '', 180);
+    if (token.length < 32) {
+      writeJson(response, 400, { error: 'This Club Connect invitation is invalid.' });
+      return;
+    }
+    const profileKey = authProfileKey(session.user);
+    const claimed = await persistence.claimClubInvite(
+      tokenHash(token),
+      profileKey,
+      sanitizeText(session.user.displayName, 'Club athlete', 120),
+    );
+    if (!claimed) {
+      writeJson(response, 409, { error: 'This invitation expired, was already used, or belongs to another account.' });
+      return;
+    }
+    writeJson(response, 200, publicClubConnectState(await persistence.loadClubConnectState(profileKey)));
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-connect/revoke') {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const payload = await readJsonBody(request, 100_000);
+    const studioRiderId = sanitizeText(payload?.studioRiderId, '', 160);
+    const revoked = studioRiderId && await persistence.revokeClubMember(authProfileKey(session.user), studioRiderId);
+    if (!revoked) {
+      writeJson(response, 404, { error: 'That club athlete connection was not found.' });
+      return;
+    }
+    writeJson(response, 200, publicClubConnectState(await persistence.loadClubConnectState(authProfileKey(session.user))));
+    return;
+  }
+
   if (requestUrl.pathname === '/api/training-sessions') {
     const session = await requireAuthSession(request, response);
     if (!session) {
@@ -4997,7 +5200,7 @@ async function serveStatic(request, response) {
       const from = Math.max(0, finiteNumber(requestUrl.searchParams.get('from'), 0));
       const to = Math.max(from, finiteNumber(requestUrl.searchParams.get('to'), Date.now()));
       const limit = Math.max(1, Math.min(2000, Math.round(finiteNumber(requestUrl.searchParams.get('limit'), 1000))));
-      const sessions = await persistence.loadTrainingSessions(profileKey, { from, to, limit });
+      const sessions = await loadTrainingSessionsForAccount(profileKey, { from, to, limit });
       writeJson(response, 200, {
         sessions,
         totals: {

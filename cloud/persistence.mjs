@@ -32,6 +32,10 @@ const memoryMap3DLoadEvents = new Map();
 const memoryTrackBriefings = new Map();
 const memoryLocalRaceResults = new Map();
 const memoryTrainingSessions = new Map();
+const memoryClubsById = new Map();
+const memoryClubIdByOwner = new Map();
+const memoryClubMembers = new Map();
+const memoryClubInvitesByHash = new Map();
 let memoryRaceResultSequence = 0;
 
 function json(value) {
@@ -899,6 +903,295 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
   return [...byId.values()]
     .sort((left, right) => right.startedAt - left.startedAt)
     .slice(0, safeLimit);
+}
+
+function clubMemberKey(clubId, studioRiderId) {
+  return `${clubId}:${studioRiderId}`;
+}
+
+function clubFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    ownerProfileKey: row.owner_profile_key,
+    name: row.name,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+  };
+}
+
+function clubMemberFromRow(row) {
+  if (!row) return null;
+  return {
+    clubId: row.club_id,
+    studioRiderId: row.studio_rider_id,
+    riderName: row.rider_name,
+    athleteProfileKey: row.athlete_profile_key || null,
+    athleteName: row.athlete_name || null,
+    status: row.status === 'claimed' ? 'claimed' : 'unclaimed',
+    claimedAt: row.claimed_at ? new Date(row.claimed_at).getTime() : null,
+    revokedAt: row.revoked_at ? new Date(row.revoked_at).getTime() : null,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+  };
+}
+
+export async function ensureClub(ownerProfileKey, ownerName, clubId) {
+  const now = Date.now();
+  if (!pool) {
+    const existingId = memoryClubIdByOwner.get(ownerProfileKey);
+    const id = existingId || clubId;
+    const existing = memoryClubsById.get(id);
+    const club = {
+      id,
+      ownerProfileKey,
+      name: ownerName,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    memoryClubsById.set(id, club);
+    memoryClubIdByOwner.set(ownerProfileKey, id);
+    return cloneJson(club, club);
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.clubs (id, owner_profile_key, name, created_at, updated_at)
+     VALUES ($1, $2, $3, now(), now())
+     ON CONFLICT (owner_profile_key) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+     RETURNING *`,
+    [clubId, ownerProfileKey, ownerName],
+  );
+  return clubFromRow(result?.rows?.[0]);
+}
+
+export async function saveClubInvite({
+  club,
+  studioRiderId,
+  riderName,
+  inviteId,
+  tokenHash,
+  expiresAt,
+}) {
+  const now = Date.now();
+  if (!pool) {
+    const key = clubMemberKey(club.id, studioRiderId);
+    const existing = memoryClubMembers.get(key);
+    memoryClubMembers.set(key, {
+      clubId: club.id,
+      studioRiderId,
+      riderName,
+      athleteProfileKey: existing?.athleteProfileKey ?? null,
+      athleteName: existing?.athleteName ?? null,
+      status: existing?.status === 'claimed' ? 'claimed' : 'unclaimed',
+      claimedAt: existing?.claimedAt ?? null,
+      revokedAt: null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+    for (const invite of memoryClubInvitesByHash.values()) {
+      if (invite.clubId === club.id && invite.studioRiderId === studioRiderId && !invite.claimedAt) {
+        invite.revokedAt = now;
+      }
+    }
+    memoryClubInvitesByHash.set(tokenHash, {
+      id: inviteId,
+      clubId: club.id,
+      studioRiderId,
+      tokenHash,
+      expiresAt,
+      claimedAt: null,
+      claimedByProfileKey: null,
+      revokedAt: null,
+      createdAt: now,
+    });
+    return { id: inviteId, expiresAt };
+  }
+  await query(
+    `INSERT INTO ${schema}.club_members (
+       club_id, studio_rider_id, rider_name, status, created_at, updated_at
+     ) VALUES ($1, $2, $3, 'unclaimed', now(), now())
+     ON CONFLICT (club_id, studio_rider_id) DO UPDATE SET
+       rider_name = EXCLUDED.rider_name,
+       updated_at = now()`,
+    [club.id, studioRiderId, riderName],
+  );
+  await query(
+    `UPDATE ${schema}.club_invites SET revoked_at = now()
+     WHERE club_id = $1 AND studio_rider_id = $2 AND claimed_at IS NULL AND revoked_at IS NULL`,
+    [club.id, studioRiderId],
+  );
+  const result = await query(
+    `INSERT INTO ${schema}.club_invites (
+       id, club_id, studio_rider_id, token_hash, expires_at, created_at
+     ) VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0), now())
+     RETURNING id, expires_at`,
+    [inviteId, club.id, studioRiderId, tokenHash, expiresAt],
+  );
+  const row = result?.rows?.[0];
+  return row ? { id: row.id, expiresAt: new Date(row.expires_at).getTime() } : null;
+}
+
+export async function claimClubInvite(tokenHash, athleteProfileKey, athleteName) {
+  const now = Date.now();
+  if (!pool) {
+    const invite = memoryClubInvitesByHash.get(tokenHash);
+    if (!invite || invite.revokedAt || invite.claimedAt || invite.expiresAt <= now) return null;
+    const club = memoryClubsById.get(invite.clubId);
+    const key = clubMemberKey(invite.clubId, invite.studioRiderId);
+    const member = memoryClubMembers.get(key);
+    if (!club || !member || club.ownerProfileKey === athleteProfileKey) return null;
+    if (member.athleteProfileKey && member.athleteProfileKey !== athleteProfileKey) return null;
+    invite.claimedAt = now;
+    invite.claimedByProfileKey = athleteProfileKey;
+    memoryClubMembers.set(key, {
+      ...member,
+      athleteProfileKey,
+      athleteName,
+      status: 'claimed',
+      claimedAt: now,
+      revokedAt: null,
+      updatedAt: now,
+    });
+    return { clubId: club.id, studioRiderId: member.studioRiderId };
+  }
+  const result = await query(
+    `WITH eligible AS (
+       SELECT invites.id, invites.club_id, invites.studio_rider_id
+       FROM ${schema}.club_invites AS invites
+       JOIN ${schema}.clubs AS clubs ON clubs.id = invites.club_id
+       JOIN ${schema}.club_members AS members
+         ON members.club_id = invites.club_id AND members.studio_rider_id = invites.studio_rider_id
+       WHERE invites.token_hash = $1
+         AND invites.claimed_at IS NULL
+         AND invites.revoked_at IS NULL
+         AND invites.expires_at > now()
+         AND clubs.owner_profile_key <> $2
+         AND (members.athlete_profile_key IS NULL OR members.athlete_profile_key = $2)
+     ), claimed_invite AS (
+       UPDATE ${schema}.club_invites AS invites
+       SET claimed_at = now(), claimed_by_profile_key = $2
+       FROM eligible
+       WHERE invites.id = eligible.id
+       RETURNING invites.club_id, invites.studio_rider_id
+     )
+     UPDATE ${schema}.club_members AS members
+     SET athlete_profile_key = $2, status = 'claimed', claimed_at = now(), revoked_at = NULL, updated_at = now()
+     FROM claimed_invite
+     WHERE members.club_id = claimed_invite.club_id
+       AND members.studio_rider_id = claimed_invite.studio_rider_id
+     RETURNING members.club_id, members.studio_rider_id`,
+    [tokenHash, athleteProfileKey],
+  );
+  const row = result?.rows?.[0];
+  return row ? { clubId: row.club_id, studioRiderId: row.studio_rider_id, athleteName } : null;
+}
+
+export async function revokeClubMember(ownerProfileKey, studioRiderId) {
+  if (!pool) {
+    const clubId = memoryClubIdByOwner.get(ownerProfileKey);
+    const key = clubId ? clubMemberKey(clubId, studioRiderId) : '';
+    const member = key ? memoryClubMembers.get(key) : null;
+    if (!clubId || !member) return false;
+    const now = Date.now();
+    memoryClubMembers.set(key, {
+      ...member,
+      athleteProfileKey: null,
+      athleteName: null,
+      status: 'unclaimed',
+      claimedAt: null,
+      revokedAt: now,
+      updatedAt: now,
+    });
+    for (const invite of memoryClubInvitesByHash.values()) {
+      if (invite.clubId === clubId && invite.studioRiderId === studioRiderId) invite.revokedAt = now;
+    }
+    return true;
+  }
+  await query(
+    `UPDATE ${schema}.club_invites AS invites SET revoked_at = now()
+     FROM ${schema}.clubs AS clubs
+     WHERE invites.club_id = clubs.id AND clubs.owner_profile_key = $1
+       AND invites.studio_rider_id = $2 AND invites.revoked_at IS NULL`,
+    [ownerProfileKey, studioRiderId],
+  );
+  const result = await query(
+    `UPDATE ${schema}.club_members AS members
+     SET athlete_profile_key = NULL, status = 'unclaimed', claimed_at = NULL,
+       revoked_at = now(), updated_at = now()
+     FROM ${schema}.clubs AS clubs
+     WHERE members.club_id = clubs.id AND clubs.owner_profile_key = $1
+       AND members.studio_rider_id = $2
+     RETURNING members.club_id`,
+    [ownerProfileKey, studioRiderId],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function loadClubConnectState(profileKey) {
+  if (!pool) {
+    const ownedClubId = memoryClubIdByOwner.get(profileKey);
+    const ownedClub = ownedClubId ? memoryClubsById.get(ownedClubId) : null;
+    const members = ownedClub
+      ? [...memoryClubMembers.values()]
+        .filter((member) => member.clubId === ownedClub.id)
+        .map((member) => cloneJson(member, member))
+      : [];
+    const memberships = [...memoryClubMembers.values()]
+      .filter((member) => member.athleteProfileKey === profileKey && member.status === 'claimed')
+      .flatMap((member) => {
+        const club = memoryClubsById.get(member.clubId);
+        if (!club) return [];
+        return [{
+          clubId: club.id,
+          clubName: club.name,
+          ownerProfileKey: club.ownerProfileKey,
+          studioRiderId: member.studioRiderId,
+          riderName: member.riderName,
+          claimedAt: member.claimedAt,
+        }];
+      });
+    return {
+      ownedClub: ownedClub ? { ...cloneJson(ownedClub, ownedClub), members } : null,
+      memberships,
+    };
+  }
+  const [ownedResult, memberResult, membershipResult] = await Promise.all([
+    query(`SELECT * FROM ${schema}.clubs WHERE owner_profile_key = $1`, [profileKey]),
+    query(
+      `SELECT members.*,
+         users.display_name AS athlete_name
+       FROM ${schema}.club_members AS members
+       JOIN ${schema}.clubs AS clubs ON clubs.id = members.club_id
+       LEFT JOIN ${schema}.auth_users AS users
+         ON ('user:' || users.id) = members.athlete_profile_key
+       WHERE clubs.owner_profile_key = $1
+       ORDER BY lower(members.rider_name), members.created_at`,
+      [profileKey],
+    ),
+    query(
+      `SELECT clubs.id AS club_id, clubs.name AS club_name, clubs.owner_profile_key,
+         members.studio_rider_id, members.rider_name, members.claimed_at
+       FROM ${schema}.club_members AS members
+       JOIN ${schema}.clubs AS clubs ON clubs.id = members.club_id
+       WHERE members.athlete_profile_key = $1 AND members.status = 'claimed'
+       ORDER BY lower(clubs.name), lower(members.rider_name)`,
+      [profileKey],
+    ),
+  ]);
+  const ownedClub = clubFromRow(ownedResult?.rows?.[0]);
+  return {
+    ownedClub: ownedClub ? {
+      ...ownedClub,
+      members: (memberResult?.rows ?? []).map(clubMemberFromRow).filter(Boolean),
+    } : null,
+    memberships: (membershipResult?.rows ?? []).map((row) => ({
+      clubId: row.club_id,
+      clubName: row.club_name,
+      ownerProfileKey: row.owner_profile_key,
+      studioRiderId: row.studio_rider_id,
+      riderName: row.rider_name,
+      claimedAt: row.claimed_at ? new Date(row.claimed_at).getTime() : null,
+    })),
+  };
 }
 
 export async function saveUserTrackMapping(

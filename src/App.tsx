@@ -1648,6 +1648,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const hasClubInvite = new URLSearchParams(window.location.search).has('clubInvite')
+      || new URLSearchParams(window.location.hash.replace(/^#/, '')).has('clubInvite');
+    if (authUser && hasClubInvite) {
+      setShowMembershipLanding(false);
+      setAppMode('profile');
+    }
+  }, [authUser]);
+
+  useEffect(() => {
     let cancelled = false;
 
     fetch('/data/track-database.json')
@@ -4160,9 +4169,11 @@ export default function App() {
     const trainingStartedAt = raceCapture.startedAt ?? raceCapture.createdAt;
     const trainingEndedAt = raceCapture.endedAt ?? savedAt;
     const trainingSummaries = raceCapture.summary.map((summary) => {
-      const photoUrl = racePlayers.find((player) => player.id === summary.playerId)?.photoUrl;
+      const player = racePlayers.find((candidate) => candidate.id === summary.playerId);
+      const photoUrl = player?.photoUrl;
       return {
         ...summary,
+        ...(player?.riderId ? { riderId: player.riderId } : {}),
         ...(photoUrl ? { photoUrl } : {}),
       };
     });
@@ -6528,6 +6539,7 @@ export default function App() {
         elevationLossMeters: result.route.elevationLossMeters ?? 0,
         riders: result.riders.map((rider) => ({
           playerId: rider.playerId,
+          ...(rider.riderId ? { riderId: rider.riderId } : {}),
           name: rider.name,
           ...(rider.photoUrl ? { photoUrl: rider.photoUrl } : {}),
           distanceMeters: rider.distanceMeters,
@@ -7595,6 +7607,7 @@ export default function App() {
             email={authUser.email}
             membershipLabel={membershipLabel}
             profile={accountProfile}
+            studioRiders={activeStudioRiders(studioRiders)}
             historyRevision={trainingHistoryRevision}
             onPhotoChange={handleAccountPhotoChange}
           />

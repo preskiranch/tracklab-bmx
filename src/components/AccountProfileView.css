@@ -5,6 +5,7 @@
 }
 
 .account-profile-hero,
+.club-connect-panel,
 .training-calendar,
 .training-day-sessions {
   border: 1px solid #dce3e8;
@@ -52,6 +53,75 @@
   padding-top: 12px;
   border-top: 1px solid #edf0f2;
 }
+
+.club-connect-panel {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.club-connect-panel > header,
+.club-connect-title,
+.club-claim-card,
+.club-athlete-access,
+.club-owner-intro,
+.club-roster-list article,
+.club-roster-actions {
+  display: flex;
+  align-items: center;
+}
+
+.club-connect-panel > header,
+.club-owner-intro { justify-content: space-between; gap: 18px; }
+.club-connect-title { gap: 11px; }
+.club-connect-title h2 { margin: 2px 0 0; }
+.club-connect-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; color: #2d6810; background: #eafbdd; }
+.club-connect-security { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px; color: #27620d; background: #effbe7; font-weight: 850; }
+
+.club-claim-card,
+.club-athlete-access {
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid #a9df86;
+  border-radius: 12px;
+  background: #f5fdef;
+}
+.club-claim-card p,
+.club-athlete-access p,
+.club-owner-intro p { margin: 3px 0 0; color: #667085; }
+.club-claim-card button,
+.club-roster-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid #cad3da;
+  border-radius: 8px;
+  background: #fff;
+  color: #17202e;
+  font-weight: 800;
+}
+.club-claim-card button,
+.club-roster-actions button.primary { border-color: #69bd39; background: #7ade36; color: #102108; }
+.club-roster-actions button.danger { color: #b42318; }
+.club-athlete-access > svg { color: #5cbb25; flex: 0 0 auto; }
+.club-athlete-access > div { flex: 1; }
+.club-athlete-access > span { padding: 6px 9px; border-radius: 999px; background: #18304b; color: #fff; font-size: 12px; font-weight: 900; }
+
+.club-owner-roster { display: grid; gap: 10px; padding-top: 2px; }
+.club-owner-intro small { max-width: 310px; color: #667085; text-align: right; }
+.club-roster-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.club-roster-list article { gap: 10px; min-width: 0; padding: 10px; border: 1px solid #e0e6ea; border-radius: 11px; background: #fafcfd; }
+.club-roster-list .rider-avatar { width: 42px; height: 42px; flex: 0 0 42px; }
+.club-roster-name { display: grid; min-width: 0; flex: 1; }
+.club-roster-name strong { overflow-wrap: anywhere; }
+.club-roster-name small { color: #667085; }
+.club-roster-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.club-connect-message { margin: 0; padding: 10px; border-radius: 8px; background: #f3f5f7; color: #52606d; }
+.club-connect-message.error { color: #b42318; background: #fff1f0; }
 
 .account-profile-summary {
   display: grid;
@@ -174,6 +244,7 @@
 @media (max-width: 980px) {
   .account-profile-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .account-training-layout { grid-template-columns: 1fr; }
+  .club-roster-list { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
@@ -185,4 +256,11 @@
   .training-calendar-controls { width: 100%; justify-content: space-between; }
   .training-session-card { grid-template-columns: 38px minmax(0, 1fr); }
   .training-session-downloads { grid-column: 1 / -1; }
+  .club-connect-panel > header,
+  .club-claim-card,
+  .club-athlete-access,
+  .club-owner-intro { align-items: flex-start; flex-direction: column; }
+  .club-owner-intro small { max-width: none; text-align: left; }
+  .club-roster-list article { align-items: flex-start; flex-wrap: wrap; }
+  .club-roster-actions { width: 100%; justify-content: flex-start; padding-left: 52px; }
 }
