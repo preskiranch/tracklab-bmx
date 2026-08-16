@@ -5573,7 +5573,10 @@ async function serveStatic(request, response) {
     writeJson(response, 400, { error: 'Invalid request path.' });
     return;
   }
-  const safePath = decodedPath === '/' ? '/index.html' : decodedPath;
+  const publicSpaRoutes = new Set(['/privacy', '/privacy-policy', '/support']);
+  const safePath = decodedPath === '/' || publicSpaRoutes.has(decodedPath)
+    ? '/index.html'
+    : decodedPath;
   const filePath = path.resolve(distDirectory, `.${safePath}`);
   const withinDist = pathIsInside(distDirectory, filePath, path);
   const fallbackPath = path.join(distDirectory, 'index.html');

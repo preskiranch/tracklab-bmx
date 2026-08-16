@@ -161,6 +161,22 @@ afterAll(async () => {
 });
 
 describe('cloud API trust boundaries', () => {
+  it('serves public App Store pages without turning missing assets into SPA routes', async () => {
+    for (const pathname of ['/privacy', '/privacy-policy', '/support']) {
+      const response = await fetch(`${baseUrl}${pathname}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/html');
+      expect(response.headers.get('cache-control')).toBe('no-cache');
+      expect(await response.text()).toContain('<div id="root"></div>');
+    }
+
+    const missingAsset = await fetch(`${baseUrl}/assets/tracklab-missing.js`, {
+      headers: { Accept: 'text/html' },
+    });
+    expect(missingAsset.status).toBe(404);
+    expect(missingAsset.headers.get('content-type')).toContain('application/json');
+  });
+
   it('reports a no-store healthy memory fallback', async () => {
     const response = await api('/api/health');
     expect(response.status).toBe(200);
