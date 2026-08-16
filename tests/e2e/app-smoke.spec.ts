@@ -4882,6 +4882,122 @@ test('club athletes see only their own connection and never the studio roster', 
   await expect(clubConnect.getByRole('button', { name: /Invite|New link|Remove access/ })).toHaveCount(0);
   await expect(clubConnect.getByText('Bobby', { exact: true })).toHaveCount(0);
   await expect(clubConnect.getByText('Cali', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Club Live Monitor', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Owner-only view', { exact: true })).toHaveCount(0);
+});
+
+test('club owners can open the read-only Club Live Monitor while athletes cannot control sessions', async ({ page }) => {
+  const now = Date.now();
+  const studioRider = {
+    id: 'studio-rasheen',
+    name: 'Rasheen “The Machine” Hicks',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const authUser = {
+    id: 'club-owner',
+    profileKey: 'user:club-owner',
+    email: 'owner@tracklab.test',
+    name: 'Club Owner',
+    admin: false,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: now,
+    },
+  };
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: [studioRider],
+        accountProfile: { updatedAt: now },
+      }),
+    });
+  });
+  await page.route('**/api/club-connect*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        canManageClub: true,
+        ownedClub: {
+          id: 'club-preski-ranch',
+          name: 'Preski Ranch LLC',
+          members: [{
+            studioRiderId: studioRider.id,
+            riderName: studioRider.name,
+            status: 'claimed',
+          }],
+        },
+        memberships: [],
+      }),
+    });
+  });
+  await page.route('**/api/training-sessions*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ sessions: [], totals: {} }),
+    });
+  });
+  await page.route('**/api/club-live/sessions', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        club: { id: 'club-preski-ranch', name: 'Preski Ranch LLC' },
+        sessions: [{
+          id: 'club-preski-ranch:studio-rasheen',
+          clubId: 'club-preski-ranch',
+          studioRiderId: studioRider.id,
+          riderName: studioRider.name,
+          athleteName: 'Rasheen Hicks',
+          activityType: 'explore',
+          status: 'active',
+          progress: { fraction: 0.42, label: '42% complete' },
+          metrics: {
+            watts: 312,
+            cadence: 91,
+            speedKph: 31.2,
+            distanceMeters: 2_414,
+            elapsedMs: 321_000,
+            position: 2,
+            participantCount: 4,
+          },
+          destinationLabel: 'Golden Gate Bridge',
+          multiplayer: true,
+          startedAt: now - 321_000,
+          updatedAt: now,
+          expiresAt: now + 60_000,
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  const openApp = page.getByRole('button', { name: 'Open App' });
+  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await openApp.click({ timeout: 2_000 }).catch(() => undefined);
+  }
+
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Club Live Monitor', exact: true }).click();
+
+  const monitor = page.getByLabel('Club Live Monitor');
+  await expect(monitor.getByText('Owner-only view', { exact: true })).toBeVisible();
+  await expect(monitor.getByRole('heading', { name: 'Rasheen Hicks' })).toBeVisible();
+  await expect(monitor.getByText('Explore the World', { exact: true })).toBeVisible();
+  await expect(monitor.getByText('Golden Gate Bridge', { exact: true })).toBeVisible();
+  await expect(monitor.getByText('Private room', { exact: true })).toBeVisible();
+  await expect(monitor.getByText('Read-only live feed', { exact: true })).toBeVisible();
+  await expect(monitor.getByRole('button', { name: /Pause|Resume|Stop|Cancel|Control/i })).toHaveCount(0);
 });
 
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {

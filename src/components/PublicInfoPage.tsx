@@ -205,8 +205,11 @@ function PrivacyPage() {
                   performance. Detailed ghost zone analytics are shared only when that option is enabled.
                 </li>
                 <li>
-                  <strong>Clubs:</strong> a claimed Club Connect athlete can associate a session with a club, allowing
-                  that club owner to review the linked studio rider&apos;s session.
+                  <strong>Clubs:</strong> a claimed Club Connect athlete can choose “Training at” a club to associate
+                  the saved session with that club. While its owner has Club Live Monitor open, TrackLab also shares
+                  the athlete&apos;s selected program, live status, course progress, track or destination, power,
+                  cadence, and speed with that owner. This read-only live feed expires automatically after the owner
+                  closes the monitor or the athlete leaves club training.
                 </li>
                 <li>
                   <strong>Google mapping services:</strong> map tiles, places, route endpoints, route geometry,

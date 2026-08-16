@@ -1,11 +1,53 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WebSocket } from 'ws';
 
 let child: ChildProcess;
 let baseUrl = '';
 let cookie = '';
 let secondaryCookie = '';
+const testSockets = new Set<WebSocket>();
+
+type TestSocket = {
+  socket: WebSocket;
+  messages: Array<Record<string, any>>;
+};
+
+async function openTestSocket(authCookie: string): Promise<TestSocket> {
+  const socket = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/multiplayer`, {
+    headers: { Cookie: authCookie, Origin: baseUrl },
+  });
+  const messages: Array<Record<string, any>> = [];
+  socket.on('message', (data) => {
+    try {
+      messages.push(JSON.parse(data.toString()));
+    } catch {
+      // Tests only inspect JSON protocol messages.
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  testSockets.add(socket);
+  return { socket, messages };
+}
+
+async function waitForSocketMessage(
+  connection: TestSocket,
+  predicate: (message: Record<string, any>) => boolean,
+  afterIndex = 0,
+  timeoutMs = 3_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const match = connection.messages.slice(afterIndex).find(predicate);
+    if (match) return match;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for WebSocket message. Received: ${JSON.stringify(connection.messages.slice(afterIndex))}`);
+}
 
 async function availablePort() {
   return new Promise<number>((resolve, reject) => {
@@ -138,6 +180,7 @@ beforeAll(async () => {
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
+      TRACKLAB_CLUB_LIVE_SESSION_TTL_MS: '600',
       APPLE_MAPKIT_JS_TOKEN: 'test-domain-restricted-mapkit-token',
       OPENAI_API_KEY: '',
     },
@@ -147,6 +190,8 @@ beforeAll(async () => {
 }, 35_000);
 
 afterAll(async () => {
+  testSockets.forEach((socket) => socket.terminate());
+  testSockets.clear();
   if (!child || child.exitCode != null) {
     return;
   }
@@ -728,6 +773,287 @@ describe('cloud API trust boundaries', () => {
         },
       },
     });
+
+    const inactiveAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
+    expect(inactiveAccess.status).toBe(200);
+    await expect(inactiveAccess.json()).resolves.toMatchObject({
+      clubId: claimedMembership.clubId,
+      active: false,
+      expiresAt: null,
+    });
+    const spoofedAccess = await api('/api/club-live/access?clubId=club-not-mine');
+    expect(spoofedAccess.status).toBe(403);
+    const athleteMonitorRead = await api('/api/club-live/sessions');
+    expect(athleteMonitorRead.status).toBe(403);
+    const publishWithoutMonitor = await api('/api/club-live/sessions', {
+      method: 'PUT',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: 0.1,
+        metrics: { watts: 500 },
+      }),
+    });
+    expect(publishWithoutMonitor.status).toBe(409);
+
+    cookie = ownerCookie;
+    const monitorOpen = await api('/api/club-live/sessions');
+    expect(monitorOpen.status).toBe(200);
+    expect(monitorOpen.headers.get('cache-control')).toBe('no-store');
+    await expect(monitorOpen.json()).resolves.toMatchObject({
+      club: { id: claimedMembership.clubId },
+      sessions: [],
+      heartbeatTtlMs: 600,
+      pollAfterMs: 1_000,
+    });
+
+    cookie = athleteCookie;
+    const activeAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
+    expect(activeAccess.status).toBe(200);
+    expect(activeAccess.headers.get('cache-control')).toBe('no-store');
+    await expect(activeAccess.json()).resolves.toMatchObject({
+      clubId: claimedMembership.clubId,
+      active: true,
+      expiresAt: expect.any(Number),
+    });
+
+    const crossSiteGrantChange = await fetch(
+      `${baseUrl}/api/club-live/access?clubId=club-not-mine`,
+      {
+        headers: {
+          Cookie: athleteCookie,
+          Origin: 'https://attacker.example',
+          'Sec-Fetch-Site': 'cross-site',
+        },
+      },
+    );
+    expect(crossSiteGrantChange.status).toBe(403);
+    expect(crossSiteGrantChange.headers.get('cache-control')).toBe('no-store');
+    const accessAfterCrossSiteAttempt = await api(
+      `/api/club-live/access?clubId=${claimedMembership.clubId}`,
+    );
+    await expect(accessAfterCrossSiteAttempt.json()).resolves.toMatchObject({ active: true });
+
+    const primarySocket = await openTestSocket(athleteCookie);
+    const primaryConnected = await waitForSocketMessage(
+      primarySocket,
+      (message) => message.type === 'connected',
+    );
+    primarySocket.socket.send(JSON.stringify({
+      type: 'hello',
+      available: true,
+      bikeCount: 4,
+      track: { id: 'club-live-track', name: 'Club Live Track' },
+    }));
+    await waitForSocketMessage(primarySocket, (message) => message.type === 'welcome');
+    const primaryRoomStart = primarySocket.messages.length;
+    primarySocket.socket.send(JSON.stringify({
+      type: 'create-room',
+      private: true,
+      racerSeatCount: 4,
+      track: { id: 'club-live-track', name: 'Club Live Track' },
+    }));
+    const primaryRoomState = await waitForSocketMessage(
+      primarySocket,
+      (message) => message.type === 'room-state'
+        && message.room?.members?.some((member: { id: string }) => member.id === primaryConnected.clientId),
+      primaryRoomStart,
+    );
+    const multiplayerRoomId = primaryRoomState.room.id;
+    const primaryRoomMember = primaryRoomState.room.members.find(
+      (member: { id: string }) => member.id === primaryConnected.clientId,
+    );
+    expect(primaryRoomMember).toMatchObject({
+      roomRole: 'racer',
+      racerSeatCount: 1,
+      membershipTier: 'racer',
+    });
+    expect(primaryRoomMember).not.toHaveProperty('racerAccess');
+    expect(primaryRoomState.room).toMatchObject({
+      hostId: primaryConnected.clientId,
+      racerCount: 1,
+      racerSeatCount: 1,
+    });
+
+    const duplicateSocket = await openTestSocket(athleteCookie);
+    const duplicateConnected = await waitForSocketMessage(
+      duplicateSocket,
+      (message) => message.type === 'connected',
+    );
+    duplicateSocket.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 4 }));
+    await waitForSocketMessage(duplicateSocket, (message) => message.type === 'welcome');
+    const duplicateJoinStart = duplicateSocket.messages.length;
+    duplicateSocket.socket.send(JSON.stringify({ type: 'join-room', roomId: multiplayerRoomId }));
+    const duplicateRoomState = await waitForSocketMessage(
+      duplicateSocket,
+      (message) => message.type === 'room-state'
+        && message.room?.members?.some((member: { id: string }) => member.id === duplicateConnected.clientId),
+      duplicateJoinStart,
+    );
+    expect(duplicateRoomState.room.members.find(
+      (member: { id: string }) => member.id === duplicateConnected.clientId,
+    )).toMatchObject({ roomRole: 'spectator', racerSeatCount: 0 });
+    expect(duplicateRoomState.room).toMatchObject({ racerCount: 1, racerSeatCount: 1 });
+
+    const raceSyncStart = primarySocket.messages.length;
+    primarySocket.socket.send(JSON.stringify({
+      type: 'race-sync',
+      state: {
+        sessionId: 'club-live-temporary-race',
+        trackId: 'club-live-track',
+        raceState: 'racing',
+        riders: [{ id: 'maya-live', playerId: 1, name: 'Maya Torres', distance: 20 }],
+        summary: [],
+      },
+    }));
+    await waitForSocketMessage(
+      primarySocket,
+      (message) => message.type === 'race-sync' && message.state?.sessionId === 'club-live-temporary-race',
+      raceSyncStart,
+    );
+
+    // Renewal remains valid beyond the original TTL while the owner keeps the
+    // monitor open, and updates already-connected sockets server-side.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    cookie = ownerCookie;
+    expect((await api('/api/club-live/sessions')).status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    cookie = athleteCookie;
+    const renewedAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
+    await expect(renewedAccess.json()).resolves.toMatchObject({ active: true });
+
+    const livePublish = await api('/api/club-live/sessions', {
+      method: 'PUT',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        riderName: 'Forged rider name',
+        athleteName: 'Forged athlete name',
+        sessionId: 'live-straight-sprint-1',
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: { percent: 45, distanceMeters: 41.15, label: '145 ft sprint' },
+        metrics: {
+          watts: 1_100,
+          cadence: 150,
+          speedKph: 42.5,
+          distanceMeters: 41.15,
+          elapsedMs: 6_200,
+          position: 1,
+          participantCount: 4,
+        },
+        trackName: 'Club Drag Strip',
+        multiplayer: true,
+        roomId: 'PRIVATE-JOIN-SECRET',
+      }),
+    });
+    expect(livePublish.status).toBe(200);
+    const livePublishPayload = await livePublish.json();
+    expect(livePublishPayload.session).toMatchObject({
+      clubId: claimedMembership.clubId,
+      studioRiderId: 'studio-maya',
+      riderName: 'Maya Torres',
+      athleteName: 'Maya Alexandria Torres (Rocket)',
+      activityType: 'straight-sprint',
+      status: 'active',
+      progress: { fraction: 0.45, distanceMeters: 41.15, label: '145 ft sprint' },
+      metrics: { watts: 1_100, participantCount: 4 },
+      multiplayer: true,
+    });
+    expect(livePublishPayload.session).not.toHaveProperty('roomId');
+    expect(livePublishPayload.session).not.toHaveProperty('_publisherProfileKey');
+    expect(JSON.stringify(livePublishPayload)).not.toContain('PRIVATE-JOIN-SECRET');
+    expect(JSON.stringify(livePublishPayload)).not.toContain('Forged rider name');
+
+    cookie = ownerCookie;
+    const ownerLiveSessions = await api('/api/club-live/sessions');
+    const ownerLivePayload = await ownerLiveSessions.json();
+    expect(ownerLivePayload.sessions).toHaveLength(1);
+    expect(ownerLivePayload.sessions[0]).toMatchObject({
+      studioRiderId: 'studio-maya',
+      activityType: 'straight-sprint',
+      multiplayer: true,
+    });
+    expect(JSON.stringify(ownerLivePayload)).not.toContain('PRIVATE-JOIN-SECRET');
+
+    cookie = athleteCookie;
+    const stoppedLiveSession = await api('/api/club-live/sessions', {
+      method: 'DELETE',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+      }),
+    });
+    await expect(stoppedLiveSession.json()).resolves.toEqual({ stopped: true });
+    const expiringPublish = await api('/api/club-live/sessions', {
+      method: 'PUT',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        activityType: 'explore',
+        status: 'active',
+        progress: 0.2,
+        metrics: { speedKph: 20, distanceMeters: 500 },
+      }),
+    });
+    expect(expiringPublish.status).toBe(200);
+    const passiveExpiryStart = primarySocket.messages.length;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const passivelyDemotedState = await waitForSocketMessage(
+      primarySocket,
+      (message) => message.type === 'room-state'
+        && message.room?.id === multiplayerRoomId
+        && message.room?.members?.find(
+          (member: { id: string }) => member.id === primaryConnected.clientId,
+        )?.roomRole === 'spectator',
+      passiveExpiryStart,
+    );
+    expect(passivelyDemotedState.room).toMatchObject({
+      hostId: null,
+      racerCount: 0,
+      racerSeatCount: 0,
+    });
+    expect(passivelyDemotedState.raceStates).toEqual([]);
+
+    const expiredControlStart = primarySocket.messages.length;
+    primarySocket.socket.send(JSON.stringify({
+      type: 'room-vote-start',
+      candidates: [1, 2, 3].map((index) => ({
+        id: `expired-vote-track-${index}`,
+        name: `Expired Track ${index}`,
+        hasPedalZones: true,
+      })),
+    }));
+    await expect(waitForSocketMessage(
+      primarySocket,
+      (message) => message.type === 'room-error'
+        && String(message.message).includes('Only the room host'),
+      expiredControlStart,
+    )).resolves.toBeTruthy();
+
+    const expiredAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
+    await expect(expiredAccess.json()).resolves.toMatchObject({ active: false, expiresAt: null });
+    const expiredPublish = await api('/api/club-live/sessions', {
+      method: 'PUT',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+        activityType: 'explore',
+        status: 'active',
+        progress: 0.3,
+        metrics: { speedKph: 21, distanceMeters: 600 },
+      }),
+    });
+    expect(expiredPublish.status).toBe(409);
+    cookie = ownerCookie;
+    const expiredMonitorSessions = await api('/api/club-live/sessions');
+    await expect(expiredMonitorSessions.json()).resolves.toMatchObject({ sessions: [] });
+    primarySocket.socket.close();
+    duplicateSocket.socket.close();
+
+    cookie = athleteCookie;
     const athleteClubHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
     const athleteClubHistoryPayload = await athleteClubHistory.json();
     expect(athleteClubHistoryPayload.sessions).toEqual(expect.arrayContaining([
@@ -816,6 +1142,8 @@ describe('cloud API trust boundaries', () => {
     expect(revoked.status).toBe(200);
 
     cookie = athleteCookie;
+    const revokedLiveAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
+    expect(revokedLiveAccess.status).toBe(403);
     const revokedHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
     const revokedHistoryPayload = await revokedHistory.json();
     expect(revokedHistoryPayload.sessions).toEqual(expect.arrayContaining([
@@ -844,6 +1172,108 @@ describe('cloud API trust boundaries', () => {
       }),
     });
     expect(revokedClubSave.status).toBe(403);
+  });
+
+  it('caps a club live monitor at four independently active studio riders', async () => {
+    const originalCookie = cookie;
+    const ownerLogin = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'club-owner-admin@tracklab.test',
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(ownerLogin.status).toBe(200);
+    const ownerCookie = String(ownerLogin.headers.get('set-cookie')).split(';')[0];
+    cookie = ownerCookie;
+    const now = Date.now();
+    const riders = Array.from({ length: 5 }, (_value, index) => ({
+      id: `live-cap-rider-${index + 1}`,
+      name: `Live Cap Rider ${index + 1}`,
+      createdAt: now + index,
+      updatedAt: now + index,
+    }));
+    const rosterSave = await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({ studioRiders: riders }),
+    });
+    expect(rosterSave.status).toBe(200);
+
+    const tokens = [];
+    for (const rider of riders) {
+      const inviteResponse = await api('/api/club-connect/invites', {
+        method: 'POST',
+        body: JSON.stringify({ studioRiderId: rider.id }),
+      });
+      expect(inviteResponse.status).toBe(201);
+      tokens.push((await inviteResponse.json()).token);
+    }
+
+    cookie = secondaryCookie;
+    for (let index = 0; index < tokens.length; index += 1) {
+      const claimResponse = await api('/api/club-connect/claim', {
+        method: 'POST',
+        body: JSON.stringify({
+          token: tokens[index],
+          fullName: `Live Cap Athlete ${index + 1}`,
+        }),
+      });
+      expect(claimResponse.status).toBe(200);
+    }
+
+    cookie = ownerCookie;
+    const openedMonitor = await api('/api/club-live/sessions');
+    expect(openedMonitor.status).toBe(200);
+    const openedPayload = await openedMonitor.json();
+    const clubId = openedPayload.club.id;
+
+    cookie = secondaryCookie;
+    for (const rider of riders.slice(0, 4)) {
+      const publishResponse = await api('/api/club-live/sessions', {
+        method: 'PUT',
+        body: JSON.stringify({
+          clubId,
+          studioRiderId: rider.id,
+          activityType: rider.id.endsWith('1') ? 'explore' : 'bmx-race',
+          status: 'active',
+          progress: 0.25,
+          metrics: { watts: 600, cadence: 95, speedKph: 24 },
+        }),
+      });
+      expect(publishResponse.status).toBe(200);
+    }
+    const fifthPublish = await api('/api/club-live/sessions', {
+      method: 'PUT',
+      body: JSON.stringify({
+        clubId,
+        studioRiderId: riders[4].id,
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: 0.2,
+        metrics: { watts: 700, cadence: 110, speedKph: 30 },
+      }),
+    });
+    expect(fifthPublish.status).toBe(409);
+    await expect(fifthPublish.json()).resolves.toEqual({
+      error: 'This club already has four active riders on its live monitor.',
+    });
+
+    cookie = ownerCookie;
+    const monitored = await api('/api/club-live/sessions');
+    const monitoredPayload = await monitored.json();
+    expect(monitoredPayload.sessions).toHaveLength(4);
+    expect(monitoredPayload.sessions.map((session: { studioRiderId: string }) => session.studioRiderId))
+      .toEqual(riders.slice(0, 4).map((rider) => rider.id));
+
+    cookie = secondaryCookie;
+    for (const rider of riders.slice(0, 4)) {
+      const stopped = await api('/api/club-live/sessions', {
+        method: 'DELETE',
+        body: JSON.stringify({ clubId, studioRiderId: rider.id }),
+      });
+      expect(stopped.status).toBe(200);
+    }
+    cookie = originalCookie;
   });
 
   it('publishes one developer-locked camera view for every account and device', async () => {

@@ -130,6 +130,12 @@ type ExploreViewProps = {
   onVoiceStart: () => void;
   onVoiceStop: () => void;
   onDemoRideStatusChange?: (status: 'ready' | 'riding' | 'paused' | 'finished') => void;
+  onLiveStateChange?: (state: {
+    status: 'ready' | 'riding' | 'paused' | 'finished';
+    route: ExploreRoute | null;
+    riders: ExploreRider[];
+    elapsedMs: number;
+  } | null) => void;
   onRideComplete?: (result: {
     route: ExploreRoute;
     riders: ExploreRider[];
@@ -309,6 +315,7 @@ export function ExploreView({
   onVoiceStart,
   onVoiceStop,
   onDemoRideStatusChange,
+  onLiveStateChange,
   onRideComplete,
   fullscreen,
   onFullscreenChange,
@@ -384,6 +391,18 @@ export function ExploreView({
     start: startLocalRide,
   } = ride;
   latestRidersRef.current = ride.riders;
+  const latestClubLiveStateRef = useRef({
+    status: ride.status,
+    route,
+    riders: ride.riders,
+    elapsedMs: ride.elapsedMs,
+  });
+  latestClubLiveStateRef.current = {
+    status: ride.status,
+    route,
+    riders: ride.riders,
+    elapsedMs: ride.elapsedMs,
+  };
 
   const roomHost = Boolean(currentRoom && currentRoom.hostId === currentUserId);
   const canChooseRoute = playMode === 'local' || roomHost;
@@ -713,6 +732,19 @@ export function ExploreView({
       onDemoRideStatusChange?.(ride.status);
     }
   }, [demoMode, onDemoRideStatusChange, ride.status]);
+
+  useEffect(() => {
+    if (!onLiveStateChange) {
+      return undefined;
+    }
+    const publish = () => onLiveStateChange(latestClubLiveStateRef.current);
+    publish();
+    const timer = window.setInterval(publish, 1_000);
+    return () => {
+      window.clearInterval(timer);
+      onLiveStateChange(null);
+    };
+  }, [onLiveStateChange]);
 
   useEffect(() => () => {
     routeRequestRef.current += 1;

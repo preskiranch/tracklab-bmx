@@ -80,6 +80,9 @@ const rooms = new Map();
 const challenges = new Map();
 const matchInvites = new Map();
 const persistedRaceResultKeys = new Map();
+const clubLiveSessions = new Map();
+const clubLiveMonitorPresence = new Map();
+const clubLiveAccessSelections = new Map();
 const voteTimers = new Map();
 const routeSelectTimers = new Map();
 const userDataWriteChains = new Map();
@@ -88,6 +91,10 @@ const globalRaceViewProfileKey = 'global:developer-race-view';
 let commentarySpeechProviderStatus = 'unknown';
 let commentarySpeechProviderRetryAt = 0;
 const maxRaceBikeCount = 4;
+const configuredClubLiveSessionTtlMs = Number(process.env.TRACKLAB_CLUB_LIVE_SESSION_TTL_MS);
+const clubLiveSessionTtlMs = Number.isFinite(configuredClubLiveSessionTtlMs)
+  ? Math.max(250, Math.min(120_000, Math.round(configuredClubLiveSessionTtlMs)))
+  : 15_000;
 const latencyGoodMs = 90;
 const latencyOkMs = 180;
 const defaultAdminAccountEmail = 'preskiranch@gmail.com';
@@ -104,6 +111,7 @@ const exploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const smartExploreRouteRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const clubConnectRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const clubLiveRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
@@ -209,6 +217,8 @@ function rememberRaceResultKey(key, now = Date.now()) {
 }
 
 function pruneTransientState(now = Date.now()) {
+  pruneClubLiveSessions(now);
+
   for (const [key, savedAt] of persistedRaceResultKeys.entries()) {
     if (savedAt <= now - transientStateMaxAgeMs) {
       persistedRaceResultKeys.delete(key);
@@ -2044,6 +2054,197 @@ function publicClubConnectState(state, user) {
   };
 }
 
+const clubLiveActivityTypes = new Set(['bmx-race', 'straight-sprint', 'explore']);
+const clubLiveStatuses = new Set([
+  'ready',
+  'staging',
+  'countdown',
+  'active',
+  'racing',
+  'paused',
+  'finished',
+]);
+
+function boundedNumber(value, minimum, maximum, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(minimum, Math.min(maximum, numeric));
+}
+
+function clubLiveSessionKey(clubId, studioRiderId) {
+  return `${clubId}:${studioRiderId}`;
+}
+
+function pruneClubLiveSessions(now = Date.now()) {
+  for (const [key, session] of clubLiveSessions.entries()) {
+    if (!session || session.expiresAt <= now) {
+      clubLiveSessions.delete(key);
+    }
+  }
+  for (const [clubId, presence] of clubLiveMonitorPresence.entries()) {
+    if (!presence || presence.expiresAt <= now) {
+      clubLiveMonitorPresence.delete(clubId);
+    }
+  }
+
+  for (const [profileKey, access] of clubLiveAccessSelections.entries()) {
+    const presence = clubLiveMonitorPresence.get(access?.clubId);
+    if (
+      !access
+      || access.expiresAt <= now
+      || !presence
+      || presence.ownerProfileKey !== access.ownerProfileKey
+    ) {
+      clubLiveAccessSelections.delete(profileKey);
+    }
+  }
+
+  for (const client of clients.values()) {
+    if (!client?.clubLiveAccess || clientHasRacerAccess(client, now)) continue;
+    demoteClubLiveClient(client);
+  }
+}
+
+function activeClubLiveAccessForState(state, now = Date.now()) {
+  for (const membership of state?.memberships ?? []) {
+    const presence = clubLiveMonitorPresence.get(membership.clubId);
+    if (
+      presence
+      && presence.ownerProfileKey === membership.ownerProfileKey
+      && presence.expiresAt > now
+    ) {
+      return {
+        clubId: membership.clubId,
+        studioRiderId: membership.studioRiderId,
+        ownerProfileKey: membership.ownerProfileKey,
+        expiresAt: presence.expiresAt,
+      };
+    }
+  }
+  return null;
+}
+
+async function loadActiveClubLiveAccess(user, now = Date.now()) {
+  if (!user || membershipForAccount(user).tier === 'racer') return null;
+  const profileKey = authProfileKey(user);
+  const selectedAccess = clubLiveAccessSelections.get(profileKey);
+  if (!selectedAccess || selectedAccess.expiresAt <= now) return null;
+  const state = await persistence.loadClubConnectState(authProfileKey(user));
+  const membership = (state?.memberships ?? []).find((candidate) => (
+    candidate.clubId === selectedAccess.clubId
+    && candidate.studioRiderId === selectedAccess.studioRiderId
+  ));
+  if (!membership) {
+    clubLiveAccessSelections.delete(profileKey);
+    return null;
+  }
+  return activeClubLiveAccessForState({ memberships: [membership] }, now);
+}
+
+function setClubLiveAccessSelection(profileKey, access) {
+  if (access) {
+    clubLiveAccessSelections.set(profileKey, access);
+  } else {
+    clubLiveAccessSelections.delete(profileKey);
+  }
+  for (const client of clients.values()) {
+    if (client.guestKey !== profileKey || client.membershipTier === 'racer') continue;
+    if (access) {
+      client.clubLiveAccess = { ...access };
+    } else if (client.clubLiveAccess) {
+      demoteClubLiveClient(client);
+    }
+  }
+}
+
+function sanitizeClubLiveProgress(value) {
+  if (typeof value === 'number') {
+    return { fraction: boundedNumber(value, 0, 1) };
+  }
+  const input = value && typeof value === 'object' ? value : {};
+  const fractionSource = input.fraction ?? (
+    Number.isFinite(Number(input.percent)) ? Number(input.percent) / 100 : 0
+  );
+  return {
+    fraction: boundedNumber(fractionSource, 0, 1),
+    ...(Number.isFinite(Number(input.distanceMeters)) ? {
+      distanceMeters: boundedNumber(input.distanceMeters, 0, 10_000_000),
+    } : {}),
+    ...(sanitizeText(input.label, '', 48) ? { label: sanitizeText(input.label, '', 48) } : {}),
+  };
+}
+
+function sanitizeClubLiveMetrics(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    watts: boundedNumber(input.watts, 0, 5_000),
+    cadence: boundedNumber(input.cadence, 0, 300),
+    speedKph: boundedNumber(input.speedKph, 0, 200),
+    distanceMeters: boundedNumber(input.distanceMeters, 0, 10_000_000),
+    elapsedMs: boundedNumber(input.elapsedMs, 0, 24 * 60 * 60 * 1000),
+    ...(Number.isFinite(Number(input.position)) ? {
+      position: Math.round(boundedNumber(input.position, 1, maxRaceBikeCount, 1)),
+    } : {}),
+    ...(Number.isFinite(Number(input.participantCount)) ? {
+      participantCount: Math.round(boundedNumber(
+        input.participantCount,
+        1,
+        maxRaceBikeCount,
+        1,
+      )),
+    } : {}),
+  };
+}
+
+function sanitizeClubLiveSnapshot(payload, membership, user, now = Date.now()) {
+  const activityType = sanitizeText(payload?.activityType, '', 32).toLowerCase();
+  const status = sanitizeText(payload?.status, '', 24).toLowerCase();
+  if (!clubLiveActivityTypes.has(activityType) || !clubLiveStatuses.has(status)) {
+    return null;
+  }
+  const startedAt = Math.round(boundedNumber(
+    payload?.startedAt,
+    now - (24 * 60 * 60 * 1000),
+    now + (5 * 60 * 1000),
+    now,
+  ));
+  const studioRiderId = membership.studioRiderId;
+  const clubId = membership.clubId;
+  const sessionId = sanitizeText(
+    payload?.sessionId,
+    `${activityType}-${studioRiderId}-${startedAt}`,
+    160,
+  );
+  return {
+    id: clubLiveSessionKey(clubId, studioRiderId),
+    clubId,
+    studioRiderId,
+    riderName: sanitizeText(membership.riderName, 'Club athlete', 120),
+    athleteName: sanitizeText(user?.displayName, membership.riderName || 'Club athlete', 120),
+    sessionId,
+    activityType,
+    status,
+    progress: sanitizeClubLiveProgress(payload?.progress),
+    metrics: sanitizeClubLiveMetrics(payload?.metrics),
+    ...(sanitizeText(payload?.trackName, '', 160) ? {
+      trackName: sanitizeText(payload.trackName, '', 160),
+    } : {}),
+    ...(sanitizeText(payload?.destinationLabel, '', 180) ? {
+      destinationLabel: sanitizeText(payload.destinationLabel, '', 180),
+    } : {}),
+    multiplayer: Boolean(payload?.multiplayer),
+    startedAt,
+    updatedAt: now,
+    expiresAt: now + clubLiveSessionTtlMs,
+    _publisherProfileKey: authProfileKey(user),
+  };
+}
+
+function publicClubLiveSession(session) {
+  const { _publisherProfileKey: _privatePublisherProfileKey, ...visibleSession } = session;
+  return visibleSession;
+}
+
 function publicUserData(userData, user) {
   const { exploreRoutes: _exploreRoutes, ...profileData } = userData;
   return {
@@ -2987,11 +3188,12 @@ function roomLatencySummary(room) {
 }
 
 function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = client?.racerSeatCount ?? 0) {
+  const racerAccess = clientHasRacerAccess(client);
   return {
     id: client.id,
     name: client.name,
     available: client.available,
-    membershipTier: client.membershipTier,
+    membershipTier: racerAccess ? 'racer' : client.membershipTier,
     bikeCount: client.bikeCount,
     racerSeatCount: role === 'racer' ? Math.max(1, Math.min(maxRaceBikeCount, Math.round(Number(racerSeatCount) || 1))) : 0,
     latencyMs: Number.isFinite(Number(client.latencyMs)) ? Math.round(Number(client.latencyMs)) : null,
@@ -3003,8 +3205,57 @@ function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = c
   };
 }
 
-function clientHasRacerAccess(client) {
-  return client?.membershipTier === 'racer';
+function clientHasRacerAccess(client, now = Date.now()) {
+  if (client?.membershipTier === 'racer') return true;
+  const access = client?.clubLiveAccess;
+  if (!access || access.expiresAt <= now) return false;
+  const presence = clubLiveMonitorPresence.get(access.clubId);
+  return Boolean(
+    presence
+    && presence.ownerProfileKey === access.ownerProfileKey
+    && presence.expiresAt > now
+  );
+}
+
+function racerSeatLimitForClient(client) {
+  return client?.membershipTier === 'racer' ? maxRaceBikeCount : 1;
+}
+
+function temporaryClubSeatInUseByAnotherClient(client) {
+  const access = client?.clubLiveAccess;
+  if (!access || client?.membershipTier === 'racer') return false;
+  return [...clients.values()].some((candidate) => (
+    candidate.id !== client.id
+    && candidate.roomRole === 'racer'
+    && candidate.clubLiveAccess?.clubId === access.clubId
+    && candidate.clubLiveAccess?.studioRiderId === access.studioRiderId
+    && clientHasRacerAccess(candidate)
+  ));
+}
+
+function clientCanClaimRacerSeat(client) {
+  return clientHasRacerAccess(client) && !temporaryClubSeatInUseByAnotherClient(client);
+}
+
+function demoteClubLiveClient(client) {
+  client.clubLiveAccess = null;
+  const room = client.roomId ? rooms.get(client.roomId) : null;
+  if (!room?.racers?.has(client.id)) return;
+  room.racers.delete(client.id);
+  room.spectators.add(client.id);
+  room.racerSeatCounts.delete(client.id);
+  room.raceStates.delete(client.id);
+  room.exploreStates?.delete(client.id);
+  client.roomRole = 'spectator';
+  client.racerSeatCount = 0;
+  if (room.hostId === client.id) {
+    room.hostId = [...room.racers].find((clientId) => (
+      clientHasRacerAccess(clients.get(clientId))
+    )) ?? null;
+  }
+  void persistence.saveRoomJoin(room, client, 'spectator', 0);
+  broadcastRoom(room.id, roomState(room));
+  broadcastLobby();
 }
 
 function requireRacerClient(client, message = 'Racer access is required for that action.') {
@@ -3013,6 +3264,16 @@ function requireRacerClient(client, message = 'Racer access is required for that
   }
 
   send(client, { type: 'room-error', message });
+  return false;
+}
+
+function requireAvailableRacerSeat(client) {
+  if (!requireRacerClient(client)) return false;
+  if (!temporaryClubSeatInUseByAnotherClient(client)) return true;
+  send(client, {
+    type: 'room-error',
+    message: 'This Club Athlete seat is already active on another device.',
+  });
   return false;
 }
 
@@ -3341,7 +3602,9 @@ function leaveRoom(client, reason = 'left') {
   client.roomRole = null;
   client.racerSeatCount = 0;
   if (room.hostId === client.id) {
-    room.hostId = [...room.members][0] ?? null;
+    room.hostId = [...room.racers].find((clientId) => (
+      clientHasRacerAccess(clients.get(clientId))
+    )) ?? null;
   }
 
   send(client, { type: 'room-left', roomId: oldRoomId, reason });
@@ -3378,11 +3641,7 @@ function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1)
     room.exploreStates = new Map();
   }
 
-  if (!room.hostId && (room.members.size === 0 || room.hostGuestKey === client.guestKey)) {
-    room.hostId = client.id;
-  }
-
-  if (!clientHasRacerAccess(client)) {
+  if (!clientCanClaimRacerSeat(client)) {
     preferredRole = 'spectator';
   }
 
@@ -3390,6 +3649,10 @@ function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1)
   const availableSeatCount = Math.max(0, maxRaceBikeCount - (roomRacerSeatCount(room) - existingSeatCount));
   if (preferredRole === 'racer' && availableSeatCount <= 0) {
     preferredRole = 'spectator';
+  }
+
+  if (!room.hostId && preferredRole === 'racer') {
+    room.hostId = client.id;
   }
 
   room.members.add(client.id);
@@ -3401,7 +3664,11 @@ function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1)
   } else {
     room.spectators.delete(client.id);
     room.racers.add(client.id);
-    const assignedSeatCount = Math.max(1, Math.min(availableSeatCount, sanitizeSeatCount(requestedSeatCount)));
+    const assignedSeatCount = Math.max(1, Math.min(
+      availableSeatCount,
+      racerSeatLimitForClient(client),
+      sanitizeSeatCount(requestedSeatCount),
+    ));
     room.racerSeatCounts.set(client.id, assignedSeatCount);
     client.racerSeatCount = assignedSeatCount;
   }
@@ -3629,6 +3896,10 @@ async function handleClientMessage(client, rawMessage) {
     return;
   }
 
+  if (client.clubLiveAccess && !clientHasRacerAccess(client)) {
+    demoteClubLiveClient(client);
+  }
+
   if (message.type === 'ping') {
     send(client, {
       type: 'pong',
@@ -3675,7 +3946,7 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'create-room') {
-    if (!requireRacerClient(client)) {
+    if (!requireAvailableRacerSeat(client)) {
       return;
     }
     createRoom(
@@ -3718,7 +3989,7 @@ async function handleClientMessage(client, rawMessage) {
     if (!room) {
       return;
     }
-    if (room.hostId !== client.id) {
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
       send(client, { type: 'room-error', message: 'Only the room host can choose the Explore route.' });
       return;
     }
@@ -3749,7 +4020,7 @@ async function handleClientMessage(client, rawMessage) {
     if (!room?.exploreRoute) {
       return;
     }
-    if (room.hostId !== client.id) {
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
       send(client, { type: 'room-error', message: 'Only the room host can control the shared Explore ride.' });
       return;
     }
@@ -3793,7 +4064,7 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    if (room.hostId !== client.id) {
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
       send(client, { type: 'room-error', message: 'Only the room host can change the track.' });
       return;
     }
@@ -3816,7 +4087,7 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    if (room.hostId && room.hostId !== client.id) {
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
       send(client, { type: 'room-error', message: 'Only the room host can start track voting.' });
       return;
     }
@@ -3912,7 +4183,7 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    if (room.hostId && room.hostId !== client.id) {
+    if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
       send(client, { type: 'room-error', message: 'Only the room host can reset the lobby.' });
       return;
     }
@@ -4055,7 +4326,7 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'create-match') {
-    if (!requireRacerClient(client)) {
+    if (!requireAvailableRacerSeat(client)) {
       return;
     }
     const targetIds = sanitizeClientIdList(message.targetIds);
@@ -4133,7 +4404,7 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'challenge') {
-    if (!requireRacerClient(client)) {
+    if (!requireAvailableRacerSeat(client)) {
       return;
     }
     const target = clients.get(sanitizeText(message.targetId, '', 80));
@@ -4147,13 +4418,13 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'quick-match') {
-    if (!requireRacerClient(client)) {
+    if (!requireAvailableRacerSeat(client)) {
       return;
     }
     const candidates = [...clients.values()]
       .filter((candidate) => candidate.id !== client.id)
       .filter((candidate) => candidate.available)
-      .filter(clientHasRacerAccess)
+      .filter((candidate) => clientHasRacerAccess(candidate))
       .filter((candidate) => candidate.socket.readyState === candidate.socket.OPEN);
 
     if (candidates.length === 0) {
@@ -5176,6 +5447,217 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/club-live/access') {
+    // This GET changes the server-side temporary multiplayer/BLE grant. Treat
+    // it like a mutation so a cross-site navigation cannot switch or clear an
+    // athlete's selected club while their SameSite=Lax cookie is present.
+    if (!mutationOriginAllowed(request)) {
+      writeJson(response, 403, { error: 'Cross-site request blocked.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubLiveRateLimiter,
+      180,
+      `club-live-access:${authProfileKey(session.user)}`,
+    )) return;
+    const now = Date.now();
+    pruneClubLiveSessions(now);
+    const clubId = sanitizeText(requestUrl.searchParams.get('clubId'), '', 160);
+    const profileKey = authProfileKey(session.user);
+    const state = await persistence.loadClubConnectState(profileKey);
+    const membership = state.memberships.find((candidate) => candidate.clubId === clubId);
+    if (!membership) {
+      setClubLiveAccessSelection(profileKey, null);
+      writeJson(response, 403, {
+        error: 'That active Club Connect membership was not found.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const presence = clubLiveMonitorPresence.get(clubId);
+    const active = Boolean(
+      presence
+      && presence.ownerProfileKey === membership.ownerProfileKey
+      && presence.expiresAt > now
+    );
+    setClubLiveAccessSelection(profileKey, active ? {
+      clubId: membership.clubId,
+      studioRiderId: membership.studioRiderId,
+      ownerProfileKey: membership.ownerProfileKey,
+      expiresAt: presence.expiresAt,
+    } : null);
+    writeJson(response, 200, {
+      clubId,
+      active,
+      expiresAt: active ? presence.expiresAt : null,
+      pollAfterMs: 1_000,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-live/sessions') {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    const profileKey = authProfileKey(session.user);
+    const now = Date.now();
+    pruneClubLiveSessions(now);
+
+    if (request.method === 'GET') {
+      if (!canManageClubConnect(session.user)) {
+        writeJson(response, 403, {
+          error: 'Only the TrackLab club owner can view live club sessions.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (!enforceRateLimit(
+        request,
+        response,
+        clubLiveRateLimiter,
+        180,
+        `club-live-read:${profileKey}`,
+      )) return;
+      const state = await persistence.loadClubConnectState(profileKey);
+      const ownedClub = state.ownedClub;
+      if (!ownedClub) {
+        writeJson(response, 200, {
+          club: null,
+          sessions: [],
+          heartbeatTtlMs: clubLiveSessionTtlMs,
+          pollAfterMs: 1_000,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const monitorExpiresAt = now + clubLiveSessionTtlMs;
+      clubLiveMonitorPresence.set(ownedClub.id, {
+        ownerProfileKey: profileKey,
+        expiresAt: monitorExpiresAt,
+      });
+      const claimedMembers = (ownedClub.members ?? [])
+        .filter((member) => member?.status === 'claimed' && member?.athleteProfileKey);
+      const claimedRiderIds = new Set(claimedMembers.map((member) => member.studioRiderId));
+      const claimedProfileByRiderId = new Map(claimedMembers.map((member) => [
+        member.studioRiderId,
+        member.athleteProfileKey,
+      ]));
+      for (const [athleteProfileKey, access] of clubLiveAccessSelections.entries()) {
+        if (access.clubId !== ownedClub.id) continue;
+        if (
+          access.ownerProfileKey === profileKey
+          && claimedProfileByRiderId.get(access.studioRiderId) === athleteProfileKey
+        ) {
+          access.expiresAt = monitorExpiresAt;
+          for (const client of clients.values()) {
+            if (client.guestKey === athleteProfileKey && client.clubLiveAccess) {
+              client.clubLiveAccess.expiresAt = monitorExpiresAt;
+            }
+          }
+        } else {
+          setClubLiveAccessSelection(athleteProfileKey, null);
+        }
+      }
+      const activeSessions = [];
+      for (const [key, liveSession] of clubLiveSessions.entries()) {
+        if (liveSession.clubId !== ownedClub.id) continue;
+        if (!claimedRiderIds.has(liveSession.studioRiderId)) {
+          clubLiveSessions.delete(key);
+          continue;
+        }
+        activeSessions.push(publicClubLiveSession(liveSession));
+      }
+      activeSessions.sort((left, right) => left.startedAt - right.startedAt
+        || left.studioRiderId.localeCompare(right.studioRiderId));
+      writeJson(response, 200, {
+        club: { id: ownedClub.id, name: ownedClub.name },
+        sessions: activeSessions.slice(0, maxRaceBikeCount),
+        heartbeatTtlMs: clubLiveSessionTtlMs,
+        monitorExpiresAt,
+        pollAfterMs: 1_000,
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (request.method !== 'PUT' && request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubLiveRateLimiter,
+      180,
+      `club-live-publish:${profileKey}`,
+    )) return;
+    const payload = await readJsonBody(request, request.method === 'PUT' ? 32_000 : 8_000);
+    const clubId = sanitizeText(payload?.clubId, '', 160);
+    const studioRiderId = sanitizeText(payload?.studioRiderId, '', 160);
+    const state = await persistence.loadClubConnectState(profileKey);
+    const membership = state.memberships.find((candidate) => (
+      candidate.clubId === clubId && candidate.studioRiderId === studioRiderId
+    ));
+    if (!membership) {
+      writeJson(response, 403, {
+        error: 'Choose an active Club Connect membership before sharing this session.',
+      });
+      return;
+    }
+    const key = clubLiveSessionKey(clubId, studioRiderId);
+    if (request.method === 'DELETE') {
+      const existing = clubLiveSessions.get(key);
+      const stopped = Boolean(existing?._publisherProfileKey === profileKey);
+      if (stopped) clubLiveSessions.delete(key);
+      writeJson(response, 200, { stopped }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const presence = clubLiveMonitorPresence.get(clubId);
+    const monitorIsActive = Boolean(
+      presence
+      && presence.ownerProfileKey === membership.ownerProfileKey
+      && presence.expiresAt > now
+    );
+    if (!monitorIsActive) {
+      writeJson(response, 409, {
+        error: 'The club owner must open Club Live Monitor before this studio session can be shared.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const liveSession = sanitizeClubLiveSnapshot(payload, membership, session.user, now);
+    if (!liveSession) {
+      writeJson(response, 400, {
+        error: 'A valid club activity type and live session status are required.',
+      });
+      return;
+    }
+    if (!clubLiveSessions.has(key)) {
+      const activeClubSessionCount = [...clubLiveSessions.values()]
+        .filter((candidate) => candidate.clubId === clubId)
+        .length;
+      if (activeClubSessionCount >= maxRaceBikeCount) {
+        writeJson(response, 409, {
+          error: 'This club already has four active riders on its live monitor.',
+        });
+        return;
+      }
+    }
+    clubLiveSessions.set(key, liveSession);
+    cloudTelemetry.increment('tracklab_club_live_updates_total', {
+      activity: liveSession.activityType,
+      multiplayer: liveSession.multiplayer ? 'yes' : 'no',
+    });
+    writeJson(response, 200, {
+      session: publicClubLiveSession(liveSession),
+      heartbeatTtlMs: clubLiveSessionTtlMs,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/club-connect') {
     const session = await requireAuthSession(request, response);
     if (!session) return;
@@ -5743,6 +6225,7 @@ wss.on('connection', (socket, request) => {
     name: sanitizeText(authUser.displayName, 'TrackLab Rider', 64),
     email: sanitizeEmail(authUser.email),
     membershipTier: membershipForAccount(authUser).tier,
+    clubLiveAccess: request.tracklabClubLiveAccess ?? null,
     available: false,
     bikeCount: 0,
     track: sanitizeTrack(null),
@@ -5836,13 +6319,14 @@ server.on('upgrade', (request, socket, head) => {
   }
 
   void currentAuthSession(request)
-    .then((session) => {
+    .then(async (session) => {
       if (!session?.user) {
         socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
         socket.destroy();
         return;
       }
 
+      request.tracklabClubLiveAccess = await loadActiveClubLiveAccess(session.user);
       request.tracklabAuthSession = session;
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
@@ -5864,6 +6348,15 @@ const websocketHeartbeat = setInterval(() => {
 }, 30_000);
 websocketHeartbeat.unref();
 
+// Club Live access is intentionally short lived. Prune independently of HTTP
+// polling so a backgrounded athlete tab cannot retain a racer seat after the
+// club owner's monitor closes.
+const clubLiveAccessMaintenance = setInterval(
+  () => pruneClubLiveSessions(Date.now()),
+  Math.max(100, Math.min(1_000, Math.floor(clubLiveSessionTtlMs / 3))),
+);
+clubLiveAccessMaintenance.unref();
+
 const persistenceMaintenance = setInterval(() => {
   pruneTransientState();
   void persistence.pruneExpiredData();
@@ -5879,6 +6372,7 @@ async function shutdown(signal) {
   cloudTelemetry.info('service.shutdown_started', { signal });
 
   clearInterval(websocketHeartbeat);
+  clearInterval(clubLiveAccessMaintenance);
   clearInterval(persistenceMaintenance);
   voteTimers.forEach(clearTimeout);
   routeSelectTimers.forEach(clearTimeout);

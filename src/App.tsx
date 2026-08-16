@@ -212,6 +212,12 @@ import {
   type ClubAthleteMembership,
 } from './lib/clubConnect';
 import type { ClubTrainingSelection } from './lib/trainingHistory';
+import type { ClubLiveAccess } from './lib/clubLive';
+import type {
+  ClubLiveActivityState,
+  ClubLiveExploreState,
+} from './components/ClubLiveAthleteBridge';
+import { shouldStopAdvancedConnector } from './lib/advancedConnectorPolicy';
 import {
   claimBillingReturn,
   loginAuthUser,
@@ -242,6 +248,7 @@ import type {
   AccountProfile,
   AppMode,
   BikeProfile,
+  BikeSample,
   ConnectedBikeDevice,
   DemoRiderNames,
   DemoRiderPhotos,
@@ -294,6 +301,9 @@ const DiagnosticsPanel = lazy(() => import('./components/DiagnosticsPanel')
   .then((module) => ({ default: module.DiagnosticsPanel })));
 const DeveloperToolsPanel = lazy(() => import('./components/DeveloperToolsPanel')
   .then((module) => ({ default: module.DeveloperToolsPanel })));
+const ClubLiveMonitor = lazy(() => import('./components/ClubLiveMonitor'));
+const ClubLiveAthleteBridge = lazy(() => import('./components/ClubLiveAthleteBridge'));
+const ClubLiveAccessNotice = lazy(() => import('./components/ClubLiveAccessNotice'));
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const customRouteInitialZoom = 18;
@@ -1401,7 +1411,6 @@ function isValidAccountEmail(email: string) {
 
 export default function App() {
   const bridge = useWattbikeBridge();
-  const bluetooth = useBluetoothBikes();
   const raceShellRef = useRef<HTMLDivElement | null>(null);
   const startGateTimeoutsRef = useRef<number[]>([]);
   const startGateSequenceIdRef = useRef(0);
@@ -1491,6 +1500,12 @@ export default function App() {
   const [clubRosterManagementProfileKey, setClubRosterManagementProfileKey] = useState<string | null>(null);
   const [clubTrainingSelection, setClubTrainingSelection] = useState<ClubTrainingSelection | null>(null);
   const [clubTrainingStatus, setClubTrainingStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [clubLiveAccess, setClubLiveAccess] = useState<(ClubLiveAccess & {
+    profileKey: string;
+    studioRiderId: string;
+  }) | null>(null);
+  const [clubLiveAccessStatus, setClubLiveAccessStatus] = useState<'idle' | 'checking' | 'active' | 'inactive' | 'error'>('idle');
+  const [exploreClubLiveState, setExploreClubLiveState] = useState<ClubLiveExploreState | null>(null);
   const clubTrainingRequestGenerationRef = useRef(0);
   const activeClubProfileKeyRef = useRef<string | null>(null);
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
@@ -1591,6 +1606,9 @@ export default function App() {
   const canManageStudioRiders = adminProfileActive || Boolean(
     authUser && clubRosterManagementProfileKey === authUser.profileKey,
   );
+  const clubOwnerActive = Boolean(
+    authUser && clubRosterManagementProfileKey === authUser.profileKey,
+  );
   const studioRidersLoadedForActiveProfile = Boolean(
     authUser && studioRidersProfileKey === authUser.profileKey,
   );
@@ -1616,6 +1634,38 @@ export default function App() {
     && clubTrainingMembershipProfileKey === authUser.profileKey
     ? clubTrainingMemberships
     : [];
+  const selectedClubTrainingMembershipActive = Boolean(
+    clubTrainingSelection
+    && activeClubTrainingMemberships.some((membership) => (
+      membership.clubId === clubTrainingSelection.clubId
+      && membership.studioRiderId === clubTrainingSelection.studioRiderId
+    )),
+  );
+  const clubLiveAccessActive = Boolean(
+    authUser
+    && clubTrainingSelection
+    && selectedClubTrainingMembershipActive
+    && clubLiveAccess?.profileKey === authUser.profileKey
+    && clubLiveAccess.clubId === clubTrainingSelection.clubId
+    && clubLiveAccess.studioRiderId === clubTrainingSelection.studioRiderId
+    && clubLiveAccess.active
+    && clubLiveAccess.expiresAt > now,
+  );
+  const authenticatedRacerAccess = authStatus === 'signed-in'
+    && authUser?.membership.tier === 'racer';
+  const clubMonitorReleasesLocalBikes = appMode === 'club-monitor';
+  const bluetoothAccessGranted = !clubMonitorReleasesLocalBikes
+    && (authenticatedRacerAccess || clubLiveAccessActive);
+  const bluetooth = useBluetoothBikes({
+    enabled: bluetoothAccessGranted,
+    maxDevices: authenticatedRacerAccess ? maxPlayers : 1,
+  });
+  const liveBikeSeatLimit = clubMonitorReleasesLocalBikes
+    ? 0
+    : authenticatedRacerAccess
+      ? maxPlayers
+      : clubLiveAccessActive ? 1 : 0;
+  const liveBikeAccessLocked = !bluetoothAccessGranted;
   const developerUiActive = adminProfileActive && !regularUserPreview;
   const developerRaceLayoutActive = isAdminAccountEmail(accountEmail);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -1694,6 +1744,12 @@ export default function App() {
   }, [refreshClubTrainingMemberships]);
 
   useEffect(() => {
+    if (appMode === 'club-monitor' && clubTrainingStatus !== 'loading' && !clubOwnerActive) {
+      setAppMode('profile');
+    }
+  }, [appMode, clubOwnerActive, clubTrainingStatus]);
+
+  useEffect(() => {
     let cancelled = false;
     setAuthStatus('loading');
 
@@ -1710,6 +1766,10 @@ export default function App() {
           setProfileEmailDraft(user.email);
           setMembership(user.membership);
           setCheckoutBikeSeats(user.membership.bikeSeats);
+        } else {
+          const visitorMembership = createMembership('visitor');
+          setMembership(visitorMembership);
+          setCheckoutBikeSeats(1);
         }
       })
       .catch((error: Error) => {
@@ -1717,6 +1777,8 @@ export default function App() {
         if (!cancelled) {
           setAuthUser(null);
           setAuthStatus('signed-out');
+          setMembership(createMembership('visitor'));
+          setCheckoutBikeSeats(1);
         }
       });
 
@@ -2374,12 +2436,17 @@ export default function App() {
   );
   const demoPlayers = exploreDemoCandidates.filter((player) => selectedDemoPlayerIds.includes(player.id));
   const connectedBikeSamples = useMemo(() => {
-    const next = new Map(bridge.samplesByDevice);
+    // A temporary Club Live Monitor grant authorizes one direct-Bluetooth studio
+    // bike only. Connector data remains a Racer feature and must never leak into
+    // the temporary club seat when a connector happens to be running locally.
+    const next = authenticatedRacerAccess
+      ? new Map(bridge.samplesByDevice)
+      : new Map<number, BikeSample>();
     bluetooth.samplesByDevice.forEach((sample, deviceId) => {
       next.set(deviceId, sample);
     });
     return next;
-  }, [bluetooth.samplesByDevice, bridge.samplesByDevice]);
+  }, [authenticatedRacerAccess, bluetooth.samplesByDevice, bridge.samplesByDevice]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
   const liveBikeDeviceIds = useMemo(() => {
     const deviceIds = new Set<number>();
@@ -2404,10 +2471,10 @@ export default function App() {
 
     return selectRaceBikeDevices(devices, now, {
       deviceTimeoutMs: connectedBikeDeviceTimeoutMs,
-      maxDevices: maxPlayers,
+      maxDevices: liveBikeSeatLimit,
     })
       .filter((device) => liveBikeDeviceIds.has(device.deviceId));
-  }, [bluetooth.devices, bridge.devices, connectedBikeSamples, liveBikeDeviceIds, now]);
+  }, [bluetooth.devices, bridge.devices, connectedBikeSamples, liveBikeDeviceIds, liveBikeSeatLimit, now]);
   const connectedBikeDeviceById = useMemo(
     () => new Map(connectedBikeDevices.map((device) => [device.deviceId, device])),
     [connectedBikeDevices],
@@ -3419,6 +3486,27 @@ export default function App() {
   }, [bikeConnectionSource]);
 
   useEffect(() => {
+    if (!authenticatedRacerAccess && clubLiveAccessActive && bikeConnectionSource !== 'bluetooth') {
+      setBikeConnectionSource('bluetooth');
+    }
+  }, [authenticatedRacerAccess, bikeConnectionSource, clubLiveAccessActive]);
+
+  useEffect(() => {
+    if (shouldStopAdvancedConnector({
+      authenticatedRacerAccess,
+      clubMonitorOpen: clubMonitorReleasesLocalBikes,
+      sourceState: bridge.sourceState,
+    })) {
+      void bridge.stopLocalBridge();
+    }
+  }, [
+    bridge.sourceState,
+    bridge.stopLocalBridge,
+    clubMonitorReleasesLocalBikes,
+    authenticatedRacerAccess,
+  ]);
+
+  useEffect(() => {
     if (!demoMode && bluetooth.connectedCount > 0 && bikeConnectionSource !== 'bluetooth') {
       setBikeConnectionSource('bluetooth');
     }
@@ -3426,9 +3514,10 @@ export default function App() {
 
   useEffect(() => {
     if (
-      demoMode
+      clubMonitorReleasesLocalBikes
+      || demoMode
       || bikeConnectionSource !== 'advanced'
-      || membership.tier !== 'racer'
+      || !authenticatedRacerAccess
       || bridge.connection !== 'open'
       || bridge.sourceState !== 'idle'
     ) {
@@ -3441,8 +3530,9 @@ export default function App() {
     bridge.connection,
     bridge.sourceState,
     bridge.startLocalBridge,
+    clubMonitorReleasesLocalBikes,
     demoMode,
-    membership.tier,
+    authenticatedRacerAccess,
   ]);
 
   useEffect(() => {
@@ -6345,10 +6435,18 @@ export default function App() {
       return;
     }
 
-    if (source !== 'demo' && membership.tier !== 'racer') {
-      setCheckoutMessage('Racer membership is required to connect live Wattbikes.');
+    if (source === 'advanced' && !authenticatedRacerAccess) {
+      setCheckoutMessage('Advanced Connector requires Racer. Club Live supports one Bluetooth studio bike.');
       setCheckoutStatus('idle');
       setShowMembershipLanding(true);
+      return;
+    }
+
+    if (source === 'bluetooth' && liveBikeAccessLocked) {
+      setCheckoutMessage(selectedClubTrainingMembershipActive
+        ? 'Ask the club owner to open Club Live Monitor to unlock one Bluetooth studio bike.'
+        : 'Choose “Training at your club” for temporary studio access, or upgrade to Racer.');
+      setCheckoutStatus('idle');
       return;
     }
 
@@ -6458,12 +6556,15 @@ export default function App() {
     } catch (error) {
       setAuthUser(null);
       setAuthStatus('signed-out');
+      setMembership(createMembership('visitor'));
+      setCheckoutBikeSeats(1);
       setProfileFormError(error instanceof Error ? error.message : 'Could not sign in.');
       return false;
     }
   }, [authMode, authPasswordDraft, profileEmailDraft, profileNameDraft]);
 
   const handleSignOut = useCallback(async () => {
+    const liveClubSelection = clubTrainingSelection;
     clearStartGateSequence();
     clubTrainingRequestGenerationRef.current += 1;
     activeClubProfileKeyRef.current = null;
@@ -6480,6 +6581,11 @@ export default function App() {
     setAuthPasswordDraft('');
     setAuthStatus('loading');
 
+    if (liveClubSelection) {
+      await import('./lib/clubLive')
+        .then(({ stopClubLiveSession }) => stopClubLiveSession(liveClubSelection, { keepalive: true }))
+        .catch(() => undefined);
+    }
     try {
       await logoutAuthUser();
     } catch (error) {
@@ -6495,7 +6601,7 @@ export default function App() {
     setBikeConnectionSource('bluetooth');
     setDemoMode(false);
     setShowMembershipLanding(true);
-  }, [clearStartGateSequence]);
+  }, [clearStartGateSequence, clubTrainingSelection]);
 
   const openFreeSpectatorAccess = useCallback(() => {
     if (!requireAccountProfile()) {
@@ -6995,13 +7101,22 @@ export default function App() {
   })();
   const bridgeBusy = bridge.sourceState === 'starting' || bridge.sourceState === 'stopping';
   const bridgeRunning = bridge.sourceState === 'running';
-  const liveBikeAccessLocked = membership.tier !== 'racer';
   const showLiveBikeUpgrade = () => {
-    setCheckoutMessage('Upgrade to Racer to connect live Wattbikes.');
+    setCheckoutMessage(selectedClubTrainingMembershipActive && !authenticatedRacerAccess
+      ? 'Ask the club owner to open Club Live Monitor to unlock one Bluetooth studio bike.'
+      : 'Upgrade to Racer to connect personal Wattbikes.');
+    setCheckoutStatus('idle');
+    if (!selectedClubTrainingMembershipActive) {
+      setShowMembershipLanding(true);
+    }
+  };
+  const showAdvancedConnectorUpgrade = () => {
+    setCheckoutMessage('Advanced Connector requires Racer. Club Live supports one Bluetooth studio bike.');
     setCheckoutStatus('idle');
     setShowMembershipLanding(true);
   };
-  const bridgeButtonDisabled = liveBikeAccessLocked || demoMode || bikeConnectionSource !== 'advanced' || bridge.connection !== 'open' || bridgeBusy;
+  const advancedConnectorAccessLocked = !authenticatedRacerAccess || clubMonitorReleasesLocalBikes;
+  const bridgeButtonDisabled = advancedConnectorAccessLocked || demoMode || bikeConnectionSource !== 'advanced' || bridge.connection !== 'open' || bridgeBusy;
   const bridgeButtonLabel = bridgeBusy
     ? bridge.sourceState === 'stopping' ? 'Stopping Connector' : 'Starting Connector'
     : bridgeRunning ? 'Stop Connector' : 'Start Connector';
@@ -7174,49 +7289,86 @@ export default function App() {
     },
   ];
 
+  const clubLiveActivity: ClubLiveActivityState = {
+    ...(accountRider?.id ? { accountRiderId: accountRider.id } : {}),
+    appMode,
+    explore: exploreClubLiveState,
+    multiplayerActive: playMode === 'multiplayer' && Boolean(multiplayer.currentRoom),
+    multiplayerParticipantCount: multiplayer.currentRoom?.racerCount ?? null,
+    now,
+    race: {
+      capture: raceCapture,
+      courseLengthMeters: effectiveRouteLengthMeters,
+      players: racePlayers,
+      riders,
+      samplesByDevice,
+      startGateActive: startGateStatus.active,
+      state: raceState,
+      trackName: effectiveTrack.name,
+    },
+  };
+  const clubLiveAthleteBridge = authUser
+    && clubTrainingSelection
+    && selectedClubTrainingMembershipActive ? (
+      <Suspense fallback={null}>
+        <ClubLiveAthleteBridge
+          accessActive={clubLiveAccessActive}
+          activity={clubLiveActivity}
+          demoMode={demoMode}
+          profileKey={authUser.profileKey}
+          selection={clubTrainingSelection}
+          onAccessChange={setClubLiveAccess}
+          onAccessStatusChange={setClubLiveAccessStatus}
+        />
+      </Suspense>
+    ) : null;
+
   if (showMembershipLanding || !accountProfileComplete) {
     return (
-      <MembershipLanding
-        membership={membership}
-        bikeSeats={checkoutBikeSeats}
-        checkoutStatus={checkoutStatus}
-        checkoutMessage={checkoutMessage}
-        authMode={authMode}
-        authLoading={authStatus === 'loading'}
-        profileName={profileNameDraft}
-        profileEmail={profileEmailDraft}
-        profilePassword={authPasswordDraft}
-        profileComplete={accountProfileComplete}
-        profileError={profileFormError}
-        isAdminProfile={adminProfileActive}
-        onlineRiderCount={multiplayer.onlineRiders.length}
-        liveRoomCount={multiplayer.rooms.length}
-        catalogReady={catalogDatabaseReady}
-        tracks={baseCatalogTracks}
-        onAuthModeChange={(mode) => {
-          setAuthMode(mode);
-          setProfileFormError(null);
-        }}
-        onProfileNameChange={(name) => {
-          setProfileNameDraft(name);
-          setProfileFormError(null);
-        }}
-        onProfileEmailChange={(email) => {
-          setProfileEmailDraft(email);
-          setProfileFormError(null);
-        }}
-        onProfilePasswordChange={(password) => {
-          setAuthPasswordDraft(password);
-          setProfileFormError(null);
-        }}
-        onProfileSubmit={saveRequiredProfile}
-        onSignOut={handleSignOut}
-        onJoinFree={openFreeSpectatorAccess}
-        onEnterApp={openRaceDashboard}
-        onStartDemo={startBenchmarkDemo}
-        onBikeSeatsChange={handleCheckoutBikeSeatsChange}
-        onCheckout={startSquareCheckout}
-      />
+      <>
+        {clubLiveAthleteBridge}
+        <MembershipLanding
+          membership={membership}
+          bikeSeats={checkoutBikeSeats}
+          checkoutStatus={checkoutStatus}
+          checkoutMessage={checkoutMessage}
+          authMode={authMode}
+          authLoading={authStatus === 'loading'}
+          profileName={profileNameDraft}
+          profileEmail={profileEmailDraft}
+          profilePassword={authPasswordDraft}
+          profileComplete={accountProfileComplete}
+          profileError={profileFormError}
+          isAdminProfile={adminProfileActive}
+          onlineRiderCount={multiplayer.onlineRiders.length}
+          liveRoomCount={multiplayer.rooms.length}
+          catalogReady={catalogDatabaseReady}
+          tracks={baseCatalogTracks}
+          onAuthModeChange={(mode) => {
+            setAuthMode(mode);
+            setProfileFormError(null);
+          }}
+          onProfileNameChange={(name) => {
+            setProfileNameDraft(name);
+            setProfileFormError(null);
+          }}
+          onProfileEmailChange={(email) => {
+            setProfileEmailDraft(email);
+            setProfileFormError(null);
+          }}
+          onProfilePasswordChange={(password) => {
+            setAuthPasswordDraft(password);
+            setProfileFormError(null);
+          }}
+          onProfileSubmit={saveRequiredProfile}
+          onSignOut={handleSignOut}
+          onJoinFree={openFreeSpectatorAccess}
+          onEnterApp={openRaceDashboard}
+          onStartDemo={startBenchmarkDemo}
+          onBikeSeatsChange={handleCheckoutBikeSeatsChange}
+          onCheckout={startSquareCheckout}
+        />
+      </>
     );
   }
 
@@ -7225,6 +7377,7 @@ export default function App() {
       className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}`}
       ref={raceShellRef}
     >
+      {clubLiveAthleteBridge}
       {bluetoothPairingOpen && showBluetoothPairing && !liveBikeAccessLocked && (
         <Suspense fallback={null}>
           <BluetoothPairingDialog
@@ -7232,7 +7385,7 @@ export default function App() {
             busy={bluetooth.connection === 'connecting'}
             connectedDevices={bluetooth.devices}
             liveCount={bluetooth.connectedCount}
-            maxPlayers={maxPlayers}
+            maxPlayers={Math.max(1, liveBikeSeatLimit)}
             onClose={() => setBluetoothPairingOpen(false)}
             onPairBike={bluetooth.connectBike}
             onReconnectSaved={bluetooth.reconnectSavedBikes}
@@ -7257,7 +7410,7 @@ export default function App() {
             <span className={`connection-dot ${connectionState}`} />
             <div>
               <strong>{connectionLabel}</strong>
-              <span>{connectedBikeDisplayCount} / {maxPlayers} bikes connected</span>
+              <span>{connectedBikeDisplayCount} / {Math.max(1, liveBikeSeatLimit)} bikes connected</span>
             </div>
           </div>
           <p>{connectionStatus}</p>
@@ -7298,11 +7451,13 @@ export default function App() {
               className="bluetooth-connect-button"
               type="button"
               onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : () => setBluetoothPairingOpen(true)}
-              disabled={!bluetooth.supported || bluetooth.connection === 'connecting'}
+              disabled={clubMonitorReleasesLocalBikes || !bluetooth.supported || bluetooth.connection === 'connecting'}
             >
               <Bluetooth size={16} />
               <span>
-                {liveBikeAccessLocked
+                {clubMonitorReleasesLocalBikes
+                  ? 'Bikes released for Club Monitor'
+                  : liveBikeAccessLocked
                   ? 'Upgrade to Connect'
                   : bluetooth.connection === 'connecting'
                     ? 'Pairing...'
@@ -7318,12 +7473,16 @@ export default function App() {
                 <button
                   className="bridge-control-button start"
                   type="button"
-                  aria-label={liveBikeAccessLocked ? 'Upgrade to Connect' : 'Open Mac Connector'}
-                  onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : openMacConnector}
-                  disabled={demoMode}
+                  aria-label={clubMonitorReleasesLocalBikes
+                    ? 'Connector unavailable in Club Live Monitor'
+                    : advancedConnectorAccessLocked ? 'Upgrade to Connect' : 'Open Mac Connector'}
+                  onClick={advancedConnectorAccessLocked ? showAdvancedConnectorUpgrade : openMacConnector}
+                  disabled={demoMode || clubMonitorReleasesLocalBikes}
                 >
                   <Usb size={16} />
-                  <span>{liveBikeAccessLocked ? 'Upgrade to Connect' : 'Open Connector'}</span>
+                  <span>{clubMonitorReleasesLocalBikes
+                    ? 'Bikes released for Club Monitor'
+                    : advancedConnectorAccessLocked ? 'Upgrade to Connect' : 'Open Connector'}</span>
                 </button>
               ) : (
                 <button
@@ -7383,11 +7542,14 @@ export default function App() {
                 );
               })}
             </div>
-            <p>
-              {clubTrainingSelection
-                ? 'One session record will appear in both your calendar and the club dashboard.'
-                : 'Personal training stays private and is not shared with a club.'}
-            </p>
+            <Suspense fallback={null}>
+              <ClubLiveAccessNotice
+                accessActive={clubLiveAccessActive}
+                accessStatus={clubLiveAccessStatus}
+                authenticatedRacerAccess={authenticatedRacerAccess}
+                selected={Boolean(clubTrainingSelection)}
+              />
+            </Suspense>
           </section>
         )}
         {clubTrainingStatus === 'error' && (
@@ -7666,6 +7828,11 @@ export default function App() {
               <button className={appMode === 'monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('monitor')}>
                 <Gauge size={17} /> Live Monitor
               </button>
+              {clubOwnerActive && (
+                <button className={appMode === 'club-monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('club-monitor')}>
+                  <Radio size={17} /> Club Live Monitor
+                </button>
+              )}
               <button className={appMode === 'diagnostics' ? 'selected' : ''} type="button" onClick={() => setAppMode('diagnostics')}>
                 <Settings size={17} /> Bike Check
               </button>
@@ -7725,7 +7892,7 @@ export default function App() {
           emptyMessage={pairingEmptyMessage}
           deviceLabel={demoMode ? 'Demo device' : pairingDeviceLabel}
           readOnly={demoMode}
-          maxPlayers={maxPlayers}
+          maxPlayers={Math.max(1, liveBikeSeatLimit)}
           demoRiderCount={demoMode ? demoBikeCount : undefined}
           onDemoRiderCountChange={demoMode ? handleDemoBikeCountChange : undefined}
         />
@@ -7739,6 +7906,14 @@ export default function App() {
               <span>
                 <strong>My Profile</strong>
                 <small>Your photo, calendar, sessions, and downloads</small>
+              </span>
+            </div>
+          ) : appMode === 'club-monitor' ? (
+            <div className="explore-topbar-heading">
+              <Radio size={20} />
+              <span>
+                <strong>Club Live Monitor</strong>
+                <small>Owner-only, read-only athlete training feed</small>
               </span>
             </div>
           ) : appMode === 'explore' ? (
@@ -7847,6 +8022,13 @@ export default function App() {
             onClubProfileComplete={handleClubProfileComplete}
           />
           </Suspense>
+        ) : appMode === 'club-monitor' && clubOwnerActive ? (
+          <Suspense fallback={<div className="explore-loading">Opening Club Live Monitor…</div>}>
+            <ClubLiveMonitor
+              studioRiders={activeStudioRiders(activeProfileStudioRiders)}
+              speedUnit={speedUnit}
+            />
+          </Suspense>
         ) : appMode === 'explore' ? (
           <Suspense fallback={<div className="explore-loading">Loading Explore the World…</div>}>
           <ExploreView
@@ -7884,6 +8066,7 @@ export default function App() {
             onVoiceStart={roomVoice.start}
             onVoiceStop={roomVoice.stop}
             onDemoRideStatusChange={handleExploreDemoRideStatusChange}
+            onLiveStateChange={setExploreClubLiveState}
             onRideComplete={handleExploreRideComplete}
             fullscreen={exploreRideFullscreen}
             onFullscreenChange={handleExploreFullscreenChange}
