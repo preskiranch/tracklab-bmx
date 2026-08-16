@@ -12,6 +12,7 @@ type StudioRaceEntryProps = {
   assignments: StudioRiderAssignments;
   accountRiderId?: string;
   canEdit: boolean;
+  canManageRiders: boolean;
   onToggleEntry: (deviceId: number) => void;
   onEnterAll: () => void;
   onClearEntries: () => void;
@@ -29,6 +30,7 @@ export function StudioRaceEntry({
   assignments,
   accountRiderId,
   canEdit,
+  canManageRiders,
   onToggleEntry,
   onEnterAll,
   onClearEntries,
@@ -202,93 +204,95 @@ export function StudioRaceEntry({
         </div>
       )}
 
-      <details
-        className="studio-rider-manager"
-        open={managerOpen}
-        onToggle={(event) => setManagerOpen(event.currentTarget.open)}
-      >
-        <summary>
-          <span><Users size={14} /> Studio riders</span>
-          <b>{managedRiders.length}</b>
-        </summary>
-        <div className="studio-rider-manager-body">
-          <form className="studio-rider-add" onSubmit={submitNewRider}>
-            <label>
-              <span>First name or nickname</span>
-              <input
-                type="text"
-                value={newRiderName}
-                maxLength={64}
-                autoComplete="off"
-                placeholder="Add student"
-                onChange={(event) => {
-                  setNewRiderName(event.target.value);
-                  setFormError(null);
-                }}
-              />
-            </label>
-            <button type="submit" title="Add studio rider" aria-label="Add studio rider">
-              <UserPlus size={16} />
-            </button>
-          </form>
-          {formError && <p className="studio-rider-error" role="alert">{formError}</p>}
+      {canManageRiders && (
+        <details
+          className="studio-rider-manager"
+          open={managerOpen}
+          onToggle={(event) => setManagerOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <span><Users size={14} /> Studio riders</span>
+            <b>{managedRiders.length}</b>
+          </summary>
+          <div className="studio-rider-manager-body">
+            <form className="studio-rider-add" onSubmit={submitNewRider}>
+              <label>
+                <span>First name or nickname</span>
+                <input
+                  type="text"
+                  value={newRiderName}
+                  maxLength={64}
+                  autoComplete="off"
+                  placeholder="Add student"
+                  onChange={(event) => {
+                    setNewRiderName(event.target.value);
+                    setFormError(null);
+                  }}
+                />
+              </label>
+              <button type="submit" title="Add studio rider" aria-label="Add studio rider">
+                <UserPlus size={16} />
+              </button>
+            </form>
+            {formError && <p className="studio-rider-error" role="alert">{formError}</p>}
 
-          {managedRiders.length > 0 ? (
-            <div className="studio-rider-list">
-              {managedRiders.map((rider) => {
-                const assignedDeviceId = assignedDeviceByRider.get(rider.id);
-                const assignedPlayer = assignedDeviceId == null ? undefined : playerByDevice.get(assignedDeviceId);
-                return (
-                  <div className="studio-rider-row" key={rider.id}>
-                    <div className="studio-rider-row-main">
-                      <label>
-                        <span className="sr-only">Rider name</span>
-                        <input
-                          type="text"
-                          value={nameDrafts[rider.id] ?? rider.name}
-                          maxLength={64}
-                          onChange={(event) => setNameDrafts((current) => ({
-                            ...current,
-                            [rider.id]: event.target.value,
-                          }))}
-                          onBlur={() => commitRiderName(rider)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.currentTarget.blur();
-                            } else if (event.key === 'Escape') {
-                              setNameDrafts((current) => {
-                                const next = { ...current };
-                                delete next[rider.id];
-                                return next;
-                              });
-                            }
-                          }}
-                        />
-                      </label>
-                      <small>{assignedPlayer ? `P${assignedPlayer.id}` : 'Available'}</small>
-                      <button
-                        type="button"
-                        title={`Remove ${rider.name}`}
-                        aria-label={`Remove ${rider.name} from studio riders`}
-                        onClick={() => onRemoveRider(rider.id)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+            {managedRiders.length > 0 ? (
+              <div className="studio-rider-list">
+                {managedRiders.map((rider) => {
+                  const assignedDeviceId = assignedDeviceByRider.get(rider.id);
+                  const assignedPlayer = assignedDeviceId == null ? undefined : playerByDevice.get(assignedDeviceId);
+                  return (
+                    <div className="studio-rider-row" key={rider.id}>
+                      <div className="studio-rider-row-main">
+                        <label>
+                          <span className="sr-only">Rider name</span>
+                          <input
+                            type="text"
+                            value={nameDrafts[rider.id] ?? rider.name}
+                            maxLength={64}
+                            onChange={(event) => setNameDrafts((current) => ({
+                              ...current,
+                              [rider.id]: event.target.value,
+                            }))}
+                            onBlur={() => commitRiderName(rider)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.currentTarget.blur();
+                              } else if (event.key === 'Escape') {
+                                setNameDrafts((current) => {
+                                  const next = { ...current };
+                                  delete next[rider.id];
+                                  return next;
+                                });
+                              }
+                            }}
+                          />
+                        </label>
+                        <small>{assignedPlayer ? `P${assignedPlayer.id}` : 'Available'}</small>
+                        <button
+                          type="button"
+                          title={`Remove ${rider.name}`}
+                          aria-label={`Remove ${rider.name} from studio riders`}
+                          onClick={() => onRemoveRider(rider.id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      <RiderPhotoEditor
+                        name={rider.name}
+                        photoUrl={rider.photoUrl}
+                        onPhotoChange={(photoUrl) => onPhotoChange(rider.id, photoUrl)}
+                      />
                     </div>
-                    <RiderPhotoEditor
-                      name={rider.name}
-                      photoUrl={rider.photoUrl}
-                      onPhotoChange={(photoUrl) => onPhotoChange(rider.id, photoUrl)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="studio-rider-empty">Add students once, then choose who is riding each bike.</p>
-          )}
-        </div>
-      </details>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="studio-rider-empty">Add students once, then choose who is riding each bike.</p>
+            )}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

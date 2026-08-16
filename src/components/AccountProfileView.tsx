@@ -50,7 +50,11 @@ const emptyHistory: TrainingHistoryResponse = {
   sessions: [],
   totals: { sessions: 0, bmxRaces: 0, straightSprints: 0, exploreRides: 0, distanceMeters: 0, durationMs: 0 },
 };
-const emptyClubState: ClubConnectState = { ownedClub: null, memberships: [] };
+const emptyClubState: ClubConnectState = {
+  canManageClub: false,
+  ownedClub: null,
+  memberships: [],
+};
 
 const activityLabels: Record<TrainingActivityType, string> = {
   'bmx-race': 'BMX Race Interval',
@@ -218,6 +222,10 @@ export function AccountProfileView({
   }, []);
 
   const inviteRider = useCallback((rider: StudioRider) => {
+    if (!clubState.canManageClub) {
+      setClubMessage('Only the TrackLab club owner can invite studio athletes.');
+      return;
+    }
     setClubBusyId(rider.id);
     setClubMessage(`Creating a private invitation for ${rider.name}…`);
     void createClubInvite(rider.id)
@@ -229,7 +237,7 @@ export function AccountProfileView({
       })
       .catch((error: Error) => setClubMessage(error.message))
       .finally(() => setClubBusyId(null));
-  }, [copyInvitation, refreshClub]);
+  }, [clubState.canManageClub, copyInvitation, refreshClub]);
 
   const acceptInvitation = useCallback(() => {
     if (!clubInviteToken) return;
@@ -258,6 +266,10 @@ export function AccountProfileView({
   }, [clubFullNameDraft, clubInviteToken, clubNicknameDraft, clubPhotoDraft, onClubProfileComplete, refresh]);
 
   const disconnectRider = useCallback((rider: StudioRider) => {
+    if (!clubState.canManageClub) {
+      setClubMessage('Only the TrackLab club owner can manage studio access.');
+      return;
+    }
     if (!window.confirm(`Remove ${rider.name}'s access to this studio record? Their TrackLab account will remain active.`)) return;
     setClubBusyId(rider.id);
     void revokeClubMember(rider.id)
@@ -272,7 +284,7 @@ export function AccountProfileView({
       })
       .catch((error: Error) => setClubMessage(error.message))
       .finally(() => setClubBusyId(null));
-  }, []);
+  }, [clubState.canManageClub]);
 
   const sessionsByDay = useMemo(() => {
     const grouped = new Map<string, TrainingSession[]>();
@@ -313,7 +325,9 @@ export function AccountProfileView({
         </p>
       </section>
 
-      {(clubInviteToken || clubState.memberships.length > 0 || visibleStudioRiders.length > 0) && (
+      {(clubInviteToken
+        || clubState.memberships.length > 0
+        || (clubState.canManageClub && visibleStudioRiders.length > 0)) && (
         <section className="club-connect-panel" aria-label="Club Connect">
           <header>
             <div className="club-connect-title">
@@ -375,7 +389,7 @@ export function AccountProfileView({
             </div>
           ))}
 
-          {visibleStudioRiders.length > 0 && (
+          {clubState.canManageClub && visibleStudioRiders.length > 0 && (
             <div className="club-owner-roster">
               <div className="club-owner-intro">
                 <div><strong>{clubState.ownedClub?.name ?? name}</strong><p>Invite each athlete privately. A claim grants only that rider's records—not the rest of your studio roster.</p></div>

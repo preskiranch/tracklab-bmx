@@ -25,6 +25,7 @@ export type ClubAthleteMembership = {
 };
 
 export type ClubConnectState = {
+  canManageClub: boolean;
   ownedClub: OwnedClub | null;
   memberships: ClubAthleteMembership[];
 };
@@ -47,7 +48,21 @@ export type ClubClaimResult = ClubConnectState & {
   accountProfile: AccountProfile;
 };
 
-const emptyClubConnectState: ClubConnectState = { ownedClub: null, memberships: [] };
+const emptyClubConnectState: ClubConnectState = {
+  canManageClub: false,
+  ownedClub: null,
+  memberships: [],
+};
+
+export function clubConnectRequestIsCurrent(
+  requestedProfileKey: string,
+  requestedGeneration: number,
+  activeProfileKey: string | null,
+  activeGeneration: number,
+) {
+  return requestedProfileKey === activeProfileKey
+    && requestedGeneration === activeGeneration;
+}
 
 async function clubFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
@@ -68,6 +83,7 @@ function normalizeState(value: unknown): ClubConnectState {
   if (!value || typeof value !== 'object') return emptyClubConnectState;
   const candidate = value as Partial<ClubConnectState>;
   return {
+    canManageClub: candidate.canManageClub === true,
     ownedClub: candidate.ownedClub && typeof candidate.ownedClub === 'object'
       ? candidate.ownedClub as OwnedClub
       : null,

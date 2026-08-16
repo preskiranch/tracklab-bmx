@@ -1649,7 +1649,10 @@ test('Bluetooth pairing stays open for multiple Wattbikes and restores approved 
   await page.reload();
   const openApp = page.getByRole('button', { name: 'Open App' });
   if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await openApp.click();
+    // Authentication can complete between the visibility check and the click,
+    // replacing the landing page with the dashboard. Do not wait for a button
+    // that has already disappeared during that valid transition.
+    await openApp.click({ timeout: 2_000 }).catch(() => undefined);
   }
   await expect(page.getByText('Bluetooth Direct paired')).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Pair Wattbike', exact: true }).click();
@@ -4801,6 +4804,84 @@ test('demo rider names and the last track view restore from the signed-in accoun
   ).toBeVisible();
   await expect(page.getByText('Angle 52 deg', { exact: true })).toBeVisible();
   await expect(page.getByText('Heading 195 deg', { exact: true })).toBeVisible();
+});
+
+test('club athletes see only their own connection and never the studio roster', async ({ page }) => {
+  const now = Date.now();
+  const authUser = {
+    id: 'club-athlete-racer',
+    profileKey: 'user:club-athlete-racer',
+    email: 'club-athlete@tracklab.test',
+    name: 'Rasheen Hicks (The Machine)',
+    admin: false,
+    membership: {
+      tier: 'spectator',
+      bikeSeats: 1,
+      updatedAt: now,
+    },
+  };
+  const contaminatedRoster = [
+    { id: 'studio-bobby', name: 'Bobby', createdAt: now, updatedAt: now },
+    { id: 'studio-cali', name: 'Cali', createdAt: now, updatedAt: now },
+  ];
+
+  await page.addInitScript(({ roster }) => {
+    // Reproduce the previous shared-browser leak as well as an already
+    // contaminated cloud profile. Neither source may reach an athlete UI.
+    window.localStorage.setItem('tracklab-bmx-studio-riders-v1', JSON.stringify(roster));
+  }, { roster: contaminatedRoster });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: contaminatedRoster,
+        accountProfile: { updatedAt: now },
+      }),
+    });
+  });
+  await page.route('**/api/club-connect*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        canManageClub: false,
+        ownedClub: null,
+        memberships: [{
+          clubId: 'club-preski-ranch',
+          clubName: 'Preski Ranch LLC',
+          studioRiderId: 'studio-rasheen',
+          riderName: 'Rasheen “The Machine” Hicks',
+          claimedAt: now,
+        }],
+      }),
+    });
+  });
+  await page.route('**/api/training-sessions*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ sessions: [], totals: {} }),
+    });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  const openApp = page.getByRole('button', { name: 'Open App' });
+  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await openApp.click({ timeout: 2_000 }).catch(() => undefined);
+  }
+  await page.getByRole('button', { name: 'My Profile', exact: true }).click();
+
+  const clubConnect = page.getByLabel('Club Connect');
+  await expect(clubConnect.getByText('Connected to Preski Ranch LLC')).toBeVisible();
+  await expect(clubConnect.getByText('Studio rider: Rasheen “The Machine” Hicks', { exact: false })).toBeVisible();
+  await expect(clubConnect.locator('.club-owner-roster')).toHaveCount(0);
+  await expect(clubConnect.getByRole('button', { name: /Invite|New link|Remove access/ })).toHaveCount(0);
+  await expect(clubConnect.getByText('Bobby', { exact: true })).toHaveCount(0);
+  await expect(clubConnect.getByText('Cali', { exact: true })).toHaveCount(0);
 });
 
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {

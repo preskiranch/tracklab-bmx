@@ -134,7 +134,7 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(port),
       DATABASE_URL: '',
-      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test',
+      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,club-owner-admin@tracklab.test',
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
@@ -290,7 +290,7 @@ describe('cloud API trust boundaries', () => {
   });
 
   it('keeps profile reads and writes bound to the authenticated account', async () => {
-    const email = `review-${Date.now()}@tracklab.test`;
+    const email = 'club-owner-admin@tracklab.test';
     const registration = await api('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ name: 'Review Rider', email, password: 'correct-horse-battery-staple' }),
@@ -623,11 +623,64 @@ describe('cloud API trust boundaries', () => {
     expect(claim.status).toBe(200);
     const claimPayload = await claim.json();
     expect(claimPayload).toMatchObject({
+      canManageClub: false,
       user: { name: 'Maya Alexandria Torres (Rocket)', membership: { tier: 'spectator' } },
       accountProfile: { photoUrl: 'data:image/png;base64,aGVsbG8=' },
       memberships: [{ clubName: 'Review Rider', studioRiderId: 'studio-maya', riderName: 'Maya Torres' }],
     });
     const claimedMembership = claimPayload.memberships[0];
+
+    const athleteClubState = await api('/api/club-connect?profileKey=user:club-owner');
+    expect(athleteClubState.status).toBe(200);
+    const athleteClubPayload = await athleteClubState.json();
+    expect(athleteClubPayload).toMatchObject({
+      canManageClub: false,
+      ownedClub: null,
+      memberships: [{ studioRiderId: 'studio-maya', riderName: 'Maya Torres' }],
+    });
+    expect(JSON.stringify(athleteClubPayload)).not.toContain('studio-jordan');
+    expect(JSON.stringify(athleteClubPayload)).not.toContain('Jordan Lee');
+
+    const copiedRosterSave = await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        studioRiders: [
+          { id: 'studio-jordan', name: 'Jordan Lee', createdAt: now, updatedAt: now },
+        ],
+        accountProfile: {
+          photoUrl: 'data:image/png;base64,aGVsbG8=',
+          updatedAt: now + 100_000,
+        },
+      }),
+    });
+    expect(copiedRosterSave.status).toBe(200);
+    await expect(copiedRosterSave.json()).resolves.toMatchObject({
+      studioRiders: [],
+      accountProfile: {
+        photoUrl: 'data:image/png;base64,aGVsbG8=',
+        updatedAt: now + 100_000,
+      },
+    });
+    const athleteUserData = await api('/api/user-data?profileKey=user:club-owner');
+    expect(athleteUserData.status).toBe(200);
+    const athleteUserDataPayload = await athleteUserData.json();
+    expect(athleteUserDataPayload.studioRiders).toEqual([]);
+    expect(JSON.stringify(athleteUserDataPayload)).not.toContain('studio-jordan');
+    expect(JSON.stringify(athleteUserDataPayload)).not.toContain('Jordan Lee');
+    const forbiddenAthleteInvite = await api('/api/club-connect/invites', {
+      method: 'POST',
+      body: JSON.stringify({ studioRiderId: 'studio-jordan' }),
+    });
+    expect(forbiddenAthleteInvite.status).toBe(403);
+    await expect(forbiddenAthleteInvite.json()).resolves.toEqual({
+      error: 'Only the TrackLab club owner can invite studio athletes.',
+    });
+    const athleteStateAfterForbiddenInvite = await api('/api/club-connect');
+    await expect(athleteStateAfterForbiddenInvite.json()).resolves.toMatchObject({
+      canManageClub: false,
+      ownedClub: null,
+      memberships: [{ studioRiderId: 'studio-maya' }],
+    });
 
     const athleteHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
     expect(athleteHistory.status).toBe(200);
@@ -720,8 +773,17 @@ describe('cloud API trust boundaries', () => {
     });
 
     cookie = ownerCookie;
+    const ownerUserData = await api('/api/user-data');
+    expect(ownerUserData.status).toBe(200);
+    await expect(ownerUserData.json()).resolves.toMatchObject({
+      studioRiders: expect.arrayContaining([
+        expect.objectContaining({ id: 'studio-maya', name: 'Maya Torres' }),
+        expect.objectContaining({ id: 'studio-jordan', name: 'Jordan Lee' }),
+      ]),
+    });
     const connectedRoster = await api('/api/club-connect');
     await expect(connectedRoster.json()).resolves.toMatchObject({
+      canManageClub: true,
       ownedClub: {
         members: [expect.objectContaining({
           studioRiderId: 'studio-maya',

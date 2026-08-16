@@ -48,7 +48,6 @@ import {
   maxPlayers,
   raceCaptureStorageKey,
   speedUnitStorageKey,
-  studioRidersStorageKey,
   storageKey,
 } from './data';
 import { countriesForCatalog, statesForCountry, trackCatalog, tracksForLocation } from './data/trackCatalog';
@@ -202,8 +201,13 @@ import {
   renameStudioRider,
   updateStudioRiderPhoto,
 } from './lib/studioRiders';
+import {
+  readStoredStudioRidersForProfile,
+  writeStoredStudioRidersForProfile,
+} from './lib/studioRiderStorage';
 import { normalizeRiderPhotoDataUrl } from './lib/riderPhotos';
 import {
+  clubConnectRequestIsCurrent,
   loadClubConnect,
   type ClubAthleteMembership,
 } from './lib/clubConnect';
@@ -1145,19 +1149,6 @@ function writeStoredBikeProfiles(profiles: BikeProfile[]) {
   safeSetLocalStorage(bikeProfilesStorageKey, JSON.stringify(dedupeBikeProfiles(profiles)));
 }
 
-function readStoredStudioRiders(): StudioRider[] {
-  try {
-    const stored = window.localStorage.getItem(studioRidersStorageKey);
-    return stored ? mergeStudioRiders(JSON.parse(stored)) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeStoredStudioRiders(riders: StudioRider[]) {
-  safeSetLocalStorage(studioRidersStorageKey, JSON.stringify(mergeStudioRiders(riders)));
-}
-
 function readStoredBikeConnectionSource(): BikeConnectionSource {
   try {
     const stored = window.localStorage.getItem(bikeConnectionSourceStorageKey);
@@ -1490,12 +1481,18 @@ export default function App() {
   const [mappingRaceViewMode, setMappingRaceViewMode] = useState<TrackRaceViewMode>('satellite');
   const [straightSprintViewMode, setStraightSprintViewMode] = useState<TrackRaceViewMode>('satellite');
   const [bikeProfiles, setBikeProfiles] = useState<BikeProfile[]>(readStoredBikeProfiles);
-  const [studioRiders, setStudioRiders] = useState<StudioRider[]>(readStoredStudioRiders);
+  const [studioRiders, setStudioRiders] = useState<StudioRider[]>([]);
+  const [studioRidersProfileKey, setStudioRidersProfileKey] = useState<string | null>(null);
+  const studioRidersProfileKeyRef = useRef<string | null>(null);
   const [accountProfile, setAccountProfile] = useState<AccountProfile>({ updatedAt: 0 });
   const [trainingHistoryRevision, setTrainingHistoryRevision] = useState(0);
   const [clubTrainingMemberships, setClubTrainingMemberships] = useState<ClubAthleteMembership[]>([]);
+  const [clubTrainingMembershipProfileKey, setClubTrainingMembershipProfileKey] = useState<string | null>(null);
+  const [clubRosterManagementProfileKey, setClubRosterManagementProfileKey] = useState<string | null>(null);
   const [clubTrainingSelection, setClubTrainingSelection] = useState<ClubTrainingSelection | null>(null);
   const [clubTrainingStatus, setClubTrainingStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const clubTrainingRequestGenerationRef = useRef(0);
+  const activeClubProfileKeyRef = useRef<string | null>(null);
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
   const [bikeConnectionSource, setBikeConnectionSource] = useState<BikeConnectionSource>(readStoredBikeConnectionSource);
   const [connectorLaunchMessage, setConnectorLaunchMessage] = useState<string | null>(null);
@@ -1591,6 +1588,34 @@ export default function App() {
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
   const adminProfileActive = Boolean(authUser?.admin);
+  const canManageStudioRiders = adminProfileActive || Boolean(
+    authUser && clubRosterManagementProfileKey === authUser.profileKey,
+  );
+  const studioRidersLoadedForActiveProfile = Boolean(
+    authUser && studioRidersProfileKey === authUser.profileKey,
+  );
+  const activeProfileStudioRiders = useMemo(
+    () => (studioRidersLoadedForActiveProfile ? studioRiders : []),
+    [studioRiders, studioRidersLoadedForActiveProfile],
+  );
+  const canManageActiveStudioRiders = canManageStudioRiders
+    && studioRidersLoadedForActiveProfile;
+  const mergeStudioRidersForProfile = useCallback((
+    profileKey: string,
+    incomingRiders: StudioRider[],
+  ) => {
+    const preserveCurrentRiders = studioRidersProfileKeyRef.current === profileKey;
+    studioRidersProfileKeyRef.current = profileKey;
+    setStudioRidersProfileKey(profileKey);
+    setStudioRiders((current) => mergeStudioRiders(
+      preserveCurrentRiders ? current : [],
+      incomingRiders,
+    ));
+  }, []);
+  const activeClubTrainingMemberships = authUser
+    && clubTrainingMembershipProfileKey === authUser.profileKey
+    ? clubTrainingMemberships
+    : [];
   const developerUiActive = adminProfileActive && !regularUserPreview;
   const developerRaceLayoutActive = isAdminAccountEmail(accountEmail);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -1605,6 +1630,8 @@ export default function App() {
     signalState: demoSignalsStopped ? 'stopped' : demoRaceStartedAt == null ? 'ready' : 'racing',
   });
 
+  activeClubProfileKeyRef.current = authUser?.profileKey ?? null;
+
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -1615,28 +1642,48 @@ export default function App() {
   }, [storedMappings]);
 
   const refreshClubTrainingMemberships = useCallback(async () => {
-    if (!authUser) {
-      setClubTrainingMemberships([]);
-      setClubTrainingSelection(null);
+    const requestedProfileKey = authUser?.profileKey ?? null;
+    if (requestedProfileKey !== activeClubProfileKeyRef.current) {
+      return;
+    }
+    const requestGeneration = ++clubTrainingRequestGenerationRef.current;
+    setClubTrainingMemberships([]);
+    setClubTrainingMembershipProfileKey(null);
+    setClubRosterManagementProfileKey(null);
+    setClubTrainingSelection(null);
+
+    if (!requestedProfileKey) {
       setClubTrainingStatus('idle');
       return;
     }
     setClubTrainingStatus('loading');
     try {
       const state = await loadClubConnect();
+      if (!clubConnectRequestIsCurrent(
+        requestedProfileKey,
+        requestGeneration,
+        activeClubProfileKeyRef.current,
+        clubTrainingRequestGenerationRef.current,
+      )) {
+        return;
+      }
       setClubTrainingMemberships(state.memberships);
-      setClubTrainingSelection((current) => (
-        current && state.memberships.some((membership) => (
-          membership.clubId === current.clubId
-          && membership.studioRiderId === current.studioRiderId
-        ))
-          ? current
-          : null
-      ));
+      setClubTrainingMembershipProfileKey(requestedProfileKey);
+      setClubRosterManagementProfileKey(state.canManageClub ? requestedProfileKey : null);
       setClubTrainingStatus('ready');
     } catch (error) {
+      if (!clubConnectRequestIsCurrent(
+        requestedProfileKey,
+        requestGeneration,
+        activeClubProfileKeyRef.current,
+        clubTrainingRequestGenerationRef.current,
+      )) {
+        return;
+      }
       console.warn(`Could not load Club Session choices: ${error instanceof Error ? error.message : error}`);
       setClubTrainingMemberships([]);
+      setClubTrainingMembershipProfileKey(null);
+      setClubRosterManagementProfileKey(null);
       setClubTrainingSelection(null);
       setClubTrainingStatus('error');
     }
@@ -2409,9 +2456,11 @@ export default function App() {
   const availableStudioRiders = useMemo(
     () => [
       ...(accountRider ? [accountRider] : []),
-      ...activeStudioRiders(studioRiders).filter((rider) => rider.id !== accountRider?.id),
+      ...(canManageActiveStudioRiders
+        ? activeStudioRiders(activeProfileStudioRiders).filter((rider) => rider.id !== accountRider?.id)
+        : []),
     ],
-    [accountRider, studioRiders],
+    [accountRider, activeProfileStudioRiders, canManageActiveStudioRiders],
   );
   const explorePlayers = useMemo(
     () => (
@@ -2493,6 +2542,20 @@ export default function App() {
     [localRaceSeatLimit, raceCandidatePlayers],
   );
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
+  useEffect(() => {
+    const profileKey = authUser?.profileKey ?? null;
+    studioRidersProfileKeyRef.current = profileKey;
+    setStudioRidersProfileKey(profileKey);
+
+    if (!profileKey) {
+      setStudioRiders([]);
+      return;
+    }
+
+    setStudioRiders(readStoredStudioRidersForProfile(profileKey, {
+      allowLegacyOwnerRoster: adminProfileActive,
+    }));
+  }, [adminProfileActive, authUser?.profileKey]);
   useEffect(() => {
     const flushPendingPreferences = () => {
       void flushCloudUserDataPatches(cloudProfileKey);
@@ -3387,6 +3450,7 @@ export default function App() {
       return;
     }
 
+    const requestedProfileKey = authUser?.profileKey ?? null;
     let cancelled = false;
     readBridgeUserData()
       .then((data) => {
@@ -3407,7 +3471,9 @@ export default function App() {
           return next;
         });
         setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
-        setStudioRiders((current) => mergeStudioRiders(current, data.studioRiders));
+        if (canManageStudioRiders && requestedProfileKey) {
+          mergeStudioRidersForProfile(requestedProfileKey, data.studioRiders);
+        }
         bridgeUserDataLoadedRef.current = true;
       })
       .catch((error: Error) => {
@@ -3418,7 +3484,13 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [adminProfileActive, bridge.connection]);
+  }, [
+    adminProfileActive,
+    authUser?.profileKey,
+    bridge.connection,
+    canManageStudioRiders,
+    mergeStudioRidersForProfile,
+  ]);
 
   useEffect(() => {
     if (!cloudProfileKey) {
@@ -3427,6 +3499,7 @@ export default function App() {
       return;
     }
 
+    const requestedProfileKey = authUser?.profileKey ?? null;
     let cancelled = false;
     let loading = false;
     cloudUserDataLoadedKeyRef.current = null;
@@ -3465,7 +3538,9 @@ export default function App() {
             return next;
           });
           setBikeProfiles((current) => mergeBikeProfiles(current, data.bikeProfiles));
-          setStudioRiders((current) => mergeStudioRiders(current, data.studioRiders));
+          if (canManageStudioRiders && requestedProfileKey) {
+            mergeStudioRidersForProfile(requestedProfileKey, data.studioRiders);
+          }
           setAccountProfile((current) => (
             data.accountProfile.updatedAt >= current.updatedAt ? data.accountProfile : current
           ));
@@ -3595,7 +3670,15 @@ export default function App() {
       window.removeEventListener('focus', refreshCloudUserData);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [adminProfileActive, applyRaceViewPreferences, authUser, cloudProfileKey, developerRaceLayoutActive]);
+  }, [
+    adminProfileActive,
+    applyRaceViewPreferences,
+    authUser,
+    canManageStudioRiders,
+    cloudProfileKey,
+    developerRaceLayoutActive,
+    mergeStudioRidersForProfile,
+  ]);
 
   useEffect(() => {
     writeStoredBikeProfiles(bikeProfiles);
@@ -3633,8 +3716,15 @@ export default function App() {
   }, [bikeProfiles, bridge.connection, cloudProfileKey]);
 
   useEffect(() => {
+    if (!authUser || studioRidersProfileKey !== authUser.profileKey) {
+      return;
+    }
+
     const normalizedRiders = mergeStudioRiders(studioRiders);
-    writeStoredStudioRiders(normalizedRiders);
+    writeStoredStudioRidersForProfile(authUser.profileKey, normalizedRiders);
+    if (!canManageActiveStudioRiders) {
+      return;
+    }
     if (bridge.connection === 'open' && bridgeUserDataLoadedRef.current) {
       void queueBridgeUserDataPatch({ studioRiders: normalizedRiders }).catch((error: Error) => {
         console.warn(`Could not save studio riders to TrackLab bridge: ${error.message}`);
@@ -3653,7 +3743,14 @@ export default function App() {
           console.warn(`Could not save studio riders to TrackLab cloud: ${error.message}`);
         });
     }
-  }, [bridge.connection, cloudProfileKey, studioRiders]);
+  }, [
+    authUser?.profileKey,
+    bridge.connection,
+    canManageActiveStudioRiders,
+    cloudProfileKey,
+    studioRiders,
+    studioRidersProfileKey,
+  ]);
 
   useEffect(() => {
     const activeRiderIds = new Set(availableStudioRiders.map((rider) => rider.id));
@@ -5545,6 +5642,9 @@ export default function App() {
   }, [raceState, startGateStatus.active]);
 
   const handleStudioRiderAdd = useCallback((name: string) => {
+    if (!canManageActiveStudioRiders) {
+      return false;
+    }
     const rider = createStudioRider(name);
     if (!rider) {
       return false;
@@ -5552,23 +5652,29 @@ export default function App() {
 
     setStudioRiders((current) => mergeStudioRiders(current, [rider]));
     return true;
-  }, []);
+  }, [canManageActiveStudioRiders]);
 
   const handleStudioRiderRename = useCallback((riderId: string, name: string) => {
+    if (!canManageActiveStudioRiders) {
+      return;
+    }
     setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
       rider.id === riderId ? renameStudioRider(rider, name) : rider
     ))));
-  }, []);
+  }, [canManageActiveStudioRiders]);
 
   const handleStudioRiderPhotoChange = useCallback((
     riderId: string,
     photoUrl: string | undefined,
   ) => {
+    if (!canManageActiveStudioRiders) {
+      return;
+    }
     setLockedRacePlayers(null);
     setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
       rider.id === riderId ? updateStudioRiderPhoto(rider, photoUrl) : rider
     ))));
-  }, []);
+  }, [canManageActiveStudioRiders]);
 
   const handleAccountPhotoChange = useCallback((photoUrl: string | undefined) => {
     const normalizedPhotoUrl = normalizeRiderPhotoDataUrl(photoUrl);
@@ -5607,6 +5713,9 @@ export default function App() {
   }, [refreshClubTrainingMemberships]);
 
   const handleStudioRiderRemove = useCallback((riderId: string) => {
+    if (!canManageActiveStudioRiders) {
+      return;
+    }
     setLockedRacePlayers(null);
     setStudioRiders((current) => mergeStudioRiders(current.map((rider) => (
       rider.id === riderId ? removeStudioRider(rider) : rider
@@ -5620,7 +5729,7 @@ export default function App() {
       });
       return next;
     });
-  }, []);
+  }, [canManageActiveStudioRiders]);
 
   const handleMappingRouteVariantChange = useCallback((variantId: RaceRouteVariantId) => {
     setMappingRouteVariantId(variantId);
@@ -6356,6 +6465,16 @@ export default function App() {
 
   const handleSignOut = useCallback(async () => {
     clearStartGateSequence();
+    clubTrainingRequestGenerationRef.current += 1;
+    activeClubProfileKeyRef.current = null;
+    studioRidersProfileKeyRef.current = null;
+    setStudioRidersProfileKey(null);
+    setStudioRiders([]);
+    setClubTrainingMemberships([]);
+    setClubTrainingMembershipProfileKey(null);
+    setClubRosterManagementProfileKey(null);
+    setClubTrainingSelection(null);
+    setClubTrainingStatus('idle');
     setCheckoutMessage(null);
     setProfileFormError(null);
     setAuthPasswordDraft('');
@@ -7227,7 +7346,7 @@ export default function App() {
           <div className="bridge-prompt">{bridgePrompt}</div>
         </section>
 
-        {clubTrainingMemberships.length > 0 && (
+        {activeClubTrainingMemberships.length > 0 && (
           <section className="connection-card" aria-label="Training ownership">
             <div className="connection-row">
               <Users size={19} />
@@ -7245,7 +7364,7 @@ export default function App() {
               >
                 Personal · private to my account
               </button>
-              {clubTrainingMemberships.map((club) => {
+              {activeClubTrainingMemberships.map((club) => {
                 const selected = clubTrainingSelection?.clubId === club.clubId
                   && clubTrainingSelection.studioRiderId === club.studioRiderId;
                 return (
@@ -7400,6 +7519,7 @@ export default function App() {
               accountRiderId={accountRider?.id}
               assignments={studioRiderAssignments}
               canEdit={canEditLiveRaceEntry}
+              canManageRiders={canManageActiveStudioRiders}
               onToggleEntry={toggleLiveRaceEntry}
               onEnterAll={enterAllLiveRaceBikes}
               onClearEntries={clearLiveRaceEntries}
@@ -7714,11 +7834,14 @@ export default function App() {
         {appMode === 'profile' && authUser ? (
           <Suspense fallback={<div className="explore-loading">Loading your profile and training history…</div>}>
           <AccountProfileView
+            key={authUser.profileKey}
             name={authUser.name}
             email={authUser.email}
             membershipLabel={membershipLabel}
             profile={accountProfile}
-            studioRiders={activeStudioRiders(studioRiders)}
+            studioRiders={canManageActiveStudioRiders
+              ? activeStudioRiders(activeProfileStudioRiders)
+              : []}
             historyRevision={trainingHistoryRevision}
             onPhotoChange={handleAccountPhotoChange}
             onClubProfileComplete={handleClubProfileComplete}

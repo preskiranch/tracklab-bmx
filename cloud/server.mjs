@@ -276,6 +276,10 @@ function isAdminEmail(email) {
   return adminAccountEmails.has(sanitizeEmail(email));
 }
 
+function canManageClubConnect(user) {
+  return isAdminEmail(user?.email);
+}
+
 function clampBikeSeats(value) {
   return Math.max(1, Math.min(maxRaceBikeCount, Math.round(Number(value) || 1)));
 }
@@ -2016,8 +2020,9 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
     .slice(0, options.limit);
 }
 
-function publicClubConnectState(state) {
+function publicClubConnectState(state, user) {
   return {
+    canManageClub: canManageClubConnect(user),
     ownedClub: state?.ownedClub ? {
       id: state.ownedClub.id,
       name: state.ownedClub.name,
@@ -2036,6 +2041,16 @@ function publicClubConnectState(state) {
       riderName: membership.riderName,
       claimedAt: membership.claimedAt ?? null,
     })),
+  };
+}
+
+function publicUserData(userData, user) {
+  const { exploreRoutes: _exploreRoutes, ...profileData } = userData;
+  return {
+    ...profileData,
+    studioRiders: canManageClubConnect(user) && Array.isArray(profileData.studioRiders)
+      ? profileData.studioRiders
+      : [],
   };
 }
 
@@ -5127,9 +5142,8 @@ async function serveStatic(request, response) {
 
     if (request.method === 'GET') {
       const userData = await persistence.loadUserData(profileKey);
-      const { exploreRoutes: _exploreRoutes, ...profileData } = userData;
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-      response.end(JSON.stringify(profileData));
+      response.end(JSON.stringify(publicUserData(userData, session.user)));
       return;
     }
 
@@ -5144,14 +5158,16 @@ async function serveStatic(request, response) {
         return;
       }
       const patch = sanitizeUserDataPatch(payload);
+      if (!canManageClubConnect(session.user)) {
+        delete patch.studioRiders;
+      }
       const userData = await saveMergedUserData(profileKey, patch);
       if (!userData) {
         writeJson(response, 503, { error: 'Cloud profile storage is temporarily unavailable.' });
         return;
       }
-      const { exploreRoutes: _exploreRoutes, ...profileData } = userData;
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
-      response.end(JSON.stringify(profileData));
+      response.end(JSON.stringify(publicUserData(userData, session.user)));
       return;
     }
 
@@ -5169,7 +5185,7 @@ async function serveStatic(request, response) {
     }
     const profileKey = authProfileKey(session.user);
     const state = await persistence.loadClubConnectState(profileKey);
-    writeJson(response, 200, publicClubConnectState(state));
+    writeJson(response, 200, publicClubConnectState(state, session.user));
     return;
   }
 
@@ -5178,6 +5194,10 @@ async function serveStatic(request, response) {
     if (!session) return;
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!canManageClubConnect(session.user)) {
+      writeJson(response, 403, { error: 'Only the TrackLab club owner can invite studio athletes.' });
       return;
     }
     if (!enforceRateLimit(request, response, clubConnectRateLimiter, 40, 'club-connect-invite')) return;
@@ -5270,7 +5290,7 @@ async function serveStatic(request, response) {
       accountProfile = savedUserData?.accountProfile ?? accountProfile;
     }
     writeJson(response, 200, {
-      ...publicClubConnectState(await persistence.loadClubConnectState(profileKey)),
+      ...publicClubConnectState(await persistence.loadClubConnectState(profileKey), updatedUser),
       user: publicAuthUser(updatedUser),
       accountProfile,
     });
@@ -5291,7 +5311,14 @@ async function serveStatic(request, response) {
       writeJson(response, 404, { error: 'That club athlete connection was not found.' });
       return;
     }
-    writeJson(response, 200, publicClubConnectState(await persistence.loadClubConnectState(authProfileKey(session.user))));
+    writeJson(
+      response,
+      200,
+      publicClubConnectState(
+        await persistence.loadClubConnectState(authProfileKey(session.user)),
+        session.user,
+      ),
+    );
     return;
   }
 
