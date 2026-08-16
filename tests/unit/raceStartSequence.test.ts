@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canControlRaceStagingCountdown,
   createRaceStagingSteps,
   liveRaceStagingSeconds,
   raceStagingDurationMs,
@@ -18,5 +19,24 @@ describe('live race staging sequence', () => {
   it('normalizes invalidly short staging durations', () => {
     expect(createRaceStagingSteps(0)).toEqual([{ delayMs: 0, secondsRemaining: 1 }]);
     expect(raceStagingDurationMs(0)).toBe(1_000);
+  });
+
+  it('allows solo staging controls whenever no private multiplayer room is active', () => {
+    expect(canControlRaceStagingCountdown({
+      gateActive: true,
+      gatePhase: 'staging',
+      multiplayerRoomActive: false,
+    })).toBe(true);
+
+    expect(canControlRaceStagingCountdown({
+      gateActive: true,
+      gatePhase: 'staging',
+      multiplayerRoomActive: true,
+    })).toBe(false);
+    expect(canControlRaceStagingCountdown({
+      gateActive: true,
+      gatePhase: 'cadence',
+      multiplayerRoomActive: false,
+    })).toBe(false);
   });
 });

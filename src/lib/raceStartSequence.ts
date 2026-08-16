@@ -16,3 +16,15 @@ export function createRaceStagingSteps(totalSeconds = liveRaceStagingSeconds): R
 export function raceStagingDurationMs(totalSeconds = liveRaceStagingSeconds) {
   return Math.max(1, Math.round(totalSeconds)) * 1000;
 }
+
+export function canControlRaceStagingCountdown({
+  gateActive,
+  gatePhase,
+  multiplayerRoomActive,
+}: {
+  gateActive: boolean;
+  gatePhase: string;
+  multiplayerRoomActive: boolean;
+}) {
+  return gateActive && gatePhase === 'staging' && !multiplayerRoomActive;
+}

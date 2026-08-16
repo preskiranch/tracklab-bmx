@@ -166,6 +166,7 @@ import {
   type FalseStartDetection,
 } from './lib/raceLifecycle';
 import {
+  canControlRaceStagingCountdown,
   liveRaceStagingSeconds,
 } from './lib/raceStartSequence';
 import {
@@ -6047,8 +6048,14 @@ export default function App() {
     }, sequenceId);
   }, [scheduleStartGateStep, startConfiguredCadence]);
 
+  const startCountdownControlsAvailable = canControlRaceStagingCountdown({
+    gateActive: startGateStatus.active,
+    gatePhase: startGateStatus.phase,
+    multiplayerRoomActive: Boolean(multiplayer.currentRoom),
+  });
+
   const handleStartCountdownPauseToggle = useCallback(() => {
-    if (playMode !== 'local' || !startGateStatus.active || startGateStatus.phase !== 'staging') {
+    if (!startCountdownControlsAvailable) {
       return;
     }
 
@@ -6079,10 +6086,10 @@ export default function App() {
         detail: `${Math.ceil(stagingCountdownRemainingMsRef.current / 1000)} seconds remaining`,
       }
       : current);
-  }, [playMode, scheduleStagingCountdown, startCountdownPaused, startGateStatus.active, startGateStatus.phase]);
+  }, [scheduleStagingCountdown, startCountdownControlsAvailable, startCountdownPaused]);
 
   const handleStartCountdownForceStart = useCallback(() => {
-    if (playMode !== 'local' || !startGateStatus.active || startGateStatus.phase !== 'staging') {
+    if (!startCountdownControlsAvailable) {
       return;
     }
 
@@ -6098,7 +6105,7 @@ export default function App() {
     stagingCountdownTrackIdRef.current = null;
     setStartCountdownPaused(false);
     void startConfiguredCadence(startingTrackId, startGateSequenceIdRef.current);
-  }, [playMode, startConfiguredCadence, startGateStatus.active, startGateStatus.phase]);
+  }, [startConfiguredCadence, startCountdownControlsAvailable]);
 
   const handleFalseStart = useCallback((detection: FalseStartDetection) => {
     if (falseStartActiveRef.current || raceState === 'racing') {
@@ -7845,7 +7852,7 @@ export default function App() {
                   startGateDetail={startGateStatus.detail}
                   startGateLightIndex={startGateStatus.lightIndex}
                   startCountdownPaused={startCountdownPaused}
-                  canPauseStartCountdown={playMode === 'local' && startGateStatus.active && startGateStatus.phase === 'staging'}
+                  canPauseStartCountdown={startCountdownControlsAvailable}
                   roomVoiceVisible={playMode === 'multiplayer' && Boolean(multiplayer.currentRoom)}
                   voiceEnabled={roomVoice.enabled}
                   voiceSupported={roomVoice.supported}
