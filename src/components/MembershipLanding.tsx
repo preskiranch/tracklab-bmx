@@ -309,6 +309,13 @@ export function MembershipLanding({
           </button>
         </article>
       </section>
+      <footer
+        aria-label="TrackLab policies and support"
+        style={{ display: 'flex', justifyContent: 'center', gap: 18, padding: '10px 20px 42px' }}
+      >
+        <a href="/support" style={{ color: '#64726a', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>Support</a>
+        <a href="/privacy" style={{ color: '#64726a', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>Privacy</a>
+      </footer>
     </main>
   );
 }

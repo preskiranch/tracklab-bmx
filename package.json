@@ -45,9 +45,15 @@
     "verify:release": "npm audit --omit=dev --omit=optional --audit-level=high && npm run test:unit && npm run build",
     "verify:release:full": "npm run verify:release && npm run test:e2e",
     "smoke:deployment": "node scripts/smoke-deployment.mjs",
-    "probe:load": "node scripts/probe-runtime-load.mjs"
+    "probe:load": "node scripts/probe-runtime-load.mjs",
+    "mobile:sync": "npm run build && npx cap sync ios",
+    "ios:open": "npx cap open ios",
+    "ios:build": "npm run mobile:sync && node scripts/build-ios-unsigned.mjs"
   },
   "dependencies": {
+    "@capacitor-community/bluetooth-le": "^8.3.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.0",
     "lucide-react": "^0.562.0",
     "pg": "^8.22.0",
     "react": "^19.2.3",
@@ -55,6 +61,8 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "@playwright/test": "^1.61.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",

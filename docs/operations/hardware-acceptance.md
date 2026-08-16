@@ -35,8 +35,11 @@ Run each supported path with one, two, three, and four bikes where applicable.
 | Windows Chrome | Bike Connector ANT+ | | | | |
 | Supported Android Chrome | Direct Web Bluetooth | | | | |
 
-iPadOS and iOS browsers do not expose Web Bluetooth. Validate those devices as
-display/control clients while a nearby Mac or PC runs the Bike Connector. Mark
+iPadOS and iOS browsers do not expose Web Bluetooth. Validate those browsers as
+display/control clients while a nearby Mac or PC runs the Bike Connector.
+Validate direct Wattbike pairing separately in the native TrackLab BMX
+iPhone/iPad app on physical hardware; the iOS Simulator has no BLE device
+support. See `docs/mobile/ios.md` for the native acceptance path. Mark
 unsupported combinations clearly; do not report them as failed connections.
 
 For each populated cell, require all of the following:
@@ -119,4 +122,3 @@ that it is required.
 
 A release that changes live bike or race behavior is not a 10/10 validated
 release until the applicable hardware and multiplayer rows pass with evidence.
-
