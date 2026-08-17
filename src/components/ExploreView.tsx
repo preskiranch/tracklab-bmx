@@ -112,7 +112,8 @@ type ExploreViewProps = {
   multiplayerConnection: string;
   currentRoom: MultiplayerRoom | null;
   currentUserId: string | null;
-  accountProfileKey: string;
+  accountProfileKey: string | null;
+  cloudRecentRoutesEnabled: boolean;
   inviteUrl: string;
   remoteStates: MultiplayerExploreState[];
   voiceEnabled: boolean;
@@ -298,6 +299,7 @@ export function ExploreView({
   currentRoom,
   currentUserId,
   accountProfileKey,
+  cloudRecentRoutesEnabled,
   inviteUrl,
   remoteStates,
   voiceEnabled,
@@ -320,7 +322,7 @@ export function ExploreView({
   fullscreen,
   onFullscreenChange,
 }: ExploreViewProps) {
-  const recentProfileKey = accountProfileKey || 'local';
+  const recentProfileKey = accountProfileKey?.trim() || null;
   const [localRoute, setLocalRoute] = useState<ExploreRoute | null>(null);
   const [originText, setOriginText] = useState('');
   const [destinationText, setDestinationText] = useState('');
@@ -345,9 +347,18 @@ export function ExploreView({
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [routeMessage, setRouteMessage] = useState('');
   const [mapPickerOpen, setMapPickerOpen] = useState(false);
-  const [recentRoutes, setRecentRoutes] = useState<ExploreRoute[]>(() => (
-    loadRecentExploreRoutes(recentProfileKey)
-  ));
+  const [recentRouteState, setRecentRouteState] = useState<{
+    profileKey: string | null;
+    routes: ExploreRoute[];
+  }>(() => ({
+    profileKey: recentProfileKey,
+    routes: recentProfileKey ? loadRecentExploreRoutes(recentProfileKey) : [],
+  }));
+  // Fail closed during an athlete/device switch. Effects load the new scope
+  // after paint, so never render routes retained in state for the old scope.
+  const recentRoutes = recentRouteState.profileKey === recentProfileKey
+    ? recentRouteState.routes
+    : [];
   const [elevationRecoveryStatus, setElevationRecoveryStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [recoveredElevation, setRecoveredElevation] = useState<RecoveredExploreElevation | null>(null);
   const [selectedLandmark, setSelectedLandmark] = useState<ExploreLandmarkPopup | null>(null);
@@ -448,17 +459,24 @@ export function ExploreView({
 
   useEffect(() => {
     let cancelled = false;
+    recentRouteSaveSequenceRef.current += 1;
+    if (!recentProfileKey) {
+      setRecentRouteState({ profileKey: null, routes: [] });
+      return () => {
+        cancelled = true;
+      };
+    }
     const cachedRoutes = loadRecentExploreRoutes(recentProfileKey);
-    setRecentRoutes(cachedRoutes);
+    setRecentRouteState({ profileKey: recentProfileKey, routes: cachedRoutes });
 
-    if (!accountProfileKey) {
+    if (!cloudRecentRoutesEnabled) {
       void upgradeExploreRoutesToBicycleRoads(cachedRoutes)
         .then((migration) => {
           if (cancelled || recentRouteProfileRef.current !== recentProfileKey) {
             return;
           }
           const nextRoutes = writeRecentExploreRoutes(recentProfileKey, migration.routes);
-          setRecentRoutes(nextRoutes);
+          setRecentRouteState({ profileKey: recentProfileKey, routes: nextRoutes });
           if (migration.upgradedCount > 0 || migration.failedCount > 0) {
             setRouteMessage(
               `${migration.upgradedCount > 0
@@ -488,7 +506,7 @@ export function ExploreView({
           return;
         }
         const nextRoutes = writeRecentExploreRoutes(recentProfileKey, migration.routes);
-        setRecentRoutes(nextRoutes);
+        setRecentRouteState({ profileKey: recentProfileKey, routes: nextRoutes });
 
         const cloudIds = cloudRoutes.map((route) => route.id).join('|');
         const nextIds = nextRoutes.map((route) => route.id).join('|');
@@ -496,7 +514,7 @@ export function ExploreView({
           const savedRoutes = await saveCloudExploreRoutes(nextRoutes);
           if (!cancelled && recentRouteProfileRef.current === recentProfileKey) {
             const synchronizedRoutes = writeRecentExploreRoutes(recentProfileKey, savedRoutes);
-            setRecentRoutes(synchronizedRoutes);
+            setRecentRouteState({ profileKey: recentProfileKey, routes: synchronizedRoutes });
           }
         }
         if (migration.upgradedCount > 0 || migration.failedCount > 0) {
@@ -516,12 +534,15 @@ export function ExploreView({
     return () => {
       cancelled = true;
     };
-  }, [accountProfileKey, recentProfileKey]);
+  }, [cloudRecentRoutesEnabled, recentProfileKey]);
 
   const rememberExploreRoute = useCallback((nextRoute: ExploreRoute) => {
+    if (!recentProfileKey) {
+      return;
+    }
     const cachedRoutes = rememberRecentExploreRoute(recentProfileKey, nextRoute);
-    setRecentRoutes(cachedRoutes);
-    if (!accountProfileKey) {
+    setRecentRouteState({ profileKey: recentProfileKey, routes: cachedRoutes });
+    if (!cloudRecentRoutesEnabled) {
       return;
     }
 
@@ -536,12 +557,12 @@ export function ExploreView({
           return;
         }
         const synchronizedRoutes = writeRecentExploreRoutes(recentProfileKey, cloudRoutes);
-        setRecentRoutes(synchronizedRoutes);
+        setRecentRouteState({ profileKey: recentProfileKey, routes: synchronizedRoutes });
       })
       .catch((error: Error) => {
         console.warn(`Could not save this personal Explore route to TrackLab cloud: ${error.message}`);
       });
-  }, [accountProfileKey, recentProfileKey]);
+  }, [cloudRecentRoutesEnabled, recentProfileKey]);
 
   const closeLandmark = useCallback(() => {
     landmarkRequestRef.current += 1;

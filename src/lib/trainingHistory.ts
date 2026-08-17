@@ -1,4 +1,5 @@
 import type { TrainingActivityType, TrainingSession } from '../types';
+import { readStoredClubTabletSession } from './clubTabletStorage';
 
 export type TrainingHistoryResponse = {
   sessions: TrainingSession[];
@@ -82,10 +83,54 @@ export async function loadTrainingHistory(from?: number, to?: number): Promise<T
   };
 }
 
-export async function saveTrainingSession(session: TrainingSessionInput, clubSession?: ClubTrainingSelection | null) {
+export type SaveTrainingSessionOptions = {
+  localPlayerId?: string | number | null;
+};
+
+function inferLocalPlayerId(
+  session: TrainingSessionInput,
+  clubSession?: ClubTrainingSelection | null,
+): string | number | null {
+  const details = session.details && typeof session.details === 'object'
+    ? session.details as { summaries?: unknown; riders?: unknown }
+    : {};
+  const entries = Array.isArray(details.summaries)
+    ? details.summaries
+    : Array.isArray(details.riders) ? details.riders : [];
+  const objects = entries.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object');
+  const match = clubSession
+    ? objects.find((entry) => entry.riderId === clubSession.studioRiderId)
+    : undefined;
+  const candidate = match ?? (objects.length === 1 ? objects[0] : undefined);
+  const playerId = candidate?.playerId;
+  if (typeof playerId === 'string') return playerId;
+  return Number.isFinite(Number(playerId)) ? Number(playerId) : null;
+}
+
+export async function saveTrainingSession(
+  session: TrainingSessionInput,
+  clubSession?: ClubTrainingSelection | null,
+  options: SaveTrainingSessionOptions = {},
+) {
+  const tabletSession = readStoredClubTabletSession();
+  const localPlayerId = options.localPlayerId ?? inferLocalPlayerId(session, clubSession);
+  if (tabletSession && localPlayerId == null) {
+    throw new Error('Club Tablet could not identify the local athlete result. The session was not saved to the wrong profile.');
+  }
+  if (tabletSession) {
+    const payload = await import('./clubTablet').then(
+      ({ saveClubTabletTrainingSession }) => saveClubTabletTrainingSession(session, localPlayerId!, tabletSession),
+    ) as { session?: Partial<TrainingSession> };
+    const saved = normalizeTrainingSession(payload.session ?? session);
+    if (!saved) throw new Error('Training history returned an invalid session.');
+    return saved;
+  }
   const response = await fetch('/api/training-sessions', {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ session, ...(clubSession ? { clubSession } : {}) }),
   });
   if (!response.ok) throw new Error(`Training history save returned ${response.status}`);

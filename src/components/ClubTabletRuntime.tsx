@@ -1,0 +1,182 @@
+import { useEffect, useRef } from 'react';
+import {
+  ClubTabletRequestError,
+  clearStoredClubTabletDevice,
+  clearStoredClubTabletSession,
+  endClubTabletSession,
+  flushClubTabletOutbox,
+  loadClubTabletRoster,
+  readStoredClubTabletSession,
+  refreshClubTabletSession,
+  storeClubTabletSession,
+  type ClubTabletDeviceCredential,
+  type ClubTabletRoster,
+  type ClubTabletSessionCredential,
+} from '../lib/clubTablet';
+
+export type ClubTabletDeviceStatus = 'idle' | 'checking' | 'active' | 'error' | 'revoked';
+
+type ClubTabletRuntimeProps = {
+  device: ClubTabletDeviceCredential;
+  roster: ClubTabletRoster | null;
+  session: ClubTabletSessionCredential | null;
+  bikeActivityAt: number;
+  onDeviceReady: (roster: ClubTabletRoster, hasStoredSession: boolean) => void;
+  onDeviceError: () => void;
+  onDeviceRevoked: () => void;
+  onSessionRenewed: (session: ClubTabletSessionCredential) => void;
+  onSessionExpired: () => void;
+};
+
+function authorizationEnded(error: unknown) {
+  return error instanceof ClubTabletRequestError && (error.status === 401 || error.status === 403);
+}
+
+export default function ClubTabletRuntime({
+  device,
+  roster,
+  session,
+  bikeActivityAt,
+  onDeviceReady,
+  onDeviceError,
+  onDeviceRevoked,
+  onSessionRenewed,
+  onSessionExpired,
+}: ClubTabletRuntimeProps) {
+  const lastActivityAtRef = useRef(Date.now());
+  const activityVersionRef = useRef(0);
+
+  useEffect(() => {
+    if (!session) return;
+    lastActivityAtRef.current = Date.now();
+    activityVersionRef.current += 1;
+  }, [session?.sessionToken]);
+
+  useEffect(() => {
+    if (!session) return;
+    const markActive = () => {
+      lastActivityAtRef.current = Date.now();
+      activityVersionRef.current += 1;
+    };
+    window.addEventListener('pointerdown', markActive, { passive: true });
+    window.addEventListener('keydown', markActive);
+    window.addEventListener('touchstart', markActive, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', markActive);
+      window.removeEventListener('keydown', markActive);
+      window.removeEventListener('touchstart', markActive);
+    };
+  }, [session?.sessionToken]);
+
+  useEffect(() => {
+    if (!session || !bikeActivityAt) return;
+    lastActivityAtRef.current = Math.max(lastActivityAtRef.current, bikeActivityAt);
+    activityVersionRef.current += 1;
+  }, [bikeActivityAt, session?.sessionToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadClubTabletRoster(device)
+      .then((nextRoster) => {
+        if (!cancelled) onDeviceReady(nextRoster, Boolean(readStoredClubTabletSession()));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (authorizationEnded(error)) {
+          clearStoredClubTabletSession();
+          clearStoredClubTabletDevice();
+          onDeviceRevoked();
+          return;
+        }
+        onDeviceError();
+      });
+    return () => { cancelled = true; };
+  }, [device, onDeviceError, onDeviceReady, onDeviceRevoked]);
+
+  useEffect(() => {
+    if (!session) return;
+    const remainingMs = session.session.expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      clearStoredClubTabletSession();
+      onSessionExpired();
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      clearStoredClubTabletSession();
+      onSessionExpired();
+    }, Math.min(remainingMs + 25, 2_147_000_000));
+    return () => window.clearTimeout(timer);
+  }, [onSessionExpired, session]);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    let controller: AbortController | null = null;
+    let timer = 0;
+    let lastRenewedActivityVersion = -1;
+    let ending = false;
+    const idleTimeoutMs = Math.max(60_000, session.heartbeatTtlMs - 15_000);
+
+    const expireIdentity = async () => {
+      if (ending || cancelled) return;
+      ending = true;
+      try {
+        await endClubTabletSession(session);
+      } catch {
+        clearStoredClubTabletSession();
+      }
+      if (!cancelled) onSessionExpired();
+    };
+
+    const renew = async () => {
+      if (cancelled) return;
+      const idleForMs = Date.now() - lastActivityAtRef.current;
+      if (idleForMs >= idleTimeoutMs) {
+        await expireIdentity();
+        return;
+      }
+      if (lastRenewedActivityVersion === activityVersionRef.current) {
+        timer = window.setTimeout(() => void renew(), Math.max(2_000, Math.min(15_000, session.pollAfterMs)));
+        return;
+      }
+      controller = new AbortController();
+      try {
+        const next = await refreshClubTabletSession(session, controller.signal);
+        if (cancelled) return;
+        lastRenewedActivityVersion = activityVersionRef.current;
+        const athlete = roster?.athletes.find(
+          (candidate) => candidate.studioRiderId === next.session.studioRiderId,
+        );
+        const enriched: ClubTabletSessionCredential = {
+          ...next,
+          session: {
+            ...next.session,
+            ...(athlete?.athleteName ? { athleteName: athlete.athleteName } : {}),
+            ...(athlete?.photoUrl ? { photoUrl: athlete.photoUrl } : {}),
+          },
+        };
+        storeClubTabletSession(enriched);
+        onSessionRenewed(enriched);
+        void flushClubTabletOutbox(enriched);
+        timer = window.setTimeout(() => void renew(), Math.max(5_000, Math.min(30_000, enriched.pollAfterMs)));
+      } catch (error) {
+        if (cancelled || (error as Error).name === 'AbortError') return;
+        if (authorizationEnded(error)) {
+          clearStoredClubTabletSession();
+          onSessionExpired();
+          return;
+        }
+        timer = window.setTimeout(() => void renew(), 5_000);
+      }
+    };
+
+    timer = window.setTimeout(() => void renew(), Math.max(2_000, Math.min(15_000, session.pollAfterMs)));
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      window.clearTimeout(timer);
+    };
+  }, [onSessionExpired, onSessionRenewed, roster?.athletes, session?.sessionToken]);
+
+  return null;
+}

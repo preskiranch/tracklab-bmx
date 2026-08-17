@@ -1,0 +1,119 @@
+.club-tablet-mode {
+  min-height: calc(100vh - 92px);
+  padding: clamp(18px, 2.6vw, 38px);
+  background:
+    radial-gradient(circle at 9% 5%, rgba(122, 222, 54, 0.13), transparent 30%),
+    #f3f6f1;
+  color: #152016;
+}
+
+.club-tablet-mode button,
+.club-tablet-mode input { font: inherit; }
+
+.club-tablet-hero,
+.club-tablet-header,
+.club-tablet-active-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.club-tablet-hero { justify-content: flex-start; max-width: 940px; margin: 4vh auto 24px; }
+.club-tablet-icon { display: grid; width: 74px; height: 74px; flex: 0 0 auto; place-items: center; border-radius: 22px; background: #142019; color: #8eef42; }
+.club-tablet-icon svg { width: 37px; height: 37px; }
+.club-tablet-mode h2 { margin: 5px 0 7px; font-size: clamp(27px, 3vw, 42px); line-height: 1.05; }
+.club-tablet-mode p { margin: 0; color: #5c675a; line-height: 1.45; }
+
+.club-tablet-setup-card,
+.club-tablet-step,
+.club-tablet-active-card,
+.club-tablet-info-grid > div {
+  border: 1px solid #d1dbcD;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 15px 42px rgba(39, 57, 35, 0.08);
+}
+
+.club-tablet-setup-card { display: grid; max-width: 720px; gap: 14px; margin: 0 auto; padding: 25px; border-radius: 21px; }
+.club-tablet-device-manager { display: grid; max-width: 920px; gap: 16px; margin: 22px auto 0; padding: 22px; border: 1px solid #d1dbcd; border-radius: 19px; background: rgba(255, 255, 255, 0.96); box-shadow: 0 15px 42px rgba(39, 57, 35, 0.08); }
+.club-tablet-device-manager h3 { margin: 4px 0 5px; font-size: 20px; }
+.club-tablet-device-list { display: grid; gap: 9px; }
+.club-tablet-device-list article { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid #dde4da; border-radius: 13px; background: #f8faf7; }
+.club-tablet-device-list article > svg { color: #4cad21; }
+.club-tablet-device-list strong,
+.club-tablet-device-list small { display: block; }
+.club-tablet-device-list small { margin-top: 3px; color: #71806d; }
+.club-tablet-device-list button { display: inline-flex; min-height: 38px; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #efb0a8; border-radius: 9px; background: #fff; color: #a52d20; font-weight: 850; }
+.club-tablet-setup-card label { display: grid; gap: 7px; font-weight: 850; }
+.club-tablet-setup-card input,
+.club-tablet-search { min-height: 48px; border: 1px solid #c6d0c1; border-radius: 12px; background: #fff; }
+.club-tablet-setup-card input { padding: 0 13px; }
+.club-tablet-primary { display: inline-flex; min-height: 50px; align-items: center; justify-content: center; gap: 9px; padding: 0 20px; border: 0; border-radius: 12px; background: linear-gradient(135deg, #64d72c, #8bea38); color: #10220a; font-weight: 950; }
+.club-tablet-primary:disabled { opacity: 0.48; }
+.club-tablet-empty { display: grid; justify-items: center; gap: 8px; padding: 15px; text-align: center; }
+
+.club-tablet-header { align-items: flex-end; margin-bottom: 20px; }
+.club-tablet-header button,
+.club-tablet-end { display: inline-flex; min-height: 42px; align-items: center; gap: 8px; padding: 0 13px; border: 1px solid #c6d0c1; border-radius: 11px; background: #fff; color: #263323; font-weight: 850; }
+.club-tablet-workflow { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr); gap: 18px; }
+.club-tablet-step { min-width: 0; padding: 19px; border-radius: 19px; }
+.club-tablet-step-title { display: flex; align-items: center; gap: 11px; margin-bottom: 15px; }
+.club-tablet-step-title > b { display: grid; width: 35px; height: 35px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #142019; color: #8eef42; }
+.club-tablet-step-title strong,
+.club-tablet-step-title small { display: block; }
+.club-tablet-step-title small { margin-top: 2px; color: #737e70; }
+.club-tablet-search { display: flex; align-items: center; gap: 9px; padding: 0 13px; }
+.club-tablet-search input { width: 100%; min-width: 0; border: 0; outline: 0; }
+
+.club-tablet-athletes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; max-height: min(53vh, 570px); margin-top: 12px; overflow: auto; }
+.club-tablet-athletes > button,
+.club-tablet-bikes > button { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 10px; border: 2px solid #e2e7df; border-radius: 14px; background: #f9fbf8; text-align: left; }
+.club-tablet-athletes > button.selected,
+.club-tablet-bikes > button.selected { border-color: #74d837; background: #effbe8; box-shadow: 0 0 0 3px rgba(116, 216, 55, 0.12); }
+.club-tablet-athletes strong,
+.club-tablet-athletes small,
+.club-tablet-bikes strong,
+.club-tablet-bikes small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.club-tablet-athletes small,
+.club-tablet-bikes small { margin-top: 3px; color: #71806d; font-size: 12px; }
+
+.club-tablet-bikes { display: grid; gap: 10px; }
+.club-tablet-bike-actions { display: grid; gap: 10px; padding: 17px; border: 1px dashed #abb7a5; border-radius: 14px; background: #f5f8f3; }
+.club-tablet-bike-actions button { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; border: 1px solid #bbc6b6; border-radius: 10px; background: #fff; font-weight: 850; }
+.club-tablet-start { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 18px; padding: 14px 16px; border-radius: 16px; background: #142019; color: #dce8d7; }
+.club-tablet-start > span { display: inline-flex; align-items: center; gap: 8px; }
+.club-tablet-message { margin-top: 13px !important; padding: 11px 13px; border-radius: 11px; background: #eaf7e3; color: #245b16 !important; font-weight: 800; }
+
+.club-tablet-active-card { padding: clamp(18px, 2.5vw, 29px); border-top: 6px solid #78dc38; border-radius: 21px; }
+.club-tablet-active-avatar { width: 80px; height: 80px; flex: 0 0 auto; font-size: 24px; }
+.club-tablet-active-card > div { flex: 1; }
+.club-tablet-active-card .eyebrow,
+.club-tablet-active-card small { display: flex; align-items: center; gap: 6px; }
+.club-tablet-active-card small { margin-top: 7px; color: #60705c; }
+.club-tablet-end { border-color: #efb0a8; color: #a52d20; }
+.club-tablet-programs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 19px; }
+.club-tablet-programs button { display: flex; min-width: 0; align-items: center; gap: 13px; padding: 18px; border: 1px solid #cbd5c6; border-radius: 16px; background: #142019; color: #fff; text-align: left; }
+.club-tablet-programs button > svg { width: 31px; height: 31px; flex: 0 0 auto; color: #8eef42; }
+.club-tablet-programs strong,
+.club-tablet-programs small { display: block; }
+.club-tablet-programs small { margin-top: 4px; color: #bcc9b7; }
+.club-tablet-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 18px; }
+.club-tablet-info-grid > div { display: flex; gap: 11px; padding: 16px; border-radius: 15px; }
+.club-tablet-info-grid svg { flex: 0 0 auto; color: #4cad21; }
+.club-tablet-info-grid strong,
+.club-tablet-info-grid small { display: block; }
+.club-tablet-info-grid small { margin-top: 4px; color: #6f7a6c; line-height: 1.4; }
+
+@media (max-width: 900px) {
+  .club-tablet-workflow { grid-template-columns: 1fr; }
+  .club-tablet-programs,
+  .club-tablet-info-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .club-tablet-header,
+  .club-tablet-active-card,
+  .club-tablet-start { align-items: stretch; flex-direction: column; }
+  .club-tablet-athletes { grid-template-columns: 1fr; }
+  .club-tablet-active-avatar { width: 68px; height: 68px; }
+}

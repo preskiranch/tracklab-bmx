@@ -34,6 +34,57 @@ async function openTestSocket(authCookie: string): Promise<TestSocket> {
   return { socket, messages };
 }
 
+async function clubTabletSocketTicket(sessionToken: string) {
+  const response = await api('/api/club-tablet/multiplayer-ticket', {
+    method: 'POST',
+    headers: { 'X-TrackLab-Club-Tablet-Session': sessionToken },
+  });
+  expect(response.status).toBe(201);
+  return response.json() as Promise<{ ticket: string; expiresAt: number }>;
+}
+
+async function openClubTabletSocketWithTicket(ticket: string, authCookie = ''): Promise<TestSocket> {
+  const socket = new WebSocket(
+    `${baseUrl.replace(/^http/, 'ws')}/multiplayer?clubTabletTicket=${encodeURIComponent(ticket)}`,
+    { headers: { Origin: baseUrl, ...(authCookie ? { Cookie: authCookie } : {}) } },
+  );
+  const messages: Array<Record<string, any>> = [];
+  socket.on('message', (data) => {
+    try {
+      messages.push(JSON.parse(data.toString()));
+    } catch {
+      // Tests only inspect JSON protocol messages.
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  testSockets.add(socket);
+  return { socket, messages };
+}
+
+async function openClubTabletSocket(sessionToken: string): Promise<TestSocket> {
+  const { ticket } = await clubTabletSocketTicket(sessionToken);
+  return openClubTabletSocketWithTicket(ticket);
+}
+
+async function expectClubTabletTicketRejected(ticket: string, authCookie = '') {
+  const socket = new WebSocket(
+    `${baseUrl.replace(/^http/, 'ws')}/multiplayer?clubTabletTicket=${encodeURIComponent(ticket)}`,
+    { headers: { Origin: baseUrl, ...(authCookie ? { Cookie: authCookie } : {}) } },
+  );
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', () => reject(new Error('A consumed or expired Club Tablet ticket was accepted.')));
+    socket.once('unexpected-response', (_request, response) => {
+      expect(response.statusCode).toBe(401);
+      response.resume();
+      resolve();
+    });
+    socket.once('error', () => resolve());
+  });
+}
+
 async function waitForSocketMessage(
   connection: TestSocket,
   predicate: (message: Record<string, any>) => boolean,
@@ -181,6 +232,7 @@ beforeAll(async () => {
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
       TRACKLAB_CLUB_LIVE_SESSION_TTL_MS: '600',
+      TRACKLAB_CLUB_TABLET_WS_TICKET_TTL_MS: '120',
       APPLE_MAPKIT_JS_TOKEN: 'test-domain-restricted-mapkit-token',
       OPENAI_API_KEY: '',
     },
@@ -618,6 +670,8 @@ describe('cloud API trust boundaries', () => {
       }),
     });
     expect(rosterSave.status).toBe(200);
+    const monitorCookie = ownerCookie;
+    expect((await api('/api/club-live/sessions')).status).toBe(200);
 
     const trainingSave = await api('/api/training-sessions', {
       method: 'POST',
@@ -1273,6 +1327,798 @@ describe('cloud API trust boundaries', () => {
       });
       expect(stopped.status).toBe(200);
     }
+    cookie = originalCookie;
+  });
+
+  it('authorizes shared club tablets without exposing the roster or binding athletes to bikes', async () => {
+    const originalCookie = cookie;
+    let ownerCookie = '';
+    let ownerLoginSequence = 20;
+    const signInOwner = async () => {
+      ownerLoginSequence += 1;
+      const ownerLogin = await api('/api/auth/login', {
+        method: 'POST',
+        headers: { 'X-Forwarded-For': `198.51.100.${ownerLoginSequence}` },
+        body: JSON.stringify({
+          email: 'club-owner-admin@tracklab.test',
+          password: 'correct-horse-battery-staple',
+        }),
+      });
+      expect(ownerLogin.status).toBe(200);
+      ownerCookie = String(ownerLogin.headers.get('set-cookie')).split(';')[0];
+      cookie = ownerCookie;
+      return ownerCookie;
+    };
+    await signInOwner();
+    const now = Date.now();
+    const rosterSave = await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        studioRiders: [
+          {
+            id: 'shared-tablet-rider-one',
+            name: 'Tablet Rider One',
+            photoUrl: 'data:image/png;base64,aGVsbG8=',
+            createdAt: now,
+            updatedAt: now,
+          },
+          { id: 'shared-tablet-rider-two', name: 'Tablet Rider Two', createdAt: now, updatedAt: now },
+        ],
+      }),
+    });
+    expect(rosterSave.status).toBe(200);
+    // The central Club Live monitor is a separate browser session. Enrolling a
+    // physical tablet must consume only that tablet browser's authorizing
+    // session and leave this independently signed-in monitor available.
+    const monitorCookie = ownerCookie;
+
+    const enroll = async (name: string, assertKioskTakeover = false) => {
+      const authorizingCookie = await signInOwner();
+      const response = await api('/api/club-tablet/devices', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      expect(response.status).toBe(201);
+      const clearingCookie = response.headers.get('set-cookie') ?? '';
+      expect(clearingCookie).toContain('tracklab_session=;');
+      expect(clearingCookie).toContain('Max-Age=0');
+      expect(clearingCookie).toContain('HttpOnly');
+      const enrolled = await response.json();
+      expect(enrolled.deviceToken).toHaveLength(43);
+      if (assertKioskTakeover) {
+        const retiredIdentity = await fetch(`${baseUrl}/api/auth/me`, {
+          headers: { Origin: baseUrl, Cookie: authorizingCookie },
+        });
+        // /api/auth/me deliberately represents signed-out as 200 + null so the
+        // app can bootstrap without treating a guest as a transport error.
+        expect(retiredIdentity.status).toBe(200);
+        await expect(retiredIdentity.json()).resolves.toEqual({ user: null });
+        const retiredOwnerDevices = await fetch(`${baseUrl}/api/club-tablet/devices`, {
+          headers: { Origin: baseUrl, Cookie: authorizingCookie },
+        });
+        expect(retiredOwnerDevices.status).toBe(401);
+        const independentMonitorIdentity = await fetch(`${baseUrl}/api/auth/me`, {
+          headers: { Origin: baseUrl, Cookie: monitorCookie },
+        });
+        expect(independentMonitorIdentity.status).toBe(200);
+        const enrolledRoster = await fetch(`${baseUrl}/api/club-tablet/roster`, {
+          headers: {
+            Origin: baseUrl,
+            Authorization: `Bearer ${enrolled.deviceToken}`,
+          },
+        });
+        expect(enrolledRoster.status).toBe(200);
+        await expect(enrolledRoster.json()).resolves.toMatchObject({
+          device: { id: enrolled.device.id },
+          athletes: expect.arrayContaining([
+            expect.objectContaining({ studioRiderId: 'shared-tablet-rider-one' }),
+          ]),
+        });
+      }
+      cookie = '';
+      return enrolled;
+    };
+    const firstDevice = await enroll('Studio iPad 1', true);
+    const secondDevice = await enroll('Studio iPad 2');
+    expect(firstDevice.deviceToken).toHaveLength(43);
+    cookie = monitorCookie;
+    const listedDevices = await api('/api/club-tablet/devices');
+    const listedPayload = await listedDevices.json();
+    expect(listedPayload.devices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: firstDevice.device.id, name: 'Studio iPad 1' }),
+      expect.objectContaining({ id: secondDevice.device.id, name: 'Studio iPad 2' }),
+    ]));
+    expect(JSON.stringify(listedPayload)).not.toContain(firstDevice.deviceToken);
+    expect(JSON.stringify(listedPayload)).not.toContain('tokenHash');
+    expect((await api('/api/club-live/sessions')).status).toBe(200);
+
+    const deviceHeaders = (deviceToken: string): HeadersInit => ({
+      Authorization: `Bearer ${deviceToken}`,
+    });
+    const athleteHeaders = (sessionToken: string): HeadersInit => ({
+      'X-TrackLab-Club-Tablet-Session': sessionToken,
+    });
+    const roster = await api('/api/club-tablet/roster', {
+      headers: deviceHeaders(firstDevice.deviceToken),
+    });
+    expect(roster.status).toBe(200);
+    const rosterPayload = await roster.json();
+    expect(rosterPayload.athletes).toEqual([
+      expect.objectContaining({
+        studioRiderId: 'shared-tablet-rider-one',
+        riderName: 'Tablet Rider One',
+        status: 'unclaimed',
+        photoUrl: 'data:image/png;base64,aGVsbG8=',
+      }),
+      expect.objectContaining({
+        studioRiderId: 'shared-tablet-rider-two',
+        riderName: 'Tablet Rider Two',
+        status: 'unclaimed',
+      }),
+    ]);
+    expect(JSON.stringify(rosterPayload)).not.toContain('@');
+    expect(JSON.stringify(rosterPayload)).not.toContain('ProfileKey');
+
+    const startTabletSession = (deviceToken: string, studioRiderId: string, bikeDeviceId: string) => (
+      api('/api/club-tablet/sessions', {
+        method: 'POST',
+        headers: deviceHeaders(deviceToken),
+        body: JSON.stringify({ studioRiderId, bikeDeviceId }),
+      })
+    );
+    const selected = await startTabletSession(
+      firstDevice.deviceToken,
+      'shared-tablet-rider-one',
+      'WattbikePM25043950',
+    );
+    expect(selected.status).toBe(201);
+    const selectedPayload = await selected.json();
+    expect(selectedPayload).toMatchObject({
+      session: {
+        clubId: firstDevice.device.clubId,
+        studioRiderId: 'shared-tablet-rider-one',
+        riderName: 'Tablet Rider One',
+        bikeDeviceId: 'WattbikePM25043950',
+      },
+      sessionToken: expect.any(String),
+    });
+    expect(JSON.stringify(selectedPayload)).not.toContain('ownerProfileKey');
+
+    const duplicateAthlete = await startTabletSession(
+      secondDevice.deviceToken,
+      'shared-tablet-rider-one',
+      'WattbikePM25043951',
+    );
+    expect(duplicateAthlete.status).toBe(409);
+    const duplicateBike = await startTabletSession(
+      secondDevice.deviceToken,
+      'shared-tablet-rider-two',
+      'WattbikePM25043950',
+    );
+    expect(duplicateBike.status).toBe(409);
+
+    const secondSelected = await startTabletSession(
+      secondDevice.deviceToken,
+      'shared-tablet-rider-two',
+      'WattbikePM25043951',
+    );
+    expect(secondSelected.status).toBe(201);
+    const secondSelectedPayload = await secondSelected.json();
+    const failedAtomicSwitch = await startTabletSession(
+      firstDevice.deviceToken,
+      'shared-tablet-rider-two',
+      'WattbikePM25043952',
+    );
+    expect(failedAtomicSwitch.status).toBe(409);
+    const stillSelected = await api('/api/club-tablet/sessions/current', {
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(stillSelected.status).toBe(200);
+    const stillSelectedPayload = await stillSelected.json();
+    expect(stillSelectedPayload).toMatchObject({
+      session: {
+        studioRiderId: 'shared-tablet-rider-one',
+        bikeDeviceId: 'WattbikePM25043950',
+      },
+    });
+
+    const wrongOrigin = await api('/api/club-tablet/live', {
+      method: 'PUT',
+      headers: {
+        Origin: 'https://malicious.example',
+        ...athleteHeaders(selectedPayload.sessionToken),
+      },
+      body: JSON.stringify({
+        activityType: 'straight-sprint',
+        status: 'active',
+      }),
+    });
+    expect(wrongOrigin.status).toBe(403);
+
+    cookie = monitorCookie;
+    const revokeSecond = await api('/api/club-tablet/devices', {
+      method: 'DELETE',
+      body: JSON.stringify({ deviceId: secondDevice.device.id }),
+    });
+    expect(revokeSecond.status).toBe(200);
+    expect((await api('/api/club-tablet/sessions/current', {
+      headers: athleteHeaders(secondSelectedPayload.sessionToken),
+    })).status).toBe(401);
+    expect((await api('/api/club-tablet/roster', {
+      headers: deviceHeaders(secondDevice.deviceToken),
+    })).status).toBe(401);
+    expect((await api('/api/club-live/sessions')).status).toBe(200);
+    const replacementDevice = await enroll('Studio iPad replacement');
+    const replacementSession = await startTabletSession(
+      replacementDevice.deviceToken,
+      'shared-tablet-rider-two',
+      'WattbikePM25043951',
+    );
+    expect(replacementSession.status).toBe(201);
+    const replacementPayload = await replacementSession.json();
+    await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: athleteHeaders(replacementPayload.sessionToken),
+    });
+
+    const livePublish = await api('/api/club-tablet/live', {
+      method: 'PUT',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({
+        clubId: 'forged-club',
+        studioRiderId: 'forged-rider',
+        riderName: 'Forged Name',
+        activityType: 'straight-sprint',
+        status: 'active',
+        progress: { percent: 50, distanceMeters: 22 },
+        metrics: { watts: 800, cadence: 120, speedKph: 36 },
+      }),
+    });
+    expect(livePublish.status).toBe(200);
+    const livePublishPayload = await livePublish.json();
+    expect(livePublishPayload).toMatchObject({
+      session: {
+        clubId: firstDevice.device.clubId,
+        studioRiderId: 'shared-tablet-rider-one',
+        riderName: 'Tablet Rider One',
+      },
+    });
+    expect(livePublishPayload.athleteSessionExpiresAt).toBe(stillSelectedPayload.session.expiresAt);
+    const explicitAthleteHeartbeat = await api('/api/club-tablet/sessions/current', {
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(explicitAthleteHeartbeat.status).toBe(200);
+    const explicitAthleteHeartbeatPayload = await explicitAthleteHeartbeat.json();
+    expect(explicitAthleteHeartbeatPayload.session.expiresAt).toBeGreaterThan(
+      livePublishPayload.athleteSessionExpiresAt,
+    );
+    cookie = monitorCookie;
+    const monitored = await api('/api/club-live/sessions');
+    await expect(monitored.json()).resolves.toMatchObject({
+      sessions: [expect.objectContaining({
+        studioRiderId: 'shared-tablet-rider-one',
+        activityType: 'straight-sprint',
+      })],
+    });
+
+    const tabletTicket = await clubTabletSocketTicket(selectedPayload.sessionToken);
+    // The explicit tablet ticket remains authoritative even though this test
+    // browser also carries the club owner's authenticated cookie.
+    const tabletSocket = await openClubTabletSocketWithTicket(tabletTicket.ticket, monitorCookie);
+    await expectClubTabletTicketRejected(tabletTicket.ticket, monitorCookie);
+    await expectClubTabletTicketRejected(selectedPayload.sessionToken);
+    const expiringTabletTicket = await clubTabletSocketTicket(selectedPayload.sessionToken);
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    await expectClubTabletTicketRejected(expiringTabletTicket.ticket);
+    const tabletConnected = await waitForSocketMessage(tabletSocket, (message) => message.type === 'connected');
+    tabletSocket.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 4 }));
+    const tabletWelcome = await waitForSocketMessage(tabletSocket, (message) => message.type === 'welcome');
+    expect(tabletWelcome.riders.find(
+      (rider: { id: string }) => rider.id === tabletConnected.clientId,
+    )).toMatchObject({ name: 'Tablet Rider One', membershipTier: 'racer', racerSeatCount: 0 });
+    tabletSocket.socket.send(JSON.stringify({
+      type: 'create-room',
+      private: true,
+      racerSeatCount: 4,
+      track: { id: 'shared-tablet-track', name: 'Shared Tablet Track' },
+    }));
+    const tabletRoom = await waitForSocketMessage(
+      tabletSocket,
+      (message) => message.type === 'room-state'
+        && message.room?.members?.some((member: { id: string }) => member.id === tabletConnected.clientId),
+    );
+    expect(tabletRoom.room.members.find(
+      (member: { id: string }) => member.id === tabletConnected.clientId,
+    )).toMatchObject({ roomRole: 'racer', racerSeatCount: 1 });
+
+    const tabletTrackId = `shared-tablet-track-${now}`;
+    const raceSessionId = `shared-tablet-race-${now}`;
+    const raceSyncMessageIndex = tabletSocket.messages.length;
+    tabletSocket.socket.send(JSON.stringify({
+      type: 'race-sync',
+      state: {
+        sessionId: raceSessionId,
+        trackId: tabletTrackId,
+        raceState: 'finished',
+        riders: [{ id: 'tablet-local-rider', playerId: 2, name: 'Pseudo Tablet Identity' }],
+        summary: [{
+          playerId: 2,
+          riderName: 'Pseudo Tablet Identity',
+          rank: 1,
+          finishTimeMs: 700,
+          topCadence: 200,
+          topWatts: 9_999,
+        }],
+      },
+    }));
+    await waitForSocketMessage(
+      tabletSocket,
+      (message) => message.type === 'race-sync' && message.state?.sessionId === raceSessionId,
+      raceSyncMessageIndex,
+    );
+    const beforeScopedRaceSave = await api(`/api/multiplayer/leaderboards?trackId=${tabletTrackId}`);
+    expect(JSON.stringify(await beforeScopedRaceSave.json())).not.toContain('Pseudo Tablet Identity');
+
+    const trainingId = `shared-tablet-training-${now}`;
+    const trainingRequestPayload = {
+      localPlayerId: 2,
+      session: {
+        id: trainingId,
+        activityType: 'straight-sprint',
+        title: 'Shared tablet sprint',
+        startedAt: now - 2_000,
+        endedAt: now - 1_000,
+        durationMs: 1_000,
+        distanceMeters: 44.2,
+        details: {
+          summaries: [
+            { playerId: 1, riderName: 'Sibling', finishTimeMs: 900, distanceMeters: 44.2 },
+            { playerId: 2, riderName: 'Forged Name', finishTimeMs: 950, distanceMeters: 44.2 },
+          ],
+          events: [{ label: 'Sibling data must not leave the tablet boundary' }],
+          otherRiders: [{ name: 'Private sibling' }],
+          privateNotes: 'Owner-only medical note',
+        },
+      },
+    };
+    const trainingSave = await api('/api/club-tablet/training-sessions', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify(trainingRequestPayload),
+    });
+    expect(trainingSave.status).toBe(201);
+    const trainingPayload = await trainingSave.json();
+    expect(trainingPayload.session.details.summaries).toEqual([
+      expect.objectContaining({
+        playerId: 2,
+        riderId: 'shared-tablet-rider-one',
+        riderName: 'Tablet Rider One',
+      }),
+    ]);
+    expect(trainingPayload.session.details.events).toEqual([]);
+    expect(JSON.stringify(trainingPayload)).not.toContain('Sibling data');
+    expect(JSON.stringify(trainingPayload)).not.toContain('Private sibling');
+    expect(JSON.stringify(trainingPayload)).not.toContain('medical note');
+    const trainingReplay = await api('/api/club-tablet/training-sessions', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify(trainingRequestPayload),
+    });
+    expect(trainingReplay.status).toBe(200);
+    await expect(trainingReplay.json()).resolves.toMatchObject({
+      replayed: true,
+      session: { id: trainingId },
+    });
+
+    const raceRequestPayload = {
+      sessionId: raceSessionId,
+      trackId: tabletTrackId,
+      trackName: 'Shared Tablet Track',
+      localPlayerId: 2,
+      summaries: [
+        { playerId: 1, riderName: 'Sibling', rank: 1, finishTimeMs: 800, topWatts: 9999 },
+        {
+          playerId: 2,
+          riderName: 'Forged Name',
+          rank: 2,
+          finishTimeMs: 950,
+          distanceMeters: 44.2,
+          topSpeedKph: 35,
+          averageSpeedKph: 30,
+          topCadence: 120,
+          averageCadence: 100,
+          topWatts: 800,
+          averageWatts: 600,
+        },
+      ],
+    };
+    const raceSave = await api('/api/club-tablet/race-results', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify(raceRequestPayload),
+    });
+    expect(raceSave.status).toBe(201);
+    await expect(raceSave.json()).resolves.toMatchObject({ saved: 1 });
+    const raceReplay = await api('/api/club-tablet/race-results', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify(raceRequestPayload),
+    });
+    expect(raceReplay.status).toBe(200);
+    await expect(raceReplay.json()).resolves.toMatchObject({ saved: 1, replayed: true });
+    const leaderboardResponse = await api(`/api/multiplayer/leaderboards?trackId=${tabletTrackId}`);
+    const leaderboardPayload = await leaderboardResponse.json();
+    expect(JSON.stringify(leaderboardPayload)).toContain('Tablet Rider One');
+    expect(JSON.stringify(leaderboardPayload)).not.toContain('Sibling');
+    expect(JSON.stringify(leaderboardPayload)).not.toContain('Pseudo Tablet Identity');
+    for (const entries of Object.values(leaderboardPayload.leaderboards) as Array<Array<{ rider: string }>>) {
+      expect(entries.filter((entry) => entry.rider === 'Tablet Rider One')).toHaveLength(1);
+    }
+
+    const ghostRequestPayload = {
+      localPlayerId: 2,
+      ghost: {
+        id: `shared-tablet-ghost-${now}`,
+        trackId: tabletTrackId,
+        trackName: 'Shared Tablet Track',
+        ownerKey: 'forged-owner',
+        ownerName: 'Forged Owner',
+        riderName: 'Forged Name',
+        colorName: 'blue',
+        accent: '#38a8ff',
+        raceSource: 'live',
+        lapCount: 1,
+        finishTimeMs: 950,
+        savedAt: now,
+        analyticsPublic: false,
+        summary: {
+          playerId: 2,
+          riderName: 'Forged Name',
+          rank: 1,
+          finishTimeMs: 950,
+          distanceMeters: 44.2,
+          topCadence: 120,
+          topWatts: 800,
+        },
+        zoneResults: [{
+          zoneId: 'zone-one',
+          zoneName: 'Zone One',
+          zoneType: 'pedal',
+          startMeter: 0,
+          endMeter: 44.2,
+          riders: [
+            { playerId: 1, sampleCount: 10, topWatts: 9999 },
+            { playerId: 2, sampleCount: 10, topWatts: 800 },
+          ],
+        }],
+        points: [
+          { elapsedMs: 0, distanceMeters: 0 },
+          { elapsedMs: 950, distanceMeters: 44.2 },
+        ],
+      },
+    };
+    const ghostSave = await api('/api/club-tablet/ghosts', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify(ghostRequestPayload),
+    });
+    expect(ghostSave.status).toBe(200);
+    await expect(ghostSave.json()).resolves.toMatchObject({ replayed: false });
+    const ghostReplay = await api('/api/club-tablet/ghosts', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify(ghostRequestPayload),
+    });
+    expect(ghostReplay.status).toBe(200);
+    await expect(ghostReplay.json()).resolves.toMatchObject({ replayed: true });
+
+    const selectedGhosts = await api(`/api/club-tablet/ghosts?trackId=${encodeURIComponent(tabletTrackId)}`, {
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(selectedGhosts.status).toBe(200);
+    await expect(selectedGhosts.json()).resolves.toMatchObject({
+      trackId: tabletTrackId,
+      ghosts: [expect.objectContaining({
+        source: 'personal',
+        riderName: 'Tablet Rider One',
+        summary: expect.objectContaining({ playerId: 2, topWatts: 800 }),
+      })],
+    });
+    const wrongSprintCategory = await api(
+      `/api/club-tablet/ghosts?trackId=${encodeURIComponent(tabletTrackId)}&sprintDistanceFeet=145&sprintAirSetting=5`,
+      { headers: athleteHeaders(selectedPayload.sessionToken) },
+    );
+    await expect(wrongSprintCategory.json()).resolves.toMatchObject({ ghosts: [] });
+
+    const siblingSessionResponse = await startTabletSession(
+      replacementDevice.deviceToken,
+      'shared-tablet-rider-two',
+      'WattbikePM25043951',
+    );
+    expect(siblingSessionResponse.status).toBe(201);
+    const siblingSessionPayload = await siblingSessionResponse.json();
+    const siblingGhostPayload = {
+      localPlayerId: 1,
+      ghost: {
+        ...ghostRequestPayload.ghost,
+        id: `shared-tablet-sibling-ghost-${now}`,
+        riderName: 'Forged sibling',
+        finishTimeMs: 900,
+        summary: {
+          ...ghostRequestPayload.ghost.summary,
+          playerId: 1,
+          topWatts: 777,
+        },
+        zoneResults: [],
+      },
+    };
+    expect((await api('/api/club-tablet/ghosts', {
+      method: 'POST',
+      headers: athleteHeaders(siblingSessionPayload.sessionToken),
+      body: JSON.stringify(siblingGhostPayload),
+    })).status).toBe(200);
+    const selectedAfterSiblingSave = await api(
+      `/api/club-tablet/ghosts?trackId=${encodeURIComponent(tabletTrackId)}`,
+      { headers: athleteHeaders(selectedPayload.sessionToken) },
+    );
+    const selectedAfterSiblingPayload = await selectedAfterSiblingSave.json();
+    expect(selectedAfterSiblingPayload.ghosts).toHaveLength(1);
+    expect(JSON.stringify(selectedAfterSiblingPayload)).not.toContain('Tablet Rider Two');
+    expect(JSON.stringify(selectedAfterSiblingPayload)).not.toContain('777');
+    const siblingGhosts = await api(
+      `/api/club-tablet/ghosts?trackId=${encodeURIComponent(tabletTrackId)}`,
+      { headers: athleteHeaders(siblingSessionPayload.sessionToken) },
+    );
+    await expect(siblingGhosts.json()).resolves.toMatchObject({
+      ghosts: [expect.objectContaining({ riderName: 'Tablet Rider Two', source: 'personal' })],
+    });
+    await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: athleteHeaders(siblingSessionPayload.sessionToken),
+    });
+
+    const ended = await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(ended.status).toBe(200);
+    const replay = await api('/api/club-tablet/sessions/current', {
+      headers: athleteHeaders(selectedPayload.sessionToken),
+    });
+    expect(replay.status).toBe(401);
+    tabletSocket.socket.close();
+
+    // Ending an athlete identity releases both locks while preserving the
+    // durable tablet enrollment (and therefore its independent BLE pairing).
+    expect((await api('/api/club-live/sessions')).status).toBe(200);
+    const reuse = await startTabletSession(
+      firstDevice.deviceToken,
+      'shared-tablet-rider-one',
+      'WattbikePM25043950',
+    );
+    expect(reuse.status).toBe(201);
+    const reusePayload = await reuse.json();
+    await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: athleteHeaders(reusePayload.sessionToken),
+    });
+    const enrolledAfterIdentityEnd = await api('/api/club-tablet/roster', {
+      headers: deviceHeaders(firstDevice.deviceToken),
+    });
+    expect(enrolledAfterIdentityEnd.status).toBe(200);
+
+    // An unclaimed tablet workout follows the studio rider when that athlete
+    // later claims their account, without exposing the sibling's result.
+    cookie = monitorCookie;
+    const inviteResponse = await api('/api/club-connect/invites', {
+      method: 'POST',
+      body: JSON.stringify({ studioRiderId: 'shared-tablet-rider-one' }),
+    });
+    expect(inviteResponse.status).toBe(201);
+    const invite = await inviteResponse.json();
+    cookie = secondaryCookie;
+    const claim = await api('/api/club-connect/claim', {
+      method: 'POST',
+      body: JSON.stringify({ token: invite.token, fullName: 'Tablet Athlete Claimed' }),
+    });
+    expect(claim.status).toBe(200);
+    const claimedHistory = await api(`/api/training-sessions?from=${now - 5_000}&to=${Date.now() + 1_000}`);
+    const claimedHistoryPayload = await claimedHistory.json();
+    const claimedTrainingSession = claimedHistoryPayload.sessions.find(
+      (session: { id: string }) => session.id.includes(trainingId),
+    );
+    expect(claimedTrainingSession).toMatchObject({
+      club: { studioRiderId: 'shared-tablet-rider-one', role: 'athlete' },
+      details: {
+        summaries: [expect.objectContaining({ riderId: 'shared-tablet-rider-one' })],
+      },
+    });
+    expect(JSON.stringify(claimedTrainingSession)).not.toContain('Sibling');
+    expect(claimedHistoryPayload.sessions.filter(
+      (session: { id: string }) => session.id.includes(trainingId),
+    )).toHaveLength(1);
+    const claimedGhosts = await api(`/api/ghosts?trackId=${encodeURIComponent(tabletTrackId)}`);
+    expect(claimedGhosts.status).toBe(200);
+    const claimedGhostPayload = await claimedGhosts.json();
+    const claimedPersonalGhost = claimedGhostPayload.ghosts.find(
+      (ghost: { riderName: string }) => ghost.riderName === 'Tablet Rider One',
+    );
+    expect(claimedPersonalGhost).toMatchObject({
+      source: 'personal',
+      riderName: 'Tablet Rider One',
+      summary: expect.objectContaining({ playerId: 2, riderName: 'Tablet Rider One' }),
+      zoneResults: [expect.objectContaining({
+        riders: [expect.objectContaining({ playerId: 2, topWatts: 800 })],
+      })],
+    });
+    expect(JSON.stringify(claimedPersonalGhost)).not.toContain('9999');
+    expect(JSON.stringify(claimedPersonalGhost)).not.toContain('Forged Owner');
+
+    // A newly selected claimed athlete sees both future account-key ghosts and
+    // the exact pre-claim tablet-history alias, never a sibling's private lap.
+    cookie = monitorCookie;
+    expect((await api('/api/club-live/sessions')).status).toBe(200);
+    const claimedTabletSession = await startTabletSession(
+      firstDevice.deviceToken,
+      'shared-tablet-rider-one',
+      'WattbikePM25043950',
+    );
+    expect(claimedTabletSession.status).toBe(201);
+    const claimedTabletSessionPayload = await claimedTabletSession.json();
+    const claimedTabletGhosts = await api(
+      `/api/club-tablet/ghosts?trackId=${encodeURIComponent(tabletTrackId)}`,
+      { headers: athleteHeaders(claimedTabletSessionPayload.sessionToken) },
+    );
+    const claimedTabletGhostPayload = await claimedTabletGhosts.json();
+    expect(claimedTabletGhostPayload.ghosts).toEqual([
+      expect.objectContaining({ riderName: 'Tablet Rider One', source: 'personal' }),
+    ]);
+    expect(JSON.stringify(claimedTabletGhostPayload)).not.toContain('Tablet Rider Two');
+    await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: athleteHeaders(claimedTabletSessionPayload.sessionToken),
+    });
+    cookie = originalCookie;
+  });
+
+  it('serializes shared tablet athlete selection across concurrent club requests', async () => {
+    const originalCookie = cookie;
+    let loginSequence = 80;
+    const signInOwner = async () => {
+      loginSequence += 1;
+      const ownerLogin = await api('/api/auth/login', {
+        method: 'POST',
+        headers: { 'X-Forwarded-For': `203.0.113.${loginSequence}` },
+        body: JSON.stringify({
+          email: 'club-owner-admin@tracklab.test',
+          password: 'correct-horse-battery-staple',
+        }),
+      });
+      expect(ownerLogin.status).toBe(200);
+      const signedInCookie = String(ownerLogin.headers.get('set-cookie')).split(';')[0];
+      cookie = signedInCookie;
+      return signedInCookie;
+    };
+    const monitorCookie = await signInOwner();
+
+    const now = Date.now();
+    const riders = Array.from({ length: 5 }, (_, index) => ({
+      id: `atomic-tablet-rider-${index + 1}`,
+      name: `Atomic Tablet Rider ${index + 1}`,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    expect((await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({ studioRiders: riders }),
+    })).status).toBe(200);
+
+    // One stolen/replayed enrollment cookie may create at most one durable
+    // tablet credential, even when both requests clear authentication before
+    // either caller observes the response.
+    const duplicateEnrollmentCookie = await signInOwner();
+    const duplicateEnrollmentResponses = await Promise.all([
+      'Atomic duplicate enrollment A',
+      'Atomic duplicate enrollment B',
+    ].map((name) => fetch(`${baseUrl}/api/club-tablet/devices`, {
+      method: 'POST',
+      headers: {
+        Origin: baseUrl,
+        Cookie: duplicateEnrollmentCookie,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name }),
+    })));
+    expect(duplicateEnrollmentResponses.filter((response) => response.status === 201)).toHaveLength(1);
+    expect(duplicateEnrollmentResponses.filter((response) => response.status !== 201)).toHaveLength(1);
+    const successfulDuplicateEnrollment = duplicateEnrollmentResponses.find(
+      (response) => response.status === 201,
+    );
+    expect(successfulDuplicateEnrollment?.headers.get('set-cookie')).toContain('Max-Age=0');
+    cookie = monitorCookie;
+    const devicesAfterDuplicateAttempt = await api('/api/club-tablet/devices');
+    expect(devicesAfterDuplicateAttempt.status).toBe(200);
+    const devicesAfterDuplicatePayload = await devicesAfterDuplicateAttempt.json();
+    expect(devicesAfterDuplicatePayload.devices.filter(
+      (device: { name: string }) => device.name.startsWith('Atomic duplicate enrollment'),
+    )).toHaveLength(1);
+
+    const devices = [];
+    for (let index = 0; index < 5; index += 1) {
+      cookie = await signInOwner();
+      const response = await api('/api/club-tablet/devices', {
+        method: 'POST',
+        body: JSON.stringify({ name: `Atomic Studio iPad ${index + 1}` }),
+      });
+      expect(response.status).toBe(201);
+      devices.push(await response.json());
+      cookie = '';
+    }
+
+    const refreshOwnerMonitor = async () => {
+      cookie = monitorCookie;
+      expect((await api('/api/club-live/sessions')).status).toBe(200);
+    };
+    const startSession = (deviceIndex: number, riderIndex: number, bikeDeviceId: string) => (
+      api('/api/club-tablet/sessions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${devices[deviceIndex].deviceToken}` },
+        body: JSON.stringify({
+          studioRiderId: riders[riderIndex].id,
+          bikeDeviceId,
+        }),
+      })
+    );
+    const readResponses = (responses: Response[]) => Promise.all(responses.map(async (response) => ({
+      status: response.status,
+      body: await response.json(),
+    })));
+    const stopSuccessfulSessions = async (records: Array<{
+      status: number;
+      body: { sessionToken?: string };
+    }>) => {
+      for (const record of records) {
+        if (record.status !== 201 || !record.body.sessionToken) continue;
+        const stopped = await api('/api/club-tablet/sessions', {
+          method: 'DELETE',
+          headers: { 'X-TrackLab-Club-Tablet-Session': record.body.sessionToken },
+        });
+        expect(stopped.status).toBe(200);
+      }
+    };
+
+    await refreshOwnerMonitor();
+    let records = await readResponses(await Promise.all([
+      startSession(0, 0, 'atomic-bike-a'),
+      startSession(1, 0, 'atomic-bike-b'),
+    ]));
+    expect(records.map((record) => record.status).sort((a, b) => a - b)).toEqual([201, 409]);
+    expect(records.find((record) => record.status === 409)?.body).toMatchObject({
+      error: 'That athlete is already active on another club tablet.',
+    });
+    await stopSuccessfulSessions(records);
+
+    await refreshOwnerMonitor();
+    records = await readResponses(await Promise.all([
+      startSession(0, 0, 'atomic-bike-shared'),
+      startSession(1, 1, 'atomic-bike-shared'),
+    ]));
+    expect(records.map((record) => record.status).sort((a, b) => a - b)).toEqual([201, 409]);
+    expect(records.find((record) => record.status === 409)?.body).toMatchObject({
+      error: 'That Wattbike is already assigned to another active club tablet.',
+    });
+    await stopSuccessfulSessions(records);
+
+    await refreshOwnerMonitor();
+    records = await readResponses(await Promise.all(devices.map((_, index) => (
+      startSession(index, index, `atomic-cap-bike-${index + 1}`)
+    ))));
+    expect(records.filter((record) => record.status === 201)).toHaveLength(4);
+    expect(records.filter((record) => record.status === 409)).toHaveLength(1);
+    expect(records.find((record) => record.status === 409)?.body).toMatchObject({
+      error: 'This club already has four active shared-tablet athletes.',
+    });
+    await stopSuccessfulSessions(records);
     cookie = originalCookie;
   });
 

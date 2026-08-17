@@ -17,6 +17,7 @@ import {
   Compass,
   Gauge,
   Globe2,
+  LogOut,
   MapPinned,
   Minus,
   Plus,
@@ -25,14 +26,14 @@ import {
   Route,
   Settings,
   StopCircle,
+  TabletSmartphone,
   Usb,
   UserCircle,
   Users,
 } from 'lucide-react';
 import type { CloudUserDataStatus } from './components/DiagnosticsPanel';
-import { EarthTrackView } from './components/EarthTrackView';
 import { MembershipLanding } from './components/MembershipLanding';
-import { type ChatMessage, MultiplayerPanel } from './components/MultiplayerPanel';
+import type { ChatMessage } from './components/MultiplayerPanel';
 import { MonitorView } from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { StudioRaceEntry } from './components/StudioRaceEntry';
@@ -67,6 +68,10 @@ import {
   updateBikeRaceAudio,
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
+import {
+  clearRaceCaptureAtIdentityBoundary,
+  clearStoredRaceCaptureAtIdentityBoundary,
+} from './lib/raceCapturePrivacy';
 import { supportsDragStripGameArena } from './lib/dragStripGameArena';
 import {
   bikeSampleHasDriveSignalSince,
@@ -139,6 +144,7 @@ import {
   mergeGhostLaps,
   playbackGhostLap,
   readStoredGhostLaps,
+  sanitizeGhostLap,
   syncGhostLapToCloud,
   writeStoredGhostLaps,
 } from './lib/ghosts';
@@ -206,6 +212,7 @@ import {
   writeStoredStudioRidersForProfile,
 } from './lib/studioRiderStorage';
 import { normalizeRiderPhotoDataUrl } from './lib/riderPhotos';
+import { resolveExploreRecentRouteHistoryScope } from './lib/exploreRecentRoutes';
 import {
   clubConnectRequestIsCurrent,
   loadClubConnect,
@@ -213,6 +220,16 @@ import {
 } from './lib/clubConnect';
 import type { ClubTrainingSelection } from './lib/trainingHistory';
 import type { ClubLiveAccess } from './lib/clubLive';
+import {
+  clearStoredClubTabletDevice,
+  clearStoredClubTabletSession,
+  readStoredClubTabletDevice,
+  readStoredClubTabletSession,
+  storeClubTabletSession,
+  type ClubTabletDeviceCredential,
+  type ClubTabletRoster,
+  type ClubTabletSessionCredential,
+} from './lib/clubTabletStorage';
 import type {
   ClubLiveActivityState,
   ClubLiveExploreState,
@@ -241,7 +258,7 @@ import { useRaceEngine } from './hooks/useRaceEngine';
 import { useRaceCommentary } from './hooks/useRaceCommentary';
 import { useBluetoothBikes } from './hooks/useBluetoothBikes';
 import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
-import { useMultiplayer } from './hooks/useMultiplayer';
+import { useMultiplayer, type MultiplayerIdentityOverride } from './hooks/useMultiplayer';
 import { useRoomVoiceChat } from './hooks/useRoomVoiceChat';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
 import type {
@@ -304,6 +321,14 @@ const DeveloperToolsPanel = lazy(() => import('./components/DeveloperToolsPanel'
 const ClubLiveMonitor = lazy(() => import('./components/ClubLiveMonitor'));
 const ClubLiveAthleteBridge = lazy(() => import('./components/ClubLiveAthleteBridge'));
 const ClubLiveAccessNotice = lazy(() => import('./components/ClubLiveAccessNotice'));
+const ClubTabletMode = lazy(() => import('./components/ClubTabletMode'));
+const ClubTabletRuntime = lazy(() => import('./components/ClubTabletRuntime'));
+const EarthTrackView = lazy(() => import('./components/EarthTrackView').then((module) => ({
+  default: module.EarthTrackView,
+})));
+const MultiplayerPanel = lazy(() => import('./components/MultiplayerPanel').then((module) => ({
+  default: module.MultiplayerPanel,
+})));
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const customRouteInitialZoom = 18;
@@ -1506,6 +1531,18 @@ export default function App() {
   }) | null>(null);
   const [clubLiveAccessStatus, setClubLiveAccessStatus] = useState<'idle' | 'checking' | 'active' | 'inactive' | 'error'>('idle');
   const [exploreClubLiveState, setExploreClubLiveState] = useState<ClubLiveExploreState | null>(null);
+  const initialClubTabletDeviceRef = useRef(readStoredClubTabletDevice());
+  const [clubTabletDevice, setClubTabletDevice] = useState<ClubTabletDeviceCredential | null>(
+    initialClubTabletDeviceRef.current,
+  );
+  const [clubTabletRoster, setClubTabletRoster] = useState<ClubTabletRoster | null>(null);
+  const [clubTabletSession, setClubTabletSession] = useState<ClubTabletSessionCredential | null>(
+    readStoredClubTabletSession,
+  );
+  const [clubTabletDeviceStatus, setClubTabletDeviceStatus] = useState<'idle' | 'checking' | 'active' | 'error' | 'revoked'>(
+    initialClubTabletDeviceRef.current ? 'checking' : 'idle',
+  );
+  const clubTabletEmergencyExitRef = useRef<() => void>(() => undefined);
   const clubTrainingRequestGenerationRef = useRef(0);
   const activeClubProfileKeyRef = useRef<string | null>(null);
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
@@ -1532,10 +1569,14 @@ export default function App() {
     () => raceViewPreferencesRef.current.commentary,
   );
   const [appMode, setAppMode] = useState<AppMode>(
-    initialTrack.countryCode === 'CUSTOM' ? 'straight-sprint' : 'race',
+    initialClubTabletDeviceRef.current
+      ? 'club-tablet'
+      : initialTrack.countryCode === 'CUSTOM' ? 'straight-sprint' : 'race',
   );
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
-  const [showMembershipLanding, setShowMembershipLanding] = useState(() => initialMembershipRef.current?.tier === 'visitor');
+  const [showMembershipLanding, setShowMembershipLanding] = useState(
+    () => !initialClubTabletDeviceRef.current && initialMembershipRef.current?.tier === 'visitor',
+  );
   const [checkoutBikeSeats, setCheckoutBikeSeats] = useState(() => Math.max(1, Math.min(maxPlayers, initialMembershipRef.current?.bikeSeats ?? 1)));
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>('idle');
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
@@ -1586,7 +1627,23 @@ export default function App() {
   const [cStartOffsetsByPlayer, setCStartOffsetsByPlayer] = useState<CStartOffsetsByPlayer>({});
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
-  const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(readStoredRaceCapture);
+  const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(() => {
+    if (initialClubTabletDeviceRef.current) {
+      clearStoredRaceCaptureAtIdentityBoundary();
+      return null;
+    }
+    return readStoredRaceCapture();
+  });
+  const clearRaceCaptureForClubTablet = useCallback(() => {
+    clearRaceCaptureAtIdentityBoundary({
+      capturedSampleKeysRef,
+      lastRaceDebugFrameAtRef,
+      activeRaceSessionIdRef,
+      ghostRaceStartedAtRef,
+      ghostTraceRef,
+      ghostTraceLastSampleAtRef,
+    }, () => setRaceCapture(null));
+  }, []);
   const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
   const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
@@ -1600,14 +1657,27 @@ export default function App() {
   const [chatDraft, setChatDraft] = useState('');
   const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
   const [regularUserPreview, setRegularUserPreview] = useState(false);
+  const clubTabletKioskMode = Boolean(clubTabletDevice);
+  const clubTabletDeviceActive = Boolean(
+    clubTabletDevice
+    && clubTabletDeviceStatus === 'active'
+    && clubTabletRoster?.device.id === clubTabletDevice.device.id,
+  );
+  const clubTabletSessionActive = Boolean(
+    clubTabletDeviceActive
+    && clubTabletSession
+    && clubTabletSession.session.expiresAt > now
+    && clubTabletSession.session.clubId === clubTabletDevice?.device.clubId,
+  );
+  const clubTabletProfileKey = clubTabletDevice ? `club-tablet:${clubTabletDevice.device.id}` : '';
   const accountEmail = normalizeAccountEmail(authUser?.email ?? '');
   const accountProfileComplete = authStatus === 'signed-in' && Boolean(authUser);
-  const adminProfileActive = Boolean(authUser?.admin);
+  const adminProfileActive = !clubTabletKioskMode && Boolean(authUser?.admin);
   const canManageStudioRiders = adminProfileActive || Boolean(
     authUser && clubRosterManagementProfileKey === authUser.profileKey,
   );
   const clubOwnerActive = Boolean(
-    authUser && clubRosterManagementProfileKey === authUser.profileKey,
+    !clubTabletKioskMode && authUser && clubRosterManagementProfileKey === authUser.profileKey,
   );
   const studioRidersLoadedForActiveProfile = Boolean(
     authUser && studioRidersProfileKey === authUser.profileKey,
@@ -1635,39 +1705,46 @@ export default function App() {
     ? clubTrainingMemberships
     : [];
   const selectedClubTrainingMembershipActive = Boolean(
-    clubTrainingSelection
-    && activeClubTrainingMemberships.some((membership) => (
-      membership.clubId === clubTrainingSelection.clubId
-      && membership.studioRiderId === clubTrainingSelection.studioRiderId
-    )),
+    clubTrainingSelection && (
+      activeClubTrainingMemberships.some((membership) => (
+        membership.clubId === clubTrainingSelection.clubId
+        && membership.studioRiderId === clubTrainingSelection.studioRiderId
+      ))
+      || (clubTabletSessionActive
+        && clubTabletSession?.session.clubId === clubTrainingSelection.clubId
+        && clubTabletSession.session.studioRiderId === clubTrainingSelection.studioRiderId)
+    ),
   );
+  const clubLiveProfileKey = clubTabletSessionActive ? clubTabletProfileKey : authUser?.profileKey ?? '';
   const clubLiveAccessActive = Boolean(
-    authUser
-    && clubTrainingSelection
+    clubTrainingSelection
     && selectedClubTrainingMembershipActive
-    && clubLiveAccess?.profileKey === authUser.profileKey
+    && clubLiveAccess?.profileKey === clubLiveProfileKey
     && clubLiveAccess.clubId === clubTrainingSelection.clubId
     && clubLiveAccess.studioRiderId === clubTrainingSelection.studioRiderId
     && clubLiveAccess.active
     && clubLiveAccess.expiresAt > now,
   );
   const authenticatedRacerAccess = authStatus === 'signed-in'
-    && authUser?.membership.tier === 'racer';
+    && authUser?.membership.tier === 'racer'
+    && !clubTabletKioskMode;
   const clubMonitorReleasesLocalBikes = appMode === 'club-monitor';
   const bluetoothAccessGranted = !clubMonitorReleasesLocalBikes
-    && (authenticatedRacerAccess || clubLiveAccessActive);
+    && (authenticatedRacerAccess || clubLiveAccessActive || clubTabletDeviceActive);
   const bluetooth = useBluetoothBikes({
     enabled: bluetoothAccessGranted,
-    maxDevices: authenticatedRacerAccess ? maxPlayers : 1,
+    maxDevices: clubTabletKioskMode ? 1 : authenticatedRacerAccess ? maxPlayers : 1,
   });
   const liveBikeSeatLimit = clubMonitorReleasesLocalBikes
     ? 0
-    : authenticatedRacerAccess
+    : clubTabletKioskMode
+      ? clubTabletDeviceActive ? 1 : 0
+      : authenticatedRacerAccess
       ? maxPlayers
       : clubLiveAccessActive ? 1 : 0;
   const liveBikeAccessLocked = !bluetoothAccessGranted;
-  const developerUiActive = adminProfileActive && !regularUserPreview;
-  const developerRaceLayoutActive = isAdminAccountEmail(accountEmail);
+  const developerUiActive = !clubTabletKioskMode && adminProfileActive && !regularUserPreview;
+  const developerRaceLayoutActive = !clubTabletKioskMode && isAdminAccountEmail(accountEmail);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: 1, author: 'Coach', text: 'Gate cadence looked strong through the first straight.', at: '10:24 AM' },
     { id: 2, author: 'System', text: "Private room opened for today's session.", at: '10:25 AM' },
@@ -1688,6 +1765,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (clubTabletKioskMode) clearRaceCaptureForClubTablet();
+  }, [clearRaceCaptureForClubTablet, clubTabletKioskMode]);
+
+  useEffect(() => {
+    if (!clubTabletSessionActive || !clubTabletSession) return;
+    const { clubId, studioRiderId, bikeDeviceId } = clubTabletSession.session;
+    setClubTrainingSelection({ clubId, studioRiderId });
+    setBikeConnectionSource('bluetooth');
+    setStudioRiderAssignments({ [bikeDeviceId]: studioRiderId });
+    setLiveRaceReadyDeviceIds([bikeDeviceId]);
+  }, [clubTabletSessionActive, clubTabletSession?.sessionToken]);
+
+  useEffect(() => {
+    if (clubTabletKioskMode && !clubTabletSessionActive && appMode !== 'club-tablet') {
+      setAppMode('club-tablet');
+    }
+  }, [appMode, clubTabletKioskMode, clubTabletSessionActive]);
+
+  useEffect(() => {
     storedMappingsRef.current = storedMappings;
   }, [storedMappings]);
 
@@ -1700,7 +1796,7 @@ export default function App() {
     setClubTrainingMemberships([]);
     setClubTrainingMembershipProfileKey(null);
     setClubRosterManagementProfileKey(null);
-    setClubTrainingSelection(null);
+    if (!clubTabletSessionActive) setClubTrainingSelection(null);
 
     if (!requestedProfileKey) {
       setClubTrainingStatus('idle');
@@ -1734,10 +1830,10 @@ export default function App() {
       setClubTrainingMemberships([]);
       setClubTrainingMembershipProfileKey(null);
       setClubRosterManagementProfileKey(null);
-      setClubTrainingSelection(null);
+      if (!clubTabletSessionActive) setClubTrainingSelection(null);
       setClubTrainingStatus('error');
     }
-  }, [authUser]);
+  }, [authUser, clubTabletSessionActive]);
 
   useEffect(() => {
     void refreshClubTrainingMemberships();
@@ -2447,6 +2543,11 @@ export default function App() {
     });
     return next;
   }, [authenticatedRacerAccess, bluetooth.samplesByDevice, bridge.samplesByDevice]);
+  const clubTabletBikeActivityAt = useMemo(() => {
+    if (!clubTabletSessionActive || !clubTabletSession) return 0;
+    const sample = connectedBikeSamples.get(clubTabletSession.session.bikeDeviceId);
+    return sample && (sample.watts > 0 || (sample.cadence ?? 0) > 0) ? sample.at : 0;
+  }, [clubTabletSession, clubTabletSessionActive, connectedBikeSamples]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
   const liveBikeDeviceIds = useMemo(() => {
     const deviceIds = new Set<number>();
@@ -2459,7 +2560,7 @@ export default function App() {
   }, [connectedBikeSamples, now]);
   const connectedBikeDevices = useMemo(() => {
     const devices: ConnectedBikeDevice[] = [
-      ...bridge.devices,
+      ...(clubTabletKioskMode ? [] : bridge.devices),
       ...bluetooth.devices,
     ];
 
@@ -2474,7 +2575,7 @@ export default function App() {
       maxDevices: liveBikeSeatLimit,
     })
       .filter((device) => liveBikeDeviceIds.has(device.deviceId));
-  }, [bluetooth.devices, bridge.devices, connectedBikeSamples, liveBikeDeviceIds, liveBikeSeatLimit, now]);
+  }, [bluetooth.devices, bridge.devices, clubTabletKioskMode, connectedBikeSamples, liveBikeDeviceIds, liveBikeSeatLimit, now]);
   const connectedBikeDeviceById = useMemo(
     () => new Map(connectedBikeDevices.map((device) => [device.deviceId, device])),
     [connectedBikeDevices],
@@ -2520,14 +2621,31 @@ export default function App() {
       }
       : null
   ), [accountProfile.photoUrl, accountProfile.updatedAt, authUser]);
+  const clubTabletRider = useMemo<StudioRider | null>(() => {
+    if (!clubTabletSessionActive || !clubTabletSession) return null;
+    const athlete = clubTabletRoster?.athletes.find(
+      (candidate) => candidate.studioRiderId === clubTabletSession.session.studioRiderId,
+    );
+    return {
+      id: clubTabletSession.session.studioRiderId,
+      name: athlete?.athleteName || athlete?.riderName || clubTabletSession.session.athleteName || clubTabletSession.session.riderName,
+      ...(athlete?.photoUrl || clubTabletSession.session.photoUrl
+        ? { photoUrl: athlete?.photoUrl ?? clubTabletSession.session.photoUrl }
+        : {}),
+      createdAt: 1,
+      updatedAt: 1,
+    };
+  }, [clubTabletRoster?.athletes, clubTabletSession, clubTabletSessionActive]);
   const availableStudioRiders = useMemo(
-    () => [
-      ...(accountRider ? [accountRider] : []),
-      ...(canManageActiveStudioRiders
-        ? activeStudioRiders(activeProfileStudioRiders).filter((rider) => rider.id !== accountRider?.id)
-        : []),
-    ],
-    [accountRider, activeProfileStudioRiders, canManageActiveStudioRiders],
+    () => clubTabletRider
+      ? [clubTabletRider]
+      : [
+        ...(accountRider ? [accountRider] : []),
+        ...(canManageActiveStudioRiders
+          ? activeStudioRiders(activeProfileStudioRiders).filter((rider) => rider.id !== accountRider?.id)
+          : []),
+      ],
+    [accountRider, activeProfileStudioRiders, canManageActiveStudioRiders, clubTabletRider],
   );
   const explorePlayers = useMemo(
     () => (
@@ -2554,14 +2672,48 @@ export default function App() {
     );
     return applyStudioRiderAssignments(enteredPlayers, availableStudioRiders, studioRiderAssignments);
   }, [activePlayers, availableStudioRiders, demoMode, liveRaceReadyDeviceIds, studioRiderAssignments]);
+  const multiplayerIdentityOverride = useMemo<MultiplayerIdentityOverride | null>(() => {
+    if (!clubTabletKioskMode || !clubTabletDevice) return null;
+    if (!clubTabletSessionActive || !clubTabletSession) {
+      return {
+        scopeKey: `club-tablet:${clubTabletDevice.device.id}:picker`,
+        guestKey: `club-tablet:${clubTabletDevice.device.id}:picker`,
+        name: 'Choose an athlete',
+        available: false,
+        membershipTier: 'visitor',
+        readOnly: true,
+      };
+    }
+    const athleteName = clubTabletRider?.name
+      || clubTabletSession.session.athleteName
+      || clubTabletSession.session.riderName;
+    return {
+      // The token is used only as a local React scope generation. It is never
+      // persisted or sent as the public multiplayer profile key.
+      scopeKey: `club-tablet-session:${clubTabletSession.sessionToken}`,
+      guestKey: `club-tablet:${clubTabletDevice.device.id}:${clubTabletSession.session.studioRiderId}`,
+      name: athleteName,
+      available: true,
+      membershipTier: 'racer',
+      readOnly: true,
+    };
+  }, [
+    clubTabletDevice,
+    clubTabletKioskMode,
+    clubTabletRider?.name,
+    clubTabletSession,
+    clubTabletSessionActive,
+  ]);
   const multiplayer = useMultiplayer({
-    enabled: playMode === 'multiplayer',
+    enabled: playMode === 'multiplayer' && (!clubTabletKioskMode || clubTabletSessionActive),
     track: effectiveTrack,
     bikeCount: appMode === 'explore'
       ? explorePlayers.length
       : demoMode
         ? activePlayers.length
         : enteredRacePlayers.length,
+    identityOverride: multiplayerIdentityOverride,
+    clubTabletSession: clubTabletSessionActive ? clubTabletSession : null,
   });
   const roomVoice = useRoomVoiceChat({
     currentRoom: multiplayer.currentRoom,
@@ -2609,6 +2761,15 @@ export default function App() {
     [localRaceSeatLimit, raceCandidatePlayers],
   );
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
+  const exploreRecentRouteHistoryScope = resolveExploreRecentRouteHistoryScope({
+    accountProfileKey: cloudProfileKey,
+    accountCloudEnabled: Boolean(authUser),
+    kioskMode: clubTabletKioskMode,
+    clubTabletDeviceId: clubTabletDevice?.device.id,
+    studioRiderId: clubTabletSessionActive
+      ? clubTabletSession?.session.studioRiderId
+      : null,
+  });
   useEffect(() => {
     const profileKey = authUser?.profileKey ?? null;
     studioRidersProfileKeyRef.current = profileKey;
@@ -2711,6 +2872,8 @@ export default function App() {
     () => eventGhostLaps.filter((ghost) => (
         ghost.raceSource === 'live'
         && (
+          clubTabletSessionActive
+          ||
           ghost.ownerKey === cloudProfileKey
           || ghost.source !== 'personal'
           || ghost.analyticsPublic
@@ -2720,6 +2883,7 @@ export default function App() {
       .slice(0, 50),
     [
       cloudProfileKey,
+      clubTabletSessionActive,
       eventGhostLaps,
     ],
   );
@@ -3486,10 +3650,10 @@ export default function App() {
   }, [bikeConnectionSource]);
 
   useEffect(() => {
-    if (!authenticatedRacerAccess && clubLiveAccessActive && bikeConnectionSource !== 'bluetooth') {
+    if ((clubTabletKioskMode || (!authenticatedRacerAccess && clubLiveAccessActive)) && bikeConnectionSource !== 'bluetooth') {
       setBikeConnectionSource('bluetooth');
     }
-  }, [authenticatedRacerAccess, bikeConnectionSource, clubLiveAccessActive]);
+  }, [authenticatedRacerAccess, bikeConnectionSource, clubLiveAccessActive, clubTabletKioskMode]);
 
   useEffect(() => {
     if (shouldStopAdvancedConnector({
@@ -3984,8 +4148,8 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    writeStoredGhostLaps(ghostLaps);
-  }, [ghostLaps]);
+    if (!clubTabletKioskMode) writeStoredGhostLaps(ghostLaps);
+  }, [clubTabletKioskMode, ghostLaps]);
 
   useEffect(() => {
     const availableIds = new Set(availableGhostLaps.map((ghost) => ghost.id));
@@ -3993,11 +4157,39 @@ export default function App() {
   }, [availableGhostLaps]);
 
   useEffect(() => {
-    if (!cloudProfileKey || isCustomRoutePreviewId(selectedTrack.id)) {
+    if (isCustomRoutePreviewId(selectedTrack.id)) {
       return undefined;
     }
 
     let cancelled = false;
+    if (clubTabletKioskMode && !clubTabletSessionActive) {
+      setSelectedGhostIds([]);
+      setGhostLaps([]);
+      return undefined;
+    }
+    if (clubTabletSessionActive && clubTabletSession) {
+      setSelectedGhostIds([]);
+      setGhostLaps([]);
+      void import('./lib/clubTablet').then(({ loadClubTabletGhosts }) => loadClubTabletGhosts(
+        selectedTrack.id,
+        appMode === 'straight-sprint'
+          ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
+          : undefined,
+        clubTabletSession,
+      )).then((values) => {
+        if (cancelled) return;
+        const scopedGhosts = values.flatMap((value) => {
+          const ghost = sanitizeGhostLap(value);
+          return ghost ? [{ ...ghost, ownerKey: clubTabletProfileKey }] : [];
+        });
+        setGhostLaps(scopedGhosts);
+      }).catch((error: Error) => {
+        if (!cancelled) console.warn(`Could not load this athlete's Club Tablet ghosts: ${error.message}`);
+      });
+      return () => { cancelled = true; };
+    }
+
+    if (!cloudProfileKey) return undefined;
     const friendKeys = friendGhostKeySignature
       ? friendGhostKeySignature.split(',').filter(Boolean)
       : [];
@@ -4027,6 +4219,10 @@ export default function App() {
   }, [
     appMode,
     cloudProfileKey,
+    clubTabletProfileKey,
+    clubTabletKioskMode,
+    clubTabletSession?.sessionToken,
+    clubTabletSessionActive,
     friendGhostKeySignature,
     selectedTrack.id,
     straightSprintAirSetting,
@@ -4317,10 +4513,20 @@ export default function App() {
       return;
     }
 
-    const ownerKey = cloudProfileKey || 'local';
-    const ownerName = authUser?.name ?? multiplayer.profile.name ?? 'TrackLab rider';
+    const tabletLocalPlayer = clubTabletSessionActive && clubTabletSession
+      ? racePlayers.find((player) => player.riderId === clubTabletSession.session.studioRiderId)
+      : undefined;
+    if (clubTabletSessionActive && !tabletLocalPlayer) {
+      console.warn('Club Tablet race result was not saved because the selected athlete could not be matched safely.');
+      return;
+    }
+    const capturedSummaries = tabletLocalPlayer
+      ? raceCapture.summary.filter((summary) => summary.playerId === tabletLocalPlayer.id)
+      : raceCapture.summary;
+    const ownerKey = clubTabletSessionActive ? clubTabletProfileKey : cloudProfileKey || 'local';
+    const ownerName = clubTabletRider?.name ?? authUser?.name ?? multiplayer.profile.name ?? 'TrackLab rider';
     const savedAt = Date.now();
-    const nextGhosts = raceCapture.summary
+    const nextGhosts = capturedSummaries
       .map((summary) => {
         const player = racePlayers.find((slot) => slot.id === summary.playerId);
         const rider = riders.find((item) => item.playerId === summary.playerId);
@@ -4365,17 +4571,7 @@ export default function App() {
 
     ghostSavedSessionIdsRef.current.add(sessionId);
     setGhostLaps((current) => mergeGhostLaps(current, nextGhosts));
-    void fetch('/api/race-results', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sessionId,
-        trackId: effectiveTrack.id,
-        trackName: effectiveTrack.name,
-        summaries: raceCapture.summary.map((summary) => {
+    const raceResultSummaries = capturedSummaries.map((summary) => {
           const photoUrl = racePlayers.find((player) => player.id === summary.playerId)?.photoUrl;
           return {
             ...summary,
@@ -4385,18 +4581,36 @@ export default function App() {
               sprintAirSetting: activeSprintAirSetting,
             } : {}),
           };
+        });
+    const raceResultSave = tabletLocalPlayer
+      ? import('./lib/clubTablet').then(({ saveClubTabletRaceResult }) => saveClubTabletRaceResult({
+        sessionId,
+        trackId: effectiveTrack.id,
+        trackName: effectiveTrack.name,
+        summaries: raceResultSummaries,
+        localPlayerId: tabletLocalPlayer.id,
+      }, clubTabletSession))
+      : fetch('/api/race-results', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionId,
+          trackId: effectiveTrack.id,
+          trackName: effectiveTrack.name,
+          summaries: raceResultSummaries,
         }),
-      }),
-    }).then((response) => {
-      if (!response.ok) {
-        throw new Error(`Race history service returned ${response.status}`);
-      }
-    }).catch((error: Error) => {
+      }).then((response) => {
+        if (!response.ok) throw new Error(`Race history service returned ${response.status}`);
+      });
+    void raceResultSave.catch((error: Error) => {
       console.warn(`Could not save TrackLab race history: ${error.message}`);
     });
     const trainingStartedAt = raceCapture.startedAt ?? raceCapture.createdAt;
     const trainingEndedAt = raceCapture.endedAt ?? savedAt;
-    const trainingSummaries = raceCapture.summary.map((summary) => {
+    const trainingSummaries = capturedSummaries.map((summary) => {
       const player = racePlayers.find((candidate) => candidate.id === summary.playerId);
       const photoUrl = player?.photoUrl;
       return {
@@ -4414,7 +4628,7 @@ export default function App() {
       startedAt: trainingStartedAt,
       endedAt: trainingEndedAt,
       durationMs: Math.max(0, trainingEndedAt - trainingStartedAt),
-      distanceMeters: Math.max(0, ...raceCapture.summary.map((summary) => summary.distanceMeters)),
+      distanceMeters: Math.max(0, ...capturedSummaries.map((summary) => summary.distanceMeters)),
       trackId: effectiveTrack.id,
       trackName: effectiveTrack.name,
       details: {
@@ -4429,13 +4643,20 @@ export default function App() {
           sprintAirSetting: activeSprintAirSetting,
         } : {}),
       },
-    }, clubTrainingSelection)).then(() => {
+    }, clubTrainingSelection, {
+      localPlayerId: tabletLocalPlayer?.id ?? null,
+    })).then(() => {
       setTrainingHistoryRevision((revision) => revision + 1);
     }).catch((error: Error) => {
       console.warn(`Could not save TrackLab training session: ${error.message}`);
     });
     nextGhosts.forEach((ghost) => {
-      void syncGhostLapToCloud(ghost, ownerKey).catch((error: Error) => {
+      const ghostSave = tabletLocalPlayer
+        ? import('./lib/clubTablet').then(({ saveClubTabletGhost }) => (
+          saveClubTabletGhost(ghost, tabletLocalPlayer.id, clubTabletSession)
+        ))
+        : syncGhostLapToCloud(ghost, ownerKey);
+      void ghostSave.catch((error: Error) => {
         console.warn(`Could not sync TrackLab ghost: ${error.message}`);
       });
     });
@@ -4446,6 +4667,10 @@ export default function App() {
     cloudProfileKey,
     appMode,
     clubTrainingSelection,
+    clubTabletProfileKey,
+    clubTabletRider?.name,
+    clubTabletSession,
+    clubTabletSessionActive,
     effectiveTrack.id,
     effectiveTrack.name,
     ghostRouteVariantId,
@@ -5726,10 +5951,13 @@ export default function App() {
     if (startGateStatus.active || raceState === 'racing') {
       return;
     }
+    if (clubTabletSessionActive && clubTabletSession) {
+      if (deviceId !== clubTabletSession.session.bikeDeviceId || riderId !== clubTabletSession.session.studioRiderId) return;
+    }
 
     setLockedRacePlayers(null);
     setStudioRiderAssignments((current) => assignStudioRider(current, deviceId, riderId));
-  }, [raceState, startGateStatus.active]);
+  }, [clubTabletSession, clubTabletSessionActive, raceState, startGateStatus.active]);
 
   const handleStudioRiderAdd = useCallback((name: string) => {
     if (!canManageActiveStudioRiders) {
@@ -6066,9 +6294,10 @@ export default function App() {
     ghostRaceStartedAtRef.current = gateDropAt;
     ghostTraceRef.current = new Map();
     ghostTraceLastSampleAtRef.current = new Map();
+    const personalBestOwnerKey = clubTabletSessionActive ? clubTabletProfileKey : cloudProfileKey;
     setPreviousRaceBestTimes(demoMode
       ? {}
-      : previousPersonalBestTimes(racePlayers, eventGhostLaps, cloudProfileKey));
+      : previousPersonalBestTimes(racePlayers, eventGhostLaps, personalBestOwnerKey));
     if (demoMode) {
       setDemoRaceSeed((seed) => seed + 104729);
       setDemoRaceStartedAt(gateDropAt);
@@ -6092,7 +6321,7 @@ export default function App() {
       redLightAtRef.current = 0;
       setStartGateStatus(idleStartGateStatus);
     });
-  }, [appendRaceCaptureEvent, bridge, cloudProfileKey, demoMode, eventGhostLaps, racePlayers, releaseCStartPlayers, scheduleStartGateStep, startRace]);
+  }, [appendRaceCaptureEvent, bridge, cloudProfileKey, clubTabletProfileKey, clubTabletSessionActive, demoMode, eventGhostLaps, racePlayers, releaseCStartPlayers, scheduleStartGateStep, startRace]);
 
   const startConfiguredCadence = useCallback(async (startingTrackId: string, sequenceId: number) => {
     if (
@@ -6428,7 +6657,9 @@ export default function App() {
   };
 
   const handleBikeConnectionSourceChange = (source: BikeConnectionSource) => {
-    if (!accountProfileComplete) {
+    if (clubTabletKioskMode && source !== 'bluetooth') return;
+
+    if (!accountProfileComplete && !clubTabletDeviceActive) {
       setProfileFormError('Create an account or sign in before connecting Wattbikes.');
       setCheckoutMessage(null);
       setShowMembershipLanding(true);
@@ -6603,6 +6834,16 @@ export default function App() {
     setShowMembershipLanding(true);
   }, [clearStartGateSequence, clubTrainingSelection]);
 
+  useEffect(() => {
+    if (!clubTabletKioskMode || !authUser) return;
+    // Enrollment immediately converts this browser into a student-safe kiosk;
+    // the owner's cookie and profile state are removed behind the locked UI.
+    void handleSignOut().finally(() => {
+      setShowMembershipLanding(false);
+      setAppMode('club-tablet');
+    });
+  }, [authUser, clubTabletKioskMode, handleSignOut]);
+
   const openFreeSpectatorAccess = useCallback(() => {
     if (!requireAccountProfile()) {
       return;
@@ -6770,6 +7011,139 @@ export default function App() {
     releaseRaceFullscreen();
   };
 
+  const returnToClubTablet = useCallback(() => {
+    clearStartGateSequence();
+    setLockedRacePlayers(null);
+    setMappingMode(false);
+    setMappingFullscreen(false);
+    setExploreRideFullscreen(false);
+    setExploreClubLiveState(null);
+    setDemoRaceStartedAt(null);
+    setDemoSignalsStopped(true);
+    resetRace();
+    raceCommentary.stop();
+    stopBmxEventAmbience();
+    stopRaceAudioKeepAlive();
+    stopBikeRaceAudio();
+    roomVoice.stop();
+    if (multiplayer.currentRoom) {
+      multiplayer.controlExploreSession('reset');
+      multiplayer.leaveRoom();
+    }
+    setPlayMode('local');
+    releaseRaceFullscreen();
+    setAppMode('club-tablet');
+  }, [
+    clearStartGateSequence,
+    multiplayer,
+    raceCommentary.stop,
+    releaseRaceFullscreen,
+    resetRace,
+    roomVoice,
+  ]);
+  clubTabletEmergencyExitRef.current = returnToClubTablet;
+
+  const handleClubTabletDeviceChange = useCallback((next: ClubTabletDeviceCredential | null) => {
+    clearRaceCaptureForClubTablet();
+    setChatDraft('');
+    setChatMessages([]);
+    if (!next) {
+      clubTabletEmergencyExitRef.current();
+      clearStoredClubTabletSession();
+      clearStoredClubTabletDevice();
+      setClubTabletSession(null);
+      setClubTabletRoster(null);
+      setClubTabletDevice(null);
+      setClubTabletDeviceStatus('idle');
+      setClubTrainingSelection(null);
+      setStudioRiderAssignments({});
+      setLiveRaceReadyDeviceIds([]);
+      setSelectedGhostIds([]);
+      setGhostLaps(readStoredGhostLaps());
+      return;
+    }
+    setClubTabletDevice(next);
+    setClubTabletDeviceStatus('checking');
+    setDemoMode(false);
+    setBikeConnectionSource('bluetooth');
+    setShowMembershipLanding(false);
+    setSidebarMoreOpen(false);
+    setAppMode('club-tablet');
+  }, [clearRaceCaptureForClubTablet]);
+
+  const handleClubTabletSessionChange = useCallback((next: ClubTabletSessionCredential | null) => {
+    clearRaceCaptureForClubTablet();
+    setChatDraft('');
+    setChatMessages([]);
+    if (!next) {
+      clubTabletEmergencyExitRef.current();
+      clearStoredClubTabletSession();
+      setClubTabletSession(null);
+      setClubTrainingSelection(null);
+      setStudioRiderAssignments({});
+      setLiveRaceReadyDeviceIds([]);
+      setSelectedGhostIds([]);
+      setGhostLaps([]);
+      return;
+    }
+    storeClubTabletSession(next);
+    setClubTabletSession(next);
+    setClubTrainingSelection({
+      clubId: next.session.clubId,
+      studioRiderId: next.session.studioRiderId,
+    });
+    setStudioRiderAssignments({ [next.session.bikeDeviceId]: next.session.studioRiderId });
+    setLiveRaceReadyDeviceIds([next.session.bikeDeviceId]);
+    setSelectedGhostIds([]);
+    setGhostLaps([]);
+    setBikeConnectionSource('bluetooth');
+    setDemoMode(false);
+    setAppMode('club-tablet');
+  }, [clearRaceCaptureForClubTablet]);
+
+  const handleClubTabletDeviceReady = useCallback((
+    nextRoster: ClubTabletRoster,
+    hasStoredSession: boolean,
+  ) => {
+    setClubTabletRoster(nextRoster);
+    setClubTabletDeviceStatus('active');
+    setAppMode((current) => (hasStoredSession ? current : 'club-tablet'));
+  }, []);
+
+  const handleClubTabletDeviceError = useCallback(() => {
+    setClubTabletDeviceStatus('error');
+  }, []);
+
+  const handleClubTabletRosterChange = useCallback((nextRoster: ClubTabletRoster | null) => {
+    setClubTabletRoster(nextRoster);
+    if (nextRoster && nextRoster.device.id === clubTabletDevice?.device.id) {
+      setClubTabletDeviceStatus('active');
+    }
+  }, [clubTabletDevice?.device.id]);
+
+  const handleClubTabletDeviceRevoked = useCallback(() => {
+    handleClubTabletDeviceChange(null);
+    setClubTabletDeviceStatus('revoked');
+    setShowMembershipLanding(true);
+  }, [handleClubTabletDeviceChange]);
+
+  const handleClubTabletSessionExpired = useCallback(() => {
+    handleClubTabletSessionChange(null);
+  }, [handleClubTabletSessionChange]);
+
+  const handleClubTabletEndAthlete = useCallback(async () => {
+    const activeSession = clubTabletSession;
+    returnToClubTablet();
+    try {
+      if (activeSession) {
+        const { endClubTabletSession } = await import('./lib/clubTablet');
+        await endClubTabletSession(activeSession);
+      }
+    } finally {
+      handleClubTabletSessionChange(null);
+    }
+  }, [clubTabletSession, handleClubTabletSessionChange, returnToClubTablet]);
+
   const shareMultiplayerInvite = useCallback(() => {
     if (!multiplayer.inviteUrl) {
       return;
@@ -6804,11 +7178,19 @@ export default function App() {
     endedAt: number;
     durationMs: number;
   }) => {
-    if (demoMode || !authUser) {
+    if (demoMode || (!authUser && !clubTabletSessionActive)) {
       return;
     }
+    const tabletRider = clubTabletSessionActive && clubTabletSession
+      ? result.riders.find((rider) => rider.riderId === clubTabletSession.session.studioRiderId)
+      : undefined;
+    if (clubTabletSessionActive && !tabletRider) {
+      console.warn('Club Tablet Explore result was not saved because the selected athlete could not be matched safely.');
+      return;
+    }
+    const savedRiders = tabletRider ? [tabletRider] : result.riders;
     const durationHours = Math.max(1, result.durationMs) / 3_600_000;
-    const distanceMeters = Math.max(0, ...result.riders.map((rider) => rider.distanceMeters));
+    const distanceMeters = Math.max(0, ...savedRiders.map((rider) => rider.distanceMeters));
     void import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
       id: `explore:${result.route.id}:${Math.round(result.startedAt)}`,
       activityType: 'explore',
@@ -6825,7 +7207,7 @@ export default function App() {
         travelMode: result.route.travelMode,
         elevationGainMeters: result.route.elevationGainMeters ?? 0,
         elevationLossMeters: result.route.elevationLossMeters ?? 0,
-        riders: result.riders.map((rider) => ({
+        riders: savedRiders.map((rider) => ({
           playerId: rider.playerId,
           ...(rider.riderId ? { riderId: rider.riderId } : {}),
           name: rider.name,
@@ -6834,12 +7216,14 @@ export default function App() {
           averageSpeedMph: (rider.distanceMeters / 1609.344) / durationHours,
         })),
       },
-    }, clubTrainingSelection)).then(() => {
+    }, clubTrainingSelection, {
+      localPlayerId: tabletRider?.playerId ?? null,
+    })).then(() => {
       setTrainingHistoryRevision((revision) => revision + 1);
     }).catch((error: Error) => {
       console.warn(`Could not save Explore the World history: ${error.message}`);
     });
-  }, [authUser, clubTrainingSelection, demoMode]);
+  }, [authUser, clubTabletSession, clubTabletSessionActive, clubTrainingSelection, demoMode]);
 
   const handleExploreFullscreenChange = useCallback((enabled: boolean) => {
     setExploreRideFullscreen(enabled);
@@ -7290,7 +7674,9 @@ export default function App() {
   ];
 
   const clubLiveActivity: ClubLiveActivityState = {
-    ...(accountRider?.id ? { accountRiderId: accountRider.id } : {}),
+    ...(clubTabletRider?.id || accountRider?.id
+      ? { accountRiderId: clubTabletRider?.id ?? accountRider?.id }
+      : {}),
     appMode,
     explore: exploreClubLiveState,
     multiplayerActive: playMode === 'multiplayer' && Boolean(multiplayer.currentRoom),
@@ -7307,7 +7693,7 @@ export default function App() {
       trackName: effectiveTrack.name,
     },
   };
-  const clubLiveAthleteBridge = authUser
+  const clubLiveAthleteBridge = clubLiveProfileKey
     && clubTrainingSelection
     && selectedClubTrainingMembershipActive ? (
       <Suspense fallback={null}>
@@ -7315,15 +7701,31 @@ export default function App() {
           accessActive={clubLiveAccessActive}
           activity={clubLiveActivity}
           demoMode={demoMode}
-          profileKey={authUser.profileKey}
+          profileKey={clubLiveProfileKey}
           selection={clubTrainingSelection}
+          tabletSessionActive={clubTabletSessionActive}
           onAccessChange={setClubLiveAccess}
           onAccessStatusChange={setClubLiveAccessStatus}
         />
       </Suspense>
     ) : null;
+  const clubTabletRuntime = clubTabletDevice ? (
+    <Suspense fallback={null}>
+      <ClubTabletRuntime
+        device={clubTabletDevice}
+        roster={clubTabletRoster}
+        session={clubTabletSession}
+        bikeActivityAt={clubTabletBikeActivityAt}
+        onDeviceReady={handleClubTabletDeviceReady}
+        onDeviceError={handleClubTabletDeviceError}
+        onDeviceRevoked={handleClubTabletDeviceRevoked}
+        onSessionRenewed={setClubTabletSession}
+        onSessionExpired={handleClubTabletSessionExpired}
+      />
+    </Suspense>
+  ) : null;
 
-  if (showMembershipLanding || !accountProfileComplete) {
+  if (!clubTabletKioskMode && (showMembershipLanding || !accountProfileComplete)) {
     return (
       <>
         {clubLiveAthleteBridge}
@@ -7378,6 +7780,25 @@ export default function App() {
       ref={raceShellRef}
     >
       {clubLiveAthleteBridge}
+      {clubTabletRuntime}
+      {clubTabletSessionActive
+        && appMode !== 'club-tablet'
+        && (raceViewFullscreen || exploreRideFullscreen) && (
+        <button
+          className="race-cancel-overlay"
+          type="button"
+          onClick={() => void handleClubTabletEndAthlete()}
+          style={{
+            position: 'fixed',
+            top: 'max(70px, calc(env(safe-area-inset-top, 0px) + 70px))',
+            right: 'max(14px, calc(env(safe-area-inset-right, 0px) + 14px))',
+            left: 'auto',
+            zIndex: 2147483001,
+          }}
+        >
+          <TabletSmartphone size={18} /> End athlete session
+        </button>
+      )}
       {bluetoothPairingOpen && showBluetoothPairing && !liveBikeAccessLocked && (
         <Suspense fallback={null}>
           <BluetoothPairingDialog
@@ -7426,15 +7847,17 @@ export default function App() {
               <Bluetooth size={15} />
               <span>Bluetooth</span>
             </button>
-            <button
-              className={bikeConnectionSource === 'advanced' && !demoMode ? 'selected' : ''}
-              type="button"
-              aria-label="Advanced Connector"
-              onClick={() => handleBikeConnectionSourceChange('advanced')}
-            >
-              <Usb size={15} />
-              <span>Connector</span>
-            </button>
+            {!clubTabletKioskMode && (
+              <button
+                className={bikeConnectionSource === 'advanced' && !demoMode ? 'selected' : ''}
+                type="button"
+                aria-label="Advanced Connector"
+                onClick={() => handleBikeConnectionSourceChange('advanced')}
+              >
+                <Usb size={15} />
+                <span>Connector</span>
+              </button>
+            )}
             {developerUiActive && (
               <button
                 className={demoMode ? 'selected' : ''}
@@ -7446,7 +7869,7 @@ export default function App() {
               </button>
             )}
           </div>
-          {bikeConnectionSource === 'bluetooth' && !demoMode && (
+          {bikeConnectionSource === 'bluetooth' && !demoMode && !clubTabletKioskMode && (
             <button
               className="bluetooth-connect-button"
               type="button"
@@ -7556,7 +7979,24 @@ export default function App() {
           <p className="bridge-prompt">Club Session choices are temporarily unavailable.</p>
         )}
 
-        {appMode === 'profile' ? (
+        {appMode === 'club-tablet' ? (
+          <section className="sidebar-workflow profile-sidebar-workflow" aria-label="Club Tablet summary">
+            <div className="workflow-heading">
+              <span>Club Tablet</span>
+              <small>{clubTabletSessionActive ? 'Athlete and Wattbike ready' : 'Choose an athlete and bike'}</small>
+            </div>
+            <div className="workflow-list">
+              <div className={`workflow-step ${clubTabletDeviceActive ? 'complete' : 'current'}`}>
+                <span className="workflow-index">1</span>
+                <span className="workflow-copy"><strong>Authorized tablet</strong><small>{clubTabletDevice?.device.name ?? 'Owner authorization required'}</small></span>
+              </div>
+              <div className={`workflow-step ${clubTabletSessionActive ? 'complete' : 'current'}`}>
+                <span className="workflow-index">2</span>
+                <span className="workflow-copy"><strong>Choose athlete</strong><small>{clubTabletRider?.name ?? 'No student selected'}</small></span>
+              </div>
+            </div>
+          </section>
+        ) : appMode === 'profile' ? (
           <section className="sidebar-workflow profile-sidebar-workflow" aria-label="My Profile summary">
             <div className="workflow-heading">
               <span>My Profile</span>
@@ -7673,7 +8113,7 @@ export default function App() {
               );
             })}
           </div>
-          {!demoMode && (
+          {!demoMode && !clubTabletKioskMode && (
             <StudioRaceEntry
               players={activePlayers}
               enteredDeviceIds={liveRaceReadyDeviceIds}
@@ -7740,6 +8180,35 @@ export default function App() {
         )}
 
         <nav className="side-nav" aria-label="Primary">
+          {clubTabletKioskMode ? (
+            <>
+              <button
+                className={appMode === 'club-tablet' ? 'selected' : ''}
+                type="button"
+                onClick={returnToClubTablet}
+              >
+                <TabletSmartphone size={17} />
+                {appMode === 'club-tablet' ? 'Club Tablet' : 'Return to Club Tablet'}
+              </button>
+              {clubTabletSessionActive && (
+                <>
+                  <button className={appMode === 'race' ? 'selected' : ''} type="button" onClick={openBmxRaceIntervals}>
+                    <Activity size={17} /> BMX Race Intervals
+                  </button>
+                  <button className={appMode === 'explore' ? 'selected' : ''} type="button" onClick={() => setAppMode('explore')}>
+                    <Compass size={17} /> Explore the World
+                  </button>
+                  <button className={appMode === 'straight-sprint' ? 'selected' : ''} type="button" onClick={openStraightSprint}>
+                    <Route size={17} /> Straight Sprint
+                  </button>
+                  <button type="button" onClick={() => void handleClubTabletEndAthlete()}>
+                    <LogOut size={17} /> End athlete session
+                  </button>
+                </>
+              )}
+            </>
+          ) : (
+          <>
           <button
             className={appMode === 'profile' ? 'selected' : ''}
             type="button"
@@ -7829,9 +8298,14 @@ export default function App() {
                 <Gauge size={17} /> Live Monitor
               </button>
               {clubOwnerActive && (
-                <button className={appMode === 'club-monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('club-monitor')}>
-                  <Radio size={17} /> Club Live Monitor
-                </button>
+                <>
+                  <button className={appMode === 'club-monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('club-monitor')}>
+                    <Radio size={17} /> Club Live Monitor
+                  </button>
+                  <button className={appMode === 'club-tablet' ? 'selected' : ''} type="button" onClick={() => setAppMode('club-tablet')}>
+                    <TabletSmartphone size={17} /> Club Tablets
+                  </button>
+                </>
               )}
               <button className={appMode === 'diagnostics' ? 'selected' : ''} type="button" onClick={() => setAppMode('diagnostics')}>
                 <Settings size={17} /> Bike Check
@@ -7855,9 +8329,11 @@ export default function App() {
               )}
             </div>
           )}
+          </>
+          )}
         </nav>
 
-        <section className="membership-mini-card">
+        {!clubTabletKioskMode && <section className="membership-mini-card">
           <RiderAvatar
             name={authUser?.name ?? 'TrackLab rider'}
             photoUrl={accountProfile.photoUrl}
@@ -7873,9 +8349,9 @@ export default function App() {
           <button type="button" onClick={handleSignOut}>
             Sign Out
           </button>
-        </section>
+        </section>}
 
-        <PairingRail
+        {!clubTabletKioskMode && <PairingRail
           players={pairingPlayers}
           samplesByDevice={samplesByDevice}
           devices={demoMode ? undefined : connectedBikeDevices}
@@ -7895,12 +8371,20 @@ export default function App() {
           maxPlayers={Math.max(1, liveBikeSeatLimit)}
           demoRiderCount={demoMode ? demoBikeCount : undefined}
           onDemoRiderCountChange={demoMode ? handleDemoBikeCountChange : undefined}
-        />
+        />}
       </aside>
 
       <main className="platform-main">
         <header className="platform-topbar">
-          {appMode === 'profile' ? (
+          {appMode === 'club-tablet' ? (
+            <div className="explore-topbar-heading">
+              <TabletSmartphone size={20} />
+              <span>
+                <strong>Club Tablet</strong>
+                <small>Secure shared-device athlete access</small>
+              </span>
+            </div>
+          ) : appMode === 'profile' ? (
             <div className="explore-topbar-heading">
               <UserCircle size={20} />
               <span>
@@ -8006,7 +8490,33 @@ export default function App() {
           )}
         </header>
 
-        {appMode === 'profile' && authUser ? (
+        {appMode === 'club-tablet' ? (
+          <Suspense fallback={<div className="explore-loading">Opening Club Tablet…</div>}>
+            <ClubTabletMode
+              canAuthorize={clubOwnerActive && !clubTabletDevice}
+              deviceCredential={clubTabletDevice}
+              roster={clubTabletRoster}
+              sessionCredential={clubTabletSessionActive ? clubTabletSession : null}
+              bikes={connectedBikeDevices.map(({ deviceId, label }) => ({ deviceId, label }))}
+              bluetoothSupported={bluetooth.supported}
+              bluetoothBusy={bluetooth.connection === 'connecting'}
+              authorizedBikeCount={bluetooth.authorizedCount}
+              onDeviceChange={handleClubTabletDeviceChange}
+              onRosterChange={handleClubTabletRosterChange}
+              onSessionChange={handleClubTabletSessionChange}
+              onOpenBikePairing={() => setBluetoothPairingOpen(true)}
+              onReconnectSavedBikes={async () => {
+                await bluetooth.reconnectSavedBikes();
+              }}
+              onOpenProgram={(mode) => {
+                setMappingMode(false);
+                if (mode === 'race') openBmxRaceIntervals();
+                else if (mode === 'straight-sprint') openStraightSprint();
+                else setAppMode('explore');
+              }}
+            />
+          </Suspense>
+        ) : appMode === 'profile' && authUser ? (
           <Suspense fallback={<div className="explore-loading">Loading your profile and training history…</div>}>
           <AccountProfileView
             key={authUser.profileKey}
@@ -8048,7 +8558,8 @@ export default function App() {
             multiplayerConnection={multiplayer.connection}
             currentRoom={multiplayer.currentRoom}
             currentUserId={multiplayer.clientId}
-            accountProfileKey={cloudProfileKey}
+            accountProfileKey={exploreRecentRouteHistoryScope.profileKey}
+            cloudRecentRoutesEnabled={exploreRecentRouteHistoryScope.cloudEnabled}
             inviteUrl={multiplayer.inviteUrl}
             remoteStates={multiplayer.roomExploreStates}
             voiceEnabled={roomVoice.enabled}
@@ -8139,6 +8650,7 @@ export default function App() {
             <div className="dashboard-grid">
               <div className="dashboard-primary-column">
                 <div className="race-canvas-shell">
+                  <Suspense fallback={<div className="explore-loading">Loading track view…</div>}>
                   <EarthTrackView
                   track={effectiveTrack}
                   riders={stagedRiders}
@@ -8219,6 +8731,7 @@ export default function App() {
                   onMappingSplitPointAdd={handleMappingSplitPointAdd}
                   onMappingSplitDrawEnd={handleMappingSplitDrawEnd}
                   />
+                  </Suspense>
                 </div>
 
                 <Suspense fallback={<div className="panel-section">Loading post-race analysis…</div>}>
@@ -8373,13 +8886,15 @@ export default function App() {
                   />
                 </Suspense>
 
-                <MultiplayerPanel
+                <Suspense fallback={<div className="panel-section">Loading multiplayer…</div>}>
+                  <MultiplayerPanel
                   playMode={playMode}
                   connection={multiplayer.connection}
                   status={multiplayer.status}
-                  profileKey={cloudProfileKey}
+                  profileKey={multiplayer.profile.guestKey}
                   riderName={multiplayer.profile.name}
                   riderAvailable={multiplayer.profile.available}
+                  profileReadOnly={multiplayer.profileReadOnly}
                   currentUserId={multiplayer.clientId}
                   currentRoom={multiplayer.currentRoom}
                   rooms={multiplayer.rooms}
@@ -8431,8 +8946,9 @@ export default function App() {
                   voiceStatus={roomVoice.status}
                   voiceRemoteCount={roomVoice.remoteCount}
                   onVoiceStart={roomVoice.start}
-                  onVoiceStop={roomVoice.stop}
-                />
+                    onVoiceStop={roomVoice.stop}
+                  />
+                </Suspense>
               </div>
             </div>
           </>

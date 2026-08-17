@@ -1,4 +1,9 @@
 import type { TrainingActivityType } from '../types';
+import {
+  clubTabletSessionHeaders,
+  currentClubTabletSessionToken,
+  readStoredClubTabletSession,
+} from './clubTabletStorage';
 
 export type ClubLiveStatus = 'ready' | 'staging' | 'active' | 'paused' | 'finished';
 
@@ -188,9 +193,11 @@ async function clubLiveFetch(path: string, init?: RequestInit) {
 }
 
 export async function publishClubLiveSession(snapshot: ClubLiveSnapshot, signal?: AbortSignal) {
-  await clubLiveFetch('/api/club-live/sessions', {
+  const tabletToken = currentClubTabletSessionToken();
+  await clubLiveFetch(tabletToken ? '/api/club-tablet/live' : '/api/club-live/sessions', {
     method: 'PUT',
     signal,
+    headers: clubTabletSessionHeaders(tabletToken),
     body: JSON.stringify(snapshot),
   });
 }
@@ -199,6 +206,18 @@ export async function stopClubLiveSession(
   selection: Pick<ClubLiveSnapshot, 'clubId' | 'studioRiderId'>,
   options: { keepalive?: boolean; signal?: AbortSignal } = {},
 ) {
+  const tabletToken = currentClubTabletSessionToken();
+  if (tabletToken) {
+    // Clearing Club Live telemetry is separate from ending the selected athlete
+    // or changing this tablet's durable Wattbike pairing.
+    await clubLiveFetch('/api/club-tablet/live', {
+      method: 'DELETE',
+      keepalive: options.keepalive,
+      signal: options.signal,
+      headers: clubTabletSessionHeaders(tabletToken),
+    });
+    return;
+  }
   await clubLiveFetch('/api/club-live/sessions', {
     method: 'DELETE',
     keepalive: options.keepalive,
@@ -230,6 +249,14 @@ export function normalizeClubLiveAccess(value: unknown, expectedClubId: string):
 }
 
 export async function loadClubLiveAccess(clubId: string, signal?: AbortSignal) {
+  const tabletSession = readStoredClubTabletSession();
+  if (tabletSession) {
+    return {
+      clubId: tabletSession.session.clubId,
+      active: tabletSession.session.clubId === clubId && tabletSession.session.expiresAt > Date.now(),
+      expiresAt: tabletSession.session.expiresAt,
+    };
+  }
   const params = new URLSearchParams({ clubId });
   return normalizeClubLiveAccess(
     await clubLiveFetch(`/api/club-live/access?${params.toString()}`, { signal }),

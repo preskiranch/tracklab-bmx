@@ -51,6 +51,7 @@ type MultiplayerPanelProps = {
   profileKey: string;
   riderName: string;
   riderAvailable: boolean;
+  profileReadOnly?: boolean;
   currentUserId: string | null;
   currentRoom: MultiplayerRoom | null;
   rooms: MultiplayerRoom[];
@@ -139,6 +140,7 @@ export function MultiplayerPanel({
   profileKey,
   riderName,
   riderAvailable,
+  profileReadOnly = false,
   currentUserId,
   currentRoom,
   rooms,
@@ -350,47 +352,56 @@ export function MultiplayerPanel({
 
         {playMode === 'multiplayer' && (
           <div className="profile-card">
-            <label className="text-field compact">
-              <span>Rider name</span>
-              <input
-                type="text"
-                value={riderName}
-                onChange={(event) => onRiderNameChange(event.target.value)}
-              />
-            </label>
-            <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={riderAvailable}
-                onChange={(event) => onRiderAvailableChange(event.target.checked)}
-              />
-              <span>Available for challenges</span>
-            </label>
-            <div className="profile-key-row">
-              <label className="text-field compact">
-                <span>Profile key</span>
-                <input
-                  type="text"
-                  value={profileKeyDraft}
-                  spellCheck={false}
-                  onBlur={commitProfileKey}
-                  onChange={(event) => setProfileKeyDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.currentTarget.blur();
-                    }
-                  }}
-                />
-              </label>
-              <button
-                className="square-button"
-                type="button"
-                aria-label="Copy profile key"
-                onClick={onProfileKeyCopy}
-              >
-                <Copy size={16} />
-              </button>
-            </div>
+            {profileReadOnly ? (
+              <div className="selected-track-note">
+                <Check size={14} />
+                <span><strong>{riderName}</strong> · Club Tablet athlete identity is verified and locked for this session.</span>
+              </div>
+            ) : (
+              <>
+                <label className="text-field compact">
+                  <span>Rider name</span>
+                  <input
+                    type="text"
+                    value={riderName}
+                    onChange={(event) => onRiderNameChange(event.target.value)}
+                  />
+                </label>
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={riderAvailable}
+                    onChange={(event) => onRiderAvailableChange(event.target.checked)}
+                  />
+                  <span>Available for challenges</span>
+                </label>
+                <div className="profile-key-row">
+                  <label className="text-field compact">
+                    <span>Profile key</span>
+                    <input
+                      type="text"
+                      value={profileKeyDraft}
+                      spellCheck={false}
+                      onBlur={commitProfileKey}
+                      onChange={(event) => setProfileKeyDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.currentTarget.blur();
+                        }
+                      }}
+                    />
+                  </label>
+                  <button
+                    className="square-button"
+                    type="button"
+                    aria-label="Copy profile key"
+                    onClick={onProfileKeyCopy}
+                  >
+                    <Copy size={16} />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

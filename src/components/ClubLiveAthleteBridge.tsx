@@ -55,6 +55,7 @@ export type ClubLiveActivityState = {
 type ClubLiveAthleteBridgeProps = {
   demoMode: boolean;
   accessActive: boolean;
+  tabletSessionActive?: boolean;
   activity: ClubLiveActivityState;
   profileKey: string;
   selection: {
@@ -71,6 +72,7 @@ export function ClubLiveAthleteBridge({
   demoMode,
   profileKey,
   selection,
+  tabletSessionActive = false,
   onAccessChange,
   onAccessStatusChange,
 }: ClubLiveAthleteBridgeProps) {
@@ -90,7 +92,7 @@ export function ClubLiveAthleteBridge({
     if (appMode === 'explore') {
       if (explore?.status === 'finished') return null;
       const rider = explore?.riders.find((candidate) => candidate.riderId === accountRiderId)
-        ?? explore?.riders[0];
+        ?? (tabletSessionActive ? undefined : explore?.riders[0]);
       if (!rider || rider.signal <= 0 || now - rider.at > liveBikeTimeoutMs) return null;
       const routeDistance = Math.max(0, explore?.route?.distanceMeters ?? 0);
       const distanceMeters = Math.max(0, rider.distanceMeters);
@@ -131,7 +133,8 @@ export function ClubLiveAthleteBridge({
     }
 
     if ((appMode !== 'race' && appMode !== 'straight-sprint') || race.state === 'finished') return null;
-    const player = race.players.find((candidate) => candidate.riderId === accountRiderId) ?? race.players[0];
+    const player = race.players.find((candidate) => candidate.riderId === accountRiderId)
+      ?? (tabletSessionActive ? undefined : race.players[0]);
     const rider = player ? race.riders.find((candidate) => candidate.playerId === player.id) : undefined;
     const sample = player?.deviceId == null ? undefined : race.samplesByDevice.get(player.deviceId);
     const liveSample = bikeSampleIsLive(sample, now, liveBikeTimeoutMs) ? sample : undefined;
@@ -169,7 +172,7 @@ export function ClubLiveAthleteBridge({
       ...(startedAt ? { startedAt } : {}),
       multiplayer: multiplayerActive,
     };
-  }, [accessActive, activity, demoMode, selection.clubId, selection.studioRiderId]);
+  }, [accessActive, activity, demoMode, selection.clubId, selection.studioRiderId, tabletSessionActive]);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
 
@@ -283,13 +286,16 @@ export function ClubLiveAthleteBridge({
       disposed = true;
       window.clearInterval(timer);
       controller?.abort();
-      void stopClubLiveSession(selection, { keepalive: true }).catch(() => undefined);
+      if (!tabletSessionActive) {
+        void stopClubLiveSession(selection, { keepalive: true }).catch(() => undefined);
+      }
     };
   }, [
     demoMode,
     profileKey,
     selection.clubId,
     selection.studioRiderId,
+    tabletSessionActive,
   ]);
 
   return null;

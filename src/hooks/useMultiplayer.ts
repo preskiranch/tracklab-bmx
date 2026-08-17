@@ -18,10 +18,11 @@ import type {
   TrackRecord,
 } from '../types';
 import { safeSetLocalStorage } from '../lib/browserStorage';
+import type { ClubTabletSessionCredential } from '../lib/clubTabletStorage';
 
 type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
 
-type MultiplayerProfile = {
+export type MultiplayerProfile = {
   guestKey: string;
   name: string;
   email: string;
@@ -29,10 +30,23 @@ type MultiplayerProfile = {
   membershipTier: 'visitor' | 'spectator' | 'racer';
 };
 
+export type MultiplayerIdentityOverride = {
+  /** Changes whenever a shared tablet switches athlete sessions. Never sent to the server. */
+  scopeKey: string;
+  guestKey: string;
+  name: string;
+  email?: string;
+  available?: boolean;
+  membershipTier?: MultiplayerProfile['membershipTier'];
+  readOnly?: boolean;
+};
+
 type UseMultiplayerOptions = {
   enabled: boolean;
   track: TrackRecord;
   bikeCount: number;
+  identityOverride?: MultiplayerIdentityOverride | null;
+  clubTabletSession?: ClubTabletSessionCredential | null;
 };
 
 type IncomingChallenge = {
@@ -78,6 +92,20 @@ function normalizeProfileEmail(value: unknown) {
 
 function normalizeMembershipTier(value: unknown): MultiplayerProfile['membershipTier'] {
   return value === 'spectator' || value === 'racer' ? value : 'visitor';
+}
+
+export function resolveMultiplayerProfile(
+  storedProfile: MultiplayerProfile,
+  identityOverride?: MultiplayerIdentityOverride | null,
+): MultiplayerProfile {
+  if (!identityOverride) return storedProfile;
+  return {
+    guestKey: normalizeGuestKey(identityOverride.guestKey, 'club-tablet-athlete'),
+    name: identityOverride.name.trim().slice(0, 64) || 'Club Tablet athlete',
+    email: normalizeProfileEmail(identityOverride.email),
+    available: Boolean(identityOverride.available),
+    membershipTier: normalizeMembershipTier(identityOverride.membershipTier),
+  };
 }
 
 function profileKeyFromUrl() {
@@ -152,14 +180,15 @@ function writeProfile(profile: MultiplayerProfile) {
   safeSetLocalStorage(profileStorageKey, JSON.stringify(profile));
 }
 
-function multiplayerUrl() {
+function multiplayerUrl(clubTabletTicket = '') {
   const configured = import.meta.env.VITE_TRACKLAB_MULTIPLAYER_URL?.trim();
-  if (configured) {
-    return configured;
-  }
-
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/multiplayer`;
+  const url = new URL(
+    configured || `${protocol}//${window.location.host}/multiplayer`,
+    window.location.href,
+  );
+  if (clubTabletTicket) url.searchParams.set('clubTabletTicket', clubTabletTicket);
+  return url.toString();
 }
 
 function trackSummary(track: TrackRecord): MultiplayerTrackSummary {
@@ -191,16 +220,29 @@ function latencyQualityForMs(value: number | null): MultiplayerLatencySnapshot['
   return 'poor';
 }
 
-export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOptions) {
+export function useMultiplayer({
+  enabled,
+  track,
+  bikeCount,
+  identityOverride = null,
+  clubTabletSession = null,
+}: UseMultiplayerOptions) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const pingTimerRef = useRef<number | null>(null);
   const pendingPingRef = useRef<Map<string, number>>(new Map());
   const pendingInviteRoomRef = useRef<string | null>(null);
+  const identityScopeRef = useRef('');
   const latestProfileRef = useRef<MultiplayerProfile | null>(null);
   const latestBikeCountRef = useRef(bikeCount);
   const latestTrackRef = useRef<MultiplayerTrackSummary | null>(null);
-  const [profile, setProfileState] = useState<MultiplayerProfile>(readProfile);
+  const [storedProfile, setStoredProfile] = useState<MultiplayerProfile>(readProfile);
+  const profile = useMemo(
+    () => resolveMultiplayerProfile(storedProfile, identityOverride),
+    [identityOverride, storedProfile],
+  );
+  const profileReadOnly = Boolean(identityOverride);
+  const identityScopeKey = identityOverride?.scopeKey ?? `owner:${storedProfile.guestKey}`;
   const [connection, setConnection] = useState<ConnectionState>('idle');
   const [clientId, setClientId] = useState<string | null>(null);
   const [onlineRiders, setOnlineRiders] = useState<MultiplayerRider[]>([]);
@@ -215,6 +257,22 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
   const [social, setSocial] = useState<MultiplayerSocialState>(emptySocialState);
   const [status, setStatus] = useState('Multiplayer offline.');
   const [latency, setLatency] = useState<MultiplayerLatencySnapshot>(initialLatency);
+
+  const resetTransientMultiplayerState = useCallback(() => {
+    setClientId(null);
+    setOnlineRiders([]);
+    setRooms([]);
+    setCurrentRoom(null);
+    setRoomMessages([]);
+    setRoomRaceStates([]);
+    setRoomExploreStates([]);
+    setVoiceSignals([]);
+    setIncomingChallenges([]);
+    setIncomingMatchInvites([]);
+    setSocial(emptySocialState);
+    setLatency(initialLatency);
+    pendingPingRef.current.clear();
+  }, []);
 
   const currentTrack = useMemo(() => trackSummary(track), [track.country, track.id, track.name, track.state]);
 
@@ -261,7 +319,8 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
   }, [bikeCount, currentTrack, profile, send]);
 
   const setProfile = useCallback((patch: Partial<Pick<MultiplayerProfile, 'guestKey' | 'name' | 'email' | 'available' | 'membershipTier'>>) => {
-    setProfileState((current) => {
+    if (profileReadOnly) return;
+    setStoredProfile((current) => {
       const next = {
         ...current,
         ...patch,
@@ -274,39 +333,88 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
       void sendPresence(next);
       return next;
     });
-  }, [sendPresence]);
+  }, [profileReadOnly, sendPresence]);
 
   useEffect(() => {
-    writeProfile(profile);
-    writeProfileCookie(profile.guestKey);
-    updateManifestProfile(profile.guestKey);
-  }, [profile]);
+    if (identityOverride) return;
+    writeProfile(storedProfile);
+    writeProfileCookie(storedProfile.guestKey);
+    updateManifestProfile(storedProfile.guestKey);
+  }, [identityOverride, storedProfile]);
 
   useEffect(() => {
-    pendingInviteRoomRef.current = new URLSearchParams(window.location.search).get('room');
-  }, []);
+    const previousScope = identityScopeRef.current;
+    const scopeChanged = Boolean(previousScope && previousScope !== identityScopeKey);
+    identityScopeRef.current = identityScopeKey;
+    if (!identityOverride && !scopeChanged) {
+      pendingInviteRoomRef.current = new URLSearchParams(window.location.search).get('room');
+      return;
+    }
+
+    // A room, social graph, challenge, or telemetry snapshot must never cross
+    // between the owner's browser identity and a selected shared-tablet athlete.
+    pendingInviteRoomRef.current = null;
+    resetTransientMultiplayerState();
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('room')) {
+      url.searchParams.delete('room');
+      window.history.replaceState(null, '', url);
+    }
+  }, [identityOverride, identityScopeKey, resetTransientMultiplayerState]);
 
   useEffect(() => {
     if (!enabled) {
       setConnection('idle');
       socketRef.current?.close();
       socketRef.current = null;
+      resetTransientMultiplayerState();
       return;
     }
 
     let cancelled = false;
 
-    const connect = () => {
+    const scheduleReconnect = () => {
+      if (cancelled || reconnectTimerRef.current != null) return;
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        void connect();
+      }, 1400);
+    };
+
+    const connect = async () => {
       if (cancelled) {
         return;
       }
 
       setConnection('connecting');
       setStatus('Connecting to TrackLab multiplayer.');
-      const socket = new WebSocket(multiplayerUrl());
+      let ticket = '';
+      // Never infer a kiosk identity from ambient browser storage. The caller
+      // must provide the exact in-memory athlete session that also produced
+      // identityOverride, preventing an abandoned token from authorizing the
+      // owner's multiplayer connection.
+      const tabletSession = identityOverride ? clubTabletSession : null;
+      if (tabletSession) {
+        try {
+          const authorization = await import('../lib/clubTablet').then(
+            ({ requestClubTabletMultiplayerTicket }) => requestClubTabletMultiplayerTicket(tabletSession),
+          );
+          if (cancelled) return;
+          ticket = authorization?.ticket ?? '';
+          if (!ticket) throw new Error('Club Tablet multiplayer authorization is unavailable.');
+        } catch (error) {
+          if (cancelled || (error as Error).name === 'AbortError') return;
+          setConnection('error');
+          setStatus('Club Tablet athlete authorization expired. Return to Club Tablet and choose the athlete again.');
+          scheduleReconnect();
+          return;
+        }
+      }
+      const socket = new WebSocket(multiplayerUrl(ticket));
       socketRef.current = socket;
 
       socket.addEventListener('open', () => {
+        if (socketRef.current !== socket) return;
         const latestProfile = latestProfileRef.current ?? profile;
         setConnection('open');
         setStatus('Multiplayer online.');
@@ -328,6 +436,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
       });
 
       socket.addEventListener('message', (event) => {
+        if (socketRef.current !== socket) return;
         const message = JSON.parse(event.data as string);
 
         if (message.type === 'connected') {
@@ -459,6 +568,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
       });
 
       socket.addEventListener('close', () => {
+        if (socketRef.current !== socket) return;
         setConnection('closed');
         setStatus('Multiplayer disconnected. Reconnecting...');
         socketRef.current = null;
@@ -471,9 +581,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
           window.clearInterval(pingTimerRef.current);
           pingTimerRef.current = null;
         }
-        if (!cancelled) {
-          reconnectTimerRef.current = window.setTimeout(connect, 1400);
-        }
+        scheduleReconnect();
       });
 
       socket.addEventListener('error', () => {
@@ -482,7 +590,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
       });
     };
 
-    connect();
+    void connect();
 
     return () => {
       cancelled = true;
@@ -497,7 +605,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [enabled, sendLatencyPing]);
+  }, [clubTabletSession, enabled, identityOverride, identityScopeKey, resetTransientMultiplayerState, sendLatencyPing]);
 
   useEffect(() => {
     if (enabled && connection === 'open') {
@@ -691,6 +799,7 @@ export function useMultiplayer({ enabled, track, bikeCount }: UseMultiplayerOpti
     leaveRoom,
     onlineRiders,
     profile,
+    profileReadOnly,
     quickMatch,
     respondToChallenge,
     roomMessages,

@@ -7,8 +7,52 @@ import type {
 
 const recentExploreRouteLimit = 8;
 const recentExploreRoutesStoragePrefix = 'tracklab-explore-recent-routes-v1';
+const clubTabletExploreRouteScopePrefix = 'club-tablet-route-history-v1:';
+
+export type ExploreRecentRouteHistoryScope = {
+  profileKey: string | null;
+  cloudEnabled: boolean;
+};
+
+export function resolveExploreRecentRouteHistoryScope({
+  accountProfileKey,
+  accountCloudEnabled,
+  kioskMode,
+  clubTabletDeviceId,
+  studioRiderId,
+}: {
+  accountProfileKey: string;
+  accountCloudEnabled: boolean;
+  kioskMode: boolean;
+  clubTabletDeviceId?: string | null;
+  studioRiderId?: string | null;
+}): ExploreRecentRouteHistoryScope {
+  if (kioskMode) {
+    const deviceId = clubTabletDeviceId?.trim() ?? '';
+    const athleteId = studioRiderId?.trim() ?? '';
+    if (!deviceId || !athleteId) {
+      return { profileKey: null, cloudEnabled: false };
+    }
+    return {
+      profileKey: `${clubTabletExploreRouteScopePrefix}${encodeURIComponent(deviceId)}:${encodeURIComponent(athleteId)}`,
+      cloudEnabled: false,
+    };
+  }
+
+  const profileKey = accountProfileKey.trim();
+  return {
+    profileKey: profileKey || null,
+    cloudEnabled: Boolean(profileKey && accountCloudEnabled),
+  };
+}
 
 function storageKey(profileKey: string) {
+  if (profileKey.startsWith(clubTabletExploreRouteScopePrefix)) {
+    // Device and studio-rider ids are already component-encoded above. Keep
+    // this scope byte-for-byte so two athletes on a shared tablet can never
+    // collapse into the same local history key.
+    return `${recentExploreRoutesStoragePrefix}:${profileKey}`;
+  }
   const normalizedProfile = profileKey.trim().toLowerCase().replace(/[^a-z0-9@._-]+/g, '-');
   return `${recentExploreRoutesStoragePrefix}:${normalizedProfile || 'local'}`;
 }

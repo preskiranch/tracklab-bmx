@@ -31,11 +31,14 @@ const memoryBillingCheckoutsByState = new Map();
 const memoryMap3DLoadEvents = new Map();
 const memoryTrackBriefings = new Map();
 const memoryLocalRaceResults = new Map();
+const memoryGhostLaps = new Map();
 const memoryTrainingSessions = new Map();
 const memoryClubsById = new Map();
 const memoryClubIdByOwner = new Map();
 const memoryClubMembers = new Map();
 const memoryClubInvitesByHash = new Map();
+const memoryClubTabletDevicesById = new Map();
+const memoryClubTabletDeviceIdByTokenHash = new Map();
 let memoryRaceResultSequence = 0;
 
 function json(value) {
@@ -858,6 +861,31 @@ export async function saveTrainingSession(profileKey, session) {
   };
 }
 
+export async function loadTrainingSessionById(profileKey, id) {
+  if (!profileKey || !id) return null;
+  if (!pool) {
+    const session = memoryTrainingSessions.get(`${profileKey}:${id}`);
+    return session ? cloneJson(enrichMemoryClubTrainingSession(session), session) : null;
+  }
+  const result = await query(
+    `SELECT sessions.*, clubs.name AS club_name, members.rider_name AS club_rider_name
+     FROM ${schema}.training_sessions AS sessions
+     LEFT JOIN ${schema}.clubs AS clubs ON clubs.id = sessions.club_id
+     LEFT JOIN ${schema}.club_members AS members
+       ON members.club_id = sessions.club_id AND members.studio_rider_id = sessions.studio_rider_id
+     WHERE sessions.profile_key = $1 AND sessions.id = $2
+     LIMIT 1`,
+    [profileKey, id],
+  );
+  const row = result?.rows?.[0];
+  const session = trainingSessionFromRow(row);
+  return session ? {
+    ...session,
+    ...(row.club_name ? { _clubName: row.club_name } : {}),
+    ...(row.club_rider_name ? { _clubRiderName: row.club_rider_name } : {}),
+  } : null;
+}
+
 function legacyRaceSessionId(entry, profileKey) {
   const suffix = `:${profileKey}:${entry.playerId}`;
   const raw = String(entry.dedupeKey || '');
@@ -1048,6 +1076,246 @@ export async function ensureClub(ownerProfileKey, ownerName, clubId) {
     [clubId, ownerProfileKey, ownerName],
   );
   return clubFromRow(result?.rows?.[0]);
+}
+
+function clubTabletDeviceFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    clubId: row.club_id,
+    clubName: row.club_name,
+    ownerProfileKey: row.owner_profile_key,
+    name: row.name,
+    tokenHash: row.token_hash,
+    lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at).getTime() : null,
+    revokedAt: row.revoked_at ? new Date(row.revoked_at).getTime() : null,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+  };
+}
+
+function enrichMemoryClubTabletDevice(device) {
+  const club = device ? memoryClubsById.get(device.clubId) : null;
+  if (!device || !club) return null;
+  return {
+    ...device,
+    clubName: club.name,
+    ownerProfileKey: club.ownerProfileKey,
+  };
+}
+
+export async function enrollClubTabletDevice({
+  id,
+  ownerProfileKey,
+  ownerUserId,
+  name,
+  tokenHash,
+  authSessionTokenHash,
+}) {
+  const now = Date.now();
+  if (!pool) {
+    const clubId = memoryClubIdByOwner.get(ownerProfileKey);
+    const authSession = memoryAuthSessionsByToken.get(authSessionTokenHash);
+    if (
+      !clubId
+      || memoryClubTabletDeviceIdByTokenHash.has(tokenHash)
+      || !authSession
+      || authSession.userId !== ownerUserId
+      || Date.parse(authSession.expiresAt) <= now
+    ) {
+      return null;
+    }
+    const device = {
+      id,
+      clubId,
+      name,
+      tokenHash,
+      lastSeenAt: now,
+      revokedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    // These synchronous memory mutations are one enrollment boundary: no
+    // successful device can coexist with the owner session that authorized it.
+    memoryClubTabletDevicesById.set(id, device);
+    memoryClubTabletDeviceIdByTokenHash.set(tokenHash, id);
+    memoryAuthSessionsByToken.delete(authSessionTokenHash);
+    return cloneJson(enrichMemoryClubTabletDevice(device), device);
+  }
+
+  const ready = await initPersistence();
+  if (!ready || !pool) return null;
+  let client = null;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Consume the exact browser session first. The row lock ensures that two
+    // simultaneous enrollments made with one owner cookie cannot both mint a
+    // durable tablet credential. A later insert failure rolls this deletion
+    // back with the rest of the transaction.
+    const retiredSession = await client.query(
+      `DELETE FROM ${schema}.auth_sessions
+       WHERE token_hash = $1 AND user_id = $2 AND expires_at > now()
+       RETURNING id`,
+      [authSessionTokenHash, ownerUserId],
+    );
+    if (!retiredSession.rows?.[0]) {
+      throw new Error('Club Tablet enrollment could not retire its authorizing owner session.');
+    }
+    const deviceResult = await client.query(
+      `INSERT INTO ${schema}.club_tablet_devices (
+         id, club_id, name, token_hash, last_seen_at, created_at, updated_at
+       )
+       SELECT $1, clubs.id, $3, $4, now(), now(), now()
+       FROM ${schema}.clubs AS clubs
+       WHERE clubs.owner_profile_key = $2
+       RETURNING *`,
+      [id, ownerProfileKey, name, tokenHash],
+    );
+    const row = deviceResult.rows?.[0];
+    if (!row) throw new Error('Club Tablet enrollment did not create a device.');
+    const clubResult = await client.query(
+      `SELECT name FROM ${schema}.clubs WHERE id = $1`,
+      [row.club_id],
+    );
+    await client.query('COMMIT');
+    cloudTelemetry.increment('tracklab_club_tablet_enrollments_total', { outcome: 'success' });
+    return clubTabletDeviceFromRow({
+      ...row,
+      owner_profile_key: ownerProfileKey,
+      club_name: clubResult.rows?.[0]?.name,
+    });
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => {});
+    cloudTelemetry.increment('tracklab_club_tablet_enrollments_total', { outcome: 'error' });
+    cloudTelemetry.warn('persistence.club_tablet_enrollment_failed', { error });
+    return null;
+  } finally {
+    client?.release();
+  }
+}
+
+export async function loadClubTabletDeviceByTokenHash(deviceTokenHash) {
+  if (!pool) {
+    const id = memoryClubTabletDeviceIdByTokenHash.get(deviceTokenHash);
+    const device = id ? memoryClubTabletDevicesById.get(id) : null;
+    if (!device || device.revokedAt) return null;
+    device.lastSeenAt = Date.now();
+    device.updatedAt = Date.now();
+    return cloneJson(enrichMemoryClubTabletDevice(device), device);
+  }
+  const result = await query(
+    `UPDATE ${schema}.club_tablet_devices AS devices
+     SET last_seen_at = now(), updated_at = now()
+     FROM ${schema}.clubs AS clubs
+     WHERE devices.club_id = clubs.id
+       AND devices.token_hash = $1
+       AND devices.revoked_at IS NULL
+     RETURNING devices.*, clubs.name AS club_name, clubs.owner_profile_key`,
+    [deviceTokenHash],
+  );
+  return clubTabletDeviceFromRow(result?.rows?.[0]);
+}
+
+export async function listClubTabletDevices(ownerProfileKey) {
+  if (!pool) {
+    const clubId = memoryClubIdByOwner.get(ownerProfileKey);
+    if (!clubId) return [];
+    return [...memoryClubTabletDevicesById.values()]
+      .filter((device) => device.clubId === clubId && !device.revokedAt)
+      .map((device) => cloneJson(enrichMemoryClubTabletDevice(device), device))
+      .sort((left, right) => left.createdAt - right.createdAt);
+  }
+  const result = await query(
+    `SELECT devices.*, clubs.name AS club_name, clubs.owner_profile_key
+     FROM ${schema}.club_tablet_devices AS devices
+     JOIN ${schema}.clubs AS clubs ON clubs.id = devices.club_id
+     WHERE clubs.owner_profile_key = $1 AND devices.revoked_at IS NULL
+     ORDER BY devices.created_at`,
+    [ownerProfileKey],
+  );
+  return (result?.rows ?? []).map(clubTabletDeviceFromRow).filter(Boolean);
+}
+
+export async function revokeClubTabletDevice(ownerProfileKey, deviceId) {
+  const now = Date.now();
+  if (!pool) {
+    const clubId = memoryClubIdByOwner.get(ownerProfileKey);
+    const device = memoryClubTabletDevicesById.get(deviceId);
+    if (!clubId || !device || device.clubId !== clubId || device.revokedAt) return false;
+    device.revokedAt = now;
+    device.updatedAt = now;
+    memoryClubTabletDeviceIdByTokenHash.delete(device.tokenHash);
+    return true;
+  }
+  const result = await query(
+    `UPDATE ${schema}.club_tablet_devices AS devices
+     SET revoked_at = now(), updated_at = now()
+     FROM ${schema}.clubs AS clubs
+     WHERE devices.club_id = clubs.id AND clubs.owner_profile_key = $1
+       AND devices.id = $2 AND devices.revoked_at IS NULL
+     RETURNING devices.id`,
+    [ownerProfileKey, deviceId],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function ensureClubRosterMember(ownerProfileKey, studioRiderId, riderName) {
+  const now = Date.now();
+  if (!pool) {
+    const clubId = memoryClubIdByOwner.get(ownerProfileKey);
+    if (!clubId) return null;
+    const key = clubMemberKey(clubId, studioRiderId);
+    const existing = memoryClubMembers.get(key);
+    const wasRevoked = Boolean(existing?.revokedAt);
+    const member = {
+      clubId,
+      studioRiderId,
+      riderName,
+      // Re-adding a studio roster name after Club Connect was revoked must
+      // not silently reconnect the previously claimed personal account.
+      athleteProfileKey: wasRevoked ? null : existing?.athleteProfileKey ?? null,
+      athleteName: wasRevoked ? null : existing?.athleteName ?? null,
+      status: !wasRevoked && existing?.status === 'claimed' ? 'claimed' : 'unclaimed',
+      claimedAt: wasRevoked ? null : existing?.claimedAt ?? null,
+      revokedAt: null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    memoryClubMembers.set(key, member);
+    return cloneJson(member, member);
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.club_members AS existing (
+       club_id, studio_rider_id, rider_name, status, revoked_at, created_at, updated_at
+     )
+     SELECT clubs.id, $2, $3, 'unclaimed', NULL, now(), now()
+     FROM ${schema}.clubs AS clubs
+     WHERE clubs.owner_profile_key = $1
+     ON CONFLICT (club_id, studio_rider_id) DO UPDATE SET
+       rider_name = EXCLUDED.rider_name,
+       athlete_profile_key = CASE
+         WHEN existing.revoked_at IS NOT NULL THEN NULL
+         ELSE existing.athlete_profile_key
+       END,
+       athlete_name = CASE
+         WHEN existing.revoked_at IS NOT NULL THEN NULL
+         ELSE existing.athlete_name
+       END,
+       status = CASE
+         WHEN existing.revoked_at IS NOT NULL THEN 'unclaimed'
+         ELSE existing.status
+       END,
+       claimed_at = CASE
+         WHEN existing.revoked_at IS NOT NULL THEN NULL
+         ELSE existing.claimed_at
+       END,
+       revoked_at = NULL,
+       updated_at = now()
+     RETURNING *`,
+    [ownerProfileKey, studioRiderId, riderName],
+  );
+  return clubMemberFromRow(result?.rows?.[0]);
 }
 
 export async function saveClubInvite({
@@ -1899,12 +2167,14 @@ export async function saveLocalRaceResults({
     sequence: memoryRaceResultSequence += 1,
   }));
   if (!pool) {
+    let inserted = 0;
     entries.forEach((entry) => {
       if (!memoryLocalRaceResults.has(entry.dedupeKey)) {
         memoryLocalRaceResults.set(entry.dedupeKey, entry);
+        inserted += 1;
       }
     });
-    return { rowCount: entries.length };
+    return { rowCount: inserted };
   }
   if (entries.length === 0) {
     return null;
@@ -2092,12 +2362,16 @@ export async function saveTrackBriefing(trackId, trackName, research) {
   } : saved;
 }
 
-export async function loadPreRaceRiderStats(trackId, profileKey, riderNames) {
+export async function loadPreRaceRiderStats(trackId, profileKeys, riderNames) {
+  const personalKeys = [...new Set((Array.isArray(profileKeys) ? profileKeys : [profileKeys])
+    .map((key) => String(key || '').trim())
+    .filter(Boolean))]
+    .slice(0, 32);
   const names = [...new Set((Array.isArray(riderNames) ? riderNames : [])
     .map((name) => String(name || '').trim())
     .filter(Boolean))]
     .slice(0, 4);
-  if (!profileKey || names.length === 0) {
+  if (personalKeys.length === 0 || names.length === 0) {
     return [];
   }
   if (!pool) {
@@ -2105,7 +2379,7 @@ export async function loadPreRaceRiderStats(trackId, profileKey, riderNames) {
     const matching = [...memoryLocalRaceResults.values()]
       .filter((entry) => (
         entry.trackId === trackId
-        && entry.guestKey === profileKey
+        && personalKeys.includes(entry.guestKey)
         && nameKeys.has(entry.riderName.toLocaleLowerCase())
       ))
       .sort((left, right) => (
@@ -2147,7 +2421,7 @@ export async function loadPreRaceRiderStats(trackId, profileKey, riderNames) {
          ) AS recent_order
        FROM ${schema}.race_results
        WHERE track_id = $1
-         AND guest_key = $2
+         AND guest_key = ANY($2::text[])
          AND lower(rider_name) = ANY($3::text[])
      ), aggregates AS (
        SELECT
@@ -2173,7 +2447,7 @@ export async function loadPreRaceRiderStats(trackId, profileKey, riderNames) {
      SELECT aggregates.*, COALESCE(streaks.current_win_streak, 0) AS current_win_streak
      FROM aggregates
      LEFT JOIN streaks USING (rider_key)`,
-    [trackId, profileKey, names.map((name) => name.toLocaleLowerCase())],
+    [trackId, personalKeys, names.map((name) => name.toLocaleLowerCase())],
   );
   return (result?.rows ?? []).map((row) => ({
     name: row.rider_name,
@@ -2311,7 +2585,51 @@ export async function saveGhostLap(ghost) {
     ghost.sprintDistanceFeet,
     ghost.sprintAirSetting,
   );
-  return query(
+  if (!pool) {
+    const key = `${ghost.ownerKey}:${ghost.riderName.toLocaleLowerCase()}:${ghost.trackId}:${safeRouteKey}`;
+    const next = {
+      id: ghost.id,
+      owner_key: ghost.ownerKey,
+      owner_name: ghost.ownerName,
+      rider_name: ghost.riderName,
+      track_id: ghost.trackId,
+      track_name: ghost.trackName,
+      route_variant_id: ghost.routeVariantId ?? null,
+      route_key: safeRouteKey,
+      finish_time_ms: Math.round(Number(ghost.finishTimeMs)),
+      thirty_foot_time_ms: ghost.thirtyFootTimeMs == null ? null : Math.round(Number(ghost.thirtyFootTimeMs)),
+      color_name: ghost.colorName,
+      accent: ghost.accent,
+      race_source: ghost.raceSource,
+      lap_count: lapCount,
+      analytics_public: Boolean(ghost.analyticsPublic),
+      summary: {
+        ...(ghost.summary && typeof ghost.summary === 'object' ? cloneJson(ghost.summary, {}) : {}),
+        ...(ghost.photoUrl ? { photoUrl: ghost.photoUrl } : {}),
+        ...(sprintDistanceFeet(ghost.sprintDistanceFeet) != null
+          && sprintAirSetting(ghost.sprintAirSetting) != null ? {
+            sprintDistanceFeet: sprintDistanceFeet(ghost.sprintDistanceFeet),
+            sprintAirSetting: sprintAirSetting(ghost.sprintAirSetting),
+          } : {}),
+      },
+      zone_results: cloneJson(ghost.zoneResults ?? [], []),
+      points: cloneJson(ghost.points ?? [], []),
+      saved_at: new Date(Math.round(Number(ghost.savedAt) || Date.now())).toISOString(),
+    };
+    const current = memoryGhostLaps.get(key);
+    let changed = false;
+    if (
+      !current
+      || next.finish_time_ms < current.finish_time_ms
+      || (next.finish_time_ms === current.finish_time_ms
+        && Date.parse(next.saved_at) > Date.parse(current.saved_at))
+    ) {
+      memoryGhostLaps.set(key, next);
+      changed = true;
+    }
+    return changed ? cloneJson(next, null) : null;
+  }
+  const result = await query(
     `INSERT INTO ${schema}.ghost_laps (
       id, owner_key, owner_name, rider_name, track_id, track_name, route_variant_id, route_key,
       finish_time_ms, thirty_foot_time_ms, color_name, accent, race_source, lap_count, analytics_public,
@@ -2369,13 +2687,21 @@ export async function saveGhostLap(ghost) {
       Math.round(Number(ghost.savedAt) || Date.now()),
     ],
   );
+  return result?.rows?.[0] ?? null;
 }
 
-export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], limit = 30, sprintConfiguration = null) {
+export async function loadGhostLaps(
+  trackId,
+  profileKey = '',
+  friendKeys = [],
+  limit = 30,
+  sprintConfiguration = null,
+  personalProfileKeys = [],
+) {
   const requestedSprintRouteSuffix = sprintConfiguration
     ? `%:sprint:${sprintDistanceFeet(sprintConfiguration.distanceFeet)}ft:air:${sprintAirSetting(sprintConfiguration.airSetting)}`
     : null;
-  const result = await query(
+  const result = !pool ? null : await query(
     `SELECT ranked.*
      FROM (
        SELECT ghost_laps.*,
@@ -2391,16 +2717,100 @@ export async function loadGhostLaps(trackId, profileKey = '', friendKeys = [], l
     [trackId, Math.max(1, Math.min(60, Math.round(Number(limit) || 30))), requestedSprintRouteSuffix],
   );
 
+  const personal = new Set([
+    profileKey,
+    ...(Array.isArray(personalProfileKeys) ? personalProfileKeys : []),
+  ].filter(Boolean));
   const friends = new Set(friendKeys);
-  return (result?.rows ?? []).map((row) => {
-    const source = row.owner_key === profileKey
+  const rows = !pool
+    ? [...memoryGhostLaps.values()]
+      .filter((row) => (
+        row.track_id === trackId
+        && row.race_source === 'live'
+        && (!requestedSprintRouteSuffix
+          || row.route_key.endsWith(requestedSprintRouteSuffix.slice(1)))
+      ))
+      .sort((left, right) => (
+        left.finish_time_ms - right.finish_time_ms
+        || Date.parse(right.saved_at) - Date.parse(left.saved_at)
+      ))
+      .slice(0, Math.max(1, Math.min(60, Math.round(Number(limit) || 30))))
+    : (result?.rows ?? []);
+  const rankByRouteAndTime = new Map();
+  for (const row of rows) {
+    const routeRanks = rankByRouteAndTime.get(row.route_key) ?? new Map();
+    if (!routeRanks.has(row.finish_time_ms)) routeRanks.set(row.finish_time_ms, routeRanks.size + 1);
+    rankByRouteAndTime.set(row.route_key, routeRanks);
+    if (!pool) row.medal_rank = routeRanks.get(row.finish_time_ms);
+  }
+  return rows.map((row) => {
+    const source = personal.has(row.owner_key)
       ? 'personal'
       : friends.has(row.owner_key)
         ? 'friend'
         : 'top';
-    const includeAnalytics = row.owner_key === profileKey || Boolean(row.analytics_public);
+    const includeAnalytics = personal.has(row.owner_key) || Boolean(row.analytics_public);
     return ghostFromRow(row, source, includeAnalytics);
   });
+}
+
+export async function loadPersonalGhostLaps(
+  trackId,
+  profileKeys = [],
+  limit = 30,
+  sprintConfiguration = null,
+) {
+  const personalKeys = [...new Set((Array.isArray(profileKeys) ? profileKeys : [profileKeys])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))]
+    .slice(0, 8);
+  if (!trackId || personalKeys.length === 0) return [];
+
+  const safeLimit = Math.max(1, Math.min(60, Math.round(Number(limit) || 30)));
+  const requestedSprintRouteSuffix = sprintConfiguration
+    ? `%:sprint:${sprintDistanceFeet(sprintConfiguration.distanceFeet)}ft:air:${sprintAirSetting(sprintConfiguration.airSetting)}`
+    : null;
+  const result = !pool ? null : await query(
+    `SELECT ranked.*
+     FROM (
+       SELECT ghost_laps.*,
+         DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
+       FROM ${schema}.ghost_laps AS ghost_laps
+       WHERE track_id = $1 AND race_source = 'live'
+         AND ($3::text IS NULL OR route_key LIKE $3)
+     ) AS ranked
+     WHERE owner_key = ANY($2::text[])
+     ORDER BY finish_time_ms ASC, saved_at DESC
+     LIMIT $4`,
+    [trackId, personalKeys, requestedSprintRouteSuffix, safeLimit],
+  );
+
+  let rows;
+  if (!pool) {
+    const allRows = [...memoryGhostLaps.values()]
+      .filter((row) => (
+        row.track_id === trackId
+        && row.race_source === 'live'
+        && (!requestedSprintRouteSuffix
+          || row.route_key.endsWith(requestedSprintRouteSuffix.slice(1)))
+      ))
+      .sort((left, right) => (
+        left.finish_time_ms - right.finish_time_ms
+        || Date.parse(right.saved_at) - Date.parse(left.saved_at)
+      ));
+    const rankByRouteAndTime = new Map();
+    for (const row of allRows) {
+      const routeRanks = rankByRouteAndTime.get(row.route_key) ?? new Map();
+      if (!routeRanks.has(row.finish_time_ms)) routeRanks.set(row.finish_time_ms, routeRanks.size + 1);
+      rankByRouteAndTime.set(row.route_key, routeRanks);
+      row.medal_rank = routeRanks.get(row.finish_time_ms);
+    }
+    const selected = new Set(personalKeys);
+    rows = allRows.filter((row) => selected.has(row.owner_key)).slice(0, safeLimit);
+  } else {
+    rows = result?.rows ?? [];
+  }
+  return rows.map((row) => ghostFromRow(row, 'personal', true));
 }
 
 function map3DUsageWindow(now = new Date()) {

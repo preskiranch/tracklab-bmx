@@ -645,6 +645,24 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           WHERE club_id IS NOT NULL`,
       ],
     },
+    {
+      version: 13,
+      name: 'add owner-authorized shared club tablets',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_tablet_devices (
+          id TEXT PRIMARY KEY,
+          club_id TEXT NOT NULL REFERENCES ${schema}.clubs(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          token_hash TEXT UNIQUE NOT NULL,
+          last_seen_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_club_tablet_devices_club
+          ON ${schema}.club_tablet_devices (club_id, revoked_at, created_at)`,
+      ],
+    },
   ];
 }
 

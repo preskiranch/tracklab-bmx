@@ -3,6 +3,7 @@ import {
   loadRecentExploreRoutes,
   mergeRecentExploreRoutes,
   rememberRecentExploreRoute,
+  resolveExploreRecentRouteHistoryScope,
 } from '../../src/lib/exploreRecentRoutes';
 import type { ExploreRoute } from '../../src/types';
 
@@ -92,5 +93,66 @@ describe('recent Explore routes', () => {
       'EXPLORE-6',
       'EXPLORE-5',
     ]);
+  });
+
+  it('ignores a stale owner key during kiosk takeover and disables owner cloud history', () => {
+    expect(resolveExploreRecentRouteHistoryScope({
+      accountProfileKey: 'owner@example.com',
+      accountCloudEnabled: true,
+      kioskMode: true,
+      clubTabletDeviceId: 'tablet-1',
+      studioRiderId: null,
+    })).toEqual({ profileKey: null, cloudEnabled: false });
+
+    expect(resolveExploreRecentRouteHistoryScope({
+      accountProfileKey: 'owner@example.com',
+      accountCloudEnabled: true,
+      kioskMode: true,
+      clubTabletDeviceId: 'tablet-1',
+      studioRiderId: 'athlete-a',
+    })).toEqual({
+      profileKey: 'club-tablet-route-history-v1:tablet-1:athlete-a',
+      cloudEnabled: false,
+    });
+  });
+
+  it('isolates route history by both tablet and selected athlete without touching owner cache', () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+    });
+    const ownerScope = resolveExploreRecentRouteHistoryScope({
+      accountProfileKey: 'owner@example.com',
+      accountCloudEnabled: true,
+      kioskMode: false,
+    });
+    const athleteAScope = resolveExploreRecentRouteHistoryScope({
+      accountProfileKey: 'owner@example.com',
+      accountCloudEnabled: true,
+      kioskMode: true,
+      clubTabletDeviceId: 'tablet-1',
+      studioRiderId: 'athlete-a',
+    });
+    const athleteBScope = resolveExploreRecentRouteHistoryScope({
+      accountProfileKey: 'owner@example.com',
+      accountCloudEnabled: true,
+      kioskMode: true,
+      clubTabletDeviceId: 'tablet-1',
+      studioRiderId: 'athlete-b',
+    });
+
+    expect(ownerScope.profileKey).toBe('owner@example.com');
+    expect(athleteAScope.profileKey).not.toBe(athleteBScope.profileKey);
+    rememberRecentExploreRoute(ownerScope.profileKey!, route(7));
+    const ownerRoutesBeforeAthleteUse = loadRecentExploreRoutes(ownerScope.profileKey!);
+    rememberRecentExploreRoute(athleteAScope.profileKey!, route(1));
+    rememberRecentExploreRoute(athleteBScope.profileKey!, route(2));
+
+    expect(loadRecentExploreRoutes(athleteAScope.profileKey!).map(({ id }) => id)).toEqual(['EXPLORE-1']);
+    expect(loadRecentExploreRoutes(athleteBScope.profileKey!).map(({ id }) => id)).toEqual(['EXPLORE-2']);
+    expect(loadRecentExploreRoutes(ownerScope.profileKey!)).toEqual(ownerRoutesBeforeAthleteUse);
   });
 });

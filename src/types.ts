@@ -389,7 +389,7 @@ export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
 
 export type RaceState = 'ready' | 'racing' | 'finished';
 
-export type AppMode = 'profile' | 'race' | 'explore' | 'straight-sprint' | 'monitor' | 'club-monitor' | 'diagnostics' | 'developer';
+export type AppMode = 'profile' | 'race' | 'explore' | 'straight-sprint' | 'monitor' | 'club-monitor' | 'club-tablet' | 'diagnostics' | 'developer';
 
 export type AccountProfile = {
   photoUrl?: string;

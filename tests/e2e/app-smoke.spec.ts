@@ -5000,6 +5000,258 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await expect(monitor.getByRole('button', { name: /Pause|Resume|Stop|Cancel|Control/i })).toHaveCount(0);
 });
 
+test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode between sessions', async ({ page }) => {
+  const now = Date.now();
+  const authUser = {
+    id: 'club-tablet-owner',
+    profileKey: 'user:club-tablet-owner',
+    email: 'tablet-owner@tracklab.test',
+    name: 'Club Tablet Owner',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: now,
+    },
+  };
+  const tabletDevice = {
+    id: 'tablet-front-desk',
+    name: 'Preski Front Desk',
+    clubId: 'club-preski-ranch',
+    clubName: 'Preski Ranch LLC',
+    createdAt: now,
+    lastSeenAt: now,
+  };
+  const athletes = [
+    {
+      studioRiderId: 'studio-bobby',
+      riderName: 'Bobby',
+      athleteName: null,
+      status: 'unclaimed',
+    },
+    {
+      studioRiderId: 'studio-rasheen',
+      riderName: 'Rasheen “The Machine” Hicks',
+      athleteName: 'Rasheen Hicks',
+      status: 'claimed',
+    },
+  ];
+  const session = {
+    clubId: tabletDevice.clubId,
+    clubName: tabletDevice.clubName,
+    studioRiderId: 'studio-rasheen',
+    riderName: 'Rasheen “The Machine” Hicks',
+    athleteName: 'Rasheen Hicks',
+    bikeDeviceId: 58701,
+    expiresAt: now + 10 * 60_000,
+  };
+  let enrollmentRequest: unknown = null;
+  let rosterAuthorization = '';
+  let sessionRequest: unknown = null;
+  let sessionDeletes = 0;
+
+  await page.addInitScript(() => {
+    const packet = new ArrayBuffer(6);
+    const packetView = new DataView(packet);
+    packetView.setUint16(0, 0x40, true);
+    packetView.setUint16(2, 2_500, true);
+    packetView.setInt16(4, 220, true);
+    let notificationTimer = 0;
+    const characteristic = Object.assign(new EventTarget(), {
+      value: packetView,
+      startNotifications: async () => {
+        if (!notificationTimer) {
+          notificationTimer = window.setInterval(() => {
+            characteristic.dispatchEvent(new Event('characteristicvaluechanged'));
+          }, 200);
+        }
+        return characteristic;
+      },
+      stopNotifications: async () => {
+        window.clearInterval(notificationTimer);
+        notificationTimer = 0;
+        return characteristic;
+      },
+    });
+    const server = {
+      connected: true,
+      disconnect: () => undefined,
+      getPrimaryService: async (uuid: string) => {
+        if (!uuid.startsWith('00001826')) {
+          throw new Error('Service unavailable in test device.');
+        }
+        return { getCharacteristic: async () => characteristic };
+      },
+    };
+    const device = Object.assign(new EventTarget(), {
+      id: 'browser-club-tablet-bike',
+      name: 'WattbikePM25058701',
+      gatt: {
+        connected: true,
+        connect: async () => server,
+      },
+    });
+    window.localStorage.setItem(
+      'tracklab.bluetooth-bike-identities.v1',
+      JSON.stringify({ 'browser-club-tablet-bike': 58701 }),
+    );
+    Object.defineProperty(navigator, 'bluetooth', {
+      configurable: true,
+      value: {
+        getDevices: async () => [device],
+        requestDevice: async () => device,
+      },
+    });
+  });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: athletes.map((athlete) => ({
+          id: athlete.studioRiderId,
+          name: athlete.riderName,
+          createdAt: now,
+          updatedAt: now,
+        })),
+        accountProfile: { updatedAt: now },
+      }),
+    });
+  });
+  await page.route('**/api/club-connect*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        canManageClub: true,
+        ownedClub: {
+          id: tabletDevice.clubId,
+          name: tabletDevice.clubName,
+          members: athletes.map((athlete) => ({
+            studioRiderId: athlete.studioRiderId,
+            riderName: athlete.riderName,
+            status: athlete.status,
+          })),
+        },
+        memberships: [],
+      }),
+    });
+  });
+  await page.route('**/api/club-tablet/devices', async (route) => {
+    if (route.request().method() === 'POST') {
+      enrollmentRequest = route.request().postDataJSON();
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ device: tabletDevice, deviceToken: 'tablet-device-token' }),
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ devices: [] }),
+    });
+  });
+  await page.route('**/api/club-tablet/roster', async (route) => {
+    rosterAuthorization = route.request().headers().authorization ?? '';
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ device: tabletDevice, athletes }),
+    });
+  });
+  await page.route('**/api/club-tablet/sessions', async (route) => {
+    if (route.request().method() === 'POST') {
+      sessionRequest = route.request().postDataJSON();
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessionToken: 'tablet-athlete-session-token',
+          session,
+          heartbeatTtlMs: 120_000,
+          pollAfterMs: 30_000,
+        }),
+      });
+      return;
+    }
+    sessionDeletes += 1;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ stopped: true }),
+    });
+  });
+
+  await page.goto('/?track=black-mountain-bmx');
+  const openApp = page.getByRole('button', { name: 'Open App' });
+  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await openApp.click({ timeout: 2_000 }).catch(() => undefined);
+  }
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Club Tablets', exact: true }).click();
+
+  await page.getByLabel('Tablet name').fill(tabletDevice.name);
+  await page.getByRole('button', { name: 'Authorize this tablet', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  expect(enrollmentRequest).toEqual({ name: tabletDevice.name });
+  expect(rosterAuthorization).toBe('Bearer tablet-device-token');
+
+  const primaryNav = page.getByRole('navigation', { name: 'Primary' });
+  await expect(primaryNav.getByRole('button')).toHaveCount(1);
+  await expect(primaryNav.getByRole('button', { name: 'Club Tablet', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'My Profile', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Club Live Monitor', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Tracks & Maps', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Authorized club tablets')).toHaveCount(0);
+
+  await expect(page.getByRole('button', { name: /Bobby/ })).toBeVisible();
+  const rasheen = page.getByRole('button', { name: /Rasheen Hicks/ });
+  await expect(rasheen).toBeVisible();
+  const startAthlete = page.getByRole('button', { name: 'Start athlete session', exact: true });
+  await expect(startAthlete).toBeDisabled();
+  const bikeChoices = page.locator('.club-tablet-bikes');
+  await expect(bikeChoices.getByRole('button')).toHaveCount(1);
+  await expect(bikeChoices.getByText('WattbikePM25058701', { exact: false })).toBeVisible();
+
+  await rasheen.click();
+  await expect(startAthlete).toBeEnabled();
+  await startAthlete.click();
+  expect(sessionRequest).toEqual({ studioRiderId: 'studio-rasheen', bikeDeviceId: '58701' });
+
+  const programs = page.locator('.club-tablet-programs');
+  await expect(programs.getByRole('button')).toHaveCount(3);
+  await expect(programs.getByRole('button', { name: /BMX Race Intervals/ })).toBeVisible();
+  await expect(programs.getByRole('button', { name: /Straight Sprint/ })).toBeVisible();
+  await expect(programs.getByRole('button', { name: /Explore the World/ })).toBeVisible();
+
+  await page.locator('.club-tablet-active-card')
+    .getByRole('button', { name: 'End athlete session', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  await expect(page.getByText('Athlete signed out. The Wattbike remains paired to this tablet for the next student.')).toBeVisible();
+  expect(sessionDeletes).toBe(1);
+  expect(await page.evaluate(() => ({
+    device: JSON.parse(window.localStorage.getItem('tracklab.club-tablet-device.v1') ?? 'null'),
+    session: window.sessionStorage.getItem('tracklab.club-tablet-athlete-session.v1'),
+    pairedBikeMonitorId: JSON.parse(
+      window.localStorage.getItem('tracklab.bluetooth-bike-identities.v1') ?? '{}',
+    )['browser-club-tablet-bike'] ?? null,
+  }))).toEqual({
+    device: { device: tabletDevice, deviceToken: 'tablet-device-token' },
+    session: null,
+    pairedBikeMonitorId: 58701,
+  });
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Primary' }).getByRole('button')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /Rasheen Hicks/ })).toBeVisible();
+});
+
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {
   const bridge = await createMockBikeBridge([58701]);
   const sampleTimer = setInterval(() => {

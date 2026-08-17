@@ -99,6 +99,18 @@ describe('database migration runner', () => {
     expect(clubSessionMigration?.statements.join('\n')).toContain('idx_tracklab_training_sessions_club_date');
   });
 
+  it('stores only hashed credentials for owner-authorized shared club tablets', () => {
+    const clubTabletMigration = databaseMigrations().find((candidate) => candidate.version === 13);
+
+    expect(clubTabletMigration).toMatchObject({
+      version: 13,
+      name: 'add owner-authorized shared club tablets',
+    });
+    expect(clubTabletMigration?.statements.join('\n')).toContain('club_tablet_devices');
+    expect(clubTabletMigration?.statements.join('\n')).toContain('token_hash TEXT UNIQUE NOT NULL');
+    expect(clubTabletMigration?.statements.join('\n')).toContain('revoked_at');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();
