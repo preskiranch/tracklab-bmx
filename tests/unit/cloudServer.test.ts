@@ -198,7 +198,7 @@ function customSprintTrack(id: string) {
     ],
     routeStatus: 'locator-only',
     zones: [],
-    leaderboards: { rpm: [], speed: [], watts: [] },
+    leaderboards: { rpm: [], speed: [] },
   };
 }
 
@@ -810,7 +810,11 @@ describe('cloud API trust boundaries', () => {
           distanceMeters: 91.44,
           trackId: 'club-drag-strip',
           trackName: 'Club Drag Strip',
-          details: { sprintDistanceFeet: 300, sprintAirSetting: 4 },
+          details: {
+            sprintDistanceFeet: 300,
+            sprintAirSetting: 4,
+            summaries: [{ riderId: 'studio-maya', riderName: 'Maya Torres', topWatts: 1_025 }],
+          },
         },
       }),
     });
@@ -1021,9 +1025,10 @@ describe('cloud API trust boundaries', () => {
       activityType: 'straight-sprint',
       status: 'active',
       progress: { fraction: 0.45, distanceMeters: 41.15, label: '145 ft sprint' },
-      metrics: { watts: 1_100, participantCount: 4 },
+      metrics: { participantCount: 4 },
       multiplayer: true,
     });
+    expect(JSON.stringify(livePublishPayload)).not.toMatch(/watts?|power/i);
     expect(livePublishPayload.session).not.toHaveProperty('roomId');
     expect(livePublishPayload.session).not.toHaveProperty('_publisherProfileKey');
     expect(JSON.stringify(livePublishPayload)).not.toContain('PRIVATE-JOIN-SECRET');
@@ -1038,6 +1043,7 @@ describe('cloud API trust boundaries', () => {
       activityType: 'straight-sprint',
       multiplayer: true,
     });
+    expect(JSON.stringify(ownerLivePayload)).not.toMatch(/watts?|power/i);
     expect(JSON.stringify(ownerLivePayload)).not.toContain('PRIVATE-JOIN-SECRET');
 
     cookie = athleteCookie;
@@ -1142,6 +1148,7 @@ describe('cloud API trust boundaries', () => {
     expect(athleteClubHistoryPayload.sessions).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: athleteClubSessionId, club: expect.objectContaining({ role: 'athlete' }) }),
     ]));
+    expect(JSON.stringify(athleteClubHistoryPayload)).toContain('topWatts');
     const athleteIdentityBeforePersonal = await api('/api/auth/me').then((response) => response.json());
 
     const athletePersonalSessionId = `athlete-personal-ride-${now}`;
@@ -1211,6 +1218,7 @@ describe('cloud API trust boundaries', () => {
       }),
     ]));
     expect(ownerCombinedPayload.sessions.some((session: { id: string }) => session.id.includes(athletePersonalSessionId))).toBe(false);
+    expect(JSON.stringify(ownerCombinedPayload)).not.toMatch(/watts?|power/i);
 
     const reusedClaim = await api('/api/club-connect/claim', {
       method: 'POST',
@@ -1808,6 +1816,7 @@ describe('cloud API trust boundaries', () => {
     expect(JSON.stringify(leaderboardPayload)).toContain('Tablet Rider One');
     expect(JSON.stringify(leaderboardPayload)).not.toContain('Sibling');
     expect(JSON.stringify(leaderboardPayload)).not.toContain('Pseudo Tablet Identity');
+    expect(JSON.stringify(leaderboardPayload)).not.toMatch(/"[^"]*(?:watts?|power)[^"]*"\s*:/i);
     for (const entries of Object.values(leaderboardPayload.leaderboards) as Array<Array<{ rider: string }>>) {
       expect(entries.filter((entry) => entry.rider === 'Tablet Rider One')).toHaveLength(1);
     }
@@ -1827,7 +1836,7 @@ describe('cloud API trust boundaries', () => {
         lapCount: 1,
         finishTimeMs: 950,
         savedAt: now,
-        analyticsPublic: false,
+        analyticsPublic: true,
         summary: {
           playerId: 2,
           riderName: 'Forged Name',
@@ -1881,6 +1890,14 @@ describe('cloud API trust boundaries', () => {
         summary: expect.objectContaining({ playerId: 2, topWatts: 800 }),
       })],
     });
+    const cookieBeforePublicGhostRead = cookie;
+    cookie = '';
+    const publicGhosts = await api(`/api/ghosts?trackId=${encodeURIComponent(tabletTrackId)}`);
+    cookie = cookieBeforePublicGhostRead;
+    expect(publicGhosts.status).toBe(200);
+    const publicGhostPayload = await publicGhosts.json();
+    expect(publicGhostPayload.ghosts).toHaveLength(1);
+    expect(JSON.stringify(publicGhostPayload)).not.toMatch(/"[^"]*(?:watts?|power)[^"]*"\s*:/i);
     const wrongSprintCategory = await api(
       `/api/club-tablet/ghosts?trackId=${encodeURIComponent(tabletTrackId)}&sprintDistanceFeet=145&sprintAirSetting=5`,
       { headers: athleteHeaders(selectedPayload.sessionToken) },

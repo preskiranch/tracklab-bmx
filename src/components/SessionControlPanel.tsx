@@ -207,7 +207,6 @@ type SessionControlPanelProps = {
 const metricOptions: Array<{ key: MetricKey; label: string; icon: typeof Activity }> = [
   { key: 'cadence', label: 'Cadence', icon: Activity },
   { key: 'speed', label: 'Speed', icon: Gauge },
-  { key: 'power', label: 'Power', icon: Zap },
   { key: 'reaction', label: 'Reaction', icon: Timer },
 ];
 

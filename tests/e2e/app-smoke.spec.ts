@@ -1959,7 +1959,7 @@ test('straight sprint restores and saves a separate camera for each distance', a
     ],
     routeStatus: 'user-mapped',
     zones: [],
-    leaderboards: { rpm: [], speed: [], watts: [] },
+    leaderboards: { rpm: [], speed: [] },
   };
   const mapping = {
     ...mockNoPedalZoneMapping,
@@ -4028,11 +4028,12 @@ test('completed race finishes the active sentence and authoritative placements b
   await expect(riderCells).toHaveCount(4);
   for (let index = 0; index < 4; index += 1) {
     const riderCell = riderCells.nth(index);
-    for (const metric of ['Max cadence', 'Max speed', 'Max power']) {
+    for (const metric of ['Max cadence', 'Max speed']) {
       const value = riderCell.locator('.table-metric').filter({ hasText: metric }).locator('strong');
       await expect(value).not.toHaveText('--');
     }
   }
+  await expect(dashboardAnalysis.getByText(/Max power|Top watts|Avg watts/i)).toHaveCount(0);
 
   const zoneTableFits = await zoneTableCard.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
   expect(zoneTableFits).toBe(true);
@@ -4167,7 +4168,7 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await page.route('**/api/multiplayer/leaderboards*', async (route) => {
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+        body: JSON.stringify({ rpm: [], speed: [] }),
       });
     });
 
@@ -4328,7 +4329,7 @@ test('live cadence detects a false start and automatically rearms after five sec
     await page.route('**/api/multiplayer/leaderboards*', async (route) => {
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+        body: JSON.stringify({ rpm: [], speed: [] }),
       });
     });
 
@@ -4457,7 +4458,7 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
     await page.route('**/api/multiplayer/leaderboards*', async (route) => {
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+        body: JSON.stringify({ rpm: [], speed: [] }),
       });
     });
 
@@ -4727,7 +4728,7 @@ test('demo rider names and the last track view restore from the signed-in accoun
   await page.route('**/api/multiplayer/leaderboards*', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ rpm: [], speed: [], watts: [] }),
+      body: JSON.stringify({ rpm: [], speed: [] }),
     });
   });
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());

@@ -27,7 +27,7 @@ export default function ClubLiveAccessNotice({
       {selected && (
         <p>
           The club owner can optionally open Club Live Monitor to view your program, status, progress, track or
-          destination, power, cadence, and speed. Your temporary Club Athlete bike and racer-seat access is based on
+          destination, cadence, and speed. Your watts remain private in your own training record. Your temporary Club Athlete bike and racer-seat access is based on
           the club membership and stops when you leave club training.
         </p>
       )}

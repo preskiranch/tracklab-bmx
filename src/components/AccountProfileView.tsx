@@ -128,6 +128,25 @@ function summarizeSession(session: TrainingSession) {
   return [sprint, result].filter(Boolean).join(' · ');
 }
 
+function privatePeakPower(session: TrainingSession) {
+  let peak = 0;
+  const visit = (value: unknown, key = '') => {
+    if (typeof value === 'number' && Number.isFinite(value) && /^(?:watts|topWatts|peakWatts|maxWatts|peakPower|maxPower)$/i.test(key)) {
+      peak = Math.max(peak, value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      Object.entries(value).forEach(([nestedKey, nestedValue]) => visit(nestedValue, nestedKey));
+    }
+  };
+  visit(session.details);
+  return peak > 0 ? Math.round(peak) : null;
+}
+
 function editableAccountName(value: string) {
   const match = value.trim().match(/^(.+?)\s*\(([^()]+)\)$/u);
   return {
@@ -384,7 +403,7 @@ export function AccountProfileView({
           {clubState.memberships.map((membership) => (
             <div className="club-athlete-access" key={`${membership.clubId}:${membership.studioRiderId}`}>
               <ShieldCheck size={21} />
-              <div><strong>Connected to {membership.clubName}</strong><p>Studio rider: {membership.riderName}. Viewing and downloading your studio data is free. Choosing “Training at {membership.clubName}” shares the saved session with the club and lets you use one available bike seat from the club membership. The owner may optionally open Club Live Monitor to view your program, live status, progress, track or destination, power, cadence, and speed. Club access ends when you leave club training.</p></div>
+              <div><strong>Connected to {membership.clubName}</strong><p>Studio rider: {membership.riderName}. Viewing and downloading your studio data is free. Choosing “Training at {membership.clubName}” shares the saved session with the club and lets you use one available bike seat from the club membership. The owner may optionally open Club Live Monitor to view your program, live status, progress, track or destination, cadence, and speed. Watts remain private in your own rider record. Club access ends when you leave club training.</p></div>
               <span>Club Athlete</span>
             </div>
           ))}
@@ -486,6 +505,9 @@ export function AccountProfileView({
                   </small>
                 )}
                 {summarizeSession(session) && <p>{summarizeSession(session)}</p>}
+                {privatePeakPower(session) != null && (
+                  <small>Private power · {privatePeakPower(session)} W peak · visible only to you</small>
+                )}
               </div>
               <div className="training-session-downloads">
                 <button type="button" onClick={() => downloadTrainingSession(session, 'json')}><Download size={15} /> JSON</button>

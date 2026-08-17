@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-16T13:26:01.922Z",
+  "generatedAt": "2026-08-17T22:19:06.726Z",
   "providerCount": 9,
   "trackCount": 1305,
   "providers": [
@@ -2171,32 +2171,6 @@
             "rider": "Taylor Smith",
             "value": 51.68,
             "unit": "MPH",
-            "date": "2026-06-15"
-          }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1296,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1164,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1122,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 985,
-            "unit": "W",
             "date": "2026-06-15"
           }
         ]
@@ -84664,32 +84638,6 @@
             "unit": "MPH",
             "date": "2026-06-15"
           }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1266,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1139,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1097,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 965,
-            "unit": "W",
-            "date": "2026-06-15"
-          }
         ]
       }
     },
@@ -88966,32 +88914,6 @@
             "rider": "Taylor Smith",
             "value": 52.22,
             "unit": "MPH",
-            "date": "2026-06-15"
-          }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1308,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1174,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1132,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 993,
-            "unit": "W",
             "date": "2026-06-15"
           }
         ]
@@ -144113,32 +144035,6 @@
             "unit": "MPH",
             "date": "2026-06-15"
           }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1296,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1164,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1122,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 985,
-            "unit": "W",
-            "date": "2026-06-15"
-          }
         ]
       }
     },
@@ -158443,32 +158339,6 @@
             "unit": "MPH",
             "date": "2026-06-15"
           }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1278,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1149,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1107,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 973,
-            "unit": "W",
-            "date": "2026-06-15"
-          }
         ]
       },
       "sourceRecord": {
@@ -160027,32 +159897,6 @@
             "rider": "Taylor Smith",
             "value": 51.41,
             "unit": "MPH",
-            "date": "2026-06-15"
-          }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1290,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1159,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1117,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 981,
-            "unit": "W",
             "date": "2026-06-15"
           }
         ]
@@ -163888,32 +163732,6 @@
             "rider": "Taylor Smith",
             "value": 53.84,
             "unit": "MPH",
-            "date": "2026-06-15"
-          }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1344,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1204,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1162,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 1017,
-            "unit": "W",
             "date": "2026-06-15"
           }
         ]
@@ -186869,32 +186687,6 @@
             "unit": "MPH",
             "date": "2026-06-15"
           }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1326,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1189,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1147,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 1005,
-            "unit": "W",
-            "date": "2026-06-15"
-          }
         ]
       },
       "sourceRecord": {
@@ -191516,32 +191308,6 @@
             "unit": "MPH",
             "date": "2026-06-15"
           }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1332,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1194,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1152,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 1009,
-            "unit": "W",
-            "date": "2026-06-15"
-          }
         ]
       }
     },
@@ -196141,32 +195907,6 @@
             "rider": "Taylor Smith",
             "value": 52.49,
             "unit": "MPH",
-            "date": "2026-06-15"
-          }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1314,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1179,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1137,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 997,
-            "unit": "W",
             "date": "2026-06-15"
           }
         ]
@@ -212080,32 +211820,6 @@
             "rider": "Taylor Smith",
             "value": 51.14,
             "unit": "MPH",
-            "date": "2026-06-15"
-          }
-        ],
-        "watts": [
-          {
-            "rider": "Alex Rider",
-            "value": 1284,
-            "unit": "W",
-            "date": "2026-05-18"
-          },
-          {
-            "rider": "Sam Carter",
-            "value": 1154,
-            "unit": "W",
-            "date": "2026-05-23"
-          },
-          {
-            "rider": "Jamie Lee",
-            "value": 1112,
-            "unit": "W",
-            "date": "2026-06-04"
-          },
-          {
-            "rider": "Taylor Smith",
-            "value": 977,
-            "unit": "W",
             "date": "2026-06-15"
           }
         ]

@@ -1938,7 +1938,10 @@ function publicTrainingSession(session, clubRole) {
     _clubRiderName,
     ...publicSession
   } = session;
-  if (!_clubId || !_studioRiderId) return publicSession;
+  const visiblePublicSession = clubRole === 'owner'
+    ? { ...publicSession, details: redactPrivatePower(publicSession.details ?? {}) }
+    : publicSession;
+  if (!_clubId || !_studioRiderId) return visiblePublicSession;
   const club = {
     id: _clubId,
     name: _clubName || 'Connected club',
@@ -1947,13 +1950,27 @@ function publicTrainingSession(session, clubRole) {
     role: clubRole === 'owner' ? 'owner' : 'athlete',
   };
   return {
-    ...publicSession,
+    ...visiblePublicSession,
     club,
     details: {
-      ...(publicSession.details ?? {}),
+      ...(visiblePublicSession.details ?? {}),
       club,
     },
   };
+}
+
+function redactPrivatePower(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactPrivatePower);
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  return Object.fromEntries(Object.entries(value).flatMap(([key, nested]) => (
+    /(?:watts?|power)/i.test(key)
+      ? []
+      : [[key, redactPrivatePower(nested)]]
+  )));
 }
 
 function normalizedRiderClaimName(value) {
@@ -2032,10 +2049,22 @@ function projectClubTrainingSession(session, membership) {
 
 async function loadTrainingSessionsForAccount(profileKey, options) {
   const clubState = await persistence.loadClubConnectState(profileKey);
+  const ownedStudioRiderIds = new Set(
+    (clubState.ownedClub?.members ?? []).map((member) => member.studioRiderId).filter(Boolean),
+  );
+  const containsOwnedStudioRider = (value) => {
+    if (Array.isArray(value)) return value.some(containsOwnedStudioRider);
+    if (!value || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, nested]) => (
+      (key === 'riderId' || key === 'studioRiderId') && ownedStudioRiderIds.has(String(nested))
+    ) || containsOwnedStudioRider(nested));
+  };
   const ownSessions = (await persistence.loadTrainingSessions(profileKey, options))
     .map((session) => publicTrainingSession(
       session,
-      clubState.ownedClub?.id === session?._clubId ? 'owner' : 'athlete',
+      clubState.ownedClub?.id === session?._clubId || containsOwnedStudioRider(session?.details)
+        ? 'owner'
+        : 'athlete',
     ))
     .filter(Boolean);
   const clubSessions = (await Promise.all(clubState.memberships.map(async (membership) => {
@@ -2585,7 +2614,6 @@ function sanitizeClubLiveProgress(value) {
 function sanitizeClubLiveMetrics(value) {
   const input = value && typeof value === 'object' ? value : {};
   return {
-    watts: boundedNumber(input.watts, 0, 5_000),
     cadence: boundedNumber(input.cadence, 0, 300),
     speedKph: boundedNumber(input.speedKph, 0, 200),
     distanceMeters: boundedNumber(input.distanceMeters, 0, 10_000_000),
@@ -3023,7 +3051,7 @@ function sanitizePublicCustomRoute(value) {
     outline: outline.length >= 2 ? outline : [center],
     routeStatus: 'locator-only',
     zones: [],
-    leaderboards: { rpm: [], speed: [], watts: [] },
+    leaderboards: { rpm: [], speed: [] },
   };
 }
 
@@ -3369,7 +3397,6 @@ function sanitizeExploreState(value, client, room) {
         cadence: rider?.cadence == null
           ? null
           : Math.max(0, Math.min(300, finiteNumber(rider.cadence, 0))),
-        watts: Math.max(0, Math.min(5_000, finiteNumber(rider?.watts, 0))),
         signal: Math.max(0, Math.min(1, finiteNumber(rider?.signal, 0))),
         recommendedAirSetting: Math.max(
           1,
@@ -3439,8 +3466,6 @@ function sanitizeRaceSummaryEntry(value, index) {
     averageSpeedKph: nullableMetric(value.averageSpeedKph, 160),
     topCadence: nullableMetric(value.topCadence, 300),
     averageCadence: nullableMetric(value.averageCadence, 300),
-    topWatts: nullableMetric(value.topWatts, 5000),
-    averageWatts: nullableMetric(value.averageWatts, 5000),
   };
 }
 
@@ -3479,7 +3504,6 @@ function sanitizeRaceState(value, client, room) {
         phase: ['pedaling', 'airborne', 'landing'].includes(rider?.phase) ? rider.phase : 'pedaling',
         rank: Math.max(1, Math.min(64, Math.round(finiteNumber(rider?.rank, index + 1)))),
         finishedAt: nullableFiniteNumber(rider?.finishedAt),
-        watts: Math.max(0, Math.round(finiteNumber(rider?.watts, 0))),
         cadence: nullableFiniteNumber(rider?.cadence),
         speedKph: nullableFiniteNumber(rider?.speedKph),
         signal: Math.max(0, Math.min(1, finiteNumber(rider?.signal, 0))),
@@ -5796,7 +5820,7 @@ async function serveStatic(request, response) {
         outline: mapping.centerline,
         routeStatus: 'locator-only',
         zones: [],
-        leaderboards: { rpm: [], speed: [], watts: [] },
+        leaderboards: { rpm: [], speed: [] },
       };
     }
 

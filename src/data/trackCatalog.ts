@@ -34,12 +34,6 @@ function leaderboard(seed: number): Record<LeaderboardMetric, LeaderboardEntry[]
       { rider: 'Jamie Lee', value: seed * 0.29 + 21.3, unit: 'MPH', date: '2026-06-04' },
       { rider: 'Taylor Smith', value: seed * 0.27 + 20.9, unit: 'MPH', date: '2026-06-15' },
     ],
-    watts: [
-      { rider: 'Alex Rider', value: seed * 6 + 612, unit: 'W', date: '2026-05-18' },
-      { rider: 'Sam Carter', value: seed * 5 + 594, unit: 'W', date: '2026-05-23' },
-      { rider: 'Jamie Lee', value: seed * 5 + 552, unit: 'W', date: '2026-06-04' },
-      { rider: 'Taylor Smith', value: seed * 4 + 529, unit: 'W', date: '2026-06-15' },
-    ],
   };
 }
 

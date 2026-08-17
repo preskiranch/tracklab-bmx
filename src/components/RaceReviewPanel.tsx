@@ -191,8 +191,6 @@ export function RaceReviewPanel({
                 <span><strong>{formatNullableSpeed(summary.averageSpeedKph, speedUnit)}</strong><small>avg speed</small></span>
                 <span><strong>{formatNullableMetric(summary.topCadence, 'RPM')}</strong><small>max cadence</small></span>
                 <span><strong>{formatNullableMetric(summary.averageCadence, 'RPM')}</strong><small>avg cadence</small></span>
-                <span><strong>{formatNullableMetric(summary.topWatts, 'W')}</strong><small>max watts</small></span>
-                <span><strong>{formatNullableMetric(summary.averageWatts, 'W')}</strong><small>avg watts</small></span>
               </div>
             </div>
           ))}
@@ -236,8 +234,6 @@ export function RaceReviewPanel({
                       <span className="table-metric">Avg speed: {formatNullableSpeed(stats?.averageSpeedKph ?? null, speedUnit)}</span>
                       <span className="table-metric">Max cadence: {formatNullableMetric(stats?.topCadence ?? null, 'RPM')}</span>
                       <span className="table-metric">Avg cadence: {formatNullableMetric(stats?.averageCadence ?? null, 'RPM')}</span>
-                      <span className="table-metric">Max watts: {formatNullableMetric(stats?.topWatts ?? null, 'W')}</span>
-                      <span className="table-metric">Avg watts: {formatNullableMetric(stats?.averageWatts ?? null, 'W')}</span>
                       <span className="table-metric muted">
                         {stats?.sampleCount ? `${stats.sampleCount} analysis points` : 'No telemetry captured'}
                       </span>

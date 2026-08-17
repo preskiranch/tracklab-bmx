@@ -53,7 +53,7 @@ const track: TrackRecord = {
     { id: 'r1', name: 'Turn one', startMeter: 65, endMeter: 100, type: 'recovery' },
     { id: 't1', name: 'Rhythm', startMeter: 100, endMeter: 180, type: 'technical' },
   ],
-  leaderboards: { speed: [], rpm: [], watts: [] },
+  leaderboards: { speed: [], rpm: [] },
 };
 
 const players: PlayerSlot[] = [

@@ -115,7 +115,6 @@ export function ClubLiveAthleteBridge({
           label: routeDistance > 0 ? `${Math.round(fraction * 100)}% of route` : 'Choosing a route',
         },
         metrics: {
-          watts: Math.max(0, Math.round(rider.watts)),
           cadence: Math.max(0, Math.round(rider.cadence ?? 0)),
           speedKph: Math.max(0, rider.velocityMps * 3.6),
           distanceMeters,
@@ -160,7 +159,6 @@ export function ClubLiveAthleteBridge({
         label: status === 'staging' ? 'At the gate' : `${Math.round(fraction * 100)}% of course`,
       },
       metrics: {
-        watts: Math.max(0, Math.round(liveSample.watts ?? rider.lastRawWatts ?? 0)),
         cadence: Math.max(0, Math.round(liveSample.cadence ?? rider.lastRawCadence ?? 0)),
         speedKph: Math.max(0, rider.velocity * 3.6),
         distanceMeters,

@@ -1,5 +1,5 @@
 import { useMemo, type CSSProperties } from 'react';
-import { Activity, Download, Gauge, ListFilter, Timer, Trophy, Zap } from 'lucide-react';
+import { Activity, Download, Gauge, ListFilter, Timer, Trophy } from 'lucide-react';
 import { buildRaceZoneResults, zoneRiderResult } from '../lib/raceReview';
 import { formatDistanceRangeMeters, formatReactionTime, formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
@@ -44,7 +44,7 @@ type AnalyticsPanelProps = {
 const metricMeta: Record<MetricKey, { label: string; unit: string; icon: typeof Activity }> = {
   cadence: { label: 'Cadence', unit: 'RPM', icon: Activity },
   speed: { label: 'Speed', unit: '', icon: Gauge },
-  power: { label: 'Power', unit: 'W', icon: Zap },
+  power: { label: 'Private power', unit: 'W', icon: Activity },
   reaction: { label: 'Reaction', unit: 'RT', icon: Timer },
 };
 
@@ -201,12 +201,10 @@ export function AnalyticsPanel({
   }, [raceCapture]);
   const showSpeedSummary = selectedMetrics.includes('speed');
   const showCadenceSummary = selectedMetrics.includes('cadence');
-  const showPowerSummary = selectedMetrics.includes('power');
   const showReactionSummary = selectedMetrics.includes('reaction');
   const winner = raceSummary[0];
   const bestSpeed = bestSummaryValue(raceSummary, (summary) => summary.topSpeedKph);
   const bestCadence = bestSummaryValue(raceSummary, (summary) => summary.topCadence);
-  const bestWatts = bestSummaryValue(raceSummary, (summary) => summary.topWatts);
   const bestReaction = bestReactionTime(raceSummary, reactionTimesByPlayer);
   const bestThirtyFoot = bestSplitTime(raceSummary);
   const playerById = useMemo(
@@ -306,7 +304,7 @@ export function AnalyticsPanel({
             Zone-based summary
           </div>
           <h2>Post-race analysis</h2>
-          <p>Peak cadence, speed, and power by zone and rider.</p>
+          <p>Cadence, speed, reaction, and finish results by zone and rider.</p>
         </div>
         <div className="metric-summary">
           {selectedMetrics.map((metric) => {
@@ -323,6 +321,7 @@ export function AnalyticsPanel({
             <strong>Race capture</strong>
             <small>
               {raceCapture.status} / {raceCapture.samples.length} samples / {raceCapture.events.length} events
+              {' / '}shared exports exclude private power
             </small>
           </div>
           <div className="capture-actions">
@@ -365,11 +364,6 @@ export function AnalyticsPanel({
               <small>peak</small>
             </div>
             <div>
-              <span>Power</span>
-              <strong>{formatNullableMetric(bestWatts, 'W')}</strong>
-              <small>peak</small>
-            </div>
-            <div>
               <span>Reaction</span>
               <strong>{formatReactionTime(bestReaction)}</strong>
               <small>best RT</small>
@@ -394,8 +388,6 @@ export function AnalyticsPanel({
                   {showSpeedSummary && <th>Avg speed</th>}
                   {showCadenceSummary && <th>Top cadence</th>}
                   {showCadenceSummary && <th>Avg cadence</th>}
-                  {showPowerSummary && <th>Top watts</th>}
-                  {showPowerSummary && <th>Avg watts</th>}
                   <th>Samples</th>
                 </tr>
               </thead>
@@ -441,8 +433,6 @@ export function AnalyticsPanel({
                     {showSpeedSummary && <td>{formatNullableSpeed(summary.averageSpeedKph, speedUnit)}</td>}
                     {showCadenceSummary && <td>{formatNullableMetric(summary.topCadence, 'RPM')}</td>}
                     {showCadenceSummary && <td>{formatNullableMetric(summary.averageCadence, 'RPM')}</td>}
-                    {showPowerSummary && <td>{formatNullableMetric(summary.topWatts, 'W')}</td>}
-                    {showPowerSummary && <td>{formatNullableMetric(summary.averageWatts, 'W')}</td>}
                     <td>{summary.sampleCount}</td>
                   </tr>
                 ))}
@@ -499,10 +489,6 @@ export function AnalyticsPanel({
                         <span className="table-metric">
                           <small>Max speed</small>
                           <strong>{formatNullableSpeed(stats?.topSpeedKph ?? null, speedUnit)}</strong>
-                        </span>
-                        <span className="table-metric">
-                          <small>Max power</small>
-                          <strong>{formatNullableMetric(stats?.topWatts ?? null, 'W')}</strong>
                         </span>
                       </td>
                     );

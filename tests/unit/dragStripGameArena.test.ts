@@ -17,7 +17,7 @@ const track = {
   outline: [],
   routeStatus: 'user-mapped',
   zones: [],
-  leaderboards: { rpm: [], speed: [], watts: [] },
+  leaderboards: { rpm: [], speed: [] },
 } satisfies TrackRecord;
 
 describe('Drag Strip game arena availability', () => {

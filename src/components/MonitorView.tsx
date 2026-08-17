@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Bike, Gauge, RadioTower, Signal, Zap } from 'lucide-react';
+import { Activity, Bike, Gauge, RadioTower, Signal } from 'lucide-react';
 import { liveBikeTimeoutMs } from '../data';
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 import { wattbikeMonitorLastThree } from '../lib/bikeProfileIdentity';
@@ -246,11 +246,6 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
 
                 <div className="monitor-primary">
                   <div>
-                    <Zap size={24} />
-                    <span>{metrics.watts}</span>
-                    <small>watts</small>
-                  </div>
-                  <div>
                     <Activity size={24} />
                     <span>{metrics.cadence}</span>
                     <small>rpm</small>
@@ -278,10 +273,6 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
                         <span>{sprintDurationSeconds(sprintResult, now).toFixed(1)}s</span>
                       </div>
                       <div className="monitor-sprint-grid">
-                        <div>
-                          <span>{sprintResult.peakWatts}</span>
-                          <small>Power peak</small>
-                        </div>
                         <div>
                           <span>{sprintResult.peakCadence}</span>
                           <small>Cadence pk</small>

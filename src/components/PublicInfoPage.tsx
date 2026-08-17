@@ -150,6 +150,11 @@ function PrivacyPage() {
                 order, personal records, ghost replays, and training history. Straight Sprint settings and Explore
                 distance, duration, grade, and elevation can also be included in saved sessions.
               </p>
+              <p>
+                Watt and power measurements are private rider records. They remain available in the individual
+                rider&apos;s own training history and downloads, but are not published to public leaderboards, ghosts,
+                demo views, multiplayer participants, or Club Live Monitor.
+              </p>
 
               <h3>Maps, routes, and location</h3>
               <p>
@@ -185,7 +190,7 @@ function PrivacyPage() {
               <ul>
                 <li>Authenticate accounts and synchronize account, club, rider, route, and training data.</li>
                 <li>Connect up to four Wattbikes and run BMX races, straight sprints, and Explore rides.</li>
-                <li>Create results, leaderboards, records, ghosts, calendar history, and downloadable reports.</li>
+                <li>Create results, non-power leaderboards, records, ghosts, calendar history, and downloadable reports.</li>
                 <li>Operate private rooms, room chat, optional voice chat, challenges, and live race state.</li>
                 <li>Load maps, resolve route locations, calculate routes and elevation, and show track information.</li>
                 <li>Generate optional pre-race and live commentary from current race context.</li>
@@ -202,13 +207,14 @@ function PrivacyPage() {
                 <li>
                   <strong>Other TrackLab users:</strong> room participants can see rider display names, photos, live
                   positions, and results. Public leaderboards and ghost replays can display rider identity and race
-                  performance. Detailed ghost zone analytics are shared only when that option is enabled.
+                  performance, excluding watts and power. Detailed non-power ghost zone analytics are shared only
+                  when that option is enabled.
                 </li>
                 <li>
                   <strong>Clubs:</strong> a claimed Club Connect athlete can choose “Training at” a club to associate
                   the saved session with that club. The club owner may optionally open Club Live Monitor; when open, TrackLab also shares
-                  the athlete&apos;s selected program, live status, course progress, track or destination, power,
-                  cadence, and speed with that owner. This read-only live feed expires automatically after the athlete
+                  the athlete&apos;s selected program, live status, course progress, track or destination, cadence, and
+                  speed with that owner. Watts remain private to the athlete. This read-only live feed expires automatically after the athlete
                   leaves club training or stops transmitting.
                 </li>
                 <li>

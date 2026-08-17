@@ -794,7 +794,6 @@ export function MultiplayerPanel({
                   <strong>{rider.name}</strong>
                   <span>{state.raceState} / rank {rider.rank}</span>
                 </div>
-                <strong>{rider.watts} W</strong>
               </div>
             ))}
           </div>
@@ -821,7 +820,6 @@ export function MultiplayerPanel({
                   <strong>{player.name}</strong>
                   <span>{player.deviceId ? `Wattbike ${player.deviceId}` : 'Unassigned'}</span>
                 </div>
-                <strong>{sample?.watts ?? rider?.lastWatts ?? 0} W</strong>
               </div>
             );
           })}

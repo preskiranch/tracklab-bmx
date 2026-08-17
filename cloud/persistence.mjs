@@ -2225,7 +2225,6 @@ export async function loadLeaderboards(trackId, limit = 10) {
     const metricDefinitions = {
       rpm: { field: 'topCadence', unit: 'RPM', factor: 1 },
       speed: { field: 'topSpeedKph', unit: 'MPH', factor: 0.621371 },
-      watts: { field: 'topWatts', unit: 'W', factor: 1 },
     };
     return Object.fromEntries(Object.entries(metricDefinitions).map(([metric, definition]) => {
       const bestByRider = new Map();
@@ -2267,43 +2266,32 @@ export async function loadLeaderboards(trackId, limit = 10) {
        FROM ${schema}.race_results
        WHERE track_id = $1 AND top_speed_kph IS NOT NULL
        ORDER BY guest_key, rider_name, top_speed_kph DESC, created_at DESC
-     ), watt_bests AS (
-       SELECT DISTINCT ON (guest_key, rider_name)
-         rider_name, top_watts AS value, created_at, summary->>'photoUrl' AS photo_url
-       FROM ${schema}.race_results
-       WHERE track_id = $1 AND top_watts IS NOT NULL
-       ORDER BY guest_key, rider_name, top_watts DESC, created_at DESC
      )
      SELECT 'rpm' AS metric, rider_name, value, created_at, photo_url
      FROM (SELECT * FROM cadence_bests ORDER BY value DESC LIMIT $2) AS cadence_leaders
      UNION ALL
      SELECT 'speed' AS metric, rider_name, value, created_at, photo_url
-     FROM (SELECT * FROM speed_bests ORDER BY value DESC LIMIT $2) AS speed_leaders
-     UNION ALL
-     SELECT 'watts' AS metric, rider_name, value, created_at, photo_url
-     FROM (SELECT * FROM watt_bests ORDER BY value DESC LIMIT $2) AS watt_leaders`,
+     FROM (SELECT * FROM speed_bests ORDER BY value DESC LIMIT $2) AS speed_leaders`,
     [trackId, safeLimit],
   );
 
-  const boards = { rpm: [], speed: [], watts: [] };
+  const boards = { rpm: [], speed: [] };
   for (const row of result?.rows ?? []) {
     boards[row.metric]?.push({
       rider: row.rider_name,
       ...(row.photo_url ? { photoUrl: row.photo_url } : {}),
       value: row.metric === 'speed' ? Number(row.value) * 0.621371 : Number(row.value),
-      unit: row.metric === 'rpm' ? 'RPM' : row.metric === 'speed' ? 'MPH' : 'W',
+      unit: row.metric === 'rpm' ? 'RPM' : 'MPH',
       date: new Date(row.created_at).toISOString().slice(0, 10),
     });
   }
 
   boards.rpm.sort((a, b) => b.value - a.value);
   boards.speed.sort((a, b) => b.value - a.value);
-  boards.watts.sort((a, b) => b.value - a.value);
 
   return {
     rpm: boards.rpm.slice(0, safeLimit),
     speed: boards.speed.slice(0, safeLimit),
-    watts: boards.watts.slice(0, safeLimit),
   };
 }
 
@@ -2540,9 +2528,24 @@ function routeKey(routeVariantId, lapCount = 1, distanceFeet, airSetting) {
   return distance != null && air != null ? `${base}:sprint:${distance}ft:air:${air}` : base;
 }
 
+function redactPrivatePower(value) {
+  if (Array.isArray(value)) return value.map(redactPrivatePower);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).flatMap(([key, nested]) => (
+    /(?:watts?|power)/i.test(key) ? [] : [[key, redactPrivatePower(nested)]]
+  )));
+}
+
 function ghostFromRow(row, source = 'top', includeAnalytics = false) {
   const medalRank = Number(row.medal_rank);
   const storedSummary = fromJson(row.summary, null);
+  const visibleSummary = includeAnalytics
+    ? (source === 'personal' ? storedSummary : redactPrivatePower(storedSummary))
+    : null;
+  const storedZoneResults = includeAnalytics ? fromJson(row.zone_results, []) : [];
+  const visibleZoneResults = source === 'personal'
+    ? storedZoneResults
+    : redactPrivatePower(storedZoneResults);
   return {
     version: 1,
     id: row.id,
@@ -2568,8 +2571,8 @@ function ghostFromRow(row, source = 'top', includeAnalytics = false) {
     savedAt: new Date(row.saved_at).getTime(),
     analyticsPublic: Boolean(row.analytics_public),
     medalRank: medalRank >= 1 && medalRank <= 3 ? medalRank : null,
-    summary: includeAnalytics ? storedSummary : null,
-    zoneResults: includeAnalytics ? fromJson(row.zone_results, []) : [],
+    summary: visibleSummary,
+    zoneResults: visibleZoneResults,
     points: fromJson(row.points, []),
   };
 }

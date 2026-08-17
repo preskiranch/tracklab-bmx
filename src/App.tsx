@@ -68,6 +68,7 @@ import {
   updateBikeRaceAudio,
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
+import { redactPrivatePower } from './lib/privatePower';
 import {
   getNativeBluetoothBootstrapStatus,
   NATIVE_BLUETOOTH_STATUS_EVENT,
@@ -1048,7 +1049,6 @@ function createCustomRouteRecord(name: string, locationLabel: string | undefined
     leaderboards: {
       rpm: [],
       speed: [],
-      watts: [],
     },
   };
 }
@@ -1292,11 +1292,9 @@ function raceCaptureToCsv(capture: RaceCapture) {
     'source',
     'sampleAtIso',
     'elapsedMs',
-    'watts',
     'cadenceRpm',
     'speedKph',
     'speedSource',
-    'wattsAtIso',
     'cadenceAtIso',
     'speedAtIso',
     'signal',
@@ -1311,8 +1309,6 @@ function raceCaptureToCsv(capture: RaceCapture) {
     'averageSpeedKph',
     'topCadence',
     'averageCadence',
-    'topWatts',
-    'averageWatts',
   ];
 
   const rows = capture.samples.map((sample) => [
@@ -1326,11 +1322,9 @@ function raceCaptureToCsv(capture: RaceCapture) {
     sample.source,
     new Date(sample.at).toISOString(),
     sample.elapsedMs,
-    sample.watts,
     sample.cadence,
     sample.speedKph,
     sample.speedSource,
-    sample.wattsAt ? new Date(sample.wattsAt).toISOString() : '',
     sample.cadenceAt ? new Date(sample.cadenceAt).toISOString() : '',
     sample.speedAt ? new Date(sample.speedAt).toISOString() : '',
     sample.signal,
@@ -1339,8 +1333,6 @@ function raceCaptureToCsv(capture: RaceCapture) {
     sample.riderVelocityMps,
     sample.riderPhase,
     sample.rank,
-    '',
-    '',
     '',
     '',
     '',
@@ -1367,8 +1359,6 @@ function raceCaptureToCsv(capture: RaceCapture) {
     '',
     '',
     '',
-    '',
-    '',
     summary.distanceMeters,
     '',
     '',
@@ -1379,8 +1369,6 @@ function raceCaptureToCsv(capture: RaceCapture) {
     summary.averageSpeedKph,
     summary.topCadence,
     summary.averageCadence,
-    summary.topWatts,
-    summary.averageWatts,
   ]);
 
   return [headers, ...rows, ...summaryRows].map((row) => row.map(csvValue).join(',')).join('\n');
@@ -1603,7 +1591,7 @@ export default function App() {
   const [selectedCountry, setSelectedCountry] = useState(initialTrack.country);
   const [selectedState, setSelectedState] = useState(initialTrack.state);
   const [selectedTrackId, setSelectedTrackId] = useState(initialTrack.id);
-  const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'power', 'reaction']);
+  const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(['cadence', 'speed', 'reaction']);
   const [branchChoicesByPlayer, setBranchChoicesByPlayer] = useState<Partial<Record<PlayerSlot['id'], SplitBranchId>>>({});
   const [liveRaceReadyDeviceIds, setLiveRaceReadyDeviceIds] = useState<number[]>([]);
   const [lockedRacePlayers, setLockedRacePlayers] = useState<PlayerSlot[] | null>(null);
@@ -5802,7 +5790,7 @@ export default function App() {
 
     downloadTextFile(
       raceCaptureFilename(raceCapture, 'json'),
-      JSON.stringify(raceCapture, null, 2),
+      JSON.stringify(redactPrivatePower(raceCapture), null, 2),
       'application/json',
     );
   };

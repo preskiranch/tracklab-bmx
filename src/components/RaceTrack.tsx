@@ -99,7 +99,7 @@ export function RaceTrack({ players, riders, samplesByDevice, raceState, speedUn
               </svg>
               <div className="lane-label" style={{ '--player-color': player.accent } as React.CSSProperties}>
                 <strong>P{player.id}</strong>
-                <span>{online ? `${sample?.watts ?? 0}W` : 'Idle'}</span>
+                <span>{online ? 'Live' : 'Idle'}</span>
               </div>
               <div
                 className={`rider rider-${player.colorName} rider-${rider?.phase ?? 'pedaling'}`}
@@ -134,10 +134,6 @@ export function RaceTrack({ players, riders, samplesByDevice, raceState, speedUn
                 <strong>{rider ? `#${rider.rank}` : '#-'}</strong>
               </div>
               <dl>
-                <div>
-                  <dt>Watts</dt>
-                  <dd>{online ? sample?.watts : 0}</dd>
-                </div>
                 <div>
                   <dt>Cadence</dt>
                   <dd>{online ? sample?.cadence ?? '-' : '-'}</dd>

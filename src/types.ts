@@ -7,7 +7,7 @@ export type IntervalMode = 'auto' | 'manual';
 export type PlayMode = 'local' | 'multiplayer';
 export type MappingEditMode = 'navigate' | 'draw' | 'adjust' | 'curve' | 'zones' | 'split';
 export type MetricKey = 'cadence' | 'speed' | 'power' | 'reaction';
-export type LeaderboardMetric = 'rpm' | 'speed' | 'watts';
+export type LeaderboardMetric = 'rpm' | 'speed';
 
 export type BikeSample = {
   at: number;
