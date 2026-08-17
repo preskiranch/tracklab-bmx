@@ -77,10 +77,12 @@ describe('Club Live Monitor client state', () => {
       clubId: 'club-other',
       active: true,
       expiresAt: Date.now() + 60_000,
+      bikeSeats: 4,
     }, 'club-1')).toEqual({
       clubId: 'club-1',
       active: false,
       expiresAt: expect.any(Number),
+      bikeSeats: 4,
     });
   });
 
@@ -88,7 +90,7 @@ describe('Club Live Monitor client state', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.startsWith('/api/club-live/access')) {
-        return new Response(JSON.stringify({ clubId: 'club-1', active: true, expiresAt: 50_000 }), {
+        return new Response(JSON.stringify({ clubId: 'club-1', active: true, expiresAt: 50_000, bikeSeats: 2 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -122,6 +124,7 @@ describe('Club Live Monitor client state', () => {
       clubId: 'club-1',
       active: true,
       expiresAt: 50_000,
+      bikeSeats: 2,
     });
 
     const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT');

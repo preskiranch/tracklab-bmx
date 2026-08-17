@@ -16,19 +16,19 @@ export default function ClubLiveAccessNotice({
       <p>
         {selected && !authenticatedRacerAccess
           ? accessActive
-            ? 'Club monitor open — one Bluetooth bike and one multiplayer racer seat enabled.'
+            ? 'Club bike access active — one Bluetooth bike and one multiplayer racer seat enabled from the club membership.'
             : accessStatus === 'checking'
-              ? 'Checking whether the club owner has Club Live Monitor open…'
-              : 'Ask the club owner to open Club Live Monitor. The studio bike and racer seat stay locked until then.'
+              ? 'Checking the club membership and available bike seats…'
+              : 'Club bike access is unavailable. The club may be using all purchased seats or its membership may need attention.'
           : selected
             ? 'Club training selected. Results save to your calendar and club dashboard.'
             : 'Personal training stays private.'}
       </p>
       {selected && (
         <p>
-          Club Live Monitor shares your program, status, progress, track or destination, power, cadence, and speed
-          with the club owner. Sharing—and temporary Club Athlete bike and racer-seat access—stops when the monitor
-          closes or you leave club training.
+          The club owner can optionally open Club Live Monitor to view your program, status, progress, track or
+          destination, power, cadence, and speed. Your temporary Club Athlete bike and racer-seat access is based on
+          the club membership and stops when you leave club training.
         </p>
       )}
     </>

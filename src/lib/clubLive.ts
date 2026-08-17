@@ -234,6 +234,8 @@ export type ClubLiveAccess = {
   clubId: string;
   active: boolean;
   expiresAt: number;
+  bikeSeats: number;
+  reason?: 'club-membership-required' | 'athlete-active-on-club-tablet' | 'club-bike-seats-full';
 };
 
 export function normalizeClubLiveAccess(value: unknown, expectedClubId: string): ClubLiveAccess {
@@ -241,10 +243,17 @@ export function normalizeClubLiveAccess(value: unknown, expectedClubId: string):
     ? value as Partial<ClubLiveAccess>
     : {};
   const clubId = optionalText(candidate.clubId);
+  const reason = candidate.reason === 'club-membership-required'
+    || candidate.reason === 'athlete-active-on-club-tablet'
+    || candidate.reason === 'club-bike-seats-full'
+    ? candidate.reason
+    : undefined;
   return {
     clubId: clubId === expectedClubId ? clubId : expectedClubId,
     active: clubId === expectedClubId && candidate.active === true,
     expiresAt: nonNegativeNumber(candidate.expiresAt),
+    bikeSeats: Math.max(0, Math.min(4, Math.round(nonNegativeNumber(candidate.bikeSeats)))),
+    ...(reason ? { reason } : {}),
   };
 }
 
@@ -255,6 +264,7 @@ export async function loadClubLiveAccess(clubId: string, signal?: AbortSignal) {
       clubId: tabletSession.session.clubId,
       active: tabletSession.session.clubId === clubId && tabletSession.session.expiresAt > Date.now(),
       expiresAt: tabletSession.session.expiresAt,
+      bikeSeats: 1,
     };
   }
   const params = new URLSearchParams({ clubId });

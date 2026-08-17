@@ -415,7 +415,7 @@ export default function ClubTabletMode({
         </div>
 
         <div className="club-tablet-info-grid">
-          <div><Radio /><span><strong>Club Live is automatic</strong><small>This tablet streams the chosen program to the central Club Live Monitor. The laptop does not connect to this bike.</small></span></div>
+          <div><Radio /><span><strong>Club Live display is optional</strong><small>This tablet securely publishes the chosen program so the owner can open the central monitor when desired. The laptop does not connect to this bike.</small></span></div>
           <div><Bluetooth /><span><strong>Bike pairing stays saved</strong><small>Ending this athlete session clears only the student identity. It never erases the Wattbike pairing.</small></span></div>
           <div><UserRoundCheck /><span><strong>Records follow the athlete</strong><small>Completed sessions save to the selected athlete and club history, including profiles that have not been claimed yet.</small></span></div>
         </div>

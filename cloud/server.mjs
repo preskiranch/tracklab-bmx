@@ -320,6 +320,21 @@ function membershipForAccount(user) {
   };
 }
 
+function authUserIdFromProfileKey(profileKey) {
+  const match = /^user:(.+)$/.exec(String(profileKey || ''));
+  return match?.[1] || '';
+}
+
+async function clubBikeAccessForOwnerProfileKey(ownerProfileKey) {
+  const ownerUserId = authUserIdFromProfileKey(ownerProfileKey);
+  const owner = ownerUserId ? await persistence.findAuthUserById(ownerUserId) : null;
+  const membership = membershipForAccount(owner);
+  return {
+    active: membership.tier === 'racer',
+    bikeSeats: membership.tier === 'racer' ? clampBikeSeats(membership.bikeSeats) : 0,
+  };
+}
+
 function canPublishSharedTrackMappings(user) {
   return isAdminEmail(user?.email);
 }
@@ -2190,12 +2205,7 @@ function stopClubTabletSession(session) {
 function scheduleClubTabletSessionExpiry(session) {
   if (!session || !clubTabletSessionsByTokenHash.has(session.tokenHash)) return;
   if (session._expiryTimer) clearTimeout(session._expiryTimer);
-  const presence = clubLiveMonitorPresence.get(session.clubId);
-  const deadline = Math.min(
-    session.expiresAt,
-    session.maxExpiresAt,
-    presence?.ownerProfileKey === session.ownerProfileKey ? presence.expiresAt : Date.now(),
-  );
+  const deadline = Math.min(session.expiresAt, session.maxExpiresAt);
   session._expiryTimer = setTimeout(() => {
     session._expiryTimer = null;
     pruneClubTabletSessions(Date.now());
@@ -2208,13 +2218,9 @@ function scheduleClubTabletSessionExpiry(session) {
 
 function pruneClubTabletSessions(now = Date.now()) {
   for (const session of clubTabletSessionsByTokenHash.values()) {
-    const presence = clubLiveMonitorPresence.get(session.clubId);
     if (
       session.expiresAt <= now
       || session.maxExpiresAt <= now
-      || !presence
-      || presence.ownerProfileKey !== session.ownerProfileKey
-      || presence.expiresAt <= now
     ) stopClubTabletSession(session);
   }
 }
@@ -2231,17 +2237,15 @@ async function loadClubTabletSessionByHash(sessionTokenHash, { renew = false } =
     stopClubTabletSession(session);
     return null;
   }
-  const [ownerData, presence] = await Promise.all([
+  const [ownerData, clubBikeAccess] = await Promise.all([
     persistence.loadUserData(session.ownerProfileKey),
-    Promise.resolve(clubLiveMonitorPresence.get(session.clubId)),
+    clubBikeAccessForOwnerProfileKey(session.ownerProfileKey),
   ]);
   const rosterStillContainsAthlete = (Array.isArray(ownerData?.studioRiders) ? ownerData.studioRiders : [])
     .some((rider) => rider?.id === session.studioRiderId && !rider?.deletedAt);
   if (
     !rosterStillContainsAthlete
-    || !presence
-    || presence.ownerProfileKey !== session.ownerProfileKey
-    || presence.expiresAt <= now
+    || !clubBikeAccess.active
   ) {
     stopClubTabletSession(session);
     return null;
@@ -2460,13 +2464,11 @@ function pruneClubLiveSessions(now = Date.now()) {
   }
 
   for (const [profileKey, access] of clubLiveAccessSelections.entries()) {
-    const presence = clubLiveMonitorPresence.get(access?.clubId);
     if (
       !access
       || access.expiresAt <= now
-      || !presence
-      || presence.ownerProfileKey !== access.ownerProfileKey
     ) {
+      if (access?._expiryTimer) clearTimeout(access._expiryTimer);
       clubLiveAccessSelections.delete(profileKey);
     }
   }
@@ -2477,19 +2479,16 @@ function pruneClubLiveSessions(now = Date.now()) {
   }
 }
 
-function activeClubLiveAccessForState(state, now = Date.now()) {
+async function activeClubLiveAccessForState(state, now = Date.now()) {
   for (const membership of state?.memberships ?? []) {
-    const presence = clubLiveMonitorPresence.get(membership.clubId);
-    if (
-      presence
-      && presence.ownerProfileKey === membership.ownerProfileKey
-      && presence.expiresAt > now
-    ) {
+    const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(membership.ownerProfileKey);
+    if (clubBikeAccess.active) {
       return {
         clubId: membership.clubId,
         studioRiderId: membership.studioRiderId,
         ownerProfileKey: membership.ownerProfileKey,
-        expiresAt: presence.expiresAt,
+        expiresAt: now + clubLiveSessionTtlMs,
+        bikeSeats: clubBikeAccess.bikeSeats,
       };
     }
   }
@@ -2514,8 +2513,17 @@ async function loadActiveClubLiveAccess(user, now = Date.now()) {
 }
 
 function setClubLiveAccessSelection(profileKey, access) {
+  const previous = clubLiveAccessSelections.get(profileKey);
+  if (previous?._expiryTimer) clearTimeout(previous._expiryTimer);
   if (access) {
-    clubLiveAccessSelections.set(profileKey, access);
+    const storedAccess = { ...access };
+    storedAccess._expiryTimer = setTimeout(() => {
+      const current = clubLiveAccessSelections.get(profileKey);
+      if (current !== storedAccess) return;
+      pruneClubLiveSessions(Date.now());
+    }, Math.max(1, access.expiresAt - Date.now() + 25));
+    storedAccess._expiryTimer.unref?.();
+    clubLiveAccessSelections.set(profileKey, storedAccess);
   } else {
     clubLiveAccessSelections.delete(profileKey);
   }
@@ -2527,6 +2535,33 @@ function setClubLiveAccessSelection(profileKey, access) {
       demoteClubLiveClient(client);
     }
   }
+}
+
+function activeClubBikeSeatAssignments(
+  clubId,
+  now = Date.now(),
+  { excludeProfileKey = '', excludeDeviceId = '' } = {},
+) {
+  const assignments = new Map();
+  for (const [profileKey, access] of clubLiveAccessSelections.entries()) {
+    if (
+      profileKey === excludeProfileKey
+      || access?.clubId !== clubId
+      || access.usesClubSeat === false
+      || access.expiresAt <= now
+    ) continue;
+    assignments.set(access.studioRiderId, { source: 'personal', profileKey });
+  }
+  for (const session of clubTabletSessionsByTokenHash.values()) {
+    if (
+      session.deviceId === excludeDeviceId
+      || session.clubId !== clubId
+      || session.expiresAt <= now
+      || session.maxExpiresAt <= now
+    ) continue;
+    assignments.set(session.studioRiderId, { source: 'tablet', deviceId: session.deviceId });
+  }
+  return assignments;
 }
 
 function sanitizeClubLiveProgress(value) {
@@ -3585,17 +3620,13 @@ function publicRider(client, role = client?.roomRole ?? null, racerSeatCount = c
 function clientHasRacerAccess(client, now = Date.now()) {
   if (client?.membershipTier === 'racer') return true;
   const access = client?.clubLiveAccess;
-  if (!access || access.expiresAt <= now) return false;
-  const presence = clubLiveMonitorPresence.get(access.clubId);
-  return Boolean(
-    presence
-    && presence.ownerProfileKey === access.ownerProfileKey
-    && presence.expiresAt > now
-  );
+  return Boolean(access && access.expiresAt > now);
 }
 
 function racerSeatLimitForClient(client) {
-  return client?.membershipTier === 'racer' ? maxRaceBikeCount : 1;
+  return client?.membershipTier === 'racer'
+    ? clampBikeSeats(client.membershipBikeSeats)
+    : 1;
 }
 
 function temporaryClubSeatInUseByAnotherClient(client) {
@@ -5939,10 +5970,10 @@ async function serveStatic(request, response) {
       await withClubTabletSessionStartLock(device.clubId, async () => {
         const now = Date.now();
         pruneClubLiveSessions(now);
-        const presence = clubLiveMonitorPresence.get(device.clubId);
-        if (!presence || presence.ownerProfileKey !== device.ownerProfileKey || presence.expiresAt <= now) {
+        const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(device.ownerProfileKey);
+        if (!clubBikeAccess.active) {
           writeJson(response, 409, {
-            error: 'The club owner must open Club Live Monitor before a shared tablet can begin an athlete session.',
+            error: 'This club needs an active Wattbike membership before a shared tablet can begin an athlete session.',
           }, { 'Cache-Control': 'no-store' });
           return;
         }
@@ -5958,6 +5989,16 @@ async function serveStatic(request, response) {
           : null;
         const activeSessions = [...clubTabletSessionsByTokenHash.values()]
           .filter((candidate) => candidate.deviceId !== device.id);
+        const clubSeatAssignments = activeClubBikeSeatAssignments(device.clubId, now, {
+          excludeDeviceId: device.id,
+        });
+        const personalAssignment = clubSeatAssignments.get(studioRiderId);
+        if (personalAssignment?.source === 'personal') {
+          writeJson(response, 409, {
+            error: 'That athlete is already using a club bike seat on a personal device.',
+          });
+          return;
+        }
         if (activeSessions.some((candidate) => (
           candidate.clubId === device.clubId && candidate.studioRiderId === studioRiderId
         ))) {
@@ -5970,8 +6011,10 @@ async function serveStatic(request, response) {
           writeJson(response, 409, { error: 'That Wattbike is already assigned to another active club tablet.' });
           return;
         }
-        if (activeSessions.filter((candidate) => candidate.clubId === device.clubId).length >= maxRaceBikeCount) {
-          writeJson(response, 409, { error: 'This club already has four active shared-tablet athletes.' });
+        if (!clubSeatAssignments.has(studioRiderId) && clubSeatAssignments.size >= clubBikeAccess.bikeSeats) {
+          writeJson(response, 409, {
+            error: `This club is already using all ${clubBikeAccess.bikeSeats} purchased bike ${clubBikeAccess.bikeSeats === 1 ? 'seat' : 'seats'}.`,
+          });
           return;
         }
         const member = await persistence.ensureClubRosterMember(
@@ -6099,10 +6142,10 @@ async function serveStatic(request, response) {
       return;
     }
     const now = Date.now();
-    const presence = clubLiveMonitorPresence.get(tabletSession.clubId);
-    if (!presence || presence.ownerProfileKey !== tabletSession.ownerProfileKey || presence.expiresAt <= now) {
+    const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(tabletSession.ownerProfileKey);
+    if (!clubBikeAccess.active) {
       stopClubTabletSession(tabletSession);
-      writeJson(response, 409, { error: 'The club owner must keep Club Live Monitor open.' }, { 'Cache-Control': 'no-store' });
+      writeJson(response, 409, { error: 'This club Wattbike membership is no longer active.' }, { 'Cache-Control': 'no-store' });
       return;
     }
     const key = clubLiveSessionKey(tabletSession.clubId, tabletSession.studioRiderId);
@@ -6333,24 +6376,67 @@ async function serveStatic(request, response) {
       }, { 'Cache-Control': 'no-store' });
       return;
     }
-    const presence = clubLiveMonitorPresence.get(clubId);
-    const active = Boolean(
-      presence
-      && presence.ownerProfileKey === membership.ownerProfileKey
-      && presence.expiresAt > now
-    );
-    setClubLiveAccessSelection(profileKey, active ? {
-      clubId: membership.clubId,
-      studioRiderId: membership.studioRiderId,
-      ownerProfileKey: membership.ownerProfileKey,
-      expiresAt: presence.expiresAt,
-    } : null);
-    writeJson(response, 200, {
-      clubId,
-      active,
-      expiresAt: active ? presence.expiresAt : null,
-      pollAfterMs: 1_000,
-    }, { 'Cache-Control': 'no-store' });
+    await withClubTabletSessionStartLock(clubId, async () => {
+      const personalMembership = membershipForAccount(session.user);
+      const access = personalMembership.tier === 'racer'
+        ? {
+            clubId: membership.clubId,
+            studioRiderId: membership.studioRiderId,
+            ownerProfileKey: membership.ownerProfileKey,
+            expiresAt: now + clubLiveSessionTtlMs,
+            bikeSeats: clampBikeSeats(personalMembership.bikeSeats),
+            usesClubSeat: false,
+          }
+        : await activeClubLiveAccessForState({ memberships: [membership] }, now);
+      if (!access) {
+        setClubLiveAccessSelection(profileKey, null);
+        writeJson(response, 200, {
+          clubId,
+          active: false,
+          expiresAt: null,
+          bikeSeats: 0,
+          reason: 'club-membership-required',
+          pollAfterMs: 1_000,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+
+      const assignments = activeClubBikeSeatAssignments(clubId, now, { excludeProfileKey: profileKey });
+      const existingAssignment = assignments.get(membership.studioRiderId);
+      if (existingAssignment?.source === 'tablet') {
+        setClubLiveAccessSelection(profileKey, null);
+        writeJson(response, 200, {
+          clubId,
+          active: false,
+          expiresAt: null,
+          bikeSeats: access.bikeSeats,
+          reason: 'athlete-active-on-club-tablet',
+          pollAfterMs: 1_000,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (!existingAssignment && assignments.size >= access.bikeSeats) {
+        setClubLiveAccessSelection(profileKey, null);
+        writeJson(response, 200, {
+          clubId,
+          active: false,
+          expiresAt: null,
+          bikeSeats: access.bikeSeats,
+          reason: 'club-bike-seats-full',
+          pollAfterMs: 1_000,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+
+      setClubLiveAccessSelection(profileKey, access);
+      writeJson(response, 200, {
+        clubId,
+        active: true,
+        expiresAt: access.expiresAt,
+        bikeSeats: access.bikeSeats,
+        pollAfterMs: 1_000,
+      }, { 'Cache-Control': 'no-store' });
+    });
     return;
   }
 
@@ -6391,37 +6477,13 @@ async function serveStatic(request, response) {
         ownerProfileKey: profileKey,
         expiresAt: monitorExpiresAt,
       });
-      for (const tabletSession of clubTabletSessionsByTokenHash.values()) {
-        if (tabletSession.clubId === ownedClub.id) scheduleClubTabletSessionExpiry(tabletSession);
-      }
       const ownerUserData = await persistence.loadUserData(profileKey);
       const activeRosterRiderIds = new Set(
         (Array.isArray(ownerUserData?.studioRiders) ? ownerUserData.studioRiders : [])
           .filter((rider) => rider?.id && !rider?.deletedAt)
           .map((rider) => rider.id),
       );
-      const claimedMembers = (ownedClub.members ?? [])
-        .filter((member) => member?.status === 'claimed' && member?.athleteProfileKey);
-      const claimedProfileByRiderId = new Map(claimedMembers.map((member) => [
-        member.studioRiderId,
-        member.athleteProfileKey,
-      ]));
-      for (const [athleteProfileKey, access] of clubLiveAccessSelections.entries()) {
-        if (access.clubId !== ownedClub.id) continue;
-        if (
-          access.ownerProfileKey === profileKey
-          && claimedProfileByRiderId.get(access.studioRiderId) === athleteProfileKey
-        ) {
-          access.expiresAt = monitorExpiresAt;
-          for (const client of clients.values()) {
-            if (client.guestKey === athleteProfileKey && client.clubLiveAccess) {
-              client.clubLiveAccess.expiresAt = monitorExpiresAt;
-            }
-          }
-        } else {
-          setClubLiveAccessSelection(athleteProfileKey, null);
-        }
-      }
+      const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(profileKey);
       const activeSessions = [];
       for (const [key, liveSession] of clubLiveSessions.entries()) {
         if (liveSession.clubId !== ownedClub.id) continue;
@@ -6436,6 +6498,7 @@ async function serveStatic(request, response) {
       writeJson(response, 200, {
         club: { id: ownedClub.id, name: ownedClub.name },
         sessions: activeSessions.slice(0, maxRaceBikeCount),
+        bikeSeats: clubBikeAccess.bikeSeats,
         heartbeatTtlMs: clubLiveSessionTtlMs,
         monitorExpiresAt,
         pollAfterMs: 1_000,
@@ -6475,17 +6538,27 @@ async function serveStatic(request, response) {
       writeJson(response, 200, { stopped }, { 'Cache-Control': 'no-store' });
       return;
     }
-    const presence = clubLiveMonitorPresence.get(clubId);
-    const monitorIsActive = Boolean(
-      presence
-      && presence.ownerProfileKey === membership.ownerProfileKey
-      && presence.expiresAt > now
-    );
-    if (!monitorIsActive) {
+    const selectedAccess = clubLiveAccessSelections.get(profileKey);
+    if (
+      !selectedAccess
+      || selectedAccess.clubId !== clubId
+      || selectedAccess.studioRiderId !== studioRiderId
+      || selectedAccess.expiresAt <= now
+    ) {
       writeJson(response, 409, {
-        error: 'The club owner must open Club Live Monitor before this studio session can be shared.',
+        error: 'Authorize this athlete\'s personal or club Wattbike seat before sharing the session.',
       }, { 'Cache-Control': 'no-store' });
       return;
+    }
+    if (selectedAccess.usesClubSeat !== false) {
+      const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(membership.ownerProfileKey);
+      if (!clubBikeAccess.active) {
+        setClubLiveAccessSelection(profileKey, null);
+        writeJson(response, 409, {
+          error: 'This club needs an active Wattbike membership before studio sessions can use club bike access.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
     }
 
     const liveSession = sanitizeClubLiveSnapshot(payload, membership, session.user, now);
@@ -6501,7 +6574,7 @@ async function serveStatic(request, response) {
         .length;
       if (activeClubSessionCount >= maxRaceBikeCount) {
         writeJson(response, 409, {
-          error: 'This club already has four active riders on its live monitor.',
+          error: `Club Live can display up to ${maxRaceBikeCount} simultaneous riders.`,
         });
         return;
       }
@@ -7093,6 +7166,7 @@ wss.on('connection', (socket, request) => {
     name: sanitizeText(authUser?.displayName || tabletSession?.athleteName || tabletSession?.riderName, 'TrackLab Rider', 64),
     email: sanitizeEmail(authUser?.email),
     membershipTier: authUser ? membershipForAccount(authUser).tier : 'spectator',
+    membershipBikeSeats: authUser ? membershipForAccount(authUser).bikeSeats : 1,
     clubLiveAccess: request.tracklabClubLiveAccess ?? (tabletSession ? {
       clubId: tabletSession.clubId,
       studioRiderId: tabletSession.studioRiderId,
@@ -7243,9 +7317,9 @@ const websocketHeartbeat = setInterval(() => {
 }, 30_000);
 websocketHeartbeat.unref();
 
-// Club Live access is intentionally short lived. Prune independently of HTTP
-// polling so a backgrounded athlete tab cannot retain a racer seat after the
-// club owner's monitor closes.
+// Club bike access is intentionally short lived. Prune independently of HTTP
+// polling so a backgrounded athlete tab cannot retain a racer seat after it
+// stops renewing its selected club-bike assignment.
 const clubLiveAccessMaintenance = setInterval(
   () => pruneClubLiveSessions(Date.now()),
   Math.max(100, Math.min(1_000, Math.floor(clubLiveSessionTtlMs / 3))),

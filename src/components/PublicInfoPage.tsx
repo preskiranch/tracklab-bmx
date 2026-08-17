@@ -206,10 +206,10 @@ function PrivacyPage() {
                 </li>
                 <li>
                   <strong>Clubs:</strong> a claimed Club Connect athlete can choose “Training at” a club to associate
-                  the saved session with that club. While its owner has Club Live Monitor open, TrackLab also shares
+                  the saved session with that club. The club owner may optionally open Club Live Monitor; when open, TrackLab also shares
                   the athlete&apos;s selected program, live status, course progress, track or destination, power,
-                  cadence, and speed with that owner. This read-only live feed expires automatically after the owner
-                  closes the monitor or the athlete leaves club training.
+                  cadence, and speed with that owner. This read-only live feed expires automatically after the athlete
+                  leaves club training or stops transmitting.
                 </li>
                 <li>
                   <strong>Google mapping services:</strong> map tiles, places, route endpoints, route geometry,

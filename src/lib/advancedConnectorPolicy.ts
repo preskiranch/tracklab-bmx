@@ -5,6 +5,17 @@ export function authenticatedRacerBikeAccess(
   return authStatus === 'signed-in' && serverMembershipTier === 'racer';
 }
 
+export function authenticatedRacerBikeSeatLimit(
+  authStatus: 'loading' | 'signed-out' | 'signed-in',
+  serverMembershipTier: string | undefined,
+  serverBikeSeats: number | undefined,
+  maximum = 4,
+) {
+  if (!authenticatedRacerBikeAccess(authStatus, serverMembershipTier)) return 0;
+  const seats = Number.isFinite(Number(serverBikeSeats)) ? Math.round(Number(serverBikeSeats)) : 1;
+  return Math.max(1, Math.min(Math.max(1, Math.round(maximum)), seats));
+}
+
 export function shouldStopAdvancedConnector(input: {
   authenticatedRacerAccess: boolean;
   clubMonitorOpen: boolean;

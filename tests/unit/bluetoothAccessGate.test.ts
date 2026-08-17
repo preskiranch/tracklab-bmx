@@ -4,7 +4,10 @@ import {
   bluetoothPairingMayOpen,
   normalizeBluetoothMaxDevices,
 } from '../../src/hooks/useBluetoothBikes';
-import { authenticatedRacerBikeAccess } from '../../src/lib/advancedConnectorPolicy';
+import {
+  authenticatedRacerBikeAccess,
+  authenticatedRacerBikeSeatLimit,
+} from '../../src/lib/advancedConnectorPolicy';
 
 describe('temporary club Bluetooth access gate', () => {
   it('fails closed if access expires while the device chooser is open', () => {
@@ -33,5 +36,13 @@ describe('temporary club Bluetooth access gate', () => {
     expect(authenticatedRacerBikeAccess('signed-out', 'racer')).toBe(false);
     expect(authenticatedRacerBikeAccess('signed-in', 'spectator')).toBe(false);
     expect(authenticatedRacerBikeAccess('signed-in', 'racer')).toBe(true);
+  });
+
+  it('limits personal connections to the server-restored number of purchased bike seats', () => {
+    expect(authenticatedRacerBikeSeatLimit('signed-in', 'racer', 1)).toBe(1);
+    expect(authenticatedRacerBikeSeatLimit('signed-in', 'racer', 3)).toBe(3);
+    expect(authenticatedRacerBikeSeatLimit('signed-in', 'racer', 99)).toBe(4);
+    expect(authenticatedRacerBikeSeatLimit('signed-in', 'spectator', 4)).toBe(0);
+    expect(authenticatedRacerBikeSeatLimit('loading', 'racer', 4)).toBe(0);
   });
 });

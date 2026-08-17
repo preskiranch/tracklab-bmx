@@ -671,7 +671,6 @@ describe('cloud API trust boundaries', () => {
     });
     expect(rosterSave.status).toBe(200);
     const monitorCookie = ownerCookie;
-    expect((await api('/api/club-live/sessions')).status).toBe(200);
 
     const trainingSave = await api('/api/training-sessions', {
       method: 'POST',
@@ -828,17 +827,23 @@ describe('cloud API trust boundaries', () => {
       },
     });
 
-    const inactiveAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
-    expect(inactiveAccess.status).toBe(200);
-    await expect(inactiveAccess.json()).resolves.toMatchObject({
-      clubId: claimedMembership.clubId,
-      active: false,
-      expiresAt: null,
-    });
     const spoofedAccess = await api('/api/club-live/access?clubId=club-not-mine');
     expect(spoofedAccess.status).toBe(403);
     const athleteMonitorRead = await api('/api/club-live/sessions');
     expect(athleteMonitorRead.status).toBe(403);
+
+    // Club bike access is authorized by the club's paid bike seats. The owner
+    // does not need to have the optional Club Live Monitor open first.
+    const activeAccessWithoutMonitor = await api(
+      `/api/club-live/access?clubId=${claimedMembership.clubId}`,
+    );
+    expect(activeAccessWithoutMonitor.status).toBe(200);
+    await expect(activeAccessWithoutMonitor.json()).resolves.toMatchObject({
+      clubId: claimedMembership.clubId,
+      active: true,
+      expiresAt: expect.any(Number),
+      bikeSeats: 4,
+    });
     const publishWithoutMonitor = await api('/api/club-live/sessions', {
       method: 'PUT',
       body: JSON.stringify({
@@ -850,7 +855,7 @@ describe('cloud API trust boundaries', () => {
         metrics: { watts: 500 },
       }),
     });
-    expect(publishWithoutMonitor.status).toBe(409);
+    expect(publishWithoutMonitor.status).toBe(200);
 
     cookie = ownerCookie;
     const monitorOpen = await api('/api/club-live/sessions');
@@ -858,7 +863,11 @@ describe('cloud API trust boundaries', () => {
     expect(monitorOpen.headers.get('cache-control')).toBe('no-store');
     await expect(monitorOpen.json()).resolves.toMatchObject({
       club: { id: claimedMembership.clubId },
-      sessions: [],
+      sessions: [expect.objectContaining({
+        studioRiderId: claimedMembership.studioRiderId,
+        activityType: 'straight-sprint',
+      })],
+      bikeSeats: 4,
       heartbeatTtlMs: 600,
       pollAfterMs: 1_000,
     });
@@ -968,12 +977,11 @@ describe('cloud API trust boundaries', () => {
       raceSyncStart,
     );
 
-    // Renewal remains valid beyond the original TTL while the owner keeps the
-    // monitor open, and updates already-connected sockets server-side.
+    // The athlete's access poll renews the short-lived seat grant. The owner
+    // monitor is a read-only optional display and is not the authorization.
     await new Promise((resolve) => setTimeout(resolve, 400));
     cookie = ownerCookie;
     expect((await api('/api/club-live/sessions')).status).toBe(200);
-    await new Promise((resolve) => setTimeout(resolve, 400));
     cookie = athleteCookie;
     const renewedAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
     await expect(renewedAccess.json()).resolves.toMatchObject({ active: true });
@@ -1041,6 +1049,11 @@ describe('cloud API trust boundaries', () => {
       }),
     });
     await expect(stoppedLiveSession.json()).resolves.toEqual({ stopped: true });
+    const passiveExpiryStart = primarySocket.messages.length;
+    const accessBeforePassiveExpiry = await api(
+      `/api/club-live/access?clubId=${claimedMembership.clubId}`,
+    );
+    await expect(accessBeforePassiveExpiry.json()).resolves.toMatchObject({ active: true });
     const expiringPublish = await api('/api/club-live/sessions', {
       method: 'PUT',
       body: JSON.stringify({
@@ -1053,8 +1066,7 @@ describe('cloud API trust boundaries', () => {
       }),
     });
     expect(expiringPublish.status).toBe(200);
-    const passiveExpiryStart = primarySocket.messages.length;
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
     const passivelyDemotedState = await waitForSocketMessage(
       primarySocket,
       (message) => message.type === 'room-state'
@@ -1087,9 +1099,13 @@ describe('cloud API trust boundaries', () => {
       expiredControlStart,
     )).resolves.toBeTruthy();
 
-    const expiredAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
-    await expect(expiredAccess.json()).resolves.toMatchObject({ active: false, expiresAt: null });
-    const expiredPublish = await api('/api/club-live/sessions', {
+    const restoredAccess = await api(`/api/club-live/access?clubId=${claimedMembership.clubId}`);
+    await expect(restoredAccess.json()).resolves.toMatchObject({
+      active: true,
+      expiresAt: expect.any(Number),
+      bikeSeats: 4,
+    });
+    const restoredPublish = await api('/api/club-live/sessions', {
       method: 'PUT',
       body: JSON.stringify({
         clubId: claimedMembership.clubId,
@@ -1100,10 +1116,23 @@ describe('cloud API trust boundaries', () => {
         metrics: { speedKph: 21, distanceMeters: 600 },
       }),
     });
-    expect(expiredPublish.status).toBe(409);
+    expect(restoredPublish.status).toBe(200);
     cookie = ownerCookie;
-    const expiredMonitorSessions = await api('/api/club-live/sessions');
-    await expect(expiredMonitorSessions.json()).resolves.toMatchObject({ sessions: [] });
+    const restoredMonitorSessions = await api('/api/club-live/sessions');
+    await expect(restoredMonitorSessions.json()).resolves.toMatchObject({
+      sessions: [expect.objectContaining({ studioRiderId: claimedMembership.studioRiderId })],
+    });
+    cookie = athleteCookie;
+    const finalStop = await api('/api/club-live/sessions', {
+      method: 'DELETE',
+      body: JSON.stringify({
+        clubId: claimedMembership.clubId,
+        studioRiderId: claimedMembership.studioRiderId,
+      }),
+    });
+    expect(finalStop.status).toBe(200);
+    const releaseSeat = await api('/api/club-live/access?clubId=');
+    expect(releaseSeat.status).toBe(403);
     primarySocket.socket.close();
     duplicateSocket.socket.close();
 
@@ -1228,7 +1257,7 @@ describe('cloud API trust boundaries', () => {
     expect(revokedClubSave.status).toBe(403);
   });
 
-  it('caps a club live monitor at four independently active studio riders', async () => {
+  it('shares four purchased club bike seats across independently active studio riders', async () => {
     const originalCookie = cookie;
     const ownerLogin = await api('/api/auth/login', {
       method: 'POST',
@@ -1263,8 +1292,20 @@ describe('cloud API trust boundaries', () => {
       tokens.push((await inviteResponse.json()).token);
     }
 
-    cookie = secondaryCookie;
+    const athleteCookies = [];
     for (let index = 0; index < tokens.length; index += 1) {
+      const athleteRegistration = await api('/api/auth/register', {
+        method: 'POST',
+        headers: { 'X-Forwarded-For': `198.51.100.${120 + index}` },
+        body: JSON.stringify({
+          name: `Live Cap Athlete ${index + 1}`,
+          email: `live-cap-athlete-${index + 1}-${now}@tracklab.test`,
+          password: 'correct-horse-battery-staple',
+        }),
+      });
+      expect(athleteRegistration.status).toBe(201);
+      cookie = String(athleteRegistration.headers.get('set-cookie')).split(';')[0];
+      athleteCookies.push(cookie);
       const claimResponse = await api('/api/club-connect/claim', {
         method: 'POST',
         body: JSON.stringify({
@@ -1276,13 +1317,25 @@ describe('cloud API trust boundaries', () => {
     }
 
     cookie = ownerCookie;
-    const openedMonitor = await api('/api/club-live/sessions');
-    expect(openedMonitor.status).toBe(200);
-    const openedPayload = await openedMonitor.json();
-    const clubId = openedPayload.club.id;
+    const ownerClubState = await api('/api/club-connect');
+    expect(ownerClubState.status).toBe(200);
+    const clubId = (await ownerClubState.json()).ownedClub.id;
 
-    cookie = secondaryCookie;
-    for (const rider of riders.slice(0, 4)) {
+    for (let index = 0; index < riders.length; index += 1) {
+      const rider = riders[index];
+      cookie = athleteCookies[index];
+      const accessResponse = await api(`/api/club-live/access?clubId=${clubId}`);
+      expect(accessResponse.status).toBe(200);
+      const accessPayload = await accessResponse.json();
+      if (index === 4) {
+        expect(accessPayload).toMatchObject({
+          active: false,
+          bikeSeats: 4,
+          reason: 'club-bike-seats-full',
+        });
+        continue;
+      }
+      expect(accessPayload).toMatchObject({ active: true, bikeSeats: 4 });
       const publishResponse = await api('/api/club-live/sessions', {
         method: 'PUT',
         body: JSON.stringify({
@@ -1296,6 +1349,8 @@ describe('cloud API trust boundaries', () => {
       });
       expect(publishResponse.status).toBe(200);
     }
+
+    cookie = athleteCookies[4];
     const fifthPublish = await api('/api/club-live/sessions', {
       method: 'PUT',
       body: JSON.stringify({
@@ -1309,7 +1364,7 @@ describe('cloud API trust boundaries', () => {
     });
     expect(fifthPublish.status).toBe(409);
     await expect(fifthPublish.json()).resolves.toEqual({
-      error: 'This club already has four active riders on its live monitor.',
+      error: "Authorize this athlete's personal or club Wattbike seat before sharing the session.",
     });
 
     cookie = ownerCookie;
@@ -1319,13 +1374,15 @@ describe('cloud API trust boundaries', () => {
     expect(monitoredPayload.sessions.map((session: { studioRiderId: string }) => session.studioRiderId))
       .toEqual(riders.slice(0, 4).map((rider) => rider.id));
 
-    cookie = secondaryCookie;
-    for (const rider of riders.slice(0, 4)) {
+    for (let index = 0; index < riders.length; index += 1) {
+      cookie = athleteCookies[index];
+      const rider = riders[index];
       const stopped = await api('/api/club-live/sessions', {
         method: 'DELETE',
         body: JSON.stringify({ clubId, studioRiderId: rider.id }),
       });
       expect(stopped.status).toBe(200);
+      expect((await api('/api/club-live/access?clubId=club-not-mine')).status).toBe(403);
     }
     cookie = originalCookie;
   });
@@ -2116,7 +2173,7 @@ describe('cloud API trust boundaries', () => {
     expect(records.filter((record) => record.status === 201)).toHaveLength(4);
     expect(records.filter((record) => record.status === 409)).toHaveLength(1);
     expect(records.find((record) => record.status === 409)?.body).toMatchObject({
-      error: 'This club already has four active shared-tablet athletes.',
+      error: 'This club is already using all 4 purchased bike seats.',
     });
     await stopSuccessfulSessions(records);
     cookie = originalCookie;

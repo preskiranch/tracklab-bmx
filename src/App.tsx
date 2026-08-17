@@ -239,7 +239,7 @@ import type {
   ClubLiveActivityState,
   ClubLiveExploreState,
 } from './components/ClubLiveAthleteBridge';
-import { shouldStopAdvancedConnector } from './lib/advancedConnectorPolicy';
+import { authenticatedRacerBikeSeatLimit, shouldStopAdvancedConnector } from './lib/advancedConnectorPolicy';
 import {
   claimBillingReturn,
   loginAuthUser,
@@ -1737,19 +1737,25 @@ export default function App() {
   const authenticatedRacerAccess = authStatus === 'signed-in'
     && authUser?.membership.tier === 'racer'
     && !clubTabletKioskMode;
+  const authenticatedBikeSeatLimit = authenticatedRacerBikeSeatLimit(
+    authStatus,
+    authUser?.membership.tier,
+    authUser?.membership.bikeSeats,
+    maxPlayers,
+  );
   const clubMonitorReleasesLocalBikes = appMode === 'club-monitor';
   const bluetoothAccessGranted = !clubMonitorReleasesLocalBikes
     && (authenticatedRacerAccess || clubLiveAccessActive || clubTabletDeviceActive);
   const bluetooth = useBluetoothBikes({
     enabled: bluetoothAccessGranted,
-    maxDevices: clubTabletKioskMode ? 1 : authenticatedRacerAccess ? maxPlayers : 1,
+    maxDevices: clubTabletKioskMode ? 1 : authenticatedBikeSeatLimit || 1,
   });
   const liveBikeSeatLimit = clubMonitorReleasesLocalBikes
     ? 0
     : clubTabletKioskMode
       ? clubTabletDeviceActive ? 1 : 0
       : authenticatedRacerAccess
-      ? maxPlayers
+      ? authenticatedBikeSeatLimit
       : clubLiveAccessActive ? 1 : 0;
   const liveBikeAccessLocked = !bluetoothAccessGranted;
   const developerUiActive = !clubTabletKioskMode && adminProfileActive && !regularUserPreview;
@@ -6685,7 +6691,7 @@ export default function App() {
     }
 
     if (source === 'advanced' && !authenticatedRacerAccess) {
-      setCheckoutMessage('Advanced Connector requires Racer. Club Live supports one Bluetooth studio bike.');
+      setCheckoutMessage('Advanced Connector requires a personal Racer bike membership.');
       setCheckoutStatus('idle');
       setShowMembershipLanding(true);
       return;
@@ -6693,7 +6699,7 @@ export default function App() {
 
     if (source === 'bluetooth' && liveBikeAccessLocked) {
       setCheckoutMessage(selectedClubTrainingMembershipActive
-        ? 'Ask the club owner to open Club Live Monitor to unlock one Bluetooth studio bike.'
+        ? 'Club bike access is unavailable. The club may be using all purchased bike seats or its membership may need attention.'
         : 'Choose “Training at your club” for temporary studio access, or upgrade to Racer.');
       setCheckoutStatus('idle');
       return;
@@ -7522,7 +7528,7 @@ export default function App() {
   const bridgeRunning = bridge.sourceState === 'running';
   const showLiveBikeUpgrade = () => {
     setCheckoutMessage(selectedClubTrainingMembershipActive && !authenticatedRacerAccess
-      ? 'Ask the club owner to open Club Live Monitor to unlock one Bluetooth studio bike.'
+      ? 'Club bike access is unavailable. The club may be using all purchased bike seats or its membership may need attention.'
       : 'Upgrade to Racer to connect personal Wattbikes.');
     setCheckoutStatus('idle');
     if (!selectedClubTrainingMembershipActive) {
@@ -7530,7 +7536,7 @@ export default function App() {
     }
   };
   const showAdvancedConnectorUpgrade = () => {
-    setCheckoutMessage('Advanced Connector requires Racer. Club Live supports one Bluetooth studio bike.');
+    setCheckoutMessage('Advanced Connector requires a personal Racer bike membership.');
     setCheckoutStatus('idle');
     setShowMembershipLanding(true);
   };

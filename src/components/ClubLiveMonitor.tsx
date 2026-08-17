@@ -131,11 +131,11 @@ export function ClubLiveMonitor({ studioRiders, speedUnit }: ClubLiveMonitorProp
         <div>
           <span className="eyebrow"><RadioTower size={15} /> Owner-only view</span>
           <h2>Club Live Monitor</h2>
-          <p>Read-only live training from athletes who selected your club for this session.</p>
+          <p>Optional read-only display for athletes using your club. Opening this screen is not required for their bike access.</p>
         </div>
         <div className={`club-live-connection ${status}`}>
           <Signal size={17} />
-          <span>{status === 'error' ? 'Feed interrupted' : `${liveSessions.length} of 4 live`}</span>
+          <span>{status === 'error' ? 'Feed interrupted' : `${liveSessions.length} live`}</span>
           <button type="button" onClick={() => void refresh()} aria-label="Refresh Club Live Monitor">
             <RefreshCw size={16} />
           </button>

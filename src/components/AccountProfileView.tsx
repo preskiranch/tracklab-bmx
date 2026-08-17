@@ -384,7 +384,7 @@ export function AccountProfileView({
           {clubState.memberships.map((membership) => (
             <div className="club-athlete-access" key={`${membership.clubId}:${membership.studioRiderId}`}>
               <ShieldCheck size={21} />
-              <div><strong>Connected to {membership.clubName}</strong><p>Studio rider: {membership.riderName}. Viewing and downloading your studio data is free. Choosing “Training at {membership.clubName}” shares the saved session with the club and, while its owner has Club Live Monitor open, shares your program, live status, progress, track or destination, power, cadence, and speed. The live feed expires automatically after the monitor closes or you leave club training.</p></div>
+              <div><strong>Connected to {membership.clubName}</strong><p>Studio rider: {membership.riderName}. Viewing and downloading your studio data is free. Choosing “Training at {membership.clubName}” shares the saved session with the club and lets you use one available bike seat from the club membership. The owner may optionally open Club Live Monitor to view your program, live status, progress, track or destination, power, cadence, and speed. Club access ends when you leave club training.</p></div>
               <span>Club Athlete</span>
             </div>
           ))}
