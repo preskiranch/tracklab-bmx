@@ -14,6 +14,7 @@ import {
   type ClubTabletDeviceCredential,
   type ClubTabletSessionCredential,
 } from '../../src/lib/clubTablet';
+import { clubTabletBikeAccessReady } from '../../src/components/ClubTabletMode';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -73,6 +74,14 @@ afterEach(() => {
 });
 
 describe('Club Tablet client state', () => {
+  it('keeps Wattbike pairing locked until server authorization is active', () => {
+    expect(clubTabletBikeAccessReady('checking', false)).toBe(false);
+    expect(clubTabletBikeAccessReady('error', false)).toBe(false);
+    expect(clubTabletBikeAccessReady('revoked', false)).toBe(false);
+    expect(clubTabletBikeAccessReady('active', false)).toBe(false);
+    expect(clubTabletBikeAccessReady('active', true)).toBe(true);
+  });
+
   it('normalizes only safe devices and approved claimed or unclaimed roster athletes', () => {
     expect(normalizeClubTabletDeviceCredential({
       ...deviceCredential,

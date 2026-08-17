@@ -31,6 +31,8 @@ import {
   type ClubTabletSessionCredential,
 } from '../lib/clubTablet';
 import type { AppMode } from '../types';
+import type { NativeBluetoothBootstrapStatus } from '../lib/nativeBluetoothBootstrap';
+import type { ClubTabletDeviceStatus } from './ClubTabletRuntime';
 import './ClubTabletMode.css';
 
 type ClubTabletBike = {
@@ -41,19 +43,30 @@ type ClubTabletBike = {
 type ClubTabletModeProps = {
   canAuthorize: boolean;
   deviceCredential: ClubTabletDeviceCredential | null;
+  deviceStatus: ClubTabletDeviceStatus;
+  accessReady: boolean;
   roster: ClubTabletRoster | null;
   sessionCredential: ClubTabletSessionCredential | null;
   bikes: ClubTabletBike[];
   bluetoothSupported: boolean;
   bluetoothBusy: boolean;
   authorizedBikeCount: number;
+  nativeBluetoothStatus: NativeBluetoothBootstrapStatus;
   onDeviceChange: (device: ClubTabletDeviceCredential | null) => void;
   onRosterChange: (roster: ClubTabletRoster | null) => void;
   onSessionChange: (session: ClubTabletSessionCredential | null) => void;
   onOpenBikePairing: () => void;
   onReconnectSavedBikes: () => Promise<void> | void;
+  onRetryAuthorization: () => void;
   onOpenProgram: (mode: Extract<AppMode, 'race' | 'straight-sprint' | 'explore'>) => void;
 };
+
+export function clubTabletBikeAccessReady(
+  deviceStatus: ClubTabletDeviceStatus,
+  accessReady: boolean,
+) {
+  return deviceStatus === 'active' && accessReady;
+}
 
 function bikeLabel(bike: ClubTabletBike) {
   const suffix = String(Math.round(bike.deviceId)).slice(-3).padStart(3, '0');
@@ -63,17 +76,21 @@ function bikeLabel(bike: ClubTabletBike) {
 export default function ClubTabletMode({
   canAuthorize,
   deviceCredential,
+  deviceStatus,
+  accessReady,
   roster,
   sessionCredential,
   bikes,
   bluetoothSupported,
   bluetoothBusy,
   authorizedBikeCount,
+  nativeBluetoothStatus,
   onDeviceChange,
   onRosterChange,
   onSessionChange,
   onOpenBikePairing,
   onReconnectSavedBikes,
+  onRetryAuthorization,
   onOpenProgram,
 }: ClubTabletModeProps) {
   const [tabletName, setTabletName] = useState(() => {
@@ -87,6 +104,8 @@ export default function ClubTabletMode({
   const [managedDevices, setManagedDevices] = useState<ClubTabletDevice[]>([]);
   const [deviceManagementBusy, setDeviceManagementBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const bikeAccessReady = clubTabletBikeAccessReady(deviceStatus, accessReady);
+  const nativeBluetoothFailed = nativeBluetoothStatus.state === 'failed';
 
   const activeSession = sessionCredential && sessionCredential.session.expiresAt > Date.now()
     ? sessionCredential
@@ -212,6 +231,40 @@ export default function ClubTabletMode({
     }
   };
 
+  const openBikePairing = () => {
+    if (!bikeAccessReady) {
+      setMessage(deviceStatus === 'checking'
+        ? 'Verifying tablet authorization before Bluetooth pairing.'
+        : 'Tablet authorization must be restored before Bluetooth pairing.');
+      return;
+    }
+    if (!bluetoothSupported) {
+      setMessage(nativeBluetoothFailed
+        ? 'Native Bluetooth could not start. Close and reopen the TrackLab app, then try again.'
+        : 'Bluetooth is unavailable here. Use the TrackLab iPad app or a supported browser.');
+      return;
+    }
+    setMessage(null);
+    onOpenBikePairing();
+  };
+
+  const reconnectSavedBike = async () => {
+    if (!bikeAccessReady) {
+      setMessage(deviceStatus === 'checking'
+        ? 'Verifying tablet authorization before reconnecting the Wattbike.'
+        : 'Tablet authorization must be restored before reconnecting the Wattbike.');
+      return;
+    }
+    if (!bluetoothSupported) {
+      setMessage(nativeBluetoothFailed
+        ? 'Native Bluetooth could not start. Close and reopen the TrackLab app, then try again.'
+        : 'Bluetooth is unavailable here. Use the TrackLab iPad app or a supported browser.');
+      return;
+    }
+    setMessage(null);
+    await onReconnectSavedBikes();
+  };
+
   if (!deviceCredential) {
     return (
       <section className="club-tablet-mode setup">
@@ -274,6 +327,52 @@ export default function ClubTabletMode({
             </div>
           </section>
         )}
+      </section>
+    );
+  }
+
+  if (deviceStatus === 'checking' || !accessReady && deviceStatus === 'active') {
+    return (
+      <section className="club-tablet-mode setup" aria-live="polite">
+        <div className="club-tablet-access-state">
+          <RefreshCw className="club-tablet-spin" size={38} />
+          <span className="eyebrow">Secure shared device</span>
+          <h2>Verifying tablet authorization…</h2>
+          <p>TrackLab is confirming this tablet with the club before it enables the athlete roster or Wattbike pairing.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (deviceStatus === 'error') {
+    return (
+      <section className="club-tablet-mode setup" aria-live="assertive">
+        <div className="club-tablet-access-state error">
+          <ShieldCheck size={38} />
+          <span className="eyebrow">Authorization check interrupted</span>
+          <h2>Could not verify this club tablet</h2>
+          <p>Check this iPad’s internet connection, then retry. Wattbike pairing stays locked until the club authorization is confirmed.</p>
+          <div className="club-tablet-access-actions">
+            <button className="club-tablet-primary" type="button" onClick={onRetryAuthorization}>
+              <RefreshCw size={18} /> Retry authorization
+            </button>
+            <button type="button" onClick={() => window.location.reload()}>
+              Refresh app
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (deviceStatus === 'revoked') {
+    return (
+      <section className="club-tablet-mode setup" aria-live="assertive">
+        <div className="club-tablet-access-state error">
+          <ShieldCheck size={38} />
+          <h2>Tablet authorization ended</h2>
+          <p>Ask the club owner to sign in and authorize this tablet again.</p>
+        </div>
       </section>
     );
   }
@@ -382,14 +481,18 @@ export default function ClubTabletMode({
           </div>
           {bikes.length === 0 && (
             <div className="club-tablet-bike-actions">
-              <p>{bluetoothSupported ? 'No Wattbike is connected to this tablet yet.' : 'Bluetooth is unavailable in this browser. Use the TrackLab iPad app.'}</p>
-              {bluetoothSupported && authorizedBikeCount > 0 && (
-                <button type="button" disabled={bluetoothBusy} onClick={() => void onReconnectSavedBikes()}>
+              <p>{bluetoothSupported
+                ? 'No Wattbike is connected to this tablet yet.'
+                : nativeBluetoothFailed
+                  ? 'Native Bluetooth could not start. Close and reopen the TrackLab app. If it continues, install the latest app build.'
+                  : 'Bluetooth is unavailable in this browser. Use the TrackLab iPad app.'}</p>
+              {bluetoothSupported && bikeAccessReady && authorizedBikeCount > 0 && (
+                <button type="button" disabled={bluetoothBusy} onClick={() => void reconnectSavedBike()}>
                   <RefreshCw size={17} /> Reconnect saved Wattbike
                 </button>
               )}
-              {bluetoothSupported && (
-                <button type="button" disabled={bluetoothBusy} onClick={onOpenBikePairing}>
+              {bluetoothSupported && bikeAccessReady && (
+                <button type="button" disabled={bluetoothBusy} onClick={openBikePairing}>
                   <Bluetooth size={17} /> Pair a Wattbike
                 </button>
               )}

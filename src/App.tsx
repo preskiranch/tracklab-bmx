@@ -69,6 +69,11 @@ import {
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
 import {
+  getNativeBluetoothBootstrapStatus,
+  NATIVE_BLUETOOTH_STATUS_EVENT,
+  type NativeBluetoothBootstrapStatus,
+} from './lib/nativeBluetoothBootstrap';
+import {
   clearRaceCaptureAtIdentityBoundary,
   clearStoredRaceCaptureAtIdentityBoundary,
 } from './lib/raceCapturePrivacy';
@@ -1542,6 +1547,10 @@ export default function App() {
   const [clubTabletDeviceStatus, setClubTabletDeviceStatus] = useState<'idle' | 'checking' | 'active' | 'error' | 'revoked'>(
     initialClubTabletDeviceRef.current ? 'checking' : 'idle',
   );
+  const [clubTabletAuthorizationRevision, setClubTabletAuthorizationRevision] = useState(0);
+  const [nativeBluetoothStatus, setNativeBluetoothStatus] = useState<NativeBluetoothBootstrapStatus>(
+    getNativeBluetoothBootstrapStatus,
+  );
   const clubTabletEmergencyExitRef = useRef<() => void>(() => undefined);
   const clubTrainingRequestGenerationRef = useRef(0);
   const activeClubProfileKeyRef = useRef<string | null>(null);
@@ -1762,6 +1771,15 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleNativeBluetoothStatus = (event: Event) => {
+      const status = (event as CustomEvent<NativeBluetoothBootstrapStatus>).detail;
+      if (status?.state) setNativeBluetoothStatus(status);
+    };
+    window.addEventListener(NATIVE_BLUETOOTH_STATUS_EVENT, handleNativeBluetoothStatus);
+    return () => window.removeEventListener(NATIVE_BLUETOOTH_STATUS_EVENT, handleNativeBluetoothStatus);
   }, []);
 
   useEffect(() => {
@@ -7114,6 +7132,13 @@ export default function App() {
     setClubTabletDeviceStatus('error');
   }, []);
 
+  const retryClubTabletAuthorization = useCallback(() => {
+    if (!clubTabletDevice) return;
+    setClubTabletDeviceStatus('checking');
+    setClubTabletRoster(null);
+    setClubTabletAuthorizationRevision((current) => current + 1);
+  }, [clubTabletDevice]);
+
   const handleClubTabletRosterChange = useCallback((nextRoster: ClubTabletRoster | null) => {
     setClubTabletRoster(nextRoster);
     if (nextRoster && nextRoster.device.id === clubTabletDevice?.device.id) {
@@ -7407,12 +7432,18 @@ export default function App() {
     }, delayMs);
   }, [effectiveTrack.id, multiplayer.currentRoom?.flow, multiplayer.latency.clockOffsetMs, playMode]);
 
+  const nativeBluetoothFailed = nativeBluetoothStatus.state === 'failed';
+  const nativeBluetoothFailureMessage = 'Native Bluetooth could not start. Close and reopen the TrackLab app. If this continues, install the latest app build.';
   const connectionLabel = (() => {
     if (demoMode) {
       return 'Demo race source online';
     }
 
     if (bikeConnectionSource === 'bluetooth') {
+      if (nativeBluetoothFailed) {
+        return 'Native Bluetooth could not start';
+      }
+
       if (!bluetooth.supported) {
         return 'Bluetooth Direct unavailable';
       }
@@ -7466,6 +7497,10 @@ export default function App() {
     }
 
     if (bikeConnectionSource === 'bluetooth') {
+      if (nativeBluetoothFailed) {
+        return nativeBluetoothFailureMessage;
+      }
+
       if (!bluetooth.supported) {
         return bluetooth.status;
       }
@@ -7514,6 +7549,10 @@ export default function App() {
     }
 
     if (bikeConnectionSource === 'bluetooth') {
+      if (nativeBluetoothFailed) {
+        return nativeBluetoothFailureMessage;
+      }
+
       return bluetooth.supported
         ? 'No connector needed. Browser Bluetooth feeds the same BMX gear logic, race engine, monitor, and summaries.'
         : bluetooth.status;
@@ -7540,9 +7579,11 @@ export default function App() {
   const connectionState = demoMode || activePlayers.length > 0
     ? 'open'
     : bikeConnectionSource === 'bluetooth'
-      ? bluetooth.supported
-        ? bluetooth.connection === 'connecting' ? 'connecting' : 'idle'
-        : 'error'
+      ? nativeBluetoothFailed
+        ? 'error'
+        : bluetooth.supported
+          ? bluetooth.connection === 'connecting' ? 'connecting' : 'idle'
+          : 'error'
       : bridge.connection === 'open' && (bridge.sourceState === 'running' || bridge.sourceState === 'starting')
       ? 'connecting'
       : bridge.connection;
@@ -7551,7 +7592,9 @@ export default function App() {
     ? 'Choose demo riders to generate live race samples.'
     : bikeConnectionSource === 'advanced'
       ? 'Start Advanced Connector, put each Wattbike in Just Ride at resistance level 1, then pedal for Bluetooth/ANT+/USB discovery.'
-      : bluetooth.supported
+      : nativeBluetoothFailed
+        ? nativeBluetoothFailureMessage
+        : bluetooth.supported
         ? 'Press Pair Wattbike to authorize a bike. Riders appear only after TrackLab establishes the connection.'
         : bluetooth.status;
   const pairingDeviceLabel = bikeConnectionSource === 'advanced' ? 'Bike connector device' : 'Bluetooth bike';
@@ -7712,6 +7755,7 @@ export default function App() {
   const clubTabletRuntime = clubTabletDevice ? (
     <Suspense fallback={null}>
       <ClubTabletRuntime
+        key={`${clubTabletDevice.device.id}:${clubTabletAuthorizationRevision}`}
         device={clubTabletDevice}
         roster={clubTabletRoster}
         session={clubTabletSession}
@@ -7799,7 +7843,7 @@ export default function App() {
           <TabletSmartphone size={18} /> End athlete session
         </button>
       )}
-      {bluetoothPairingOpen && showBluetoothPairing && !liveBikeAccessLocked && (
+      {bluetoothPairingOpen && showBluetoothPairing && !liveBikeAccessLocked && !nativeBluetoothFailed && (
         <Suspense fallback={null}>
           <BluetoothPairingDialog
             authorizedCount={bluetooth.authorizedCount}
@@ -7874,7 +7918,7 @@ export default function App() {
               className="bluetooth-connect-button"
               type="button"
               onClick={liveBikeAccessLocked ? showLiveBikeUpgrade : () => setBluetoothPairingOpen(true)}
-              disabled={clubMonitorReleasesLocalBikes || !bluetooth.supported || bluetooth.connection === 'connecting'}
+              disabled={clubMonitorReleasesLocalBikes || nativeBluetoothFailed || !bluetooth.supported || bluetooth.connection === 'connecting'}
             >
               <Bluetooth size={16} />
               <span>
@@ -8359,7 +8403,7 @@ export default function App() {
           onAutoAssign={demoMode ? () => undefined : autoAssign}
           onRename={demoMode ? renameDemoPlayer : renamePlayer}
           onPhotoChange={demoMode ? handleDemoRiderPhotoChange : undefined}
-          onBluetoothConnect={showBluetoothPairing && !liveBikeAccessLocked ? () => setBluetoothPairingOpen(true) : undefined}
+          onBluetoothConnect={showBluetoothPairing && !liveBikeAccessLocked && !nativeBluetoothFailed ? () => setBluetoothPairingOpen(true) : undefined}
           bluetoothSupported={bluetooth.supported}
           bluetoothStatus={bluetooth.status}
           bluetoothDeviceCount={bluetooth.connectedCount}
@@ -8495,19 +8539,26 @@ export default function App() {
             <ClubTabletMode
               canAuthorize={clubOwnerActive && !clubTabletDevice}
               deviceCredential={clubTabletDevice}
+              deviceStatus={clubTabletDeviceStatus}
+              accessReady={clubTabletDeviceActive}
               roster={clubTabletRoster}
               sessionCredential={clubTabletSessionActive ? clubTabletSession : null}
               bikes={connectedBikeDevices.map(({ deviceId, label }) => ({ deviceId, label }))}
               bluetoothSupported={bluetooth.supported}
               bluetoothBusy={bluetooth.connection === 'connecting'}
               authorizedBikeCount={bluetooth.authorizedCount}
+              nativeBluetoothStatus={nativeBluetoothStatus}
               onDeviceChange={handleClubTabletDeviceChange}
               onRosterChange={handleClubTabletRosterChange}
               onSessionChange={handleClubTabletSessionChange}
-              onOpenBikePairing={() => setBluetoothPairingOpen(true)}
+              onOpenBikePairing={() => {
+                if (!clubTabletDeviceActive || nativeBluetoothFailed || !bluetooth.supported) return;
+                setBluetoothPairingOpen(true);
+              }}
               onReconnectSavedBikes={async () => {
                 await bluetooth.reconnectSavedBikes();
               }}
+              onRetryAuthorization={retryClubTabletAuthorization}
               onOpenProgram={(mode) => {
                 setMappingMode(false);
                 if (mode === 'race') openBmxRaceIntervals();

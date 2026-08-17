@@ -5047,6 +5047,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   };
   let enrollmentRequest: unknown = null;
   let rosterAuthorization = '';
+  let failNextRosterAuthorization = false;
   let sessionRequest: unknown = null;
   let sessionDeletes = 0;
 
@@ -5158,6 +5159,16 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   });
   await page.route('**/api/club-tablet/roster', async (route) => {
     rosterAuthorization = route.request().headers().authorization ?? '';
+    await new Promise((resolve) => setTimeout(resolve, 175));
+    if (failNextRosterAuthorization) {
+      failNextRosterAuthorization = false;
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Temporary authorization check failure' }),
+      });
+      return;
+    }
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ device: tabletDevice, athletes }),
@@ -5195,6 +5206,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
 
   await page.getByLabel('Tablet name').fill(tabletDevice.name);
   await page.getByRole('button', { name: 'Authorize this tablet', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Verifying tablet authorization…' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
   expect(enrollmentRequest).toEqual({ name: tabletDevice.name });
   expect(rosterAuthorization).toBe('Bearer tablet-device-token');
@@ -5250,6 +5262,14 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Primary' }).getByRole('button')).toHaveCount(1);
   await expect(page.getByRole('button', { name: /Rasheen Hicks/ })).toBeVisible();
+
+  failNextRosterAuthorization = true;
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Could not verify this club tablet' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pair a Wattbike' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Retry authorization', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Verifying tablet authorization…' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
 });
 
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {
