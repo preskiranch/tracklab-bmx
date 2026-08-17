@@ -10,12 +10,11 @@ export type MembershipState = {
 
 export const membershipStorageKey = 'tracklab-bmx-membership-v1';
 export const benchmarkDemoTrackId = 'north-bay-bmx-napa-valley';
-export const includedBikeMonthlyCents = 999;
-export const additionalBikeMonthlyCents = 499;
-export const maxBillingBikeSeats = 4;
+export const bikeSeatMonthlyCents = 999;
+export const maxBillingBikeSeats = 1000;
 export const adminAccountEmail = 'preskiranch@gmail.com';
 
-function clampBikeSeats(value: number) {
+export function clampBillingBikeSeats(value: number) {
   return Math.max(1, Math.min(maxBillingBikeSeats, Math.round(value)));
 }
 
@@ -28,8 +27,7 @@ export function isAdminAccountEmail(email: string) {
 }
 
 export function racerMonthlyCents(bikeSeats: number) {
-  const seats = clampBikeSeats(bikeSeats);
-  return includedBikeMonthlyCents + Math.max(0, seats - 1) * additionalBikeMonthlyCents;
+  return clampBillingBikeSeats(bikeSeats) * bikeSeatMonthlyCents;
 }
 
 export function formatUsd(cents: number) {
@@ -43,7 +41,7 @@ export function formatUsd(cents: number) {
 export function createMembership(tier: MembershipTier, bikeSeats = 1): MembershipState {
   return {
     tier,
-    bikeSeats: clampBikeSeats(bikeSeats),
+    bikeSeats: clampBillingBikeSeats(bikeSeats),
     updatedAt: Date.now(),
   };
 }
@@ -58,7 +56,7 @@ function readMembershipFromUrl() {
     return null;
   }
 
-  const bikeSeats = clampBikeSeats(Number(params.get('bikes') ?? 1));
+  const bikeSeats = clampBillingBikeSeats(Number(params.get('bikes') ?? 1));
   const membership = createMembership('racer', bikeSeats);
   const cleanUrl = new URL(window.location.href);
   cleanUrl.searchParams.delete('billing');
@@ -91,7 +89,7 @@ export function readStoredMembership(): MembershipState {
       : 'visitor';
     return {
       tier,
-      bikeSeats: clampBikeSeats(Number(parsed.bikeSeats ?? 1)),
+      bikeSeats: clampBillingBikeSeats(Number(parsed.bikeSeats ?? 1)),
       updatedAt: Number.isFinite(parsed.updatedAt) ? Number(parsed.updatedAt) : Date.now(),
     };
   } catch {
@@ -106,6 +104,6 @@ export function writeStoredMembership(membership: MembershipState) {
 
   safeSetLocalStorage(membershipStorageKey, JSON.stringify({
     ...membership,
-    bikeSeats: clampBikeSeats(membership.bikeSeats),
+    bikeSeats: clampBillingBikeSeats(membership.bikeSeats),
   }));
 }

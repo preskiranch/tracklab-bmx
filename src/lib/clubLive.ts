@@ -1,4 +1,5 @@
 import type { TrainingActivityType } from '../types';
+import { maxBillingBikeSeats } from './membership';
 import {
   clubTabletSessionHeaders,
   currentClubTabletSessionToken,
@@ -156,13 +157,13 @@ export function normalizeClubLiveSessions(value: unknown) {
       uniqueByRider.set(session.studioRiderId, session);
     }
   });
-  return [...uniqueByRider.values()].slice(0, 4);
+  return [...uniqueByRider.values()].slice(0, maxBillingBikeSeats);
 }
 
 export function activeClubLiveSessions(sessions: ClubLiveSession[], now: number) {
   return sessions
     .filter((session) => session.expiresAt > now)
-    .slice(0, 4);
+    .slice(0, maxBillingBikeSeats);
 }
 
 export class ClubLiveRequestError extends Error {
@@ -252,7 +253,7 @@ export function normalizeClubLiveAccess(value: unknown, expectedClubId: string):
     clubId: clubId === expectedClubId ? clubId : expectedClubId,
     active: clubId === expectedClubId && candidate.active === true,
     expiresAt: nonNegativeNumber(candidate.expiresAt),
-    bikeSeats: Math.max(0, Math.min(4, Math.round(nonNegativeNumber(candidate.bikeSeats)))),
+    bikeSeats: Math.max(0, Math.min(maxBillingBikeSeats, Math.round(nonNegativeNumber(candidate.bikeSeats)))),
     ...(reason ? { reason } : {}),
   };
 }

@@ -6,29 +6,21 @@ const squareApiBase = squareEnvironment === 'production'
   ? 'https://connect.squareup.com'
   : 'https://connect.squareupsandbox.com';
 
-const includedBikeMonthlyCents = 999;
-const additionalBikeMonthlyCents = 499;
-const maxBillingBikeSeats = 4;
-
-const planVariationEnvByBikeCount = {
-  1: 'SQUARE_RACER_PLAN_VARIATION_1_BIKE',
-  2: 'SQUARE_RACER_PLAN_VARIATION_2_BIKES',
-  3: 'SQUARE_RACER_PLAN_VARIATION_3_BIKES',
-  4: 'SQUARE_RACER_PLAN_VARIATION_4_BIKES',
-};
+const bikeSeatMonthlyCents = 999;
+const maxBillingBikeSeats = 1000;
 
 function clampBikeSeats(value) {
   return Math.max(1, Math.min(maxBillingBikeSeats, Math.round(Number(value) || 1)));
 }
 
 export function racerMonthlyCents(bikeSeats) {
-  const seats = clampBikeSeats(bikeSeats);
-  return includedBikeMonthlyCents + Math.max(0, seats - 1) * additionalBikeMonthlyCents;
+  return clampBikeSeats(bikeSeats) * bikeSeatMonthlyCents;
 }
 
-function planVariationIdForBikeCount(bikeSeats) {
-  const envName = planVariationEnvByBikeCount[clampBikeSeats(bikeSeats)];
-  return process.env[envName] || '';
+function planVariationId() {
+  return process.env.SQUARE_RACER_PLAN_VARIATION_ID
+    || process.env.SQUARE_RACER_PLAN_VARIATION_1_BIKE
+    || '';
 }
 
 export function squareCheckoutConfigStatus() {
@@ -40,19 +32,14 @@ export function squareCheckoutConfigStatus() {
     missing.push('SQUARE_LOCATION_ID');
   }
 
-  Object.values(planVariationEnvByBikeCount).forEach((envName) => {
-    if (!process.env[envName]) {
-      missing.push(envName);
-    }
-  });
+  if (!planVariationId()) missing.push('SQUARE_RACER_PLAN_VARIATION_ID');
 
   return {
     configured: missing.length === 0,
     environment: squareEnvironment,
     currency: 'USD',
     pricing: {
-      includedBikeMonthlyCents,
-      additionalBikeMonthlyCents,
+      bikeSeatMonthlyCents,
       maxBillingBikeSeats,
     },
     missing,
@@ -92,7 +79,7 @@ export async function createRacerSubscriptionCheckout({ bikeSeats, origin, retur
     throw error;
   }
 
-  const subscriptionPlanId = planVariationIdForBikeCount(seats);
+  const subscriptionPlanId = planVariationId();
   const monthlyCents = racerMonthlyCents(seats);
   const redirectUrl = new URL(origin || 'http://localhost:10000');
   redirectUrl.searchParams.set('billing', 'success');
@@ -106,7 +93,7 @@ export async function createRacerSubscriptionCheckout({ bikeSeats, origin, retur
     body: JSON.stringify({
       idempotency_key: randomUUID(),
       quick_pay: {
-        name: `TrackLab BMX Racer - ${seats} Wattbike${seats === 1 ? '' : 's'}`,
+        name: `TrackLab BMX Racer - ${seats} Wattbike seat${seats === 1 ? '' : 's'}`,
         price_money: {
           amount: monthlyCents,
           currency: 'USD',

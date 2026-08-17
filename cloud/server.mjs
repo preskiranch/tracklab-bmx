@@ -95,6 +95,7 @@ const globalRaceViewProfileKey = 'global:developer-race-view';
 let commentarySpeechProviderStatus = 'unknown';
 let commentarySpeechProviderRetryAt = 0;
 const maxRaceBikeCount = 4;
+const maxBillingBikeSeats = 1000;
 const configuredClubLiveSessionTtlMs = Number(process.env.TRACKLAB_CLUB_LIVE_SESSION_TTL_MS);
 const clubLiveSessionTtlMs = Number.isFinite(configuredClubLiveSessionTtlMs)
   ? Math.max(250, Math.min(120_000, Math.round(configuredClubLiveSessionTtlMs)))
@@ -304,19 +305,19 @@ function canManageClubConnect(user) {
   return isAdminEmail(user?.email);
 }
 
-function clampBikeSeats(value) {
-  return Math.max(1, Math.min(maxRaceBikeCount, Math.round(Number(value) || 1)));
+function clampBillingBikeSeats(value) {
+  return Math.max(1, Math.min(maxBillingBikeSeats, Math.round(Number(value) || 1)));
 }
 
 function membershipForAccount(user) {
   if (isAdminEmail(user?.email)) {
-    return { tier: 'racer', bikeSeats: maxRaceBikeCount };
+    return { tier: 'racer', bikeSeats: Math.max(maxRaceBikeCount, clampBillingBikeSeats(user?.bikeSeats)) };
   }
 
   const tier = user?.membershipTier === 'racer' ? 'racer' : 'spectator';
   return {
     tier,
-    bikeSeats: tier === 'racer' ? clampBikeSeats(user?.bikeSeats) : 1,
+    bikeSeats: tier === 'racer' ? clampBillingBikeSeats(user?.bikeSeats) : 1,
   };
 }
 
@@ -331,7 +332,7 @@ async function clubBikeAccessForOwnerProfileKey(ownerProfileKey) {
   const membership = membershipForAccount(owner);
   return {
     active: membership.tier === 'racer',
-    bikeSeats: membership.tier === 'racer' ? clampBikeSeats(membership.bikeSeats) : 0,
+    bikeSeats: membership.tier === 'racer' ? clampBillingBikeSeats(membership.bikeSeats) : 0,
   };
 }
 
@@ -3625,7 +3626,7 @@ function clientHasRacerAccess(client, now = Date.now()) {
 
 function racerSeatLimitForClient(client) {
   return client?.membershipTier === 'racer'
-    ? clampBikeSeats(client.membershipBikeSeats)
+    ? Math.min(maxRaceBikeCount, clampBillingBikeSeats(client.membershipBikeSeats))
     : 1;
 }
 
@@ -5610,7 +5611,10 @@ async function serveStatic(request, response) {
     }
 
     const entitledUser = isAdminEmail(user.email)
-      ? await persistence.updateAuthUserAdminAccess(user.id, maxRaceBikeCount) ?? user
+      ? await persistence.updateAuthUserAdminAccess(
+          user.id,
+          Math.max(maxRaceBikeCount, clampBillingBikeSeats(user.bikeSeats)),
+        ) ?? user
       : user;
     const loggedInUser = await persistence.touchAuthUserLogin(entitledUser.id) ?? entitledUser;
     await createSignedInResponse(request, response, loggedInUser);
@@ -5671,7 +5675,7 @@ async function serveStatic(request, response) {
     }
 
     const nextUser = isAdminEmail(session.user.email)
-      ? session.user
+      ? await persistence.updateAuthUserAdminAccess(session.user.id, checkout.bikeSeats)
       : await persistence.updateAuthUserMembership(session.user.id, 'racer', checkout.bikeSeats);
     await persistence.markBillingCheckoutClaimed(checkout.stateHash, session.user.id);
     writeJson(response, 200, { user: publicAuthUser(nextUser ?? session.user) });
@@ -6384,7 +6388,7 @@ async function serveStatic(request, response) {
             studioRiderId: membership.studioRiderId,
             ownerProfileKey: membership.ownerProfileKey,
             expiresAt: now + clubLiveSessionTtlMs,
-            bikeSeats: clampBikeSeats(personalMembership.bikeSeats),
+            bikeSeats: clampBillingBikeSeats(personalMembership.bikeSeats),
             usesClubSeat: false,
           }
         : await activeClubLiveAccessForState({ memberships: [membership] }, now);
@@ -6497,7 +6501,7 @@ async function serveStatic(request, response) {
         || left.studioRiderId.localeCompare(right.studioRiderId));
       writeJson(response, 200, {
         club: { id: ownedClub.id, name: ownedClub.name },
-        sessions: activeSessions.slice(0, maxRaceBikeCount),
+        sessions: activeSessions.slice(0, maxBillingBikeSeats),
         bikeSeats: clubBikeAccess.bikeSeats,
         heartbeatTtlMs: clubLiveSessionTtlMs,
         monitorExpiresAt,
@@ -6572,9 +6576,9 @@ async function serveStatic(request, response) {
       const activeClubSessionCount = [...clubLiveSessions.values()]
         .filter((candidate) => candidate.clubId === clubId)
         .length;
-      if (activeClubSessionCount >= maxRaceBikeCount) {
+      if (activeClubSessionCount >= maxBillingBikeSeats) {
         writeJson(response, 409, {
-          error: `Club Live can display up to ${maxRaceBikeCount} simultaneous riders.`,
+          error: 'Club Live monitor capacity was reached.',
         });
         return;
       }
@@ -6837,7 +6841,7 @@ async function serveStatic(request, response) {
       }
 
       const payload = await readJsonBody(request, 32_000);
-      const bikeSeats = Math.max(1, Math.min(maxRaceBikeCount, Math.round(finiteNumber(payload.bikeSeats, 1))));
+      const bikeSeats = clampBillingBikeSeats(finiteNumber(payload.bikeSeats, 1));
       const returnState = createSessionToken();
       const origin = publicRequestOrigin(request);
       if (!origin) {
@@ -6992,6 +6996,9 @@ async function serveStatic(request, response) {
       websocketPath,
       billing: {
         configured: squareCheckoutConfigStatus().configured,
+        bikeSeatMonthlyCents: racerMonthlyCents(1),
+        maxBillingBikeSeats,
+        maxRaceBikeCount,
         oneBikeMonthlyCents: racerMonthlyCents(1),
         fourBikeMonthlyCents: racerMonthlyCents(maxRaceBikeCount),
       },

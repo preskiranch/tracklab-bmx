@@ -195,8 +195,9 @@ Square setup:
 
 1. Create or copy a Square access token. Use sandbox first if you want a test
    checkout, then production when the account is ready to charge customers.
-2. Run the TrackLab setup helper. It creates/reuses the Racer subscription plan
-   and the four monthly plan variations, then prints the exact Render variables:
+2. Run the TrackLab setup helper. It creates/reuses one monthly per-Wattbike-seat
+   subscription plan variation, then prints the exact Render variables. Checkout
+   multiplies that $9.99 seat price by the club's selected seat count:
 
 ```bash
 SQUARE_ACCESS_TOKEN=... npm run billing:square:setup -- --production --write-env-local
@@ -211,10 +212,7 @@ SQUARE_ENVIRONMENT=production
 SQUARE_VERSION=2025-10-16
 SQUARE_ACCESS_TOKEN=...
 SQUARE_LOCATION_ID=...
-SQUARE_RACER_PLAN_VARIATION_1_BIKE=...
-SQUARE_RACER_PLAN_VARIATION_2_BIKES=...
-SQUARE_RACER_PLAN_VARIATION_3_BIKES=...
-SQUARE_RACER_PLAN_VARIATION_4_BIKES=...
+SQUARE_RACER_PLAN_VARIATION_ID=...
 ```
 
 If you have a Render API key, the helper can sync the values from `.env.local`
@@ -225,10 +223,10 @@ RENDER_API_KEY=... npm run billing:square:sync-render -- --deploy
 ```
 
 Use `SQUARE_ENVIRONMENT=sandbox` and Square sandbox plan variation IDs while
-testing. The current benchmark activates the local Racer entitlement after a
-successful Square redirect. The production enforcement step is to add Square
-webhooks and a real account table so subscription status is verified on every
-login/device.
+testing. The server verifies the completed Square order before assigning the
+purchased Wattbike seat count to the account. Square webhooks should remain the
+authoritative follow-up for cancellations, failed renewals, and other
+subscription-status changes.
 
 ## Wattbike Monitor Control
 

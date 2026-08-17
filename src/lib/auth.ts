@@ -1,4 +1,4 @@
-import type { MembershipState, MembershipTier } from './membership';
+import { clampBillingBikeSeats, type MembershipState, type MembershipTier } from './membership';
 
 export type AuthUser = {
   id: string;
@@ -22,7 +22,7 @@ function normalizeMembership(value: Partial<MembershipState> | null | undefined)
     : 'visitor';
   return {
     tier,
-    bikeSeats: Math.max(1, Math.min(4, Math.round(Number(value?.bikeSeats ?? 1)))),
+    bikeSeats: clampBillingBikeSeats(Number(value?.bikeSeats ?? 1)),
     updatedAt: Number.isFinite(value?.updatedAt) ? Number(value?.updatedAt) : Date.now(),
   };
 }

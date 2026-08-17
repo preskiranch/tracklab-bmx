@@ -44,7 +44,7 @@ const baseSession: ClubLiveSession = {
 };
 
 describe('Club Live Monitor client state', () => {
-  it('normalizes untrusted sessions, keeps the newest rider snapshot, and caps the feed at four', () => {
+  it('normalizes untrusted sessions and keeps every unique club seat while preserving the newest rider snapshot', () => {
     const sessions = normalizeClubLiveSessions({
       sessions: [
         { ...baseSession, id: 'old', updatedAt: 1_000 },
@@ -59,7 +59,7 @@ describe('Club Live Monitor client state', () => {
       ],
     });
 
-    expect(sessions).toHaveLength(4);
+    expect(sessions).toHaveLength(6);
     expect(sessions[0]).toMatchObject({ id: 'new', progress: { fraction: 1 } });
     expect(sessions.filter((session) => session.studioRiderId === 'rider-1')).toHaveLength(1);
     expect(sessions[0]).not.toHaveProperty('roomId');
@@ -83,6 +83,20 @@ describe('Club Live Monitor client state', () => {
       active: false,
       expiresAt: expect.any(Number),
       bikeSeats: 4,
+    });
+  });
+
+  it('preserves a 20-seat club entitlement without changing race capacity', () => {
+    expect(normalizeClubLiveAccess({
+      clubId: 'club-1',
+      active: true,
+      expiresAt: Date.now() + 60_000,
+      bikeSeats: 20,
+    }, 'club-1')).toEqual({
+      clubId: 'club-1',
+      active: true,
+      expiresAt: expect.any(Number),
+      bikeSeats: 20,
     });
   });
 

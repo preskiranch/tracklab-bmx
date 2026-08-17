@@ -251,6 +251,7 @@ import {
 } from './lib/auth';
 import {
   benchmarkDemoTrackId,
+  clampBillingBikeSeats,
   createMembership,
   isAdminAccountEmail,
   normalizeAccountEmail,
@@ -1586,7 +1587,7 @@ export default function App() {
   const [showMembershipLanding, setShowMembershipLanding] = useState(
     () => !initialClubTabletDeviceRef.current && initialMembershipRef.current?.tier === 'visitor',
   );
-  const [checkoutBikeSeats, setCheckoutBikeSeats] = useState(() => Math.max(1, Math.min(maxPlayers, initialMembershipRef.current?.bikeSeats ?? 1)));
+  const [checkoutBikeSeats, setCheckoutBikeSeats] = useState(() => clampBillingBikeSeats(initialMembershipRef.current?.bikeSeats ?? 1));
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>('idle');
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
@@ -6935,7 +6936,7 @@ export default function App() {
   }, [requireAccountProfile]);
 
   const handleCheckoutBikeSeatsChange = useCallback((bikeSeats: number) => {
-    setCheckoutBikeSeats(Math.max(1, Math.min(maxPlayers, Math.round(bikeSeats))));
+    setCheckoutBikeSeats(clampBillingBikeSeats(bikeSeats));
     setCheckoutMessage(null);
     setCheckoutStatus('idle');
   }, []);

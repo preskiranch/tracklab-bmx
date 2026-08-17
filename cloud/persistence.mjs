@@ -5,6 +5,7 @@ import { cloudTelemetry } from './telemetry.mjs';
 const { Pool } = pg;
 
 const schema = 'tracklab';
+const maxBillingBikeSeats = 1000;
 const databaseUrl = process.env.DATABASE_URL?.trim();
 const databaseConfigured = Boolean(databaseUrl);
 let pool = databaseUrl
@@ -465,7 +466,7 @@ export async function saveBillingCheckout(checkout) {
     userId: checkout.userId,
     orderId: checkout.orderId,
     paymentLinkId: checkout.paymentLinkId || '',
-    bikeSeats: Math.max(1, Math.min(4, Math.round(Number(checkout.bikeSeats) || 1))),
+    bikeSeats: Math.max(1, Math.min(maxBillingBikeSeats, Math.round(Number(checkout.bikeSeats) || 1))),
     expectedAmountCents: Math.max(0, Math.round(Number(checkout.expectedAmountCents) || 0)),
     expiresAt: checkout.expiresAt,
     claimedAt: null,

@@ -1,9 +1,9 @@
 import { Activity, Bike, CreditCard, Globe2, Lock, LogIn, MapPinned, Play, Radio, Users } from 'lucide-react';
 import type { AuthMode } from '../lib/auth';
 import {
-  additionalBikeMonthlyCents,
+  bikeSeatMonthlyCents,
+  clampBillingBikeSeats,
   formatUsd,
-  includedBikeMonthlyCents,
   maxBillingBikeSeats,
   racerMonthlyCents,
   type MembershipState,
@@ -263,20 +263,22 @@ export function MembershipLanding({
           <span className="eyebrow">Racer</span>
           <h3>{formatUsd(monthlyCents)} / month</h3>
           <p>
-            Includes one Wattbike at {formatUsd(includedBikeMonthlyCents)} per month.
-            Each additional Wattbike is {formatUsd(additionalBikeMonthlyCents)} per month.
+            Every connected Wattbike seat is {formatUsd(bikeSeatMonthlyCents)} per month.
+            Clubs can purchase 20 or more seats, while each race remains limited to four riders.
           </p>
           <div className="seat-selector" aria-label="Wattbike seats">
-            {Array.from({ length: maxBillingBikeSeats }, (_, index) => index + 1).map((count) => (
-              <button
-                className={bikeSeats === count ? 'selected' : ''}
-                key={count}
-                type="button"
-                onClick={() => onBikeSeatsChange(count)}
-              >
-                {count}
-              </button>
-            ))}
+            <button type="button" aria-label="Remove one Wattbike seat" disabled={bikeSeats <= 1} onClick={() => onBikeSeatsChange(bikeSeats - 1)}>−</button>
+            <input
+              aria-label="Wattbike seats"
+              title="Wattbike seats"
+              type="number"
+              min="1"
+              max={maxBillingBikeSeats}
+              inputMode="numeric"
+              value={bikeSeats}
+              onChange={(event) => onBikeSeatsChange(clampBillingBikeSeats(Number(event.target.value) || 1))}
+            />
+            <button type="button" aria-label="Add one Wattbike seat" disabled={bikeSeats >= maxBillingBikeSeats} onClick={() => onBikeSeatsChange(bikeSeats + 1)}>+</button>
           </div>
           <button className="primary-button full-width" type="button" onClick={onCheckout} disabled={!profileComplete || checkoutStatus === 'loading'}>
             <CreditCard size={17} />

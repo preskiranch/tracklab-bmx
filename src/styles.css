@@ -782,7 +782,7 @@ input:focus {
 
 .seat-selector {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
   gap: 8px;
   padding: 6px;
   border: 1px solid var(--line);
@@ -800,10 +800,9 @@ input:focus {
   font-weight: 900;
 }
 
-.seat-selector button.selected {
-  border-color: #0b1117;
-  background: #0b1117;
-  color: #ffffff;
+.seat-selector input {
+  min-width: 0;
+  text-align: center;
 }
 
 .checkout-message.error {

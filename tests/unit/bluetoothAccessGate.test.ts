@@ -41,6 +41,7 @@ describe('temporary club Bluetooth access gate', () => {
   it('limits personal connections to the server-restored number of purchased bike seats', () => {
     expect(authenticatedRacerBikeSeatLimit('signed-in', 'racer', 1)).toBe(1);
     expect(authenticatedRacerBikeSeatLimit('signed-in', 'racer', 3)).toBe(3);
+    expect(authenticatedRacerBikeSeatLimit('signed-in', 'racer', 20)).toBe(4);
     expect(authenticatedRacerBikeSeatLimit('signed-in', 'racer', 99)).toBe(4);
     expect(authenticatedRacerBikeSeatLimit('signed-in', 'spectator', 4)).toBe(0);
     expect(authenticatedRacerBikeSeatLimit('loading', 'racer', 4)).toBe(0);

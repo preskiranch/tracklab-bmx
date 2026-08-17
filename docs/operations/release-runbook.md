@@ -31,7 +31,7 @@ Render must use Node.js 22 or newer and contain these server-side values:
 | `SQUARE_ENVIRONMENT` | `sandbox` during billing acceptance; `production` only after approval. |
 | `SQUARE_ACCESS_TOKEN` | Server-only Square credential. Never use a `VITE_` prefix. |
 | `SQUARE_LOCATION_ID` | Square location that owns the subscriptions. |
-| `SQUARE_RACER_PLAN_VARIATION_*` | One valid plan variation for each supported bike count. |
+| `SQUARE_RACER_PLAN_VARIATION_ID` | One $9.99 monthly per-Wattbike-seat plan variation. The legacy `SQUARE_RACER_PLAN_VARIATION_1_BIKE` key is accepted during migration. |
 
 Keep `TRACKLAB_LOG_HTTP=0` during normal operation. Enable it only for a short
 diagnostic window. Restrict Google Maps HTTP referrers to the production and

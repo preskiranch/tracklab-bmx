@@ -21,10 +21,13 @@ const configuredLocationId = envValue('SQUARE_LOCATION_ID', loadedEnv);
 const planName = 'TrackLab BMX Racer';
 const currency = 'USD';
 const variations = [
-  { seats: 1, name: 'TrackLab BMX Racer - 1 Wattbike', amount: 999, env: 'SQUARE_RACER_PLAN_VARIATION_1_BIKE' },
-  { seats: 2, name: 'TrackLab BMX Racer - 2 Wattbikes', amount: 1498, env: 'SQUARE_RACER_PLAN_VARIATION_2_BIKES' },
-  { seats: 3, name: 'TrackLab BMX Racer - 3 Wattbikes', amount: 1997, env: 'SQUARE_RACER_PLAN_VARIATION_3_BIKES' },
-  { seats: 4, name: 'TrackLab BMX Racer - 4 Wattbikes', amount: 2496, env: 'SQUARE_RACER_PLAN_VARIATION_4_BIKES' },
+  {
+    seats: 1,
+    name: 'TrackLab BMX Racer - Per Wattbike seat',
+    legacyNames: ['TrackLab BMX Racer - 1 Wattbike'],
+    amount: 999,
+    env: 'SQUARE_RACER_PLAN_VARIATION_ID',
+  },
 ];
 
 function usage() {
@@ -102,9 +105,10 @@ function phasePriceMoney(phase) {
 }
 
 function findExistingVariation(objects, planId, variation) {
+  const acceptedNames = new Set([variation.name, ...(variation.legacyNames ?? [])]);
   return objects.find((object) => object.type === 'SUBSCRIPTION_PLAN_VARIATION'
     && object.subscription_plan_variation_data?.subscription_plan_id === planId
-    && object.subscription_plan_variation_data?.name === variation.name
+    && acceptedNames.has(object.subscription_plan_variation_data?.name)
     && object.subscription_plan_variation_data?.phases?.some((phase) => (
       phasePriceMoney(phase)?.amount === variation.amount
       && phasePriceMoney(phase)?.currency === currency
@@ -179,7 +183,7 @@ function updateEnvLocal(values) {
     'SQUARE_ENVIRONMENT',
     'SQUARE_VERSION',
     'SQUARE_LOCATION_ID',
-    ...variations.map((variation) => variation.env),
+    'SQUARE_RACER_PLAN_VARIATION_ID',
   ].filter((key, index, all) => all.indexOf(key) === index);
 
   const text = `${orderedKeys

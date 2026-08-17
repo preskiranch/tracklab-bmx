@@ -12,15 +12,13 @@ const squareKeys = [
   'SQUARE_VERSION',
   'SQUARE_ACCESS_TOKEN',
   'SQUARE_LOCATION_ID',
-  'SQUARE_RACER_PLAN_VARIATION_1_BIKE',
-  'SQUARE_RACER_PLAN_VARIATION_2_BIKES',
-  'SQUARE_RACER_PLAN_VARIATION_3_BIKES',
-  'SQUARE_RACER_PLAN_VARIATION_4_BIKES',
+  'SQUARE_RACER_PLAN_VARIATION_ID',
 ];
 
 const values = Object.fromEntries(squareKeys.map((key) => [key, envValue(key, loadedEnv)]));
 values.SQUARE_ENVIRONMENT ||= 'production';
 values.SQUARE_VERSION ||= '2025-10-16';
+values.SQUARE_RACER_PLAN_VARIATION_ID ||= envValue('SQUARE_RACER_PLAN_VARIATION_1_BIKE', loadedEnv);
 
 const missing = squareKeys.filter((key) => !values[key]);
 if (!renderApiKey) {
