@@ -10,6 +10,7 @@ import {
   Route,
   Signal,
   Users,
+  Zap,
 } from 'lucide-react';
 import {
   activeClubLiveSessions,
@@ -191,6 +192,7 @@ export function ClubLiveMonitor({ studioRiders, speedUnit }: ClubLiveMonitorProp
 
                 <div className="club-live-metrics">
                   <div><Activity size={18} /><strong>{session.metrics.cadence}</strong><small>rpm</small></div>
+                  <div><Zap size={18} /><strong>{session.metrics.watts}</strong><small>watts</small></div>
                   <div><Gauge size={18} /><strong>{formatSpeedFromKph(session.metrics.speedKph, speedUnit)}</strong><small>{speedUnitLabel(speedUnit)}</small></div>
                   <div><Clock3 size={18} /><strong>{formatElapsed(session.metrics.elapsedMs)}</strong><small>elapsed</small></div>
                 </div>

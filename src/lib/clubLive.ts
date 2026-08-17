@@ -15,6 +15,7 @@ export type ClubLiveProgress = {
 };
 
 export type ClubLiveMetrics = {
+  watts: number;
   cadence: number;
   speedKph: number;
   distanceMeters: number;
@@ -88,6 +89,7 @@ function normalizeMetrics(value: unknown): ClubLiveMetrics {
     : {};
   const position = Number(candidate.position);
   return {
+    watts: Math.round(nonNegativeNumber(candidate.watts)),
     cadence: Math.round(nonNegativeNumber(candidate.cadence)),
     speedKph: nonNegativeNumber(candidate.speedKph),
     distanceMeters: nonNegativeNumber(candidate.distanceMeters),

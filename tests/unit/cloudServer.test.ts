@@ -1025,10 +1025,9 @@ describe('cloud API trust boundaries', () => {
       activityType: 'straight-sprint',
       status: 'active',
       progress: { fraction: 0.45, distanceMeters: 41.15, label: '145 ft sprint' },
-      metrics: { participantCount: 4 },
+      metrics: { watts: 1_100, participantCount: 4 },
       multiplayer: true,
     });
-    expect(JSON.stringify(livePublishPayload)).not.toMatch(/watts?|power/i);
     expect(livePublishPayload.session).not.toHaveProperty('roomId');
     expect(livePublishPayload.session).not.toHaveProperty('_publisherProfileKey');
     expect(JSON.stringify(livePublishPayload)).not.toContain('PRIVATE-JOIN-SECRET');
@@ -1041,9 +1040,9 @@ describe('cloud API trust boundaries', () => {
     expect(ownerLivePayload.sessions[0]).toMatchObject({
       studioRiderId: 'studio-maya',
       activityType: 'straight-sprint',
+      metrics: { watts: 1_100 },
       multiplayer: true,
     });
-    expect(JSON.stringify(ownerLivePayload)).not.toMatch(/watts?|power/i);
     expect(JSON.stringify(ownerLivePayload)).not.toContain('PRIVATE-JOIN-SECRET');
 
     cookie = athleteCookie;

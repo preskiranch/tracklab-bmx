@@ -153,7 +153,9 @@ function PrivacyPage() {
               <p>
                 Watt and power measurements are private rider records. They remain available in the individual
                 rider&apos;s own training history and downloads, but are not published to public leaderboards, ghosts,
-                demo views, multiplayer participants, or Club Live Monitor.
+                demo views, multiplayer participants, or shared exports. During club training, current live watts may
+                appear only on the authenticated club owner’s optional Club Live Monitor and on a local monitor directly
+                connected to the bikes.
               </p>
 
               <h3>Maps, routes, and location</h3>
@@ -214,7 +216,9 @@ function PrivacyPage() {
                   <strong>Clubs:</strong> a claimed Club Connect athlete can choose “Training at” a club to associate
                   the saved session with that club. The club owner may optionally open Club Live Monitor; when open, TrackLab also shares
                   the athlete&apos;s selected program, live status, course progress, track or destination, cadence, and
-                  speed with that owner. Watts remain private to the athlete. This read-only live feed expires automatically after the athlete
+                  speed and current live watts with that owner. Saved power history remains private to the athlete and
+                  live watts are not published to public leaderboards, shared ghosts, multiplayer participants, or shared
+                  exports. This read-only live feed expires automatically after the athlete
                   leaves club training or stops transmitting.
                 </li>
                 <li>

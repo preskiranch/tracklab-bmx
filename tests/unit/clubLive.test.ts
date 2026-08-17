@@ -60,7 +60,7 @@ describe('Club Live Monitor client state', () => {
     });
 
     expect(sessions).toHaveLength(6);
-    expect(sessions[0]).toMatchObject({ id: 'new', progress: { fraction: 1 } });
+    expect(sessions[0]).toMatchObject({ id: 'new', progress: { fraction: 1 }, metrics: { watts: 500 } });
     expect(sessions.filter((session) => session.studioRiderId === 'rider-1')).toHaveLength(1);
     expect(sessions[0]).not.toHaveProperty('roomId');
   });

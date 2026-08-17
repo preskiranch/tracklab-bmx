@@ -2614,6 +2614,7 @@ function sanitizeClubLiveProgress(value) {
 function sanitizeClubLiveMetrics(value) {
   const input = value && typeof value === 'object' ? value : {};
   return {
+    watts: Math.round(boundedNumber(input.watts, 0, 5_000)),
     cadence: boundedNumber(input.cadence, 0, 300),
     speedKph: boundedNumber(input.speedKph, 0, 200),
     distanceMeters: boundedNumber(input.distanceMeters, 0, 10_000_000),

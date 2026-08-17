@@ -4997,6 +4997,8 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await expect(monitor.getByText('Explore the World', { exact: true })).toBeVisible();
   await expect(monitor.getByText('Golden Gate Bridge', { exact: true })).toBeVisible();
   await expect(monitor.getByText('Private room', { exact: true })).toBeVisible();
+  await expect(monitor.getByText('312', { exact: true })).toBeVisible();
+  await expect(monitor.getByText('watts', { exact: true })).toBeVisible();
   await expect(monitor.getByText('Read-only live feed', { exact: true })).toBeVisible();
   await expect(monitor.getByRole('button', { name: /Pause|Resume|Stop|Cancel|Control/i })).toHaveCount(0);
 });

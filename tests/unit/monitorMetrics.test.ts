@@ -24,6 +24,7 @@ describe('Monitor View metrics', () => {
   it('derives speed from cadence using the shared 44/16 BMX rollout', () => {
     const metrics = monitorMetrics(sample(), 1_000);
 
+    expect(metrics.watts).toBe(63);
     expect(metrics.speedKph).toBeCloseTo(bmxSpeedKphFromCadence(66), 6);
     expect(metrics.speedKph).toBeGreaterThan(0);
   });
