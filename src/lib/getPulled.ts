@@ -91,6 +91,19 @@ export function getPulledMetrics(sample: BikeSample | undefined, now = Date.now(
   };
 }
 
+export function getPulledDemoMetrics(elapsedMs: number, airSetting: number): GetPulledMetrics {
+  const elapsedSeconds = Math.max(0, elapsedMs) / 1_000;
+  const launch = Math.min(1, elapsedSeconds / 1.15);
+  const cadence = Math.round((58 + Math.sin(elapsedSeconds * 5.1) * 4 + airSetting * 1.4) * launch);
+  const watts = Math.round((285 + airSetting * 38 + Math.sin(elapsedSeconds * 4.3) * 34) * launch);
+  return {
+    live: true,
+    watts,
+    cadence,
+    speedKph: bmxSpeedKphFromCadence(cadence),
+  };
+}
+
 export function createGetPulledAccumulator(): GetPulledAccumulator {
   return {
     sampleCount: 0,

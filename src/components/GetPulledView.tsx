@@ -4,6 +4,7 @@ import {
   addGetPulledSample,
   createGetPulledAccumulator,
   getPulledCountdownSeconds,
+  getPulledDemoMetrics,
   getPulledAirSettings,
   getPulledMetrics,
   getPulledPresetSeconds,
@@ -18,6 +19,12 @@ import {
 } from '../lib/getPulled';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type { BikeSample, PlayerSlot, SpeedUnit } from '../types';
+import { playStartGateTone, primeAudioCues } from '../lib/audioCues';
+import {
+  primeBikeRaceAudio,
+  stopBikeRaceAudio,
+  updateGetPulledBikeAudio,
+} from '../lib/bikeRaceAudio';
 import { PullSledScene } from './PullSledScene';
 import './GetPulledView.css';
 
@@ -63,9 +70,15 @@ export function GetPulledView({
   const accumulatorRef = useRef<GetPulledAccumulator>(createGetPulledAccumulator());
   const phaseRef = useRef<GetPulledPhase>('setup');
   const completedRef = useRef(false);
+  const lastCountdownToneRef = useRef<number | null>(null);
   const selectedPlayer = connectedPlayers.find((player) => player.id === selectedPlayerId) ?? null;
   const sample = selectedPlayer?.deviceId == null ? undefined : samplesByDevice.get(selectedPlayer.deviceId);
-  const metrics = useMemo(() => getPulledMetrics(sample, now), [now, sample]);
+  const metrics = useMemo(() => {
+    if (demoMode && phase === 'active' && startedAt != null) {
+      return getPulledDemoMetrics(now - startedAt, airSetting);
+    }
+    return getPulledMetrics(sample, now);
+  }, [airSetting, demoMode, now, phase, sample, startedAt]);
   const elapsedMs = phase === 'active' && startedAt != null
     ? Math.min(durationSeconds * 1_000, Math.max(0, now - startedAt))
     : result ? result.durationSeconds * 1_000 : 0;
@@ -90,18 +103,27 @@ export function GetPulledView({
     setResult(null);
     setNow(Date.now());
     onLiveStateChange(null);
+    stopBikeRaceAudio();
   }, [onLiveStateChange]);
+
+  const primePullAudio = useCallback(() => {
+    void primeAudioCues();
+    void primeBikeRaceAudio();
+  }, []);
 
   const start = useCallback(() => {
     if (!selectedPlayer || selectedPlayer.deviceId == null || phaseRef.current !== 'setup') return;
+    primePullAudio();
     accumulatorRef.current = createGetPulledAccumulator();
     completedRef.current = false;
     setResult(null);
     setCountdown(getPulledCountdownSeconds);
     phaseRef.current = 'countdown';
+    lastCountdownToneRef.current = getPulledCountdownSeconds;
+    playStartGateTone('tick');
     setPhase('countdown');
     setNow(Date.now());
-  }, [selectedPlayer]);
+  }, [primePullAudio, selectedPlayer]);
 
   useEffect(() => {
     if (phase !== 'countdown') return undefined;
@@ -110,6 +132,10 @@ export function GetPulledView({
       const remaining = Math.max(0, getPulledCountdownSeconds - Math.floor((Date.now() - countdownStartedAt) / 1_000));
       setCountdown(remaining);
       setNow(Date.now());
+      if (remaining !== lastCountdownToneRef.current) {
+        lastCountdownToneRef.current = remaining;
+        playStartGateTone(remaining > 0 ? 'tick' : 'gate');
+      }
       if (remaining <= 0) {
         window.clearInterval(timer);
         const nextStartedAt = Date.now();
@@ -124,13 +150,28 @@ export function GetPulledView({
   }, [phase]);
 
   useEffect(() => {
+    if (!selectedPlayer) {
+      stopBikeRaceAudio();
+      return;
+    }
+    updateGetPulledBikeAudio(
+      phase === 'active' && metrics.cadence >= 1,
+      selectedPlayer.id,
+      metrics.cadence,
+      metrics.speedKph,
+    );
+  }, [metrics.cadence, metrics.speedKph, phase, selectedPlayer]);
+
+  useEffect(() => {
     if (phase !== 'active' || startedAt == null || !selectedPlayer) return undefined;
     const timer = window.setInterval(() => {
       const sampleAt = Date.now();
-      const liveMetrics = getPulledMetrics(
-        selectedPlayer.deviceId == null ? undefined : samplesByDevice.get(selectedPlayer.deviceId),
-        sampleAt,
-      );
+      const liveMetrics = demoMode
+        ? getPulledDemoMetrics(sampleAt - startedAt, airSetting)
+        : getPulledMetrics(
+          selectedPlayer.deviceId == null ? undefined : samplesByDevice.get(selectedPlayer.deviceId),
+          sampleAt,
+        );
       accumulatorRef.current = addGetPulledSample(accumulatorRef.current, liveMetrics, sampleAt);
       setNow(sampleAt);
       if (sampleAt - startedAt < durationSeconds * 1_000 || completedRef.current) return;
@@ -151,7 +192,7 @@ export function GetPulledView({
       onComplete(nextResult);
     }, 100);
     return () => window.clearInterval(timer);
-  }, [airSetting, durationSeconds, onComplete, phase, samplesByDevice, selectedPlayer, startedAt]);
+  }, [airSetting, demoMode, durationSeconds, onComplete, phase, samplesByDevice, selectedPlayer, startedAt]);
 
   useEffect(() => {
     if (phase !== 'results') return undefined;
@@ -183,7 +224,10 @@ export function GetPulledView({
     });
   }, [airSetting, durationSeconds, elapsedMs, metrics, onLiveStateChange, phase, result, selectedPlayer]);
 
-  useEffect(() => () => onLiveStateChange(null), [onLiveStateChange]);
+  useEffect(() => () => {
+    onLiveStateChange(null);
+    stopBikeRaceAudio();
+  }, [onLiveStateChange]);
 
   const displayed = result ? {
     watts: result.averageWatts,
@@ -200,7 +244,12 @@ export function GetPulledView({
   return (
     <main className="get-pulled-view" aria-label="Get Pulled timed Wattbike test">
       <section className="get-pulled-hero">
-        <PullSledScene active={phase === 'active'} progress={progress} />
+        <PullSledScene
+          active={phase === 'active'}
+          cadenceRpm={metrics.cadence}
+          progress={progress}
+          speedKph={metrics.speedKph}
+        />
         <div className="get-pulled-overlay">
           <div className="get-pulled-timer">
             <strong>{phase === 'countdown' ? `0:${String(countdown).padStart(2, '0')}` : `${(elapsedMs / 1_000).toFixed(2)}s`}</strong>
@@ -291,7 +340,7 @@ export function GetPulledView({
           </div>
           <p className="get-pulled-privacy">Watts and power results are saved privately to the selected athlete. They are visible on the athlete’s records and authorized club monitors, never public leaderboards or shared ghosts.</p>
           <div className="get-pulled-actions">
-            <button className="primary" type="button" onClick={start}><Play size={18} /> Start {secondsLabel(durationSeconds)} pull · Air {airSetting}</button>
+            <button className="primary" type="button" onPointerDown={primePullAudio} onClick={start}><Play size={18} /> Start {secondsLabel(durationSeconds)} pull · Air {airSetting}</button>
           </div>
         </section>
       ) : (

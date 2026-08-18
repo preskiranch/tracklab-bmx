@@ -390,8 +390,22 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   expect(consoleErrors).toEqual([]);
 });
 
-test('Get Pulled runs a six-second countdown and keeps Air records separated', async ({ page }) => {
+test('Get Pulled runs a six-second countdown and keeps Air records separated', async ({ page }, testInfo) => {
   test.setTimeout(30_000);
+  await page.addInitScript(() => {
+    const audioWindow = window as typeof window & {
+      __tracklabGetPulledTones?: string[];
+    };
+    window.addEventListener('tracklab-start-gate-tone', (event) => {
+      const kind = (event as CustomEvent<{ kind?: string }>).detail?.kind;
+      if (kind) {
+        audioWindow.__tracklabGetPulledTones = [
+          ...(audioWindow.__tracklabGetPulledTones ?? []),
+          kind,
+        ];
+      }
+    });
+  });
   const now = Date.now();
   const authUser = {
     id: 'get-pulled-developer',
@@ -452,6 +466,36 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   await expect(view.getByText('Get ready', { exact: false })).toBeVisible();
   await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
   await expect(view.getByText('Pulling now', { exact: false })).toBeVisible({ timeout: 7_500 });
+  const pullScene = view.getByRole('img', { name: /actively pulling/i });
+  await expect(pullScene).toHaveAttribute('data-pedaling', 'true');
+  await expect(pullScene).toHaveAttribute('data-pull-scrolling', 'true');
+  await expect(pullScene.locator('[data-pedal-cycle="running"]')).toBeVisible();
+  const scenery = pullScene.locator('[data-pull-scenery="track"]');
+  await expect(scenery).toHaveCSS('animation-name', 'tracklab-pull-scenery-scroll');
+  const sceneryTransformBefore = await scenery.evaluate((element) => getComputedStyle(element).transform);
+  const pedalFrameBefore = await pullScene.locator('[data-pedal-cycle="running"] span').evaluate(
+    (element) => getComputedStyle(element).backgroundPositionX,
+  );
+  await page.waitForTimeout(450);
+  const sceneryTransformAfter = await scenery.evaluate((element) => getComputedStyle(element).transform);
+  const pedalFrameAfter = await pullScene.locator('[data-pedal-cycle="running"] span').evaluate(
+    (element) => getComputedStyle(element).backgroundPositionX,
+  );
+  expect(sceneryTransformAfter).not.toBe(sceneryTransformBefore);
+  expect(pedalFrameAfter).not.toBe(pedalFrameBefore);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __tracklabGetPulledTones?: string[] })
+      .__tracklabGetPulledTones ?? []
+  ))).toEqual(['tick', 'tick', 'tick', 'tick', 'tick', 'tick', 'gate']);
+  await expect.poll(() => page.evaluate(() => {
+    const audio = (window as typeof window & {
+      __tracklabBikeRaceAudio?: { seenModes: Record<number, string[]> };
+    }).__tracklabBikeRaceAudio;
+    return Object.values(audio?.seenModes ?? {}).flat();
+  }), { timeout: 3_000 }).toContain('pedaling');
+  await pullScene.screenshot({
+    path: testInfo.outputPath('get-pulled-active-animation.png'),
+  });
   await expect(view.getByText('Pull complete', { exact: false })).toBeVisible({ timeout: 4_500 });
   await expect(view.getByLabel('Result recorded at Wattbike Air 7')).toBeVisible();
   await expect(view.getByText('Demo pull results are for testing only and are not saved or published.')).toBeVisible();

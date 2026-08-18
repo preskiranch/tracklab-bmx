@@ -189,9 +189,11 @@ export function ClubLiveMonitor({ studioRiders, speedUnit }: ClubLiveMonitorProp
                   <div className="club-live-pull-scene">
                     <PullSledScene
                       active={!stale && session.status === 'active'}
+                      cadenceRpm={session.metrics.cadence}
                       compact
                       label={`${displayName} in a Get Pulled test`}
                       progress={session.progress.fraction}
+                      speedKph={session.metrics.speedKph}
                     />
                   </div>
                 )}

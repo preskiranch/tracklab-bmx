@@ -1,4 +1,4 @@
-import type { ExploreRider, RaceState, RiderState } from '../types';
+import type { ExploreRider, PlayerId, RaceState, RiderState } from '../types';
 import { getTrackLabAudioContext } from './audioCues';
 
 export const bmxBikeMechanicsUrl = '/assets/bmx-bike-mechanics.mp3';
@@ -327,6 +327,24 @@ export function updateExploreBikeAudio(
       lastRawCadence: rider.cadence ?? 0,
       velocity: rider.velocityMps,
     })),
+  );
+}
+
+export function updateGetPulledBikeAudio(
+  active: boolean,
+  playerId: PlayerId,
+  cadenceRpm: number,
+  speedKph: number,
+) {
+  updateBikeMechanicsAudio(
+    active ? 'racing' : 'ready',
+    [{
+      playerId,
+      driveAllowed: active && cadenceRpm >= 1,
+      finishedAt: null,
+      lastRawCadence: cadenceRpm,
+      velocity: speedKph / 3.6,
+    }],
   );
 }
 

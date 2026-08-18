@@ -3175,7 +3175,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (appMode === 'explore') {
+    if (appMode === 'explore' || appMode === 'get-pulled') {
       return;
     }
     updateBikeRaceAudio(raceState, riders);

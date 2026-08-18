@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addGetPulledSample,
   createGetPulledAccumulator,
+  getPulledDemoMetrics,
   getPulledMetrics,
   getPulledResultFromAccumulator,
   normalizeGetPulledAirSetting,
@@ -53,6 +54,16 @@ describe('Get Pulled test math and record categories', () => {
       cadence: 0,
       speedKph: 0,
     });
+  });
+
+  it('ramps demo pulls from rest and uses the same 44/16 rollout speed', () => {
+    const atRest = getPulledDemoMetrics(0, 7);
+    const underway = getPulledDemoMetrics(1_500, 7);
+
+    expect(atRest).toMatchObject({ live: true, cadence: 0, speedKph: 0 });
+    expect(underway.cadence).toBeGreaterThan(0);
+    expect(underway.watts).toBeGreaterThan(0);
+    expect(underway.speedKph).toBeCloseTo(bmxSpeedKphFromCadence(underway.cadence), 6);
   });
 
   it('records averages, peaks, distance, duration, and the exact Air category', () => {

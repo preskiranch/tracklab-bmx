@@ -247,8 +247,10 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
 
                 <PullSledScene
                   active={isSprintActive(metrics)}
+                  cadenceRpm={metrics.cadence}
                   compact
                   label={`${player.name} pulling the TrackLab sled`}
+                  speedKph={metrics.speedKph}
                 />
 
                 <div className="monitor-primary">

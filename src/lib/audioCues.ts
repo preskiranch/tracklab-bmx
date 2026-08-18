@@ -628,6 +628,11 @@ function playStartGateToneWithWebAudio(kind: StartGateToneKind) {
 }
 
 export function playStartGateTone(kind: StartGateToneKind) {
+  if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('tracklab-start-gate-tone', {
+      detail: { kind, at: Date.now() },
+    }));
+  }
   const context = resumeAudioContext();
   if (playStartGateToneWithWebAudio(kind)) {
     return;
