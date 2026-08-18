@@ -5416,10 +5416,11 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   expect(sessionRequest).toEqual({ studioRiderId: 'studio-rasheen', bikeDeviceId: '58701' });
 
   const programs = page.locator('.club-tablet-programs');
-  await expect(programs.getByRole('button')).toHaveCount(3);
+  await expect(programs.getByRole('button')).toHaveCount(4);
   await expect(programs.getByRole('button', { name: /BMX Race Intervals/ })).toBeVisible();
   await expect(programs.getByRole('button', { name: /Straight Sprint/ })).toBeVisible();
   await expect(programs.getByRole('button', { name: /Explore the World/ })).toBeVisible();
+  await expect(programs.getByRole('button', { name: /Get Pulled/ })).toBeVisible();
 
   await page.locator('.club-tablet-active-card')
     .getByRole('button', { name: 'End athlete session', exact: true })

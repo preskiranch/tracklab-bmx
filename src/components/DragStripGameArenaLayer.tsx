@@ -823,6 +823,7 @@ function ArenaPanel({
             <div
               key={rider.id}
               aria-label={`${rider.name} arena rider`}
+              data-ghost-color={rider.ghost ? 'fluorescent-orange' : undefined}
               data-lane={rider.playerId}
               data-lane-center={laneCenter}
               data-distance-meters={rider.distanceMeters.toFixed(3)}
@@ -844,7 +845,9 @@ function ArenaPanel({
                 style={{
                   position: 'absolute',
                   inset: '4%',
-                  filter: 'brightness(1.04) contrast(1.08) drop-shadow(0 3px 2px rgba(0,0,0,.48))',
+                  filter: rider.ghost
+                    ? 'hue-rotate(-28deg) saturate(2.6) brightness(1.18) drop-shadow(0 0 5px rgba(255,106,0,.92))'
+                    : 'brightness(1.04) contrast(1.08) drop-shadow(0 3px 2px rgba(0,0,0,.48))',
                   transform: 'scaleX(var(--arena-camera-inverse-scale, 1))',
                 }}
               >

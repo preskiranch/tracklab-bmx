@@ -21,6 +21,14 @@ const maxStoredGhosts = 80;
 const maxGhostPoints = 900;
 const defaultGhostAccent = '#9ca3af';
 
+// A ghost is a timing target, not another live player. Keep one unmistakable
+// fluorescent-orange identity across every renderer so it cannot be confused
+// with any of the four selectable live-rider colors.
+export const ghostPlaybackColorName = 'yellow' as const;
+export const ghostPlaybackAccent = '#ff6a00';
+export const ghostPlaybackGlow = 'rgba(255, 106, 0, 0.92)';
+export const ghostPlaybackHighlight = 'rgba(255, 183, 77, 0.88)';
+
 function finiteNumber(value: unknown, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -323,8 +331,8 @@ export function playbackGhostLap(ghost: GhostLap, elapsedMs: number, index: numb
   }
 
   const safeElapsedMs = Math.max(0, elapsedMs);
-  const playbackColorName = 'blue' as const;
-  const playbackAccent = '#22d3ee';
+  const playbackColorName = ghostPlaybackColorName;
+  const playbackAccent = ghostPlaybackAccent;
   if (safeElapsedMs === 0) {
     return {
       id: ghost.id,

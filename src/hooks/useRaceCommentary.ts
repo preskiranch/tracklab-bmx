@@ -30,6 +30,7 @@ import {
 } from '../lib/preRaceReport';
 import type {
   GhostLap,
+  GhostPlaybackRider,
   PlayerSlot,
   RaceCommentaryPreferences,
   RaceCommentaryVoicePreset,
@@ -39,6 +40,7 @@ import type {
   TrackRecord,
   TrackZone,
 } from '../types';
+import type { PersonalRecordAchievements } from '../lib/personalRecords';
 
 type CommentaryServiceMode = 'checking' | 'ai' | 'unavailable';
 export type CommentarySpeechStatus = 'checking' | 'ready' | 'quota-exhausted' | 'unavailable';
@@ -92,6 +94,10 @@ type UseRaceCommentaryOptions = {
   riders: RiderState[];
   zones: TrackZone[];
   ghostLaps: GhostLap[];
+  selectedGhostLaps: GhostLap[];
+  ghostRiders: GhostPlaybackRider[];
+  ghostOwnerKey: string;
+  newPersonalRecordsByPlayer: PersonalRecordAchievements;
   lapCount: number;
   reactionTimesByPlayer: ReactionTimesByPlayer;
   straightSprint: boolean;
@@ -121,6 +127,13 @@ function deliveryStyleForEvent(event: RaceCommentaryEvent): CommentaryDeliverySt
     return 'pressure';
   }
   return 'straight';
+}
+
+function speechRiderNamesForEvent(event: RaceCommentaryEvent) {
+  return [...new Set([
+    ...event.riders.map((rider) => rider.name),
+    ...(event.ghostRace ? [event.ghostRace.ghost.name] : []),
+  ])];
 }
 
 function preparedStartSpeechKey(
@@ -529,6 +542,10 @@ export function useRaceCommentary({
   riders,
   zones,
   ghostLaps,
+  selectedGhostLaps,
+  ghostRiders,
+  ghostOwnerKey,
+  newPersonalRecordsByPlayer,
   lapCount,
   reactionTimesByPlayer,
   straightSprint,
@@ -574,6 +591,15 @@ export function useRaceCommentary({
 
   const trackName = track.name;
   const riderNamesKey = players.map((player) => `${player.id}:${player.name}`).join('|');
+  const primaryGhost = selectedGhostLaps[0];
+  const selectedGhostIdentity = selectedGhostLaps
+    .map((ghost) => `${ghost.id}:${ghost.finishTimeMs}:${ghost.ownerKey}`)
+    .join('|');
+  const startSpeechRiderNames = [
+    ...players.map((player) => player.name),
+    ...selectedGhostLaps.map((ghost) => ghost.riderName),
+  ];
+  const startSpeechRiderNamesKey = startSpeechRiderNames.join('|');
   const startLineRef = useRef({ identity: '', line: '' });
   preferencesRef.current = preferences;
   recentLinesChangeRef.current = onRecentLinesChange;
@@ -582,6 +608,7 @@ export function useRaceCommentary({
     const startLineIdentity = [
       trackName,
       riderNamesKey,
+      selectedGhostIdentity,
       preferences.adaptiveMemory ? preferences.recentLines.length : 0,
       preferences.adaptiveMemory ? preferences.recentLines.at(-1) ?? '' : '',
     ].join('::');
@@ -592,6 +619,12 @@ export function useRaceCommentary({
           trackName,
           players.map((player) => player.name),
           preferences.adaptiveMemory ? preferences.recentLines : [],
+          primaryGhost ? {
+            name: primaryGhost.riderName,
+            isOwn: primaryGhost.ownerKey === ghostOwnerKey,
+            finishTimeMs: primaryGhost.finishTimeMs,
+            trackName: primaryGhost.trackName,
+          } : undefined,
         ),
       };
     }
@@ -605,6 +638,12 @@ export function useRaceCommentary({
         preferences.adaptiveMemory
           ? preferences.recentLines
           : [],
+        primaryGhost ? {
+          name: primaryGhost.riderName,
+          isOwn: primaryGhost.ownerKey === ghostOwnerKey,
+          finishTimeMs: primaryGhost.finishTimeMs,
+          trackName: primaryGhost.trackName,
+        } : undefined,
       ),
     };
   }
@@ -855,7 +894,7 @@ export function useRaceCommentary({
       startLine,
       preferences,
       'race-start',
-      players.map((player) => player.name),
+      startSpeechRiderNames,
       'sprint',
       controller.signal,
     )
@@ -906,6 +945,7 @@ export function useRaceCommentary({
     startGateActive,
     startGatePhase,
     startSpeechKey,
+    startSpeechRiderNamesKey,
   ]);
 
   useEffect(() => {
@@ -1131,7 +1171,7 @@ export function useRaceCommentary({
         line,
         activePreferences,
         event.kind,
-        event.riders.map((rider) => rider.name),
+        speechRiderNamesForEvent(event),
         deliveryStyle,
         controller.signal,
       );
@@ -1341,7 +1381,7 @@ export function useRaceCommentary({
                 line,
                 activePreferences,
                 event.kind,
-                event.riders.map((rider) => rider.name),
+                speechRiderNamesForEvent(event),
                 'sprint',
                 activeAudioRef,
                 activeBufferSourceRef,
@@ -1377,7 +1417,7 @@ export function useRaceCommentary({
               line,
               activePreferences,
               event.kind,
-              event.riders.map((rider) => rider.name),
+              speechRiderNamesForEvent(event),
               'sprint',
               activeAudioRef,
               activeBufferSourceRef,
@@ -1459,7 +1499,7 @@ export function useRaceCommentary({
             line,
             activePreferences,
             event.kind,
-            event.riders.map((rider) => rider.name),
+            speechRiderNamesForEvent(event),
             deliveryStyle,
             activeAudioRef,
             activeBufferSourceRef,
@@ -1526,6 +1566,26 @@ export function useRaceCommentary({
       zones,
       reactionTimesByPlayer,
       straightSprint,
+      ghosts: selectedGhostLaps.map((ghost) => {
+        const playback = ghostRiders.find((rider) => rider.id === ghost.id);
+        return {
+          id: ghost.id,
+          name: ghost.riderName,
+          ownerName: ghost.ownerName,
+          isOwn: ghost.ownerKey === ghostOwnerKey,
+          source: ghost.source,
+          trackName: ghost.trackName,
+          finishTimeMs: ghost.finishTimeMs,
+          savedAt: ghost.savedAt,
+          distanceMeters: playback?.distance ?? 0,
+          finished: playback?.finishedAt != null,
+        };
+      }),
+      newPersonalRecordPlayerIds: Object.keys(newPersonalRecordsByPlayer)
+        .map(Number)
+        .filter((playerId): playerId is PlayerSlot['id'] => (
+          playerId === 1 || playerId === 2 || playerId === 3 || playerId === 4
+        )),
     });
     if (raceStateStopsCommentary(raceState)) {
       raceLinesRef.current = [];
@@ -1613,6 +1673,10 @@ export function useRaceCommentary({
     raceState,
     reactionTimesByPlayer,
     riders,
+    ghostOwnerKey,
+    ghostRiders,
+    newPersonalRecordsByPlayer,
+    selectedGhostLaps,
     startGateActive,
     stopPlayback,
     trackName,

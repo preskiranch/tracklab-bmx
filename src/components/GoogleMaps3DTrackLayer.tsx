@@ -56,6 +56,11 @@ import {
   riderMarkerDrawSize,
   uprightRiderOrientation,
 } from '../lib/riderPresentation';
+import {
+  ghostPlaybackAccent,
+  ghostPlaybackColorName,
+  ghostPlaybackGlow,
+} from '../lib/ghosts';
 
 type GoogleMaps3DTrackLayerProps = {
   track: TrackRecord;
@@ -425,7 +430,7 @@ function createRiderContent(
 ) {
   const content = document.createElement('div');
   content.className = `map-3d-rider-marker map-3d-rider-marker-${appearance}`;
-  content.style.setProperty('--rider-accent', appearance === 'ghost' ? '#22d3ee' : player.accent);
+  content.style.setProperty('--rider-accent', appearance === 'ghost' ? ghostPlaybackAccent : player.accent);
   content.style.height = `${riderMarkerDrawSize}px`;
   content.style.pointerEvents = 'none';
   content.style.width = `${riderMarkerDrawSize}px`;
@@ -434,12 +439,17 @@ function createRiderContent(
   const image = document.createElement('img');
   image.className = 'map-3d-rider-image';
   image.alt = label;
-  image.src = riderIconByColor[appearance === 'ghost' ? 'blue' : player.colorName];
+  image.src = riderIconByColor[appearance === 'ghost' ? ghostPlaybackColorName : player.colorName];
   image.style.display = 'block';
   image.style.height = `${riderMarkerDrawSize}px`;
   image.style.objectFit = 'fill';
   image.style.transformOrigin = '50% 100%';
   image.style.width = `${riderMarkerDrawSize}px`;
+  if (appearance === 'ghost') {
+    content.dataset.ghostColor = 'fluorescent-orange';
+    image.style.filter = `hue-rotate(-28deg) saturate(2.6) brightness(1.18) drop-shadow(0 0 5px ${ghostPlaybackGlow})`;
+    image.style.opacity = '0.72';
+  }
   content.append(image);
   return content;
 }
@@ -1101,8 +1111,8 @@ export function GoogleMaps3DTrackLayer({
         const ghostPlayer: PlayerSlot = {
           id: ((index % 4) + 1) as PlayerId,
           name: rider.name,
-          colorName: 'blue',
-          accent: '#22d3ee',
+          colorName: ghostPlaybackColorName,
+          accent: ghostPlaybackAccent,
           deviceId: null,
         };
         updateRider(

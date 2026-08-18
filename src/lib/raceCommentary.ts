@@ -45,6 +45,31 @@ export type RaceCommentaryRiderFact = {
   distanceMeters: number;
   driveAllowed: boolean;
   finished: boolean;
+  finishTimeMs?: number | null;
+};
+
+export type RaceCommentaryGhostFact = {
+  id: string;
+  name: string;
+  ownerName: string;
+  isOwn: boolean;
+  source: 'personal' | 'friend' | 'top';
+  trackName: string;
+  finishTimeMs: number;
+  savedAt: number;
+  distanceMeters: number;
+  finished: boolean;
+};
+
+export type RaceCommentaryGhostRaceFact = {
+  livePlayerId: PlayerSlot['id'];
+  ghost: RaceCommentaryGhostFact;
+  liveAhead: boolean;
+  gapMeters: number;
+  result?: 'live-beat-ghost' | 'ghost-beat-live' | 'tie';
+  deltaMs?: number;
+  newRecord: boolean;
+  newPersonalRecord: boolean;
 };
 
 export type RaceCommentaryCloseBattleFact = {
@@ -76,6 +101,7 @@ export type RaceCommentaryEvent = {
   pedalReferenceAllowed: boolean;
   straightSprint?: boolean;
   riders: RaceCommentaryRiderFact[];
+  ghostRace?: RaceCommentaryGhostRaceFact;
 };
 
 export function maximumRaceCommentaryEventAgeMs(kind: RaceCommentaryEventKind) {
@@ -126,6 +152,8 @@ export type RaceCommentarySnapshot = {
   zones: TrackZone[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
   straightSprint: boolean;
+  ghosts?: RaceCommentaryGhostFact[];
+  newPersonalRecordPlayerIds?: PlayerSlot['id'][];
 };
 
 export type RaceCommentaryTracker = {
@@ -187,7 +215,55 @@ function riderFacts(snapshot: RaceCommentarySnapshot): RaceCommentaryRiderFact[]
     distanceMeters: Number(Math.max(0, rider.distance).toFixed(2)),
     driveAllowed: rider.driveAllowed,
     finished: rider.finishedAt != null,
+    finishTimeMs: rider.finishedAt,
   }));
+}
+
+function ghostRaceFact(
+  snapshot: RaceCommentarySnapshot,
+  facts: RaceCommentaryRiderFact[],
+  finishingPlayerId?: PlayerSlot['id'],
+): RaceCommentaryGhostRaceFact | undefined {
+  if (!snapshot.ghosts?.length || facts.length === 0) {
+    return undefined;
+  }
+  const liveRider = facts.find((rider) => rider.playerId === finishingPlayerId)
+    ?? facts[0];
+  const ghost = [...snapshot.ghosts].sort((left, right) => (
+    Math.abs(liveRider.distanceMeters - left.distanceMeters)
+      - Math.abs(liveRider.distanceMeters - right.distanceMeters)
+    || left.finishTimeMs - right.finishTimeMs
+  ))[0];
+  if (!ghost) {
+    return undefined;
+  }
+
+  const signedGapMeters = liveRider.distanceMeters - ghost.distanceMeters;
+  const liveFinishTimeMs = liveRider.finishTimeMs;
+  const result = liveFinishTimeMs == null
+    ? undefined
+    : liveFinishTimeMs < ghost.finishTimeMs
+      ? 'live-beat-ghost' as const
+      : liveFinishTimeMs > ghost.finishTimeMs
+        ? 'ghost-beat-live' as const
+        : 'tie' as const;
+  const newPersonalRecord = Boolean(
+    snapshot.newPersonalRecordPlayerIds?.includes(liveRider.playerId),
+  );
+  return {
+    livePlayerId: liveRider.playerId,
+    ghost,
+    liveAhead: signedGapMeters > 0.05,
+    gapMeters: Number(Math.abs(signedGapMeters).toFixed(2)),
+    ...(result ? {
+      result,
+      deltaMs: Math.abs((liveFinishTimeMs ?? ghost.finishTimeMs) - ghost.finishTimeMs),
+    } : {}),
+    // Beating a selected timing target establishes a new ghost-race benchmark;
+    // the separate flag identifies when it is also the rider's personal best.
+    newRecord: result === 'live-beat-ghost',
+    newPersonalRecord,
+  };
 }
 
 function coursePhaseForProgress(progress: number): RaceCommentaryCoursePhase {
@@ -256,6 +332,9 @@ function eventFor(
     pedalReferenceAllowed: false,
     straightSprint: snapshot.straightSprint,
     riders: facts,
+    ...(snapshot.ghosts?.length ? {
+      ghostRace: ghostRaceFact(snapshot, facts, extra.finishingPlayerId),
+    } : {}),
     ...extra,
   };
 }
@@ -870,11 +949,97 @@ const startBridgeFragments = [
   'The race is busy from the opening drive.',
 ] as const;
 
+export type RaceStartGhostTarget = {
+  name: string;
+  isOwn: boolean;
+  finishTimeMs: number;
+  trackName: string;
+};
+
+function ghostBenchmarkTime(finishTimeMs: number) {
+  return `${(Math.max(0, finishTimeMs) / 1000).toFixed(2)} seconds`;
+}
+
+function localGhostRaceStartLine(
+  trackName: string,
+  riderNames: string[],
+  ghost: RaceStartGhostTarget,
+  recentLines: string[],
+) {
+  const seed = stableCommentaryHash([
+    trackName,
+    riderNames.join('|'),
+    ghost.name,
+    ghost.isOwn ? 'own' : 'other',
+    ghost.finishTimeMs,
+    recentLines.length,
+    recentLines.at(-1) ?? '',
+  ].join('|'));
+  const liveName = selectCommentaryRiderName(
+    riderNames[0] ?? 'The rider',
+    (seed % 1000) / 1000,
+  );
+  const ghostName = selectCommentaryRiderName(
+    ghost.name,
+    ((seed + 263) % 1000) / 1000,
+  );
+  const opponent = ghost.isOwn ? `${liveName}'s own ghost` : `${ghostName}'s ghost`;
+  const target = ghostBenchmarkTime(ghost.finishTimeMs);
+  const venue = ghost.trackName || trackName;
+  const openings = [
+    `${liveName} launches against ${opponent}`,
+    `The gate drops with ${liveName} chasing ${opponent}`,
+    `${liveName} is racing the clock and ${opponent}`,
+    `This is a ghost challenge for ${liveName} against ${opponent}`,
+    `${liveName} powers away with ${opponent} as the target`,
+    `The benchmark battle is live—${liveName} versus ${opponent}`,
+    `${liveName} starts the hunt for ${opponent}`,
+    `Here we go—${liveName} takes on ${opponent}`,
+  ];
+  const targets = [
+    `the time to beat is ${target}, set at ${venue}`,
+    `${target} is the benchmark recorded at ${venue}`,
+    `the target from ${venue} stands at ${target}`,
+    `that ghost posted ${target} here at ${venue}`,
+    `the clock to improve is ${target} from ${venue}`,
+    `the saved mark is ${target}, recorded at ${venue}`,
+  ];
+  const closes = [
+    'Every meter is a comparison now.',
+    'The improvement chase starts immediately.',
+    'The gap will tell the story.',
+    'This one is rider against recorded pace.',
+    'A new record is there to be earned.',
+    'The old mark is officially under attack.',
+  ];
+  const candidates = Array.from({ length: 64 }, (_, variant) => (
+    `${openings[(seed + variant * 17) % openings.length]}; ${targets[(seed + variant * 29) % targets.length]}. ${closes[(seed + variant * 37) % closes.length]}`
+  ));
+  const ranked = candidates
+    .map((candidate) => ({
+      candidate,
+      similarity: recentLines.reduce(
+        (highest, recentLine) => Math.max(highest, tokenSimilarity(candidate, recentLine)),
+        0,
+      ),
+    }))
+    .sort((left, right) => left.similarity - right.similarity);
+  const bestSimilarity = ranked[0]?.similarity ?? 0;
+  const pool = ranked
+    .filter((item) => item.similarity <= bestSimilarity + 0.05)
+    .map((item) => item.candidate);
+  return pool[seed % pool.length] ?? ranked[0]?.candidate ?? candidates[0];
+}
+
 export function localRaceStartLine(
   trackName: string,
   riderNames: string[],
   recentLines: string[] = [],
+  ghost?: RaceStartGhostTarget,
 ) {
+  if (ghost) {
+    return localGhostRaceStartLine(trackName, riderNames, ghost, recentLines);
+  }
   const seed = stableCommentaryHash([
     trackName,
     riderNames.join('|'),
@@ -1110,6 +1275,195 @@ function runningOrderLine(
   return `${clauses.slice(0, -1).join('; ')}${clauses.length > 1 ? '; and ' : ''}${clauses.at(-1)}.`;
 }
 
+function ghostCommentaryCandidates(
+  event: RaceCommentaryEvent,
+  recentLines: string[],
+  raceLines: string[],
+) {
+  const comparison = event.ghostRace;
+  const liveRider = comparison
+    ? event.riders.find((rider) => rider.playerId === comparison.livePlayerId)
+    : undefined;
+  if (!comparison || !liveRider) {
+    return [];
+  }
+
+  const ghost = comparison.ghost;
+  const objectOpponent = ghost.isOwn ? 'their own ghost' : `${ghost.name}'s ghost`;
+  const subjectOpponent = ghost.isOwn ? `${liveRider.name}'s ghost` : `${ghost.name}'s ghost`;
+  const benchmark = ghostBenchmarkTime(ghost.finishTimeMs);
+  const liveTime = liveRider.finishTimeMs == null
+    ? null
+    : ghostBenchmarkTime(liveRider.finishTimeMs);
+  const gap = comparison.gapMeters < 1
+    ? `${comparison.gapMeters.toFixed(2)} meters`
+    : `${comparison.gapMeters.toFixed(1)} meters`;
+  const phaseOptions = phasePhrases[event.straightSprint ? 'last-straight' : event.coursePhase];
+
+  return Array.from({ length: 96 }, (_, variant) => {
+    const phase = commentaryChoice(
+      phaseOptions,
+      event,
+      recentLines,
+      raceLines,
+      variant,
+      'ghost-phase',
+    );
+    const raceMode = event.straightSprint
+      ? commentaryChoice(
+        ['straight sprint', 'sprint lane', 'run against the clock', 'flat-out sprint'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'ghost-sprint-mode',
+      )
+      : commentaryChoice(
+        ['race interval', 'lap challenge', 'track interval', 'benchmark run'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'ghost-interval-mode',
+      );
+
+    if (event.kind === 'race-start') {
+      return localGhostRaceStartLine(event.trackName, [liveRider.name], {
+        name: ghost.name,
+        isOwn: ghost.isOwn,
+        finishTimeMs: ghost.finishTimeMs,
+        trackName: ghost.trackName,
+      }, [...recentLines, ...raceLines]);
+    }
+
+    if (event.kind === 'finish' || event.kind === 'rider-finish') {
+      const delta = `${((comparison.deltaMs ?? 0) / 1000).toFixed(2)} seconds`;
+      if (comparison.result === 'live-beat-ghost') {
+        const record = comparison.newPersonalRecord
+          ? commentaryChoice(
+            ['a new personal record', 'a fresh personal best', 'a new lifetime mark', 'a personal record reset'],
+            event,
+            recentLines,
+            raceLines,
+            variant,
+            'ghost-personal-record',
+          )
+          : commentaryChoice(
+            ['a new ghost-race record', 'a new target-beating record', 'a fresh benchmark record', 'a new ghost challenge mark'],
+            event,
+            recentLines,
+            raceLines,
+            variant,
+            'ghost-other-record',
+          );
+        const hook = commentaryChoice(
+          ['At the finish', 'Across the stripe', 'The clock confirms it', 'Result locked', 'Challenge complete', 'The line tells the story'],
+          event,
+          recentLines,
+          raceLines,
+          variant,
+          'ghost-win-hook',
+        );
+        const recordAction = commentaryChoice(
+          ['sets', 'delivers', 'records', 'owns', 'establishes', 'earns'],
+          event,
+          recentLines,
+          raceLines,
+          variant,
+          'ghost-record-action',
+        );
+        return `${hook}—${liveRider.name} beats ${objectOpponent} by ${delta}! ${liveRider.name} ${recordAction} ${record} at ${liveTime}; the ghost target was ${benchmark}, set at ${ghost.trackName}.`;
+      }
+      if (comparison.result === 'ghost-beat-live') {
+        const hook = commentaryChoice(
+          ['At the stripe', 'The result is in', 'The clock settles it', 'Challenge complete', 'Across the line', 'The benchmark holds'],
+          event,
+          recentLines,
+          raceLines,
+          variant,
+          'ghost-loss-hook',
+        );
+        const hold = commentaryChoice(
+          ['keeps the benchmark', 'wins this ghost race', 'holds the target time', 'takes the comparison', 'defends the saved mark', 'stays out front on the clock'],
+          event,
+          recentLines,
+          raceLines,
+          variant,
+          'ghost-loss-action',
+        );
+        return `${hook}—${subjectOpponent} beats ${liveRider.name} by ${delta} and ${hold}. ${liveRider.name} finishes in ${liveTime}; the ${benchmark} ghost from ${ghost.trackName} remains the time to beat.`;
+      }
+      return `Dead even at the finish—${liveRider.name} ties ${objectOpponent} at ${benchmark}, matching the ghost time set at ${ghost.trackName}.`;
+    }
+
+    if (comparison.gapMeters <= 0.35) {
+      const hook = commentaryChoice(
+        ['Nothing between them', 'The comparison is dead level', 'This ghost race is razor close', 'The timing traces overlap', 'They are nearly frame for frame', 'The benchmark battle is balanced'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'ghost-level-hook',
+      );
+      const action = commentaryChoice(
+        ['matches the saved pace', 'runs shoulder to shoulder with the ghost', 'mirrors the benchmark', 'stays locked to the recorded effort', 'tracks the ghost almost exactly', 'keeps the old mark within inches'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'ghost-level-action',
+      );
+      return `${hook} ${phase}—${liveRider.name} ${action} in this ${raceMode}; ${benchmark} is still the mark to beat.`;
+    }
+
+    if (comparison.liveAhead) {
+      const hook = commentaryChoice(
+        ['Record pace right now', 'The live run has the advantage', 'The old mark is under pressure', 'The rider is ahead of history', 'The benchmark is being stretched', 'This is target-beating pace'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'ghost-live-ahead-hook',
+      );
+      const action = commentaryChoice(
+        ['leads', 'has opened', 'holds', 'carries', 'protects', 'has built'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'ghost-live-ahead-action',
+      );
+      const pressure = commentaryChoice(
+        ['but the gap still needs defending', 'and the new record is taking shape', 'with the ghost still visible in pursuit', 'as the saved pace starts to give way', 'but every clean meter matters now', 'and the clock is moving in the right direction'],
+        event,
+        recentLines,
+        raceLines,
+        variant,
+        'ghost-live-ahead-close',
+      );
+      return `${hook} ${phase}—${liveRider.name} ${action} ${gap} over ${objectOpponent}, ${pressure}.`;
+    }
+
+    const hook = commentaryChoice(
+      ['The ghost has the edge', 'The saved run is ahead', 'The benchmark leads for now', 'The old mark has breathing room', 'The rider is chasing recorded pace', 'The clock favors the ghost at this point'],
+      event,
+      recentLines,
+      raceLines,
+      variant,
+      'ghost-behind-hook',
+    );
+    const response = commentaryChoice(
+      ['needs to find the difference', 'is still close enough to answer', 'has time to reel that target back', 'must keep the pressure building', 'is hunting for a cleaner final drive', 'can still turn the comparison around'],
+      event,
+      recentLines,
+      raceLines,
+      variant,
+      'ghost-behind-response',
+    );
+    return `${hook} ${phase}—${subjectOpponent} leads ${liveRider.name} by ${gap}, but ${liveRider.name} ${response} in this ${raceMode}.`;
+  });
+}
+
 function localCommentaryCandidates(
   event: RaceCommentaryEvent,
   recentLines: string[],
@@ -1131,7 +1485,22 @@ function localCommentaryCandidates(
         ((nameSeed + index * 263) % 1000) / 1000,
       ),
     })),
+    ...(event.ghostRace ? {
+      ghostRace: {
+        ...event.ghostRace,
+        ghost: {
+          ...event.ghostRace.ghost,
+          name: selectCommentaryRiderName(
+            event.ghostRace.ghost.name,
+            ((nameSeed + 887) % 1000) / 1000,
+          ),
+        },
+      },
+    } : {}),
   };
+  if (event.ghostRace) {
+    return ghostCommentaryCandidates(event, recentLines, raceLines);
+  }
   const leader = event.riders.find((rider) => rider.playerId === event.leaderPlayerId)
     ?? event.riders[0];
   const second = event.riders[1];

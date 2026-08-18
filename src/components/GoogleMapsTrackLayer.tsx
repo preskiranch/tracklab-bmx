@@ -80,6 +80,12 @@ import {
   pedalZoneLabelPosition,
   pedalZoneLabelSizePixels,
 } from '../lib/mapZoneLabels';
+import {
+  ghostPlaybackAccent,
+  ghostPlaybackColorName,
+  ghostPlaybackGlow,
+  ghostPlaybackHighlight,
+} from '../lib/ghosts';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -820,7 +826,7 @@ function drawUprightRiderCanvas(
   context.translate(size / 2, size / 2);
   context.rotate((leanBucket * Math.PI) / 180);
   context.scale(orientation.mirrored ? -1 : 1, 1);
-  context.shadowColor = appearance === 'ghost' ? 'rgba(34, 211, 238, 0.85)' : 'rgba(0, 0, 0, 0.35)';
+  context.shadowColor = appearance === 'ghost' ? ghostPlaybackGlow : 'rgba(0, 0, 0, 0.35)';
   context.shadowBlur = appearance === 'ghost'
     ? riderMarkerMaximumShadowBlurPixels
     : riderMarkerShadowBlurPixels;
@@ -843,7 +849,7 @@ function drawUprightRiderCanvas(
   drawRiderCrankAndLegRig(context, animation.crankAngleRadians, player.accent);
   context.globalAlpha = 1;
   const wheelRotation = (animation.wheelFrameIndex / riderWheelFrameCount) * Math.PI * 2;
-  context.strokeStyle = appearance === 'ghost' ? 'rgba(103, 232, 249, 0.78)' : player.accent;
+  context.strokeStyle = appearance === 'ghost' ? ghostPlaybackHighlight : player.accent;
   context.globalAlpha = appearance === 'ghost' ? 0.65 : 0.72;
   context.lineCap = 'round';
   context.lineWidth = 0.85;
@@ -2753,8 +2759,8 @@ export function GoogleMapsTrackLayer({
       const ghostPlayer: PlayerSlot = {
         id: ((index % 4) + 1) as PlayerId,
         name: rider.name,
-        colorName: 'blue',
-        accent: '#22d3ee',
+        colorName: ghostPlaybackColorName,
+        accent: ghostPlaybackAccent,
         deviceId: null,
       };
       const speedKph = rider.velocity > 0 ? rider.velocity * 3.6 : null;

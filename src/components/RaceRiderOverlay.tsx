@@ -8,6 +8,7 @@ import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import { RiderAvatar } from './RiderAvatar';
 import { NewRecordBadge } from './NewRecordBadge';
 import type { PersonalRecordAchievements } from '../lib/personalRecords';
+import { ghostPlaybackAccent } from '../lib/ghosts';
 
 type DragState =
   | {
@@ -168,7 +169,7 @@ export function RaceRiderOverlay({
       badge: `G${index + 1}`,
       name: rider.name,
       photoUrl: undefined,
-      accent: '#22d3ee',
+      accent: ghostPlaybackAccent,
       rank: rider.rank,
       progressPct: raceProgressPercent(rider.distance, trackLengthMeters),
       speedKph: rider.velocity > 0 ? rider.velocity * 3.6 : null,

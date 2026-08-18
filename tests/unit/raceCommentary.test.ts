@@ -73,6 +73,141 @@ function snapshot(riders: RiderState[], raceState: RaceCommentarySnapshot['raceS
 }
 
 describe('race commentary event detection', () => {
+  it('introduces an own ghost and another rider ghost as distinct timing targets', () => {
+    const ownGhostLine = localRaceStartLine('North Bay BMX', ['Avery'], [], {
+      name: 'Avery',
+      isOwn: true,
+      finishTimeMs: 12_340,
+      trackName: 'North Bay BMX',
+    });
+    const otherGhostLine = localRaceStartLine('North Bay BMX', ['Avery'], [], {
+      name: 'Blake',
+      isOwn: false,
+      finishTimeMs: 11_980,
+      trackName: 'North Bay BMX',
+    });
+
+    expect(ownGhostLine).toMatch(/Avery.*own ghost/i);
+    expect(ownGhostLine).toMatch(/12\.34 seconds.*North Bay BMX/i);
+    expect(otherGhostLine).toMatch(/Avery.*Blake.*ghost/i);
+    expect(otherGhostLine).toMatch(/11\.98 seconds.*North Bay BMX/i);
+  });
+
+  it('calls the live gap to a selected ghost during a straight sprint', () => {
+    const tracker = createRaceCommentaryTracker();
+    const ghostSnapshot: RaceCommentarySnapshot = {
+      ...snapshot([rider(1, 14)]),
+      players: [players[0]],
+      straightSprint: true,
+      ghosts: [{
+        id: 'ghost-avery',
+        name: 'Avery',
+        ownerName: 'Avery',
+        isOwn: true,
+        source: 'personal',
+        trackName: 'North Bay BMX',
+        finishTimeMs: 12_340,
+        savedAt: 1_000,
+        distanceMeters: 11,
+        finished: false,
+      }],
+    };
+    const events = detectRaceCommentaryEvents(tracker, ghostSnapshot, 1_000);
+    const established = events.find((event) => event.kind === 'positions-established');
+
+    expect(established?.ghostRace).toMatchObject({
+      liveAhead: true,
+      gapMeters: 3,
+    });
+    expect(localCommentaryLine(established!)).toMatch(/Avery.*3\.0 meters.*own ghost|Avery.*own ghost.*3\.0 meters/i);
+
+    const raceLines: string[] = [];
+    for (let index = 0; index < 24; index += 1) {
+      raceLines.push(localCommentaryLine({
+        ...established!,
+        id: `ghost-variation-${index}`,
+        sequence: index + 2,
+      }, raceLines.slice(-8), raceLines));
+    }
+    expect(new Set(raceLines).size).toBeGreaterThan(16);
+    expect(raceLines.every((line) => /Avery/i.test(line) && /ghost/i.test(line))).toBe(true);
+  });
+
+  it('announces a target-beating record against another rider ghost at the finish', () => {
+    const tracker = createRaceCommentaryTracker();
+    const baseGhost = {
+      id: 'ghost-blake',
+      name: 'Blake',
+      ownerName: 'Blake',
+      isOwn: false,
+      source: 'friend' as const,
+      trackName: 'North Bay BMX',
+      finishTimeMs: 12_000,
+      savedAt: 1_000,
+      distanceMeters: 300,
+      finished: true,
+    };
+    detectRaceCommentaryEvents(tracker, {
+      ...snapshot([rider(1, 0)]),
+      players: [players[0]],
+      ghosts: [{ ...baseGhost, distanceMeters: 0, finished: false }],
+    }, 1_000);
+    const finishEvents = detectRaceCommentaryEvents(tracker, {
+      ...snapshot([rider(1, 300, { finishedAt: 11_400 })], 'finished'),
+      players: [players[0]],
+      ghosts: [baseGhost],
+    }, 12_400);
+    const finish = finishEvents.find((event) => (
+      event.kind === 'finish' || event.kind === 'rider-finish'
+    ));
+    const line = localCommentaryLine(finish!);
+
+    expect(finish?.ghostRace).toMatchObject({
+      result: 'live-beat-ghost',
+      deltaMs: 600,
+      newRecord: true,
+    });
+    expect(line).toMatch(/Avery beats Blake(?:'s|’s) ghost by 0\.60 seconds/i);
+    expect(line).toMatch(/new .*record/i);
+    expect(line).toMatch(/11\.40.*12\.00.*North Bay BMX/i);
+  });
+
+  it('makes it explicit when an own ghost wins and leaves the record intact', () => {
+    const tracker = createRaceCommentaryTracker();
+    const ownGhost = {
+      id: 'ghost-avery',
+      name: 'Avery',
+      ownerName: 'Avery',
+      isOwn: true,
+      source: 'personal' as const,
+      trackName: 'North Bay BMX',
+      finishTimeMs: 11_500,
+      savedAt: 1_000,
+      distanceMeters: 300,
+      finished: true,
+    };
+    detectRaceCommentaryEvents(tracker, {
+      ...snapshot([rider(1, 0)]),
+      players: [players[0]],
+      ghosts: [{ ...ownGhost, distanceMeters: 0, finished: false }],
+    }, 1_000);
+    const [finish] = detectRaceCommentaryEvents(tracker, {
+      ...snapshot([rider(1, 300, { finishedAt: 12_250 })], 'finished'),
+      players: [players[0]],
+      ghosts: [ownGhost],
+    }, 13_250);
+    const line = localCommentaryLine(finish);
+
+    expect(finish.ghostRace).toMatchObject({
+      result: 'ghost-beat-live',
+      deltaMs: 750,
+      newRecord: false,
+    });
+    expect(line).toMatch(/Avery(?:'s|’s) ghost beats Avery by 0\.75 seconds/i);
+    expect(line).toMatch(/11\.50.*time to beat|11\.50.*benchmark/i);
+    expect(line).not.toMatch(/new .*record/i);
+  });
+
   it('names the complete field in the opening race call', () => {
     const line = localRaceStartLine(
       'North Bay BMX',

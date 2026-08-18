@@ -137,8 +137,8 @@ describe('ghost lap categories and privacy metadata', () => {
     expect(ghost).not.toBeNull();
 
     expect(playbackGhostLap(ghost!, 0, 0)).toMatchObject({
-      colorName: 'blue',
-      accent: '#22d3ee',
+      colorName: 'yellow',
+      accent: '#ff6a00',
       distance: 0,
       velocity: 0,
       phase: 'pedaling',
