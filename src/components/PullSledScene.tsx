@@ -20,6 +20,12 @@ const sceneStyles = `
 `;
 
 const venueUrl = '/assets/get-pulled/tracklab-pull-venue-v2.png';
+const venueGeometry = {
+  width: 1672,
+  height: 941,
+  roadTop: 613,
+  roadBottom: 764,
+} as const;
 
 export function PullSledScene({
   active,
@@ -30,6 +36,8 @@ export function PullSledScene({
   progress = 0,
   speedKph = 0,
 }: PullSledSceneProps) {
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const finishLineRef = useRef<HTMLDivElement>(null);
   const assemblyRef = useRef<HTMLDivElement>(null);
   const sledHitchRef = useRef<HTMLSpanElement>(null);
   const rearAxleRef = useRef<HTMLSpanElement>(null);
@@ -98,8 +106,40 @@ export function PullSledScene({
     return () => resizeObserver.disconnect();
   }, [compact]);
 
+  useLayoutEffect(() => {
+    const scene = sceneRef.current;
+    const finishLine = finishLineRef.current;
+    if (!scene || !finishLine) return undefined;
+
+    const clipFinishLineToRoad = () => {
+      const sceneBox = scene.getBoundingClientRect();
+      const coverScale = Math.max(
+        sceneBox.width / venueGeometry.width,
+        sceneBox.height / venueGeometry.height,
+      );
+      const renderedHeight = venueGeometry.height * coverScale;
+      const centeredOffsetY = (sceneBox.height - renderedHeight) / 2;
+      const roadTop = Math.max(
+        0,
+        centeredOffsetY + venueGeometry.roadTop * coverScale,
+      );
+      const roadBottom = Math.min(
+        sceneBox.height,
+        centeredOffsetY + venueGeometry.roadBottom * coverScale,
+      );
+      finishLine.style.top = `${roadTop.toFixed(2)}px`;
+      finishLine.style.height = `${Math.max(1, roadBottom - roadTop).toFixed(2)}px`;
+    };
+
+    clipFinishLineToRoad();
+    const resizeObserver = new ResizeObserver(clipFinishLineToRoad);
+    resizeObserver.observe(scene);
+    return () => resizeObserver.disconnect();
+  }, [compact]);
+
   return (
     <div
+      ref={sceneRef}
       className="pull-sled-scene"
       aria-label={label ?? (active ? 'BMX rider actively pulling the TrackLab sled' : 'BMX rider ready to pull the TrackLab sled')}
       data-course-mode="fixed-screen"
@@ -137,9 +177,9 @@ export function PullSledScene({
         zIndex: 1,
       }} />
 
-      <div aria-hidden="true" data-finish-line="pull" data-finish-surface="road-only-checkered" style={{
-        position: 'absolute', right: compact ? '2.5%' : '3%', bottom: '9.5%',
-        zIndex: 2, width: compact ? 7 : 14, height: '21.5%',
+      <div ref={finishLineRef} aria-hidden="true" data-finish-line="pull" data-finish-surface="road-only-checkered" data-road-clip="source-image-coordinates" style={{
+        position: 'absolute', right: compact ? '2.5%' : '3%', top: '65%',
+        zIndex: 2, width: compact ? 7 : 14, height: '16%',
         backgroundColor: '#f4f4ef',
         backgroundImage: 'linear-gradient(45deg,#090a0a 25%,transparent 25%,transparent 75%,#090a0a 75%),linear-gradient(45deg,#090a0a 25%,transparent 25%,transparent 75%,#090a0a 75%)',
         backgroundPosition: '0 0,6px 6px',

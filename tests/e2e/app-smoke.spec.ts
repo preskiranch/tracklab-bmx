@@ -490,6 +490,7 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   const finishLine = pullScene.locator('[data-finish-line="pull"]');
   await expect(finishLine).toBeVisible();
   await expect(finishLine).toHaveAttribute('data-finish-surface', 'road-only-checkered');
+  await expect(finishLine).toHaveAttribute('data-road-clip', 'source-image-coordinates');
   const scenery = pullScene.locator('[data-pull-scenery="fixed-track"]');
   await expect(scenery).toHaveCSS('animation-name', 'none');
   const rig = pullScene.locator('[data-pull-rig="sled-left-rider-right"]');
