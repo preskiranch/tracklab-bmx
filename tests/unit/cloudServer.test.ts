@@ -2139,7 +2139,10 @@ describe('cloud API trust boundaries', () => {
     const selectedAfterSiblingPayload = await selectedAfterSiblingSave.json();
     expect(selectedAfterSiblingPayload.ghosts).toHaveLength(1);
     expect(JSON.stringify(selectedAfterSiblingPayload)).not.toContain('Tablet Rider Two');
-    expect(JSON.stringify(selectedAfterSiblingPayload)).not.toContain('777');
+    expect(selectedAfterSiblingPayload.ghosts[0]).toMatchObject({
+      riderName: 'Tablet Rider One',
+      summary: { topWatts: 800 },
+    });
     const siblingGhosts = await api(
       `/api/club-tablet/ghosts?trackId=${encodeURIComponent(tabletTrackId)}`,
       { headers: athleteHeaders(siblingSessionPayload.sessionToken) },
