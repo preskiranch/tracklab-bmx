@@ -3,7 +3,6 @@ import {
   Activity,
   Bike,
   Box,
-  Compass,
   Download,
   Flag,
   Gamepad2,
@@ -93,8 +92,6 @@ type SessionControlPanelProps = {
   selectedMetrics: MetricKey[];
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
-  earthAngle: number;
-  earthHeading: number;
   customRouteName: string;
   customRouteLocation: string;
   customRouteStatus: string | null;
@@ -155,8 +152,6 @@ type SessionControlPanelProps = {
   onMetricToggle: (metric: MetricKey) => void;
   onSpeedUnitChange: (unit: SpeedUnit) => void;
   onDistanceUnitChange: (unit: DistanceUnit) => void;
-  onEarthAngleChange: (angle: number) => void;
-  onEarthHeadingChange: (heading: number) => void;
   onCustomRouteNameChange: (value: string) => void;
   onCustomRouteLocationChange: (value: string) => void;
   onCustomRoutePredictionSelect: (prediction: PlacePredictionOption) => void;
@@ -219,8 +214,6 @@ export function SessionControlPanel({
   selectedMetrics,
   speedUnit,
   distanceUnit,
-  earthAngle,
-  earthHeading,
   customRouteName,
   customRouteLocation,
   customRouteStatus,
@@ -281,8 +274,6 @@ export function SessionControlPanel({
   onMetricToggle,
   onSpeedUnitChange,
   onDistanceUnitChange,
-  onEarthAngleChange,
-  onEarthHeadingChange,
   onCustomRouteNameChange,
   onCustomRouteLocationChange,
   onCustomRoutePredictionSelect,
@@ -1527,34 +1518,10 @@ export function SessionControlPanel({
       <section className="panel-section">
         <div className="section-heading">
           <div>
-            <span className="eyebrow">View</span>
-            <h3>Camera</h3>
+            <span className="eyebrow">Display</span>
+            <h3>Speed units</h3>
           </div>
-          <span className="angle-value">{earthAngle} deg / {earthHeading} deg</span>
         </div>
-        <label className="camera-slider">
-          <span>Tilt</span>
-          <input
-            className="angle-slider"
-            type="range"
-            min="0"
-            max="67"
-            value={earthAngle}
-            onChange={(event) => onEarthAngleChange(Number(event.target.value))}
-          />
-        </label>
-        <label className="camera-slider">
-          <span><Compass size={14} /> Heading</span>
-          <input
-            className="angle-slider"
-            type="range"
-            min="0"
-            max="359"
-            value={earthHeading}
-            onChange={(event) => onEarthHeadingChange(Number(event.target.value))}
-          />
-        </label>
-
         <div className="segmented-control compact" aria-label="Speed unit">
           <button
             className={speedUnit === 'kph' ? 'selected' : ''}

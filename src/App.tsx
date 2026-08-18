@@ -8828,8 +8828,6 @@ export default function App() {
                   selectedMetrics={selectedMetrics}
                   speedUnit={speedUnit}
                   distanceUnit={distanceUnit}
-                  earthAngle={earthAngle}
-                  earthHeading={earthHeading}
                   customRouteName={customRouteName}
                   customRouteLocation={customRouteLocation}
                   customRouteStatus={customRouteStatus}
@@ -8891,8 +8889,6 @@ export default function App() {
                   onMetricToggle={toggleMetric}
                   onSpeedUnitChange={setSpeedUnit}
                   onDistanceUnitChange={setDistanceUnit}
-                  onEarthAngleChange={handleEarthAngleChange}
-                  onEarthHeadingChange={handleEarthHeadingChange}
                   onCustomRouteNameChange={setCustomRouteName}
                   onCustomRouteLocationChange={handleCustomRouteLocationChange}
                   onCustomRoutePredictionSelect={handleCustomRoutePredictionSelect}

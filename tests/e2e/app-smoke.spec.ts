@@ -1690,6 +1690,11 @@ test('dashboard analysis follows the map without a blank grid row', async ({ pag
   await expect(earthPanel.getByRole('button', { name: '3D', exact: true })).toHaveCount(0);
   await expect(earthPanel.getByRole('link', { name: 'Open Maps', exact: true })).toBeVisible();
   await expect(page.locator('.analytics-panel')).toBeVisible();
+  const controlPanel = page.locator('.control-panel');
+  await expect(controlPanel.getByText('Camera', { exact: true })).toHaveCount(0);
+  await expect(controlPanel.getByText('Tilt', { exact: true })).toHaveCount(0);
+  await expect(controlPanel.getByText('Heading', { exact: true })).toHaveCount(0);
+  await expect(controlPanel.getByText('Speed units', { exact: true })).toBeVisible();
 
   const mapBounds = await earthPanel.boundingBox();
   const analysisBounds = await page.locator('.analytics-panel').boundingBox();
