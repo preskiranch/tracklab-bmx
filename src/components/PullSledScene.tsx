@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { AnimatedBmxRider } from './AnimatedBmxRider';
 
@@ -29,6 +30,14 @@ export function PullSledScene({
   progress = 0,
   speedKph = 0,
 }: PullSledSceneProps) {
+  const assemblyRef = useRef<HTMLDivElement>(null);
+  const sledHitchRef = useRef<HTMLSpanElement>(null);
+  const rearAxleRef = useRef<HTMLSpanElement>(null);
+  const towSvgRef = useRef<SVGSVGElement>(null);
+  const towShadowRef = useRef<SVGPathElement>(null);
+  const towBarRef = useRef<SVGPathElement>(null);
+  const sledJointRef = useRef<SVGCircleElement>(null);
+  const bikeJointRef = useRef<SVGCircleElement>(null);
   const clampedProgress = Math.min(1, Math.max(0, progress));
   const pedaling = active && cadenceRpm >= 1;
   const timedTravel = active && typeof durationSeconds === 'number' && durationSeconds > 0;
@@ -46,6 +55,48 @@ export function PullSledScene({
       ? 'tracklab-pull-rig-travel var(--tracklab-pull-duration) linear forwards'
       : 'none',
   } as CSSProperties;
+
+  useLayoutEffect(() => {
+    const assembly = assemblyRef.current;
+    const sledHitch = sledHitchRef.current;
+    const rearAxle = rearAxleRef.current;
+    if (!assembly || !sledHitch || !rearAxle) return undefined;
+
+    const updateTowBar = () => {
+      const assemblyBox = assembly.getBoundingClientRect();
+      const hitchBox = sledHitch.getBoundingClientRect();
+      const axleBox = rearAxle.getBoundingClientRect();
+      const start = {
+        x: hitchBox.left + hitchBox.width / 2 - assemblyBox.left,
+        y: hitchBox.top + hitchBox.height / 2 - assemblyBox.top,
+      };
+      const end = {
+        x: axleBox.left + axleBox.width / 2 - assemblyBox.left,
+        y: axleBox.top + axleBox.height / 2 - assemblyBox.top,
+      };
+      const path = [
+        `M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`,
+        `L ${end.x.toFixed(2)} ${end.y.toFixed(2)}`,
+      ].join(' ');
+      towSvgRef.current?.setAttribute(
+        'viewBox',
+        `0 0 ${assemblyBox.width.toFixed(2)} ${assemblyBox.height.toFixed(2)}`,
+      );
+      towShadowRef.current?.setAttribute('d', path);
+      towBarRef.current?.setAttribute('d', path);
+      sledJointRef.current?.setAttribute('cx', start.x.toFixed(2));
+      sledJointRef.current?.setAttribute('cy', start.y.toFixed(2));
+      bikeJointRef.current?.setAttribute('cx', end.x.toFixed(2));
+      bikeJointRef.current?.setAttribute('cy', end.y.toFixed(2));
+    };
+
+    updateTowBar();
+    const resizeObserver = new ResizeObserver(updateTowBar);
+    resizeObserver.observe(assembly);
+    resizeObserver.observe(sledHitch);
+    resizeObserver.observe(rearAxle);
+    return () => resizeObserver.disconnect();
+  }, [compact]);
 
   return (
     <div
@@ -86,16 +137,21 @@ export function PullSledScene({
         zIndex: 1,
       }} />
 
-      <div aria-hidden="true" data-finish-line="pull" style={{
-        position: 'absolute', right: compact ? '2.5%' : '3%', bottom: compact ? 5 : 29,
-        zIndex: 2, width: compact ? 3 : 6, height: compact ? 62 : 214, borderRadius: 999,
-        background: 'linear-gradient(90deg,#f7fff1,#dfff36,#f7fff1)',
-        boxShadow: '0 0 0 2px rgba(8,15,10,.78),0 0 15px rgba(210,255,55,.7)',
+      <div aria-hidden="true" data-finish-line="pull" data-finish-surface="road-only-checkered" style={{
+        position: 'absolute', right: compact ? '2.5%' : '3%', bottom: '9.5%',
+        zIndex: 2, width: compact ? 7 : 14, height: '21.5%',
+        backgroundColor: '#f4f4ef',
+        backgroundImage: 'linear-gradient(45deg,#090a0a 25%,transparent 25%,transparent 75%,#090a0a 75%),linear-gradient(45deg,#090a0a 25%,transparent 25%,transparent 75%,#090a0a 75%)',
+        backgroundPosition: '0 0,6px 6px',
+        backgroundSize: compact ? '8px 8px' : '12px 12px',
+        border: compact ? '1px solid rgba(0,0,0,.78)' : '2px solid rgba(0,0,0,.82)',
+        boxShadow: '0 2px 5px rgba(0,0,0,.46)',
+        transform: 'skewY(-1.5deg)',
       }}>
         {!compact && <span style={{
-          position: 'absolute', top: -32, left: '50%', transform: 'translateX(-50%)',
-          padding: '5px 10px', border: '2px solid #dfff36', borderRadius: 7,
-          background: '#101712', color: '#fff', fontSize: 12, fontWeight: 900, letterSpacing: '.08em',
+          position: 'absolute', top: -29, left: '50%', transform: 'translateX(-50%) skewY(1.5deg)',
+          padding: '4px 8px', border: '1px solid rgba(255,255,255,.72)', borderRadius: 5,
+          background: '#0a0b0b', color: '#fff', fontSize: 11, fontWeight: 900, letterSpacing: '.08em',
         }}>FINISH</span>}
       </div>
 
@@ -106,7 +162,7 @@ export function PullSledScene({
         data-rig-finish="front-tire-at-right-finish"
         style={rigStyle}
       >
-        <div data-pull-assembly="close-coupled" style={{
+        <div ref={assemblyRef} data-pull-assembly="close-coupled" style={{
           position: 'absolute', left: compact ? '2.5%' : '2%', top: compact ? '29%' : '40%',
           width: compact ? '35%' : '31%', height: compact ? '63%' : '40%',
         }}>
@@ -117,30 +173,43 @@ export function PullSledScene({
           }}>
             <img alt="" draggable={false} src="/assets/get-pulled/tracklab-bmx-pull-sled-clean-v2.png" style={{
               position: 'absolute', inset: 'auto 0 0', width: '100%', height: 'auto',
-              userSelect: 'none',
+              userSelect: 'none', transform: 'scaleX(-1)',
+            }} />
+            <span ref={sledHitchRef} data-tow-joint="sled-front" style={{
+              position: 'absolute', left: '78.5%', top: '84%', zIndex: 2,
+              width: compact ? 5 : 7, height: compact ? 5 : 7,
+              borderRadius: '50%', border: '1.5px solid #303436', background: '#050606',
+              transform: 'translate(-50%,-50%)',
             }} />
           </div>
 
           <svg
-            data-tow-attachment="sled-hitch-to-seat-post"
-            viewBox="0 0 100 100"
+            ref={towSvgRef}
+            data-tow-attachment="sled-hitch-to-rear-axle"
+            data-tow-color="matte-black"
             preserveAspectRatio="none"
             style={{
               position: 'absolute', inset: 0, zIndex: 4,
               width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none',
             }}
           >
-            <line x1="42" y1="74" x2="65.5" y2="55" stroke="rgba(2,4,3,.78)" strokeWidth="4.4" />
-            <line x1="42" y1="72.5" x2="65.5" y2="53.5" stroke="#d7dddf" strokeWidth="2.15" />
-            <circle cx="42" cy="72.5" r="1.7" fill="#111514" stroke="#b9c0c2" strokeWidth=".7" />
-            <circle cx="65.5" cy="53.5" r="1.6" fill="#111514" stroke="#b9c0c2" strokeWidth=".7" />
+            <path ref={towShadowRef} fill="none" stroke="rgba(255,255,255,.18)" strokeWidth={compact ? 4.2 : 5.8} strokeLinecap="round" strokeLinejoin="round" />
+            <path ref={towBarRef} fill="none" stroke="#070809" strokeWidth={compact ? 3.1 : 4.5} strokeLinecap="round" strokeLinejoin="round" />
+            <circle ref={sledJointRef} r={compact ? 1.8 : 2.5} fill="#050606" stroke="#303436" strokeWidth=".8" />
+            <circle ref={bikeJointRef} r={compact ? 1.8 : 2.5} fill="#050606" stroke="#303436" strokeWidth=".8" />
           </svg>
 
-          <div data-pedal-cycle={pedaling ? 'running' : 'stopped'} data-tow-anchor="seat-post-rear" style={{
-            position: 'absolute', left: '42%', top: '-2%', zIndex: 5,
-            height: '100%', aspectRatio: '1 / 1',
+          <div data-pedal-cycle={pedaling ? 'running' : 'stopped'} data-tow-anchor="rear-axle-hitch" style={{
+            position: 'absolute', left: '40%', top: '-8%', zIndex: 5,
+            height: '108%', aspectRatio: '303 / 312',
             filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.42))', transformOrigin: '52% 82%',
           }}>
+            <span ref={rearAxleRef} data-tow-joint="bike-rear-axle" style={{
+              position: 'absolute', left: '18.5%', top: '82.7%', zIndex: 2,
+              width: compact ? 5 : 7, height: compact ? 5 : 7,
+              borderRadius: '50%', border: '1.5px solid #303436', background: '#050606',
+              transform: 'translate(-50%,-50%)', boxSizing: 'border-box',
+            }} />
             <AnimatedBmxRider active={pedaling} cadenceRpm={cadenceRpm} />
           </div>
         </div>
