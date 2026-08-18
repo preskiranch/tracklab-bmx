@@ -554,6 +554,80 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   expect(trainingSaveCount).toBe(0);
 });
 
+test('live Get Pulled waits after the countdown and starts on the first pedal packet', async ({ page }) => {
+  test.setTimeout(35_000);
+  const deviceId = 58701;
+  const bridge = await createMockBikeBridge([deviceId]);
+  let pedaling = false;
+  const sampleTimer = setInterval(() => {
+    bridge.broadcast(mockBikeSample({
+      deviceId,
+      watts: pedaling ? 487 : 0,
+      cadence: pedaling ? 90 : 0,
+      speedKph: 0,
+    }));
+  }, 120);
+  const now = Date.now();
+  const authUser = {
+    id: 'get-pulled-live-racer',
+    profileKey: 'user:get-pulled-live-racer',
+    email: 'get-pulled-live@tracklab.test',
+    name: 'Get Pulled Live Racer',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 1, updatedAt: now },
+  };
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {},
+          customRoutes: [],
+          bikeProfiles: [],
+          studioRiders: [],
+          accountProfile: { updatedAt: now },
+        }),
+      });
+    });
+    await page.route('**/api/training-sessions*', async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ sessions: [], totals: {} }) });
+    });
+    await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+    await page.goto('/?track=black-mountain-bmx');
+    const openApp = page.getByRole('button', { name: 'Open App' });
+    if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+    await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Get Pulled', exact: true }).click();
+
+    const view = page.getByLabel('Get Pulled timed Wattbike test');
+    await view.getByRole('button', { name: /Start 3 seconds pull · Air 1/ }).click();
+    await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
+    await expect(view.getByRole('status')).toContainText('Pedal to start', { timeout: 7_500 });
+    const clock = view.locator('.get-pulled-timer strong');
+    await expect(clock).toHaveText('0.00s');
+    await page.waitForTimeout(900);
+    await expect(clock).toHaveText('0.00s');
+    await expect(view.getByText('Pulling now', { exact: false })).toHaveCount(0);
+
+    pedaling = true;
+    await expect(view.getByText('Pulling now', { exact: false })).toBeVisible({ timeout: 3_000 });
+    await expect.poll(async () => Number((await clock.textContent())?.replace('s', '') ?? 0))
+      .toBeGreaterThan(0);
+    await expect(view.getByText('Pull complete', { exact: false })).toBeVisible({ timeout: 5_000 });
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
+});
+
 test('developer Explore demo rides without commentary and keeps bike mechanics audio', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const authUser = {

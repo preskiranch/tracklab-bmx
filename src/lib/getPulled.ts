@@ -9,7 +9,7 @@ export const getPulledResultHoldMs = 15_000;
 export const getPulledMinimumSeconds = 1;
 export const getPulledMaximumSeconds = 300;
 
-export type GetPulledPhase = 'setup' | 'countdown' | 'active' | 'results';
+export type GetPulledPhase = 'setup' | 'countdown' | 'armed' | 'active' | 'results';
 
 export type GetPulledMetrics = {
   live: boolean;
@@ -88,6 +88,42 @@ export function getPulledMetrics(sample: BikeSample | undefined, now = Date.now(
     watts: cleanWatts,
     cadence: cleanCadence,
     speedKph: idleNoise ? 0 : bmxSpeedKphFromCadence(cleanCadence),
+  };
+}
+
+export type GetPulledTakeoffSignal = {
+  at: number;
+  metrics: GetPulledMetrics;
+};
+
+export function getPulledTakeoffSignal(
+  sample: BikeSample | undefined,
+  armedAt: number,
+  now = Date.now(),
+): GetPulledTakeoffSignal | null {
+  if (!sample || !Number.isFinite(armedAt)) return null;
+  const metrics = getPulledMetrics(sample, now);
+  if (!metrics.live) return null;
+
+  const cadenceAt = sample.cadenceAt ?? sample.at;
+  const wattsAt = sample.wattsAt ?? sample.at;
+  const cadenceStarted = metrics.cadence > 0 && cadenceAt >= armedAt;
+  const wattsStarted = metrics.watts > 0 && wattsAt >= armedAt;
+  if (!cadenceStarted && !wattsStarted) return null;
+
+  const firstDriveAt = Math.min(
+    ...(cadenceStarted ? [cadenceAt] : []),
+    ...(wattsStarted ? [wattsAt] : []),
+  );
+  const cadence = cadenceStarted ? metrics.cadence : 0;
+  return {
+    at: Math.min(now, Math.max(armedAt, firstDriveAt)),
+    metrics: {
+      live: true,
+      watts: wattsStarted ? metrics.watts : 0,
+      cadence,
+      speedKph: bmxSpeedKphFromCadence(cadence),
+    },
   };
 }
 

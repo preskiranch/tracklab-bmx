@@ -98,7 +98,7 @@ export function ClubLiveAthleteBridge({
       const fraction = Math.min(1, Math.max(0, getPulled.elapsedMs / durationMs));
       const status = getPulled.phase === 'active'
         ? 'active'
-        : getPulled.phase === 'countdown' ? 'staging' : 'finished';
+        : (getPulled.phase === 'countdown' || getPulled.phase === 'armed') ? 'staging' : 'finished';
       return {
         clubId: selection.clubId,
         studioRiderId: selection.studioRiderId,

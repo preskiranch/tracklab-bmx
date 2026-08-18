@@ -10,6 +10,7 @@ import {
   getPulledPresetSeconds,
   getPulledResultFromAccumulator,
   getPulledResultHoldMs,
+  getPulledTakeoffSignal,
   normalizeGetPulledSeconds,
   normalizeGetPulledAirSetting,
   type GetPulledAccumulator,
@@ -45,6 +46,7 @@ function secondsLabel(seconds: number) {
 
 function phaseLabel(phase: GetPulledPhase) {
   if (phase === 'countdown') return 'Get ready';
+  if (phase === 'armed') return 'Ready · pedal to start';
   if (phase === 'active') return 'Pulling now';
   if (phase === 'results') return 'Pull complete';
   return 'Choose athlete and time';
@@ -73,6 +75,7 @@ export function GetPulledView({
   const [result, setResult] = useState<GetPulledResult | null>(null);
   const accumulatorRef = useRef<GetPulledAccumulator>(createGetPulledAccumulator());
   const phaseRef = useRef<GetPulledPhase>('setup');
+  const armedAtRef = useRef<number | null>(null);
   const completedRef = useRef(false);
   const lastCountdownToneRef = useRef<number | null>(null);
   const selectedPlayer = connectedPlayers.find((player) => player.id === selectedPlayerId) ?? null;
@@ -101,6 +104,7 @@ export function GetPulledView({
     phaseRef.current = 'setup';
     completedRef.current = false;
     accumulatorRef.current = createGetPulledAccumulator();
+    armedAtRef.current = null;
     setPhase('setup');
     setCountdown(getPulledCountdownSeconds);
     setStartedAt(null);
@@ -121,6 +125,7 @@ export function GetPulledView({
     primePullAudio();
     onFullscreenChange?.(true);
     accumulatorRef.current = createGetPulledAccumulator();
+    armedAtRef.current = null;
     completedRef.current = false;
     setResult(null);
     setCountdown(getPulledCountdownSeconds);
@@ -144,16 +149,46 @@ export function GetPulledView({
       }
       if (remaining <= 0) {
         window.clearInterval(timer);
-        const nextStartedAt = Date.now();
+        const nextArmedAt = Date.now();
         accumulatorRef.current = createGetPulledAccumulator();
-        phaseRef.current = 'active';
-        setStartedAt(nextStartedAt);
-        setPhase('active');
-        setNow(nextStartedAt);
+        armedAtRef.current = nextArmedAt;
+        phaseRef.current = 'armed';
+        setStartedAt(null);
+        setPhase('armed');
+        setNow(nextArmedAt);
       }
     }, 80);
     return () => window.clearInterval(timer);
   }, [phase]);
+
+  const beginPull = useCallback((takeoffAt: number, initialMetrics?: ReturnType<typeof getPulledMetrics>) => {
+    if (phaseRef.current !== 'armed') return;
+    const startedAtSignal = Math.max(armedAtRef.current ?? takeoffAt, takeoffAt);
+    accumulatorRef.current = initialMetrics
+      ? addGetPulledSample(createGetPulledAccumulator(), initialMetrics, startedAtSignal)
+      : createGetPulledAccumulator();
+    completedRef.current = false;
+    phaseRef.current = 'active';
+    setStartedAt(startedAtSignal);
+    setPhase('active');
+    setNow(startedAtSignal);
+  }, []);
+
+  useEffect(() => {
+    if (phase !== 'armed') return undefined;
+    if (demoMode) {
+      beginPull(Date.now());
+      return undefined;
+    }
+    if (!selectedPlayer || selectedPlayer.deviceId == null || armedAtRef.current == null) return undefined;
+    const takeoff = getPulledTakeoffSignal(
+      samplesByDevice.get(selectedPlayer.deviceId),
+      armedAtRef.current,
+      Date.now(),
+    );
+    if (takeoff) beginPull(takeoff.at, takeoff.metrics);
+    return undefined;
+  }, [beginPull, demoMode, phase, samplesByDevice, selectedPlayer]);
 
   useEffect(() => {
     if (!selectedPlayer) {
@@ -268,7 +303,9 @@ export function GetPulledView({
         <div className="get-pulled-overlay">
           <div className="get-pulled-timer">
             <strong>{phase === 'countdown' ? `0:${String(countdown).padStart(2, '0')}` : `${(elapsedMs / 1_000).toFixed(2)}s`}</strong>
-            <small>{phase === 'countdown' ? 'Countdown' : `of ${durationSeconds}s pull`}</small>
+            <small>{phase === 'countdown'
+              ? 'Countdown'
+              : phase === 'armed' ? 'Starts on first pedal signal' : `of ${durationSeconds}s pull`}</small>
           </div>
           <div className="get-pulled-phase">
             <strong>{selectedPlayer?.name ?? 'No athlete selected'}</strong>
@@ -276,6 +313,12 @@ export function GetPulledView({
           </div>
         </div>
         {phase === 'countdown' && <div className="get-pulled-countdown"><strong>{countdown}</strong></div>}
+        {phase === 'armed' && (
+          <div className="get-pulled-countdown" role="status">
+            <strong style={{ width: 'auto', height: 'auto', minWidth: 190, padding: '18px 26px', borderRadius: 18, fontSize: 'clamp(34px,5vw,62px)' }}>READY</strong>
+            <small style={{ marginTop: 10, padding: '7px 12px', borderRadius: 999, color: '#fff', background: 'rgba(7,12,9,.86)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.12em' }}>Pedal to start</small>
+          </div>
+        )}
       </section>
 
       {connectedPlayers.length === 0 ? (

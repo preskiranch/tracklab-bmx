@@ -5,6 +5,7 @@ import {
   getPulledDemoMetrics,
   getPulledMetrics,
   getPulledResultFromAccumulator,
+  getPulledTakeoffSignal,
   normalizeGetPulledAirSetting,
   normalizeGetPulledSeconds,
 } from '../../src/lib/getPulled';
@@ -64,6 +65,43 @@ describe('Get Pulled test math and record categories', () => {
     expect(underway.cadence).toBeGreaterThan(0);
     expect(underway.watts).toBeGreaterThan(0);
     expect(underway.speedKph).toBeCloseTo(bmxSpeedKphFromCadence(underway.cadence), 6);
+  });
+
+  it('arms indefinitely and accepts only a fresh post-countdown pedaling packet', () => {
+    const armedAt = 10_000;
+
+    expect(getPulledTakeoffSignal(sample({
+      at: 10_100,
+      cadenceAt: 10_100,
+      wattsAt: 10_100,
+      cadence: 0,
+      watts: 0,
+    }), armedAt, 10_100)).toBeNull();
+    expect(getPulledTakeoffSignal(sample({
+      at: 10_100,
+      cadenceAt: 9_999,
+      wattsAt: 9_999,
+      cadence: 90,
+      watts: 487,
+    }), armedAt, 10_100)).toBeNull();
+
+    const takeoff = getPulledTakeoffSignal(sample({
+      at: 11_250,
+      cadenceAt: 11_250,
+      wattsAt: 11_250,
+      cadence: 90,
+      watts: 487,
+    }), armedAt, 11_260);
+
+    expect(takeoff).toEqual({
+      at: 11_250,
+      metrics: {
+        live: true,
+        watts: 487,
+        cadence: 90,
+        speedKph: bmxSpeedKphFromCadence(90),
+      },
+    });
   });
 
   it('records averages, peaks, distance, duration, and the exact Air category', () => {
