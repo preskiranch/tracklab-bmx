@@ -1,27 +1,23 @@
 import type { CSSProperties } from 'react';
-import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 
 type PullSledSceneProps = {
   active: boolean;
   cadenceRpm?: number;
   compact?: boolean;
+  durationSeconds?: number;
   label?: string;
   progress?: number;
   speedKph?: number;
 };
 
 const sceneStyles = `
-@keyframes tracklab-pull-scenery-scroll {
+@keyframes tracklab-pull-rig-travel {
   from { transform: translate3d(0,0,0); }
-  to { transform: translate3d(-66.666667%,0,0); }
+  to { transform: translate3d(66.667%,0,0); }
 }
 @keyframes tracklab-pull-rider-cycle {
   from { background-position-x: 0%; }
   to { background-position-x: 100%; }
-}
-@keyframes tracklab-pull-sled-shudder {
-  0%,100% { transform: translate3d(0,0,0); }
-  50% { transform: translate3d(-1px,0,0); }
 }
 `;
 
@@ -31,34 +27,46 @@ export function PullSledScene({
   active,
   cadenceRpm = 0,
   compact = false,
+  durationSeconds,
   label,
   progress = 0,
   speedKph = 0,
 }: PullSledSceneProps) {
   const clampedProgress = Math.min(1, Math.max(0, progress));
   const pedaling = active && cadenceRpm >= 1;
+  const timedTravel = active && typeof durationSeconds === 'number' && durationSeconds > 0;
   const height = compact ? 112 : 420;
-  const pedalDurationSeconds = 60 / Math.max(24, cadenceRpm || 24);
-  const motionSpeedKph = Math.max(speedKph, bmxSpeedKphFromCadence(cadenceRpm));
-  const sceneryDurationSeconds = Math.min(14, Math.max(3.5, 16 - (Math.max(0, motionSpeedKph) * 0.45)));
-  const riderWidth = compact ? 92 : 218;
-  const riderBottom = compact ? 6 : 31;
-  const sledWidth = compact ? 112 : 268;
-  const sledHeight = compact ? 55 : 132;
+  const pedalDurationSeconds = Math.min(2, Math.max(0.12, 60 / Math.max(1, cadenceRpm)));
+  const directTravelPercent = clampedProgress * 66.667;
   const sceneStyle = {
     '--tracklab-pedal-duration': `${pedalDurationSeconds.toFixed(3)}s`,
-    '--tracklab-scenery-duration': `${sceneryDurationSeconds.toFixed(3)}s`,
+    '--tracklab-pull-duration': `${Math.max(0.1, durationSeconds ?? 1).toFixed(3)}s`,
+  } as CSSProperties;
+  const rigStyle = {
+    position: 'absolute',
+    left: 0,
+    bottom: compact ? 3 : 24,
+    zIndex: 3,
+    width: compact ? '61%' : '62%',
+    height: compact ? 79 : 268,
+    willChange: active ? 'transform' : 'auto',
+    transform: timedTravel ? undefined : `translate3d(${directTravelPercent}%,0,0)`,
+    animation: timedTravel
+      ? 'tracklab-pull-rig-travel var(--tracklab-pull-duration) linear forwards'
+      : 'none',
   } as CSSProperties;
 
   return (
     <div
       className="pull-sled-scene"
       aria-label={label ?? (active ? 'BMX rider actively pulling the TrackLab sled' : 'BMX rider ready to pull the TrackLab sled')}
+      data-course-mode="fixed-screen"
       data-pedaling={pedaling ? 'true' : 'false'}
       data-rider-side="right"
       data-sled-side="left"
-      data-pull-scrolling={pedaling ? 'true' : 'false'}
+      data-pull-scrolling="false"
       data-pull-speed-kph={speedKph.toFixed(1)}
+      data-travel-duration-seconds={durationSeconds ?? ''}
       role="img"
       style={{
         ...sceneStyle,
@@ -75,148 +83,85 @@ export function PullSledScene({
     >
       <style>{sceneStyles}</style>
 
-      <div
-        aria-hidden="true"
-        data-pull-scenery="track"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          width: '300%',
-          willChange: pedaling ? 'transform' : 'auto',
-          animation: pedaling
-            ? 'tracklab-pull-scenery-scroll var(--tracklab-scenery-duration) linear infinite'
-            : 'none',
-        }}
-      >
-        {[false, true, false].map((mirrored, index) => (
-          <div
-            key={index}
-            style={{
-              flex: '0 0 33.333334%',
-              height: '100%',
-              backgroundImage: `linear-gradient(180deg,rgba(6,12,8,.01),rgba(3,6,5,.15)),url('${venueUrl}')`,
-              backgroundPosition: 'center',
-              backgroundRepeat: 'no-repeat',
-              backgroundSize: compact ? 'auto 165%' : 'cover',
-              transform: mirrored ? 'scaleX(-1)' : undefined,
-            }}
-          />
-        ))}
+      <div aria-hidden="true" data-pull-scenery="fixed-track" style={{
+        position: 'absolute', inset: 0,
+        backgroundImage: `linear-gradient(180deg,rgba(6,12,8,.01),rgba(3,6,5,.15)),url('${venueUrl}')`,
+        backgroundPosition: 'center', backgroundRepeat: 'no-repeat', backgroundSize: 'cover',
+      }} />
+
+      <div aria-hidden="true" style={{
+        position: 'absolute', inset: 0,
+        background: 'linear-gradient(180deg,rgba(5,11,7,.01) 0%,rgba(3,7,5,.03) 55%,rgba(2,5,4,.22) 100%)',
+        zIndex: 1,
+      }} />
+
+      <div aria-hidden="true" data-finish-line="pull" style={{
+        position: 'absolute', right: compact ? '2.5%' : '3%', bottom: compact ? 5 : 29,
+        zIndex: 2, width: compact ? 3 : 6, height: compact ? 62 : 214, borderRadius: 999,
+        background: 'linear-gradient(90deg,#f7fff1,#dfff36,#f7fff1)',
+        boxShadow: '0 0 0 2px rgba(8,15,10,.78),0 0 15px rgba(210,255,55,.7)',
+      }}>
+        {!compact && <span style={{
+          position: 'absolute', top: -32, left: '50%', transform: 'translateX(-50%)',
+          padding: '5px 10px', border: '2px solid #dfff36', borderRadius: 7,
+          background: '#101712', color: '#fff', fontSize: 12, fontWeight: 900, letterSpacing: '.08em',
+        }}>FINISH</span>}
       </div>
 
       <div
         aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'linear-gradient(180deg,rgba(5,11,7,.01) 0%,rgba(3,7,5,.03) 55%,rgba(2,5,4,.22) 100%)',
-          zIndex: 1,
-        }}
-      />
-
-      <div
-        aria-hidden="true"
-        data-pedal-cycle={pedaling ? 'running' : 'stopped'}
-        style={{
-          position: 'absolute',
-          left: compact ? '58%' : '60%',
-          bottom: riderBottom,
-          zIndex: 3,
-          width: riderWidth,
-          aspectRatio: '1 / 1',
-          filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.42))',
-          transformOrigin: '52% 82%',
-        }}
+        data-pull-rig="sled-left-rider-right"
+        data-rig-start="sled-at-left-edge"
+        data-rig-finish="front-tire-at-right-finish"
+        style={rigStyle}
       >
-        <span
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'block',
-            backgroundImage: "url('/assets/rider-lime-animated.png')",
-            backgroundPosition: '0% center',
-            backgroundRepeat: 'no-repeat',
-            backgroundSize: '900% 100%',
-            animation: pedaling
-              ? 'tracklab-pull-rider-cycle var(--tracklab-pedal-duration) steps(8,end) infinite'
-              : 'none',
-          }}
-        />
-      </div>
-
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          left: compact ? '31%' : '32%',
-          bottom: compact ? 38 : 108,
-          zIndex: 2,
-          width: compact ? '31%' : '30%',
-          height: compact ? 3 : 7,
-          borderRadius: 999,
-          background: '#171916',
-          boxShadow: '0 2px 2px rgba(0,0,0,.38)',
-          transform: 'rotate(-4deg)',
-          transformOrigin: 'left center',
-        }}
-      />
-
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          left: compact ? '8%' : '9%',
-          bottom: compact ? 17 : 42,
-          zIndex: 3,
-          width: sledWidth,
-          height: sledHeight,
-          overflow: 'hidden',
-          animation: pedaling ? 'tracklab-pull-sled-shudder calc(var(--tracklab-pedal-duration) / 2) ease-in-out infinite' : 'none',
-          filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.44))',
-        }}
-      >
-        <img
-          alt=""
-          draggable={false}
-          src="/assets/get-pulled/tracklab-bmx-pull-sled-v1.png"
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: '220%',
-            height: 'auto',
-            maxWidth: 'none',
-            userSelect: 'none',
-          }}
-        />
-      </div>
-
-      {!compact && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            left: 20,
-            right: 20,
-            bottom: 14,
-            zIndex: 4,
-            height: 5,
-            borderRadius: 999,
-            background: 'rgba(7,12,9,.62)',
-            overflow: 'hidden',
-          }}
-        >
-          <span style={{
-            display: 'block',
-            width: `${clampedProgress * 100}%`,
-            height: '100%',
-            borderRadius: 'inherit',
-            background: 'linear-gradient(90deg,#78df3b,#d8ff42)',
-            transition: 'width .1s linear',
-          } as CSSProperties} />
+        <div data-pull-sled="trailing" style={{
+          position: 'absolute', left: compact ? '-1%' : '-1.5%', bottom: compact ? 9 : 15,
+          zIndex: 3, width: compact ? '25%' : '26%', height: compact ? 48 : 124,
+          overflow: 'hidden', filter: 'drop-shadow(0 8px 6px rgba(0,0,0,.44))',
+        }}>
+          <img alt="" draggable={false} src="/assets/get-pulled/tracklab-bmx-pull-sled-v1.png" style={{
+            position: 'absolute', right: 0, bottom: 0, width: '310%', height: 'auto',
+            maxWidth: 'none', userSelect: 'none',
+          }} />
         </div>
-      )}
+
+        <svg
+          data-tow-attachment="sled-hitch-to-seat-post"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          style={{ position: 'absolute', inset: 0, zIndex: 2, overflow: 'visible', pointerEvents: 'none' }}
+        >
+          <line x1="24" y1="72" x2="70.5" y2="51.5" stroke="rgba(4,6,5,.45)" strokeWidth="2.2" />
+          <line x1="24" y1="70.5" x2="70.5" y2="50" stroke="#171a18" strokeWidth="1.2" />
+          <circle cx="24" cy="70.5" r="1.4" fill="#161916" stroke="#838a84" strokeWidth=".5" />
+          <circle cx="70.5" cy="50" r="1.3" fill="#161916" stroke="#838a84" strokeWidth=".5" />
+        </svg>
+
+        <div data-pedal-cycle={pedaling ? 'running' : 'stopped'} data-tow-anchor="seat-post-rear" style={{
+          position: 'absolute', left: compact ? '56%' : '55%', bottom: 0, zIndex: 4,
+          width: compact ? '35%' : '36%', aspectRatio: '1 / 1',
+          filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.42))', transformOrigin: '52% 82%',
+        }}>
+          <span style={{
+            position: 'absolute', inset: 0, display: 'block',
+            backgroundImage: "url('/assets/rider-lime-animated.png')", backgroundPosition: '0% center',
+            backgroundRepeat: 'no-repeat', backgroundSize: '900% 100%',
+            animation: pedaling ? 'tracklab-pull-rider-cycle var(--tracklab-pedal-duration) steps(8,end) infinite' : 'none',
+            willChange: pedaling ? 'background-position' : 'auto',
+          }} />
+        </div>
+      </div>
+
+      {!compact && <div aria-hidden="true" style={{
+        position: 'absolute', left: 20, right: 20, bottom: 14, zIndex: 4, height: 5,
+        borderRadius: 999, background: 'rgba(7,12,9,.62)', overflow: 'hidden',
+      }}>
+        <span style={{
+          display: 'block', width: `${clampedProgress * 100}%`, height: '100%', borderRadius: 'inherit',
+          background: 'linear-gradient(90deg,#78df3b,#d8ff42)', transition: 'width .1s linear',
+        } as CSSProperties} />
+      </div>}
     </div>
   );
 }

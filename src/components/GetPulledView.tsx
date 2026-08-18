@@ -261,6 +261,7 @@ export function GetPulledView({
         <PullSledScene
           active={phase === 'active'}
           cadenceRpm={metrics.cadence}
+          durationSeconds={durationSeconds}
           progress={progress}
           speedKph={metrics.speedKph}
         />

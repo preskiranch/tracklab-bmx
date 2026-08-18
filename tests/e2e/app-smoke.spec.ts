@@ -457,6 +457,16 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   const view = page.getByLabel('Get Pulled timed Wattbike test');
   await expect(view).toBeVisible();
   await expect(view.getByRole('button', { name: '3s', exact: true })).toHaveClass(/selected/);
+  const setupScene = view.getByRole('img', { name: /ready to pull/i });
+  await view.getByRole('button', { name: '30s', exact: true }).click();
+  await expect(setupScene).toHaveAttribute('data-travel-duration-seconds', '30');
+  await view.getByRole('button', { name: '6s', exact: true }).click();
+  await expect(setupScene).toHaveAttribute('data-travel-duration-seconds', '6');
+  await view.getByRole('button', { name: 'Custom', exact: true }).click();
+  await view.getByLabel('Custom pull duration in seconds').fill('12');
+  await expect(setupScene).toHaveAttribute('data-travel-duration-seconds', '12');
+  await view.getByRole('button', { name: '3s', exact: true }).click();
+  await expect(setupScene).toHaveAttribute('data-travel-duration-seconds', '3');
   const airOptions = view.getByLabel('Wattbike Air setting').getByRole('button');
   await expect(airOptions).toHaveCount(10);
   await airOptions.filter({ hasText: /^7$/ }).click();
@@ -471,20 +481,29 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   await expect(pullScene).toHaveAttribute('data-rider-side', 'right');
   await expect(pullScene).toHaveAttribute('data-sled-side', 'left');
   await expect(pullScene).toHaveAttribute('data-pedaling', 'true');
-  await expect(pullScene).toHaveAttribute('data-pull-scrolling', 'true');
+  await expect(pullScene).toHaveAttribute('data-course-mode', 'fixed-screen');
+  await expect(pullScene).toHaveAttribute('data-pull-scrolling', 'false');
+  await expect(pullScene).toHaveAttribute('data-travel-duration-seconds', '3');
   await expect(pullScene.locator('[data-pedal-cycle="running"]')).toBeVisible();
-  const scenery = pullScene.locator('[data-pull-scenery="track"]');
-  await expect(scenery).toHaveCSS('animation-name', 'tracklab-pull-scenery-scroll');
+  await expect(pullScene.locator('[data-tow-attachment="sled-hitch-to-seat-post"]')).toBeVisible();
+  await expect(pullScene.locator('[data-finish-line="pull"]')).toBeVisible();
+  const scenery = pullScene.locator('[data-pull-scenery="fixed-track"]');
+  await expect(scenery).toHaveCSS('animation-name', 'none');
+  const rig = pullScene.locator('[data-pull-rig="sled-left-rider-right"]');
+  await expect(rig).toHaveCSS('animation-name', 'tracklab-pull-rig-travel');
   const sceneryTransformBefore = await scenery.evaluate((element) => getComputedStyle(element).transform);
+  const rigTransformBefore = await rig.evaluate((element) => getComputedStyle(element).transform);
   const pedalFrameBefore = await pullScene.locator('[data-pedal-cycle="running"] span').evaluate(
     (element) => getComputedStyle(element).backgroundPositionX,
   );
   await page.waitForTimeout(450);
   const sceneryTransformAfter = await scenery.evaluate((element) => getComputedStyle(element).transform);
+  const rigTransformAfter = await rig.evaluate((element) => getComputedStyle(element).transform);
   const pedalFrameAfter = await pullScene.locator('[data-pedal-cycle="running"] span').evaluate(
     (element) => getComputedStyle(element).backgroundPositionX,
   );
-  expect(sceneryTransformAfter).not.toBe(sceneryTransformBefore);
+  expect(sceneryTransformAfter).toBe(sceneryTransformBefore);
+  expect(rigTransformAfter).not.toBe(rigTransformBefore);
   expect(pedalFrameAfter).not.toBe(pedalFrameBefore);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabGetPulledTones?: string[] })
