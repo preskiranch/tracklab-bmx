@@ -60,7 +60,7 @@ function optionalText(value: unknown) {
 }
 
 function normalizeActivityType(value: unknown): TrainingActivityType {
-  return value === 'straight-sprint' || value === 'explore' ? value : 'bmx-race';
+  return value === 'straight-sprint' || value === 'explore' || value === 'get-pulled' ? value : 'bmx-race';
 }
 
 function normalizeStatus(value: unknown): ClubLiveStatus {

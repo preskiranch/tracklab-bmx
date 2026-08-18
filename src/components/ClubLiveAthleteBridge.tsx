@@ -8,6 +8,7 @@ import {
 } from '../lib/clubLive';
 import { bikeSampleIsLive } from '../lib/liveBikeRegistry';
 import { liveBikeTimeoutMs } from '../data';
+import type { GetPulledLiveState } from '../lib/getPulled';
 import type {
   AppMode,
   BikeSample,
@@ -37,6 +38,7 @@ export type ClubLiveActivityState = {
   accountRiderId?: string;
   appMode: AppMode;
   explore: ClubLiveExploreState | null;
+  getPulled: GetPulledLiveState | null;
   multiplayerActive: boolean;
   multiplayerParticipantCount: number | null;
   now: number;
@@ -83,11 +85,45 @@ export function ClubLiveAthleteBridge({
       accountRiderId,
       appMode,
       explore,
+      getPulled,
       multiplayerActive,
       multiplayerParticipantCount,
       now,
       race,
     } = activity;
+
+    if (appMode === 'get-pulled') {
+      if (!getPulled || getPulled.riderId !== accountRiderId) return null;
+      const durationMs = Math.max(1, getPulled.durationSeconds * 1_000);
+      const fraction = Math.min(1, Math.max(0, getPulled.elapsedMs / durationMs));
+      const status = getPulled.phase === 'active'
+        ? 'active'
+        : getPulled.phase === 'countdown' ? 'staging' : 'finished';
+      return {
+        clubId: selection.clubId,
+        studioRiderId: selection.studioRiderId,
+        sessionId: `get-pulled:${getPulled.playerId}:${getPulled.durationSeconds}:air-${getPulled.airSetting}`,
+        activityType: 'get-pulled',
+        status,
+        progress: {
+          fraction,
+          distanceMeters: Math.max(0, getPulled.distanceMeters),
+          label: `${getPulled.durationSeconds}s pull · Air ${getPulled.airSetting}`,
+        },
+        metrics: {
+          watts: Math.max(0, Math.round(getPulled.metrics.watts)),
+          cadence: Math.max(0, Math.round(getPulled.metrics.cadence)),
+          speedKph: Math.max(0, getPulled.metrics.speedKph),
+          distanceMeters: Math.max(0, getPulled.distanceMeters),
+          elapsedMs: Math.max(0, getPulled.elapsedMs),
+          position: 1,
+          participantCount: 1,
+        },
+        trackName: `Preski Ranch Pull Lane · Air ${getPulled.airSetting}`,
+        ...(getPulled.phase === 'active' ? { startedAt: Math.max(1, now - getPulled.elapsedMs) } : {}),
+        multiplayer: false,
+      };
+    }
 
     if (appMode === 'explore') {
       if (explore?.status === 'finished') return null;

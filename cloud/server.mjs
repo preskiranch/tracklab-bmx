@@ -1900,7 +1900,7 @@ function sanitizeTrainingSession(value) {
     return null;
   }
   const id = sanitizeText(value.id, '', 160).replace(/[^a-zA-Z0-9:._-]/g, '-');
-  const activityType = ['bmx-race', 'straight-sprint', 'explore'].includes(value.activityType)
+  const activityType = ['bmx-race', 'straight-sprint', 'explore', 'get-pulled'].includes(value.activityType)
     ? value.activityType
     : '';
   const startedAt = Math.max(1, Math.round(finiteNumber(value.startedAt, 0)));
@@ -2006,6 +2006,32 @@ function projectClubTrainingSession(session, membership) {
       },
       details: {
         ...details,
+        riders,
+        club: { id: membership.clubId, name: membership.clubName, role: 'athlete' },
+      },
+    };
+  }
+
+  if (session.activityType === 'get-pulled') {
+    const riders = Array.isArray(details.riders) ? details.riders.filter(matchesRider) : [];
+    if (riders.length === 0) return null;
+    const durationSeconds = Math.round(boundedNumber(details.durationSeconds, 1, 300, 3));
+    const airSetting = Math.round(boundedNumber(details.airSetting, 1, 10, 1));
+    return {
+      ...visibleSession,
+      id: `club:${membership.clubId}:${session.id}`,
+      distanceMeters: Math.max(0, ...riders.map((rider) => finiteNumber(rider.distanceMeters, 0))),
+      club: {
+        id: membership.clubId,
+        name: membership.clubName,
+        studioRiderId: membership.studioRiderId,
+        riderName: membership.riderName,
+        role: 'athlete',
+      },
+      details: {
+        durationSeconds,
+        airSetting,
+        recordKey: `${durationSeconds}s-air-${airSetting}`,
         riders,
         club: { id: membership.clubId, name: membership.clubName, role: 'athlete' },
       },
@@ -2390,6 +2416,25 @@ function sanitizeClubTabletExploreRider(entry, tabletSession, playerId) {
   };
 }
 
+function sanitizeClubTabletGetPulledRider(entry, tabletSession, playerId) {
+  if (!entry || typeof entry !== 'object' || clubTabletPlayerId(entry.playerId) !== playerId) return null;
+  return {
+    playerId,
+    riderId: tabletSession.studioRiderId,
+    studioRiderId: tabletSession.studioRiderId,
+    name: tabletSession.riderName,
+    riderName: tabletSession.riderName,
+    ...(tabletSession.photoUrl ? { photoUrl: tabletSession.photoUrl } : {}),
+    distanceMeters: boundedNumber(entry.distanceMeters, 0, 10_000),
+    averageWatts: Math.round(boundedNumber(entry.averageWatts, 0, 5_000)),
+    peakWatts: Math.round(boundedNumber(entry.peakWatts, 0, 5_000)),
+    averageCadence: Math.round(boundedNumber(entry.averageCadence, 0, 300)),
+    peakCadence: Math.round(boundedNumber(entry.peakCadence, 0, 300)),
+    averageSpeedKph: boundedNumber(entry.averageSpeedKph, 0, 150),
+    peakSpeedKph: boundedNumber(entry.peakSpeedKph, 0, 150),
+  };
+}
+
 function sanitizeClubTabletZoneResults(value, playerId) {
   return (Array.isArray(value) ? value : []).slice(0, 500).flatMap((zone) => {
     const sanitized = sanitizeGhostZoneResult(zone);
@@ -2427,6 +2472,26 @@ function scopeTrainingSessionToClubTabletAthlete(trainingSession, tabletSession,
     };
   }
 
+  if (trainingSession.activityType === 'get-pulled') {
+    const selectedRider = (Array.isArray(details.riders) ? details.riders : [])
+      .map((rider) => sanitizeClubTabletGetPulledRider(rider, tabletSession, selectedPlayerId))
+      .find(Boolean);
+    if (!selectedRider) return null;
+    const durationSeconds = Math.round(boundedNumber(details.durationSeconds, 1, 300, 3));
+    const airSetting = Math.round(boundedNumber(details.airSetting, 1, 10, 1));
+    return {
+      ...trainingSession,
+      distanceMeters: selectedRider.distanceMeters,
+      durationMs: durationSeconds * 1_000,
+      details: {
+        durationSeconds,
+        airSetting,
+        recordKey: `${durationSeconds}s-air-${airSetting}`,
+        riders: [selectedRider],
+      },
+    };
+  }
+
   const selectedSummary = (Array.isArray(details.summaries) ? details.summaries : [])
     .map((summary) => sanitizeClubTabletRaceSummary(summary, tabletSession, selectedPlayerId))
     .find(Boolean);
@@ -2459,7 +2524,7 @@ function scopeTrainingSessionToClubTabletAthlete(trainingSession, tabletSession,
   };
 }
 
-const clubLiveActivityTypes = new Set(['bmx-race', 'straight-sprint', 'explore']);
+const clubLiveActivityTypes = new Set(['bmx-race', 'straight-sprint', 'explore', 'get-pulled']);
 const clubLiveStatuses = new Set([
   'ready',
   'staging',
@@ -6788,6 +6853,7 @@ async function serveStatic(request, response) {
           bmxRaces: sessions.filter((item) => item.activityType === 'bmx-race').length,
           straightSprints: sessions.filter((item) => item.activityType === 'straight-sprint').length,
           exploreRides: sessions.filter((item) => item.activityType === 'explore').length,
+          getPulledTests: sessions.filter((item) => item.activityType === 'get-pulled').length,
           distanceMeters: sessions.reduce((total, item) => total + finiteNumber(item.distanceMeters, 0), 0),
           durationMs: sessions.reduce((total, item) => total + finiteNumber(item.durationMs, 0), 0),
         },

@@ -228,6 +228,7 @@ import {
 } from './lib/clubConnect';
 import type { ClubTrainingSelection } from './lib/trainingHistory';
 import type { ClubLiveAccess } from './lib/clubLive';
+import type { GetPulledLiveState, GetPulledResult } from './lib/getPulled';
 import {
   clearStoredClubTabletDevice,
   clearStoredClubTabletSession,
@@ -321,6 +322,8 @@ const AnalyticsPanel = lazy(() => import('./components/AnalyticsPanel')
   .then((module) => ({ default: module.AnalyticsPanel })));
 const ExploreView = lazy(() => import('./components/ExploreView')
   .then((module) => ({ default: module.ExploreView })));
+const GetPulledView = lazy(() => import('./components/GetPulledView')
+  .then((module) => ({ default: module.GetPulledView })));
 const AccountProfileView = lazy(() => import('./components/AccountProfileView')
   .then((module) => ({ default: module.AccountProfileView })));
 const DiagnosticsPanel = lazy(() => import('./components/DiagnosticsPanel')
@@ -1527,6 +1530,7 @@ export default function App() {
   }) | null>(null);
   const [clubLiveAccessStatus, setClubLiveAccessStatus] = useState<'idle' | 'checking' | 'active' | 'inactive' | 'error'>('idle');
   const [exploreClubLiveState, setExploreClubLiveState] = useState<ClubLiveExploreState | null>(null);
+  const [getPulledLiveState, setGetPulledLiveState] = useState<GetPulledLiveState | null>(null);
   const initialClubTabletDeviceRef = useRef(readStoredClubTabletDevice());
   const [clubTabletDevice, setClubTabletDevice] = useState<ClubTabletDeviceCredential | null>(
     initialClubTabletDeviceRef.current,
@@ -4924,6 +4928,11 @@ export default function App() {
     }, 80);
   };
 
+  const openGetPulled = () => {
+    setMappingMode(false);
+    setAppMode('get-pulled');
+  };
+
   const handleCustomRouteLocationChange = useCallback((value: string) => {
     customRoutePreviewRequestIdRef.current += 1;
     setCustomRouteLocation(value);
@@ -7246,6 +7255,48 @@ export default function App() {
     });
   }, [authUser, clubTabletSession, clubTabletSessionActive, clubTrainingSelection, demoMode]);
 
+  const handleGetPulledComplete = useCallback((result: GetPulledResult) => {
+    if (demoMode || (!authUser && !clubTabletSessionActive)) return;
+    if (clubTabletSessionActive && result.riderId !== clubTabletSession?.session.studioRiderId) {
+      console.warn('Get Pulled result was not saved because the selected club athlete could not be matched safely.');
+      return;
+    }
+    void import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
+      id: result.id,
+      activityType: 'get-pulled',
+      title: `${result.durationSeconds}s Get Pulled · Air ${result.airSetting}`,
+      startedAt: result.startedAt,
+      endedAt: result.endedAt,
+      durationMs: Math.max(0, result.endedAt - result.startedAt),
+      distanceMeters: result.distanceMeters,
+      trackId: 'preski-ranch-pull-lane',
+      trackName: 'Preski Ranch Pull Lane',
+      details: {
+        durationSeconds: result.durationSeconds,
+        airSetting: result.airSetting,
+        recordKey: `${result.durationSeconds}s-air-${result.airSetting}`,
+        riders: [{
+          playerId: result.playerId,
+          ...(result.riderId ? { riderId: result.riderId } : {}),
+          name: result.riderName,
+          distanceMeters: result.distanceMeters,
+          averageWatts: result.averageWatts,
+          peakWatts: result.peakWatts,
+          averageCadence: result.averageCadence,
+          peakCadence: result.peakCadence,
+          averageSpeedKph: result.averageSpeedKph,
+          peakSpeedKph: result.peakSpeedKph,
+        }],
+      },
+    }, clubTrainingSelection, {
+      localPlayerId: result.playerId,
+    })).then(() => {
+      setTrainingHistoryRevision((revision) => revision + 1);
+    }).catch((error: Error) => {
+      console.warn(`Could not save Get Pulled history: ${error.message}`);
+    });
+  }, [authUser, clubTabletSession, clubTabletSessionActive, clubTrainingSelection, demoMode]);
+
   const handleExploreFullscreenChange = useCallback((enabled: boolean) => {
     setExploreRideFullscreen(enabled);
     if (enabled) {
@@ -7722,6 +7773,7 @@ export default function App() {
       : {}),
     appMode,
     explore: exploreClubLiveState,
+    getPulled: getPulledLiveState,
     multiplayerActive: playMode === 'multiplayer' && Boolean(multiplayer.currentRoom),
     multiplayerParticipantCount: multiplayer.currentRoom?.racerCount ?? null,
     now,
@@ -8067,6 +8119,27 @@ export default function App() {
               </div>
             </div>
           </section>
+        ) : appMode === 'get-pulled' ? (
+          <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Get Pulled setup workflow">
+            <div className="workflow-heading">
+              <span>Get Pulled</span>
+              <small>Timed Wattbike sled pull</small>
+            </div>
+            <div className="workflow-list">
+              <div className={`workflow-step ${activePlayers.length > 0 ? 'complete' : 'current'}`}>
+                <span className="workflow-index">1</span>
+                <span className="workflow-copy"><strong>Connect athlete</strong><small>{activePlayers.length > 0 ? 'Wattbike ready' : 'Pair one Wattbike'}</small></span>
+              </div>
+              <div className="workflow-step current">
+                <span className="workflow-index">2</span>
+                <span className="workflow-copy"><strong>Choose pull</strong><small>Time and Wattbike Air 1–10</small></span>
+              </div>
+              <div className="workflow-step pending">
+                <span className="workflow-index">3</span>
+                <span className="workflow-copy"><strong>Pull and review</strong><small>Private watts and personal record</small></span>
+              </div>
+            </div>
+          </section>
         ) : appMode === 'explore' ? (
           <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Explore the World setup workflow">
             <div className="workflow-heading">
@@ -8255,6 +8328,9 @@ export default function App() {
                   <button className={appMode === 'straight-sprint' ? 'selected' : ''} type="button" onClick={openStraightSprint}>
                     <Route size={17} /> Straight Sprint
                   </button>
+                  <button className={appMode === 'get-pulled' ? 'selected' : ''} type="button" onClick={openGetPulled}>
+                    <Gauge size={17} /> Get Pulled
+                  </button>
                   <button type="button" onClick={() => void handleClubTabletEndAthlete()}>
                     <LogOut size={17} /> End athlete session
                   </button>
@@ -8300,6 +8376,14 @@ export default function App() {
           >
             <Route size={17} />
             Straight Sprint
+          </button>
+          <button
+            className={appMode === 'get-pulled' ? 'selected' : ''}
+            type="button"
+            onClick={openGetPulled}
+          >
+            <Gauge size={17} />
+            Get Pulled
           </button>
           <button
             type="button"
@@ -8470,6 +8554,14 @@ export default function App() {
                 <small>Custom locations and saved sprint routes</small>
               </span>
             </div>
+          ) : appMode === 'get-pulled' ? (
+            <div className="explore-topbar-heading">
+              <Gauge size={20} />
+              <span>
+                <strong>Get Pulled</strong>
+                <small>Timed Wattbike sled pulls at Preski Ranch</small>
+              </span>
+            </div>
           ) : (
           <div className="track-selectors">
             <label>
@@ -8573,6 +8665,7 @@ export default function App() {
                 setMappingMode(false);
                 if (mode === 'race') openBmxRaceIntervals();
                 else if (mode === 'straight-sprint') openStraightSprint();
+                else if (mode === 'get-pulled') openGetPulled();
                 else setAppMode('explore');
               }}
             />
@@ -8598,6 +8691,17 @@ export default function App() {
             <ClubLiveMonitor
               studioRiders={activeStudioRiders(activeProfileStudioRiders)}
               speedUnit={speedUnit}
+            />
+          </Suspense>
+        ) : appMode === 'get-pulled' ? (
+          <Suspense fallback={<div className="explore-loading">Loading Get Pulled…</div>}>
+            <GetPulledView
+              demoMode={demoMode}
+              players={explorePlayers}
+              samplesByDevice={samplesByDevice}
+              speedUnit={speedUnit}
+              onComplete={handleGetPulledComplete}
+              onLiveStateChange={setGetPulledLiveState}
             />
           </Suspense>
         ) : appMode === 'explore' ? (

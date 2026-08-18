@@ -202,6 +202,13 @@
   white-space: nowrap;
 }
 
+.club-live-pull-scene {
+  margin: -16px 0 18px;
+  overflow: hidden;
+  border-radius: 13px;
+  background: #152019;
+}
+
 .club-live-progress-copy {
   display: flex;
   justify-content: space-between;

@@ -593,7 +593,7 @@ describe('cloud API trust boundaries', () => {
     });
 
     const trainingStartedAt = Date.now() - 20_000;
-    for (const [index, activityType] of ['bmx-race', 'straight-sprint', 'explore'].entries()) {
+    for (const [index, activityType] of ['bmx-race', 'straight-sprint', 'explore', 'get-pulled'].entries()) {
       const trainingSave = await api('/api/training-sessions', {
         method: 'POST',
         body: JSON.stringify({
@@ -604,10 +604,17 @@ describe('cloud API trust boundaries', () => {
             startedAt: trainingStartedAt + index * 1_000,
             endedAt: trainingStartedAt + index * 1_000 + 8_000,
             durationMs: 8_000,
-            distanceMeters: activityType === 'explore' ? 3_218.688 : 320,
+            distanceMeters: activityType === 'explore' ? 3_218.688 : activityType === 'get-pulled' ? 18 : 320,
             trackId: 'north-bay-bmx',
             trackName: 'North Bay BMX',
-            details: { riderName: 'Review Rider', attempt: index + 1 },
+            details: activityType === 'get-pulled'
+              ? {
+                durationSeconds: 6,
+                airSetting: 7,
+                recordKey: '6s-air-7',
+                riders: [{ playerId: 1, riderName: 'Review Rider', distanceMeters: 18, peakWatts: 1240 }],
+              }
+              : { riderName: 'Review Rider', attempt: index + 1 },
           },
         }),
       });
@@ -618,12 +625,13 @@ describe('cloud API trust boundaries', () => {
     expect(trainingHistory.status).toBe(200);
     await expect(trainingHistory.json()).resolves.toMatchObject({
       totals: {
-        sessions: 3,
+        sessions: 4,
         bmxRaces: 1,
         straightSprints: 1,
         exploreRides: 1,
-        distanceMeters: 3_858.688,
-        durationMs: 24_000,
+        getPulledTests: 1,
+        distanceMeters: 3_876.688,
+        durationMs: 32_000,
       },
     });
 
@@ -1217,7 +1225,19 @@ describe('cloud API trust boundaries', () => {
       }),
     ]));
     expect(ownerCombinedPayload.sessions.some((session: { id: string }) => session.id.includes(athletePersonalSessionId))).toBe(false);
-    expect(JSON.stringify(ownerCombinedPayload)).not.toMatch(/watts?|power/i);
+    const ownerViewOfAthleteSession = ownerCombinedPayload.sessions.find(
+      (session: { id: string }) => session.id === `club-owner:${claimedMembership.clubId}:studio-maya:${athleteClubSessionId}`,
+    );
+    expect(JSON.stringify(ownerViewOfAthleteSession)).not.toMatch(/watts?|power/i);
+    expect(ownerCombinedPayload.sessions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        activityType: 'get-pulled',
+        details: expect.objectContaining({
+          recordKey: '6s-air-7',
+          riders: [expect.objectContaining({ peakWatts: 1_240 })],
+        }),
+      }),
+    ]));
 
     const reusedClaim = await api('/api/club-connect/claim', {
       method: 'POST',

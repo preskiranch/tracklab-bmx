@@ -19,6 +19,7 @@ import {
   type ClubLiveSession,
 } from '../lib/clubLive';
 import { RiderAvatar } from './RiderAvatar';
+import { PullSledScene } from './PullSledScene';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type { SpeedUnit, StudioRider } from '../types';
 import './ClubLiveMonitor.css';
@@ -29,12 +30,14 @@ type ClubLiveMonitorProps = {
 };
 
 function activityLabel(activityType: ClubLiveSession['activityType']) {
+  if (activityType === 'get-pulled') return 'Get Pulled';
   if (activityType === 'straight-sprint') return 'Straight Sprint';
   if (activityType === 'explore') return 'Explore the World';
   return 'BMX Race';
 }
 
 function ActivityIcon({ activityType }: { activityType: ClubLiveSession['activityType'] }) {
+  if (activityType === 'get-pulled') return <Zap size={18} />;
   if (activityType === 'straight-sprint') return <Route size={18} />;
   if (activityType === 'explore') return <Compass size={18} />;
   return <Bike size={18} />;
@@ -181,6 +184,17 @@ export function ClubLiveMonitor({ studioRiders, speedUnit }: ClubLiveMonitorProp
                   </div>
                   {session.multiplayer && <b><Users size={14} /> Private room</b>}
                 </div>
+
+                {session.activityType === 'get-pulled' && (
+                  <div className="club-live-pull-scene">
+                    <PullSledScene
+                      active={!stale && session.status === 'active'}
+                      compact
+                      label={`${displayName} in a Get Pulled test`}
+                      progress={session.progress.fraction}
+                    />
+                  </div>
+                )}
 
                 <div className="club-live-progress-copy">
                   <strong>{session.progress.label ?? `${percent}% complete`}</strong>

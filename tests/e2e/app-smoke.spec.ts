@@ -390,6 +390,74 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   expect(consoleErrors).toEqual([]);
 });
 
+test('Get Pulled runs a six-second countdown and keeps Air records separated', async ({ page }) => {
+  test.setTimeout(30_000);
+  const now = Date.now();
+  const authUser = {
+    id: 'get-pulled-developer',
+    profileKey: 'user:get-pulled-developer',
+    email: 'preskiranch@gmail.com',
+    name: 'Get Pulled Developer',
+    admin: true,
+    membership: {
+      tier: 'racer',
+      bikeSeats: 4,
+      updatedAt: now,
+    },
+  };
+  let trainingSaveCount = 0;
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: [],
+        accountProfile: { updatedAt: now },
+      }),
+    });
+  });
+  await page.route('**/api/club-connect*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ canManageClub: true, ownedClub: null, memberships: [] }),
+    });
+  });
+  await page.route('**/api/training-sessions*', async (route) => {
+    if (route.request().method() !== 'GET') trainingSaveCount += 1;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ sessions: [], totals: {} }) });
+  });
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  await page.goto('/?track=black-mountain-bmx');
+  const openApp = page.getByRole('button', { name: 'Open App' });
+  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+  await page.getByRole('button', { name: /Demo/i }).first().click();
+  await page.getByRole('button', { name: 'Get Pulled', exact: true }).click();
+
+  const view = page.getByLabel('Get Pulled timed Wattbike test');
+  await expect(view).toBeVisible();
+  await expect(view.getByRole('button', { name: '3s', exact: true })).toHaveClass(/selected/);
+  const airOptions = view.getByLabel('Wattbike Air setting').getByRole('button');
+  await expect(airOptions).toHaveCount(10);
+  await airOptions.filter({ hasText: /^7$/ }).click();
+  await expect(airOptions.filter({ hasText: /^7$/ })).toHaveClass(/selected/);
+
+  await view.getByRole('button', { name: /Start 3 seconds pull · Air 7/ }).click();
+  await expect(view.getByText('Get ready', { exact: false })).toBeVisible();
+  await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
+  await expect(view.getByText('Pulling now', { exact: false })).toBeVisible({ timeout: 7_500 });
+  await expect(view.getByText('Pull complete', { exact: false })).toBeVisible({ timeout: 4_500 });
+  await expect(view.getByLabel('Result recorded at Wattbike Air 7')).toBeVisible();
+  await expect(view.getByText('Demo pull results are for testing only and are not saved or published.')).toBeVisible();
+  expect(trainingSaveCount).toBe(0);
+});
+
 test('developer Explore demo rides without commentary and keeps bike mechanics audio', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const authUser = {

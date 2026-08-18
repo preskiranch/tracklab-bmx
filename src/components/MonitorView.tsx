@@ -5,6 +5,7 @@ import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 import { wattbikeMonitorLastThree } from '../lib/bikeProfileIdentity';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type { BikeSample, PlayerSlot, SpeedUnit } from '../types';
+import { PullSledScene } from './PullSledScene';
 
 type MonitorViewProps = {
   players: PlayerSlot[];
@@ -243,6 +244,12 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
                     {metrics.live && sample ? `${Math.round(sample.signal * 100)}%` : 'Idle'}
                   </span>
                 </div>
+
+                <PullSledScene
+                  active={isSprintActive(metrics)}
+                  compact
+                  label={`${player.name} pulling the TrackLab sled`}
+                />
 
                 <div className="monitor-primary">
                   <div>

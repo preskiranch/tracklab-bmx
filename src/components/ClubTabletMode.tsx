@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock3,
   Compass,
+  Gauge,
   LogOut,
   Radio,
   RefreshCw,
@@ -58,7 +59,7 @@ type ClubTabletModeProps = {
   onOpenBikePairing: () => void;
   onReconnectSavedBikes: () => Promise<void> | void;
   onRetryAuthorization: () => void;
-  onOpenProgram: (mode: Extract<AppMode, 'race' | 'straight-sprint' | 'explore'>) => void;
+  onOpenProgram: (mode: Extract<AppMode, 'race' | 'straight-sprint' | 'explore' | 'get-pulled'>) => void;
 };
 
 export function clubTabletBikeAccessReady(
@@ -408,6 +409,9 @@ export default function ClubTabletMode({
           </button>
           <button type="button" onClick={() => onOpenProgram('straight-sprint')}>
             <Route /><span><strong>Straight Sprint</strong><small>Timed sprint distances and personal records</small></span>
+          </button>
+          <button type="button" onClick={() => onOpenProgram('get-pulled')}>
+            <Gauge /><span><strong>Get Pulled</strong><small>Timed sled pulls with Wattbike Air 1–10 records</small></span>
           </button>
           <button type="button" onClick={() => onOpenProgram('explore')}>
             <Compass /><span><strong>Explore the World</strong><small>Solo or multiplayer route riding</small></span>

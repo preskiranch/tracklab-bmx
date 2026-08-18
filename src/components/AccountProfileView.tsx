@@ -48,7 +48,7 @@ type AccountProfileViewProps = {
 
 const emptyHistory: TrainingHistoryResponse = {
   sessions: [],
-  totals: { sessions: 0, bmxRaces: 0, straightSprints: 0, exploreRides: 0, distanceMeters: 0, durationMs: 0 },
+  totals: { sessions: 0, bmxRaces: 0, straightSprints: 0, exploreRides: 0, getPulledTests: 0, distanceMeters: 0, durationMs: 0 },
 };
 const emptyClubState: ClubConnectState = {
   canManageClub: false,
@@ -60,6 +60,7 @@ const activityLabels: Record<TrainingActivityType, string> = {
   'bmx-race': 'BMX Race Interval',
   'straight-sprint': 'Straight Sprint',
   explore: 'Explore the World',
+  'get-pulled': 'Get Pulled',
 };
 
 function localDateKey(timestamp: number) {
@@ -105,6 +106,7 @@ function formatDistance(meters: number) {
 function sessionIcon(type: TrainingActivityType) {
   if (type === 'explore') return <Compass size={19} />;
   if (type === 'straight-sprint') return <Timer size={19} />;
+  if (type === 'get-pulled') return <Activity size={19} />;
   return <Bike size={19} />;
 }
 
@@ -112,11 +114,22 @@ function summarizeSession(session: TrainingSession) {
   const details = session.details as {
     summaries?: Array<{ riderName?: string; rank?: number; finishTimeMs?: number; topCadence?: number; topWatts?: number }>;
     riders?: Array<{ name?: string; distanceMeters?: number; averageSpeedMph?: number }>;
+    durationSeconds?: number;
+    airSetting?: number;
     sprintDistanceFeet?: number;
     sprintAirSetting?: number;
   };
   if (session.activityType === 'explore') {
     return (details.riders ?? []).map((rider) => `${rider.name ?? 'Rider'} · ${formatDistance(Number(rider.distanceMeters) || 0)}`).join(' · ');
+  }
+  if (session.activityType === 'get-pulled') {
+    const rider = details.riders?.[0] as { name?: string; peakWatts?: number } | undefined;
+    return [
+      rider?.name,
+      details.durationSeconds ? `${details.durationSeconds}s pull` : undefined,
+      details.airSetting ? `Air ${details.airSetting}` : undefined,
+      rider?.peakWatts ? `${rider.peakWatts} W peak` : undefined,
+    ].filter(Boolean).join(' · ');
   }
   const winner = (details.summaries ?? []).find((summary) => summary.rank === 1) ?? details.summaries?.[0];
   const sprint = details.sprintDistanceFeet
@@ -442,6 +455,7 @@ export function AccountProfileView({
         <article><Activity size={20} /><span><b>{history.totals.sessions}</b><small>Sessions this month</small></span></article>
         <article><Bike size={20} /><span><b>{history.totals.bmxRaces}</b><small>BMX races</small></span></article>
         <article><Timer size={20} /><span><b>{history.totals.straightSprints}</b><small>Straight sprints</small></span></article>
+        <article><Activity size={20} /><span><b>{history.totals.getPulledTests}</b><small>Get Pulled tests</small></span></article>
         <article><Compass size={20} /><span><b>{formatDistance(history.totals.distanceMeters)}</b><small>Total distance</small></span></article>
       </section>
 
