@@ -107,17 +107,17 @@ export function PullSledScene({
         style={rigStyle}
       >
         <div data-pull-assembly="close-coupled" style={{
-          position: 'absolute', left: '1%', top: compact ? '29%' : '40%',
-          width: compact ? '34%' : '30%', height: compact ? '63%' : '40%',
+          position: 'absolute', left: compact ? '2.5%' : '2%', top: compact ? '29%' : '40%',
+          width: compact ? '35%' : '31%', height: compact ? '63%' : '40%',
         }}>
           <div data-pull-sled="trailing" style={{
-            position: 'absolute', left: 0, bottom: '2%',
-            zIndex: 3, width: '41%', height: '50%',
-            overflow: 'hidden', filter: 'drop-shadow(0 8px 6px rgba(0,0,0,.44))',
+            position: 'absolute', left: 0, bottom: 0,
+            zIndex: 3, width: '41.5%', height: '54%',
+            filter: 'drop-shadow(0 8px 6px rgba(0,0,0,.44))',
           }}>
-            <img alt="" draggable={false} src="/assets/get-pulled/tracklab-bmx-pull-sled-v1.png" style={{
-              position: 'absolute', right: 0, bottom: 0, width: '310%', height: 'auto',
-              maxWidth: 'none', userSelect: 'none',
+            <img alt="" draggable={false} src="/assets/get-pulled/tracklab-bmx-pull-sled-clean-v2.png" style={{
+              position: 'absolute', inset: 'auto 0 0', width: '100%', height: 'auto',
+              userSelect: 'none',
             }} />
           </div>
 
@@ -130,14 +130,14 @@ export function PullSledScene({
               width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none',
             }}
           >
-            <line x1="39" y1="74" x2="65.5" y2="55" stroke="rgba(4,6,5,.5)" strokeWidth="2.2" />
-            <line x1="39" y1="72.5" x2="65.5" y2="53.5" stroke="#171a18" strokeWidth="1.25" />
-            <circle cx="39" cy="72.5" r="1.5" fill="#161916" stroke="#a1aaa3" strokeWidth=".6" />
-            <circle cx="65.5" cy="53.5" r="1.45" fill="#161916" stroke="#a1aaa3" strokeWidth=".6" />
+            <line x1="42" y1="74" x2="65.5" y2="55" stroke="rgba(2,4,3,.78)" strokeWidth="4.4" />
+            <line x1="42" y1="72.5" x2="65.5" y2="53.5" stroke="#d7dddf" strokeWidth="2.15" />
+            <circle cx="42" cy="72.5" r="1.7" fill="#111514" stroke="#b9c0c2" strokeWidth=".7" />
+            <circle cx="65.5" cy="53.5" r="1.6" fill="#111514" stroke="#b9c0c2" strokeWidth=".7" />
           </svg>
 
           <div data-pedal-cycle={pedaling ? 'running' : 'stopped'} data-tow-anchor="seat-post-rear" style={{
-            position: 'absolute', left: '43%', top: 0, zIndex: 5,
+            position: 'absolute', left: '42%', top: '-2%', zIndex: 5,
             height: '100%', aspectRatio: '1 / 1',
             filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.42))', transformOrigin: '52% 82%',
           }}>

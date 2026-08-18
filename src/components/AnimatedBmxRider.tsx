@@ -1,171 +1,108 @@
 import { useEffect, useRef } from 'react';
-import {
-  riderCrankPedalPositions,
-  riderLegKnee,
-  riderRigGeometry,
-  type RiderRigPoint,
-} from '../lib/riderRig';
 
 type AnimatedBmxRiderProps = {
   active: boolean;
   cadenceRpm: number;
 };
 
-const logicalSize = 192;
-const baseImageUrl = '/assets/rider-lime-rig-base.png';
+const sourceFrameSize = 192;
+const sourceFrameCount = 9;
+const safetyPadding = 10;
+const canvasSize = sourceFrameSize + safetyPadding * 2;
+const spriteSheetUrl = '/assets/rider-lime-animated.png';
 
-function point(value: RiderRigPoint) {
-  return { x: value.x * logicalSize, y: value.y * logicalSize };
+type CanvasPoint = {
+  x: number;
+  y: number;
+};
+
+const wheelGeometry = {
+  rear: { x: 0.22, y: 0.745, radius: 0.17 },
+  front: { x: 0.795, y: 0.745, radius: 0.17 },
+} as const;
+
+function paddedPoint(point: CanvasPoint) {
+  return {
+    x: safetyPadding + point.x * sourceFrameSize,
+    y: safetyPadding + point.y * sourceFrameSize,
+  };
 }
 
-function strokeSegment(
+function drawCompleteWheel(
   context: CanvasRenderingContext2D,
-  start: RiderRigPoint,
-  end: RiderRigPoint,
-  color: string,
-  width: number,
+  wheel: CanvasPoint & { radius: number },
 ) {
-  const from = point(start);
-  const to = point(end);
-  context.strokeStyle = color;
-  context.lineWidth = width;
-  context.beginPath();
-  context.moveTo(from.x, from.y);
-  context.lineTo(to.x, to.y);
-  context.stroke();
-}
+  const center = paddedPoint(wheel);
+  const radius = wheel.radius * sourceFrameSize;
 
-function eraseOriginalMovingParts(context: CanvasRenderingContext2D) {
-  const legPaths = [
-    [[0.36, 0.34], [0.33, 0.5], [0.39, 0.65], [0.48, 0.7]],
-    [[0.4, 0.34], [0.45, 0.51], [0.44, 0.66], [0.53, 0.71]],
-  ] as const;
   context.save();
-  context.globalCompositeOperation = 'destination-out';
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-  context.lineWidth = 22;
-  for (const path of legPaths) {
+  context.strokeStyle = '#090b0d';
+  context.lineWidth = 8;
+  context.beginPath();
+  context.arc(center.x, center.y, radius, 0, Math.PI * 2);
+  context.stroke();
+
+  context.strokeStyle = '#5d6367';
+  context.lineWidth = 1.5;
+  context.beginPath();
+  context.arc(center.x, center.y, radius - 4.5, 0, Math.PI * 2);
+  context.stroke();
+
+  context.strokeStyle = 'rgba(151,159,164,.72)';
+  context.lineWidth = 0.7;
+  for (let spokeIndex = 0; spokeIndex < 12; spokeIndex += 1) {
+    const angle = (spokeIndex / 12) * Math.PI * 2;
     context.beginPath();
-    context.moveTo(path[0][0] * logicalSize, path[0][1] * logicalSize);
-    path.slice(1).forEach(([x, y]) => context.lineTo(x * logicalSize, y * logicalSize));
+    context.moveTo(center.x, center.y);
+    context.lineTo(
+      center.x + Math.cos(angle) * (radius - 7),
+      center.y + Math.sin(angle) * (radius - 7),
+    );
     context.stroke();
   }
-  const crank = point(riderRigGeometry.crankCenter);
+
+  context.fillStyle = '#111416';
   context.beginPath();
-  context.arc(crank.x, crank.y, 14, 0, Math.PI * 2);
+  context.arc(center.x, center.y, 3.2, 0, Math.PI * 2);
   context.fill();
-  context.restore();
-}
-
-function drawFrame(context: CanvasRenderingContext2D, accent: string) {
-  const rearHub = { x: 0.22, y: 0.745 };
-  const bottomBracket = riderRigGeometry.crankCenter;
-  const seatJoint = { x: 0.365, y: 0.55 };
-  const headTop = { x: 0.655, y: 0.485 };
-  const headBottom = { x: 0.66, y: 0.555 };
-  const segments = [
-    [rearHub, seatJoint],
-    [rearHub, bottomBracket],
-    [seatJoint, bottomBracket],
-    [seatJoint, headTop],
-    [headBottom, bottomBracket],
-    [headTop, headBottom],
-  ] as const;
-
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-  segments.forEach(([start, end]) => strokeSegment(context, start, end, '#07090b', 7));
-  segments.forEach(([start, end]) => strokeSegment(context, start, end, '#343b40', 3));
-  strokeSegment(context, seatJoint, headTop, accent, 1.2);
-  strokeSegment(context, rearHub, bottomBracket, '#9ca3af', 1.4);
-}
-
-function drawCrankArm(context: CanvasRenderingContext2D, pedal: RiderRigPoint, color: string) {
-  strokeSegment(context, riderRigGeometry.crankCenter, pedal, '#050607', 6);
-  strokeSegment(context, riderRigGeometry.crankCenter, pedal, color, 2.5);
-  const location = point(pedal);
-  context.strokeStyle = '#08090b';
-  context.lineWidth = 4;
-  context.beginPath();
-  context.moveTo(location.x - 5, location.y);
-  context.lineTo(location.x + 9, location.y);
-  context.stroke();
-}
-
-function drawLeg(
-  context: CanvasRenderingContext2D,
-  hip: RiderRigPoint,
-  pedal: RiderRigPoint,
-  accent: string,
-  rear: boolean,
-) {
-  const knee = riderLegKnee(hip, pedal);
-  const localHip = point(hip);
-  const localKnee = point(knee);
-  const localPedal = point(pedal);
-  context.save();
-  context.globalAlpha = rear ? 0.76 : 1;
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-  context.strokeStyle = '#050607';
-  context.lineWidth = rear ? 14 : 15;
-  context.beginPath();
-  context.moveTo(localHip.x, localHip.y);
-  context.lineTo(localKnee.x, localKnee.y);
-  context.lineTo(localPedal.x, localPedal.y);
-  context.stroke();
-  context.strokeStyle = rear ? '#111417' : '#202427';
-  context.lineWidth = rear ? 10 : 11;
-  context.stroke();
-  context.strokeStyle = accent;
-  context.globalAlpha = rear ? 0.3 : 0.7;
-  context.lineWidth = 1.8;
-  context.stroke();
-  context.restore();
-
-  context.save();
-  context.globalAlpha = rear ? 0.76 : 1;
-  context.strokeStyle = '#050607';
-  context.lineWidth = rear ? 7 : 8;
-  context.beginPath();
-  context.moveTo(localPedal.x - 5, localPedal.y);
-  context.lineTo(localPedal.x + 10, localPedal.y);
-  context.stroke();
   context.restore();
 }
 
 function renderRider(
   canvas: HTMLCanvasElement,
-  image: HTMLImageElement,
+  spriteSheet: HTMLImageElement,
   crankAngle: number,
 ) {
   const pixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-  const nextSize = Math.round(logicalSize * pixelRatio);
+  const nextSize = Math.round(canvasSize * pixelRatio);
   if (canvas.width !== nextSize || canvas.height !== nextSize) {
     canvas.width = nextSize;
     canvas.height = nextSize;
   }
+
   const context = canvas.getContext('2d');
-  if (!context) return;
+  if (!context) return 0;
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  context.clearRect(0, 0, logicalSize, logicalSize);
-  context.drawImage(image, 0, 0, logicalSize, logicalSize);
-  eraseOriginalMovingParts(context);
-  drawFrame(context, '#78df3b');
-  const pedals = riderCrankPedalPositions(crankAngle);
-  drawCrankArm(context, pedals.rear, '#555c63');
-  drawLeg(context, riderRigGeometry.rearHip, pedals.rear, '#78df3b', true);
-  drawCrankArm(context, pedals.front, '#aeb5bd');
-  drawLeg(context, riderRigGeometry.frontHip, pedals.front, '#78df3b', false);
-  const crank = point(riderRigGeometry.crankCenter);
-  context.fillStyle = '#d1d5db';
-  context.strokeStyle = '#050607';
-  context.lineWidth = 2.3;
-  context.beginPath();
-  context.arc(crank.x, crank.y, 3.5, 0, Math.PI * 2);
-  context.fill();
-  context.stroke();
+  context.clearRect(0, 0, canvasSize, canvasSize);
+
+  drawCompleteWheel(context, wheelGeometry.rear);
+  drawCompleteWheel(context, wheelGeometry.front);
+
+  const normalizedAngle = ((crankAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  const frameIndex = Math.floor(normalizedAngle / (Math.PI * 2) * sourceFrameCount) % sourceFrameCount;
+  context.drawImage(
+    spriteSheet,
+    frameIndex * sourceFrameSize,
+    0,
+    sourceFrameSize,
+    sourceFrameSize,
+    safetyPadding,
+    safetyPadding,
+    sourceFrameSize,
+    sourceFrameSize,
+  );
+
+  return frameIndex;
 }
 
 export function AnimatedBmxRider({ active, cadenceRpm }: AnimatedBmxRiderProps) {
@@ -184,30 +121,37 @@ export function AnimatedBmxRider({ active, cadenceRpm }: AnimatedBmxRiderProps) 
     let cancelled = false;
     let frameId = 0;
     let previousTime: number | null = null;
-    const image = new Image();
-    image.decoding = 'async';
+    const spriteSheet = new Image();
+    spriteSheet.decoding = 'async';
 
     const render = (time: number) => {
       if (cancelled || !canvasRef.current) return;
       const isActive = activeRef.current;
       const currentCadence = cadenceRef.current;
       if (previousTime !== null && isActive && currentCadence > 0) {
-        const elapsedSeconds = Math.min(0.1, Math.max(0, time - previousTime) / 1000);
-        phaseRef.current = (phaseRef.current + elapsedSeconds * currentCadence / 60 * Math.PI * 2) % (Math.PI * 2);
+        const elapsedSeconds = Math.max(0, time - previousTime) / 1000;
+        phaseRef.current = (
+          phaseRef.current
+          + elapsedSeconds * currentCadence / 60 * Math.PI * 2
+        ) % (Math.PI * 2);
       } else if (!isActive) {
         phaseRef.current = 0;
       }
       previousTime = time;
-      renderRider(canvasRef.current, image, phaseRef.current);
-      canvasRef.current.dataset.crankAngleDegrees = ((phaseRef.current * 180 / Math.PI) % 360).toFixed(1);
+
+      const frameIndex = renderRider(canvasRef.current, spriteSheet, phaseRef.current);
+      canvasRef.current.dataset.crankAngleDegrees = (
+        (phaseRef.current * 180 / Math.PI) % 360
+      ).toFixed(1);
+      canvasRef.current.dataset.pedalFrame = String(frameIndex);
       frameId = requestAnimationFrame(render);
     };
 
-    image.onload = () => {
+    spriteSheet.onload = () => {
       if (cancelled) return;
       frameId = requestAnimationFrame(render);
     };
-    image.src = baseImageUrl;
+    spriteSheet.src = spriteSheetUrl;
     return () => {
       cancelled = true;
       cancelAnimationFrame(frameId);
@@ -218,6 +162,7 @@ export function AnimatedBmxRider({ active, cadenceRpm }: AnimatedBmxRiderProps) 
     <canvas
       ref={canvasRef}
       aria-hidden="true"
+      data-animation-sync="wattbike-cadence-1-to-1"
       data-crank-motion={active ? 'continuous-360' : 'level-stopped'}
       data-cadence-rpm={Math.max(0, cadenceRpm).toFixed(1)}
       style={{ display: 'block', width: '100%', height: '100%' }}

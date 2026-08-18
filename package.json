@@ -23,6 +23,7 @@
     "db:migrate:tracklab": "node scripts/migrate-tracklab-postgres.mjs",
     "assets:clean": "node scripts/clean-sprite-alpha.mjs",
     "assets:rider-rigs": "node scripts/extract-rider-rig-bases.mjs",
+    "assets:pull-sled": "node scripts/build-clean-pull-sled-asset.mjs",
     "tracks:import:usabmx": "node scripts/import-usabmx-tracks.mjs",
     "tracks:import:ffc": "node scripts/import-ffc-bmx-tracks.mjs",
     "tracks:import:bmxnz": "node scripts/import-bmxnz-tracks.mjs",

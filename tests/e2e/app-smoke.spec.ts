@@ -507,14 +507,23 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   const rigTransformBefore = await rig.evaluate((element) => getComputedStyle(element).transform);
   const animatedRider = pullScene.locator('[data-crank-motion="continuous-360"]');
   await expect(animatedRider).toBeVisible();
+  await expect(animatedRider).toHaveAttribute('data-animation-sync', 'wattbike-cadence-1-to-1');
+  await expect(animatedRider).toHaveAttribute('data-pedal-frame', /[0-8]/);
+  const cadenceBefore = Number(await animatedRider.getAttribute('data-cadence-rpm'));
   const crankAngleBefore = Number(await animatedRider.getAttribute('data-crank-angle-degrees'));
+  const animationSampleStartedAt = performance.now();
   await page.waitForTimeout(450);
+  const animationSampleSeconds = (performance.now() - animationSampleStartedAt) / 1_000;
   const sceneryTransformAfter = await scenery.evaluate((element) => getComputedStyle(element).transform);
   const rigTransformAfter = await rig.evaluate((element) => getComputedStyle(element).transform);
+  const cadenceAfter = Number(await animatedRider.getAttribute('data-cadence-rpm'));
   const crankAngleAfter = Number(await animatedRider.getAttribute('data-crank-angle-degrees'));
+  const measuredCrankDelta = ((crankAngleAfter - crankAngleBefore) + 360) % 360;
+  const expectedCrankDelta = ((cadenceBefore + cadenceAfter) / 2) * 6 * animationSampleSeconds;
   expect(sceneryTransformAfter).toBe(sceneryTransformBefore);
   expect(rigTransformAfter).not.toBe(rigTransformBefore);
-  expect(crankAngleAfter).not.toBe(crankAngleBefore);
+  expect(measuredCrankDelta).toBeGreaterThan(expectedCrankDelta * .75);
+  expect(measuredCrankDelta).toBeLessThan(expectedCrankDelta * 1.25);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabGetPulledTones?: string[] })
       .__tracklabGetPulledTones ?? []
