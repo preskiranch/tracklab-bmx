@@ -220,7 +220,7 @@ export function RaceReviewPanel({
             {zonesToDisplay.length > 0 ? zonesToDisplay.map((zone, zoneIndex) => (
               <tr key={zone.id}>
                 <td>
-                  <strong>{zone.name || `Pedal Zone ${zoneIndex + 1}`}</strong>
+                  <strong>{zone.name || `Zone ${zoneIndex + 1}`}</strong>
                   <small>{zone.type === 'pedal' ? 'Pedal section' : zone.type}</small>
                 </td>
                 <td>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</td>

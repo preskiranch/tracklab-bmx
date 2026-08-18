@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TrackZone, UserTrackMapping } from '../../src/types';
 import {
   appendProSetZoneBoundaryMeter,
+  createTrackZones,
   mergeTrackMappingsBySavedAt,
   newestTrackMapping,
   parseUserTrackMapping,
@@ -138,5 +139,17 @@ describe('Pro Set pedal-zone pins', () => {
 
   it('snaps the final endpoint to the merge', () => {
     expect(appendProSetZoneBoundaryMeter([0, 42, 68], 96, 100)).toEqual([0, 42, 68, 100]);
+  });
+});
+
+describe('pedal-zone labels', () => {
+  it('numbers every mapped zone without imposing a ten-zone limit', () => {
+    const boundaries = Array.from({ length: 24 }, (_, index) => index * 10);
+    const zones = createTrackZones(240, boundaries);
+
+    expect(zones).toHaveLength(12);
+    expect(zones[0]?.name).toBe('Zone 1');
+    expect(zones[9]?.name).toBe('Zone 10');
+    expect(zones[11]?.name).toBe('Zone 12');
   });
 });

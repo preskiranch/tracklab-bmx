@@ -258,7 +258,7 @@ export function buildRaceZoneResults(capture: RaceCapture): RaceZoneResult[] {
 
   return capture.zones.map((zone, zoneIndex) => ({
     zoneId: zone.id,
-    zoneName: zone.name || `Pedal Zone ${zoneIndex + 1}`,
+    zoneName: zone.name || `Zone ${zoneIndex + 1}`,
     zoneType: zone.type,
     startMeter: zone.startMeter,
     endMeter: zone.endMeter,

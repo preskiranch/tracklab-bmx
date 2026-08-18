@@ -541,7 +541,7 @@ function isTrackZone(zone: TrackZone) {
 }
 
 function defaultPedalZoneName(index: number) {
-  return `Pedal Zone ${index + 1}`;
+  return `Zone ${index + 1}`;
 }
 
 export function createTrackZones(
