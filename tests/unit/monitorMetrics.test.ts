@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { monitorMetrics } from '../../src/components/MonitorView';
+import { monitorMaximumCadenceRpm, monitorMetrics } from '../../src/components/MonitorView';
 import { bmxSpeedKphFromCadence } from '../../src/game/bmxRollout';
 import type { BikeSample } from '../../src/types';
 
@@ -34,5 +34,21 @@ describe('Monitor View metrics', () => {
 
     expect(metrics.speedKph).toBeCloseTo(bmxSpeedKphFromCadence(60), 6);
     expect(metrics.speedKph).not.toBe(80);
+  });
+
+  it('rejects impossible post-sprint flywheel cadence without changing live metrics', () => {
+    const metrics = monitorMetrics(sample({ cadence: 100_000, watts: 940 }), 1_000);
+
+    expect(metrics.live).toBe(true);
+    expect(metrics.cadence).toBe(0);
+    expect(metrics.speedKph).toBe(0);
+    expect(metrics.watts).toBe(0);
+  });
+
+  it('preserves legitimate elite cadence through the human-range ceiling', () => {
+    const metrics = monitorMetrics(sample({ cadence: monitorMaximumCadenceRpm }), 1_000);
+
+    expect(metrics.cadence).toBe(monitorMaximumCadenceRpm);
+    expect(metrics.speedKph).toBeCloseTo(bmxSpeedKphFromCadence(monitorMaximumCadenceRpm), 6);
   });
 });

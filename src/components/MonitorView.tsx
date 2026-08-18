@@ -22,6 +22,12 @@ type MonitorMetrics = {
   speedKph: number;
 };
 
+// Elite BMX cadence can be exceptionally high, but a Wattbike flywheel packet in
+// the thousands is not a rider measurement. Keep generous headroom above the
+// expected human range while rejecting the post-sprint runaway values outright.
+export const monitorMaximumCadenceRpm = 320;
+const monitorTravelSeconds = 6;
+
 type MonitorSprintDraft = {
   deviceId: number;
   startedAt: number;
@@ -60,12 +66,25 @@ export function monitorMetrics(sample: BikeSample | undefined, now = Date.now())
   const wattsFresh = metricIsFresh(sample, sample?.wattsAt, now);
   const cadenceFresh = metricIsFresh(sample, sample?.cadenceAt, now);
   const watts = wattsFresh ? sample?.watts ?? 0 : 0;
-  const cadence = cadenceFresh ? sample?.cadence ?? 0 : 0;
+  const rawCadence = cadenceFresh ? sample?.cadence ?? 0 : 0;
+  const cadenceIsPlausible = Number.isFinite(rawCadence)
+    && rawCadence >= 0
+    && rawCadence <= monitorMaximumCadenceRpm;
+  const cadence = cadenceIsPlausible ? rawCadence : 0;
   const bmxSpeedKph = bmxSpeedKphFromCadence(cadence);
   const idleNoise = watts <= 10 && cadence <= 15;
 
+  if (!cadenceIsPlausible) {
+    return {
+      live: metricIsFresh(sample, sample?.at, now),
+      watts: 0,
+      cadence: 0,
+      speedKph: 0,
+    };
+  }
+
   return {
-    live: metricIsFresh(sample, sample?.at),
+    live: metricIsFresh(sample, sample?.at, now),
     watts: idleNoise ? 0 : watts,
     cadence: idleNoise ? 0 : cadence,
     speedKph: idleNoise ? 0 : bmxSpeedKph,
@@ -236,6 +255,11 @@ export function MonitorView({
             const monitorId = player.deviceId == null
               ? null
               : wattbikeMonitorLastThree(deviceLabel, player.deviceId);
+            const sprintProgress = sprintResult?.status === 'complete'
+              ? 1
+              : sprintResult
+                ? Math.min(1, sprintDurationSeconds(sprintResult, now) / monitorTravelSeconds)
+                : 0;
 
             return (
               <section
@@ -261,8 +285,9 @@ export function MonitorView({
                 <PullSledScene
                   active={isSprintActive(metrics)}
                   cadenceRpm={metrics.cadence}
-                  compact
+                  durationSeconds={isSprintActive(metrics) ? monitorTravelSeconds : undefined}
                   label={`${player.name} pulling the TrackLab sled`}
+                  progress={sprintProgress}
                   speedKph={metrics.speedKph}
                 />
 

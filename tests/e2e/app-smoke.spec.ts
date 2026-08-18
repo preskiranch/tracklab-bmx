@@ -664,6 +664,87 @@ test('live Get Pulled waits after the countdown and starts on the first pedal pa
   }
 });
 
+test('Monitor View fills the screen, travels across the road, and rejects post-sprint flywheel spikes', async ({ page }, testInfo) => {
+  test.setTimeout(35_000);
+  const deviceId = 58701;
+  const bridge = await createMockBikeBridge([deviceId]);
+  const authUser = {
+    id: 'monitor-view-racer',
+    profileKey: 'user:monitor-view-racer',
+    email: 'monitor-view@tracklab.test',
+    name: 'Monitor View Rider',
+    admin: true,
+    membership: { tier: 'racer', bikeSeats: 1, updatedAt: Date.now() },
+  };
+  let active = true;
+  const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample({
+    deviceId,
+    watts: active ? 510 : 0,
+    cadence: active ? 96 : 0,
+    speedKph: 0,
+  })), 120);
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ trackMappings: {}, customRoutes: [], bikeProfiles: [], studioRiders: [] }),
+      });
+    });
+    await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+    await page.goto('/?track=black-mountain-bmx');
+    const openApp = page.getByRole('button', { name: 'Open App' });
+    if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+    await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'More', exact: true }).click();
+    await page.getByRole('button', { name: 'Live Monitor', exact: true }).click();
+
+    const shell = page.locator('.platform-shell');
+    const monitor = page.locator('.monitor-panel');
+    const scene = monitor.getByRole('img', { name: /pulling the TrackLab sled/i });
+    await expect(shell).toHaveClass(/utility-fullscreen/);
+    await expect(monitor).toBeVisible();
+    await expect(scene).toHaveAttribute('data-course-mode', 'fixed-screen');
+    await expect(scene).toHaveAttribute('data-pull-scrolling', 'false');
+    await expect(scene).toHaveAttribute('data-travel-duration-seconds', '6');
+    await expect(scene.locator('[data-finish-surface="road-only-checkered"]')).toBeVisible();
+    await expect(scene.locator('[data-tow-color="matte-black"]')).toBeVisible();
+    const sceneBox = await scene.boundingBox();
+    expect(sceneBox?.height).toBeGreaterThanOrEqual(330);
+    expect(sceneBox?.width).toBeGreaterThan(page.viewportSize()!.width * .75);
+    const rig = scene.locator('[data-pull-rig="sled-left-rider-right"]');
+    await expect(rig).toHaveCSS('animation-name', 'tracklab-pull-rig-travel');
+    const transformBefore = await rig.evaluate((element) => getComputedStyle(element).transform);
+    await page.waitForTimeout(450);
+    const transformAfter = await rig.evaluate((element) => getComputedStyle(element).transform);
+    expect(transformAfter).not.toBe(transformBefore);
+    await page.waitForTimeout(900);
+
+    active = false;
+    await expect(monitor.getByText('Last sprint result', { exact: true })).toBeVisible({ timeout: 5_000 });
+    const result = monitor.locator('.monitor-sprint-result.complete');
+    await expect(result.locator('.monitor-sprint-grid > div').nth(0).locator('span')).toHaveText('96');
+    const finishedRiderBox = await scene.locator('[data-tow-anchor="rear-axle-hitch"]').boundingBox();
+    expect((finishedRiderBox!.x - sceneBox!.x) / sceneBox!.width).toBeGreaterThan(.7);
+
+    bridge.broadcast(mockBikeSample({ deviceId, watts: 940, cadence: 100_000, speedKph: 0 }));
+    await page.waitForTimeout(700);
+    await expect(monitor.locator('.monitor-primary > div').nth(0).locator('span')).toHaveText('0');
+    await expect(result.locator('.monitor-sprint-grid > div').nth(0).locator('span')).toHaveText('96');
+    await monitor.screenshot({ path: testInfo.outputPath('monitor-fullscreen-pull-lane.png') });
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
+});
+
 test('developer Explore demo rides without commentary and keeps bike mechanics audio', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const authUser = {
