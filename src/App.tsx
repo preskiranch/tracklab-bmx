@@ -8740,9 +8740,13 @@ export default function App() {
           <Suspense fallback={<div className="explore-loading">Loading Get Pulled…</div>}>
             <GetPulledView
               demoMode={demoMode}
-              players={explorePlayers}
+              players={activePlayers}
+              riders={availableStudioRiders}
+              riderAssignments={studioRiderAssignments}
               samplesByDevice={samplesByDevice}
               speedUnit={speedUnit}
+              canAssignRiders={!clubTabletSessionActive}
+              onAssignRider={handleStudioRiderAssignment}
               onComplete={handleGetPulledComplete}
               onLiveStateChange={setGetPulledLiveState}
               fullscreen={utilityFullscreen}

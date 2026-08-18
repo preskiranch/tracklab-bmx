@@ -19,7 +19,14 @@ import {
   type GetPulledResult,
 } from '../lib/getPulled';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
-import type { BikeSample, PlayerSlot, SpeedUnit } from '../types';
+import type {
+  BikeSample,
+  PlayerSlot,
+  SpeedUnit,
+  StudioRider,
+  StudioRiderAssignments,
+} from '../types';
+import { applyStudioRiderAssignments } from '../lib/studioRiders';
 import { playStartGateTone, primeAudioCues } from '../lib/audioCues';
 import {
   primeBikeRaceAudio,
@@ -32,9 +39,13 @@ import './GetPulledView.css';
 type GetPulledViewProps = {
   demoMode: boolean;
   players: PlayerSlot[];
+  riders: StudioRider[];
+  riderAssignments: StudioRiderAssignments;
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
+  canAssignRiders?: boolean;
   fullscreen?: boolean;
+  onAssignRider: (deviceId: number, riderId: string | null) => void;
   onComplete: (result: GetPulledResult) => void;
   onFullscreenChange?: (enabled: boolean) => void;
   onLiveStateChange: (state: GetPulledLiveState | null) => void;
@@ -55,14 +66,41 @@ function phaseLabel(phase: GetPulledPhase) {
 export function GetPulledView({
   demoMode,
   players,
+  riders,
+  riderAssignments,
   samplesByDevice,
   speedUnit,
+  canAssignRiders = true,
   fullscreen = false,
+  onAssignRider,
   onComplete,
   onFullscreenChange,
   onLiveStateChange,
 }: GetPulledViewProps) {
-  const connectedPlayers = useMemo(() => players.filter((player) => player.deviceId != null), [players]);
+  const assignedPlayers = useMemo(
+    () => demoMode ? players : applyStudioRiderAssignments(players, riders, riderAssignments),
+    [demoMode, players, riderAssignments, riders],
+  );
+  const connectedPlayers = useMemo(
+    () => assignedPlayers.filter((player) => player.deviceId != null),
+    [assignedPlayers],
+  );
+  const rawPlayerById = useMemo(
+    () => new Map(players.map((player) => [player.id, player])),
+    [players],
+  );
+  const connectedDeviceIds = useMemo(
+    () => new Set(connectedPlayers.flatMap((player) => player.deviceId == null ? [] : [player.deviceId])),
+    [connectedPlayers],
+  );
+  const assignedDeviceByRider = useMemo(() => {
+    const next = new Map<string, number>();
+    Object.entries(riderAssignments).forEach(([deviceId, riderId]) => {
+      const numericDeviceId = Number(deviceId);
+      if (connectedDeviceIds.has(numericDeviceId)) next.set(riderId, numericDeviceId);
+    });
+    return next;
+  }, [connectedDeviceIds, riderAssignments]);
   const [selectedPlayerId, setSelectedPlayerId] = useState<PlayerSlot['id'] | null>(connectedPlayers[0]?.id ?? null);
   const [durationSeconds, setDurationSeconds] = useState<number>(3);
   const [airSetting, setAirSetting] = useState(1);
@@ -90,6 +128,7 @@ export function GetPulledView({
     ? Math.min(durationSeconds * 1_000, Math.max(0, now - startedAt))
     : result ? result.durationSeconds * 1_000 : 0;
   const progress = durationSeconds > 0 ? Math.min(1, elapsedMs / (durationSeconds * 1_000)) : 0;
+  const selectedAthleteReady = demoMode || Boolean(selectedPlayer?.riderId);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -121,7 +160,12 @@ export function GetPulledView({
   }, []);
 
   const start = useCallback(() => {
-    if (!selectedPlayer || selectedPlayer.deviceId == null || phaseRef.current !== 'setup') return;
+    if (
+      !selectedPlayer
+      || selectedPlayer.deviceId == null
+      || (!demoMode && !selectedPlayer.riderId)
+      || phaseRef.current !== 'setup'
+    ) return;
     primePullAudio();
     onFullscreenChange?.(true);
     accumulatorRef.current = createGetPulledAccumulator();
@@ -134,7 +178,7 @@ export function GetPulledView({
     playStartGateTone('tick');
     setPhase('countdown');
     setNow(Date.now());
-  }, [onFullscreenChange, primePullAudio, selectedPlayer]);
+  }, [demoMode, onFullscreenChange, primePullAudio, selectedPlayer]);
 
   useEffect(() => {
     if (phase !== 'countdown') return undefined;
@@ -381,24 +425,72 @@ export function GetPulledView({
             </div>
           </div>
           <div className="get-pulled-panel">
-            <h3>Athlete</h3>
+            <h3>Bike and athlete</h3>
+            {!demoMode && <p>Choose the Wattbike for this pull, then assign the athlete riding it.</p>}
             <div className="get-pulled-riders">
-              {connectedPlayers.map((player) => (
-                <button
-                  className={selectedPlayerId === player.id ? 'selected' : ''}
-                  key={player.id}
-                  type="button"
-                  onClick={() => setSelectedPlayerId(player.id)}
-                >
-                  <span><strong>{player.name}</strong><small>P{player.id} · {player.deviceLabel ?? 'Wattbike'}</small></span>
-                  <span>{selectedPlayerId === player.id ? 'Selected' : 'Choose'}</span>
-                </button>
-              ))}
+              {connectedPlayers.map((player) => {
+                const rawPlayer = rawPlayerById.get(player.id) ?? player;
+                const deviceId = player.deviceId;
+                const bikeName = rawPlayer.bikeName ?? rawPlayer.name;
+                const bikeLabel = `${bikeName} · P${player.id} · ${rawPlayer.deviceLabel ?? 'Wattbike'}`;
+                const assignedRiderId = deviceId == null ? '' : riderAssignments[deviceId] ?? '';
+                const selected = selectedPlayerId === player.id;
+                return (
+                  <div className={`get-pulled-bike-row${selected ? ' selected' : ''}${demoMode ? ' demo' : ''}`} key={player.id}>
+                    <button
+                      className={`get-pulled-bike-choice${selected ? ' selected' : ''}`}
+                      type="button"
+                      onClick={() => setSelectedPlayerId(player.id)}
+                      aria-pressed={selected}
+                      aria-label={`Select ${bikeLabel}`}
+                    >
+                      <span><strong>{bikeName}</strong><small>P{player.id} · {rawPlayer.deviceLabel ?? 'Wattbike'}</small></span>
+                      <span>{selected ? 'Selected bike' : 'Choose bike'}</span>
+                    </button>
+                    {!demoMode && (
+                      <label className="get-pulled-athlete-select">
+                        <span>Athlete</span>
+                        <select
+                          aria-label={`Athlete assigned to ${bikeName}`}
+                          value={assignedRiderId}
+                          disabled={!canAssignRiders || deviceId == null}
+                          onFocus={() => setSelectedPlayerId(player.id)}
+                          onChange={(event) => {
+                            setSelectedPlayerId(player.id);
+                            if (deviceId != null) onAssignRider(deviceId, event.target.value || null);
+                          }}
+                        >
+                          <option value="">Choose athlete…</option>
+                          {riders.map((rider) => {
+                            const assignedDeviceId = assignedDeviceByRider.get(rider.id);
+                            const assignedElsewhere = assignedDeviceId != null && assignedDeviceId !== deviceId;
+                            return (
+                              <option value={rider.id} disabled={assignedElsewhere} key={rider.id}>
+                                {rider.name}{assignedElsewhere ? ' · assigned to another bike' : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
           <p className="get-pulled-privacy">Watts and power results are saved privately to the selected athlete. They are visible on the athlete’s records and authorized club monitors, never public leaderboards or shared ghosts.</p>
           <div className="get-pulled-actions">
-            <button className="primary" type="button" onPointerDown={primePullAudio} onClick={start}><Play size={18} /> Start {secondsLabel(durationSeconds)} pull · Air {airSetting}</button>
+            <button
+              className="primary"
+              type="button"
+              disabled={!selectedAthleteReady}
+              onPointerDown={primePullAudio}
+              onClick={start}
+            >
+              <Play size={18} /> {selectedAthleteReady
+                ? `Start ${secondsLabel(durationSeconds)} pull · Air ${airSetting}`
+                : 'Choose an athlete to start'}
+            </button>
           </div>
         </section>
       ) : (

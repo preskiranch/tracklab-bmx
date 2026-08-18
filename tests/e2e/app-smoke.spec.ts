@@ -554,18 +554,21 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   expect(trainingSaveCount).toBe(0);
 });
 
-test('live Get Pulled waits after the countdown and starts on the first pedal packet', async ({ page }) => {
+test('live Get Pulled waits after the countdown and starts on the first pedal packet', async ({ page }, testInfo) => {
   test.setTimeout(35_000);
-  const deviceId = 58701;
-  const bridge = await createMockBikeBridge([deviceId]);
+  const deviceIds = [58701, 58702, 58703, 58704];
+  const selectedDeviceId = deviceIds[1];
+  const bridge = await createMockBikeBridge(deviceIds);
   let pedaling = false;
+  let broadcastAllBikes = true;
   const sampleTimer = setInterval(() => {
-    bridge.broadcast(mockBikeSample({
+    const activeDeviceIds = broadcastAllBikes ? deviceIds : [selectedDeviceId];
+    activeDeviceIds.forEach((deviceId) => bridge.broadcast(mockBikeSample({
       deviceId,
-      watts: pedaling ? 487 : 0,
-      cadence: pedaling ? 90 : 0,
+      watts: pedaling && deviceId === selectedDeviceId ? 487 : 0,
+      cadence: pedaling && deviceId === selectedDeviceId ? 90 : 0,
       speedKph: 0,
-    }));
+    })));
   }, 120);
   const now = Date.now();
   const authUser = {
@@ -573,9 +576,16 @@ test('live Get Pulled waits after the countdown and starts on the first pedal pa
     profileKey: 'user:get-pulled-live-racer',
     email: 'get-pulled-live@tracklab.test',
     name: 'Get Pulled Live Racer',
-    admin: false,
-    membership: { tier: 'racer', bikeSeats: 1, updatedAt: now },
+    admin: true,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: now },
   };
+  const studioRiders = [
+    { id: 'studio-maya', name: 'Maya Torres', createdAt: now, updatedAt: now },
+    { id: 'studio-jordan', name: 'Jordan Lee', createdAt: now, updatedAt: now },
+    { id: 'studio-avery', name: 'Avery Cole', createdAt: now, updatedAt: now },
+    { id: 'studio-riley', name: 'Riley Brooks', createdAt: now, updatedAt: now },
+  ];
+  let savedRiderId: string | null = null;
 
   try {
     await page.addInitScript(() => {
@@ -591,12 +601,18 @@ test('live Get Pulled waits after the countdown and starts on the first pedal pa
           trackMappings: {},
           customRoutes: [],
           bikeProfiles: [],
-          studioRiders: [],
+          studioRiders,
           accountProfile: { updatedAt: now },
         }),
       });
     });
     await page.route('**/api/training-sessions*', async (route) => {
+      if (route.request().method() === 'POST') {
+        const body = route.request().postDataJSON() as {
+          session?: { details?: { riders?: Array<{ riderId?: string }> } };
+        };
+        savedRiderId = body.session?.details?.riders?.[0]?.riderId ?? null;
+      }
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ sessions: [], totals: {} }) });
     });
     await page.route('https://maps.googleapis.com/**', (route) => route.abort());
@@ -604,11 +620,24 @@ test('live Get Pulled waits after the countdown and starts on the first pedal pa
     await page.goto('/?track=black-mountain-bmx');
     const openApp = page.getByRole('button', { name: 'Open App' });
     if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
-    await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/4 connected bikes/i)).toBeVisible({ timeout: 15_000 });
+    broadcastAllBikes = false;
     await page.getByRole('button', { name: 'Get Pulled', exact: true }).click();
 
     const view = page.getByLabel('Get Pulled timed Wattbike test');
-    await view.getByRole('button', { name: /Start 3 seconds pull · Air 1/ }).click();
+    const start = view.getByRole('button', { name: 'Choose an athlete to start', exact: true });
+    await expect(start).toBeDisabled();
+    const athleteSelects = view.getByRole('combobox', { name: /Athlete assigned to Bike/ });
+    await expect(athleteSelects).toHaveCount(4);
+    await athleteSelects.nth(0).selectOption('studio-maya');
+    await expect(athleteSelects.nth(1).locator('option[value="studio-maya"]')).toHaveAttribute('disabled', '');
+    await view.getByRole('button', { name: /Select Bike 702/ }).click();
+    await athleteSelects.nth(1).selectOption('studio-jordan');
+    await expect(view.getByRole('button', { name: /Select Bike 702/ })).toHaveAttribute('aria-pressed', 'true');
+    const readyStart = view.getByRole('button', { name: /Start 3 seconds pull · Air 1/ });
+    await expect(readyStart).toBeEnabled();
+    await view.screenshot({ path: testInfo.outputPath('get-pulled-four-bike-athlete-assignment.png') });
+    await readyStart.click();
     await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
     await expect(view.getByRole('status')).toContainText('Pedal to start', { timeout: 7_500 });
     const clock = view.locator('.get-pulled-timer strong');
@@ -618,10 +647,17 @@ test('live Get Pulled waits after the countdown and starts on the first pedal pa
     await expect(view.getByText('Pulling now', { exact: false })).toHaveCount(0);
 
     pedaling = true;
-    await expect(view.getByText('Pulling now', { exact: false })).toBeVisible({ timeout: 3_000 });
+    bridge.broadcast(mockBikeSample({
+      deviceId: selectedDeviceId,
+      watts: 487,
+      cadence: 90,
+      speedKph: 0,
+    }));
+    await expect(view.getByText('Pulling now', { exact: false })).toBeVisible({ timeout: 5_000 });
     await expect.poll(async () => Number((await clock.textContent())?.replace('s', '') ?? 0))
       .toBeGreaterThan(0);
     await expect(view.getByText('Pull complete', { exact: false })).toBeVisible({ timeout: 5_000 });
+    await expect.poll(() => savedRiderId).toBe('studio-jordan');
   } finally {
     clearInterval(sampleTimer);
     await bridge.close();
