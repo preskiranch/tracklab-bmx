@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { AnimatedBmxRider } from './AnimatedBmxRider';
 
 type PullSledSceneProps = {
   active: boolean;
@@ -13,11 +14,7 @@ type PullSledSceneProps = {
 const sceneStyles = `
 @keyframes tracklab-pull-rig-travel {
   from { transform: translate3d(0,0,0); }
-  to { transform: translate3d(66.667%,0,0); }
-}
-@keyframes tracklab-pull-rider-cycle {
-  from { background-position-x: 0%; }
-  to { background-position-x: 100%; }
+  to { transform: translate3d(64%,0,0); }
 }
 `;
 
@@ -36,19 +33,13 @@ export function PullSledScene({
   const pedaling = active && cadenceRpm >= 1;
   const timedTravel = active && typeof durationSeconds === 'number' && durationSeconds > 0;
   const height = compact ? 112 : 420;
-  const pedalDurationSeconds = Math.min(2, Math.max(0.12, 60 / Math.max(1, cadenceRpm)));
-  const directTravelPercent = clampedProgress * 66.667;
+  const directTravelPercent = clampedProgress * 64;
   const sceneStyle = {
-    '--tracklab-pedal-duration': `${pedalDurationSeconds.toFixed(3)}s`,
     '--tracklab-pull-duration': `${Math.max(0.1, durationSeconds ?? 1).toFixed(3)}s`,
   } as CSSProperties;
   const rigStyle = {
-    position: 'absolute',
-    left: 0,
-    bottom: compact ? 3 : 24,
+    position: 'absolute', inset: 0,
     zIndex: 3,
-    width: compact ? '61%' : '62%',
-    height: compact ? 79 : 268,
     willChange: active ? 'transform' : 'auto',
     transform: timedTravel ? undefined : `translate3d(${directTravelPercent}%,0,0)`,
     animation: timedTravel
@@ -115,41 +106,43 @@ export function PullSledScene({
         data-rig-finish="front-tire-at-right-finish"
         style={rigStyle}
       >
-        <div data-pull-sled="trailing" style={{
-          position: 'absolute', left: compact ? '-1%' : '-1.5%', bottom: compact ? 9 : 15,
-          zIndex: 3, width: compact ? '25%' : '26%', height: compact ? 48 : 124,
-          overflow: 'hidden', filter: 'drop-shadow(0 8px 6px rgba(0,0,0,.44))',
+        <div data-pull-assembly="close-coupled" style={{
+          position: 'absolute', left: '1%', top: compact ? '29%' : '40%',
+          width: compact ? '34%' : '30%', height: compact ? '63%' : '40%',
         }}>
-          <img alt="" draggable={false} src="/assets/get-pulled/tracklab-bmx-pull-sled-v1.png" style={{
-            position: 'absolute', right: 0, bottom: 0, width: '310%', height: 'auto',
-            maxWidth: 'none', userSelect: 'none',
-          }} />
-        </div>
+          <div data-pull-sled="trailing" style={{
+            position: 'absolute', left: 0, bottom: '2%',
+            zIndex: 3, width: '41%', height: '50%',
+            overflow: 'hidden', filter: 'drop-shadow(0 8px 6px rgba(0,0,0,.44))',
+          }}>
+            <img alt="" draggable={false} src="/assets/get-pulled/tracklab-bmx-pull-sled-v1.png" style={{
+              position: 'absolute', right: 0, bottom: 0, width: '310%', height: 'auto',
+              maxWidth: 'none', userSelect: 'none',
+            }} />
+          </div>
 
-        <svg
-          data-tow-attachment="sled-hitch-to-seat-post"
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          style={{ position: 'absolute', inset: 0, zIndex: 2, overflow: 'visible', pointerEvents: 'none' }}
-        >
-          <line x1="24" y1="72" x2="70.5" y2="51.5" stroke="rgba(4,6,5,.45)" strokeWidth="2.2" />
-          <line x1="24" y1="70.5" x2="70.5" y2="50" stroke="#171a18" strokeWidth="1.2" />
-          <circle cx="24" cy="70.5" r="1.4" fill="#161916" stroke="#838a84" strokeWidth=".5" />
-          <circle cx="70.5" cy="50" r="1.3" fill="#161916" stroke="#838a84" strokeWidth=".5" />
-        </svg>
+          <svg
+            data-tow-attachment="sled-hitch-to-seat-post"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            style={{
+              position: 'absolute', inset: 0, zIndex: 4,
+              width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none',
+            }}
+          >
+            <line x1="39" y1="74" x2="65.5" y2="55" stroke="rgba(4,6,5,.5)" strokeWidth="2.2" />
+            <line x1="39" y1="72.5" x2="65.5" y2="53.5" stroke="#171a18" strokeWidth="1.25" />
+            <circle cx="39" cy="72.5" r="1.5" fill="#161916" stroke="#a1aaa3" strokeWidth=".6" />
+            <circle cx="65.5" cy="53.5" r="1.45" fill="#161916" stroke="#a1aaa3" strokeWidth=".6" />
+          </svg>
 
-        <div data-pedal-cycle={pedaling ? 'running' : 'stopped'} data-tow-anchor="seat-post-rear" style={{
-          position: 'absolute', left: compact ? '56%' : '55%', bottom: 0, zIndex: 4,
-          width: compact ? '35%' : '36%', aspectRatio: '1 / 1',
-          filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.42))', transformOrigin: '52% 82%',
-        }}>
-          <span style={{
-            position: 'absolute', inset: 0, display: 'block',
-            backgroundImage: "url('/assets/rider-lime-animated.png')", backgroundPosition: '0% center',
-            backgroundRepeat: 'no-repeat', backgroundSize: '900% 100%',
-            animation: pedaling ? 'tracklab-pull-rider-cycle var(--tracklab-pedal-duration) steps(8,end) infinite' : 'none',
-            willChange: pedaling ? 'background-position' : 'auto',
-          }} />
+          <div data-pedal-cycle={pedaling ? 'running' : 'stopped'} data-tow-anchor="seat-post-rear" style={{
+            position: 'absolute', left: '43%', top: 0, zIndex: 5,
+            height: '100%', aspectRatio: '1 / 1',
+            filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.42))', transformOrigin: '52% 82%',
+          }}>
+            <AnimatedBmxRider active={pedaling} cadenceRpm={cadenceRpm} />
+          </div>
         </div>
       </div>
 

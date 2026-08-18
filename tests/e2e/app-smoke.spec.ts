@@ -491,20 +491,30 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   await expect(scenery).toHaveCSS('animation-name', 'none');
   const rig = pullScene.locator('[data-pull-rig="sled-left-rider-right"]');
   await expect(rig).toHaveCSS('animation-name', 'tracklab-pull-rig-travel');
+  const rider = pullScene.locator('[data-tow-anchor="seat-post-rear"]');
+  const sled = pullScene.locator('[data-pull-sled="trailing"]');
+  const sceneBox = await pullScene.boundingBox();
+  const riderBox = await rider.boundingBox();
+  const sledBox = await sled.boundingBox();
+  expect(sceneBox).not.toBeNull();
+  expect(riderBox).not.toBeNull();
+  expect(sledBox).not.toBeNull();
+  expect((riderBox?.x ?? 0) - ((sledBox?.x ?? 0) + (sledBox?.width ?? 0))).toBeLessThan(14);
+  expect((riderBox?.x ?? 0) - (sceneBox?.x ?? 0)).toBeLessThan((sceneBox?.width ?? 0) * .4);
+  expect(((riderBox?.y ?? 0) + (riderBox?.height ?? 0) - (sceneBox?.y ?? 0)) / (sceneBox?.height ?? 1)).toBeGreaterThan(.72);
+  expect(((riderBox?.y ?? 0) + (riderBox?.height ?? 0) - (sceneBox?.y ?? 0)) / (sceneBox?.height ?? 1)).toBeLessThan(.83);
   const sceneryTransformBefore = await scenery.evaluate((element) => getComputedStyle(element).transform);
   const rigTransformBefore = await rig.evaluate((element) => getComputedStyle(element).transform);
-  const pedalFrameBefore = await pullScene.locator('[data-pedal-cycle="running"] span').evaluate(
-    (element) => getComputedStyle(element).backgroundPositionX,
-  );
+  const animatedRider = pullScene.locator('[data-crank-motion="continuous-360"]');
+  await expect(animatedRider).toBeVisible();
+  const crankAngleBefore = Number(await animatedRider.getAttribute('data-crank-angle-degrees'));
   await page.waitForTimeout(450);
   const sceneryTransformAfter = await scenery.evaluate((element) => getComputedStyle(element).transform);
   const rigTransformAfter = await rig.evaluate((element) => getComputedStyle(element).transform);
-  const pedalFrameAfter = await pullScene.locator('[data-pedal-cycle="running"] span').evaluate(
-    (element) => getComputedStyle(element).backgroundPositionX,
-  );
+  const crankAngleAfter = Number(await animatedRider.getAttribute('data-crank-angle-degrees'));
   expect(sceneryTransformAfter).toBe(sceneryTransformBefore);
   expect(rigTransformAfter).not.toBe(rigTransformBefore);
-  expect(pedalFrameAfter).not.toBe(pedalFrameBefore);
+  expect(crankAngleAfter).not.toBe(crankAngleBefore);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabGetPulledTones?: string[] })
       .__tracklabGetPulledTones ?? []
