@@ -159,8 +159,8 @@ function nativeRequestOptions(options: BluetoothRequestDeviceOptions) {
   };
 }
 
-export async function installCapacitorBluetoothBridge() {
-  if (!Capacitor.isNativePlatform()) {
+export async function installCapacitorBluetoothBridge({ nativeShell = false }: { nativeShell?: boolean } = {}) {
+  if (!nativeShell && !Capacitor.isNativePlatform()) {
     return false;
   }
 

@@ -23,6 +23,7 @@ import {
   Plus,
   PlayCircle,
   Radio,
+  RefreshCcw,
   Route,
   Settings,
   StopCircle,
@@ -70,6 +71,7 @@ import {
 import { safeSetLocalStorage } from './lib/browserStorage';
 import { redactPrivatePower } from './lib/privatePower';
 import {
+  bootstrapNativeBluetooth,
   getNativeBluetoothBootstrapStatus,
   NATIVE_BLUETOOTH_STATUS_EVENT,
   type NativeBluetoothBootstrapStatus,
@@ -1750,8 +1752,7 @@ export default function App() {
   const developerUiActive = !clubTabletKioskMode && adminProfileActive && !regularUserPreview;
   const developerRaceLayoutActive = !clubTabletKioskMode && isAdminAccountEmail(accountEmail);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { id: 1, author: 'Coach', text: 'Gate cadence looked strong through the first straight.', at: '10:24 AM' },
-    { id: 2, author: 'System', text: "Private room opened for today's session.", at: '10:25 AM' },
+    { id: 1, author: 'System', text: "Private room opened for today's session.", at: '10:25 AM' },
   ]);
   const demo = useDemoBikes({
     enabled: demoMode,
@@ -7343,7 +7344,7 @@ export default function App() {
 
     setChatMessages((current) => [
       ...current,
-      { id: Date.now(), author: playMode === 'local' ? 'Local Coach' : 'Room Host', text, at: formatClock() },
+      { id: Date.now(), author: playMode === 'local' ? 'You' : 'Room Host', text, at: formatClock() },
     ].slice(-6));
     setChatDraft('');
   };
@@ -7429,6 +7430,10 @@ export default function App() {
 
   const nativeBluetoothFailed = nativeBluetoothStatus.state === 'failed';
   const nativeBluetoothFailureMessage = 'Native Bluetooth could not start. Close and reopen the TrackLab app. If this continues, install the latest app build.';
+  const retryNativeBluetooth = async () => {
+    const status = await bootstrapNativeBluetooth();
+    setNativeBluetoothStatus(status);
+  };
   const connectionLabel = (() => {
     if (demoMode) {
       return 'Demo race source online';
@@ -7550,7 +7555,7 @@ export default function App() {
 
       return bluetooth.supported
         ? 'No connector needed. Browser Bluetooth feeds the same BMX gear logic, race engine, monitor, and summaries.'
-        : bluetooth.status;
+        : null;
     }
 
     if (bridge.connection !== 'open') {
@@ -7964,7 +7969,17 @@ export default function App() {
               </span>
             </div>
           )}
-          <div className="bridge-prompt">{bridgePrompt}</div>
+          {bridgePrompt && <div className="bridge-prompt">{bridgePrompt}</div>}
+          {nativeBluetoothFailed && bikeConnectionSource === 'bluetooth' && !demoMode && (
+            <button
+              className="bluetooth-connect-button"
+              type="button"
+              onClick={() => { void retryNativeBluetooth(); }}
+            >
+              <RefreshCcw size={16} />
+              <span>Retry Native Bluetooth</span>
+            </button>
+          )}
         </section>
 
         {activeClubTrainingMemberships.length > 0 && (

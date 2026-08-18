@@ -739,7 +739,7 @@ export function EarthTrackView({
           </div>
         )}
 
-        {!showingGameArena && <div
+        {showMappingUi && !showingGameArena && <div
           className={`map-camera-pad${raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked) ? ' locked' : ''}`}
           aria-label="Map camera controls"
         >

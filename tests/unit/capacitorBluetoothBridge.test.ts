@@ -89,6 +89,16 @@ describe('Capacitor Bluetooth bridge', () => {
     expect(bleClient.initialize).not.toHaveBeenCalled();
   });
 
+  it('installs when the verified shell signal arrives before Capacitor reports native', async () => {
+    capacitor.isNativePlatform.mockReturnValue(false);
+    const { fakeWindow } = installWindow();
+    const { installCapacitorBluetoothBridge } = await loadBridge();
+
+    await expect(installCapacitorBluetoothBridge({ nativeShell: true })).resolves.toBe(true);
+
+    expect(fakeWindow.navigator.bluetooth).toBeDefined();
+  });
+
   it('requests a native device with normalized optional services and remembers it', async () => {
     const { fakeWindow, storage } = installWindow();
     const { installCapacitorBluetoothBridge } = await loadBridge();

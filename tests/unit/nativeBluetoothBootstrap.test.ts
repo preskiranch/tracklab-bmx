@@ -9,9 +9,11 @@ vi.mock('@capacitor/core', () => ({ Capacitor: capacitor }));
 function installBrowser({
   userAgent = 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15',
   compatibilityCapacitor,
+  nativeBridge = false,
 }: {
   userAgent?: string;
   compatibilityCapacitor?: { isNativePlatform: () => boolean };
+  nativeBridge?: boolean;
 } = {}) {
   const eventTarget = new EventTarget();
   const sessionStorage = {
@@ -24,6 +26,11 @@ function installBrowser({
   });
   if (compatibilityCapacitor) {
     Object.assign(fakeWindow, { Capacitor: compatibilityCapacitor });
+  }
+  if (nativeBridge) {
+    Object.assign(fakeWindow, {
+      webkit: { messageHandlers: { bridge: { postMessage: vi.fn() } } },
+    });
   }
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -56,6 +63,13 @@ describe('native Bluetooth bootstrap', () => {
     expect(isNativeTrackLabShell()).toBe(true);
     expect(capacitor.isNativePlatform).toHaveBeenCalledTimes(1);
     expect(window).not.toHaveProperty('Capacitor');
+  });
+
+  it('recognizes the injected iOS bridge even when the imported Capacitor signal is late', async () => {
+    installBrowser({ nativeBridge: true });
+    const { isNativeTrackLabShell } = await loadBootstrap();
+
+    expect(isNativeTrackLabShell()).toBe(true);
   });
 
   it('skips bridge installation on a non-native web browser', async () => {

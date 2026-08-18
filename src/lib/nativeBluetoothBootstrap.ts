@@ -13,6 +13,16 @@ type CompatibilityCapacitor = {
   isNativePlatform?: () => boolean;
 };
 
+type NativeBridgeWindow = Window & {
+  WEBVIEW_SERVER_URL?: unknown;
+  androidBridge?: unknown;
+  webkit?: {
+    messageHandlers?: {
+      bridge?: unknown;
+    };
+  };
+};
+
 type NativeBluetoothBootstrapOptions = {
   installBridge?: () => Promise<boolean>;
   native?: boolean;
@@ -57,6 +67,15 @@ export function isNativeTrackLabShell() {
   }
 
   if (currentUserAgent().includes('TrackLabBMX-iOS')) {
+    return true;
+  }
+
+  const nativeBridgeWindow = currentWindow() as NativeBridgeWindow | undefined;
+  if (
+    nativeBridgeWindow?.webkit?.messageHandlers?.bridge
+    || nativeBridgeWindow?.androidBridge
+    || typeof nativeBridgeWindow?.WEBVIEW_SERVER_URL === 'string'
+  ) {
     return true;
   }
 
@@ -113,7 +132,10 @@ function reportFailure(
 
 async function defaultBridgeInstaller() {
   const { installCapacitorBluetoothBridge } = await import('./capacitorBluetoothBridge');
-  return installCapacitorBluetoothBridge();
+  // bootstrapNativeBluetooth already verified that this is a native shell.
+  // Passing that result through prevents a transient Capacitor global timing
+  // mismatch from incorrectly downgrading the installed iPad app to Safari.
+  return installCapacitorBluetoothBridge({ nativeShell: true });
 }
 
 /**

@@ -2135,7 +2135,10 @@ test('straight sprint restores and saves a separate camera for each distance', a
   await page.getByLabel('Sprint distance').selectOption('500');
   await expect(page.getByText('Angle 50 deg', { exact: true })).toBeVisible();
   await expect(page.getByText('Heading 200 deg', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Tilt map up', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Edit map' }).click();
   await page.getByRole('button', { name: 'Tilt map up', exact: true }).click();
+  await page.locator('.mapping-section').getByRole('button', { name: 'View', exact: true }).click();
   await expect.poll(() => preferences.earthCamerasByTrack[`${trackId}:sprint:500ft`]?.angle).toBe(55);
   expect(preferences.earthCamerasByTrack[`${trackId}:sprint:100ft`]?.angle).toBe(10);
 
@@ -4193,7 +4196,7 @@ test('live race with mapped pedal zones stays active through UCI gate cadence', 
     await expect(page.getByRole('button', { name: 'Lock View', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Unlock rider panel', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Resize rider overlay', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Rotate map left', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Rotate map left', exact: true })).toHaveCount(0);
     await expect(page.locator('.race-staging-countdown strong')).toHaveText(/20|1[8-9]/);
     await expect(page.locator('.start-tree-light')).toHaveCount(0);
     await expect(page.locator('.rider-stat.ghost')).toContainText('Ghost 1 / 0%');
@@ -4490,7 +4493,7 @@ test('two-bike live race stays fullscreen through UCI cadence with no pedal zone
 
     await page.getByRole('button', { name: 'Lock View', exact: true }).click();
     await expect(page.getByRole('button', { name: 'View Locked', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('button', { name: 'Rotate map left', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Rotate map left', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Lock rider panel position and size', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Unlock rider panel', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('button', { name: 'Resize rider overlay', exact: true })).toHaveCount(0);
@@ -4740,6 +4743,8 @@ test('demo rider names and the last track view restore from the signed-in accoun
   await expect(page.getByLabel('Name for player 2')).toHaveValue('Jordan Lee');
   await expect(page.getByText('Angle 47 deg', { exact: true })).toBeVisible();
   await expect(page.getByText('Heading 180 deg', { exact: true })).toBeVisible();
+  await expect(page.getByText('Coach', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Tilt map up', exact: true })).toHaveCount(0);
 
   await page.getByLabel('Name for player 1').fill('Gate Master');
   await page.getByLabel('Name for player 2').fill('Rhythm Queen');
@@ -4748,8 +4753,10 @@ test('demo rider names and the last track view restore from the signed-in accoun
     mimeType: 'image/png',
     buffer: tinyPngBuffer(),
   });
+  await page.getByRole('button', { name: 'Edit map' }).click();
   await page.getByRole('button', { name: 'Tilt map up', exact: true }).click();
   await page.getByRole('button', { name: 'Rotate map right', exact: true }).click();
+  await page.locator('.mapping-section').getByRole('button', { name: 'View', exact: true }).click();
 
   await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[1]).toBe('Gate Master');
   await expect.poll(() => cloudRaceViewPreferences.demoRiderNames[2]).toBe('Rhythm Queen');
