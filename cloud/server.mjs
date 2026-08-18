@@ -76,6 +76,7 @@ const websocketPath = '/multiplayer';
 const databaseRequired = process.env.TRACKLAB_REQUIRE_DATABASE === '1';
 
 const clients = new Map();
+const trainingHistoryStreams = new Map();
 const rooms = new Map();
 const challenges = new Map();
 const matchInvites = new Map();
@@ -2049,6 +2050,11 @@ function projectClubTrainingSession(session, membership) {
         : [],
     }))
     : [];
+  const reactionTimesByPlayer = details.reactionTimesByPlayer && typeof details.reactionTimesByPlayer === 'object'
+    ? Object.fromEntries(Object.entries(details.reactionTimesByPlayer).filter(([playerId]) => (
+      playerIds.has(Number(playerId))
+    )))
+    : {};
   const distanceMeters = Math.max(0, ...summaries.map((summary) => finiteNumber(summary.distanceMeters, 0)));
   const finishTimeMs = Math.max(0, ...summaries.map((summary) => finiteNumber(summary.finishTimeMs, 0)));
   return {
@@ -2067,6 +2073,7 @@ function projectClubTrainingSession(session, membership) {
       ...details,
       summaries,
       zoneResults,
+      reactionTimesByPlayer,
       events: [],
       club: { id: membership.clubId, name: membership.clubName, role: 'athlete' },
     },
@@ -2499,6 +2506,7 @@ function scopeTrainingSessionToClubTabletAthlete(trainingSession, tabletSession,
   const selectedMetrics = (Array.isArray(details.selectedMetrics) ? details.selectedMetrics : [])
     .filter((metric) => ['cadence', 'speed', 'power', 'reaction'].includes(metric))
     .slice(0, 4);
+  const reactionTime = finiteNumber(details.reactionTimesByPlayer?.[selectedPlayerId], Number.NaN);
   const sprintDistanceFeet = Math.round(finiteNumber(details.sprintDistanceFeet, 0));
   const sprintAirSetting = Math.round(finiteNumber(details.sprintAirSetting, 0));
   const validSprint = (
@@ -2513,6 +2521,9 @@ function scopeTrainingSessionToClubTabletAthlete(trainingSession, tabletSession,
     details: {
       summaries: [selectedSummary],
       zoneResults: sanitizeClubTabletZoneResults(details.zoneResults, selectedPlayerId),
+      reactionTimesByPlayer: Number.isFinite(reactionTime)
+        ? { [selectedPlayerId]: boundedNumber(reactionTime, 0, 60_000) }
+        : {},
       events: [],
       selectedMetrics,
       lapCount: Math.round(boundedNumber(details.lapCount, 1, 20, 1)),
@@ -3870,6 +3881,80 @@ function send(client, payload) {
     client.socket.send(JSON.stringify(payload));
     cloudTelemetry.increment('tracklab_websocket_messages_total', { direction: 'outbound' });
   }
+}
+
+function trainingSessionStudioRiderIds(session) {
+  const riderIds = new Set();
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    Object.entries(value).forEach(([key, nested]) => {
+      if ((key === 'riderId' || key === 'studioRiderId') && typeof nested === 'string' && nested.trim()) {
+        riderIds.add(nested.trim());
+      } else {
+        visit(nested);
+      }
+    });
+  };
+  visit(session?.details);
+  return riderIds;
+}
+
+async function trainingHistoryRecipients(profileKey, session, clubMembership = null) {
+  const recipients = new Set([profileKey]);
+  if (clubMembership?.ownerProfileKey) recipients.add(clubMembership.ownerProfileKey);
+
+  try {
+    const clubState = await persistence.loadClubConnectState(profileKey);
+    const riderIds = trainingSessionStudioRiderIds(session);
+    (clubState.ownedClub?.members ?? []).forEach((member) => {
+      if (
+        riderIds.has(member.studioRiderId)
+        && member.status === 'claimed'
+        && member.athleteProfileKey
+      ) {
+        recipients.add(member.athleteProfileKey);
+      }
+    });
+  } catch (error) {
+    cloudTelemetry.warn('training_history.recipient_lookup_failed', { profileKey, error });
+  }
+  return recipients;
+}
+
+function trainingHistoryEvent(response, event, payload) {
+  if (response.destroyed || response.writableEnded) return false;
+  try {
+    response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function notifyTrainingHistoryProfiles(profileKeys, session) {
+  const targets = new Set([...profileKeys].filter(Boolean));
+  const payload = {
+    sessionId: session.id,
+    activityType: session.activityType,
+    startedAt: session.startedAt,
+    updatedAt: session.updatedAt ?? Date.now(),
+  };
+  targets.forEach((profileKey) => {
+    const streams = trainingHistoryStreams.get(profileKey);
+    streams?.forEach((response) => {
+      if (!trainingHistoryEvent(response, 'training-history-updated', payload)) {
+        streams.delete(response);
+      }
+    });
+    if (streams?.size === 0) trainingHistoryStreams.delete(profileKey);
+  });
+  clients.forEach((client) => {
+    if (targets.has(client.guestKey)) send(client, { type: 'training-history-updated', ...payload });
+  });
 }
 
 function visibleRoomsForClient(client) {
@@ -6317,6 +6402,10 @@ async function serveStatic(request, response) {
       writeJson(response, 503, { error: 'Training history storage is temporarily unavailable.' });
       return;
     }
+    notifyTrainingHistoryProfiles(new Set([
+      identity.profileKey,
+      tabletSession.ownerProfileKey,
+    ]), saved);
     writeJson(response, existing ? 200 : 201, {
       session: publicTrainingSession(saved, identity.member.status === 'claimed' ? 'athlete' : 'owner'),
       replayed: Boolean(existing),
@@ -6835,6 +6924,32 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/training-sessions/stream') {
+    const session = await requireAuthSession(request, response);
+    if (!session) return;
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const profileKey = authProfileKey(session.user);
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    response.flushHeaders?.();
+    const streams = trainingHistoryStreams.get(profileKey) ?? new Set();
+    streams.add(response);
+    trainingHistoryStreams.set(profileKey, streams);
+    trainingHistoryEvent(response, 'ready', { connectedAt: Date.now() });
+    response.once('close', () => {
+      streams.delete(response);
+      if (streams.size === 0) trainingHistoryStreams.delete(profileKey);
+    });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/training-sessions') {
     const session = await requireAuthSession(request, response);
     if (!session) {
@@ -6876,6 +6991,7 @@ async function serveStatic(request, response) {
       const requestedClubId = sanitizeText(payload?.clubSession?.clubId, '', 160);
       const requestedStudioRiderId = sanitizeText(payload?.clubSession?.studioRiderId, '', 160);
       let clubAttribution = {};
+      let clubMembership = null;
       if (requestedClubId || requestedStudioRiderId) {
         const clubState = await persistence.loadClubConnectState(profileKey);
         const membership = clubState.memberships.find((candidate) => (
@@ -6886,6 +7002,7 @@ async function serveStatic(request, response) {
           writeJson(response, 403, { error: 'Choose an active Club Connect membership before saving this as club training.' });
           return;
         }
+        clubMembership = membership;
         clubAttribution = {
           _clubId: membership.clubId,
           _clubName: membership.clubName,
@@ -6901,6 +7018,10 @@ async function serveStatic(request, response) {
         writeJson(response, 503, { error: 'Training history storage is temporarily unavailable.' });
         return;
       }
+      notifyTrainingHistoryProfiles(
+        await trainingHistoryRecipients(profileKey, saved, clubMembership),
+        saved,
+      );
       writeJson(response, 201, {
         session: publicTrainingSession(saved, requestedClubId ? 'athlete' : undefined),
         persistence: persistence.persistenceEnabled(),
@@ -7419,6 +7540,16 @@ const websocketHeartbeat = setInterval(() => {
 }, 30_000);
 websocketHeartbeat.unref();
 
+const trainingHistoryStreamHeartbeat = setInterval(() => {
+  trainingHistoryStreams.forEach((streams, profileKey) => {
+    streams.forEach((response) => {
+      if (!trainingHistoryEvent(response, 'heartbeat', { at: Date.now() })) streams.delete(response);
+    });
+    if (streams.size === 0) trainingHistoryStreams.delete(profileKey);
+  });
+}, 20_000);
+trainingHistoryStreamHeartbeat.unref();
+
 // Club bike access is intentionally short lived. Prune independently of HTTP
 // polling so a backgrounded athlete tab cannot retain a racer seat after it
 // stops renewing its selected club-bike assignment.
@@ -7443,12 +7574,16 @@ async function shutdown(signal) {
   cloudTelemetry.info('service.shutdown_started', { signal });
 
   clearInterval(websocketHeartbeat);
+  clearInterval(trainingHistoryStreamHeartbeat);
   clearInterval(clubLiveAccessMaintenance);
   clearInterval(persistenceMaintenance);
   voteTimers.forEach(clearTimeout);
   routeSelectTimers.forEach(clearTimeout);
   voteTimers.clear();
   routeSelectTimers.clear();
+
+  trainingHistoryStreams.forEach((streams) => streams.forEach((response) => response.end()));
+  trainingHistoryStreams.clear();
 
   wss.clients.forEach((socket) => socket.close(1001, 'Server shutting down'));
   const forceExit = setTimeout(() => {

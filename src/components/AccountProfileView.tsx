@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Bike,
@@ -29,6 +29,9 @@ import {
 import {
   downloadTrainingSession,
   loadTrainingHistory,
+  trainingSessionRaceSummaries,
+  trainingSessionReactionTimes,
+  trainingSessionZoneResults,
   type TrainingHistoryResponse,
 } from '../lib/trainingHistory';
 import type { AuthUser } from '../lib/auth';
@@ -160,6 +163,65 @@ function privatePeakPower(session: TrainingSession) {
   return peak > 0 ? Math.round(peak) : null;
 }
 
+function recordedNumber(value: number | null | undefined, digits = 1) {
+  return value != null && Number.isFinite(value) ? value.toFixed(digits) : '—';
+}
+
+function recordedMilliseconds(value: number | null | undefined) {
+  return value != null && Number.isFinite(value) ? `${Math.round(value)} ms` : '—';
+}
+
+function recordedSpeed(value: number | null | undefined) {
+  return value != null && Number.isFinite(value)
+    ? `${(value / 1.609344).toFixed(1)} mph (${value.toFixed(1)} kph)`
+    : '—';
+}
+
+function CompleteRecordedMetrics({ session }: { session: TrainingSession }) {
+  const summaries = trainingSessionRaceSummaries(session);
+  const zones = trainingSessionZoneResults(session);
+  const reactionTimes = trainingSessionReactionTimes(session);
+  if (summaries.length === 0 && zones.length === 0) return null;
+  const riderNames = new Map(summaries.map((summary) => [summary.playerId, summary.riderName ?? `Rider ${summary.playerId}`]));
+
+  return (
+    <details style={{ marginTop: 7 }}>
+      <summary style={{ color: '#344054', cursor: 'pointer', fontSize: 12, fontWeight: 800 }}>
+        Complete recorded metrics{zones.length > 0 ? ` · ${zones.length} mapped pedal ${zones.length === 1 ? 'zone' : 'zones'}` : ''}
+      </summary>
+      <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+        {summaries.map((summary) => (
+          <div key={`summary-${summary.playerId}`} style={{ border: '1px solid #d0d5dd', borderRadius: 8, display: 'grid', gap: 2, padding: 8 }}>
+            <strong>{summary.riderName ?? `Rider ${summary.playerId}`}</strong>
+            <small>
+              Rank {summary.rank ?? '—'} · Finish {recordedMilliseconds(summary.finishTimeMs)} · 30 ft {recordedMilliseconds(summary.thirtyFootTimeMs)} · Reaction {recordedMilliseconds(reactionTimes[String(summary.playerId)])}
+            </small>
+            <small>Distance {recordedNumber(summary.distanceMeters, 2)} m · {summary.sampleCount ?? 0} analysis points</small>
+            <small>Speed avg/top: {recordedSpeed(summary.averageSpeedKph)} / {recordedSpeed(summary.topSpeedKph)}</small>
+            <small>Cadence avg/top: {recordedNumber(summary.averageCadence)} / {recordedNumber(summary.topCadence)} rpm</small>
+            <small>Power avg/top: {recordedNumber(summary.averageWatts, 0)} / {recordedNumber(summary.topWatts, 0)} W · private</small>
+          </div>
+        ))}
+        {zones.map((zone) => (
+          <div key={zone.zoneId} style={{ border: '1px solid #d0d5dd', borderRadius: 8, display: 'grid', gap: 5, padding: 8 }}>
+            <strong>{zone.zoneName || zone.zoneId}</strong>
+            <small>{zone.zoneType} · {recordedNumber(zone.startMeter, 2)}–{recordedNumber(zone.endMeter, 2)} m · ID {zone.zoneId}</small>
+            {zone.riders.map((rider) => (
+              <div key={`${zone.zoneId}-${rider.playerId}`} style={{ borderTop: '1px solid #eaecf0', display: 'grid', gap: 2, paddingTop: 5 }}>
+                <small><b>{riderNames.get(rider.playerId) ?? `Rider ${rider.playerId}`}</b> · {rider.sampleCount} analysis points</small>
+                <small>Entry/exit/duration: {recordedMilliseconds(rider.entryElapsedMs)} / {recordedMilliseconds(rider.exitElapsedMs)} / {recordedMilliseconds(rider.durationMs)}</small>
+                <small>Speed avg/top: {recordedSpeed(rider.averageSpeedKph)} / {recordedSpeed(rider.topSpeedKph)}</small>
+                <small>Cadence avg/top: {recordedNumber(rider.averageCadence)} / {recordedNumber(rider.topCadence)} rpm</small>
+                <small>Power avg/top: {recordedNumber(rider.averageWatts, 0)} / {recordedNumber(rider.topWatts, 0)} W · private</small>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function editableAccountName(value: string) {
   const match = value.trim().match(/^(.+?)\s*\(([^()]+)\)$/u);
   return {
@@ -199,24 +261,59 @@ export function AccountProfileView({
   const [clubPhotoDraft, setClubPhotoDraft] = useState(profile.photoUrl);
   const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
   const [clubBusyId, setClubBusyId] = useState<string | null>(null);
+  const historyRequestRef = useRef(0);
 
-  const refresh = useCallback(() => {
+  const loadHistory = useCallback((showLoading: boolean) => {
     const range = monthRange(month);
-    setStatus('loading');
-    setMessage('Loading your training history…');
+    const requestId = historyRequestRef.current + 1;
+    historyRequestRef.current = requestId;
+    if (showLoading) {
+      setStatus('loading');
+      setMessage('Loading your training history…');
+    }
     void loadTrainingHistory(range.from, range.to)
       .then((next) => {
+        if (historyRequestRef.current !== requestId) return;
         setHistory(next);
         setStatus('ready');
         setMessage(next.sessions.length > 0 ? '' : 'No saved training sessions in this month yet.');
       })
       .catch((error: Error) => {
+        if (historyRequestRef.current !== requestId) return;
         setStatus('error');
         setMessage(`Training history is temporarily unavailable. ${error.message}`);
       });
   }, [month]);
 
+  const refresh = useCallback(() => loadHistory(true), [loadHistory]);
+  const refreshQuietly = useCallback(() => loadHistory(false), [loadHistory]);
+
   useEffect(() => refresh(), [historyRevision, refresh]);
+
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return undefined;
+    const stream = new EventSource('/api/training-sessions/stream');
+    const handleUpdate = () => refreshQuietly();
+    stream.addEventListener('training-history-updated', handleUpdate);
+    return () => {
+      stream.removeEventListener('training-history-updated', handleUpdate);
+      stream.close();
+    };
+  }, [refreshQuietly]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshQuietly();
+    };
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    const fallback = window.setInterval(refreshWhenVisible, 10_000);
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.clearInterval(fallback);
+    };
+  }, [refreshQuietly]);
 
   const refreshClub = useCallback(() => {
     setClubStatus('loading');
@@ -522,6 +619,7 @@ export function AccountProfileView({
                 {privatePeakPower(session) != null && (
                   <small>Private power · {privatePeakPower(session)} W peak · visible only to you</small>
                 )}
+                <CompleteRecordedMetrics session={session} />
               </div>
               <div className="training-session-downloads">
                 <button type="button" onClick={() => downloadTrainingSession(session, 'json')}><Download size={15} /> JSON</button>
@@ -537,7 +635,7 @@ export function AccountProfileView({
           )}
         </section>
       </div>
-      <small className="account-history-sync-note">Calendar month: {monthKey(month)} · Account history is stored by your signed-in profile and available across browsers.</small>
+      <small className="account-history-sync-note">Calendar month: {monthKey(month)} · Live cloud sync is active. Completed sessions appear across signed-in devices automatically; JSON and CSV include the full saved record.</small>
     </div>
   );
 }

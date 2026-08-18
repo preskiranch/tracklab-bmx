@@ -1,4 +1,4 @@
-import type { TrainingActivityType, TrainingSession } from '../types';
+import type { RaceSummaryEntry, RaceZoneResult, TrainingActivityType, TrainingSession } from '../types';
 import { readStoredClubTabletSession } from './clubTabletStorage';
 
 export type TrainingHistoryResponse = {
@@ -22,6 +22,41 @@ export type ClubTrainingSelection = {
   clubId: string;
   studioRiderId: string;
 };
+
+export type TrainingSessionRaceSummary = Partial<RaceSummaryEntry> & {
+  playerId: RaceSummaryEntry['playerId'];
+  riderId?: string;
+  riderName?: string;
+};
+
+export function trainingSessionRaceSummaries(session: TrainingSession): TrainingSessionRaceSummary[] {
+  const summaries = (session.details as { summaries?: unknown }).summaries;
+  if (!Array.isArray(summaries)) return [];
+  return summaries.filter((summary): summary is TrainingSessionRaceSummary => Boolean(
+    summary
+    && typeof summary === 'object'
+    && Number.isFinite(Number((summary as TrainingSessionRaceSummary).playerId)),
+  ));
+}
+
+export function trainingSessionZoneResults(session: TrainingSession): RaceZoneResult[] {
+  const zoneResults = (session.details as { zoneResults?: unknown }).zoneResults;
+  if (!Array.isArray(zoneResults)) return [];
+  return zoneResults.filter((zone): zone is RaceZoneResult => Boolean(
+    zone
+    && typeof zone === 'object'
+    && typeof (zone as RaceZoneResult).zoneId === 'string'
+    && Array.isArray((zone as RaceZoneResult).riders),
+  ));
+}
+
+export function trainingSessionReactionTimes(session: TrainingSession): Record<string, number> {
+  const reactionTimes = (session.details as { reactionTimesByPlayer?: unknown }).reactionTimesByPlayer;
+  if (!reactionTimes || typeof reactionTimes !== 'object' || Array.isArray(reactionTimes)) return {};
+  return Object.fromEntries(Object.entries(reactionTimes).flatMap(([playerId, value]) => (
+    Number.isFinite(Number(value)) ? [[playerId, Number(value)]] : []
+  )));
+}
 
 function trainingHistoryUrl(from?: number, to?: number) {
   const params = new URLSearchParams();
@@ -156,6 +191,81 @@ function csvCell(value: unknown) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+export function trainingSessionCsv(session: TrainingSession) {
+  const reactionTimes = trainingSessionReactionTimes(session);
+  const summaryRows = trainingSessionRaceSummaries(session).map((summary) => {
+    return [
+      summary.playerId,
+      summary.riderId ?? '',
+      summary.riderName ?? '',
+      summary.rank ?? '',
+      summary.finishTimeMs ?? '',
+      summary.thirtyFootTimeMs ?? '',
+      reactionTimes[String(summary.playerId)] ?? '',
+      summary.distanceMeters ?? '',
+      summary.sampleCount ?? '',
+      summary.topSpeedKph ?? '',
+      summary.averageSpeedKph ?? '',
+      summary.topCadence ?? '',
+      summary.averageCadence ?? '',
+      summary.topWatts ?? '',
+      summary.averageWatts ?? '',
+    ];
+  });
+  const zoneRows = trainingSessionZoneResults(session).flatMap((zone) => zone.riders.map((rider) => [
+    zone.zoneId,
+    zone.zoneName,
+    zone.zoneType,
+    zone.startMeter,
+    zone.endMeter,
+    rider.playerId,
+    rider.sampleCount,
+    rider.entryElapsedMs ?? '',
+    rider.exitElapsedMs ?? '',
+    rider.durationMs ?? '',
+    rider.topSpeedKph ?? '',
+    rider.averageSpeedKph ?? '',
+    rider.topCadence ?? '',
+    rider.averageCadence ?? '',
+    rider.topWatts ?? '',
+    rider.averageWatts ?? '',
+  ]));
+  const rows: Array<[string, unknown]> = [
+    ['Session ID', session.id],
+    ['Activity', session.activityType],
+    ['Title', session.title],
+    ['Started', new Date(session.startedAt).toISOString()],
+    ['Ended', new Date(session.endedAt).toISOString()],
+    ['Duration seconds', session.durationMs / 1_000],
+    ['Distance meters', Number(session.distanceMeters.toFixed(2))],
+    ['Track', session.trackName ?? ''],
+    ['Training owner', session.club ? `${session.club.name} / ${session.club.riderName}` : 'Personal'],
+    ['Details', session.details],
+  ];
+  const sections = [`Field,Value\n${rows.map((row) => row.map(csvCell).join(',')).join('\n')}`];
+  if (summaryRows.length > 0) {
+    sections.push([
+      [
+        'Player ID', 'Studio rider ID', 'Rider', 'Rank', 'Finish ms', '30 ft ms', 'Reaction ms',
+        'Distance meters', 'Analysis points', 'Top speed kph', 'Average speed kph',
+        'Top cadence rpm', 'Average cadence rpm', 'Top watts', 'Average watts',
+      ].map(csvCell).join(','),
+      ...summaryRows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n'));
+  }
+  if (zoneRows.length > 0) {
+    sections.push([
+      [
+        'Zone ID', 'Zone', 'Zone type', 'Start meter', 'End meter', 'Player ID', 'Analysis points',
+        'Entry ms', 'Exit ms', 'Duration ms', 'Top speed kph', 'Average speed kph',
+        'Top cadence rpm', 'Average cadence rpm', 'Top watts', 'Average watts',
+      ].map(csvCell).join(','),
+      ...zoneRows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n'));
+  }
+  return `${sections.join('\n\n')}\n`;
+}
+
 export function downloadTrainingSession(session: TrainingSession, format: 'json' | 'csv') {
   const day = new Date(session.startedAt).toISOString().slice(0, 10);
   const base = `tracklab-${session.activityType}-${day}-${session.id.replace(/[^a-z0-9_-]+/gi, '-').slice(0, 48)}`;
@@ -163,17 +273,5 @@ export function downloadTrainingSession(session: TrainingSession, format: 'json'
     downloadFile(`${base}.json`, 'application/json', `${JSON.stringify(session, null, 2)}\n`);
     return;
   }
-  const rows: Array<[string, unknown]> = [
-    ['Session ID', session.id],
-    ['Activity', session.activityType],
-    ['Title', session.title],
-    ['Started', new Date(session.startedAt).toISOString()],
-    ['Ended', new Date(session.endedAt).toISOString()],
-    ['Duration seconds', Math.round(session.durationMs / 1_000)],
-    ['Distance meters', Number(session.distanceMeters.toFixed(2))],
-    ['Track', session.trackName ?? ''],
-    ['Training owner', session.club ? `${session.club.name} / ${session.club.riderName}` : 'Personal'],
-    ['Details', session.details],
-  ];
-  downloadFile(`${base}.csv`, 'text/csv;charset=utf-8', `Field,Value\n${rows.map((row) => row.map(csvCell).join(',')).join('\n')}\n`);
+  downloadFile(`${base}.csv`, 'text/csv;charset=utf-8', trainingSessionCsv(session));
 }

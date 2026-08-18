@@ -4657,6 +4657,7 @@ export default function App() {
       details: {
         summaries: trainingSummaries,
         zoneResults: raceCapture.zoneResults ?? [],
+        reactionTimesByPlayer: raceCapture.reactionTimesByPlayer,
         events: raceCapture.events,
         selectedMetrics: raceCapture.selectedMetrics,
         lapCount: isLoopTrack ? lapCount : 1,

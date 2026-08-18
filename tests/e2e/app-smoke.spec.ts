@@ -5113,9 +5113,75 @@ test('club athletes see only their own connection and never the studio roster', 
     });
   });
   await page.route('**/api/training-sessions*', async (route) => {
+    if (new URL(route.request().url()).pathname.endsWith('/stream')) {
+      await route.abort();
+      return;
+    }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ sessions: [], totals: {} }),
+      body: JSON.stringify({
+        sessions: [{
+          id: 'club:preski:phone-zone-metrics',
+          activityType: 'bmx-race',
+          title: 'Mapped interval phone sync',
+          startedAt: now - 9_000,
+          endedAt: now - 1_000,
+          durationMs: 8_000,
+          distanceMeters: 44.2,
+          trackId: 'mapped-interval',
+          trackName: 'Mapped interval',
+          source: 'live',
+          createdAt: now - 9_000,
+          updatedAt: now - 1_000,
+          club: {
+            id: 'club-preski-ranch',
+            name: 'Preski Ranch LLC',
+            studioRiderId: 'studio-rasheen',
+            riderName: 'Rasheen “The Machine” Hicks',
+            role: 'athlete',
+          },
+          details: {
+            summaries: [{
+              playerId: 1,
+              riderId: 'studio-rasheen',
+              riderName: 'Rasheen “The Machine” Hicks',
+              rank: 1,
+              finishTimeMs: 8_000,
+              thirtyFootTimeMs: 1_640,
+              distanceMeters: 44.2,
+              sampleCount: 32,
+              topSpeedKph: 45.4,
+              averageSpeedKph: 39.2,
+              topCadence: 182,
+              averageCadence: 168,
+              topWatts: 1_120,
+              averageWatts: 875,
+            }],
+            reactionTimesByPlayer: { 1: 178 },
+            zoneResults: [{
+              zoneId: 'mapped-pedal-zone',
+              zoneName: 'First straight drive',
+              zoneType: 'pedal',
+              startMeter: 4.5,
+              endMeter: 22.1,
+              riders: [{
+                playerId: 1,
+                sampleCount: 12,
+                entryElapsedMs: 110,
+                exitElapsedMs: 490,
+                durationMs: 380,
+                topSpeedKph: 44.8,
+                averageSpeedKph: 38.6,
+                topCadence: 181,
+                averageCadence: 169.5,
+                topWatts: 1_100,
+                averageWatts: 890.5,
+              }],
+            }],
+          },
+        }],
+        totals: {},
+      }),
     });
   });
 
@@ -5133,6 +5199,14 @@ test('club athletes see only their own connection and never the studio roster', 
   await expect(clubConnect.getByRole('button', { name: /Invite|New link|Remove access/ })).toHaveCount(0);
   await expect(clubConnect.getByText('Bobby', { exact: true })).toHaveCount(0);
   await expect(clubConnect.getByText('Cali', { exact: true })).toHaveCount(0);
+
+  const recordedMetrics = page.getByText(/Complete recorded metrics · 1 mapped pedal zone/);
+  await expect(recordedMetrics).toBeVisible();
+  await recordedMetrics.click();
+  await expect(page.getByText('First straight drive', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Entry\/exit\/duration: 110 ms \/ 490 ms \/ 380 ms/)).toBeVisible();
+  await expect(page.getByText(/Cadence avg\/top: 169.5 \/ 181.0 rpm/)).toBeVisible();
+  await expect(page.getByText(/Power avg\/top: 891 \/ 1100 W · private/)).toBeVisible();
 
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Club Live Monitor', exact: true })).toHaveCount(0);

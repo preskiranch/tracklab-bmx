@@ -8,11 +8,71 @@ let baseUrl = '';
 let cookie = '';
 let secondaryCookie = '';
 const testSockets = new Set<WebSocket>();
+const testEventStreams = new Set<AbortController>();
 
 type TestSocket = {
   socket: WebSocket;
   messages: Array<Record<string, any>>;
 };
+
+type TestEventStream = {
+  controller: AbortController;
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+  decoder: TextDecoder;
+  buffer: string;
+};
+
+async function openTrainingHistoryStream(authCookie: string): Promise<TestEventStream> {
+  const controller = new AbortController();
+  const response = await fetch(`${baseUrl}/api/training-sessions/stream`, {
+    headers: { Cookie: authCookie, Accept: 'text/event-stream' },
+    signal: controller.signal,
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('content-type')).toContain('text/event-stream');
+  if (!response.body) throw new Error('Training history event stream did not include a body.');
+  testEventStreams.add(controller);
+  return {
+    controller,
+    reader: response.body.getReader(),
+    decoder: new TextDecoder(),
+    buffer: '',
+  };
+}
+
+async function waitForTrainingHistoryEvent(
+  stream: TestEventStream,
+  eventName: string,
+  timeoutMs = 3_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const separator = stream.buffer.indexOf('\n\n');
+    if (separator >= 0) {
+      const block = stream.buffer.slice(0, separator);
+      stream.buffer = stream.buffer.slice(separator + 2);
+      const event = block.match(/^event:\s*(.+)$/m)?.[1]?.trim();
+      const data = block.match(/^data:\s*(.+)$/m)?.[1]?.trim();
+      if (event === eventName) return data ? JSON.parse(data) : {};
+      continue;
+    }
+    const remaining = Math.max(1, deadline - Date.now());
+    const chunk = await Promise.race([
+      stream.reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error(`Timed out waiting for ${eventName}.`)), remaining);
+      }),
+    ]);
+    if (chunk.done) throw new Error(`Training history stream ended before ${eventName}.`);
+    stream.buffer += stream.decoder.decode(chunk.value, { stream: true }).replace(/\r\n/g, '\n');
+  }
+  throw new Error(`Timed out waiting for ${eventName}.`);
+}
+
+function closeTrainingHistoryStream(stream: TestEventStream) {
+  stream.controller.abort();
+  testEventStreams.delete(stream.controller);
+}
 
 async function openTestSocket(authCookie: string): Promise<TestSocket> {
   const socket = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/multiplayer`, {
@@ -242,6 +302,8 @@ beforeAll(async () => {
 }, 35_000);
 
 afterAll(async () => {
+  testEventStreams.forEach((controller) => controller.abort());
+  testEventStreams.clear();
   testSockets.forEach((socket) => socket.terminate());
   testSockets.clear();
   if (!child || child.exitCode != null) {
@@ -799,6 +861,126 @@ describe('cloud API trust boundaries', () => {
       expect.objectContaining({ playerId: 1, topWatts: 900 }),
     ]);
     expect(athleteHistoryPayload.sessions[0].details.events).toEqual([]);
+
+    const athleteHistoryStream = await openTrainingHistoryStream(athleteCookie);
+    const immediateSessionId = `club-race-live-sync-${now}`;
+    cookie = ownerCookie;
+    const immediateSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: immediateSessionId,
+          activityType: 'bmx-race',
+          title: 'Mapped interval live sync',
+          startedAt: now - 900,
+          endedAt: now - 100,
+          durationMs: 800,
+          distanceMeters: 44.2,
+          trackId: 'mapped-interval',
+          trackName: 'Mapped interval',
+          details: {
+            summaries: [
+              {
+                playerId: 1,
+                riderId: 'studio-maya',
+                riderName: 'Maya Torres',
+                rank: 1,
+                finishTimeMs: 800,
+                thirtyFootTimeMs: 420,
+                distanceMeters: 44.2,
+                sampleCount: 18,
+                topSpeedKph: 45.4,
+                averageSpeedKph: 39.2,
+                topCadence: 182,
+                averageCadence: 168,
+                topWatts: 1_120,
+                averageWatts: 875,
+              },
+              { playerId: 2, riderId: 'studio-jordan', riderName: 'Jordan Lee', topWatts: 980 },
+            ],
+            reactionTimesByPlayer: { 1: 178, 2: 204 },
+            zoneResults: [{
+              zoneId: 'mapped-pedal-zone',
+              zoneName: 'First straight drive',
+              zoneType: 'pedal',
+              startMeter: 4.5,
+              endMeter: 22.1,
+              riders: [
+                {
+                  playerId: 1,
+                  sampleCount: 12,
+                  entryElapsedMs: 110,
+                  exitElapsedMs: 490,
+                  durationMs: 380,
+                  topSpeedKph: 44.8,
+                  averageSpeedKph: 38.6,
+                  topCadence: 181,
+                  averageCadence: 169.5,
+                  topWatts: 1_100,
+                  averageWatts: 890.5,
+                },
+                { playerId: 2, sampleCount: 10, topWatts: 960 },
+              ],
+            }],
+            events: [{ label: 'Private multi-rider event' }],
+          },
+        },
+      }),
+    });
+    expect(immediateSave.status).toBe(201);
+    const pushedUpdate = await waitForTrainingHistoryEvent(athleteHistoryStream, 'training-history-updated');
+    expect(pushedUpdate).toMatchObject({
+      sessionId: immediateSessionId,
+      activityType: 'bmx-race',
+    });
+    expect(JSON.stringify(pushedUpdate)).not.toMatch(/Maya|Jordan|watts|cadence/i);
+    closeTrainingHistoryStream(athleteHistoryStream);
+
+    cookie = athleteCookie;
+    const immediateHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
+    expect(immediateHistory.status).toBe(200);
+    const immediateHistoryPayload = await immediateHistory.json();
+    const immediateAthleteSession = immediateHistoryPayload.sessions.find(
+      (session: { id: string }) => session.id.includes(immediateSessionId),
+    );
+    expect(immediateAthleteSession).toMatchObject({
+      details: {
+        summaries: [expect.objectContaining({
+          playerId: 1,
+          riderId: 'studio-maya',
+          topSpeedKph: 45.4,
+          averageSpeedKph: 39.2,
+          topCadence: 182,
+          averageCadence: 168,
+          topWatts: 1_120,
+          averageWatts: 875,
+        })],
+        reactionTimesByPlayer: { 1: 178 },
+        zoneResults: [{
+          zoneId: 'mapped-pedal-zone',
+          zoneName: 'First straight drive',
+          zoneType: 'pedal',
+          startMeter: 4.5,
+          endMeter: 22.1,
+          riders: [{
+            playerId: 1,
+            sampleCount: 12,
+            entryElapsedMs: 110,
+            exitElapsedMs: 490,
+            durationMs: 380,
+            topSpeedKph: 44.8,
+            averageSpeedKph: 38.6,
+            topCadence: 181,
+            averageCadence: 169.5,
+            topWatts: 1_100,
+            averageWatts: 890.5,
+          }],
+        }],
+        events: [],
+      },
+    });
+    expect(JSON.stringify(immediateAthleteSession)).not.toContain('studio-jordan');
+    expect(JSON.stringify(immediateAthleteSession)).not.toContain('Jordan Lee');
 
     const athleteClubSessionId = `athlete-club-sprint-${now}`;
     const athleteClubSave = await api('/api/training-sessions', {
