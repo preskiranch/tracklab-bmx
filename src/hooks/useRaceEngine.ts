@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createInitialRiders, stepRiders, type BranchChoicesByPlayer } from '../game/physics';
 import { nextRaceFinishDeadline } from '../lib/raceLifecycle';
+import { reportedBmxTopSpeedKph } from '../game/bmxRollout';
 import type { SplitRouteDecisionPoint } from '../lib/trackMapping';
 import type { BikeSample, PlayerSlot, RaceState, RaceSummaryEntry, RiderState, TrackZone } from '../types';
 
@@ -63,21 +64,30 @@ function recordRaceSamples(
 
     const rider = riders.find((item) => item.playerId === player.id);
     const stats = statsByPlayer.get(player.id) ?? createMetricAccumulator(sample.label);
-    const speedKph = rider && rider.velocity > 0 ? rider.velocity * 3.6 : null;
+    const courseSpeedKph = rider && rider.velocity > 0 ? rider.velocity * 3.6 : null;
+    const cadenceIsFromRace = metricIsFromRace(sample, sample.cadenceAt, raceStartedAt)
+      && sample.cadence != null
+      && Number.isFinite(sample.cadence);
+    const cadenceRpm = cadenceIsFromRace ? sample.cadence : null;
 
     stats.deviceLabel = sample.label;
     stats.sampleCount += 1;
     stats.lastSampleAt = sample.at;
 
-    if (speedKph != null && Number.isFinite(speedKph)) {
-      stats.topSpeedKph = Math.max(stats.topSpeedKph, speedKph);
-      stats.speedTotalKph += speedKph;
+    if (courseSpeedKph != null && Number.isFinite(courseSpeedKph)) {
+      stats.topSpeedKph = Math.max(
+        stats.topSpeedKph,
+        reportedBmxTopSpeedKph(cadenceRpm, courseSpeedKph),
+      );
+      // Average speed remains the honest course velocity implied by distance
+      // and time. Only the peak reconciles a brief cadence peak to 44/16.
+      stats.speedTotalKph += courseSpeedKph;
       stats.speedSamples += 1;
     }
 
-    if (metricIsFromRace(sample, sample.cadenceAt, raceStartedAt) && sample.cadence != null && Number.isFinite(sample.cadence)) {
-      stats.topCadence = Math.max(stats.topCadence, sample.cadence);
-      stats.cadenceTotal += sample.cadence;
+    if (cadenceRpm != null) {
+      stats.topCadence = Math.max(stats.topCadence, cadenceRpm);
+      stats.cadenceTotal += cadenceRpm;
       stats.cadenceSamples += 1;
     }
 

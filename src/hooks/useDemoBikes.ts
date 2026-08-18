@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { defaultPlayerSlots, maxPlayers } from '../data';
-import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
+import { bmxSpeedKphFromCadence, realisticDemoCadenceRpm } from '../game/bmxRollout';
 import { wattbikeProAirHighWattsFromCadence } from '../game/wattbikePowerTable';
 import type { BikeSample, DemoRiderNames, DemoRiderPhotos, PlayerSlot } from '../types';
 
@@ -330,7 +330,9 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     - mistakeEnvelope * 8
     + noise * 2;
   const racePacedCadence = rawCadence * (1 - lapPaceBlend) + Math.min(rawCadence, lapPaceLimit) * lapPaceBlend;
-  const cadence = Math.round(Math.max(0, racePacedCadence, gateCadenceFloor));
+  const cadence = Math.round(realisticDemoCadenceRpm(
+    Math.max(0, racePacedCadence, gateCadenceFloor),
+  ));
   const resistanceLevel = 1;
   const tableWatts = wattbikeProAirHighWattsFromCadence(cadence, resistanceLevel);
   const physicsWatts = Math.round(clamp(
@@ -365,14 +367,10 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     0,
     demoLevelOneThirtyFootWatts * 1.18,
   ));
-  const speedKph = Number(clamp(
-    bmxSpeedKphFromCadence(cadence)
-      + variables.wheelSpeedNoise * noise * 0.7
-      - fatigueLull * 1.2
-      - mistakeEnvelope * 1.4,
-    0,
-    53,
-  ).toFixed(1));
+  // The demo wheel speed is mechanically locked to the same 44/16 rollout as
+  // the race engine. Rider variation belongs in cadence and effort, not in a
+  // second noisy speed formula that can contradict the drivetrain.
+  const speedKph = Number(bmxSpeedKphFromCadence(cadence).toFixed(1));
   const signal = clamp(
     0.78
       + steadiness * 0.16

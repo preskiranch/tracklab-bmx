@@ -5,7 +5,11 @@ import {
   bmxGearRatio,
   bmxRolloutInchesPerCrankRevolution,
   bmxRolloutMetersPerCrankRevolution,
+  bmxDemoMaximumCadenceRpm,
+  bmxDemoMaximumSpeedMph,
   bmxSpeedKphFromCadence,
+  realisticDemoCadenceRpm,
+  reportedBmxTopSpeedKph,
 } from '../../src/game/bmxRollout';
 
 describe('44/16 BMX rollout', () => {
@@ -26,5 +30,25 @@ describe('44/16 BMX rollout', () => {
 
     expect(cadence).toBeCloseTo(91.67, 1);
     expect(bmxSpeedKphFromCadence(cadence) / 1.609344).toBeCloseTo(15, 5);
+  });
+
+  it('compresses impossible demo peaks into a realistic 44/16 sprint range', () => {
+    const cadenceFrom263 = realisticDemoCadenceRpm(263);
+    const cadenceFrom255 = realisticDemoCadenceRpm(255);
+    const speedFrom263Mph = bmxSpeedKphFromCadence(cadenceFrom263) / 1.609344;
+    const speedFrom255Mph = bmxSpeedKphFromCadence(cadenceFrom255) / 1.609344;
+
+    expect(cadenceFrom263).toBeCloseTo(172.6, 6);
+    expect(cadenceFrom255).toBeCloseTo(171, 6);
+    expect(speedFrom263Mph).toBeCloseTo(28.24, 2);
+    expect(speedFrom255Mph).toBeCloseTo(27.98, 2);
+    expect(speedFrom263Mph).toBeGreaterThan(speedFrom255Mph);
+    expect(bmxDemoMaximumCadenceRpm).toBeCloseTo(183.32, 1);
+    expect(bmxDemoMaximumSpeedMph).toBe(30);
+  });
+
+  it('reports cadence rollout as the minimum peak speed without changing course average speed', () => {
+    expect(reportedBmxTopSpeedKph(171, 44.8)).toBeCloseTo(bmxSpeedKphFromCadence(171), 6);
+    expect(reportedBmxTopSpeedKph(120, 50)).toBe(50);
   });
 });

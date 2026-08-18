@@ -146,10 +146,10 @@ describe('post-race pedal-zone results', () => {
       entryElapsedMs: 0,
       exitElapsedMs: 1_500,
       durationMs: 1_500,
-      topSpeedKph: 25,
       topCadence: 100,
       topWatts: 650,
     });
+    expect(riderOneZoneOne?.topSpeedKph).toBeCloseTo(26.3328, 4);
     expect(riderOneZoneOne?.averageSpeedKph).toBeCloseTo(15, 3);
     expect(riderTwoZoneTwo?.sampleCount).toBeGreaterThanOrEqual(3);
     expect(riderTwoZoneTwo?.topSpeedKph).toBe(27);
@@ -177,6 +177,40 @@ describe('post-race pedal-zone results', () => {
     expect(hydratedSummary[0].averageSpeedKph).toBeGreaterThan(0);
     expect(hydratedSummary[0].averageCadence).toBeGreaterThan(0);
     expect(hydratedSummary[0].averageWatts).toBeGreaterThan(0);
+  });
+
+  it('keeps corrected demo cadence and reported peak speed in the same order', () => {
+    const capture = baseCapture();
+    capture.frames = [
+      frame(1_000, [
+        { playerId: 1, distanceMeters: 0, speedKph: 0, cadence: 0, watts: 0 },
+        { playerId: 2, distanceMeters: 0, speedKph: 0, cadence: 0, watts: 0 },
+      ]),
+      frame(2_000, [
+        { playerId: 1, distanceMeters: 12, speedKph: 27.9 * 1.609344, cadence: 173, watts: 900 },
+        { playerId: 2, distanceMeters: 12, speedKph: 28 * 1.609344, cadence: 171, watts: 890 },
+      ]),
+    ];
+    const emptyMetricSummary = capture.summary.map((entry) => ({
+      ...entry,
+      sampleCount: 0,
+      topSpeedKph: null,
+      averageSpeedKph: null,
+      topCadence: null,
+      averageCadence: null,
+      topWatts: null,
+      averageWatts: null,
+    }));
+
+    const hydratedSummary = raceSummaryWithCapturedMetrics(capture, emptyMetricSummary);
+    const higherCadenceRider = hydratedSummary.find((entry) => entry.playerId === 1);
+    const lowerCadenceRider = hydratedSummary.find((entry) => entry.playerId === 2);
+
+    expect(higherCadenceRider?.topCadence).toBe(173);
+    expect(lowerCadenceRider?.topCadence).toBe(171);
+    expect(higherCadenceRider?.topSpeedKph).toBeGreaterThan(lowerCadenceRider?.topSpeedKph ?? 0);
+    expect((higherCadenceRider?.topSpeedKph ?? 0) / 1.609344).toBeCloseTo(28.31, 2);
+    expect((lowerCadenceRider?.topSpeedKph ?? 0) / 1.609344).toBeCloseTo(28, 2);
   });
 
   it('interpolates narrow zone boundaries when raw samples skip across the zone', () => {

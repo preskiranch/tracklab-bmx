@@ -93,6 +93,7 @@ const arenaLaneCenters = [0, 1, 2, 3].map(
 const arenaFrontTireAnchorPercent = 4 + (0.92 * (61.5 + 33.5));
 const arenaCameraEaseMs = 180;
 const arenaCameraRiderPaddingRatio = 0.16;
+const arenaCloseCameraLeadRatio = 0.15;
 
 function applyArenaWorldCamera(
   element: HTMLDivElement,
@@ -262,9 +263,16 @@ export function dragStripAdaptiveCameraWindow(riderWorldPositions: number[]) {
     100,
   );
   const riderCenterPercent = (minimumRiderWorldPercent + maximumRiderWorldPercent) / 2;
+  // When the pack is tight, frame it slightly left of center so the camera
+  // begins tracking during a realistic launch instead of waiting for the old
+  // 250+ RPM demo acceleration. Wide packs stay centered so both edges retain
+  // equal safety padding.
+  const closeCameraLead = viewportPercent === arenaViewportWidth
+    ? viewportPercent * arenaCloseCameraLeadRatio
+    : 0;
   return {
     scrollPercent: clamp(
-      riderCenterPercent - viewportPercent / 2,
+      riderCenterPercent - viewportPercent / 2 + closeCameraLead,
       0,
       100 - viewportPercent,
     ),

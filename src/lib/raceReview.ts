@@ -8,6 +8,7 @@ import type {
   RaceZoneRiderResult,
   TrackZone,
 } from '../types';
+import { reportedBmxTopSpeedKph } from '../game/bmxRollout';
 
 type RaceMetricPoint = {
   elapsedMs: number;
@@ -212,6 +213,14 @@ function average(values: number[]) {
     : null;
 }
 
+function reportedTopSpeedForPoints(points: RaceMetricPoint[]) {
+  return maximum(points.flatMap((point) => (
+    point.cadence == null && point.speedKph == null
+      ? []
+      : [reportedBmxTopSpeedKph(point.cadence, point.speedKph)]
+  )));
+}
+
 function zoneResultForPlayer(
   playerId: PlayerSlot['id'],
   zone: TrackZone,
@@ -232,7 +241,7 @@ function zoneResultForPlayer(
     durationMs: entryElapsedMs == null || exitElapsedMs == null
       ? null
       : Math.max(0, exitElapsedMs - entryElapsedMs),
-    topSpeedKph: maximum(speedValues),
+    topSpeedKph: reportedTopSpeedForPoints(points),
     averageSpeedKph: average(speedValues),
     topCadence: maximum(cadenceValues),
     averageCadence: average(cadenceValues),
@@ -281,7 +290,7 @@ export function raceSummaryWithCapturedMetrics(
       ...entry,
       deviceLabel: deviceLabel ?? entry.deviceLabel,
       sampleCount: Math.max(entry.sampleCount, points.length),
-      topSpeedKph: maximum(speedValues) ?? entry.topSpeedKph,
+      topSpeedKph: reportedTopSpeedForPoints(points) ?? entry.topSpeedKph,
       averageSpeedKph: average(speedValues) ?? entry.averageSpeedKph,
       topCadence: maximum(cadenceValues) ?? entry.topCadence,
       averageCadence: average(cadenceValues) ?? entry.averageCadence,
