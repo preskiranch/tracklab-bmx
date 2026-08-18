@@ -172,6 +172,30 @@ describe('race commentary event detection', () => {
     expect(line).toMatch(/11\.40.*12\.00.*North Bay BMX/i);
   });
 
+  it('does not call a different studio rider ghost your own on a shared account', () => {
+    const tracker = createRaceCommentaryTracker();
+    const [start] = detectRaceCommentaryEvents(tracker, {
+      ...snapshot([rider(1, 0)]),
+      players: [players[0]],
+      ghosts: [{
+        id: 'shared-account-blake',
+        name: 'Blake',
+        ownerName: 'Shared Studio',
+        isOwn: true,
+        source: 'personal',
+        trackName: 'North Bay BMX',
+        finishTimeMs: 12_000,
+        savedAt: 1_000,
+        distanceMeters: 0,
+        finished: false,
+      }],
+    }, 1_000);
+
+    expect(start.ghostRace?.ghost.isOwn).toBe(false);
+    expect(localCommentaryLine(start)).toMatch(/Avery.*Blake(?:'s|’s) ghost/i);
+    expect(localCommentaryLine(start)).not.toMatch(/own ghost/i);
+  });
+
   it('makes it explicit when an own ghost wins and leaves the record intact', () => {
     const tracker = createRaceCommentaryTracker();
     const ownGhost = {

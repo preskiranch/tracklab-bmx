@@ -229,14 +229,24 @@ function ghostRaceFact(
   }
   const liveRider = facts.find((rider) => rider.playerId === finishingPlayerId)
     ?? facts[0];
-  const ghost = [...snapshot.ghosts].sort((left, right) => (
+  const selectedGhost = [...snapshot.ghosts].sort((left, right) => (
     Math.abs(liveRider.distanceMeters - left.distanceMeters)
       - Math.abs(liveRider.distanceMeters - right.distanceMeters)
     || left.finishTimeMs - right.finishTimeMs
   ))[0];
-  if (!ghost) {
+  if (!selectedGhost) {
     return undefined;
   }
+  const normalizedLiveName = liveRider.name.trim().toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const normalizedGhostName = selectedGhost.name.trim().toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const ghost = {
+    ...selectedGhost,
+    // Club athletes can share one owner account. It is only the rider's own
+    // ghost when both account ownership and rider identity match.
+    isOwn: selectedGhost.isOwn
+      && normalizedLiveName.length > 0
+      && normalizedLiveName === normalizedGhostName,
+  };
 
   const signedGapMeters = liveRider.distanceMeters - ghost.distanceMeters;
   const liveFinishTimeMs = liveRider.finishTimeMs;

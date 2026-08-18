@@ -136,6 +136,14 @@ function speechRiderNamesForEvent(event: RaceCommentaryEvent) {
   ])];
 }
 
+function sameRiderIdentity(left: string, right: string) {
+  const normalize = (value: string) => (
+    value.trim().toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+  );
+  const normalizedLeft = normalize(left);
+  return normalizedLeft.length > 0 && normalizedLeft === normalize(right);
+}
+
 function preparedStartSpeechKey(
   line: string,
   preferences: RaceCommentaryPreferences,
@@ -621,7 +629,8 @@ export function useRaceCommentary({
           preferences.adaptiveMemory ? preferences.recentLines : [],
           primaryGhost ? {
             name: primaryGhost.riderName,
-            isOwn: primaryGhost.ownerKey === ghostOwnerKey,
+            isOwn: primaryGhost.ownerKey === ghostOwnerKey
+              && sameRiderIdentity(primaryGhost.riderName, players[0]?.name ?? ''),
             finishTimeMs: primaryGhost.finishTimeMs,
             trackName: primaryGhost.trackName,
           } : undefined,
@@ -640,7 +649,8 @@ export function useRaceCommentary({
           : [],
         primaryGhost ? {
           name: primaryGhost.riderName,
-          isOwn: primaryGhost.ownerKey === ghostOwnerKey,
+          isOwn: primaryGhost.ownerKey === ghostOwnerKey
+            && sameRiderIdentity(primaryGhost.riderName, players[0]?.name ?? ''),
           finishTimeMs: primaryGhost.finishTimeMs,
           trackName: primaryGhost.trackName,
         } : undefined,
