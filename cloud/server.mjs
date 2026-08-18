@@ -2428,8 +2428,8 @@ function sanitizeClubTabletGetPulledRider(entry, tabletSession, playerId) {
     distanceMeters: boundedNumber(entry.distanceMeters, 0, 10_000),
     averageWatts: Math.round(boundedNumber(entry.averageWatts, 0, 5_000)),
     peakWatts: Math.round(boundedNumber(entry.peakWatts, 0, 5_000)),
-    averageCadence: Math.round(boundedNumber(entry.averageCadence, 0, 300)),
-    peakCadence: Math.round(boundedNumber(entry.peakCadence, 0, 300)),
+    averageCadence: Math.round(Math.max(0, finiteNumber(entry.averageCadence, 0))),
+    peakCadence: Math.round(Math.max(0, finiteNumber(entry.peakCadence, 0))),
     averageSpeedKph: boundedNumber(entry.averageSpeedKph, 0, 150),
     peakSpeedKph: boundedNumber(entry.peakSpeedKph, 0, 150),
   };
@@ -2680,7 +2680,7 @@ function sanitizeClubLiveMetrics(value) {
   const input = value && typeof value === 'object' ? value : {};
   return {
     watts: Math.round(boundedNumber(input.watts, 0, 5_000)),
-    cadence: boundedNumber(input.cadence, 0, 300),
+    cadence: Math.max(0, finiteNumber(input.cadence, 0)),
     speedKph: boundedNumber(input.speedKph, 0, 200),
     distanceMeters: boundedNumber(input.distanceMeters, 0, 10_000_000),
     elapsedMs: boundedNumber(input.elapsedMs, 0, 24 * 60 * 60 * 1000),
@@ -3462,7 +3462,7 @@ function sanitizeExploreState(value, client, room) {
         velocityMps: Math.max(0, Math.min(60, finiteNumber(rider?.velocityMps, 0))),
         cadence: rider?.cadence == null
           ? null
-          : Math.max(0, Math.min(300, finiteNumber(rider.cadence, 0))),
+          : Math.max(0, finiteNumber(rider.cadence, 0)),
         signal: Math.max(0, Math.min(1, finiteNumber(rider?.signal, 0))),
         recommendedAirSetting: Math.max(
           1,
@@ -3516,6 +3516,10 @@ function sanitizeRaceSummaryEntry(value, index) {
     const number = nullableFiniteNumber(metric);
     return number == null ? null : Math.max(0, Math.min(max, number));
   };
+  const nullableCadence = (metric) => {
+    const number = nullableFiniteNumber(metric);
+    return number == null ? null : Math.max(0, number);
+  };
 
   return {
     playerId,
@@ -3530,8 +3534,8 @@ function sanitizeRaceSummaryEntry(value, index) {
     sampleCount: Math.max(0, Math.min(1_000_000, Math.round(finiteNumber(value.sampleCount, 0)))),
     topSpeedKph: nullableMetric(value.topSpeedKph, 160),
     averageSpeedKph: nullableMetric(value.averageSpeedKph, 160),
-    topCadence: nullableMetric(value.topCadence, 300),
-    averageCadence: nullableMetric(value.averageCadence, 300),
+    topCadence: nullableCadence(value.topCadence),
+    averageCadence: nullableCadence(value.averageCadence),
   };
 }
 

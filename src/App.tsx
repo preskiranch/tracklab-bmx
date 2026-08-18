@@ -1493,6 +1493,7 @@ export default function App() {
   const [mappingMode, setMappingMode] = useState(false);
   const [mappingFullscreen, setMappingFullscreen] = useState(false);
   const [exploreRideFullscreen, setExploreRideFullscreen] = useState(false);
+  const [utilityFullscreen, setUtilityFullscreen] = useState(false);
   const [mappingEditMode, setMappingEditMode] = useState<MappingEditMode>('navigate');
   const [mappingObstacleView3D, setMappingObstacleView3D] = useState(false);
   const [draftPoints, setDraftPoints] = useState<TrackPoint[]>([]);
@@ -3196,14 +3197,14 @@ export default function App() {
   }, [raceViewFullscreen]);
 
   useEffect(() => {
-    const fullscreenActive = raceViewFullscreen || exploreRideFullscreen;
+    const fullscreenActive = raceViewFullscreen || exploreRideFullscreen || utilityFullscreen;
     document.documentElement.classList.toggle('tracklab-race-active', fullscreenActive);
     document.body.classList.toggle('tracklab-race-active', fullscreenActive);
     return () => {
       document.documentElement.classList.remove('tracklab-race-active');
       document.body.classList.remove('tracklab-race-active');
     };
-  }, [exploreRideFullscreen, raceViewFullscreen]);
+  }, [exploreRideFullscreen, raceViewFullscreen, utilityFullscreen]);
 
   const cancelStartGateSequence = useCallback(() => {
     startGateSequenceIdRef.current += 1;
@@ -7306,12 +7307,35 @@ export default function App() {
     }
   }, []);
 
+  const handleUtilityFullscreenChange = useCallback((enabled: boolean) => {
+    setUtilityFullscreen(enabled);
+    if (enabled) {
+      requestBrowserFullscreen(raceShellRef.current);
+    } else {
+      releaseBrowserFullscreen();
+    }
+  }, []);
+
+  const openFullscreenUtility = useCallback((mode: 'monitor' | 'club-monitor') => {
+    setAppMode(mode);
+    setUtilityFullscreen(true);
+    requestBrowserFullscreen(raceShellRef.current);
+  }, []);
+
   useEffect(() => {
     if (appMode !== 'explore' && exploreRideFullscreen) {
       setExploreRideFullscreen(false);
       releaseBrowserFullscreen();
     }
   }, [appMode, exploreRideFullscreen]);
+
+  useEffect(() => {
+    const utilityModeActive = appMode === 'get-pulled' || appMode === 'monitor' || appMode === 'club-monitor';
+    if (!utilityModeActive && utilityFullscreen) {
+      setUtilityFullscreen(false);
+      releaseBrowserFullscreen();
+    }
+  }, [appMode, utilityFullscreen]);
 
   const copyMultiplayerProfileKey = useCallback(() => {
     if (!cloudProfileKey) {
@@ -7872,14 +7896,26 @@ export default function App() {
 
   return (
     <div
-      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}`}
+      className={`platform-shell${raceViewFullscreen ? ' race-fullscreen' : ''}${mappingFullscreen ? ' map-fullscreen' : ''}${exploreRideFullscreen ? ' explore-fullscreen' : ''}${utilityFullscreen ? ' utility-fullscreen' : ''}`}
       ref={raceShellRef}
     >
+      {utilityFullscreen && <style>{`
+        .platform-shell.utility-fullscreen{position:fixed;inset:0;z-index:2147480000;display:block;width:100vw;height:100dvh;min-height:0;overflow:hidden;background:#07100b}
+        .utility-fullscreen .sidebar,.utility-fullscreen .platform-topbar{display:none}
+        .utility-fullscreen .platform-main{width:100%;height:100%;min-height:0;padding:0;overflow:auto}
+        .utility-fullscreen .get-pulled-view,.utility-fullscreen .monitor-panel,.utility-fullscreen .club-live-monitor{width:100%;min-height:100%;box-sizing:border-box}
+        .utility-fullscreen .get-pulled-view{grid-template-rows:minmax(0,1fr) auto auto;padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));background:#07100b}
+        .utility-fullscreen .get-pulled-hero{height:100%;min-height:0}
+        .utility-fullscreen .get-pulled-hero>.pull-sled-scene{height:100%!important;min-height:330px!important}
+        .utility-fullscreen .get-pulled-config,.utility-fullscreen .get-pulled-privacy{display:none}
+        .utility-fullscreen .monitor-panel,.utility-fullscreen .club-live-monitor{padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(14px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
+        .utility-fullscreen .monitor-grid{min-height:calc(100dvh - 110px)}
+      `}</style>}
       {clubLiveAthleteBridge}
       {clubTabletRuntime}
       {clubTabletSessionActive
         && appMode !== 'club-tablet'
-        && (raceViewFullscreen || exploreRideFullscreen) && (
+        && (raceViewFullscreen || exploreRideFullscreen || utilityFullscreen) && (
         <button
           className="race-cancel-overlay"
           type="button"
@@ -8432,12 +8468,12 @@ export default function App() {
               <button type="button" onClick={openTrackLocator}>
                 <MapPinned size={17} /> Track Locator
               </button>
-              <button className={appMode === 'monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('monitor')}>
+              <button className={appMode === 'monitor' ? 'selected' : ''} type="button" onClick={() => openFullscreenUtility('monitor')}>
                 <Gauge size={17} /> Live Monitor
               </button>
               {clubOwnerActive && (
                 <>
-                  <button className={appMode === 'club-monitor' ? 'selected' : ''} type="button" onClick={() => setAppMode('club-monitor')}>
+                  <button className={appMode === 'club-monitor' ? 'selected' : ''} type="button" onClick={() => openFullscreenUtility('club-monitor')}>
                     <Radio size={17} /> Club Live Monitor
                   </button>
                   <button className={appMode === 'club-tablet' ? 'selected' : ''} type="button" onClick={() => setAppMode('club-tablet')}>
@@ -8691,6 +8727,8 @@ export default function App() {
             <ClubLiveMonitor
               studioRiders={activeStudioRiders(activeProfileStudioRiders)}
               speedUnit={speedUnit}
+              fullscreen={utilityFullscreen}
+              onFullscreenChange={handleUtilityFullscreenChange}
             />
           </Suspense>
         ) : appMode === 'get-pulled' ? (
@@ -8702,6 +8740,8 @@ export default function App() {
               speedUnit={speedUnit}
               onComplete={handleGetPulledComplete}
               onLiveStateChange={setGetPulledLiveState}
+              fullscreen={utilityFullscreen}
+              onFullscreenChange={handleUtilityFullscreenChange}
             />
           </Suspense>
         ) : appMode === 'explore' ? (
@@ -8753,6 +8793,8 @@ export default function App() {
             players={activePlayers}
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
+            fullscreen={utilityFullscreen}
+            onFullscreenChange={handleUtilityFullscreenChange}
           />
         ) : appMode === 'diagnostics' ? (
           <Suspense fallback={<div className="explore-loading">Loading diagnostics…</div>}>
@@ -8803,7 +8845,7 @@ export default function App() {
             onCopyInvite={shareMultiplayerInvite}
             onCopyProfileKey={copyMultiplayerProfileKey}
             onOpenRace={() => setAppMode('race')}
-              onOpenMonitor={() => setAppMode('monitor')}
+            onOpenMonitor={() => openFullscreenUtility('monitor')}
             />
           </Suspense>
         ) : appMode === 'developer' && developerUiActive ? (

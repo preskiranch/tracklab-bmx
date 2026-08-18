@@ -5,6 +5,7 @@ import {
   Clock3,
   Compass,
   Gauge,
+  Minimize2,
   RadioTower,
   RefreshCw,
   Route,
@@ -27,6 +28,8 @@ import './ClubLiveMonitor.css';
 type ClubLiveMonitorProps = {
   studioRiders: StudioRider[];
   speedUnit: SpeedUnit;
+  fullscreen?: boolean;
+  onFullscreenChange?: (enabled: boolean) => void;
 };
 
 function activityLabel(activityType: ClubLiveSession['activityType']) {
@@ -66,7 +69,12 @@ function formatDistance(distanceMeters: number) {
   return feet >= 5_280 ? `${(feet / 5_280).toFixed(2)} mi` : `${Math.round(feet).toLocaleString()} ft`;
 }
 
-export function ClubLiveMonitor({ studioRiders, speedUnit }: ClubLiveMonitorProps) {
+export function ClubLiveMonitor({
+  studioRiders,
+  speedUnit,
+  fullscreen = false,
+  onFullscreenChange,
+}: ClubLiveMonitorProps) {
   const requestGenerationRef = useRef(0);
   const [sessions, setSessions] = useState<ClubLiveSession[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -142,6 +150,16 @@ export function ClubLiveMonitor({ studioRiders, speedUnit }: ClubLiveMonitorProp
           <button type="button" onClick={() => void refresh()} aria-label="Refresh Club Live Monitor">
             <RefreshCw size={16} />
           </button>
+          {fullscreen && (
+            <button
+              className="club-live-exit-fullscreen"
+              type="button"
+              onClick={() => onFullscreenChange?.(false)}
+              aria-label="Exit full screen Club Live Monitor"
+            >
+              <Minimize2 size={16} />
+            </button>
+          )}
         </div>
       </header>
 

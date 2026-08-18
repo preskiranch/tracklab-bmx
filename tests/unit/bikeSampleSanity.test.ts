@@ -10,11 +10,13 @@ import {
 import type { BikeSample } from '../../src/types';
 
 describe('bike sample sanitization', () => {
-  it('rejects non-finite, negative, and implausible metrics', () => {
+  it('rejects invalid metrics without capping legitimate high cadence', () => {
     expect(cleanBikeWatts(-1)).toBeNull();
     expect(cleanBikeWatts(4001)).toBeNull();
     expect(cleanBikeCadenceRpm(Number.NaN)).toBeNull();
-    expect(cleanBikeCadenceRpm(261)).toBeNull();
+    expect(cleanBikeCadenceRpm(-1)).toBeNull();
+    expect(cleanBikeCadenceRpm(261)).toBe(261);
+    expect(cleanBikeCadenceRpm(420.4)).toBe(420);
     expect(cleanBikeSpeedKph(81)).toBeNull();
     expect(cleanBikeBattery(101)).toBeUndefined();
   });

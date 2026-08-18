@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 
 type PullSledSceneProps = {
   active: boolean;
@@ -18,13 +19,9 @@ const sceneStyles = `
   from { background-position-x: 0%; }
   to { background-position-x: 100%; }
 }
-@keyframes tracklab-pull-rider-drive {
-  0%,100% { transform: translate3d(0,0,0) rotate(-0.25deg); }
-  50% { transform: translate3d(0,2px,0) rotate(0.25deg); }
-}
 @keyframes tracklab-pull-sled-shudder {
   0%,100% { transform: translate3d(0,0,0); }
-  50% { transform: translate3d(-2px,1px,0); }
+  50% { transform: translate3d(-1px,0,0); }
 }
 `;
 
@@ -39,10 +36,11 @@ export function PullSledScene({
   speedKph = 0,
 }: PullSledSceneProps) {
   const clampedProgress = Math.min(1, Math.max(0, progress));
-  const pedaling = active && cadenceRpm >= 1 && speedKph > 0;
+  const pedaling = active && cadenceRpm >= 1;
   const height = compact ? 112 : 420;
   const pedalDurationSeconds = 60 / Math.max(24, cadenceRpm || 24);
-  const sceneryDurationSeconds = Math.min(28, Math.max(8, 32 - (Math.max(0, speedKph) * 0.7)));
+  const motionSpeedKph = Math.max(speedKph, bmxSpeedKphFromCadence(cadenceRpm));
+  const sceneryDurationSeconds = Math.min(14, Math.max(3.5, 16 - (Math.max(0, motionSpeedKph) * 0.45)));
   const riderWidth = compact ? 92 : 218;
   const riderBottom = compact ? 6 : 31;
   const sledWidth = compact ? 112 : 268;
@@ -54,8 +52,11 @@ export function PullSledScene({
 
   return (
     <div
+      className="pull-sled-scene"
       aria-label={label ?? (active ? 'BMX rider actively pulling the TrackLab sled' : 'BMX rider ready to pull the TrackLab sled')}
       data-pedaling={pedaling ? 'true' : 'false'}
+      data-rider-side="right"
+      data-sled-side="left"
       data-pull-scrolling={pedaling ? 'true' : 'false'}
       data-pull-speed-kph={speedKph.toFixed(1)}
       role="img"
@@ -119,12 +120,11 @@ export function PullSledScene({
         data-pedal-cycle={pedaling ? 'running' : 'stopped'}
         style={{
           position: 'absolute',
-          left: compact ? '14%' : '18%',
+          left: compact ? '58%' : '60%',
           bottom: riderBottom,
           zIndex: 3,
           width: riderWidth,
           aspectRatio: '1 / 1',
-          animation: pedaling ? 'tracklab-pull-rider-drive .18s ease-in-out infinite' : 'none',
           filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.42))',
           transformOrigin: '52% 82%',
         }}
@@ -149,15 +149,15 @@ export function PullSledScene({
         aria-hidden="true"
         style={{
           position: 'absolute',
-          left: compact ? '39%' : '38%',
+          left: compact ? '31%' : '32%',
           bottom: compact ? 38 : 108,
           zIndex: 2,
-          width: compact ? '25%' : '29%',
+          width: compact ? '31%' : '30%',
           height: compact ? 3 : 7,
           borderRadius: 999,
           background: '#171916',
           boxShadow: '0 2px 2px rgba(0,0,0,.38)',
-          transform: 'rotate(4deg)',
+          transform: 'rotate(-4deg)',
           transformOrigin: 'left center',
         }}
       />
@@ -166,13 +166,13 @@ export function PullSledScene({
         aria-hidden="true"
         style={{
           position: 'absolute',
-          left: compact ? '58%' : '59%',
+          left: compact ? '8%' : '9%',
           bottom: compact ? 17 : 42,
           zIndex: 3,
           width: sledWidth,
           height: sledHeight,
           overflow: 'hidden',
-          animation: pedaling ? 'tracklab-pull-sled-shudder .22s ease-in-out infinite' : 'none',
+          animation: pedaling ? 'tracklab-pull-sled-shudder calc(var(--tracklab-pedal-duration) / 2) ease-in-out infinite' : 'none',
           filter: 'drop-shadow(0 9px 7px rgba(0,0,0,.44))',
         }}
       >

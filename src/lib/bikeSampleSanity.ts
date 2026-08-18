@@ -2,7 +2,6 @@ import type { BikeSample } from '../types';
 
 export type BikeMetricPatch = Partial<Pick<BikeSample, 'battery' | 'cadence' | 'speedKph' | 'watts'>>;
 
-export const maxReasonableBikeCadenceRpm = 260;
 export const maxReasonableBikeSpeedKph = 80;
 export const maxReasonableBikeWatts = 4000;
 
@@ -22,7 +21,7 @@ export function cleanBikeWatts(value: unknown) {
 
 export function cleanBikeCadenceRpm(value: unknown) {
   const numberValue = finiteNumber(value);
-  if (numberValue == null || numberValue < 0 || numberValue > maxReasonableBikeCadenceRpm) {
+  if (numberValue == null || numberValue < 0) {
     return null;
   }
 

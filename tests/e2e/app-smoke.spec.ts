@@ -463,10 +463,13 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   await expect(airOptions.filter({ hasText: /^7$/ })).toHaveClass(/selected/);
 
   await view.getByRole('button', { name: /Start 3 seconds pull · Air 7/ }).click();
+  await expect(page.locator('.platform-shell')).toHaveClass(/utility-fullscreen/);
   await expect(view.getByText('Get ready', { exact: false })).toBeVisible();
   await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
   await expect(view.getByText('Pulling now', { exact: false })).toBeVisible({ timeout: 7_500 });
   const pullScene = view.getByRole('img', { name: /actively pulling/i });
+  await expect(pullScene).toHaveAttribute('data-rider-side', 'right');
+  await expect(pullScene).toHaveAttribute('data-sled-side', 'left');
   await expect(pullScene).toHaveAttribute('data-pedaling', 'true');
   await expect(pullScene).toHaveAttribute('data-pull-scrolling', 'true');
   await expect(pullScene.locator('[data-pedal-cycle="running"]')).toBeVisible();
@@ -498,7 +501,8 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   });
   await expect(view.getByText('Pull complete', { exact: false })).toBeVisible({ timeout: 4_500 });
   await expect(view.getByLabel('Result recorded at Wattbike Air 7')).toBeVisible();
-  await expect(view.getByText('Demo pull results are for testing only and are not saved or published.')).toBeVisible();
+  await expect(view.getByText('Peak cadence', { exact: true })).toBeVisible();
+  await expect(view.getByText('Demo pull results are for testing only and are not saved or published.')).toBeHidden();
   expect(trainingSaveCount).toBe(0);
 });
 
@@ -5114,6 +5118,8 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
 
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Club Live Monitor', exact: true }).click();
+
+  await expect(page.locator('.platform-shell')).toHaveClass(/utility-fullscreen/);
 
   const monitor = page.getByLabel('Club Live Monitor');
   await expect(monitor.getByText('Owner-only view', { exact: true })).toBeVisible();

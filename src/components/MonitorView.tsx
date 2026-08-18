@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Bike, Gauge, RadioTower, Signal, Zap } from 'lucide-react';
+import { Activity, Bike, Gauge, Minimize2, RadioTower, Signal, Zap } from 'lucide-react';
 import { liveBikeTimeoutMs } from '../data';
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
 import { wattbikeMonitorLastThree } from '../lib/bikeProfileIdentity';
@@ -11,6 +11,8 @@ type MonitorViewProps = {
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
+  fullscreen?: boolean;
+  onFullscreenChange?: (enabled: boolean) => void;
 };
 
 type MonitorMetrics = {
@@ -87,7 +89,13 @@ function sprintDurationSeconds(result: MonitorSprintResult, now: number) {
   return Math.max(0, (end - result.startedAt) / 1000);
 }
 
-export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorViewProps) {
+export function MonitorView({
+  players,
+  samplesByDevice,
+  speedUnit,
+  fullscreen = false,
+  onFullscreenChange,
+}: MonitorViewProps) {
   const activeSprintsRef = useRef<Map<number, MonitorSprintDraft>>(new Map());
   const [sprintResults, setSprintResults] = useState<Record<number, MonitorSprintResult>>({});
   const [now, setNow] = useState(Date.now());
@@ -205,6 +213,11 @@ export function MonitorView({ players, samplesByDevice, speedUnit }: MonitorView
         <div className="monitor-count">
           <Bike size={18} />
           <span>{connectedPlayers.length} connected</span>
+          {fullscreen && (
+            <button type="button" onClick={() => onFullscreenChange?.(false)}>
+              <Minimize2 size={17} /> Exit full screen
+            </button>
+          )}
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Gauge, Play, RotateCcw, TimerReset, Zap } from 'lucide-react';
+import { Activity, Gauge, Minimize2, Play, RotateCcw, TimerReset, Zap } from 'lucide-react';
 import {
   addGetPulledSample,
   createGetPulledAccumulator,
@@ -33,7 +33,9 @@ type GetPulledViewProps = {
   players: PlayerSlot[];
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
+  fullscreen?: boolean;
   onComplete: (result: GetPulledResult) => void;
+  onFullscreenChange?: (enabled: boolean) => void;
   onLiveStateChange: (state: GetPulledLiveState | null) => void;
 };
 
@@ -53,7 +55,9 @@ export function GetPulledView({
   players,
   samplesByDevice,
   speedUnit,
+  fullscreen = false,
   onComplete,
+  onFullscreenChange,
   onLiveStateChange,
 }: GetPulledViewProps) {
   const connectedPlayers = useMemo(() => players.filter((player) => player.deviceId != null), [players]);
@@ -103,8 +107,9 @@ export function GetPulledView({
     setResult(null);
     setNow(Date.now());
     onLiveStateChange(null);
+    onFullscreenChange?.(false);
     stopBikeRaceAudio();
-  }, [onLiveStateChange]);
+  }, [onFullscreenChange, onLiveStateChange]);
 
   const primePullAudio = useCallback(() => {
     void primeAudioCues();
@@ -114,6 +119,7 @@ export function GetPulledView({
   const start = useCallback(() => {
     if (!selectedPlayer || selectedPlayer.deviceId == null || phaseRef.current !== 'setup') return;
     primePullAudio();
+    onFullscreenChange?.(true);
     accumulatorRef.current = createGetPulledAccumulator();
     completedRef.current = false;
     setResult(null);
@@ -123,7 +129,7 @@ export function GetPulledView({
     playStartGateTone('tick');
     setPhase('countdown');
     setNow(Date.now());
-  }, [primePullAudio, selectedPlayer]);
+  }, [onFullscreenChange, primePullAudio, selectedPlayer]);
 
   useEffect(() => {
     if (phase !== 'countdown') return undefined;
@@ -226,23 +232,31 @@ export function GetPulledView({
 
   useEffect(() => () => {
     onLiveStateChange(null);
+    onFullscreenChange?.(false);
     stopBikeRaceAudio();
-  }, [onLiveStateChange]);
+  }, [onFullscreenChange, onLiveStateChange]);
 
   const displayed = result ? {
     watts: result.averageWatts,
     peakWatts: result.peakWatts,
     cadence: result.averageCadence,
+    peakCadence: result.peakCadence,
     speedKph: result.averageSpeedKph,
   } : {
     watts: metrics.watts,
     peakWatts: accumulatorRef.current.peakWatts,
     cadence: metrics.cadence,
+    peakCadence: accumulatorRef.current.peakCadence,
     speedKph: metrics.speedKph,
   };
 
   return (
     <main className="get-pulled-view" aria-label="Get Pulled timed Wattbike test">
+      {fullscreen && phase !== 'setup' && (
+        <button className="get-pulled-exit-fullscreen" type="button" onClick={() => onFullscreenChange?.(false)}>
+          <Minimize2 size={18} /> Exit full screen
+        </button>
+      )}
       <section className="get-pulled-hero">
         <PullSledScene
           active={phase === 'active'}
@@ -349,6 +363,7 @@ export function GetPulledView({
             <div className="get-pulled-metric"><Zap size={20} /><strong>{displayed.watts}</strong><small>{result ? 'Average watts' : 'Live watts'}</small></div>
             <div className="get-pulled-metric"><Zap size={20} /><strong>{displayed.peakWatts}</strong><small>Peak watts</small></div>
             <div className="get-pulled-metric"><Activity size={20} /><strong>{displayed.cadence}</strong><small>Cadence rpm</small></div>
+            <div className="get-pulled-metric"><Activity size={20} /><strong>{displayed.peakCadence}</strong><small>Peak cadence</small></div>
             <div className="get-pulled-metric"><Gauge size={20} /><strong>{formatSpeedFromKph(displayed.speedKph, speedUnit)}</strong><small>{speedUnitLabel(speedUnit)}</small></div>
           </section>
           {phase === 'results' && (

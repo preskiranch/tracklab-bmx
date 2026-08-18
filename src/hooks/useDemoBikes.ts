@@ -330,11 +330,7 @@ function sampleForProfile(profile: DemoProfile, elapsedSeconds: number, racing: 
     - mistakeEnvelope * 8
     + noise * 2;
   const racePacedCadence = rawCadence * (1 - lapPaceBlend) + Math.min(rawCadence, lapPaceLimit) * lapPaceBlend;
-  const cadence = Math.round(clamp(
-    Math.max(racePacedCadence, gateCadenceFloor),
-    0,
-    184,
-  ));
+  const cadence = Math.round(Math.max(0, racePacedCadence, gateCadenceFloor));
   const resistanceLevel = 1;
   const tableWatts = wattbikeProAirHighWattsFromCadence(cadence, resistanceLevel);
   const physicsWatts = Math.round(clamp(

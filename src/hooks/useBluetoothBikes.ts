@@ -3,7 +3,6 @@ import {
   cleanBikeCadenceRpm,
   cleanBikeSpeedKph,
   cleanBikeWatts,
-  maxReasonableBikeCadenceRpm,
   sanitizeBikeMetricPatch,
   type BikeMetricPatch,
 } from '../lib/bikeSampleSanity';
@@ -264,8 +263,8 @@ function cadenceFromCrankDeltas(
     return null;
   }
 
-  const cadence = Math.round((revolutionDelta / (timeDeltaTicks / 1024)) * 60);
-  return cadence > maxReasonableBikeCadenceRpm ? null : cadence;
+  const cadence = (revolutionDelta / (timeDeltaTicks / 1024)) * 60;
+  return cleanBikeCadenceRpm(cadence);
 }
 
 function parseCyclingPowerMeasurement(
