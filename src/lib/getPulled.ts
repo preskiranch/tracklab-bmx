@@ -80,7 +80,7 @@ function metricFresh(sample: BikeSample | undefined, at: number | undefined, now
 export function getPulledMetrics(sample: BikeSample | undefined, now = Date.now()): GetPulledMetrics {
   const watts = metricFresh(sample, sample?.wattsAt, now) ? Math.max(0, sample?.watts ?? 0) : 0;
   const cadence = metricFresh(sample, sample?.cadenceAt, now) ? Math.max(0, sample?.cadence ?? 0) : 0;
-  const idleNoise = watts <= 10 && cadence <= 15;
+  const idleNoise = watts < 1 && cadence <= 15;
   const cleanWatts = idleNoise ? 0 : Math.round(watts);
   const cleanCadence = idleNoise ? 0 : Math.round(cadence);
   return {
@@ -105,22 +105,21 @@ export function getPulledTakeoffSignal(
   const metrics = getPulledMetrics(sample, now);
   if (!metrics.live) return null;
 
-  const cadenceAt = sample.cadenceAt ?? sample.at;
   const wattsAt = sample.wattsAt ?? sample.at;
-  const cadenceStarted = metrics.cadence > 0 && cadenceAt >= armedAt;
-  const wattsStarted = metrics.watts > 0 && wattsAt >= armedAt;
-  if (!cadenceStarted && !wattsStarted) return null;
+  const freshPowerStarted = metricFresh(sample, sample.wattsAt, now)
+    && sample.watts >= 1
+    && wattsAt >= armedAt;
+  if (!freshPowerStarted) return null;
 
-  const firstDriveAt = Math.min(
-    ...(cadenceStarted ? [cadenceAt] : []),
-    ...(wattsStarted ? [wattsAt] : []),
-  );
-  const cadence = cadenceStarted ? metrics.cadence : 0;
+  const cadenceAt = sample.cadenceAt ?? sample.at;
+  const cadence = metricFresh(sample, sample.cadenceAt, now) && cadenceAt >= armedAt
+    ? Math.max(0, Math.round(sample.cadence ?? 0))
+    : 0;
   return {
-    at: Math.min(now, Math.max(armedAt, firstDriveAt)),
+    at: Math.min(now, Math.max(armedAt, wattsAt)),
     metrics: {
       live: true,
-      watts: wattsStarted ? metrics.watts : 0,
+      watts: Math.max(1, Math.round(sample.watts)),
       cadence,
       speedKph: bmxSpeedKphFromCadence(cadence),
     },

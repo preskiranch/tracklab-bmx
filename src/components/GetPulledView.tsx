@@ -57,7 +57,7 @@ function secondsLabel(seconds: number) {
 
 function phaseLabel(phase: GetPulledPhase) {
   if (phase === 'countdown') return 'Get ready';
-  if (phase === 'armed') return 'Ready · pedal to start';
+  if (phase === 'armed') return 'Ready · reach 1 watt to start';
   if (phase === 'active') return 'Pulling now';
   if (phase === 'results') return 'Pull complete';
   return 'Choose athlete and time';
@@ -349,7 +349,7 @@ export function GetPulledView({
             <strong>{phase === 'countdown' ? `0:${String(countdown).padStart(2, '0')}` : `${(elapsedMs / 1_000).toFixed(2)}s`}</strong>
             <small>{phase === 'countdown'
               ? 'Countdown'
-              : phase === 'armed' ? 'Starts on first pedal signal' : `of ${durationSeconds}s pull`}</small>
+              : phase === 'armed' ? 'Starts on first 1-watt power signal' : `of ${durationSeconds}s pull`}</small>
           </div>
           <div className="get-pulled-phase">
             <strong>{selectedPlayer?.name ?? 'No athlete selected'}</strong>
@@ -360,7 +360,7 @@ export function GetPulledView({
         {phase === 'armed' && (
           <div className="get-pulled-countdown" role="status">
             <strong style={{ width: 'auto', height: 'auto', minWidth: 190, padding: '18px 26px', borderRadius: 18, fontSize: 'clamp(34px,5vw,62px)' }}>READY</strong>
-            <small style={{ marginTop: 10, padding: '7px 12px', borderRadius: 999, color: '#fff', background: 'rgba(7,12,9,.86)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.12em' }}>Pedal to start</small>
+            <small style={{ marginTop: 10, padding: '7px 12px', borderRadius: 999, color: '#fff', background: 'rgba(7,12,9,.86)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.12em' }}>Reach 1 watt to start</small>
           </div>
         )}
       </section>

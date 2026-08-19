@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { monitorMaximumCadenceRpm, monitorMetrics } from '../../src/components/MonitorView';
+import {
+  monitorMaximumCadenceRpm,
+  monitorMetrics,
+  monitorSprintShouldCapture,
+} from '../../src/components/MonitorView';
 import { bmxSpeedKphFromCadence } from '../../src/game/bmxRollout';
 import type { BikeSample } from '../../src/types';
 
@@ -50,5 +54,10 @@ describe('Monitor View metrics', () => {
 
     expect(metrics.cadence).toBe(monitorMaximumCadenceRpm);
     expect(metrics.speedKph).toBeCloseTo(bmxSpeedKphFromCadence(monitorMaximumCadenceRpm), 6);
+  });
+
+  it('does not begin recording from backward crank cadence without one watt of power', () => {
+    expect(monitorSprintShouldCapture(monitorMetrics(sample({ watts: 0, cadence: 90 }), 1_000))).toBe(false);
+    expect(monitorSprintShouldCapture(monitorMetrics(sample({ watts: 1, cadence: 90 }), 1_000))).toBe(true);
   });
 });

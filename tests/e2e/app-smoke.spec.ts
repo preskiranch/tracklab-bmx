@@ -554,19 +554,19 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   expect(trainingSaveCount).toBe(0);
 });
 
-test('live Get Pulled waits after the countdown and starts on the first pedal packet', async ({ page }, testInfo) => {
+test('live Get Pulled ignores backward cranking and starts on the first 1-watt packet', async ({ page }, testInfo) => {
   test.setTimeout(35_000);
   const deviceIds = [58701, 58702, 58703, 58704];
   const selectedDeviceId = deviceIds[1];
   const bridge = await createMockBikeBridge(deviceIds);
-  let pedaling = false;
+  let powerWatts = 0;
   let broadcastAllBikes = true;
   const sampleTimer = setInterval(() => {
     const activeDeviceIds = broadcastAllBikes ? deviceIds : [selectedDeviceId];
     activeDeviceIds.forEach((deviceId) => bridge.broadcast(mockBikeSample({
       deviceId,
-      watts: pedaling && deviceId === selectedDeviceId ? 487 : 0,
-      cadence: pedaling && deviceId === selectedDeviceId ? 90 : 0,
+      watts: deviceId === selectedDeviceId ? powerWatts : 0,
+      cadence: deviceId === selectedDeviceId ? 90 : 0,
       speedKph: 0,
     })));
   }, 120);
@@ -639,17 +639,17 @@ test('live Get Pulled waits after the countdown and starts on the first pedal pa
     await view.screenshot({ path: testInfo.outputPath('get-pulled-four-bike-athlete-assignment.png') });
     await readyStart.click();
     await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
-    await expect(view.getByRole('status')).toContainText('Pedal to start', { timeout: 7_500 });
+    await expect(view.getByRole('status')).toContainText(/reach 1 watt to start/i, { timeout: 7_500 });
     const clock = view.locator('.get-pulled-timer strong');
     await expect(clock).toHaveText('0.00s');
     await page.waitForTimeout(900);
     await expect(clock).toHaveText('0.00s');
     await expect(view.getByText('Pulling now', { exact: false })).toHaveCount(0);
 
-    pedaling = true;
+    powerWatts = 1;
     bridge.broadcast(mockBikeSample({
       deviceId: selectedDeviceId,
-      watts: 487,
+      watts: 1,
       cadence: 90,
       speedKph: 0,
     }));
@@ -676,11 +676,11 @@ test('Monitor View fills the screen, travels across the road, and rejects post-s
     admin: true,
     membership: { tier: 'racer', bikeSeats: 1, updatedAt: Date.now() },
   };
-  let active = true;
+  let powerWatts = 0;
   const sampleTimer = setInterval(() => bridge.broadcast(mockBikeSample({
     deviceId,
-    watts: active ? 510 : 0,
-    cadence: active ? 96 : 0,
+    watts: powerWatts,
+    cadence: 96,
     speedKph: 0,
   })), 120);
 
@@ -713,13 +713,20 @@ test('Monitor View fills the screen, travels across the road, and rejects post-s
     await expect(monitor).toBeVisible();
     await expect(scene).toHaveAttribute('data-course-mode', 'fixed-screen');
     await expect(scene).toHaveAttribute('data-pull-scrolling', 'false');
-    await expect(scene).toHaveAttribute('data-travel-duration-seconds', '6');
+    await expect(scene).toHaveAttribute('data-travel-duration-seconds', '');
     await expect(scene.locator('[data-finish-surface="road-only-checkered"]')).toBeVisible();
     await expect(scene.locator('[data-tow-color="matte-black"]')).toBeVisible();
     const sceneBox = await scene.boundingBox();
     expect(sceneBox?.height).toBeGreaterThanOrEqual(330);
     expect(sceneBox?.width).toBeGreaterThan(page.viewportSize()!.width * .75);
     const rig = scene.locator('[data-pull-rig="sled-left-rider-right"]');
+    await expect(rig).toHaveCSS('animation-name', 'none');
+    await expect(monitor.getByText('No completed sprint yet', { exact: true })).toBeVisible();
+    await page.waitForTimeout(700);
+    await expect(monitor.getByText('No completed sprint yet', { exact: true })).toBeVisible();
+
+    powerWatts = 1;
+    await expect(scene).toHaveAttribute('data-travel-duration-seconds', '6');
     await expect(rig).toHaveCSS('animation-name', 'tracklab-pull-rig-travel');
     const transformBefore = await rig.evaluate((element) => getComputedStyle(element).transform);
     await page.waitForTimeout(450);
@@ -727,7 +734,7 @@ test('Monitor View fills the screen, travels across the road, and rejects post-s
     expect(transformAfter).not.toBe(transformBefore);
     await page.waitForTimeout(900);
 
-    active = false;
+    powerWatts = 0;
     await expect(monitor.getByText('Last sprint result', { exact: true })).toBeVisible({ timeout: 5_000 });
     const result = monitor.locator('.monitor-sprint-result.complete');
     await expect(result.locator('.monitor-sprint-grid > div').nth(0).locator('span')).toHaveText('96');
@@ -736,7 +743,8 @@ test('Monitor View fills the screen, travels across the road, and rejects post-s
 
     bridge.broadcast(mockBikeSample({ deviceId, watts: 940, cadence: 100_000, speedKph: 0 }));
     await page.waitForTimeout(700);
-    await expect(monitor.locator('.monitor-primary > div').nth(0).locator('span')).toHaveText('0');
+    await expect(monitor.locator('.monitor-primary > div').nth(0).locator('span')).toHaveText('96');
+    await expect(monitor.getByText('Capturing sprint', { exact: true })).toHaveCount(0);
     await expect(result.locator('.monitor-sprint-grid > div').nth(0).locator('span')).toHaveText('96');
     await monitor.screenshot({ path: testInfo.outputPath('monitor-fullscreen-pull-lane.png') });
   } finally {

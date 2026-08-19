@@ -72,7 +72,7 @@ export function monitorMetrics(sample: BikeSample | undefined, now = Date.now())
     && rawCadence <= monitorMaximumCadenceRpm;
   const cadence = cadenceIsPlausible ? rawCadence : 0;
   const bmxSpeedKph = bmxSpeedKphFromCadence(cadence);
-  const idleNoise = watts <= 10 && cadence <= 15;
+  const idleNoise = watts < 1 && cadence <= 15;
 
   if (!cadenceIsPlausible) {
     return {
@@ -91,8 +91,8 @@ export function monitorMetrics(sample: BikeSample | undefined, now = Date.now())
   };
 }
 
-function isSprintActive(metrics: MonitorMetrics) {
-  return metrics.watts > 10 || metrics.cadence > 18 || metrics.speedKph > 2;
+export function monitorSprintShouldCapture(metrics: MonitorMetrics) {
+  return metrics.watts >= 1;
 }
 
 function resultFromDraft(draft: MonitorSprintDraft, status: MonitorSprintResult['status'], endedAt: number | null): MonitorSprintResult {
@@ -141,7 +141,7 @@ export function MonitorView({
 
       const sample = samplesByDevice.get(player.deviceId);
       const metrics = monitorMetrics(sample, now);
-      const active = isSprintActive(metrics);
+      const active = monitorSprintShouldCapture(metrics);
       const existing = activeSprintsRef.current.get(player.deviceId);
 
       if (active) {
@@ -283,9 +283,9 @@ export function MonitorView({
                 </div>
 
                 <PullSledScene
-                  active={isSprintActive(metrics)}
+                  active={monitorSprintShouldCapture(metrics)}
                   cadenceRpm={metrics.cadence}
-                  durationSeconds={isSprintActive(metrics) ? monitorTravelSeconds : undefined}
+                  durationSeconds={monitorSprintShouldCapture(metrics) ? monitorTravelSeconds : undefined}
                   label={`${player.name} pulling the TrackLab sled`}
                   progress={sprintProgress}
                   speedKph={metrics.speedKph}

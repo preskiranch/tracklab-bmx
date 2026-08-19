@@ -49,9 +49,15 @@ describe('Get Pulled test math and record categories', () => {
       cadence: 90,
       speedKph: bmxSpeedKphFromCadence(90),
     });
-    expect(getPulledMetrics(sample({ watts: 8, cadence: 10 }), 1_000)).toEqual({
+    expect(getPulledMetrics(sample({ watts: 0, cadence: 10 }), 1_000)).toEqual({
       live: true,
       watts: 0,
+      cadence: 0,
+      speedKph: 0,
+    });
+    expect(getPulledMetrics(sample({ watts: 1, cadence: 0 }), 1_000)).toEqual({
+      live: true,
+      watts: 1,
       cadence: 0,
       speedKph: 0,
     });
@@ -67,7 +73,7 @@ describe('Get Pulled test math and record categories', () => {
     expect(underway.speedKph).toBeCloseTo(bmxSpeedKphFromCadence(underway.cadence), 6);
   });
 
-  it('arms indefinitely and accepts only a fresh post-countdown pedaling packet', () => {
+  it('arms indefinitely and starts only on a fresh post-countdown 1-watt power packet', () => {
     const armedAt = 10_000;
 
     expect(getPulledTakeoffSignal(sample({
@@ -78,11 +84,18 @@ describe('Get Pulled test math and record categories', () => {
       watts: 0,
     }), armedAt, 10_100)).toBeNull();
     expect(getPulledTakeoffSignal(sample({
+      at: 10_200,
+      cadenceAt: 10_200,
+      wattsAt: 10_200,
+      cadence: 90,
+      watts: 0,
+    }), armedAt, 10_200)).toBeNull();
+    expect(getPulledTakeoffSignal(sample({
       at: 10_100,
       cadenceAt: 9_999,
       wattsAt: 9_999,
       cadence: 90,
-      watts: 487,
+      watts: 1,
     }), armedAt, 10_100)).toBeNull();
 
     const takeoff = getPulledTakeoffSignal(sample({
@@ -90,14 +103,14 @@ describe('Get Pulled test math and record categories', () => {
       cadenceAt: 11_250,
       wattsAt: 11_250,
       cadence: 90,
-      watts: 487,
+      watts: 1,
     }), armedAt, 11_260);
 
     expect(takeoff).toEqual({
       at: 11_250,
       metrics: {
         live: true,
-        watts: 487,
+        watts: 1,
         cadence: 90,
         speedKph: bmxSpeedKphFromCadence(90),
       },
