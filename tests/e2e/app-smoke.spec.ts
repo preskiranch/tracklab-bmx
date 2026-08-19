@@ -476,7 +476,13 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   await expect(page.locator('.platform-shell')).toHaveClass(/utility-fullscreen/);
   await expect(view.getByText('Get ready', { exact: false })).toBeVisible();
   await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
+  await view.getByRole('button', { name: 'Cancel sprint', exact: true }).click();
+  await expect(page.locator('.platform-shell')).not.toHaveClass(/utility-fullscreen/);
+  await expect(view.getByRole('button', { name: /Start 3 seconds pull · Air 7/ })).toBeVisible();
+  await view.getByRole('button', { name: /Start 3 seconds pull · Air 7/ }).click();
+  await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
   await expect(view.getByText('Pulling now', { exact: false })).toBeVisible({ timeout: 7_500 });
+  await expect(view.getByRole('button', { name: 'Cancel sprint', exact: true })).toBeVisible();
   const pullScene = view.getByRole('img', { name: /actively pulling/i });
   await expect(pullScene).toHaveAttribute('data-rider-side', 'right');
   await expect(pullScene).toHaveAttribute('data-sled-side', 'left');
@@ -537,7 +543,7 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabGetPulledTones?: string[] })
       .__tracklabGetPulledTones ?? []
-  ))).toEqual(['tick', 'tick', 'tick', 'tick', 'tick', 'tick', 'gate']);
+  ))).toEqual(['tick', 'tick', 'tick', 'tick', 'tick', 'tick', 'tick', 'gate']);
   await expect.poll(() => page.evaluate(() => {
     const audio = (window as typeof window & {
       __tracklabBikeRaceAudio?: { seenModes: Record<number, string[]> };
@@ -645,6 +651,15 @@ test('live Get Pulled ignores backward cranking and starts on the first 1-watt p
     await page.waitForTimeout(900);
     await expect(clock).toHaveText('0.00s');
     await expect(view.getByText('Pulling now', { exact: false })).toHaveCount(0);
+    await view.getByRole('button', { name: 'Cancel sprint', exact: true }).click();
+    await expect(page.locator('.platform-shell')).not.toHaveClass(/utility-fullscreen/);
+    await expect(readyStart).toBeVisible();
+    expect(savedRiderId).toBeNull();
+
+    await readyStart.click();
+    await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
+    await expect(view.getByRole('status')).toContainText(/reach 1 watt to start/i, { timeout: 7_500 });
+    await expect(clock).toHaveText('0.00s');
 
     powerWatts = 1;
     bridge.broadcast(mockBikeSample({

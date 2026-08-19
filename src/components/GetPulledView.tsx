@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Gauge, Minimize2, Play, RotateCcw, TimerReset, Zap } from 'lucide-react';
+import { Activity, Gauge, Play, RotateCcw, TimerReset, Zap } from 'lucide-react';
 import {
   addGetPulledSample,
   createGetPulledAccumulator,
@@ -141,7 +141,7 @@ export function GetPulledView({
 
   const reset = useCallback(() => {
     phaseRef.current = 'setup';
-    completedRef.current = false;
+    completedRef.current = true;
     accumulatorRef.current = createGetPulledAccumulator();
     armedAtRef.current = null;
     setPhase('setup');
@@ -331,9 +331,9 @@ export function GetPulledView({
 
   return (
     <main className="get-pulled-view" aria-label="Get Pulled timed Wattbike test">
-      {fullscreen && phase !== 'setup' && (
-        <button className="get-pulled-exit-fullscreen" type="button" onClick={() => onFullscreenChange?.(false)}>
-          <Minimize2 size={18} /> Exit full screen
+      {fullscreen && (phase === 'countdown' || phase === 'armed' || phase === 'active') && (
+        <button className="get-pulled-exit-fullscreen" type="button" onClick={reset}>
+          <RotateCcw size={18} /> Cancel sprint
         </button>
       )}
       <section className="get-pulled-hero">
