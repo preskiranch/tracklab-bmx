@@ -753,6 +753,121 @@ test('Monitor View fills the screen, travels across the road, and rejects post-s
   }
 });
 
+test('Monitor View fits four complete bike panels into a fullscreen 2-by-2 wall without scrolling', async ({ page }, testInfo) => {
+  test.setTimeout(30_000);
+  const deviceIds = [58701, 58702, 58703, 58704];
+  const bridge = await createMockBikeBridge(deviceIds);
+  let connectedBikeCount = 4;
+  const sampleTimer = setInterval(() => deviceIds.slice(0, connectedBikeCount).forEach((deviceId, index) => {
+    bridge.broadcast(mockBikeSample({
+      deviceId,
+      watts: 320 + index * 20,
+      cadence: 82 + index * 3,
+      speedKph: 0,
+      signal: .92 - index * .02,
+    }));
+  }), 120);
+  const authUser = {
+    id: 'four-bike-monitor-racer',
+    profileKey: 'user:four-bike-monitor-racer',
+    email: 'four-bike-monitor@tracklab.test',
+    name: 'Four Bike Monitor Coach',
+    admin: true,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: Date.now() },
+  };
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ trackMappings: {}, customRoutes: [], bikeProfiles: [], studioRiders: [] }),
+      });
+    });
+    await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+    await page.goto('/?track=black-mountain-bmx');
+    const openApp = page.getByRole('button', { name: 'Open App' });
+    if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+    await expect(page.getByText(/4 connected bikes/i)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'More', exact: true }).click();
+    await page.getByRole('button', { name: 'Live Monitor', exact: true }).click();
+
+    const panel = page.locator('.monitor-panel');
+    const grid = panel.locator('.monitor-grid');
+    const cards = grid.locator('.monitor-card');
+    await expect(grid).toHaveAttribute('data-monitor-layout', '4-way');
+    await expect(cards).toHaveCount(4);
+    await expect(page.locator('.platform-shell')).toHaveClass(/utility-fullscreen/);
+
+    const boxes = await cards.evaluateAll((elements) => elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+    }));
+    expect(boxes[0].left).toBeLessThan(boxes[1].left);
+    expect(boxes[0].top).toBe(boxes[1].top);
+    expect(boxes[2].left).toBeLessThan(boxes[3].left);
+    expect(boxes[2].top).toBeGreaterThan(boxes[0].top);
+    expect(Math.max(...boxes.map((box) => box.bottom))).toBeLessThanOrEqual(page.viewportSize()!.height);
+    expect(await page.locator('.platform-main').evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+
+    for (let index = 0; index < 4; index += 1) {
+      const card = cards.nth(index);
+      const scene = card.getByRole('img', { name: /pulling the TrackLab sled/i });
+      await expect(scene).toBeVisible();
+      const sceneBounds = await scene.boundingBox();
+      const finishBounds = await scene.locator('[data-finish-line="pull"]').boundingBox();
+      expect(finishBounds!.height).toBeGreaterThan(sceneBounds!.height * .3);
+      await expect(card.locator('.monitor-primary')).toBeVisible();
+      await expect(card.locator('.monitor-secondary')).toBeVisible();
+      await expect(card.locator('.monitor-sprint-result')).toBeVisible();
+    }
+    await panel.screenshot({ path: testInfo.outputPath('monitor-four-bike-fullscreen-wall.png') });
+
+    const setConnectedBikeCount = (count: number) => {
+      connectedBikeCount = count;
+      bridge.broadcast({
+        type: 'bridge-status',
+        mode: 'bluetooth',
+        sourceState: 'running',
+        message: `${count} mock bikes connected.`,
+        connectedDevices: deviceIds.slice(0, count).map((deviceId, index) => ({
+          deviceId,
+          label: `WattbikePM250${deviceId}`,
+          connected: true,
+          source: 'bluetooth',
+          signal: .92 - index * .02,
+          at: Date.now(),
+        })),
+      });
+    };
+    setConnectedBikeCount(3);
+    await expect(grid).toHaveAttribute('data-monitor-layout', '3-way');
+    await expect(cards).toHaveCount(3);
+    const threeWayTops = await cards.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().top));
+    expect(new Set(threeWayTops).size).toBe(1);
+
+    setConnectedBikeCount(2);
+    await expect(grid).toHaveAttribute('data-monitor-layout', '2-way');
+    await expect(cards).toHaveCount(2);
+    const twoWayBoxes = await cards.evaluateAll((elements) => elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, top: box.top };
+    }));
+    expect(twoWayBoxes[0].left).toBeLessThan(twoWayBoxes[1].left);
+    expect(twoWayBoxes[0].top).toBe(twoWayBoxes[1].top);
+    expect(await page.locator('.platform-main').evaluate((element) => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
+});
+
 test('developer Explore demo rides without commentary and keeps bike mechanics audio', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const authUser = {
