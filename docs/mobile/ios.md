@@ -8,7 +8,7 @@ inside the shell because iPhone and iPad browsers do not expose Web Bluetooth.
 ## App identity
 
 - App name: `TrackLab BMX`
-- Bundle identifier: `com.preskilabs.tracklabbmx`
+- Bundle identifier: `com.preskilranch.tracklabbmx`
 - URL scheme: `tracklabbmx`
 - Minimum iOS version: iOS 15
 - Supported layouts: portrait and landscape on iPhone and iPad
@@ -43,9 +43,9 @@ The iOS shell installs a Web Bluetooth-compatible adapter over Capacitor's BLE
 plugin before the React app starts. This lets the existing four-bike race entry
 and metric parsing code run unchanged. A rider can choose a Wattbike from the
 native device list, and TrackLab remembers up to four selected native device
-identifiers on that device for reconnection on later launches. The chooser is
-intentionally labeled as nearby Bluetooth devices because some Model B monitors
-advertise only a PM serial rather than the Wattbike name. TrackLab validates the
+identifiers on that device for reconnection on later launches. The iOS scan uses
+the `Wattbike` name prefix so Model B names such as `WattbikePM…` remain visible
+even when the advertisement omits service UUIDs. TrackLab then validates the
 selected device through the expected Wattbike metric services before using its
 data. iOS may still show its Bluetooth permission prompt or require the monitor
 to be awake.
@@ -82,7 +82,7 @@ and policy items are resolved:
 After those blockers are cleared:
 
 1. Select the approved Preski Ranch LLC organization team in Xcode Signing & Capabilities.
-2. Register `com.preskilabs.tracklabbmx` if Xcode does not create it automatically.
+2. Use the existing App Store Connect identifier `com.preskilranch.tracklabbmx`.
 3. Create the TrackLab BMX app record in App Store Connect.
 4. Add the support URL, privacy-policy URL, category, age rating, and screenshots.
 5. Archive from Xcode and upload the build to TestFlight.

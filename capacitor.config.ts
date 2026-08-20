@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.preskilabs.tracklabbmx',
+  appId: 'com.preskilranch.tracklabbmx',
   appName: 'TrackLab BMX',
   webDir: 'dist',
   backgroundColor: '#05080c',

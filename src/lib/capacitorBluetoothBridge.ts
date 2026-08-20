@@ -6,6 +6,7 @@ const savedNativeDeviceIdsKey = 'tracklab.native-bluetooth-device-ids.v1';
 const bluetoothServiceBase = '-0000-1000-8000-00805f9b34fb';
 
 let initialized = false;
+let initializationPromise: Promise<void> | null = null;
 
 function normalizeUuid(value: string) {
   const normalized = value.trim().toLowerCase();
@@ -42,8 +43,25 @@ async function initializeNativeBluetooth() {
   if (initialized) {
     return;
   }
-  await BleClient.initialize();
-  initialized = true;
+  if (!initializationPromise) {
+    initializationPromise = (async () => {
+      try {
+        await BleClient.initialize();
+        if (!await BleClient.isEnabled()) {
+          throw new Error('Bluetooth is turned off. Turn it on in iPad Settings, then try again.');
+        }
+        initialized = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Native Bluetooth could not initialize. ${message}`);
+      }
+    })();
+  }
+  try {
+    await initializationPromise;
+  } finally {
+    initializationPromise = null;
+  }
 }
 
 class NativeBluetoothCharacteristic extends EventTarget {
@@ -111,12 +129,22 @@ class NativeBluetoothServer {
   connect = async () => {
     if (!this.connected) {
       await initializeNativeBluetooth();
-      await BleClient.connect(this.deviceId, () => {
+      try {
+        await BleClient.connect(this.deviceId, () => {
+          this.connected = false;
+          this.onDisconnect();
+        });
+        this.connected = true;
+        this.services = await BleClient.getServices(this.deviceId);
+      } catch (error) {
         this.connected = false;
-        this.onDisconnect();
-      });
-      this.connected = true;
-      this.services = await BleClient.getServices(this.deviceId);
+        // A service-discovery failure happens after CoreBluetooth has already
+        // connected. Always tear that partial link down so a retry is not
+        // blocked by an orphaned native connection.
+        await BleClient.disconnect(this.deviceId).catch(() => undefined);
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`The Wattbike was found, but its live data connection failed. ${message}`);
+      }
     }
     return this;
   };
@@ -153,10 +181,49 @@ class NativeBluetoothDevice extends EventTarget {
 
 function nativeRequestOptions(options: BluetoothRequestDeviceOptions) {
   const optionalServices = options.optionalServices.map(normalizeUuid);
+  const filters = options.filters ?? [];
+  const namePrefixes = filters
+    .flatMap((filter) => filter.namePrefix?.trim() ? [filter.namePrefix.trim()] : [])
+    .sort((left, right) => left.length - right.length);
+  // Web Bluetooth filters are OR conditions, while the Capacitor plugin can
+  // express only one native name prefix. The shortest Wattbike prefix covers
+  // WattbikePM model names too. Do not filter by service UUID on iOS: Model B
+  // monitors advertise their WattbikePM name but may omit service UUIDs until
+  // after connection.
+  const namePrefix = namePrefixes.find((candidate) => (
+    namePrefixes.every((other) => other.toLowerCase().startsWith(candidate.toLowerCase()))
+  ));
+  const exactNames = filters
+    .flatMap((filter) => filter.name?.trim() ? [filter.name.trim()] : []);
   return {
     displayMode: 'list' as const,
     optionalServices,
+    ...(namePrefix
+      ? { namePrefix }
+      : exactNames.length === 1
+        ? { name: exactNames[0] }
+        : {}),
   };
+}
+
+function installNavigatorBluetooth(bluetooth: object) {
+  try {
+    Object.defineProperty(window.navigator, 'bluetooth', {
+      configurable: true,
+      enumerable: true,
+      value: bluetooth,
+    });
+  } catch {
+    const navigatorPrototype = Object.getPrototypeOf(window.navigator) as object | null;
+    if (!navigatorPrototype) {
+      throw new Error('The native app could not expose its Bluetooth bridge to TrackLab.');
+    }
+    Object.defineProperty(navigatorPrototype, 'bluetooth', {
+      configurable: true,
+      enumerable: true,
+      value: bluetooth,
+    });
+  }
 }
 
 export async function installCapacitorBluetoothBridge({ nativeShell = false }: { nativeShell?: boolean } = {}) {
@@ -176,16 +243,18 @@ export async function installCapacitorBluetoothBridge({ nativeShell = false }: {
     },
     requestDevice: async (options: BluetoothRequestDeviceOptions) => {
       await initializeNativeBluetooth();
-      const device = await BleClient.requestDevice(nativeRequestOptions(options));
+      let device: BleDevice;
+      try {
+        device = await BleClient.requestDevice(nativeRequestOptions(options));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Native Wattbike scan did not complete. ${message}`);
+      }
       saveNativeDeviceId(device.deviceId);
       return new NativeBluetoothDevice(device);
     },
   };
 
-  Object.defineProperty(window.navigator, 'bluetooth', {
-    configurable: true,
-    enumerable: true,
-    value: bluetooth,
-  });
+  installNavigatorBluetooth(bluetooth);
   return true;
 }

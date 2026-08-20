@@ -6,6 +6,7 @@ const bleClient = vi.hoisted(() => ({
   getDevices: vi.fn(),
   getServices: vi.fn(),
   initialize: vi.fn(),
+  isEnabled: vi.fn(),
   read: vi.fn(),
   requestDevice: vi.fn(),
   startNotifications: vi.fn(),
@@ -33,7 +34,7 @@ type InstalledBluetooth = {
   }>>;
   requestDevice: (options: {
     acceptAllDevices?: boolean;
-    filters?: Array<{ namePrefix?: string }>;
+    filters?: Array<{ name?: string; namePrefix?: string; services?: string[] }>;
     optionalServices: string[];
   }) => Promise<{ id: string; name?: string }>;
 };
@@ -68,6 +69,7 @@ describe('Capacitor Bluetooth bridge', () => {
     vi.clearAllMocks();
     capacitor.isNativePlatform.mockReturnValue(true);
     bleClient.initialize.mockResolvedValue(undefined);
+    bleClient.isEnabled.mockResolvedValue(true);
     bleClient.connect.mockResolvedValue(undefined);
     bleClient.disconnect.mockResolvedValue(undefined);
     bleClient.getDevices.mockResolvedValue([]);
@@ -99,20 +101,25 @@ describe('Capacitor Bluetooth bridge', () => {
     expect(fakeWindow.navigator.bluetooth).toBeDefined();
   });
 
-  it('requests a native device with normalized optional services and remembers it', async () => {
+  it('preserves the Wattbike name filter, normalizes services, and remembers the device', async () => {
     const { fakeWindow, storage } = installWindow();
     const { installCapacitorBluetoothBridge } = await loadBridge();
     await expect(installCapacitorBluetoothBridge()).resolves.toBe(true);
     const bluetooth = fakeWindow.navigator.bluetooth as InstalledBluetooth;
 
     const device = await bluetooth.requestDevice({
-      filters: [{ namePrefix: 'Wattbike' }],
+      filters: [
+        { namePrefix: 'Wattbike' },
+        { namePrefix: 'WattbikePM' },
+        { services: ['1818'] },
+      ],
       optionalServices: ['180f', '00001818', 'F7461223-D7C1-11E4-9AB1-0002A5D5C51B'],
     });
 
     expect(bleClient.initialize).toHaveBeenCalledTimes(1);
     expect(bleClient.requestDevice).toHaveBeenCalledWith({
       displayMode: 'list',
+      namePrefix: 'Wattbike',
       optionalServices: [
         '0000180f-0000-1000-8000-00805f9b34fb',
         '00001818-0000-1000-8000-00805f9b34fb',
@@ -121,6 +128,21 @@ describe('Capacitor Bluetooth bridge', () => {
     });
     expect(device).toMatchObject({ id: 'native-bike-1', name: 'WattbikePM25043950' });
     expect(storage.setItem).toHaveBeenCalledWith(savedDeviceIdsKey, '["native-bike-1"]');
+  });
+
+  it('reports when native Bluetooth is disabled before opening the device list', async () => {
+    const { fakeWindow } = installWindow();
+    bleClient.isEnabled.mockResolvedValue(false);
+    const { installCapacitorBluetoothBridge } = await loadBridge();
+    await installCapacitorBluetoothBridge();
+    const bluetooth = fakeWindow.navigator.bluetooth as InstalledBluetooth;
+
+    await expect(bluetooth.requestDevice({
+      filters: [{ namePrefix: 'Wattbike' }],
+      optionalServices: ['1818'],
+    })).rejects.toThrow('Bluetooth is turned off');
+
+    expect(bleClient.requestDevice).not.toHaveBeenCalled();
   });
 
   it('restores at most four saved native bikes and reconnects after a GATT disconnect', async () => {
@@ -171,6 +193,29 @@ describe('Capacitor Bluetooth bridge', () => {
     expect(bleClient.connect).toHaveBeenCalledTimes(2);
     expect(bleClient.getServices).toHaveBeenCalledTimes(2);
     expect(devices[0].gatt.connected).toBe(true);
+  });
+
+  it('disconnects a partial native link when service discovery fails', async () => {
+    const storage = createStorage({
+      [savedDeviceIdsKey]: JSON.stringify(['native-bike-1']),
+    });
+    const { fakeWindow } = installWindow(storage);
+    bleClient.getDevices.mockResolvedValue([
+      { deviceId: 'native-bike-1', name: 'WattbikePM25043950' },
+    ]);
+    bleClient.getServices.mockRejectedValue(new Error('Service discovery timed out.'));
+    const { installCapacitorBluetoothBridge } = await loadBridge();
+    await installCapacitorBluetoothBridge();
+    const bluetooth = fakeWindow.navigator.bluetooth as InstalledBluetooth;
+    const [device] = await bluetooth.getDevices();
+
+    await expect(device.gatt.connect()).rejects.toThrow(
+      'The Wattbike was found, but its live data connection failed. Service discovery timed out.',
+    );
+
+    expect(bleClient.connect).toHaveBeenCalledWith('native-bike-1', expect.any(Function));
+    expect(bleClient.disconnect).toHaveBeenCalledWith('native-bike-1');
+    expect(device.gatt.connected).toBe(false);
   });
 
   it('treats malformed saved-device storage as an empty remembered list', async () => {

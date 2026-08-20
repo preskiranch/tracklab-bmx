@@ -28,6 +28,13 @@ type UseExploreRideOptions = {
   route: ExploreRoute | null;
   samplesByDevice: Map<number, BikeSample>;
   demoMode?: boolean;
+  restoredRide?: ExploreRideRestoreState | null;
+};
+
+export type ExploreRideRestoreState = {
+  routeId: string;
+  riders: ExploreRider[];
+  elapsedMs: number;
 };
 
 const exploreSampleFreshMs = 3_000;
@@ -62,15 +69,42 @@ function initialExploreRiders(
   }));
 }
 
+function restoredExploreRiders(riders: ExploreRider[]) {
+  const at = Date.now();
+  return riders.map((rider) => ({
+    ...rider,
+    // A reopened app always restores safely paused. Do not let momentum or a
+    // stale Wattbike sample advance the map before the rider presses Resume.
+    velocityMps: 0,
+    cadence: 0,
+    watts: 0,
+    signal: 0,
+    finishedAt: null,
+    at,
+  }));
+}
+
 export function useExploreRide({
   clientId,
   players,
   route,
   samplesByDevice,
   demoMode = false,
+  restoredRide = null,
 }: UseExploreRideOptions) {
-  const [status, setStatus] = useState<ExploreRideStatus>('ready');
-  const [riders, setRiders] = useState<ExploreRider[]>(() => initialExploreRiders(clientId, players, route));
+  const initialRestoreRef = useRef(
+    restoredRide && restoredRide.routeId === route?.id && restoredRide.riders.length > 0
+      ? restoredRide
+      : null,
+  );
+  const [status, setStatus] = useState<ExploreRideStatus>(
+    initialRestoreRef.current ? 'paused' : 'ready',
+  );
+  const [riders, setRiders] = useState<ExploreRider[]>(() => (
+    initialRestoreRef.current
+      ? restoredExploreRiders(initialRestoreRef.current.riders)
+      : initialExploreRiders(clientId, players, route)
+  ));
   const statusRef = useRef(status);
   const playersRef = useRef(players);
   const ridePlayersRef = useRef(players);
@@ -79,7 +113,8 @@ export function useExploreRide({
   const demoModeRef = useRef(demoMode);
   const frameRef = useRef(0);
   const lastFrameRef = useRef(0);
-  const activeElapsedMsRef = useRef(0);
+  const activeElapsedMsRef = useRef(initialRestoreRef.current?.elapsedMs ?? 0);
+  const rideScopeRef = useRef(`${clientId}:${route?.id ?? ''}`);
 
   const playerSignature = useMemo(
     () => players.map((player) => `${player.id}:${player.deviceId ?? 'none'}:${player.riderId ?? ''}:${player.name}:${player.photoUrl ?? ''}`).join('|'),
@@ -123,13 +158,36 @@ export function useExploreRide({
   const resume = useCallback(() => {
     if (statusRef.current === 'paused') {
       lastFrameRef.current = performance.now();
+      ridePlayersRef.current = playersRef.current;
       setStatus('riding');
     }
   }, []);
 
+  const restore = useCallback((snapshot: ExploreRideRestoreState) => {
+    if (
+      !routeRef.current
+      || snapshot.routeId !== routeRef.current.id
+      || snapshot.riders.length === 0
+    ) {
+      return false;
+    }
+    window.cancelAnimationFrame(frameRef.current);
+    lastFrameRef.current = 0;
+    activeElapsedMsRef.current = Math.max(0, snapshot.elapsedMs);
+    ridePlayersRef.current = playersRef.current;
+    setRiders(restoredExploreRiders(snapshot.riders));
+    setStatus('paused');
+    return true;
+  }, []);
+
   useEffect(() => {
+    const nextScope = `${clientId}:${route?.id ?? ''}`;
+    if (rideScopeRef.current === nextScope) {
+      return;
+    }
+    rideScopeRef.current = nextScope;
     reset();
-  }, [reset, route?.id]);
+  }, [clientId, reset, route?.id]);
 
   useEffect(() => {
     if (statusRef.current !== 'ready') {
@@ -238,6 +296,7 @@ export function useExploreRide({
     elapsedMs,
     pause,
     reset,
+    restore,
     resume,
     riders,
     start,

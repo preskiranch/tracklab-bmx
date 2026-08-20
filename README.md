@@ -329,7 +329,7 @@ That capture should show the exact BLE write sent by Hub when Play is pressed. O
 
 - **Track locator database**: country, state/region, and track selectors load the generated database at `public/data/track-database.json`, including USA BMX/BMX Canada official locator records.
 - **Google Earth-style viewer**: Google Maps Platform satellite imagery with tilt/heading controls, route overlays, rider markers, and a Google Earth link. A Google Maps API key is required.
-- **Explore rides**: choose real or fictitious start and destination locations, follow a Google bicycle or driving route in satellite view, and advance up to four riders using TrackLab's 44/16 BMX rollout. Local bikes and private rooms are supported; maps automatically split when riders separate.
+- **Explore rides**: choose real or fictitious start and destination locations, follow a Google bicycle or driving route in satellite view, and advance up to four riders using TrackLab's 44/16 BMX rollout. Local bikes and private rooms are supported; maps automatically split when riders separate. An unfinished local ride is checkpointed for the active rider profile and reopens paused at the saved route position so it can be resumed after closing the app.
 - **Sprint mode**: full-track race distance based on the selected track length.
 - **Manual track mapping**: users can enter Edit map mode on the satellite view, drag to trace the real centerline through straights and turns, click sprint-zone split points along that traced route, then save a user-mapped ride line for that selected track.
 - **Interval mode**: auto-selected pedaling zones or manually chosen track zones. User-mapped routes generate sprint zones from the saved zone split points.

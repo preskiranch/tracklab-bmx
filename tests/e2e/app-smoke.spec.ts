@@ -230,7 +230,10 @@ async function createMockBikeBridge(deviceIds = [58701]) {
   return {
     broadcast,
     close: async () => {
-      clients.forEach((client) => client.close());
+      // These clients intentionally reconnect while the app is open. End the
+      // mocked transport immediately so WebSocket close handshakes cannot
+      // outlive the test and turn a passed assertion into a suite timeout.
+      clients.forEach((client) => client.terminate());
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
@@ -1984,6 +1987,156 @@ test('live Explore ride survives a temporary Wattbike sample gap', async ({ page
     if (sampleTimer) {
       clearInterval(sampleTimer);
     }
+    await bridge.close();
+  }
+});
+
+test('unfinished local Explore ride restores across reload and after returning from multiplayer', async ({ page }) => {
+  test.setTimeout(90_000);
+  const deviceId = 733113;
+  const bridge = await createMockBikeBridge([deviceId]);
+  const sampleTimer = setInterval(() => {
+    bridge.broadcast(mockBikeSample({
+      deviceId,
+      label: 'WattbikePM250733113',
+      watts: 280,
+      cadence: 88,
+      speedKph: 0,
+    }));
+  }, 120);
+  const authUser = {
+    id: 'explore-checkpoint-racer',
+    profileKey: 'user:explore-checkpoint-racer',
+    email: 'explore-checkpoint@tracklab.test',
+    name: 'Checkpoint Rider',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 1, updatedAt: Date.now() },
+  };
+  const checkpointStorageKey = `tracklab-explore-ride-checkpoint-v1:${encodeURIComponent(authUser.profileKey)}`;
+  const checkpoint = {
+    version: 1,
+    route: {
+      id: 'EXPLORE-checkpoint-reload',
+      name: 'Checkpoint Coast Ride',
+      origin: { lat: 38.5, lng: -121.5 },
+      destination: { lat: 38.6, lng: -121.4 },
+      originLabel: 'Checkpoint Start',
+      destinationLabel: 'Checkpoint Finish',
+      travelMode: 'bicycle',
+      distanceMeters: 10_000,
+      durationSeconds: 1_800,
+      encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+      elevationSamples: [
+        { distanceMeters: 0, elevationMeters: 10 },
+        { distanceMeters: 10_000, elevationMeters: 10 },
+      ],
+      elevationGainMeters: 0,
+      elevationLossMeters: 0,
+      createdAt: Date.now() - 800_000,
+    },
+    riders: [{
+      id: 'checkpoint-client:1',
+      clientId: 'checkpoint-client',
+      playerId: 1,
+      name: 'Checkpoint Rider',
+      colorName: 'lime',
+      accent: '#7ade36',
+      distanceMeters: 5_125,
+      velocityMps: 7.4,
+      cadence: 83,
+      watts: 312,
+      signal: 0.94,
+      recommendedAirSetting: 1,
+      finishedAt: null,
+      at: Date.now() - 1_000,
+    }],
+    elapsedMs: 742_500,
+    savedAt: Date.now(),
+  };
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ user: authUser }),
+      });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {},
+          customRoutes: [],
+          bikeProfiles: [],
+          studioRiders: [],
+          raceViewPreferences: null,
+        }),
+      });
+    });
+    await page.route('**/api/explore/recent-routes', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ routes: [] }),
+      });
+    });
+    await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+    await page.goto('/');
+    await page.evaluate(({ key, value }) => {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    }, { key: checkpointStorageKey, value: checkpoint });
+    await page.reload();
+
+    const openApp = page.getByRole('button', { name: 'Open App' });
+    if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await openApp.click({ timeout: 2_000 }).catch(() => undefined);
+    }
+    await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
+
+    await expect(page.getByText(
+      'Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.',
+      { exact: true },
+    )).toBeVisible();
+    await expect(page.locator('.explore-route-summary')).toContainText('Checkpoint Coast Ride');
+    const restoredRider = page.locator('.explore-rider-strip article').filter({ hasText: 'Checkpoint Rider' });
+    await expect(restoredRider).toContainText('3.18 mi');
+    await expect(restoredRider).toContainText('51%');
+    await expect(page.getByRole('button', { name: 'Resume ride', exact: true })).toBeEnabled();
+    expect(await page.evaluate((key) => {
+      const saved = JSON.parse(window.localStorage.getItem(key) ?? 'null') as typeof checkpoint | null;
+      return saved && {
+        version: saved.version,
+        routeId: saved.route.id,
+        distanceMeters: saved.riders[0]?.distanceMeters,
+        elapsedMs: saved.elapsedMs,
+      };
+    }, checkpointStorageKey)).toEqual({
+      version: 1,
+      routeId: 'EXPLORE-checkpoint-reload',
+      distanceMeters: 5_125,
+      elapsedMs: 742_500,
+    });
+
+    const exploreMode = page.locator('.explore-mode-switch');
+    await exploreMode.getByRole('button', { name: 'Private room', exact: true }).click();
+    await expect(page.locator('.explore-route-summary')).toHaveCount(0);
+    await exploreMode.getByRole('button', { name: 'Local bikes', exact: true }).click();
+
+    await expect(page.locator('.explore-route-summary')).toContainText('Checkpoint Coast Ride');
+    await expect(restoredRider).toContainText('3.18 mi');
+    await expect(restoredRider).toContainText('51%');
+    await page.getByRole('button', { name: 'Resume ride', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Pause ride' }).first()).toBeVisible();
+    await expect.poll(() => page.evaluate((key) => {
+      const saved = JSON.parse(window.localStorage.getItem(key) ?? 'null') as typeof checkpoint | null;
+      return saved?.riders[0]?.distanceMeters ?? 0;
+    }, checkpointStorageKey), { timeout: 8_000 }).toBeGreaterThan(5_125);
+  } finally {
+    clearInterval(sampleTimer);
     await bridge.close();
   }
 });
@@ -5811,7 +5964,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(startAthlete).toBeDisabled();
   const bikeChoices = page.locator('.club-tablet-bikes');
   await expect(bikeChoices.getByRole('button')).toHaveCount(1);
-  await expect(bikeChoices.getByText('WattbikePM25058701', { exact: false })).toBeVisible();
+  await expect(bikeChoices.getByText('FTMS · PM 701', { exact: false })).toBeVisible();
 
   await rasheen.click();
   await expect(startAthlete).toBeEnabled();

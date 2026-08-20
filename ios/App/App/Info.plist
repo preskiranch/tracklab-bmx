@@ -28,7 +28,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.preskilabs.tracklabbmx</string>
+			<string>com.preskilranch.tracklabbmx</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>tracklabbmx</string>

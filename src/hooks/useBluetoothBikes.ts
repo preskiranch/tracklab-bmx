@@ -543,7 +543,9 @@ export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothB
       );
 
       let subscriptions = 0;
+      const subscriptionFailures: string[] = [];
       const subscribe = async (
+        label: string,
         serviceUuid: string,
         characteristicUuid: string,
         onValue: (value: DataView) => PartialBikeSample,
@@ -564,22 +566,27 @@ export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothB
             void characteristic.stopNotifications?.().catch(() => undefined);
           });
           subscriptions += 1;
-        } catch {
+        } catch (error) {
           // Wattbike models vary; unsupported standard services are expected.
+          const message = error instanceof Error ? error.message : String(error);
+          subscriptionFailures.push(`${label}: ${message}`);
         }
       };
 
       await subscribe(
+        'FTMS',
         wattbikeBluetoothServices.fitnessMachine,
         bluetoothCharacteristics.indoorBikeData,
         parseIndoorBikeData,
       );
       await subscribe(
+        'Cycling Power',
         wattbikeBluetoothServices.cyclingPower,
         bluetoothCharacteristics.cyclingPowerMeasurement,
         (value) => parseCyclingPowerMeasurement(value, numericId, crankCacheRef.current),
       );
       await subscribe(
+        'Cadence',
         wattbikeBluetoothServices.cyclingSpeedCadence,
         bluetoothCharacteristics.cscMeasurement,
         (value) => parseCscMeasurement(value, numericId, crankCacheRef.current),
@@ -598,7 +605,10 @@ export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothB
 
       if (subscriptions === 0) {
         server.disconnect?.();
-        throw new Error('No FTMS, Cycling Power, or Cycling Speed/Cadence service was found on that Bluetooth device.');
+        const details = subscriptionFailures.length > 0
+          ? ` ${subscriptionFailures.join(' | ')}`
+          : '';
+        throw new Error(`The device connected, but no Wattbike live-data service could start.${details}`);
       }
 
       if (!server.connected) {

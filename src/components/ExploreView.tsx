@@ -24,6 +24,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { App as CapacitorApp } from '@capacitor/app';
 import {
   type CSSProperties,
   lazy,
@@ -56,6 +57,12 @@ import {
   rememberRecentExploreRoute,
   writeRecentExploreRoutes,
 } from '../lib/exploreRecentRoutes';
+import {
+  clearExploreRideCheckpoint,
+  loadExploreRideCheckpoint,
+  saveExploreRideCheckpoint,
+  type ExploreRideCheckpoint,
+} from '../lib/exploreRideCheckpoint';
 import { loadCloudExploreRoutes, saveCloudExploreRoutes } from '../lib/cloudExploreRoutes';
 import {
   exploreElevationAtMeter,
@@ -323,14 +330,33 @@ export function ExploreView({
   onFullscreenChange,
 }: ExploreViewProps) {
   const recentProfileKey = accountProfileKey?.trim() || null;
-  const [localRoute, setLocalRoute] = useState<ExploreRoute | null>(null);
-  const [originText, setOriginText] = useState('');
-  const [destinationText, setDestinationText] = useState('');
-  const [routeName, setRouteName] = useState('');
+  const initialCheckpointRef = useRef<ExploreRideCheckpoint | null>(
+    recentProfileKey && !demoMode ? loadExploreRideCheckpoint(recentProfileKey) : null,
+  );
+  const loadedCheckpointProfileRef = useRef(recentProfileKey);
+  const pendingCheckpointRef = useRef<ExploreRideCheckpoint | null>(null);
+  const initialRoute = initialCheckpointRef.current?.route ?? null;
+  const [localRouteState, setLocalRouteState] = useState<{
+    profileKey: string | null;
+    route: ExploreRoute | null;
+  }>(() => ({ profileKey: recentProfileKey, route: initialRoute }));
+  const localRoute = localRouteState.profileKey === recentProfileKey
+    ? localRouteState.route
+    : null;
+  const setLocalRoute = useCallback((nextRoute: ExploreRoute | null) => {
+    setLocalRouteState({ profileKey: recentProfileKey, route: nextRoute });
+  }, [recentProfileKey]);
+  const [originText, setOriginText] = useState(initialRoute?.originLabel ?? '');
+  const [destinationText, setDestinationText] = useState(initialRoute?.destinationLabel ?? '');
+  const [routeName, setRouteName] = useState(initialRoute?.name ?? '');
   const [smartRoutePrompt, setSmartRoutePrompt] = useState('');
   const [smartRoutePlan, setSmartRoutePlan] = useState<ExploreSmartRoutePlan | null>(null);
-  const [selectedOrigin, setSelectedOrigin] = useState<ExploreOrigin | null>(null);
-  const [selectedDestination, setSelectedDestination] = useState<ExploreOrigin | null>(null);
+  const [selectedOrigin, setSelectedOrigin] = useState<ExploreOrigin | null>(() => (
+    initialRoute ? { point: initialRoute.origin, label: initialRoute.originLabel } : null
+  ));
+  const [selectedDestination, setSelectedDestination] = useState<ExploreOrigin | null>(() => (
+    initialRoute ? { point: initialRoute.destination, label: initialRoute.destinationLabel } : null
+  ));
   const [selectedOriginPrediction, setSelectedOriginPrediction] = useState<PlacePredictionOption | null>(null);
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
   const [exploreDistanceUnit, setExploreDistanceUnit] = useState<ExploreDistanceUnit>(
@@ -345,7 +371,9 @@ export function ExploreView({
   const [followTravelHeading, setFollowTravelHeading] = useState(false);
   const [mapRenderer, setMapRenderer] = useState<ExploreMapRenderer>(savedExploreMapRenderer);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
-  const [routeMessage, setRouteMessage] = useState('');
+  const [routeMessage, setRouteMessage] = useState(
+    initialRoute ? 'Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.' : '',
+  );
   const [mapPickerOpen, setMapPickerOpen] = useState(false);
   const [recentRouteState, setRecentRouteState] = useState<{
     profileKey: string | null;
@@ -394,10 +422,18 @@ export function ExploreView({
     route,
     samplesByDevice,
     demoMode,
+    restoredRide: playMode === 'local' && !demoMode && initialCheckpointRef.current
+      ? {
+        routeId: initialCheckpointRef.current.route.id,
+        riders: initialCheckpointRef.current.riders,
+        elapsedMs: initialCheckpointRef.current.elapsedMs,
+      }
+      : null,
   });
   const {
     pause: pauseLocalRide,
     reset: resetLocalRide,
+    restore: restoreLocalRide,
     resume: resumeLocalRide,
     start: startLocalRide,
   } = ride;
@@ -410,6 +446,16 @@ export function ExploreView({
   });
   latestClubLiveStateRef.current = {
     status: ride.status,
+    route,
+    riders: ride.riders,
+    elapsedMs: ride.elapsedMs,
+  };
+  const latestCheckpointStateRef = useRef({
+    route,
+    riders: ride.riders,
+    elapsedMs: ride.elapsedMs,
+  });
+  latestCheckpointStateRef.current = {
     route,
     riders: ride.riders,
     elapsedMs: ride.elapsedMs,
@@ -456,6 +502,68 @@ export function ExploreView({
   );
 
   recentRouteProfileRef.current = recentProfileKey;
+
+  useEffect(() => {
+    if (loadedCheckpointProfileRef.current === recentProfileKey) {
+      return;
+    }
+    loadedCheckpointProfileRef.current = recentProfileKey;
+    pendingCheckpointRef.current = null;
+    resetLocalRide();
+
+    const checkpoint = recentProfileKey && !demoMode
+      ? loadExploreRideCheckpoint(recentProfileKey)
+      : null;
+    setLocalRouteState({
+      profileKey: recentProfileKey,
+      route: checkpoint?.route ?? null,
+    });
+    if (!checkpoint) {
+      setOriginText('');
+      setDestinationText('');
+      setRouteName('');
+      setSelectedOrigin(null);
+      setSelectedDestination(null);
+      setRouteMessage('');
+      return;
+    }
+
+    pendingCheckpointRef.current = checkpoint;
+    setOriginText(checkpoint.route.originLabel);
+    setDestinationText(checkpoint.route.destinationLabel);
+    setRouteName(checkpoint.route.name ?? '');
+    setSelectedOrigin({
+      point: checkpoint.route.origin,
+      label: checkpoint.route.originLabel,
+    });
+    setSelectedDestination({
+      point: checkpoint.route.destination,
+      label: checkpoint.route.destinationLabel,
+    });
+    setRouteStatus('idle');
+    setRouteMessage('Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.');
+  }, [demoMode, recentProfileKey, resetLocalRide]);
+
+  useEffect(() => {
+    if (playMode !== 'local' || demoMode) {
+      return;
+    }
+    const checkpoint = pendingCheckpointRef.current
+      ?? (ride.status === 'ready' && recentProfileKey
+        ? loadExploreRideCheckpoint(recentProfileKey)
+        : null);
+    if (!checkpoint || localRoute?.id !== checkpoint.route.id) {
+      return;
+    }
+    if (restoreLocalRide({
+      routeId: checkpoint.route.id,
+      riders: checkpoint.riders,
+      elapsedMs: checkpoint.elapsedMs,
+    })) {
+      pendingCheckpointRef.current = null;
+      setRouteMessage('Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.');
+    }
+  }, [demoMode, localRoute?.id, playMode, recentProfileKey, restoreLocalRide, ride.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -749,6 +857,57 @@ export function ExploreView({
   }, [ride.riders, ride.status]);
 
   useEffect(() => {
+    if (
+      playMode !== 'local'
+      || demoMode
+      || !recentProfileKey
+      || !route
+      || (ride.status !== 'riding' && ride.status !== 'paused')
+    ) {
+      return undefined;
+    }
+
+    const persistCheckpoint = () => {
+      const latest = latestCheckpointStateRef.current;
+      if (!latest.route || latest.route.id !== route.id || latest.riders.length === 0) {
+        return;
+      }
+      saveExploreRideCheckpoint(recentProfileKey, {
+        route: latest.route,
+        riders: latest.riders,
+        elapsedMs: latest.elapsedMs,
+      });
+    };
+    const persistWhenHidden = () => {
+      if (document.visibilityState === 'hidden') {
+        persistCheckpoint();
+        pauseLocalRide();
+      }
+    };
+    const persistOnPageHide = () => {
+      persistCheckpoint();
+      pauseLocalRide();
+    };
+
+    persistCheckpoint();
+    const timer = window.setInterval(persistCheckpoint, 1_000);
+    window.addEventListener('pagehide', persistOnPageHide);
+    document.addEventListener('visibilitychange', persistWhenHidden);
+    const nativeAppStateListener = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) {
+        persistCheckpoint();
+        pauseLocalRide();
+      }
+    }).catch(() => null);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('pagehide', persistOnPageHide);
+      document.removeEventListener('visibilitychange', persistWhenHidden);
+      void nativeAppStateListener.then((listener) => listener?.remove());
+    };
+  }, [demoMode, pauseLocalRide, playMode, recentProfileKey, ride.status, route]);
+
+  useEffect(() => {
     if (demoMode) {
       onDemoRideStatusChange?.(ride.status);
     }
@@ -829,6 +988,9 @@ export function ExploreView({
       && previousRideStatusRef.current !== 'finished'
     ) {
       const endedAt = Math.max(Date.now(), ...ride.riders.map((rider) => rider.finishedAt ?? 0));
+      if (playMode === 'local' && recentProfileKey) {
+        clearExploreRideCheckpoint(recentProfileKey);
+      }
       if (route) {
         onRideComplete?.({
           route,
@@ -843,7 +1005,17 @@ export function ExploreView({
       }
     }
     previousRideStatusRef.current = ride.status;
-  }, [fullscreen, onFullscreenChange, onRideComplete, ride.elapsedMs, ride.riders, ride.status, route]);
+  }, [
+    fullscreen,
+    onFullscreenChange,
+    onRideComplete,
+    playMode,
+    recentProfileKey,
+    ride.elapsedMs,
+    ride.riders,
+    ride.status,
+    route,
+  ]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !currentRoom || !route) {
@@ -889,6 +1061,9 @@ export function ExploreView({
   };
 
   const applyExploreRoute = (nextRoute: ExploreRoute, message = '') => {
+    if (playMode === 'local' && recentProfileKey && nextRoute.id !== localRoute?.id) {
+      clearExploreRideCheckpoint(recentProfileKey);
+    }
     setLocalRoute(nextRoute);
     if (playMode === 'multiplayer') {
       onSyncRoute(nextRoute);
@@ -1154,6 +1329,9 @@ export function ExploreView({
         onControlSession('reset');
       }
     } else {
+      if (recentProfileKey) {
+        clearExploreRideCheckpoint(recentProfileKey);
+      }
       resetLocalRide();
     }
   };
