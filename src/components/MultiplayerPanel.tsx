@@ -33,9 +33,12 @@ import type {
   PlayMode,
   PlayerSlot,
   RiderState,
+  SpeedUnit,
   SplitBranchChoice,
   TrackRecord,
 } from '../types';
+import { proSplitMinimumMph } from '../lib/trackMapping';
+import { formatSpeedFromKph, speedUnitLabel } from '../units';
 
 export type ChatMessage = {
   id: number;
@@ -67,6 +70,7 @@ type MultiplayerPanelProps = {
   social: MultiplayerSocialState;
   inviteUrl: string;
   track: TrackRecord;
+  speedUnit: SpeedUnit;
   trackVoteCandidates: MultiplayerTrackVoteCandidate[];
   players: PlayerSlot[];
   maxPlayers: number;
@@ -97,8 +101,7 @@ type MultiplayerPanelProps = {
   onChallengeRider: (riderId: string) => void;
   onAcceptChallenge: (challengeId: string) => void;
   onDeclineChallenge: (challengeId: string) => void;
-  onSendFriendRequest: (riderId: string) => void;
-  onRespondToFriendRequest: (requestId: string, accepted: boolean) => void;
+  onOpenFriends: () => void;
   onCreateGroup: (name: string) => void;
   onInviteToGroup: (groupId: string, riderId: string) => void;
   onRespondToGroupInvite: (inviteId: string, accepted: boolean) => void;
@@ -133,6 +136,10 @@ function latencyQualityLabel(quality: string | null | undefined) {
   return 'Checking';
 }
 
+export function formatMultiplayerProSetMinimumSpeed(speedUnit: SpeedUnit) {
+  return `${formatSpeedFromKph(proSplitMinimumMph * 1.609344, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+}
+
 export function MultiplayerPanel({
   playMode,
   connection,
@@ -150,6 +157,7 @@ export function MultiplayerPanel({
   social,
   inviteUrl,
   track,
+  speedUnit,
   trackVoteCandidates,
   players,
   maxPlayers,
@@ -180,8 +188,7 @@ export function MultiplayerPanel({
   onChallengeRider,
   onAcceptChallenge,
   onDeclineChallenge,
-  onSendFriendRequest,
-  onRespondToFriendRequest,
+  onOpenFriends,
   onCreateGroup,
   onInviteToGroup,
   onRespondToGroupInvite,
@@ -269,11 +276,6 @@ export function MultiplayerPanel({
   const availableRiders = onlineRiders
     .filter((rider) => rider.id !== currentUserId && rider.available)
     .slice(0, 20);
-  const friendRiderIds = new Set(social.friends.map((friend) => friend.riderId).filter(Boolean));
-  const pendingFriendNames = new Set([
-    ...social.incomingFriendRequests.map((request) => request.fromName),
-    ...social.outgoingFriendRequests.map((request) => request.toName),
-  ]);
   const selectedGroup = social.groups.find((group) => group.id === activeGroupId) ?? social.groups[0] ?? null;
   const selectedRiders = availableRiders.filter((rider) => selectedRiderIds.includes(rider.id));
   const totalMatchSeats = localSeatCount + selectedRiders.length;
@@ -524,7 +526,10 @@ export function MultiplayerPanel({
                   Pro Set
                 </button>
               </div>
-              <p className="diagnostic-note">No choice defaults to Amateur Line. Pro Set still requires 26+ mph at the split.</p>
+              <p className="diagnostic-note">
+                No choice defaults to Amateur Line. Pro Set still requires{' '}
+                {formatMultiplayerProSetMinimumSpeed(speedUnit)} or faster at the split.
+              </p>
             </div>
           )}
 
@@ -665,13 +670,6 @@ export function MultiplayerPanel({
                   {selectedRiderIds.includes(rider.id) ? 'Selected' : 'Select'}
                 </button>
                 <button type="button" onClick={() => onChallengeRider(rider.id)}>1v1</button>
-                <button
-                  type="button"
-                  disabled={friendRiderIds.has(rider.id) || pendingFriendNames.has(rider.name)}
-                  onClick={() => onSendFriendRequest(rider.id)}
-                >
-                  Friend
-                </button>
                 {selectedGroup && (
                   <button type="button" onClick={() => onInviteToGroup(selectedGroup.id, rider.id)}>
                     Group
@@ -681,18 +679,8 @@ export function MultiplayerPanel({
             ))}
           </div>
 
-          {(social.incomingFriendRequests.length > 0 || social.incomingGroupInvites.length > 0) && (
+          {social.incomingGroupInvites.length > 0 && (
             <div className="social-request-list">
-              {social.incomingFriendRequests.map((request) => (
-                <div className="social-request-row" key={request.id}>
-                  <div>
-                    <strong>{request.fromName}</strong>
-                    <span>Friend request</span>
-                  </div>
-                  <button type="button" onClick={() => onRespondToFriendRequest(request.id, true)}><Check size={14} /></button>
-                  <button type="button" onClick={() => onRespondToFriendRequest(request.id, false)}><X size={14} /></button>
-                </div>
-              ))}
               {social.incomingGroupInvites.map((invite) => (
                 <div className="social-request-row" key={invite.id}>
                   <div>
@@ -709,18 +697,8 @@ export function MultiplayerPanel({
           <div className="friends-groups-grid">
             <div className="social-list-card">
               <span className="eyebrow">Friends</span>
-              {social.friends.length === 0 && <div className="empty-compact">No friends yet.</div>}
-              {social.friends.slice(0, 8).map((friend) => (
-                <div className="social-mini-row" key={friend.guestKey}>
-                  <div>
-                    <strong>{friend.name}</strong>
-                    <span>{friend.online ? (friend.available ? 'Available' : 'Online') : 'Offline'}</span>
-                  </div>
-                  {friend.riderId && (
-                    <button type="button" onClick={() => toggleSelectedRider(friend.riderId ?? '')}>Select</button>
-                  )}
-                </div>
-              ))}
+              <div className="empty-compact">Manage requests, invitations, and rider privacy in the Friends hub.</div>
+              <button type="button" onClick={onOpenFriends}><UserPlus size={14} /> Open Friends</button>
             </div>
 
             <div className="social-list-card">

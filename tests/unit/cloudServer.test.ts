@@ -726,6 +726,71 @@ describe('cloud API trust boundaries', () => {
     });
   });
 
+  it('keeps the newest account unit preference across stale and concurrent cloud writes', async () => {
+      const initialSave = await api('/api/user-data', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          unitPreferences: { speedUnit: 'mph', distanceUnit: 'ft', updatedAt: 200 },
+        }),
+      });
+      expect(initialSave.status).toBe(200);
+      await expect(initialSave.json()).resolves.toMatchObject({
+        unitPreferences: { speedUnit: 'mph', distanceUnit: 'ft', updatedAt: 200 },
+      });
+
+      const staleSave = await api('/api/user-data', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          unitPreferences: { speedUnit: 'kph', distanceUnit: 'm', updatedAt: 100 },
+        }),
+      });
+      expect(staleSave.status).toBe(200);
+      await expect(staleSave.json()).resolves.toMatchObject({
+        unitPreferences: { speedUnit: 'mph', distanceUnit: 'ft', updatedAt: 200 },
+      });
+
+      const newerUpdatedAt = Date.now();
+      const [newerSave, olderSave] = await Promise.all([
+        api('/api/user-data', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            unitPreferences: { speedUnit: 'kph', distanceUnit: 'm', updatedAt: newerUpdatedAt },
+          }),
+        }),
+        api('/api/user-data', {
+          method: 'PATCH',
+          body: JSON.stringify({
+            unitPreferences: { speedUnit: 'mph', distanceUnit: 'ft', updatedAt: newerUpdatedAt - 1 },
+          }),
+        }),
+      ]);
+      expect(newerSave.status).toBe(200);
+      expect(olderSave.status).toBe(200);
+
+      const loaded = await api('/api/user-data');
+      expect(loaded.status).toBe(200);
+      await expect(loaded.json()).resolves.toMatchObject({
+        unitPreferences: { speedUnit: 'kph', distanceUnit: 'm', updatedAt: newerUpdatedAt },
+      });
+
+      const beforeFutureSave = Date.now();
+      const futureSave = await api('/api/user-data', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          unitPreferences: {
+            speedUnit: 'mph',
+            distanceUnit: 'ft',
+            updatedAt: beforeFutureSave + 24 * 60 * 60 * 1000,
+          },
+        }),
+      });
+      expect(futureSave.status).toBe(200);
+      const futurePayload = await futureSave.json();
+      expect(futurePayload.unitPreferences).toMatchObject({ speedUnit: 'mph', distanceUnit: 'ft' });
+      expect(futurePayload.unitPreferences.updatedAt).toBeGreaterThanOrEqual(beforeFutureSave);
+      expect(futurePayload.unitPreferences.updatedAt).toBeLessThanOrEqual(Date.now());
+  });
+
   it('lets a student privately claim only their studio training record', async () => {
     const now = Date.now();
     const ownerCookie = cookie;
@@ -1882,6 +1947,26 @@ describe('cloud API trust boundaries', () => {
     expect(tabletWelcome.riders.find(
       (rider: { id: string }) => rider.id === tabletConnected.clientId,
     )).toMatchObject({ name: 'Tablet Rider One', membershipTier: 'racer', racerSeatCount: 0 });
+    const tabletFriendMessageIndex = tabletSocket.messages.length;
+    tabletSocket.socket.send(JSON.stringify({ type: 'friend-request', targetId: 'RIDER-forged-target' }));
+    await waitForSocketMessage(
+      tabletSocket,
+      (message) => message.type === 'challenge-status'
+        && /personal account/i.test(String(message.message)),
+      tabletFriendMessageIndex,
+    );
+    const tabletFriendResponseIndex = tabletSocket.messages.length;
+    tabletSocket.socket.send(JSON.stringify({
+      type: 'friend-response',
+      requestId: 'forged-tablet-request',
+      accepted: true,
+    }));
+    await waitForSocketMessage(
+      tabletSocket,
+      (message) => message.type === 'challenge-status'
+        && /personal account/i.test(String(message.message)),
+      tabletFriendResponseIndex,
+    );
     tabletSocket.socket.send(JSON.stringify({
       type: 'create-room',
       private: true,

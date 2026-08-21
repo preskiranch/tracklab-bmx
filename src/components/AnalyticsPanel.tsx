@@ -1,7 +1,14 @@
 import { useMemo, type CSSProperties } from 'react';
 import { Activity, Download, Gauge, ListFilter, Timer, Trophy } from 'lucide-react';
 import { buildRaceZoneResults, zoneRiderResult } from '../lib/raceReview';
-import { formatDistanceRangeMeters, formatReactionTime, formatSpeedFromKph, speedUnitLabel } from '../units';
+import {
+  formatDistanceMeters,
+  formatDistanceRangeMeters,
+  formatReactionTime,
+  formatSpeedFromKph,
+  speedUnitLabel,
+} from '../units';
+import { straightSprintFeetToMeters } from '../lib/straightSprint';
 import type {
   DistanceUnit,
   GhostLap,
@@ -127,6 +134,10 @@ function formatNullableSpeed(speedKph: number | null, speedUnit: SpeedUnit) {
   }
 
   return `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+}
+
+export function formatAnalyticsFeetDistance(distanceFeet: number, distanceUnit: DistanceUnit) {
+  return formatDistanceMeters(straightSprintFeetToMeters(distanceFeet), distanceUnit);
 }
 
 function bestSummaryValue(
@@ -369,7 +380,7 @@ export function AnalyticsPanel({
               <small>best RT</small>
             </div>
             <div>
-              <span>30 ft</span>
+              <span>{formatAnalyticsFeetDistance(30, distanceUnit)}</span>
               <strong>{formatSplitTime(bestThirtyFoot)}</strong>
               <small>best split</small>
             </div>
@@ -382,7 +393,7 @@ export function AnalyticsPanel({
                   <th>Place</th>
                   <th>Rider</th>
                   <th>Finish</th>
-                  <th>30 ft</th>
+                  <th>{formatAnalyticsFeetDistance(30, distanceUnit)}</th>
                   {showReactionSummary && <th>Reaction</th>}
                   {showSpeedSummary && <th>Top speed</th>}
                   {showSpeedSummary && <th>Avg speed</th>}
@@ -510,7 +521,7 @@ export function AnalyticsPanel({
               <h3>{track.name}</h3>
               {sprintConfiguration && (
                 <small className="leaderboard-configuration">
-                  {sprintConfiguration.distanceFeet.toLocaleString()} ft sprint • Wattbike Air {sprintConfiguration.airSetting}
+                  {formatAnalyticsFeetDistance(sprintConfiguration.distanceFeet, distanceUnit)} sprint • Wattbike Air {sprintConfiguration.airSetting}
                 </small>
               )}
             </div>
@@ -527,7 +538,7 @@ export function AnalyticsPanel({
           {rankedGhosts.length === 0 ? (
             <small className="ghost-group-empty">
               {sprintConfiguration
-                ? `Complete a live ${sprintConfiguration.distanceFeet.toLocaleString()} ft sprint at Air ${sprintConfiguration.airSetting} to create this configuration’s first record.`
+                ? `Complete a live ${formatAnalyticsFeetDistance(sprintConfiguration.distanceFeet, distanceUnit)} sprint at Air ${sprintConfiguration.airSetting} to create this configuration’s first record.`
                 : 'Complete a live Wattbike race on this track to create the first ranked ghost.'}
             </small>
           ) : (

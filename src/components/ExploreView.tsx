@@ -38,11 +38,14 @@ import {
 import { primeBikeRaceAudio, stopBikeRaceAudio, updateExploreBikeAudio } from '../lib/bikeRaceAudio';
 import {
   exploreAverageSpeedMph,
+  exploreDemoMaximumCruiseMph,
+  exploreDemoMinimumCruiseMph,
   groupExploreRiders,
   exploreGridClass,
   exploreRemoteStateFreshMs,
   type ExploreCameraFollowPosition,
 } from '../lib/explore';
+import { exploreRolloutConfig } from '../game/exploreRollout';
 import {
   fetchExploreElevationProfile,
   fetchExploreRoute,
@@ -114,6 +117,7 @@ type ExploreViewProps = {
   samplesByDevice: Map<number, BikeSample>;
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
+  onDistanceUnitChange: (unit: DistanceUnit) => void;
   playMode: PlayMode;
   demoMode: boolean;
   multiplayerConnection: string;
@@ -154,6 +158,17 @@ type ExploreViewProps = {
   fullscreen: boolean;
   onFullscreenChange: (enabled: boolean) => void;
 };
+
+export function formatExploreDemoRollout(distanceUnit: DistanceUnit) {
+  const rolloutMeters = exploreRolloutConfig.rolloutMetersPerCrankRevolution;
+  const value = distanceUnit === 'm' ? rolloutMeters : rolloutMeters * 3.28084;
+  return `${value.toFixed(1)} ${distanceUnit}`;
+}
+
+export function exploreSmartRoutePlaceholder(distanceUnit: DistanceUnit) {
+  const exampleDistance = distanceUnit === 'm' ? '16-kilometer' : '10-mile';
+  return `Example: A ${exampleDistance} coastal ride in Malibu with ocean views, or stage 3 of the 2026 Tour de France`;
+}
 
 type ExploreMapRenderer = 'google-satellite' | 'google-3d' | 'apple-satellite';
 const exploreTravelMode = 'bicycle' as const;
@@ -300,6 +315,7 @@ export function ExploreView({
   samplesByDevice,
   speedUnit,
   distanceUnit,
+  onDistanceUnitChange,
   playMode,
   demoMode,
   multiplayerConnection,
@@ -359,9 +375,7 @@ export function ExploreView({
   ));
   const [selectedOriginPrediction, setSelectedOriginPrediction] = useState<PlacePredictionOption | null>(null);
   const [selectedDestinationPrediction, setSelectedDestinationPrediction] = useState<PlacePredictionOption | null>(null);
-  const [exploreDistanceUnit, setExploreDistanceUnit] = useState<ExploreDistanceUnit>(
-    distanceUnit === 'm' ? 'km' : 'mi',
-  );
+  const exploreDistanceUnit: ExploreDistanceUnit = distanceUnit === 'm' ? 'km' : 'mi';
   const [followZoom, setFollowZoom] = useState(18);
   const [cameraFollowPosition, setCameraFollowPosition] = useState<ExploreCameraFollowPosition>('center');
   const [cameraFollowEnabled, setCameraFollowEnabled] = useState(true);
@@ -1366,7 +1380,14 @@ export function ExploreView({
         <div className="explore-demo-banner">
           <Radio size={17} />
           <strong>Developer Demo active</strong>
-          <span>54/17 road rollout · 6.9 m (22.6 ft) per crank · natural launch · 12–18 MPH averages. Commentary is off; bike sounds remain on.</span>
+          <span>
+            {exploreRolloutConfig.frontChainringTeeth}/{exploreRolloutConfig.rearCogTeeth} road rollout ·{' '}
+            {formatExploreDemoRollout(distanceUnit)} per crank · natural launch ·{' '}
+            {speedUnit === 'mph'
+              ? `${exploreDemoMinimumCruiseMph}–${exploreDemoMaximumCruiseMph} MPH`
+              : `${formatSpeedFromKph(exploreDemoMinimumCruiseMph * 1.609344, speedUnit)}–${formatSpeedFromKph(exploreDemoMaximumCruiseMph * 1.609344, speedUnit)} ${speedUnitLabel(speedUnit)}`} averages.
+            {' '}Commentary is off; bike sounds remain on.
+          </span>
         </div>
       )}
 
@@ -1599,7 +1620,7 @@ export function ExploreView({
               <textarea
                 value={smartRoutePrompt}
                 aria-label="Describe your Smart Route"
-                placeholder="Example: A 10-mile coastal ride in Malibu with ocean views, or stage 3 of the 2026 Tour de France"
+                placeholder={exploreSmartRoutePlaceholder(distanceUnit)}
                 disabled={!canChooseRoute || routeStatus === 'loading'}
                 maxLength={600}
                 onChange={(event) => setSmartRoutePrompt(event.target.value)}
@@ -1934,7 +1955,7 @@ export function ExploreView({
                     type="button"
                     aria-label="Show distances in miles"
                     aria-pressed={exploreDistanceUnit === 'mi'}
-                    onClick={() => setExploreDistanceUnit('mi')}
+                    onClick={() => onDistanceUnitChange('ft')}
                   >
                     <span className="distance-long">Miles</span>
                     <span className="distance-short">mi</span>
@@ -1944,7 +1965,7 @@ export function ExploreView({
                     type="button"
                     aria-label="Show distances in kilometers"
                     aria-pressed={exploreDistanceUnit === 'km'}
-                    onClick={() => setExploreDistanceUnit('km')}
+                    onClick={() => onDistanceUnitChange('m')}
                   >
                     <span className="distance-long">Kilometers</span>
                     <span className="distance-short">km</span>
@@ -2217,7 +2238,14 @@ export function ExploreView({
                           {' '}
                           {speedUnitLabel(speedUnit)}
                         </span>
-                        <span>Avg {exploreAverageSpeedMph(rider.distanceMeters, ride.elapsedMs).toFixed(1)} MPH</span>
+                        <span>
+                          Avg{' '}
+                          {formatSpeedFromKph(
+                            exploreAverageSpeedMph(rider.distanceMeters, ride.elapsedMs) * 1.609344,
+                            speedUnit,
+                          )}{' '}
+                          {speedUnitLabel(speedUnit)}
+                        </span>
                         <span
                           role="status"
                           aria-live="polite"

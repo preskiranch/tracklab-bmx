@@ -70,7 +70,7 @@ function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | nu
     return layout;
   }
 
-  const minimumHeight = container.clientWidth <= 780 ? 230 : 190;
+  const minimumHeight = container.clientWidth <= 900 ? 340 : 190;
   const width = Math.max(320, Math.min(layout.width, Math.max(320, container.clientWidth - 24)));
   const height = Math.max(
     minimumHeight,

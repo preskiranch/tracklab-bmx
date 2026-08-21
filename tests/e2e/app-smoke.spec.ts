@@ -393,6 +393,489 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   expect(consoleErrors).toEqual([]);
 });
 
+test('Friends hub shows removable official connections and private account discovery controls', async ({ page }, testInfo) => {
+  const now = Date.now();
+  const authUser = {
+    id: 'friends-rider',
+    profileKey: 'user:friends-rider',
+    email: 'friends-rider@tracklab.test',
+    name: 'Friends Rider',
+    admin: false,
+    membership: { tier: 'spectator', bikeSeats: 1, updatedAt: now },
+  };
+  let discoverable = false;
+  let incomingPending = true;
+  let activeInvite = false;
+  const friendMutations: string[] = [];
+  const ghostRequests: string[] = [];
+  const friendGhostPreview = {
+    id: 'recent-friend-ghost',
+    trackId: 'chula-vista-elite-bmx',
+    trackName: 'Chula Vista Elite BMX',
+    lapCount: 1,
+    finishTimeMs: 90_000,
+  };
+  const publicProfile = (overrides: Record<string, unknown>) => ({
+    id: 'rider',
+    handle: 'tracklab-rider',
+    displayName: 'TrackLab Rider',
+    relationship: 'none',
+    ...overrides,
+  });
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: [],
+        accountProfile: { updatedAt: now },
+      }),
+    });
+  });
+  await page.route('**/api/friends**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const method = request.method();
+    const json = (value: unknown, status = 200) => route.fulfill({
+      status,
+      contentType: 'application/json',
+      body: JSON.stringify(value),
+    });
+
+    if (url.pathname === '/api/friends/events') {
+      await route.fulfill({ status: 204, body: '' });
+      return;
+    }
+    if (url.pathname === '/api/friends/privacy') {
+      if (method === 'PATCH') {
+        const body = request.postDataJSON() as { discoverable?: boolean };
+        discoverable = body.discoverable === true;
+        friendMutations.push(`discoverable:${discoverable}`);
+      }
+      await json({
+        privacy: {
+          discoverable,
+          profile: { id: authUser.id, handle: 'friends.rider', displayName: authUser.name },
+        },
+      });
+      return;
+    }
+    if (url.pathname === '/api/friends/requests') {
+      if (method === 'POST') {
+        friendMutations.push('request:sent');
+        await json({ request: { id: 'sent-request' } }, 201);
+        return;
+      }
+      const direction = url.searchParams.get('direction');
+      await json(direction === 'incoming' && incomingPending ? {
+        items: [{
+          id: 'incoming-request',
+          profile: publicProfile({ id: 'request-rider', handle: 'request.rider', displayName: 'Request Rider' }),
+          createdAt: '2026-08-20T18:00:00.000Z',
+        }],
+        nextCursor: null,
+        total: 1,
+      } : { items: [], nextCursor: null, total: 0 });
+      return;
+    }
+    if (url.pathname === '/api/friends/requests/incoming-request/accept' && method === 'POST') {
+      incomingPending = false;
+      friendMutations.push('request:accepted');
+      await json({ result: { accepted: true } });
+      return;
+    }
+    if (url.pathname === '/api/friends/suggestions') {
+      await json({
+        items: [{
+          profile: publicProfile({ id: 'mutual-rider', handle: 'mutual.rider', displayName: 'Mutual Rider', mutualFriendCount: 2 }),
+          reason: '2 mutual friends',
+        }],
+        nextCursor: null,
+        total: 1,
+      });
+      return;
+    }
+    if (url.pathname === '/api/friends/search') {
+      await json({
+        items: [publicProfile({
+          id: 'pending-rider',
+          handle: 'pending.rider',
+          displayName: 'Pending Rider',
+          relationship: 'outgoing-request',
+        })],
+        nextCursor: null,
+        total: 1,
+      });
+      return;
+    }
+    if (url.pathname === '/api/friends/blocks') {
+      await json({ items: [], nextCursor: null, total: 0 });
+      return;
+    }
+    if (url.pathname === '/api/friends/invites/claim' && method === 'POST') {
+      const body = request.postDataJSON() as { token?: string };
+      friendMutations.push(`invite:${body.token ?? ''}`);
+      await json({ friend: { id: 'invite-friend' } });
+      return;
+    }
+    if (url.pathname === '/api/friends/invites' && method === 'POST') {
+      activeInvite = true;
+      await json({
+        invite: {
+          inviteId: 'secure-invite',
+          inviteUrl: 'https://tracklab.test/join?friendInvite=secure-token',
+          qrCodeUrl: '/friend-qr.png',
+          expiresAt: '2026-08-27T18:00:00.000Z',
+        },
+      });
+      return;
+    }
+    if (url.pathname === '/api/friends/invites' && method === 'GET') {
+      await json({
+        invites: activeInvite ? [{
+          id: 'secure-invite',
+          createdAt: '2026-08-20T18:00:00.000Z',
+          expiresAt: '2026-08-27T18:00:00.000Z',
+        }] : [],
+      });
+      return;
+    }
+    if (url.pathname === '/api/friends/invites' && method === 'DELETE') {
+      activeInvite = false;
+      friendMutations.push('invites:revoked-all');
+      await json({ revoked: 1 });
+      return;
+    }
+    if (url.pathname === '/api/friends/invites/secure-invite' && method === 'DELETE') {
+      activeInvite = false;
+      friendMutations.push('invite:revoked');
+      await json({ revoked: true });
+      return;
+    }
+    if (url.pathname === '/api/friends') {
+      await json({
+        items: [
+          publicProfile({ id: 'official-club', handle: 'preski-ranch', displayName: 'Preski Ranch', relationship: 'friend', officialKind: 'club', hasGhost: true }),
+          publicProfile({ id: 'official-founder', handle: 'tracklab-founder', displayName: 'TrackLab Founder', relationship: 'friend', officialKind: 'founder', hasGhost: true }),
+          publicProfile({
+            id: 'ghost-friend',
+            handle: 'ghost.friend',
+            displayName: 'Ghost Friend',
+            relationship: 'friend',
+            hasGhost: true,
+            ghostPreview: friendGhostPreview,
+          }),
+        ],
+        nextCursor: null,
+        total: 3,
+      });
+      return;
+    }
+    await json({ result: true });
+  });
+  await page.route('**/friend-qr.png', async (route) => {
+    await route.fulfill({ contentType: 'image/png', body: tinyPngBuffer() });
+  });
+  await page.route('**/api/ghosts*', async (route) => {
+    ghostRequests.push(route.request().url());
+    const pointPair = (finishTimeMs: number) => [
+      { elapsedMs: 0, distanceMeters: 0 },
+      { elapsedMs: finishTimeMs, distanceMeters: 365 },
+    ];
+    const fasterWorldwideGhosts = Array.from({ length: 50 }, (_, index) => ({
+      version: 1,
+      id: `faster-world-ghost-${index}`,
+      trackId: friendGhostPreview.trackId,
+      trackName: friendGhostPreview.trackName,
+      riderName: `Faster World Rider ${index}`,
+      ownerKey: `user:world-${index}`,
+      ownerName: 'Worldwide',
+      colorName: 'lime',
+      accent: '#7ade36',
+      source: 'top',
+      raceSource: 'live',
+      lapCount: 1,
+      finishTimeMs: 20_000 + index,
+      thirtyFootTimeMs: null,
+      savedAt: now - index,
+      analyticsPublic: false,
+      medalRank: null,
+      summary: null,
+      zoneResults: [],
+      points: pointPair(20_000 + index),
+    }));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ghosts: [...fasterWorldwideGhosts, {
+          version: 1,
+          ...friendGhostPreview,
+          riderName: 'Patient Friend Ghost',
+          ownerKey: 'user:ghost-friend',
+          ownerName: 'Ghost Friend',
+          colorName: 'blue',
+          accent: '#2878ff',
+          source: 'friend',
+          raceSource: 'live',
+          thirtyFootTimeMs: null,
+          savedAt: now,
+          analyticsPublic: false,
+          medalRank: null,
+          summary: null,
+          zoneResults: [],
+          points: pointPair(friendGhostPreview.finishTimeMs),
+        }],
+      }),
+    });
+  });
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  await page.goto('/?track=rock-hill-bmx-supercross');
+  const openApp = page.getByRole('button', { name: 'Open App' });
+  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+
+  await expect(page.getByRole('button', { name: /Friends.*pending friend request/ })).toBeVisible();
+  await page.getByRole('button', { name: /Friends.*pending friend request/ }).click();
+  await expect(page.getByRole('heading', { name: 'Friends', exact: true })).toBeVisible();
+  await expect(page.getByText('Preski Ranch', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Official TrackLab club')).toBeVisible();
+  await expect(page.getByText('TrackLab Founder', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('TrackLab founder', { exact: true })).toBeVisible();
+  const officialCards = page.locator('.friend-profile-card.official');
+  await expect(officialCards).toHaveCount(2);
+  await expect(officialCards.getByRole('button', { name: 'Race ghost', exact: true })).toHaveCount(0);
+  const ghostFriendCard = page.locator('.friend-profile-card').filter({ hasText: 'Ghost Friend' });
+  await expect(ghostFriendCard).toContainText('Recent ghost · Chula Vista Elite BMX · 90.00s');
+  await ghostFriendCard.getByRole('button', { name: 'Race ghost', exact: true }).click();
+  await expect(page).toHaveURL(/track=chula-vista-elite-bmx/);
+  const selectedFriendGhost = page.locator('.ghost-leaderboard-entry').filter({ hasText: 'Patient Friend Ghost' });
+  await expect(selectedFriendGhost).toContainText('Selected to race');
+  await expect(page.locator('.ghost-summary-row')).toContainText('1 selected to race');
+  await expect.poll(() => ghostRequests.some((requestUrl) => {
+    const url = new URL(requestUrl);
+    return url.searchParams.get('friendGhostId') === friendGhostPreview.id
+      && url.searchParams.get('friendProfileId') === 'ghost-friend';
+  })).toBe(true);
+
+  await page.getByRole('button', { name: /Friends/ }).click();
+  await expect(page.getByRole('heading', { name: 'Friends', exact: true })).toBeVisible();
+  await expect(page.locator('.friends-view').getByText('friends-rider@tracklab.test')).toHaveCount(0);
+  await expect(page.getByText(/A friend connection does not unlock private rides, live location, or training history/)).toBeVisible();
+
+  const discoverySwitch = page.getByRole('switch', { name: 'Appear in rider search and trusted suggestions' });
+  await expect(discoverySwitch).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByText('Your TrackLab handle:')).toContainText('@friends.rider');
+  await discoverySwitch.click();
+  await expect(discoverySwitch).toHaveAttribute('aria-checked', 'true');
+  expect(friendMutations).toContain('discoverable:true');
+
+  const friendsTab = page.getByRole('tab', { name: /^Friends/ });
+  const requestsTab = page.getByRole('tab', { name: /^Requests/ });
+  const suggestionsTab = page.getByRole('tab', { name: 'Suggestions', exact: true });
+  const inviteTab = page.getByRole('tab', { name: 'Invite', exact: true });
+  const friendsPanel = page.getByRole('tabpanel');
+  await expect(friendsPanel).toHaveAttribute('id', 'friends-panel');
+  await expect(page.getByRole('tab')).toHaveCount(4);
+  for (const tab of [friendsTab, requestsTab, suggestionsTab, inviteTab]) {
+    await expect(tab).toHaveAttribute('aria-controls', 'friends-panel');
+  }
+
+  await friendsTab.focus();
+  await expect(friendsTab).toBeFocused();
+  await expect(friendsTab).toHaveAttribute('tabindex', '0');
+  await friendsTab.press('ArrowRight');
+  await expect(requestsTab).toBeFocused();
+  await expect(requestsTab).toHaveAttribute('aria-selected', 'true');
+  await expect(requestsTab).toHaveAttribute('tabindex', '0');
+  await requestsTab.press('End');
+  await expect(inviteTab).toBeFocused();
+  await expect(inviteTab).toHaveAttribute('aria-selected', 'true');
+  await inviteTab.press('Home');
+  await expect(friendsTab).toBeFocused();
+  await friendsTab.press('ArrowLeft');
+  await expect(inviteTab).toBeFocused();
+  await inviteTab.press('ArrowRight');
+  await expect(friendsTab).toBeFocused();
+  await expect(page.locator('[role="tab"][tabindex="0"]')).toHaveCount(1);
+  await expect(page.locator('[role="tab"][tabindex="-1"]')).toHaveCount(3);
+
+  await requestsTab.click();
+  await page.getByRole('button', { name: 'Accept', exact: true }).click();
+  await expect(page.getByText(/You and Request Rider are now friends/)).toBeVisible();
+  expect(friendMutations).toContain('request:accepted');
+
+  await suggestionsTab.click();
+  const search = page.getByPlaceholder('Find a rider by name or @handle');
+  await search.fill('@pending.rider');
+  await expect(page.getByRole('button', { name: 'Request sent', exact: true })).toBeDisabled();
+
+  const pendingCard = page.locator('.friend-profile-card').filter({ hasText: 'Pending Rider' });
+  await pendingCard.locator('summary').click();
+  const reportTrigger = pendingCard.getByRole('button', { name: 'Report', exact: true });
+  await reportTrigger.click();
+  await expect(page.getByRole('dialog', { name: 'Report Pending Rider' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close report dialog' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Report Pending Rider' })).toHaveCount(0);
+  await expect(reportTrigger).toBeFocused();
+
+  const blockedRidersTrigger = page.getByRole('button', { name: 'Blocked riders', exact: true });
+  await blockedRidersTrigger.click();
+  await expect(page.getByRole('dialog', { name: 'Blocked riders' })).toContainText('You have not blocked any riders.');
+  const closeBlockedRiders = page.getByRole('button', { name: 'Close blocked riders' });
+  await expect(closeBlockedRiders).toBeFocused();
+  await closeBlockedRiders.click();
+  await expect(blockedRidersTrigger).toBeFocused();
+
+  await inviteTab.click();
+  await expect(page.getByText('0 active invitation links')).toBeVisible();
+  await page.getByRole('button', { name: 'Create a new secure invite' }).click();
+  await expect(page.getByText('1 active invitation link')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'QR code for this TrackLab friend invitation' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /friendInvite=secure-token/ })).toHaveAttribute('href', /friendInvite=secure-token/);
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByRole('button', { name: 'Revoke this link' }).click();
+  await expect(page.getByText('Invitation revoked. You can create a new one when you are ready.')).toBeVisible();
+  await expect(page.getByText('0 active invitation links')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create a new secure invite' })).toBeVisible();
+  expect(friendMutations).toContain('invite:revoked');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const control of [discoverySwitch, inviteTab, blockedRidersTrigger]) {
+    await expect.poll(async () => (await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await expect.poll(async () => (await control.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  await expect.poll(() => page.evaluate(() => (
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth
+  ))).toBe(true);
+  await page.screenshot({ fullPage: false, path: testInfo.outputPath('friends-hub-mobile.png') });
+
+  await page.goto('/?friendInvite=claimed-token');
+  await expect(page.getByRole('heading', { name: 'Friends', exact: true })).toBeVisible();
+  await expect(page.getByText('Friend connection added. Welcome to their TrackLab network.')).toBeVisible();
+  await expect(page).not.toHaveURL(/friendInvite=/);
+  expect(friendMutations).toContain('invite:claimed-token');
+});
+
+test('account display units persist across Settings and reload', async ({ page }, testInfo) => {
+  const now = Date.now();
+  const authUser = {
+    id: 'unit-preferences-racer',
+    profileKey: 'user:unit-preferences-racer',
+    email: 'unit-preferences@tracklab.test',
+    name: 'Unit Preferences Rider',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 1, updatedAt: now },
+  };
+  let savedUnits = {
+    speedUnit: 'kph',
+    distanceUnit: 'm',
+    updatedAt: now,
+  };
+  const savedPatches: Array<typeof savedUnits> = [];
+  let forcedCloudUnits: typeof savedUnits | null = null;
+
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const body = route.request().postDataJSON() as { unitPreferences?: typeof savedUnits };
+      if (body.unitPreferences) {
+        savedPatches.push(body.unitPreferences);
+        savedUnits = forcedCloudUnits ?? body.unitPreferences;
+        forcedCloudUnits = null;
+      }
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: [],
+        accountProfile: { updatedAt: now },
+        unitPreferences: savedUnits,
+      }),
+    });
+  });
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  const openSettings = async () => {
+    const settingsButton = page.getByRole('button', { name: 'Settings', exact: true });
+    if (!await settingsButton.isVisible().catch(() => false)) {
+      await page.getByRole('button', { name: 'More', exact: true }).click();
+    }
+    await settingsButton.click();
+    await expect(page.getByRole('heading', { name: 'Display & units' })).toBeVisible();
+  };
+
+  await page.goto('/?track=black-mountain-bmx');
+  const openApp = page.getByRole('button', { name: 'Open App' });
+  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+  await openSettings();
+  await expect(page.locator('.app-settings-sync')).toHaveAttribute('role', 'status');
+  await expect(page.locator('.app-settings-sync')).toHaveAttribute('aria-live', 'polite');
+  await expect(page.getByLabel('BMX Race Intervals setup workflow')).toHaveCount(0);
+
+  const mph = page.getByRole('button', { name: /MPH Miles per hour/ });
+  const kph = page.getByRole('button', { name: /KPH Kilometers per hour/ });
+  const feet = page.getByRole('button', { name: /Feet ft \/ miles/ });
+  const meters = page.getByRole('button', { name: /Meters m \/ kilometers/ });
+  await expect(kph).toHaveAttribute('aria-pressed', 'true');
+  await expect(meters).toHaveAttribute('aria-pressed', 'true');
+
+  await mph.click();
+  await feet.click();
+  await expect(mph).toHaveAttribute('aria-pressed', 'true');
+  await expect(feet).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('Unit preview')).toContainText('28.0 MPH');
+  await expect.poll(() => savedPatches.at(-1)).toMatchObject({ speedUnit: 'mph', distanceUnit: 'ft' });
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('account-display-unit-settings.png'),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => (
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth
+  ))).toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath('account-display-unit-settings-mobile.png'),
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  forcedCloudUnits = {
+    speedUnit: 'mph',
+    distanceUnit: 'ft',
+    updatedAt: Date.now() + 60_000,
+  };
+  await kph.click();
+  await expect(kph).toHaveAttribute('aria-pressed', 'true');
+  await expect(mph).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.app-settings-sync')).toContainText(
+    'A newer display-unit choice from your TrackLab profile was kept.',
+  );
+  await expect.poll(() => page.evaluate(() => {
+    const stored = window.localStorage.getItem(
+      `tracklab-bmx-unit-preferences-v1:${encodeURIComponent('user:unit-preferences-racer')}`,
+    );
+    return stored ? JSON.parse(stored) : null;
+  })).toMatchObject({ speedUnit: 'mph', distanceUnit: 'ft' });
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Open App' }).click({ timeout: 2_000 }).catch(() => undefined);
+  await openSettings();
+  await expect(page.getByRole('button', { name: /MPH Miles per hour/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /Feet ft \/ miles/ })).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('Get Pulled runs a six-second countdown and keeps Air records separated', async ({ page }, testInfo) => {
   test.setTimeout(30_000);
   await page.addInitScript(() => {
@@ -1142,10 +1625,13 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   await expect(raceDemoRiderButtons.nth(3)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 2');
   await expect(page.getByLabel('Bike pairing')).toContainText('Demo Rider 4');
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: /KPH Kilometers per hour/ }).click();
   await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
 
   await expect(page.getByText('Developer Demo active', { exact: true })).toBeVisible();
-  await expect(page.getByText(/54\/17 road rollout.*6\.9 m.*12–18 MPH averages/i)).toBeVisible();
+  await expect(page.getByText(/54\/17 road rollout.*22\.6 ft.*19\.3–29\.0 KPH averages/i)).toBeVisible();
   const mapRenderer = page.getByRole('group', { name: 'Explore map renderer' });
   await expect(mapRenderer).toBeVisible();
   await expect(mapRenderer.getByRole('button')).toHaveCount(3);
@@ -1534,7 +2020,21 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
     .toHaveAttribute('aria-pressed', 'true');
   await distanceUnits.getByRole('button', { name: 'Show distances in kilometers' }).click();
   await expect(page.getByText('1.00 km', { exact: true })).toBeVisible();
+  await expect(page.getByText(/54\/17 road rollout.*6\.9 m.*19\.3–29\.0 KPH averages/i)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const stored = window.localStorage.getItem(
+      `tracklab-bmx-unit-preferences-v1:${encodeURIComponent('user:explore-developer')}`,
+    );
+    return stored ? (JSON.parse(stored) as { distanceUnit?: string }).distanceUnit : null;
+  })).toBe('m');
   await distanceUnits.getByRole('button', { name: 'Show distances in miles' }).click();
+  await expect(page.getByText(/54\/17 road rollout.*22\.6 ft.*19\.3–29\.0 KPH averages/i)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const stored = window.localStorage.getItem(
+      `tracklab-bmx-unit-preferences-v1:${encodeURIComponent('user:explore-developer')}`,
+    );
+    return stored ? (JSON.parse(stored) as { distanceUnit?: string }).distanceUnit : null;
+  })).toBe('ft');
   await exploreDemoRiderButtons.nth(0).click();
   await exploreDemoRiderButtons.nth(2).click();
   await expect(page.locator('.explore-rider-strip article')).toHaveCount(4);
@@ -1806,8 +2306,8 @@ test('developer Explore demo rides without commentary and keeps bike mechanics a
   });
   await expect.poll(async () => (
     page.locator('.explore-rider-strip article').first().locator('div > span').first().textContent()
-  ), { timeout: 14_000 }).toMatch(/ · (?:1[2-7](?:\.\d)?|18(?:\.0)?) MPH/);
-  await expect(page.locator('.explore-rider-strip article').first()).toContainText(/Avg \d+\.\d MPH/);
+  ), { timeout: 14_000 }).toMatch(/ · (?:1[9]|2\d)(?:\.\d)? KPH/);
+  await expect(page.locator('.explore-rider-strip article').first()).toContainText(/Avg \d+\.\d KPH/);
   expect(commentaryRequestCount).toBe(0);
 
   await page.screenshot({
@@ -4946,6 +5446,7 @@ test('live cadence detects a false start and automatically rearms after five sec
       updatedAt: Date.now(),
     },
   };
+  const unitPreferences = { speedUnit: 'kph', distanceUnit: 'm', updatedAt: Date.now() };
 
   try {
     await page.addInitScript(() => {
@@ -4971,7 +5472,7 @@ test('live cadence detects a false start and automatically rearms after five sec
     await page.route('**/api/user-data*', async (route) => {
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ trackMappings: {}, customRoutes: [], bikeProfiles: [] }),
+        body: JSON.stringify({ trackMappings: {}, customRoutes: [], bikeProfiles: [], unitPreferences }),
       });
     });
     await page.route('**/api/ghosts*', async (route) => {
@@ -5001,6 +5502,12 @@ test('live cadence detects a false start and automatically rearms after five sec
     const falseStart = page.locator('.race-staging-countdown').filter({ hasText: 'False start' });
     await expect(falseStart).toBeVisible({ timeout: 5_000 });
     await expect(falseStart.locator('strong')).toHaveText(/[1-5]/);
+    await expect.poll(() => page.evaluate(() => {
+      const stored = window.localStorage.getItem('tracklab-bmx-last-race-capture-v1');
+      if (!stored) return null;
+      const capture = JSON.parse(stored) as { events?: Array<{ type?: string; label?: string }> };
+      return capture.events?.find((event) => event.type === 'false-start')?.label ?? null;
+    })).toContain('KPH before gate drop');
     moving = false;
 
     await page.screenshot({

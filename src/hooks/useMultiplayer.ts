@@ -47,6 +47,7 @@ type UseMultiplayerOptions = {
   bikeCount: number;
   identityOverride?: MultiplayerIdentityOverride | null;
   clubTabletSession?: ClubTabletSessionCredential | null;
+  onFriendNetworkChange?: () => void;
 };
 
 type IncomingChallenge = {
@@ -226,6 +227,7 @@ export function useMultiplayer({
   bikeCount,
   identityOverride = null,
   clubTabletSession = null,
+  onFriendNetworkChange,
 }: UseMultiplayerOptions) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -236,6 +238,7 @@ export function useMultiplayer({
   const latestProfileRef = useRef<MultiplayerProfile | null>(null);
   const latestBikeCountRef = useRef(bikeCount);
   const latestTrackRef = useRef<MultiplayerTrackSummary | null>(null);
+  const onFriendNetworkChangeRef = useRef(onFriendNetworkChange);
   const [storedProfile, setStoredProfile] = useState<MultiplayerProfile>(readProfile);
   const profile = useMemo(
     () => resolveMultiplayerProfile(storedProfile, identityOverride),
@@ -281,6 +284,10 @@ export function useMultiplayer({
     latestBikeCountRef.current = bikeCount;
     latestTrackRef.current = currentTrack;
   }, [bikeCount, currentTrack, profile]);
+
+  useEffect(() => {
+    onFriendNetworkChangeRef.current = onFriendNetworkChange;
+  }, [onFriendNetworkChange]);
 
   const send = useCallback((payload: Record<string, unknown>) => {
     const socket = socketRef.current;
@@ -467,6 +474,10 @@ export function useMultiplayer({
             groups: Array.isArray(message.social.groups) ? message.social.groups : [],
             incomingGroupInvites: Array.isArray(message.social.incomingGroupInvites) ? message.social.incomingGroupInvites : [],
           });
+        }
+
+        if (message.type === 'friend-event') {
+          onFriendNetworkChangeRef.current?.();
         }
 
         if (message.type === 'room-state') {
@@ -736,15 +747,6 @@ export function useMultiplayer({
     return send({ type: 'challenge', targetId, track: currentTrack });
   }, [currentTrack, send]);
 
-  const sendFriendRequest = useCallback((targetId: string) => {
-    setStatus('Sending friend request.');
-    return send({ type: 'friend-request', targetId });
-  }, [send]);
-
-  const respondToFriendRequest = useCallback((requestId: string, accepted: boolean) => {
-    return send({ type: 'friend-response', requestId, accepted });
-  }, [send]);
-
   const createGroup = useCallback((name: string) => {
     setStatus('Creating group.');
     return send({ type: 'group-create', name });
@@ -818,10 +820,8 @@ export function useMultiplayer({
     syncExploreRoute,
     resetRoomFlow,
     voiceSignals,
-    respondToFriendRequest,
     respondToGroupInvite,
     respondToMatchInvite,
-    sendFriendRequest,
     social,
   };
 }

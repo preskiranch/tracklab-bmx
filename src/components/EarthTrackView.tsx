@@ -352,7 +352,7 @@ export function EarthTrackView({
         <div className="earth-meta">
           <span><MapPinned size={15} /> {track.source}</span>
           <span title="Catalog source confidence"><ShieldCheck size={15} /> {verificationLabel}</span>
-          <span><MapIcon size={15} /> {track.elevationMeters} m elevation</span>
+          <span><MapIcon size={15} /> {formatDistanceMeters(track.elevationMeters, distanceUnit)} elevation</span>
           <span><Flag size={15} /> {routeStatusLabel}</span>
           <a href={googleMapsUrl} target="_blank" rel="noreferrer">
             <ExternalLink size={15} /> Open Maps
@@ -401,6 +401,7 @@ export function EarthTrackView({
                 players={players}
                 samplesByDevice={samplesByDevice}
                 speedUnit={speedUnit}
+                distanceUnit={distanceUnit}
                 cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                 raceViewFullscreen={showingRace3D ? raceViewFullscreen : false}
                 raceState={raceState}

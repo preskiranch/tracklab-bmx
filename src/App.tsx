@@ -30,6 +30,7 @@ import {
   TabletSmartphone,
   Usb,
   UserCircle,
+  UserPlus,
   Users,
 } from 'lucide-react';
 import type { CloudUserDataStatus } from './components/DiagnosticsPanel';
@@ -44,12 +45,10 @@ import {
   bikeProfilesStorageKey,
   customRoutesStorageKey,
   defaultPlayerSlots,
-  distanceUnitStorageKey,
   earthCameraStorageKey,
   liveBikeTimeoutMs,
   maxPlayers,
   raceCaptureStorageKey,
-  speedUnitStorageKey,
   storageKey,
 } from './data';
 import { countriesForCatalog, statesForCountry, trackCatalog, tracksForLocation } from './data/trackCatalog';
@@ -102,6 +101,7 @@ import {
   newestTrackMapping,
   parseUserTrackMapping,
   pointAtRouteMeter,
+  proSplitMinimumMph,
   draftRouteFromMapping,
   readStoredTrackMappings,
   repeatTrackZonesForLaps,
@@ -222,6 +222,23 @@ import {
 import { normalizeRiderPhotoDataUrl } from './lib/riderPhotos';
 import { resolveExploreRecentRouteHistoryScope } from './lib/exploreRecentRoutes';
 import {
+  clearQueuedFriendRequests,
+  createFriendsApi,
+  subscribeToFriendNetworkEvents,
+  type FriendGhostPreview,
+  type FriendProfile,
+} from './lib/friends';
+import {
+  localeRegionCode,
+  mergeUnitPreferences,
+  migrateLegacyUnitPreferences,
+  readStoredUnitPreferences,
+  regionalUnitPreferences,
+  unitPreferencesMatch,
+  writeStoredUnitPreferences,
+} from './lib/unitPreferences';
+import { formatDistanceMeters, formatSpeedFromKph, speedUnitLabel } from './units';
+import {
   clubConnectRequestIsCurrent,
   loadClubConnect,
   type ClubAthleteMembership,
@@ -309,6 +326,7 @@ import type {
   TrackZoneBranchSelections,
   TrackSplitBranch,
   TrackSplitSection,
+  UnitPreferences,
   UserTrackMapping,
 } from './types';
 
@@ -326,6 +344,10 @@ const GetPulledView = lazy(() => import('./components/GetPulledView')
   .then((module) => ({ default: module.GetPulledView })));
 const AccountProfileView = lazy(() => import('./components/AccountProfileView')
   .then((module) => ({ default: module.AccountProfileView })));
+const AppSettingsView = lazy(() => import('./components/AppSettingsView')
+  .then((module) => ({ default: module.AppSettingsView })));
+const FriendsView = lazy(() => import('./components/FriendsView')
+  .then((module) => ({ default: module.FriendsView })));
 const DiagnosticsPanel = lazy(() => import('./components/DiagnosticsPanel')
   .then((module) => ({ default: module.DiagnosticsPanel })));
 const DeveloperToolsPanel = lazy(() => import('./components/DeveloperToolsPanel')
@@ -347,6 +369,20 @@ const customRouteInitialZoom = 18;
 const customRouteInitialAngle = 0;
 const customRouteInitialHeading = 0;
 const connectedBikeDeviceTimeoutMs = 15000;
+const sideNavCountStyle: CSSProperties = {
+  display: 'inline-grid',
+  minWidth: 20,
+  height: 20,
+  marginLeft: 'auto',
+  padding: '0 6px',
+  placeItems: 'center',
+  borderRadius: 999,
+  background: '#e3524f',
+  color: '#fff',
+  fontSize: 10,
+  fontWeight: 900,
+  lineHeight: 1,
+};
 
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 type CheckoutStatus = 'idle' | 'loading' | 'error';
@@ -379,6 +415,14 @@ function isBikeConnectionSource(value: unknown): value is BikeConnectionSource {
 
 function browserSupportsBluetoothDirect() {
   return Boolean((navigator as Navigator & { bluetooth?: unknown }).bluetooth);
+}
+
+function browserHasFriendInvite() {
+  const url = new URL(window.location.href);
+  return Boolean(
+    url.searchParams.get('friendInvite')?.trim()
+    || (url.pathname === '/friends/invite' && url.searchParams.get('token')?.trim()),
+  );
 }
 
 type FullscreenDocument = Document & {
@@ -1208,15 +1252,6 @@ function readStoredBikeConnectionSource(): BikeConnectionSource {
   return browserSupportsBluetoothDirect() ? 'bluetooth' : 'advanced';
 }
 
-function readStoredSpeedUnit(): SpeedUnit {
-  return window.localStorage.getItem(speedUnitStorageKey) === 'mph' ? 'mph' : 'kph';
-}
-
-function readStoredDistanceUnit(): DistanceUnit {
-  const stored = window.localStorage.getItem(distanceUnitStorageKey);
-  return stored === 'm' || stored === 'km' ? 'm' : 'ft';
-}
-
 function downloadTrackMapping(mapping: UserTrackMapping) {
   const blob = new Blob([JSON.stringify(mapping, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1465,6 +1500,7 @@ export default function App() {
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const racePhotoSyncPendingRef = useRef(true);
   const racePhotoSignatureRef = useRef('');
+  const friendInviteAutoOpenedRef = useRef(false);
   const customRoutePreviewRequestIdRef = useRef(0);
   const customRoutePreviewTrackIdRef = useRef<string | null>(null);
   const initialMembershipRef = useRef<MembershipState | null>(null);
@@ -1592,8 +1628,13 @@ export default function App() {
   const [profileNameDraft, setProfileNameDraft] = useState('');
   const [profileEmailDraft, setProfileEmailDraft] = useState('');
   const [profileFormError, setProfileFormError] = useState<string | null>(null);
-  const [speedUnit, setSpeedUnit] = useState<SpeedUnit>(readStoredSpeedUnit);
-  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>(readStoredDistanceUnit);
+  const [pendingFriendRequestCount, setPendingFriendRequestCount] = useState(0);
+  const [friendGraphRevision, setFriendGraphRevision] = useState(0);
+  const [friendNetworkRefreshRevision, setFriendNetworkRefreshRevision] = useState(0);
+  const friendCountRef = useRef<number | null>(null);
+  const [unitPreferences, setUnitPreferences] = useState<UnitPreferences>(() => regionalUnitPreferences());
+  const unitPreferencesRef = useRef(unitPreferences);
+  const { speedUnit, distanceUnit } = unitPreferences;
   const [now, setNow] = useState(Date.now());
   const [selectedCountry, setSelectedCountry] = useState(initialTrack.country);
   const [selectedState, setSelectedState] = useState(initialTrack.state);
@@ -1651,6 +1692,8 @@ export default function App() {
   }, []);
   const [ghostLaps, setGhostLaps] = useState(readStoredGhostLaps);
   const [selectedGhostIds, setSelectedGhostIds] = useState<string[]>([]);
+  const [friendGhostRaceTarget, setFriendGhostRaceTarget] = useState<(FriendGhostPreview & { profileId: string }) | null>(null);
+  const friendGhostAutoSelectPendingRef = useRef(false);
   const [ghostPlaybackMs, setGhostPlaybackMs] = useState(0);
   const [previousRaceBestTimes, setPreviousRaceBestTimes] = useState<PreviousPersonalBestTimes>({});
   const [lapCount, setLapCount] = useState(1);
@@ -1659,10 +1702,13 @@ export default function App() {
   const [playMode, setPlayMode] = useState<PlayMode>('local');
   const [cloudUserDataStatus, setCloudUserDataStatus] = useState<CloudUserDataStatus>('loading');
   const [cloudUserDataMessage, setCloudUserDataMessage] = useState('Loading cloud profile data.');
+  const [unitPreferencesSyncStatus, setUnitPreferencesSyncStatus] = useState<CloudUserDataStatus>('loading');
+  const [unitPreferencesSyncMessage, setUnitPreferencesSyncMessage] = useState('Loading saved display units.');
   const [chatDraft, setChatDraft] = useState('');
   const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
   const [regularUserPreview, setRegularUserPreview] = useState(false);
   const clubTabletKioskMode = Boolean(clubTabletDevice);
+  const friendsApi = useMemo(() => createFriendsApi(), []);
   const clubTabletDeviceActive = Boolean(
     clubTabletDevice
     && clubTabletDeviceStatus === 'active'
@@ -1693,6 +1739,72 @@ export default function App() {
   );
   const canManageActiveStudioRiders = canManageStudioRiders
     && studioRidersLoadedForActiveProfile;
+
+  useEffect(() => {
+    if (
+      !authUser
+      || clubTabletKioskMode
+      || friendInviteAutoOpenedRef.current
+      || !browserHasFriendInvite()
+    ) {
+      return;
+    }
+
+    friendInviteAutoOpenedRef.current = true;
+    setMappingMode(false);
+    setAppMode('friends');
+  }, [authUser, clubTabletKioskMode]);
+
+  const handleFriendNetworkChange = useCallback(() => {
+    friendCountRef.current = null;
+    setFriendGraphRevision((current) => current + 1);
+    setFriendNetworkRefreshRevision((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    if (authStatus !== 'signed-in' || !authUser?.id || clubTabletKioskMode) return undefined;
+    return subscribeToFriendNetworkEvents(handleFriendNetworkChange);
+  }, [authStatus, authUser?.id, clubTabletKioskMode, handleFriendNetworkChange]);
+
+  useEffect(() => {
+    if (!authUser || clubTabletKioskMode) {
+      setPendingFriendRequestCount(0);
+      friendCountRef.current = null;
+      return undefined;
+    }
+
+    let cancelled = false;
+    const refreshPendingRequests = () => {
+      void Promise.all([
+        friendsApi.listRequests({ direction: 'incoming', limit: 1 }),
+        friendsApi.listFriends({ limit: 1 }),
+      ])
+        .then(([requestPage, friendPage]) => {
+          if (cancelled) return;
+          setPendingFriendRequestCount(requestPage.incomingTotal);
+          if (friendCountRef.current != null && friendCountRef.current !== friendPage.total) {
+            setFriendGraphRevision((current) => current + 1);
+          }
+          friendCountRef.current = friendPage.total;
+        })
+        .catch(() => undefined);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshPendingRequests();
+    };
+
+    refreshPendingRequests();
+    window.addEventListener('focus', refreshPendingRequests);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const intervalId = window.setInterval(refreshPendingRequests, 45_000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', refreshPendingRequests);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(intervalId);
+    };
+  }, [authUser, clubTabletKioskMode, friendNetworkRefreshRevision, friendsApi]);
+
   const mergeStudioRidersForProfile = useCallback((
     profileKey: string,
     incomingRiders: StudioRider[],
@@ -2733,6 +2845,9 @@ export default function App() {
         : enteredRacePlayers.length,
     identityOverride: multiplayerIdentityOverride,
     clubTabletSession: clubTabletSessionActive ? clubTabletSession : null,
+    onFriendNetworkChange: authUser && !clubTabletKioskMode
+      ? handleFriendNetworkChange
+      : undefined,
   });
   const roomVoice = useRoomVoiceChat({
     currentRoom: multiplayer.currentRoom,
@@ -2789,6 +2904,88 @@ export default function App() {
       ? clubTabletSession?.session.studioRiderId
       : null,
   });
+  const regionalUnits = useMemo(() => regionalUnitPreferences(), []);
+  const regionalUnitRegion = useMemo(() => localeRegionCode(), []);
+  const applyUnitPreferences = useCallback((preferences: UnitPreferences) => {
+    const normalized = mergeUnitPreferences(null, preferences) ?? regionalUnitPreferences();
+    unitPreferencesRef.current = normalized;
+    setUnitPreferences(normalized);
+    return normalized;
+  }, []);
+  const persistUnitPreferences = useCallback((preferences: UnitPreferences) => {
+    const normalized = applyUnitPreferences(preferences);
+    writeStoredUnitPreferences(cloudProfileKey, normalized);
+    if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+      setCloudUserDataStatus('loading');
+      setCloudUserDataMessage('Saving display units to your TrackLab profile.');
+      setUnitPreferencesSyncStatus('loading');
+      setUnitPreferencesSyncMessage('Saving display units to your TrackLab profile.');
+      void queueCloudUserDataPatch(cloudProfileKey, { unitPreferences: normalized })
+        .then((data) => {
+          if (cloudUserDataLoadedKeyRef.current !== cloudProfileKey) return;
+          if (!data.unitPreferences) {
+            throw new Error('Cloud returned no display-unit preference.');
+          }
+
+          const current = unitPreferencesRef.current;
+          const requestIsStillCurrent = unitPreferencesMatch(current, normalized);
+          const resolved = requestIsStillCurrent
+            ? data.unitPreferences
+            : mergeUnitPreferences(data.unitPreferences, current) ?? current;
+          applyUnitPreferences(resolved);
+          writeStoredUnitPreferences(cloudProfileKey, resolved);
+          setCloudUserDataStatus('online');
+          setUnitPreferencesSyncStatus('online');
+          if (!unitPreferencesMatch(data.unitPreferences, resolved)) {
+            setCloudUserDataStatus('loading');
+            setCloudUserDataMessage('Your latest display-unit change is still syncing.');
+            setUnitPreferencesSyncStatus('loading');
+            setUnitPreferencesSyncMessage('Your latest display-unit change is still syncing.');
+          } else if (data.unitPreferences.updatedAt > normalized.updatedAt) {
+            setCloudUserDataMessage('A newer display-unit choice from your TrackLab profile was kept.');
+            setUnitPreferencesSyncMessage('A newer display-unit choice from your TrackLab profile was kept.');
+          } else {
+            setCloudUserDataMessage('Display units saved to your TrackLab profile.');
+            setUnitPreferencesSyncMessage('Display units saved to your TrackLab profile.');
+          }
+        })
+        .catch((error: Error) => {
+          if (cloudUserDataLoadedKeyRef.current !== cloudProfileKey) return;
+          setCloudUserDataStatus('offline');
+          setCloudUserDataMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+          setUnitPreferencesSyncStatus('offline');
+          setUnitPreferencesSyncMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+        });
+    }
+  }, [applyUnitPreferences, cloudProfileKey]);
+  const handleSpeedUnitChange = useCallback((nextSpeedUnit: SpeedUnit) => {
+    const current = unitPreferencesRef.current;
+    if (current.speedUnit === nextSpeedUnit && current.updatedAt > 0) return;
+    persistUnitPreferences({
+      ...current,
+      speedUnit: nextSpeedUnit,
+      updatedAt: Math.max(Date.now(), current.updatedAt + 1),
+    });
+  }, [persistUnitPreferences]);
+  const handleDistanceUnitChange = useCallback((nextDistanceUnit: DistanceUnit) => {
+    const current = unitPreferencesRef.current;
+    if (current.distanceUnit === nextDistanceUnit && current.updatedAt > 0) return;
+    persistUnitPreferences({
+      ...current,
+      distanceUnit: nextDistanceUnit,
+      updatedAt: Math.max(Date.now(), current.updatedAt + 1),
+    });
+  }, [persistUnitPreferences]);
+  const handleRegionalUnitDefaults = useCallback(() => {
+    const current = unitPreferencesRef.current;
+    persistUnitPreferences({
+      ...regionalUnitPreferences(),
+      updatedAt: Math.max(Date.now(), current.updatedAt + 1),
+    });
+  }, [persistUnitPreferences]);
+  useEffect(() => {
+    applyUnitPreferences(readStoredUnitPreferences(cloudProfileKey) ?? regionalUnitPreferences());
+  }, [applyUnitPreferences, cloudProfileKey]);
   useEffect(() => {
     const profileKey = authUser?.profileKey ?? null;
     studioRidersProfileKeyRef.current = profileKey;
@@ -2898,12 +3095,17 @@ export default function App() {
           || ghost.analyticsPublic
         )
       ))
-      .sort((left, right) => left.finishTimeMs - right.finishTimeMs || right.savedAt - left.savedAt)
+      .sort((left, right) => (
+        Number(right.id === friendGhostRaceTarget?.id) - Number(left.id === friendGhostRaceTarget?.id)
+        || left.finishTimeMs - right.finishTimeMs
+        || right.savedAt - left.savedAt
+      ))
       .slice(0, 50),
     [
       cloudProfileKey,
       clubTabletSessionActive,
       eventGhostLaps,
+      friendGhostRaceTarget?.id,
     ],
   );
   const selectedGhostLaps = useMemo(
@@ -3548,12 +3750,12 @@ export default function App() {
             at,
             elapsedMs: at - current.createdAt,
             type: 'false-start',
-            label: `False start: ${detection.playerName} reached ${(detection.speedKph / 1.609344).toFixed(1)} mph before gate drop`,
+            label: `False start: ${detection.playerName} reached ${formatSpeedFromKph(detection.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)} before gate drop`,
           },
         ],
       };
     });
-  }, []);
+  }, [speedUnit]);
 
   useEffect(() => {
     if (
@@ -3773,6 +3975,8 @@ export default function App() {
     if (!cloudProfileKey) {
       setCloudUserDataStatus('offline');
       setCloudUserDataMessage('No profile key is available for cloud sync.');
+      setUnitPreferencesSyncStatus('offline');
+      setUnitPreferencesSyncMessage('Display units are saved on this device because no profile key is available.');
       return;
     }
 
@@ -3783,6 +3987,8 @@ export default function App() {
     cloudUserDataAvailableRef.current = false;
     setCloudUserDataStatus('loading');
     setCloudUserDataMessage('Loading cloud profile data.');
+    setUnitPreferencesSyncStatus('loading');
+    setUnitPreferencesSyncMessage('Loading saved display units.');
 
     const refreshCloudUserData = () => {
       if (loading || cancelled) {
@@ -3821,6 +4027,63 @@ export default function App() {
           setAccountProfile((current) => (
             data.accountProfile.updatedAt >= current.updatedAt ? data.accountProfile : current
           ));
+          const storedUnitPreferences = readStoredUnitPreferences(cloudProfileKey);
+          const accountUnitPreferences = data.unitPreferences
+            ? mergeUnitPreferences(storedUnitPreferences, data.unitPreferences)
+            : storedUnitPreferences
+              ?? (requestedProfileKey ? migrateLegacyUnitPreferences(cloudProfileKey) : null)
+              ?? regionalUnitPreferences(undefined, Date.now());
+          if (accountUnitPreferences) {
+            applyUnitPreferences(accountUnitPreferences);
+            writeStoredUnitPreferences(cloudProfileKey, accountUnitPreferences);
+            if (!data.unitPreferences || !unitPreferencesMatch(data.unitPreferences, accountUnitPreferences)) {
+              setUnitPreferencesSyncStatus('loading');
+              setUnitPreferencesSyncMessage('Saving display units to your TrackLab profile.');
+              void queueCloudUserDataPatch(cloudProfileKey, {
+                unitPreferences: accountUnitPreferences,
+              })
+                .then((savedData) => {
+                  if (cancelled || cloudUserDataLoadedKeyRef.current !== cloudProfileKey) return;
+                  if (!savedData.unitPreferences) {
+                    throw new Error('Cloud returned no display-unit preference.');
+                  }
+
+                  const current = unitPreferencesRef.current;
+                  const requestIsStillCurrent = unitPreferencesMatch(current, accountUnitPreferences);
+                  const resolved = requestIsStillCurrent
+                    ? savedData.unitPreferences
+                    : mergeUnitPreferences(savedData.unitPreferences, current) ?? current;
+                  applyUnitPreferences(resolved);
+                  writeStoredUnitPreferences(cloudProfileKey, resolved);
+                  if (!unitPreferencesMatch(savedData.unitPreferences, resolved)) {
+                    setCloudUserDataStatus('loading');
+                    setCloudUserDataMessage('Your latest display-unit change is still syncing.');
+                    setUnitPreferencesSyncStatus('loading');
+                    setUnitPreferencesSyncMessage('Your latest display-unit change is still syncing.');
+                  } else if (savedData.unitPreferences.updatedAt > accountUnitPreferences.updatedAt) {
+                    setCloudUserDataStatus('online');
+                    setCloudUserDataMessage('A newer display-unit choice from your TrackLab profile was kept.');
+                    setUnitPreferencesSyncStatus('online');
+                    setUnitPreferencesSyncMessage('A newer display-unit choice from your TrackLab profile was kept.');
+                  } else {
+                    setUnitPreferencesSyncStatus('online');
+                    setUnitPreferencesSyncMessage('Display units saved to your TrackLab profile.');
+                  }
+                })
+                .catch((error: Error) => {
+                  console.warn(`Could not reconcile display units with TrackLab cloud: ${error.message}`);
+                  if (!cancelled && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+                    setCloudUserDataStatus('offline');
+                    setCloudUserDataMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+                    setUnitPreferencesSyncStatus('offline');
+                    setUnitPreferencesSyncMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+                  }
+                });
+            } else {
+              setUnitPreferencesSyncStatus('online');
+              setUnitPreferencesSyncMessage('Display units are synced to your TrackLab profile.');
+            }
+          }
           const localRaceViewPreferences = readStoredRaceViewPreferences(
             cloudProfileKey,
             readStoredEarthCameras(),
@@ -3869,7 +4132,7 @@ export default function App() {
               });
           }
           setCloudUserDataStatus('online');
-          setCloudUserDataMessage('Bike names, the developer camera view, studio riders, custom routes, and track maps are syncing.');
+          setCloudUserDataMessage('Display units, bike names, the developer camera view, studio riders, custom routes, and track maps are synced to your profile.');
 
           if (authUser && adminProfileActive && mappingBackfillProfileRef.current !== cloudProfileKey) {
             mappingBackfillProfileRef.current = cloudProfileKey;
@@ -3922,10 +4185,17 @@ export default function App() {
         .catch((error: Error) => {
           console.warn(`Could not load TrackLab cloud user data: ${error.message}`);
           if (!cancelled) {
+            const offlineUnitPreferences = readStoredUnitPreferences(cloudProfileKey)
+              ?? (requestedProfileKey ? migrateLegacyUnitPreferences(cloudProfileKey) : null)
+              ?? regionalUnitPreferences(undefined, Date.now());
+            applyUnitPreferences(offlineUnitPreferences);
+            writeStoredUnitPreferences(cloudProfileKey, offlineUnitPreferences);
             cloudUserDataAvailableRef.current = false;
             cloudUserDataLoadedKeyRef.current = cloudProfileKey;
             setCloudUserDataStatus('offline');
             setCloudUserDataMessage(`Cloud profile unavailable. Local browser storage is still active. ${error.message}`);
+            setUnitPreferencesSyncStatus('offline');
+            setUnitPreferencesSyncMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
           }
         })
         .finally(() => {
@@ -3950,6 +4220,7 @@ export default function App() {
   }, [
     adminProfileActive,
     applyRaceViewPreferences,
+    applyUnitPreferences,
     authUser,
     canManageStudioRiders,
     cloudProfileKey,
@@ -4088,14 +4359,6 @@ export default function App() {
   }, [adminProfileActive, bridge.connection, storedMappings]);
 
   useEffect(() => {
-    safeSetLocalStorage(speedUnitStorageKey, speedUnit);
-  }, [speedUnit]);
-
-  useEffect(() => {
-    safeSetLocalStorage(distanceUnitStorageKey, distanceUnit);
-  }, [distanceUnit]);
-
-  useEffect(() => {
     if (!raceCapture) {
       window.localStorage.removeItem(raceCaptureStorageKey);
       (window as typeof window & { __tracklabLastRaceCapture?: RaceCapture | null }).__tracklabLastRaceCapture = null;
@@ -4180,6 +4443,49 @@ export default function App() {
   }, [availableGhostLaps]);
 
   useEffect(() => {
+    if (!friendGhostRaceTarget || selectedTrack.id !== friendGhostRaceTarget.trackId) return;
+    const expectsStraightSprint = friendGhostRaceTarget.sprintDistanceFeet != null
+      && friendGhostRaceTarget.sprintAirSetting != null;
+    if (friendGhostRaceTarget.routeVariantId && raceRouteVariantId !== friendGhostRaceTarget.routeVariantId) {
+      setRaceRouteVariantId(friendGhostRaceTarget.routeVariantId);
+      return;
+    }
+    if (lapCount !== friendGhostRaceTarget.lapCount) {
+      setLapCount(friendGhostRaceTarget.lapCount);
+      return;
+    }
+    if (
+      expectsStraightSprint
+      && (
+        straightSprintDistanceFeet !== friendGhostRaceTarget.sprintDistanceFeet
+        || straightSprintAirSetting !== friendGhostRaceTarget.sprintAirSetting
+      )
+    ) {
+      setStraightSprintDistanceFeet(friendGhostRaceTarget.sprintDistanceFeet!);
+      setStraightSprintAirSetting(friendGhostRaceTarget.sprintAirSetting!);
+    }
+  }, [
+    friendGhostRaceTarget,
+    lapCount,
+    raceRouteVariantId,
+    selectedTrack.id,
+    straightSprintAirSetting,
+    straightSprintDistanceFeet,
+  ]);
+
+  useEffect(() => {
+    if (!friendGhostAutoSelectPendingRef.current || !friendGhostRaceTarget) return;
+    const authorizedTarget = availableGhostLaps.find((ghost) => (
+      ghost.id === friendGhostRaceTarget.id
+      && ghost.ownerKey === `user:${friendGhostRaceTarget.profileId}`
+      && ghost.source === 'friend'
+    ));
+    if (!authorizedTarget) return;
+    setSelectedGhostIds([authorizedTarget.id]);
+    friendGhostAutoSelectPendingRef.current = false;
+  }, [availableGhostLaps, friendGhostRaceTarget]);
+
+  useEffect(() => {
     if (isCustomRoutePreviewId(selectedTrack.id)) {
       return undefined;
     }
@@ -4216,6 +4522,9 @@ export default function App() {
     const friendKeys = friendGhostKeySignature
       ? friendGhostKeySignature.split(',').filter(Boolean)
       : [];
+    const focusedFriendGhost = friendGhostRaceTarget?.trackId === selectedTrack.id
+      ? { ghostId: friendGhostRaceTarget.id, profileId: friendGhostRaceTarget.profileId }
+      : undefined;
 
     loadGhostLapsFromCloud(
       selectedTrack.id,
@@ -4224,13 +4533,18 @@ export default function App() {
       appMode === 'straight-sprint'
         ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
         : undefined,
+      focusedFriendGhost,
     )
       .then((cloudGhosts) => {
-        if (cancelled || cloudGhosts.length === 0) {
-          return;
-        }
+        if (cancelled) return;
 
-        setGhostLaps((current) => mergeGhostLaps(current, cloudGhosts));
+        // Friend and leaderboard ghosts are server-authorized snapshots. Drop
+        // the previous snapshot before merging so an unfriend or block removes
+        // access immediately instead of leaving a stale shared-device copy.
+        setGhostLaps((current) => mergeGhostLaps(
+          current.filter((ghost) => ghost.source === 'personal' && ghost.ownerKey === cloudProfileKey),
+          cloudGhosts,
+        ));
       })
       .catch((error: Error) => {
         console.warn(`Could not load TrackLab ghosts: ${error.message}`);
@@ -4247,6 +4561,10 @@ export default function App() {
     clubTabletSession?.sessionToken,
     clubTabletSessionActive,
     friendGhostKeySignature,
+    friendGhostRaceTarget?.id,
+    friendGhostRaceTarget?.profileId,
+    friendGhostRaceTarget?.trackId,
+    friendGraphRevision,
     selectedTrack.id,
     straightSprintAirSetting,
     straightSprintDistanceFeet,
@@ -4902,6 +5220,35 @@ export default function App() {
     setSelectedCountry(nextTrack.country);
     setSelectedState(nextTrack.state);
     setSelectedTrackId(nextTrack.id);
+  };
+
+  const handleRaceFriendGhost = (profile: FriendProfile) => {
+    const preview = profile.ghostPreview;
+    if (!preview) return;
+    const nextTrack = persistentCatalogTracks.find((track) => track.id === preview.trackId);
+    if (!nextTrack) {
+      return `${preview.trackName} is not available in this TrackLab catalog yet.`;
+    }
+
+    const isStraightSprint = preview.sprintDistanceFeet != null && preview.sprintAirSetting != null;
+    friendGhostAutoSelectPendingRef.current = true;
+    setFriendGhostRaceTarget({ ...preview, profileId: profile.id });
+    setSelectedGhostIds([]);
+    discardCustomRoutePreview();
+    prepareForTrackSelection(nextTrack.id);
+    setMappingMode(false);
+    setAppMode(isStraightSprint ? 'straight-sprint' : 'race');
+    setSelectedCountry(nextTrack.country);
+    setSelectedState(nextTrack.state);
+    setSelectedTrackId(nextTrack.id);
+    if (preview.routeVariantId) setRaceRouteVariantId(preview.routeVariantId);
+    setLapCount(preview.lapCount);
+    if (isStraightSprint) {
+      setStraightSprintDistanceFeet(preview.sprintDistanceFeet!);
+      setStraightSprintAirSetting(preview.sprintAirSetting!);
+    }
+    setFriendGraphRevision((current) => current + 1);
+    return undefined;
   };
 
   const openBmxRaceIntervals = () => {
@@ -6825,6 +7172,12 @@ export default function App() {
 
   const handleSignOut = useCallback(async () => {
     const liveClubSelection = clubTrainingSelection;
+    if (authUser?.id) {
+      clearQueuedFriendRequests(authUser.id);
+    }
+    friendInviteAutoOpenedRef.current = false;
+    friendGhostAutoSelectPendingRef.current = false;
+    setFriendGhostRaceTarget(null);
     clearStartGateSequence();
     clubTrainingRequestGenerationRef.current += 1;
     activeClubProfileKeyRef.current = null;
@@ -6861,7 +7214,7 @@ export default function App() {
     setBikeConnectionSource('bluetooth');
     setDemoMode(false);
     setShowMembershipLanding(true);
-  }, [clearStartGateSequence, clubTrainingSelection]);
+  }, [authUser?.id, clearStartGateSequence, clubTrainingSelection]);
 
   useEffect(() => {
     if (!clubTabletKioskMode || !authUser) return;
@@ -7074,6 +7427,8 @@ export default function App() {
 
   const handleClubTabletDeviceChange = useCallback((next: ClubTabletDeviceCredential | null) => {
     clearRaceCaptureForClubTablet();
+    friendGhostAutoSelectPendingRef.current = false;
+    setFriendGhostRaceTarget(null);
     setChatDraft('');
     setChatMessages([]);
     if (!next) {
@@ -7102,6 +7457,8 @@ export default function App() {
 
   const handleClubTabletSessionChange = useCallback((next: ClubTabletSessionCredential | null) => {
     clearRaceCaptureForClubTablet();
+    friendGhostAutoSelectPendingRef.current = false;
+    setFriendGhostRaceTarget(null);
     setChatDraft('');
     setChatMessages([]);
     if (!next) {
@@ -7730,7 +8087,10 @@ export default function App() {
       label: 'Map Zones',
       detail: workflowMapReady
         ? appMode === 'straight-sprint'
-          ? `${straightSprintMappedFeet.toLocaleString()} ft mapped`
+          ? `${formatDistanceMeters(
+            straightSprintFeetToMeters(straightSprintMappedFeet),
+            distanceUnit,
+          )} mapped`
           : `${effectiveTrack.zones.length} pedal zone${effectiveTrack.zones.length === 1 ? '' : 's'}`
         : 'Needs layout',
       state: workflowMapReady ? 'complete' as const : 'next' as const,
@@ -7775,7 +8135,7 @@ export default function App() {
           ? 'Create sprint first'
           : !workflowMapReady
           ? appMode === 'straight-sprint' && effectiveTrack.routeStatus === 'user-mapped'
-            ? `Map at least ${straightSprintDistanceFeet.toLocaleString()} ft`
+            ? `Map at least ${formatDistanceMeters(straightSprintDistanceMeters, distanceUnit)}`
             : 'Map first'
           : !workflowConnectionReady
             ? 'Connect bike'
@@ -8160,7 +8520,7 @@ export default function App() {
               </div>
             </div>
           </section>
-        ) : appMode === 'get-pulled' ? (
+        ) : appMode === 'settings' || appMode === 'friends' ? null : appMode === 'get-pulled' ? (
           <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Get Pulled setup workflow">
             <div className="workflow-heading">
               <span>Get Pulled</span>
@@ -8304,7 +8664,9 @@ export default function App() {
             <div className="workflow-split-choice" aria-label="Start Here rider race line choices">
               <div className="workflow-split-choice-heading">
                 <span>Race Line</span>
-                <small>Pro Set needs 26+ mph at split</small>
+                <small>
+                  Pro Set needs {formatSpeedFromKph(proSplitMinimumMph * 1.609344, speedUnit)}+ {speedUnitLabel(speedUnit)} at split
+                </small>
               </div>
               <div className="workflow-split-choice-list">
                 {racePlayers.map((player) => {
@@ -8392,6 +8754,22 @@ export default function App() {
             My Profile
           </button>
           <button
+            className={appMode === 'friends' ? 'selected' : ''}
+            type="button"
+            onClick={() => {
+              setMappingMode(false);
+              setAppMode('friends');
+            }}
+          >
+            <UserPlus size={17} />
+            Friends
+            {pendingFriendRequestCount > 0 && (
+              <span className="side-nav-count" style={sideNavCountStyle} aria-label={`${pendingFriendRequestCount} pending friend request${pendingFriendRequestCount === 1 ? '' : 's'}`}>
+                {pendingFriendRequestCount > 99 ? '99+' : pendingFriendRequestCount}
+              </span>
+            )}
+          </button>
+          <button
             className={appMode === 'race' && !mappingMode ? 'selected' : ''}
             type="button"
             onClick={openBmxRaceIntervals}
@@ -8457,7 +8835,7 @@ export default function App() {
             Results
           </button>
           <button
-            className={sidebarMoreOpen ? 'selected' : ''}
+            className={sidebarMoreOpen || appMode === 'settings' ? 'selected' : ''}
             type="button"
             aria-expanded={sidebarMoreOpen}
             onClick={() => setSidebarMoreOpen((open) => !open)}
@@ -8467,6 +8845,16 @@ export default function App() {
           </button>
           {sidebarMoreOpen && (
             <div className="side-nav-more">
+              <button
+                className={appMode === 'settings' ? 'selected' : ''}
+                type="button"
+                onClick={() => {
+                  setAppMode('settings');
+                  setSidebarMoreOpen(false);
+                }}
+              >
+                <Settings size={17} /> Settings
+              </button>
               <button type="button" onClick={() => setShowMembershipLanding(true)}>
                 <Globe2 size={17} /> Community
               </button>
@@ -8569,6 +8957,22 @@ export default function App() {
               <span>
                 <strong>My Profile</strong>
                 <small>Your photo, calendar, sessions, and downloads</small>
+              </span>
+            </div>
+          ) : appMode === 'friends' ? (
+            <div className="explore-topbar-heading">
+              <UserPlus size={20} />
+              <span>
+                <strong>Friends</strong>
+                <small>Find riders, manage requests, and invite people you already know</small>
+              </span>
+            </div>
+          ) : appMode === 'settings' ? (
+            <div className="explore-topbar-heading">
+              <Settings size={20} />
+              <span>
+                <strong>Settings</strong>
+                <small>Your saved display and unit preferences</small>
               </span>
             </div>
           ) : appMode === 'club-monitor' ? (
@@ -8711,6 +9115,33 @@ export default function App() {
               }}
             />
           </Suspense>
+        ) : appMode === 'friends' && authUser ? (
+          <Suspense fallback={<div className="explore-loading">Loading your TrackLab friends…</div>}>
+            <FriendsView
+              currentProfileId={authUser.id}
+              api={friendsApi}
+              distanceUnit={distanceUnit}
+              refreshToken={friendNetworkRefreshRevision}
+              onPendingCountChange={setPendingFriendRequestCount}
+              onFriendGraphChange={handleFriendNetworkChange}
+              onRaceGhost={handleRaceFriendGhost}
+            />
+          </Suspense>
+        ) : appMode === 'settings' ? (
+          <Suspense fallback={<div className="explore-loading">Loading settings…</div>}>
+            <AppSettingsView
+              speedUnit={speedUnit}
+              distanceUnit={distanceUnit}
+              regionalSpeedUnit={regionalUnits.speedUnit}
+              regionalDistanceUnit={regionalUnits.distanceUnit}
+              regionCode={regionalUnitRegion}
+              cloudStatus={unitPreferencesSyncStatus}
+              cloudMessage={unitPreferencesSyncMessage}
+              onSpeedUnitChange={handleSpeedUnitChange}
+              onDistanceUnitChange={handleDistanceUnitChange}
+              onUseRegionalDefaults={handleRegionalUnitDefaults}
+            />
+          </Suspense>
         ) : appMode === 'profile' && authUser ? (
           <Suspense fallback={<div className="explore-loading">Loading your profile and training history…</div>}>
           <AccountProfileView
@@ -8723,6 +9154,8 @@ export default function App() {
               ? activeStudioRiders(activeProfileStudioRiders)
               : []}
             historyRevision={trainingHistoryRevision}
+            speedUnit={speedUnit}
+            distanceUnit={distanceUnit}
             onPhotoChange={handleAccountPhotoChange}
             onClubProfileComplete={handleClubProfileComplete}
           />
@@ -8732,6 +9165,7 @@ export default function App() {
             <ClubLiveMonitor
               studioRiders={activeStudioRiders(activeProfileStudioRiders)}
               speedUnit={speedUnit}
+              distanceUnit={distanceUnit}
               fullscreen={utilityFullscreen}
               onFullscreenChange={handleUtilityFullscreenChange}
             />
@@ -8767,6 +9201,7 @@ export default function App() {
             samplesByDevice={samplesByDevice}
             speedUnit={speedUnit}
             distanceUnit={distanceUnit}
+            onDistanceUnitChange={handleDistanceUnitChange}
             playMode={playMode}
             demoMode={demoMode}
             multiplayerConnection={multiplayer.connection}
@@ -9042,8 +9477,8 @@ export default function App() {
                   commentaryPreferences={raceCommentaryPreferences}
                   commentarySpeechStatus={raceCommentary.speechStatus}
                   onMetricToggle={toggleMetric}
-                  onSpeedUnitChange={setSpeedUnit}
-                  onDistanceUnitChange={setDistanceUnit}
+                  onSpeedUnitChange={handleSpeedUnitChange}
+                  onDistanceUnitChange={handleDistanceUnitChange}
                   onCustomRouteNameChange={setCustomRouteName}
                   onCustomRouteLocationChange={handleCustomRouteLocationChange}
                   onCustomRoutePredictionSelect={handleCustomRoutePredictionSelect}
@@ -9116,6 +9551,7 @@ export default function App() {
                   social={multiplayer.social}
                   inviteUrl={multiplayer.inviteUrl}
                   track={effectiveTrack}
+                  speedUnit={speedUnit}
                   players={activePlayers}
                   maxPlayers={maxPlayers}
                   riders={riders}
@@ -9145,8 +9581,10 @@ export default function App() {
                   onChallengeRider={multiplayer.challengeRider}
                   onAcceptChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, true)}
                   onDeclineChallenge={(challengeId) => multiplayer.respondToChallenge(challengeId, false)}
-                  onSendFriendRequest={multiplayer.sendFriendRequest}
-                  onRespondToFriendRequest={multiplayer.respondToFriendRequest}
+                  onOpenFriends={() => {
+                    setMappingMode(false);
+                    setAppMode('friends');
+                  }}
                   onCreateGroup={multiplayer.createGroup}
                   onInviteToGroup={multiplayer.inviteToGroup}
                   onRespondToGroupInvite={multiplayer.respondToGroupInvite}

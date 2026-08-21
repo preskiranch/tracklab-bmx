@@ -25,6 +25,7 @@ Render must use Node.js 22 or newer and contain these server-side values:
 | `DATABASE_URL` | Required PostgreSQL connection URL. |
 | `TRACKLAB_REQUIRE_DATABASE` | Must be `1`; prevents temporary in-memory production storage. |
 | `TRACKLAB_ADMIN_EMAILS` | Comma-separated administrator email allowlist. |
+| `TRACKLAB_OFFICIAL_ACCOUNT_BOOTSTRAP_TOKEN` | A server-only random value of at least 32 characters. It is used only to provision a missing reserved Club or Founder account, then must be rotated or removed. Existing official accounts are bound automatically by the Friends migration. |
 | `TRACKLAB_METRICS_TOKEN` | Long, random secret used only by the metrics collector. |
 | `VITE_GOOGLE_MAPS_API_KEY` | Browser-restricted Google Maps JavaScript API key. |
 | `OPENAI_API_KEY` | Optional server-only key for source-backed track research, pre-race reports, natural race wording, and speech. Without it, TrackLab uses verified catalog facts and the browser voice fallback. |
@@ -36,6 +37,13 @@ Render must use Node.js 22 or newer and contain these server-side values:
 Keep `TRACKLAB_LOG_HTTP=0` during normal operation. Enable it only for a short
 diagnostic window. Restrict Google Maps HTTP referrers to the production and
 approved development origins.
+
+The Friends migration binds the already-provisioned `preskiranch@gmail.com`
+and `rasheen25@gmail.com` rows to immutable Official identities. If either row
+does not exist yet, ordinary public registration for that reserved address is
+rejected. Provision it once through `POST /api/auth/register` with the
+`x-tracklab-official-bootstrap-token` header, confirm the Official badge and
+default connection fan-out, and then rotate or remove the bootstrap token.
 
 ## Pre-Release Gates
 

@@ -2,6 +2,7 @@ import { useMemo, type CSSProperties } from 'react';
 import { Pause, Play, RotateCcw, Timer, Trophy } from 'lucide-react';
 import { buildRaceZoneResults, zoneRiderResult } from '../lib/raceReview';
 import {
+  formatDistanceMeters,
   formatDistanceRangeMeters,
   formatReactionTime,
   formatSpeedFromKph,
@@ -17,6 +18,7 @@ import type {
   TrackRecord,
   TrackZone,
 } from '../types';
+import { straightSprintFeetToMeters } from '../lib/straightSprint';
 import { RiderAvatar } from './RiderAvatar';
 
 type RaceReviewPanelProps = {
@@ -72,6 +74,10 @@ function formatNullableSpeed(speedKph: number | null, speedUnit: SpeedUnit) {
   }
 
   return `${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+}
+
+export function formatRaceReviewSplitDistance(distanceUnit: DistanceUnit) {
+  return formatDistanceMeters(straightSprintFeetToMeters(30), distanceUnit);
 }
 
 function formatZoneTime(durationMs: number | null | undefined) {
@@ -185,7 +191,10 @@ export function RaceReviewPanel({
               </div>
               <div className="race-review-rider-metrics">
                 <span><strong>{formatFinishTime(summary.finishTimeMs)}</strong><small>finish</small></span>
-                <span><strong>{formatSplitTime(summary.thirtyFootTimeMs)}</strong><small>30 ft</small></span>
+                <span>
+                  <strong>{formatSplitTime(summary.thirtyFootTimeMs)}</strong>
+                  <small>{formatRaceReviewSplitDistance(distanceUnit)}</small>
+                </span>
                 <span><strong>{formatReactionTime(reactionTimesByPlayer[summary.playerId])}</strong><small>reaction</small></span>
                 <span><strong>{formatNullableSpeed(summary.topSpeedKph, speedUnit)}</strong><small>top speed</small></span>
                 <span><strong>{formatNullableSpeed(summary.averageSpeedKph, speedUnit)}</strong><small>avg speed</small></span>

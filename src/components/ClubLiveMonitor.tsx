@@ -21,13 +21,19 @@ import {
 } from '../lib/clubLive';
 import { RiderAvatar } from './RiderAvatar';
 import { PullSledScene } from './PullSledScene';
-import { formatSpeedFromKph, speedUnitLabel } from '../units';
-import type { SpeedUnit, StudioRider } from '../types';
+import {
+  formatDistanceMeters,
+  formatExploreDistanceMeters,
+  formatSpeedFromKph,
+  speedUnitLabel,
+} from '../units';
+import type { DistanceUnit, SpeedUnit, StudioRider } from '../types';
 import './ClubLiveMonitor.css';
 
 type ClubLiveMonitorProps = {
   studioRiders: StudioRider[];
   speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
   fullscreen?: boolean;
   onFullscreenChange?: (enabled: boolean) => void;
 };
@@ -64,14 +70,20 @@ function formatElapsed(elapsedMs: number) {
     : `${minutes}:${String(remainder).padStart(2, '0')}`;
 }
 
-function formatDistance(distanceMeters: number) {
-  const feet = distanceMeters * 3.28084;
-  return feet >= 5_280 ? `${(feet / 5_280).toFixed(2)} mi` : `${Math.round(feet).toLocaleString()} ft`;
+export function formatClubLiveActivityDistance(
+  distanceMeters: number,
+  distanceUnit: DistanceUnit,
+  activityType: ClubLiveSession['activityType'],
+) {
+  return activityType === 'explore'
+    ? formatExploreDistanceMeters(distanceMeters, distanceUnit === 'm' ? 'km' : 'mi')
+    : formatDistanceMeters(distanceMeters, distanceUnit);
 }
 
 export function ClubLiveMonitor({
   studioRiders,
   speedUnit,
+  distanceUnit,
   fullscreen = false,
   onFullscreenChange,
 }: ClubLiveMonitorProps) {
@@ -218,7 +230,11 @@ export function ClubLiveMonitor({
 
                 <div className="club-live-progress-copy">
                   <strong>{session.progress.label ?? `${percent}% complete`}</strong>
-                  <span>{formatDistance(session.metrics.distanceMeters)}</span>
+                  <span>{formatClubLiveActivityDistance(
+                    session.metrics.distanceMeters,
+                    distanceUnit,
+                    session.activityType,
+                  )}</span>
                 </div>
                 <div className="club-live-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
                   <span style={{ width: `${percent}%` }} />

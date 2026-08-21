@@ -40,7 +40,19 @@ const memoryClubMembers = new Map();
 const memoryClubInvitesByHash = new Map();
 const memoryClubTabletDevicesById = new Map();
 const memoryClubTabletDeviceIdByTokenHash = new Map();
+const memoryAccountFriendships = new Map();
+const memoryAccountFriendRequests = new Map();
+const memoryFriendshipSuppressions = new Map();
+const memoryFriendBlocks = new Map();
+const memoryFriendReports = new Map();
+const memoryFriendInvitesByHash = new Map();
+const memoryOfficialFriendKindByUserId = new Map();
+const memoryReconciledOfficialFriendUserIds = new Set();
+const memoryGroupsById = new Map();
+const memoryGroupMembersByKey = new Map();
+const memoryGroupInvitesById = new Map();
 let memoryRaceResultSequence = 0;
+let memoryFriendInviteSequence = 0;
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -64,6 +76,59 @@ function cloneJson(value, fallback) {
   return fromJson(json(value ?? fallback), fallback);
 }
 
+function jsonObjectOrNull(value) {
+  const parsed = fromJson(value, null);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+}
+
+function unitPreferenceRevisionSql(jsonExpression) {
+  return `(CASE
+    WHEN jsonb_typeof((${jsonExpression}) -> 'updatedAt') = 'number'
+      THEN ((${jsonExpression}) ->> 'updatedAt')::numeric
+    ELSE 0::numeric
+  END)`;
+}
+
+function userDataUpsertStatement() {
+  const storedUnitPreferences = `${schema}.user_data.unit_preferences`;
+  const incomingUnitPreferences = '$9::jsonb';
+  return `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences, unit_preferences, updated_at)
+     VALUES (
+       $1,
+       COALESCE($2::jsonb, '{}'::jsonb),
+       COALESCE($3::jsonb, '[]'::jsonb),
+       COALESCE($4::jsonb, '[]'::jsonb),
+       COALESCE($5::jsonb, '[]'::jsonb),
+       COALESCE($6::jsonb, '[]'::jsonb),
+       COALESCE($7::jsonb, '{}'::jsonb),
+       $8::jsonb,
+       $9::jsonb,
+       now()
+     )
+     ON CONFLICT (guest_key) DO UPDATE SET
+       track_mappings = COALESCE($2::jsonb, ${schema}.user_data.track_mappings),
+       custom_routes = COALESCE($3::jsonb, ${schema}.user_data.custom_routes),
+       bike_profiles = COALESCE($4::jsonb, ${schema}.user_data.bike_profiles),
+       studio_riders = COALESCE($5::jsonb, ${schema}.user_data.studio_riders),
+       explore_routes = COALESCE($6::jsonb, ${schema}.user_data.explore_routes),
+       account_profile = COALESCE($7::jsonb, ${schema}.user_data.account_profile),
+       race_view_preferences = COALESCE($8::jsonb, ${schema}.user_data.race_view_preferences),
+       unit_preferences = CASE
+         WHEN ${incomingUnitPreferences} IS NULL THEN ${storedUnitPreferences}
+         WHEN jsonb_typeof(${incomingUnitPreferences}) <> 'object' THEN ${storedUnitPreferences}
+         WHEN ${storedUnitPreferences} IS NULL
+           OR ${unitPreferenceRevisionSql(incomingUnitPreferences)} >= ${unitPreferenceRevisionSql(storedUnitPreferences)}
+           THEN ${incomingUnitPreferences}
+         ELSE ${storedUnitPreferences}
+       END,
+       updated_at = now()
+     RETURNING track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences, unit_preferences`;
+}
+
+export const persistenceTestHooks = Object.freeze({
+  userDataUpsertStatement,
+});
+
 function newestMappingBySavedAt(preferred, candidate) {
   if (!preferred) {
     return candidate;
@@ -81,6 +146,28 @@ function newestMappingBySavedAt(preferred, candidate) {
 
 function authEmailKey(email) {
   return String(email || '').trim().toLowerCase();
+}
+
+function accountPair(userIdA, userIdB) {
+  return String(userIdA) < String(userIdB)
+    ? [String(userIdA), String(userIdB)]
+    : [String(userIdB), String(userIdA)];
+}
+
+function accountPairKey(userIdA, userIdB) {
+  return accountPair(userIdA, userIdB).join(':');
+}
+
+function normalizedUsername(displayName, userId) {
+  const base = String(displayName || 'rider')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 20) || 'rider';
+  const suffix = String(userId || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12).toLowerCase() || 'tracklab';
+  return `${base}-${suffix}`;
 }
 
 function cloneAuthUser(user) {
@@ -125,6 +212,31 @@ export async function query(text, params = []) {
     cloudTelemetry.warn('persistence.query_failed', { operation, error });
     return null;
   }
+}
+
+async function withPersistenceLock(lockKey, operation) {
+  const ready = await initPersistence();
+  if (!ready || !pool) {
+    return null;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [lockKey]);
+    const value = await operation(client);
+    await client.query('COMMIT');
+    return value;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    cloudTelemetry.warn('persistence.friend_pair_transaction_failed', { error });
+    return null;
+  } finally {
+    client.release();
+  }
+}
+
+async function withAccountPairTransaction(userIdA, userIdB, operation) {
+  return withPersistenceLock(`friend-pair:${accountPair(userIdA, userIdB).join(':')}`, operation);
 }
 
 export async function initPersistence() {
@@ -197,6 +309,9 @@ function authUserFromRow(row) {
     id: row.id,
     email: row.email,
     displayName: row.display_name,
+    username: row.username || normalizedUsername(row.display_name, row.id),
+    friendDiscoverable: row.friend_discoverable === true,
+    officialFriendKind: row.official_friend_kind ?? null,
     passwordHash: row.password_hash,
     membershipTier: row.membership_tier,
     bikeSeats: Number(row.bike_seats) || 1,
@@ -216,7 +331,10 @@ export async function findAuthUserByEmail(email) {
   }
 
   const result = await query(
-    `SELECT * FROM ${schema}.auth_users WHERE email = $1 LIMIT 1`,
+    `SELECT users.*, official.kind AS official_friend_kind
+     FROM ${schema}.auth_users AS users
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
+     WHERE users.email = $1 LIMIT 1`,
     [email],
   );
   return authUserFromRow(result?.rows?.[0]);
@@ -228,7 +346,10 @@ export async function findAuthUserById(id) {
   }
 
   const result = await query(
-    `SELECT * FROM ${schema}.auth_users WHERE id = $1 LIMIT 1`,
+    `SELECT users.*, official.kind AS official_friend_kind
+     FROM ${schema}.auth_users AS users
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
+     WHERE users.id = $1 LIMIT 1`,
     [id],
   );
   return authUserFromRow(result?.rows?.[0]);
@@ -241,6 +362,9 @@ export async function createAuthUser(user) {
       id: user.id,
       email: user.email,
       displayName: user.displayName,
+      username: user.username || normalizedUsername(user.displayName, user.id),
+      friendDiscoverable: user.friendDiscoverable === true,
+      officialFriendKind: user.officialFriendKind ?? null,
       passwordHash: user.passwordHash,
       membershipTier: user.membershipTier,
       bikeSeats: Number(user.bikeSeats) || 1,
@@ -253,21 +377,37 @@ export async function createAuthUser(user) {
     };
     memoryAuthUsersById.set(memoryUser.id, memoryUser);
     memoryAuthUserIdByEmail.set(authEmailKey(memoryUser.email), memoryUser.id);
+    if (memoryUser.officialFriendKind === 'club' || memoryUser.officialFriendKind === 'founder') {
+      memoryOfficialFriendKindByUserId.set(memoryUser.id, memoryUser.officialFriendKind);
+    }
     return cloneAuthUser(memoryUser);
   }
 
   const result = await query(
-    `INSERT INTO ${schema}.auth_users (id, email, display_name, password_hash, membership_tier, bike_seats, admin, last_login)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-     RETURNING *`,
+    `WITH created AS (
+       INSERT INTO ${schema}.auth_users (id, email, display_name, username, friend_discoverable, password_hash, membership_tier, bike_seats, admin, last_login)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+       RETURNING *
+     ), bound AS (
+       INSERT INTO ${schema}.official_friend_accounts (kind, user_id)
+       SELECT $10, created.id FROM created
+       WHERE $10 IN ('club', 'founder')
+       ON CONFLICT DO NOTHING
+       RETURNING kind, user_id
+     )
+     SELECT created.*, bound.kind AS official_friend_kind
+     FROM created LEFT JOIN bound ON bound.user_id = created.id`,
     [
       user.id,
       user.email,
       user.displayName,
+      user.username || normalizedUsername(user.displayName, user.id),
+      user.friendDiscoverable === true,
       user.passwordHash,
       user.membershipTier,
       user.bikeSeats,
       Boolean(user.admin),
+      user.officialFriendKind ?? null,
     ],
   );
   return authUserFromRow(result?.rows?.[0]);
@@ -309,6 +449,26 @@ export async function updateAuthUserDisplayName(userId, displayName) {
      WHERE id = $1
      RETURNING *`,
     [userId, displayName],
+  );
+  return authUserFromRow(result?.rows?.[0]);
+}
+
+export async function updateFriendDiscoverability(userId, discoverable) {
+  if (!pool) {
+    const user = memoryAuthUsersById.get(userId);
+    if (!user) {
+      return null;
+    }
+    user.friendDiscoverable = Boolean(discoverable);
+    user.updatedAt = new Date().toISOString();
+    return cloneAuthUser(user);
+  }
+  const result = await query(
+    `UPDATE ${schema}.auth_users
+     SET friend_discoverable = $2, updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [userId, Boolean(discoverable)],
   );
   return authUserFromRow(result?.rows?.[0]);
 }
@@ -413,9 +573,11 @@ export async function findAuthSession(tokenHash) {
        session.id AS session_id,
        session.expires_at,
        session.last_seen,
-       users.*
+       users.*,
+       official.kind AS official_friend_kind
      FROM ${schema}.auth_sessions AS session
      JOIN ${schema}.auth_users AS users ON users.id = session.user_id
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = users.id
      WHERE session.token_hash = $1 AND session.expires_at > now()
      LIMIT 1`,
     [tokenHash],
@@ -654,6 +816,7 @@ export async function loadUserData(guestKey) {
       exploreRoutes: [],
       accountProfile: {},
       raceViewPreferences: null,
+      unitPreferences: null,
     };
     const stored = cloneJson(memoryUserDataByGuestKey.get(guestKey), fallback);
     return {
@@ -667,11 +830,12 @@ export async function loadUserData(guestKey) {
       raceViewPreferences: stored?.raceViewPreferences && typeof stored.raceViewPreferences === 'object'
         ? stored.raceViewPreferences
         : null,
+      unitPreferences: jsonObjectOrNull(stored?.unitPreferences),
     };
   }
 
   const result = await query(
-    `SELECT track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences FROM ${schema}.user_data WHERE guest_key = $1`,
+    `SELECT track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences, unit_preferences FROM ${schema}.user_data WHERE guest_key = $1`,
     [guestKey],
   );
   const row = result?.rows?.[0];
@@ -684,6 +848,7 @@ export async function loadUserData(guestKey) {
     exploreRoutes: fromJson(row?.explore_routes, []),
     accountProfile: fromJson(row?.account_profile, {}),
     raceViewPreferences: fromJson(row?.race_view_preferences, null),
+    unitPreferences: jsonObjectOrNull(row?.unit_preferences),
   };
 }
 
@@ -701,6 +866,11 @@ export async function saveUserData(guestKey, patch) {
   const raceViewPreferences = patch.raceViewPreferences && typeof patch.raceViewPreferences === 'object'
     ? patch.raceViewPreferences
     : null;
+  const unitPreferences = patch.unitPreferences
+    && typeof patch.unitPreferences === 'object'
+    && !Array.isArray(patch.unitPreferences)
+    ? patch.unitPreferences
+    : null;
 
   if (!pool) {
     const current = await loadUserData(guestKey);
@@ -712,34 +882,14 @@ export async function saveUserData(guestKey, patch) {
       exploreRoutes: exploreRoutes ?? current.exploreRoutes,
       accountProfile: accountProfile ?? current.accountProfile,
       raceViewPreferences: raceViewPreferences ?? current.raceViewPreferences,
+      unitPreferences: unitPreferences ?? current.unitPreferences,
     };
     memoryUserDataByGuestKey.set(guestKey, cloneJson(next, next));
     return cloneJson(next, next);
   }
 
   const result = await query(
-    `INSERT INTO ${schema}.user_data (guest_key, track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences, updated_at)
-     VALUES (
-       $1,
-       COALESCE($2::jsonb, '{}'::jsonb),
-       COALESCE($3::jsonb, '[]'::jsonb),
-       COALESCE($4::jsonb, '[]'::jsonb),
-       COALESCE($5::jsonb, '[]'::jsonb),
-       COALESCE($6::jsonb, '[]'::jsonb),
-       COALESCE($7::jsonb, '{}'::jsonb),
-       $8::jsonb,
-       now()
-     )
-     ON CONFLICT (guest_key) DO UPDATE SET
-       track_mappings = COALESCE($2::jsonb, ${schema}.user_data.track_mappings),
-       custom_routes = COALESCE($3::jsonb, ${schema}.user_data.custom_routes),
-       bike_profiles = COALESCE($4::jsonb, ${schema}.user_data.bike_profiles),
-       studio_riders = COALESCE($5::jsonb, ${schema}.user_data.studio_riders),
-       explore_routes = COALESCE($6::jsonb, ${schema}.user_data.explore_routes),
-       account_profile = COALESCE($7::jsonb, ${schema}.user_data.account_profile),
-       race_view_preferences = COALESCE($8::jsonb, ${schema}.user_data.race_view_preferences),
-       updated_at = now()
-     RETURNING track_mappings, custom_routes, bike_profiles, studio_riders, explore_routes, account_profile, race_view_preferences`,
+    userDataUpsertStatement(),
     [
       guestKey,
       trackMappings == null ? null : json(trackMappings),
@@ -749,6 +899,7 @@ export async function saveUserData(guestKey, patch) {
       exploreRoutes == null ? null : json(exploreRoutes),
       accountProfile == null ? null : json(accountProfile),
       raceViewPreferences == null ? null : json(raceViewPreferences),
+      unitPreferences == null ? null : json(unitPreferences),
     ],
   );
   const row = result?.rows?.[0];
@@ -764,6 +915,7 @@ export async function saveUserData(guestKey, patch) {
     exploreRoutes: fromJson(row.explore_routes, []),
     accountProfile: fromJson(row.account_profile, {}),
     raceViewPreferences: fromJson(row.race_view_preferences, null),
+    unitPreferences: jsonObjectOrNull(row.unit_preferences),
   };
 }
 
@@ -1773,6 +1925,1599 @@ export async function saveChallenge(challenge, fromClient, targetClient) {
   );
 }
 
+function accountProfileFromRow(row, extras = {}) {
+  if (!row) {
+    return null;
+  }
+  return {
+    profileId: row.profile_id ?? row.id,
+    displayName: row.display_name,
+    username: row.username,
+    officialType: row.official_type ?? null,
+    ...extras,
+  };
+}
+
+function memoryAccountProfile(user, extras = {}) {
+  if (!user) {
+    return null;
+  }
+  return {
+    profileId: user.id,
+    displayName: user.displayName,
+    username: user.username || normalizedUsername(user.displayName, user.id),
+    officialType: memoryOfficialFriendKindByUserId.get(user.id) ?? null,
+    ...extras,
+  };
+}
+
+function friendGhostPreviewFromRow(row) {
+  if (!row?.id || !row?.track_id || !row?.track_name) return null;
+  const finishTimeMs = Math.round(Number(row.finish_time_ms));
+  if (!Number.isFinite(finishTimeMs) || finishTimeMs <= 0) return null;
+  const storedSummary = fromJson(row.summary, null);
+  const distanceFeet = sprintDistanceFeet(storedSummary?.sprintDistanceFeet);
+  const airSetting = sprintAirSetting(storedSummary?.sprintAirSetting);
+  return {
+    id: row.id,
+    trackId: row.track_id,
+    trackName: row.track_name,
+    ...(row.route_variant_id === 'amateur' || row.route_variant_id === 'pro'
+      ? { routeVariantId: row.route_variant_id }
+      : {}),
+    lapCount: safeLapCount(row.lap_count),
+    ...(distanceFeet != null && airSetting != null ? {
+      sprintDistanceFeet: distanceFeet,
+      sprintAirSetting: airSetting,
+    } : {}),
+    finishTimeMs,
+  };
+}
+
+function memoryRecentLiveGhostPreview(userId) {
+  const ownerKey = `user:${userId}`;
+  const recent = [...memoryGhostLaps.values()]
+    .filter((ghost) => ghost.owner_key === ownerKey && ghost.race_source === 'live')
+    .sort((left, right) => (
+      Date.parse(right.saved_at) - Date.parse(left.saved_at)
+      || left.finish_time_ms - right.finish_time_ms
+      || String(left.id).localeCompare(String(right.id))
+    ))[0];
+  return friendGhostPreviewFromRow(recent);
+}
+
+function memoryUsersAreBlocked(userIdA, userIdB) {
+  return memoryFriendBlocks.has(`${userIdA}:${userIdB}`)
+    || memoryFriendBlocks.has(`${userIdB}:${userIdA}`);
+}
+
+function memoryGuestKeysAreBlocked(guestKeyA, guestKeyB) {
+  const userIdA = String(guestKeyA || '').startsWith('user:') ? String(guestKeyA).slice(5) : '';
+  const userIdB = String(guestKeyB || '').startsWith('user:') ? String(guestKeyB).slice(5) : '';
+  return Boolean(userIdA && userIdB && memoryUsersAreBlocked(userIdA, userIdB));
+}
+
+function memoryGroupMemberKey(groupId, guestKey) {
+  return `${groupId}:${guestKey}`;
+}
+
+function memoryFriendIds(userId, { includeOfficial = true } = {}) {
+  const ids = [];
+  for (const friendship of memoryAccountFriendships.values()) {
+    if (!includeOfficial && friendship.source === 'official') {
+      continue;
+    }
+    if (friendship.userIdA === userId) {
+      ids.push(friendship.userIdB);
+    } else if (friendship.userIdB === userId) {
+      ids.push(friendship.userIdA);
+    }
+  }
+  return ids;
+}
+
+function memoryUsersShareClaimedClub(userIdA, userIdB) {
+  const profileKeyA = `user:${userIdA}`;
+  const profileKeyB = `user:${userIdB}`;
+  for (const club of memoryClubsById.values()) {
+    const profileKeys = new Set([club.ownerProfileKey]);
+    for (const member of memoryClubMembers.values()) {
+      if (
+        member.clubId === club.id
+        && member.status === 'claimed'
+        && !member.revokedAt
+        && member.athleteProfileKey
+      ) {
+        profileKeys.add(member.athleteProfileKey);
+      }
+    }
+    if (profileKeys.has(profileKeyA) && profileKeys.has(profileKeyB)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function ensureOfficialFriendships(userId = '') {
+  if (!pool) {
+    if (userId && memoryOfficialFriendKindByUserId.has(userId) && memoryReconciledOfficialFriendUserIds.has(userId)) {
+      return [];
+    }
+    const changedUserIds = new Set();
+    const officialUsers = [...memoryAuthUsersById.values()]
+      .filter((user) => memoryOfficialFriendKindByUserId.has(user.id));
+    const candidateUsers = [...memoryAuthUsersById.values()];
+    for (const official of officialUsers) {
+      for (const candidate of candidateUsers) {
+        if (candidate.id === official.id) {
+          continue;
+        }
+        if (userId && candidate.id !== userId && official.id !== userId) {
+          continue;
+        }
+        const [userIdA, userIdB] = accountPair(candidate.id, official.id);
+        const pairKey = accountPairKey(userIdA, userIdB);
+        if (memoryFriendshipSuppressions.has(pairKey) || memoryUsersAreBlocked(userIdA, userIdB)) {
+          continue;
+        }
+        const existing = memoryAccountFriendships.get(pairKey);
+        if (!existing || existing.source === 'legacy') {
+          memoryAccountFriendships.set(pairKey, {
+            userIdA,
+            userIdB,
+            source: 'official',
+            createdAt: new Date().toISOString(),
+          });
+          changedUserIds.add(userIdA);
+          changedUserIds.add(userIdB);
+        }
+      }
+    }
+    if (userId && memoryOfficialFriendKindByUserId.has(userId)) {
+      memoryReconciledOfficialFriendUserIds.add(userId);
+    }
+    return [...changedUserIds];
+  }
+
+  const officialLookup = userId ? await query(
+    `SELECT kind, reconciled_at FROM ${schema}.official_friend_accounts WHERE user_id = $1 LIMIT 1`,
+    [userId],
+  ) : null;
+  if (officialLookup?.rows?.[0]) {
+    if (officialLookup.rows[0].reconciled_at) return [];
+    // A late-provisioned Official account may need to connect to every existing
+    // rider. Acquire the same pair locks used by accept/remove/block, in a
+    // stable order, then perform one set-based insert so block always wins and
+    // login does not open one transaction per account.
+    const connected = await withPersistenceLock(`official-fanout:${userId}`, async (client) => {
+      const alreadyReconciled = await client.query(
+        `SELECT 1 FROM ${schema}.official_friend_accounts
+         WHERE user_id = $1 AND reconciled_at IS NOT NULL
+         LIMIT 1`,
+        [userId],
+      );
+      if (alreadyReconciled.rows[0]) return null;
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext(
+           'friend-pair:' || LEAST(users.id, $1) || ':' || GREATEST(users.id, $1)
+         ))
+         FROM ${schema}.auth_users AS users
+         WHERE users.id <> $1
+         ORDER BY LEAST(users.id, $1), GREATEST(users.id, $1)`,
+        [userId],
+      );
+      const connected = await client.query(
+        `INSERT INTO ${schema}.account_friendships AS existing (user_id_a, user_id_b, source)
+         SELECT LEAST(users.id, $1), GREATEST(users.id, $1), 'official'
+         FROM ${schema}.auth_users AS users
+         WHERE users.id <> $1
+           AND NOT EXISTS (
+             SELECT 1 FROM ${schema}.friendship_suppressions AS suppression
+             WHERE suppression.user_id_a = LEAST(users.id, $1)
+               AND suppression.user_id_b = GREATEST(users.id, $1)
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM ${schema}.friend_blocks AS block
+             WHERE (block.blocker_user_id = users.id AND block.blocked_user_id = $1)
+                OR (block.blocker_user_id = $1 AND block.blocked_user_id = users.id)
+           )
+         ON CONFLICT (user_id_a, user_id_b) DO UPDATE SET source = 'official'
+         WHERE existing.source = 'legacy'
+         RETURNING existing.user_id_a, existing.user_id_b`,
+        [userId],
+      );
+      await client.query(
+        `UPDATE ${schema}.official_friend_accounts SET reconciled_at = now() WHERE user_id = $1`,
+        [userId],
+      );
+      return connected;
+    });
+    return [...new Set((connected?.rows ?? []).flatMap((row) => [row.user_id_a, row.user_id_b]).filter(Boolean))];
+  }
+
+  const pairs = await query(
+    `SELECT DISTINCT
+       LEAST(users.id, official.user_id) AS user_id_a,
+       GREATEST(users.id, official.user_id) AS user_id_b
+     FROM ${schema}.auth_users AS users
+     CROSS JOIN ${schema}.official_friend_accounts AS official
+     WHERE users.id <> official.user_id
+       AND ($1 = '' OR users.id = $1 OR official.user_id = $1)`,
+    [userId],
+  );
+  const changedUserIds = new Set();
+  for (const pair of pairs?.rows ?? []) {
+    const connected = await withAccountPairTransaction(pair.user_id_a, pair.user_id_b, (client) => client.query(
+      `INSERT INTO ${schema}.account_friendships AS existing (user_id_a, user_id_b, source)
+       SELECT $1, $2, 'official'
+       WHERE NOT EXISTS (
+         SELECT 1 FROM ${schema}.friendship_suppressions AS suppression
+         WHERE suppression.user_id_a = $1 AND suppression.user_id_b = $2
+       )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = $1 AND block.blocked_user_id = $2)
+              OR (block.blocker_user_id = $2 AND block.blocked_user_id = $1)
+       )
+       ON CONFLICT (user_id_a, user_id_b) DO UPDATE SET source = 'official'
+       WHERE existing.source = 'legacy'
+       RETURNING existing.user_id_a, existing.user_id_b`,
+      [pair.user_id_a, pair.user_id_b],
+    ));
+    (connected?.rows ?? []).forEach((row) => {
+      if (row.user_id_a) changedUserIds.add(row.user_id_a);
+      if (row.user_id_b) changedUserIds.add(row.user_id_b);
+    });
+  }
+  return [...changedUserIds];
+}
+
+export async function listAccountFriends(userId, { offset = 0, limit = 25, searchText = '' } = {}) {
+  const normalizedSearch = String(searchText || '').trim().toLowerCase();
+  if (!pool) {
+    return [...memoryAccountFriendships.values()]
+      .filter((friendship) => friendship.userIdA === userId || friendship.userIdB === userId)
+      .filter((friendship) => {
+        if (!normalizedSearch) return true;
+        const friendId = friendship.userIdA === userId ? friendship.userIdB : friendship.userIdA;
+        const friend = memoryAuthUsersById.get(friendId);
+        return String(friend?.username || '').toLowerCase().includes(normalizedSearch)
+          || String(friend?.displayName || '').toLowerCase().includes(normalizedSearch);
+      })
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(offset, offset + limit)
+      .map((friendship) => {
+        const friendId = friendship.userIdA === userId ? friendship.userIdB : friendship.userIdA;
+        return memoryAccountProfile(memoryAuthUsersById.get(friendId), {
+          friendshipSource: friendship.source,
+          connectedAt: friendship.createdAt,
+          photoUrl: memoryUserDataByGuestKey.get(`user:${friendId}`)?.accountProfile?.photoUrl ?? '',
+          ...(friendship.source !== 'official'
+            ? { ghostPreview: memoryRecentLiveGhostPreview(friendId) }
+            : {}),
+        });
+      })
+      .filter(Boolean);
+  }
+
+  const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
+  const result = await query(
+    `WITH friend_edges AS (
+       SELECT user_id_b AS friend_id, source, created_at
+       FROM ${schema}.account_friendships WHERE user_id_a = $1
+       UNION ALL
+       SELECT user_id_a AS friend_id, source, created_at
+       FROM ${schema}.account_friendships WHERE user_id_b = $1
+     )
+     SELECT
+       friend.id AS profile_id,
+       friend.display_name,
+       friend.username,
+       official.kind AS official_type,
+       profile_data.account_profile ->> 'photoUrl' AS photo_url,
+       edge.source AS friendship_source,
+       edge.created_at AS connected_at,
+       recent_ghost.id AS ghost_id,
+       recent_ghost.track_id AS ghost_track_id,
+       recent_ghost.track_name AS ghost_track_name,
+       recent_ghost.route_variant_id AS ghost_route_variant_id,
+       recent_ghost.lap_count AS ghost_lap_count,
+       recent_ghost.finish_time_ms AS ghost_finish_time_ms,
+       recent_ghost.summary AS ghost_summary
+     FROM friend_edges AS edge
+     JOIN ${schema}.auth_users AS friend ON friend.id = edge.friend_id
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = friend.id
+     LEFT JOIN ${schema}.user_data AS profile_data ON profile_data.guest_key = 'user:' || friend.id
+     LEFT JOIN LATERAL (
+       SELECT id, track_id, track_name, route_variant_id, lap_count, finish_time_ms, summary
+       FROM ${schema}.ghost_laps
+       WHERE owner_key = 'user:' || friend.id AND race_source = 'live'
+       ORDER BY saved_at DESC, finish_time_ms ASC, id
+       LIMIT 1
+     ) AS recent_ghost ON edge.source <> 'official'
+     WHERE $4 = ''
+        OR friend.username ILIKE '%' || $4 || '%' ESCAPE '\\'
+        OR friend.display_name ILIKE '%' || $4 || '%' ESCAPE '\\'
+     ORDER BY edge.created_at DESC, friend.id
+     OFFSET $2 LIMIT $3`,
+    [userId, offset, limit, escapedSearch],
+  );
+  return (result?.rows ?? []).map((row) => accountProfileFromRow(row, {
+    friendshipSource: row.friendship_source,
+    connectedAt: new Date(row.connected_at).toISOString(),
+    photoUrl: row.photo_url ?? '',
+    ghostPreview: friendGhostPreviewFromRow({
+      id: row.ghost_id,
+      track_id: row.ghost_track_id,
+      track_name: row.ghost_track_name,
+      route_variant_id: row.ghost_route_variant_id,
+      lap_count: row.ghost_lap_count,
+      finish_time_ms: row.ghost_finish_time_ms,
+      summary: row.ghost_summary,
+    }),
+  }));
+}
+
+export async function listAccountFriendRequests(userId, direction, { offset = 0, limit = 25, searchText = '' } = {}) {
+  const incoming = direction !== 'outgoing';
+  const normalizedSearch = String(searchText || '').trim().toLowerCase();
+  if (!pool) {
+    return [...memoryAccountFriendRequests.values()]
+      .filter((request) => request.status === 'pending')
+      .filter((request) => incoming ? request.toUserId === userId : request.fromUserId === userId)
+      .filter((request) => {
+        if (!normalizedSearch) return true;
+        const otherId = incoming ? request.fromUserId : request.toUserId;
+        const other = memoryAuthUsersById.get(otherId);
+        return String(other?.username || '').toLowerCase().includes(normalizedSearch)
+          || String(other?.displayName || '').toLowerCase().includes(normalizedSearch);
+      })
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(offset, offset + limit)
+      .map((request) => {
+        const otherId = incoming ? request.fromUserId : request.toUserId;
+        return {
+          requestId: request.id,
+          direction: incoming ? 'incoming' : 'outgoing',
+          profile: memoryAccountProfile(memoryAuthUsersById.get(otherId)),
+          createdAt: request.createdAt,
+        };
+      });
+  }
+
+  const ownerColumn = incoming ? 'request.to_user_id' : 'request.from_user_id';
+  const otherColumn = incoming ? 'request.from_user_id' : 'request.to_user_id';
+  const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
+  const result = await query(
+    `SELECT
+       request.id AS request_id,
+       request.created_at,
+       other.id AS profile_id,
+       other.display_name,
+       other.username,
+       official.kind AS official_type
+     FROM ${schema}.account_friend_requests AS request
+     JOIN ${schema}.auth_users AS other ON other.id = ${otherColumn}
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = other.id
+     WHERE ${ownerColumn} = $1 AND request.status = 'pending'
+       AND (
+         $4 = ''
+         OR other.username ILIKE '%' || $4 || '%' ESCAPE '\\'
+         OR other.display_name ILIKE '%' || $4 || '%' ESCAPE '\\'
+       )
+     ORDER BY request.created_at DESC, request.id DESC
+     OFFSET $2 LIMIT $3`,
+    [userId, offset, limit, escapedSearch],
+  );
+  return (result?.rows ?? []).map((row) => ({
+    requestId: row.request_id,
+    direction: incoming ? 'incoming' : 'outgoing',
+    profile: accountProfileFromRow(row),
+    createdAt: new Date(row.created_at).toISOString(),
+  }));
+}
+
+export async function searchAccountProfiles(userId, searchText, { offset = 0, limit = 25 } = {}) {
+  const normalizedSearch = String(searchText || '').trim().toLowerCase();
+  if (!pool) {
+    return [...memoryAuthUsersById.values()]
+      .filter((user) => user.id !== userId && user.friendDiscoverable === true)
+      .filter((user) => !memoryUsersAreBlocked(userId, user.id))
+      .filter((user) => (
+        String(user.username || '').toLowerCase().startsWith(normalizedSearch)
+        || String(user.displayName || '').toLowerCase().startsWith(normalizedSearch)
+      ))
+      .sort((a, b) => {
+        const aExact = a.username.toLowerCase() === normalizedSearch ? 0 : 1;
+        const bExact = b.username.toLowerCase() === normalizedSearch ? 0 : 1;
+        return aExact - bExact || a.displayName.localeCompare(b.displayName);
+      })
+      .slice(offset, offset + limit)
+      .map((user) => {
+        const pairKey = accountPairKey(userId, user.id);
+        const friendship = memoryAccountFriendships.get(pairKey);
+        const request = [...memoryAccountFriendRequests.values()].find((candidate) => (
+          candidate.status === 'pending'
+          && accountPairKey(candidate.fromUserId, candidate.toUserId) === pairKey
+        ));
+        return memoryAccountProfile(user, {
+          relationship: friendship
+            ? 'friend'
+            : request?.fromUserId === userId
+              ? 'outgoing-request'
+              : request
+                ? 'incoming-request'
+                : 'none',
+          friendshipSource: friendship?.source ?? null,
+        });
+      });
+  }
+
+  const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
+  const result = await query(
+    `SELECT
+       candidate.id AS profile_id,
+       candidate.display_name,
+       candidate.username,
+       official.kind AS official_type,
+       friendship.source AS friendship_source,
+       CASE
+         WHEN friendship.user_id_a IS NOT NULL THEN 'friend'
+         WHEN pending.from_user_id = $1 THEN 'outgoing-request'
+         WHEN pending.to_user_id = $1 THEN 'incoming-request'
+         ELSE 'none'
+       END AS relationship
+     FROM ${schema}.auth_users AS candidate
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = candidate.id
+     LEFT JOIN ${schema}.account_friendships AS friendship
+       ON friendship.user_id_a = LEAST($1, candidate.id)
+      AND friendship.user_id_b = GREATEST($1, candidate.id)
+     LEFT JOIN ${schema}.account_friend_requests AS pending
+       ON pending.status = 'pending'
+      AND LEAST(pending.from_user_id, pending.to_user_id) = LEAST($1, candidate.id)
+      AND GREATEST(pending.from_user_id, pending.to_user_id) = GREATEST($1, candidate.id)
+     WHERE candidate.id <> $1
+       AND candidate.friend_discoverable = true
+       AND (
+         lower(candidate.username) LIKE $2 || '%' ESCAPE '\\'
+         OR lower(candidate.display_name) LIKE $2 || '%' ESCAPE '\\'
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM ${schema}.friend_blocks AS block
+         WHERE (block.blocker_user_id = $1 AND block.blocked_user_id = candidate.id)
+            OR (block.blocker_user_id = candidate.id AND block.blocked_user_id = $1)
+       )
+     ORDER BY
+       CASE WHEN lower(candidate.username) = lower($3) THEN 0 ELSE 1 END,
+       CASE WHEN lower(candidate.username) LIKE lower($3) || '%' THEN 0 ELSE 1 END,
+       lower(candidate.display_name), candidate.id
+     OFFSET $4 LIMIT $5`,
+    [userId, escapedSearch, normalizedSearch, offset, limit],
+  );
+  return (result?.rows ?? []).map((row) => accountProfileFromRow(row, {
+    relationship: row.relationship,
+    friendshipSource: row.friendship_source ?? null,
+  }));
+}
+
+export async function suggestAccountFriends(userId, { offset = 0, limit = 25 } = {}) {
+  if (!pool) {
+    const allFriendIds = new Set(memoryFriendIds(userId));
+    const ownFriends = new Set(memoryFriendIds(userId, { includeOfficial: false }));
+    return [...memoryAuthUsersById.values()]
+      .filter((user) => user.id !== userId && user.friendDiscoverable === true)
+      .filter((user) => !allFriendIds.has(user.id))
+      .filter((user) => !memoryUsersAreBlocked(userId, user.id))
+      .filter((user) => !memoryFriendshipSuppressions.has(accountPairKey(userId, user.id)))
+      .filter((user) => ![...memoryAccountFriendRequests.values()].some((request) => (
+        request.status === 'pending'
+        && accountPairKey(request.fromUserId, request.toUserId) === accountPairKey(userId, user.id)
+      )))
+      .map((user) => {
+        const candidateFriends = new Set(memoryFriendIds(user.id, { includeOfficial: false }));
+        const mutualFriendCount = [...ownFriends].filter((friendId) => candidateFriends.has(friendId)).length;
+        const sharedClub = memoryUsersShareClaimedClub(userId, user.id);
+        return memoryAccountProfile(user, {
+          mutualFriendCount,
+          reason: sharedClub ? 'shared-club' : mutualFriendCount > 0 ? 'mutual-friends' : null,
+        });
+      })
+      .filter((profile) => profile.reason)
+      .sort((a, b) => b.mutualFriendCount - a.mutualFriendCount || a.displayName.localeCompare(b.displayName))
+      .slice(offset, offset + limit);
+  }
+
+  const result = await query(
+    `WITH all_friends AS (
+       SELECT CASE WHEN friendship.user_id_a = $1 THEN friendship.user_id_b ELSE friendship.user_id_a END AS friend_id
+       FROM ${schema}.account_friendships AS friendship
+       WHERE friendship.user_id_a = $1 OR friendship.user_id_b = $1
+     ), my_friends AS (
+       SELECT CASE WHEN friendship.user_id_a = $1 THEN friendship.user_id_b ELSE friendship.user_id_a END AS friend_id
+       FROM ${schema}.account_friendships AS friendship
+       WHERE friendship.source <> 'official'
+         AND (friendship.user_id_a = $1 OR friendship.user_id_b = $1)
+     ), my_clubs AS (
+       SELECT club.id
+       FROM ${schema}.clubs AS club
+       WHERE club.owner_profile_key = 'user:' || $1
+          OR EXISTS (
+            SELECT 1 FROM ${schema}.club_members AS member
+            WHERE member.club_id = club.id
+              AND member.athlete_profile_key = 'user:' || $1
+              AND member.status = 'claimed' AND member.revoked_at IS NULL
+          )
+     ), candidates AS (
+       SELECT
+         candidate.id AS profile_id,
+         candidate.display_name,
+         candidate.username,
+         candidate.created_at,
+         official.kind AS official_type,
+         (
+           SELECT count(*)::integer
+           FROM my_friends AS mine
+           JOIN ${schema}.account_friendships AS candidate_friendship
+             ON candidate_friendship.user_id_a = LEAST(mine.friend_id, candidate.id)
+            AND candidate_friendship.user_id_b = GREATEST(mine.friend_id, candidate.id)
+            AND candidate_friendship.source <> 'official'
+         ) AS mutual_friend_count,
+         EXISTS (
+           SELECT 1
+           FROM my_clubs AS mine
+           JOIN ${schema}.clubs AS club ON club.id = mine.id
+           WHERE club.owner_profile_key = 'user:' || candidate.id
+              OR EXISTS (
+                SELECT 1 FROM ${schema}.club_members AS member
+                WHERE member.club_id = mine.id
+                  AND member.athlete_profile_key = 'user:' || candidate.id
+                  AND member.status = 'claimed' AND member.revoked_at IS NULL
+              )
+         ) AS shared_club,
+         EXISTS (
+           SELECT 1
+           FROM ${schema}.race_results AS mine
+           JOIN ${schema}.race_results AS theirs ON theirs.room_id = mine.room_id
+           WHERE mine.guest_key = 'user:' || $1
+             AND theirs.guest_key = 'user:' || candidate.id
+             AND mine.room_id <> 'local'
+             AND mine.created_at > now() - interval '90 days'
+         ) AS recent_race
+       FROM ${schema}.auth_users AS candidate
+       LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = candidate.id
+       WHERE candidate.id <> $1
+         AND candidate.friend_discoverable = true
+         AND NOT EXISTS (
+           SELECT 1 FROM all_friends WHERE friend_id = candidate.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.account_friend_requests AS request
+           WHERE request.status = 'pending'
+             AND request.from_user_id IN ($1, candidate.id)
+             AND request.to_user_id IN ($1, candidate.id)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = $1 AND block.blocked_user_id = candidate.id)
+              OR (block.blocker_user_id = candidate.id AND block.blocked_user_id = $1)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friendship_suppressions AS suppression
+           WHERE suppression.user_id_a = LEAST($1, candidate.id)
+             AND suppression.user_id_b = GREATEST($1, candidate.id)
+         )
+     )
+     SELECT
+       profile_id, display_name, username, official_type,
+       mutual_friend_count, shared_club, recent_race
+     FROM candidates
+     WHERE shared_club OR recent_race OR mutual_friend_count > 0
+     ORDER BY shared_club DESC, recent_race DESC, mutual_friend_count DESC,
+       created_at DESC, profile_id
+     OFFSET $2 LIMIT $3`,
+    [userId, offset, limit],
+  );
+  return (result?.rows ?? []).map((row) => {
+    const mutualFriendCount = Number(row.mutual_friend_count) || 0;
+    const reason = row.shared_club
+      ? 'shared-club'
+      : row.recent_race
+        ? 'recent-race'
+        : mutualFriendCount > 0
+          ? 'mutual-friends'
+          : 'tracklab-rider';
+    return accountProfileFromRow(row, { mutualFriendCount, reason });
+  });
+}
+
+export async function countAccountFriends(userId, { searchText = '' } = {}) {
+  const normalizedSearch = String(searchText || '').trim().toLowerCase();
+  if (!pool) {
+    return memoryFriendIds(userId).filter((friendId) => {
+      if (!normalizedSearch) return true;
+      const friend = memoryAuthUsersById.get(friendId);
+      return String(friend?.username || '').toLowerCase().includes(normalizedSearch)
+        || String(friend?.displayName || '').toLowerCase().includes(normalizedSearch);
+    }).length;
+  }
+  const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
+  const result = await query(
+    `SELECT count(*)::integer AS total
+     FROM ${schema}.account_friendships AS friendship
+     JOIN ${schema}.auth_users AS friend
+       ON friend.id = CASE
+         WHEN friendship.user_id_a = $1 THEN friendship.user_id_b
+         ELSE friendship.user_id_a
+       END
+     WHERE (friendship.user_id_a = $1 OR friendship.user_id_b = $1)
+       AND (
+         $2 = ''
+         OR friend.username ILIKE '%' || $2 || '%' ESCAPE '\\'
+         OR friend.display_name ILIKE '%' || $2 || '%' ESCAPE '\\'
+       )`,
+    [userId, escapedSearch],
+  );
+  return Number(result?.rows?.[0]?.total) || 0;
+}
+
+export async function countAccountFriendRequests(userId, direction, { searchText = '' } = {}) {
+  const incoming = direction !== 'outgoing';
+  const normalizedSearch = String(searchText || '').trim().toLowerCase();
+  if (!pool) {
+    return [...memoryAccountFriendRequests.values()].filter((request) => (
+      request.status === 'pending'
+      && (incoming ? request.toUserId === userId : request.fromUserId === userId)
+      && (() => {
+        if (!normalizedSearch) return true;
+        const otherId = incoming ? request.fromUserId : request.toUserId;
+        const other = memoryAuthUsersById.get(otherId);
+        return String(other?.username || '').toLowerCase().includes(normalizedSearch)
+          || String(other?.displayName || '').toLowerCase().includes(normalizedSearch);
+      })()
+    )).length;
+  }
+  const ownerColumn = incoming ? 'request.to_user_id' : 'request.from_user_id';
+  const otherColumn = incoming ? 'request.from_user_id' : 'request.to_user_id';
+  const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
+  const result = await query(
+    `SELECT count(*)::integer AS total
+     FROM ${schema}.account_friend_requests AS request
+     JOIN ${schema}.auth_users AS other ON other.id = ${otherColumn}
+     WHERE ${ownerColumn} = $1 AND request.status = 'pending'
+       AND (
+         $2 = ''
+         OR other.username ILIKE '%' || $2 || '%' ESCAPE '\\'
+         OR other.display_name ILIKE '%' || $2 || '%' ESCAPE '\\'
+       )`,
+    [userId, escapedSearch],
+  );
+  return Number(result?.rows?.[0]?.total) || 0;
+}
+
+export async function countAccountProfileSearch(userId, searchText) {
+  const normalizedSearch = String(searchText || '').trim().toLowerCase();
+  if (!pool) {
+    return [...memoryAuthUsersById.values()].filter((user) => (
+      user.id !== userId
+      && user.friendDiscoverable === true
+      && !memoryUsersAreBlocked(userId, user.id)
+      && (
+        String(user.username || '').toLowerCase().startsWith(normalizedSearch)
+        || String(user.displayName || '').toLowerCase().startsWith(normalizedSearch)
+      )
+    )).length;
+  }
+  const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
+  const result = await query(
+    `SELECT count(*)::integer AS total
+     FROM ${schema}.auth_users AS candidate
+     WHERE candidate.id <> $1
+       AND candidate.friend_discoverable = true
+       AND (
+         lower(candidate.username) LIKE $2 || '%' ESCAPE '\\'
+         OR lower(candidate.display_name) LIKE $2 || '%' ESCAPE '\\'
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM ${schema}.friend_blocks AS block
+         WHERE (block.blocker_user_id = $1 AND block.blocked_user_id = candidate.id)
+            OR (block.blocker_user_id = candidate.id AND block.blocked_user_id = $1)
+       )`,
+    [userId, escapedSearch],
+  );
+  return Number(result?.rows?.[0]?.total) || 0;
+}
+
+export async function countAccountFriendSuggestions(userId) {
+  if (!pool) {
+    const ownFriends = new Set(memoryFriendIds(userId));
+    const nonOfficialFriends = new Set(memoryFriendIds(userId, { includeOfficial: false }));
+    return [...memoryAuthUsersById.values()].filter((user) => (
+      user.id !== userId
+      && user.friendDiscoverable === true
+      && !ownFriends.has(user.id)
+      && !memoryUsersAreBlocked(userId, user.id)
+      && !memoryFriendshipSuppressions.has(accountPairKey(userId, user.id))
+      && ![...memoryAccountFriendRequests.values()].some((request) => (
+        request.status === 'pending'
+        && accountPairKey(request.fromUserId, request.toUserId) === accountPairKey(userId, user.id)
+      ))
+      && (
+        memoryUsersShareClaimedClub(userId, user.id)
+        || memoryFriendIds(user.id, { includeOfficial: false })
+          .some((friendId) => nonOfficialFriends.has(friendId))
+      )
+    )).length;
+  }
+  const result = await query(
+    `WITH my_friends AS (
+       SELECT CASE WHEN friendship.user_id_a = $1 THEN friendship.user_id_b ELSE friendship.user_id_a END AS friend_id
+       FROM ${schema}.account_friendships AS friendship
+       WHERE friendship.source <> 'official'
+         AND (friendship.user_id_a = $1 OR friendship.user_id_b = $1)
+     ), my_clubs AS (
+       SELECT club.id
+       FROM ${schema}.clubs AS club
+       WHERE club.owner_profile_key = 'user:' || $1
+          OR EXISTS (
+            SELECT 1 FROM ${schema}.club_members AS member
+            WHERE member.club_id = club.id
+              AND member.athlete_profile_key = 'user:' || $1
+              AND member.status = 'claimed' AND member.revoked_at IS NULL
+          )
+     ), candidates AS (
+       SELECT candidate.id,
+         EXISTS (
+           SELECT 1 FROM my_friends AS mine
+           JOIN ${schema}.account_friendships AS candidate_friendship
+             ON candidate_friendship.user_id_a = LEAST(mine.friend_id, candidate.id)
+            AND candidate_friendship.user_id_b = GREATEST(mine.friend_id, candidate.id)
+            AND candidate_friendship.source <> 'official'
+         ) AS has_mutual_friend,
+         EXISTS (
+           SELECT 1 FROM my_clubs AS mine
+           JOIN ${schema}.clubs AS club ON club.id = mine.id
+           WHERE club.owner_profile_key = 'user:' || candidate.id
+              OR EXISTS (
+                SELECT 1 FROM ${schema}.club_members AS member
+                WHERE member.club_id = mine.id
+                  AND member.athlete_profile_key = 'user:' || candidate.id
+                  AND member.status = 'claimed' AND member.revoked_at IS NULL
+              )
+         ) AS shared_club,
+         EXISTS (
+           SELECT 1 FROM ${schema}.race_results AS mine
+           JOIN ${schema}.race_results AS theirs ON theirs.room_id = mine.room_id
+           WHERE mine.guest_key = 'user:' || $1
+             AND theirs.guest_key = 'user:' || candidate.id
+             AND mine.room_id <> 'local'
+             AND mine.created_at > now() - interval '90 days'
+         ) AS recent_race
+       FROM ${schema}.auth_users AS candidate
+       WHERE candidate.id <> $1
+         AND candidate.friend_discoverable = true
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.account_friendships AS friendship
+           WHERE friendship.user_id_a = LEAST($1, candidate.id)
+             AND friendship.user_id_b = GREATEST($1, candidate.id)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.account_friend_requests AS request
+           WHERE request.status = 'pending'
+             AND request.from_user_id IN ($1, candidate.id)
+             AND request.to_user_id IN ($1, candidate.id)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = $1 AND block.blocked_user_id = candidate.id)
+              OR (block.blocker_user_id = candidate.id AND block.blocked_user_id = $1)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friendship_suppressions AS suppression
+           WHERE suppression.user_id_a = LEAST($1, candidate.id)
+             AND suppression.user_id_b = GREATEST($1, candidate.id)
+         )
+     )
+     SELECT count(*)::integer AS total
+     FROM candidates
+     WHERE has_mutual_friend OR shared_club OR recent_race`,
+    [userId],
+  );
+  return Number(result?.rows?.[0]?.total) || 0;
+}
+
+export async function countBlockedAccountProfiles(userId) {
+  if (!pool) {
+    return [...memoryFriendBlocks.values()].filter((block) => block.blockerUserId === userId).length;
+  }
+  const result = await query(
+    `SELECT count(*)::integer AS total
+     FROM ${schema}.friend_blocks
+     WHERE blocker_user_id = $1`,
+    [userId],
+  );
+  return Number(result?.rows?.[0]?.total) || 0;
+}
+
+export async function loadBlockedAccountProfileIds(userId) {
+  if (!userId) return [];
+  if (!pool) {
+    const profileIds = new Set();
+    for (const block of memoryFriendBlocks.values()) {
+      if (block.blockerUserId === userId) profileIds.add(block.blockedUserId);
+      if (block.blockedUserId === userId) profileIds.add(block.blockerUserId);
+    }
+    return [...profileIds];
+  }
+  const result = await query(
+    `SELECT CASE
+       WHEN blocker_user_id = $1 THEN blocked_user_id
+       ELSE blocker_user_id
+     END AS profile_id
+     FROM ${schema}.friend_blocks
+     WHERE blocker_user_id = $1 OR blocked_user_id = $1`,
+    [userId],
+  );
+  if (!result) return null;
+  return [...new Set((result?.rows ?? []).map((row) => row.profile_id).filter(Boolean))];
+}
+
+export async function createAccountFriendRequest({ id, fromUserId, toUserId }) {
+  if (!fromUserId || !toUserId || fromUserId === toUserId) {
+    return null;
+  }
+  if (!pool) {
+    const target = memoryAuthUsersById.get(toUserId);
+    const pairKey = accountPairKey(fromUserId, toUserId);
+    const replay = memoryAccountFriendRequests.get(id);
+    if (replay?.fromUserId === fromUserId && replay?.toUserId === toUserId && replay?.status === 'pending') {
+      return {
+        requestId: replay.id,
+        direction: 'outgoing',
+        profile: memoryAccountProfile(target),
+        createdAt: replay.createdAt,
+      };
+    }
+    const now = Date.now();
+    const cooldown = [...memoryAccountFriendRequests.values()]
+      .filter((request) => request.fromUserId === fromUserId && request.toUserId === toUserId)
+      .map((request) => {
+        const respondedAt = Date.parse(request.respondedAt ?? '');
+        const cooldownMs = request.status === 'declined'
+          ? 30 * 24 * 60 * 60 * 1000
+          : request.status === 'cancelled'
+            ? 24 * 60 * 60 * 1000
+            : 0;
+        return cooldownMs > 0 && Number.isFinite(respondedAt)
+          ? { status: request.status, retryAt: respondedAt + cooldownMs }
+          : null;
+      })
+      .filter((candidate) => candidate && candidate.retryAt > now)
+      .sort((left, right) => right.retryAt - left.retryAt)[0];
+    if (cooldown) {
+      return {
+        unavailableReason: cooldown.status === 'declined' ? 'declined-cooldown' : 'cancelled-cooldown',
+        retryAt: new Date(cooldown.retryAt).toISOString(),
+      };
+    }
+    if (
+      !target
+      || target.friendDiscoverable !== true
+      || memoryUsersAreBlocked(fromUserId, toUserId)
+      || memoryAccountFriendships.has(pairKey)
+    ) {
+      return null;
+    }
+    if ([...memoryAccountFriendRequests.values()].some((request) => (
+      request.status === 'pending'
+      && accountPairKey(request.fromUserId, request.toUserId) === pairKey
+    ))) {
+      return null;
+    }
+    const request = {
+      id,
+      fromUserId,
+      toUserId,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    memoryAccountFriendRequests.set(id, request);
+    return {
+      requestId: id,
+      direction: 'outgoing',
+      profile: memoryAccountProfile(target),
+      createdAt: request.createdAt,
+    };
+  }
+
+  const result = await withAccountPairTransaction(fromUserId, toUserId, async (client) => {
+    const replay = await client.query(
+      `SELECT id, to_user_id, created_at
+       FROM ${schema}.account_friend_requests
+       WHERE id = $1 AND from_user_id = $2 AND to_user_id = $3 AND status = 'pending'
+       LIMIT 1`,
+      [id, fromUserId, toUserId],
+    );
+    if (replay.rows[0]) return { request: replay.rows[0] };
+
+    const cooldown = await client.query(
+      `SELECT status,
+         CASE
+           WHEN status = 'declined' THEN responded_at + interval '30 days'
+           ELSE responded_at + interval '24 hours'
+         END AS retry_at
+       FROM ${schema}.account_friend_requests
+       WHERE from_user_id = $1 AND to_user_id = $2
+         AND responded_at IS NOT NULL
+         AND (
+           (status = 'declined' AND responded_at > now() - interval '30 days')
+           OR (status = 'cancelled' AND responded_at > now() - interval '24 hours')
+         )
+       ORDER BY retry_at DESC
+       LIMIT 1`,
+      [fromUserId, toUserId],
+    );
+    if (cooldown.rows[0]) {
+      return {
+        unavailableReason: cooldown.rows[0].status === 'declined'
+          ? 'declined-cooldown'
+          : 'cancelled-cooldown',
+        retryAt: new Date(cooldown.rows[0].retry_at).toISOString(),
+      };
+    }
+
+    const inserted = await client.query(
+      `INSERT INTO ${schema}.account_friend_requests (id, from_user_id, to_user_id, status)
+       SELECT $1, $2, target.id, 'pending'
+       FROM ${schema}.auth_users AS target
+       WHERE target.id = $3
+         AND target.id <> $2
+         AND target.friend_discoverable = true
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.account_friendships AS friendship
+           WHERE friendship.user_id_a = LEAST($2, target.id)
+             AND friendship.user_id_b = GREATEST($2, target.id)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = $2 AND block.blocked_user_id = target.id)
+              OR (block.blocker_user_id = target.id AND block.blocked_user_id = $2)
+         )
+       ON CONFLICT DO NOTHING
+       RETURNING id, to_user_id, created_at`,
+      [id, fromUserId, toUserId],
+    );
+    return { request: inserted.rows[0] ?? null };
+  });
+  if (result?.unavailableReason) return result;
+  const request = result?.request;
+  if (!request) {
+    return null;
+  }
+  const target = await findAuthUserById(request.to_user_id);
+  return {
+    requestId: request.id,
+    direction: 'outgoing',
+    profile: memoryAccountProfile(target),
+    createdAt: new Date(request.created_at).toISOString(),
+  };
+}
+
+export async function respondToAccountFriendRequest(requestId, userId, action) {
+  if (!['accept', 'decline', 'cancel'].includes(action)) {
+    return null;
+  }
+  if (!pool) {
+    const request = memoryAccountFriendRequests.get(requestId);
+    const authorized = action === 'cancel'
+      ? request?.fromUserId === userId
+      : request?.toUserId === userId;
+    if (!request || request.status !== 'pending' || !authorized) {
+      return null;
+    }
+    request.status = action === 'accept' ? 'accepted' : action === 'decline' ? 'declined' : 'cancelled';
+    request.respondedAt = new Date().toISOString();
+    if (action === 'accept') {
+      const [userIdA, userIdB] = accountPair(request.fromUserId, request.toUserId);
+      const pairKey = accountPairKey(userIdA, userIdB);
+      if (memoryUsersAreBlocked(userIdA, userIdB)) {
+        request.status = 'blocked';
+        return null;
+      }
+      memoryFriendshipSuppressions.delete(pairKey);
+      memoryAccountFriendships.set(pairKey, {
+        userIdA,
+        userIdB,
+        source: 'request',
+        createdAt: request.respondedAt,
+      });
+    }
+    const otherUserId = request.fromUserId === userId ? request.toUserId : request.fromUserId;
+    return {
+      requestId,
+      action,
+      profile: memoryAccountProfile(memoryAuthUsersById.get(otherUserId)),
+    };
+  }
+
+  if (action !== 'accept') {
+    const ownerColumn = action === 'cancel' ? 'from_user_id' : 'to_user_id';
+    const status = action === 'cancel' ? 'cancelled' : 'declined';
+    const result = await query(
+      `UPDATE ${schema}.account_friend_requests
+       SET status = $3, responded_at = now()
+       WHERE id = $1 AND ${ownerColumn} = $2 AND status = 'pending'
+       RETURNING id, from_user_id, to_user_id`,
+      [requestId, userId, status],
+    );
+    const request = result?.rows?.[0];
+    if (!request) {
+      return null;
+    }
+    const otherUserId = request.from_user_id === userId ? request.to_user_id : request.from_user_id;
+    return { requestId, action, profile: memoryAccountProfile(await findAuthUserById(otherUserId)) };
+  }
+
+  const pending = await query(
+    `SELECT from_user_id, to_user_id
+     FROM ${schema}.account_friend_requests
+     WHERE id = $1 AND to_user_id = $2 AND status = 'pending'
+     LIMIT 1`,
+    [requestId, userId],
+  );
+  const pendingRequest = pending?.rows?.[0];
+  if (!pendingRequest) {
+    return null;
+  }
+  const result = await withAccountPairTransaction(
+    pendingRequest.from_user_id,
+    pendingRequest.to_user_id,
+    (client) => client.query(
+    `WITH accepted AS (
+       UPDATE ${schema}.account_friend_requests AS request
+       SET status = 'accepted', responded_at = now()
+       WHERE request.id = $1
+         AND request.to_user_id = $2
+         AND request.status = 'pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = request.from_user_id AND block.blocked_user_id = request.to_user_id)
+              OR (block.blocker_user_id = request.to_user_id AND block.blocked_user_id = request.from_user_id)
+         )
+       RETURNING request.id, request.from_user_id, request.to_user_id, request.responded_at
+     ), cleared AS (
+       DELETE FROM ${schema}.friendship_suppressions AS suppression
+       USING accepted
+       WHERE suppression.user_id_a = LEAST(accepted.from_user_id, accepted.to_user_id)
+         AND suppression.user_id_b = GREATEST(accepted.from_user_id, accepted.to_user_id)
+     ), connected AS (
+       INSERT INTO ${schema}.account_friendships (user_id_a, user_id_b, source, created_at)
+       SELECT LEAST(from_user_id, to_user_id), GREATEST(from_user_id, to_user_id), 'request', responded_at
+       FROM accepted
+       ON CONFLICT (user_id_a, user_id_b) DO NOTHING
+     )
+     SELECT * FROM accepted`,
+    [requestId, userId],
+    ),
+  );
+  const request = result?.rows?.[0];
+  if (!request) {
+    return null;
+  }
+  return {
+    requestId,
+    action,
+    profile: memoryAccountProfile(await findAuthUserById(request.from_user_id)),
+  };
+}
+
+export async function removeAccountFriend(userId, friendUserId) {
+  if (!userId || !friendUserId || userId === friendUserId) {
+    return null;
+  }
+  const [userIdA, userIdB] = accountPair(userId, friendUserId);
+  const pairKey = accountPairKey(userIdA, userIdB);
+  if (!pool) {
+    const friendship = memoryAccountFriendships.get(pairKey);
+    if (!friendship) {
+      return null;
+    }
+    memoryAccountFriendships.delete(pairKey);
+    if (
+      friendship.source === 'official'
+      || memoryOfficialFriendKindByUserId.has(userId)
+      || memoryOfficialFriendKindByUserId.has(friendUserId)
+    ) {
+      memoryFriendshipSuppressions.set(pairKey, {
+        userIdA,
+        userIdB,
+        actorUserId: userId,
+        reason: 'removed',
+        createdAt: new Date().toISOString(),
+      });
+    }
+    return memoryAccountProfile(memoryAuthUsersById.get(friendUserId));
+  }
+
+  const result = await withAccountPairTransaction(userIdA, userIdB, (client) => client.query(
+     `WITH removed AS (
+       DELETE FROM ${schema}.account_friendships
+       WHERE user_id_a = $1 AND user_id_b = $2
+       RETURNING source
+     ), legacy_removed AS (
+       DELETE FROM ${schema}.friendships
+       WHERE (guest_key_a = 'user:' || $1 AND guest_key_b = 'user:' || $2)
+          OR (guest_key_a = 'user:' || $2 AND guest_key_b = 'user:' || $1)
+     ), suppressed AS (
+       INSERT INTO ${schema}.friendship_suppressions (
+         user_id_a, user_id_b, actor_user_id, reason, created_at
+       )
+       SELECT $1, $2, $3, 'removed', now()
+       WHERE EXISTS (
+         SELECT 1 FROM removed WHERE source = 'official'
+       ) OR EXISTS (
+         SELECT 1 FROM ${schema}.official_friend_accounts
+         WHERE user_id IN ($1, $2)
+       )
+       ON CONFLICT (user_id_a, user_id_b) DO UPDATE SET
+         actor_user_id = EXCLUDED.actor_user_id,
+         reason = EXCLUDED.reason,
+         created_at = now()
+     )
+     SELECT source FROM removed`,
+    [userIdA, userIdB, userId],
+  ));
+  if (!result?.rows?.[0]) {
+    return null;
+  }
+  return memoryAccountProfile(await findAuthUserById(friendUserId));
+}
+
+export async function blockAccountProfile(userId, blockedUserId) {
+  if (!userId || !blockedUserId || userId === blockedUserId) {
+    return null;
+  }
+  const target = await findAuthUserById(blockedUserId);
+  if (!target) {
+    return null;
+  }
+  const [userIdA, userIdB] = accountPair(userId, blockedUserId);
+  const pairKey = accountPairKey(userIdA, userIdB);
+  if (!pool) {
+    memoryFriendBlocks.set(`${userId}:${blockedUserId}`, {
+      blockerUserId: userId,
+      blockedUserId,
+      createdAt: new Date().toISOString(),
+    });
+    memoryAccountFriendships.delete(pairKey);
+    for (const request of memoryAccountFriendRequests.values()) {
+      if (request.status === 'pending' && accountPairKey(request.fromUserId, request.toUserId) === pairKey) {
+        request.status = 'blocked';
+        request.respondedAt = new Date().toISOString();
+      }
+    }
+    for (const invite of memoryGroupInvitesById.values()) {
+      if (
+        invite.status === 'pending'
+        && new Set([invite.fromGuestKey, invite.toGuestKey]).has(`user:${userId}`)
+        && new Set([invite.fromGuestKey, invite.toGuestKey]).has(`user:${blockedUserId}`)
+      ) {
+        invite.status = 'blocked';
+        invite.respondedAt = new Date().toISOString();
+      }
+    }
+    memoryFriendshipSuppressions.set(pairKey, {
+      userIdA,
+      userIdB,
+      actorUserId: userId,
+      reason: 'blocked',
+      createdAt: new Date().toISOString(),
+    });
+    return memoryAccountProfile(target);
+  }
+
+  const result = await withAccountPairTransaction(userId, blockedUserId, (client) => client.query(
+     `WITH blocked AS (
+       INSERT INTO ${schema}.friend_blocks (blocker_user_id, blocked_user_id)
+       VALUES ($1, $2)
+       ON CONFLICT (blocker_user_id, blocked_user_id) DO UPDATE SET created_at = now()
+       RETURNING blocker_user_id
+     ), removed AS (
+       DELETE FROM ${schema}.account_friendships
+       WHERE user_id_a = LEAST($1, $2) AND user_id_b = GREATEST($1, $2)
+     ), legacy_removed AS (
+       DELETE FROM ${schema}.friendships
+       WHERE (guest_key_a = 'user:' || $1 AND guest_key_b = 'user:' || $2)
+          OR (guest_key_a = 'user:' || $2 AND guest_key_b = 'user:' || $1)
+     ), requests AS (
+       UPDATE ${schema}.account_friend_requests
+       SET status = 'blocked', responded_at = now()
+       WHERE status = 'pending'
+         AND from_user_id IN ($1, $2) AND to_user_id IN ($1, $2)
+     ), legacy_requests AS (
+       UPDATE ${schema}.friend_requests
+       SET status = 'blocked', responded_at = now()
+       WHERE status = 'pending'
+         AND from_guest_key IN ('user:' || $1, 'user:' || $2)
+         AND to_guest_key IN ('user:' || $1, 'user:' || $2)
+     ), group_requests AS (
+       UPDATE ${schema}.group_invites
+       SET status = 'blocked', responded_at = now()
+       WHERE status = 'pending'
+         AND from_guest_key IN ('user:' || $1, 'user:' || $2)
+         AND to_guest_key IN ('user:' || $1, 'user:' || $2)
+     ), suppressed AS (
+       INSERT INTO ${schema}.friendship_suppressions (
+         user_id_a, user_id_b, actor_user_id, reason, created_at
+       ) VALUES (LEAST($1, $2), GREATEST($1, $2), $1, 'blocked', now())
+       ON CONFLICT (user_id_a, user_id_b) DO UPDATE SET
+         actor_user_id = EXCLUDED.actor_user_id,
+         reason = 'blocked',
+         created_at = now()
+     )
+     SELECT blocker_user_id FROM blocked`,
+    [userId, blockedUserId],
+  ));
+  return result?.rows?.[0] ? memoryAccountProfile(target) : null;
+}
+
+export async function unblockAccountProfile(userId, blockedUserId) {
+  if (!pool) {
+    return memoryFriendBlocks.delete(`${userId}:${blockedUserId}`);
+  }
+  const result = await query(
+    `DELETE FROM ${schema}.friend_blocks
+     WHERE blocker_user_id = $1 AND blocked_user_id = $2
+     RETURNING blocker_user_id`,
+    [userId, blockedUserId],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function listBlockedAccountProfiles(userId, { offset = 0, limit = 25 } = {}) {
+  if (!pool) {
+    return [...memoryFriendBlocks.values()]
+      .filter((block) => block.blockerUserId === userId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(offset, offset + limit)
+      .map((block) => memoryAccountProfile(memoryAuthUsersById.get(block.blockedUserId), {
+        blockedAt: block.createdAt,
+      }))
+      .filter(Boolean);
+  }
+  const result = await query(
+    `SELECT
+       blocked.id AS profile_id,
+       blocked.display_name,
+       blocked.username,
+       official.kind AS official_type,
+       block.created_at AS blocked_at
+     FROM ${schema}.friend_blocks AS block
+     JOIN ${schema}.auth_users AS blocked ON blocked.id = block.blocked_user_id
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = blocked.id
+     WHERE block.blocker_user_id = $1
+     ORDER BY block.created_at DESC, blocked.id
+     OFFSET $2 LIMIT $3`,
+    [userId, offset, limit],
+  );
+  return (result?.rows ?? []).map((row) => accountProfileFromRow(row, {
+    blockedAt: new Date(row.blocked_at).toISOString(),
+  }));
+}
+
+export async function createFriendReport(report) {
+  if (!report.reporterUserId || !report.reportedUserId || report.reporterUserId === report.reportedUserId) {
+    return null;
+  }
+  if (!pool) {
+    if (!memoryAuthUsersById.has(report.reportedUserId)) {
+      return null;
+    }
+    const record = { ...report, status: 'open', createdAt: new Date().toISOString() };
+    memoryFriendReports.set(record.id, record);
+    return { reportId: record.id, status: record.status, createdAt: record.createdAt };
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.friend_reports (
+       id, reporter_user_id, reported_user_id, reason, details, status
+     )
+     SELECT $1, $2, reported.id, $4, $5, 'open'
+     FROM ${schema}.auth_users AS reported
+     WHERE reported.id = $3 AND reported.id <> $2
+     RETURNING id, status, created_at`,
+    [report.id, report.reporterUserId, report.reportedUserId, report.reason, report.details],
+  );
+  const row = result?.rows?.[0];
+  return row ? { reportId: row.id, status: row.status, createdAt: new Date(row.created_at).toISOString() } : null;
+}
+
+export async function createFriendInvite(invite) {
+  if (!pool) {
+    const revokedAt = new Date().toISOString();
+    [...memoryFriendInvitesByHash.values()]
+      .filter((existing) => (
+        existing.inviterUserId === invite.inviterUserId
+        && !existing.claimedAt
+        && !existing.revokedAt
+        && Date.parse(existing.expiresAt) > Date.now()
+      ))
+      .sort((left, right) => (
+        Date.parse(right.createdAt) - Date.parse(left.createdAt)
+        || Number(right._sequence || 0) - Number(left._sequence || 0)
+      ))
+      .slice(4)
+      .forEach((existing) => {
+        existing.revokedAt = revokedAt;
+      });
+    const record = {
+      ...invite,
+      claimedByUserId: null,
+      claimedAt: null,
+      revokedAt: null,
+      createdAt: new Date().toISOString(),
+      _sequence: ++memoryFriendInviteSequence,
+    };
+    memoryFriendInvitesByHash.set(invite.tokenHash, record);
+    return { inviteId: record.id, expiresAt: record.expiresAt, createdAt: record.createdAt };
+  }
+  const result = await withPersistenceLock(`friend-invite:${invite.inviterUserId}`, async (client) => {
+    await client.query(
+      `UPDATE ${schema}.friend_invites AS invite
+       SET revoked_at = now()
+       WHERE invite.id IN (
+         SELECT stale.id
+         FROM ${schema}.friend_invites AS stale
+         WHERE stale.inviter_user_id = $1
+           AND stale.claimed_at IS NULL
+           AND stale.revoked_at IS NULL
+           AND stale.expires_at > now()
+         ORDER BY stale.created_at DESC, stale.id DESC
+         OFFSET 4
+       )`,
+      [invite.inviterUserId],
+    );
+    return client.query(
+      `INSERT INTO ${schema}.friend_invites (id, inviter_user_id, token_hash, expires_at)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, expires_at, created_at`,
+      [invite.id, invite.inviterUserId, invite.tokenHash, invite.expiresAt],
+    );
+  });
+  const row = result?.rows?.[0];
+  return row ? {
+    inviteId: row.id,
+    expiresAt: new Date(row.expires_at).toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
+  } : null;
+}
+
+export async function listActiveFriendInvites(inviterUserId) {
+  if (!inviterUserId) return [];
+  if (!pool) {
+    return [...memoryFriendInvitesByHash.values()]
+      .filter((invite) => (
+        invite.inviterUserId === inviterUserId
+        && !invite.claimedAt
+        && !invite.revokedAt
+        && Date.parse(invite.expiresAt) > Date.now()
+      ))
+      .sort((left, right) => (
+        Date.parse(right.createdAt) - Date.parse(left.createdAt)
+        || Number(right._sequence || 0) - Number(left._sequence || 0)
+      ))
+      .map((invite) => ({
+        id: invite.id,
+        createdAt: invite.createdAt,
+        expiresAt: invite.expiresAt,
+      }));
+  }
+  const result = await query(
+    `SELECT id, created_at, expires_at
+     FROM ${schema}.friend_invites
+     WHERE inviter_user_id = $1
+       AND claimed_at IS NULL
+       AND revoked_at IS NULL
+       AND expires_at > now()
+     ORDER BY created_at DESC, id DESC
+     LIMIT 5`,
+    [inviterUserId],
+  );
+  return (result?.rows ?? []).map((row) => ({
+    id: row.id,
+    createdAt: new Date(row.created_at).toISOString(),
+    expiresAt: new Date(row.expires_at).toISOString(),
+  }));
+}
+
+export async function revokeAllFriendInvites(inviterUserId) {
+  if (!inviterUserId) return 0;
+  if (!pool) {
+    const revokedAt = new Date().toISOString();
+    let revoked = 0;
+    for (const invite of memoryFriendInvitesByHash.values()) {
+      if (
+        invite.inviterUserId === inviterUserId
+        && !invite.claimedAt
+        && !invite.revokedAt
+        && Date.parse(invite.expiresAt) > Date.now()
+      ) {
+        invite.revokedAt = revokedAt;
+        revoked += 1;
+      }
+    }
+    return revoked;
+  }
+  const result = await withPersistenceLock(`friend-invite:${inviterUserId}`, (client) => client.query(
+    `UPDATE ${schema}.friend_invites
+     SET revoked_at = now()
+     WHERE inviter_user_id = $1
+       AND claimed_at IS NULL
+       AND revoked_at IS NULL
+       AND expires_at > now()
+     RETURNING id`,
+    [inviterUserId],
+  ));
+  return result?.rowCount ?? result?.rows?.length ?? 0;
+}
+
+export async function previewFriendInvite(tokenHashValue) {
+  if (!pool) {
+    const invite = memoryFriendInvitesByHash.get(tokenHashValue);
+    if (!invite || invite.claimedAt || invite.revokedAt || Date.parse(invite.expiresAt) <= Date.now()) {
+      return null;
+    }
+    return {
+      inviteId: invite.id,
+      expiresAt: invite.expiresAt,
+      profile: memoryAccountProfile(memoryAuthUsersById.get(invite.inviterUserId)),
+    };
+  }
+  const result = await query(
+    `SELECT
+       invite.id,
+       invite.expires_at,
+       inviter.id AS profile_id,
+       inviter.display_name,
+       inviter.username,
+       official.kind AS official_type
+     FROM ${schema}.friend_invites AS invite
+     JOIN ${schema}.auth_users AS inviter ON inviter.id = invite.inviter_user_id
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = inviter.id
+     WHERE invite.token_hash = $1
+       AND invite.claimed_at IS NULL
+       AND invite.revoked_at IS NULL
+       AND invite.expires_at > now()
+     LIMIT 1`,
+    [tokenHashValue],
+  );
+  const row = result?.rows?.[0];
+  return row ? {
+    inviteId: row.id,
+    expiresAt: new Date(row.expires_at).toISOString(),
+    profile: accountProfileFromRow(row),
+  } : null;
+}
+
+export async function claimFriendInvite(tokenHashValue, claimantUserId) {
+  if (!pool) {
+    const invite = memoryFriendInvitesByHash.get(tokenHashValue);
+    if (
+      !invite
+      || invite.claimedAt
+      || invite.revokedAt
+      || Date.parse(invite.expiresAt) <= Date.now()
+      || invite.inviterUserId === claimantUserId
+      || memoryUsersAreBlocked(invite.inviterUserId, claimantUserId)
+    ) {
+      return null;
+    }
+    const [userIdA, userIdB] = accountPair(invite.inviterUserId, claimantUserId);
+    const pairKey = accountPairKey(userIdA, userIdB);
+    const claimedAt = new Date().toISOString();
+    invite.claimedByUserId = claimantUserId;
+    invite.claimedAt = claimedAt;
+    memoryFriendshipSuppressions.delete(pairKey);
+    const existingFriendship = memoryAccountFriendships.get(pairKey);
+    if (!existingFriendship || ['official', 'legacy'].includes(existingFriendship.source)) {
+      memoryAccountFriendships.set(pairKey, { userIdA, userIdB, source: 'invite', createdAt: claimedAt });
+    }
+    const friendshipSource = memoryAccountFriendships.get(pairKey)?.source ?? 'invite';
+    return {
+      inviteId: invite.id,
+      connectedAt: claimedAt,
+      profile: memoryAccountProfile(memoryAuthUsersById.get(invite.inviterUserId), { friendshipSource }),
+    };
+  }
+
+  const inviteLookup = await query(
+    `SELECT inviter_user_id
+     FROM ${schema}.friend_invites
+     WHERE token_hash = $1 AND claimed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+     LIMIT 1`,
+    [tokenHashValue],
+  );
+  const inviterUserId = inviteLookup?.rows?.[0]?.inviter_user_id;
+  if (!inviterUserId || inviterUserId === claimantUserId) {
+    return null;
+  }
+  const result = await withAccountPairTransaction(inviterUserId, claimantUserId, (client) => client.query(
+    `WITH claimed AS (
+       UPDATE ${schema}.friend_invites AS invite
+       SET claimed_by_user_id = $2, claimed_at = now()
+       WHERE invite.token_hash = $1
+         AND invite.claimed_at IS NULL
+         AND invite.revoked_at IS NULL
+         AND invite.expires_at > now()
+         AND invite.inviter_user_id <> $2
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = invite.inviter_user_id AND block.blocked_user_id = $2)
+              OR (block.blocker_user_id = $2 AND block.blocked_user_id = invite.inviter_user_id)
+         )
+       RETURNING invite.id, invite.inviter_user_id, invite.claimed_at
+     ), cleared AS (
+       DELETE FROM ${schema}.friendship_suppressions AS suppression
+       USING claimed
+       WHERE suppression.user_id_a = LEAST(claimed.inviter_user_id, $2)
+         AND suppression.user_id_b = GREATEST(claimed.inviter_user_id, $2)
+     ), connected AS (
+       INSERT INTO ${schema}.account_friendships AS existing (user_id_a, user_id_b, source, created_at)
+       SELECT LEAST(inviter_user_id, $2), GREATEST(inviter_user_id, $2), 'invite', claimed_at
+       FROM claimed
+       ON CONFLICT (user_id_a, user_id_b) DO UPDATE SET
+         source = 'invite',
+         created_at = EXCLUDED.created_at
+       WHERE existing.source IN ('official', 'legacy')
+       RETURNING source
+     )
+     SELECT claimed.id, claimed.inviter_user_id, claimed.claimed_at,
+       inviter.display_name, inviter.username,
+       official.kind AS official_type,
+       COALESCE(
+         (SELECT source FROM connected LIMIT 1),
+         (SELECT friendship.source
+          FROM ${schema}.account_friendships AS friendship
+          WHERE friendship.user_id_a = LEAST(claimed.inviter_user_id, $2)
+            AND friendship.user_id_b = GREATEST(claimed.inviter_user_id, $2)
+          LIMIT 1),
+         'invite'
+       ) AS friendship_source
+     FROM claimed
+     JOIN ${schema}.auth_users AS inviter ON inviter.id = claimed.inviter_user_id
+     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = inviter.id`,
+    [tokenHashValue, claimantUserId],
+  ));
+  const row = result?.rows?.[0];
+  return row ? {
+    inviteId: row.id,
+    connectedAt: new Date(row.claimed_at).toISOString(),
+    profile: accountProfileFromRow(
+      { ...row, profile_id: row.inviter_user_id },
+      { friendshipSource: row.friendship_source ?? 'invite' },
+    ),
+  } : null;
+}
+
+export async function revokeFriendInvite(inviteId, inviterUserId) {
+  if (!pool) {
+    const invite = [...memoryFriendInvitesByHash.values()].find((candidate) => (
+      candidate.id === inviteId && candidate.inviterUserId === inviterUserId
+    ));
+    if (!invite || invite.claimedAt || invite.revokedAt) {
+      return false;
+    }
+    invite.revokedAt = new Date().toISOString();
+    return true;
+  }
+  const result = await query(
+    `UPDATE ${schema}.friend_invites
+     SET revoked_at = now()
+     WHERE id = $1 AND inviter_user_id = $2 AND claimed_at IS NULL AND revoked_at IS NULL
+     RETURNING id`,
+    [inviteId, inviterUserId],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
 function sortFriendKeys(a, b) {
   return String(a) < String(b) ? [a, b] : [b, a];
 }
@@ -1791,16 +3536,44 @@ export async function loadFriendKeys(guestKey) {
     return [];
   }
 
+  const accountUserId = String(guestKey).startsWith('user:') ? String(guestKey).slice(5) : '';
+  if (!pool) {
+    return accountUserId
+      ? memoryFriendIds(accountUserId, { includeOfficial: false }).map((userId) => `user:${userId}`)
+      : [];
+  }
+
   const result = await query(
-    `SELECT guest_key_a, guest_key_b
-     FROM ${schema}.friendships
-     WHERE guest_key_a = $1 OR guest_key_b = $1
+    `SELECT friend_key
+     FROM (
+       SELECT CASE
+         WHEN legacy.guest_key_a = $1 THEN legacy.guest_key_b
+         ELSE legacy.guest_key_a
+       END AS friend_key,
+       legacy.created_at
+       FROM ${schema}.friendships AS legacy
+       WHERE (legacy.guest_key_a = $1 OR legacy.guest_key_b = $1)
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.official_friend_accounts AS official
+           WHERE ('user:' || official.user_id) IN (legacy.guest_key_a, legacy.guest_key_b)
+         )
+
+       UNION
+
+       SELECT 'user:' || CASE
+         WHEN friendship.user_id_a = $2 THEN friendship.user_id_b
+         ELSE friendship.user_id_a
+       END AS friend_key,
+       friendship.created_at
+       FROM ${schema}.account_friendships AS friendship
+       WHERE friendship.source <> 'official'
+         AND (friendship.user_id_a = $2 OR friendship.user_id_b = $2)
+     ) AS private_friends
+     ORDER BY created_at DESC
      LIMIT 250`,
-    [guestKey],
+    [guestKey, accountUserId],
   );
-  return (result?.rows ?? []).map((row) => (
-    row.guest_key_a === guestKey ? row.guest_key_b : row.guest_key_a
-  ));
+  return (result?.rows ?? []).map((row) => row.friend_key);
 }
 
 export async function createFriendRequest(request, fromClient, targetClient) {
@@ -1865,6 +3638,25 @@ export async function respondToFriendRequest(requestId, client, accepted) {
 }
 
 export async function createGroup(group, ownerClient) {
+  if (!pool) {
+    const createdAt = new Date().toISOString();
+    const saved = {
+      id: group.id,
+      name: group.name,
+      ownerGuestKey: ownerClient.guestKey,
+      createdAt,
+    };
+    memoryGroupsById.set(group.id, saved);
+    memoryGroupMembersByKey.set(memoryGroupMemberKey(group.id, ownerClient.guestKey), {
+      groupId: group.id,
+      guestKey: ownerClient.guestKey,
+      displayName: ownerClient.name,
+      role: 'owner',
+      joinedAt: createdAt,
+      leftAt: null,
+    });
+    return group;
+  }
   await query(
     `INSERT INTO ${schema}.groups (id, owner_guest_key, name)
      VALUES ($1, $2, $3)
@@ -1884,6 +3676,10 @@ export async function createGroup(group, ownerClient) {
 }
 
 export async function isGroupMember(groupId, guestKey) {
+  if (!pool) {
+    const member = memoryGroupMembersByKey.get(memoryGroupMemberKey(groupId, guestKey));
+    return Boolean(member && !member.leftAt);
+  }
   const result = await query(
     `SELECT 1 FROM ${schema}.group_members WHERE group_id = $1 AND guest_key = $2 AND left_at IS NULL LIMIT 1`,
     [groupId, guestKey],
@@ -1892,6 +3688,39 @@ export async function isGroupMember(groupId, guestKey) {
 }
 
 export async function createGroupInvite(invite, fromClient, targetClient) {
+  if (!pool) {
+    if (
+      memoryGuestKeysAreBlocked(fromClient.guestKey, targetClient.guestKey)
+      || !(await isGroupMember(invite.groupId, fromClient.guestKey))
+      || await isGroupMember(invite.groupId, targetClient.guestKey)
+      || [...memoryGroupInvitesById.values()].some((candidate) => (
+        candidate.groupId === invite.groupId
+        && candidate.toGuestKey === targetClient.guestKey
+        && candidate.status === 'pending'
+      ))
+    ) {
+      return null;
+    }
+    memoryGroupInvitesById.set(invite.id, {
+      ...invite,
+      fromGuestKey: fromClient.guestKey,
+      fromName: fromClient.name,
+      toGuestKey: targetClient.guestKey,
+      toName: targetClient.name,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      respondedAt: null,
+    });
+    return invite;
+  }
+  const blockState = await query(
+    `SELECT 1 FROM ${schema}.friend_blocks AS block
+     WHERE ('user:' || block.blocker_user_id = $1 AND 'user:' || block.blocked_user_id = $2)
+        OR ('user:' || block.blocker_user_id = $2 AND 'user:' || block.blocked_user_id = $1)
+     LIMIT 1`,
+    [fromClient.guestKey, targetClient.guestKey],
+  );
+  if (!blockState || blockState.rows[0]) return null;
   if (!(await isGroupMember(invite.groupId, fromClient.guestKey))) {
     return null;
   }
@@ -1919,10 +3748,47 @@ export async function createGroupInvite(invite, fromClient, targetClient) {
 }
 
 export async function respondToGroupInvite(inviteId, client, accepted) {
+  if (!pool) {
+    const invite = memoryGroupInvitesById.get(inviteId);
+    if (
+      !invite
+      || invite.toGuestKey !== client.guestKey
+      || invite.status !== 'pending'
+      || memoryGuestKeysAreBlocked(invite.fromGuestKey, invite.toGuestKey)
+    ) {
+      return null;
+    }
+    invite.status = accepted ? 'accepted' : 'declined';
+    invite.respondedAt = new Date().toISOString();
+    if (accepted) {
+      const memberKey = memoryGroupMemberKey(invite.groupId, client.guestKey);
+      const existing = memoryGroupMembersByKey.get(memberKey);
+      memoryGroupMembersByKey.set(memberKey, {
+        groupId: invite.groupId,
+        guestKey: client.guestKey,
+        displayName: client.name,
+        role: existing?.role === 'owner' ? 'owner' : 'member',
+        joinedAt: existing?.joinedAt ?? invite.respondedAt,
+        leftAt: null,
+      });
+    }
+    return {
+      id: invite.id,
+      groupId: invite.groupId,
+      fromGuestKey: invite.fromGuestKey,
+      toGuestKey: invite.toGuestKey,
+      accepted,
+    };
+  }
   const result = await query(
     `UPDATE ${schema}.group_invites
      SET status = $3, responded_at = now()
      WHERE id = $1 AND to_guest_key = $2 AND status = 'pending'
+       AND NOT EXISTS (
+         SELECT 1 FROM ${schema}.friend_blocks AS block
+         WHERE ('user:' || block.blocker_user_id = $2 AND 'user:' || block.blocked_user_id = ${schema}.group_invites.from_guest_key)
+            OR ('user:' || block.blocked_user_id = $2 AND 'user:' || block.blocker_user_id = ${schema}.group_invites.from_guest_key)
+       )
      RETURNING *`,
     [inviteId, client.guestKey, accepted ? 'accepted' : 'declined'],
   );
@@ -1963,11 +3829,68 @@ export async function loadSocialState(guestKey) {
     };
   }
 
+  if (!pool) {
+    const groups = [...memoryGroupMembersByKey.values()]
+      .filter((member) => member.guestKey === guestKey && !member.leftAt)
+      .map((member) => ({ member, group: memoryGroupsById.get(member.groupId) }))
+      .filter(({ group }) => group && !memoryGuestKeysAreBlocked(guestKey, group.ownerGuestKey))
+      .sort((left, right) => Date.parse(right.group.createdAt) - Date.parse(left.group.createdAt))
+      .slice(0, 25)
+      .map(({ member, group }) => ({
+        id: group.id,
+        name: group.name,
+        ownerGuestKey: group.ownerGuestKey,
+        role: member.role,
+        members: [...memoryGroupMembersByKey.values()]
+          .filter((candidate) => (
+            candidate.groupId === group.id
+            && !candidate.leftAt
+            && !memoryGuestKeysAreBlocked(guestKey, candidate.guestKey)
+          ))
+          .sort((left, right) => Date.parse(left.joinedAt) - Date.parse(right.joinedAt))
+          .map((candidate) => ({
+            guestKey: candidate.guestKey,
+            name: candidate.displayName,
+            role: candidate.role,
+          })),
+        createdAt: group.createdAt,
+      }));
+    const incomingGroupInvites = [...memoryGroupInvitesById.values()]
+      .filter((invite) => (
+        invite.toGuestKey === guestKey
+        && invite.status === 'pending'
+        && !memoryGuestKeysAreBlocked(invite.fromGuestKey, guestKey)
+      ))
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+      .slice(0, 25)
+      .map((invite) => ({
+        id: invite.id,
+        groupId: invite.groupId,
+        groupName: memoryGroupsById.get(invite.groupId)?.name ?? 'TrackLab group',
+        fromGuestKey: invite.fromGuestKey,
+        fromName: invite.fromName,
+        toGuestKey: invite.toGuestKey,
+        toName: invite.toName,
+        createdAt: invite.createdAt,
+      }));
+    return {
+      friends: [],
+      incomingFriendRequests: [],
+      outgoingFriendRequests: [],
+      groups,
+      incomingGroupInvites,
+    };
+  }
+
   const [friends, incomingFriendRequests, outgoingFriendRequests, groups, groupMembers, incomingGroupInvites] = await Promise.all([
     query(
       `SELECT guest_key_a, guest_key_b, display_name_a, display_name_b, created_at
        FROM ${schema}.friendships
-       WHERE guest_key_a = $1 OR guest_key_b = $1
+       WHERE (guest_key_a = $1 OR guest_key_b = $1)
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.official_friend_accounts AS official
+           WHERE ('user:' || official.user_id) IN (guest_key_a, guest_key_b)
+         )
        ORDER BY created_at DESC`,
       [guestKey],
     ),
@@ -1975,6 +3898,11 @@ export async function loadSocialState(guestKey) {
       `SELECT id, from_guest_key, from_name, to_guest_key, to_name, created_at
        FROM ${schema}.friend_requests
        WHERE to_guest_key = $1 AND status = 'pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE ('user:' || block.blocker_user_id = $1 AND 'user:' || block.blocked_user_id = from_guest_key)
+              OR ('user:' || block.blocked_user_id = $1 AND 'user:' || block.blocker_user_id = from_guest_key)
+         )
        ORDER BY created_at DESC
        LIMIT 25`,
       [guestKey],
@@ -1983,6 +3911,11 @@ export async function loadSocialState(guestKey) {
       `SELECT id, from_guest_key, from_name, to_guest_key, to_name, created_at
        FROM ${schema}.friend_requests
        WHERE from_guest_key = $1 AND status = 'pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE ('user:' || block.blocker_user_id = $1 AND 'user:' || block.blocked_user_id = to_guest_key)
+              OR ('user:' || block.blocked_user_id = $1 AND 'user:' || block.blocker_user_id = to_guest_key)
+         )
        ORDER BY created_at DESC
        LIMIT 25`,
       [guestKey],
@@ -1992,6 +3925,11 @@ export async function loadSocialState(guestKey) {
        FROM ${schema}.groups AS group_table
        JOIN ${schema}.group_members AS member ON member.group_id = group_table.id
        WHERE member.guest_key = $1 AND member.left_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE ('user:' || block.blocker_user_id = $1 AND 'user:' || block.blocked_user_id = group_table.owner_guest_key)
+              OR ('user:' || block.blocked_user_id = $1 AND 'user:' || block.blocker_user_id = group_table.owner_guest_key)
+         )
        ORDER BY group_table.created_at DESC
        LIMIT 25`,
       [guestKey],
@@ -2000,6 +3938,11 @@ export async function loadSocialState(guestKey) {
       `SELECT group_id, guest_key, display_name, role
        FROM ${schema}.group_members
        WHERE left_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE ('user:' || block.blocker_user_id = $1 AND 'user:' || block.blocked_user_id = guest_key)
+              OR ('user:' || block.blocked_user_id = $1 AND 'user:' || block.blocker_user_id = guest_key)
+         )
          AND group_id IN (
            SELECT group_id
            FROM ${schema}.group_members
@@ -2014,6 +3957,11 @@ export async function loadSocialState(guestKey) {
        FROM ${schema}.group_invites AS invite
        JOIN ${schema}.groups AS group_table ON group_table.id = invite.group_id
        WHERE invite.to_guest_key = $1 AND invite.status = 'pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE ('user:' || block.blocker_user_id = $1 AND 'user:' || block.blocked_user_id = invite.from_guest_key)
+              OR ('user:' || block.blocked_user_id = $1 AND 'user:' || block.blocker_user_id = invite.from_guest_key)
+         )
        ORDER BY invite.created_at DESC
        LIMIT 25`,
       [guestKey],
@@ -2701,33 +4649,36 @@ export async function loadGhostLaps(
   limit = 30,
   sprintConfiguration = null,
   personalProfileKeys = [],
+  focusedFriendGhost = null,
 ) {
+  const safeLimit = Math.max(1, Math.min(60, Math.round(Number(limit) || 30)));
+  const friendLimit = 50;
+  const personalLimit = 30;
   const requestedSprintRouteSuffix = sprintConfiguration
     ? `%:sprint:${sprintDistanceFeet(sprintConfiguration.distanceFeet)}ft:air:${sprintAirSetting(sprintConfiguration.airSetting)}`
     : null;
-  const result = !pool ? null : await query(
-    `SELECT ranked.*
-     FROM (
-       SELECT ghost_laps.*,
-         DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
-       FROM ${schema}.ghost_laps AS ghost_laps
-       WHERE track_id = $1 AND race_source = 'live'
-         AND ($3::text IS NULL OR route_key LIKE $3)
-     ) AS ranked
-     ORDER BY
-       finish_time_ms ASC,
-       saved_at DESC
-     LIMIT $2`,
-    [trackId, Math.max(1, Math.min(60, Math.round(Number(limit) || 30))), requestedSprintRouteSuffix],
-  );
-
-  const personal = new Set([
+  const personalKeys = [...new Set([
     profileKey,
     ...(Array.isArray(personalProfileKeys) ? personalProfileKeys : []),
-  ].filter(Boolean));
-  const friends = new Set(friendKeys);
-  const rows = !pool
-    ? [...memoryGhostLaps.values()]
+  ].map((value) => String(value || '').trim()).filter(Boolean))].slice(0, 8);
+  const personal = new Set(personalKeys);
+  const authorizedFriends = new Set((Array.isArray(friendKeys) ? friendKeys : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean));
+  const focusedGhostId = String(focusedFriendGhost?.ghostId || '').trim().slice(0, 180);
+  const focusedFriendId = String(focusedFriendGhost?.profileId || '').trim().slice(0, 180);
+  const focusedOwnerKey = focusedFriendId ? `user:${focusedFriendId}` : '';
+  const focusMatches = (row) => Boolean(
+    focusedGhostId
+    && row.id === focusedGhostId
+    && (!focusedOwnerKey || row.owner_key === focusedOwnerKey),
+  );
+
+  let globalRows = [];
+  let friendRows = [];
+  let personalRows = [];
+  if (!pool) {
+    const allRows = [...memoryGhostLaps.values()]
       .filter((row) => (
         row.track_id === trackId
         && row.race_source === 'live'
@@ -2737,20 +4688,117 @@ export async function loadGhostLaps(
       .sort((left, right) => (
         left.finish_time_ms - right.finish_time_ms
         || Date.parse(right.saved_at) - Date.parse(left.saved_at)
+        || String(left.id).localeCompare(String(right.id))
+      ));
+    const rankByRouteAndTime = new Map();
+    for (const row of allRows) {
+      const routeRanks = rankByRouteAndTime.get(row.route_key) ?? new Map();
+      if (!routeRanks.has(row.finish_time_ms)) routeRanks.set(row.finish_time_ms, routeRanks.size + 1);
+      rankByRouteAndTime.set(row.route_key, routeRanks);
+      row.medal_rank = routeRanks.get(row.finish_time_ms);
+    }
+    globalRows = allRows.slice(0, safeLimit);
+    friendRows = allRows
+      .filter((row) => authorizedFriends.has(row.owner_key))
+      .sort((left, right) => (
+        Number(focusMatches(right)) - Number(focusMatches(left))
+        || left.finish_time_ms - right.finish_time_ms
+        || Date.parse(right.saved_at) - Date.parse(left.saved_at)
       ))
-      .slice(0, Math.max(1, Math.min(60, Math.round(Number(limit) || 30))))
-    : (result?.rows ?? []);
-  const rankByRouteAndTime = new Map();
-  for (const row of rows) {
-    const routeRanks = rankByRouteAndTime.get(row.route_key) ?? new Map();
-    if (!routeRanks.has(row.finish_time_ms)) routeRanks.set(row.finish_time_ms, routeRanks.size + 1);
-    rankByRouteAndTime.set(row.route_key, routeRanks);
-    if (!pool) row.medal_rank = routeRanks.get(row.finish_time_ms);
+      .slice(0, friendLimit);
+    personalRows = allRows.filter((row) => personal.has(row.owner_key)).slice(0, personalLimit);
+  } else {
+    const accountUserId = profileKey.startsWith('user:') ? profileKey.slice(5) : '';
+    const [globalResult, friendResult, personalResult] = await Promise.all([
+      query(
+        `SELECT ranked.*
+         FROM (
+           SELECT ghost_laps.*,
+             DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
+           FROM ${schema}.ghost_laps AS ghost_laps
+           WHERE track_id = $1 AND race_source = 'live'
+             AND ($3::text IS NULL OR route_key LIKE $3)
+         ) AS ranked
+         ORDER BY finish_time_ms ASC, saved_at DESC, id
+         LIMIT $2`,
+        [trackId, safeLimit, requestedSprintRouteSuffix],
+      ),
+      profileKey ? query(
+        `WITH explicit_friend_keys AS (
+           SELECT 'user:' || CASE
+             WHEN friendship.user_id_a = $2 THEN friendship.user_id_b
+             ELSE friendship.user_id_a
+           END AS friend_key
+           FROM ${schema}.account_friendships AS friendship
+           WHERE $2::text <> ''
+             AND friendship.source <> 'official'
+             AND (friendship.user_id_a = $2 OR friendship.user_id_b = $2)
+
+           UNION
+
+           SELECT CASE
+             WHEN legacy.guest_key_a = $3 THEN legacy.guest_key_b
+             ELSE legacy.guest_key_a
+           END AS friend_key
+           FROM ${schema}.friendships AS legacy
+           WHERE (legacy.guest_key_a = $3 OR legacy.guest_key_b = $3)
+             AND NOT EXISTS (
+               SELECT 1 FROM ${schema}.official_friend_accounts AS official
+               WHERE ('user:' || official.user_id) IN (legacy.guest_key_a, legacy.guest_key_b)
+             )
+         )
+         SELECT ghost_laps.*, NULL::integer AS medal_rank
+         FROM ${schema}.ghost_laps AS ghost_laps
+         JOIN explicit_friend_keys AS friend ON friend.friend_key = ghost_laps.owner_key
+         WHERE ghost_laps.track_id = $1 AND ghost_laps.race_source = 'live'
+           AND ($4::text IS NULL OR ghost_laps.route_key LIKE $4)
+         ORDER BY
+           CASE WHEN ghost_laps.id = $5::text
+             AND ($6::text = '' OR ghost_laps.owner_key = $6::text) THEN 0 ELSE 1 END,
+           ghost_laps.finish_time_ms ASC,
+           ghost_laps.saved_at DESC,
+           ghost_laps.id
+         LIMIT $7`,
+        [
+          trackId,
+          accountUserId,
+          profileKey,
+          requestedSprintRouteSuffix,
+          focusedGhostId,
+          focusedOwnerKey,
+          friendLimit,
+        ],
+      ) : Promise.resolve(null),
+      personalKeys.length > 0 ? query(
+        `SELECT ghost_laps.*, NULL::integer AS medal_rank
+         FROM ${schema}.ghost_laps AS ghost_laps
+         WHERE ghost_laps.track_id = $1 AND ghost_laps.race_source = 'live'
+           AND ghost_laps.owner_key = ANY($2::text[])
+           AND ($3::text IS NULL OR ghost_laps.route_key LIKE $3)
+         ORDER BY ghost_laps.finish_time_ms ASC, ghost_laps.saved_at DESC, ghost_laps.id
+         LIMIT $4`,
+        [trackId, personalKeys, requestedSprintRouteSuffix, personalLimit],
+      ) : Promise.resolve(null),
+    ]);
+    globalRows = globalResult?.rows ?? [];
+    friendRows = friendResult?.rows ?? [];
+    personalRows = personalResult?.rows ?? [];
+    for (const row of friendRows) authorizedFriends.add(row.owner_key);
   }
+
+  const rowsById = new Map();
+  for (const row of [...globalRows, ...friendRows, ...personalRows]) {
+    if (!rowsById.has(row.id)) rowsById.set(row.id, row);
+  }
+  const rows = [...rowsById.values()].sort((left, right) => (
+    left.finish_time_ms - right.finish_time_ms
+    || Date.parse(right.saved_at) - Date.parse(left.saved_at)
+    || String(left.id).localeCompare(String(right.id))
+  ));
   return rows.map((row) => {
     const source = personal.has(row.owner_key)
       ? 'personal'
-      : friends.has(row.owner_key)
+      : authorizedFriends.has(row.owner_key)
         ? 'friend'
         : 'top';
     const includeAnalytics = personal.has(row.owner_key) || Boolean(row.analytics_public);

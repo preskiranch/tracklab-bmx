@@ -389,10 +389,16 @@ export type ReactionTimesByPlayer = Partial<Record<PlayerSlot['id'], number>>;
 
 export type RaceState = 'ready' | 'racing' | 'finished';
 
-export type AppMode = 'profile' | 'race' | 'explore' | 'straight-sprint' | 'get-pulled' | 'monitor' | 'club-monitor' | 'club-tablet' | 'diagnostics' | 'developer';
+export type AppMode = 'profile' | 'friends' | 'settings' | 'race' | 'explore' | 'straight-sprint' | 'get-pulled' | 'monitor' | 'club-monitor' | 'club-tablet' | 'diagnostics' | 'developer';
 
 export type AccountProfile = {
   photoUrl?: string;
+  updatedAt: number;
+};
+
+export type UnitPreferences = {
+  speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
   updatedAt: number;
 };
 

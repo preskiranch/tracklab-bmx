@@ -15,7 +15,14 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import type { AccountProfile, StudioRider, TrainingActivityType, TrainingSession } from '../types';
+import type {
+  AccountProfile,
+  DistanceUnit,
+  SpeedUnit,
+  StudioRider,
+  TrainingActivityType,
+  TrainingSession,
+} from '../types';
 import {
   claimClubInvite,
   clearClubInviteFromUrl,
@@ -35,6 +42,12 @@ import {
   type TrainingHistoryResponse,
 } from '../lib/trainingHistory';
 import type { AuthUser } from '../lib/auth';
+import {
+  formatDistanceMeters,
+  formatExploreDistanceMeters,
+  formatSpeedFromKph,
+  speedUnitLabel,
+} from '../units';
 import { RiderAvatar, RiderPhotoEditor } from './RiderAvatar';
 import './AccountProfileView.css';
 
@@ -45,6 +58,8 @@ type AccountProfileViewProps = {
   profile: AccountProfile;
   studioRiders: StudioRider[];
   historyRevision: number;
+  speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
   onPhotoChange: (photoUrl: string | undefined) => void;
   onClubProfileComplete: (user: AuthUser, profile: AccountProfile) => void;
 };
@@ -101,9 +116,31 @@ function formatDuration(durationMs: number) {
   return `${remainingSeconds}s`;
 }
 
-function formatDistance(meters: number) {
-  const miles = meters / 1609.344;
-  return miles >= 0.1 ? `${miles.toFixed(miles >= 10 ? 1 : 2)} mi` : `${Math.round(meters * 3.28084)} ft`;
+export function formatProfileHistoryDistance(meters: number, distanceUnit: DistanceUnit) {
+  const longDistanceUnit = distanceUnit === 'm' ? 'km' : 'mi';
+  const longDistanceThresholdMeters = distanceUnit === 'm' ? 100 : 160.9344;
+  return meters >= longDistanceThresholdMeters
+    ? formatExploreDistanceMeters(meters, longDistanceUnit)
+    : formatDistanceMeters(meters, distanceUnit);
+}
+
+export function formatProfileExploreDistance(meters: number, distanceUnit: DistanceUnit) {
+  return formatExploreDistanceMeters(meters, distanceUnit === 'm' ? 'km' : 'mi');
+}
+
+export function profileSplitDistanceLabel(distanceUnit: DistanceUnit) {
+  return formatDistanceMeters(30 * 0.3048, distanceUnit);
+}
+
+export function displayedProfileSessionTitle(session: TrainingSession, distanceUnit: DistanceUnit) {
+  if (session.activityType !== 'straight-sprint' || distanceUnit === 'ft') return session.title;
+  const details = session.details as { sprintDistanceFeet?: number };
+  const sprintDistanceFeet = Number(details.sprintDistanceFeet);
+  if (!Number.isFinite(sprintDistanceFeet) || sprintDistanceFeet <= 0) return session.title;
+  return session.title.replace(
+    /[\d,]+\s*ft\b/i,
+    formatDistanceMeters(sprintDistanceFeet * 0.3048, distanceUnit),
+  );
 }
 
 function sessionIcon(type: TrainingActivityType) {
@@ -113,7 +150,7 @@ function sessionIcon(type: TrainingActivityType) {
   return <Bike size={19} />;
 }
 
-function summarizeSession(session: TrainingSession) {
+function summarizeSession(session: TrainingSession, distanceUnit: DistanceUnit) {
   const details = session.details as {
     summaries?: Array<{ riderName?: string; rank?: number; finishTimeMs?: number; topCadence?: number; topWatts?: number }>;
     riders?: Array<{ name?: string; distanceMeters?: number; averageSpeedMph?: number }>;
@@ -123,7 +160,9 @@ function summarizeSession(session: TrainingSession) {
     sprintAirSetting?: number;
   };
   if (session.activityType === 'explore') {
-    return (details.riders ?? []).map((rider) => `${rider.name ?? 'Rider'} · ${formatDistance(Number(rider.distanceMeters) || 0)}`).join(' · ');
+    return (details.riders ?? []).map((rider) => (
+      `${rider.name ?? 'Rider'} · ${formatProfileExploreDistance(Number(rider.distanceMeters) || 0, distanceUnit)}`
+    )).join(' · ');
   }
   if (session.activityType === 'get-pulled') {
     const rider = details.riders?.[0] as { name?: string; peakWatts?: number } | undefined;
@@ -136,7 +175,7 @@ function summarizeSession(session: TrainingSession) {
   }
   const winner = (details.summaries ?? []).find((summary) => summary.rank === 1) ?? details.summaries?.[0];
   const sprint = details.sprintDistanceFeet
-    ? `${details.sprintDistanceFeet} ft${details.sprintAirSetting ? ` · Air ${details.sprintAirSetting}` : ''}`
+    ? `${formatDistanceMeters(details.sprintDistanceFeet * 0.3048, distanceUnit)}${details.sprintAirSetting ? ` · Air ${details.sprintAirSetting}` : ''}`
     : '';
   const result = winner?.riderName
     ? `${winner.riderName}${winner.finishTimeMs ? ` · ${(winner.finishTimeMs / 1_000).toFixed(2)}s` : ''}`
@@ -167,17 +206,49 @@ function recordedNumber(value: number | null | undefined, digits = 1) {
   return value != null && Number.isFinite(value) ? value.toFixed(digits) : '—';
 }
 
+export function formatProfileRecordedDistance(
+  meters: number | null | undefined,
+  distanceUnit: DistanceUnit,
+) {
+  if (meters == null || !Number.isFinite(meters)) return '—';
+  const value = distanceUnit === 'm' ? meters : meters * 3.28084;
+  return `${value.toFixed(2)} ${distanceUnit}`;
+}
+
+export function formatProfileRecordedDistanceRange(
+  startMeters: number | null | undefined,
+  endMeters: number | null | undefined,
+  distanceUnit: DistanceUnit,
+) {
+  if (
+    startMeters == null
+    || endMeters == null
+    || !Number.isFinite(startMeters)
+    || !Number.isFinite(endMeters)
+  ) return '—';
+  const multiplier = distanceUnit === 'm' ? 1 : 3.28084;
+  return `${(startMeters * multiplier).toFixed(2)}–${(endMeters * multiplier).toFixed(2)} ${distanceUnit}`;
+}
+
 function recordedMilliseconds(value: number | null | undefined) {
   return value != null && Number.isFinite(value) ? `${Math.round(value)} ms` : '—';
 }
 
-function recordedSpeed(value: number | null | undefined) {
+function recordedSpeed(value: number | null | undefined, speedUnit: SpeedUnit) {
   return value != null && Number.isFinite(value)
-    ? `${(value / 1.609344).toFixed(1)} mph (${value.toFixed(1)} kph)`
+    ? `${formatSpeedFromKph(value, speedUnit)} ${speedUnitLabel(speedUnit)}`
     : '—';
 }
 
-function CompleteRecordedMetrics({ session }: { session: TrainingSession }) {
+function CompleteRecordedMetrics({
+  session,
+  speedUnit,
+  distanceUnit,
+}: {
+  session: TrainingSession;
+  speedUnit: SpeedUnit;
+  distanceUnit: DistanceUnit;
+}) {
   const summaries = trainingSessionRaceSummaries(session);
   const zones = trainingSessionZoneResults(session);
   const reactionTimes = trainingSessionReactionTimes(session);
@@ -194,10 +265,10 @@ function CompleteRecordedMetrics({ session }: { session: TrainingSession }) {
           <div key={`summary-${summary.playerId}`} style={{ border: '1px solid #d0d5dd', borderRadius: 8, display: 'grid', gap: 2, padding: 8 }}>
             <strong>{summary.riderName ?? `Rider ${summary.playerId}`}</strong>
             <small>
-              Rank {summary.rank ?? '—'} · Finish {recordedMilliseconds(summary.finishTimeMs)} · 30 ft {recordedMilliseconds(summary.thirtyFootTimeMs)} · Reaction {recordedMilliseconds(reactionTimes[String(summary.playerId)])}
+              Rank {summary.rank ?? '—'} · Finish {recordedMilliseconds(summary.finishTimeMs)} · {profileSplitDistanceLabel(distanceUnit)} {recordedMilliseconds(summary.thirtyFootTimeMs)} · Reaction {recordedMilliseconds(reactionTimes[String(summary.playerId)])}
             </small>
-            <small>Distance {recordedNumber(summary.distanceMeters, 2)} m · {summary.sampleCount ?? 0} analysis points</small>
-            <small>Speed avg/top: {recordedSpeed(summary.averageSpeedKph)} / {recordedSpeed(summary.topSpeedKph)}</small>
+            <small>Distance {formatProfileRecordedDistance(summary.distanceMeters, distanceUnit)} · {summary.sampleCount ?? 0} analysis points</small>
+            <small>Speed avg/top: {recordedSpeed(summary.averageSpeedKph, speedUnit)} / {recordedSpeed(summary.topSpeedKph, speedUnit)}</small>
             <small>Cadence avg/top: {recordedNumber(summary.averageCadence)} / {recordedNumber(summary.topCadence)} rpm</small>
             <small>Power avg/top: {recordedNumber(summary.averageWatts, 0)} / {recordedNumber(summary.topWatts, 0)} W · private</small>
           </div>
@@ -205,12 +276,12 @@ function CompleteRecordedMetrics({ session }: { session: TrainingSession }) {
         {zones.map((zone) => (
           <div key={zone.zoneId} style={{ border: '1px solid #d0d5dd', borderRadius: 8, display: 'grid', gap: 5, padding: 8 }}>
             <strong>{zone.zoneName || zone.zoneId}</strong>
-            <small>{zone.zoneType} · {recordedNumber(zone.startMeter, 2)}–{recordedNumber(zone.endMeter, 2)} m · ID {zone.zoneId}</small>
+            <small>{zone.zoneType} · {formatProfileRecordedDistanceRange(zone.startMeter, zone.endMeter, distanceUnit)} · ID {zone.zoneId}</small>
             {zone.riders.map((rider) => (
               <div key={`${zone.zoneId}-${rider.playerId}`} style={{ borderTop: '1px solid #eaecf0', display: 'grid', gap: 2, paddingTop: 5 }}>
                 <small><b>{riderNames.get(rider.playerId) ?? `Rider ${rider.playerId}`}</b> · {rider.sampleCount} analysis points</small>
                 <small>Entry/exit/duration: {recordedMilliseconds(rider.entryElapsedMs)} / {recordedMilliseconds(rider.exitElapsedMs)} / {recordedMilliseconds(rider.durationMs)}</small>
-                <small>Speed avg/top: {recordedSpeed(rider.averageSpeedKph)} / {recordedSpeed(rider.topSpeedKph)}</small>
+                <small>Speed avg/top: {recordedSpeed(rider.averageSpeedKph, speedUnit)} / {recordedSpeed(rider.topSpeedKph, speedUnit)}</small>
                 <small>Cadence avg/top: {recordedNumber(rider.averageCadence)} / {recordedNumber(rider.topCadence)} rpm</small>
                 <small>Power avg/top: {recordedNumber(rider.averageWatts, 0)} / {recordedNumber(rider.topWatts, 0)} W · private</small>
               </div>
@@ -243,6 +314,8 @@ export function AccountProfileView({
   profile,
   studioRiders,
   historyRevision,
+  speedUnit,
+  distanceUnit,
   onPhotoChange,
   onClubProfileComplete,
 }: AccountProfileViewProps) {
@@ -553,7 +626,7 @@ export function AccountProfileView({
         <article><Bike size={20} /><span><b>{history.totals.bmxRaces}</b><small>BMX races</small></span></article>
         <article><Timer size={20} /><span><b>{history.totals.straightSprints}</b><small>Straight sprints</small></span></article>
         <article><Activity size={20} /><span><b>{history.totals.getPulledTests}</b><small>Get Pulled tests</small></span></article>
-        <article><Compass size={20} /><span><b>{formatDistance(history.totals.distanceMeters)}</b><small>Total distance</small></span></article>
+        <article><Compass size={20} /><span><b>{formatProfileHistoryDistance(history.totals.distanceMeters, distanceUnit)}</b><small>Total distance</small></span></article>
       </section>
 
       <div className="account-training-layout">
@@ -603,10 +676,12 @@ export function AccountProfileView({
               <div className="training-session-icon">{sessionIcon(session.activityType)}</div>
               <div className="training-session-copy">
                 <span>{activityLabels[session.activityType]}</span>
-                <strong>{session.title}</strong>
+                <strong>{displayedProfileSessionTitle(session, distanceUnit)}</strong>
                 <small>
                   {new Date(session.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                  {' · '}{formatDuration(session.durationMs)}{' · '}{formatDistance(session.distanceMeters)}
+                  {' · '}{formatDuration(session.durationMs)}{' · '}{session.activityType === 'explore'
+                    ? formatProfileExploreDistance(session.distanceMeters, distanceUnit)
+                    : formatDistanceMeters(session.distanceMeters, distanceUnit)}
                 </small>
                 {session.club && (
                   <small>
@@ -615,11 +690,15 @@ export function AccountProfileView({
                       : `Training at ${session.club.name}`}
                   </small>
                 )}
-                {summarizeSession(session) && <p>{summarizeSession(session)}</p>}
+                {summarizeSession(session, distanceUnit) && <p>{summarizeSession(session, distanceUnit)}</p>}
                 {privatePeakPower(session) != null && (
                   <small>Private power · {privatePeakPower(session)} W peak · visible only to you</small>
                 )}
-                <CompleteRecordedMetrics session={session} />
+                <CompleteRecordedMetrics
+                  session={session}
+                  speedUnit={speedUnit}
+                  distanceUnit={distanceUnit}
+                />
               </div>
               <div className="training-session-downloads">
                 <button type="button" onClick={() => downloadTrainingSession(session, 'json')}><Download size={15} /> JSON</button>

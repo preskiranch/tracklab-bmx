@@ -663,6 +663,208 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ON ${schema}.club_tablet_devices (club_id, revoked_at, created_at)`,
       ],
     },
+    {
+      version: 14,
+      name: 'save account display unit preferences',
+      statements: [
+        `ALTER TABLE ${schema}.user_data
+          ADD COLUMN IF NOT EXISTS unit_preferences JSONB`,
+      ],
+    },
+    {
+      version: 15,
+      name: 'add authenticated account friend network',
+      statements: [
+        `ALTER TABLE ${schema}.auth_users
+          ADD COLUMN IF NOT EXISTS username TEXT`,
+        `ALTER TABLE ${schema}.auth_users
+          ADD COLUMN IF NOT EXISTS friend_discoverable BOOLEAN NOT NULL DEFAULT false`,
+        `UPDATE ${schema}.auth_users
+         SET username = COALESCE(NULLIF(trim(BOTH '-' FROM left(
+           regexp_replace(lower(display_name), '[^a-z0-9]+', '-', 'g'),
+           20
+         )), ''), 'rider') || '-' || substring(md5(id), 1, 12)
+         WHERE username IS NULL OR btrim(username) = ''`,
+        `ALTER TABLE ${schema}.auth_users
+          ALTER COLUMN username SET NOT NULL`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_auth_users_username_ci
+          ON ${schema}.auth_users (lower(username))`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_friend_search
+          ON ${schema}.auth_users (friend_discoverable, lower(display_name), lower(username))`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_friend_handle_prefix
+          ON ${schema}.auth_users (friend_discoverable, lower(username) text_pattern_ops, id)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_auth_users_friend_name_prefix
+          ON ${schema}.auth_users (friend_discoverable, lower(display_name) text_pattern_ops, id)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.official_friend_accounts (
+          kind TEXT PRIMARY KEY CHECK (kind IN ('club', 'founder')),
+          user_id TEXT UNIQUE NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE RESTRICT,
+          reconciled_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `INSERT INTO ${schema}.official_friend_accounts (kind, user_id)
+         SELECT reserved.kind, users.id
+         FROM (VALUES
+           ('club', 'preskiranch@gmail.com'),
+           ('founder', 'rasheen25@gmail.com')
+         ) AS reserved(kind, email)
+         JOIN ${schema}.auth_users AS users ON lower(users.email) = reserved.email
+         ON CONFLICT DO NOTHING`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.account_friendships (
+          user_id_a TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          user_id_b TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          source TEXT NOT NULL DEFAULT 'request'
+            CHECK (source IN ('request', 'invite', 'legacy', 'official')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (user_id_a, user_id_b),
+          CHECK (user_id_a < user_id_b)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_account_friendships_b
+          ON ${schema}.account_friendships (user_id_b, created_at DESC, user_id_a)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_account_friendships_a
+          ON ${schema}.account_friendships (user_id_a, created_at DESC, user_id_b)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.account_friend_requests (
+          id TEXT PRIMARY KEY,
+          from_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          to_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled', 'blocked')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          responded_at TIMESTAMPTZ,
+          CHECK (from_user_id <> to_user_id)
+        )`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_account_friend_requests_pending_pair
+          ON ${schema}.account_friend_requests (
+            LEAST(from_user_id, to_user_id),
+            GREATEST(from_user_id, to_user_id)
+          ) WHERE status = 'pending'`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_account_friend_requests_incoming
+          ON ${schema}.account_friend_requests (to_user_id, status, created_at DESC, id DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_account_friend_requests_outgoing
+          ON ${schema}.account_friend_requests (from_user_id, status, created_at DESC, id DESC)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.friendship_suppressions (
+          user_id_a TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          user_id_b TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          actor_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          reason TEXT NOT NULL DEFAULT 'removed'
+            CHECK (reason IN ('removed', 'blocked')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (user_id_a, user_id_b),
+          CHECK (user_id_a < user_id_b)
+        )`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.friend_blocks (
+          blocker_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          blocked_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (blocker_user_id, blocked_user_id),
+          CHECK (blocker_user_id <> blocked_user_id)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_friend_blocks_blocked
+          ON ${schema}.friend_blocks (blocked_user_id, created_at DESC)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.friend_reports (
+          id TEXT PRIMARY KEY,
+          reporter_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          reported_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          reason TEXT NOT NULL,
+          details TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'open'
+            CHECK (status IN ('open', 'reviewing', 'resolved', 'dismissed')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          reviewed_at TIMESTAMPTZ,
+          CHECK (reporter_user_id <> reported_user_id)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_friend_reports_status
+          ON ${schema}.friend_reports (status, created_at DESC)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.friend_invites (
+          id TEXT PRIMARY KEY,
+          inviter_user_id TEXT NOT NULL REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          token_hash TEXT UNIQUE NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          claimed_by_user_id TEXT REFERENCES ${schema}.auth_users(id) ON DELETE SET NULL,
+          claimed_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_friend_invites_inviter
+          ON ${schema}.friend_invites (inviter_user_id, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_friend_invites_expiry
+          ON ${schema}.friend_invites (expires_at) WHERE claimed_at IS NULL AND revoked_at IS NULL`,
+        `INSERT INTO ${schema}.account_friendships (user_id_a, user_id_b, source, created_at)
+         SELECT
+           LEAST(substring(legacy.guest_key_a FROM 6), substring(legacy.guest_key_b FROM 6)),
+           GREATEST(substring(legacy.guest_key_a FROM 6), substring(legacy.guest_key_b FROM 6)),
+           'legacy',
+           legacy.created_at
+         FROM ${schema}.friendships AS legacy
+         JOIN ${schema}.auth_users AS user_a ON legacy.guest_key_a = 'user:' || user_a.id
+         JOIN ${schema}.auth_users AS user_b ON legacy.guest_key_b = 'user:' || user_b.id
+         WHERE legacy.guest_key_a <> legacy.guest_key_b
+         ON CONFLICT (user_id_a, user_id_b) DO NOTHING`,
+        `INSERT INTO ${schema}.account_friend_requests (
+           id, from_user_id, to_user_id, status, created_at, responded_at
+         )
+         SELECT
+           legacy_request.id,
+           legacy_request.from_user_id,
+           legacy_request.to_user_id,
+           CASE
+             WHEN legacy_request.status IN ('pending', 'accepted', 'declined') THEN legacy_request.status
+             ELSE 'cancelled'
+           END,
+           legacy_request.created_at,
+           legacy_request.responded_at
+         FROM (
+           SELECT
+             legacy.*,
+             substring(legacy.from_guest_key FROM 6) AS from_user_id,
+             substring(legacy.to_guest_key FROM 6) AS to_user_id,
+             row_number() OVER (
+               PARTITION BY
+                 CASE WHEN legacy.status = 'pending'
+                   THEN LEAST(legacy.from_guest_key, legacy.to_guest_key)
+                   ELSE legacy.id
+                 END,
+                 CASE WHEN legacy.status = 'pending'
+                   THEN GREATEST(legacy.from_guest_key, legacy.to_guest_key)
+                   ELSE legacy.id
+                 END
+               ORDER BY legacy.created_at DESC, legacy.id DESC
+             ) AS pair_rank
+           FROM ${schema}.friend_requests AS legacy
+           JOIN ${schema}.auth_users AS from_user ON legacy.from_guest_key = 'user:' || from_user.id
+           JOIN ${schema}.auth_users AS to_user ON legacy.to_guest_key = 'user:' || to_user.id
+           WHERE legacy.from_guest_key <> legacy.to_guest_key
+         ) AS legacy_request
+         WHERE legacy_request.pair_rank = 1
+         ON CONFLICT (id) DO NOTHING`,
+        `WITH official_pairs AS (
+           SELECT DISTINCT
+             LEAST(users.id, official.user_id) AS user_id_a,
+             GREATEST(users.id, official.user_id) AS user_id_b
+           FROM ${schema}.auth_users AS users
+           CROSS JOIN ${schema}.official_friend_accounts AS official
+           WHERE users.id <> official.user_id
+         )
+         INSERT INTO ${schema}.account_friendships AS existing (user_id_a, user_id_b, source)
+         SELECT pair.user_id_a, pair.user_id_b, 'official'
+         FROM official_pairs AS pair
+         WHERE NOT EXISTS (
+           SELECT 1 FROM ${schema}.friendship_suppressions AS suppression
+           WHERE suppression.user_id_a = pair.user_id_a AND suppression.user_id_b = pair.user_id_b
+         )
+         ON CONFLICT (user_id_a, user_id_b) DO UPDATE SET source = 'official'
+         WHERE existing.source = 'legacy'`,
+        `UPDATE ${schema}.official_friend_accounts SET reconciled_at = now()`,
+      ],
+    },
+    {
+      version: 16,
+      name: 'index live ghosts for friend race discovery',
+      statements: [
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_ghost_laps_live_owner_recent
+          ON ${schema}.ghost_laps (owner_key, saved_at DESC, finish_time_ms ASC, id)
+          WHERE race_source = 'live'`,
+      ],
+    },
   ];
 }
 

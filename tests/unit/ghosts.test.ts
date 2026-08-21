@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { ghostsForTrackRoute, mergeGhostLaps, playbackGhostLap, sanitizeGhostLap } from '../../src/lib/ghosts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  ghostsForTrackRoute,
+  loadGhostLapsFromCloud,
+  mergeGhostLaps,
+  playbackGhostLap,
+  sanitizeGhostLap,
+} from '../../src/lib/ghosts';
 
 function rawGhost(lapCount: number, riderName = 'Studio Rider') {
   return {
@@ -30,6 +36,10 @@ function rawGhost(lapCount: number, riderName = 'Studio Rider') {
 }
 
 describe('ghost lap categories and privacy metadata', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('keeps one-lap and multi-lap records in separate race selections', () => {
     const oneLap = sanitizeGhostLap(rawGhost(1));
     const threeLaps = sanitizeGhostLap(rawGhost(3, 'Three Lap Rider'));
@@ -127,6 +137,29 @@ describe('ghost lap categories and privacy metadata', () => {
       'Friend Rider',
       'Personal Rider',
     ]);
+  });
+
+  it('requests a focused friend ghost without treating the client hint as authorization', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ ghosts: [rawGhost(1, 'Friend Rider')] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetcher);
+
+    await loadGhostLapsFromCloud(
+      'lasalle-loop',
+      'user:me',
+      [],
+      { distanceFeet: 500, airSetting: 5 },
+      { ghostId: 'friend-ghost-1', profileId: 'friend-profile-1' },
+    );
+
+    const url = new URL(String(fetcher.mock.calls[0]?.[0]), 'https://tracklab.test');
+    expect(url.searchParams.get('trackId')).toBe('lasalle-loop');
+    expect(url.searchParams.get('friendGhostId')).toBe('friend-ghost-1');
+    expect(url.searchParams.get('friendProfileId')).toBe('friend-profile-1');
+    expect(url.searchParams.get('sprintDistanceFeet')).toBe('500');
+    expect(url.searchParams.get('sprintAirSetting')).toBe('5');
   });
 
   it('stages a selected ghost at rest on the start line before playback begins', () => {

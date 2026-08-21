@@ -86,6 +86,7 @@ import {
   ghostPlaybackGlow,
   ghostPlaybackHighlight,
 } from '../lib/ghosts';
+import { riderRigBaseAssetByColor } from '../lib/riderAssets';
 
 type GoogleMapsTrackLayerProps = {
   track: TrackRecord;
@@ -143,18 +144,6 @@ const routeVariantColors: Record<TrackRouteVariantId, string> = {
 const drawSampleMeters = 1.2;
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
-const riderFallbackIconByColor: Record<PlayerSlot['colorName'], string> = {
-  lime: '/assets/rider-lime.png',
-  red: '/assets/rider-red.png',
-  blue: '/assets/rider-blue.png',
-  yellow: '/assets/rider-yellow.png',
-};
-const riderRigBaseByColor: Record<PlayerSlot['colorName'], string> = {
-  lime: '/assets/rider-lime-rig-base.png',
-  red: '/assets/rider-red-rig-base.png',
-  blue: '/assets/rider-blue-rig-base.png',
-  yellow: '/assets/rider-yellow-rig-base.png',
-};
 const riderFrontTireInset = 2.5;
 const riderGroundContactInset = 1;
 const riderLaneSpacingMeters = 1.1;
@@ -172,6 +161,10 @@ const finishStripeCoreStrokeWeight = mappingRouteCoreStrokeWeight / 2;
 const finishStripeHaloStrokeWeight = finishStripeCoreStrokeWeight + 2;
 const finishStripeWidthMeters = 9;
 const finishLabelOffsetMeters = 8;
+
+export function formatProSetPedalStartTitle(distanceUnit: DistanceUnit) {
+  return `Set Pro Set pedal start at split (${formatDistanceMeters(0, distanceUnit)})`;
+}
 
 type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
@@ -615,7 +608,7 @@ function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
     anchor: new google.maps.Point(38, 40),
     labelOrigin: new google.maps.Point(74, 13),
     scaledSize: new google.maps.Size(38, 43),
-    url: riderFallbackIconByColor[player.colorName],
+    url: riderRigBaseAssetByColor[player.colorName],
   };
 }
 
@@ -885,7 +878,7 @@ async function uprightRiderIconUrl(
   animation: RiderAnimationState,
   appearance: RiderMarkerAppearance = 'live',
 ) {
-  const imageUrl = riderRigBaseByColor[player.colorName];
+  const imageUrl = riderRigBaseAssetByColor[player.colorName];
   const orientation = uprightRiderOrientation(rotationDegrees);
   const leanBucket = riderLeanBucket(rotationDegrees);
   const cacheKey = `${appearance}:${player.colorName}:${player.accent}:${orientation.mirrored ? 'left' : 'right'}:${leanBucket}:${animation.crankStep}:${animation.wheelFrameIndex}`;
@@ -929,7 +922,7 @@ function createPersistentRiderOverlay(
   element.dataset.riderCanvasSize = String(riderMarkerCanvasSize);
   element.title = initialTitle;
   element.setAttribute('aria-label', initialTitle);
-  element.style.background = `center / auto ${riderMarkerDrawSize}px no-repeat url("${riderFallbackIconByColor[player.colorName]}")`;
+  element.style.background = `center / ${riderMarkerDrawSize}px ${riderMarkerDrawSize}px no-repeat url("${riderRigBaseAssetByColor[player.colorName]}")`;
   element.style.height = `${riderMarkerCanvasSize}px`;
   element.style.overflow = 'visible';
   element.style.pointerEvents = 'none';
@@ -1031,7 +1024,7 @@ function createPersistentRiderOverlay(
     }
   };
 
-  void loadRiderImage(riderRigBaseByColor[player.colorName])
+  void loadRiderImage(riderRigBaseAssetByColor[player.colorName])
     .then((image) => {
       if (disposed) {
         return;
@@ -2168,7 +2161,9 @@ export function GoogleMapsTrackLayer({
         map,
         optimized: false,
         position: section.splitPoint,
-        title: isActiveProZoneSection ? 'Set Pro Set pedal start at split (0 ft)' : `Split ${section.index}`,
+        title: isActiveProZoneSection
+          ? formatProSetPedalStartTitle(distanceUnit)
+          : `Split ${section.index}`,
         zIndex: 800 + section.index,
       });
       splitMarkers.push(splitMarker);

@@ -197,7 +197,7 @@ export function readStoredGhostLaps() {
 
     return parsed
       .map(sanitizeGhostLap)
-      .filter((ghost): ghost is GhostLap => ghost?.raceSource === 'live');
+      .filter((ghost): ghost is GhostLap => ghost?.raceSource === 'live' && ghost.source === 'personal');
   } catch {
     return [];
   }
@@ -206,7 +206,9 @@ export function readStoredGhostLaps() {
 export function writeStoredGhostLaps(ghosts: GhostLap[]) {
   safeSetLocalStorage(
     ghostLapsStorageKey,
-    JSON.stringify(ghosts.filter((ghost) => ghost.raceSource === 'live').slice(0, maxStoredGhosts)),
+    JSON.stringify(ghosts.filter((ghost) => (
+      ghost.raceSource === 'live' && ghost.source === 'personal'
+    )).slice(0, maxStoredGhosts)),
   );
 }
 
@@ -413,6 +415,7 @@ export async function loadGhostLapsFromCloud(
   profileKey: string,
   friendKeys: string[],
   sprintConfiguration?: { distanceFeet: number; airSetting: number },
+  focusedFriendGhost?: { ghostId: string; profileId: string },
 ) {
   const params = new URLSearchParams({ trackId, profileKey });
   if (friendKeys.length > 0) {
@@ -421,6 +424,10 @@ export async function loadGhostLapsFromCloud(
   if (sprintConfiguration) {
     params.set('sprintDistanceFeet', String(normalizeStraightSprintDistance(sprintConfiguration.distanceFeet)));
     params.set('sprintAirSetting', String(normalizeStraightSprintAirSetting(sprintConfiguration.airSetting)));
+  }
+  if (focusedFriendGhost?.ghostId && focusedFriendGhost.profileId) {
+    params.set('friendGhostId', focusedFriendGhost.ghostId);
+    params.set('friendProfileId', focusedFriendGhost.profileId);
   }
 
   const response = await fetch(`/api/ghosts?${params.toString()}`);

@@ -102,7 +102,7 @@ function PrivacyPage() {
           This notice describes the current TrackLab BMX web and iPhone/iPad app behavior. TrackLab combines
           Wattbike telemetry, mapped tracks, training history, multiplayer rooms, and optional AI commentary.
         </p>
-        <span className="public-info-updated">Last updated August 15, 2026</span>
+        <span className="public-info-updated">Last updated August 20, 2026</span>
       </section>
 
       <section className="public-info-summary" aria-label="Privacy summary">
@@ -140,6 +140,14 @@ function PrivacyPage() {
                 session. Passwords are stored by the TrackLab server as salted password hashes, not as readable
                 passwords. You may add a rider photo. Studio and Club Connect features can also store rider names,
                 nicknames, photos, club relationships, and invite status.
+              </p>
+
+              <h3>Friends, handles, and safety information</h3>
+              <p>
+                TrackLab assigns an account handle for the Friends feature. If you choose to appear in rider discovery,
+                signed-in users can find your public handle and display name and may send you a friend request. TrackLab
+                stores friend connections, pending and answered requests, invite-link status, blocks, removals of default
+                connections, and safety reports so the service can operate the network and enforce your choices.
               </p>
 
               <h3>Wattbike and training information</h3>
@@ -193,6 +201,7 @@ function PrivacyPage() {
                 <li>Authenticate accounts and synchronize account, club, rider, route, and training data.</li>
                 <li>Connect up to four Wattbikes and run BMX races, straight sprints, and Explore rides.</li>
                 <li>Create results, non-power leaderboards, records, ghosts, calendar history, and downloadable reports.</li>
+                <li>Provide rider discovery, friend requests, secure friend invitations, suggestions, blocks, and safety reporting.</li>
                 <li>Operate private rooms, room chat, optional voice chat, challenges, and live race state.</li>
                 <li>Load maps, resolve route locations, calculate routes and elevation, and show track information.</li>
                 <li>Generate optional pre-race and live commentary from current race context.</li>
@@ -206,6 +215,23 @@ function PrivacyPage() {
             <div>
               <h2>When data is shared</h2>
               <ul>
+                <li>
+                  <strong>Friends and rider discovery:</strong> if you opt in to discovery, other signed-in users can see
+                  your public handle and display name in search or relevant suggestions. An accepted friend connection is
+                  visible to both accounts, and ordinary connected friends can see an optional account profile photo. TrackLab
+                  adds the verified Preski Ranch club account and TrackLab founder as default connections; a rider may see
+                  those verified accounts&apos; photos, but the default connection does not share the rider&apos;s photo back. You can
+                  remove or block either connection. Friendship by itself does not share
+                  private workout history, private pedal-zone analytics, live device location, or current training activity.
+                  Information can still be shared through a separate action or feature you choose, such as joining a room,
+                  publishing an eligible ghost, or training through Club Connect.
+                </li>
+                <li>
+                  <strong>Friend invitation links:</strong> you can create an expiring, single-use link or QR code and send
+                  it through a service of your choice. The link contains a random invitation token rather than your email
+                  address. A signed-in rider who opens a valid link becomes connected to the inviter, so invitation links
+                  should be sent only to the intended rider.
+                </li>
                 <li>
                   <strong>Other TrackLab users:</strong> room participants can see rider display names, photos, live
                   positions, and results. Public leaderboards and ghost replays can display rider identity and race
@@ -238,6 +264,12 @@ function PrivacyPage() {
                   <strong>Hosting and database providers:</strong> TrackLab uses hosted application and database
                   infrastructure to deliver and store cloud-backed features.
                 </li>
+                <li>
+                  <strong>Safety and moderation:</strong> blocking removes the friend connection and pending requests and
+                  prevents the blocked pair from reconnecting while the block remains. A safety report stores the reported
+                  account, category, available details, and review status for TrackLab safety review and moderation. The
+                  reported rider is not told who submitted the report.
+                </li>
               </ul>
               <p>
                 External services process data under their own terms and privacy notices. Opening a landmark website,
@@ -252,6 +284,9 @@ function PrivacyPage() {
               <h2>Your controls</h2>
               <ul>
                 <li>Profile photos are optional and can be replaced from profile or rider controls.</li>
+                <li>You can choose whether your account appears in rider search and friend suggestions.</li>
+                <li>You can approve or decline ordinary friend requests, remove friends, and block or report an account.</li>
+                <li>Verified club and founder connections are added by default, but each can be removed or blocked.</li>
                 <li>Current location is requested only after you choose the current-location action.</li>
                 <li>Room microphone access starts only after a racer turns voice chat on.</li>
                 <li>Race commentary and ambient track sound each have an on/off control.</li>
@@ -284,6 +319,14 @@ function PrivacyPage() {
                 contact support for an account-specific deletion request. No internet service or storage method can
                 guarantee absolute security.
               </p>
+              <p>
+                Friend connections are deleted when either account removes the connection. TrackLab retains a suppression
+                record after a verified default connection is removed or blocked so that connection is not silently added
+                again. Blocks remain until the blocking account removes them. Answered requests, claimed or expired invite
+                records, and safety reports may be retained for network integrity, abuse prevention, moderation, and legal
+                obligations. An account-deletion request also covers the account&apos;s social graph, subject to records that
+                TrackLab must retain for safety, security, dispute, or legal reasons.
+              </p>
             </div>
           </section>
 
@@ -296,6 +339,11 @@ function PrivacyPage() {
                 a rider&apos;s age. When a rider is a minor, the club, studio, parent, or guardian is responsible for using
                 the service only with the authorization and supervision required in their location. Do not upload a
                 minor&apos;s photo or create a claimed account for a minor without appropriate permission.
+              </p>
+              <p>
+                Friend discovery, invitations, and connection controls do not independently verify a rider&apos;s age. A
+                parent or guardian should supervise a minor&apos;s discovery setting, friend requests, shared invitations,
+                blocks, and reports.
               </p>
             </div>
           </section>

@@ -77,6 +77,8 @@ const databaseRequired = process.env.TRACKLAB_REQUIRE_DATABASE === '1';
 
 const clients = new Map();
 const trainingHistoryStreams = new Map();
+const friendEventStreams = new Map();
+let friendEventStreamCount = 0;
 const rooms = new Map();
 const challenges = new Map();
 const matchInvites = new Map();
@@ -128,6 +130,9 @@ const commentaryRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const clubConnectRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const clubLiveRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const clubTabletRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const friendReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const friendMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const friendRequestRateLimiter = createRateLimiter({ windowMs: 24 * 60 * 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
@@ -172,6 +177,21 @@ const adminAccountEmails = new Set(
     .map((email) => sanitizeEmail(email))
     .filter(Boolean),
 );
+const friendReportReasons = new Set([
+  'harassment',
+  'impersonation',
+  'spam',
+  'unsafe-behavior',
+  'other',
+]);
+const friendInviteTtlMs = 7 * 24 * 60 * 60 * 1000;
+const maxFriendEventStreamsPerAccount = 6;
+const maxFriendEventStreamsTotal = 1_000;
+const maxFriendEventStreamWritableBytes = 64 * 1024;
+const officialFriendKindsByEmail = new Map([
+  ['preskiranch@gmail.com', 'club'],
+  ['rasheen25@gmail.com', 'founder'],
+]);
 
 function metricsTokenAllowed(request) {
   const expectedToken = String(process.env.TRACKLAB_METRICS_TOKEN || '').trim();
@@ -187,6 +207,15 @@ function metricsTokenAllowed(request) {
     return false;
   }
 
+  const expectedHash = Buffer.from(tokenHash(expectedToken));
+  const providedHash = Buffer.from(tokenHash(providedToken));
+  return expectedHash.length === providedHash.length && timingSafeEqual(expectedHash, providedHash);
+}
+
+function officialAccountBootstrapAllowed(request) {
+  const expectedToken = String(process.env.TRACKLAB_OFFICIAL_ACCOUNT_BOOTSTRAP_TOKEN || '').trim();
+  const providedToken = String(request.headers['x-tracklab-official-bootstrap-token'] || '').trim();
+  if (expectedToken.length < 32 || !providedToken) return false;
   const expectedHash = Buffer.from(tokenHash(expectedToken));
   const providedHash = Buffer.from(tokenHash(providedToken));
   return expectedHash.length === providedHash.length && timingSafeEqual(expectedHash, providedHash);
@@ -302,6 +331,10 @@ function isAdminEmail(email) {
   return adminAccountEmails.has(sanitizeEmail(email));
 }
 
+function officialFriendKindForEmail(email) {
+  return officialFriendKindsByEmail.get(sanitizeEmail(email)) ?? null;
+}
+
 function canManageClubConnect(user) {
   return isAdminEmail(user?.email);
 }
@@ -370,6 +403,7 @@ function publicAuthUser(user) {
     profileKey: `user:${user.id}`,
     email: user.email,
     name: user.displayName,
+    username: user.username,
     admin: isAdminEmail(user.email),
     membership,
   };
@@ -502,8 +536,467 @@ async function requireAuthSession(request, response) {
   return session;
 }
 
+async function requireAccountFriendSession(request, response) {
+  if (
+    request.tracklabClubTabletSession
+    || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
+    || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+  ) {
+    writeJson(response, 403, { error: 'Friend settings are available only from a rider’s personal account.' });
+    return null;
+  }
+  return requireAuthSession(request, response);
+}
+
 function authProfileKey(user) {
   return `user:${user.id}`;
+}
+
+function sanitizeAccountProfileId(value) {
+  const id = sanitizeText(value, '', 80);
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]{5,79}$/.test(id) ? id : '';
+}
+
+function friendPageOptions(requestUrl) {
+  const limit = Math.max(1, Math.min(50, Math.round(Number(requestUrl.searchParams.get('limit'))) || 25));
+  const cursor = String(requestUrl.searchParams.get('cursor') || '').slice(0, 160);
+  let offset = 0;
+  if (cursor) {
+    try {
+      const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+      if (decoded?.version === 1 && Number.isSafeInteger(decoded.offset) && decoded.offset >= 0) {
+        if (decoded.offset > 1_000_000) {
+          throw new HttpRequestError(400, 'The friends page cursor is outside the supported range.');
+        }
+        offset = decoded.offset;
+      } else {
+        throw new HttpRequestError(400, 'The friends page cursor is invalid.');
+      }
+    } catch {
+      throw new HttpRequestError(400, 'The friends page cursor is invalid.');
+    }
+  }
+  const searchText = sanitizeText(requestUrl.searchParams.get('q'), '', 64)
+    .trim()
+    .replace(/^@+/, '');
+  return { offset, limit, searchText };
+}
+
+function friendPageEnvelope(items, total, { offset, limit }) {
+  const nextOffset = offset + items.length;
+  return {
+    items,
+    nextCursor: nextOffset < total
+      ? Buffer.from(JSON.stringify({ version: 1, offset: nextOffset }), 'utf8').toString('base64url')
+      : null,
+    total,
+  };
+}
+
+function notifyFriendProfile(profileId, event) {
+  const guestKey = `user:${profileId}`;
+  for (const client of clients.values()) {
+    if (client.guestKey === guestKey) {
+      send(client, { type: 'friend-event', ...event });
+    }
+  }
+}
+
+function removeFriendEventStream(profileId, response) {
+  const streams = friendEventStreams.get(profileId);
+  if (!streams?.delete(response)) return;
+  friendEventStreamCount = Math.max(0, friendEventStreamCount - 1);
+  if (streams.size === 0) friendEventStreams.delete(profileId);
+  cloudTelemetry.setGauge('tracklab_friend_event_streams', friendEventStreamCount);
+}
+
+function writeFriendEventStream(response, frame) {
+  if (
+    response.destroyed
+    || response.writableEnded
+    || response.writableLength > maxFriendEventStreamWritableBytes
+  ) {
+    return false;
+  }
+  try {
+    response.write(frame);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function notifyFriendGraphProfiles(profileIds) {
+  const targets = new Set([...profileIds]
+    .map((profileId) => sanitizeAccountProfileId(profileId))
+    .filter(Boolean));
+  targets.forEach((profileId) => {
+    const streams = friendEventStreams.get(profileId);
+    streams?.forEach((response) => {
+      if (!writeFriendEventStream(response, 'event: graph-invalidated\ndata: {}\n\n')) {
+        removeFriendEventStream(profileId, response);
+        response.end();
+      }
+    });
+  });
+}
+
+function publicFriendGhostPreview(value) {
+  if (!value || typeof value !== 'object') return null;
+  const id = sanitizeText(value.id, '', 180);
+  const trackId = sanitizeText(value.trackId, '', 140);
+  const trackName = sanitizeText(value.trackName, '', 140);
+  const finishTimeMs = Math.round(finiteNumber(value.finishTimeMs, Number.NaN));
+  const lapCount = Math.max(1, Math.min(20, Math.round(finiteNumber(value.lapCount, 1))));
+  const distanceFeet = Math.round(finiteNumber(value.sprintDistanceFeet, 0));
+  const airSetting = Math.round(finiteNumber(value.sprintAirSetting, 0));
+  const hasSprintConfiguration = (
+    (distanceFeet === 30
+      || distanceFeet === 145
+      || (distanceFeet >= 100 && distanceFeet <= 1_500 && distanceFeet % 100 === 0))
+    && airSetting >= 1
+    && airSetting <= 10
+  );
+  if (!id || !trackId || !trackName || !Number.isFinite(finishTimeMs) || finishTimeMs <= 0) return null;
+  return {
+    id,
+    trackId,
+    trackName,
+    ...(value.routeVariantId === 'amateur' || value.routeVariantId === 'pro'
+      ? { routeVariantId: value.routeVariantId }
+      : {}),
+    lapCount,
+    ...(hasSprintConfiguration ? {
+      sprintDistanceFeet: distanceFeet,
+      sprintAirSetting: airSetting,
+    } : {}),
+    finishTimeMs,
+  };
+}
+
+function publicFriendProfile(profile, relationship = profile?.relationship || 'none') {
+  if (!profile?.profileId || !profile?.username || !profile?.displayName) {
+    return null;
+  }
+  // Official-default connections deliberately do not reveal live presence or
+  // private ghost availability. A rider must form a non-official connection
+  // before either permission can be considered elsewhere.
+  const liveClient = profile.friendshipSource === 'official' || relationship !== 'friend'
+    ? null
+    : [...clients.values()].find((client) => client.guestKey === `user:${profile.profileId}`);
+  const photoUrl = relationship === 'friend'
+    && (profile.friendshipSource !== 'official' || profile.officialType)
+    ? sanitizeRiderPhotoDataUrl(profile.photoUrl)
+    : '';
+  const ghostPreview = relationship === 'friend' && profile.friendshipSource !== 'official'
+    ? publicFriendGhostPreview(profile.ghostPreview)
+    : null;
+  return {
+    id: profile.profileId,
+    handle: profile.username,
+    displayName: profile.displayName,
+    online: Boolean(liveClient),
+    available: Boolean(liveClient?.available),
+    hasGhost: Boolean(ghostPreview),
+    ...(ghostPreview ? { ghostPreview } : {}),
+    mutualFriendCount: Math.max(0, Math.round(Number(profile.mutualFriendCount) || 0)),
+    relationship,
+    ...(photoUrl ? { photoUrl } : {}),
+    ...(profile.officialType ? { officialKind: profile.officialType } : {}),
+    ...(profile.connectedAt ? { connectedAt: profile.connectedAt } : {}),
+    ...(profile.blockedAt ? { blockedAt: profile.blockedAt } : {}),
+  };
+}
+
+function publicFriendRequest(friendRequest) {
+  const profile = publicFriendProfile(
+    friendRequest?.profile,
+    friendRequest?.direction === 'incoming' ? 'incoming-request' : 'outgoing-request',
+  );
+  return profile ? {
+    id: friendRequest.requestId,
+    direction: friendRequest.direction,
+    profile,
+    createdAt: friendRequest.createdAt,
+  } : null;
+}
+
+function clientsCanInteract(left, right) {
+  if (!left || !right || left.id === right.id) return true;
+  if (!left.profileId || !right.profileId) return true;
+  return !left.blockedProfileIds?.has(right.profileId)
+    && !right.blockedProfileIds?.has(left.profileId);
+}
+
+async function refreshRealtimeBlockState(profileIds, { addBlockedPair = null } = {}) {
+  const uniqueIds = [...new Set(profileIds.filter(Boolean))];
+  if (Array.isArray(addBlockedPair) && addBlockedPair.length === 2) {
+    const [leftId, rightId] = addBlockedPair;
+    clients.forEach((client) => {
+      if (client.profileId === leftId) client.blockedProfileIds?.add(rightId);
+      if (client.profileId === rightId) client.blockedProfileIds?.add(leftId);
+    });
+  }
+  await Promise.all(uniqueIds.map(async (profileId) => {
+    const loadedIds = await persistence.loadBlockedAccountProfileIds(profileId);
+    // Retain the previous cache on database failure. For a new block the pair
+    // was inserted above before this reload, so realtime privacy fails closed.
+    if (!Array.isArray(loadedIds)) return;
+    const blockedIds = new Set(loadedIds);
+    clients.forEach((client) => {
+      if (client.profileId === profileId) client.blockedProfileIds = blockedIds;
+    });
+  }));
+
+  const changedClients = [...clients.values()].filter((client) => uniqueIds.includes(client.profileId));
+  changedClients.forEach((client) => {
+    if (!client.roomId) return;
+    const room = rooms.get(client.roomId);
+    if (!room) return;
+    const hasBlockedMember = [...room.members]
+      .map((memberId) => clients.get(memberId))
+      .some((member) => member && !clientsCanInteract(client, member));
+    if (hasBlockedMember) leaveRoom(client);
+  });
+
+  for (const [challengeId, challenge] of challenges.entries()) {
+    const from = clients.get(challenge.fromId);
+    const to = clients.get(challenge.toId);
+    if (!clientsCanInteract(from, to)) challenges.delete(challengeId);
+  }
+  for (const [inviteId, invite] of matchInvites.entries()) {
+    const host = clients.get(invite.fromId);
+    invite.targetIds = invite.targetIds.filter((targetId) => clientsCanInteract(host, clients.get(targetId)));
+    if (invite.targetIds.length === 0) matchInvites.delete(inviteId);
+  }
+  refreshSocialForGuestKeys(changedClients.map((client) => client.guestKey));
+  broadcastLobby();
+}
+
+function friendInviteToken(value) {
+  const token = typeof value === 'string' ? value.trim() : '';
+  return /^[a-zA-Z0-9_-]{32,96}$/.test(token) ? token : '';
+}
+
+// Small, dependency-free QR encoder for first-party friend invite SVGs. Invite
+// links fit QR versions 1-10 at low error correction; the token never leaves
+// TrackLab for QR generation.
+const qrLowEccCodewordsPerBlock = [0, 7, 10, 15, 20, 26, 18, 20, 24, 30, 18];
+const qrLowEccBlockCount = [0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4];
+
+function qrRawDataModules(version) {
+  let result = (16 * version + 128) * version + 64;
+  if (version >= 2) {
+    const alignmentCount = Math.floor(version / 7) + 2;
+    result -= (25 * alignmentCount - 10) * alignmentCount - 55;
+    if (version >= 7) result -= 36;
+  }
+  return result;
+}
+
+function qrMultiply(left, right) {
+  let result = 0;
+  for (let index = 7; index >= 0; index -= 1) {
+    result = (result << 1) ^ ((result >>> 7) * 0x11d);
+    result ^= ((right >>> index) & 1) * left;
+  }
+  return result;
+}
+
+function qrDivisor(degree) {
+  const result = Array(degree).fill(0);
+  result[degree - 1] = 1;
+  let root = 1;
+  for (let index = 0; index < degree; index += 1) {
+    for (let position = 0; position < result.length; position += 1) {
+      result[position] = qrMultiply(result[position], root);
+      if (position + 1 < result.length) result[position] ^= result[position + 1];
+    }
+    root = qrMultiply(root, 0x02);
+  }
+  return result;
+}
+
+function qrRemainder(data, divisor) {
+  const result = Array(divisor.length).fill(0);
+  for (const byte of data) {
+    const factor = byte ^ result.shift();
+    result.push(0);
+    for (let index = 0; index < result.length; index += 1) {
+      result[index] ^= qrMultiply(divisor[index], factor);
+    }
+  }
+  return result;
+}
+
+function qrAppendBits(bits, value, length) {
+  for (let index = length - 1; index >= 0; index -= 1) {
+    bits.push(((value >>> index) & 1) !== 0);
+  }
+}
+
+function qrCodewords(text, version) {
+  const bytes = [...Buffer.from(text, 'utf8')];
+  const eccLength = qrLowEccCodewordsPerBlock[version];
+  const blockCount = qrLowEccBlockCount[version];
+  const rawCodewords = Math.floor(qrRawDataModules(version) / 8);
+  const dataCapacity = rawCodewords - eccLength * blockCount;
+  const bits = [];
+  qrAppendBits(bits, 0x4, 4);
+  qrAppendBits(bits, bytes.length, version <= 9 ? 8 : 16);
+  bytes.forEach((byte) => qrAppendBits(bits, byte, 8));
+  qrAppendBits(bits, 0, Math.min(4, dataCapacity * 8 - bits.length));
+  while (bits.length % 8 !== 0) bits.push(false);
+  const data = [];
+  for (let index = 0; index < bits.length; index += 8) {
+    let byte = 0;
+    for (let bit = 0; bit < 8; bit += 1) byte = (byte << 1) | Number(bits[index + bit]);
+    data.push(byte);
+  }
+  for (let pad = 0; data.length < dataCapacity; pad += 1) data.push(pad % 2 === 0 ? 0xec : 0x11);
+
+  const shortBlockLength = Math.floor(rawCodewords / blockCount);
+  const shortBlockCount = blockCount - (rawCodewords % blockCount);
+  const shortDataLength = shortBlockLength - eccLength;
+  const divisor = qrDivisor(eccLength);
+  const blocks = [];
+  let dataIndex = 0;
+  for (let block = 0; block < blockCount; block += 1) {
+    const dataLength = shortDataLength + Number(block >= shortBlockCount);
+    const blockData = data.slice(dataIndex, dataIndex + dataLength);
+    dataIndex += dataLength;
+    const ecc = qrRemainder(blockData, divisor);
+    if (block < shortBlockCount) blockData.push(0);
+    blocks.push([...blockData, ...ecc]);
+  }
+
+  const interleaved = [];
+  for (let index = 0; index < blocks[0].length; index += 1) {
+    for (let block = 0; block < blocks.length; block += 1) {
+      if (index !== shortDataLength || block >= shortBlockCount) {
+        interleaved.push(blocks[block][index]);
+      }
+    }
+  }
+  return interleaved;
+}
+
+function qrAlignmentPositions(version, size) {
+  if (version === 1) return [];
+  const count = Math.floor(version / 7) + 2;
+  const step = version === 32
+    ? 26
+    : Math.floor((version * 4 + count * 2 + 1) / (count * 2 - 2)) * 2;
+  const result = [6];
+  for (let position = size - 7; result.length < count; position -= step) result.splice(1, 0, position);
+  return result;
+}
+
+function qrSvg(text) {
+  const byteLength = Buffer.byteLength(text, 'utf8');
+  let version = 1;
+  for (; version <= 10; version += 1) {
+    const dataCapacity = Math.floor(qrRawDataModules(version) / 8)
+      - qrLowEccCodewordsPerBlock[version] * qrLowEccBlockCount[version];
+    const countBits = version <= 9 ? 8 : 16;
+    if (4 + countBits + byteLength * 8 <= dataCapacity * 8) break;
+  }
+  if (version > 10) throw new HttpRequestError(400, 'The invitation URL is too long for its QR code.');
+
+  const size = version * 4 + 17;
+  const modules = Array.from({ length: size }, () => Array(size).fill(false));
+  const functions = Array.from({ length: size }, () => Array(size).fill(false));
+  const setFunction = (x, y, dark) => {
+    if (x >= 0 && x < size && y >= 0 && y < size) {
+      modules[y][x] = dark;
+      functions[y][x] = true;
+    }
+  };
+  const finder = (centerX, centerY) => {
+    for (let y = -4; y <= 4; y += 1) {
+      for (let x = -4; x <= 4; x += 1) {
+        const distance = Math.max(Math.abs(x), Math.abs(y));
+        setFunction(centerX + x, centerY + y, distance !== 2 && distance !== 4);
+      }
+    }
+  };
+  for (let index = 0; index < size; index += 1) {
+    setFunction(6, index, index % 2 === 0);
+    setFunction(index, 6, index % 2 === 0);
+  }
+  finder(3, 3);
+  finder(size - 4, 3);
+  finder(3, size - 4);
+  const alignments = qrAlignmentPositions(version, size);
+  alignments.forEach((x, column) => alignments.forEach((y, row) => {
+    const isFinderCorner = (column === 0 && row === 0)
+      || (column === 0 && row === alignments.length - 1)
+      || (column === alignments.length - 1 && row === 0);
+    if (isFinderCorner) return;
+    for (let dy = -2; dy <= 2; dy += 1) {
+      for (let dx = -2; dx <= 2; dx += 1) {
+        setFunction(x + dx, y + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+      }
+    }
+  }));
+
+  const formatData = 1 << 3; // Low error correction, mask 0.
+  let formatRemainder = formatData;
+  for (let index = 0; index < 10; index += 1) {
+    formatRemainder = (formatRemainder << 1) ^ ((formatRemainder >>> 9) * 0x537);
+  }
+  const formatBits = ((formatData << 10) | formatRemainder) ^ 0x5412;
+  const formatBit = (index) => ((formatBits >>> index) & 1) !== 0;
+  for (let index = 0; index <= 5; index += 1) setFunction(8, index, formatBit(index));
+  setFunction(8, 7, formatBit(6));
+  setFunction(8, 8, formatBit(7));
+  setFunction(7, 8, formatBit(8));
+  for (let index = 9; index < 15; index += 1) setFunction(14 - index, 8, formatBit(index));
+  for (let index = 0; index < 8; index += 1) setFunction(size - 1 - index, 8, formatBit(index));
+  for (let index = 8; index < 15; index += 1) setFunction(8, size - 15 + index, formatBit(index));
+  setFunction(8, size - 8, true);
+
+  if (version >= 7) {
+    let remainder = version;
+    for (let index = 0; index < 12; index += 1) {
+      remainder = (remainder << 1) ^ ((remainder >>> 11) * 0x1f25);
+    }
+    const versionBits = (version << 12) | remainder;
+    for (let index = 0; index < 18; index += 1) {
+      const dark = ((versionBits >>> index) & 1) !== 0;
+      const x = size - 11 + (index % 3);
+      const y = Math.floor(index / 3);
+      setFunction(x, y, dark);
+      setFunction(y, x, dark);
+    }
+  }
+
+  const codewords = qrCodewords(text, version);
+  let bitIndex = 0;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let vertical = 0; vertical < size; vertical += 1) {
+      const upward = ((right + 1) & 2) === 0;
+      const y = upward ? size - 1 - vertical : vertical;
+      for (let column = 0; column < 2; column += 1) {
+        const x = right - column;
+        if (functions[y][x]) continue;
+        const dataDark = bitIndex < codewords.length * 8
+          ? ((codewords[bitIndex >>> 3] >>> (7 - (bitIndex & 7))) & 1) !== 0
+          : false;
+        modules[y][x] = dataDark !== ((x + y) % 2 === 0);
+        bitIndex += 1;
+      }
+    }
+  }
+
+  const quiet = 4;
+  const paths = [];
+  modules.forEach((row, y) => row.forEach((dark, x) => {
+    if (dark) paths.push(`M${x + quiet},${y + quiet}h1v1h-1z`);
+  }));
+  const viewSize = size + quiet * 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewSize} ${viewSize}" shape-rendering="crispEdges" role="img" aria-label="TrackLab friend invitation QR code"><rect width="100%" height="100%" fill="#fff"/><path d="${paths.join('')}" fill="#000"/></svg>`;
 }
 
 function enforceRateLimit(request, response, limiter, limit, scope) {
@@ -1732,6 +2225,35 @@ function sanitizeRaceViewPreferences(value) {
   };
 }
 
+function sanitizeUnitPreferences(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  if (!['mph', 'kph'].includes(value.speedUnit) || !['ft', 'm'].includes(value.distanceUnit)) {
+    return null;
+  }
+  const now = Date.now();
+  const submittedUpdatedAt = typeof value.updatedAt === 'number' || typeof value.updatedAt === 'string'
+    ? Math.max(
+      0,
+      Math.min(Number.MAX_SAFE_INTEGER, Math.round(finiteNumber(value.updatedAt, 0))),
+    )
+    : 0;
+  return {
+    speedUnit: value.speedUnit,
+    distanceUnit: value.distanceUnit,
+    updatedAt: submittedUpdatedAt > now + 5 * 60 * 1000 ? now : submittedUpdatedAt,
+  };
+}
+
+function mergeSavedUnitPreferences(currentValue, incomingValue) {
+  const current = sanitizeUnitPreferences(currentValue);
+  const incoming = sanitizeUnitPreferences(incomingValue);
+  if (!current) return incoming;
+  if (!incoming) return current;
+  return incoming.updatedAt >= current.updatedAt ? incoming : current;
+}
+
 function sanitizeGlobalRaceViewPreferences(value) {
   const preferences = sanitizeRaceViewPreferences(value);
   if (!preferences || Object.keys(preferences.earthCamerasByTrack).length === 0) {
@@ -1892,6 +2414,10 @@ function sanitizeUserDataPatch(value) {
   const raceViewPreferences = sanitizeRaceViewPreferences(value.raceViewPreferences);
   if (raceViewPreferences) {
     patch.raceViewPreferences = raceViewPreferences;
+  }
+  const unitPreferences = sanitizeUnitPreferences(value.unitPreferences);
+  if (unitPreferences) {
+    patch.unitPreferences = unitPreferences;
   }
   return patch;
 }
@@ -2767,6 +3293,7 @@ function publicUserData(userData, user) {
   const { exploreRoutes: _exploreRoutes, ...profileData } = userData;
   return {
     ...profileData,
+    unitPreferences: sanitizeUnitPreferences(profileData.unitPreferences),
     studioRiders: canManageClubConnect(user) && Array.isArray(profileData.studioRiders)
       ? profileData.studioRiders
       : [],
@@ -2779,7 +3306,7 @@ function saveMergedUserData(profileKey, patch) {
     .catch(() => undefined)
     .then(async () => {
       let mergedPatch = patch;
-      if (patch.raceViewPreferences || patch.exploreRoutes) {
+      if (patch.raceViewPreferences || patch.exploreRoutes || patch.unitPreferences) {
         const current = await persistence.loadUserData(profileKey);
         mergedPatch = {
           ...patch,
@@ -2791,6 +3318,12 @@ function saveMergedUserData(profileKey, patch) {
           } : {}),
           ...(patch.exploreRoutes ? {
             exploreRoutes: mergeExploreRouteHistory(patch.exploreRoutes, current?.exploreRoutes),
+          } : {}),
+          ...(patch.unitPreferences ? {
+            unitPreferences: mergeSavedUnitPreferences(
+              current?.unitPreferences,
+              patch.unitPreferences,
+            ),
           } : {}),
         };
       }
@@ -3960,14 +4493,18 @@ function notifyTrainingHistoryProfiles(profileKeys, session) {
 function visibleRoomsForClient(client) {
   return [...rooms.values()]
     .filter((room) => !room.private || room.members.has(client.id))
+    .filter((room) => [...room.members]
+      .map((memberId) => clients.get(memberId))
+      .every((member) => !member || clientsCanInteract(client, member)))
     .map(publicRoom);
 }
 
 function broadcastLobby() {
-  const riders = [...clients.values()].map(publicRider);
   clients.forEach((client) => send(client, {
     type: 'lobby-state',
-    riders,
+    riders: [...clients.values()]
+      .filter((candidate) => clientsCanInteract(client, candidate))
+      .map(publicRider),
     rooms: visibleRoomsForClient(client),
   }));
 }
@@ -4523,7 +5060,9 @@ async function handleClientMessage(client, rawMessage) {
         type: 'welcome',
         clientId: client.id,
         persistence: persistence.persistenceEnabled(),
-        riders: [...clients.values()].map(publicRider),
+        riders: [...clients.values()]
+          .filter((candidate) => clientsCanInteract(client, candidate))
+          .map(publicRider),
         rooms: visibleRoomsForClient(client),
       });
     }
@@ -4551,6 +5090,13 @@ async function handleClientMessage(client, rawMessage) {
     const room = await findRoom(roomId);
     if (!room) {
       send(client, { type: 'room-error', message: `Room ${roomId || 'unknown'} is not available.` });
+      return;
+    }
+    const blockedRoomMember = [...room.members]
+      .map((memberId) => clients.get(memberId))
+      .find((member) => member && !clientsCanInteract(client, member));
+    if (blockedRoomMember) {
+      send(client, { type: 'room-error', message: 'That room is not available.' });
       return;
     }
 
@@ -4923,7 +5469,8 @@ async function handleClientMessage(client, rawMessage) {
     if (!requireAvailableRacerSeat(client)) {
       return;
     }
-    const targetIds = sanitizeClientIdList(message.targetIds);
+    const targetIds = sanitizeClientIdList(message.targetIds)
+      .filter((targetId) => clientsCanInteract(client, clients.get(targetId)));
     createSelectedMatchRoom(client, targetIds, message.track, message.localSeatCount);
     return;
   }
@@ -4949,6 +5496,12 @@ async function handleClientMessage(client, rawMessage) {
       send(client, { type: 'challenge-status', message: 'Match room is no longer open.' });
       return;
     }
+    const hostForInvite = clients.get(invite.fromId);
+    if (!clientsCanInteract(client, hostForInvite)) {
+      matchInvites.delete(invite.id);
+      send(client, { type: 'challenge-status', message: 'Match invite is no longer available.' });
+      return;
+    }
 
     const beforeRole = roomRacerSeatCount(room) >= maxRaceBikeCount ? 'spectator' : 'racer';
     joinRoom(client, room, beforeRole, 1);
@@ -4961,30 +5514,46 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'friend-request') {
-    const target = clients.get(sanitizeText(message.targetId, '', 80));
-    if (!target || target.id === client.id) {
-      send(client, { type: 'challenge-status', message: 'That rider is not online.' });
-      return;
-    }
-
-    await sendFriendRequest(client, target);
+    send(client, {
+      type: 'challenge-status',
+      message: client.clubTabletSessionTokenHash
+        ? 'Friend requests are available only from a rider’s personal account.'
+        : 'Use the Friends screen to send a secure request, even when the rider is offline.',
+    });
     return;
   }
 
   if (message.type === 'friend-response') {
-    await respondToFriendRequest(client, sanitizeText(message.requestId, '', 40), Boolean(message.accepted));
+    send(client, {
+      type: 'challenge-status',
+      message: client.clubTabletSessionTokenHash
+        ? 'Friend requests are available only from a rider’s personal account.'
+        : 'Use the Friends screen to respond to this request.',
+    });
     return;
   }
 
   if (message.type === 'group-create') {
+    if (client.clubTabletSessionTokenHash) {
+      send(client, { type: 'challenge-status', message: 'Groups are available only from a rider’s personal account.' });
+      return;
+    }
     await createSocialGroup(client, message.name);
     return;
   }
 
   if (message.type === 'group-invite') {
+    if (client.clubTabletSessionTokenHash) {
+      send(client, { type: 'challenge-status', message: 'Groups are available only from a rider’s personal account.' });
+      return;
+    }
     const target = clients.get(sanitizeText(message.targetId, '', 80));
     if (!target || target.id === client.id) {
       send(client, { type: 'challenge-status', message: 'That rider is not online.' });
+      return;
+    }
+    if (!clientsCanInteract(client, target)) {
+      send(client, { type: 'challenge-status', message: 'That rider is not available.' });
       return;
     }
 
@@ -4993,6 +5562,10 @@ async function handleClientMessage(client, rawMessage) {
   }
 
   if (message.type === 'group-invite-response') {
+    if (client.clubTabletSessionTokenHash) {
+      send(client, { type: 'challenge-status', message: 'Groups are available only from a rider’s personal account.' });
+      return;
+    }
     await respondToGroupInvite(client, sanitizeText(message.inviteId, '', 40), Boolean(message.accepted));
     return;
   }
@@ -5006,6 +5579,10 @@ async function handleClientMessage(client, rawMessage) {
       send(client, { type: 'challenge-status', message: 'That rider is not online.' });
       return;
     }
+    if (!clientsCanInteract(client, target)) {
+      send(client, { type: 'challenge-status', message: 'That rider is not available.' });
+      return;
+    }
 
     sendChallenge(client, target, message.track);
     return;
@@ -5017,6 +5594,7 @@ async function handleClientMessage(client, rawMessage) {
     }
     const candidates = [...clients.values()]
       .filter((candidate) => candidate.id !== client.id)
+      .filter((candidate) => clientsCanInteract(client, candidate))
       .filter((candidate) => candidate.available)
       .filter((candidate) => clientHasRacerAccess(candidate))
       .filter((candidate) => candidate.socket.readyState === candidate.socket.OPEN);
@@ -5042,6 +5620,10 @@ async function handleClientMessage(client, rawMessage) {
     const challenger = clients.get(challenge.fromId);
     if (!challenger) {
       send(client, { type: 'challenge-status', message: 'The challenger is no longer online.' });
+      return;
+    }
+    if (!clientsCanInteract(client, challenger)) {
+      send(client, { type: 'challenge-status', message: 'The challenge is no longer available.' });
       return;
     }
 
@@ -5710,6 +6292,60 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/friends/invites/qr.svg') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const inviteToken = friendInviteToken(requestUrl.searchParams.get('token'));
+    const preview = inviteToken && await persistence.previewFriendInvite(tokenHash(inviteToken));
+    if (!preview) {
+      writeJson(response, 404, { error: 'This friend invitation is invalid or expired.' });
+      return;
+    }
+    const origin = publicRequestOrigin(request);
+    if (!origin) {
+      writeJson(response, 400, { error: 'The invitation origin is invalid.' });
+      return;
+    }
+    const inviteUrl = `${origin}/?friendInvite=${encodeURIComponent(inviteToken)}`;
+    const svg = qrSvg(inviteUrl);
+    response.writeHead(200, {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(svg),
+      'Content-Security-Policy': "default-src 'none'; style-src 'none'; sandbox",
+      'X-Robots-Tag': 'noindex, nofollow, noarchive',
+    });
+    if (request.method === 'HEAD') {
+      response.end();
+    } else {
+      response.end(svg);
+    }
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/friends/invites/preview') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const inviteToken = friendInviteToken(requestUrl.searchParams.get('token'));
+    const preview = inviteToken && await persistence.previewFriendInvite(tokenHash(inviteToken));
+    if (!preview) {
+      writeJson(response, 404, { error: 'This friend invitation is invalid or expired.' });
+      return;
+    }
+    writeJson(response, 200, {
+      invite: {
+        inviteId: preview.inviteId,
+        expiresAt: preview.expiresAt,
+        profile: publicFriendProfile(preview.profile, 'none'),
+      },
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/auth/me') {
     const session = await currentAuthSession(request);
     writeJson(response, 200, { user: publicAuthUser(session?.user ?? null) });
@@ -5732,10 +6368,23 @@ async function serveStatic(request, response) {
       writeJson(response, 400, { error: account.error });
       return;
     }
+    const registrationInviteToken = payload?.inviteToken == null
+      ? ''
+      : friendInviteToken(payload.inviteToken);
+    if (payload?.inviteToken != null && !registrationInviteToken) {
+      writeJson(response, 400, { error: 'The friend invitation link is invalid.' });
+      return;
+    }
 
     const existing = await persistence.findAuthUserByEmail(account.email);
     if (existing) {
       writeJson(response, 409, { error: 'An account already exists for this email. Sign in instead.' });
+      return;
+    }
+
+    const officialFriendKind = officialFriendKindForEmail(account.email);
+    if (officialFriendKind && !officialAccountBootstrapAllowed(request)) {
+      writeJson(response, 403, { error: 'This reserved TrackLab account must be provisioned by the operator.' });
       return;
     }
 
@@ -5749,11 +6398,25 @@ async function serveStatic(request, response) {
       membershipTier: isAdmin ? 'racer' : 'spectator',
       bikeSeats: isAdmin ? maxRaceBikeCount : 1,
       admin: isAdmin,
+      officialFriendKind,
     });
 
     if (!createdUser) {
       writeJson(response, 500, { error: 'Could not create the account.' });
       return;
+    }
+
+    const officialFriendChanges = await persistence.ensureOfficialFriendships(createdUser.id);
+    notifyFriendGraphProfiles(officialFriendChanges ?? []);
+    if (registrationInviteToken) {
+      const inviteResult = await persistence.claimFriendInvite(tokenHash(registrationInviteToken), createdUser.id);
+      if (inviteResult) {
+        notifyFriendProfile(inviteResult.profile?.profileId, {
+          event: 'invite-claimed',
+          profileId: createdUser.id,
+        });
+        notifyFriendGraphProfiles([createdUser.id, inviteResult.profile?.profileId]);
+      }
     }
 
     await createSignedInResponse(request, response, createdUser, 201);
@@ -5796,6 +6459,8 @@ async function serveStatic(request, response) {
         ) ?? user
       : user;
     const loggedInUser = await persistence.touchAuthUserLogin(entitledUser.id) ?? entitledUser;
+    const officialFriendChanges = await persistence.ensureOfficialFriendships(loggedInUser.id);
+    notifyFriendGraphProfiles(officialFriendChanges ?? []);
     await createSignedInResponse(request, response, loggedInUser);
     return;
   }
@@ -5812,6 +6477,427 @@ async function serveStatic(request, response) {
     }
     clearAuthCookie(response, request);
     writeJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/friends' || requestUrl.pathname.startsWith('/api/friends/')) {
+    const session = await requireAccountFriendSession(request, response);
+    if (!session) {
+      return;
+    }
+    const userId = session.user.id;
+    const isRead = request.method === 'GET' || request.method === 'HEAD';
+    const rateAllowed = isRead
+      ? enforceRateLimit(request, response, friendReadRateLimiter, 180, `friends-read:${userId}`)
+      : enforceRateLimit(request, response, friendMutationRateLimiter, 120, `friends-write:${userId}`);
+    if (!rateAllowed) {
+      return;
+    }
+    if (requestUrl.pathname === '/api/friends/events') {
+      if (request.method !== 'GET') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const streams = friendEventStreams.get(userId) ?? new Set();
+      if (
+        streams.size >= maxFriendEventStreamsPerAccount
+        || friendEventStreamCount >= maxFriendEventStreamsTotal
+      ) {
+        writeJson(response, 429, { error: 'Too many friend update connections.' }, {
+          'Retry-After': '15',
+          'Cache-Control': 'no-store',
+        });
+        return;
+      }
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-store',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      response.flushHeaders?.();
+      response.socket?.setKeepAlive(true, 20_000);
+      streams.add(response);
+      friendEventStreams.set(userId, streams);
+      friendEventStreamCount += 1;
+      cloudTelemetry.increment('tracklab_friend_event_stream_connections_total');
+      cloudTelemetry.setGauge('tracklab_friend_event_streams', friendEventStreamCount);
+      writeFriendEventStream(response, ': connected\n\n');
+      response.once('close', () => removeFriendEventStream(userId, response));
+      return;
+    }
+    if (requestUrl.pathname === '/api/friends/privacy') {
+      if (request.method === 'GET') {
+        const currentUser = await persistence.findAuthUserById(userId) ?? session.user;
+        writeJson(response, 200, {
+          privacy: {
+            discoverable: currentUser.friendDiscoverable === true,
+            profile: {
+              id: currentUser.id,
+              handle: currentUser.username,
+              displayName: currentUser.displayName,
+            },
+          },
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (request.method === 'PATCH') {
+        const payload = await readJsonBody(request, 10_000);
+        if (typeof payload?.discoverable !== 'boolean') {
+          writeJson(response, 400, { error: 'Choose whether other riders can find this account.' });
+          return;
+        }
+        const updated = await persistence.updateFriendDiscoverability(userId, payload.discoverable);
+        if (!updated) {
+          writeJson(response, 503, { error: 'Friend privacy could not be saved.' });
+          return;
+        }
+        writeJson(response, 200, {
+          privacy: {
+            discoverable: updated.friendDiscoverable === true,
+            profile: {
+              id: updated.id,
+              handle: updated.username,
+              displayName: updated.displayName,
+            },
+          },
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/friends' && request.method === 'GET') {
+      const page = friendPageOptions(requestUrl);
+      const [items, total] = await Promise.all([
+        persistence.listAccountFriends(userId, page),
+        persistence.countAccountFriends(userId, page),
+      ]);
+      writeJson(response, 200, friendPageEnvelope(
+        items.map((profile) => publicFriendProfile(profile, 'friend')).filter(Boolean),
+        total,
+        page,
+      ), { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/friends/requests') {
+      if (request.method === 'GET') {
+        const direction = requestUrl.searchParams.get('direction') === 'outgoing' ? 'outgoing' : 'incoming';
+        const page = friendPageOptions(requestUrl);
+        const [items, total] = await Promise.all([
+          persistence.listAccountFriendRequests(userId, direction, page),
+          persistence.countAccountFriendRequests(userId, direction, page),
+        ]);
+        writeJson(response, 200, friendPageEnvelope(
+          items.map(publicFriendRequest).filter(Boolean),
+          total,
+          page,
+        ), { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (request.method === 'POST') {
+        if (!enforceRateLimit(request, response, friendRequestRateLimiter, 20, `friend-request-send:${userId}`)) {
+          return;
+        }
+        const payload = await readJsonBody(request, 20_000);
+        const profileId = sanitizeAccountProfileId(payload?.profileId);
+        const clientRequestId = sanitizeAccountProfileId(payload?.clientRequestId) || randomUUID();
+        if (!profileId || profileId === userId) {
+          writeJson(response, 400, { error: 'Choose another TrackLab rider.' });
+          return;
+        }
+        const friendRequest = await persistence.createAccountFriendRequest({
+          id: clientRequestId,
+          fromUserId: userId,
+          toUserId: profileId,
+        });
+        if (friendRequest?.unavailableReason) {
+          const declined = friendRequest.unavailableReason === 'declined-cooldown';
+          writeJson(response, 409, {
+            error: declined
+              ? 'That rider declined a recent request. You can try again after the 30-day cooldown.'
+              : 'You recently cancelled this request. You can try again after the 24-hour cooldown.',
+            code: friendRequest.unavailableReason,
+            retryAt: friendRequest.retryAt,
+          }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        if (!friendRequest) {
+          writeJson(response, 409, { error: 'That request is unavailable, already pending, blocked, or already connected.' });
+          return;
+        }
+        notifyFriendProfile(profileId, {
+          event: 'request-created',
+          requestId: friendRequest.requestId,
+          profileId: userId,
+        });
+        notifyFriendGraphProfiles([userId, profileId]);
+        writeJson(response, 201, { request: publicFriendRequest(friendRequest) }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const requestActionMatch = /^\/api\/friends\/requests\/([a-zA-Z0-9._-]{6,180})\/(accept|decline|cancel)$/.exec(requestUrl.pathname);
+    if (requestActionMatch) {
+      if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const [, requestId, action] = requestActionMatch;
+      const result = await persistence.respondToAccountFriendRequest(requestId, userId, action);
+      if (!result) {
+        writeJson(response, 404, { error: 'That friend request is no longer available.' });
+        return;
+      }
+      notifyFriendProfile(result.profile?.profileId, {
+        event: `request-${action === 'accept' ? 'accepted' : action === 'decline' ? 'declined' : 'cancelled'}`,
+        requestId,
+        profileId: userId,
+      });
+      notifyFriendGraphProfiles([userId, result.profile?.profileId]);
+      writeJson(response, 200, {
+        result: {
+          requestId: result.requestId,
+          action: result.action,
+          profile: publicFriendProfile(result.profile, action === 'accept' ? 'friend' : 'none'),
+        },
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/friends/search') {
+      if (request.method !== 'GET') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const page = friendPageOptions(requestUrl);
+      const searchText = page.searchText;
+      if (!searchText) {
+        writeJson(response, 400, { error: 'Enter a name or username.' });
+        return;
+      }
+      const [items, total] = await Promise.all([
+        persistence.searchAccountProfiles(userId, searchText, page),
+        persistence.countAccountProfileSearch(userId, searchText),
+      ]);
+      writeJson(response, 200, friendPageEnvelope(
+        items.map((profile) => publicFriendProfile(profile, profile.relationship)).filter(Boolean),
+        total,
+        page,
+      ), { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/friends/suggestions') {
+      if (request.method !== 'GET') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const page = friendPageOptions(requestUrl);
+      const [profiles, total] = await Promise.all([
+        persistence.suggestAccountFriends(userId, page),
+        persistence.countAccountFriendSuggestions(userId),
+      ]);
+      const items = profiles.map((profile) => ({
+        profile: publicFriendProfile(profile, 'none'),
+        reason: profile.reason,
+      })).filter((suggestion) => suggestion.profile);
+      writeJson(response, 200, friendPageEnvelope(items, total, page), { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/friends/blocks') {
+      if (request.method === 'GET') {
+        const page = friendPageOptions(requestUrl);
+        const [items, total] = await Promise.all([
+          persistence.listBlockedAccountProfiles(userId, page),
+          persistence.countBlockedAccountProfiles(userId),
+        ]);
+        writeJson(response, 200, friendPageEnvelope(
+          items.map((profile) => publicFriendProfile(profile, 'blocked')).filter(Boolean),
+          total,
+          page,
+        ), { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (request.method === 'POST') {
+        const payload = await readJsonBody(request, 20_000);
+        const profileId = sanitizeAccountProfileId(payload?.profileId);
+        if (!profileId || profileId === userId) {
+          writeJson(response, 400, { error: 'Choose another TrackLab rider.' });
+          return;
+        }
+        const blocked = await persistence.blockAccountProfile(userId, profileId);
+        if (!blocked) {
+          writeJson(response, 404, { error: 'That rider was not found.' });
+          return;
+        }
+        notifyFriendGraphProfiles([userId, profileId]);
+        await refreshRealtimeBlockState([userId, profileId], { addBlockedPair: [userId, profileId] });
+        writeJson(response, 201, { blocked: publicFriendProfile(blocked, 'blocked') }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const unblockMatch = /^\/api\/friends\/blocks\/([a-zA-Z0-9._-]{6,180})$/.exec(requestUrl.pathname);
+    if (unblockMatch) {
+      if (request.method !== 'DELETE') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const unblocked = await persistence.unblockAccountProfile(userId, unblockMatch[1]);
+      if (!unblocked) {
+        writeJson(response, 404, { error: 'That blocked rider was not found.' });
+        return;
+      }
+      notifyFriendGraphProfiles([userId, unblockMatch[1]]);
+      await refreshRealtimeBlockState([userId, unblockMatch[1]]);
+      writeJson(response, 200, { unblocked: true }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/friends/reports') {
+      if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      if (!enforceRateLimit(request, response, friendMutationRateLimiter, 10, `friend-report:${userId}`)) {
+        return;
+      }
+      const payload = await readJsonBody(request, 20_000);
+      const profileId = sanitizeAccountProfileId(payload?.profileId);
+      const reason = sanitizeText(payload?.reason, '', 40).toLowerCase();
+      const details = sanitizeText(payload?.details, '', 1_000);
+      if (!profileId || profileId === userId || !friendReportReasons.has(reason)) {
+        writeJson(response, 400, { error: 'Choose a rider and a valid report reason.' });
+        return;
+      }
+      const report = await persistence.createFriendReport({
+        id: randomUUID(),
+        reporterUserId: userId,
+        reportedUserId: profileId,
+        reason,
+        details,
+      });
+      if (!report) {
+        writeJson(response, 404, { error: 'That rider was not found.' });
+        return;
+      }
+      writeJson(response, 201, { report }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/friends/invites') {
+      if (request.method === 'GET') {
+        const invites = await persistence.listActiveFriendInvites(userId);
+        writeJson(response, 200, { invites }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (request.method === 'DELETE') {
+        const revoked = await persistence.revokeAllFriendInvites(userId);
+        writeJson(response, 200, { revoked }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const inviteToken = createSessionToken();
+      const expiresAt = new Date(Date.now() + friendInviteTtlMs).toISOString();
+      const saved = await persistence.createFriendInvite({
+        id: randomUUID(),
+        inviterUserId: userId,
+        tokenHash: tokenHash(inviteToken),
+        expiresAt,
+      });
+      const origin = publicRequestOrigin(request);
+      if (!saved || !origin) {
+        writeJson(response, 503, { error: 'TrackLab could not create the friend invitation.' });
+        return;
+      }
+      const inviteUrl = `${origin}/?friendInvite=${encodeURIComponent(inviteToken)}`;
+      const qrCodeUrl = `${origin}/api/friends/invites/qr.svg?token=${encodeURIComponent(inviteToken)}`;
+      writeJson(response, 201, {
+        invite: {
+          inviteId: saved.inviteId,
+          inviteUrl,
+          qrCodeUrl,
+          expiresAt: saved.expiresAt,
+        },
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/friends/invites/claim') {
+      if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const payload = await readJsonBody(request, 10_000);
+      const inviteToken = friendInviteToken(payload?.token);
+      if (!inviteToken) {
+        writeJson(response, 400, { error: 'The friend invitation link is invalid.' });
+        return;
+      }
+      const result = await persistence.claimFriendInvite(tokenHash(inviteToken), userId);
+      if (!result) {
+        writeJson(response, 409, { error: 'This friend invitation is invalid, expired, used, blocked, or belongs to you.' });
+        return;
+      }
+      notifyFriendProfile(result.profile?.profileId, {
+        event: 'invite-claimed',
+        profileId: userId,
+      });
+      notifyFriendGraphProfiles([userId, result.profile?.profileId]);
+      writeJson(response, 200, {
+        result: {
+          inviteId: result.inviteId,
+          connectedAt: result.connectedAt,
+          profile: publicFriendProfile(result.profile, 'friend'),
+        },
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const inviteRevokeMatch = /^\/api\/friends\/invites\/([a-zA-Z0-9._-]{6,180})$/.exec(requestUrl.pathname);
+    if (inviteRevokeMatch) {
+      if (request.method !== 'DELETE') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const revoked = await persistence.revokeFriendInvite(inviteRevokeMatch[1], userId);
+      if (!revoked) {
+        writeJson(response, 404, { error: 'That invitation is no longer available.' });
+        return;
+      }
+      writeJson(response, 200, { revoked: true }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const unfriendMatch = /^\/api\/friends\/([a-zA-Z0-9._-]{6,180})$/.exec(requestUrl.pathname);
+    if (unfriendMatch) {
+      if (request.method !== 'DELETE') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const friend = await persistence.removeAccountFriend(userId, unfriendMatch[1]);
+      if (!friend) {
+        writeJson(response, 404, { error: 'That friend connection was not found.' });
+        return;
+      }
+      notifyFriendProfile(friend.profileId, { event: 'friend-removed', profileId: userId });
+      notifyFriendGraphProfiles([userId, friend.profileId]);
+      writeJson(response, 200, { friend: publicFriendProfile(friend, 'none') }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    writeJson(response, 404, { error: 'Friends endpoint not found.' });
     return;
   }
 
@@ -6226,6 +7312,9 @@ async function serveStatic(request, response) {
           riderName: athlete.riderName,
           athleteName: athlete.athleteName,
           photoUrl: athlete.photoUrl,
+          profileId: member.status === 'claimed' && String(member.athleteProfileKey || '').startsWith('user:')
+            ? sanitizeAccountProfileId(String(member.athleteProfileKey).slice(5))
+            : '',
           bikeDeviceId,
           createdAt: now,
           maxExpiresAt,
@@ -7113,6 +8202,16 @@ async function serveStatic(request, response) {
       ]) : [[], null];
       const tabletHistoryProfileKeys = clubTabletHistoricalProfileKeys(clubState);
       const sprintConfiguration = requestedGhostSprintConfiguration(requestUrl.searchParams);
+      const focusedFriendGhost = {
+        ghostId: sanitizeText(
+          requestUrl.searchParams.get('friendGhostId') ?? requestUrl.searchParams.get('focusGhostId'),
+          '',
+          180,
+        ).replace(/[^a-zA-Z0-9:._-]/g, '-'),
+        profileId: sanitizeAccountProfileId(
+          requestUrl.searchParams.get('friendProfileId') ?? requestUrl.searchParams.get('focusProfileId'),
+        ),
+      };
       const ghosts = await persistence.loadGhostLaps(
         trackId,
         profileKey,
@@ -7120,6 +8219,7 @@ async function serveStatic(request, response) {
         50,
         sprintConfiguration,
         tabletHistoryProfileKeys,
+        focusedFriendGhost,
       );
       writeJson(response, 200, {
         trackId,
@@ -7385,6 +8485,8 @@ wss.on('connection', (socket, request) => {
     guestKey: authUser
       ? authProfileKey(authUser)
       : `club-tablet-session:${tabletSession.tokenHash.slice(0, 24)}`,
+    profileId: authUser?.id ?? tabletSession?.profileId ?? '',
+    blockedProfileIds: new Set(request.tracklabBlockedProfileIds ?? []),
     socket,
     name: sanitizeText(authUser?.displayName || tabletSession?.athleteName || tabletSession?.riderName, 'TrackLab Rider', 64),
     email: sanitizeEmail(authUser?.email),
@@ -7511,6 +8613,15 @@ server.on('upgrade', (request, socket, head) => {
         return;
       }
       request.tracklabClubTabletSession = tabletSession;
+      if (tabletSession.profileId) {
+        const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(tabletSession.profileId);
+        if (!Array.isArray(blockedProfileIds)) {
+          socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        request.tracklabBlockedProfileIds = blockedProfileIds;
+      }
     } else {
       const session = await currentAuthSession(request);
       if (!session?.user) {
@@ -7520,6 +8631,13 @@ server.on('upgrade', (request, socket, head) => {
       }
       request.tracklabClubLiveAccess = await loadActiveClubLiveAccess(session.user);
       request.tracklabAuthSession = session;
+      const blockedProfileIds = await persistence.loadBlockedAccountProfileIds(session.user.id);
+      if (!Array.isArray(blockedProfileIds)) {
+        socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      request.tracklabBlockedProfileIds = blockedProfileIds;
     }
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
@@ -7550,6 +8668,18 @@ const trainingHistoryStreamHeartbeat = setInterval(() => {
 }, 20_000);
 trainingHistoryStreamHeartbeat.unref();
 
+const friendEventStreamHeartbeat = setInterval(() => {
+  friendEventStreams.forEach((streams, profileId) => {
+    streams.forEach((response) => {
+      if (!writeFriendEventStream(response, ': keepalive\n\n')) {
+        removeFriendEventStream(profileId, response);
+        response.end();
+      }
+    });
+  });
+}, 20_000);
+friendEventStreamHeartbeat.unref();
+
 // Club bike access is intentionally short lived. Prune independently of HTTP
 // polling so a backgrounded athlete tab cannot retain a racer seat after it
 // stops renewing its selected club-bike assignment.
@@ -7575,6 +8705,7 @@ async function shutdown(signal) {
 
   clearInterval(websocketHeartbeat);
   clearInterval(trainingHistoryStreamHeartbeat);
+  clearInterval(friendEventStreamHeartbeat);
   clearInterval(clubLiveAccessMaintenance);
   clearInterval(persistenceMaintenance);
   voteTimers.forEach(clearTimeout);
@@ -7584,6 +8715,9 @@ async function shutdown(signal) {
 
   trainingHistoryStreams.forEach((streams) => streams.forEach((response) => response.end()));
   trainingHistoryStreams.clear();
+  friendEventStreams.forEach((streams) => streams.forEach((response) => response.end()));
+  friendEventStreams.clear();
+  friendEventStreamCount = 0;
 
   wss.clients.forEach((socket) => socket.close(1001, 'Server shutting down'));
   const forceExit = setTimeout(() => {

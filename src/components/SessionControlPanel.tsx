@@ -27,12 +27,22 @@ import {
   Zap,
   Volume2,
 } from 'lucide-react';
-import { formatDistanceMeters, formatDistanceRangeMeters } from '../units';
+import {
+  formatDistanceMeters,
+  formatDistanceRangeMeters,
+  formatSpeedFromKph,
+  speedUnitLabel,
+} from '../units';
 import type { PlacePredictionOption } from '../lib/googleMaps';
-import { distanceBetweenTrackPoints, routeLengthMeters } from '../lib/trackMapping';
+import {
+  distanceBetweenTrackPoints,
+  proSplitMinimumMph,
+  routeLengthMeters,
+} from '../lib/trackMapping';
 import {
   straightSprintAirSettings,
   straightSprintDistanceOptions,
+  straightSprintFeetToMeters,
   straightSprintMaximumFeet,
 } from '../lib/straightSprint';
 import type {
@@ -55,6 +65,14 @@ import type {
 
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
+
+export function formatStraightSprintFeet(feet: number, distanceUnit: DistanceUnit) {
+  return formatDistanceMeters(straightSprintFeetToMeters(feet), distanceUnit);
+}
+
+export function formatProSetMinimumSpeed(speedUnit: SpeedUnit) {
+  return `${formatSpeedFromKph(proSplitMinimumMph * 1.609344, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+}
 
 function splitBranchInteriorPoints(
   points: DraftTrackSplit['branchA'],
@@ -586,7 +604,7 @@ export function SessionControlPanel({
               onChange={(event) => onStraightSprintDistanceChange(Number(event.target.value))}
             >
               {straightSprintDistanceOptions.map((feet) => (
-                <option key={feet} value={feet}>{feet.toLocaleString()} ft sprint</option>
+                <option key={feet} value={feet}>{formatStraightSprintFeet(feet, distanceUnit)} sprint</option>
               ))}
             </select>
           </label>
@@ -652,23 +670,30 @@ export function SessionControlPanel({
           )}
 
           <div className={`mapping-hint${straightSprintMaximumRouteReady ? ' pedal-zone' : ''}`}>
-            <strong>{straightSprintMappedFeet.toLocaleString()} / {straightSprintMaximumFeet.toLocaleString()} ft mapped</strong>
+            <strong>
+              {formatStraightSprintFeet(straightSprintMappedFeet, distanceUnit)} /{' '}
+              {formatStraightSprintFeet(straightSprintMaximumFeet, distanceUnit)} mapped
+            </strong>
             <br />
             <span>
               {straightSprintMaximumRouteReady
                 ? 'Full drag-strip course ready. Only the selected distance finish line appears during the sprint.'
-                : `Map the straight course to ${straightSprintMaximumFeet.toLocaleString()} ft to unlock every sprint distance.`}
+                : `Map the straight course to ${formatStraightSprintFeet(straightSprintMaximumFeet, distanceUnit)} to unlock every sprint distance.`}
             </span>
           </div>
 
           {straightSprintMappedFeet < straightSprintDistanceFeet && (
             <p className="mapping-hint warning" role="status">
-              This route needs {(straightSprintDistanceFeet - straightSprintMappedFeet).toLocaleString()} more ft before the selected sprint can start.
+              This route needs {formatStraightSprintFeet(
+                straightSprintDistanceFeet - straightSprintMappedFeet,
+                distanceUnit,
+              )} more before the selected sprint can start.
             </p>
           )}
 
           <p className="panel-helper">
-            Records and ghost rankings below are filtered to exactly {straightSprintDistanceFeet.toLocaleString()} ft at Air {straightSprintAirSetting}.
+            Records and ghost rankings below are filtered to exactly{' '}
+            {formatStraightSprintFeet(straightSprintDistanceFeet, distanceUnit)} at Air {straightSprintAirSetting}.
           </p>
         </section>
       )}
@@ -717,7 +742,11 @@ export function SessionControlPanel({
 
             {showCustomRoutes && (
               <p className={`mapping-hint${(mappingMode ? draftLengthMeters / 0.3048 : straightSprintMappedFeet) >= straightSprintMaximumFeet ? ' pedal-zone' : ''}`}>
-                Drag-strip target: {Math.round(mappingMode ? draftLengthMeters / 0.3048 : straightSprintMappedFeet).toLocaleString()} / {straightSprintMaximumFeet.toLocaleString()} ft. Draw one continuous start-to-finish line; sprint finish markers are placed automatically.
+                Drag-strip target:{' '}
+                {mappingMode
+                  ? formatDistanceMeters(draftLengthMeters, distanceUnit)
+                  : formatStraightSprintFeet(straightSprintMappedFeet, distanceUnit)} /{' '}
+                {formatStraightSprintFeet(straightSprintMaximumFeet, distanceUnit)}. Draw one continuous start-to-finish line; sprint finish markers are placed automatically.
               </p>
             )}
 
@@ -903,7 +932,9 @@ export function SessionControlPanel({
                           disabled={draftZoneStartsAtRouteStart}
                         >
                           <strong>1. S split</strong>
-                          <small>{draftZoneStartsAtRouteStart ? 'Pinned at 0 ft' : 'Set first pin'}</small>
+                          <small>{draftZoneStartsAtRouteStart
+                            ? `Pinned at ${formatDistanceMeters(0, distanceUnit)}`
+                            : 'Set first pin'}</small>
                         </button>
                         <span className={draftZoneStartsAtRouteStart && !draftZoneEndsAtRouteFinish ? 'active' : ''}>
                           <strong>2. Blue route</strong>
@@ -1343,7 +1374,7 @@ export function SessionControlPanel({
               : !hasMappedRoute
               ? 'Map Route First'
               : showCustomRoutes && straightSprintMappedFeet < straightSprintDistanceFeet
-              ? `Map ${straightSprintDistanceFeet.toLocaleString()} ft First`
+              ? `Map ${formatStraightSprintFeet(straightSprintDistanceFeet, distanceUnit)} First`
               : activeBikeCount === 0
                 ? (demoMode ? 'Choose Demo Riders' : 'Connect Bikes First')
                 : startGateActive
@@ -1413,7 +1444,9 @@ export function SessionControlPanel({
               );
             })}
           </div>
-          <p className="split-choice-note">Pro Set opens at 26+ mph at the split; otherwise the rider stays on Amateur Line.</p>
+          <p className="split-choice-note">
+            Pro Set opens at {formatProSetMinimumSpeed(speedUnit)} or faster at the split; otherwise the rider stays on Amateur Line.
+          </p>
         </section>
       )}
 
