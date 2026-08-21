@@ -111,6 +111,57 @@ describe('database migration runner', () => {
     expect(clubTabletMigration?.statements.join('\n')).toContain('revoked_at');
   });
 
+  it('adds durable per-account display unit preferences', () => {
+    const unitPreferencesMigration = databaseMigrations().find((candidate) => candidate.version === 14);
+
+    expect(unitPreferencesMigration).toMatchObject({
+      version: 14,
+      name: 'save account display unit preferences',
+    });
+    expect(unitPreferencesMigration?.statements.join('\n')).toContain('unit_preferences JSONB');
+  });
+
+  it('adds a private authenticated friend graph with hashed expiring invitations', () => {
+    const friendsMigration = databaseMigrations().find((candidate) => candidate.version === 15);
+    const statements = friendsMigration?.statements.join('\n') ?? '';
+
+    expect(friendsMigration).toMatchObject({
+      version: 15,
+      name: 'add authenticated account friend network',
+    });
+    expect(statements).toContain('friend_discoverable BOOLEAN NOT NULL DEFAULT false');
+    expect(statements).toContain('account_friendships');
+    expect(statements).toContain('account_friend_requests');
+    expect(statements).toContain('friend_blocks');
+    expect(statements).toContain('friend_reports');
+    expect(statements).toContain('friend_invites');
+    expect(statements).toContain('token_hash TEXT UNIQUE NOT NULL');
+    expect(statements).toContain('official_friend_accounts');
+    expect(statements).toContain('reconciled_at TIMESTAMPTZ');
+    expect(statements).toContain('SET reconciled_at = now()');
+    expect(statements).toContain('idx_tracklab_auth_users_friend_handle_prefix');
+    expect(statements).toContain('idx_tracklab_auth_users_friend_name_prefix');
+    expect(statements).toContain('text_pattern_ops');
+    expect(statements).toContain("('club', 'preskiranch@gmail.com')");
+    expect(statements).toContain("('founder', 'rasheen25@gmail.com')");
+    expect(statements).toContain("ON CONFLICT (user_id_a, user_id_b) DO UPDATE SET source = 'official'");
+    expect(statements).toContain("WHERE existing.source = 'legacy'");
+    expect(statements).toContain('row_number() OVER');
+  });
+
+  it('indexes recent live ghosts for friend race previews', () => {
+    const migration = databaseMigrations().find((candidate) => candidate.version === 16);
+    const statements = migration?.statements.join('\n') ?? '';
+
+    expect(migration).toMatchObject({
+      version: 16,
+      name: 'index live ghosts for friend race discovery',
+    });
+    expect(statements).toContain('idx_tracklab_ghost_laps_live_owner_recent');
+    expect(statements).toContain('owner_key, saved_at DESC, finish_time_ms ASC, id');
+    expect(statements).toContain("WHERE race_source = 'live'");
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();
