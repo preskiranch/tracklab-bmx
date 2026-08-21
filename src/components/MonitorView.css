@@ -1,0 +1,138 @@
+.monitor-primary,
+.monitor-secondary {
+  display: grid;
+  gap: 10px;
+}
+
+.monitor-primary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.monitor-secondary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.monitor-secondary .monitor-heart-rate.live svg,
+.monitor-secondary .monitor-heart-rate.live span {
+  color: #d92d50;
+}
+
+.monitor-history-status {
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+.monitor-history-status.authorizing,
+.monitor-history-status.saving {
+  background: rgba(245, 177, 55, 0.16);
+  color: #8a5a00;
+}
+
+.monitor-history-status.saved {
+  background: rgba(72, 199, 116, 0.18);
+  color: #176a33;
+}
+
+.monitor-history-status.error {
+  background: rgba(227, 70, 70, 0.16);
+  color: #9d2525;
+}
+
+.monitor-card-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+  flex-direction: column;
+}
+
+.monitor-watch-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 27px;
+  padding: 4px 8px;
+  border: 1px solid rgba(217, 45, 80, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 233, 238, 0.9);
+  color: #a41f42;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.monitor-watch-button.waiting-athlete,
+.monitor-watch-button.waiting-watch,
+.monitor-watch-button.inviting {
+  border-color: rgba(170, 111, 0, 0.35);
+  background: rgba(255, 243, 214, 0.94);
+  color: #795000;
+}
+
+.monitor-watch-button.watch-ready {
+  border-color: rgba(32, 137, 64, 0.36);
+  background: rgba(227, 248, 232, 0.95);
+  color: #176a33;
+}
+
+.monitor-watch-button.error {
+  border-color: rgba(157, 37, 37, 0.35);
+  background: rgba(255, 231, 231, 0.95);
+  color: #962828;
+}
+
+.monitor-watch-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.monitor-studio-heart-rate-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483200;
+  display: grid;
+  place-items: center;
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  background: rgba(5, 12, 17, 0.72);
+  backdrop-filter: blur(7px);
+}
+
+.monitor-studio-heart-rate-dialog {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: 90dvh;
+  overflow: auto;
+  border-radius: 16px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+}
+
+.monitor-studio-heart-rate-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid #c8d2d9;
+  border-radius: 999px;
+  background: #fff;
+  color: #1d2933;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .monitor-watch-button span {
+    display: none;
+  }
+
+  .monitor-watch-button {
+    width: 28px;
+    padding: 4px;
+  }
+}

@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { PublicInfoPage } from '../../src/components/PublicInfoPage';
 import { resolvePublicPage } from '../../src/lib/publicPages';
 
 describe('public App Store pages', () => {
@@ -14,5 +17,20 @@ describe('public App Store pages', () => {
     expect(resolvePublicPage('/')).toBeNull();
     expect(resolvePublicPage('/privacy/account')).toBeNull();
     expect(resolvePublicPage('/supports')).toBeNull();
+  });
+
+  it('discloses optional private heart rate and separates club live consent', () => {
+    const markup = renderToStaticMarkup(createElement(PublicInfoPage, { page: 'privacy' }));
+
+    expect(markup).toContain('Optional Apple Watch heart rate');
+    expect(markup).toContain('continue using every training mode without granting Apple Health access');
+    expect(markup).toContain('does not sell heart-rate data');
+    expect(markup).toContain('trusted Watch Connect enrollment for one');
+    expect(markup).toContain('starts each four-hour studio connection with one');
+    expect(markup).toContain('club owner can disconnect studio');
+    expect(markup).toContain('does not automatically erase heart-rate samples already saved');
+    expect(markup).toContain('excluded from generic session JSON/CSV and public or club exports');
+    expect(markup).toContain('must not be enabled for a minor without the permission');
+    expect(markup).toContain('does not store personal health information in iCloud');
   });
 });

@@ -27,6 +27,14 @@ export type ClubTabletAthlete = {
   athleteName: string | null;
   photoUrl?: string;
   status: 'claimed' | 'unclaimed';
+  watchConnect?: ClubTabletWatchConnectStatus;
+};
+
+export type ClubTabletWatchConnectStatus = {
+  recognized: boolean;
+  state: 'not-set-up' | 'ready' | 'connected' | 'expired';
+  connectedUntil: number | null;
+  remainingMs: number;
 };
 
 export type ClubTabletRoster = {
@@ -101,12 +109,50 @@ function normalizeAthlete(value: unknown): ClubTabletAthlete | null {
   if (!studioRiderId || !riderName) return null;
   const athleteName = clubTabletText(candidate.athleteName, 80) || null;
   const photoUrl = normalizeRiderPhotoDataUrl(candidate.photoUrl);
+  const status = candidate.status === 'claimed' || candidate.claimed === true ? 'claimed' : 'unclaimed';
+  const watchConnect = status === 'claimed'
+    ? normalizeClubTabletWatchConnectStatus(candidate.watchConnect)
+    : null;
   return {
     studioRiderId,
     riderName,
     athleteName,
     ...(photoUrl ? { photoUrl } : {}),
-    status: candidate.status === 'claimed' || candidate.claimed === true ? 'claimed' : 'unclaimed',
+    status,
+    ...(watchConnect ? { watchConnect } : {}),
+  };
+}
+
+export function normalizeClubTabletWatchConnectStatus(value: unknown): ClubTabletWatchConnectStatus | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  const state = item.state === 'not-set-up'
+    || item.state === 'ready'
+    || item.state === 'connected'
+    || item.state === 'expired'
+    ? item.state
+    : null;
+  const connectedUntilValue = item.connectedUntil == null ? null : Number(item.connectedUntil);
+  const connectedUntil = connectedUntilValue == null
+    ? null
+    : Number.isFinite(connectedUntilValue) && connectedUntilValue >= 0
+      ? Math.round(connectedUntilValue)
+      : null;
+  const remainingValue = Number(item.remainingMs);
+  const remainingMs = Number.isFinite(remainingValue) && remainingValue >= 0
+    ? Math.round(remainingValue)
+    : null;
+  if (
+    !state
+    || remainingMs == null
+    || (state === 'connected' && connectedUntil == null)
+    || (state !== 'connected' && item.connectedUntil != null && connectedUntil == null)
+  ) return null;
+  return {
+    recognized: item.recognized === true,
+    state,
+    connectedUntil,
+    remainingMs,
   };
 }
 

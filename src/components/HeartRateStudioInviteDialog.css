@@ -1,0 +1,321 @@
+.heart-rate-studio-invite-backdrop {
+  align-items: center;
+  backdrop-filter: blur(6px);
+  background: rgba(8, 14, 23, .72);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 18px;
+  position: fixed;
+  z-index: 12500;
+}
+
+.heart-rate-studio-invite-dialog {
+  background: #fff;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 17px;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .4);
+  color: #101828;
+  display: grid;
+  gap: 15px;
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
+  padding: clamp(17px, 3vw, 24px);
+  width: min(590px, 100%);
+}
+
+.heart-rate-studio-invite-dialog > header {
+  align-items: flex-start;
+  display: grid;
+  gap: 11px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.heart-rate-studio-invite-dialog h2 {
+  font-size: clamp(21px, 4vw, 28px);
+  line-height: 1.08;
+  margin: 3px 0 0;
+}
+
+.heart-rate-studio-invite-dialog > header > button {
+  align-items: center;
+  background: #f5f6f7;
+  border: 1px solid #d9dde3;
+  border-radius: 10px;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.heart-rate-studio-invite-icon {
+  align-items: center;
+  background: #fff0f3;
+  border-radius: 11px;
+  color: #a72b48;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.heart-rate-studio-invite-dialog button {
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  touch-action: manipulation;
+}
+
+.heart-rate-studio-invite-dialog button:focus-visible,
+.heart-rate-studio-invite-consent input:focus-visible {
+  outline: 3px solid #245f96;
+  outline-offset: 2px;
+}
+
+.heart-rate-studio-invite-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.heart-rate-studio-invite-dialog button.primary {
+  align-items: center;
+  background: #a72b48;
+  border: 1px solid #a72b48;
+  border-radius: 10px;
+  color: #fff;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 46px;
+  padding: 10px 15px;
+}
+
+.heart-rate-studio-handoff,
+.heart-rate-studio-auth,
+.heart-rate-studio-error,
+.heart-rate-studio-loading {
+  background: #f8fafc;
+  border: 1px solid #d9e1ea;
+  border-radius: 13px;
+  padding: 15px;
+}
+
+.heart-rate-studio-handoff {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.heart-rate-studio-handoff > svg {
+  color: #245f96;
+}
+
+.heart-rate-studio-handoff p,
+.heart-rate-studio-auth p,
+.heart-rate-studio-error p {
+  color: #526275;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 5px 0 0;
+}
+
+.heart-rate-studio-handoff > button {
+  grid-column: 1 / -1;
+}
+
+.heart-rate-studio-auth,
+.heart-rate-studio-error {
+  display: grid;
+  gap: 12px;
+}
+
+.heart-rate-studio-error {
+  background: #fff8f6;
+  border-color: #f3c5bc;
+}
+
+.heart-rate-studio-error > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.heart-rate-studio-error > div > button:not(.primary) {
+  background: #fff;
+  border: 1px solid #d9c6c2;
+  border-radius: 10px;
+  min-height: 46px;
+  padding: 10px 15px;
+}
+
+.heart-rate-studio-loading {
+  align-items: center;
+  color: #425466;
+  display: flex;
+  font-weight: 750;
+  gap: 10px;
+}
+
+.heart-rate-studio-preview {
+  border: 1px solid #dce3ea;
+  border-radius: 13px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  overflow: hidden;
+}
+
+.heart-rate-studio-preview > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 13px;
+}
+
+.heart-rate-studio-preview > div:nth-child(even) {
+  border-left: 1px solid #e5e9ee;
+}
+
+.heart-rate-studio-preview > div:nth-child(n + 3) {
+  border-top: 1px solid #e5e9ee;
+}
+
+.heart-rate-studio-preview dt {
+  color: #667085;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.heart-rate-studio-preview dd {
+  font-weight: 850;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.heart-rate-studio-invite-consent {
+  background: #f7fbff;
+  border: 1px solid #cbddeb;
+  border-radius: 13px;
+  display: grid;
+  gap: 11px;
+  margin: 0;
+  padding: 14px;
+}
+
+.heart-rate-studio-invite-consent legend {
+  color: #183753;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 0 5px;
+}
+
+.heart-rate-studio-invite-consent > p {
+  color: #53677b;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.heart-rate-studio-invite-consent label {
+  align-items: flex-start;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.heart-rate-studio-invite-consent input {
+  accent-color: #a72b48;
+  flex: 0 0 auto;
+  height: 22px;
+  margin: 2px 0 0;
+  width: 22px;
+}
+
+.heart-rate-studio-invite-consent label span {
+  display: grid;
+  gap: 2px;
+}
+
+.heart-rate-studio-invite-consent label small {
+  color: #66798a;
+  line-height: 1.4;
+}
+
+.heart-rate-studio-connect {
+  width: 100%;
+}
+
+.heart-rate-studio-privacy {
+  align-items: flex-start;
+  background: #fff6f7;
+  border: 1px solid #f2d0d8;
+  border-radius: 12px;
+  color: #7a273c;
+  display: flex;
+  gap: 9px;
+  padding: 11px 13px;
+}
+
+.heart-rate-studio-privacy svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.heart-rate-studio-privacy p,
+.heart-rate-studio-message {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.heart-rate-studio-message {
+  color: #425466;
+  text-align: center;
+}
+
+.heart-rate-studio-invite-dialog .spin {
+  animation: heart-rate-studio-spin .85s linear infinite;
+}
+
+@keyframes heart-rate-studio-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 620px) {
+  .heart-rate-studio-invite-backdrop {
+    align-items: end;
+    padding: 8px;
+  }
+
+  .heart-rate-studio-invite-dialog {
+    border-radius: 16px 16px 8px 8px;
+    max-height: calc(100dvh - 16px);
+    padding: 16px;
+  }
+
+  .heart-rate-studio-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .heart-rate-studio-preview > div:nth-child(even) {
+    border-left: 0;
+  }
+
+  .heart-rate-studio-preview > div:nth-child(n + 2) {
+    border-top: 1px solid #e5e9ee;
+  }
+
+  .heart-rate-studio-error > div > button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heart-rate-studio-invite-dialog .spin {
+    animation: none;
+  }
+}

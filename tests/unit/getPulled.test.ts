@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addGetPulledSample,
+  addGetPulledSampleThroughEnd,
   createGetPulledAccumulator,
   getPulledDemoMetrics,
   getPulledMetrics,
@@ -10,6 +11,14 @@ import {
   normalizeGetPulledSeconds,
 } from '../../src/lib/getPulled';
 import { bmxSpeedKphFromCadence } from '../../src/game/bmxRollout';
+import {
+  bindGetPulledResultToSession,
+  authorizeGetPulledSessionArm,
+  createGetPulledSessionArm,
+  createGetPulledSessionCancellation,
+  getPulledSessionArmMatchesLiveBinding,
+  getPulledSessionStartFromArm,
+} from '../../src/components/GetPulledView';
 import type { BikeSample, PlayerSlot } from '../../src/types';
 
 const sample = (overrides: Partial<BikeSample> = {}): BikeSample => ({
@@ -34,6 +43,84 @@ const player: PlayerSlot = {
 };
 
 describe('Get Pulled test math and record categories', () => {
+  it('allocates the immutable athlete/bike arm before countdown and cancels that same ID', () => {
+    const arm = createGetPulledSessionArm(player, 6_000, 8, 10_000, () => 'arm-1');
+    expect(arm).toEqual({
+      sessionId: 'get-pulled:arm-1',
+      playerId: 1,
+      riderId: 'studio-rasheem',
+      riderName: 'Rasheem "The Machine" Hicks',
+      deviceId: 250_439_950,
+      armedAt: 10_000,
+      durationMs: 6_000,
+      airSetting: 8,
+    });
+    expect(Object.isFrozen(arm)).toBe(true);
+
+    const cancellation = createGetPulledSessionCancellation(
+      arm!,
+      'countdown',
+      'user-cancelled',
+      10_250,
+    );
+    expect(cancellation).toMatchObject({
+      sessionId: 'get-pulled:arm-1',
+      playerId: 1,
+      deviceId: 250_439_950,
+      phase: 'countdown',
+      reason: 'user-cancelled',
+      canceledAt: 10_250,
+    });
+  });
+
+  it('keeps an armed physical bike and rider valid when surviving bikes are reindexed', () => {
+    const armedPlayer = { ...player, id: 2 as const };
+    const arm = createGetPulledSessionArm(armedPlayer, 6_000, 8, 10_000, () => 'reindexed')!;
+    const reindexedPlayer = { ...player, id: 1 as const };
+
+    expect(getPulledSessionArmMatchesLiveBinding(
+      arm,
+      [reindexedPlayer],
+      { [player.deviceId!]: 'studio-rasheem' },
+      false,
+    )).toBe(true);
+    expect(arm.playerId).toBe(2);
+  });
+
+  it('invalidates an armed pull on a real device disconnect or rider reassignment', () => {
+    const arm = createGetPulledSessionArm(player, 6_000, 8, 10_000, () => 'changed-binding')!;
+
+    expect(getPulledSessionArmMatchesLiveBinding(
+      arm,
+      [],
+      { [player.deviceId!]: 'studio-rasheem' },
+      false,
+    )).toBe(false);
+    expect(getPulledSessionArmMatchesLiveBinding(
+      arm,
+      [player],
+      { [player.deviceId!]: 'studio-someone-else' },
+      false,
+    )).toBe(false);
+  });
+
+  it('waits for an asynchronous owner arm decision and can cancel before countdown', async () => {
+    const arm = createGetPulledSessionArm(player, 6_000, 8, 10_000, () => 'delayed-arm')!;
+    let decide!: (allowed: boolean) => void;
+    const decision = new Promise<boolean>((resolve) => { decide = resolve; });
+    let settled = false;
+    const pending = authorizeGetPulledSessionArm(arm, () => decision).then((allowed) => {
+      settled = true;
+      return allowed;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    decide(false);
+    await expect(pending).resolves.toBe(false);
+    await expect(authorizeGetPulledSessionArm(arm, () => undefined)).resolves.toBe(true);
+  });
+
   it('normalizes duration and Wattbike Air settings to supported limits', () => {
     expect(normalizeGetPulledSeconds(0)).toBe(1);
     expect(normalizeGetPulledSeconds(600)).toBe(300);
@@ -115,6 +202,16 @@ describe('Get Pulled test math and record categories', () => {
         speedKph: bmxSpeedKphFromCadence(90),
       },
     });
+
+    const arm = createGetPulledSessionArm(player, 6_000, 8, 10_000, () => 'first-watt');
+    const session = getPulledSessionStartFromArm(arm!, takeoff!.at);
+    expect(session).toMatchObject({
+      sessionId: 'get-pulled:first-watt',
+      armedAt: 10_000,
+      startedAt: 11_250,
+      deviceId: 250_439_950,
+      riderId: 'studio-rasheem',
+    });
   });
 
   it('records averages, peaks, distance, duration, and the exact Air category', () => {
@@ -135,5 +232,19 @@ describe('Get Pulled test math and record categories', () => {
       peakSpeedKph: 24,
     });
     expect(result.distanceMeters).toBeCloseTo(24 / 3.6 / 2, 5);
+
+    const arm = createGetPulledSessionArm(player, 6_000, 8, 500, () => 'history-relay-id');
+    const session = getPulledSessionStartFromArm(arm!, 1_000);
+    expect(bindGetPulledResultToSession(result, session).id).toBe('get-pulled:history-relay-id');
+  });
+
+  it('clamps a delayed timer sample to the official pull finish', () => {
+    let accumulator = createGetPulledAccumulator();
+    const metrics = { live: true, watts: 500, cadence: 90, speedKph: 36 };
+    accumulator = addGetPulledSample(accumulator, metrics, 1_900);
+    accumulator = addGetPulledSampleThroughEnd(accumulator, metrics, 2_075, 2_000);
+
+    expect(accumulator.lastAt).toBe(2_000);
+    expect(accumulator.distanceMeters).toBeCloseTo(1, 8);
   });
 });

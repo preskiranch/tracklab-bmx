@@ -4,6 +4,7 @@ import {
   Compass,
   ExternalLink,
   Flag,
+  HeartPulse,
   Landmark,
   LocateFixed,
   MapPin,
@@ -62,6 +63,9 @@ import {
 } from '../lib/exploreRecentRoutes';
 import {
   clearExploreRideCheckpoint,
+  createExploreRideSessionArm,
+  createExploreRideStudioBinding,
+  exploreRideSessionArmMatches,
   loadExploreRideCheckpoint,
   saveExploreRideCheckpoint,
   type ExploreRideCheckpoint,
@@ -90,7 +94,15 @@ import type {
   BikeSample,
   DistanceUnit,
   ExploreDistanceUnit,
+  ExploreRideAuthorizationReferences,
+  ExploreRideCompleteEvent,
   ExploreRider,
+  ExploreRideSessionArm,
+  ExploreRideSessionCancellation,
+  ExploreRideSessionClockEvent,
+  ExploreRideSessionRestored,
+  ExploreRideSessionStartEvent,
+  ExploreRideStudioBinding,
   ExploreRoute,
   MultiplayerExploreState,
   MultiplayerRoom,
@@ -106,6 +118,8 @@ import { ExploreRouteMapPicker } from './ExploreRouteMapPicker';
 import { ExploreStreetViewOverlay } from './ExploreStreetViewOverlay';
 import { RiderAvatar } from './RiderAvatar';
 import './ExploreView.css';
+import { heartRateReadingState } from './HeartRateMetric';
+import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
 
 type ExploreViewProps = {
   developerMode: boolean;
@@ -148,15 +162,22 @@ type ExploreViewProps = {
     riders: ExploreRider[];
     elapsedMs: number;
   } | null) => void;
-  onRideComplete?: (result: {
-    route: ExploreRoute;
-    riders: ExploreRider[];
-    startedAt: number;
-    endedAt: number;
-    durationMs: number;
-  }) => void;
+  onRideComplete?: (result: ExploreRideCompleteEvent) => void;
+  /** Called before a local studio ride starts; may reserve server IDs, never a token. */
+  onRideSessionArm?: (
+    session: ExploreRideSessionArm,
+  ) => ExploreRideAuthorizationReferences | null | void | Promise<ExploreRideAuthorizationReferences | null | void>;
+  /** Awaited before a restored ride resumes so the caller can recover its in-memory token. */
+  onRideSessionRestore?: (session: ExploreRideSessionRestored) => void | Promise<void>;
+  onRideSessionStart?: (session: ExploreRideSessionStartEvent) => void;
+  onRideSessionPause?: (session: ExploreRideSessionClockEvent) => void;
+  onRideSessionResume?: (session: ExploreRideSessionClockEvent) => void;
+  onRideSessionCancel?: (session: ExploreRideSessionCancellation) => void;
+  /** Legacy personal-session reset callback retained for existing callers. */
+  onRideSessionReset?: (sessionId: string) => void;
   fullscreen: boolean;
   onFullscreenChange: (enabled: boolean) => void;
+  heartRateByPlayer?: LiveHeartRateByPlayer;
 };
 
 export function formatExploreDemoRollout(distanceUnit: DistanceUnit) {
@@ -202,6 +223,13 @@ type ExploreLandmarkPopup = {
 
 type RecoveredExploreElevation = ExploreElevationProfile & {
   routeId: string;
+};
+
+type LocalExploreRideSession = {
+  sessionId: string;
+  startedAt: number;
+  arm?: ExploreRideSessionArm;
+  studioBinding?: ExploreRideStudioBinding;
 };
 
 function formatDuration(seconds: number) {
@@ -342,8 +370,16 @@ export function ExploreView({
   onDemoRideStatusChange,
   onLiveStateChange,
   onRideComplete,
+  onRideSessionArm,
+  onRideSessionRestore,
+  onRideSessionStart,
+  onRideSessionPause,
+  onRideSessionResume,
+  onRideSessionCancel,
+  onRideSessionReset,
   fullscreen,
   onFullscreenChange,
+  heartRateByPlayer = {},
 }: ExploreViewProps) {
   const recentProfileKey = accountProfileKey?.trim() || null;
   const initialCheckpointRef = useRef<ExploreRideCheckpoint | null>(
@@ -351,6 +387,22 @@ export function ExploreView({
   );
   const loadedCheckpointProfileRef = useRef(recentProfileKey);
   const pendingCheckpointRef = useRef<ExploreRideCheckpoint | null>(null);
+  const rideSessionRef = useRef<LocalExploreRideSession | null>(
+    initialCheckpointRef.current?.sessionId
+      ? {
+        sessionId: initialCheckpointRef.current.sessionId,
+        startedAt: initialCheckpointRef.current.startedAt
+          ?? Math.max(1, initialCheckpointRef.current.savedAt - initialCheckpointRef.current.elapsedMs),
+        ...(initialCheckpointRef.current.studioBinding
+          ? { studioBinding: initialCheckpointRef.current.studioBinding }
+          : {}),
+      }
+      : null,
+  );
+  const restoredBindingPendingRef = useRef(Boolean(initialCheckpointRef.current?.studioBinding));
+  const armingRideRef = useRef(false);
+  const armAttemptRevisionRef = useRef(0);
+  const pendingRideArmRef = useRef<ExploreRideSessionArm | null>(null);
   const initialRoute = initialCheckpointRef.current?.route ?? null;
   const [localRouteState, setLocalRouteState] = useState<{
     profileKey: string | null;
@@ -441,6 +493,7 @@ export function ExploreView({
         routeId: initialCheckpointRef.current.route.id,
         riders: initialCheckpointRef.current.riders,
         elapsedMs: initialCheckpointRef.current.elapsedMs,
+        activeClockSegments: initialCheckpointRef.current.activeClockSegments,
       }
       : null,
   });
@@ -452,6 +505,8 @@ export function ExploreView({
     start: startLocalRide,
   } = ride;
   latestRidersRef.current = ride.riders;
+  const latestPlayersRef = useRef(players);
+  latestPlayersRef.current = players;
   const latestClubLiveStateRef = useRef({
     status: ride.status,
     route,
@@ -474,6 +529,10 @@ export function ExploreView({
     riders: ride.riders,
     elapsedMs: ride.elapsedMs,
   };
+  const fullscreenChangeRef = useRef(onFullscreenChange);
+  fullscreenChangeRef.current = onFullscreenChange;
+  const rideSessionCancelRef = useRef(onRideSessionCancel);
+  rideSessionCancelRef.current = onRideSessionCancel;
 
   const roomHost = Boolean(currentRoom && currentRoom.hostId === currentUserId);
   const canChooseRoute = playMode === 'local' || roomHost;
@@ -528,6 +587,14 @@ export function ExploreView({
     const checkpoint = recentProfileKey && !demoMode
       ? loadExploreRideCheckpoint(recentProfileKey)
       : null;
+    rideSessionRef.current = checkpoint?.sessionId
+      ? {
+        sessionId: checkpoint.sessionId,
+        startedAt: checkpoint.startedAt ?? Math.max(1, checkpoint.savedAt - checkpoint.elapsedMs),
+        ...(checkpoint.studioBinding ? { studioBinding: checkpoint.studioBinding } : {}),
+      }
+      : null;
+    restoredBindingPendingRef.current = Boolean(checkpoint?.studioBinding);
     setLocalRouteState({
       profileKey: recentProfileKey,
       route: checkpoint?.route ?? null,
@@ -573,6 +640,7 @@ export function ExploreView({
       routeId: checkpoint.route.id,
       riders: checkpoint.riders,
       elapsedMs: checkpoint.elapsedMs,
+      activeClockSegments: checkpoint.activeClockSegments,
     })) {
       pendingCheckpointRef.current = null;
       setRouteMessage('Unfinished ride restored. Pair your Wattbike, then press Resume ride when ready.');
@@ -890,17 +958,38 @@ export function ExploreView({
         route: latest.route,
         riders: latest.riders,
         elapsedMs: latest.elapsedMs,
+        ...(rideSessionRef.current ? {
+          sessionId: rideSessionRef.current.sessionId,
+          startedAt: rideSessionRef.current.startedAt,
+        } : {}),
+        activeClockSegments: ride.activeClockSegments,
+        ...(rideSessionRef.current?.studioBinding
+          ? { studioBinding: rideSessionRef.current.studioBinding }
+          : {}),
       });
+    };
+    const pauseForBackground = () => {
+      const session = rideSessionRef.current;
+      const at = Date.now();
+      pauseLocalRide();
+      if (session && ride.status === 'riding') {
+        onRideSessionPause?.({
+          sessionId: session.sessionId,
+          at,
+          activeElapsedMs: latestCheckpointStateRef.current.elapsedMs,
+          ...(session.studioBinding ? { studioBinding: session.studioBinding } : {}),
+        });
+      }
     };
     const persistWhenHidden = () => {
       if (document.visibilityState === 'hidden') {
         persistCheckpoint();
-        pauseLocalRide();
+        pauseForBackground();
       }
     };
     const persistOnPageHide = () => {
       persistCheckpoint();
-      pauseLocalRide();
+      pauseForBackground();
     };
 
     persistCheckpoint();
@@ -910,7 +999,7 @@ export function ExploreView({
     const nativeAppStateListener = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       if (!isActive) {
         persistCheckpoint();
-        pauseLocalRide();
+        pauseForBackground();
       }
     }).catch(() => null);
     return () => {
@@ -919,7 +1008,7 @@ export function ExploreView({
       document.removeEventListener('visibilitychange', persistWhenHidden);
       void nativeAppStateListener.then((listener) => listener?.remove());
     };
-  }, [demoMode, pauseLocalRide, playMode, recentProfileKey, ride.status, route]);
+  }, [demoMode, onRideSessionPause, pauseLocalRide, playMode, recentProfileKey, ride.activeClockSegments, ride.status, route]);
 
   useEffect(() => {
     if (demoMode) {
@@ -942,12 +1031,24 @@ export function ExploreView({
 
   useEffect(() => () => {
     routeRequestRef.current += 1;
+    armAttemptRevisionRef.current += 1;
     stopBikeRaceAudio();
-    onFullscreenChange(false);
+    fullscreenChangeRef.current(false);
     if (scheduledStartTimerRef.current != null) {
       window.clearTimeout(scheduledStartTimerRef.current);
     }
-  }, [onFullscreenChange]);
+    const pendingArm = pendingRideArmRef.current;
+    if (pendingArm) {
+      rideSessionCancelRef.current?.({
+        sessionId: pendingArm.sessionId,
+        at: Date.now(),
+        activeElapsedMs: 0,
+        reason: 'view-closed',
+        arm: pendingArm,
+      });
+      pendingRideArmRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !currentRoom?.exploreSession) {
@@ -1006,13 +1107,21 @@ export function ExploreView({
         clearExploreRideCheckpoint(recentProfileKey);
       }
       if (route) {
+        const session = rideSessionRef.current ?? {
+          sessionId: `explore:${route.id}:${Math.round(Math.max(1, endedAt - ride.elapsedMs))}`,
+          startedAt: Math.max(1, endedAt - ride.elapsedMs),
+        };
         onRideComplete?.({
+          sessionId: session.sessionId,
           route,
           riders: ride.riders,
-          startedAt: Math.max(1, endedAt - ride.elapsedMs),
+          startedAt: session.startedAt,
           endedAt,
           durationMs: ride.elapsedMs,
+          activeClockSegments: ride.activeClockSegments,
+          ...(session.studioBinding ? { studioBinding: session.studioBinding } : {}),
         });
+        rideSessionRef.current = null;
       }
       if (fullscreen) {
         onFullscreenChange(false);
@@ -1026,6 +1135,7 @@ export function ExploreView({
     playMode,
     recentProfileKey,
     ride.elapsedMs,
+    ride.activeClockSegments,
     ride.riders,
     ride.status,
     route,
@@ -1309,20 +1419,129 @@ export function ExploreView({
     window.setTimeout(() => destinationInputRef.current?.focus(), 0);
   };
 
-  const startOrResume = () => {
+  const startOrResume = async () => {
     void primeBikeRaceAudio();
-    onFullscreenChange(true);
     if (playMode === 'multiplayer') {
       if (!roomHost) {
         return;
       }
+      onFullscreenChange(true);
       onControlSession(ride.status === 'paused' ? 'resume' : 'start');
       return;
     }
     if (ride.status === 'paused') {
+      const session = rideSessionRef.current ?? {
+        sessionId: `explore:${route?.id ?? 'route'}:${Date.now()}`,
+        startedAt: Math.max(1, Date.now() - ride.elapsedMs),
+      };
+      rideSessionRef.current = session;
+      if (session.studioBinding && restoredBindingPendingRef.current) {
+        if (!route) return;
+        try {
+          await onRideSessionRestore?.({
+            sessionId: session.sessionId,
+            route,
+            startedAt: session.startedAt,
+            elapsedMs: ride.elapsedMs,
+            activeClockSegments: ride.activeClockSegments,
+            studioBinding: session.studioBinding,
+          });
+          restoredBindingPendingRef.current = false;
+        } catch (error) {
+          setRouteStatus('error');
+          setRouteMessage(`This studio ride could not recover its authorization. ${error instanceof Error ? error.message : String(error)}`);
+          onFullscreenChange(false);
+          return;
+        }
+      }
+      const at = Date.now();
+      onFullscreenChange(true);
       resumeLocalRide();
+      onRideSessionResume?.({
+        sessionId: session.sessionId,
+        at,
+        activeElapsedMs: ride.elapsedMs,
+        ...(session.studioBinding ? { studioBinding: session.studioBinding } : {}),
+      });
     } else {
-      startLocalRide();
+      if (!route || armingRideRef.current) return;
+      const arm = createExploreRideSessionArm(route, ride.riders, players, Date.now());
+      if (!arm) {
+        setRouteStatus('error');
+        setRouteMessage('Every Explore athlete needs one connected Wattbike before this ride can start.');
+        onFullscreenChange(false);
+        return;
+      }
+      armingRideRef.current = true;
+      const armAttemptRevision = armAttemptRevisionRef.current + 1;
+      armAttemptRevisionRef.current = armAttemptRevision;
+      pendingRideArmRef.current = arm;
+      let studioBinding: ExploreRideStudioBinding | undefined;
+      try {
+        if (!demoMode && onRideSessionArm) {
+          const references = await onRideSessionArm(arm);
+          if (references != null) {
+            const binding = createExploreRideStudioBinding(arm, references);
+            if (!binding) throw new Error('The returned studio authorization did not match the armed bikes.');
+            studioBinding = binding;
+          }
+        }
+        if (armAttemptRevisionRef.current !== armAttemptRevision) return;
+        if (!exploreRideSessionArmMatches(
+          arm,
+          latestCheckpointStateRef.current.route,
+          latestRidersRef.current,
+          latestPlayersRef.current,
+        )) {
+          onRideSessionCancel?.({
+            sessionId: arm.sessionId,
+            at: Date.now(),
+            activeElapsedMs: 0,
+            reason: 'binding-changed',
+            arm,
+            ...(studioBinding ? { studioBinding } : {}),
+          });
+          setRouteStatus('error');
+          setRouteMessage('An athlete or Wattbike assignment changed while this ride was arming. Review the assignments and start again.');
+          onFullscreenChange(false);
+          return;
+        }
+        const startedAt = Date.now();
+        if (!startLocalRide(startedAt)) return;
+        const session: LocalExploreRideSession = {
+          sessionId: arm.sessionId,
+          startedAt,
+          arm,
+          ...(studioBinding ? { studioBinding } : {}),
+        };
+        rideSessionRef.current = session;
+        restoredBindingPendingRef.current = false;
+        onFullscreenChange(true);
+        onRideSessionStart?.({
+          ...arm,
+          riders: ride.riders,
+          startedAt,
+          ...(studioBinding ? { studioBinding } : {}),
+        });
+      } catch (error) {
+        if (armAttemptRevisionRef.current !== armAttemptRevision) return;
+        onRideSessionCancel?.({
+          sessionId: arm.sessionId,
+          at: Date.now(),
+          activeElapsedMs: 0,
+          reason: 'authorization-failed',
+          arm,
+          ...(studioBinding ? { studioBinding } : {}),
+        });
+        setRouteStatus('error');
+        setRouteMessage(`This studio ride could not be armed. ${error instanceof Error ? error.message : String(error)}`);
+        onFullscreenChange(false);
+      } finally {
+        if (armAttemptRevisionRef.current === armAttemptRevision) {
+          armingRideRef.current = false;
+          pendingRideArmRef.current = null;
+        }
+      }
     }
   };
 
@@ -1332,7 +1551,17 @@ export function ExploreView({
         onControlSession('pause');
       }
     } else {
+      const session = rideSessionRef.current;
+      const at = Date.now();
       pauseLocalRide();
+      if (session && ride.status === 'riding') {
+        onRideSessionPause?.({
+          sessionId: session.sessionId,
+          at,
+          activeElapsedMs: ride.elapsedMs,
+          ...(session.studioBinding ? { studioBinding: session.studioBinding } : {}),
+        });
+      }
     }
   };
 
@@ -1343,6 +1572,32 @@ export function ExploreView({
         onControlSession('reset');
       }
     } else {
+      armAttemptRevisionRef.current += 1;
+      armingRideRef.current = false;
+      if (pendingRideArmRef.current) {
+        onRideSessionCancel?.({
+          sessionId: pendingRideArmRef.current.sessionId,
+          at: Date.now(),
+          activeElapsedMs: 0,
+          reason: 'reset',
+          arm: pendingRideArmRef.current,
+        });
+        pendingRideArmRef.current = null;
+      }
+      if (rideSessionRef.current) {
+        onRideSessionCancel?.({
+          sessionId: rideSessionRef.current.sessionId,
+          at: Date.now(),
+          activeElapsedMs: ride.elapsedMs,
+          reason: 'reset',
+          ...(rideSessionRef.current.studioBinding
+            ? { studioBinding: rideSessionRef.current.studioBinding }
+            : {}),
+        });
+        onRideSessionReset?.(rideSessionRef.current.sessionId);
+        rideSessionRef.current = null;
+      }
+      restoredBindingPendingRef.current = false;
       if (recentProfileKey) {
         clearExploreRideCheckpoint(recentProfileKey);
       }
@@ -2224,6 +2479,10 @@ export function ExploreView({
                   const gradeStatus = elevationRecoveryStatus === 'loading'
                     ? 'Grade loading…'
                     : 'Grade unavailable · Retrying every 15s';
+                  const heartRate = heartRateReadingState(
+                    heartRateByPlayer[rider.playerId]?.bpm,
+                    heartRateByPlayer[rider.playerId]?.recordedAt,
+                  );
                   return (
                     <article style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
                       {rider.photoUrl
@@ -2246,7 +2505,12 @@ export function ExploreView({
                           )}{' '}
                           {speedUnitLabel(speedUnit)}
                         </span>
+                        <span className={`explore-heart-rate ${heartRate.state}`}>
+                          <HeartPulse size={14} aria-hidden="true" />
+                          {heartRate.bpm == null ? heartRate.detail : `${heartRate.bpm} BPM`}
+                        </span>
                         <span
+                          className="explore-air-status"
                           role="status"
                           aria-live="polite"
                           aria-label={`Recommended Wattbike air setting ${recommendedAirSetting}. ${airInstruction}.`}
@@ -2254,17 +2518,22 @@ export function ExploreView({
                           <strong style={{ color: rider.accent, fontSize: 16 }}>
                             AIR {recommendedAirSetting}
                           </strong>
-                          {' · '}
-                          {airInstruction}
+                          <span className="explore-air-instruction">
+                            {' · '}
+                            {airInstruction}
+                          </span>
                         </span>
                         {elevationMeters != null ? (
-                          <span aria-label={`${slopeLabel}, grade ${formatExploreGrade(gradePercent)}`}>
+                          <span
+                            className="explore-elevation-status"
+                            aria-label={`${slopeLabel}, grade ${formatExploreGrade(gradePercent)}`}
+                          >
                             {formatExploreElevation(elevationMeters, exploreDistanceUnit)}
                             {' · '}
                             {formatExploreGrade(gradePercent)} {slopeLabel}
                           </span>
                         ) : (
-                          <span aria-label={gradeStatus}>{gradeStatus}</span>
+                          <span className="explore-elevation-status" aria-label={gradeStatus}>{gradeStatus}</span>
                         )}
                       </div>
                       <b>{route.distanceMeters > 0 ? Math.round(rider.distanceMeters / route.distanceMeters * 100) : 0}%</b>

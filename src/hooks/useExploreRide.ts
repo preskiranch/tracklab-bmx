@@ -19,6 +19,7 @@ import type {
   ExploreRoute,
   PlayerSlot,
 } from '../types';
+import type { HeartRateActiveClockSegment } from '../lib/heartRate';
 
 export type ExploreRideStatus = 'ready' | 'riding' | 'paused' | 'finished';
 
@@ -35,6 +36,7 @@ export type ExploreRideRestoreState = {
   routeId: string;
   riders: ExploreRider[];
   elapsedMs: number;
+  activeClockSegments?: HeartRateActiveClockSegment[];
 };
 
 const exploreSampleFreshMs = 3_000;
@@ -69,8 +71,10 @@ function initialExploreRiders(
   }));
 }
 
-function restoredExploreRiders(riders: ExploreRider[]) {
-  const at = Date.now();
+export function restoreExploreRidersPaused(
+  riders: ExploreRider[],
+  at = Date.now(),
+) {
   return riders.map((rider) => ({
     ...rider,
     // A reopened app always restores safely paused. Do not let momentum or a
@@ -79,7 +83,10 @@ function restoredExploreRiders(riders: ExploreRider[]) {
     cadence: 0,
     watts: 0,
     signal: 0,
-    finishedAt: null,
+    // A finished rider's clock is immutable. Clearing this would make a mixed
+    // group finish that rider again after resume and widen their exact saved
+    // heart-rate window to include app downtime.
+    finishedAt: rider.finishedAt,
     at,
   }));
 }
@@ -102,7 +109,7 @@ export function useExploreRide({
   );
   const [riders, setRiders] = useState<ExploreRider[]>(() => (
     initialRestoreRef.current
-      ? restoredExploreRiders(initialRestoreRef.current.riders)
+      ? restoreExploreRidersPaused(initialRestoreRef.current.riders)
       : initialExploreRiders(clientId, players, route)
   ));
   const statusRef = useRef(status);
@@ -114,6 +121,9 @@ export function useExploreRide({
   const frameRef = useRef(0);
   const lastFrameRef = useRef(0);
   const activeElapsedMsRef = useRef(initialRestoreRef.current?.elapsedMs ?? 0);
+  const initialClockSegments = initialRestoreRef.current?.activeClockSegments ?? [];
+  const [activeClockSegments, setActiveClockSegments] = useState<HeartRateActiveClockSegment[]>(initialClockSegments);
+  const activeClockSegmentsRef = useRef<HeartRateActiveClockSegment[]>(initialClockSegments);
   const rideScopeRef = useRef(`${clientId}:${route?.id ?? ''}`);
 
   const playerSignature = useMemo(
@@ -131,6 +141,8 @@ export function useExploreRide({
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = 0;
     activeElapsedMsRef.current = 0;
+    activeClockSegmentsRef.current = [];
+    setActiveClockSegments([]);
     ridePlayersRef.current = playersRef.current;
     setRiders(initialExploreRiders(clientId, ridePlayersRef.current, routeRef.current));
     setStatus('ready');
@@ -143,6 +155,13 @@ export function useExploreRide({
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = performance.now();
     activeElapsedMsRef.current = Math.max(0, Date.now() - startedAt);
+    const segment: HeartRateActiveClockSegment = {
+      startedAt,
+      endedAt: null,
+      activeElapsedAtStartMs: 0,
+    };
+    activeClockSegmentsRef.current = [segment];
+    setActiveClockSegments([segment]);
     ridePlayersRef.current = playersRef.current;
     setRiders(initialExploreRiders(clientId, ridePlayersRef.current, routeRef.current));
     setStatus('riding');
@@ -151,12 +170,27 @@ export function useExploreRide({
 
   const pause = useCallback(() => {
     if (statusRef.current === 'riding') {
+      const pausedAt = Date.now();
+      const next = activeClockSegmentsRef.current.map((segment, index, segments) => (
+        index === segments.length - 1 && segment.endedAt == null
+          ? { ...segment, endedAt: Math.max(segment.startedAt, pausedAt) }
+          : segment
+      ));
+      activeClockSegmentsRef.current = next;
+      setActiveClockSegments(next);
       setStatus('paused');
     }
   }, []);
 
   const resume = useCallback(() => {
     if (statusRef.current === 'paused') {
+      const next = [...activeClockSegmentsRef.current, {
+        startedAt: Date.now(),
+        endedAt: null,
+        activeElapsedAtStartMs: Math.max(0, activeElapsedMsRef.current),
+      }];
+      activeClockSegmentsRef.current = next;
+      setActiveClockSegments(next);
       lastFrameRef.current = performance.now();
       ridePlayersRef.current = playersRef.current;
       setStatus('riding');
@@ -174,8 +208,16 @@ export function useExploreRide({
     window.cancelAnimationFrame(frameRef.current);
     lastFrameRef.current = 0;
     activeElapsedMsRef.current = Math.max(0, snapshot.elapsedMs);
+    const restoredSegments = (snapshot.activeClockSegments ?? []).map((segment) => ({
+      ...segment,
+      // A restored ride is always paused. Closing an unexpectedly open segment
+      // prevents app downtime from counting as active training time.
+      endedAt: segment.endedAt ?? Date.now(),
+    }));
+    activeClockSegmentsRef.current = restoredSegments;
+    setActiveClockSegments(restoredSegments);
     ridePlayersRef.current = playersRef.current;
-    setRiders(restoredExploreRiders(snapshot.riders));
+    setRiders(restoreExploreRidersPaused(snapshot.riders));
     setStatus('paused');
     return true;
   }, []);
@@ -287,12 +329,21 @@ export function useExploreRide({
       && riders.every((rider) => rider.distanceMeters >= route.distanceMeters - 0.01)
     ) {
       setStatus('finished');
+      const finishedAt = Date.now();
+      const next = activeClockSegmentsRef.current.map((segment, index, segments) => (
+        index === segments.length - 1 && segment.endedAt == null
+          ? { ...segment, endedAt: Math.max(segment.startedAt, finishedAt) }
+          : segment
+      ));
+      activeClockSegmentsRef.current = next;
+      setActiveClockSegments(next);
     }
   }, [riders, route, status]);
 
   const elapsedMs = activeElapsedMsRef.current;
 
   return {
+    activeClockSegments,
     elapsedMs,
     pause,
     reset,

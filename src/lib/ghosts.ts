@@ -306,6 +306,19 @@ export function buildGhostLapFromRace(options: {
   return sanitizeGhostLap(ghost);
 }
 
+export function legacyRacePersistencePlan(
+  summaryCount: number,
+  ghostCount: number,
+) {
+  const hasHistory = Number.isFinite(summaryCount) && summaryCount > 0;
+  return {
+    saveHistory: hasHistory,
+    // A DNF or an otherwise incomplete trace cannot produce a playback ghost,
+    // but its official race/training result still belongs in rider history.
+    saveGhosts: hasHistory && Number.isFinite(ghostCount) && ghostCount > 0,
+  } as const;
+}
+
 export function ghostsForTrackRoute(
   ghosts: GhostLap[],
   trackId: string,

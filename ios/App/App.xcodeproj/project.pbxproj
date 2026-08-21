@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01A760281BE89118EA4F4E82 /* HeartRateCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FADA3E08274186CD24A607E4 /* HeartRateCoordinator.swift */; };
+		0A38E3B12529F7E8191907C4 /* HeartRateRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788B50A2054B8A53BE8EB148 /* HeartRateRelay.swift */; };
+		119F6296445E5EAE15F4F3A2 /* HeartRateWireSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F94477117DBD80391E89BBC /* HeartRateWireSample.swift */; };
+		2ADDC18408522981A3D223C7 /* WatchWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAD302908F83577ABF692E44 /* WatchWorkoutView.swift */; };
+		2CC92E203A233482EC260752 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = E9A4380DA630675844059865 /* PrivacyInfo.xcprivacy */; };
+		2DF832488F25B91F1CE96B0D /* WatchWorkoutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD69F55B0BCF55F1EA990B5 /* WatchWorkoutManager.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
@@ -15,10 +21,44 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		66284C2A5185DD5ABA831290 /* HeartRateWireSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F94477117DBD80391E89BBC /* HeartRateWireSample.swift */; };
+		7C1D2E9B04F05121D1B1DE1C /* TrackLabBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B57481343D689AF7667233D7 /* TrackLabBridgeViewController.swift */; };
+		83D8517E6E26FE0B5895AAF6 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7460E4B30C94CA2C2B590956 /* PrivacyInfo.xcprivacy */; };
+		8E791E0166979867169F58C7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		A3CA08D7173DB930EF642142 /* HeartRatePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F007C69B26274CBC3949C03A /* HeartRatePlugin.swift */; };
+		B14DA05E67A74D38B70DA581 /* WatchConnectSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30ACAEF452E45D8A8D5D46D /* WatchConnectSession.swift */; };
+		D1873E16AA122B3C72AA5148 /* TrackLabWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04176BF8C892D4CA5BA627D6 /* TrackLabWatchApp.swift */; };
+		FAC30C7438B083BF3F9CD616 /* TrackLab Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 71DBE0594E337BEF31CC810F /* TrackLab Watch App.app */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		F78999D7C0CB14E6AB9030D2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 650F2B380F7E0C26408E9D9C;
+			remoteInfo = "TrackLab Watch App";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DA3B1243A3E8F76D1790C0BF /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				FAC30C7438B083BF3F9CD616 /* TrackLab Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		04176BF8C892D4CA5BA627D6 /* TrackLabWatchApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrackLabWatchApp.swift; sourceTree = "<group>"; };
+		1AD69F55B0BCF55F1EA990B5 /* WatchWorkoutManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchWorkoutManager.swift; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -28,8 +68,20 @@
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+		6F94477117DBD80391E89BBC /* HeartRateWireSample.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartRateWireSample.swift; sourceTree = "<group>"; };
+		71B4DE8FB707304DB2490125 /* TrackLabWatch.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = TrackLabWatch.entitlements; sourceTree = "<group>"; };
+		71DBE0594E337BEF31CC810F /* TrackLab Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "TrackLab Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7460E4B30C94CA2C2B590956 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		788B50A2054B8A53BE8EB148 /* HeartRateRelay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartRateRelay.swift; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		B57481343D689AF7667233D7 /* TrackLabBridgeViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrackLabBridgeViewController.swift; sourceTree = "<group>"; };
+		CAD302908F83577ABF692E44 /* WatchWorkoutView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchWorkoutView.swift; sourceTree = "<group>"; };
+		C30ACAEF452E45D8A8D5D46D /* WatchConnectSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchConnectSession.swift; sourceTree = "<group>"; };
+		D4750F6CE8882F23509585E7 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		E9A4380DA630675844059865 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F007C69B26274CBC3949C03A /* HeartRatePlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartRatePlugin.swift; sourceTree = "<group>"; };
+		FADA3E08274186CD24A607E4 /* HeartRateCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HeartRateCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -41,15 +93,33 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		50B81857035C2A046974D4D1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		07FDD2F1F55B83F5837F5D7D /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				6F94477117DBD80391E89BBC /* HeartRateWireSample.swift */,
+			);
+			name = Shared;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		504EC2FB1FED79650016851F = {
 			isa = PBXGroup;
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
 				504EC3051FED79650016851F /* Products */,
+				07FDD2F1F55B83F5837F5D7D /* Shared */,
+				C29407A0E40FA1BA832BDF2D /* TrackLabWatch */,
 			);
 			sourceTree = "<group>";
 		};
@@ -57,6 +127,7 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				71DBE0594E337BEF31CC810F /* TrackLab Watch App.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -73,8 +144,28 @@
 				504EC3131FED79650016851F /* Info.plist */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
+				FADA3E08274186CD24A607E4 /* HeartRateCoordinator.swift */,
+				788B50A2054B8A53BE8EB148 /* HeartRateRelay.swift */,
+				F007C69B26274CBC3949C03A /* HeartRatePlugin.swift */,
+				C30ACAEF452E45D8A8D5D46D /* WatchConnectSession.swift */,
+				B57481343D689AF7667233D7 /* TrackLabBridgeViewController.swift */,
+				E9A4380DA630675844059865 /* PrivacyInfo.xcprivacy */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		C29407A0E40FA1BA832BDF2D /* TrackLabWatch */ = {
+			isa = PBXGroup;
+			children = (
+				04176BF8C892D4CA5BA627D6 /* TrackLabWatchApp.swift */,
+				1AD69F55B0BCF55F1EA990B5 /* WatchWorkoutManager.swift */,
+				CAD302908F83577ABF692E44 /* WatchWorkoutView.swift */,
+				7460E4B30C94CA2C2B590956 /* PrivacyInfo.xcprivacy */,
+				D4750F6CE8882F23509585E7 /* Info.plist */,
+				71B4DE8FB707304DB2490125 /* TrackLabWatch.entitlements */,
+			);
+			name = TrackLabWatch;
+			path = TrackLabWatch;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -87,10 +178,12 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				DA3B1243A3E8F76D1790C0BF /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				8904CB8872E802528EA6C0A2 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -98,6 +191,23 @@
 			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		650F2B380F7E0C26408E9D9C /* TrackLab Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 725C2895AE08489D9022A268 /* Build configuration list for PBXNativeTarget "TrackLab Watch App" */;
+			buildPhases = (
+				D0473CF3C821AE0F09D2DB04 /* Sources */,
+				50B81857035C2A046974D4D1 /* Frameworks */,
+				CA8BF039C87499719002C5E1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "TrackLab Watch App";
+			productName = "TrackLab Watch App";
+			productReference = 71DBE0594E337BEF31CC810F /* TrackLab Watch App.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -113,6 +223,24 @@
 						CreatedOnToolsVersion = 9.2;
 						LastSwiftMigration = 1100;
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.AssociatedDomains = {
+								enabled = 1;
+							};
+							com.apple.HealthKit = {
+								enabled = 1;
+							};
+						};
+					};
+					650F2B380F7E0C26408E9D9C = {
+						CreatedOnToolsVersion = 26.0;
+						DevelopmentTeam = DU7FUS4N34;
+						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.HealthKit = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
@@ -133,6 +261,7 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				650F2B380F7E0C26408E9D9C /* TrackLab Watch App */,
 			);
 		};
 /* End PBXProject section */
@@ -148,6 +277,16 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
+				2CC92E203A233482EC260752 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CA8BF039C87499719002C5E1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8E791E0166979867169F58C7 /* Assets.xcassets in Resources */,
+				83D8517E6E26FE0B5895AAF6 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -160,10 +299,36 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				01A760281BE89118EA4F4E82 /* HeartRateCoordinator.swift in Sources */,
+				0A38E3B12529F7E8191907C4 /* HeartRateRelay.swift in Sources */,
+				A3CA08D7173DB930EF642142 /* HeartRatePlugin.swift in Sources */,
+				B14DA05E67A74D38B70DA581 /* WatchConnectSession.swift in Sources */,
+				7C1D2E9B04F05121D1B1DE1C /* TrackLabBridgeViewController.swift in Sources */,
+				119F6296445E5EAE15F4F3A2 /* HeartRateWireSample.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0473CF3C821AE0F09D2DB04 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D1873E16AA122B3C72AA5148 /* TrackLabWatchApp.swift in Sources */,
+				2DF832488F25B91F1CE96B0D /* WatchWorkoutManager.swift in Sources */,
+				2ADDC18408522981A3D223C7 /* WatchWorkoutView.swift in Sources */,
+				66284C2A5185DD5ABA831290 /* HeartRateWireSample.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8904CB8872E802528EA6C0A2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "TrackLab Watch App";
+			target = 650F2B380F7E0C26408E9D9C /* TrackLab Watch App */;
+			targetProxy = F78999D7C0CB14E6AB9030D2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
@@ -185,6 +350,51 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		44330AD6E30D0BE286C73AA0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = TrackLabWatch/TrackLabWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = DU7FUS4N34;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TrackLabWatch/Info.plist;
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.preskilranch.tracklabbmx.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		497101A96E4E92E672D7B740 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = TrackLabWatch/TrackLabWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 4;
+				DEVELOPMENT_TEAM = DU7FUS4N34;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TrackLabWatch/Info.plist;
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.preskilranch.tracklabbmx.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
@@ -299,8 +509,9 @@
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = DU7FUS4N34;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -308,7 +519,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = com.preskilranch.tracklabbmx;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -322,8 +533,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = DU7FUS4N34;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -331,7 +543,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.preskilranch.tracklabbmx;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
@@ -357,6 +569,15 @@
 			buildConfigurations = (
 				504EC3171FED79650016851F /* Debug */,
 				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		725C2895AE08489D9022A268 /* Build configuration list for PBXNativeTarget "TrackLab Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				497101A96E4E92E672D7B740 /* Release */,
+				44330AD6E30D0BE286C73AA0 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

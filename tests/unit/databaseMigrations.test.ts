@@ -174,6 +174,140 @@ describe('database migration runner', () => {
     expect(statements).toContain('gen_random_uuid()');
   });
 
+  it('stores private heart-rate relay data outside public training and ghost payloads', () => {
+    const heartRateMigration = databaseMigrations().find((candidate) => candidate.version === 18);
+    const statements = heartRateMigration?.statements.join('\n') ?? '';
+
+    expect(heartRateMigration).toMatchObject({
+      version: 18,
+      name: 'store private apple watch heart rate sessions',
+    });
+    expect(statements).toContain('heart_rate_studio_invitations');
+    expect(statements).toContain('heart_rate_pairings');
+    expect(statements).toContain('pair_code_hash TEXT UNIQUE NOT NULL');
+    expect(statements).toContain('ingest_token_hash TEXT UNIQUE');
+    expect(statements).toContain('live_studio_consent BOOLEAN NOT NULL DEFAULT false');
+    expect(statements).toContain('heart_rate_streams');
+    expect(statements).toContain("zone_summaries JSONB NOT NULL DEFAULT '[]'::jsonb");
+    expect(statements).toContain('heart_rate_samples');
+    expect(statements).toContain('PRIMARY KEY (stream_id, sequence)');
+    expect(statements).toContain('ON DELETE CASCADE');
+    expect(statements).toContain('monitor-sprint');
+  });
+
+  it('binds owner Monitor View saves to one claimed athlete, bike, and session token', () => {
+    const monitorMigration = databaseMigrations().find((candidate) => candidate.version === 19);
+    const statements = monitorMigration?.statements.join('\n') ?? '';
+
+    expect(monitorMigration).toMatchObject({
+      version: 19,
+      name: 'authorize owner monitor sprints for claimed club athletes',
+    });
+    expect(statements).toContain('club_monitor_sprint_authorizations');
+    expect(statements).toContain('athlete_profile_key TEXT NOT NULL');
+    expect(statements).toContain('bike_device_id TEXT NOT NULL');
+    expect(statements).toContain('token_hash TEXT UNIQUE NOT NULL');
+    expect(statements).toContain('UNIQUE (club_id, studio_rider_id, session_id)');
+    expect(statements).toContain('consumed_at TIMESTAMPTZ');
+    expect(statements).toContain('revoked_at TIMESTAMPTZ');
+    expect(statements).toContain('REFERENCES tracklab.club_members');
+    expect(statements).toContain('ON DELETE CASCADE');
+  });
+
+  it('arms Monitor sprints before first watt and segments continuous studio heart rate', () => {
+    const studioBlockMigration = databaseMigrations().find((candidate) => candidate.version === 20);
+    const statements = studioBlockMigration?.statements.join('\n') ?? '';
+
+    expect(studioBlockMigration).toMatchObject({
+      version: 20,
+      name: 'arm monitor sprints and segment continuous studio heart rate',
+    });
+    expect(statements).toContain('armed_at TIMESTAMPTZ');
+    expect(statements).toContain('activated_at TIMESTAMPTZ');
+    expect(statements).toContain('ALTER COLUMN started_at DROP NOT NULL');
+    expect(statements).toContain("relay_scope IN ('session', 'studio-block')");
+    expect(statements).toContain('studio_block_stopped_at TIMESTAMPTZ');
+    expect(statements).toContain('heart_rate_training_segments');
+    expect(statements).toContain('heart_rate_training_segment_bindings');
+    expect(statements).toContain("zone_windows JSONB NOT NULL DEFAULT '[]'::jsonb");
+    expect(statements).toContain('expires_at TIMESTAMPTZ NOT NULL');
+    expect(statements).toContain('UNIQUE (training_profile_key, training_session_id)');
+    expect(statements).toContain('studio_visible BOOLEAN NOT NULL DEFAULT false');
+    expect(statements).toContain('finalized_at TIMESTAMPTZ');
+    expect(statements).toContain('REFERENCES tracklab.training_sessions');
+    expect(statements).toContain('ON DELETE CASCADE');
+  });
+
+  it('segments one private continuous account heart-rate block across personal-device sessions', () => {
+    const accountBlockMigration = databaseMigrations().find((candidate) => candidate.version === 21);
+    const statements = accountBlockMigration?.statements.join('\n') ?? '';
+
+    expect(accountBlockMigration).toMatchObject({
+      version: 21,
+      name: 'segment private continuous account heart rate across devices',
+    });
+    expect(statements).toContain("'training-block'");
+    expect(statements).toContain("relay_scope IN ('session', 'studio-block', 'account-block')");
+    expect(statements).toContain('idx_tracklab_heart_rate_pairings_one_account_block');
+    expect(statements).toContain('account_block_stop_requested_at');
+    expect(statements).toContain('account_block_drain_expires_at');
+    expect(statements).toContain('idx_tracklab_heart_rate_pairings_account_block_drain');
+    expect(statements).toContain('ALTER COLUMN club_id DROP NOT NULL');
+    expect(statements).toContain('ALTER COLUMN studio_rider_id DROP NOT NULL');
+    expect(statements).toContain("relay_scope = 'account-block' AND club_id IS NULL");
+    expect(statements).toContain('heart_rate_training_segment_bindings');
+    expect(statements).toContain("active_clock_segments JSONB NOT NULL DEFAULT '[]'::jsonb");
+    expect(statements).toContain('idx_tracklab_heart_rate_account_segment_bindings_match');
+  });
+
+  it('atomically binds owner multi-bike sessions to immutable claimed-athlete seats', () => {
+    const groupMigration = databaseMigrations().find((candidate) => candidate.version === 22);
+    const statements = groupMigration?.statements.join('\n') ?? '';
+
+    expect(groupMigration).toMatchObject({
+      version: 22,
+      name: 'atomically save owner assigned multi bike training',
+    });
+    expect(statements).toContain('club_group_training_authorizations');
+    expect(statements).toContain('club_group_training_assignments');
+    expect(statements).toContain('athlete_profile_key TEXT NOT NULL');
+    expect(statements).toContain('token_hash TEXT UNIQUE NOT NULL');
+    expect(statements).toContain('completion_digest TEXT');
+    expect(statements).toContain('heart_rate_attachment_status TEXT NOT NULL');
+    expect(statements).toContain('UNIQUE (owner_profile_key, request_id)');
+    expect(statements).toContain('UNIQUE (club_id, session_id)');
+    expect(statements).toContain('UNIQUE (authorization_id, athlete_profile_key)');
+    expect(statements).toContain('idx_tracklab_group_training_active_rider');
+    expect(statements).toContain('idx_tracklab_group_training_active_bike');
+    expect(statements).toContain('WHERE released_at IS NULL');
+    expect(statements).toContain('REFERENCES tracklab.training_sessions');
+    expect(statements).toContain('ON DELETE SET NULL');
+  });
+
+  it('remembers revocable watches and limits each Watch Connect session to four hours', () => {
+    const watchConnectMigration = databaseMigrations().find((candidate) => candidate.version === 23);
+    const statements = watchConnectMigration?.statements.join('\n') ?? '';
+
+    expect(watchConnectMigration).toMatchObject({
+      version: 23,
+      name: 'remember trusted watches and authorize four hour watch connect sessions',
+    });
+    expect(statements).toContain('heart_rate_watch_enrollments');
+    expect(statements).toContain('install_id_hash TEXT NOT NULL');
+    expect(statements).toContain('UNIQUE (owner_profile_key, request_id)');
+    expect(statements).toContain("scope TEXT NOT NULL CHECK (scope IN ('personal', 'studio'))");
+    expect(statements).toContain('heart_rate_watch_connections');
+    expect(statements).toContain("connected_until = connected_at + interval '4 hours'");
+    expect(statements).toContain('idx_tracklab_watch_connection_one_active_scope');
+    expect(statements).toContain('WHERE stopped_at IS NULL');
+    expect(statements).toContain('live_studio_consent BOOLEAN NOT NULL DEFAULT false');
+    expect(statements).toContain('session_studio_consent BOOLEAN NOT NULL DEFAULT false');
+    expect(statements).toContain("'studio-disconnected'");
+    expect(statements).toContain('REFERENCES tracklab.club_members');
+    expect(statements).toContain('ON DELETE CASCADE');
+    expect(statements).not.toContain('bike_device_id');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();

@@ -1,0 +1,230 @@
+.studio-heart-rate-block {
+  background: #fff;
+  border: 1px solid #cfd8df;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px #10203012;
+  color: #101823;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.studio-heart-rate-block > header {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.studio-heart-rate-block-icon {
+  background: #ffe9ee;
+  border-radius: 12px;
+  color: #ca244a;
+  display: grid;
+  height: 38px;
+  place-items: center;
+  width: 38px;
+}
+
+.studio-heart-rate-block .eyebrow {
+  color: #667581;
+  display: block;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.studio-heart-rate-block h3 {
+  font-size: 16px;
+  margin: 2px 0 0;
+}
+
+.studio-heart-rate-block header small {
+  color: #667581;
+}
+
+.studio-heart-rate-block-status {
+  align-items: center;
+  background: #eef2f5;
+  border-radius: 999px;
+  color: #4a5965;
+  display: flex;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 5px;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.studio-heart-rate-block-status.inviting,
+.studio-heart-rate-block-status.waiting-athlete {
+  background: #fff3d6;
+  color: #7a5000;
+}
+
+.studio-heart-rate-block-status.watch-ready {
+  background: #e3f8e8;
+  color: #176a33;
+}
+
+.studio-heart-rate-block-status.error {
+  background: #ffe7e7;
+  color: #962828;
+}
+
+.studio-heart-rate-block-message {
+  background: #f5f8fa;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.studio-heart-rate-block-message p,
+.studio-heart-rate-block-message small {
+  line-height: 1.45;
+  margin: 0;
+}
+
+.studio-heart-rate-block-message p {
+  font-size: 12px;
+}
+
+.studio-heart-rate-block-message small {
+  color: #5b6974;
+  display: block;
+  margin-top: 4px;
+}
+
+.studio-heart-rate-block-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.studio-heart-rate-block-actions button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #c8d2d9;
+  border-radius: 9px;
+  color: #1d2933;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 6px;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 12px;
+  touch-action: manipulation;
+}
+
+.studio-heart-rate-block-actions button.primary {
+  background: #d9ffbf;
+  border-color: #75c94b;
+  color: #17310a;
+}
+
+.studio-heart-rate-block-actions button:focus-visible {
+  outline: 3px solid #245f96;
+  outline-offset: 2px;
+}
+
+.studio-heart-rate-block-actions button:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.studio-heart-rate-block-privacy {
+  align-items: flex-start;
+  color: #596872;
+  display: flex;
+  gap: 7px;
+}
+
+.studio-heart-rate-block-privacy svg {
+  color: #3c8d22;
+  flex: none;
+}
+
+.studio-heart-rate-block-privacy p,
+.studio-heart-rate-block-stop-note {
+  font-size: 10px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.studio-heart-rate-block-stop-note {
+  color: #596872;
+}
+
+.studio-heart-rate-block .spin {
+  animation: studio-heart-rate-spin .8s linear infinite;
+}
+
+@keyframes studio-heart-rate-spin {
+  to { transform: rotate(360deg); }
+}
+
+.studio-heart-rate-overlay {
+  backdrop-filter: blur(7px);
+  background: #050c11b8;
+  display: grid;
+  inset: 0;
+  padding: 18px;
+  place-items: center;
+  position: fixed;
+  z-index: 2147483200;
+}
+
+.studio-heart-rate-overlay-dialog {
+  border-radius: 16px;
+  box-shadow: 0 24px 70px #0006;
+  max-height: 90dvh;
+  overflow: auto;
+  position: relative;
+  width: min(520px, 100%);
+}
+
+.studio-heart-rate-overlay-close {
+  background: #fff;
+  border: 1px solid #c8d2d9;
+  border-radius: 999px;
+  color: #1d2933;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 5px 9px;
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 2;
+}
+
+@media (max-width: 620px) {
+  .studio-heart-rate-block > header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .studio-heart-rate-block-status {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .studio-heart-rate-block-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .studio-heart-rate-block-actions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-heart-rate-block .spin {
+    animation: none;
+  }
+}

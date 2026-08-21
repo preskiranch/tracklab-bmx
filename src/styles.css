@@ -6915,13 +6915,6 @@ input:focus {
   font-weight: 850;
 }
 
-.monitor-primary,
-.monitor-secondary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
 .monitor-primary div,
 .monitor-secondary div {
   justify-content: center;
@@ -6987,7 +6980,7 @@ input:focus {
 
 .monitor-sprint-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 

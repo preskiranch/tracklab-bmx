@@ -875,6 +875,541 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           )`,
       ],
     },
+    {
+      version: 18,
+      name: 'store private apple watch heart rate sessions',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.heart_rate_studio_invitations (
+          id TEXT PRIMARY KEY,
+          club_id TEXT NOT NULL,
+          studio_rider_id TEXT NOT NULL,
+          owner_profile_key TEXT NOT NULL,
+          athlete_profile_key TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          activity_type TEXT NOT NULL CHECK (
+            activity_type IN ('bmx-race', 'straight-sprint', 'explore', 'get-pulled', 'monitor-sprint')
+          ),
+          player_id INTEGER CHECK (player_id IS NULL OR player_id BETWEEN 1 AND 4),
+          invite_code_hash TEXT UNIQUE NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          claimed_at TIMESTAMPTZ,
+          claimed_by_profile_key TEXT,
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          FOREIGN KEY (club_id, studio_rider_id)
+            REFERENCES ${schema}.club_members(club_id, studio_rider_id) ON DELETE CASCADE
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_studio_invites_owner
+          ON ${schema}.heart_rate_studio_invitations (owner_profile_key, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_studio_invites_athlete
+          ON ${schema}.heart_rate_studio_invitations (athlete_profile_key, expires_at DESC)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.heart_rate_pairings (
+          id TEXT PRIMARY KEY,
+          studio_invitation_id TEXT UNIQUE
+            REFERENCES ${schema}.heart_rate_studio_invitations(id) ON DELETE SET NULL,
+          owner_profile_key TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          activity_type TEXT NOT NULL CHECK (
+            activity_type IN ('bmx-race', 'straight-sprint', 'explore', 'get-pulled', 'monitor-sprint')
+          ),
+          rider_id TEXT NOT NULL,
+          player_id INTEGER CHECK (player_id IS NULL OR player_id BETWEEN 1 AND 4),
+          club_id TEXT,
+          studio_rider_id TEXT,
+          pair_code_hash TEXT UNIQUE NOT NULL,
+          ingest_token_hash TEXT UNIQUE,
+          pair_code_expires_at TIMESTAMPTZ NOT NULL,
+          ingest_expires_at TIMESTAMPTZ,
+          claimed_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ,
+          live_studio_consent BOOLEAN NOT NULL DEFAULT false,
+          session_studio_consent BOOLEAN NOT NULL DEFAULT false,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CHECK (
+            (club_id IS NULL AND studio_rider_id IS NULL)
+            OR (club_id IS NOT NULL AND studio_rider_id IS NOT NULL)
+          ),
+          CHECK (
+            (claimed_at IS NULL AND ingest_token_hash IS NULL AND ingest_expires_at IS NULL)
+            OR (claimed_at IS NOT NULL AND ingest_token_hash IS NOT NULL AND ingest_expires_at IS NOT NULL)
+          )
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_pairings_owner_session
+          ON ${schema}.heart_rate_pairings (owner_profile_key, session_id, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_pairings_club
+          ON ${schema}.heart_rate_pairings (club_id, studio_rider_id, created_at DESC)
+          WHERE club_id IS NOT NULL`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.heart_rate_streams (
+          id TEXT PRIMARY KEY,
+          pairing_id TEXT UNIQUE NOT NULL
+            REFERENCES ${schema}.heart_rate_pairings(id) ON DELETE CASCADE,
+          owner_profile_key TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          activity_type TEXT NOT NULL CHECK (
+            activity_type IN ('bmx-race', 'straight-sprint', 'explore', 'get-pulled', 'monitor-sprint')
+          ),
+          rider_id TEXT NOT NULL,
+          player_id INTEGER CHECK (player_id IS NULL OR player_id BETWEEN 1 AND 4),
+          club_id TEXT,
+          studio_rider_id TEXT,
+          live_studio_consent BOOLEAN NOT NULL DEFAULT false,
+          session_studio_consent BOOLEAN NOT NULL DEFAULT false,
+          source TEXT NOT NULL DEFAULT 'apple-watch',
+          started_at TIMESTAMPTZ NOT NULL,
+          ended_at TIMESTAMPTZ,
+          active_duration_ms BIGINT,
+          summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+          zone_summaries JSONB NOT NULL DEFAULT '[]'::jsonb,
+          finalized_at TIMESTAMPTZ,
+          training_profile_key TEXT,
+          training_session_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CHECK (active_duration_ms IS NULL OR active_duration_ms BETWEEN 0 AND 604800000),
+          CHECK (
+            (training_profile_key IS NULL AND training_session_id IS NULL)
+            OR (training_profile_key IS NOT NULL AND training_session_id IS NOT NULL)
+          ),
+          FOREIGN KEY (training_profile_key, training_session_id)
+            REFERENCES ${schema}.training_sessions(profile_key, id) ON DELETE CASCADE
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_streams_owner_session
+          ON ${schema}.heart_rate_streams (owner_profile_key, session_id, started_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_streams_club_session
+          ON ${schema}.heart_rate_streams (club_id, session_id, started_at DESC)
+          WHERE club_id IS NOT NULL AND session_studio_consent = true`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.heart_rate_samples (
+          stream_id TEXT NOT NULL
+            REFERENCES ${schema}.heart_rate_streams(id) ON DELETE CASCADE,
+          sequence BIGINT NOT NULL CHECK (sequence BETWEEN 0 AND 1000000),
+          recorded_at TIMESTAMPTZ NOT NULL,
+          active_elapsed_ms BIGINT NOT NULL CHECK (active_elapsed_ms BETWEEN 0 AND 604800000),
+          bpm SMALLINT NOT NULL CHECK (bpm BETWEEN 20 AND 260),
+          received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (stream_id, sequence)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_samples_stream_clock
+          ON ${schema}.heart_rate_samples (stream_id, active_elapsed_ms, sequence)`,
+      ],
+    },
+    {
+      version: 19,
+      name: 'authorize owner monitor sprints for claimed club athletes',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_monitor_sprint_authorizations (
+          id TEXT PRIMARY KEY,
+          club_id TEXT NOT NULL,
+          studio_rider_id TEXT NOT NULL,
+          owner_profile_key TEXT NOT NULL,
+          athlete_profile_key TEXT NOT NULL,
+          bike_device_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          player_id INTEGER NOT NULL CHECK (player_id BETWEEN 1 AND 4),
+          started_at TIMESTAMPTZ NOT NULL,
+          token_hash TEXT UNIQUE NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          consumed_at TIMESTAMPTZ,
+          revoked_at TIMESTAMPTZ,
+          training_profile_key TEXT,
+          training_session_id TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (club_id, studio_rider_id, session_id),
+          CHECK (
+            (training_profile_key IS NULL AND training_session_id IS NULL)
+            OR (training_profile_key IS NOT NULL AND training_session_id IS NOT NULL)
+          ),
+          FOREIGN KEY (club_id, studio_rider_id)
+            REFERENCES ${schema}.club_members(club_id, studio_rider_id) ON DELETE CASCADE,
+          FOREIGN KEY (training_profile_key, training_session_id)
+            REFERENCES ${schema}.training_sessions(profile_key, id) ON DELETE SET NULL
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_monitor_sprint_auth_owner
+          ON ${schema}.club_monitor_sprint_authorizations (owner_profile_key, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_monitor_sprint_auth_active_rider
+          ON ${schema}.club_monitor_sprint_authorizations (club_id, studio_rider_id, expires_at)
+          WHERE consumed_at IS NULL AND revoked_at IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_monitor_sprint_auth_active_bike
+          ON ${schema}.club_monitor_sprint_authorizations (club_id, bike_device_id, expires_at)
+          WHERE consumed_at IS NULL AND revoked_at IS NULL`,
+      ],
+    },
+    {
+      version: 20,
+      name: 'arm monitor sprints and segment continuous studio heart rate',
+      statements: [
+        `ALTER TABLE ${schema}.club_monitor_sprint_authorizations
+          ADD COLUMN IF NOT EXISTS armed_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.club_monitor_sprint_authorizations
+          ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ`,
+        `UPDATE ${schema}.club_monitor_sprint_authorizations
+          SET armed_at = COALESCE(armed_at, started_at),
+            activated_at = CASE
+              WHEN started_at IS NOT NULL THEN COALESCE(activated_at, created_at)
+              ELSE activated_at
+            END
+          WHERE armed_at IS NULL OR (started_at IS NOT NULL AND activated_at IS NULL)`,
+        `ALTER TABLE ${schema}.club_monitor_sprint_authorizations
+          ALTER COLUMN armed_at SET NOT NULL`,
+        `ALTER TABLE ${schema}.club_monitor_sprint_authorizations
+          ALTER COLUMN started_at DROP NOT NULL`,
+        `ALTER TABLE ${schema}.heart_rate_studio_invitations
+          ADD COLUMN IF NOT EXISTS relay_scope TEXT NOT NULL DEFAULT 'session'
+          CHECK (relay_scope IN ('session', 'studio-block'))`,
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          ADD COLUMN IF NOT EXISTS relay_scope TEXT NOT NULL DEFAULT 'session'
+          CHECK (relay_scope IN ('session', 'studio-block'))`,
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          ADD COLUMN IF NOT EXISTS studio_block_stopped_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          ADD COLUMN IF NOT EXISTS studio_block_stopped_by_profile_key TEXT`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          ADD COLUMN IF NOT EXISTS relay_scope TEXT NOT NULL DEFAULT 'session'
+          CHECK (relay_scope IN ('session', 'studio-block'))`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          ADD COLUMN IF NOT EXISTS studio_block_stopped_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          ADD COLUMN IF NOT EXISTS relay_expires_at TIMESTAMPTZ`,
+        `UPDATE ${schema}.heart_rate_streams AS streams
+          SET relay_expires_at = pairings.ingest_expires_at
+          FROM ${schema}.heart_rate_pairings AS pairings
+          WHERE streams.pairing_id = pairings.id AND streams.relay_expires_at IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_streams_active_studio_block
+          ON ${schema}.heart_rate_streams (club_id, studio_rider_id, started_at DESC)
+          WHERE relay_scope = 'studio-block' AND finalized_at IS NULL`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.heart_rate_training_segments (
+          id TEXT PRIMARY KEY,
+          stream_id TEXT NOT NULL
+            REFERENCES ${schema}.heart_rate_streams(id) ON DELETE CASCADE,
+          pairing_id TEXT NOT NULL
+            REFERENCES ${schema}.heart_rate_pairings(id) ON DELETE CASCADE,
+          owner_profile_key TEXT NOT NULL,
+          club_id TEXT NOT NULL,
+          studio_rider_id TEXT NOT NULL,
+          training_profile_key TEXT NOT NULL,
+          training_session_id TEXT NOT NULL,
+          activity_type TEXT NOT NULL CHECK (
+            activity_type IN ('bmx-race', 'straight-sprint', 'explore', 'get-pulled', 'monitor-sprint')
+          ),
+          player_id INTEGER CHECK (player_id IS NULL OR player_id BETWEEN 1 AND 4),
+          started_at TIMESTAMPTZ NOT NULL,
+          ended_at TIMESTAMPTZ NOT NULL,
+          active_duration_ms BIGINT NOT NULL CHECK (active_duration_ms BETWEEN 0 AND 604800000),
+          summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+          zone_summaries JSONB NOT NULL DEFAULT '[]'::jsonb,
+          finalized_at TIMESTAMPTZ,
+          studio_visible BOOLEAN NOT NULL DEFAULT false,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (training_profile_key, training_session_id),
+          CHECK (ended_at >= started_at),
+          FOREIGN KEY (training_profile_key, training_session_id)
+            REFERENCES ${schema}.training_sessions(profile_key, id) ON DELETE CASCADE,
+          FOREIGN KEY (club_id, studio_rider_id)
+            REFERENCES ${schema}.club_members(club_id, studio_rider_id) ON DELETE CASCADE
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_segments_owner_session
+          ON ${schema}.heart_rate_training_segments
+          (owner_profile_key, training_session_id, started_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_segments_club_session
+          ON ${schema}.heart_rate_training_segments
+          (club_id, training_session_id, started_at DESC)
+          WHERE studio_visible = true`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_segments_stream
+          ON ${schema}.heart_rate_training_segments (stream_id, started_at, ended_at)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.heart_rate_training_segment_bindings (
+          training_profile_key TEXT NOT NULL,
+          training_session_id TEXT NOT NULL,
+          club_id TEXT NOT NULL,
+          studio_rider_id TEXT NOT NULL,
+          activity_type TEXT NOT NULL CHECK (
+            activity_type IN ('bmx-race', 'straight-sprint', 'explore', 'get-pulled', 'monitor-sprint')
+          ),
+          player_id INTEGER CHECK (player_id IS NULL OR player_id BETWEEN 1 AND 4),
+          started_at TIMESTAMPTZ NOT NULL,
+          ended_at TIMESTAMPTZ NOT NULL,
+          zone_windows JSONB NOT NULL DEFAULT '[]'::jsonb,
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (training_profile_key, training_session_id),
+          CHECK (ended_at >= started_at),
+          FOREIGN KEY (training_profile_key, training_session_id)
+            REFERENCES ${schema}.training_sessions(profile_key, id) ON DELETE CASCADE,
+          FOREIGN KEY (club_id, studio_rider_id)
+            REFERENCES ${schema}.club_members(club_id, studio_rider_id) ON DELETE CASCADE
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_segment_bindings_match
+          ON ${schema}.heart_rate_training_segment_bindings
+          (training_profile_key, club_id, studio_rider_id, started_at, ended_at, expires_at)`,
+      ],
+    },
+    {
+      version: 21,
+      name: 'segment private continuous account heart rate across devices',
+      statements: [
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          DROP CONSTRAINT IF EXISTS heart_rate_pairings_activity_type_check`,
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          ADD CONSTRAINT heart_rate_pairings_activity_type_check CHECK (
+            activity_type IN (
+              'bmx-race', 'straight-sprint', 'explore', 'get-pulled',
+              'monitor-sprint', 'training-block'
+            )
+          )`,
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          DROP CONSTRAINT IF EXISTS heart_rate_pairings_relay_scope_check`,
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          ADD CONSTRAINT heart_rate_pairings_relay_scope_check CHECK (
+            relay_scope IN ('session', 'studio-block', 'account-block')
+          )`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          DROP CONSTRAINT IF EXISTS heart_rate_streams_activity_type_check`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          ADD CONSTRAINT heart_rate_streams_activity_type_check CHECK (
+            activity_type IN (
+              'bmx-race', 'straight-sprint', 'explore', 'get-pulled',
+              'monitor-sprint', 'training-block'
+            )
+          )`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          DROP CONSTRAINT IF EXISTS heart_rate_streams_relay_scope_check`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          ADD CONSTRAINT heart_rate_streams_relay_scope_check CHECK (
+            relay_scope IN ('session', 'studio-block', 'account-block')
+          )`,
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          ADD COLUMN IF NOT EXISTS account_block_stop_requested_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.heart_rate_pairings
+          ADD COLUMN IF NOT EXISTS account_block_drain_expires_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          ADD COLUMN IF NOT EXISTS account_block_stop_requested_at TIMESTAMPTZ`,
+        `ALTER TABLE ${schema}.heart_rate_streams
+          ADD COLUMN IF NOT EXISTS account_block_drain_expires_at TIMESTAMPTZ`,
+        `DROP INDEX IF EXISTS ${schema}.idx_tracklab_heart_rate_pairings_one_account_block`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_heart_rate_pairings_one_account_block
+          ON ${schema}.heart_rate_pairings (owner_profile_key)
+          WHERE relay_scope = 'account-block'
+            AND revoked_at IS NULL
+            AND account_block_stop_requested_at IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_pairings_account_block_drain
+          ON ${schema}.heart_rate_pairings (account_block_drain_expires_at)
+          WHERE relay_scope = 'account-block'
+            AND revoked_at IS NULL
+            AND account_block_stop_requested_at IS NOT NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_streams_active_account_block
+          ON ${schema}.heart_rate_streams (owner_profile_key, started_at DESC)
+          WHERE relay_scope = 'account-block' AND finalized_at IS NULL`,
+        `ALTER TABLE ${schema}.heart_rate_training_segments
+          ADD COLUMN IF NOT EXISTS relay_scope TEXT NOT NULL DEFAULT 'studio-block'`,
+        `ALTER TABLE ${schema}.heart_rate_training_segments
+          ADD COLUMN IF NOT EXISTS active_clock_segments JSONB NOT NULL DEFAULT '[]'::jsonb`,
+        `ALTER TABLE ${schema}.heart_rate_training_segments
+          ALTER COLUMN club_id DROP NOT NULL`,
+        `ALTER TABLE ${schema}.heart_rate_training_segments
+          ALTER COLUMN studio_rider_id DROP NOT NULL`,
+        `ALTER TABLE ${schema}.heart_rate_training_segments
+          ADD CONSTRAINT heart_rate_training_segments_relay_scope_check CHECK (
+            (relay_scope = 'studio-block' AND club_id IS NOT NULL AND studio_rider_id IS NOT NULL)
+            OR (relay_scope = 'account-block' AND club_id IS NULL AND studio_rider_id IS NULL)
+          )`,
+        `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
+          ADD COLUMN IF NOT EXISTS relay_scope TEXT NOT NULL DEFAULT 'studio-block'`,
+        `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
+          ADD COLUMN IF NOT EXISTS active_clock_segments JSONB NOT NULL DEFAULT '[]'::jsonb`,
+        `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
+          ALTER COLUMN club_id DROP NOT NULL`,
+        `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
+          ALTER COLUMN studio_rider_id DROP NOT NULL`,
+        `ALTER TABLE ${schema}.heart_rate_training_segment_bindings
+          ADD CONSTRAINT heart_rate_training_segment_bindings_relay_scope_check CHECK (
+            (relay_scope = 'studio-block' AND club_id IS NOT NULL AND studio_rider_id IS NOT NULL)
+            OR (relay_scope = 'account-block' AND club_id IS NULL AND studio_rider_id IS NULL)
+          )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_heart_rate_account_segment_bindings_match
+          ON ${schema}.heart_rate_training_segment_bindings
+          (training_profile_key, started_at, ended_at, expires_at)
+          WHERE relay_scope = 'account-block'`,
+      ],
+    },
+    {
+      version: 22,
+      name: 'atomically save owner assigned multi bike training',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_group_training_authorizations (
+          id TEXT PRIMARY KEY,
+          club_id TEXT NOT NULL REFERENCES ${schema}.clubs(id) ON DELETE CASCADE,
+          owner_profile_key TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          activity_type TEXT NOT NULL CHECK (
+            activity_type IN ('bmx-race', 'straight-sprint', 'get-pulled', 'explore')
+          ),
+          armed_at TIMESTAMPTZ NOT NULL,
+          token_hash TEXT UNIQUE NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          completion_digest TEXT,
+          completed_at TIMESTAMPTZ,
+          cancelled_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (owner_profile_key, request_id),
+          UNIQUE (club_id, session_id),
+          CHECK (completed_at IS NULL OR cancelled_at IS NULL),
+          CHECK (
+            (completed_at IS NULL AND completion_digest IS NULL)
+            OR (completed_at IS NOT NULL AND completion_digest IS NOT NULL)
+          )
+        )`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_group_training_assignments (
+          id TEXT PRIMARY KEY,
+          authorization_id TEXT NOT NULL
+            REFERENCES ${schema}.club_group_training_authorizations(id) ON DELETE CASCADE,
+          club_id TEXT NOT NULL,
+          studio_rider_id TEXT NOT NULL,
+          athlete_profile_key TEXT NOT NULL,
+          bike_device_id TEXT NOT NULL,
+          player_id INTEGER NOT NULL CHECK (player_id BETWEEN 1 AND 4),
+          started_at TIMESTAMPTZ,
+          activated_at TIMESTAMPTZ,
+          ended_at TIMESTAMPTZ,
+          released_at TIMESTAMPTZ,
+          training_profile_key TEXT,
+          training_session_id TEXT,
+          heart_rate_attachment_status TEXT NOT NULL DEFAULT 'not-checked' CHECK (
+            heart_rate_attachment_status IN (
+              'not-checked', 'shared-attached', 'shared-pending', 'not-shared', 'failed'
+            )
+          ),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (authorization_id, studio_rider_id),
+          UNIQUE (authorization_id, athlete_profile_key),
+          UNIQUE (authorization_id, bike_device_id),
+          UNIQUE (authorization_id, player_id),
+          CHECK ((started_at IS NULL) = (activated_at IS NULL)),
+          CHECK (ended_at IS NULL OR started_at IS NOT NULL),
+          CHECK (
+            (training_profile_key IS NULL AND training_session_id IS NULL)
+            OR (training_profile_key IS NOT NULL AND training_session_id IS NOT NULL)
+          ),
+          FOREIGN KEY (club_id, studio_rider_id)
+            REFERENCES ${schema}.club_members(club_id, studio_rider_id) ON DELETE CASCADE,
+          FOREIGN KEY (training_profile_key, training_session_id)
+            REFERENCES ${schema}.training_sessions(profile_key, id) ON DELETE SET NULL
+        )`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_group_training_active_rider
+          ON ${schema}.club_group_training_assignments (club_id, studio_rider_id)
+          WHERE released_at IS NULL`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_group_training_active_bike
+          ON ${schema}.club_group_training_assignments (club_id, bike_device_id)
+          WHERE released_at IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_group_training_owner_recent
+          ON ${schema}.club_group_training_authorizations (owner_profile_key, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_group_training_active_expiry
+          ON ${schema}.club_group_training_authorizations (club_id, expires_at)
+          WHERE completed_at IS NULL AND cancelled_at IS NULL`,
+      ],
+    },
+    {
+      version: 23,
+      name: 'remember trusted watches and authorize four hour watch connect sessions',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.heart_rate_watch_enrollments (
+          id TEXT PRIMARY KEY,
+          owner_profile_key TEXT NOT NULL,
+          scope TEXT NOT NULL CHECK (scope IN ('personal', 'studio')),
+          club_id TEXT,
+          studio_rider_id TEXT,
+          install_id_hash TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          live_studio_consent BOOLEAN NOT NULL DEFAULT false,
+          session_studio_consent BOOLEAN NOT NULL DEFAULT false,
+          last_verified_at TIMESTAMPTZ NOT NULL,
+          revoked_at TIMESTAMPTZ,
+          revoked_reason TEXT CHECK (
+            revoked_reason IS NULL OR revoked_reason IN (
+              'athlete-disconnected', 'studio-disconnected', 'device-replaced',
+              'membership-ended', 'account-revoked'
+            )
+          ),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (owner_profile_key, request_id),
+          CHECK (
+            (
+              scope = 'personal'
+              AND club_id IS NULL
+              AND studio_rider_id IS NULL
+              AND live_studio_consent = false
+              AND session_studio_consent = false
+            ) OR (
+              scope = 'studio'
+              AND club_id IS NOT NULL
+              AND studio_rider_id IS NOT NULL
+            )
+          ),
+          FOREIGN KEY (club_id, studio_rider_id)
+            REFERENCES ${schema}.club_members(club_id, studio_rider_id) ON DELETE CASCADE
+        )`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_watch_enrollment_active_scope
+          ON ${schema}.heart_rate_watch_enrollments
+          (owner_profile_key, scope, (COALESCE(club_id, '')))
+          WHERE revoked_at IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_watch_enrollment_install
+          ON ${schema}.heart_rate_watch_enrollments (install_id_hash, updated_at DESC)
+          WHERE revoked_at IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_watch_enrollment_studio
+          ON ${schema}.heart_rate_watch_enrollments
+          (club_id, studio_rider_id, updated_at DESC)
+          WHERE scope = 'studio' AND revoked_at IS NULL`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.heart_rate_watch_connections (
+          id TEXT PRIMARY KEY,
+          enrollment_id TEXT NOT NULL
+            REFERENCES ${schema}.heart_rate_watch_enrollments(id) ON DELETE CASCADE,
+          pairing_id TEXT UNIQUE NOT NULL
+            REFERENCES ${schema}.heart_rate_pairings(id) ON DELETE CASCADE,
+          owner_profile_key TEXT NOT NULL,
+          scope TEXT NOT NULL CHECK (scope IN ('personal', 'studio')),
+          club_id TEXT,
+          studio_rider_id TEXT,
+          request_id TEXT NOT NULL,
+          connected_at TIMESTAMPTZ NOT NULL,
+          connected_until TIMESTAMPTZ NOT NULL,
+          stopped_at TIMESTAMPTZ,
+          stopped_reason TEXT CHECK (
+            stopped_reason IS NULL OR stopped_reason IN (
+              'athlete-stopped', 'expired', 'replaced', 'enrollment-revoked',
+              'studio-disconnected', 'membership-ended', 'account-revoked'
+            )
+          ),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (owner_profile_key, request_id),
+          CHECK (connected_until = connected_at + interval '4 hours'),
+          CHECK (stopped_at IS NULL OR stopped_at >= connected_at),
+          CHECK (
+            (scope = 'personal' AND club_id IS NULL AND studio_rider_id IS NULL)
+            OR (scope = 'studio' AND club_id IS NOT NULL AND studio_rider_id IS NOT NULL)
+          ),
+          FOREIGN KEY (club_id, studio_rider_id)
+            REFERENCES ${schema}.club_members(club_id, studio_rider_id) ON DELETE CASCADE
+        )`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_watch_connection_one_active_scope
+          ON ${schema}.heart_rate_watch_connections
+          (owner_profile_key, scope, (COALESCE(club_id, '')))
+          WHERE stopped_at IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_watch_connection_expiry
+          ON ${schema}.heart_rate_watch_connections (connected_until)
+          WHERE stopped_at IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_watch_connection_studio
+          ON ${schema}.heart_rate_watch_connections
+          (club_id, studio_rider_id, connected_at DESC)
+          WHERE scope = 'studio'`,
+      ],
+    },
   ];
 }
 

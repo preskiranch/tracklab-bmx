@@ -9,6 +9,7 @@ export type TrainingHistoryResponse = {
     straightSprints: number;
     exploreRides: number;
     getPulledTests: number;
+    monitorSprints: number;
     distanceMeters: number;
     durationMs: number;
   };
@@ -67,7 +68,12 @@ function trainingHistoryUrl(from?: number, to?: number) {
 }
 
 function normalizeActivityType(value: unknown): TrainingActivityType {
-  return value === 'straight-sprint' || value === 'explore' || value === 'get-pulled' ? value : 'bmx-race';
+  return value === 'straight-sprint'
+    || value === 'explore'
+    || value === 'get-pulled'
+    || value === 'monitor-sprint'
+    ? value
+    : 'bmx-race';
 }
 
 function normalizeTrainingSession(value: Partial<TrainingSession>): TrainingSession | null {
@@ -114,6 +120,7 @@ export async function loadTrainingHistory(from?: number, to?: number): Promise<T
       straightSprints: sessions.filter((session) => session.activityType === 'straight-sprint').length,
       exploreRides: sessions.filter((session) => session.activityType === 'explore').length,
       getPulledTests: sessions.filter((session) => session.activityType === 'get-pulled').length,
+      monitorSprints: sessions.filter((session) => session.activityType === 'monitor-sprint').length,
       distanceMeters: sessions.reduce((total, session) => total + session.distanceMeters, 0),
       durationMs: sessions.reduce((total, session) => total + session.durationMs, 0),
     },

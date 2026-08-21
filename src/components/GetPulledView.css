@@ -54,5 +54,5 @@
   .get-pulled-phase{display:none}
 }
 
-@media(min-width:801px){.get-pulled-metrics{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media(min-width:801px){.get-pulled-metrics{grid-template-columns:repeat(6,minmax(0,1fr))}}
 .get-pulled-exit-fullscreen{position:fixed;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));z-index:2147483002;display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:0 14px;border:1px solid rgba(255,255,255,.3);border-radius:10px;background:rgba(7,14,10,.9);color:#fff;font:inherit;font-weight:800;box-shadow:0 8px 24px rgba(0,0,0,.3)}

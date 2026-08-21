@@ -1,0 +1,284 @@
+.watch-connect-card {
+  background: #fff;
+  border: 1px solid #cfd8df;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px #10203012;
+  color: #101823;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.watch-connect-card > header {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.watch-connect-card-icon {
+  background: #ffe9ee;
+  border-radius: 12px;
+  color: #ca244a;
+  display: grid;
+  height: 40px;
+  place-items: center;
+  width: 40px;
+}
+
+.watch-connect-card .eyebrow {
+  color: #667581;
+  display: block;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.watch-connect-card h3 {
+  font-size: 17px;
+  margin: 2px 0 0;
+}
+
+.watch-connect-card header small {
+  color: #667581;
+}
+
+.watch-connect-card-status {
+  align-items: center;
+  background: #eef2f5;
+  border-radius: 999px;
+  color: #4a5965;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 5px;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.watch-connect-card-status.connecting,
+.watch-connect-card-status.syncing {
+  background: #fff3d6;
+  color: #795000;
+}
+
+.watch-connect-card-status.connected {
+  background: #e3f8e8;
+  color: #176a33;
+}
+
+.watch-connect-card-status.ended {
+  background: #e7efff;
+  color: #28589b;
+}
+
+.watch-connect-card-message {
+  background: #f5f8fa;
+  border-radius: 10px;
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+}
+
+.watch-connect-card-message strong,
+.watch-connect-card-message span,
+.watch-connect-card-message small {
+  line-height: 1.45;
+}
+
+.watch-connect-card-message strong,
+.watch-connect-card-message span {
+  font-size: 12px;
+}
+
+.watch-connect-card-message small {
+  color: #5b6974;
+}
+
+.watch-connect-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.watch-connect-card-actions button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #c8d2d9;
+  border-radius: 9px;
+  color: #1d2933;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 7px;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 14px;
+  touch-action: manipulation;
+}
+
+.watch-connect-card-actions button.primary {
+  background: #d9ffbf;
+  border-color: #75c94b;
+  color: #17310a;
+}
+
+.watch-connect-card-actions button:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.watch-connect-card-actions button:focus-visible,
+.watch-connect-card-consent input:focus-visible {
+  outline: 3px solid #245f96;
+  outline-offset: 2px;
+}
+
+.watch-connect-card-consent {
+  border: 1px solid #dce4e9;
+  border-radius: 11px;
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 10px;
+}
+
+.watch-connect-card-consent legend {
+  color: #43515c;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 0 5px;
+}
+
+.watch-connect-card-consent label {
+  align-items: flex-start;
+  display: flex;
+  gap: 9px;
+}
+
+.watch-connect-card-consent input {
+  height: 18px;
+  margin: 1px 0 0;
+  width: 18px;
+}
+
+.watch-connect-card-consent span {
+  display: grid;
+  gap: 2px;
+}
+
+.watch-connect-card-consent strong {
+  font-size: 11px;
+}
+
+.watch-connect-card-consent small {
+  color: #596872;
+  line-height: 1.4;
+}
+
+.watch-connect-card-privacy {
+  align-items: flex-start;
+  color: #596872;
+  display: flex;
+  gap: 8px;
+}
+
+.watch-connect-card-privacy svg {
+  color: #3c8d22;
+  flex: none;
+}
+
+.watch-connect-card-privacy p {
+  font-size: 10px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.watch-connect-card-required {
+  color: #8a3d17;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.watch-connect-card-forget {
+  background: none;
+  border: 0;
+  color: #667581;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  justify-self: start;
+  padding: 2px 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.watch-connect-card-forget:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.watch-connect-owner-note {
+  color: #596872;
+  font-size: 11px;
+  margin: 0;
+}
+
+.watch-connect-owner-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.watch-connect-owner-list li,
+.watch-connect-owner-list li > span {
+  display: flex;
+  gap: 8px;
+}
+
+.watch-connect-owner-list li {
+  align-items: center;
+  border-top: 1px solid #e2e8ec;
+  justify-content: space-between;
+  padding-top: 8px;
+}
+
+.watch-connect-owner-list li > span { flex-direction: column; }
+.watch-connect-owner-list small { color: #596872; }
+
+.watch-connect-card .spin {
+  animation: watch-connect-spin .8s linear infinite;
+}
+
+@keyframes watch-connect-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 620px) {
+  .watch-connect-card > header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .watch-connect-card-status {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .watch-connect-card-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .watch-connect-card-actions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-connect-card .spin { animation: none; }
+}
