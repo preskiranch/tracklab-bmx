@@ -22,6 +22,7 @@ if (!target) {
 const baseUrl = normalizedBaseUrl(target);
 const timeoutMs = Number(process.env.TRACKLAB_SMOKE_TIMEOUT_MS) || defaultTimeoutMs;
 const expectPostgres = process.env.TRACKLAB_EXPECT_POSTGRES === '1';
+const expectFriends = process.env.TRACKLAB_EXPECT_FRIENDS === '1';
 
 async function request(pathname, init = {}) {
   const startedAt = performance.now();
@@ -58,8 +59,10 @@ const health = await healthRequest.response.json();
 assert(health.status === 'ok' && health.storage?.ready === true, 'Health payload reports an unavailable service.');
 if (expectPostgres) {
   assert(
-    health.storage?.configured === true && health.storage?.mode === 'postgres',
-    'Production smoke expected PostgreSQL, but the service reported memory persistence.',
+    health.storage?.configured === true
+      && health.storage?.mode === 'postgres'
+      && health.requirements?.database === true,
+    'Production smoke expected required PostgreSQL persistence, but the service is not configured to fail closed.',
   );
 }
 results.push(['health', healthRequest.durationMs]);
@@ -97,6 +100,17 @@ assert(authRequest.response.ok, `/api/auth/me returned ${authRequest.response.st
 const auth = await authRequest.response.json();
 assert(Object.hasOwn(auth, 'user'), 'Anonymous auth response is malformed.');
 results.push(['anonymous authentication boundary', authRequest.durationMs]);
+
+if (expectFriends) {
+  const friendsRequest = await request('/api/friends');
+  assert(
+    friendsRequest.response.status === 401,
+    `Anonymous Friends boundary returned ${friendsRequest.response.status} instead of 401.`,
+  );
+  const friendsError = await friendsRequest.response.json();
+  assert(typeof friendsError.error === 'string', 'Anonymous Friends response is malformed.');
+  results.push(['anonymous Friends boundary', friendsRequest.durationMs]);
+}
 
 const missingAssetRequest = await request('/assets/tracklab-smoke-missing.js', { headers: { Accept: 'text/html' } });
 assert(missingAssetRequest.response.status === 404, 'A missing static asset did not return 404.');
