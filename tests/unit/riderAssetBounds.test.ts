@@ -31,9 +31,7 @@ describe('rider rig source assets', () => {
     for (let y = 0; y < image.height; y += 1) {
       for (let x = 0; x < image.width; x += 1) {
         const alpha = image.data[((y * image.width) + x) * 4 + 3];
-        if (alpha <= 8) {
-          continue;
-        }
+        if (alpha <= 8) continue;
         minimumX = Math.min(minimumX, x);
         minimumY = Math.min(minimumY, y);
         maximumX = Math.max(maximumX, x);
@@ -63,9 +61,7 @@ describe('rider rig source assets', () => {
       for (let y = 0; y < image.height; y += 1) {
         for (let x = 0; x < image.width; x += 1) {
           const alpha = image.data[((y * image.width) + x) * 4 + 3];
-          if (alpha <= 8) {
-            continue;
-          }
+          if (alpha <= 8) continue;
 
           const localX = (x - image.width / 2) * sourceToDrawScale;
           const localY = (y - image.height) * sourceToDrawScale;

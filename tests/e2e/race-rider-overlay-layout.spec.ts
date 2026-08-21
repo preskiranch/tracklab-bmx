@@ -62,9 +62,8 @@ test('keeps every placement fully visible with a long photographed rider name on
     const panel = page.locator('.race-rider-overlay');
     const layout = await panel.evaluate((element) => {
       const grid = element.querySelector<HTMLElement>('.race-rider-overlay-grid')!;
-      const columnCount = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
       return {
-        columnCount,
+        columnCount: getComputedStyle(grid).gridTemplateColumns.split(' ').length,
         height: element.getBoundingClientRect().height,
       };
     });
