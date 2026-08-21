@@ -865,6 +865,16 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           WHERE race_source = 'live'`,
       ],
     },
+    {
+      version: 17,
+      name: 'keep account registration compatible with pre-friends releases',
+      statements: [
+        `ALTER TABLE ${schema}.auth_users
+          ALTER COLUMN username SET DEFAULT (
+            'rider-' || replace(gen_random_uuid()::text, '-', '')
+          )`,
+      ],
+    },
   ];
 }
 

@@ -162,6 +162,18 @@ describe('database migration runner', () => {
     expect(statements).toContain("WHERE race_source = 'live'");
   });
 
+  it('keeps legacy account inserts compatible after usernames become required', () => {
+    const compatibilityMigration = databaseMigrations().find((candidate) => candidate.version === 17);
+    const statements = compatibilityMigration?.statements.join('\n') ?? '';
+
+    expect(compatibilityMigration).toMatchObject({
+      version: 17,
+      name: 'keep account registration compatible with pre-friends releases',
+    });
+    expect(statements).toContain('ALTER COLUMN username SET DEFAULT');
+    expect(statements).toContain('gen_random_uuid()');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();
