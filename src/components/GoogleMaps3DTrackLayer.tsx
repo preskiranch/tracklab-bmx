@@ -53,7 +53,9 @@ import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGate
 import {
   riderAirPixelsToMeters,
   riderLaneOffsetsByPlayer,
+  riderMarkerCanvasSize,
   riderMarkerDrawSize,
+  riderMarkerSafetyInsetPixels,
   uprightRiderOrientation,
 } from '../lib/riderPresentation';
 import {
@@ -61,6 +63,7 @@ import {
   ghostPlaybackColorName,
   ghostPlaybackGlow,
 } from '../lib/ghosts';
+import { riderRigBaseAssetByColor } from '../lib/riderAssets';
 
 type GoogleMaps3DTrackLayerProps = {
   track: TrackRecord;
@@ -120,12 +123,6 @@ const routeColors: Record<TrackRouteVariantId, string> = {
 };
 const splitBranchMinInteriorPoints = 2;
 const splitBranchEndpointSnapMeters = 8;
-const riderIconByColor: Record<PlayerSlot['colorName'], string> = {
-  lime: '/assets/rider-lime.png',
-  red: '/assets/rider-red.png',
-  blue: '/assets/rider-blue.png',
-  yellow: '/assets/rider-yellow.png',
-};
 const remoteRiderLaneOffsetBaseMeters = 3.2;
 const remoteRiderLaneSpacingMeters = 0.7;
 
@@ -431,18 +428,26 @@ function createRiderContent(
   const content = document.createElement('div');
   content.className = `map-3d-rider-marker map-3d-rider-marker-${appearance}`;
   content.style.setProperty('--rider-accent', appearance === 'ghost' ? ghostPlaybackAccent : player.accent);
-  content.style.height = `${riderMarkerDrawSize}px`;
+  content.dataset.riderCanvasSize = String(riderMarkerCanvasSize);
+  content.style.height = `${riderMarkerCanvasSize}px`;
+  content.style.overflow = 'visible';
   content.style.pointerEvents = 'none';
-  content.style.width = `${riderMarkerDrawSize}px`;
+  content.style.position = 'relative';
+  content.style.width = `${riderMarkerCanvasSize}px`;
   content.title = label;
   content.setAttribute('aria-label', label);
   const image = document.createElement('img');
   image.className = 'map-3d-rider-image';
   image.alt = label;
-  image.src = riderIconByColor[appearance === 'ghost' ? ghostPlaybackColorName : player.colorName];
+  image.src = riderRigBaseAssetByColor[
+    appearance === 'ghost' ? ghostPlaybackColorName : player.colorName
+  ];
   image.style.display = 'block';
   image.style.height = `${riderMarkerDrawSize}px`;
-  image.style.objectFit = 'fill';
+  image.style.left = `${riderMarkerSafetyInsetPixels}px`;
+  image.style.objectFit = 'contain';
+  image.style.position = 'absolute';
+  image.style.top = `${riderMarkerSafetyInsetPixels}px`;
   image.style.transformOrigin = '50% 100%';
   image.style.width = `${riderMarkerDrawSize}px`;
   if (appearance === 'ghost') {
@@ -525,7 +530,12 @@ function updateDynamicRiderMarker(
     const tireY = -riderMarkerDrawSize * 0.04;
     const anchorX = tireX * Math.cos(radians) - tireY * Math.sin(radians);
     const anchorY = tireX * Math.sin(radians) + tireY * Math.cos(radians);
-    dynamic.content.style.transform = `translate(${-anchorX}px, ${-anchorY}px)`;
+    // MarkerElement anchors custom content at its bottom center. The larger
+    // safety envelope moves that edge down by the inset, so compensate here
+    // to leave the visible 58px rider at exactly the same screen position.
+    dynamic.content.style.transform = `translate(${-anchorX}px, ${
+      riderMarkerSafetyInsetPixels - anchorY
+    }px)`;
     image.style.transform = `rotate(${orientation.leanDegrees}deg) scaleX(${orientation.mirrored ? -1 : 1})`;
   }
 }

@@ -15,6 +15,9 @@ const riderMaximumAltitudeMeters = 0.85;
 export const riderMarkerCanvasSize = 120;
 export const riderMarkerDrawSize = 58;
 export const riderMarkerDrawTop = -riderMarkerDrawSize / 2;
+export const riderMarkerSafetyInsetPixels = (
+  riderMarkerCanvasSize - riderMarkerDrawSize
+) / 2;
 export const riderMarkerShadowBlurPixels = 8;
 export const riderMarkerMaximumShadowBlurPixels = 14;
 export const riderMarkerShadowOffsetYPixels = 5;
