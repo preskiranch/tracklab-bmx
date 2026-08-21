@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ghostsForTrackRoute,
+  legacyRacePersistencePlan,
   loadGhostLapsFromCloud,
   mergeGhostLaps,
   playbackGhostLap,
@@ -38,6 +39,21 @@ function rawGhost(lapCount: number, riderName = 'Studio Rider') {
 describe('ghost lap categories and privacy metadata', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('keeps DNF race and training history when no playback ghost can be built', () => {
+    expect(legacyRacePersistencePlan(1, 0)).toEqual({
+      saveHistory: true,
+      saveGhosts: false,
+    });
+    expect(legacyRacePersistencePlan(1, 1)).toEqual({
+      saveHistory: true,
+      saveGhosts: true,
+    });
+    expect(legacyRacePersistencePlan(0, 0)).toEqual({
+      saveHistory: false,
+      saveGhosts: false,
+    });
   });
 
   it('keeps one-lap and multi-lap records in separate race selections', () => {

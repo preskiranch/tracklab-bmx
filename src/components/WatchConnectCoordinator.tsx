@@ -1,0 +1,749 @@
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
+import type { UseHeartRateResult } from '../hooks/useHeartRate';
+import type {
+  NativeHeartRateRelaySnapshot,
+  NativeHeartRateStatus,
+  NativeWatchConnectState,
+} from '../lib/nativeHeartRate';
+import {
+  createWatchConnectRequestId,
+  finishWatchConnectDisconnect,
+  runWatchConnectSingleFlight,
+  startWatchConnectAction,
+  stopWatchConnectAction,
+  WatchConnectStartError,
+  type WatchConnectNativeResult,
+} from '../lib/watchConnectActions';
+import {
+  forgetWatchConnectEnrollment,
+  loadWatchConnect,
+  type WatchConnectCloudSnapshot,
+} from '../lib/watchConnectCloud';
+import {
+  resolveWatchConnectViewState,
+  type WatchConnectConnection,
+  type WatchConnectEnrollment,
+  type WatchConnectScope,
+} from '../lib/watchConnect';
+import { reconcileWatchConnectAccount } from '../lib/watchConnectReconciliation';
+import { WatchConnectCard } from './WatchConnectCard';
+import { OwnerStudioWatchConnectSettings } from './OwnerStudioWatchConnectSettings';
+
+export const watchConnectSettingsSlotId = 'watch-connect-settings-slot';
+
+export type StudioContext = Readonly<{
+  clubId: string;
+  clubName: string;
+}>;
+
+export type OwnedStudioContext = StudioContext;
+
+export type WatchConnectCoordinatorProps = Readonly<{
+  authStatus: 'loading' | 'signed-out' | 'signed-in';
+  accountId: string | null;
+  accountName: string;
+  settingsOpen: boolean;
+  heartRate: UseHeartRateResult;
+  studioContext?: StudioContext | null;
+  studioContexts?: readonly StudioContext[];
+  ownedStudio?: OwnedStudioContext | null;
+  preferPersonal?: boolean;
+  onLegacyRelaySuppressionChange?: (suppressed: boolean) => void;
+  onCapabilityChange?: (capable: boolean) => void;
+  onMessage?: (message: string) => void;
+}>;
+
+const emptySnapshot: WatchConnectCloudSnapshot = Object.freeze({
+  enrollments: [],
+  connections: [],
+});
+
+function nativeResultFromState(state: NativeWatchConnectState): WatchConnectNativeResult {
+  return {
+    state: state.state,
+    scope: state.scope,
+    connectionId: state.connectionId,
+    sessionId: state.sessionId,
+    connectedUntil: state.connectedUntil,
+    remainingMs: state.remainingMs,
+    requiresUserStart: state.requiresUserStart,
+    workoutReady: state.workoutReady,
+    relayConfigured: state.relayConfigured,
+    ...(state.reason ? { reason: state.reason } : {}),
+  };
+}
+
+export const watchConnectNativeResultFromState = nativeResultFromState;
+
+export function watchConnectNativeCapability(state: NativeWatchConnectState) {
+  const reason = state.reason?.toLowerCase() ?? '';
+  return !(state.state === 'inactive' && (
+    reason.includes('install the latest tracklab build')
+    || reason.includes('not implemented')
+    || reason.includes('unimplemented')
+    || reason.includes('does not have an implementation')
+  ));
+}
+
+export function watchConnectLegacyHeartRateIsBusy(
+  status: NativeHeartRateStatus | null,
+  relay: NativeHeartRateRelaySnapshot | null,
+) {
+  const isWatchConnect = (sessionId: string | null | undefined) => (
+    sessionId?.startsWith('watch-connect:') === true
+  );
+  if (relay?.sessions.some((session) => !isWatchConnect(session.sessionId))) return true;
+  if (relay?.configured && !isWatchConnect(relay.sessionId)) return true;
+  return Boolean(
+    status
+    && ['launching', 'connecting', 'active', 'paused', 'ending'].includes(status.state)
+    && !isWatchConnect(status.sessionId),
+  );
+}
+
+export function watchConnectSuppressesLegacyRelay({
+  accountId,
+  hydratedAccountId,
+  capable,
+  snapshot,
+  native,
+}: {
+  accountId: string | null;
+  hydratedAccountId: string | null;
+  capable: boolean | null;
+  snapshot: WatchConnectCloudSnapshot;
+  native: NativeWatchConnectState | null;
+}) {
+  if (!accountId || capable === false) return false;
+  if (capable == null) return true;
+  if (hydratedAccountId !== accountId) return true;
+  return snapshot.enrollments.some((candidate) => candidate.state === 'trusted')
+    || Boolean(native && ['connecting', 'connected', 'syncing', 'disconnecting'].includes(native.state));
+}
+
+export function defaultWatchConnectClubId({
+  contexts,
+  preferredClubId,
+  preferPersonal,
+}: {
+  contexts: readonly StudioContext[];
+  preferredClubId?: string | null;
+  preferPersonal?: boolean;
+}) {
+  if (preferPersonal) return null;
+  if (preferredClubId && contexts.some((context) => context.clubId === preferredClubId)) {
+    return preferredClubId;
+  }
+  return contexts.length === 1 ? contexts[0].clubId : null;
+}
+
+export function watchConnectAccountRequestIsCurrent(
+  requestedAccountId: string,
+  currentAccountId: string | null,
+) {
+  return requestedAccountId === currentAccountId;
+}
+
+export function watchConnectStudioConsentForStart(
+  enrollment: WatchConnectEnrollment | null,
+  live: boolean,
+  session: boolean,
+) {
+  return enrollment?.scope === 'studio' && enrollment.state === 'trusted'
+    ? { live: enrollment.liveStudioConsent, session: enrollment.sessionStudioConsent }
+    : { live, session };
+}
+
+export function watchConnectNeedsCredentialRecovery({
+  accountId,
+  hydratedAccountId,
+  enrollment,
+  connection,
+  native,
+  inFlight,
+  now = Date.now(),
+}: {
+  accountId: string | null;
+  hydratedAccountId: string | null;
+  enrollment: WatchConnectEnrollment | null;
+  connection: WatchConnectConnection | null;
+  native: NativeWatchConnectState | null;
+  inFlight: boolean;
+  now?: number;
+}) {
+  const state = native;
+  return !inFlight
+    && Boolean(accountId && hydratedAccountId === accountId)
+    && enrollment?.state === 'trusted'
+    && connection?.state === 'connecting'
+    && connection.enrollmentId === enrollment.id
+    && connection.connectedUntil > now
+    && state?.state === 'connecting'
+    && state.scope === connection.scope
+    && state.connectionId === connection.id
+    && state.sessionId === `watch-connect:${connection.id}`
+    && state.connectedUntil === connection.connectedUntil
+    && state.relayConfigured === false;
+}
+
+export function watchConnectCanRetryCloudConnection({
+  accountId,
+  hydratedAccountId,
+  connection,
+  native,
+}: {
+  accountId: string | null;
+  hydratedAccountId: string | null;
+  connection: WatchConnectConnection | null;
+  native: NativeWatchConnectState | null;
+}) {
+  return Boolean(
+    accountId
+    && hydratedAccountId === accountId
+    && connection?.state === 'connecting'
+    && (native == null || ['inactive', 'reconnect', 'error'].includes(native.state)),
+  );
+}
+
+function newestEnrollment(
+  snapshot: WatchConnectCloudSnapshot,
+  scope: WatchConnectScope,
+  clubId: string | null,
+) {
+  return [...snapshot.enrollments]
+    .filter((candidate) => (
+      candidate.scope === scope
+      && candidate.clubId === clubId
+      && candidate.state === 'trusted'
+    ))
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
+}
+
+function newestConnection(
+  snapshot: WatchConnectCloudSnapshot,
+  enrollment: WatchConnectEnrollment | null,
+) {
+  if (!enrollment) return null;
+  return [...snapshot.connections]
+    .filter((candidate) => candidate.enrollmentId === enrollment.id)
+    .sort((left, right) => right.connectedAt - left.connectedAt)[0] ?? null;
+}
+
+export function WatchConnectCoordinator({
+  authStatus,
+  accountId,
+  accountName,
+  settingsOpen,
+  heartRate,
+  studioContext = null,
+  studioContexts = [],
+  ownedStudio = null,
+  preferPersonal = false,
+  onLegacyRelaySuppressionChange,
+  onCapabilityChange,
+  onMessage,
+}: WatchConnectCoordinatorProps) {
+  const [snapshot, setSnapshot] = useState<WatchConnectCloudSnapshot>(emptySnapshot);
+  const [nativeState, setNativeState] = useState<NativeWatchConnectState | null>(heartRate.watchConnect);
+  const [hydratedAccountId, setHydratedAccountId] = useState<string | null>(null);
+  const [capable, setCapable] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionDetail, setActionDetail] = useState('');
+  const [now, setNow] = useState(Date.now());
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [liveStudioConsent, setLiveStudioConsent] = useState(false);
+  const [sessionStudioConsent, setSessionStudioConsent] = useState(false);
+  const [recoveryRetryConnectionId, setRecoveryRetryConnectionId] = useState<string | null>(null);
+  const contextsKey = studioContexts.map((context) => `${context.clubId}:${context.clubName}`).join('|');
+  const [targetClubId, setTargetClubId] = useState<string | null>(() => defaultWatchConnectClubId({
+    contexts: studioContexts,
+    preferredClubId: studioContext?.clubId,
+    preferPersonal,
+  }));
+  const requestIdsRef = useRef<{ enrollment: string; connection: string } | null>(null);
+  const previousAccountIdRef = useRef(accountId);
+  const pendingStartConnectionRef = useRef<WatchConnectConnection | null>(null);
+  const connectPromiseRef = useRef<Promise<void> | null>(null);
+  const recoveryAttemptedConnectionRef = useRef<string | null>(null);
+  const currentAccountIdRef = useRef(accountId);
+  currentAccountIdRef.current = accountId;
+  const {
+    availability,
+    relayState,
+    status,
+    getWatchConnectIdentity,
+    getWatchConnectState,
+    startWatchConnect,
+    stopWatchConnect,
+    watchConnect,
+  } = heartRate;
+
+  const selectedStudioContext = studioContexts.find((context) => context.clubId === targetClubId)
+    ?? (studioContext?.clubId === targetClubId ? studioContext : null);
+  const scope: WatchConnectScope = selectedStudioContext ? 'studio' : 'personal';
+  const clubId = selectedStudioContext?.clubId ?? null;
+  const enrollment = useMemo(
+    () => newestEnrollment(snapshot, scope, clubId),
+    [clubId, scope, snapshot],
+  );
+  const connection = useMemo(
+    () => newestConnection(snapshot, enrollment),
+    [enrollment, snapshot],
+  );
+  const onPairedIPhone = availability?.platform === 'iphone'
+    && availability.supported === true;
+  const nativeDisplayState = nativeState ? nativeResultFromState(nativeState) : null;
+  const viewState = resolveWatchConnectViewState({
+    enrollment,
+    connection,
+    nativeState: nativeDisplayState,
+    requiresNativeMatch: onPairedIPhone,
+    busy,
+    now,
+  });
+  const platformViewState = !onPairedIPhone && (viewState.phase === 'connect' || viewState.phase === 'ended')
+    ? { ...viewState, detail: 'Open TrackLab on the paired iPhone and press Watch Connect.' }
+    : viewState;
+  const cardState = actionDetail && platformViewState.phase !== 'connected'
+    ? { ...platformViewState, detail: actionDetail }
+    : platformViewState;
+
+  useEffect(() => {
+    setPortalTarget(settingsOpen && typeof document !== 'undefined'
+      ? document.getElementById(watchConnectSettingsSlotId)
+      : null);
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    setNativeState(watchConnect);
+  }, [watchConnect]);
+
+  useEffect(() => {
+    setTargetClubId(defaultWatchConnectClubId({
+      contexts: studioContexts,
+      preferredClubId: studioContext?.clubId,
+      preferPersonal,
+    }));
+    setLiveStudioConsent(false);
+    setSessionStudioConsent(false);
+    requestIdsRef.current = null;
+    recoveryAttemptedConnectionRef.current = null;
+    setRecoveryRetryConnectionId(null);
+    // contextsKey avoids resetting the choice when App recreates the array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId, contextsKey, preferPersonal, studioContext?.clubId]);
+
+  useEffect(() => {
+    if (
+      !nativeState?.connectionId
+      || !['connecting', 'connected', 'syncing', 'disconnecting'].includes(nativeState.state)
+    ) return;
+    const exact = snapshot.connections.find((candidate) => (
+      candidate.id === nativeState.connectionId
+      && candidate.connectedUntil === nativeState.connectedUntil
+    ));
+    if (exact) setTargetClubId(exact.scope === 'studio' ? exact.clubId : null);
+  }, [nativeState?.connectedUntil, nativeState?.connectionId, snapshot.connections]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (authStatus !== 'signed-in' || !accountId) return;
+    const requestedAccountId = accountId;
+    const nativePlatform = availability?.platform === 'iphone' || availability?.platform === 'ipad';
+    const [cloudResult, nativeResult] = await Promise.allSettled([
+      loadWatchConnect(),
+      nativePlatform ? getWatchConnectState() : Promise.resolve(null),
+    ]);
+    if (!watchConnectAccountRequestIsCurrent(requestedAccountId, currentAccountIdRef.current)) return;
+    if (nativeResult.status === 'fulfilled' && nativeResult.value) {
+      const native = nativeResult.value;
+      setNativeState(native);
+      const nextCapable = watchConnectNativeCapability(native);
+      setCapable(nextCapable);
+      onCapabilityChange?.(nextCapable);
+    } else if (availability != null && !nativePlatform) {
+      setCapable(false);
+      onCapabilityChange?.(false);
+    }
+    if (cloudResult.status === 'rejected') throw cloudResult.reason;
+    setSnapshot(cloudResult.value);
+    setHydratedAccountId(requestedAccountId);
+    setNow(Date.now());
+  }, [accountId, authStatus, availability, getWatchConnectState, onCapabilityChange]);
+
+  useEffect(() => {
+    if (authStatus !== 'signed-in' || !accountId) {
+      setSnapshot(emptySnapshot);
+      setActionDetail('');
+      onLegacyRelaySuppressionChange?.(false);
+      return undefined;
+    }
+    let cancelled = false;
+    const run = () => refresh().catch((error: unknown) => {
+      if (!cancelled) setActionDetail(error instanceof Error ? error.message : String(error));
+    });
+    void run();
+    const timer = window.setInterval(run, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [accountId, authStatus, onLegacyRelaySuppressionChange, refresh]);
+
+  useEffect(() => {
+    const accountChanged = previousAccountIdRef.current !== accountId;
+    previousAccountIdRef.current = accountId;
+    if (!accountChanged) return;
+    requestIdsRef.current = null;
+    pendingStartConnectionRef.current = null;
+    connectPromiseRef.current = null;
+    recoveryAttemptedConnectionRef.current = null;
+    setRecoveryRetryConnectionId(null);
+    setSnapshot(emptySnapshot);
+    setHydratedAccountId(null);
+    setNativeState(null);
+    setCapable(null);
+    setActionDetail('');
+  }, [accountId]);
+
+  useEffect(() => {
+    // A remembered connection owns all heart-rate routing for this account,
+    // even between four-hour sessions. This prevents legacy mode-specific
+    // relays from starting after expiry or during a bike reconnect.
+    onLegacyRelaySuppressionChange?.(watchConnectSuppressesLegacyRelay({
+      accountId,
+      hydratedAccountId,
+      capable,
+      snapshot,
+      native: nativeState,
+    }));
+  }, [accountId, capable, hydratedAccountId, nativeState, onLegacyRelaySuppressionChange, snapshot]);
+
+  useEffect(() => {
+    if (!onPairedIPhone || authStatus !== 'signed-in') return;
+    if (reconcileWatchConnectAccount({
+      accountId,
+      hydratedAccountId,
+      connections: snapshot.connections,
+      native: nativeState,
+    }) !== 'foreign-native-session') return;
+    // Finalize a foreign-account native session before this account can use or
+    // display Watch data. The encrypted finalized outbox remains drainable.
+    void stopWatchConnect().then((status) => {
+      setNativeState(status);
+      setActionDetail('Previous-account Watch data is syncing privately. Press Watch Connect when it finishes.');
+    }).catch(() => undefined);
+  }, [accountId, authStatus, hydratedAccountId, nativeState, onPairedIPhone, snapshot.connections, stopWatchConnect]);
+
+  useEffect(() => {
+    const pending = pendingStartConnectionRef.current;
+    if (!pending || !nativeState || hydratedAccountId !== accountId) return;
+    const exact = nativeState.scope === pending.scope
+      && nativeState.connectionId === pending.id
+      && nativeState.sessionId === `watch-connect:${pending.id}`
+      && nativeState.connectedUntil === pending.connectedUntil;
+    const cloudConnected = snapshot.connections.some((candidate) => (
+      candidate.id === pending.id && candidate.state === 'connected'
+    ));
+    if (nativeState.state === 'connected' && exact && cloudConnected) {
+      pendingStartConnectionRef.current = null;
+      setActionDetail('Ready for every TrackLab program during this four-hour session.');
+      return;
+    }
+    if ((nativeState.state === 'connecting' || nativeState.state === 'connected') && exact) return;
+    const terminal = ['error', 'reconnect', 'inactive'].includes(nativeState.state);
+    const mismatchedActive = ['connecting', 'connected'].includes(nativeState.state) && !exact;
+    if (!terminal && !mismatchedActive) return;
+    pendingStartConnectionRef.current = null;
+    setBusy(true);
+    void (async () => {
+      if (nativeState.connectionId === pending.id) await stopWatchConnect().catch(() => undefined);
+      const { connection: stopped } = await finishWatchConnectDisconnect(pending, {});
+      setSnapshot((current) => ({
+        ...current,
+        connections: [stopped, ...current.connections.filter((item) => item.id !== stopped.id)],
+      }));
+      setActionDetail(nativeState.reason || 'Watch did not connect. Press Watch Connect to try again.');
+    })().catch((error: unknown) => {
+      setActionDetail(error instanceof Error ? error.message : String(error));
+    }).finally(() => setBusy(false));
+  }, [accountId, hydratedAccountId, nativeState, snapshot.connections, stopWatchConnect]);
+
+  const connect = useCallback((automaticRecovery = false) => {
+    if (!onPairedIPhone) return Promise.resolve();
+    return runWatchConnectSingleFlight(connectPromiseRef, async () => {
+      if (reconcileWatchConnectAccount({
+        accountId,
+        hydratedAccountId,
+        connections: snapshot.connections,
+        native: nativeState,
+      }) === 'foreign-native-session') {
+        setActionDetail('Previous-account Watch data is syncing privately. Try again when it finishes.');
+        return;
+      }
+      if (watchConnectLegacyHeartRateIsBusy(status, relayState)) {
+        const message = 'Finish syncing your current Apple Watch session, then press Watch Connect.';
+        setActionDetail(message);
+        onMessage?.(message);
+        return;
+      }
+      const actionAccountId = accountId;
+      setBusy(true);
+      setActionDetail('Connecting…');
+      requestIdsRef.current ??= {
+        enrollment: createWatchConnectRequestId('watch-connect-enrollment'),
+        connection: createWatchConnectRequestId('watch-connect-session'),
+      };
+      try {
+      const savedStudioConsent = watchConnectStudioConsentForStart(
+        enrollment,
+        liveStudioConsent,
+        sessionStudioConsent,
+      );
+      const started = await startWatchConnectAction({
+        scope,
+        baseUrl: window.location.origin,
+        ...(clubId ? { clubId } : {}),
+        ...(enrollment ? { existingEnrollment: enrollment } : {}),
+        ...(scope === 'studio' ? {
+          liveStudioConsent: savedStudioConsent.live,
+          sessionStudioConsent: savedStudioConsent.session,
+        } : {}),
+        enrollmentRequestId: requestIdsRef.current.enrollment,
+        connectionRequestId: requestIdsRef.current.connection,
+      }, {
+        getIdentity: async () => {
+          const identity = await getWatchConnectIdentity();
+          if (!identity) throw new Error('Use the TrackLab iPhone app paired with this Apple Watch.');
+          return identity;
+        },
+        getNativeState: async () => nativeResultFromState(await getWatchConnectState()),
+        startNative: async (options) => nativeResultFromState(await startWatchConnect(options)),
+        stopNative: async () => nativeResultFromState(await stopWatchConnect()),
+      });
+      if (currentAccountIdRef.current !== actionAccountId) {
+        if (started.native.connectionId === started.connection.id) {
+          await stopWatchConnect().catch(() => undefined);
+        }
+        return;
+      }
+      requestIdsRef.current = null;
+      setRecoveryRetryConnectionId(null);
+      setSnapshot((current) => ({
+        enrollments: [
+          started.enrollment,
+          ...current.enrollments.filter((item) => item.id !== started.enrollment.id),
+        ],
+        connections: [
+          started.connection,
+          ...current.connections.filter((item) => item.id !== started.connection.id),
+        ],
+      }));
+      setNativeState({
+        version: 1,
+        state: started.native.state,
+        scope,
+        connectionId: started.native.connectionId,
+        sessionId: `watch-connect:${started.connection.id}`,
+        connectedUntil: started.native.connectedUntil,
+        remainingMs: started.native.remainingMs,
+        requiresUserStart: started.native.requiresUserStart,
+        workoutReady: started.native.workoutReady,
+        relayConfigured: started.native.relayConfigured,
+        ...(started.native.reason ? { reason: started.native.reason } : {}),
+      });
+      pendingStartConnectionRef.current = started.connection.state === 'connecting'
+        ? started.connection
+        : null;
+      setActionDetail(started.native.state === 'connected'
+        ? 'Ready for every TrackLab program during this four-hour session.'
+        : 'Confirm TrackLab on Apple Watch to finish connecting.');
+      onMessage?.('Watch Connect started for four hours.');
+      } catch (error) {
+        if (!watchConnectAccountRequestIsCurrent(actionAccountId ?? '', currentAccountIdRef.current)) return;
+        if (automaticRecovery && connection?.state === 'connecting') {
+          setRecoveryRetryConnectionId(connection.id);
+        }
+        if (!(error instanceof WatchConnectStartError) || !error.reuseRequestIds) {
+          requestIdsRef.current = null;
+        }
+        setActionDetail(error instanceof Error ? error.message : String(error));
+        onMessage?.(error instanceof Error ? error.message : String(error));
+        await refresh().catch(() => undefined);
+      } finally {
+        setBusy(false);
+      }
+    });
+  }, [
+    clubId,
+    accountId,
+    connection,
+    getWatchConnectIdentity,
+    getWatchConnectState,
+    hydratedAccountId,
+    enrollment,
+    liveStudioConsent,
+    onMessage,
+    onPairedIPhone,
+    relayState,
+    refresh,
+    scope,
+    sessionStudioConsent,
+    snapshot.connections,
+    startWatchConnect,
+    status,
+    stopWatchConnect,
+  ]);
+
+  useEffect(() => {
+    if (connection?.state !== 'connecting') {
+      recoveryAttemptedConnectionRef.current = null;
+      setRecoveryRetryConnectionId(null);
+      return;
+    }
+    if (!watchConnectNeedsCredentialRecovery({
+      accountId,
+      hydratedAccountId,
+      enrollment,
+      connection,
+      native: nativeState,
+      inFlight: Boolean(connectPromiseRef.current || pendingStartConnectionRef.current),
+      now,
+    })) return;
+    if (recoveryAttemptedConnectionRef.current === connection.id) return;
+    recoveryAttemptedConnectionRef.current = connection.id;
+    void connect(true);
+  }, [accountId, connect, connection, enrollment, hydratedAccountId, nativeState, now]);
+
+  const disconnect = useCallback(async (forgetEnrollmentId: string | null = null) => {
+    if (!connection || !onPairedIPhone) return;
+    setBusy(true);
+    setActionDetail('Syncing…');
+    try {
+      const stopped = await stopWatchConnectAction(connection, {
+        getIdentity: async () => {
+          throw new Error('Identity is not needed while disconnecting.');
+        },
+        startNative: async () => {
+          throw new Error('Start is not available while disconnecting.');
+        },
+        stopNative: async () => nativeResultFromState(await stopWatchConnect()),
+      });
+      setSnapshot((current) => ({
+        ...current,
+        connections: [stopped.connection, ...current.connections.filter((item) => item.id !== stopped.connection.id)],
+      }));
+      if (forgetEnrollmentId) {
+        const forgotten = await forgetWatchConnectEnrollment(forgetEnrollmentId);
+        setSnapshot((current) => ({
+          ...current,
+          enrollments: [forgotten, ...current.enrollments.filter((item) => item.id !== forgotten.id)],
+        }));
+      }
+      setActionDetail(forgetEnrollmentId ? 'Watch forgotten.' : 'Session ended.');
+    } catch (error) {
+      setActionDetail(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [connection, onPairedIPhone, stopWatchConnect]);
+
+  const forget = useCallback(async () => {
+    if (!enrollment || !onPairedIPhone) return;
+    if (typeof window !== 'undefined' && !window.confirm(
+      'Forget this Apple Watch? You will approve Apple Health and studio sharing again next time.',
+    )) return;
+    if (
+      (connection?.state === 'connecting' || connection?.state === 'connected')
+      && connection.connectedUntil > Date.now()
+    ) {
+      await disconnect(enrollment.id);
+      return;
+    }
+    setBusy(true);
+    try {
+      const forgotten = await forgetWatchConnectEnrollment(enrollment.id);
+      setSnapshot((current) => ({
+        ...current,
+        enrollments: [forgotten, ...current.enrollments.filter((item) => item.id !== forgotten.id)],
+      }));
+      setActionDetail('Watch forgotten.');
+    } catch (error) {
+      setActionDetail(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [connection, disconnect, enrollment, onPairedIPhone]);
+
+  if (
+    !portalTarget
+    || authStatus !== 'signed-in'
+    || !accountId
+  ) return null;
+  return createPortal(
+    <>
+    {capable === true && <WatchConnectCard
+      athleteName={accountName}
+      busy={busy}
+      context={scope === 'studio' ? 'studio' : 'personal'}
+      disabled={hydratedAccountId !== accountId}
+      enrolled={Boolean(enrollment)}
+      liveStudioConsent={enrollment?.liveStudioConsent ?? liveStudioConsent}
+      onConnect={onPairedIPhone ? () => { void connect(); } : undefined}
+      onDisconnect={onPairedIPhone && connection?.state === 'connected'
+        ? () => { void disconnect(); }
+        : undefined}
+      onForgetWatch={onPairedIPhone && enrollment ? () => { void forget(); } : undefined}
+      onLiveStudioConsentChange={setLiveStudioConsent}
+      onSessionStudioConsentChange={setSessionStudioConsent}
+      onTargetChange={(value) => {
+        setTargetClubId(value === 'personal' ? null : value);
+        setLiveStudioConsent(false);
+        setSessionStudioConsent(false);
+        setActionDetail('');
+        requestIdsRef.current = null;
+        recoveryAttemptedConnectionRef.current = null;
+        setRecoveryRetryConnectionId(null);
+      }}
+      sessionStudioConsent={enrollment?.sessionStudioConsent ?? sessionStudioConsent}
+      state={cardState}
+      studioName={selectedStudioContext?.clubName}
+      targetDisabled={busy || Boolean(nativeState && [
+        'connecting',
+        'connected',
+        'disconnecting',
+      ].includes(nativeState.state)) || Boolean(
+        nativeState?.state === 'syncing' && viewState.phase !== 'ended',
+      )}
+      targetOptions={studioContexts.length > 0
+        ? [
+          { value: 'personal', label: 'My account' },
+          ...studioContexts.map((context) => ({ value: context.clubId, label: context.clubName })),
+        ]
+        : undefined}
+      targetValue={clubId ?? 'personal'}
+      retryWhileConnecting={recoveryRetryConnectionId === connection?.id || watchConnectCanRetryCloudConnection({
+        accountId,
+        hydratedAccountId,
+        connection,
+        native: nativeState,
+      })}
+    />}
+    {ownedStudio && <OwnerStudioWatchConnectSettings studio={ownedStudio} />}
+    </>,
+    portalTarget,
+  );
+}
+
+export default WatchConnectCoordinator;

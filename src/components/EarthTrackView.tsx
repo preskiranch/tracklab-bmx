@@ -55,6 +55,7 @@ import type {
 } from '../types';
 import type { CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 import type { PersonalRecordAchievements } from '../lib/personalRecords';
+import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
 
 const GoogleMaps3DTrackLayer = lazy(async () => {
   const module = await import('./GoogleMaps3DTrackLayer');
@@ -100,6 +101,7 @@ type EarthTrackViewProps = {
   finishCountdownSeconds: number | null;
   reactionTimesByPlayer: ReactionTimesByPlayer;
   newPersonalRecordsByPlayer: PersonalRecordAchievements;
+  heartRateByPlayer?: LiveHeartRateByPlayer;
   earthAngle: number;
   earthHeading: number;
   earthCenter: TrackPoint | null;
@@ -214,6 +216,7 @@ export function EarthTrackView({
   finishCountdownSeconds,
   reactionTimesByPlayer,
   newPersonalRecordsByPlayer,
+  heartRateByPlayer,
   earthAngle,
   earthHeading,
   earthCenter,
@@ -709,6 +712,7 @@ export function EarthTrackView({
               onPreferenceChange={onRiderOverlayPreferenceChange}
               onFullscreenInteraction={onRaceFullscreenInteraction}
               newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
+              heartRateByPlayer={heartRateByPlayer}
             />
           </Suspense>
         )}

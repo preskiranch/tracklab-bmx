@@ -8,6 +8,7 @@ import {
   Compass,
   Copy,
   Download,
+  HeartPulse,
   Link2,
   RefreshCw,
   ShieldCheck,
@@ -43,6 +44,13 @@ import {
 } from '../lib/trainingHistory';
 import type { AuthUser } from '../lib/auth';
 import {
+  loadClubHeartRateSummaryHistory,
+  loadPrivateHeartRateSessionHistory,
+  type ClubHeartRateHistoryItem,
+  type PrivateHeartRateHistoryItem,
+  type HeartRateStream,
+} from '../lib/heartRateCloud';
+import {
   formatDistanceMeters,
   formatExploreDistanceMeters,
   formatSpeedFromKph,
@@ -66,7 +74,7 @@ type AccountProfileViewProps = {
 
 const emptyHistory: TrainingHistoryResponse = {
   sessions: [],
-  totals: { sessions: 0, bmxRaces: 0, straightSprints: 0, exploreRides: 0, getPulledTests: 0, distanceMeters: 0, durationMs: 0 },
+  totals: { sessions: 0, bmxRaces: 0, straightSprints: 0, exploreRides: 0, getPulledTests: 0, monitorSprints: 0, distanceMeters: 0, durationMs: 0 },
 };
 const emptyClubState: ClubConnectState = {
   canManageClub: false,
@@ -79,6 +87,7 @@ const activityLabels: Record<TrainingActivityType, string> = {
   'straight-sprint': 'Straight Sprint',
   explore: 'Explore the World',
   'get-pulled': 'Get Pulled',
+  'monitor-sprint': 'Monitor Sprint',
 };
 
 function localDateKey(timestamp: number) {
@@ -146,7 +155,7 @@ export function displayedProfileSessionTitle(session: TrainingSession, distanceU
 function sessionIcon(type: TrainingActivityType) {
   if (type === 'explore') return <Compass size={19} />;
   if (type === 'straight-sprint') return <Timer size={19} />;
-  if (type === 'get-pulled') return <Activity size={19} />;
+  if (type === 'get-pulled' || type === 'monitor-sprint') return <Activity size={19} />;
   return <Bike size={19} />;
 }
 
@@ -171,6 +180,19 @@ function summarizeSession(session: TrainingSession, distanceUnit: DistanceUnit) 
       details.durationSeconds ? `${details.durationSeconds}s pull` : undefined,
       details.airSetting ? `Air ${details.airSetting}` : undefined,
       rider?.peakWatts ? `${rider.peakWatts} W peak` : undefined,
+    ].filter(Boolean).join(' · ');
+  }
+  if (session.activityType === 'monitor-sprint') {
+    const rider = details.riders?.[0] as {
+      name?: string;
+      peakWatts?: number;
+      peakCadence?: number;
+      peakSpeedKph?: number;
+    } | undefined;
+    return [
+      rider?.name,
+      rider?.peakCadence ? `${Math.round(rider.peakCadence)} rpm peak` : undefined,
+      rider?.peakWatts ? `${Math.round(rider.peakWatts)} W peak` : undefined,
     ].filter(Boolean).join(' · ');
   }
   const winner = (details.summaries ?? []).find((summary) => summary.rank === 1) ?? details.summaries?.[0];
@@ -238,6 +260,191 @@ function recordedSpeed(value: number | null | undefined, speedUnit: SpeedUnit) {
   return value != null && Number.isFinite(value)
     ? `${formatSpeedFromKph(value, speedUnit)} ${speedUnitLabel(speedUnit)}`
     : '—';
+}
+
+export function privateHeartRateSessionId(session: TrainingSession) {
+  if (session.club?.role === 'owner') return null;
+  if (session.club?.role !== 'athlete') return session.id;
+  const projectedPrefix = `club:${session.club.id}:`;
+  return session.id.startsWith(projectedPrefix)
+    ? session.id.slice(projectedPrefix.length)
+    : session.id;
+}
+
+export type ClubHeartRateHistoryTarget = Readonly<{
+  clubId: string;
+  clubName: string;
+  sessionId: string;
+}>;
+
+export function clubHeartRateHistoryTarget(session: TrainingSession): ClubHeartRateHistoryTarget | null {
+  if (session.club?.role !== 'owner') return null;
+  const projectedPrefix = `club-owner:${session.club.id}:${session.club.studioRiderId}:`;
+  const sessionId = session.id.startsWith(projectedPrefix)
+    ? session.id.slice(projectedPrefix.length)
+    : session.id;
+  return sessionId ? { clubId: session.club.id, clubName: session.club.name, sessionId } : null;
+}
+
+type HeartRateHistorySummaryStream = PrivateHeartRateHistoryItem | ClubHeartRateHistoryItem;
+
+function heartRateMetric(value: number | null | undefined) {
+  return value != null && Number.isFinite(value) ? `${Math.round(value)} BPM` : '—';
+}
+
+function heartRateCoverage(summary: HeartRateStream['summary']) {
+  if (!summary) return 'Not available';
+  const percentage = Number.isInteger(summary.coveragePercent)
+    ? summary.coveragePercent.toFixed(0)
+    : summary.coveragePercent.toFixed(1);
+  return `${summary.sampleCount.toLocaleString()} ${summary.sampleCount === 1 ? 'sample' : 'samples'} · ${percentage}% · ${formatDuration(summary.coverageMs)} measured`;
+}
+
+function activeClockLabel(value: number) {
+  const seconds = Math.max(0, value) / 1_000;
+  return seconds < 60
+    ? `${Number.isInteger(seconds) ? seconds.toFixed(0) : seconds.toFixed(1)}s`
+    : formatDuration(value);
+}
+
+export type PrivateHeartRateHistoryState = 'loading' | 'ready' | 'error';
+
+export function PrivateHeartRateHistoryPanel({
+  state,
+  streams,
+  error = '',
+  onRetry,
+  sharingLabel,
+}: {
+  state: PrivateHeartRateHistoryState;
+  streams: readonly HeartRateHistorySummaryStream[];
+  error?: string;
+  onRetry?: () => void;
+  sharingLabel?: string;
+}) {
+  return (
+    <section className={`private-heart-rate-history ${state}`} aria-label={sharingLabel ? 'Consented Apple Watch heart-rate summary' : 'Private Apple Watch heart-rate history'}>
+      <header>
+        <span className="private-heart-rate-title"><HeartPulse size={16} /> {sharingLabel ? 'Consented Apple Watch summary' : 'Private Apple Watch heart rate'}</span>
+        <span className="private-heart-rate-owner"><ShieldCheck size={13} /> {sharingLabel || 'Only you'}</span>
+      </header>
+
+      {state === 'loading' ? (
+        <p className="private-heart-rate-message" role="status">
+          {sharingLabel ? 'Loading rider-consented heart-rate summary…' : 'Loading private heart-rate history…'}
+        </p>
+      ) : state === 'error' ? (
+        <div className="private-heart-rate-message error" role="alert">
+          <span>{sharingLabel ? 'Consented heart-rate summary' : 'Private heart-rate history'} is temporarily unavailable{error ? `: ${error}` : '.'}</span>
+          {onRetry && <button type="button" onClick={onRetry}><RefreshCw size={13} /> Try again</button>}
+        </div>
+      ) : streams.length === 0 ? (
+        <p className="private-heart-rate-message">
+          {sharingLabel
+            ? 'The rider did not share an Apple Watch summary for this club session.'
+            : 'No Apple Watch heart-rate data was saved for this session.'}
+        </p>
+      ) : (
+        <div className="private-heart-rate-streams">
+          {streams.map((stream, index) => (
+            <div className="private-heart-rate-stream" key={stream.id}>
+              {streams.length > 1 && <strong className="private-heart-rate-segment">Watch segment {index + 1}</strong>}
+              {stream.summary ? (
+                <dl className="private-heart-rate-metrics">
+                  <div><dt>Minimum</dt><dd>{heartRateMetric(stream.summary.minimumBpm)}</dd></div>
+                  <div><dt>Average</dt><dd>{heartRateMetric(stream.summary.averageBpm)}</dd></div>
+                  <div><dt>Peak</dt><dd>{heartRateMetric(stream.summary.peakBpm)}</dd></div>
+                  <div className="coverage"><dt>Sample coverage</dt><dd>{heartRateCoverage(stream.summary)}</dd></div>
+                </dl>
+              ) : (
+                <div className="private-heart-rate-message">
+                  <span>{stream.finalizedAt == null
+                    ? 'Apple Watch data is still syncing for this session.'
+                    : 'No valid Apple Watch samples were recorded for this session.'}</span>
+                  {stream.finalizedAt == null && onRetry && (
+                    <button type="button" onClick={onRetry}><RefreshCw size={13} /> Check again</button>
+                  )}
+                </div>
+              )}
+
+              {stream.zoneSummaries.length > 0 && (
+                <div className="private-heart-rate-zones">
+                  <strong>Heart rate by pedal zone</strong>
+                  {stream.zoneSummaries.map((zone) => (
+                    <article key={`${stream.id}:${zone.zoneId}`}>
+                      <div>
+                        <strong>{zone.zoneName || zone.zoneId}</strong>
+                        <small>{activeClockLabel(zone.startElapsedMs)}–{activeClockLabel(zone.endElapsedMs)} active time</small>
+                      </div>
+                      <span>Avg {heartRateMetric(zone.summary.averageBpm)} · Peak {heartRateMetric(zone.summary.peakBpm)}</span>
+                      <small>{heartRateCoverage(zone.summary)}</small>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <small className="private-heart-rate-separation">
+        {sharingLabel
+          ? 'Summary only · raw heart-rate samples are unavailable to the club and excluded from downloads'
+          : 'Owner-only health data · kept separate from club history and generic JSON/CSV downloads'}
+      </small>
+    </section>
+  );
+}
+
+function PrivateHeartRateHistoryForSession({
+  session,
+  refreshKey,
+}: {
+  session: TrainingSession;
+  refreshKey: string;
+}) {
+  const sessionId = privateHeartRateSessionId(session);
+  const clubTarget = useMemo(() => clubHeartRateHistoryTarget(session), [session]);
+  const [state, setState] = useState<PrivateHeartRateHistoryState>('loading');
+  const [streams, setStreams] = useState<readonly HeartRateHistorySummaryStream[]>([]);
+  const [error, setError] = useState('');
+  const [retryRevision, setRetryRevision] = useState(0);
+
+  useEffect(() => {
+    if (!sessionId && !clubTarget) return undefined;
+    let cancelled = false;
+    setState('loading');
+    setError('');
+    const request = clubTarget
+      ? loadClubHeartRateSummaryHistory(clubTarget.clubId, clubTarget.sessionId)
+      : loadPrivateHeartRateSessionHistory(sessionId!);
+    void request
+      .then((next) => {
+        if (cancelled) return;
+        setStreams(next);
+        setState('ready');
+      })
+      .catch((loadError: unknown) => {
+        if (cancelled) return;
+        setStreams([]);
+        setError(loadError instanceof Error ? loadError.message : String(loadError));
+        setState('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clubTarget, refreshKey, retryRevision, sessionId]);
+
+  if (!sessionId && !clubTarget) return null;
+  return (
+    <PrivateHeartRateHistoryPanel
+      state={state}
+      streams={streams}
+      error={error}
+      sharingLabel={clubTarget ? `Shared with ${clubTarget.clubName} by rider consent` : undefined}
+      onRetry={() => setRetryRevision((revision) => revision + 1)}
+    />
+  );
 }
 
 function CompleteRecordedMetrics({
@@ -625,6 +832,7 @@ export function AccountProfileView({
         <article><Activity size={20} /><span><b>{history.totals.sessions}</b><small>Sessions this month</small></span></article>
         <article><Bike size={20} /><span><b>{history.totals.bmxRaces}</b><small>BMX races</small></span></article>
         <article><Timer size={20} /><span><b>{history.totals.straightSprints}</b><small>Straight sprints</small></span></article>
+        <article><Activity size={20} /><span><b>{history.totals.monitorSprints}</b><small>Monitor sprints</small></span></article>
         <article><Activity size={20} /><span><b>{history.totals.getPulledTests}</b><small>Get Pulled tests</small></span></article>
         <article><Compass size={20} /><span><b>{formatProfileHistoryDistance(history.totals.distanceMeters, distanceUnit)}</b><small>Total distance</small></span></article>
       </section>
@@ -694,6 +902,10 @@ export function AccountProfileView({
                 {privatePeakPower(session) != null && (
                   <small>Private power · {privatePeakPower(session)} W peak · visible only to you</small>
                 )}
+                <PrivateHeartRateHistoryForSession
+                  session={session}
+                  refreshKey={`${historyRevision}:${session.updatedAt}`}
+                />
                 <CompleteRecordedMetrics
                   session={session}
                   speedUnit={speedUnit}
@@ -714,7 +926,7 @@ export function AccountProfileView({
           )}
         </section>
       </div>
-      <small className="account-history-sync-note">Calendar month: {monthKey(month)} · Live cloud sync is active. Completed sessions appear across signed-in devices automatically; JSON and CSV include the full saved record.</small>
+      <small className="account-history-sync-note">Calendar month: {monthKey(month)} · Live cloud sync is active. JSON and CSV contain the non-health session record. Apple Watch data stays in a protected panel; club views are summary-only and require rider consent.</small>
     </div>
   );
 }

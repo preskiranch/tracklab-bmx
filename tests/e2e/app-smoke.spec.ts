@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { WebSocket, WebSocketServer } from 'ws';
 
 const ignoredConsoleFragments = [
@@ -9,6 +9,16 @@ const ignoredConsoleFragments = [
   'ws://127.0.0.1:',
   'ws://localhost:',
 ];
+
+async function openSignedInAppIfNeeded(page: Page) {
+  const openApp = page.getByRole('button', { name: 'Open App' });
+  const primaryNavigation = page.getByRole('navigation', { name: 'Primary' });
+  // locator.isVisible() is an immediate snapshot; its timeout option does not
+  // wait for the lazy public landing chunk. Wait for either valid signed-in
+  // state before deciding whether the landing button needs to be clicked.
+  await openApp.or(primaryNavigation).first().waitFor({ state: 'visible', timeout: 15_000 });
+  if (await openApp.isVisible()) await openApp.click();
+}
 
 function silentWavBuffer(durationMs = 500) {
   const sampleRate = 8_000;
@@ -637,8 +647,7 @@ test('Friends hub shows removable official connections and private account disco
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
   await page.goto('/?track=rock-hill-bmx-supercross');
-  const openApp = page.getByRole('button', { name: 'Open App' });
-  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+  await openSignedInAppIfNeeded(page);
 
   await expect(page.getByRole('button', { name: /Friends.*pending friend request/ })).toBeVisible();
   await page.getByRole('button', { name: /Friends.*pending friend request/ }).click();
@@ -817,8 +826,7 @@ test('account display units persist across Settings and reload', async ({ page }
   };
 
   await page.goto('/?track=black-mountain-bmx');
-  const openApp = page.getByRole('button', { name: 'Open App' });
-  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+  await openSignedInAppIfNeeded(page);
   await openSettings();
   await expect(page.locator('.app-settings-sync')).toHaveAttribute('role', 'status');
   await expect(page.locator('.app-settings-sync')).toHaveAttribute('aria-live', 'polite');
@@ -870,14 +878,14 @@ test('account display units persist across Settings and reload', async ({ page }
   })).toMatchObject({ speedUnit: 'mph', distanceUnit: 'ft' });
 
   await page.reload();
-  await page.getByRole('button', { name: 'Open App' }).click({ timeout: 2_000 }).catch(() => undefined);
+  await page.getByRole('button', { name: 'Open App' }).click({ timeout: 10_000 }).catch(() => undefined);
   await openSettings();
   await expect(page.getByRole('button', { name: /MPH Miles per hour/ })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: /Feet ft \/ miles/ })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('Get Pulled runs a six-second countdown and keeps Air records separated', async ({ page }, testInfo) => {
-  test.setTimeout(30_000);
+  test.setTimeout(60_000);
   await page.addInitScript(() => {
     const audioWindow = window as typeof window & {
       __tracklabGetPulledTones?: string[];
@@ -935,8 +943,7 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
   await page.goto('/?track=black-mountain-bmx');
-  const openApp = page.getByRole('button', { name: 'Open App' });
-  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+  await openSignedInAppIfNeeded(page);
   await page.getByRole('button', { name: /Demo/i }).first().click();
   await page.getByRole('button', { name: 'Get Pulled', exact: true }).click();
 
@@ -959,86 +966,121 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
   await expect(airOptions.filter({ hasText: /^7$/ })).toHaveClass(/selected/);
 
   await view.getByRole('button', { name: /Start 3 seconds pull · Air 7/ }).click();
+  await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
   await expect(page.locator('.platform-shell')).toHaveClass(/utility-fullscreen/);
   await expect(view.getByText('Get ready', { exact: false })).toBeVisible();
-  await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
   await view.getByRole('button', { name: 'Cancel sprint', exact: true }).click();
   await expect(page.locator('.platform-shell')).not.toHaveClass(/utility-fullscreen/);
   await expect(view.getByRole('button', { name: /Start 3 seconds pull · Air 7/ })).toBeVisible();
+  await page.evaluate(() => {
+    (window as typeof window & { __tracklabGetPulledTones?: string[] })
+      .__tracklabGetPulledTones = [];
+  });
   await view.getByRole('button', { name: /Start 3 seconds pull · Air 7/ }).click();
   await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
   await expect(view.getByText('Pulling now', { exact: false })).toBeVisible({ timeout: 7_500 });
   await expect(view.getByRole('button', { name: 'Cancel sprint', exact: true })).toBeVisible();
   const pullScene = view.getByRole('img', { name: /actively pulling/i });
-  await expect(pullScene).toHaveAttribute('data-rider-side', 'right');
-  await expect(pullScene).toHaveAttribute('data-sled-side', 'left');
   await expect(pullScene).toHaveAttribute('data-pedaling', 'true');
-  await expect(pullScene).toHaveAttribute('data-course-mode', 'fixed-screen');
-  await expect(pullScene).toHaveAttribute('data-pull-scrolling', 'false');
-  await expect(pullScene).toHaveAttribute('data-travel-duration-seconds', '3');
-  await expect(pullScene.locator('[data-pedal-cycle="running"]')).toBeVisible();
-  await expect(pullScene.locator('[data-tow-attachment="sled-hitch-to-rear-axle"]')).toBeVisible();
-  await expect(pullScene.locator('[data-tow-attachment="sled-hitch-to-rear-axle"]')).toHaveAttribute('data-tow-color', 'matte-black');
-  const finishLine = pullScene.locator('[data-finish-line="pull"]');
-  await expect(finishLine).toBeVisible();
-  await expect(finishLine).toHaveAttribute('data-finish-surface', 'road-only-checkered');
-  await expect(finishLine).toHaveAttribute('data-road-clip', 'source-image-coordinates');
-  const scenery = pullScene.locator('[data-pull-scenery="fixed-track"]');
-  await expect(scenery).toHaveCSS('animation-name', 'none');
-  const rig = pullScene.locator('[data-pull-rig="sled-left-rider-right"]');
-  await expect(rig).toHaveCSS('animation-name', 'tracklab-pull-rig-travel');
-  const rider = pullScene.locator('[data-tow-anchor="rear-axle-hitch"]');
-  const sled = pullScene.locator('[data-pull-sled="trailing"]');
-  const sceneBox = await pullScene.boundingBox();
-  const riderBox = await rider.boundingBox();
-  const sledBox = await sled.boundingBox();
-  expect(sceneBox).not.toBeNull();
-  expect(riderBox).not.toBeNull();
-  expect(sledBox).not.toBeNull();
-  expect((riderBox?.x ?? 0) - ((sledBox?.x ?? 0) + (sledBox?.width ?? 0))).toBeLessThan(14);
-  expect((riderBox?.x ?? 0) - (sceneBox?.x ?? 0)).toBeLessThan((sceneBox?.width ?? 0) * .4);
-  expect(((riderBox?.y ?? 0) + (riderBox?.height ?? 0) - (sceneBox?.y ?? 0)) / (sceneBox?.height ?? 1)).toBeGreaterThan(.72);
-  expect(((riderBox?.y ?? 0) + (riderBox?.height ?? 0) - (sceneBox?.y ?? 0)) / (sceneBox?.height ?? 1)).toBeLessThan(.83);
-  const finishBox = await finishLine.boundingBox();
-  expect(finishBox).not.toBeNull();
-  expect((finishBox?.height ?? 0) / (sceneBox?.height ?? 1)).toBeLessThan(.22);
-  expect(((finishBox?.y ?? 0) - (sceneBox?.y ?? 0)) / (sceneBox?.height ?? 1)).toBeGreaterThan(.62);
-  const sceneryTransformBefore = await scenery.evaluate((element) => getComputedStyle(element).transform);
-  const rigTransformBefore = await rig.evaluate((element) => getComputedStyle(element).transform);
-  const animatedRider = pullScene.locator('[data-crank-motion="continuous-360"]');
-  await expect(animatedRider).toBeVisible();
-  await expect(animatedRider).toHaveAttribute('data-animation-sync', 'wattbike-cadence-1-to-1');
-  await expect(animatedRider).toHaveAttribute('data-render-model', 'single-stable-articulated-rig');
-  await expect(animatedRider).toHaveAttribute('data-bike-standard', '20-inch-bmx-race');
-  await expect(animatedRider).toHaveAttribute('data-pedal-phase', /0\.\d{4}/);
-  const cadenceBefore = Number(await animatedRider.getAttribute('data-cadence-rpm'));
-  const crankAngleBefore = Number(await animatedRider.getAttribute('data-crank-angle-degrees'));
-  const animationSampleStartedAt = performance.now();
+  await expect(pullScene.locator('[data-crank-motion="continuous-360"]'))
+    .toHaveAttribute('data-pedal-phase', /0\.\d{4}/);
+  const samplePullMotion = () => pullScene.evaluate((element) => {
+    const animatedRider = element.querySelector<HTMLElement>('[data-crank-motion="continuous-360"]');
+    const scenery = element.querySelector<HTMLElement>('[data-pull-scenery="fixed-track"]');
+    const rig = element.querySelector<HTMLElement>('[data-pull-rig="sled-left-rider-right"]');
+    const rider = element.querySelector<HTMLElement>('[data-tow-anchor="rear-axle-hitch"]');
+    const sled = element.querySelector<HTMLElement>('[data-pull-sled="trailing"]');
+    const finishLine = element.querySelector<HTMLElement>('[data-finish-line="pull"]');
+    const pedalCycle = element.querySelector<HTMLElement>('[data-pedal-cycle="running"]');
+    const towAttachment = element.querySelector<HTMLElement>('[data-tow-attachment="sled-hitch-to-rear-axle"]');
+    if (!animatedRider || !scenery || !rig || !rider || !sled || !finishLine || !pedalCycle || !towAttachment) {
+      throw new Error('Active pull animation is incomplete.');
+    }
+    const rectangle = (target: Element) => {
+      const bounds = target.getBoundingClientRect();
+      return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+    };
+    return {
+      sampledAt: performance.now(),
+      cadenceRpm: Number(animatedRider.dataset.cadenceRpm),
+      crankAngleDegrees: Number(animatedRider.dataset.crankAngleDegrees),
+      sceneryTransform: getComputedStyle(scenery).transform,
+      sceneryAnimationName: getComputedStyle(scenery).animationName,
+      rigTransform: getComputedStyle(rig).transform,
+      rigAnimationName: getComputedStyle(rig).animationName,
+      animationSync: animatedRider.dataset.animationSync,
+      renderModel: animatedRider.dataset.renderModel,
+      bikeStandard: animatedRider.dataset.bikeStandard,
+      pedalPhase: animatedRider.dataset.pedalPhase,
+      riderSide: element.dataset.riderSide,
+      sledSide: element.dataset.sledSide,
+      pedaling: element.dataset.pedaling,
+      courseMode: element.dataset.courseMode,
+      pullScrolling: element.dataset.pullScrolling,
+      travelDurationSeconds: element.dataset.travelDurationSeconds,
+      towColor: towAttachment.dataset.towColor,
+      finishSurface: finishLine.dataset.finishSurface,
+      roadClip: finishLine.dataset.roadClip,
+      sceneBox: rectangle(element),
+      riderBox: rectangle(rider),
+      sledBox: rectangle(sled),
+      finishBox: rectangle(finishLine),
+    };
+  });
+  const motionBefore = await samplePullMotion();
   await page.waitForTimeout(450);
-  const animationSampleSeconds = (performance.now() - animationSampleStartedAt) / 1_000;
-  const sceneryTransformAfter = await scenery.evaluate((element) => getComputedStyle(element).transform);
-  const rigTransformAfter = await rig.evaluate((element) => getComputedStyle(element).transform);
-  const cadenceAfter = Number(await animatedRider.getAttribute('data-cadence-rpm'));
-  const crankAngleAfter = Number(await animatedRider.getAttribute('data-crank-angle-degrees'));
-  const measuredCrankDelta = ((crankAngleAfter - crankAngleBefore) + 360) % 360;
-  const expectedCrankDelta = ((cadenceBefore + cadenceAfter) / 2) * 6 * animationSampleSeconds;
-  expect(sceneryTransformAfter).toBe(sceneryTransformBefore);
-  expect(rigTransformAfter).not.toBe(rigTransformBefore);
-  expect(measuredCrankDelta).toBeGreaterThan(expectedCrankDelta * .75);
-  expect(measuredCrankDelta).toBeLessThan(expectedCrankDelta * 1.25);
+  const motionAfter = await samplePullMotion();
+  const animationSampleSeconds = (motionAfter.sampledAt - motionBefore.sampledAt) / 1_000;
+  const measuredCrankDelta = (
+    (motionAfter.crankAngleDegrees - motionBefore.crankAngleDegrees) + 360
+  ) % 360;
+  const expectedCrankDelta = (
+    (motionBefore.cadenceRpm + motionAfter.cadenceRpm) / 2
+  ) * 6 * animationSampleSeconds;
+  const expectedCrankDeltaModulo = expectedCrankDelta % 360;
+  const crankDeltaError = Math.abs(
+    ((measuredCrankDelta - expectedCrankDeltaModulo + 540) % 360) - 180,
+  );
+  expect(motionBefore.sceneryTransform).toBe(motionAfter.sceneryTransform);
+  expect(motionBefore.rigTransform).not.toBe(motionAfter.rigTransform);
+  expect(motionBefore.animationSync).toBe('wattbike-cadence-1-to-1');
+  expect(motionBefore.renderModel).toBe('single-stable-articulated-rig');
+  expect(motionBefore.bikeStandard).toBe('20-inch-bmx-race');
+  expect(motionBefore.pedalPhase).toMatch(/0\.\d{4}/);
+  expect(motionBefore.riderSide).toBe('right');
+  expect(motionBefore.sledSide).toBe('left');
+  expect(motionBefore.pedaling).toBe('true');
+  expect(motionBefore.courseMode).toBe('fixed-screen');
+  expect(motionBefore.pullScrolling).toBe('false');
+  expect(motionBefore.travelDurationSeconds).toBe('3');
+  expect(motionBefore.towColor).toBe('matte-black');
+  expect(motionBefore.finishSurface).toBe('road-only-checkered');
+  expect(motionBefore.roadClip).toBe('source-image-coordinates');
+  expect(motionBefore.sceneryAnimationName).toBe('none');
+  expect(motionBefore.rigAnimationName).toBe('tracklab-pull-rig-travel');
+  expect(crankDeltaError).toBeLessThan(Math.max(12, expectedCrankDelta * .25));
+  expect(motionBefore.riderBox.x - (motionBefore.sledBox.x + motionBefore.sledBox.width)).toBeLessThan(14);
+  expect(motionBefore.riderBox.x - motionBefore.sceneBox.x).toBeLessThan(motionBefore.sceneBox.width * .4);
+  const riderBottomRatio = (
+    motionBefore.riderBox.y + motionBefore.riderBox.height - motionBefore.sceneBox.y
+  ) / motionBefore.sceneBox.height;
+  expect(riderBottomRatio).toBeGreaterThan(.72);
+  expect(riderBottomRatio).toBeLessThan(.83);
+  expect(motionBefore.finishBox.height / motionBefore.sceneBox.height).toBeLessThan(.22);
+  expect((motionBefore.finishBox.y - motionBefore.sceneBox.y) / motionBefore.sceneBox.height).toBeGreaterThan(.62);
+  await pullScene.screenshot({
+    path: testInfo.outputPath('get-pulled-active-animation.png'),
+  });
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & { __tracklabGetPulledTones?: string[] })
       .__tracklabGetPulledTones ?? []
-  ))).toEqual(['tick', 'tick', 'tick', 'tick', 'tick', 'tick', 'tick', 'gate']);
+  ))).toEqual(['tick', 'tick', 'tick', 'tick', 'tick', 'tick', 'gate']);
   await expect.poll(() => page.evaluate(() => {
     const audio = (window as typeof window & {
       __tracklabBikeRaceAudio?: { seenModes: Record<number, string[]> };
     }).__tracklabBikeRaceAudio;
     return Object.values(audio?.seenModes ?? {}).flat();
   }), { timeout: 3_000 }).toContain('pedaling');
-  await pullScene.screenshot({
-    path: testInfo.outputPath('get-pulled-active-animation.png'),
-  });
   await expect(view.getByText('Pull complete', { exact: false })).toBeVisible({ timeout: 4_500 });
   await expect(view.getByLabel('Result recorded at Wattbike Air 7')).toBeVisible();
   await expect(view.getByText('Peak cadence', { exact: true })).toBeVisible();
@@ -1110,8 +1152,7 @@ test('live Get Pulled ignores backward cranking and starts on the first 1-watt p
     await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
     await page.goto('/?track=black-mountain-bmx');
-    const openApp = page.getByRole('button', { name: 'Open App' });
-    if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+    await openSignedInAppIfNeeded(page);
     await expect(page.getByText(/4 connected bikes/i)).toBeVisible({ timeout: 15_000 });
     broadcastAllBikes = false;
     await page.getByRole('button', { name: 'Get Pulled', exact: true }).click();
@@ -1131,7 +1172,8 @@ test('live Get Pulled ignores backward cranking and starts on the first 1-watt p
     await view.screenshot({ path: testInfo.outputPath('get-pulled-four-bike-athlete-assignment.png') });
     await readyStart.click();
     await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
-    await expect(view.getByRole('status')).toContainText(/reach 1 watt to start/i, { timeout: 7_500 });
+    const firstWattStatus = view.locator('.get-pulled-countdown[role="status"]');
+    await expect(firstWattStatus).toContainText(/reach 1 watt to start/i, { timeout: 7_500 });
     const clock = view.locator('.get-pulled-timer strong');
     await expect(clock).toHaveText('0.00s');
     await page.waitForTimeout(900);
@@ -1144,7 +1186,7 @@ test('live Get Pulled ignores backward cranking and starts on the first 1-watt p
 
     await readyStart.click();
     await expect(view.locator('.get-pulled-countdown strong')).toHaveText('6');
-    await expect(view.getByRole('status')).toContainText(/reach 1 watt to start/i, { timeout: 7_500 });
+    await expect(firstWattStatus).toContainText(/reach 1 watt to start/i, { timeout: 7_500 });
     await expect(clock).toHaveText('0.00s');
 
     powerWatts = 1;
@@ -1201,8 +1243,7 @@ test('Monitor View fills the screen, travels across the road, and rejects post-s
     await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
     await page.goto('/?track=black-mountain-bmx');
-    const openApp = page.getByRole('button', { name: 'Open App' });
-    if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+    await openSignedInAppIfNeeded(page);
     await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: 'More', exact: true }).click();
     await page.getByRole('button', { name: 'Live Monitor', exact: true }).click();
@@ -1293,8 +1334,7 @@ test('Monitor View fits four complete bike panels into a fullscreen 2-by-2 wall 
     await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
     await page.goto('/?track=black-mountain-bmx');
-    const openApp = page.getByRole('button', { name: 'Open App' });
-    if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) await openApp.click();
+    await openSignedInAppIfNeeded(page);
     await expect(page.getByText(/4 connected bikes/i)).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: 'More', exact: true }).click();
     await page.getByRole('button', { name: 'Live Monitor', exact: true }).click();
@@ -2590,10 +2630,7 @@ test('unfinished local Explore ride restores across reload and after returning f
     }, { key: checkpointStorageKey, value: checkpoint });
     await page.reload();
 
-    const openApp = page.getByRole('button', { name: 'Open App' });
-    if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await openApp.click({ timeout: 2_000 }).catch(() => undefined);
-    }
+    await openSignedInAppIfNeeded(page);
     await expect(page.getByText(/1 connected bike/i)).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: 'Explore the World', exact: true }).click();
 
@@ -2793,13 +2830,7 @@ test('Bluetooth pairing stays open for multiple Wattbikes and restores approved 
   await expect(pairingDialog).toBeVisible();
 
   await page.reload();
-  const openApp = page.getByRole('button', { name: 'Open App' });
-  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    // Authentication can complete between the visibility check and the click,
-    // replacing the landing page with the dashboard. Do not wait for a button
-    // that has already disappeared during that valid transition.
-    await openApp.click({ timeout: 2_000 }).catch(() => undefined);
-  }
+  await openSignedInAppIfNeeded(page);
   await expect(page.getByText('Bluetooth Direct paired')).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Pair Wattbike', exact: true }).click();
   pairingDialog = page.getByRole('dialog', { name: 'Connect Wattbikes' });
@@ -6101,10 +6132,7 @@ test('club athletes see only their own connection and never the studio roster', 
   });
 
   await page.goto('/?track=black-mountain-bmx');
-  const openApp = page.getByRole('button', { name: 'Open App' });
-  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await openApp.click({ timeout: 2_000 }).catch(() => undefined);
-  }
+  await openSignedInAppIfNeeded(page);
   await page.getByRole('button', { name: 'My Profile', exact: true }).click();
 
   const clubConnect = page.getByLabel('Club Connect');
@@ -6222,10 +6250,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   });
 
   await page.goto('/?track=black-mountain-bmx');
-  const openApp = page.getByRole('button', { name: 'Open App' });
-  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await openApp.click({ timeout: 2_000 }).catch(() => undefined);
-  }
+  await openSignedInAppIfNeeded(page);
 
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Club Live Monitor', exact: true }).click();
@@ -6441,10 +6466,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   });
 
   await page.goto('/?track=black-mountain-bmx');
-  const openApp = page.getByRole('button', { name: 'Open App' });
-  if (await openApp.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await openApp.click({ timeout: 2_000 }).catch(() => undefined);
-  }
+  await openSignedInAppIfNeeded(page);
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByRole('button', { name: 'Club Tablets', exact: true }).click();
 

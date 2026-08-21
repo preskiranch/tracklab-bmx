@@ -78,6 +78,9 @@ const databaseRequired = process.env.TRACKLAB_REQUIRE_DATABASE === '1';
 const clients = new Map();
 const trainingHistoryStreams = new Map();
 const friendEventStreams = new Map();
+const heartRateOwnerLiveStreams = new Map();
+const heartRateClubLiveStreams = new Map();
+const heartRateStreamWriteChains = new Map();
 let friendEventStreamCount = 0;
 const rooms = new Map();
 const challenges = new Map();
@@ -133,6 +136,10 @@ const clubTabletRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const friendReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const friendMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const friendRequestRateLimiter = createRateLimiter({ windowMs: 24 * 60 * 60 * 1000 });
+const heartRateReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const heartRateMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const heartRateIngestRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const clubMonitorHistoryRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const commentaryGenerationCapacity = createCommentaryCapacity(4);
 const commentarySpeechCache = createCommentarySpeechCache();
 const commentaryEngineModels = new Set(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol']);
@@ -543,6 +550,30 @@ async function requireAccountFriendSession(request, response) {
     || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
   ) {
     writeJson(response, 403, { error: 'Friend settings are available only from a rider’s personal account.' });
+    return null;
+  }
+  return requireAuthSession(request, response);
+}
+
+async function requirePersonalHeartRateSession(request, response) {
+  if (
+    request.tracklabClubTabletSession
+    || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
+    || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+  ) {
+    writeJson(response, 403, { error: 'Heart-rate settings are available only from the athlete’s personal account.' });
+    return null;
+  }
+  return requireAuthSession(request, response);
+}
+
+async function requireClubMonitorOwnerSession(request, response) {
+  if (
+    request.tracklabClubTabletSession
+    || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
+    || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+  ) {
+    writeJson(response, 403, { error: 'Monitor View club history is available only from the signed-in club owner account.' });
     return null;
   }
   return requireAuthSession(request, response);
@@ -2422,12 +2453,40 @@ function sanitizeUserDataPatch(value) {
   return patch;
 }
 
+function privateHeartRatePayloadKey(key) {
+  const raw = String(key || '');
+  const normalized = raw.replace(/[^a-zA-Z0-9]/g, '').toLocaleLowerCase();
+  const tokens = raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLocaleLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return normalized.includes('heartrate')
+    || normalized.includes('healthkit')
+    || normalized.includes('bpm')
+    || tokens.includes('heart')
+    || tokens.includes('hr');
+}
+
+function stripPrivateHeartRateFields(value, depth = 0) {
+  if (depth > 32) return null;
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripPrivateHeartRateFields(entry, depth + 1));
+  }
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).flatMap(([key, nested]) => (
+    privateHeartRatePayloadKey(key)
+      ? []
+      : [[key, stripPrivateHeartRateFields(nested, depth + 1)]]
+  )));
+}
+
 function sanitizeTrainingSession(value) {
   if (!value || typeof value !== 'object') {
     return null;
   }
   const id = sanitizeText(value.id, '', 160).replace(/[^a-zA-Z0-9:._-]/g, '-');
-  const activityType = ['bmx-race', 'straight-sprint', 'explore', 'get-pulled'].includes(value.activityType)
+  const activityType = ['bmx-race', 'straight-sprint', 'explore', 'get-pulled', 'monitor-sprint'].includes(value.activityType)
     ? value.activityType
     : '';
   const startedAt = Math.max(1, Math.round(finiteNumber(value.startedAt, 0)));
@@ -2438,7 +2497,8 @@ function sanitizeTrainingSession(value) {
   const submittedDetails = value.details && typeof value.details === 'object' && !Array.isArray(value.details)
     ? value.details
     : {};
-  const { club: _untrustedClubDetails, ...details } = submittedDetails;
+  const { club: _untrustedClubDetails, ...untrustedDetails } = submittedDetails;
+  const details = stripPrivateHeartRateFields(untrustedDetails);
   return {
     id,
     activityType,
@@ -2465,9 +2525,13 @@ function publicTrainingSession(session, clubRole) {
     _clubRiderName,
     ...publicSession
   } = session;
+  const privateHealthRedactedSession = {
+    ...publicSession,
+    details: stripPrivateHeartRateFields(publicSession.details ?? {}),
+  };
   const visiblePublicSession = clubRole === 'owner'
-    ? { ...publicSession, details: redactPrivatePower(publicSession.details ?? {}) }
-    : publicSession;
+    ? { ...privateHealthRedactedSession, details: redactPrivatePower(privateHealthRedactedSession.details) }
+    : privateHealthRedactedSession;
   if (!_clubId || !_studioRiderId) return visiblePublicSession;
   const club = {
     id: _clubId,
@@ -2507,7 +2571,9 @@ function normalizedRiderClaimName(value) {
 function projectClubTrainingSession(session, membership) {
   const visibleSession = publicTrainingSession(session);
   if (!visibleSession) return null;
-  const details = session?.details && typeof session.details === 'object' ? session.details : {};
+  const details = stripPrivateHeartRateFields(
+    session?.details && typeof session.details === 'object' ? session.details : {},
+  );
   const riderId = membership.studioRiderId;
   const legacyName = normalizedRiderClaimName(membership.riderName);
   const matchesRider = (entry) => {
@@ -2681,6 +2747,702 @@ function requestBearerToken(request) {
   return String(request.headers.authorization || '').match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
 }
 
+const heartRateActivityTypes = new Set([
+  'bmx-race',
+  'straight-sprint',
+  'explore',
+  'get-pulled',
+  'monitor-sprint',
+]);
+const heartRateCodeAlphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const configuredHeartRatePairCodeTtlMs = process.env.NODE_ENV === 'test'
+  ? Number(process.env.TRACKLAB_HEART_RATE_PAIR_CODE_TTL_MS)
+  : Number.NaN;
+const heartRatePairCodeTtlMs = Number.isFinite(configuredHeartRatePairCodeTtlMs)
+  ? Math.max(1_000, Math.min(10 * 60 * 1000, Math.round(configuredHeartRatePairCodeTtlMs)))
+  : 10 * 60 * 1000;
+const configuredHeartRateStudioInvitationTtlMs = process.env.NODE_ENV === 'test'
+  ? Number(process.env.TRACKLAB_HEART_RATE_STUDIO_INVITATION_TTL_MS)
+  : Number.NaN;
+const heartRateStudioInvitationTtlMs = Number.isFinite(configuredHeartRateStudioInvitationTtlMs)
+  ? Math.max(1_000, Math.min(10 * 60 * 1000, Math.round(configuredHeartRateStudioInvitationTtlMs)))
+  : 10 * 60 * 1000;
+const heartRateIngestTokenTtlMs = 7 * 24 * 60 * 60 * 1000;
+const heartRateStudioBlockIngestTtlMs = 12 * 60 * 60 * 1000;
+const heartRateAccountBlockDrainTtlMs = 10 * 60 * 1000;
+const heartRateLiveFreshnessMs = 15_000;
+const maxHeartRateSamplesPerStream = 1_000_000;
+
+function createHeartRateCode() {
+  const bytes = randomBytes(8);
+  const characters = [...bytes].map((byte) => heartRateCodeAlphabet[byte % heartRateCodeAlphabet.length]);
+  return `${characters.slice(0, 4).join('')}-${characters.slice(4).join('')}`;
+}
+
+function normalizeHeartRateAccountBlockRequestId(value) {
+  const requestId = String(value || '').trim();
+  return /^[a-zA-Z0-9_-]{24,160}$/.test(requestId) ? requestId : '';
+}
+
+function heartRateAccountBlockIdentity(profileKey, requestId) {
+  const digest = createHash('sha256')
+    .update('tracklab-heart-rate-account-block\0')
+    .update(profileKey)
+    .update('\0')
+    .update(requestId)
+    .digest();
+  const pairCharacters = [...digest.subarray(0, 8)]
+    .map((byte) => heartRateCodeAlphabet[byte % heartRateCodeAlphabet.length]);
+  const opaque = digest.toString('hex');
+  return {
+    pairingId: `hrp_ab_${opaque.slice(0, 32)}`,
+    blockId: `account-block:${opaque.slice(0, 48)}`,
+    pairCode: `${pairCharacters.slice(0, 4).join('')}-${pairCharacters.slice(4).join('')}`,
+  };
+}
+
+function normalizeHeartRateCode(value) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
+}
+
+function heartRatePairCodeHash(code) {
+  return tokenHash(`heart-rate-pair-code:${normalizeHeartRateCode(code)}`);
+}
+
+function heartRateStudioInvitationCodeHash(code) {
+  return tokenHash(`heart-rate-studio-invitation:${normalizeHeartRateCode(code)}`);
+}
+
+function heartRateIngestTokenHash(token) {
+  return tokenHash(`heart-rate-ingest:${token}`);
+}
+
+function normalizeHeartRateWatchInstallId(value) {
+  const installId = String(value || '').trim().toLowerCase();
+  return /^wci_[a-f0-9]{64}$/.test(installId) ? installId : '';
+}
+
+function heartRateWatchInstallIdHash(installId) {
+  return tokenHash(`heart-rate-watch-install:${normalizeHeartRateWatchInstallId(installId)}`);
+}
+
+function publicHeartRateWatchEnrollment(enrollment) {
+  if (!enrollment) return null;
+  const membershipActive = enrollment.membershipActive !== false;
+  const state = !membershipActive || enrollment.revokedReason === 'membership-ended'
+    ? 'membership-required'
+    : enrollment.revokedAt != null
+      ? 'revoked'
+      : 'trusted';
+  return {
+    id: enrollment.id,
+    scope: enrollment.scope,
+    clubId: enrollment.clubId ?? null,
+    studioRiderId: enrollment.studioRiderId ?? null,
+    state,
+    liveStudioConsent: Boolean(enrollment.liveStudioConsent),
+    sessionStudioConsent: Boolean(enrollment.sessionStudioConsent),
+    createdAt: enrollment.createdAt,
+    updatedAt: enrollment.updatedAt,
+  };
+}
+
+function publicHeartRateWatchConnection(connection, enrollment, now = Date.now()) {
+  if (!connection) return null;
+  const enrollmentState = publicHeartRateWatchEnrollment(enrollment)?.state ?? 'revoked';
+  const state = enrollmentState === 'membership-required'
+    ? 'membership-required'
+    : enrollmentState !== 'trusted'
+      ? 'revoked'
+      : connection.pairingMissing || connection.pairingRevokedAt != null
+        ? 'revoked'
+      : connection.stoppedAt != null
+        ? connection.stoppedReason === 'expired' || connection.connectedUntil <= now
+          ? 'expired'
+          : 'stopped'
+        : connection.connectedUntil <= now
+          ? 'expired'
+          : connection.streamStartedAt == null
+            ? 'connecting'
+            : 'connected';
+  return {
+    id: connection.id,
+    enrollmentId: connection.enrollmentId,
+    scope: connection.scope,
+    clubId: connection.clubId ?? null,
+    studioRiderId: connection.studioRiderId ?? null,
+    state,
+    connectedAt: connection.connectedAt,
+    connectedUntil: connection.connectedUntil,
+    remainingMs: ['connecting', 'connected'].includes(state)
+      ? Math.max(0, connection.connectedUntil - now)
+      : 0,
+    liveStudioConsent: Boolean(connection.liveStudioConsent),
+    sessionStudioConsent: Boolean(connection.sessionStudioConsent),
+  };
+}
+
+function heartRateWatchStudioProjection(row, now = Date.now()) {
+  const enrollment = row.enrollment ? {
+    ...row.enrollment,
+    membershipActive: true,
+  } : null;
+  const publicEnrollment = publicHeartRateWatchEnrollment(enrollment);
+  const connection = publicHeartRateWatchConnection(row.connection, enrollment, now);
+  const state = connection?.state === 'connected'
+    ? 'connected'
+    : connection?.state === 'expired'
+      ? 'expired'
+      : publicEnrollment?.state === 'trusted'
+        ? 'ready'
+        : publicEnrollment?.state === 'membership-required'
+          ? 'membership-required'
+          : 'not-set-up';
+  return {
+    clubId: row.clubId,
+    studioRiderId: row.studioRiderId,
+    riderName: sanitizeText(row.riderName, 'Club athlete', 120),
+    state,
+    enrollment: publicEnrollment,
+    connection,
+  };
+}
+
+function heartRateTimestamp(value) {
+  if (typeof value === 'string' && value.trim() && !Number.isFinite(Number(value))) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : null;
+}
+
+function publicHeartRatePairing(pairing) {
+  if (!pairing) return null;
+  return {
+    id: pairing.id,
+    sessionId: pairing.sessionId,
+    activityType: pairing.activityType,
+    relayScope: pairing.relayScope || 'session',
+    studioBlockStoppedAt: pairing.studioBlockStoppedAt ?? null,
+    riderId: pairing.riderId,
+    playerId: pairing.playerId ?? null,
+    clubId: pairing.clubId ?? null,
+    studioRiderId: pairing.studioRiderId ?? null,
+    pairCodeExpiresAt: pairing.pairCodeExpiresAt,
+    expiresAt: pairing.ingestExpiresAt ?? pairing.pairCodeExpiresAt,
+    ingestExpiresAt: pairing.ingestExpiresAt ?? null,
+    claimedAt: pairing.claimedAt ?? null,
+    revokedAt: pairing.revokedAt ?? null,
+    liveStudioConsent: Boolean(pairing.liveStudioConsent),
+    sessionStudioConsent: Boolean(pairing.sessionStudioConsent),
+    createdAt: pairing.createdAt,
+    updatedAt: pairing.updatedAt,
+  };
+}
+
+function watchHeartRatePairing(pairing) {
+  return pairing ? {
+    id: pairing.id,
+    sessionId: pairing.sessionId,
+    activityType: pairing.activityType,
+    relayScope: pairing.relayScope || 'session',
+    riderId: pairing.riderId,
+    playerId: pairing.playerId ?? null,
+  } : null;
+}
+
+function publicHeartRateStudioInvitation(invitation) {
+  return invitation ? {
+    id: invitation.id,
+    clubId: invitation.clubId,
+    studioRiderId: invitation.studioRiderId,
+    sessionId: invitation.sessionId,
+    activityType: invitation.activityType,
+    relayScope: invitation.relayScope || 'session',
+    playerId: invitation.playerId ?? null,
+    expiresAt: invitation.expiresAt,
+    claimedAt: invitation.claimedAt ?? null,
+    revokedAt: invitation.revokedAt ?? null,
+    createdAt: invitation.createdAt,
+  } : null;
+}
+
+function publicHeartRateStudioBlockStatus(block) {
+  if (!block) return null;
+  return {
+    invitationId: block.invitationId,
+    clubId: block.clubId,
+    studioRiderId: block.studioRiderId,
+    anchorSessionId: block.anchorSessionId,
+    activityType: block.activityType,
+    relayScope: 'studio-block',
+    playerId: block.playerId ?? null,
+    state: block.state,
+    invitationExpiresAt: block.invitationExpiresAt,
+    pairCodeExpiresAt: block.pairCodeExpiresAt ?? null,
+    blockExpiresAt: block.blockExpiresAt ?? null,
+    streamStartedAt: block.streamStartedAt ?? null,
+    lastSampleAt: block.lastSampleAt ?? null,
+    lastSampleReceivedAt: block.lastSampleReceivedAt ?? null,
+    freshUntil: block.lastSampleReceivedAt == null
+      ? null
+      : block.lastSampleReceivedAt + heartRateLiveFreshnessMs,
+  };
+}
+
+function publicHeartRateAccountBlockStatus(block) {
+  if (!block) return null;
+  return {
+    pairingId: block.pairingId,
+    blockId: block.blockId,
+    relayScope: 'account-block',
+    state: block.state,
+    pairCodeExpiresAt: block.pairCodeExpiresAt,
+    ingestExpiresAt: block.ingestExpiresAt ?? null,
+    effectiveExpiresAt: block.effectiveExpiresAt,
+    claimedAt: block.claimedAt ?? null,
+    revokedAt: block.revokedAt ?? null,
+    stopRequestedAt: block.stopRequestedAt ?? null,
+    drainExpiresAt: block.drainExpiresAt ?? null,
+    streamStartedAt: block.streamStartedAt ?? null,
+    streamEndedAt: block.streamEndedAt ?? null,
+    lastSampleAt: block.lastSampleAt ?? null,
+    lastSampleReceivedAt: block.lastSampleReceivedAt ?? null,
+    freshUntil: block.freshUntil ?? null,
+    createdAt: block.createdAt,
+    updatedAt: block.updatedAt,
+  };
+}
+
+function publicHeartRateStream(stream, { club = false } = {}) {
+  if (!stream) return null;
+  return {
+    id: stream.id,
+    ...(!club ? { pairingId: stream.pairingId } : {}),
+    sessionId: stream.sessionId,
+    activityType: stream.activityType,
+    relayScope: stream.relayScope || 'session',
+    relayExpiresAt: stream.relayExpiresAt ?? null,
+    studioBlockStoppedAt: stream.studioBlockStoppedAt ?? null,
+    ...(stream.relayScope === 'account-block' ? {
+      stopRequestedAt: stream.accountBlockStopRequestedAt ?? null,
+      drainExpiresAt: stream.accountBlockDrainExpiresAt ?? null,
+    } : {}),
+    ...(!club ? { riderId: stream.riderId } : {}),
+    playerId: stream.playerId ?? null,
+    ...(stream.studioRiderId ? { studioRiderId: stream.studioRiderId } : {}),
+    source: 'apple-watch',
+    startedAt: stream.startedAt,
+    endedAt: stream.endedAt ?? null,
+    activeDurationMs: stream.activeDurationMs ?? null,
+    summary: stream.summary && typeof stream.summary === 'object' ? stream.summary : {},
+    zoneSummaries: Array.isArray(stream.zoneSummaries) ? stream.zoneSummaries : [],
+    finalizedAt: stream.finalizedAt ?? null,
+    ...(!club ? {
+      liveStudioConsent: Boolean(stream.liveStudioConsent),
+      sessionStudioConsent: Boolean(stream.sessionStudioConsent),
+    } : {}),
+    createdAt: stream.createdAt,
+    updatedAt: stream.updatedAt,
+  };
+}
+
+function publicHeartRateTrainingSegment(segment, { club = false } = {}) {
+  if (!segment) return null;
+  return {
+    id: segment.id,
+    streamId: segment.streamId,
+    trainingSessionId: segment.trainingSessionId,
+    activityType: segment.activityType,
+    playerId: segment.playerId ?? null,
+    ...(segment.studioRiderId ? { studioRiderId: segment.studioRiderId } : {}),
+    source: 'apple-watch',
+    relayScope: segment.relayScope || 'studio-block',
+    startedAt: segment.startedAt,
+    endedAt: segment.endedAt,
+    activeDurationMs: segment.activeDurationMs,
+    summary: segment.summary && typeof segment.summary === 'object' ? segment.summary : {},
+    zoneSummaries: Array.isArray(segment.zoneSummaries) ? segment.zoneSummaries : [],
+    finalizedAt: segment.finalizedAt ?? null,
+    ...(!club && segment.clubId ? { clubId: segment.clubId } : {}),
+    createdAt: segment.createdAt,
+    updatedAt: segment.updatedAt,
+  };
+}
+
+function addHeartRateLiveStream(streamsByKey, key, response) {
+  const streams = streamsByKey.get(key) ?? new Set();
+  if (streams.size >= 16) return false;
+  streams.add(response);
+  streamsByKey.set(key, streams);
+  response.once('close', () => {
+    streams.delete(response);
+    if (streams.size === 0) streamsByKey.delete(key);
+  });
+  return true;
+}
+
+async function withHeartRateStreamWriteChain(streamId, operation) {
+  const previous = heartRateStreamWriteChains.get(streamId) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(operation);
+  heartRateStreamWriteChains.set(streamId, next);
+  try {
+    return await next;
+  } finally {
+    if (heartRateStreamWriteChains.get(streamId) === next) heartRateStreamWriteChains.delete(streamId);
+  }
+}
+
+function notifyHeartRateLive(stream, sample, receivedAt = Date.now()) {
+  if (
+    stream.accountBlockStopRequestedAt != null
+    && receivedAt >= stream.accountBlockStopRequestedAt
+  ) return;
+  const personalPayload = {
+    streamId: stream.id,
+    sessionId: stream.sessionId,
+    relayScope: stream.relayScope || 'session',
+    riderId: stream.riderId,
+    playerId: stream.playerId ?? null,
+    bpm: sample.bpm,
+    recordedAt: sample.recordedAt,
+    activeElapsedMs: sample.activeElapsedMs,
+    receivedAt,
+    freshUntil: receivedAt + heartRateLiveFreshnessMs,
+  };
+  const ownerStreams = heartRateOwnerLiveStreams.get(stream.ownerProfileKey);
+  ownerStreams?.forEach((response) => {
+    if (!trainingHistoryEvent(response, 'heart-rate', personalPayload)) ownerStreams.delete(response);
+  });
+  if (ownerStreams?.size === 0) heartRateOwnerLiveStreams.delete(stream.ownerProfileKey);
+
+  if (!stream.liveStudioConsent || !stream.clubId || !stream.studioRiderId) return;
+  const clubPayload = {
+    streamId: stream.id,
+    sessionId: stream.sessionId,
+    relayScope: stream.relayScope || 'session',
+    studioRiderId: stream.studioRiderId,
+    playerId: stream.playerId ?? null,
+    bpm: sample.bpm,
+    recordedAt: sample.recordedAt,
+    receivedAt,
+    freshUntil: receivedAt + heartRateLiveFreshnessMs,
+  };
+  const clubStreams = heartRateClubLiveStreams.get(stream.clubId);
+  clubStreams?.forEach((response) => {
+    if (!trainingHistoryEvent(response, 'heart-rate', clubPayload)) clubStreams.delete(response);
+  });
+  if (clubStreams?.size === 0) heartRateClubLiveStreams.delete(stream.clubId);
+}
+
+function sanitizeHeartRateSamples(value, stream, now = Date.now()) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 250) {
+    return { error: 'Send between 1 and 250 heart-rate samples.' };
+  }
+  const bySequence = new Map();
+  let repeatedInBatch = 0;
+  let clippedAfterAccountStop = 0;
+  for (const candidate of value) {
+    const sequence = Number(candidate?.sequence);
+    const recordedAt = heartRateTimestamp(candidate?.recordedAt);
+    const activeElapsedMs = Number(candidate?.activeElapsedMs);
+    const bpm = Number(candidate?.bpm);
+    if (
+      !Number.isSafeInteger(sequence)
+      || sequence < 0
+      || sequence > maxHeartRateSamplesPerStream
+      || recordedAt == null
+      || !Number.isInteger(activeElapsedMs)
+      || activeElapsedMs < 0
+      || activeElapsedMs > 7 * 24 * 60 * 60 * 1000
+      || !Number.isInteger(bpm)
+      || bpm < 20
+      || bpm > 260
+      || recordedAt < stream.startedAt - 60_000
+      || recordedAt > now + 60_000
+      || recordedAt < stream.startedAt + activeElapsedMs - 120_000
+    ) {
+      return { error: 'A heart-rate sample has an invalid sequence, clock, or BPM value.' };
+    }
+    if (
+      ['account-block', 'studio-block'].includes(stream.relayScope)
+      && stream.accountBlockStopRequestedAt != null
+      && recordedAt > stream.accountBlockStopRequestedAt
+    ) {
+      clippedAfterAccountStop += 1;
+      continue;
+    }
+    if (bySequence.has(sequence)) repeatedInBatch += 1;
+    else bySequence.set(sequence, { sequence, recordedAt, activeElapsedMs, bpm });
+  }
+  const samples = [...bySequence.values()].sort((left, right) => left.sequence - right.sequence);
+  for (let index = 1; index < samples.length; index += 1) {
+    if (
+      samples[index].activeElapsedMs < samples[index - 1].activeElapsedMs
+      || samples[index].recordedAt < samples[index - 1].recordedAt
+    ) return { error: 'Heart-rate sample clocks must move forward with sequence.' };
+  }
+  return { samples, repeatedInBatch, clippedAfterAccountStop };
+}
+
+function heartRateSummary(samples, activeDurationMs) {
+  const sorted = [...samples]
+    .filter((sample) => sample.activeElapsedMs <= activeDurationMs)
+    .sort((left, right) => left.activeElapsedMs - right.activeElapsedMs || left.sequence - right.sequence);
+  if (sorted.length === 0) {
+    return {
+      sampleCount: 0,
+      coverageMs: 0,
+      coveragePercent: 0,
+      firstSampleElapsedMs: null,
+      lastSampleElapsedMs: null,
+      minimumBpm: null,
+      averageBpm: null,
+      peakBpm: null,
+    };
+  }
+  let coverageMs = 0;
+  let weightedBpmMs = 0;
+  sorted.forEach((sample, index) => {
+    const nextElapsed = index + 1 < sorted.length
+      ? sorted[index + 1].activeElapsedMs
+      : activeDurationMs;
+    const covered = Math.max(0, Math.min(10_000, activeDurationMs - sample.activeElapsedMs, nextElapsed - sample.activeElapsedMs));
+    coverageMs += covered;
+    weightedBpmMs += sample.bpm * covered;
+  });
+  const arithmeticAverage = sorted.reduce((total, sample) => total + sample.bpm, 0) / sorted.length;
+  const average = coverageMs > 0 ? weightedBpmMs / coverageMs : arithmeticAverage;
+  return {
+    sampleCount: sorted.length,
+    coverageMs,
+    coveragePercent: activeDurationMs > 0
+      ? Math.round(Math.min(100, (coverageMs / activeDurationMs) * 100) * 10) / 10
+      : 0,
+    firstSampleElapsedMs: sorted[0].activeElapsedMs,
+    lastSampleElapsedMs: sorted[sorted.length - 1].activeElapsedMs,
+    minimumBpm: Math.min(...sorted.map((sample) => sample.bpm)),
+    averageBpm: Math.round(average * 10) / 10,
+    peakBpm: Math.max(...sorted.map((sample) => sample.bpm)),
+  };
+}
+
+const maximumHeartRateZoneWindows = 500;
+
+function sanitizeHeartRateZoneWindows(value, activeDurationMs) {
+  if (value == null) return { windows: [] };
+  if (!Array.isArray(value) || value.length > maximumHeartRateZoneWindows) {
+    return { error: `Heart-rate zone windows must contain at most ${maximumHeartRateZoneWindows} zones.` };
+  }
+  const windows = [];
+  const zoneIds = new Set();
+  for (let index = 0; index < value.length; index += 1) {
+    const candidate = value[index];
+    const zoneId = sanitizeText(candidate?.zoneId, '', 80).replace(/[^a-zA-Z0-9:._-]/g, '-');
+    const zoneName = sanitizeText(candidate?.zoneName, `Zone ${index + 1}`, 80);
+    const startElapsedMs = Number(candidate?.startElapsedMs);
+    const endElapsedMs = Number(candidate?.endElapsedMs);
+    if (
+      !zoneId
+      || zoneIds.has(zoneId)
+      || !Number.isInteger(startElapsedMs)
+      || !Number.isInteger(endElapsedMs)
+      || startElapsedMs < 0
+      || endElapsedMs <= startElapsedMs
+      || endElapsedMs > activeDurationMs
+      || (windows.length > 0 && startElapsedMs < windows[windows.length - 1].endElapsedMs)
+    ) {
+      return { error: 'Heart-rate zone windows must be unique, ordered, non-overlapping, and inside the active clock.' };
+    }
+    zoneIds.add(zoneId);
+    windows.push({ zoneId, zoneName, startElapsedMs, endElapsedMs });
+  }
+  return { windows };
+}
+
+function trainingSessionHeartRatePlayerId(session, preferredPlayerId = null) {
+  const selectedPlayerId = clubTabletPlayerId(preferredPlayerId);
+  if (selectedPlayerId) return selectedPlayerId;
+  const details = session?.details && typeof session.details === 'object'
+    ? session.details
+    : {};
+  const studioRiderId = sanitizeText(session?._studioRiderId, '', 160);
+  const candidates = [
+    ...(Array.isArray(details.summaries) ? details.summaries : []),
+    ...(Array.isArray(details.riders) ? details.riders : []),
+  ];
+  const matchingRider = studioRiderId
+    ? candidates.find((candidate) => (
+      sanitizeText(candidate?.studioRiderId ?? candidate?.riderId, '', 160) === studioRiderId
+    ))
+    : null;
+  return clubTabletPlayerId(matchingRider?.playerId)
+    ?? (candidates.length === 1 ? clubTabletPlayerId(candidates[0]?.playerId) : null);
+}
+
+function trainingSessionHeartRateActiveClockSegments(session) {
+  const details = session?.details && typeof session.details === 'object'
+    ? session.details
+    : {};
+  const candidates = details.activeClockSegments;
+  if (!Array.isArray(candidates) || candidates.length === 0 || candidates.length > 256) return null;
+  const startedAt = Math.round(finiteNumber(session?.startedAt, 0));
+  const endedAt = Math.round(finiteNumber(session?.endedAt, startedAt));
+  const segments = [];
+  let previousEndedAt = startedAt;
+  let activeElapsedAtStartMs = 0;
+  let positiveDurationSegments = 0;
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+    const segmentStartedAt = Math.round(finiteNumber(candidate.startedAt, -1));
+    const segmentEndedAt = Math.round(finiteNumber(candidate.endedAt, -1));
+    const submittedActiveElapsed = Math.round(finiteNumber(candidate.activeElapsedAtStartMs, -1));
+    if (
+      segmentStartedAt < startedAt
+      || segmentEndedAt < segmentStartedAt
+      || segmentEndedAt > endedAt
+      || segmentStartedAt < previousEndedAt
+      || submittedActiveElapsed < 0
+    ) return null;
+    segments.push({
+      startedAt: segmentStartedAt,
+      endedAt: segmentEndedAt,
+      // The server derives the active clock from ordered wall-clock windows;
+      // it never trusts the client-provided accumulated duration.
+      activeElapsedAtStartMs,
+    });
+    const segmentDurationMs = segmentEndedAt - segmentStartedAt;
+    if (segmentDurationMs > 0) positiveDurationSegments += 1;
+    activeElapsedAtStartMs += segmentDurationMs;
+    previousEndedAt = segmentEndedAt;
+  }
+  return positiveDurationSegments > 0 ? segments : null;
+}
+
+function heartRateActiveClockDuration(activeClockSegments, wallDurationMs) {
+  if (!Array.isArray(activeClockSegments) || activeClockSegments.length === 0) {
+    return wallDurationMs;
+  }
+  return activeClockSegments.reduce((duration, segment) => Math.max(
+    duration,
+    segment.activeElapsedAtStartMs + segment.endedAt - segment.startedAt,
+  ), 0);
+}
+
+function trainingSessionHeartRateZoneWindows(session, playerId, activeClockSegments = []) {
+  const details = session?.details && typeof session.details === 'object'
+    ? session.details
+    : {};
+  const wallDurationMs = Math.max(0, Math.round(
+    finiteNumber(session?.endedAt, 0) - finiteNumber(session?.startedAt, 0),
+  ));
+  const activeDurationMs = heartRateActiveClockDuration(activeClockSegments, wallDurationMs);
+  if (activeDurationMs <= 0 || !Array.isArray(details.zoneResults)) return [];
+
+  const seenZoneIds = new Set();
+  let lastEndElapsedMs = 0;
+  const candidates = details.zoneResults
+    .slice(0, clubGroupTrainingMaxZones)
+    .flatMap((zone, index) => {
+      const riders = Array.isArray(zone?.riders) ? zone.riders : [];
+      const rider = playerId == null
+        ? (riders.length === 1 ? riders[0] : null)
+        : riders.find((candidate) => clubTabletPlayerId(candidate?.playerId) === playerId);
+      const startElapsedMs = Math.round(Number(rider?.entryElapsedMs));
+      const endElapsedMs = Math.round(Number(rider?.exitElapsedMs));
+      const zoneId = sanitizeText(zone?.zoneId, '', 80).replace(/[^a-zA-Z0-9:._-]/g, '-');
+      if (
+        !rider
+        || !zoneId
+        || seenZoneIds.has(zoneId)
+        || !Number.isFinite(startElapsedMs)
+        || !Number.isFinite(endElapsedMs)
+        || startElapsedMs < lastEndElapsedMs
+        || startElapsedMs < 0
+        || endElapsedMs <= startElapsedMs
+        || endElapsedMs > activeDurationMs
+      ) return [];
+      seenZoneIds.add(zoneId);
+      lastEndElapsedMs = endElapsedMs;
+      return [{
+        zoneId,
+        zoneName: sanitizeText(zone?.zoneName, `Zone ${index + 1}`, 80),
+        startElapsedMs,
+        endElapsedMs,
+      }];
+    })
+    .slice(0, clubGroupTrainingMaxZones);
+  return sanitizeHeartRateZoneWindows(candidates, activeDurationMs).windows ?? [];
+}
+
+async function attachStudioBlockHeartRateToTrainingSession(
+  athleteProfileKey,
+  session,
+  preferredPlayerId = null,
+) {
+  const clubId = sanitizeText(session?._clubId, '', 160);
+  const studioRiderId = sanitizeText(session?._studioRiderId, '', 160);
+  if (!athleteProfileKey || !clubId || !studioRiderId) {
+    return { status: 'not-club', segment: null };
+  }
+  const playerId = trainingSessionHeartRatePlayerId(session, preferredPlayerId);
+  const activeClockSegments = trainingSessionHeartRateActiveClockSegments(session) ?? [];
+  return persistence.createHeartRateTrainingSegmentForClubSession({
+    athleteProfileKey,
+    clubId,
+    studioRiderId,
+    trainingSessionId: session.id,
+    activityType: session.activityType,
+    playerId,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    zoneWindows: trainingSessionHeartRateZoneWindows(session, playerId, activeClockSegments),
+    activeClockSegments,
+    now: Date.now(),
+  });
+}
+
+async function attachAccountBlockHeartRateToTrainingSession(profileKey, session) {
+  if (!profileKey || !session?.id) return { status: 'not-account', segment: null };
+  const playerId = trainingSessionHeartRatePlayerId(session);
+  const activeClockSegments = trainingSessionHeartRateActiveClockSegments(session);
+  if (session.activityType === 'explore' && !activeClockSegments) {
+    return { status: 'invalid-active-clock', segment: null };
+  }
+  return persistence.createHeartRateTrainingSegmentForAccountSession({
+    athleteProfileKey: profileKey,
+    trainingSessionId: session.id,
+    activityType: session.activityType,
+    playerId,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    zoneWindows: trainingSessionHeartRateZoneWindows(session, playerId, activeClockSegments ?? []),
+    activeClockSegments: activeClockSegments ?? [],
+    now: Date.now(),
+  });
+}
+
+function heartRateZoneSummaries(samples, windows) {
+  return windows.map((window) => {
+    const zoneSamples = samples.filter((sample) => (
+      sample.activeElapsedMs >= window.startElapsedMs
+      && sample.activeElapsedMs < window.endElapsedMs
+    ));
+    const relativeSamples = zoneSamples.map((sample) => ({
+      ...sample,
+      activeElapsedMs: sample.activeElapsedMs - window.startElapsedMs,
+    }));
+    const summary = heartRateSummary(relativeSamples, window.endElapsedMs - window.startElapsedMs);
+    return {
+      ...window,
+      ...summary,
+      firstSampleElapsedMs: zoneSamples[0]?.activeElapsedMs ?? null,
+      lastSampleElapsedMs: zoneSamples[zoneSamples.length - 1]?.activeElapsedMs ?? null,
+    };
+  });
+}
+
 function requestClubTabletSessionToken(request) {
   return sanitizeText(request.headers['x-tracklab-club-tablet-session'], '', 180);
 }
@@ -2704,11 +3466,16 @@ async function loadClubTabletDeviceFromRequest(request) {
 
 async function loadClubTabletRoster(device) {
   if (!device) return [];
-  const [userData, state] = await Promise.all([
+  const [userData, state, watchProjection] = await Promise.all([
     persistence.loadUserData(device.ownerProfileKey),
     persistence.loadClubConnectState(device.ownerProfileKey),
+    persistence.loadHeartRateWatchStudioProjection(device.ownerProfileKey, device.clubId),
   ]);
   if (state.ownedClub?.id !== device.clubId) return [];
+  const watchByRiderId = new Map((watchProjection ?? []).map((row) => [
+    row.studioRiderId,
+    heartRateWatchStudioProjection(row, Date.now()),
+  ]));
   const memberByRiderId = new Map((state.ownedClub.members ?? []).map((member) => [
     member.studioRiderId,
     member,
@@ -2723,11 +3490,20 @@ async function loadClubTabletRoster(device) {
       const photoUrl = sanitizeRiderPhotoDataUrl(
         claimedUserData?.accountProfile?.photoUrl || rider.photoUrl,
       );
+      const watchConnect = claimedProfile ? watchByRiderId.get(rider.id) : null;
       return {
         studioRiderId: sanitizeText(rider.id, '', 160),
         riderName: sanitizeText(rider.name, 'Club athlete', 120),
         athleteName: sanitizeText(member?.athleteName, '', 120) || null,
         status: member?.status === 'claimed' ? 'claimed' : 'unclaimed',
+        ...(watchConnect ? {
+          watchConnect: {
+            recognized: watchConnect.enrollment?.state === 'trusted',
+            state: watchConnect.state,
+            connectedUntil: watchConnect.connection?.connectedUntil ?? null,
+            remainingMs: watchConnect.connection?.remainingMs ?? 0,
+          },
+        } : {}),
         ...(photoUrl ? { photoUrl } : {}),
       };
     }));
@@ -2969,12 +3745,14 @@ function sanitizeClubTabletGetPulledRider(entry, tabletSession, playerId) {
 }
 
 function sanitizeClubTabletZoneResults(value, playerId) {
-  return (Array.isArray(value) ? value : []).slice(0, 500).flatMap((zone) => {
+  return (Array.isArray(value) ? value : []).slice(0, clubGroupTrainingMaxZones).flatMap((zone) => {
     const sanitized = sanitizeGhostZoneResult(zone);
     if (!sanitized) return [];
+    const riders = sanitized.riders.filter((rider) => rider.playerId === playerId);
+    if (riders.length !== 1) return [];
     return [{
       ...sanitized,
-      riders: sanitized.riders.filter((rider) => rider.playerId === playerId),
+      riders,
     }];
   });
 }
@@ -2997,7 +3775,9 @@ function scopeTrainingSessionToClubTabletAthlete(trainingSession, tabletSession,
       details: {
         originLabel: sanitizeText(details.originLabel, '', 180),
         destinationLabel: sanitizeText(details.destinationLabel, '', 180),
-        travelMode: details.travelMode === 'car' ? 'car' : 'bicycle',
+        travelMode: details.travelMode === 'drive' || details.travelMode === 'car'
+          ? 'drive'
+          : 'bicycle',
         elevationGainMeters: boundedNumber(details.elevationGainMeters, 0, 100_000),
         elevationLossMeters: boundedNumber(details.elevationLossMeters, 0, 100_000),
         riders: [selectedRider],
@@ -3061,7 +3841,556 @@ function scopeTrainingSessionToClubTabletAthlete(trainingSession, tabletSession,
   };
 }
 
-const clubLiveActivityTypes = new Set(['bmx-race', 'straight-sprint', 'explore', 'get-pulled']);
+const clubGroupTrainingActivityTypes = new Set([
+  'bmx-race',
+  'straight-sprint',
+  'get-pulled',
+  'explore',
+]);
+const clubGroupTrainingTokenHeader = 'x-tracklab-group-completion-token';
+const defaultClubGroupTrainingSprintTtlMs = 15 * 60 * 1000;
+const requestedTestClubGroupTrainingSprintTtlMs = Number(
+  process.env.TRACKLAB_TEST_GROUP_SPRINT_TTL_MS,
+);
+const clubGroupTrainingSprintTtlMs = process.env.NODE_ENV === 'test'
+  && Number.isInteger(requestedTestClubGroupTrainingSprintTtlMs)
+  && requestedTestClubGroupTrainingSprintTtlMs >= 50
+  && requestedTestClubGroupTrainingSprintTtlMs <= defaultClubGroupTrainingSprintTtlMs
+  ? requestedTestClubGroupTrainingSprintTtlMs
+  : defaultClubGroupTrainingSprintTtlMs;
+const clubGroupTrainingExploreTtlMs = 12 * 60 * 60 * 1000;
+// Existing race/ghost results support as many as 500 mapped zones. Keep the
+// canonical athlete result and its server-computed heart-rate zone summary on
+// that same bounded limit so no recorded zone is silently omitted.
+const clubGroupTrainingMaxZones = maximumHeartRateZoneWindows;
+
+function clubGroupTrainingAuthorizationTtl(activityType) {
+  return activityType === 'explore'
+    ? clubGroupTrainingExploreTtlMs
+    : clubGroupTrainingSprintTtlMs;
+}
+
+function clubGroupTrainingTokenHash(token) {
+  return tokenHash(`club-group-training-completion:${token}`);
+}
+
+function clubGroupTrainingRequestId(value) {
+  const requestId = typeof value === 'string' ? value.trim() : '';
+  return /^[a-zA-Z0-9_-]{24,160}$/.test(requestId) ? requestId : '';
+}
+
+function exactObjectKeys(value, allowedKeys) {
+  return value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function sanitizeClubGroupTrainingBinding(value, now = Date.now(), { recovery = false } = {}) {
+  const allowedKeys = new Set([
+    'requestId', 'clubId', 'sessionId', 'activityType', 'armedAt', 'assignments',
+  ]);
+  if (!exactObjectKeys(value, allowedKeys)) return null;
+  const requestId = clubGroupTrainingRequestId(value.requestId);
+  const clubId = strictClubMonitorIdentifier(value.clubId);
+  const sessionId = strictClubMonitorIdentifier(value.sessionId);
+  const activityType = sanitizeText(value.activityType, '', 32).toLowerCase();
+  const armedAt = Number(value.armedAt);
+  // Recovery still performs an exact immutable binding comparison in
+  // persistence. Let the request reach that check for the full possible
+  // reservation lifetime (including an Explore arm created from a checkpoint)
+  // so an expired credential receives the truthful expired response.
+  const maximumAge = recovery
+    ? clubGroupTrainingAuthorizationTtl(activityType) * 2
+    : activityType === 'explore'
+      ? clubGroupTrainingAuthorizationTtl(activityType)
+      : 2 * 60 * 1000;
+  if (
+    !requestId
+    || !clubId
+    || !sessionId
+    || !clubGroupTrainingActivityTypes.has(activityType)
+    || !Number.isSafeInteger(armedAt)
+    || armedAt < now - maximumAge
+    || armedAt > now + 30_000
+    || !Array.isArray(value.assignments)
+    || value.assignments.length < 1
+    || value.assignments.length > maxRaceBikeCount
+  ) return null;
+  const assignmentKeys = new Set(['studioRiderId', 'bikeDeviceId', 'playerId']);
+  const assignments = value.assignments.map((assignment) => {
+    if (!exactObjectKeys(assignment, assignmentKeys)) return null;
+    const studioRiderId = strictClubMonitorIdentifier(assignment.studioRiderId);
+    const bikeDeviceId = clubMonitorBikeDeviceId(assignment.bikeDeviceId);
+    const playerId = Number(assignment.playerId);
+    return studioRiderId
+      && bikeDeviceId
+      && Number.isInteger(playerId)
+      && playerId >= 1
+      && playerId <= maxRaceBikeCount
+      ? { studioRiderId, bikeDeviceId, playerId }
+      : null;
+  });
+  if (assignments.some((assignment) => !assignment)) return null;
+  const uniqueRiders = new Set(assignments.map((assignment) => assignment.studioRiderId));
+  const uniqueBikes = new Set(assignments.map((assignment) => assignment.bikeDeviceId));
+  const uniquePlayers = new Set(assignments.map((assignment) => assignment.playerId));
+  if (
+    uniqueRiders.size !== assignments.length
+    || uniqueBikes.size !== assignments.length
+    || uniquePlayers.size !== assignments.length
+  ) return null;
+  return {
+    requestId,
+    clubId,
+    sessionId,
+    activityType,
+    armedAt,
+    assignments: assignments.sort((left, right) => left.playerId - right.playerId),
+  };
+}
+
+function publicClubGroupTrainingAuthorization(authorization, now = Date.now()) {
+  if (!authorization) return null;
+  const state = authorization.completedAt != null
+    ? 'completed'
+    : authorization.cancelledAt != null
+      ? 'cancelled'
+      : authorization.expiresAt <= now
+        ? 'expired'
+        : authorization.assignments.every((assignment) => assignment.startedAt != null)
+          ? 'active'
+          : authorization.assignments.some((assignment) => assignment.startedAt != null)
+            ? 'partially-active'
+            : 'armed';
+  return {
+    id: authorization.id,
+    clubId: authorization.clubId,
+    requestId: authorization.requestId,
+    sessionId: authorization.sessionId,
+    activityType: authorization.activityType,
+    armedAt: authorization.armedAt,
+    expiresAt: authorization.expiresAt,
+    state,
+    completedAt: authorization.completedAt ?? null,
+    cancelledAt: authorization.cancelledAt ?? null,
+    createdAt: authorization.createdAt,
+    updatedAt: authorization.updatedAt,
+    assignments: authorization.assignments.map((assignment) => ({
+      id: assignment.id,
+      studioRiderId: assignment.studioRiderId,
+      bikeDeviceId: assignment.bikeDeviceId,
+      playerId: assignment.playerId,
+      startedAt: assignment.startedAt ?? null,
+      activatedAt: assignment.activatedAt ?? null,
+      endedAt: assignment.endedAt ?? null,
+      heartRateAttachmentStatus: assignment.heartRateAttachmentStatus ?? 'not-checked',
+      state: assignment.endedAt != null
+        ? 'completed'
+        : authorization.cancelledAt != null
+          ? 'cancelled'
+          : authorization.expiresAt <= now
+            ? 'expired'
+            : assignment.startedAt != null
+              ? 'active'
+              : 'waiting',
+    })),
+  };
+}
+
+function sanitizeClubGroupTrainingActivation(value, now = Date.now()) {
+  if (!exactObjectKeys(value, new Set(['startedAt']))) return null;
+  const startedAt = Number(value.startedAt);
+  return Number.isSafeInteger(startedAt)
+    && startedAt > 0
+    && startedAt <= now + 30_000
+    ? { startedAt }
+    : null;
+}
+
+function canonicalClubGroupTrainingTitle(session) {
+  if (session.activityType === 'bmx-race') {
+    return `${sanitizeText(session.trackName, 'TrackLab track', 140)} BMX race`;
+  }
+  if (session.activityType === 'straight-sprint') {
+    const distance = Math.round(finiteNumber(session.details?.sprintDistanceFeet, 0));
+    return distance > 0
+      ? `${distance.toLocaleString('en-US')} ft sprint at ${sanitizeText(session.trackName, 'TrackLab', 140)}`
+      : `Straight sprint at ${sanitizeText(session.trackName, 'TrackLab', 140)}`;
+  }
+  if (session.activityType === 'get-pulled') {
+    return `${Math.round(finiteNumber(session.details?.durationSeconds, 3))}s Get Pulled · Air ${Math.round(finiteNumber(session.details?.airSetting, 1))}`;
+  }
+  return sanitizeText(
+    session.trackName ?? session.details?.destinationLabel,
+    'Explore the World ride',
+    160,
+  );
+}
+
+function validClubGroupRaceMetrics(summary, { dnf = false } = {}) {
+  return summary
+    && (dnf ? summary.finishTimeMs == null : summary.finishTimeMs > 0)
+    && summary.topSpeedKph <= 200
+    && summary.averageSpeedKph <= summary.topSpeedKph
+    && summary.topCadence <= 320
+    && summary.averageCadence <= summary.topCadence
+    && summary.topWatts <= 5_000
+    && summary.averageWatts <= summary.topWatts;
+}
+
+function validClubGroupZoneMetricPair(average, peak, maximum) {
+  if (average == null && peak == null) return true;
+  return Number.isFinite(average)
+    && Number.isFinite(peak)
+    && average >= 0
+    && peak >= 0
+    && peak <= maximum
+    && average <= peak;
+}
+
+function validRawClubGroupZoneResults(value, playerId, distanceMeters, { dnf = false } = {}) {
+  if (!Array.isArray(value) || value.length > clubGroupTrainingMaxZones) return false;
+  const maximumDistance = Math.max(1, finiteNumber(distanceMeters, 0));
+  let openZoneCount = 0;
+  return value.every((zone) => {
+    if (
+      !zone
+      || typeof zone !== 'object'
+      || typeof zone.zoneId !== 'string'
+      || !zone.zoneId.trim()
+      || !Number.isFinite(zone.startMeter)
+      || !Number.isFinite(zone.endMeter)
+      || zone.startMeter < 0
+      || zone.endMeter <= zone.startMeter
+      || zone.endMeter > maximumDistance + 0.5
+      || !Array.isArray(zone.riders)
+    ) return false;
+    const riders = zone.riders.filter((rider) => Number(rider?.playerId) === playerId);
+    if (riders.length !== 1) return false;
+    const rider = riders[0];
+    if (
+      !Number.isSafeInteger(rider.sampleCount)
+      || rider.sampleCount < 0
+      || rider.sampleCount > 1_000_000
+      || !validClubGroupZoneMetricPair(rider.averageSpeedKph, rider.topSpeedKph, 200)
+      || !validClubGroupZoneMetricPair(rider.averageCadence, rider.topCadence, 320)
+      || !validClubGroupZoneMetricPair(rider.averageWatts, rider.topWatts, 5_000)
+    ) return false;
+    const entry = rider.entryElapsedMs;
+    const exit = rider.exitElapsedMs;
+    const duration = rider.durationMs;
+    if (rider.sampleCount === 0) return entry == null && exit == null && duration == null;
+    if (!Number.isSafeInteger(entry) || entry < 0) return false;
+    if (exit == null || duration == null) {
+      if (!dnf || exit != null || duration != null) return false;
+      openZoneCount += 1;
+      return openZoneCount === 1;
+    }
+    return Number.isSafeInteger(exit)
+      && Number.isSafeInteger(duration)
+      && exit > entry
+      && duration === exit - entry;
+  });
+}
+
+function normalizeClubGroupDnfZoneResults(zoneResults, durationMs) {
+  const normalized = [];
+  let reachedDnfEnd = false;
+  for (const zone of zoneResults) {
+    const rider = zone?.riders?.[0];
+    if (!rider) return null;
+    if (rider.sampleCount === 0) continue;
+    if (
+      reachedDnfEnd
+      || !Number.isSafeInteger(rider.entryElapsedMs)
+      || rider.entryElapsedMs < 0
+      || rider.entryElapsedMs >= durationMs
+    ) return null;
+    const rawExit = rider.exitElapsedMs;
+    const exitElapsedMs = rawExit == null ? durationMs : Math.min(rawExit, durationMs);
+    if (!Number.isSafeInteger(exitElapsedMs) || exitElapsedMs <= rider.entryElapsedMs) return null;
+    normalized.push({
+      ...zone,
+      riders: [{
+        ...rider,
+        exitElapsedMs,
+        durationMs: exitElapsedMs - rider.entryElapsedMs,
+      }],
+    });
+    reachedDnfEnd = exitElapsedMs === durationMs;
+  }
+  return normalized;
+}
+
+function validClubGroupZoneResults(zoneResults, playerId, durationMs, distanceMeters) {
+  if (!Array.isArray(zoneResults) || zoneResults.length > clubGroupTrainingMaxZones) return false;
+  const seenZoneIds = new Set();
+  let previousExitElapsedMs = 0;
+  const maximumDistance = Math.max(1, finiteNumber(distanceMeters, 0));
+  for (const zone of zoneResults) {
+    const rider = Array.isArray(zone?.riders) && zone.riders.length === 1
+      ? zone.riders[0]
+      : null;
+    if (
+      !zone?.zoneId
+      || seenZoneIds.has(zone.zoneId)
+      || !rider
+      || rider.playerId !== playerId
+      || !Number.isFinite(zone.startMeter)
+      || !Number.isFinite(zone.endMeter)
+      || zone.startMeter < 0
+      || zone.endMeter <= zone.startMeter
+      || zone.endMeter > maximumDistance + 0.5
+      || !Number.isInteger(rider.sampleCount)
+      || rider.sampleCount < 0
+      || rider.sampleCount > 1_000_000
+      || !validClubGroupZoneMetricPair(rider.averageSpeedKph, rider.topSpeedKph, 200)
+      || !validClubGroupZoneMetricPair(rider.averageCadence, rider.topCadence, 320)
+      || !validClubGroupZoneMetricPair(rider.averageWatts, rider.topWatts, 5_000)
+    ) return false;
+    const times = [rider.entryElapsedMs, rider.exitElapsedMs, rider.durationMs];
+    if (rider.sampleCount === 0 && times.every((value) => value == null)) {
+      seenZoneIds.add(zone.zoneId);
+      continue;
+    }
+    if (
+      times.some((value) => !Number.isInteger(value))
+      || rider.entryElapsedMs < previousExitElapsedMs
+      || rider.entryElapsedMs < 0
+      || rider.exitElapsedMs < rider.entryElapsedMs
+      || rider.exitElapsedMs > durationMs
+      || rider.durationMs !== rider.exitElapsedMs - rider.entryElapsedMs
+    ) return false;
+    seenZoneIds.add(zone.zoneId);
+    previousExitElapsedMs = rider.exitElapsedMs;
+  }
+  return true;
+}
+
+function validClubGroupGetPulledMetrics(rider) {
+  return rider
+    && rider.averageWatts <= rider.peakWatts
+    && rider.peakWatts <= 5_000
+    && rider.averageCadence <= rider.peakCadence
+    && rider.peakCadence <= 320
+    && rider.averageSpeedKph <= rider.peakSpeedKph
+    && rider.peakSpeedKph <= 160;
+}
+
+function sanitizeClubGroupTrainingCompletions(authorization, sharedSession, value, now = Date.now()) {
+  if (
+    !authorization
+    || !sharedSession
+    || sharedSession.id !== authorization.sessionId
+    || sharedSession.activityType !== authorization.activityType
+    || !Array.isArray(value)
+    || value.length !== authorization.assignments.length
+  ) return null;
+  const windowKeys = new Set(['assignmentId', 'status', 'endedAt', 'activeClockSegments']);
+  const activeSegmentKeys = new Set(['startedAt', 'endedAt', 'activeElapsedAtStartMs']);
+  const windowsByAssignmentId = new Map();
+  for (const candidate of value) {
+    if (!exactObjectKeys(candidate, windowKeys)) return null;
+    const assignmentId = strictClubMonitorIdentifier(candidate.assignmentId);
+    const resultStatus = candidate.status;
+    const endedAt = Number(candidate.endedAt);
+    if (
+      !assignmentId
+      || !['finished', 'dnf'].includes(resultStatus)
+      || windowsByAssignmentId.has(assignmentId)
+      || !Number.isSafeInteger(endedAt)
+      || endedAt > now + 30_000
+    ) return null;
+    const rawActiveSegments = candidate.activeClockSegments;
+    if (
+      rawActiveSegments != null
+      && (
+        !Array.isArray(rawActiveSegments)
+        || rawActiveSegments.length > 256
+        || rawActiveSegments.some((segment) => !exactObjectKeys(segment, activeSegmentKeys))
+      )
+    ) return null;
+    windowsByAssignmentId.set(assignmentId, {
+      assignmentId,
+      resultStatus,
+      endedAt,
+      activeClockSegments: rawActiveSegments ?? [],
+    });
+  }
+
+  const completions = [];
+  for (const assignment of authorization.assignments) {
+    const window = windowsByAssignmentId.get(assignment.id);
+    if (
+      !window
+      || assignment.startedAt == null
+      || assignment.currentMemberStatus !== 'claimed'
+      || assignment.currentAthleteProfileKey !== assignment.athleteProfileKey
+      || window.endedAt <= assignment.startedAt
+      || window.endedAt > authorization.expiresAt
+      || window.endedAt - assignment.startedAt > clubGroupTrainingAuthorizationTtl(authorization.activityType)
+    ) return null;
+    const scoped = scopeTrainingSessionToClubTabletAthlete(
+      sharedSession,
+      {
+        studioRiderId: assignment.studioRiderId,
+        riderName: assignment.riderName || 'Club athlete',
+        bikeDeviceId: assignment.bikeDeviceId,
+      },
+      assignment.playerId,
+    );
+    if (!scoped) return null;
+
+    let endedAt = window.endedAt;
+    let durationMs = endedAt - assignment.startedAt;
+    let activeClockSegments = [];
+    if (authorization.activityType === 'bmx-race' || authorization.activityType === 'straight-sprint') {
+      const summary = scoped.details?.summaries?.[0];
+      const dnf = window.resultStatus === 'dnf';
+      const rawZoneResults = sharedSession.details?.zoneResults ?? [];
+      if (
+        !validClubGroupRaceMetrics(summary, { dnf })
+        || !validRawClubGroupZoneResults(
+          rawZoneResults,
+          assignment.playerId,
+          sharedSession.distanceMeters,
+          { dnf },
+        )
+      ) return null;
+      if (!dnf) {
+        const expectedEndedAt = assignment.startedAt + summary.finishTimeMs;
+        if (endedAt !== expectedEndedAt) return null;
+        durationMs = summary.finishTimeMs;
+      } else {
+        const normalizedZones = normalizeClubGroupDnfZoneResults(
+          scoped.details?.zoneResults ?? [],
+          durationMs,
+        );
+        if (!normalizedZones) return null;
+        scoped.details.zoneResults = normalizedZones;
+      }
+      if (
+        window.activeClockSegments.length > 0
+        || !validClubGroupZoneResults(
+          scoped.details?.zoneResults,
+          assignment.playerId,
+          durationMs,
+          sharedSession.distanceMeters,
+        )
+      ) return null;
+      summary.resultStatus = window.resultStatus;
+    } else if (authorization.activityType === 'get-pulled') {
+      const durationSeconds = Number(scoped.details?.durationSeconds);
+      const rider = scoped.details?.riders?.[0];
+      const plannedEndedAt = assignment.startedAt + durationSeconds * 1_000;
+      if (
+        !Number.isInteger(durationSeconds)
+        || durationSeconds < 1
+        || durationSeconds > 300
+        || (window.resultStatus === 'finished' && endedAt !== plannedEndedAt)
+        || (window.resultStatus === 'dnf' && endedAt >= plannedEndedAt)
+        || window.activeClockSegments.length > 0
+        || !validClubGroupGetPulledMetrics(rider)
+      ) return null;
+      durationMs = endedAt - assignment.startedAt;
+      rider.resultStatus = window.resultStatus;
+    } else {
+      if (window.activeClockSegments.length === 0) return null;
+      const provisional = {
+        ...scoped,
+        startedAt: assignment.startedAt,
+        endedAt,
+        details: { ...scoped.details, activeClockSegments: window.activeClockSegments },
+      };
+      activeClockSegments = trainingSessionHeartRateActiveClockSegments(provisional);
+      if (
+        !activeClockSegments
+        || activeClockSegments[0].startedAt !== assignment.startedAt
+        || activeClockSegments[activeClockSegments.length - 1].endedAt !== endedAt
+      ) return null;
+      durationMs = heartRateActiveClockDuration(activeClockSegments, endedAt - assignment.startedAt);
+      const rider = scoped.details?.riders?.[0];
+      if (!rider || durationMs <= 0) return null;
+      rider.averageSpeedMph = (rider.distanceMeters / 1609.344) / (durationMs / 3_600_000);
+      rider.resultStatus = window.resultStatus;
+      scoped.details.activeClockSegments = activeClockSegments;
+    }
+    scoped.details.resultStatus = window.resultStatus;
+    const session = {
+      ...scoped,
+      title: canonicalClubGroupTrainingTitle(scoped),
+      startedAt: assignment.startedAt,
+      endedAt,
+      durationMs,
+      createdAt: assignment.startedAt,
+      // Keep the completion digest stable across safe retry requests. Persistence
+      // records its own write timestamp; the canonical athlete result ends here.
+      updatedAt: endedAt,
+      _profileKey: assignment.athleteProfileKey,
+      _clubId: authorization.clubId,
+      _clubName: authorization.clubName,
+      _studioRiderId: assignment.studioRiderId,
+      _clubRiderName: assignment.riderName || 'Club athlete',
+    };
+    completions.push({
+      assignmentId: assignment.id,
+      resultStatus: window.resultStatus,
+      session,
+      activeClockSegments,
+      zoneWindows: trainingSessionHeartRateZoneWindows(
+        session,
+        assignment.playerId,
+        activeClockSegments,
+      ),
+    });
+  }
+  return completions.sort((left, right) => (
+    authorization.assignments.find((assignment) => assignment.id === left.assignmentId).playerId
+      - authorization.assignments.find((assignment) => assignment.id === right.assignmentId).playerId
+  ));
+}
+
+function clubGroupTrainingDigestSession(session) {
+  const {
+    _clubName,
+    _clubRiderName,
+    details,
+    ...stableSession
+  } = session;
+  const stableDetails = details && typeof details === 'object' ? { ...details } : {};
+  if (Array.isArray(stableDetails.summaries)) {
+    stableDetails.summaries = stableDetails.summaries.map((summary) => {
+      const { riderName, photoUrl, ...stableSummary } = summary;
+      return stableSummary;
+    });
+  }
+  if (Array.isArray(stableDetails.riders)) {
+    stableDetails.riders = stableDetails.riders.map((rider) => {
+      const { name, riderName, photoUrl, ...stableRider } = rider;
+      return stableRider;
+    });
+  }
+  return { ...stableSession, details: stableDetails };
+}
+
+function clubGroupTrainingCompletionDigest(authorization, completions) {
+  return createHash('sha256').update(JSON.stringify({
+    authorizationId: authorization.id,
+    sessionId: authorization.sessionId,
+    activityType: authorization.activityType,
+    completions: completions.map((completion) => ({
+      assignmentId: completion.assignmentId,
+      session: clubGroupTrainingDigestSession(completion.session),
+      zoneWindows: completion.zoneWindows,
+      activeClockSegments: completion.activeClockSegments,
+    })),
+  })).digest('hex');
+}
+
+const clubLiveActivityTypes = new Set(['bmx-race', 'straight-sprint', 'explore', 'get-pulled', 'monitor-sprint']);
+const clubMonitorSprintAuthorizationTtlMs = 15 * 60 * 1000;
+const clubMonitorSprintTokenHeader = 'x-tracklab-monitor-save-token';
 const clubLiveStatuses = new Set([
   'ready',
   'staging',
@@ -3076,6 +4405,162 @@ function boundedNumber(value, minimum, maximum, fallback = 0) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.max(minimum, Math.min(maximum, numeric));
+}
+
+function strictClubMonitorIdentifier(value, maximumLength = 160) {
+  if (typeof value !== 'string') return '';
+  const candidate = value.trim();
+  if (
+    !candidate
+    || candidate.length > maximumLength
+    || !/^[a-zA-Z0-9][a-zA-Z0-9:._-]*$/.test(candidate)
+  ) return '';
+  return candidate;
+}
+
+function clubMonitorBikeDeviceId(value) {
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric > 0 ? String(numeric) : '';
+}
+
+function sanitizeClubMonitorSprintReservation(value, now = Date.now()) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const clubId = strictClubMonitorIdentifier(value.clubId);
+  const studioRiderId = strictClubMonitorIdentifier(value.studioRiderId);
+  const bikeDeviceId = clubMonitorBikeDeviceId(value.bikeDeviceId);
+  const sessionId = strictClubMonitorIdentifier(value.sessionId);
+  const playerId = Number(value.playerId);
+  const legacyStartedAt = value.armedAt == null ? Number(value.startedAt) : null;
+  const armedAt = Number(value.armedAt ?? value.startedAt);
+  if (
+    !clubId
+    || !studioRiderId
+    || !bikeDeviceId
+    || !sessionId
+    || !Number.isInteger(playerId)
+    || playerId < 1
+    || playerId > maxRaceBikeCount
+    || !Number.isSafeInteger(armedAt)
+    || armedAt < now - 2 * 60 * 1000
+    || armedAt > now + 30_000
+    || (legacyStartedAt != null && !Number.isSafeInteger(legacyStartedAt))
+  ) return null;
+  return {
+    clubId,
+    studioRiderId,
+    bikeDeviceId,
+    sessionId,
+    playerId,
+    armedAt,
+    legacyStartedAt,
+  };
+}
+
+function sanitizeClubMonitorSprintActivation(value, now = Date.now()) {
+  const startedAt = Number(value?.startedAt);
+  return Number.isSafeInteger(startedAt)
+    && startedAt >= now - 2 * 60 * 1000
+    && startedAt <= now + 30_000
+    ? { startedAt }
+    : null;
+}
+
+function sanitizeClubMonitorSprintBinding(value, now = Date.now(), { completion = false } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const clubId = strictClubMonitorIdentifier(value.clubId);
+  const studioRiderId = strictClubMonitorIdentifier(value.studioRiderId);
+  const bikeDeviceId = clubMonitorBikeDeviceId(value.bikeDeviceId);
+  const sessionId = strictClubMonitorIdentifier(value.sessionId);
+  const playerId = Number(value.playerId);
+  const startedAt = Number(value.startedAt ?? value.result?.startedAt);
+  const oldestAllowed = completion
+    ? now - clubMonitorSprintAuthorizationTtlMs
+    : now - 2 * 60 * 1000;
+  if (
+    !clubId
+    || !studioRiderId
+    || !bikeDeviceId
+    || !sessionId
+    || !Number.isInteger(playerId)
+    || playerId < 1
+    || playerId > maxRaceBikeCount
+    || !Number.isSafeInteger(startedAt)
+    || startedAt < oldestAllowed
+    || startedAt > now + 30_000
+  ) return null;
+  return { clubId, studioRiderId, bikeDeviceId, sessionId, playerId, startedAt };
+}
+
+function requiredClubMonitorMetric(value, minimum, maximum) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
+    ? value
+    : null;
+}
+
+function sanitizeClubMonitorSprintResult(value, binding, now = Date.now()) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const startedAt = Number(value.startedAt);
+  const endedAt = Number(value.endedAt);
+  const distanceMeters = requiredClubMonitorMetric(value.distanceMeters, 0, 20_000);
+  const averageWatts = requiredClubMonitorMetric(value.averageWatts, 0, 5_000);
+  const peakWatts = requiredClubMonitorMetric(value.peakWatts, 0, 5_000);
+  const averageCadence = requiredClubMonitorMetric(value.averageCadence, 0, 320);
+  const peakCadence = requiredClubMonitorMetric(value.peakCadence, 0, 320);
+  const averageSpeedKph = requiredClubMonitorMetric(value.averageSpeedKph, 0, 160);
+  const peakSpeedKph = requiredClubMonitorMetric(value.peakSpeedKph, 0, 160);
+  if (
+    !Number.isSafeInteger(startedAt)
+    || startedAt !== binding.startedAt
+    || !Number.isSafeInteger(endedAt)
+    || endedAt < startedAt
+    || endedAt - startedAt > clubMonitorSprintAuthorizationTtlMs
+    || endedAt > now + 30_000
+    || distanceMeters == null
+    || averageWatts == null
+    || peakWatts == null
+    || peakWatts < averageWatts
+    || averageCadence == null
+    || peakCadence == null
+    || peakCadence < averageCadence
+    || averageSpeedKph == null
+    || peakSpeedKph == null
+    || peakSpeedKph < averageSpeedKph
+  ) return null;
+  return {
+    startedAt,
+    endedAt,
+    distanceMeters,
+    averageWatts,
+    peakWatts,
+    averageCadence,
+    peakCadence,
+    averageSpeedKph,
+    peakSpeedKph,
+  };
+}
+
+function clubMonitorSprintTokenHash(token) {
+  return tokenHash(`club-monitor-sprint-save:${token}`);
+}
+
+function publicClubMonitorSprintAuthorization(authorization) {
+  if (!authorization) return null;
+  return {
+    id: authorization.id,
+    clubId: authorization.clubId,
+    studioRiderId: authorization.studioRiderId,
+    bikeDeviceId: authorization.bikeDeviceId,
+    sessionId: authorization.sessionId,
+    playerId: authorization.playerId,
+    armedAt: authorization.armedAt,
+    startedAt: authorization.startedAt ?? null,
+    activatedAt: authorization.activatedAt ?? null,
+    expiresAt: authorization.expiresAt,
+    consumedAt: authorization.consumedAt ?? null,
+    revokedAt: authorization.revokedAt ?? null,
+    createdAt: authorization.createdAt,
+    updatedAt: authorization.updatedAt,
+  };
 }
 
 function clubLiveSessionKey(clubId, studioRiderId) {
@@ -3799,10 +5284,18 @@ function sanitizeGhostLapPayload(value, profileKey) {
     savedAt: Math.max(0, Math.round(finiteNumber(value.savedAt, Date.now()))),
     analyticsPublic: Boolean(value.analyticsPublic),
     medalRank: null,
-    summary: value.summary && typeof value.summary === 'object' ? value.summary : {},
+    summary: stripPrivateHeartRateFields(
+      value.summary && typeof value.summary === 'object' ? value.summary : {},
+    ),
     zoneResults,
     points,
   };
+}
+
+function publicGhostLap(value) {
+  return value && typeof value === 'object'
+    ? stripPrivateHeartRateFields(value)
+    : value;
 }
 
 function readJsonBody(request, maxBytes = 1_000_000) {
@@ -5642,8 +7135,2328 @@ async function handleClientMessage(client, rawMessage) {
   }
 }
 
+async function handleHeartRateStreamApi(request, response, requestUrl) {
+  const pathname = requestUrl.pathname;
+  const now = Date.now();
+  if (pathname === '/api/heart-rate/streams') {
+    if (request.method === 'GET') {
+      const session = await requirePersonalHeartRateSession(request, response);
+      if (!session) return;
+      const sessionId = sanitizeText(requestUrl.searchParams.get('sessionId'), '', 160);
+      const profileKey = authProfileKey(session.user);
+      const [streams, segments] = await Promise.all([
+        persistence.loadHeartRateStreams(profileKey, sessionId || null),
+        persistence.loadHeartRateTrainingSegments(profileKey, sessionId || null),
+      ]);
+      writeJson(response, 200, {
+        streams: streams.map(publicHeartRateStream),
+        segments: segments.map(publicHeartRateTrainingSegment),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, heartRateIngestRateLimiter, 120, 'heart-rate-stream-create')) return;
+    const ingestToken = requestBearerToken(request);
+    if (ingestToken.length < 32) {
+      writeJson(response, 401, { error: 'Heart-rate ingest authorization required.' });
+      return;
+    }
+    const ingestTokenHash = heartRateIngestTokenHash(ingestToken);
+    const pairing = await persistence.loadHeartRatePairingByIngestTokenHash(ingestTokenHash, now);
+    if (!pairing) {
+      writeJson(response, 401, { error: 'This heart-rate ingest authorization is invalid, expired, or revoked.' });
+      return;
+    }
+    const existing = await persistence.loadHeartRateStreamForIngestToken(null, ingestTokenHash, now, pairing.id);
+    if (existing) {
+      writeJson(response, 200, { stream: publicHeartRateStream(existing) }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const payload = await readJsonBody(request, 8_000);
+    const startedAt = heartRateTimestamp(payload?.startedAt);
+    if (
+      startedAt == null
+      || startedAt < (pairing.claimedAt ?? now) - 5 * 60 * 1000
+      || startedAt > now + 60_000
+    ) {
+      writeJson(response, 400, { error: 'The heart-rate stream start clock is invalid.' });
+      return;
+    }
+    const stream = await persistence.createHeartRateStream(
+      pairing.id,
+      ingestTokenHash,
+      `hrs_${randomUUID()}`,
+      startedAt,
+      now,
+    );
+    if (!stream) {
+      writeJson(response, 503, { error: 'The private heart-rate stream could not be created.' });
+      return;
+    }
+    writeJson(response, 201, { stream: publicHeartRateStream(stream) }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const samplesMatch = /^\/api\/heart-rate\/streams\/([^/]+)\/samples$/.exec(pathname);
+  if (samplesMatch) {
+    const streamId = sanitizeText(samplesMatch[1], '', 160);
+    if (request.method === 'GET') {
+      const session = await requirePersonalHeartRateSession(request, response);
+      if (!session) return;
+      const stream = await persistence.loadHeartRateStreamById(authProfileKey(session.user), streamId);
+      if (!stream) {
+        writeJson(response, 404, { error: 'That private heart-rate stream was not found.' });
+        return;
+      }
+      const samples = await persistence.loadHeartRateSamples(stream.id);
+      writeJson(response, 200, { stream: publicHeartRateStream(stream), samples }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, heartRateIngestRateLimiter, 600, 'heart-rate-samples')) return;
+    const ingestToken = requestBearerToken(request);
+    if (ingestToken.length < 32) {
+      writeJson(response, 401, { error: 'Heart-rate ingest authorization required.' });
+      return;
+    }
+    const ingestTokenHash = heartRateIngestTokenHash(ingestToken);
+    const stream = await persistence.loadHeartRateStreamForIngestToken(streamId, ingestTokenHash, now);
+    if (!stream) {
+      writeJson(response, 401, { error: 'This heart-rate stream authorization is invalid, expired, or revoked.' });
+      return;
+    }
+    if (stream.finalizedAt != null) {
+      writeJson(response, 409, { error: 'This heart-rate stream is already finalized.' });
+      return;
+    }
+    const payload = await readJsonBody(request, 80_000);
+    const sanitized = sanitizeHeartRateSamples(payload?.samples, stream, now);
+    if (sanitized.error) {
+      writeJson(response, 400, { error: sanitized.error });
+      return;
+    }
+    const writeResult = await withHeartRateStreamWriteChain(stream.id, async () => {
+      const currentStream = await persistence.loadHeartRateStreamForIngestToken(
+        stream.id,
+        ingestTokenHash,
+        Date.now(),
+      );
+      if (!currentStream) return { authorizationFailed: true, acceptedSequences: [] };
+      if (currentStream.finalizedAt != null) return { finalized: true, acceptedSequences: [] };
+      const latestStoredSample = await persistence.loadLatestHeartRateSample(stream.id);
+      const firstNewTailSample = latestStoredSample
+        ? sanitized.samples.find((sample) => sample.sequence > latestStoredSample.sequence)
+        : null;
+      if (
+        firstNewTailSample
+        && (
+          firstNewTailSample.activeElapsedMs < latestStoredSample.activeElapsedMs
+          || firstNewTailSample.recordedAt < latestStoredSample.recordedAt
+        )
+      ) return { backwardClock: true, acceptedSequences: [] };
+      const acceptedSequences = await persistence.insertHeartRateSamples(
+        stream.id,
+        ingestTokenHash,
+        sanitized.samples,
+        Date.now(),
+      );
+      if (['studio-block', 'account-block'].includes(currentStream.relayScope)) {
+        try {
+          await persistence.reconcileHeartRateTrainingSegmentBindingsForStream(stream.id, Date.now());
+          await persistence.refreshHeartRateTrainingSegmentsForStream(stream.id, Date.now());
+        } catch {
+          cloudTelemetry.warn('heart_rate.continuous_segment_refresh_failed', { status: 'failed' });
+        }
+      }
+      return { acceptedSequences };
+    });
+    if (writeResult.authorizationFailed) {
+      writeJson(response, 401, { error: 'This heart-rate stream authorization is invalid, expired, or revoked.' });
+      return;
+    }
+    if (writeResult.finalized) {
+      writeJson(response, 409, { error: 'This heart-rate stream is already finalized.' });
+      return;
+    }
+    if (writeResult.backwardClock) {
+      writeJson(response, 400, { error: 'The heart-rate active clock cannot move backward between batches.' });
+      return;
+    }
+    const { acceptedSequences } = writeResult;
+    const acceptedSet = new Set(acceptedSequences);
+    const latestAccepted = [...sanitized.samples].reverse().find((sample) => acceptedSet.has(sample.sequence));
+    if (latestAccepted) notifyHeartRateLive(stream, latestAccepted, now);
+    writeJson(response, 200, {
+      accepted: acceptedSequences.length,
+      duplicates: sanitized.repeatedInBatch
+        + sanitized.samples.length
+        - acceptedSequences.length
+        + sanitized.clippedAfterAccountStop,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const finalizeMatch = /^\/api\/heart-rate\/streams\/([^/]+)\/finalize$/.exec(pathname);
+  if (finalizeMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const ingestToken = requestBearerToken(request);
+    if (ingestToken.length < 32) {
+      writeJson(response, 401, { error: 'Heart-rate ingest authorization required.' });
+      return;
+    }
+    const streamId = sanitizeText(finalizeMatch[1], '', 160);
+    const ingestTokenHash = heartRateIngestTokenHash(ingestToken);
+    const stream = await persistence.loadHeartRateStreamForIngestToken(streamId, ingestTokenHash, now);
+    if (!stream) {
+      writeJson(response, 401, { error: 'This heart-rate stream authorization is invalid, expired, or revoked.' });
+      return;
+    }
+    if (stream.finalizedAt != null) {
+      writeJson(response, 200, { stream: publicHeartRateStream(stream) }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const payload = await readJsonBody(request, 32_000);
+    const submittedEndedAt = heartRateTimestamp(payload?.endedAt);
+    const endedAt = submittedEndedAt != null
+      && ['account-block', 'studio-block'].includes(stream.relayScope)
+      && stream.accountBlockStopRequestedAt != null
+      ? Math.min(submittedEndedAt, stream.accountBlockStopRequestedAt)
+      : submittedEndedAt;
+    const activeDurationMs = ['account-block', 'studio-block'].includes(stream.relayScope)
+      && stream.accountBlockStopRequestedAt != null
+      ? Math.max(0, (endedAt ?? stream.startedAt) - stream.startedAt)
+      : payload?.activeDurationMs == null
+        && ['studio-block', 'account-block'].includes(stream.relayScope)
+        ? Math.max(0, (endedAt ?? stream.startedAt) - stream.startedAt)
+        : Number(payload?.activeDurationMs);
+    if (
+      submittedEndedAt == null
+      || submittedEndedAt < stream.startedAt
+      || submittedEndedAt > now + 60_000
+      || endedAt == null
+      || endedAt < stream.startedAt
+      || !Number.isInteger(activeDurationMs)
+      || activeDurationMs < 0
+      || activeDurationMs > 7 * 24 * 60 * 60 * 1000
+      || activeDurationMs > endedAt - stream.startedAt + 120_000
+    ) {
+      writeJson(response, 400, { error: 'The heart-rate finish clock or active duration is invalid.' });
+      return;
+    }
+    const zoneWindows = sanitizeHeartRateZoneWindows(
+      payload?.zoneWindows ?? payload?.zones,
+      activeDurationMs,
+    );
+    if (zoneWindows.error) {
+      writeJson(response, 400, { error: zoneWindows.error });
+      return;
+    }
+    const finalSamples = payload?.samples == null
+      ? { samples: [] }
+      : sanitizeHeartRateSamples(payload.samples, stream, now);
+    if (finalSamples.error) {
+      writeJson(response, 400, { error: finalSamples.error });
+      return;
+    }
+    const finalizeResult = await withHeartRateStreamWriteChain(stream.id, async () => {
+      const currentStream = await persistence.loadHeartRateStreamForIngestToken(
+        stream.id,
+        ingestTokenHash,
+        Date.now(),
+      );
+      if (!currentStream) return { authorizationFailed: true, stream: null };
+      if (currentStream.finalizedAt != null) return { stream: currentStream };
+      if (finalSamples.samples.length > 0) {
+        const latestStoredSample = await persistence.loadLatestHeartRateSample(stream.id);
+        const firstNewTailSample = latestStoredSample
+          ? finalSamples.samples.find((sample) => sample.sequence > latestStoredSample.sequence)
+          : null;
+        if (
+          firstNewTailSample
+          && (
+            firstNewTailSample.activeElapsedMs < latestStoredSample.activeElapsedMs
+            || firstNewTailSample.recordedAt < latestStoredSample.recordedAt
+          )
+        ) return { backwardClock: true, stream: null };
+        await persistence.insertHeartRateSamples(
+          stream.id,
+          ingestTokenHash,
+          finalSamples.samples,
+          Date.now(),
+        );
+      }
+      const samples = await persistence.loadHeartRateSamples(stream.id);
+      const finalizedStream = await persistence.finalizeHeartRateStream(stream.id, ingestTokenHash, {
+        endedAt,
+        activeDurationMs,
+        summary: heartRateSummary(samples, activeDurationMs),
+        zoneSummaries: heartRateZoneSummaries(samples, zoneWindows.windows),
+        finalizedAt: Date.now(),
+      });
+      if (['studio-block', 'account-block'].includes(finalizedStream?.relayScope)) {
+        try {
+          await persistence.reconcileHeartRateTrainingSegmentBindingsForStream(stream.id, Date.now());
+          await persistence.refreshHeartRateTrainingSegmentsForStream(stream.id, Date.now());
+        } catch {
+          cloudTelemetry.warn('heart_rate.continuous_segment_finalize_refresh_failed', { status: 'failed' });
+        }
+      }
+      return { stream: finalizedStream };
+    });
+    if (finalizeResult.authorizationFailed) {
+      writeJson(response, 401, { error: 'This heart-rate stream authorization is invalid, expired, or revoked.' });
+      return;
+    }
+    if (finalizeResult.backwardClock) {
+      writeJson(response, 400, { error: 'The heart-rate active clock cannot move backward in the final batch.' });
+      return;
+    }
+    const finalized = finalizeResult.stream;
+    if (!finalized) {
+      writeJson(response, 409, { error: 'The heart-rate stream could not be finalized.' });
+      return;
+    }
+    writeJson(response, 200, { stream: publicHeartRateStream(finalized) }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const streamMatch = /^\/api\/heart-rate\/streams\/([^/]+)$/.exec(pathname);
+  if (streamMatch) {
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    if (request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const deleted = await persistence.deleteHeartRateStream(
+      authProfileKey(session.user),
+      sanitizeText(streamMatch[1], '', 160),
+    );
+    if (!deleted) {
+      writeJson(response, 404, { error: 'That private heart-rate stream was not found.' });
+      return;
+    }
+    writeJson(response, 200, { deleted: true }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  writeJson(response, 404, { error: 'Heart-rate stream endpoint not found.' });
+}
+
+async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
+  const pathname = requestUrl.pathname;
+  const now = Date.now();
+
+  if (pathname === '/api/heart-rate/watch-connect/tablet-status') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const tabletSession = await loadClubTabletSessionFromRequest(request);
+    if (!tabletSession) {
+      writeJson(response, 401, {
+        error: 'This club tablet athlete session expired or ended.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateReadRateLimiter,
+      240,
+      `heart-rate-watch-tablet:${tabletSession.tokenHash}`,
+    )) return;
+    const identity = await clubTabletMemberAndProfile(tabletSession);
+    if (
+      !identity
+      || identity.member.status !== 'claimed'
+      || !String(identity.member.athleteProfileKey || '').startsWith('user:')
+      || identity.member.athleteProfileKey !== identity.profileKey
+    ) {
+      writeJson(response, 403, {
+        error: 'Watch Connect requires this selected athlete to have a claimed TrackLab account.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const [enrollments, connections] = await Promise.all([
+      persistence.loadHeartRateWatchEnrollments(identity.profileKey),
+      persistence.loadHeartRateWatchConnections(identity.profileKey),
+    ]);
+    const enrollment = enrollments.find((candidate) => (
+      candidate.scope === 'studio'
+      && candidate.clubId === tabletSession.clubId
+      && candidate.studioRiderId === tabletSession.studioRiderId
+      && candidate.revokedAt == null
+      && candidate.membershipActive !== false
+    )) ?? null;
+    const connection = enrollment
+      ? connections.find((candidate) => candidate.enrollmentId === enrollment.id) ?? null
+      : null;
+    const projected = publicHeartRateWatchConnection(connection, enrollment, now);
+    const state = projected?.state === 'connected'
+      ? 'connected'
+      : projected?.state === 'expired'
+        ? 'expired'
+        : enrollment
+          ? 'ready'
+          : 'not-set-up';
+    writeJson(response, 200, {
+      watchConnect: {
+        recognized: Boolean(enrollment),
+        state,
+        connectedUntil: projected?.connectedUntil ?? null,
+        remainingMs: projected?.remainingMs ?? 0,
+      },
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const session = await requirePersonalHeartRateSession(request, response);
+  if (!session) return;
+  const profileKey = authProfileKey(session.user);
+
+  if (pathname === '/api/heart-rate/watch-connect') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateReadRateLimiter,
+      240,
+      `heart-rate-watch-status:${profileKey}`,
+    )) return;
+    const [enrollments, connections] = await Promise.all([
+      persistence.loadHeartRateWatchEnrollments(profileKey),
+      persistence.loadHeartRateWatchConnections(profileKey),
+    ]);
+    const enrollmentById = new Map(enrollments.map((enrollment) => [enrollment.id, enrollment]));
+    writeJson(response, 200, {
+      enrollments: enrollments.map(publicHeartRateWatchEnrollment),
+      connections: connections.map((connection) => publicHeartRateWatchConnection(
+        connection,
+        enrollmentById.get(connection.enrollmentId),
+        now,
+      )),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/heart-rate/watch-connect/studio') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateReadRateLimiter,
+      240,
+      `heart-rate-watch-studio:${profileKey}`,
+    )) return;
+    const clubId = sanitizeText(requestUrl.searchParams.get('clubId'), '', 160);
+    if (!clubId) {
+      writeJson(response, 400, { error: 'clubId is required.' });
+      return;
+    }
+    const projection = await persistence.loadHeartRateWatchStudioProjection(profileKey, clubId);
+    if (!projection) {
+      writeJson(response, 403, { error: 'Only this club owner can view Watch Connect readiness.' });
+      return;
+    }
+    writeJson(response, 200, {
+      athletes: projection.map((row) => heartRateWatchStudioProjection(row, now)),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const studioEnrollmentMatch = /^\/api\/heart-rate\/watch-connect\/studio\/enrollments\/([^/]+)$/.exec(pathname);
+  if (studioEnrollmentMatch) {
+    if (request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateMutationRateLimiter,
+      60,
+      `heart-rate-watch-studio-disconnect:${profileKey}`,
+    )) return;
+    const clubId = sanitizeText(requestUrl.searchParams.get('clubId'), '', 160);
+    const enrollmentId = sanitizeText(studioEnrollmentMatch[1], '', 160);
+    if (!clubId || !enrollmentId) {
+      writeJson(response, 400, { error: 'Choose the studio Watch Connect setup to disconnect.' });
+      return;
+    }
+    const revoked = await persistence.revokeHeartRateWatchStudioEnrollmentByOwner(
+      profileKey,
+      clubId,
+      enrollmentId,
+      now,
+    );
+    if (!revoked) {
+      writeJson(response, 404, { error: 'That studio Watch Connect setup was not found.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    const projection = await persistence.loadHeartRateWatchStudioProjection(profileKey, clubId);
+    const athlete = projection?.find((row) => row.studioRiderId === revoked.studioRiderId) ?? null;
+    if (!athlete) {
+      writeJson(response, 404, { error: 'That studio Watch Connect setup was not found.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    cloudTelemetry.info('heart_rate.watch_connect_studio_disconnected', { status: 'success' });
+    writeJson(response, 200, {
+      athlete: heartRateWatchStudioProjection(athlete, now),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/heart-rate/watch-connect/enrollments') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateMutationRateLimiter,
+      30,
+      `heart-rate-watch-enroll:${profileKey}`,
+    )) return;
+    const payload = await readJsonBody(request, 16_000);
+    const allowedKeys = new Set([
+      'requestId',
+      'installId',
+      'scope',
+      'clubId',
+      'liveStudioConsent',
+      'sessionStudioConsent',
+    ]);
+    if (Object.keys(payload ?? {}).some((key) => !allowedKeys.has(key))) {
+      writeJson(response, 400, {
+        error: 'Watch Connect resolves the signed-in athlete and does not accept identity or bike overrides.',
+      });
+      return;
+    }
+    const requestId = normalizeHeartRateAccountBlockRequestId(payload?.requestId);
+    const installId = normalizeHeartRateWatchInstallId(payload?.installId);
+    const scope = sanitizeText(payload?.scope, '', 16).toLowerCase();
+    const clubId = sanitizeText(payload?.clubId, '', 160);
+    if (!requestId || !installId || !['personal', 'studio'].includes(scope)) {
+      writeJson(response, 400, {
+        error: 'Watch Connect requires a valid request, this iPhone installation, and connection type.',
+      });
+      return;
+    }
+    if (scope === 'personal' && (
+      clubId
+      || payload?.liveStudioConsent === true
+      || payload?.sessionStudioConsent === true
+    )) {
+      writeJson(response, 400, { error: 'Personal Watch Connect is always private.' });
+      return;
+    }
+    if (scope === 'studio' && (
+      !clubId
+      || typeof payload?.liveStudioConsent !== 'boolean'
+      || payload?.sessionStudioConsent !== true
+    )) {
+      writeJson(response, 400, {
+        error: 'Studio Watch Connect requires one claimed studio, saved-session consent, and an explicit live-heart-rate choice.',
+      });
+      return;
+    }
+    let membership = null;
+    if (scope === 'studio') {
+      const clubState = await persistence.loadClubConnectState(profileKey);
+      membership = (clubState.memberships ?? []).find((candidate) => candidate.clubId === clubId) ?? null;
+      if (!membership) {
+        writeJson(response, 403, {
+          error: 'Watch Connect requires this athlete’s active claimed studio membership.',
+        });
+        return;
+      }
+    }
+    const result = await persistence.createOrRefreshHeartRateWatchEnrollment({
+      id: `hrwe_${randomUUID()}`,
+      ownerProfileKey: profileKey,
+      requestId,
+      installIdHash: heartRateWatchInstallIdHash(installId),
+      scope,
+      clubId: membership?.clubId ?? null,
+      studioRiderId: membership?.studioRiderId ?? null,
+      liveStudioConsent: scope === 'studio' && payload.liveStudioConsent === true,
+      sessionStudioConsent: scope === 'studio' && payload.sessionStudioConsent === true,
+      now,
+    });
+    if (result.status === 'membership-required') {
+      writeJson(response, 403, { error: 'This athlete’s claimed studio membership is no longer active.' });
+      return;
+    }
+    if (result.status === 'expired') {
+      writeJson(response, 409, {
+        error: 'That Watch Connect request has expired. Press Watch Connect again to start a new four-hour session.',
+      });
+      return;
+    }
+    if (result.status === 'device-conflict') {
+      writeJson(response, 409, {
+        error: 'This TrackLab installation is already trusted by another athlete account. Sign into the correct account or reinstall TrackLab.',
+      });
+      return;
+    }
+    if (!result.enrollment || result.status === 'conflict') {
+      writeJson(response, 409, { error: 'That Watch Connect setup request conflicts with an earlier request.' });
+      return;
+    }
+    writeJson(response, result.status === 'created' ? 201 : 200, {
+      enrollment: publicHeartRateWatchEnrollment({ ...result.enrollment, membershipActive: true }),
+      replayed: result.status === 'replayed',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const enrollmentMatch = /^\/api\/heart-rate\/watch-connect\/enrollments\/([^/]+)$/.exec(pathname);
+  if (enrollmentMatch) {
+    if (request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateMutationRateLimiter,
+      60,
+      `heart-rate-watch-forget:${profileKey}`,
+    )) return;
+    const enrollment = await persistence.revokeHeartRateWatchEnrollment(
+      profileKey,
+      sanitizeText(enrollmentMatch[1], '', 160),
+      now,
+    );
+    if (!enrollment) {
+      writeJson(response, 404, { error: 'That trusted Watch Connect setup was not found.' });
+      return;
+    }
+    writeJson(response, 200, {
+      enrollment: publicHeartRateWatchEnrollment({ ...enrollment, membershipActive: true }),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/heart-rate/watch-connect/connections') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateMutationRateLimiter,
+      60,
+      `heart-rate-watch-connect:${profileKey}`,
+    )) return;
+    const payload = await readJsonBody(request, 12_000);
+    const allowedKeys = new Set(['requestId', 'enrollmentId', 'installId']);
+    if (Object.keys(payload ?? {}).some((key) => !allowedKeys.has(key))) {
+      writeJson(response, 400, {
+        error: 'Watch Connect uses the trusted athlete setup and does not accept identity, studio, or bike overrides.',
+      });
+      return;
+    }
+    const requestId = normalizeHeartRateAccountBlockRequestId(payload?.requestId);
+    const enrollmentId = sanitizeText(payload?.enrollmentId, '', 160);
+    const installId = normalizeHeartRateWatchInstallId(payload?.installId);
+    if (!requestId || !enrollmentId || !installId) {
+      writeJson(response, 400, {
+        error: 'Watch Connect requires a trusted setup and a new connection request.',
+      });
+      return;
+    }
+    const connectionId = `hrwc_${randomUUID()}`;
+    const pairingId = `hrp_wc_${randomUUID()}`;
+    const relaySessionId = `watch-connect:${connectionId}`;
+    const ingestToken = createSessionToken();
+    const connectedUntil = now + persistence.heartRateWatchConnectDurationMs;
+    const result = await persistence.createHeartRateWatchConnection({
+      id: connectionId,
+      enrollmentId,
+      ownerProfileKey: profileKey,
+      requestId,
+      installIdHash: heartRateWatchInstallIdHash(installId),
+      pairingId,
+      relaySessionId,
+      riderId: `account:${session.user.id}`,
+      pairCodeHash: heartRatePairCodeHash(createHeartRateCode()),
+      ingestTokenHash: heartRateIngestTokenHash(ingestToken),
+      connectedUntil,
+      now,
+    });
+    if (result.status === 'not-trusted') {
+      writeJson(response, 403, { error: 'Set up Watch Connect on this iPhone before connecting.' });
+      return;
+    }
+    if (result.status === 'membership-required') {
+      writeJson(response, 403, { error: 'This athlete’s claimed studio membership is no longer active.' });
+      return;
+    }
+    if (!result.connection || !result.enrollment || !result.pairing) {
+      writeJson(response, 409, { error: 'That Watch Connect request conflicts with an earlier request.' });
+      return;
+    }
+    const connection = publicHeartRateWatchConnection(result.connection, {
+      ...result.enrollment,
+      membershipActive: true,
+    }, now);
+    writeJson(response, result.status === 'created' ? 201 : 200, {
+      connection,
+      credentials: {
+        connectionId: connection.id,
+        pairingId: result.pairing.id,
+        relaySessionId: result.pairing.sessionId,
+        ingestToken,
+        expiresAt: connection.connectedUntil,
+      },
+      replayed: result.status === 'replayed' || result.status === 'active',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const connectionMatch = /^\/api\/heart-rate\/watch-connect\/connections\/([^/]+)$/.exec(pathname);
+  if (connectionMatch) {
+    if (request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateMutationRateLimiter,
+      120,
+      `heart-rate-watch-stop:${profileKey}`,
+    )) return;
+    const connection = await persistence.stopHeartRateWatchConnection(
+      profileKey,
+      sanitizeText(connectionMatch[1], '', 160),
+      now,
+    );
+    if (!connection) {
+      writeJson(response, 404, { error: 'That Watch Connect session was not found.' });
+      return;
+    }
+    const enrollments = await persistence.loadHeartRateWatchEnrollments(profileKey);
+    const enrollment = enrollments.find((candidate) => candidate.id === connection.enrollmentId) ?? null;
+    writeJson(response, 200, {
+      connection: publicHeartRateWatchConnection(connection, enrollment, now),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  writeJson(response, 404, { error: 'Watch Connect endpoint not found.' });
+}
+
+async function handleHeartRatePairingApi(request, response, requestUrl) {
+  const pathname = requestUrl.pathname;
+  const now = Date.now();
+  if (pathname === '/api/heart-rate/pairings/claim') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    if (!enforceRateLimit(request, response, heartRateMutationRateLimiter, 20, 'heart-rate-watch-claim')) return;
+    const payload = await readJsonBody(request, 8_000);
+    const pairCode = normalizeHeartRateCode(payload?.pairCode);
+    if (pairCode.length !== 8) {
+      writeJson(response, 400, { error: 'Enter the eight-character heart-rate pairing code.' });
+      return;
+    }
+    const pairCodeHash = heartRatePairCodeHash(pairCode);
+    const profileKey = authProfileKey(session.user);
+    const claimOwnerProfileKey = await persistence.loadHeartRatePairingClaimOwner(pairCodeHash, now);
+    if (claimOwnerProfileKey && claimOwnerProfileKey !== profileKey) {
+      writeJson(response, 403, { error: 'This heart-rate pairing belongs to a different athlete account.' });
+      return;
+    }
+    const ingestToken = createSessionToken();
+    const ingestExpiresAt = now + heartRateIngestTokenTtlMs;
+    const studioBlockIngestExpiresAt = now + heartRateStudioBlockIngestTtlMs;
+    const pairing = await persistence.claimHeartRatePairing(
+      pairCodeHash,
+      heartRateIngestTokenHash(ingestToken),
+      now,
+      ingestExpiresAt,
+      studioBlockIngestExpiresAt,
+      profileKey,
+    );
+    if (!pairing) {
+      writeJson(response, 409, { error: 'This heart-rate pairing code is invalid, expired, revoked, or already claimed.' });
+      return;
+    }
+    writeJson(response, 200, {
+      ingestToken,
+      ingestExpiresAt: pairing.ingestExpiresAt,
+      pairing: watchHeartRatePairing(pairing),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/heart-rate/pairings') {
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const profileKey = authProfileKey(session.user);
+    if (request.method === 'GET') {
+      const pairings = await persistence.loadHeartRatePairings(profileKey);
+      writeJson(response, 200, { pairings: pairings.map(publicHeartRatePairing) }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, heartRateMutationRateLimiter, 60, `heart-rate-pairing:${profileKey}`)) return;
+    const payload = await readJsonBody(request, 16_000);
+    const sessionId = sanitizeText(payload?.sessionId, '', 160).replace(/[^a-zA-Z0-9:._-]/g, '-');
+    const activityType = sanitizeText(payload?.activityType, '', 32).toLowerCase();
+    const riderId = sanitizeText(payload?.riderId, '', 160);
+    const expectedRiderId = `account:${session.user.id}`;
+    const playerId = payload?.playerId == null ? null : Number(payload.playerId);
+    if (
+      !sessionId
+      || !heartRateActivityTypes.has(activityType)
+      || riderId !== expectedRiderId
+      || (playerId != null && (!Number.isInteger(playerId) || playerId < 1 || playerId > maxRaceBikeCount))
+    ) {
+      writeJson(response, 400, { error: 'Choose this signed-in athlete and a valid TrackLab session.' });
+      return;
+    }
+    const requestedClubId = sanitizeText(payload?.clubSession?.clubId, '', 160);
+    const requestedStudioRiderId = sanitizeText(payload?.clubSession?.studioRiderId, '', 160);
+    let membership = null;
+    if (requestedClubId || requestedStudioRiderId) {
+      const clubState = await persistence.loadClubConnectState(profileKey);
+      membership = (clubState.memberships ?? []).find((candidate) => (
+        candidate.clubId === requestedClubId && candidate.studioRiderId === requestedStudioRiderId
+      )) ?? null;
+      if (!membership) {
+        writeJson(response, 403, { error: 'Choose this athlete’s active Club Connect membership.' });
+        return;
+      }
+    }
+    const liveStudioConsent = payload?.liveStudioConsent === true;
+    const sessionStudioConsent = payload?.sessionStudioConsent === true;
+    if ((liveStudioConsent || sessionStudioConsent) && !membership) {
+      writeJson(response, 400, { error: 'Studio heart-rate sharing requires an active claimed club membership.' });
+      return;
+    }
+    let pairCode = '';
+    let pairing = null;
+    for (let attempt = 0; attempt < 3 && !pairing; attempt += 1) {
+      pairCode = createHeartRateCode();
+      pairing = await persistence.createHeartRatePairing({
+        id: `hrp_${randomUUID()}`,
+        ownerProfileKey: profileKey,
+        sessionId,
+        activityType,
+        relayScope: 'session',
+        riderId,
+        playerId,
+        clubId: membership?.clubId ?? null,
+        studioRiderId: membership?.studioRiderId ?? null,
+        pairCodeHash: heartRatePairCodeHash(pairCode),
+        pairCodeExpiresAt: now + heartRatePairCodeTtlMs,
+        liveStudioConsent,
+        sessionStudioConsent,
+        createdAt: now,
+      });
+    }
+    if (!pairing) {
+      writeJson(response, 503, { error: 'The private heart-rate pairing could not be created.' });
+      return;
+    }
+    writeJson(response, 201, {
+      pairing: publicHeartRatePairing(pairing),
+      pairCode,
+      expiresAt: pairing.pairCodeExpiresAt,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const pairingMatch = /^\/api\/heart-rate\/pairings\/([^/]+)$/.exec(pathname);
+  if (!pairingMatch) {
+    writeJson(response, 404, { error: 'Heart-rate pairing endpoint not found.' });
+    return;
+  }
+  const session = await requirePersonalHeartRateSession(request, response);
+  if (!session) return;
+  const profileKey = authProfileKey(session.user);
+  const pairingId = sanitizeText(pairingMatch[1], '', 160);
+  const pairing = await persistence.loadHeartRatePairingById(profileKey, pairingId);
+  if (!pairing) {
+    writeJson(response, 404, { error: 'That private heart-rate pairing was not found.' });
+    return;
+  }
+  if (request.method === 'DELETE') {
+    const revoked = await persistence.revokeHeartRatePairing(profileKey, pairingId, now);
+    writeJson(response, 200, { pairing: publicHeartRatePairing(revoked) }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+  if (request.method !== 'PATCH') {
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+  if (pairing.relayScope === 'account-block') {
+    writeJson(response, 409, {
+      error: 'Account heart-rate blocks are always private and do not allow studio sharing.',
+    });
+    return;
+  }
+  const payload = await readJsonBody(request, 8_000);
+  if (typeof payload?.liveStudioConsent !== 'boolean' && typeof payload?.sessionStudioConsent !== 'boolean') {
+    writeJson(response, 400, { error: 'Choose the heart-rate sharing consent to update.' });
+    return;
+  }
+  const liveStudioConsent = typeof payload.liveStudioConsent === 'boolean'
+    ? payload.liveStudioConsent
+    : pairing.liveStudioConsent;
+  const sessionStudioConsent = typeof payload.sessionStudioConsent === 'boolean'
+    ? payload.sessionStudioConsent
+    : pairing.sessionStudioConsent;
+  if (liveStudioConsent || sessionStudioConsent) {
+    const clubState = await persistence.loadClubConnectState(profileKey);
+    const activeMembership = (clubState.memberships ?? []).some((candidate) => (
+      candidate.clubId === pairing.clubId && candidate.studioRiderId === pairing.studioRiderId
+    ));
+    if (!activeMembership) {
+      writeJson(response, 403, { error: 'Studio sharing requires this athlete’s active claimed club membership.' });
+      return;
+    }
+  }
+  const updated = await persistence.updateHeartRatePairingConsent(profileKey, pairingId, {
+    liveStudioConsent,
+    sessionStudioConsent,
+  });
+  if (!updated) {
+    writeJson(response, 409, { error: 'This heart-rate pairing can no longer be updated.' });
+    return;
+  }
+  writeJson(response, 200, { pairing: publicHeartRatePairing(updated) }, { 'Cache-Control': 'no-store' });
+}
+
+async function handleHeartRateStudioInvitationApi(request, response, requestUrl) {
+  const pathname = requestUrl.pathname;
+  const now = Date.now();
+  if (pathname === '/api/heart-rate/studio-invitations/preview') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const profileKey = authProfileKey(session.user);
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateReadRateLimiter,
+      120,
+      `heart-rate-studio-preview:${profileKey}`,
+    )) return;
+    const inviteCode = normalizeHeartRateCode(requestUrl.searchParams.get('code'));
+    if (inviteCode.length !== 8) {
+      writeJson(response, 400, { error: 'Enter the eight-character studio heart-rate invitation code.' });
+      return;
+    }
+    const invitation = await persistence.previewHeartRateStudioInvitation(
+      heartRateStudioInvitationCodeHash(inviteCode),
+      profileKey,
+      now,
+    );
+    if (!invitation) {
+      writeJson(response, 404, {
+        error: 'This invitation is unavailable, expired, cancelled, claimed, or belongs to another athlete.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    writeJson(response, 200, {
+      invitation: {
+        clubName: sanitizeText(invitation.clubName, 'TrackLab Club', 120),
+        riderName: sanitizeText(invitation.riderName, 'Club athlete', 120),
+        sessionId: invitation.sessionId,
+        activityType: invitation.activityType,
+        relayScope: invitation.relayScope || 'session',
+        playerId: invitation.playerId ?? null,
+        expiresAt: invitation.expiresAt,
+      },
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+  if (pathname === '/api/heart-rate/studio-invitations/claim') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const profileKey = authProfileKey(session.user);
+    if (!enforceRateLimit(request, response, heartRateMutationRateLimiter, 30, `heart-rate-studio-claim:${profileKey}`)) return;
+    const payload = await readJsonBody(request, 16_000);
+    const inviteCode = normalizeHeartRateCode(payload?.inviteCode);
+    if (inviteCode.length !== 8) {
+      writeJson(response, 400, { error: 'Enter the eight-character studio heart-rate invitation code.' });
+      return;
+    }
+    const invitationPreview = await persistence.previewHeartRateStudioInvitation(
+      heartRateStudioInvitationCodeHash(inviteCode),
+      profileKey,
+      now,
+    );
+    if (!invitationPreview) {
+      writeJson(response, 409, {
+        error: 'This invitation is invalid, expired, cancelled, already claimed, or belongs to another athlete.',
+      });
+      return;
+    }
+    if (
+      invitationPreview.relayScope === 'studio-block'
+      && (
+        payload?.studioBlockConsent !== true
+        || payload?.sessionStudioConsent !== true
+      )
+    ) {
+      writeJson(response, 400, {
+        error: 'Continuous studio heart-rate requires the athlete’s explicit block and saved-session consent.',
+      });
+      return;
+    }
+    const pairCode = createHeartRateCode();
+    const pairCodeExpiresAt = now + heartRatePairCodeTtlMs;
+    const claimed = await persistence.claimHeartRateStudioInvitationAndCreatePairing(
+      heartRateStudioInvitationCodeHash(inviteCode),
+      profileKey,
+      {
+        id: `hrp_${randomUUID()}`,
+        ownerProfileKey: profileKey,
+        riderId: `account:${session.user.id}`,
+        pairCodeHash: heartRatePairCodeHash(pairCode),
+        pairCodeExpiresAt,
+        liveStudioConsent: payload?.liveStudioConsent === true,
+        sessionStudioConsent: payload?.sessionStudioConsent === true,
+      },
+      now,
+    );
+    if (!claimed) {
+      writeJson(response, 409, {
+        error: 'This invitation is invalid, expired, cancelled, already claimed, or belongs to another athlete.',
+      });
+      return;
+    }
+    writeJson(response, 201, {
+      pairing: publicHeartRatePairing(claimed.pairing),
+      pairCode,
+      expiresAt: pairCodeExpiresAt,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/heart-rate/studio-invitations') {
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const profileKey = authProfileKey(session.user);
+    const clubState = await persistence.loadClubConnectState(profileKey);
+    const ownedClub = clubState.ownedClub;
+    if (!ownedClub) {
+      writeJson(response, 403, { error: 'Only a TrackLab club owner can create studio heart-rate invitations.' });
+      return;
+    }
+    if (request.method === 'GET') {
+      const invitations = await persistence.loadHeartRateStudioInvitations(profileKey);
+      writeJson(response, 200, {
+        invitations: invitations.map(publicHeartRateStudioInvitation),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, heartRateMutationRateLimiter, 60, `heart-rate-studio-invite:${profileKey}`)) return;
+    const payload = await readJsonBody(request, 16_000);
+    const sessionId = sanitizeText(payload?.sessionId, '', 160).replace(/[^a-zA-Z0-9:._-]/g, '-');
+    const activityType = sanitizeText(payload?.activityType, '', 32).toLowerCase();
+    const requestedRelayScope = sanitizeText(payload?.relayScope, '', 32).toLowerCase();
+    const relayScope = requestedRelayScope || (activityType === 'monitor-sprint' ? 'studio-block' : 'session');
+    const studioRiderId = sanitizeText(payload?.studioRiderId, '', 160);
+    const playerId = payload?.playerId == null ? null : Number(payload.playerId);
+    if (
+      !sessionId
+      || !heartRateActivityTypes.has(activityType)
+      || !['session', 'studio-block'].includes(relayScope)
+      || !studioRiderId
+      || (playerId != null && (!Number.isInteger(playerId) || playerId < 1 || playerId > maxRaceBikeCount))
+    ) {
+      writeJson(response, 400, { error: 'Choose a valid session, activity, assigned athlete, and player lane.' });
+      return;
+    }
+    const member = (ownedClub.members ?? []).find((candidate) => (
+      candidate.studioRiderId === studioRiderId
+      && candidate.status === 'claimed'
+      && String(candidate.athleteProfileKey || '').startsWith('user:')
+    ));
+    if (!member) {
+      writeJson(response, 409, { error: 'That studio rider must claim their TrackLab account before heart-rate pairing.' });
+      return;
+    }
+    pruneClubLiveSessions(now);
+    const [monitorAssignments, groupAuthorizations] = await Promise.all([
+      persistence.loadActiveClubMonitorSprintAuthorizations(ownedClub.id, now),
+      persistence.loadActiveClubGroupTrainingAuthorizations(ownedClub.id, now),
+    ]);
+    if (!monitorAssignments || !groupAuthorizations) {
+      writeJson(response, 503, { error: 'Active studio assignment storage is temporarily unavailable.' });
+      return;
+    }
+    const monitorAssignment = monitorAssignments.find((candidate) => (
+      candidate.studioRiderId === studioRiderId
+    ));
+    const groupAssignment = groupAuthorizations.flatMap((authorization) => (
+      authorization.assignments.map((assignment) => ({ authorization, assignment }))
+    )).find((candidate) => candidate.assignment.studioRiderId === studioRiderId);
+    const activeAssignment = activeClubBikeSeatAssignments(ownedClub.id, now).get(studioRiderId)
+      ?? (monitorAssignment ? { source: 'owner-monitor' } : null)
+      ?? (groupAssignment ? { source: 'owner-group' } : null);
+    const activeRace = clubLiveSessions.get(clubLiveSessionKey(ownedClub.id, studioRiderId));
+    if (!activeAssignment) {
+      writeJson(response, 409, { error: 'Assign this athlete to an active club bike before creating the invitation.' });
+      return;
+    }
+    if (
+      monitorAssignment
+      && (
+        activityType !== 'monitor-sprint'
+        || monitorAssignment.sessionId !== sessionId
+        || (playerId != null && monitorAssignment.playerId !== playerId)
+      )
+    ) {
+      writeJson(response, 409, { error: 'The athlete is assigned to a different active Monitor View sprint.' });
+      return;
+    }
+    if (
+      groupAssignment
+      && (
+        groupAssignment.authorization.sessionId !== sessionId
+        || groupAssignment.authorization.activityType !== activityType
+        || (playerId != null && groupAssignment.assignment.playerId !== playerId)
+      )
+    ) {
+      writeJson(response, 409, { error: 'The athlete is assigned to a different active club training session.' });
+      return;
+    }
+    if (activeRace && activeRace.sessionId !== sessionId) {
+      writeJson(response, 409, { error: 'The athlete is assigned to a different active studio session.' });
+      return;
+    }
+    const inviteCode = createHeartRateCode();
+    const invitation = await persistence.createHeartRateStudioInvitation({
+      id: `hri_${randomUUID()}`,
+      clubId: ownedClub.id,
+      studioRiderId,
+      ownerProfileKey: profileKey,
+      athleteProfileKey: member.athleteProfileKey,
+      sessionId,
+      activityType,
+      relayScope,
+      playerId,
+      inviteCodeHash: heartRateStudioInvitationCodeHash(inviteCode),
+      expiresAt: now + heartRateStudioInvitationTtlMs,
+      createdAt: now,
+    });
+    if (!invitation) {
+      writeJson(response, 503, { error: 'The studio heart-rate invitation could not be created.' });
+      return;
+    }
+    const origin = publicRequestOrigin(request);
+    writeJson(response, 201, {
+      invitation: publicHeartRateStudioInvitation(invitation),
+      inviteCode,
+      ...(origin ? { claimUrl: `${origin}/?heartRateStudioInvite=${encodeURIComponent(inviteCode)}` } : {}),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const invitationMatch = /^\/api\/heart-rate\/studio-invitations\/([^/]+)$/.exec(pathname);
+  if (!invitationMatch) {
+    writeJson(response, 404, { error: 'Studio heart-rate invitation endpoint not found.' });
+    return;
+  }
+  const session = await requirePersonalHeartRateSession(request, response);
+  if (!session) return;
+  if (request.method !== 'DELETE') {
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+  const revoked = await persistence.revokeHeartRateStudioInvitation(
+    authProfileKey(session.user),
+    sanitizeText(invitationMatch[1], '', 160),
+    now,
+  );
+  if (!revoked) {
+    writeJson(response, 404, { error: 'That open studio heart-rate invitation was not found.' });
+    return;
+  }
+  writeJson(response, 200, { invitation: publicHeartRateStudioInvitation(revoked) }, {
+    'Cache-Control': 'no-store',
+  });
+}
+
+async function handleHeartRateStudioBlockApi(request, response, requestUrl) {
+  const session = await requirePersonalHeartRateSession(request, response);
+  if (!session) return;
+  const profileKey = authProfileKey(session.user);
+  const pathname = requestUrl.pathname;
+  const now = Date.now();
+
+  if (pathname === '/api/heart-rate/studio-blocks') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateReadRateLimiter,
+      240,
+      `heart-rate-studio-block-status:${profileKey}`,
+    )) return;
+    const clubId = sanitizeText(requestUrl.searchParams.get('clubId'), '', 160);
+    if (!clubId) {
+      writeJson(response, 400, { error: 'clubId is required.' });
+      return;
+    }
+    const clubState = await persistence.loadClubConnectState(profileKey);
+    if (clubState.ownedClub?.id !== clubId) {
+      writeJson(response, 403, { error: 'Only this club owner can view studio heart-rate readiness.' });
+      return;
+    }
+    const blocks = await persistence.loadHeartRateStudioBlockStatuses(profileKey, clubId, now);
+    writeJson(response, 200, {
+      blocks: blocks.map(publicHeartRateStudioBlockStatus),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const stopMatch = /^\/api\/heart-rate\/studio-blocks\/([^/]+)$/.exec(pathname);
+  if (!stopMatch) {
+    writeJson(response, 404, { error: 'Studio heart-rate block endpoint not found.' });
+    return;
+  }
+  if (request.method !== 'DELETE') {
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+  if (!enforceRateLimit(
+    request,
+    response,
+    heartRateMutationRateLimiter,
+    120,
+    `heart-rate-studio-block-stop:${profileKey}`,
+  )) return;
+  const invitationId = sanitizeText(stopMatch[1], '', 160);
+  const stopped = await persistence.stopHeartRateStudioBlock(profileKey, invitationId, now);
+  if (!stopped) {
+    writeJson(response, 404, { error: 'That studio heart-rate block was not found.' });
+    return;
+  }
+  cloudTelemetry.info('heart_rate.studio_block_stopped', { status: 'success' });
+  writeJson(response, 200, {
+    block: publicHeartRateStudioBlockStatus(stopped),
+  }, { 'Cache-Control': 'no-store' });
+}
+
+async function handleHeartRateAccountBlockApi(request, response, requestUrl) {
+  const session = await requirePersonalHeartRateSession(request, response);
+  if (!session) return;
+  const profileKey = authProfileKey(session.user);
+  const pathname = requestUrl.pathname;
+  const now = Date.now();
+
+  if (pathname === '/api/heart-rate/account-blocks') {
+    if (request.method === 'GET') {
+      if (!enforceRateLimit(
+        request,
+        response,
+        heartRateReadRateLimiter,
+        240,
+        `heart-rate-account-block-status:${profileKey}`,
+      )) return;
+      const blocks = await persistence.loadHeartRateAccountBlockStatuses(profileKey, now);
+      writeJson(response, 200, {
+        blocks: blocks.map(publicHeartRateAccountBlockStatus),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateMutationRateLimiter,
+      30,
+      `heart-rate-account-block-create:${profileKey}`,
+    )) return;
+    const payload = await readJsonBody(request, 8_000);
+    const requestId = normalizeHeartRateAccountBlockRequestId(payload?.requestId);
+    const unexpectedKeys = Object.keys(payload ?? {}).filter((key) => key !== 'requestId');
+    if (!requestId || unexpectedKeys.length > 0) {
+      writeJson(response, 400, {
+        error: 'Start account heart rate with only a new private request ID from this signed-in account.',
+      });
+      return;
+    }
+    const identity = heartRateAccountBlockIdentity(profileKey, requestId);
+    const created = await persistence.createHeartRateAccountBlockPairing({
+      id: identity.pairingId,
+      ownerProfileKey: profileKey,
+      sessionId: identity.blockId,
+      activityType: 'training-block',
+      relayScope: 'account-block',
+      riderId: `account:${session.user.id}`,
+      playerId: null,
+      clubId: null,
+      studioRiderId: null,
+      pairCodeHash: heartRatePairCodeHash(identity.pairCode),
+      pairCodeExpiresAt: now + heartRatePairCodeTtlMs,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+      createdAt: now,
+    });
+    if (!created) {
+      writeJson(response, 503, { error: 'The private account heart-rate block could not be created.' });
+      return;
+    }
+    if (created.status === 'active') {
+      const blocks = await persistence.loadHeartRateAccountBlockStatuses(profileKey, now);
+      const block = blocks.find((candidate) => candidate.pairingId === created.pairing?.id) ?? null;
+      writeJson(response, 409, {
+        error: 'End or stop the current account heart-rate block before starting another.',
+        ...(block ? { block: publicHeartRateAccountBlockStatus(block) } : {}),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!created.pairing || created.status === 'conflict') {
+      writeJson(response, 409, { error: 'That account heart-rate start request can no longer be used.' });
+      return;
+    }
+    const blocks = await persistence.loadHeartRateAccountBlockStatuses(profileKey, now);
+    const block = blocks.find((candidate) => candidate.pairingId === created.pairing.id);
+    if (!block) {
+      writeJson(response, 503, { error: 'The private account heart-rate block status is temporarily unavailable.' });
+      return;
+    }
+    writeJson(response, created.status === 'created' ? 201 : 200, {
+      block: publicHeartRateAccountBlockStatus(block),
+      pairing: publicHeartRatePairing(created.pairing),
+      pairCode: identity.pairCode,
+      replayed: created.status === 'replayed',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const handoffMatch = /^\/api\/heart-rate\/account-blocks\/([^/]+)\/handoff$/.exec(pathname);
+  if (handoffMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateMutationRateLimiter,
+      30,
+      `heart-rate-account-block-handoff:${profileKey}`,
+    )) return;
+    const payload = await readJsonBody(request, 1_000);
+    if (Object.keys(payload ?? {}).length > 0) {
+      writeJson(response, 400, { error: 'Account heart-rate handoff recovery does not accept identity overrides.' });
+      return;
+    }
+    const pairingId = sanitizeText(handoffMatch[1], '', 160);
+    const pairCode = createHeartRateCode();
+    const rotated = pairingId && await persistence.rotateHeartRateAccountBlockPairCode({
+      ownerProfileKey: profileKey,
+      pairingId,
+      pairCodeHash: heartRatePairCodeHash(pairCode),
+      pairCodeExpiresAt: now + heartRatePairCodeTtlMs,
+      now,
+    });
+    if (!rotated) {
+      writeJson(response, 503, { error: 'The private account heart-rate handoff could not be recovered.' });
+      return;
+    }
+    if (rotated.status === 'not-found') {
+      writeJson(response, 404, { error: 'That private account heart-rate block was not found.' });
+      return;
+    }
+    if (rotated.status === 'claimed') {
+      writeJson(response, 409, { error: 'This account heart-rate block is already paired with its iPhone.' });
+      return;
+    }
+    if (rotated.status !== 'rotated' || !rotated.pairing) {
+      writeJson(response, 409, { error: 'This account heart-rate block can no longer create a handoff.' });
+      return;
+    }
+    const blocks = await persistence.loadHeartRateAccountBlockStatuses(profileKey, now);
+    const block = blocks.find((candidate) => candidate.pairingId === pairingId);
+    if (!block) {
+      writeJson(response, 503, { error: 'The private account heart-rate block status is temporarily unavailable.' });
+      return;
+    }
+    writeJson(response, 200, {
+      block: publicHeartRateAccountBlockStatus(block),
+      pairCode,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const stopMatch = /^\/api\/heart-rate\/account-blocks\/([^/]+)$/.exec(pathname);
+  if (!stopMatch) {
+    writeJson(response, 404, { error: 'Account heart-rate block endpoint not found.' });
+    return;
+  }
+  if (request.method !== 'DELETE') {
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+  if (!enforceRateLimit(
+    request,
+    response,
+    heartRateMutationRateLimiter,
+    60,
+    `heart-rate-account-block-stop:${profileKey}`,
+  )) return;
+  const pairingId = sanitizeText(stopMatch[1], '', 160);
+  const pairing = await persistence.loadHeartRatePairingById(profileKey, pairingId);
+  if (!pairing || pairing.relayScope !== 'account-block') {
+    writeJson(response, 404, { error: 'That private account heart-rate block was not found.' });
+    return;
+  }
+  const stop = await persistence.requestHeartRateAccountBlockStop(
+    profileKey,
+    pairingId,
+    now,
+    now + heartRateAccountBlockDrainTtlMs,
+  );
+  if (!stop) {
+    writeJson(response, 404, { error: 'That private account heart-rate block was not found.' });
+    return;
+  }
+  const blocks = await persistence.loadHeartRateAccountBlockStatuses(profileKey, now);
+  const block = blocks.find((candidate) => candidate.pairingId === pairingId);
+  writeJson(response, stop.draining ? 202 : 200, {
+    block: publicHeartRateAccountBlockStatus(block),
+    draining: stop.draining,
+  }, { 'Cache-Control': 'no-store' });
+}
+
+async function handleHeartRateApi(request, response, requestUrl) {
+  const pathname = requestUrl.pathname;
+  if (pathname === '/api/heart-rate/live') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const profileKey = authProfileKey(session.user);
+    if (!enforceRateLimit(request, response, heartRateReadRateLimiter, 120, `heart-rate-live:${profileKey}`)) return;
+    const clubId = sanitizeText(requestUrl.searchParams.get('clubId'), '', 160);
+    let streamsByKey = heartRateOwnerLiveStreams;
+    let streamKey = profileKey;
+    if (clubId) {
+      const clubState = await persistence.loadClubConnectState(profileKey);
+      if (clubState.ownedClub?.id !== clubId) {
+        writeJson(response, 403, { error: 'Only this club owner can monitor consented live heart rate.' });
+        return;
+      }
+      streamsByKey = heartRateClubLiveStreams;
+      streamKey = clubId;
+    }
+    if ((streamsByKey.get(streamKey)?.size ?? 0) >= 16) {
+      writeJson(response, 429, { error: 'Too many heart-rate live connections.' });
+      return;
+    }
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    response.flushHeaders?.();
+    addHeartRateLiveStream(streamsByKey, streamKey, response);
+    trainingHistoryEvent(response, 'ready', {
+      connectedAt: Date.now(),
+      scope: clubId ? 'club-live-consent' : 'athlete-private',
+      freshnessMs: heartRateLiveFreshnessMs,
+    });
+    return;
+  }
+
+  if (pathname === '/api/heart-rate/club-streams') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const profileKey = authProfileKey(session.user);
+    const clubId = sanitizeText(requestUrl.searchParams.get('clubId'), '', 160);
+    const sessionId = sanitizeText(requestUrl.searchParams.get('sessionId'), '', 160);
+    if (!clubId || !sessionId) {
+      writeJson(response, 400, { error: 'clubId and sessionId are required.' });
+      return;
+    }
+    const clubState = await persistence.loadClubConnectState(profileKey);
+    if (clubState.ownedClub?.id !== clubId) {
+      writeJson(response, 403, { error: 'Only this club owner can view consented heart-rate summaries.' });
+      return;
+    }
+    const [streams, segments] = await Promise.all([
+      persistence.loadClubHeartRateStreamSummaries(clubId, sessionId),
+      persistence.loadClubHeartRateTrainingSegments(clubId, sessionId),
+    ]);
+    writeJson(response, 200, {
+      streams: streams.map((stream) => publicHeartRateStream(stream, { club: true })),
+      segments: segments.map((segment) => publicHeartRateTrainingSegment(segment, { club: true })),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname.startsWith('/api/heart-rate/watch-connect')) {
+    await handleHeartRateWatchConnectApi(request, response, requestUrl);
+    return;
+  }
+
+  if (pathname.startsWith('/api/heart-rate/studio-invitations')) {
+    await handleHeartRateStudioInvitationApi(request, response, requestUrl);
+    return;
+  }
+  if (pathname.startsWith('/api/heart-rate/studio-blocks')) {
+    await handleHeartRateStudioBlockApi(request, response, requestUrl);
+    return;
+  }
+  if (pathname.startsWith('/api/heart-rate/account-blocks')) {
+    await handleHeartRateAccountBlockApi(request, response, requestUrl);
+    return;
+  }
+  if (pathname.startsWith('/api/heart-rate/pairings')) {
+    await handleHeartRatePairingApi(request, response, requestUrl);
+    return;
+  }
+  if (pathname.startsWith('/api/heart-rate/streams')) {
+    await handleHeartRateStreamApi(request, response, requestUrl);
+    return;
+  }
+  writeJson(response, 404, { error: 'Heart-rate endpoint not found.' });
+}
+
+async function handleClubMonitorHistoryApi(request, response, requestUrl) {
+  const session = await requireClubMonitorOwnerSession(request, response);
+  if (!session) return;
+  const profileKey = authProfileKey(session.user);
+  const pathname = requestUrl.pathname;
+
+  const activationMatch = /^\/api\/club-live\/monitor-authorizations\/([^/]+)\/activate$/.exec(pathname);
+  if (activationMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubMonitorHistoryRateLimiter,
+      480,
+      `club-monitor-activate:${profileKey}`,
+    )) return;
+    const saveToken = String(request.headers[clubMonitorSprintTokenHeader] || '').trim();
+    if (!/^[a-zA-Z0-9_-]{40,180}$/.test(saveToken)) {
+      writeJson(response, 401, { error: 'This Monitor View sprint activation is invalid or expired.' });
+      return;
+    }
+    const authorizationId = strictClubMonitorIdentifier(activationMatch[1]);
+    const payload = await readJsonBody(request, 8_000);
+    if (
+      Object.prototype.hasOwnProperty.call(payload ?? {}, 'athleteProfileKey')
+      || Object.prototype.hasOwnProperty.call(payload ?? {}, 'profileKey')
+      || Object.prototype.hasOwnProperty.call(payload ?? {}, 'riderId')
+    ) {
+      writeJson(response, 400, { error: 'Monitor View activation uses the reserved server assignment.' });
+      return;
+    }
+    const now = Date.now();
+    const activation = authorizationId && sanitizeClubMonitorSprintActivation(payload, now);
+    if (!activation) {
+      writeJson(response, 400, { error: 'A current first-watt sprint start is required.' });
+      return;
+    }
+    const activated = await persistence.activateClubMonitorSprintAuthorization({
+      ownerProfileKey: profileKey,
+      authorizationId,
+      tokenHash: clubMonitorSprintTokenHash(saveToken),
+      startedAt: activation.startedAt,
+      now,
+    });
+    if (!activated) {
+      writeJson(response, 503, { error: 'Monitor View sprint activation storage is temporarily unavailable.' });
+      return;
+    }
+    if (activated.status !== 'active' || !activated.authorization) {
+      const statusCodes = {
+        invalid: 401,
+        consumed: 409,
+        expired: 410,
+        'binding-conflict': 409,
+        'member-inactive': 403,
+      };
+      const messages = {
+        invalid: 'This Monitor View sprint activation is invalid or expired.',
+        consumed: 'This Monitor View sprint was already saved.',
+        expired: 'This Monitor View sprint reservation expired or was cancelled.',
+        'binding-conflict': 'This sprint start does not match its reserved owner authorization.',
+        'member-inactive': 'That athlete is no longer a claimed member of this club.',
+      };
+      writeJson(response, statusCodes[activated.status] ?? 409, {
+        error: messages[activated.status] ?? 'The Monitor View sprint could not be activated.',
+      });
+      return;
+    }
+    writeJson(response, 200, {
+      authorization: publicClubMonitorSprintAuthorization(activated.authorization),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/club-live/monitor-authorizations') {
+    if (request.method === 'DELETE') {
+      if (!enforceRateLimit(
+        request,
+        response,
+        clubMonitorHistoryRateLimiter,
+        240,
+        `club-monitor-cancel:${profileKey}`,
+      )) return;
+      const payload = await readJsonBody(request, 8_000);
+      const authorizationId = strictClubMonitorIdentifier(payload?.authorizationId);
+      if (!authorizationId) {
+        writeJson(response, 400, { error: 'A valid Monitor View sprint authorization is required.' });
+        return;
+      }
+      const revoked = await persistence.revokeClubMonitorSprintAuthorization(
+        profileKey,
+        authorizationId,
+      );
+      if (!revoked) {
+        writeJson(response, 404, { error: 'That active Monitor View sprint authorization was not found.' });
+        return;
+      }
+      writeJson(response, 200, {
+        authorization: publicClubMonitorSprintAuthorization(revoked),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubMonitorHistoryRateLimiter,
+      240,
+      `club-monitor-authorize:${profileKey}`,
+    )) return;
+    const payload = await readJsonBody(request, 16_000);
+    if (
+      Object.prototype.hasOwnProperty.call(payload ?? {}, 'athleteProfileKey')
+      || Object.prototype.hasOwnProperty.call(payload ?? {}, 'profileKey')
+      || Object.prototype.hasOwnProperty.call(payload ?? {}, 'riderId')
+    ) {
+      writeJson(response, 400, { error: 'Monitor View resolves the claimed athlete from the club roster.' });
+      return;
+    }
+    const now = Date.now();
+    const reservation = sanitizeClubMonitorSprintReservation(payload, now);
+    if (!reservation) {
+      writeJson(response, 400, { error: 'A current Monitor View rider, Wattbike, player, and arm time are required.' });
+      return;
+    }
+    const { legacyStartedAt, ...binding } = reservation;
+    await withClubTabletSessionStartLock(binding.clubId, async () => {
+      pruneClubLiveSessions(now);
+      const [state, ownerData, bikeAccess] = await Promise.all([
+        persistence.loadClubConnectState(profileKey),
+        persistence.loadUserData(profileKey),
+        clubBikeAccessForOwnerProfileKey(profileKey),
+      ]);
+      const ownedClub = state?.ownedClub;
+      if (ownedClub?.id !== binding.clubId) {
+        writeJson(response, 403, { error: 'Only this club owner can authorize Monitor View athlete history.' });
+        return;
+      }
+      if (!bikeAccess.active || bikeAccess.bikeSeats < 1) {
+        writeJson(response, 409, { error: 'An active club Wattbike membership is required for Monitor View athlete history.' });
+        return;
+      }
+      const activeRosterRider = (Array.isArray(ownerData?.studioRiders) ? ownerData.studioRiders : [])
+        .some((rider) => rider?.id === binding.studioRiderId && !rider?.deletedAt);
+      const member = (ownedClub.members ?? []).find((candidate) => (
+        candidate.studioRiderId === binding.studioRiderId
+      ));
+      if (
+        !activeRosterRider
+        || member?.status !== 'claimed'
+        || !member.athleteProfileKey
+      ) {
+        writeJson(response, 409, { error: 'That studio rider must claim their TrackLab account before Monitor View can save history.' });
+        return;
+      }
+      const externalAssignments = activeClubBikeSeatAssignments(binding.clubId, now);
+      if (externalAssignments.has(binding.studioRiderId)) {
+        writeJson(response, 409, { error: 'That athlete is already active on another club device.' });
+        return;
+      }
+      const bikeAlreadyAssigned = [...clubTabletSessionsByTokenHash.values()].some((candidate) => (
+        candidate.clubId === binding.clubId
+        && candidate.expiresAt > now
+        && candidate.maxExpiresAt > now
+        && candidate.bikeDeviceId === binding.bikeDeviceId
+      ));
+      if (bikeAlreadyAssigned) {
+        writeJson(response, 409, { error: 'That Wattbike is already active on another club tablet.' });
+        return;
+      }
+      if (externalAssignments.size >= bikeAccess.bikeSeats) {
+        writeJson(response, 409, {
+          error: `This club is already using all ${bikeAccess.bikeSeats} purchased bike ${bikeAccess.bikeSeats === 1 ? 'seat' : 'seats'}.`,
+        });
+        return;
+      }
+      const saveToken = createSessionToken();
+      const created = await persistence.createClubMonitorSprintAuthorization({
+        id: `club-monitor-${randomUUID()}`,
+        ownerProfileKey: profileKey,
+        ...binding,
+        startedAt: legacyStartedAt,
+        activatedAt: legacyStartedAt == null ? null : now,
+        tokenHash: clubMonitorSprintTokenHash(saveToken),
+        expiresAt: now + clubMonitorSprintAuthorizationTtlMs,
+        maximumActiveAssignments: bikeAccess.bikeSeats - externalAssignments.size,
+        now,
+      });
+      if (!created) {
+        writeJson(response, 503, { error: 'Monitor View sprint authorization storage is temporarily unavailable.' });
+        return;
+      }
+      if (created.status !== 'created' || !created.authorization) {
+        const messages = {
+          'not-claimed': 'That studio rider is no longer connected to a claimed TrackLab account.',
+          'session-used': 'That Monitor View sprint was already authorized or saved.',
+          'binding-conflict': 'That Monitor View sprint ID is already bound to a different rider, Wattbike, player, or start time.',
+          'rider-active': 'That athlete is already assigned to another active Monitor View sprint.',
+          'bike-active': 'That Wattbike is already assigned to another active Monitor View sprint.',
+          capacity: 'All purchased club bike seats are already assigned.',
+        };
+        writeJson(response, 409, {
+          error: messages[created.status] ?? 'The Monitor View sprint could not be authorized.',
+        });
+        return;
+      }
+      writeJson(response, 201, {
+        authorization: publicClubMonitorSprintAuthorization(created.authorization),
+        saveToken,
+      }, { 'Cache-Control': 'no-store' });
+    });
+    return;
+  }
+
+  if (pathname === '/api/club-live/monitor-training-sessions') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubMonitorHistoryRateLimiter,
+      480,
+      `club-monitor-save:${profileKey}`,
+    )) return;
+    const saveToken = String(request.headers[clubMonitorSprintTokenHeader] || '').trim();
+    if (!/^[a-zA-Z0-9_-]{40,180}$/.test(saveToken)) {
+      writeJson(response, 401, { error: 'This Monitor View sprint save authorization is invalid or expired.' });
+      return;
+    }
+    const payload = await readJsonBody(request, 32_000);
+    if (
+      Object.prototype.hasOwnProperty.call(payload ?? {}, 'athleteProfileKey')
+      || Object.prototype.hasOwnProperty.call(payload ?? {}, 'profileKey')
+      || Object.prototype.hasOwnProperty.call(payload ?? {}, 'riderId')
+      || Object.prototype.hasOwnProperty.call(payload?.result ?? {}, 'athleteProfileKey')
+      || Object.prototype.hasOwnProperty.call(payload?.result ?? {}, 'profileKey')
+      || Object.prototype.hasOwnProperty.call(payload?.result ?? {}, 'riderId')
+    ) {
+      writeJson(response, 400, { error: 'Monitor View resolves the claimed athlete from the server authorization.' });
+      return;
+    }
+    const now = Date.now();
+    const binding = sanitizeClubMonitorSprintBinding(payload, now, { completion: true });
+    const result = binding && sanitizeClubMonitorSprintResult(payload?.result, binding, now);
+    if (!binding || !result) {
+      writeJson(response, 400, { error: 'A valid authorized Monitor View sprint result is required.' });
+      return;
+    }
+    const state = await persistence.loadClubConnectState(profileKey);
+    if (state?.ownedClub?.id !== binding.clubId) {
+      writeJson(response, 403, { error: 'Only this club owner can save the assigned Monitor View sprint.' });
+      return;
+    }
+    const saved = await persistence.consumeClubMonitorSprintAuthorizationAndSave({
+      tokenHash: clubMonitorSprintTokenHash(saveToken),
+      ownerProfileKey: profileKey,
+      ...binding,
+      result,
+      now,
+    });
+    if (!saved) {
+      writeJson(response, 503, { error: 'Monitor View athlete history storage is temporarily unavailable.' });
+      return;
+    }
+    if ((saved.status !== 'saved' && saved.status !== 'duplicate') || !saved.session) {
+      const statusCodes = {
+        invalid: 401,
+        consumed: 409,
+        expired: 410,
+        'not-activated': 409,
+        'binding-conflict': 409,
+        'member-inactive': 403,
+        'session-conflict': 409,
+      };
+      const messages = {
+        invalid: 'This Monitor View sprint save authorization is invalid or expired.',
+        consumed: 'This one-time Monitor View sprint save authorization was already used.',
+        expired: 'This Monitor View sprint save authorization expired or was cancelled.',
+        'not-activated': 'This Monitor View sprint must activate on the first watt before it can be saved.',
+        'binding-conflict': 'The completed sprint does not match its authorized rider, Wattbike, player, session, or start time.',
+        'member-inactive': 'That athlete is no longer a claimed member of this club.',
+        'session-conflict': 'That Monitor View session ID is already used by different training history.',
+      };
+      writeJson(response, statusCodes[saved.status] ?? 409, {
+        error: messages[saved.status] ?? 'The Monitor View sprint could not be saved.',
+      });
+      return;
+    }
+    if (saved.status === 'saved') {
+      notifyTrainingHistoryProfiles(new Set([
+        saved.session._profileKey,
+        profileKey,
+      ]), saved.session);
+    }
+    writeJson(response, saved.status === 'saved' ? 201 : 200, {
+      session: publicTrainingSession(saved.session, 'owner'),
+      replayed: saved.status === 'duplicate',
+      heartRate: {
+        status: saved.heartRateSegment?.status ?? 'no-stream',
+        ...(saved.heartRateSegment?.segment?.studioVisible ? {
+          segment: publicHeartRateTrainingSegment(saved.heartRateSegment.segment, { club: true }),
+        } : {}),
+      },
+      persistence: persistence.persistenceEnabled(),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  writeJson(response, 404, { error: 'Monitor View club history endpoint not found.' });
+}
+
+async function handleClubGroupTrainingHistoryApi(request, response, requestUrl) {
+  const session = await requireClubMonitorOwnerSession(request, response);
+  if (!session) return;
+  const profileKey = authProfileKey(session.user);
+  const pathname = requestUrl.pathname;
+  const now = Date.now();
+
+  if (pathname === '/api/club-live/training-authorizations') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubMonitorHistoryRateLimiter,
+      240,
+      `club-group-training-authorize:${profileKey}`,
+    )) return;
+    const payload = await readJsonBody(request, 32_000);
+    const binding = sanitizeClubGroupTrainingBinding(payload, now);
+    if (!binding) {
+      writeJson(response, 400, {
+        error: 'Choose one to four unique claimed athletes, Wattbikes, player lanes, and a current arm time.',
+      });
+      return;
+    }
+    await withClubTabletSessionStartLock(binding.clubId, async () => {
+      pruneClubLiveSessions(now);
+      const [state, ownerData, bikeAccess] = await Promise.all([
+        persistence.loadClubConnectState(profileKey),
+        persistence.loadUserData(profileKey),
+        clubBikeAccessForOwnerProfileKey(profileKey),
+      ]);
+      const ownedClub = state?.ownedClub;
+      if (ownedClub?.id !== binding.clubId) {
+        writeJson(response, 403, { error: 'Only this club owner can authorize assigned athlete history.' });
+        return;
+      }
+      if (!bikeAccess.active || bikeAccess.bikeSeats < binding.assignments.length) {
+        writeJson(response, 409, { error: 'An active club Wattbike seat is required for every assigned athlete.' });
+        return;
+      }
+      const activeRosterIds = new Set((Array.isArray(ownerData?.studioRiders)
+        ? ownerData.studioRiders
+        : []).filter((rider) => rider?.id && !rider.deletedAt).map((rider) => rider.id));
+      const claimedByRiderId = new Map((ownedClub.members ?? []).map((member) => (
+        [member.studioRiderId, member]
+      )));
+      if (binding.assignments.some((assignment) => {
+        const member = claimedByRiderId.get(assignment.studioRiderId);
+        return !activeRosterIds.has(assignment.studioRiderId)
+          || member?.status !== 'claimed'
+          || !member.athleteProfileKey;
+      })) {
+        writeJson(response, 409, {
+          error: 'Every assigned studio rider must have an active roster entry and claimed TrackLab account.',
+        });
+        return;
+      }
+      const athleteProfileKeys = binding.assignments.map((assignment) => (
+        claimedByRiderId.get(assignment.studioRiderId).athleteProfileKey
+      ));
+      if (new Set(athleteProfileKeys).size !== athleteProfileKeys.length) {
+        writeJson(response, 409, {
+          error: 'Each assigned bike must belong to a different claimed athlete account.',
+        });
+        return;
+      }
+      const externalAssignments = activeClubBikeSeatAssignments(binding.clubId, now);
+      if (binding.assignments.some((assignment) => externalAssignments.has(assignment.studioRiderId))) {
+        writeJson(response, 409, { error: 'An assigned athlete is already active on another club device.' });
+        return;
+      }
+      const activeTabletBikeIds = new Set([...clubTabletSessionsByTokenHash.values()]
+        .filter((candidate) => (
+          candidate.clubId === binding.clubId
+          && candidate.expiresAt > now
+          && candidate.maxExpiresAt > now
+        ))
+        .map((candidate) => String(candidate.bikeDeviceId)));
+      if (binding.assignments.some((assignment) => activeTabletBikeIds.has(assignment.bikeDeviceId))) {
+        writeJson(response, 409, { error: 'An assigned Wattbike is already active on another club tablet.' });
+        return;
+      }
+      const maximumAvailable = bikeAccess.bikeSeats - externalAssignments.size;
+      if (binding.assignments.length > maximumAvailable) {
+        writeJson(response, 409, {
+          error: `This club has only ${Math.max(0, maximumAvailable)} available bike ${maximumAvailable === 1 ? 'seat' : 'seats'}.`,
+        });
+        return;
+      }
+      const completionToken = createSessionToken();
+      const created = await persistence.createClubGroupTrainingAuthorization({
+        id: `club-group-${randomUUID()}`,
+        ownerProfileKey: profileKey,
+        ...binding,
+        assignments: binding.assignments.map((assignment) => ({
+          ...assignment,
+          id: `club-group-assignment-${randomUUID()}`,
+        })),
+        tokenHash: clubGroupTrainingTokenHash(completionToken),
+        expiresAt: now + clubGroupTrainingAuthorizationTtl(binding.activityType),
+        maximumActiveAssignments: maximumAvailable,
+        now,
+      });
+      if (!created) {
+        writeJson(response, 503, { error: 'Assigned athlete authorization storage is temporarily unavailable.' });
+        return;
+      }
+      if (!created.authorization || !['created', 'replay'].includes(created.status)) {
+        const messages = {
+          'not-owner': 'Only this club owner can authorize assigned athlete history.',
+          'not-claimed': 'Every assigned athlete must still have the same claimed TrackLab account.',
+          'duplicate-athlete': 'Each assigned bike must belong to a different claimed athlete account.',
+          'binding-conflict': 'That request ID is already bound to different riders, bikes, lanes, or mode.',
+          'session-used': 'That club training session ID was already authorized, completed, or cancelled.',
+          'rider-active': 'An athlete is already reserved by Monitor View or another assigned session.',
+          'bike-active': 'A Wattbike is already reserved by Monitor View or another assigned session.',
+          capacity: 'All purchased club bike seats are already reserved.',
+        };
+        writeJson(response, created.status === 'not-owner' ? 403 : 409, {
+          error: messages[created.status] ?? 'The assigned athlete session could not be authorized.',
+        });
+        return;
+      }
+      const replayed = created.status === 'replay';
+      writeJson(response, replayed ? 200 : 201, {
+        authorization: publicClubGroupTrainingAuthorization(created.authorization, now),
+        ...(!replayed ? { completionToken } : {}),
+        replayed,
+      }, { 'Cache-Control': 'no-store' });
+    });
+    return;
+  }
+
+  const recoveryMatch = /^\/api\/club-live\/training-authorizations\/([^/]+)\/recover$/.exec(pathname);
+  if (recoveryMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubMonitorHistoryRateLimiter,
+      120,
+      `club-group-training-recover:${profileKey}`,
+    )) return;
+    const authorizationId = strictClubMonitorIdentifier(recoveryMatch[1]);
+    const payload = await readJsonBody(request, 32_000);
+    const binding = sanitizeClubGroupTrainingBinding(payload, now, { recovery: true });
+    if (!authorizationId || !binding) {
+      writeJson(response, 400, { error: 'The complete original assigned-session binding is required.' });
+      return;
+    }
+    const state = await persistence.loadClubConnectState(profileKey);
+    if (state?.ownedClub?.id !== binding.clubId) {
+      writeJson(response, 403, { error: 'Only this club owner can recover the assigned session.' });
+      return;
+    }
+    const completionToken = createSessionToken();
+    const recovered = await persistence.recoverClubGroupTrainingAuthorization({
+      ownerProfileKey: profileKey,
+      authorizationId,
+      binding,
+      tokenHash: clubGroupTrainingTokenHash(completionToken),
+      now,
+    });
+    if (!recovered) {
+      writeJson(response, 503, { error: 'Assigned-session recovery storage is temporarily unavailable.' });
+      return;
+    }
+    if (recovered.status !== 'recovered' || !recovered.authorization) {
+      const statusCodes = {
+        invalid: 404,
+        'not-owner': 403,
+        'binding-conflict': 409,
+        completed: 409,
+        expired: 410,
+      };
+      writeJson(response, statusCodes[recovered.status] ?? 409, {
+        error: recovered.status === 'binding-conflict'
+          ? 'The saved checkpoint does not exactly match the server-authorized riders, bikes, lanes, and mode.'
+          : 'That assigned-session authorization cannot be recovered.',
+      });
+      return;
+    }
+    writeJson(response, 200, {
+      authorization: publicClubGroupTrainingAuthorization(recovered.authorization, now),
+      completionToken,
+      recovered: true,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const activationMatch = /^\/api\/club-live\/training-authorizations\/([^/]+)\/assignments\/([^/]+)\/activate$/.exec(pathname);
+  if (activationMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubMonitorHistoryRateLimiter,
+      480,
+      `club-group-training-activate:${profileKey}`,
+    )) return;
+    const completionToken = String(request.headers[clubGroupTrainingTokenHeader] || '').trim();
+    if (!/^[a-zA-Z0-9_-]{40,180}$/.test(completionToken)) {
+      writeJson(response, 401, { error: 'This assigned-session activation is invalid or expired.' });
+      return;
+    }
+    const authorizationId = strictClubMonitorIdentifier(activationMatch[1]);
+    const assignmentId = strictClubMonitorIdentifier(activationMatch[2]);
+    const payload = await readJsonBody(request, 8_000);
+    const activation = sanitizeClubGroupTrainingActivation(payload, now);
+    if (!authorizationId || !assignmentId || !activation) {
+      writeJson(response, 400, { error: 'A current first-watt start is required for this exact assignment.' });
+      return;
+    }
+    const activated = await persistence.activateClubGroupTrainingAssignment({
+      ownerProfileKey: profileKey,
+      authorizationId,
+      assignmentId,
+      tokenHash: clubGroupTrainingTokenHash(completionToken),
+      startedAt: activation.startedAt,
+      now,
+    });
+    if (!activated) {
+      writeJson(response, 503, { error: 'Assigned-session activation storage is temporarily unavailable.' });
+      return;
+    }
+    if (activated.status !== 'active' || !activated.authorization) {
+      const statusCodes = {
+        invalid: 401,
+        completed: 409,
+        expired: 410,
+        'binding-conflict': 409,
+        'member-inactive': 403,
+      };
+      writeJson(response, statusCodes[activated.status] ?? 409, {
+        error: activated.status === 'member-inactive'
+          ? 'That athlete no longer has the same claimed club account.'
+          : 'The first-watt start does not match this assigned session.',
+      });
+      return;
+    }
+    writeJson(response, 200, {
+      authorization: publicClubGroupTrainingAuthorization(activated.authorization, now),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const authorizationMatch = /^\/api\/club-live\/training-authorizations\/([^/]+)$/.exec(pathname);
+  if (authorizationMatch) {
+    if (request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubMonitorHistoryRateLimiter,
+      240,
+      `club-group-training-cancel:${profileKey}`,
+    )) return;
+    const completionToken = String(request.headers[clubGroupTrainingTokenHeader] || '').trim();
+    if (!/^[a-zA-Z0-9_-]{40,180}$/.test(completionToken)) {
+      writeJson(response, 401, { error: 'This assigned-session cancellation is invalid or expired.' });
+      return;
+    }
+    const authorizationId = strictClubMonitorIdentifier(authorizationMatch[1]);
+    const cancelled = authorizationId && await persistence.cancelClubGroupTrainingAuthorization({
+      ownerProfileKey: profileKey,
+      authorizationId,
+      tokenHash: clubGroupTrainingTokenHash(completionToken),
+      now,
+    });
+    if (!cancelled) {
+      writeJson(response, 503, { error: 'Assigned-session cancellation storage is temporarily unavailable.' });
+      return;
+    }
+    if (!['cancelled', 'cancelled-replay'].includes(cancelled.status) || !cancelled.authorization) {
+      writeJson(response, cancelled.status === 'invalid' ? 401 : 409, {
+        error: cancelled.status === 'completed'
+          ? 'A completed assigned session cannot be cancelled.'
+          : 'This assigned-session cancellation does not match its owner authorization.',
+      });
+      return;
+    }
+    writeJson(response, 200, {
+      authorization: publicClubGroupTrainingAuthorization(cancelled.authorization, now),
+      cancelled: true,
+      replayed: cancelled.status === 'cancelled-replay',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/club-live/assigned-training-sessions') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubMonitorHistoryRateLimiter,
+      240,
+      `club-group-training-complete:${profileKey}`,
+    )) return;
+    const completionToken = String(request.headers[clubGroupTrainingTokenHeader] || '').trim();
+    if (!/^[a-zA-Z0-9_-]{40,180}$/.test(completionToken)) {
+      writeJson(response, 401, { error: 'This assigned-session completion is invalid or expired.' });
+      return;
+    }
+    const payload = await readJsonBody(request, 900_000);
+    if (!exactObjectKeys(payload, new Set(['authorizationId', 'session', 'riderWindows']))) {
+      writeJson(response, 400, { error: 'Submit only the authorized shared session and exact rider finish windows.' });
+      return;
+    }
+    const authorizationId = strictClubMonitorIdentifier(payload.authorizationId);
+    if (!authorizationId) {
+      writeJson(response, 400, { error: 'A valid assigned-session authorization is required.' });
+      return;
+    }
+    const authorization = await persistence.loadClubGroupTrainingAuthorizationForOwner({
+      ownerProfileKey: profileKey,
+      authorizationId,
+      tokenHash: clubGroupTrainingTokenHash(completionToken),
+    });
+    if (authorization === undefined) {
+      writeJson(response, 503, { error: 'Assigned-session authorization storage is temporarily unavailable.' });
+      return;
+    }
+    if (!authorization) {
+      writeJson(response, 401, { error: 'This assigned-session completion is invalid or expired.' });
+      return;
+    }
+    const sharedSession = sanitizeTrainingSession(payload.session);
+    const completions = sanitizeClubGroupTrainingCompletions(
+      authorization,
+      sharedSession,
+      payload.riderWindows,
+      now,
+    );
+    if (!completions) {
+      writeJson(response, 400, {
+        error: 'Every assigned athlete needs one valid, identity-matched result and exact finish window.',
+      });
+      return;
+    }
+    const completionDigest = clubGroupTrainingCompletionDigest(authorization, completions);
+    const saved = await persistence.completeClubGroupTrainingAuthorization({
+      ownerProfileKey: profileKey,
+      authorizationId,
+      tokenHash: clubGroupTrainingTokenHash(completionToken),
+      completionDigest,
+      completions,
+      now,
+    });
+    if (!saved) {
+      writeJson(response, 503, { error: 'Assigned athlete history storage is temporarily unavailable.' });
+      return;
+    }
+    if (!['saved', 'duplicate'].includes(saved.status) || saved.sessions.length === 0) {
+      const statusCodes = {
+        invalid: 401,
+        'binding-conflict': 409,
+        'completion-conflict': 409,
+        'session-conflict': 409,
+        'not-activated': 409,
+        'member-inactive': 403,
+        expired: 410,
+      };
+      const messages = {
+        'completion-conflict': 'That completed authorization was already used with different athlete results.',
+        'session-conflict': 'An athlete already has different history under this session ID; no group results were saved.',
+        'not-activated': 'Every assigned athlete must start on their first watt before the group can be saved.',
+        'member-inactive': 'An assigned athlete no longer has the same claimed club account.',
+        expired: 'This assigned-session authorization expired or was cancelled.',
+      };
+      writeJson(response, statusCodes[saved.status] ?? 409, {
+        error: messages[saved.status] ?? 'The completed group did not match its immutable authorization.',
+      });
+      return;
+    }
+    if (saved.status === 'saved') {
+      saved.sessions.forEach((storedSession) => {
+        notifyTrainingHistoryProfiles(new Set([
+          storedSession._profileKey,
+          profileKey,
+        ]), storedSession);
+      });
+    }
+    writeJson(response, saved.status === 'saved' ? 201 : 200, {
+      authorization: publicClubGroupTrainingAuthorization(saved.authorization, now),
+      sessions: saved.sessions.map((storedSession) => publicTrainingSession(storedSession, 'owner')),
+      replayed: saved.status === 'duplicate',
+      persistence: persistence.persistenceEnabled(),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  writeJson(response, 404, { error: 'Assigned club training endpoint not found.' });
+}
+
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
+  if (
+    requestUrl.pathname === '/.well-known/apple-app-site-association'
+    || requestUrl.pathname === '/apple-app-site-association'
+  ) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const body = JSON.stringify({
+      applinks: {
+        details: [{
+          appIDs: ['DU7FUS4N34.com.preskilranch.tracklabbmx'],
+          components: [{
+            '/': '/',
+            '?': { heartRateStudioInvite: '*' },
+            comment: 'Open an athlete-specific TrackLab studio heart-rate invitation.',
+          }, {
+            '/': '/',
+            '#': 'heartRateAccountBlock=*',
+            comment: 'Open a private same-account Apple Watch handoff without sending its code to the server.',
+          }],
+        }],
+      },
+    });
+    response.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'public, max-age=3600',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    if (request.method === 'GET') response.end(body);
+    else response.end();
+    return;
+  }
+  if (requestUrl.pathname.startsWith('/api/heart-rate')) {
+    await handleHeartRateApi(request, response, requestUrl);
+    return;
+  }
+  if (
+    requestUrl.pathname.startsWith('/api/club-live/monitor-authorizations')
+    || requestUrl.pathname === '/api/club-live/monitor-training-sessions'
+  ) {
+    await handleClubMonitorHistoryApi(request, response, requestUrl);
+    return;
+  }
+  if (
+    requestUrl.pathname.startsWith('/api/club-live/training-authorizations')
+    || requestUrl.pathname === '/api/club-live/assigned-training-sessions'
+  ) {
+    await handleClubGroupTrainingHistoryApi(request, response, requestUrl);
+    return;
+  }
   if (requestUrl.pathname === '/api/health') {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       writeJson(response, 405, { error: 'Method not allowed' });
@@ -7261,11 +11074,28 @@ async function serveStatic(request, response) {
         const clubSeatAssignments = activeClubBikeSeatAssignments(device.clubId, now, {
           excludeDeviceId: device.id,
         });
+        const [monitorAssignments, groupAuthorizations] = await Promise.all([
+          persistence.loadActiveClubMonitorSprintAuthorizations(device.clubId, now),
+          persistence.loadActiveClubGroupTrainingAuthorizations(device.clubId, now),
+        ]);
+        if (!monitorAssignments || !groupAuthorizations) {
+          writeJson(response, 503, { error: 'Active studio assignment storage is temporarily unavailable.' });
+          return;
+        }
+        const groupAssignments = groupAuthorizations.flatMap((authorization) => authorization.assignments);
         const personalAssignment = clubSeatAssignments.get(studioRiderId);
         if (personalAssignment?.source === 'personal') {
           writeJson(response, 409, {
             error: 'That athlete is already using a club bike seat on a personal device.',
           });
+          return;
+        }
+        if (monitorAssignments.some((candidate) => candidate.studioRiderId === studioRiderId)) {
+          writeJson(response, 409, { error: 'That athlete is already active in the owner’s Monitor View.' });
+          return;
+        }
+        if (groupAssignments.some((candidate) => candidate.studioRiderId === studioRiderId)) {
+          writeJson(response, 409, { error: 'That athlete is already active in an owner-assigned training session.' });
           return;
         }
         if (activeSessions.some((candidate) => (
@@ -7280,7 +11110,20 @@ async function serveStatic(request, response) {
           writeJson(response, 409, { error: 'That Wattbike is already assigned to another active club tablet.' });
           return;
         }
-        if (!clubSeatAssignments.has(studioRiderId) && clubSeatAssignments.size >= clubBikeAccess.bikeSeats) {
+        if (monitorAssignments.some((candidate) => candidate.bikeDeviceId === bikeDeviceId)) {
+          writeJson(response, 409, { error: 'That Wattbike is already active in the owner’s Monitor View.' });
+          return;
+        }
+        if (groupAssignments.some((candidate) => candidate.bikeDeviceId === bikeDeviceId)) {
+          writeJson(response, 409, { error: 'That Wattbike is already active in an owner-assigned training session.' });
+          return;
+        }
+        const assignedRiderIds = new Set([
+          ...clubSeatAssignments.keys(),
+          ...monitorAssignments.map((candidate) => candidate.studioRiderId),
+          ...groupAssignments.map((candidate) => candidate.studioRiderId),
+        ]);
+        if (!assignedRiderIds.has(studioRiderId) && assignedRiderIds.size >= clubBikeAccess.bikeSeats) {
           writeJson(response, 409, {
             error: `This club is already using all ${clubBikeAccess.bikeSeats} purchased bike ${clubBikeAccess.bikeSeats === 1 ? 'seat' : 'seats'}.`,
           });
@@ -7486,11 +11329,28 @@ async function serveStatic(request, response) {
       _clubRiderName: tabletSession.riderName,
     };
     const existing = await persistence.loadTrainingSessionById(identity.profileKey, scopedSession.id);
+    if (existing && (
+      existing._clubId !== tabletSession.clubId
+      || existing._studioRiderId !== tabletSession.studioRiderId
+      || existing.activityType !== scopedSession.activityType
+      || existing.startedAt !== scopedSession.startedAt
+      || existing.endedAt !== scopedSession.endedAt
+    )) {
+      writeJson(response, 409, { error: 'That training session ID is already bound to different athlete history.' });
+      return;
+    }
     const saved = existing ?? await persistence.saveTrainingSession(identity.profileKey, storedSession);
     if (!saved) {
       writeJson(response, 503, { error: 'Training history storage is temporarily unavailable.' });
       return;
     }
+    const heartRateSegment = identity.member.status === 'claimed'
+      ? await attachStudioBlockHeartRateToTrainingSession(
+        identity.profileKey,
+        saved,
+        clubTabletPlayerId(payload?.localPlayerId),
+      )
+      : { status: 'not-claimed', segment: null };
     notifyTrainingHistoryProfiles(new Set([
       identity.profileKey,
       tabletSession.ownerProfileKey,
@@ -7498,6 +11358,12 @@ async function serveStatic(request, response) {
     writeJson(response, existing ? 200 : 201, {
       session: publicTrainingSession(saved, identity.member.status === 'claimed' ? 'athlete' : 'owner'),
       replayed: Boolean(existing),
+      heartRate: {
+        status: heartRateSegment.status,
+        ...(heartRateSegment.segment?.studioVisible ? {
+          segment: publicHeartRateTrainingSegment(heartRateSegment.segment, { club: true }),
+        } : {}),
+      },
       persistence: persistence.persistenceEnabled(),
     }, { 'Cache-Control': 'no-store' });
     return;
@@ -7584,7 +11450,7 @@ async function serveStatic(request, response) {
       writeJson(response, 200, {
         trackId,
         persistence: persistence.persistenceEnabled(),
-        ghosts,
+        ghosts: ghosts.map(publicGhostLap),
       }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -7678,6 +11544,18 @@ async function serveStatic(request, response) {
       }
 
       const assignments = activeClubBikeSeatAssignments(clubId, now, { excludeProfileKey: profileKey });
+      const [monitorAssignments, groupAuthorizations] = await Promise.all([
+        persistence.loadActiveClubMonitorSprintAuthorizations(clubId, now),
+        persistence.loadActiveClubGroupTrainingAuthorizations(clubId, now),
+      ]);
+      if (!monitorAssignments || !groupAuthorizations) {
+        setClubLiveAccessSelection(profileKey, null);
+        writeJson(response, 503, {
+          error: 'Active studio assignment storage is temporarily unavailable.',
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const groupAssignments = groupAuthorizations.flatMap((authorization) => authorization.assignments);
       const existingAssignment = assignments.get(membership.studioRiderId);
       if (existingAssignment?.source === 'tablet') {
         setClubLiveAccessSelection(profileKey, null);
@@ -7691,7 +11569,36 @@ async function serveStatic(request, response) {
         }, { 'Cache-Control': 'no-store' });
         return;
       }
-      if (!existingAssignment && assignments.size >= access.bikeSeats) {
+      if (monitorAssignments.some((candidate) => candidate.studioRiderId === membership.studioRiderId)) {
+        setClubLiveAccessSelection(profileKey, null);
+        writeJson(response, 200, {
+          clubId,
+          active: false,
+          expiresAt: null,
+          bikeSeats: access.bikeSeats,
+          reason: 'athlete-active-in-owner-monitor',
+          pollAfterMs: 1_000,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (groupAssignments.some((candidate) => candidate.studioRiderId === membership.studioRiderId)) {
+        setClubLiveAccessSelection(profileKey, null);
+        writeJson(response, 200, {
+          clubId,
+          active: false,
+          expiresAt: null,
+          bikeSeats: access.bikeSeats,
+          reason: 'athlete-active-in-owner-session',
+          pollAfterMs: 1_000,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const assignedRiderIds = new Set([
+        ...assignments.keys(),
+        ...monitorAssignments.map((candidate) => candidate.studioRiderId),
+        ...groupAssignments.map((candidate) => candidate.studioRiderId),
+      ]);
+      if (!existingAssignment && assignedRiderIds.size >= access.bikeSeats) {
         setClubLiveAccessSelection(profileKey, null);
         writeJson(response, 200, {
           clubId,
@@ -8047,8 +11954,13 @@ async function serveStatic(request, response) {
     const profileKey = authProfileKey(session.user);
 
     if (request.method === 'GET') {
-      const from = Math.max(0, finiteNumber(requestUrl.searchParams.get('from'), 0));
-      const to = Math.max(from, finiteNumber(requestUrl.searchParams.get('to'), Date.now()));
+      const requestedFrom = requestUrl.searchParams.get('from');
+      const requestedTo = requestUrl.searchParams.get('to');
+      const from = Math.max(0, requestedFrom == null ? 0 : finiteNumber(requestedFrom, 0));
+      const to = Math.max(
+        from,
+        requestedTo == null ? Date.now() : finiteNumber(requestedTo, Date.now()),
+      );
       const requestedLimit = requestUrl.searchParams.get('limit');
       const limit = Math.max(1, Math.min(2000, Math.round(
         requestedLimit == null ? 1000 : finiteNumber(requestedLimit, 1000),
@@ -8062,6 +11974,7 @@ async function serveStatic(request, response) {
           straightSprints: sessions.filter((item) => item.activityType === 'straight-sprint').length,
           exploreRides: sessions.filter((item) => item.activityType === 'explore').length,
           getPulledTests: sessions.filter((item) => item.activityType === 'get-pulled').length,
+          monitorSprints: sessions.filter((item) => item.activityType === 'monitor-sprint').length,
           distanceMeters: sessions.reduce((total, item) => total + finiteNumber(item.distanceMeters, 0), 0),
           durationMs: sessions.reduce((total, item) => total + finiteNumber(item.durationMs, 0), 0),
         },
@@ -8099,6 +12012,17 @@ async function serveStatic(request, response) {
           _clubRiderName: membership.riderName,
         };
       }
+      const existing = await persistence.loadTrainingSessionById(profileKey, trainingSession.id);
+      if (existing && requestedClubId && (
+        existing._clubId !== requestedClubId
+        || existing._studioRiderId !== requestedStudioRiderId
+        || existing.activityType !== trainingSession.activityType
+        || existing.startedAt !== trainingSession.startedAt
+        || existing.endedAt !== trainingSession.endedAt
+      )) {
+        writeJson(response, 409, { error: 'That training session ID is already bound to different club history.' });
+        return;
+      }
       const saved = await persistence.saveTrainingSession(profileKey, {
         ...trainingSession,
         ...clubAttribution,
@@ -8107,12 +12031,22 @@ async function serveStatic(request, response) {
         writeJson(response, 503, { error: 'Training history storage is temporarily unavailable.' });
         return;
       }
+      let heartRateSegment = await attachAccountBlockHeartRateToTrainingSession(profileKey, saved);
+      if (heartRateSegment.status === 'no-block' && clubMembership) {
+        heartRateSegment = await attachStudioBlockHeartRateToTrainingSession(profileKey, saved);
+      }
       notifyTrainingHistoryProfiles(
         await trainingHistoryRecipients(profileKey, saved, clubMembership),
         saved,
       );
       writeJson(response, 201, {
         session: publicTrainingSession(saved, requestedClubId ? 'athlete' : undefined),
+        heartRate: {
+          status: heartRateSegment.status,
+          ...(heartRateSegment.segment ? {
+            segment: publicHeartRateTrainingSegment(heartRateSegment.segment),
+          } : {}),
+        },
         persistence: persistence.persistenceEnabled(),
       });
       return;
@@ -8224,7 +12158,7 @@ async function serveStatic(request, response) {
       writeJson(response, 200, {
         trackId,
         persistence: persistence.persistenceEnabled(),
-        ghosts,
+        ghosts: ghosts.map(publicGhostLap),
       });
       return;
     }
@@ -8680,6 +12614,18 @@ const friendEventStreamHeartbeat = setInterval(() => {
 }, 20_000);
 friendEventStreamHeartbeat.unref();
 
+const heartRateLiveStreamHeartbeat = setInterval(() => {
+  [heartRateOwnerLiveStreams, heartRateClubLiveStreams].forEach((streamsByKey) => {
+    streamsByKey.forEach((streams, key) => {
+      streams.forEach((response) => {
+        if (!trainingHistoryEvent(response, 'heartbeat', { at: Date.now() })) streams.delete(response);
+      });
+      if (streams.size === 0) streamsByKey.delete(key);
+    });
+  });
+}, 20_000);
+heartRateLiveStreamHeartbeat.unref();
+
 // Club bike access is intentionally short lived. Prune independently of HTTP
 // polling so a backgrounded athlete tab cannot retain a racer seat after it
 // stops renewing its selected club-bike assignment.
@@ -8706,6 +12652,7 @@ async function shutdown(signal) {
   clearInterval(websocketHeartbeat);
   clearInterval(trainingHistoryStreamHeartbeat);
   clearInterval(friendEventStreamHeartbeat);
+  clearInterval(heartRateLiveStreamHeartbeat);
   clearInterval(clubLiveAccessMaintenance);
   clearInterval(persistenceMaintenance);
   voteTimers.forEach(clearTimeout);
@@ -8718,6 +12665,11 @@ async function shutdown(signal) {
   friendEventStreams.forEach((streams) => streams.forEach((response) => response.end()));
   friendEventStreams.clear();
   friendEventStreamCount = 0;
+  heartRateOwnerLiveStreams.forEach((streams) => streams.forEach((response) => response.end()));
+  heartRateOwnerLiveStreams.clear();
+  heartRateClubLiveStreams.forEach((streams) => streams.forEach((response) => response.end()));
+  heartRateClubLiveStreams.clear();
+  heartRateStreamWriteChains.clear();
 
   wss.clients.forEach((socket) => socket.close(1001, 'Server shutting down'));
   const forceExit = setTimeout(() => {

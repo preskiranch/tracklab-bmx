@@ -34,9 +34,16 @@ import {
   Users,
 } from 'lucide-react';
 import type { CloudUserDataStatus } from './components/DiagnosticsPanel';
-import { MembershipLanding } from './components/MembershipLanding';
 import type { ChatMessage } from './components/MultiplayerPanel';
-import { MonitorView } from './components/MonitorView';
+import type {
+  MonitorSprintArm,
+  MonitorSprintArmCancellation,
+  MonitorSprintCancellation,
+  MonitorSprintCompleteResult,
+  MonitorSprintHistoryStatus,
+  MonitorSprintSession,
+  MonitorStudioHeartRateControl,
+} from './components/MonitorView';
 import { PairingRail } from './components/PairingRail';
 import { StudioRaceEntry } from './components/StudioRaceEntry';
 import { RiderAvatar } from './components/RiderAvatar';
@@ -148,6 +155,7 @@ import {
 import {
   buildGhostLapFromRace,
   ghostsForTrackRoute,
+  legacyRacePersistencePlan,
   loadGhostLapsFromCloud,
   mergeGhostLaps,
   playbackGhostLap,
@@ -242,8 +250,10 @@ import {
   clubConnectRequestIsCurrent,
   loadClubConnect,
   type ClubAthleteMembership,
+  type OwnedClub,
 } from './lib/clubConnect';
 import type { ClubTrainingSelection } from './lib/trainingHistory';
+import type { ClubOwnerTrainingCoordinatorEntry } from './lib/clubOwnerTrainingCoordinator';
 import type { ClubLiveAccess } from './lib/clubLive';
 import type { GetPulledLiveState, GetPulledResult } from './lib/getPulled';
 import {
@@ -288,6 +298,28 @@ import { createDemoPlayers, useDemoBikes } from './hooks/useDemoBikes';
 import { useMultiplayer, type MultiplayerIdentityOverride } from './hooks/useMultiplayer';
 import { useRoomVoiceChat } from './hooks/useRoomVoiceChat';
 import { useWattbikeBridge } from './hooks/useWattbikeBridge';
+import { useHeartRate } from './hooks/useHeartRate';
+import {
+  mapHeartRateMeasurementsToActiveClock,
+  summarizeHeartRate,
+  summarizeHeartRateZones,
+} from './lib/heartRate';
+import type {
+  HeartRateActivityType,
+  HeartRateAccountBlockStatus,
+  HeartRateLiveEvent,
+  HeartRateStudioInvitation,
+  HeartRateStudioBlockStatus,
+  HeartRateStudioInviteUrlDisposition,
+  HeartRateStudioRelayClaim,
+} from './lib/heartRateCloud';
+import type {
+  AuthorizedClubMonitorSprint,
+  ClubMonitorHeartRateSaveStatus,
+  ClubMonitorSprintBinding,
+  ClubMonitorSprintReservation,
+} from './lib/clubMonitorHistory';
+import type { LiveHeartRateByPlayer } from './components/RaceRiderOverlay';
 import type {
   AccountProfile,
   AppMode,
@@ -300,6 +332,7 @@ import type {
   DraftTrackSplit,
   EarthCamera,
   ExploreRider,
+  ExploreRideCompleteEvent,
   ExploreRoute,
   GhostLapPoint,
   MappingEditMode,
@@ -308,6 +341,7 @@ import type {
   MultiplayerTrackVoteCandidate,
   PlayerId,
   PlayerSlot,
+  PrivateHeartRateCapture,
   PlayMode,
   RaceCapture,
   RaceCommentaryPreferences,
@@ -333,19 +367,34 @@ import type {
 const BluetoothPairingDialog = lazy(() => import('./components/BluetoothPairingDialog').then((module) => ({
   default: module.BluetoothPairingDialog,
 })));
+const MembershipLanding = lazy(() => import('./components/MembershipLanding').then((module) => ({
+  default: module.MembershipLanding,
+})));
 
 const SessionControlPanel = lazy(() => import('./components/SessionControlPanel')
   .then((module) => ({ default: module.SessionControlPanel })));
 const AnalyticsPanel = lazy(() => import('./components/AnalyticsPanel')
   .then((module) => ({ default: module.AnalyticsPanel })));
-const ExploreView = lazy(() => import('./components/ExploreView')
-  .then((module) => ({ default: module.ExploreView })));
-const GetPulledView = lazy(() => import('./components/GetPulledView')
-  .then((module) => ({ default: module.GetPulledView })));
+const ClubOwnerUtilityMode = lazy(() => import('./components/ClubOwnerUtilityMode')
+  .then((module) => ({ default: module.ClubOwnerUtilityMode })));
+const MonitorView = lazy(() => import('./components/MonitorView')
+  .then((module) => ({ default: module.MonitorView })));
 const AccountProfileView = lazy(() => import('./components/AccountProfileView')
   .then((module) => ({ default: module.AccountProfileView })));
 const AppSettingsView = lazy(() => import('./components/AppSettingsView')
   .then((module) => ({ default: module.AppSettingsView })));
+const HeartRateSettingsCard = lazy(() => import('./components/HeartRateSettingsCard')
+  .then((module) => ({ default: module.HeartRateSettingsCard })));
+const HeartRateAccountBlockCoordinator = lazy(() => import('./components/HeartRateAccountBlockCoordinator')
+  .then((module) => ({ default: module.HeartRateAccountBlockCoordinator })));
+const WatchConnectCoordinator = lazy(() => import('./components/WatchConnectCoordinator')
+  .then((module) => ({ default: module.WatchConnectCoordinator })));
+const HeartRateStudioInviteDialog = lazy(() => import('./components/HeartRateStudioInviteDialog')
+  .then((module) => ({ default: module.HeartRateStudioInviteDialog })));
+const StudioHeartRateBlockOverlay = lazy(() => import('./components/StudioHeartRateBlockOverlay')
+  .then((module) => ({ default: module.StudioHeartRateBlockOverlay })));
+const ClubOwnerTrainingPreparationDialog = lazy(() => import('./components/ClubOwnerTrainingPreparationDialog')
+  .then((module) => ({ default: module.ClubOwnerTrainingPreparationDialog })));
 const FriendsView = lazy(() => import('./components/FriendsView')
   .then((module) => ({ default: module.FriendsView })));
 const DiagnosticsPanel = lazy(() => import('./components/DiagnosticsPanel')
@@ -1468,6 +1517,230 @@ function isValidAccountEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeAccountEmail(email));
 }
 
+const heartRateStudioInviteParameter = 'heartRateStudioInvite';
+
+function normalizedHeartRateStudioInviteCode(value: unknown) {
+  if (typeof value !== 'string') return '';
+  const compact = value.trim().toUpperCase().replace(/[\s-]/g, '');
+  return /^[2-9A-HJ-NP-Z]{8}$/.test(compact)
+    ? `${compact.slice(0, 4)}-${compact.slice(4)}`
+    : '';
+}
+
+function parsedHeartRateStudioInviteHref(href: string) {
+  try {
+    const url = new URL(href, 'https://tracklab.invalid/');
+    return {
+      present: url.searchParams.has(heartRateStudioInviteParameter),
+      inviteCode: normalizedHeartRateStudioInviteCode(url.searchParams.get(heartRateStudioInviteParameter)),
+    };
+  } catch {
+    return { present: false, inviteCode: '' };
+  }
+}
+
+function monitorHeartRateInviteHandoffHref(currentHref: string, inviteCode: string) {
+  try {
+    const current = new URL(currentHref, 'https://tracklab.invalid/');
+    const normalizedCode = normalizedHeartRateStudioInviteCode(inviteCode);
+    if (!normalizedCode) return '';
+    current.search = '';
+    current.hash = '';
+    current.searchParams.set(heartRateStudioInviteParameter, normalizedCode);
+    return current.toString();
+  } catch {
+    return '';
+  }
+}
+
+function applyMonitorHeartRateInviteDisposition(disposition: HeartRateStudioInviteUrlDisposition) {
+  if (disposition !== 'remove' || typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(heartRateStudioInviteParameter)) return;
+  url.searchParams.delete(heartRateStudioInviteParameter);
+  window.history.replaceState(
+    window.history.state,
+    '',
+    `${url.pathname}${url.search}${url.hash}`,
+  );
+}
+
+type ClubMonitorSprintAuthorizationEntry = {
+  reservation: ClubMonitorSprintReservation;
+  authorization: Promise<AuthorizedClubMonitorSprint>;
+  activation: Promise<AuthorizedClubMonitorSprint> | null;
+};
+
+type MonitorHeartRateInvitationSecret = Readonly<{
+  invitationId: string;
+  inviteCode: string;
+  claimUrl: string;
+}>;
+
+type MonitorHeartRateActionState = Readonly<{
+  phase: 'inviting' | 'error';
+  detail?: string;
+}>;
+
+type ClubOwnerRacePreparationState = Readonly<{
+  phase: 'idle' | 'authorizing' | 'ready' | 'activating' | 'active' | 'saving' | 'saved' | 'error';
+  sessionId: string | null;
+  playerIds: readonly PlayerSlot['id'][];
+  detail: string;
+  failureStage?: 'prepare' | 'activate' | 'complete';
+}>;
+
+const idleClubOwnerRacePreparation: ClubOwnerRacePreparationState = {
+  phase: 'idle',
+  sessionId: null,
+  playerIds: [],
+  detail: '',
+};
+
+type PersonalHeartRateFinalizeOutcome = 'account-block' | 'queued' | 'waiting' | 'not-recording';
+
+export function nativeHeartRateWorkoutBelongsToAccount(
+  workoutSessionId: string | null | undefined,
+  accountId: string | null | undefined,
+  knownPairingIds: ReadonlySet<string>,
+) {
+  if (!workoutSessionId || !accountId) return false;
+  if (workoutSessionId.startsWith(`watch-block:${accountId}:`)) return true;
+  const accountBlockPairingId = workoutSessionId.startsWith('watch-account-block:')
+    ? workoutSessionId.slice('watch-account-block:'.length)
+    : '';
+  if (accountBlockPairingId && knownPairingIds.has(accountBlockPairingId)) return true;
+  const studioPairingId = workoutSessionId.startsWith('watch-studio-block:')
+    ? workoutSessionId.slice('watch-studio-block:'.length)
+    : '';
+  return Boolean(studioPairingId && knownPairingIds.has(studioPairingId));
+}
+
+export function personalMonitorSavedStatus(
+  heartRateOutcome: PersonalHeartRateFinalizeOutcome,
+): MonitorSprintHistoryStatus {
+  if (heartRateOutcome === 'account-block') {
+    return {
+      state: 'saved',
+      label: 'Session saved · HR linking',
+      detail: 'Sprint metrics are saved. The private account Watch block will attach this exact session window.',
+    };
+  }
+  if (heartRateOutcome === 'queued') {
+    return {
+      state: 'saved',
+      label: 'Session saved · HR syncing',
+      detail: 'Sprint metrics are saved. Private Apple Watch heart rate is queued for TrackLab Cloud sync.',
+    };
+  }
+  if (heartRateOutcome === 'waiting') {
+    return {
+      state: 'saved',
+      label: 'Session saved · HR waiting',
+      detail: 'Sprint metrics are saved, but Apple Watch heart rate still needs to finish syncing.',
+    };
+  }
+  return {
+    state: 'saved',
+    label: 'Session saved · No Watch HR',
+    detail: 'Sprint metrics are saved. No private Apple Watch relay was recording for this sprint.',
+  };
+}
+
+export function clubMonitorSavedStatus(
+  heartRateStatus: ClubMonitorHeartRateSaveStatus,
+): MonitorSprintHistoryStatus {
+  if (heartRateStatus === 'created' || heartRateStatus === 'updated') {
+    return {
+      state: 'saved',
+      label: 'Athlete + HR linked',
+      detail: 'The sprint is saved to the athlete and its consented Watch heart-rate segment is attached.',
+    };
+  }
+  if (heartRateStatus === 'pending') {
+    return {
+      state: 'saved',
+      label: 'Athlete saved · HR syncing',
+      detail: 'The sprint is saved and linked. Watch heart rate will attach when the athlete’s private relay syncs.',
+    };
+  }
+  if (heartRateStatus === 'conflict') {
+    return {
+      state: 'saved',
+      label: 'Athlete saved · HR needs review',
+      detail: 'The sprint is saved, but TrackLab could not safely attach the Watch segment to this exact sprint.',
+    };
+  }
+  return {
+    state: 'saved',
+    label: heartRateStatus === 'unknown'
+      ? 'Athlete saved · HR unconfirmed'
+      : 'Athlete saved · No Watch HR',
+    detail: heartRateStatus === 'unknown'
+      ? 'The sprint is saved, but this server did not confirm a Watch heart-rate result.'
+      : 'The sprint is saved. No consented Watch heart-rate stream was attached.',
+  };
+}
+
+/**
+ * Monitor can emit cancellation and a replacement arm in one render pass.
+ * Keep every server mutation for an exact Wattbike ordered even when a prior
+ * reserve/activate request rejects.
+ */
+export function queueClubMonitorBikeOperation<T>(
+  chains: Map<number, Promise<void>>,
+  bikeDeviceId: number,
+  operation: () => Promise<T>,
+) {
+  const previous = chains.get(bikeDeviceId) ?? Promise.resolve();
+  const result = previous.catch(() => undefined).then(operation);
+  const tail = result.then(() => undefined, () => undefined);
+  chains.set(bikeDeviceId, tail);
+  void tail.finally(() => {
+    if (chains.get(bikeDeviceId) === tail) chains.delete(bikeDeviceId);
+  });
+  return result;
+}
+
+export function activeMonitorHeartRateInvitation(
+  invitations: HeartRateStudioInvitation[],
+  clubId: string,
+  studioRiderId: string,
+  now = Date.now(),
+) {
+  return invitations
+    .filter((invitation) => (
+      invitation.clubId === clubId
+      && invitation.studioRiderId === studioRiderId
+      && invitation.relayScope === 'studio-block'
+      && invitation.revokedAt == null
+      // A claimed invitation is only a one-time handoff receipt. Readiness and
+      // terminal lifecycle come from its studio block; never let an old claimed
+      // invitation strand the owner in “waiting for athlete.”
+      && invitation.claimedAt == null
+      && invitation.expiresAt > now
+    ))
+    .sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
+}
+
+export function activeMonitorHeartRateBlock(
+  blocks: HeartRateStudioBlockStatus[],
+  clubId: string,
+  studioRiderId: string,
+) {
+  return blocks
+    .filter((block) => (
+      block.clubId === clubId
+      && block.studioRiderId === studioRiderId
+      && block.relayScope === 'studio-block'
+      && !['ended', 'expired', 'stopped'].includes(block.state)
+    ))
+    .sort((left, right) => (
+      (right.blockExpiresAt ?? right.pairCodeExpiresAt ?? right.invitationExpiresAt)
+      - (left.blockExpiresAt ?? left.pairCodeExpiresAt ?? left.invitationExpiresAt)
+    ))[0] ?? null;
+}
+
 export default function App() {
   const bridge = useWattbikeBridge();
   const raceShellRef = useRef<HTMLDivElement | null>(null);
@@ -1485,6 +1758,42 @@ export default function App() {
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
   const lastRaceDebugFrameAtRef = useRef(0);
   const activeRaceSessionIdRef = useRef<string | null>(null);
+  const activeHeartRateRelaySessionRef = useRef<string | null>(null);
+  const activeHeartRatePairingIdRef = useRef<string | null>(null);
+  const heartRateRelayStartPromisesRef = useRef<Map<string, Promise<boolean>>>(new Map());
+  const heartRatePairingIdsBySessionRef = useRef<Map<string, string>>(new Map());
+  const heartRateKnownPairingIdsRef = useRef<Set<string>>(new Set());
+  const heartRateAccountBlocksRef = useRef<HeartRateAccountBlockStatus[]>([]);
+  const activeHeartRateAccountBlockRef = useRef<HeartRateAccountBlockStatus | null>(null);
+  const heartRateAccountBlockCoversSessionsRef = useRef(false);
+  // Fail closed during lazy capability/account hydration so an older
+  // per-program relay cannot race a remembered Watch Connect session.
+  const watchConnectSuppressLegacyRelayRef = useRef(true);
+  const heartRateAccountBlockCoveredSessionIdsRef = useRef<Set<string>>(new Set());
+  const heartRateAccountBlockObservedRelayIdsRef = useRef<Set<string>>(new Set());
+  const heartRateAccountBlockActionPromiseRef = useRef<Promise<void> | null>(null);
+  const heartRateAccountHydrationRef = useRef<{
+    accountId: string;
+    promise: Promise<boolean>;
+  } | null>(null);
+  const heartRateAccountHydrationGenerationRef = useRef(0);
+  const cancelledHeartRateRelaySessionsRef = useRef<Set<string>>(new Set());
+  const finalizedHeartRateRelaySessionsRef = useRef<Set<string>>(new Set());
+  const heartRateConsentUpdateRevisionRef = useRef(0);
+  const clubMonitorSprintAuthorizationsRef = useRef<Map<string, ClubMonitorSprintAuthorizationEntry>>(new Map());
+  const clubMonitorSaveChainsByDeviceRef = useRef<Map<number, Promise<void>>>(new Map());
+  const monitorHeartRateInvitationSecretsRef = useRef<Map<string, MonitorHeartRateInvitationSecret>>(new Map());
+  const monitorHeartRateBusyRidersRef = useRef<Set<string>>(new Set());
+  const monitorStoppedHeartRateInvitationIdsRef = useRef<Set<string>>(new Set());
+  const clubOwnerTrainingGroupRef = useRef<ClubOwnerTrainingCoordinatorEntry | null>(null);
+  const clubOwnerTrainingPreparePromiseRef = useRef<Promise<void> | null>(null);
+  const clubOwnerTrainingGenerationRef = useRef(0);
+  const clubOwnerTrainingCompletionStartedRef = useRef<Set<string>>(new Set());
+  const clubOwnerTrainingAuthorizedPlayersRef = useRef<Map<string, Set<PlayerSlot['id']>>>(new Map());
+  const clubOwnerTrainingCheckpointScopeRef = useRef<string | null>(null);
+  const clubOwnerTrainingRecoveryScopeRef = useRef<string | null>(null);
+  const clubOwnerUtilityStartedAtRef = useRef<{ sessionId: string; startedAt: number } | null>(null);
+  const clubOwnerUtilityCompletionRef = useRef<GetPulledResult | ExploreRideCompleteEvent | null>(null);
   const ghostRaceStartedAtRef = useRef<number | null>(null);
   const ghostTraceRef = useRef<Map<PlayerSlot['id'], GhostLapPoint[]>>(new Map());
   const ghostTraceLastSampleAtRef = useRef<Map<PlayerSlot['id'], number>>(new Map());
@@ -1557,6 +1866,7 @@ export default function App() {
   const [accountProfile, setAccountProfile] = useState<AccountProfile>({ updatedAt: 0 });
   const [trainingHistoryRevision, setTrainingHistoryRevision] = useState(0);
   const [clubTrainingMemberships, setClubTrainingMemberships] = useState<ClubAthleteMembership[]>([]);
+  const [ownedClub, setOwnedClub] = useState<OwnedClub | null>(null);
   const [clubTrainingMembershipProfileKey, setClubTrainingMembershipProfileKey] = useState<string | null>(null);
   const [clubRosterManagementProfileKey, setClubRosterManagementProfileKey] = useState<string | null>(null);
   const [clubTrainingSelection, setClubTrainingSelection] = useState<ClubTrainingSelection | null>(null);
@@ -1628,6 +1938,49 @@ export default function App() {
   const [profileNameDraft, setProfileNameDraft] = useState('');
   const [profileEmailDraft, setProfileEmailDraft] = useState('');
   const [profileFormError, setProfileFormError] = useState<string | null>(null);
+  const [heartRateStudioInviteCode, setHeartRateStudioInviteCode] = useState(() => (
+    typeof window === 'undefined' ? '' : parsedHeartRateStudioInviteHref(window.location.href).inviteCode
+  ));
+  const [heartRateStudioInviteOpen, setHeartRateStudioInviteOpen] = useState(() => (
+    typeof window !== 'undefined' && Boolean(parsedHeartRateStudioInviteHref(window.location.href).inviteCode)
+  ));
+  const [heartRateMessage, setHeartRateMessage] = useState('');
+  const [watchConnectCapable, setWatchConnectCapable] = useState<boolean | null>(null);
+  const [ownerWatchConnectStatusByRider, setOwnerWatchConnectStatusByRider] = useState<Record<string, string>>({});
+  const [heartRateAccountBlockPresent, setHeartRateAccountBlockPresent] = useState(false);
+  const [heartRateHydratedAccountId, setHeartRateHydratedAccountId] = useState<string | null>(null);
+  const [heartRateStudioConsent, setHeartRateStudioConsent] = useState({
+    live: false,
+    session: false,
+  });
+  const [liveHeartRateByRider, setLiveHeartRateByRider] = useState<Record<string, HeartRateLiveEvent>>({});
+  const [monitorHistoryStatusByPlayer, setMonitorHistoryStatusByPlayer] = useState<Partial<Record<
+    PlayerSlot['id'],
+    MonitorSprintHistoryStatus
+  >>>({});
+  const [monitorReservedSessionByPlayer, setMonitorReservedSessionByPlayer] = useState<Partial<Record<
+    PlayerSlot['id'],
+    string
+  >>>({});
+  const [monitorHeartRateInvitations, setMonitorHeartRateInvitations] = useState<HeartRateStudioInvitation[]>([]);
+  const [monitorHeartRateBlocks, setMonitorHeartRateBlocks] = useState<HeartRateStudioBlockStatus[]>([]);
+  const [monitorHeartRateActionByRider, setMonitorHeartRateActionByRider] = useState<Record<
+    string,
+    MonitorHeartRateActionState
+  >>({});
+  const [monitorHeartRateOverlayPlayerId, setMonitorHeartRateOverlayPlayerId] = useState<PlayerSlot['id'] | null>(null);
+  const [clubOwnerRacePreparation, setClubOwnerRacePreparation] = useState<ClubOwnerRacePreparationState>(
+    idleClubOwnerRacePreparation,
+  );
+
+  useEffect(() => {
+    // Reload recovery restores the active pairing's server consent. Changing
+    // club navigation must not visually reset that still-active authorization.
+    if (activeHeartRatePairingIdRef.current) return;
+    heartRateConsentUpdateRevisionRef.current += 1;
+    setHeartRateStudioConsent({ live: false, session: false });
+  }, [clubTrainingSelection?.clubId, clubTrainingSelection?.studioRiderId]);
+
   const [pendingFriendRequestCount, setPendingFriendRequestCount] = useState(0);
   const [friendGraphRevision, setFriendGraphRevision] = useState(0);
   const [friendNetworkRefreshRevision, setFriendNetworkRefreshRevision] = useState(0);
@@ -1680,6 +2033,7 @@ export default function App() {
     }
     return readStoredRaceCapture();
   });
+  const [raceHeartRateByPlayer, setRaceHeartRateByPlayer] = useState<Partial<Record<PlayerSlot['id'], PrivateHeartRateCapture>>>({});
   const clearRaceCaptureForClubTablet = useCallback(() => {
     clearRaceCaptureAtIdentityBoundary({
       capturedSampleKeysRef,
@@ -1708,6 +2062,11 @@ export default function App() {
   const [sidebarMoreOpen, setSidebarMoreOpen] = useState(false);
   const [regularUserPreview, setRegularUserPreview] = useState(false);
   const clubTabletKioskMode = Boolean(clubTabletDevice);
+  const heartRate = useHeartRate({
+    enabled: Boolean(authUser || heartRateStudioInviteCode) && !clubTabletKioskMode,
+  });
+  const heartRateNativeSupported = heartRate.availability?.supported ?? null;
+  const heartRateRelayStateReady = heartRate.relayState != null;
   const friendsApi = useMemo(() => createFriendsApi(), []);
   const clubTabletDeviceActive = Boolean(
     clubTabletDevice
@@ -1741,6 +2100,115 @@ export default function App() {
     && studioRidersLoadedForActiveProfile;
 
   useEffect(() => {
+    const generation = ++heartRateAccountHydrationGenerationRef.current;
+    const accountId = authStatus === 'signed-in' && authUser?.id && !clubTabletKioskMode
+      ? authUser.id
+      : null;
+    let disposed = false;
+
+    setHeartRateHydratedAccountId(null);
+    heartRateAccountHydrationRef.current = null;
+    activeHeartRateRelaySessionRef.current = null;
+    activeHeartRatePairingIdRef.current = null;
+    heartRatePairingIdsBySessionRef.current.clear();
+    heartRateKnownPairingIdsRef.current.clear();
+    heartRateAccountBlocksRef.current = [];
+    activeHeartRateAccountBlockRef.current = null;
+    heartRateAccountBlockCoversSessionsRef.current = false;
+    heartRateAccountBlockCoveredSessionIdsRef.current.clear();
+    heartRateAccountBlockObservedRelayIdsRef.current.clear();
+    cancelledHeartRateRelaySessionsRef.current.clear();
+    finalizedHeartRateRelaySessionsRef.current.clear();
+    heartRateConsentUpdateRevisionRef.current += 1;
+    setHeartRateStudioConsent({ live: false, session: false });
+
+    if (!accountId) return undefined;
+    if (heartRateNativeSupported == null) return undefined;
+    if (heartRateNativeSupported && !heartRateRelayStateReady) return undefined;
+
+    const hydration = (async () => {
+      try {
+        const [{ loadHeartRatePairings }, { reconcileHeartRateRelayAccount }] = await Promise.all([
+          import('./lib/heartRateCloud'),
+          import('./lib/heartRateRelayRecovery'),
+        ]);
+        const pairings = await loadHeartRatePairings();
+        const reconciliation = reconcileHeartRateRelayAccount({
+          accountId,
+          pairings,
+          relayState: heartRate.relayState,
+        });
+        if (
+          disposed
+          || heartRateAccountHydrationGenerationRef.current !== generation
+        ) return false;
+
+        reconciliation.pairingIdsBySession.forEach(([sessionId, pairingId]) => {
+          heartRatePairingIdsBySessionRef.current.set(sessionId, pairingId);
+        });
+        reconciliation.knownPairingIds.forEach((pairingId) => {
+          heartRateKnownPairingIdsRef.current.add(pairingId);
+        });
+        activeHeartRateRelaySessionRef.current = reconciliation.activeSessionId;
+        activeHeartRatePairingIdRef.current = reconciliation.activePairing?.id ?? null;
+        if (reconciliation.activePairing?.relayScope === 'account-block') {
+          heartRateAccountBlockCoversSessionsRef.current = true;
+          if (reconciliation.activeSessionId) {
+            heartRateAccountBlockObservedRelayIdsRef.current.add(reconciliation.activeSessionId);
+          }
+          setHeartRateMessage('Restored the private account Apple Watch block. Exact TrackLab session windows will attach automatically.');
+        } else if (reconciliation.activePairing) {
+          setHeartRateStudioConsent({
+            live: reconciliation.activePairing.liveStudioConsent,
+            session: reconciliation.activePairing.sessionStudioConsent,
+          });
+        }
+
+        const clearedAccountBoundarySessions = await Promise.all(
+          reconciliation.orphanActiveSessionIds.map(async (sessionId) => {
+            const cleared = await heartRate.clearRelay({ sessionId }).catch(() => null);
+            return cleared && !cleared.configured ? sessionId : null;
+          }),
+        );
+        if (
+          disposed
+          || heartRateAccountHydrationGenerationRef.current !== generation
+        ) return false;
+
+        setHeartRateHydratedAccountId(accountId);
+        if (reconciliation.activeSessionId && reconciliation.activePairing?.relayScope !== 'account-block') {
+          setHeartRateMessage('Restored the private Apple Watch relay for the active TrackLab session.');
+        } else if (clearedAccountBoundarySessions.some(Boolean)) {
+          setHeartRateMessage('Removed an unfinished Apple Watch relay that could not be safely matched to this account. Finalized private uploads were left intact.');
+        } else if (reconciliation.foreignQueuedSessionCount > 0) {
+          setHeartRateMessage('Private Apple Watch data from another account is still finishing its original cloud sync and will not appear in this account.');
+        }
+        return true;
+      } catch (error) {
+        if (
+          !disposed
+          && heartRateAccountHydrationGenerationRef.current === generation
+        ) {
+          setHeartRateMessage(`Apple Watch relay recovery could not verify this account. ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return false;
+      }
+    })();
+    heartRateAccountHydrationRef.current = { accountId, promise: hydration };
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    authStatus,
+    authUser?.id,
+    clubTabletKioskMode,
+    heartRate.clearRelay,
+    heartRateNativeSupported,
+    heartRateRelayStateReady,
+  ]);
+
+  useEffect(() => {
     if (
       !authUser
       || clubTabletKioskMode
@@ -1765,6 +2233,366 @@ export default function App() {
     if (authStatus !== 'signed-in' || !authUser?.id || clubTabletKioskMode) return undefined;
     return subscribeToFriendNetworkEvents(handleFriendNetworkChange);
   }, [authStatus, authUser?.id, clubTabletKioskMode, handleFriendNetworkChange]);
+
+  useEffect(() => {
+    if (authStatus !== 'signed-in' || !authUser?.id || clubTabletKioskMode) {
+      setLiveHeartRateByRider({});
+      return undefined;
+    }
+    let disposed = false;
+    let unsubscribe: () => void = () => undefined;
+    void import('./lib/heartRateCloud').then(({ subscribeToHeartRateLive }) => {
+      if (disposed) return;
+      unsubscribe = subscribeToHeartRateLive((event) => {
+        setLiveHeartRateByRider((current) => {
+          const previous = current[event.riderId];
+          if (previous && previous.recordedAt > event.recordedAt) return current;
+          return { ...current, [event.riderId]: event };
+        });
+      });
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [authStatus, authUser?.id, clubTabletKioskMode]);
+
+  useEffect(() => {
+    if (authStatus !== 'signed-in' || !authUser?.id || clubTabletKioskMode || !ownedClub?.id) {
+      return undefined;
+    }
+    let disposed = false;
+    let unsubscribe: () => void = () => undefined;
+    void import('./lib/heartRateCloud').then(({ subscribeToHeartRateLive }) => {
+      if (disposed) return;
+      unsubscribe = subscribeToHeartRateLive((event) => {
+        setLiveHeartRateByRider((current) => {
+          const previous = current[event.riderId];
+          if (previous && previous.recordedAt > event.recordedAt) return current;
+          return { ...current, [event.riderId]: event };
+        });
+      }, { clubId: ownedClub.id });
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [authStatus, authUser?.id, clubTabletKioskMode, ownedClub?.id]);
+
+  useEffect(() => {
+    if (
+      !['monitor', 'race', 'straight-sprint', 'get-pulled', 'explore'].includes(appMode)
+      || authStatus !== 'signed-in'
+      || !authUser?.id
+      || clubTabletKioskMode
+      || !ownedClub?.id
+    ) return undefined;
+
+    let disposed = false;
+    let requestActive = false;
+    const heartRateCloudApi = import('./lib/heartRateCloud');
+    const refresh = async () => {
+      if (requestActive) return;
+      requestActive = true;
+      try {
+        const { loadHeartRateStudioBlocks, loadHeartRateStudioInvitations } = await heartRateCloudApi;
+        const [invitations, blocks] = await Promise.all([
+          loadHeartRateStudioInvitations(),
+          loadHeartRateStudioBlocks(ownedClub.id),
+        ]);
+        if (disposed) return;
+        const relevant = invitations.filter((invitation) => (
+          invitation.clubId === ownedClub.id
+          && invitation.relayScope === 'studio-block'
+          && invitation.revokedAt == null
+          && !monitorStoppedHeartRateInvitationIdsRef.current.has(invitation.id)
+        ));
+        const relevantBlocks = blocks.filter((block) => (
+          block.clubId === ownedClub.id
+          && block.relayScope === 'studio-block'
+          && !monitorStoppedHeartRateInvitationIdsRef.current.has(block.invitationId)
+        ));
+        relevantBlocks.forEach((block) => {
+          if (block.state !== 'waiting-athlete') {
+            monitorHeartRateInvitationSecretsRef.current.delete(block.studioRiderId);
+          }
+        });
+        setMonitorHeartRateInvitations(relevant);
+        setMonitorHeartRateBlocks(relevantBlocks);
+      } catch (error) {
+        if (!disposed) {
+          console.warn(`Could not refresh studio Apple Watch invitations: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      } finally {
+        requestActive = false;
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 1_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [appMode, authStatus, authUser?.id, clubTabletKioskMode, ownedClub?.id]);
+
+  useEffect(() => {
+    if (heartRate.status?.state !== 'ended') return;
+    const activeSessionId = activeHeartRateRelaySessionRef.current;
+    if (!activeSessionId) return;
+    const finalizedStudioBlock = heartRate.relayState?.sessions.find((session) => (
+      session.sessionId === activeSessionId
+      && session.scope === 'studio-block'
+      && session.finalized
+    ));
+    if (!finalizedStudioBlock) return;
+    activeHeartRateRelaySessionRef.current = null;
+    activeHeartRatePairingIdRef.current = null;
+    heartRatePairingIdsBySessionRef.current.delete(activeSessionId);
+    heartRateConsentUpdateRevisionRef.current += 1;
+    setHeartRateStudioConsent({ live: false, session: false });
+    setHeartRateMessage('Apple Watch ended the studio workout. Its heart-rate block is queued for private TrackLab Cloud sync.');
+  }, [heartRate.relayState, heartRate.status?.state]);
+
+  const handleHeartRateStudioInviteClose = useCallback((
+    disposition: HeartRateStudioInviteUrlDisposition,
+  ) => {
+    applyMonitorHeartRateInviteDisposition(disposition);
+    if (disposition === 'remove') setHeartRateStudioInviteCode('');
+    setHeartRateStudioInviteOpen(false);
+  }, []);
+
+  const handleHeartRateStudioInviteSignIn = useCallback(() => {
+    setHeartRateStudioInviteOpen(false);
+    setAuthMode('login');
+    setProfileFormError(null);
+    setCheckoutMessage('Sign in as the athlete named in the Apple Watch studio invitation.');
+    setShowMembershipLanding(true);
+  }, []);
+
+  const handleHeartRateAccountBlockSignIn = useCallback(() => {
+    setAuthMode('login');
+    setProfileFormError(null);
+    setCheckoutMessage('Sign in to the same personal TrackLab account that created this private Apple Watch handoff.');
+    setShowMembershipLanding(true);
+  }, []);
+
+  const handleHeartRateAccountBlockOpenSettings = useCallback(() => {
+    setShowMembershipLanding(false);
+    setAppMode('settings');
+  }, []);
+
+  const handleHeartRateStudioRelayConfigure = useCallback(async (
+    claim: HeartRateStudioRelayClaim,
+  ) => {
+    if (heartRate.availability?.platform !== 'iphone' || heartRate.availability.supported !== true) {
+      throw new Error(
+        heartRate.availability?.reason
+          || 'Open this invitation in the native TrackLab iPhone app paired with the athlete’s Apple Watch.',
+      );
+    }
+
+    const workoutSessionId = `watch-studio-block:${claim.pairing.id}`;
+    let workoutState = heartRate.status;
+    const existingWorkoutCanSettle = workoutState?.state === 'active'
+      || workoutState?.state === 'paused'
+      || workoutState?.state === 'launching'
+      || workoutState?.state === 'connecting';
+    if (!existingWorkoutCanSettle) {
+      workoutState = await heartRate.startWorkout(workoutSessionId);
+    }
+    if (!workoutState) {
+      throw new Error('Apple Watch did not return a TrackLab workout state.');
+    }
+    const [{ waitForHeartRateAccountBlockWorkout }, { nativeHeartRate }] = await Promise.all([
+      import('./lib/heartRateAccountBlock'),
+      import('./lib/nativeHeartRate'),
+    ]);
+    workoutState = await waitForHeartRateAccountBlockWorkout({
+      sessionId: workoutSessionId,
+      initialStatus: workoutState,
+      getState: nativeHeartRate.getState,
+      addStatusListener: nativeHeartRate.addStatusListener,
+    });
+    if (workoutState.state === 'paused') {
+      workoutState = await heartRate.resumeWorkout();
+      workoutState = await waitForHeartRateAccountBlockWorkout({
+        sessionId: workoutSessionId,
+        initialStatus: workoutState,
+        getState: nativeHeartRate.getState,
+        addStatusListener: nativeHeartRate.addStatusListener,
+      });
+    }
+    if (workoutState.state !== 'active' || workoutState.sessionId !== workoutSessionId) {
+      throw new Error(workoutState.message || 'Apple Watch did not start the TrackLab indoor-cycling workout.');
+    }
+
+    const relay = await heartRate.configureRelay({
+      baseUrl: window.location.origin,
+      ingestToken: claim.ingestToken,
+      sessionId: claim.pairing.sessionId,
+      startedAt: Date.now(),
+      scope: 'studio-block',
+    });
+    if (!relay.configured || relay.sessionId !== claim.pairing.sessionId) {
+      throw new Error(relay.reason || 'The private studio heart-rate relay could not start.');
+    }
+
+    activeHeartRateRelaySessionRef.current = claim.pairing.sessionId;
+    activeHeartRatePairingIdRef.current = claim.pairing.id;
+    heartRatePairingIdsBySessionRef.current.set(claim.pairing.sessionId, claim.pairing.id);
+    heartRateKnownPairingIdsRef.current.add(claim.pairing.id);
+    setHeartRateStudioConsent({
+      live: claim.pairing.liveStudioConsent,
+      session: claim.pairing.sessionStudioConsent,
+    });
+    setHeartRateMessage('Apple Watch is connected for this studio training block. Each sprint will use only its exact first-watt-to-finish heart-rate window.');
+  }, [heartRate]);
+
+  const handleHeartRateStudioConsentChange = useCallback((
+    field: 'live' | 'session',
+    enabled: boolean,
+  ) => {
+    const pairingId = activeHeartRatePairingIdRef.current;
+    if (!pairingId) {
+      setHeartRateMessage('Reconnect the active Apple Watch session before changing studio heart-rate sharing. No server consent was changed.');
+      return;
+    }
+    const previous = heartRateStudioConsent;
+    const next = { ...previous, [field]: enabled };
+    const revision = ++heartRateConsentUpdateRevisionRef.current;
+    setHeartRateStudioConsent(next);
+    void import('./lib/heartRateCloud').then(({ updateHeartRatePairingConsent }) => (
+      updateHeartRatePairingConsent(pairingId, {
+        liveStudioConsent: next.live,
+        sessionStudioConsent: next.session,
+      })
+    )).then(() => {
+      if (heartRateConsentUpdateRevisionRef.current === revision) {
+        setHeartRateMessage('Studio heart-rate sharing updated for this session.');
+      }
+    }).catch((error: unknown) => {
+      if (heartRateConsentUpdateRevisionRef.current !== revision) return;
+      setHeartRateStudioConsent(previous);
+      setHeartRateMessage(`Studio heart-rate sharing was not changed. ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, [heartRateStudioConsent]);
+
+  const beginHeartRateRelay = useCallback(({
+    sessionId,
+    activityType,
+    riderId,
+    playerId,
+    startedAt,
+  }: {
+    sessionId: string;
+    activityType: HeartRateActivityType;
+    riderId: string | undefined;
+    playerId: PlayerSlot['id'];
+    startedAt: number;
+  }) => {
+    const existingStart = heartRateRelayStartPromisesRef.current.get(sessionId);
+    if (existingStart) return existingStart;
+
+    cancelledHeartRateRelaySessionsRef.current.delete(sessionId);
+    const startOperation = import('./lib/personalHeartRateSessionActions')
+      .then(({ startPersonalHeartRateSession }) => startPersonalHeartRateSession({
+        sessionId,
+        activityType,
+        riderId,
+        playerId,
+        startedAt,
+        accountId: authUser?.id ?? null,
+        accountHydration: heartRateAccountHydrationRef.current,
+        accountBlockCoversSessions: heartRateAccountBlockCoversSessionsRef.current
+          || watchConnectSuppressLegacyRelayRef.current,
+        accountBlockCoveredSessionIds: heartRateAccountBlockCoveredSessionIdsRef.current,
+        clubTrainingSelection,
+        studioConsent: heartRateStudioConsent,
+        heartRate,
+        activeSessionRef: activeHeartRateRelaySessionRef,
+        activePairingRef: activeHeartRatePairingIdRef,
+        pairingIdsBySession: heartRatePairingIdsBySessionRef.current,
+        knownPairingIds: heartRateKnownPairingIdsRef.current,
+        cancelledSessionIds: cancelledHeartRateRelaySessionsRef.current,
+        finalizedSessionIds: finalizedHeartRateRelaySessionsRef.current,
+        baseUrl: window.location.origin,
+        onMessage: setHeartRateMessage,
+      })).finally(() => {
+        if (heartRateRelayStartPromisesRef.current.get(sessionId) === startOperation) {
+          heartRateRelayStartPromisesRef.current.delete(sessionId);
+        }
+      });
+    heartRateRelayStartPromisesRef.current.set(sessionId, startOperation);
+    return startOperation;
+  }, [authUser, clubTrainingSelection, heartRate, heartRateStudioConsent.live, heartRateStudioConsent.session]);
+
+  const finalizeHeartRateRelay = useCallback(async ({
+    sessionId,
+    endedAt,
+    activeDurationMs,
+    zones,
+  }: {
+    sessionId: string;
+    endedAt: number;
+    activeDurationMs: number;
+    zones?: Array<{
+      zoneId: string;
+      zoneName?: string;
+      startElapsedMs: number;
+      endElapsedMs: number;
+    }>;
+  }) => {
+    if (
+      heartRateAccountBlockCoveredSessionIdsRef.current.delete(sessionId)
+      || heartRateAccountBlockCoversSessionsRef.current
+      || watchConnectSuppressLegacyRelayRef.current
+    ) return 'account-block' as const;
+    return import('./lib/personalHeartRateSessionActions')
+      .then(({ finalizePersonalHeartRateSession }) => finalizePersonalHeartRateSession({
+        sessionId,
+        endedAt,
+        activeDurationMs,
+        ...(zones ? { zones } : {}),
+        pendingStart: heartRateRelayStartPromisesRef.current.get(sessionId) ?? null,
+        heartRate,
+        activeSessionRef: activeHeartRateRelaySessionRef,
+        activePairingRef: activeHeartRatePairingIdRef,
+        pairingIdsBySession: heartRatePairingIdsBySessionRef.current,
+        cancelledSessionIds: cancelledHeartRateRelaySessionsRef.current,
+        finalizedSessionIds: finalizedHeartRateRelaySessionsRef.current,
+        onStudioConsentReset: () => {
+          heartRateConsentUpdateRevisionRef.current += 1;
+          setHeartRateStudioConsent({ live: false, session: false });
+        },
+        onMessage: setHeartRateMessage,
+      }));
+  }, [heartRate]);
+
+  const clearHeartRateRelay = useCallback((sessionId: string) => {
+    if (
+      heartRateAccountBlockCoveredSessionIdsRef.current.delete(sessionId)
+      || heartRateAccountBlockCoversSessionsRef.current
+      || watchConnectSuppressLegacyRelayRef.current
+    ) return;
+    cancelledHeartRateRelaySessionsRef.current.add(sessionId);
+    const pendingStart = heartRateRelayStartPromisesRef.current.get(sessionId);
+    void import('./lib/personalHeartRateSessionActions')
+      .then(({ clearPersonalHeartRateSession }) => clearPersonalHeartRateSession({
+        sessionId,
+        pendingStart: pendingStart ?? null,
+        heartRate,
+        activeSessionRef: activeHeartRateRelaySessionRef,
+        activePairingRef: activeHeartRatePairingIdRef,
+        pairingIdsBySession: heartRatePairingIdsBySessionRef.current,
+        knownPairingIds: heartRateKnownPairingIdsRef.current,
+        cancelledSessionIds: cancelledHeartRateRelaySessionsRef.current,
+        finalizedSessionIds: finalizedHeartRateRelaySessionsRef.current,
+        onStudioConsentReset: () => {
+          heartRateConsentUpdateRevisionRef.current += 1;
+          setHeartRateStudioConsent({ live: false, session: false });
+        },
+      }));
+  }, [heartRate]);
 
   useEffect(() => {
     if (!authUser || clubTabletKioskMode) {
@@ -1832,6 +2660,61 @@ export default function App() {
         && clubTabletSession.session.studioRiderId === clubTrainingSelection.studioRiderId)
     ),
   );
+  const selectedHeartRateClubName = clubTrainingSelection
+    ? activeClubTrainingMemberships.find((membership) => (
+      membership.clubId === clubTrainingSelection.clubId
+      && membership.studioRiderId === clubTrainingSelection.studioRiderId
+    ))?.clubName ?? null
+    : null;
+  const watchConnectStudioMembership = clubTrainingSelection
+    ? activeClubTrainingMemberships.find((membership) => (
+      membership.clubId === clubTrainingSelection.clubId
+      && membership.studioRiderId === clubTrainingSelection.studioRiderId
+    )) ?? null
+    : !ownedClub && activeClubTrainingMemberships.length === 1
+      ? activeClubTrainingMemberships[0]
+      : null;
+
+  useEffect(() => {
+    if (watchConnectCapable !== true || !clubOwnerActive || !ownedClub) {
+      setOwnerWatchConnectStatusByRider({});
+      return undefined;
+    }
+    let cancelled = false;
+    const { id: requestedClubId, members } = ownedClub;
+    const refresh = () => {
+      void Promise.all([
+        import('./lib/watchConnectCloud'),
+        import('./lib/studioWatchConnectSelection'),
+      ]).then(async ([cloud, selection]) => {
+        const projections = await cloud.loadStudioWatchConnect(requestedClubId);
+        if (cancelled) return;
+        const next: Record<string, string> = {};
+        members.forEach((member) => {
+          const state = selection.studioWatchConnectSelectionState({
+            clubId: requestedClubId,
+            studioRiderId: member.studioRiderId,
+            claimed: member.status === 'claimed',
+            projections,
+          });
+          next[member.studioRiderId] = selection.studioWatchConnectOwnerLabel(state);
+        });
+        setOwnerWatchConnectStatusByRider(next);
+      }).catch(() => undefined);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 12_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [clubOwnerActive, ownedClub, watchConnectCapable]);
+
+  useEffect(() => {
+    // Health sharing is session-scoped and always returns to private when the
+    // rider changes training ownership or signs into a different club.
+    setHeartRateStudioConsent({ live: false, session: false });
+  }, [clubTrainingSelection?.clubId, clubTrainingSelection?.studioRiderId]);
   const clubLiveProfileKey = clubTabletSessionActive ? clubTabletProfileKey : authUser?.profileKey ?? '';
   const clubLiveAccessActive = Boolean(
     clubTrainingSelection
@@ -1925,6 +2808,7 @@ export default function App() {
     }
     const requestGeneration = ++clubTrainingRequestGenerationRef.current;
     setClubTrainingMemberships([]);
+    setOwnedClub(null);
     setClubTrainingMembershipProfileKey(null);
     setClubRosterManagementProfileKey(null);
     if (!clubTabletSessionActive) setClubTrainingSelection(null);
@@ -1945,6 +2829,7 @@ export default function App() {
         return;
       }
       setClubTrainingMemberships(state.memberships);
+      setOwnedClub(state.ownedClub);
       setClubTrainingMembershipProfileKey(requestedProfileKey);
       setClubRosterManagementProfileKey(state.canManageClub ? requestedProfileKey : null);
       setClubTrainingStatus('ready');
@@ -1959,6 +2844,7 @@ export default function App() {
       }
       console.warn(`Could not load Club Session choices: ${error instanceof Error ? error.message : error}`);
       setClubTrainingMemberships([]);
+      setOwnedClub(null);
       setClubTrainingMembershipProfileKey(null);
       setClubRosterManagementProfileKey(null);
       if (!clubTabletSessionActive) setClubTrainingSelection(null);
@@ -2032,6 +2918,54 @@ export default function App() {
       setAppMode('profile');
     }
   }, [authUser]);
+
+  useEffect(() => {
+    const syncHeartRateStudioInvitation = () => {
+      const parsed = parsedHeartRateStudioInviteHref(window.location.href);
+      if (!parsed.present) return;
+      if (!parsed.inviteCode) {
+        applyMonitorHeartRateInviteDisposition('remove');
+        setHeartRateStudioInviteCode('');
+        setHeartRateStudioInviteOpen(false);
+        return;
+      }
+      setHeartRateStudioInviteCode(parsed.inviteCode);
+      setHeartRateStudioInviteOpen(true);
+    };
+    syncHeartRateStudioInvitation();
+    window.addEventListener('popstate', syncHeartRateStudioInvitation);
+    return () => window.removeEventListener('popstate', syncHeartRateStudioInvitation);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let listener: { remove: () => Promise<void> } | null = null;
+    void import('./lib/nativeAppLinks')
+      .then(({ listenForHeartRateStudioInviteAppLinks }) => (
+        listenForHeartRateStudioInviteAppLinks((inviteCode) => {
+          if (disposed) return;
+          const handoffHref = monitorHeartRateInviteHandoffHref(window.location.href, inviteCode);
+          window.history.replaceState(window.history.state, '', handoffHref);
+          setHeartRateStudioInviteCode(inviteCode);
+          setHeartRateStudioInviteOpen(true);
+        })
+      )).then((handle) => {
+        listener = handle;
+        if (disposed) void handle.remove();
+      }).catch((error: unknown) => {
+        console.warn(`Could not listen for native heart-rate handoffs: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    return () => {
+      disposed = true;
+      if (listener) void listener.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (authUser && heartRateStudioInviteCode) {
+      setHeartRateStudioInviteOpen(true);
+    }
+  }, [authUser, heartRateStudioInviteCode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2894,6 +3828,139 @@ export default function App() {
     () => raceCandidatePlayers.slice(0, localRaceSeatLimit),
     [localRaceSeatLimit, raceCandidatePlayers],
   );
+  const cancelActiveClubOwnerTrainingGroup = useCallback((options: {
+    keepalive?: boolean;
+    preserveStatus?: boolean;
+  } = {}) => {
+    clubOwnerTrainingGenerationRef.current += 1;
+    const entry = clubOwnerTrainingGroupRef.current;
+    const preparation = clubOwnerTrainingPreparePromiseRef.current;
+    const checkpointScope = clubOwnerTrainingCheckpointScopeRef.current;
+    if (!options.preserveStatus) setClubOwnerRacePreparation(idleClubOwnerRacePreparation);
+    return (async () => {
+      if (entry) {
+        const coordinator = await import('./lib/clubOwnerTrainingCoordinator');
+        await coordinator.cancelClubOwnerTrainingGroup(entry, { keepalive: options.keepalive });
+        if (clubOwnerTrainingGroupRef.current === entry) clubOwnerTrainingGroupRef.current = null;
+        clubOwnerTrainingAuthorizedPlayersRef.current.delete(entry.request.sessionId);
+        clubOwnerTrainingCompletionStartedRef.current.delete(entry.request.sessionId);
+        if (clubOwnerUtilityStartedAtRef.current?.sessionId === entry.request.sessionId) {
+          clubOwnerUtilityStartedAtRef.current = null;
+        }
+        if (
+          (clubOwnerUtilityCompletionRef.current as { id?: string; sessionId?: string } | null)?.id === entry.request.sessionId
+          || (clubOwnerUtilityCompletionRef.current as { id?: string; sessionId?: string } | null)?.sessionId === entry.request.sessionId
+        ) {
+          clubOwnerUtilityCompletionRef.current = null;
+        }
+        if (checkpointScope) coordinator.clearClubOwnerTrainingCheckpoint(checkpointScope);
+      }
+      if (preparation) await preparation.catch(() => undefined);
+      if (entry && clubOwnerTrainingCheckpointScopeRef.current === checkpointScope) {
+        clubOwnerTrainingCheckpointScopeRef.current = null;
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    const entry = clubOwnerTrainingGroupRef.current;
+    if (!entry) return;
+    const expectedActivity = appMode === 'race'
+      ? 'bmx-race'
+      : appMode === 'straight-sprint' || appMode === 'get-pulled' || appMode === 'explore'
+        ? appMode
+        : null;
+    const connected = new Set(connectedDeviceIds);
+    const modePlayers = appMode === 'race' || appMode === 'straight-sprint'
+      ? lockedRacePlayers ?? []
+      : appMode === 'explore' || appMode === 'get-pulled' ? explorePlayers : activePlayers;
+    const lockedByPlayer = new Map(modePlayers.map((player) => [player.id, player]));
+    const finishedRecoveryMatches = raceCapture?.status === 'finished'
+      && raceCapture.sessionId === entry.request.sessionId;
+    const bindingMatches = entry.request.clubId === ownedClub?.id
+      && entry.request.activityType === expectedActivity
+      && (expectedActivity === 'bmx-race' || expectedActivity === 'straight-sprint'
+        ? entry.request.sessionId === activeRaceSessionIdRef.current
+        : true)
+      && (finishedRecoveryMatches || entry.riders.every((rider) => {
+        const player = lockedByPlayer.get(rider.playerId);
+        return player?.riderId === rider.studioRiderId
+          && player.deviceId === rider.bikeDeviceId
+          && connected.has(rider.bikeDeviceId);
+      }));
+    const preserveResumableExplore = entry.request.activityType === 'explore'
+      && expectedActivity !== 'explore'
+      && clubOwnerActive
+      && playMode === 'local'
+      && !demoMode
+      && entry.request.clubId === ownedClub?.id;
+    if (preserveResumableExplore) return;
+    if (
+      !expectedActivity
+      || !clubOwnerActive
+      || playMode !== 'local'
+      || demoMode
+      || !bindingMatches
+    ) {
+      void cancelActiveClubOwnerTrainingGroup().catch((error: unknown) => {
+        console.warn(`Club preparation cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
+  }, [
+    appMode,
+    cancelActiveClubOwnerTrainingGroup,
+    clubOwnerActive,
+    connectedDeviceIds,
+    demoMode,
+    activePlayers,
+    explorePlayers,
+    lockedRacePlayers,
+    ownedClub?.id,
+    playMode,
+    raceCapture?.sessionId,
+    raceCapture?.status,
+  ]);
+
+  useEffect(() => () => {
+    if (clubOwnerTrainingGroupRef.current?.request.activityType === 'explore') return;
+    void cancelActiveClubOwnerTrainingGroup({ keepalive: true }).catch(() => undefined);
+  }, [cancelActiveClubOwnerTrainingGroup]);
+  const heartRateByPlayer = useMemo<LiveHeartRateByPlayer>(() => {
+    const next: LiveHeartRateByPlayer = {};
+    const accountRiderId = authUser ? `account:${authUser.id}` : null;
+    const nativeWorkoutOwnedByAccount = nativeHeartRateWorkoutBelongsToAccount(
+      heartRate.status?.sessionId,
+      authUser?.id,
+      heartRateKnownPairingIdsRef.current,
+    );
+    const candidateById = new Map<PlayerSlot['id'], PlayerSlot>();
+    [...explorePlayers, ...racePlayers].forEach((player) => candidateById.set(player.id, player));
+
+    candidateById.forEach((player) => {
+      if (!player.riderId) return;
+      const cloudReading = liveHeartRateByRider[player.riderId];
+      const nativeReading = player.riderId === accountRiderId
+        && heartRateHydratedAccountId === authUser?.id
+        && nativeWorkoutOwnedByAccount
+        ? heartRate.latest
+        : null;
+      const latest = nativeReading && (!cloudReading || nativeReading.recordedAt >= cloudReading.recordedAt)
+        ? { bpm: nativeReading.bpm, recordedAt: nativeReading.recordedAt }
+        : cloudReading
+          ? { bpm: cloudReading.bpm, recordedAt: cloudReading.recordedAt }
+          : null;
+      if (latest) next[player.id] = latest;
+    });
+    return next;
+  }, [
+    authUser,
+    explorePlayers,
+    heartRate.latest,
+    heartRate.status?.sessionId,
+    heartRateHydratedAccountId,
+    liveHeartRateByRider,
+    racePlayers,
+  ]);
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
   const exploreRecentRouteHistoryScope = resolveExploreRecentRouteHistoryScope({
     accountProfileKey: cloudProfileKey,
@@ -3469,6 +4536,9 @@ export default function App() {
   }, []);
 
   const prepareForTrackSelection = useCallback((nextTrackId: string) => {
+    void cancelActiveClubOwnerTrainingGroup().catch((error: unknown) => {
+      console.warn(`Could not cancel club training preparation while changing tracks: ${error instanceof Error ? error.message : String(error)}`);
+    });
     pendingInitialTrackIdRef.current = null;
     setInitialUrlTrackPending(false);
     selectedTrackIdRef.current = nextTrackId;
@@ -3479,7 +4549,7 @@ export default function App() {
     setLockedRacePlayers(null);
     resetRace();
     releaseRaceFullscreen();
-  }, [clearStartGateSequence, releaseRaceFullscreen, resetRace]);
+  }, [cancelActiveClubOwnerTrainingGroup, clearStartGateSequence, releaseRaceFullscreen, resetRace]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom?.track.id) {
@@ -3637,6 +4707,7 @@ export default function App() {
     ghostRaceStartedAtRef.current = null;
     ghostTraceRef.current = new Map();
     ghostTraceLastSampleAtRef.current = new Map();
+    setRaceHeartRateByPlayer({});
 
     const capture: RaceCapture = {
       version: 1,
@@ -3673,7 +4744,7 @@ export default function App() {
         at: createdAt,
         elapsedMs: 0,
         type: 'race-arm',
-        label: 'Race armed / countdown started',
+        label: 'Race armed / riders locked',
       }],
       samples: [],
       frames: [],
@@ -3682,6 +4753,7 @@ export default function App() {
     };
 
     setRaceCapture(capture);
+    return capture;
   }, [
     appMode,
     demoMode,
@@ -4839,6 +5911,152 @@ export default function App() {
   }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer]);
 
   useEffect(() => {
+    if (raceState !== 'finished' || !raceCapture || raceCapture.status !== 'finished') return;
+    const sessionId = activeRaceSessionIdRef.current ?? raceCapture.sessionId;
+    const startedAt = raceCapture.startedAt ?? raceCapture.createdAt;
+    const endedAt = raceCapture.endedAt ?? Date.now();
+    const accountRiderId = authUser ? `account:${authUser.id}` : null;
+    const accountPlayer = accountRiderId
+      ? racePlayers.find((player) => player.riderId === accountRiderId)
+      : undefined;
+    let zoneWindows: Array<{
+      zoneId: string;
+      zoneName?: string;
+      startElapsedMs: number;
+      endElapsedMs: number;
+    }> = [];
+    if (accountPlayer) {
+      const samples = mapHeartRateMeasurementsToActiveClock(heartRate.measurements, [{
+        startedAt,
+        endedAt,
+        activeElapsedAtStartMs: 0,
+      }]);
+      const durationMs = Math.max(0, endedAt - startedAt);
+      const summary = summarizeHeartRate(samples, { startElapsedMs: 0, endElapsedMs: durationMs });
+      zoneWindows = (raceCapture.zoneResults ?? []).flatMap((zone) => {
+        const rider = zone.riders.find((candidate) => candidate.playerId === accountPlayer.id);
+        return rider?.entryElapsedMs != null && rider.exitElapsedMs != null
+          ? [{
+            zoneId: zone.zoneId,
+            zoneName: zone.zoneName,
+            startElapsedMs: rider.entryElapsedMs,
+            endElapsedMs: rider.exitElapsedMs,
+          }]
+          : [];
+      });
+      setRaceHeartRateByPlayer({
+        [accountPlayer.id]: {
+          source: 'apple-watch',
+          samples,
+          summary,
+          zones: summarizeHeartRateZones(samples, zoneWindows),
+        },
+      });
+    }
+    void finalizeHeartRateRelay({
+      sessionId,
+      endedAt,
+      activeDurationMs: Math.max(0, endedAt - startedAt),
+      zones: zoneWindows,
+    });
+  }, [authUser, finalizeHeartRateRelay, heartRate.measurements, raceCapture, racePlayers, raceState]);
+
+  const saveClubOwnerRaceGroup = useCallback(async (
+    capture: RaceCapture,
+    entry: ClubOwnerTrainingCoordinatorEntry,
+  ) => {
+    if (capture.sessionId !== entry.request.sessionId || capture.startedAt == null) return;
+    const coordinator = await import('./lib/clubOwnerTrainingCoordinator');
+    return coordinator.saveClubOwnerRaceGroupFlow({
+      entry,
+      capture,
+      title: entry.request.activityType === 'straight-sprint' && activeSprintDistanceFeet != null
+        ? `${activeSprintDistanceFeet.toLocaleString()} ft sprint at ${effectiveTrack.name}`
+        : `${effectiveTrack.name} BMX race`,
+      lapCount: isLoopTrack ? lapCount : 1,
+      routeVariantId: ghostRouteVariantId,
+      ...(activeSprintDistanceFeet != null && activeSprintAirSetting != null
+        ? { sprintDistanceFeet: activeSprintDistanceFeet, sprintAirSetting: activeSprintAirSetting }
+        : {}),
+      checkpointScope: clubOwnerTrainingCheckpointScopeRef.current,
+      isCurrent: () => clubOwnerTrainingGroupRef.current === entry,
+      onCheckpointCleared: () => { clubOwnerTrainingCheckpointScopeRef.current = null; },
+      onHistoryChanged: () => setTrainingHistoryRevision((revision) => revision + 1),
+      onStatus: (status) => setClubOwnerRacePreparation((current) => ({ ...current, ...status })),
+    });
+  }, [
+    activeSprintAirSetting,
+    activeSprintDistanceFeet,
+    effectiveTrack.name,
+    ghostRouteVariantId,
+    isLoopTrack,
+    lapCount,
+  ]);
+
+  useEffect(() => {
+    if (!clubOwnerActive || authStatus !== 'signed-in' || !authUser?.profileKey || !ownedClub?.id) return undefined;
+    const scope = authUser.profileKey;
+    if (clubOwnerTrainingRecoveryScopeRef.current === scope || clubOwnerTrainingGroupRef.current) return undefined;
+    clubOwnerTrainingRecoveryScopeRef.current = scope;
+    let disposed = false;
+    void import('./lib/clubOwnerTrainingCoordinator').then(async (coordinator) => {
+      const recovered = await coordinator.recoverClubOwnerRaceCheckpoint({
+        scope,
+        clubId: ownedClub.id,
+        capture: raceCapture,
+      });
+      if (!recovered) return;
+      const { entry, playerIds } = recovered;
+      if (disposed) {
+        await coordinator.cancelClubOwnerTrainingGroup(entry, { keepalive: true });
+        return;
+      }
+      if (!raceCapture || raceCapture.status !== 'finished') return;
+      activeRaceSessionIdRef.current = raceCapture.sessionId;
+      clubOwnerTrainingGroupRef.current = entry;
+      clubOwnerTrainingCheckpointScopeRef.current = scope;
+      clubOwnerTrainingAuthorizedPlayersRef.current.set(raceCapture.sessionId, new Set(playerIds));
+      clubOwnerTrainingCompletionStartedRef.current.add(raceCapture.sessionId);
+      setClubOwnerRacePreparation({
+        phase: 'saving',
+        sessionId: raceCapture.sessionId,
+        playerIds,
+        detail: 'Recovered club authorization. Finishing athlete save.',
+      });
+      await saveClubOwnerRaceGroup(raceCapture, entry);
+    }).catch((error: unknown) => {
+      if (!disposed) {
+        setClubOwnerRacePreparation({
+          phase: 'error',
+          failureStage: 'complete',
+          sessionId: raceCapture?.sessionId ?? null,
+          playerIds: [],
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [
+    authStatus,
+    authUser?.profileKey,
+    clubOwnerActive,
+    ownedClub?.id,
+    raceCapture,
+    saveClubOwnerRaceGroup,
+  ]);
+
+  useEffect(() => {
+    if (raceState !== 'finished' || !raceCapture || raceCapture.status !== 'finished') return;
+    const entry = clubOwnerTrainingGroupRef.current;
+    if (!entry || entry.request.sessionId !== raceCapture.sessionId) return;
+    if (clubOwnerTrainingCompletionStartedRef.current.has(raceCapture.sessionId)) return;
+    clubOwnerTrainingCompletionStartedRef.current.add(raceCapture.sessionId);
+    void saveClubOwnerRaceGroup(raceCapture, entry).catch(() => undefined);
+  }, [raceCapture, raceState, saveClubOwnerRaceGroup]);
+
+  useEffect(() => {
     if (
       raceState !== 'finished'
       || !raceCapture
@@ -4861,9 +6079,17 @@ export default function App() {
       console.warn('Club Tablet race result was not saved because the selected athlete could not be matched safely.');
       return;
     }
-    const capturedSummaries = tabletLocalPlayer
+    const authorizedClubPlayerIds = clubOwnerTrainingAuthorizedPlayersRef.current.get(sessionId) ?? new Set<PlayerSlot['id']>();
+    const capturedSummaries = (tabletLocalPlayer
       ? raceCapture.summary.filter((summary) => summary.playerId === tabletLocalPlayer.id)
-      : raceCapture.summary;
+      : raceCapture.summary)
+      .filter((summary) => !authorizedClubPlayerIds.has(summary.playerId));
+    if (capturedSummaries.length === 0 && authorizedClubPlayerIds.size > 0) {
+      // The atomic club-group endpoint owns every result in this capture.
+      // Mark the legacy owner path handled without creating duplicate history.
+      ghostSavedSessionIdsRef.current.add(sessionId);
+      return;
+    }
     const ownerKey = clubTabletSessionActive ? clubTabletProfileKey : cloudProfileKey || 'local';
     const ownerName = clubTabletRider?.name ?? authUser?.name ?? multiplayer.profile.name ?? 'TrackLab rider';
     const savedAt = Date.now();
@@ -4906,12 +6132,16 @@ export default function App() {
       })
       .filter((ghost): ghost is NonNullable<typeof ghost> => ghost != null);
 
-    if (nextGhosts.length === 0) {
+    const persistence = legacyRacePersistencePlan(capturedSummaries.length, nextGhosts.length);
+    if (!persistence.saveHistory) {
+      ghostSavedSessionIdsRef.current.add(sessionId);
       return;
     }
 
     ghostSavedSessionIdsRef.current.add(sessionId);
-    setGhostLaps((current) => mergeGhostLaps(current, nextGhosts));
+    if (persistence.saveGhosts) {
+      setGhostLaps((current) => mergeGhostLaps(current, nextGhosts));
+    }
     const raceResultSummaries = capturedSummaries.map((summary) => {
           const photoUrl = racePlayers.find((player) => player.id === summary.playerId)?.photoUrl;
           return {
@@ -4974,9 +6204,13 @@ export default function App() {
       trackName: effectiveTrack.name,
       details: {
         summaries: trainingSummaries,
-        zoneResults: raceCapture.zoneResults ?? [],
-        reactionTimesByPlayer: raceCapture.reactionTimesByPlayer,
-        events: raceCapture.events,
+        zoneResults: (raceCapture.zoneResults ?? []).map((zone) => ({
+          ...zone,
+          riders: zone.riders.filter((rider) => !authorizedClubPlayerIds.has(rider.playerId)),
+        })),
+        reactionTimesByPlayer: Object.fromEntries(Object.entries(raceCapture.reactionTimesByPlayer)
+          .filter(([playerId]) => !authorizedClubPlayerIds.has(Number(playerId) as PlayerSlot['id']))),
+        events: authorizedClubPlayerIds.size > 0 ? [] : raceCapture.events,
         selectedMetrics: raceCapture.selectedMetrics,
         lapCount: isLoopTrack ? lapCount : 1,
         routeVariantId: ghostRouteVariantId,
@@ -6691,13 +7925,46 @@ export default function App() {
     }
 
     appendRaceCaptureEvent('race-start', 'Gate drop / race started', gateDropAt);
+    const clubGroup = clubOwnerTrainingGroupRef.current;
+    if (clubGroup && clubGroup.request.sessionId === activeRaceSessionIdRef.current) {
+      void import('./lib/clubOwnerTrainingCoordinator')
+        .then(({ activateAndCheckpointClubOwnerTrainingGroup }) => (
+          activateAndCheckpointClubOwnerTrainingGroup(
+            clubGroup,
+            gateDropAt,
+            clubOwnerTrainingCheckpointScopeRef.current,
+          )
+        ))
+        .catch((error: unknown) => {
+          if (clubOwnerTrainingGroupRef.current !== clubGroup) return;
+          setClubOwnerRacePreparation((current) => ({
+            ...current,
+            phase: 'error',
+            failureStage: 'activate',
+            detail: error instanceof Error ? error.message : String(error),
+          }));
+        });
+    }
+    const heartRatePlayer = authUser
+      ? racePlayers.find((player) => player.riderId === `account:${authUser.id}`)
+      : undefined;
+    const heartRateSessionId = activeRaceSessionIdRef.current;
+    if (!demoMode && heartRatePlayer && heartRateSessionId) {
+      void beginHeartRateRelay({
+        sessionId: heartRateSessionId,
+        activityType: appMode === 'straight-sprint' ? 'straight-sprint' : 'bmx-race',
+        riderId: heartRatePlayer.riderId,
+        playerId: heartRatePlayer.id,
+        startedAt: gateDropAt,
+      });
+    }
     releaseCStartPlayers();
     startRace(gateDropAt, inputAllowedAt);
     scheduleStartGateStep(420, () => {
       redLightAtRef.current = 0;
       setStartGateStatus(idleStartGateStatus);
     });
-  }, [appendRaceCaptureEvent, bridge, cloudProfileKey, clubTabletProfileKey, clubTabletSessionActive, demoMode, eventGhostLaps, racePlayers, releaseCStartPlayers, scheduleStartGateStep, startRace]);
+  }, [appMode, appendRaceCaptureEvent, authUser, beginHeartRateRelay, bridge, cloudProfileKey, clubTabletProfileKey, clubTabletSessionActive, demoMode, eventGhostLaps, racePlayers, releaseCStartPlayers, scheduleStartGateStep, startRace]);
 
   const startConfiguredCadence = useCallback(async (startingTrackId: string, sequenceId: number) => {
     if (
@@ -7171,7 +8438,42 @@ export default function App() {
   }, [authMode, authPasswordDraft, profileEmailDraft, profileNameDraft]);
 
   const handleSignOut = useCallback(async () => {
+    const unsyncedHeartRate = Boolean(
+      heartRate.relayState?.configured
+      || (heartRate.relayState?.queuedCount ?? 0) > 0
+      || (heartRate.relayState?.pendingSampleCount ?? 0) > 0,
+    );
+    if (
+      !clubTabletKioskMode
+      && unsyncedHeartRate
+      && typeof window !== 'undefined'
+      && !window.confirm(
+        'Apple Watch heart-rate data is still active or waiting to sync on this iPhone. Choose Cancel and wait for “Heart rate synced to TrackLab Cloud” to protect it. Choose OK only if you want to discard the device copy and sign out now.',
+      )
+    ) {
+      setHeartRateMessage('Sign-out paused while Apple Watch heart rate finishes syncing.');
+      return;
+    }
+    heartRateAccountHydrationGenerationRef.current += 1;
+    heartRateAccountHydrationRef.current = null;
+    setHeartRateHydratedAccountId(null);
     const liveClubSelection = clubTrainingSelection;
+    const pendingHeartRateStarts = [...heartRateRelayStartPromisesRef.current.entries()];
+    pendingHeartRateStarts.forEach(([sessionId]) => {
+      cancelledHeartRateRelaySessionsRef.current.add(sessionId);
+    });
+    const pendingMonitorAuthorizations = [...clubMonitorSprintAuthorizationsRef.current.values()];
+    const pendingClubGroupCancellation = cancelActiveClubOwnerTrainingGroup({ keepalive: true });
+    clubMonitorSprintAuthorizationsRef.current.clear();
+    setMonitorHistoryStatusByPlayer({});
+    setMonitorReservedSessionByPlayer({});
+    setMonitorHeartRateInvitations([]);
+    setMonitorHeartRateBlocks([]);
+    setMonitorHeartRateActionByRider({});
+    setMonitorHeartRateOverlayPlayerId(null);
+    monitorHeartRateInvitationSecretsRef.current.clear();
+    monitorHeartRateBusyRidersRef.current.clear();
+    monitorStoppedHeartRateInvitationIdsRef.current.clear();
     if (authUser?.id) {
       clearQueuedFriendRequests(authUser.id);
     }
@@ -7185,6 +8487,7 @@ export default function App() {
     setStudioRidersProfileKey(null);
     setStudioRiders([]);
     setClubTrainingMemberships([]);
+    setOwnedClub(null);
     setClubTrainingMembershipProfileKey(null);
     setClubRosterManagementProfileKey(null);
     setClubTrainingSelection(null);
@@ -7193,6 +8496,111 @@ export default function App() {
     setProfileFormError(null);
     setAuthPasswordDraft('');
     setAuthStatus('loading');
+
+    const pendingHeartRateAccountBlockAction = heartRateAccountBlockActionPromiseRef.current;
+    await pendingClubGroupCancellation.catch(() => undefined);
+    await Promise.all(pendingHeartRateStarts.map(([, pending]) => pending.catch(() => false)));
+    if (pendingHeartRateAccountBlockAction) {
+      await pendingHeartRateAccountBlockAction.catch(() => undefined);
+    }
+    const heartRateCloudApi = await import('./lib/heartRateCloud');
+    const serverPairingIds = authUser?.id
+      ? await heartRateCloudApi.loadHeartRatePairings().then((pairings) => pairings
+        .filter((pairing) => (
+          pairing.riderId === `account:${authUser.id}` && pairing.revokedAt == null
+        ))
+        .map((pairing) => pairing.id)).catch(() => [] as string[])
+      : [];
+    const heartRateSessionIds = new Set([
+      ...heartRatePairingIdsBySessionRef.current.keys(),
+      ...(heartRate.relayState?.sessions.map((session) => session.sessionId) ?? []),
+      ...(activeHeartRateRelaySessionRef.current ? [activeHeartRateRelaySessionRef.current] : []),
+    ]);
+    const heartRatePairingIds = new Set([
+      ...heartRatePairingIdsBySessionRef.current.values(),
+      ...heartRateKnownPairingIdsRef.current,
+      ...serverPairingIds,
+      ...(activeHeartRatePairingIdRef.current ? [activeHeartRatePairingIdRef.current] : []),
+    ]);
+    await import('./lib/watchConnectActions').then(({ stopWatchConnectForAccountBoundary }) => (
+      stopWatchConnectForAccountBoundary({
+        getNativeState: async () => {
+          const state = await heartRate.getWatchConnectState();
+          return {
+            state: state.state,
+            scope: state.scope,
+            connectionId: state.connectionId,
+            sessionId: state.sessionId,
+            connectedUntil: state.connectedUntil,
+            remainingMs: state.remainingMs,
+            requiresUserStart: state.requiresUserStart,
+            workoutReady: state.workoutReady,
+            relayConfigured: state.relayConfigured,
+            ...(state.reason ? { reason: state.reason } : {}),
+          };
+        },
+        stopNative: async () => {
+          const state = await heartRate.stopWatchConnect();
+          return {
+            state: state.state,
+            scope: state.scope,
+            connectionId: state.connectionId,
+            sessionId: state.sessionId,
+            connectedUntil: state.connectedUntil,
+            remainingMs: state.remainingMs,
+            requiresUserStart: state.requiresUserStart,
+            workoutReady: state.workoutReady,
+            relayConfigured: state.relayConfigured,
+            ...(state.reason ? { reason: state.reason } : {}),
+          };
+        },
+      })
+    )).catch(() => undefined);
+    const clearedRelays = await heartRate.clearAllRelays().catch(() => ({
+      configured: false,
+      reason: 'Native relay cleanup failed.',
+    }));
+    if (clearedRelays.reason) {
+      await Promise.all([...heartRateSessionIds].map((sessionId) => (
+        heartRate.clearRelay({ sessionId }).catch(() => undefined)
+      )));
+    }
+    await Promise.all([...heartRatePairingIds].map((pairingId) => (
+      heartRateCloudApi.revokeHeartRatePairing(pairingId).catch(() => undefined)
+    )));
+    await Promise.all(pendingMonitorAuthorizations.map((entry) => queueClubMonitorBikeOperation(
+      clubMonitorSaveChainsByDeviceRef.current,
+      entry.reservation.bikeDeviceId,
+      async () => {
+        let secured: AuthorizedClubMonitorSprint;
+        try {
+          secured = await (entry.activation ?? entry.authorization);
+        } catch {
+          secured = await entry.authorization;
+        }
+        await import('./lib/clubMonitorHistory').then(({ cancelClubMonitorSprintAuthorization }) => (
+          cancelClubMonitorSprintAuthorization(secured.authorization.id, { keepalive: true })
+        ));
+      },
+    ).catch(() => undefined)));
+    clubMonitorSaveChainsByDeviceRef.current.clear();
+    activeHeartRateRelaySessionRef.current = null;
+    activeHeartRatePairingIdRef.current = null;
+    heartRateRelayStartPromisesRef.current.clear();
+    heartRatePairingIdsBySessionRef.current.clear();
+    heartRateKnownPairingIdsRef.current.clear();
+    heartRateAccountBlocksRef.current = [];
+    activeHeartRateAccountBlockRef.current = null;
+    heartRateAccountBlockCoversSessionsRef.current = false;
+    heartRateAccountBlockCoveredSessionIdsRef.current.clear();
+    heartRateAccountBlockObservedRelayIdsRef.current.clear();
+    heartRateAccountBlockActionPromiseRef.current = null;
+    watchConnectSuppressLegacyRelayRef.current = false;
+    clubOwnerTrainingRecoveryScopeRef.current = null;
+    cancelledHeartRateRelaySessionsRef.current.clear();
+    finalizedHeartRateRelaySessionsRef.current.clear();
+    heartRateConsentUpdateRevisionRef.current += 1;
+    setHeartRateStudioConsent({ live: false, session: false });
 
     if (liveClubSelection) {
       await import('./lib/clubLive')
@@ -7214,7 +8622,14 @@ export default function App() {
     setBikeConnectionSource('bluetooth');
     setDemoMode(false);
     setShowMembershipLanding(true);
-  }, [authUser?.id, clearStartGateSequence, clubTrainingSelection]);
+  }, [
+    authUser?.id,
+    cancelActiveClubOwnerTrainingGroup,
+    clearStartGateSequence,
+    clubTabletKioskMode,
+    clubTrainingSelection,
+    heartRate,
+  ]);
 
   useEffect(() => {
     if (!clubTabletKioskMode || !authUser) return;
@@ -7350,6 +8765,10 @@ export default function App() {
 
   const handleReset = () => {
     const sessionId = raceCapture?.sessionId ?? `reset-${Date.now()}`;
+    void cancelActiveClubOwnerTrainingGroup().catch((error: unknown) => {
+      console.warn(`Could not cancel club training preparation during reset: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    clearHeartRateRelay(sessionId);
     appendRaceCaptureEvent('race-reset', 'Race reset');
     clearStartGateSequence();
     setLockedRacePlayers(null);
@@ -7371,6 +8790,10 @@ export default function App() {
 
   const handleCancel = () => {
     const sessionId = raceCapture?.sessionId ?? `cancel-${Date.now()}`;
+    void cancelActiveClubOwnerTrainingGroup().catch((error: unknown) => {
+      console.warn(`Could not cancel club training preparation: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    clearHeartRateRelay(sessionId);
     const label = raceState === 'racing'
       ? 'Race cancelled mid-race'
       : 'Race cancelled before gate drop';
@@ -7564,102 +8987,470 @@ export default function App() {
     }
   }, [demoMode]);
 
-  const handleExploreRideComplete = useCallback((result: {
-    route: ExploreRoute;
-    riders: ExploreRider[];
-    startedAt: number;
-    endedAt: number;
-    durationMs: number;
+  const handleMonitorSprintArm = useCallback((arm: MonitorSprintArm) => {
+    if (demoMode) return;
+    const accountRiderId = authUser ? `account:${authUser.id}` : null;
+    if (arm.riderId === accountRiderId) return;
+
+    const member = ownedClub?.members.find((candidate) => candidate.studioRiderId === arm.riderId);
+    if (!ownedClub || !arm.riderId || member?.status !== 'claimed') {
+      setMonitorReservedSessionByPlayer((current) => {
+        if (!(arm.playerId in current)) return current;
+        const next = { ...current };
+        delete next[arm.playerId];
+        return next;
+      });
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [arm.playerId]: {
+          state: 'error',
+          label: 'Not armed',
+          detail: arm.riderId
+            ? 'This studio rider must claim their TrackLab account before Monitor View can save history.'
+            : 'Assign a claimed athlete to this Wattbike before they pedal.',
+        },
+      }));
+      return;
+    }
+
+    const reservation: ClubMonitorSprintReservation = {
+      clubId: ownedClub.id,
+      studioRiderId: arm.riderId,
+      bikeDeviceId: arm.deviceId,
+      sessionId: arm.id,
+      playerId: arm.playerId,
+      armedAt: arm.armedAt,
+    };
+    setMonitorReservedSessionByPlayer((current) => {
+      if (!(arm.playerId in current)) return current;
+      const next = { ...current };
+      delete next[arm.playerId];
+      return next;
+    });
+    setMonitorHistoryStatusByPlayer((current) => ({
+      ...current,
+      [arm.playerId]: {
+        state: 'authorizing',
+        label: 'Securing',
+        detail: 'Reserving this exact rider, lane, and Wattbike before the first watt.',
+      },
+    }));
+    const authorization = queueClubMonitorBikeOperation(
+      clubMonitorSaveChainsByDeviceRef.current,
+      arm.deviceId,
+      () => import('./lib/clubMonitorHistory')
+        .then(({ authorizeClubMonitorSprint }) => authorizeClubMonitorSprint(reservation)),
+    );
+    const entry: ClubMonitorSprintAuthorizationEntry = {
+      reservation,
+      authorization,
+      activation: null,
+    };
+    // Store synchronously: Monitor may emit arm and first-watt start in the
+    // same React effect when a bike is already producing power.
+    clubMonitorSprintAuthorizationsRef.current.set(arm.id, entry);
+    void authorization.then(() => {
+      if (clubMonitorSprintAuthorizationsRef.current.get(arm.id) !== entry) return;
+      setMonitorReservedSessionByPlayer((current) => ({ ...current, [arm.playerId]: arm.id }));
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [arm.playerId]: {
+          state: 'saving',
+          label: 'Ready',
+          detail: 'Secure reservation ready. The sprint clock will start at the first watt.',
+        },
+      }));
+    }).catch((error: unknown) => {
+      if (clubMonitorSprintAuthorizationsRef.current.get(arm.id) === entry) {
+        clubMonitorSprintAuthorizationsRef.current.delete(arm.id);
+      }
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [arm.playerId]: {
+          state: 'error',
+          label: 'Not armed',
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      }));
+    });
+  }, [authUser, demoMode, ownedClub]);
+
+  const cancelMonitorSprintAuthorization = useCallback((cancellation: {
+    id: string;
+    playerId: PlayerSlot['id'];
+    deviceId: number;
+    reason: MonitorSprintArmCancellation['reason'] | MonitorSprintCancellation['reason'];
   }) => {
-    if (demoMode || (!authUser && !clubTabletSessionActive)) {
-      return;
-    }
-    const tabletRider = clubTabletSessionActive && clubTabletSession
-      ? result.riders.find((rider) => rider.riderId === clubTabletSession.session.studioRiderId)
-      : undefined;
-    if (clubTabletSessionActive && !tabletRider) {
-      console.warn('Club Tablet Explore result was not saved because the selected athlete could not be matched safely.');
-      return;
-    }
-    const savedRiders = tabletRider ? [tabletRider] : result.riders;
-    const durationHours = Math.max(1, result.durationMs) / 3_600_000;
-    const distanceMeters = Math.max(0, ...savedRiders.map((rider) => rider.distanceMeters));
-    void import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
-      id: `explore:${result.route.id}:${Math.round(result.startedAt)}`,
-      activityType: 'explore',
-      title: result.route.name || `${result.route.originLabel} to ${result.route.destinationLabel}`,
-      startedAt: result.startedAt,
-      endedAt: result.endedAt,
-      durationMs: result.durationMs,
-      distanceMeters,
-      trackId: result.route.id,
-      trackName: result.route.name || result.route.destinationLabel,
-      details: {
-        originLabel: result.route.originLabel,
-        destinationLabel: result.route.destinationLabel,
-        travelMode: result.route.travelMode,
-        elevationGainMeters: result.route.elevationGainMeters ?? 0,
-        elevationLossMeters: result.route.elevationLossMeters ?? 0,
-        riders: savedRiders.map((rider) => ({
-          playerId: rider.playerId,
-          ...(rider.riderId ? { riderId: rider.riderId } : {}),
-          name: rider.name,
-          ...(rider.photoUrl ? { photoUrl: rider.photoUrl } : {}),
-          distanceMeters: rider.distanceMeters,
-          averageSpeedMph: (rider.distanceMeters / 1609.344) / durationHours,
-        })),
-      },
-    }, clubTrainingSelection, {
-      localPlayerId: tabletRider?.playerId ?? null,
-    })).then(() => {
-      setTrainingHistoryRevision((revision) => revision + 1);
-    }).catch((error: Error) => {
-      console.warn(`Could not save Explore the World history: ${error.message}`);
+    const entry = clubMonitorSprintAuthorizationsRef.current.get(cancellation.id);
+    if (!entry) return;
+    clubMonitorSprintAuthorizationsRef.current.delete(cancellation.id);
+    setMonitorReservedSessionByPlayer((current) => {
+      if (current[cancellation.playerId] !== cancellation.id) return current;
+      const next = { ...current };
+      delete next[cancellation.playerId];
+      return next;
     });
-  }, [authUser, clubTabletSession, clubTabletSessionActive, clubTrainingSelection, demoMode]);
+    const operation = queueClubMonitorBikeOperation(
+      clubMonitorSaveChainsByDeviceRef.current,
+      cancellation.deviceId,
+      async () => {
+        let secured: AuthorizedClubMonitorSprint;
+        try {
+          secured = await (entry.activation ?? entry.authorization);
+        } catch {
+          secured = await entry.authorization;
+        }
+        await import('./lib/clubMonitorHistory').then(({ cancelClubMonitorSprintAuthorization }) => (
+          cancelClubMonitorSprintAuthorization(secured.authorization.id, {
+            keepalive: cancellation.reason === 'view-closed',
+          })
+        ));
+      },
+    );
+    void operation.catch((error: unknown) => {
+      // A failed reserve has nothing to cancel. Surface every other failure so
+      // the owner knows this lane needs a fresh secure arm.
+      void entry.authorization.then(() => {
+        setMonitorHistoryStatusByPlayer((current) => ({
+          ...current,
+          [cancellation.playerId]: {
+            state: 'error',
+            label: 'Cancel failed',
+            detail: error instanceof Error ? error.message : String(error),
+          },
+        }));
+      }).catch(() => undefined);
+    });
+  }, []);
 
-  const handleGetPulledComplete = useCallback((result: GetPulledResult) => {
-    if (demoMode || (!authUser && !clubTabletSessionActive)) return;
-    if (clubTabletSessionActive && result.riderId !== clubTabletSession?.session.studioRiderId) {
-      console.warn('Get Pulled result was not saved because the selected club athlete could not be matched safely.');
+  const handleMonitorSprintArmCancel = useCallback((cancellation: MonitorSprintArmCancellation) => {
+    cancelMonitorSprintAuthorization(cancellation);
+  }, [cancelMonitorSprintAuthorization]);
+
+  const handleMonitorSprintCancel = useCallback((cancellation: MonitorSprintCancellation) => {
+    const accountRiderId = authUser ? `account:${authUser.id}` : null;
+    if (cancellation.riderId === accountRiderId) {
+      void clearHeartRateRelay(cancellation.id);
       return;
     }
-    void import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
-      id: result.id,
-      activityType: 'get-pulled',
-      title: `${result.durationSeconds}s Get Pulled · Air ${result.airSetting}`,
-      startedAt: result.startedAt,
-      endedAt: result.endedAt,
-      durationMs: Math.max(0, result.endedAt - result.startedAt),
-      distanceMeters: result.distanceMeters,
-      trackId: 'preski-ranch-pull-lane',
-      trackName: 'Preski Ranch Pull Lane',
-      details: {
-        durationSeconds: result.durationSeconds,
-        airSetting: result.airSetting,
-        recordKey: `${result.durationSeconds}s-air-${result.airSetting}`,
-        riders: [{
-          playerId: result.playerId,
-          ...(result.riderId ? { riderId: result.riderId } : {}),
-          name: result.riderName,
-          distanceMeters: result.distanceMeters,
-          averageWatts: result.averageWatts,
-          peakWatts: result.peakWatts,
-          averageCadence: result.averageCadence,
-          peakCadence: result.peakCadence,
-          averageSpeedKph: result.averageSpeedKph,
-          peakSpeedKph: result.peakSpeedKph,
-        }],
-      },
-    }, clubTrainingSelection, {
-      localPlayerId: result.playerId,
-    })).then(() => {
-      setTrainingHistoryRevision((revision) => revision + 1);
-    }).catch((error: Error) => {
-      console.warn(`Could not save Get Pulled history: ${error.message}`);
-    });
-  }, [authUser, clubTabletSession, clubTabletSessionActive, clubTrainingSelection, demoMode]);
+    cancelMonitorSprintAuthorization(cancellation);
+  }, [authUser, cancelMonitorSprintAuthorization, clearHeartRateRelay]);
 
+  const handleMonitorSprintStart = useCallback((session: MonitorSprintSession) => {
+    if (demoMode) return;
+    const accountRiderId = authUser ? `account:${authUser.id}` : null;
+    if (session.riderId === accountRiderId) {
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [session.playerId]: { state: 'saving', label: 'Capturing', detail: 'This sprint will save to your TrackLab account.' },
+      }));
+      void beginHeartRateRelay({
+        sessionId: session.id,
+        activityType: 'monitor-sprint',
+        riderId: session.riderId,
+        playerId: session.playerId,
+        startedAt: session.startedAt,
+      });
+      return;
+    }
+
+    const entry = clubMonitorSprintAuthorizationsRef.current.get(session.id);
+    if (
+      !entry
+      || entry.reservation.studioRiderId !== session.riderId
+      || entry.reservation.bikeDeviceId !== session.deviceId
+      || entry.reservation.playerId !== session.playerId
+    ) {
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [session.playerId]: {
+          state: 'error',
+          label: 'Not captured',
+          detail: 'The secure pre-pedal reservation did not match this rider and Wattbike.',
+        },
+      }));
+      return;
+    }
+
+    setMonitorHistoryStatusByPlayer((current) => ({
+      ...current,
+      [session.playerId]: {
+        state: 'authorizing',
+        label: 'Starting',
+        detail: 'Locking the authoritative sprint clock to this first-watt sample.',
+      },
+    }));
+    const activation = queueClubMonitorBikeOperation(
+      clubMonitorSaveChainsByDeviceRef.current,
+      session.deviceId,
+      async () => {
+        const { activateAuthorizedClubMonitorSprint } = await import('./lib/clubMonitorHistory');
+        return activateAuthorizedClubMonitorSprint(await entry.authorization, session.startedAt);
+      },
+    );
+    entry.activation = activation;
+    void activation.then(() => {
+      if (clubMonitorSprintAuthorizationsRef.current.get(session.id) !== entry) return;
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [session.playerId]: {
+          state: 'saving',
+          label: 'Capturing',
+          detail: 'Saving this exact first-watt-to-finish sprint to the assigned athlete.',
+        },
+      }));
+    }).catch((error: unknown) => {
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [session.playerId]: {
+          state: 'error',
+          label: 'Not captured',
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      }));
+    });
+  }, [authUser, beginHeartRateRelay, demoMode]);
+
+  const handleMonitorSprintComplete = useCallback((result: MonitorSprintCompleteResult) => {
+    if (demoMode || !authUser) return;
+    const accountRiderId = `account:${authUser.id}`;
+    if (result.riderId === accountRiderId) {
+      const heartRateFinalization = finalizeHeartRateRelay({
+        sessionId: result.id,
+        endedAt: result.endedAt,
+        activeDurationMs: result.durationMs,
+      });
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [result.playerId]: { state: 'saving', label: 'Saving', detail: 'Saving this sprint to your TrackLab account.' },
+      }));
+      void import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
+        id: result.id,
+        activityType: 'monitor-sprint',
+        title: 'Monitor View sprint',
+        startedAt: result.startedAt,
+        endedAt: result.endedAt,
+        durationMs: result.durationMs,
+        distanceMeters: result.distanceMeters,
+        trackId: 'tracklab-monitor-sprint',
+        trackName: 'Monitor View',
+        details: {
+          riders: [{
+            playerId: result.playerId,
+            ...(result.riderId ? { riderId: result.riderId } : {}),
+            name: result.riderName,
+            distanceMeters: result.distanceMeters,
+            averageWatts: result.averageWatts,
+            peakWatts: result.peakWatts,
+            averageCadence: result.averageCadence,
+            peakCadence: result.peakCadence,
+            averageSpeedKph: result.averageSpeedKph,
+            peakSpeedKph: result.peakSpeedKph,
+          }],
+        },
+      })).then(async () => {
+        const heartRateOutcome = await heartRateFinalization;
+        setTrainingHistoryRevision((revision) => revision + 1);
+        setMonitorHistoryStatusByPlayer((current) => ({
+          ...current,
+          [result.playerId]: personalMonitorSavedStatus(heartRateOutcome),
+        }));
+      }).catch((error: Error) => {
+        setMonitorHistoryStatusByPlayer((current) => ({
+          ...current,
+          [result.playerId]: { state: 'error', label: 'Save failed', detail: error.message },
+        }));
+      });
+      return;
+    }
+
+    const pending = clubMonitorSprintAuthorizationsRef.current.get(result.id);
+    if (!pending || pending.reservation.studioRiderId !== result.riderId || !pending.activation) return;
+    const binding: ClubMonitorSprintBinding = {
+      clubId: pending.reservation.clubId,
+      studioRiderId: pending.reservation.studioRiderId,
+      bikeDeviceId: pending.reservation.bikeDeviceId,
+      sessionId: pending.reservation.sessionId,
+      playerId: pending.reservation.playerId,
+      startedAt: result.startedAt,
+    };
+    setMonitorHistoryStatusByPlayer((current) => ({
+      ...current,
+      [result.playerId]: { state: 'saving', label: 'Saving', detail: 'Saving to the assigned athlete account.' },
+    }));
+    const save = queueClubMonitorBikeOperation(
+      clubMonitorSaveChainsByDeviceRef.current,
+      result.deviceId,
+      async () => {
+        const { saveToken } = await pending.activation!;
+        return import('./lib/clubMonitorHistory').then(({ saveAuthorizedClubMonitorSprint }) => (
+          saveAuthorizedClubMonitorSprint(binding, {
+            startedAt: result.startedAt,
+            endedAt: result.endedAt,
+            distanceMeters: result.distanceMeters,
+            averageWatts: result.averageWatts,
+            peakWatts: result.peakWatts,
+            averageCadence: result.averageCadence,
+            peakCadence: result.peakCadence,
+            averageSpeedKph: result.averageSpeedKph,
+            peakSpeedKph: result.peakSpeedKph,
+          }, saveToken)
+        ));
+      },
+    ).then((saved) => {
+      setTrainingHistoryRevision((revision) => revision + 1);
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [result.playerId]: clubMonitorSavedStatus(saved.heartRate.status),
+      }));
+    }).catch((error: unknown) => {
+      setMonitorHistoryStatusByPlayer((current) => ({
+        ...current,
+        [result.playerId]: {
+          state: 'error',
+          label: 'Save failed',
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      }));
+    }).finally(() => {
+      clubMonitorSprintAuthorizationsRef.current.delete(result.id);
+    });
+  }, [authUser, demoMode, finalizeHeartRateRelay]);
+
+  const handleMonitorHeartRateOpen = useCallback((player: PlayerSlot) => {
+    setMonitorHeartRateOverlayPlayerId(player.id);
+  }, []);
+
+  const handleMonitorHeartRateCreate = useCallback(async (player: PlayerSlot) => {
+    if (!ownedClub || !player.riderId) return;
+    await import('./lib/studioHeartRateOwnerActions').then(({ createOwnerStudioHeartRateInvitation }) => (
+      createOwnerStudioHeartRateInvitation({
+        club: ownedClub,
+        player,
+        anchorContext: {
+          appMode,
+          monitorSessionId: monitorReservedSessionByPlayer[player.id],
+          group: clubOwnerTrainingGroupRef.current,
+          preparation: clubOwnerRacePreparation,
+        },
+        blocks: monitorHeartRateBlocks,
+        invitations: monitorHeartRateInvitations,
+        busyRiderIds: monitorHeartRateBusyRidersRef.current,
+        currentHref: window.location.href,
+        buildFallbackClaimUrl: monitorHeartRateInviteHandoffHref,
+        invitationSecrets: monitorHeartRateInvitationSecretsRef.current,
+        updateActions: setMonitorHeartRateActionByRider,
+        updateInvitations: setMonitorHeartRateInvitations,
+      })
+    ));
+  }, [appMode, clubOwnerRacePreparation, monitorHeartRateBlocks, monitorHeartRateInvitations, monitorReservedSessionByPlayer, ownedClub]);
+
+  const handleMonitorHeartRateCopy = useCallback(async (studioRiderId: string) => {
+    await import('./lib/studioHeartRateOwnerActions').then(({ copyOwnerStudioHeartRateInvitation }) => (
+      copyOwnerStudioHeartRateInvitation({
+        studioRiderId,
+        invitationSecrets: monitorHeartRateInvitationSecretsRef.current,
+        updateActions: setMonitorHeartRateActionByRider,
+      })
+    ));
+  }, []);
+
+  const handleMonitorHeartRateShare = useCallback(async (studioRiderId: string) => {
+    await import('./lib/studioHeartRateOwnerActions').then(({ shareOwnerStudioHeartRateInvitation }) => (
+      shareOwnerStudioHeartRateInvitation({
+        studioRiderId,
+        invitationSecrets: monitorHeartRateInvitationSecretsRef.current,
+        updateActions: setMonitorHeartRateActionByRider,
+      })
+    ));
+  }, []);
+
+  const handleMonitorHeartRateCancel = useCallback(async (studioRiderId: string) => {
+    if (!ownedClub) return;
+    await import('./lib/studioHeartRateOwnerActions').then(({ stopOwnerStudioHeartRateSharing }) => (
+      stopOwnerStudioHeartRateSharing({
+        clubId: ownedClub.id,
+        studioRiderId,
+        invitations: monitorHeartRateInvitations,
+        blocks: monitorHeartRateBlocks,
+        busyRiderIds: monitorHeartRateBusyRidersRef.current,
+        stoppedInvitationIds: monitorStoppedHeartRateInvitationIdsRef.current,
+        invitationSecrets: monitorHeartRateInvitationSecretsRef.current,
+        updateActions: setMonitorHeartRateActionByRider,
+        updateInvitations: setMonitorHeartRateInvitations,
+        updateBlocks: setMonitorHeartRateBlocks,
+      })
+    ));
+  }, [monitorHeartRateBlocks, monitorHeartRateInvitations, ownedClub]);
+
+  const handleMonitorHeartRateRetry = useCallback((player: PlayerSlot) => {
+    if (!ownedClub || !player.riderId) return;
+    void import('./lib/studioHeartRateOwnerActions').then(({ retryOwnerStudioHeartRateInvitation }) => (
+      retryOwnerStudioHeartRateInvitation({
+        clubId: ownedClub.id,
+        player,
+        invitations: monitorHeartRateInvitations,
+        blocks: monitorHeartRateBlocks,
+        updateActions: setMonitorHeartRateActionByRider,
+        onCreate: (target) => { void handleMonitorHeartRateCreate(target); },
+      })
+    ));
+  }, [handleMonitorHeartRateCreate, monitorHeartRateBlocks, monitorHeartRateInvitations, ownedClub]);
+
+  const monitorStudioHeartRateByPlayer = useMemo<Partial<Record<
+    PlayerSlot['id'],
+    MonitorStudioHeartRateControl
+  >>>(() => {
+    if (!ownedClub) return {};
+    const accountRiderId = authUser ? `account:${authUser.id}` : null;
+    const controls: Partial<Record<PlayerSlot['id'], MonitorStudioHeartRateControl>> = {};
+    explorePlayers.forEach((player) => {
+      if (!player.riderId || player.riderId === accountRiderId) return;
+      const member = ownedClub.members.find((candidate) => candidate.studioRiderId === player.riderId);
+      if (member?.status !== 'claimed') return;
+      const action = monitorHeartRateActionByRider[player.riderId];
+      const block = activeMonitorHeartRateBlock(
+        monitorHeartRateBlocks,
+        ownedClub.id,
+        player.riderId,
+      );
+      const invitation = activeMonitorHeartRateInvitation(
+        monitorHeartRateInvitations,
+        ownedClub.id,
+        player.riderId,
+        now,
+      );
+      controls[player.id] = {
+        phase: action?.phase
+          ?? (block
+            ? block.state
+            : invitation
+              ? 'waiting-athlete'
+              : 'disconnected'),
+      };
+    });
+    return controls;
+  }, [
+    authUser,
+    explorePlayers,
+    monitorHeartRateActionByRider,
+    monitorHeartRateBlocks,
+    monitorHeartRateInvitations,
+    now,
+    ownedClub,
+  ]);
+
+  const monitorHeartRateOverlayPlayer = monitorHeartRateOverlayPlayerId == null
+    ? null
+    : (appMode === 'race' || appMode === 'straight-sprint' ? racePlayers : explorePlayers)
+      .find((player) => player.id === monitorHeartRateOverlayPlayerId) ?? null;
+  const monitorHeartRateOverlayRiderId = monitorHeartRateOverlayPlayer?.riderId ?? null;
+  const monitorHeartRateOverlayAction = monitorHeartRateOverlayRiderId
+    ? monitorHeartRateActionByRider[monitorHeartRateOverlayRiderId]
+    : null;
+  const monitorHeartRateOverlaySecret = monitorHeartRateOverlayRiderId
+    ? monitorHeartRateInvitationSecretsRef.current.get(monitorHeartRateOverlayRiderId)
+    : null;
   const handleExploreFullscreenChange = useCallback((enabled: boolean) => {
     setExploreRideFullscreen(enabled);
     if (enabled) {
@@ -7800,7 +9591,7 @@ export default function App() {
     setSelectedGhostIds([]);
   }, []);
 
-  const handleStart = () => {
+  const handleStart = async () => {
     const startingRacePlayers = racePlayers;
     if (
       effectiveTrack.routeStatus !== 'user-mapped'
@@ -7817,23 +9608,197 @@ export default function App() {
       return;
     }
 
-    setLockedRacePlayers(startingRacePlayers);
+    const activityType = appMode === 'straight-sprint' ? 'straight-sprint' : 'bmx-race';
+    const groupPlayers = startingRacePlayers.filter((player) => player.deviceId != null
+      && player.riderId != null
+      && ownedClub?.members.some((member) => member.status === 'claimed'
+        && member.studioRiderId === player.riderId));
+    const shouldUseClubGroup = clubOwnerActive
+      && playMode === 'local'
+      && !demoMode
+      && Boolean(ownedClub)
+      && groupPlayers.length > 0;
+    let clubGroup = clubOwnerTrainingGroupRef.current;
+
+    if (shouldUseClubGroup && !clubGroup) {
+      if (clubOwnerTrainingPreparePromiseRef.current) return;
+      setLockedRacePlayers(startingRacePlayers);
+      setMappingMode(false);
+      setMappingFullscreen(false);
+      setDemoSignalsStopped(false);
+      const capture = createRaceCapture();
+      const generation = ++clubOwnerTrainingGenerationRef.current;
+      const checkpointScope = authUser!.profileKey;
+      const playerIds = groupPlayers.map((player) => player.id);
+      setClubOwnerRacePreparation({
+        phase: 'authorizing',
+        sessionId: capture.sessionId,
+        playerIds,
+        detail: `Securing ${playerIds.length} rider/bike ${playerIds.length === 1 ? 'assignment' : 'assignments'} before countdown.`,
+      });
+      const request = {
+        requestId: `club-race-${capture.sessionId}`,
+        clubId: ownedClub!.id,
+        sessionId: capture.sessionId,
+        activityType,
+        armedAt: capture.createdAt,
+        assignments: groupPlayers.map((player) => ({
+          studioRiderId: player.riderId!,
+          bikeDeviceId: player.deviceId!,
+          playerId: player.id,
+        })),
+      } as const;
+      let entry: ClubOwnerTrainingCoordinatorEntry | null = null;
+      const preparation = (async () => {
+        try {
+          const coordinator = await import('./lib/clubOwnerTrainingCoordinator');
+          entry = await coordinator.prepareClubOwnerTrainingGroup({
+            request,
+            checkpointScope,
+            isCurrent: () => generation === clubOwnerTrainingGenerationRef.current,
+            onArm: (armedEntry) => {
+              entry = armedEntry;
+              if (generation !== clubOwnerTrainingGenerationRef.current) return;
+              clubOwnerTrainingGroupRef.current = armedEntry;
+              clubOwnerTrainingCheckpointScopeRef.current = checkpointScope;
+              clubOwnerTrainingAuthorizedPlayersRef.current.set(capture.sessionId, new Set(playerIds));
+            },
+          });
+          if (!entry || generation !== clubOwnerTrainingGenerationRef.current) return;
+          setClubOwnerRacePreparation({
+            phase: 'ready',
+            sessionId: capture.sessionId,
+            playerIds,
+            detail: 'Riders locked. Connect Apple Watch now or continue without it.',
+          });
+        } catch (error) {
+          if (generation !== clubOwnerTrainingGenerationRef.current) return;
+          setClubOwnerRacePreparation({
+            phase: 'error',
+            failureStage: 'prepare',
+            sessionId: capture.sessionId,
+            playerIds,
+            detail: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+      clubOwnerTrainingPreparePromiseRef.current = preparation;
+      void preparation.finally(() => {
+        if (clubOwnerTrainingPreparePromiseRef.current === preparation) {
+          clubOwnerTrainingPreparePromiseRef.current = null;
+        }
+      });
+      return;
+    }
+
+    if (!shouldUseClubGroup && clubGroup) {
+      await cancelActiveClubOwnerTrainingGroup();
+      clubGroup = null;
+    }
+    if (shouldUseClubGroup && clubGroup) {
+      if (
+        clubGroup.request.sessionId !== activeRaceSessionIdRef.current
+        || clubGroup.request.activityType !== activityType
+        || clubOwnerRacePreparation.phase !== 'ready'
+      ) return;
+      setClubOwnerRacePreparation((current) => ({
+        ...current,
+        phase: 'active',
+        detail: 'Countdown started; all athletes share the gate clock.',
+      }));
+    } else {
+      setLockedRacePlayers(startingRacePlayers);
+      createRaceCapture();
+    }
+
     clearStartGateSequence();
     const sequenceId = startGateSequenceIdRef.current;
     setMappingMode(false);
     setMappingFullscreen(false);
     setDemoSignalsStopped(false);
-    createRaceCapture();
     requestBrowserFullscreen(raceShellRef.current);
-    if (!demoMode) {
-      bridge.sendControlCommand('race-arm');
-    }
-
+    if (!demoMode) bridge.sendControlCommand('race-arm');
     primeRaceAudio();
     void primeBikeRaceAudio();
-
     scheduleStagingCountdown(startingTrackId, sequenceId);
   };
+
+  const clubOwnerPreparationDialogVisible = (
+    appMode === 'race' || appMode === 'straight-sprint'
+  ) && (
+    clubOwnerRacePreparation.phase === 'authorizing'
+    || clubOwnerRacePreparation.phase === 'ready'
+    || (clubOwnerRacePreparation.phase === 'error' && raceState !== 'racing')
+  );
+  const retryClubOwnerTrainingAction = () => {
+    const entry = clubOwnerTrainingGroupRef.current;
+    if (
+      entry
+      && raceCapture?.status === 'finished'
+      && entry.request.sessionId === raceCapture.sessionId
+      && (clubOwnerRacePreparation.failureStage === 'activate'
+        || clubOwnerRacePreparation.failureStage === 'complete')
+    ) {
+      clubOwnerTrainingCompletionStartedRef.current.add(raceCapture.sessionId);
+      void saveClubOwnerRaceGroup(raceCapture, entry).catch(() => undefined);
+      return;
+    }
+    if (entry) {
+      void cancelActiveClubOwnerTrainingGroup({ preserveStatus: true })
+        .then(() => handleStart())
+        .catch(() => undefined);
+      return;
+    }
+    void handleStart();
+  };
+
+  const clubOwnerUtilitySharedProps = {
+    owner: {
+      authUser: authUser ? { id: authUser.id, profileKey: authUser.profileKey } : null,
+      ownedClub,
+      clubOwnerActive,
+      clubTabletSessionActive,
+      clubTabletSession,
+      clubTrainingSelection,
+      playMode,
+      preparation: clubOwnerRacePreparation,
+      setPreparation: setClubOwnerRacePreparation,
+      groupRef: clubOwnerTrainingGroupRef,
+      preparePromiseRef: clubOwnerTrainingPreparePromiseRef,
+      generationRef: clubOwnerTrainingGenerationRef,
+      completionStartedRef: clubOwnerTrainingCompletionStartedRef,
+      authorizedPlayersRef: clubOwnerTrainingAuthorizedPlayersRef,
+      checkpointScopeRef: clubOwnerTrainingCheckpointScopeRef,
+      startedAtRef: clubOwnerUtilityStartedAtRef,
+      completionRef: clubOwnerUtilityCompletionRef,
+      cancelActiveGroup: cancelActiveClubOwnerTrainingGroup,
+      onHistoryChanged: () => setTrainingHistoryRevision((revision) => revision + 1),
+    },
+    heartRateContext: {
+      heartRate: {
+        measurements: heartRate.measurements,
+        pauseRelay: heartRate.pauseRelay,
+        resumeRelay: heartRate.resumeRelay,
+      },
+      begin: beginHeartRateRelay,
+      finalize: finalizeHeartRateRelay,
+      clear: clearHeartRateRelay,
+      relayStartPromisesRef: heartRateRelayStartPromisesRef,
+      cancelledSessionsRef: cancelledHeartRateRelaySessionsRef,
+      activeSessionRef: activeHeartRateRelaySessionRef,
+      accountBlockCoveredSessionIdsRef: heartRateAccountBlockCoveredSessionIdsRef,
+      accountBlockCoversSessionsRef: heartRateAccountBlockCoversSessionsRef,
+      onMessage: setHeartRateMessage,
+    },
+    preparationHeartRate: {
+      players: explorePlayers,
+      actionsByRider: monitorHeartRateActionByRider,
+      blocks: monitorHeartRateBlocks,
+      invitations: monitorHeartRateInvitations,
+      now,
+      onOpen: setMonitorHeartRateOverlayPlayerId,
+    },
+  } as const;
 
   useEffect(() => {
     const roomFlow = multiplayer.currentRoom?.flow;
@@ -8209,12 +10174,82 @@ export default function App() {
       />
     </Suspense>
   ) : null;
+  const heartRateStudioInviteDialog = heartRateStudioInviteCode ? (
+    <Suspense fallback={null}>
+      <HeartRateStudioInviteDialog
+        authenticated={Boolean(authUser)}
+        currentHref={typeof window === 'undefined' ? '' : window.location.href}
+        inviteCode={heartRateStudioInviteCode}
+        onClose={handleHeartRateStudioInviteClose}
+        onConfigureNativeRelay={handleHeartRateStudioRelayConfigure}
+        onRequestSignIn={handleHeartRateStudioInviteSignIn}
+        open={heartRateStudioInviteOpen}
+        platform={heartRate.availability?.platform ?? 'other'}
+      />
+    </Suspense>
+  ) : null;
+  const heartRateAccountBlockCoordinator = !clubTabletKioskMode ? (
+    <Suspense fallback={null}>
+      <HeartRateAccountBlockCoordinator
+        authStatus={authStatus}
+        accountId={authUser?.id ?? null}
+        kioskMode={clubTabletKioskMode}
+        settingsOpen={appMode === 'settings' && watchConnectCapable === false}
+        hydratedAccountId={heartRateHydratedAccountId}
+        heartRate={heartRate}
+        accountHydrationRef={heartRateAccountHydrationRef}
+        activeRelaySessionRef={activeHeartRateRelaySessionRef}
+        activePairingIdRef={activeHeartRatePairingIdRef}
+        pairingIdsBySessionRef={heartRatePairingIdsBySessionRef}
+        knownPairingIdsRef={heartRateKnownPairingIdsRef}
+        accountBlocksRef={heartRateAccountBlocksRef}
+        activeBlockRef={activeHeartRateAccountBlockRef}
+        coversSessionsRef={heartRateAccountBlockCoversSessionsRef}
+        observedRelayIdsRef={heartRateAccountBlockObservedRelayIdsRef}
+        actionPromiseRef={heartRateAccountBlockActionPromiseRef}
+        onMessage={setHeartRateMessage}
+        onRequestSignIn={handleHeartRateAccountBlockSignIn}
+        onOpenSettings={handleHeartRateAccountBlockOpenSettings}
+        onBlockPresenceChange={setHeartRateAccountBlockPresent}
+      />
+    </Suspense>
+  ) : null;
+  const watchConnectCoordinator = !clubTabletKioskMode ? (
+    <Suspense fallback={null}>
+      <WatchConnectCoordinator
+        accountId={authUser?.id ?? null}
+        accountName={authUser?.name ?? 'TrackLab athlete'}
+        authStatus={authStatus}
+        heartRate={heartRate}
+        onCapabilityChange={setWatchConnectCapable}
+        onLegacyRelaySuppressionChange={(suppressed) => {
+          watchConnectSuppressLegacyRelayRef.current = suppressed;
+        }}
+        onMessage={setHeartRateMessage}
+        ownedStudio={ownedClub ? { clubId: ownedClub.id, clubName: ownedClub.name } : null}
+        settingsOpen={appMode === 'settings'}
+        preferPersonal={Boolean(ownedClub)}
+        studioContext={watchConnectStudioMembership ? {
+          clubId: watchConnectStudioMembership.clubId,
+          clubName: watchConnectStudioMembership.clubName,
+        } : null}
+        studioContexts={activeClubTrainingMemberships.map((membership) => ({
+          clubId: membership.clubId,
+          clubName: membership.clubName,
+        }))}
+      />
+    </Suspense>
+  ) : null;
 
   if (!clubTabletKioskMode && (showMembershipLanding || !accountProfileComplete)) {
     return (
       <>
         {clubLiveAthleteBridge}
-        <MembershipLanding
+        {heartRateStudioInviteDialog}
+        {heartRateAccountBlockCoordinator}
+        {watchConnectCoordinator}
+        <Suspense fallback={<div className="explore-loading">Loading TrackLab…</div>}>
+          <MembershipLanding
           membership={membership}
           bikeSeats={checkoutBikeSeats}
           checkoutStatus={checkoutStatus}
@@ -8253,8 +10288,9 @@ export default function App() {
           onEnterApp={openRaceDashboard}
           onStartDemo={startBenchmarkDemo}
           onBikeSeatsChange={handleCheckoutBikeSeatsChange}
-          onCheckout={startSquareCheckout}
-        />
+            onCheckout={startSquareCheckout}
+          />
+        </Suspense>
       </>
     );
   }
@@ -8276,6 +10312,67 @@ export default function App() {
         .utility-fullscreen .monitor-panel,.utility-fullscreen .club-live-monitor{padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(14px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
         .utility-fullscreen .monitor-grid{min-height:calc(100dvh - 110px)}
       `}</style>}
+      {heartRateStudioInviteDialog}
+      {heartRateAccountBlockCoordinator}
+      {watchConnectCoordinator}
+      {clubOwnerPreparationDialogVisible && (
+        <Suspense fallback={null}>
+          <ClubOwnerTrainingPreparationDialog
+            activityLabel={appMode === 'straight-sprint' ? 'Straight Sprint' : 'BMX Race'}
+            clubId={ownedClub?.id}
+            detail={clubOwnerRacePreparation.detail}
+            heartRateActionsByRider={monitorHeartRateActionByRider}
+            heartRateBlocks={monitorHeartRateBlocks}
+            heartRateInvitations={monitorHeartRateInvitations}
+            now={now}
+            onCancel={handleCancel}
+            onHeartRateOpen={setMonitorHeartRateOverlayPlayerId}
+            onRetry={retryClubOwnerTrainingAction}
+            onStart={() => { void handleStart(); }}
+            phase={clubOwnerRacePreparation.phase === 'error'
+              ? 'error'
+              : clubOwnerRacePreparation.phase === 'ready'
+                ? 'ready'
+                : 'authorizing'}
+            retryLabel={clubOwnerRacePreparation.failureStage === 'complete'
+              || clubOwnerRacePreparation.failureStage === 'activate'
+              ? 'Retry athlete save'
+              : 'Retry preparation'}
+            playerIds={clubOwnerRacePreparation.playerIds}
+            players={racePlayers}
+            watchConnectMode={watchConnectCapable !== false}
+            watchConnectStatusByRider={ownerWatchConnectStatusByRider}
+          />
+        </Suspense>
+      )}
+      {watchConnectCapable === false
+        && monitorHeartRateOverlayPlayer
+        && monitorHeartRateOverlayRiderId
+        && ownedClub && (
+        <Suspense fallback={<div className="explore-loading">Loading Apple Watch setup…</div>}>
+          <StudioHeartRateBlockOverlay
+            action={monitorHeartRateOverlayAction}
+            anchorContext={{
+              appMode,
+              monitorSessionId: monitorReservedSessionByPlayer[monitorHeartRateOverlayPlayer.id],
+              group: clubOwnerTrainingGroupRef.current,
+              preparation: clubOwnerRacePreparation,
+            }}
+            blocks={monitorHeartRateBlocks}
+            clubId={ownedClub.id}
+            invitations={monitorHeartRateInvitations}
+            invitationSecretAvailable={Boolean(monitorHeartRateOverlaySecret)}
+            now={now}
+            onCancel={() => { void handleMonitorHeartRateCancel(monitorHeartRateOverlayRiderId); }}
+            onClose={() => setMonitorHeartRateOverlayPlayerId(null)}
+            onCopy={() => { void handleMonitorHeartRateCopy(monitorHeartRateOverlayRiderId); }}
+            onCreate={() => { void handleMonitorHeartRateCreate(monitorHeartRateOverlayPlayer); }}
+            onRetry={() => handleMonitorHeartRateRetry(monitorHeartRateOverlayPlayer)}
+            onShare={() => { void handleMonitorHeartRateShare(monitorHeartRateOverlayRiderId); }}
+            player={monitorHeartRateOverlayPlayer}
+          />
+        </Suspense>
+      )}
       {clubLiveAthleteBridge}
       {clubTabletRuntime}
       {clubTabletSessionActive
@@ -8650,6 +10747,9 @@ export default function App() {
               assignments={studioRiderAssignments}
               canEdit={canEditLiveRaceEntry}
               canManageRiders={canManageActiveStudioRiders}
+              watchConnectStatusByRider={watchConnectCapable === true
+                ? ownerWatchConnectStatusByRider
+                : undefined}
               onToggleEntry={toggleLiveRaceEntry}
               onEnterAll={enterAllLiveRaceBikes}
               onClearEntries={clearLiveRaceEntries}
@@ -9140,6 +11240,36 @@ export default function App() {
               onSpeedUnitChange={handleSpeedUnitChange}
               onDistanceUnitChange={handleDistanceUnitChange}
               onUseRegionalDefaults={handleRegionalUnitDefaults}
+              heartRatePanel={authUser ? (
+                <Suspense fallback={<div className="explore-loading">Checking Apple Watch…</div>}>
+                  <div id="heart-rate-account-block-settings-slot" />
+                  <div id="watch-connect-settings-slot" />
+                  <HeartRateSettingsCard
+                    availability={heartRate.availability}
+                    status={heartRate.status}
+                    relayState={heartRate.relayState}
+                    readingState={heartRate.readingState}
+                    latest={heartRate.latest}
+                    message={heartRateMessage}
+                    showWorkoutActions={false}
+                    onStart={() => undefined}
+                    onPause={() => undefined}
+                    onResume={() => undefined}
+                    onEnd={() => undefined}
+                    onRetry={() => { void heartRate.refreshAvailability(); }}
+                    studioSharing={watchConnectCapable === false
+                      && !heartRateAccountBlockPresent
+                      && clubTrainingSelection
+                      && selectedHeartRateClubName ? {
+                      clubName: selectedHeartRateClubName,
+                      liveConsent: heartRateStudioConsent.live,
+                      sessionConsent: heartRateStudioConsent.session,
+                      onLiveConsentChange: (live) => handleHeartRateStudioConsentChange('live', live),
+                      onSessionConsentChange: (session) => handleHeartRateStudioConsentChange('session', session),
+                    } : undefined}
+                  />
+                </Suspense>
+              ) : undefined}
             />
           </Suspense>
         ) : appMode === 'profile' && authUser ? (
@@ -9172,74 +11302,94 @@ export default function App() {
           </Suspense>
         ) : appMode === 'get-pulled' ? (
           <Suspense fallback={<div className="explore-loading">Loading Get Pulled…</div>}>
-            <GetPulledView
-              demoMode={demoMode}
-              players={activePlayers}
-              riders={availableStudioRiders}
-              riderAssignments={studioRiderAssignments}
-              samplesByDevice={samplesByDevice}
-              speedUnit={speedUnit}
-              canAssignRiders={!clubTabletSessionActive}
-              onAssignRider={handleStudioRiderAssignment}
-              onComplete={handleGetPulledComplete}
-              onLiveStateChange={setGetPulledLiveState}
-              fullscreen={utilityFullscreen}
-              onFullscreenChange={handleUtilityFullscreenChange}
+            <ClubOwnerUtilityMode
+              {...clubOwnerUtilitySharedProps}
+              mode="get-pulled"
+              viewProps={{
+                demoMode,
+                players: activePlayers,
+                riders: availableStudioRiders,
+                riderAssignments: studioRiderAssignments,
+                samplesByDevice,
+                speedUnit,
+                canAssignRiders: !clubTabletSessionActive,
+                onAssignRider: handleStudioRiderAssignment,
+                onLiveStateChange: setGetPulledLiveState,
+                fullscreen: utilityFullscreen,
+                onFullscreenChange: handleUtilityFullscreenChange,
+                heartRateByPlayer,
+                heartRateMeasurements: heartRate.measurements,
+              }}
             />
           </Suspense>
         ) : appMode === 'explore' ? (
           <Suspense fallback={<div className="explore-loading">Loading Explore the World…</div>}>
-          <ExploreView
-            developerMode={developerUiActive}
-            players={playMode === 'multiplayer'
-              ? explorePlayers.slice(0, localExploreSeatLimit)
-              : explorePlayers}
-            demoPlayerOptions={exploreDemoCandidates}
-            selectedDemoPlayerIds={selectedDemoPlayerIds}
-            liveRiderProfiles={availableStudioRiders}
-            liveRiderAssignments={studioRiderAssignments}
-            samplesByDevice={samplesByDevice}
-            speedUnit={speedUnit}
-            distanceUnit={distanceUnit}
-            onDistanceUnitChange={handleDistanceUnitChange}
-            playMode={playMode}
-            demoMode={demoMode}
-            multiplayerConnection={multiplayer.connection}
-            currentRoom={multiplayer.currentRoom}
-            currentUserId={multiplayer.clientId}
-            accountProfileKey={exploreRecentRouteHistoryScope.profileKey}
-            cloudRecentRoutesEnabled={exploreRecentRouteHistoryScope.cloudEnabled}
-            inviteUrl={multiplayer.inviteUrl}
-            remoteStates={multiplayer.roomExploreStates}
-            voiceEnabled={roomVoice.enabled}
-            voiceSupported={roomVoice.supported}
-            voiceStatus={roomVoice.status}
-            voiceRemoteCount={roomVoice.remoteCount}
-            onPlayModeChange={setPlayMode}
-            onCreatePrivateRoom={multiplayer.createPrivateRoom}
-            onShareInvite={shareMultiplayerInvite}
-            onSyncRoute={multiplayer.syncExploreRoute}
-            onControlSession={multiplayer.controlExploreSession}
-            onSendState={multiplayer.sendExploreState}
-            onDemoPlayerSelectionChange={handleDemoPlayerSelectionChange}
-            onLiveRiderAssignment={handleStudioRiderAssignment}
-            onVoiceStart={roomVoice.start}
-            onVoiceStop={roomVoice.stop}
-            onDemoRideStatusChange={handleExploreDemoRideStatusChange}
-            onLiveStateChange={setExploreClubLiveState}
-            onRideComplete={handleExploreRideComplete}
-            fullscreen={exploreRideFullscreen}
-            onFullscreenChange={handleExploreFullscreenChange}
-          />
+            <ClubOwnerUtilityMode
+              {...clubOwnerUtilitySharedProps}
+              mode="explore"
+              viewProps={{
+                developerMode: developerUiActive,
+                players: playMode === 'multiplayer'
+                  ? explorePlayers.slice(0, localExploreSeatLimit)
+                  : explorePlayers,
+                demoPlayerOptions: exploreDemoCandidates,
+                selectedDemoPlayerIds,
+                liveRiderProfiles: availableStudioRiders,
+                liveRiderAssignments: studioRiderAssignments,
+                samplesByDevice,
+                speedUnit,
+                distanceUnit,
+                onDistanceUnitChange: handleDistanceUnitChange,
+                playMode,
+                demoMode,
+                multiplayerConnection: multiplayer.connection,
+                currentRoom: multiplayer.currentRoom,
+                currentUserId: multiplayer.clientId,
+                accountProfileKey: exploreRecentRouteHistoryScope.profileKey,
+                cloudRecentRoutesEnabled: exploreRecentRouteHistoryScope.cloudEnabled,
+                inviteUrl: multiplayer.inviteUrl,
+                remoteStates: multiplayer.roomExploreStates,
+                voiceEnabled: roomVoice.enabled,
+                voiceSupported: roomVoice.supported,
+                voiceStatus: roomVoice.status,
+                voiceRemoteCount: roomVoice.remoteCount,
+                onPlayModeChange: setPlayMode,
+                onCreatePrivateRoom: multiplayer.createPrivateRoom,
+                onShareInvite: shareMultiplayerInvite,
+                onSyncRoute: multiplayer.syncExploreRoute,
+                onControlSession: multiplayer.controlExploreSession,
+                onSendState: multiplayer.sendExploreState,
+                onDemoPlayerSelectionChange: handleDemoPlayerSelectionChange,
+                onLiveRiderAssignment: handleStudioRiderAssignment,
+                onVoiceStart: roomVoice.start,
+                onVoiceStop: roomVoice.stop,
+                onDemoRideStatusChange: handleExploreDemoRideStatusChange,
+                onLiveStateChange: setExploreClubLiveState,
+                fullscreen: exploreRideFullscreen,
+                onFullscreenChange: handleExploreFullscreenChange,
+                heartRateByPlayer,
+              }}
+            />
           </Suspense>
         ) : appMode === 'monitor' ? (
-          <MonitorView
-            players={activePlayers}
-            samplesByDevice={samplesByDevice}
-            speedUnit={speedUnit}
-            fullscreen={utilityFullscreen}
-            onFullscreenChange={handleUtilityFullscreenChange}
-          />
+          <Suspense fallback={<div className="explore-loading">Loading monitor…</div>}>
+            <MonitorView
+              players={explorePlayers}
+              samplesByDevice={samplesByDevice}
+              speedUnit={speedUnit}
+              fullscreen={utilityFullscreen}
+              onFullscreenChange={handleUtilityFullscreenChange}
+              heartRateByPlayer={heartRateByPlayer}
+              historyStatusByPlayer={monitorHistoryStatusByPlayer}
+              studioHeartRateByPlayer={monitorStudioHeartRateByPlayer}
+              onStudioHeartRateOpen={handleMonitorHeartRateOpen}
+              onSprintArm={handleMonitorSprintArm}
+              onSprintArmCancel={handleMonitorSprintArmCancel}
+              onSprintStart={handleMonitorSprintStart}
+              onSprintCancel={handleMonitorSprintCancel}
+              onSprintComplete={handleMonitorSprintComplete}
+            />
+          </Suspense>
         ) : appMode === 'diagnostics' ? (
           <Suspense fallback={<div className="explore-loading">Loading diagnostics…</div>}>
             <DiagnosticsPanel
@@ -9331,6 +11481,7 @@ export default function App() {
                   finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
                   newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
+                  heartRateByPlayer={heartRateByPlayer}
                   earthAngle={earthAngle}
                   earthHeading={earthHeading}
                   earthCenter={earthCenter}
@@ -9407,6 +11558,7 @@ export default function App() {
                     onRaceCaptureCsvExport={exportRaceCaptureCsv}
                     onGhostToggle={toggleGhostLap}
                     onGhostClear={clearSelectedGhosts}
+                    heartRateByPlayer={raceHeartRateByPlayer}
                   />
                 </Suspense>
               </div>

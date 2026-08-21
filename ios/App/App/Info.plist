@@ -37,10 +37,16 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>TrackLab BMX connects to your Wattbike monitor to read live cadence, power, speed, and battery data during your training session.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>TrackLab BMX uses the camera only when you choose to take a rider profile photo.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>TrackLab BMX reads heart rate from Apple Watch during a training session so it can display and save your performance.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>TrackLab BMX saves the indoor cycling workout you start in TrackLab to Apple Health.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>TrackLab BMX uses your location only when you choose your current position as the start of an Explore the World ride.</string>
 	<key>NSMicrophoneUsageDescription</key>

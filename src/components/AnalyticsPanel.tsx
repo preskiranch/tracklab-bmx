@@ -1,5 +1,5 @@
 import { useMemo, type CSSProperties } from 'react';
-import { Activity, Download, Gauge, ListFilter, Timer, Trophy } from 'lucide-react';
+import { Activity, Download, Gauge, HeartPulse, ListFilter, Timer, Trophy } from 'lucide-react';
 import { buildRaceZoneResults, zoneRiderResult } from '../lib/raceReview';
 import {
   formatDistanceMeters,
@@ -14,6 +14,7 @@ import type {
   GhostLap,
   MetricKey,
   PlayerSlot,
+  PrivateHeartRateCapture,
   RaceCapture,
   RaceSummaryEntry,
   ReactionTimesByPlayer,
@@ -46,6 +47,7 @@ type AnalyticsPanelProps = {
   onRaceCaptureCsvExport: () => void;
   onGhostToggle: (ghostId: string) => void;
   onGhostClear: () => void;
+  heartRateByPlayer?: Partial<Record<PlayerSlot['id'], PrivateHeartRateCapture>>;
 };
 
 const metricMeta: Record<MetricKey, { label: string; unit: string; icon: typeof Activity }> = {
@@ -195,6 +197,7 @@ export function AnalyticsPanel({
   onRaceCaptureCsvExport,
   onGhostToggle,
   onGhostClear,
+  heartRateByPlayer = {},
 }: AnalyticsPanelProps) {
   const zonesToDisplay = activeZones.length > 0
     ? activeZones
@@ -243,6 +246,9 @@ export function AnalyticsPanel({
   const selectedGhostCount = selectedGhostIds.filter((ghostId) => (
     rankedGhosts.some((ghost) => ghost.id === ghostId)
   )).length;
+  const hasHeartRate = Object.values(heartRateByPlayer).some((capture) => (
+    (capture?.summary?.sampleCount ?? 0) > 0
+  ));
   const renderGhostOption = (ghost: GhostLap, rank: number) => {
     const selected = selectedGhostIds.includes(ghost.id);
     const normalizedRiderName = ghost.riderName.trim().toLocaleLowerCase();
@@ -315,7 +321,7 @@ export function AnalyticsPanel({
             Zone-based summary
           </div>
           <h2>Post-race analysis</h2>
-          <p>Cadence, speed, reaction, and finish results by zone and rider.</p>
+          <p>Cadence, speed, reaction, finish, and private Apple Watch heart-rate results by zone and rider.</p>
         </div>
         <div className="metric-summary">
           {selectedMetrics.map((metric) => {
@@ -399,6 +405,7 @@ export function AnalyticsPanel({
                   {showSpeedSummary && <th>Avg speed</th>}
                   {showCadenceSummary && <th>Top cadence</th>}
                   {showCadenceSummary && <th>Avg cadence</th>}
+                  {hasHeartRate && <th>Private heart rate</th>}
                   <th>Samples</th>
                 </tr>
               </thead>
@@ -444,6 +451,17 @@ export function AnalyticsPanel({
                     {showSpeedSummary && <td>{formatNullableSpeed(summary.averageSpeedKph, speedUnit)}</td>}
                     {showCadenceSummary && <td>{formatNullableMetric(summary.topCadence, 'RPM')}</td>}
                     {showCadenceSummary && <td>{formatNullableMetric(summary.averageCadence, 'RPM')}</td>}
+                    {hasHeartRate && (
+                      <td>
+                        {heartRateByPlayer[summary.playerId]?.summary?.sampleCount
+                          ? <span aria-label="Private Apple Watch heart rate">
+                            {formatNullableMetric(heartRateByPlayer[summary.playerId]?.summary?.averageBpm ?? null, 'BPM')} avg
+                            {' / '}
+                            {formatNullableMetric(heartRateByPlayer[summary.playerId]?.summary?.peakBpm ?? null, 'BPM')} peak
+                          </span>
+                          : '—'}
+                      </td>
+                    )}
                     <td>{summary.sampleCount}</td>
                   </tr>
                 ))}
@@ -490,6 +508,7 @@ export function AnalyticsPanel({
                   <td>{formatDistanceRangeMeters(zone.startMeter, zone.endMeter, distanceUnit)}</td>
                   {players.map((player) => {
                     const stats = zoneRiderResult(zoneResults, zone.id, player.id);
+                    const heartRateZone = heartRateByPlayer[player.id]?.zones?.find((item) => item.zoneId === zone.id);
 
                     return (
                       <td className="zone-rider-metrics" key={player.id}>
@@ -501,6 +520,14 @@ export function AnalyticsPanel({
                           <small>Max speed</small>
                           <strong>{formatNullableSpeed(stats?.topSpeedKph ?? null, speedUnit)}</strong>
                         </span>
+                        {hasHeartRate && (
+                          <span className="table-metric private-heart-rate-metric">
+                            <small><HeartPulse size={12} /> Private HR avg / peak</small>
+                            <strong>{heartRateZone?.summary.sampleCount
+                              ? `${Math.round(heartRateZone.summary.averageBpm ?? 0)} / ${Math.round(heartRateZone.summary.peakBpm ?? 0)} BPM`
+                              : 'No heart-rate sample'}</strong>
+                          </span>
+                        )}
                       </td>
                     );
                   })}

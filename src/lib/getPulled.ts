@@ -173,6 +173,16 @@ export function addGetPulledSample(
   };
 }
 
+/** Includes the boundary sample without allowing timer jitter past the official finish clock. */
+export function addGetPulledSampleThroughEnd(
+  accumulator: GetPulledAccumulator,
+  metrics: GetPulledMetrics,
+  sampleAt: number,
+  endedAt: number,
+): GetPulledAccumulator {
+  return addGetPulledSample(accumulator, metrics, Math.min(sampleAt, endedAt));
+}
+
 export function getPulledResultFromAccumulator(
   accumulator: GetPulledAccumulator,
   player: PlayerSlot,

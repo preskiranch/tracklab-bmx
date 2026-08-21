@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   closestExploreScreenRotation,
@@ -19,6 +20,7 @@ import {
   stepExploreLiveVelocity,
 } from '../../src/lib/explore';
 import { exploreBikeAudioMode } from '../../src/lib/bikeRaceAudio';
+import { restoreExploreRidersPaused } from '../../src/hooks/useExploreRide';
 import { formatExploreDistanceMeters } from '../../src/units';
 import type { ExploreRider } from '../../src/types';
 
@@ -41,6 +43,45 @@ function rider(id: number, distanceMeters: number): ExploreRider {
 }
 
 describe('Explore route geometry', () => {
+  it('restores a mixed group paused without changing a finished rider clock', () => {
+    const finished = {
+      ...rider(1, 1_000),
+      velocityMps: 12,
+      cadence: 145,
+      watts: 900,
+      signal: 0.95,
+      finishedAt: 10_500,
+      at: 10_500,
+    };
+    const unfinished = {
+      ...rider(2, 600),
+      finishedAt: null,
+      at: 10_400,
+    };
+
+    const restored = restoreExploreRidersPaused([finished, unfinished], 20_000);
+
+    expect(restored.map((candidate) => candidate.finishedAt)).toEqual([10_500, null]);
+    expect(restored).toEqual([
+      expect.objectContaining({
+        playerId: 1,
+        velocityMps: 0,
+        cadence: 0,
+        watts: 0,
+        signal: 0,
+        at: 20_000,
+      }),
+      expect.objectContaining({
+        playerId: 2,
+        velocityMps: 0,
+        cadence: 0,
+        watts: 0,
+        signal: 0,
+        at: 20_000,
+      }),
+    ]);
+  });
+
   it('decodes Google encoded polylines and follows them by route progress', () => {
     const points = decodeGooglePolyline('_p~iF~ps|U_ulLnnqC_mqNvxq`@');
     expect(points).toEqual([
@@ -255,6 +296,12 @@ describe('Explore automatic map layouts', () => {
     ]);
     expect(groups.map((group) => group.riders.length)).toEqual([1, 1, 1, 1]);
     expect(exploreGridClass(groups.length)).toBe('explore-map-grid four-way');
+  });
+
+  it('keeps the four-way fullscreen rider strip to compact one-line metrics', () => {
+    const css = readFileSync(new URL('../../src/components/ExploreView.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.explore-air-instruction\s*\{[^}]*display:\s*none;/s);
+    expect(css).toMatch(/\.explore-elevation-status\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*white-space:\s*nowrap;/s);
   });
 });
 

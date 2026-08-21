@@ -183,6 +183,92 @@ export type ExploreRider = {
   at: number;
 };
 
+/**
+ * An immutable studio-side snapshot of who was assigned to a physical bike
+ * before an Explore ride began. These values are identifiers and display
+ * metadata only; bearer credentials must never be added to this shape.
+ */
+export type ExploreRideRiderBinding = Readonly<{
+  playerId: PlayerSlot['id'];
+  riderId?: string;
+  riderName: string;
+  deviceId: number;
+  deviceLabel?: string;
+}>;
+
+/** Non-secret identifiers returned after a future club authorization call. */
+export type ExploreRideAuthorizationReferences = Readonly<{
+  authorizationGroupId: string;
+  riders: readonly Readonly<{
+    playerId: PlayerSlot['id'];
+    authorizationId: string;
+  }>[];
+  /** Full allow-listed recovery material; never contains the completion token. */
+  authorizationCheckpoint?: import('./lib/clubOwnerTrainingCoordinator').ClubOwnerTrainingCheckpoint;
+}>;
+
+/**
+ * The allow-listed subset of studio authorization state that may survive an
+ * app reload. A recovered token is intentionally owned by the caller and is
+ * never accepted by the checkpoint serializer.
+ */
+export type ExploreRideStudioBinding = Readonly<{
+  authorizationGroupId?: string;
+  authorizationCheckpoint?: import('./lib/clubOwnerTrainingCoordinator').ClubOwnerTrainingCheckpoint;
+  riders: readonly Readonly<ExploreRideRiderBinding & {
+    authorizationId?: string;
+  }>[];
+}>;
+
+export type ExploreRideSessionArm = Readonly<{
+  sessionId: string;
+  route: ExploreRoute;
+  armedAt: number;
+  riderBindings: readonly ExploreRideRiderBinding[];
+}>;
+
+export type ExploreRideSessionRestored = Readonly<{
+  sessionId: string;
+  route: ExploreRoute;
+  startedAt: number;
+  elapsedMs: number;
+  activeClockSegments: readonly import('./lib/heartRate').HeartRateActiveClockSegment[];
+  studioBinding: ExploreRideStudioBinding;
+}>;
+
+export type ExploreRideSessionStartEvent = Readonly<ExploreRideSessionArm & {
+  riders: ExploreRider[];
+  startedAt: number;
+  studioBinding?: ExploreRideStudioBinding;
+}>;
+
+export type ExploreRideSessionClockEvent = Readonly<{
+  sessionId: string;
+  at: number;
+  activeElapsedMs: number;
+  studioBinding?: ExploreRideStudioBinding;
+}>;
+
+export type ExploreRideSessionCancellation = Readonly<{
+  sessionId: string;
+  at: number;
+  activeElapsedMs: number;
+  reason: 'authorization-failed' | 'binding-changed' | 'reset' | 'view-closed';
+  arm?: ExploreRideSessionArm;
+  studioBinding?: ExploreRideStudioBinding;
+}>;
+
+export type ExploreRideCompleteEvent = Readonly<{
+  sessionId: string;
+  route: ExploreRoute;
+  riders: ExploreRider[];
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  activeClockSegments: import('./lib/heartRate').HeartRateActiveClockSegment[];
+  studioBinding?: ExploreRideStudioBinding;
+}>;
+
 export type ExploreSession = {
   id: string;
   routeId: string;
@@ -402,7 +488,52 @@ export type UnitPreferences = {
   updatedAt: number;
 };
 
-export type TrainingActivityType = 'bmx-race' | 'straight-sprint' | 'explore' | 'get-pulled';
+/**
+ * Apple Watch heart-rate data is private training data. Keep these types out of
+ * public race, leaderboard, multiplayer, friend, and ghost payloads.
+ */
+export type HeartRateSource = 'apple-watch';
+
+export type HeartRateMeasurement = Readonly<{
+  source: HeartRateSource;
+  sessionId: string | null;
+  sequence: number;
+  bpm: number;
+  recordedAt: number;
+  receivedAt: number;
+}>;
+
+export type PrivateHeartRateSample = Readonly<HeartRateMeasurement & {
+  activeElapsedMs: number;
+}>;
+
+export type PrivateHeartRateSummary = Readonly<{
+  sampleCount: number;
+  coverageMs: number;
+  coveragePercent: number;
+  firstSampleElapsedMs: number | null;
+  lastSampleElapsedMs: number | null;
+  minimumBpm: number | null;
+  averageBpm: number | null;
+  peakBpm: number | null;
+}>;
+
+export type PrivateHeartRateZoneSummary = Readonly<{
+  zoneId: string;
+  zoneName?: string;
+  startElapsedMs: number;
+  endElapsedMs: number;
+  summary: PrivateHeartRateSummary;
+}>;
+
+export type PrivateHeartRateCapture = Readonly<{
+  source: HeartRateSource;
+  samples: readonly PrivateHeartRateSample[];
+  summary?: PrivateHeartRateSummary;
+  zones?: readonly PrivateHeartRateZoneSummary[];
+}>;
+
+export type TrainingActivityType = 'bmx-race' | 'straight-sprint' | 'explore' | 'get-pulled' | 'monitor-sprint';
 
 export type TrainingSessionClub = {
   id: string;

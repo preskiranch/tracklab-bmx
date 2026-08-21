@@ -239,6 +239,7 @@
 }
 .training-session-card.straight-sprint { border-left-color: #ffcc37; }
 .training-session-card.explore { border-left-color: #38a7f3; }
+.training-session-card.monitor-sprint { border-left-color: #8b5cf6; }
 .training-session-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #edf2f5; }
 .training-session-copy { display: grid; gap: 2px; min-width: 0; }
 .training-session-copy > span { color: #667085; font-size: 11px; font-weight: 900; text-transform: uppercase; }
@@ -248,6 +249,67 @@
 .training-session-copy p { margin: 4px 0 0; }
 .training-session-downloads { display: flex; gap: 6px; }
 .training-session-downloads button { padding: 6px 9px; }
+.private-heart-rate-history {
+  display: grid;
+  gap: 9px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #d9c9ff;
+  border-radius: 10px;
+  background: #faf8ff;
+}
+.private-heart-rate-history > header,
+.private-heart-rate-title,
+.private-heart-rate-owner,
+.private-heart-rate-message.error,
+.private-heart-rate-message button {
+  display: flex;
+  align-items: center;
+}
+.private-heart-rate-history > header { justify-content: space-between; gap: 8px; }
+.private-heart-rate-title { gap: 6px; color: #43217b; font-size: 12px; font-weight: 900; }
+.private-heart-rate-owner { justify-content: flex-end; gap: 4px; color: #315b20; font-size: 10px; font-weight: 850; text-align: right; }
+.private-heart-rate-owner > svg { flex: 0 0 auto; }
+.private-heart-rate-message { margin: 0; color: #667085; font-size: 12px; }
+.private-heart-rate-stream .private-heart-rate-message { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.private-heart-rate-message.error { justify-content: space-between; gap: 8px; color: #b42318; }
+.private-heart-rate-message button {
+  flex: 0 0 auto;
+  gap: 4px;
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid #cab8ed;
+  border-radius: 7px;
+  background: #fff;
+  color: #43217b;
+  font: inherit;
+  font-weight: 800;
+}
+.private-heart-rate-streams,
+.private-heart-rate-stream { display: grid; gap: 8px; }
+.private-heart-rate-stream + .private-heart-rate-stream { padding-top: 8px; border-top: 1px solid #e8def9; }
+.private-heart-rate-segment { color: #667085; font-size: 11px; }
+.private-heart-rate-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.private-heart-rate-metrics > div { display: grid; gap: 1px; padding: 7px; border-radius: 7px; background: #fff; }
+.private-heart-rate-metrics > div.coverage { grid-column: 1 / -1; }
+.private-heart-rate-metrics dt { color: #667085; font-size: 10px; font-weight: 750; }
+.private-heart-rate-metrics dd { margin: 0; color: #1f2937; font-size: 12px; font-weight: 900; }
+.private-heart-rate-zones { display: grid; gap: 6px; }
+.private-heart-rate-zones > strong { color: #43217b; font-size: 11px; }
+.private-heart-rate-zones article {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(150px, 1fr);
+  gap: 3px 10px;
+  padding: 7px;
+  border: 1px solid #ebe4f8;
+  border-radius: 7px;
+  background: #fff;
+}
+.private-heart-rate-zones article > div { display: grid; grid-row: 1 / span 2; }
+.private-heart-rate-zones article span,
+.private-heart-rate-zones article small { color: #667085; font-size: 11px; }
+.private-heart-rate-zones article > span { color: #344054; font-weight: 800; }
+.private-heart-rate-separation { color: #667085; font-size: 10px; }
 .training-day-empty { display: grid; place-items: center; gap: 6px; min-height: 210px; text-align: center; color: #667085; }
 .account-history-sync-note { color: #667085; text-align: right; }
 
@@ -266,6 +328,10 @@
   .training-calendar-controls { width: 100%; justify-content: space-between; }
   .training-session-card { grid-template-columns: 38px minmax(0, 1fr); }
   .training-session-downloads { grid-column: 1 / -1; }
+  .private-heart-rate-metrics { grid-template-columns: 1fr; }
+  .private-heart-rate-metrics > div.coverage { grid-column: auto; }
+  .private-heart-rate-zones article { grid-template-columns: 1fr; }
+  .private-heart-rate-zones article > div { grid-row: auto; }
   .club-connect-panel > header,
   .club-athlete-access,
   .club-owner-intro { align-items: flex-start; flex-direction: column; }

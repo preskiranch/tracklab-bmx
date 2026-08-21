@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bike,
   Bluetooth,
@@ -30,10 +30,14 @@ import {
   type ClubTabletDeviceCredential,
   type ClubTabletRoster,
   type ClubTabletSessionCredential,
+  type ClubTabletWatchConnectStatus,
 } from '../lib/clubTablet';
 import type { AppMode } from '../types';
 import type { NativeBluetoothBootstrapStatus } from '../lib/nativeBluetoothBootstrap';
 import type { ClubTabletDeviceStatus } from './ClubTabletRuntime';
+import { loadClubTabletWatchConnectStatus } from '../lib/watchConnectCloud';
+import { clubTabletWatchConnectSelectionState } from '../lib/studioWatchConnectSelection';
+import { StudioWatchConnectStatus } from './StudioWatchConnectStatus';
 import './ClubTabletMode.css';
 
 type ClubTabletBike = {
@@ -67,6 +71,10 @@ export function clubTabletBikeAccessReady(
   accessReady: boolean,
 ) {
   return deviceStatus === 'active' && accessReady;
+}
+
+export function clubTabletWatchStatusRequestIsCurrent(requestKey: string, currentKey: string) {
+  return Boolean(requestKey) && requestKey === currentKey;
 }
 
 function bikeLabel(bike: ClubTabletBike) {
@@ -105,6 +113,8 @@ export default function ClubTabletMode({
   const [managedDevices, setManagedDevices] = useState<ClubTabletDevice[]>([]);
   const [deviceManagementBusy, setDeviceManagementBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [watchStatus, setWatchStatus] = useState<ClubTabletWatchConnectStatus | null>(null);
+  const [watchClock, setWatchClock] = useState(Date.now());
   const bikeAccessReady = clubTabletBikeAccessReady(deviceStatus, accessReady);
   const nativeBluetoothFailed = nativeBluetoothStatus.state === 'failed';
 
@@ -114,6 +124,11 @@ export default function ClubTabletMode({
   const sessionAthlete = activeSession
     ? roster?.athletes.find((athlete) => athlete.studioRiderId === activeSession.session.studioRiderId)
     : null;
+  const activeWatchRequestKey = activeSession
+    ? `${activeSession.sessionToken}:${activeSession.session.clubId}:${activeSession.session.studioRiderId}`
+    : '';
+  const activeWatchRequestKeyRef = useRef(activeWatchRequestKey);
+  activeWatchRequestKeyRef.current = activeWatchRequestKey;
   const filteredAthletes = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return roster?.athletes ?? [];
@@ -133,6 +148,39 @@ export default function ClubTabletMode({
       setSelectedRiderId(filteredAthletes[0].studioRiderId);
     }
   }, [filteredAthletes, selectedRiderId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setWatchClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!activeSession || !activeWatchRequestKey) {
+      setWatchStatus(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setWatchStatus(sessionAthlete?.watchConnect ?? null);
+    const refresh = () => {
+      const requestKey = activeWatchRequestKey;
+      void loadClubTabletWatchConnectStatus(activeSession.sessionToken)
+        .then((next) => {
+          if (
+            cancelled
+            || !clubTabletWatchStatusRequestIsCurrent(requestKey, activeWatchRequestKeyRef.current)
+          ) return;
+          setWatchStatus(next);
+          setWatchClock(Date.now());
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 12_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeSession, activeWatchRequestKey, sessionAthlete?.watchConnect]);
 
   useEffect(() => {
     if (!canAuthorize || deviceCredential) return;
@@ -383,6 +431,11 @@ export default function ClubTabletMode({
       ? clubTabletAthleteDisplayName(sessionAthlete)
       : activeSession.session.athleteName || activeSession.session.riderName;
     const expiresInMinutes = Math.max(1, Math.ceil((activeSession.session.expiresAt - Date.now()) / 60_000));
+    const activeWatchState = clubTabletWatchConnectSelectionState({
+      claimed: sessionAthlete?.status === 'claimed',
+      status: watchStatus ?? sessionAthlete?.watchConnect,
+      now: watchClock,
+    });
     return (
       <section className="club-tablet-mode active">
         <div className="club-tablet-active-card">
@@ -397,6 +450,7 @@ export default function ClubTabletMode({
             <h2>{athleteName}</h2>
             <p>{activeSession.session.clubName} · {bikeLabel({ deviceId: activeSession.session.bikeDeviceId, label: bikes.find((bike) => bike.deviceId === activeSession.session.bikeDeviceId)?.label ?? 'Wattbike' })}</p>
             <small><Clock3 size={13} /> Secure session renews automatically · about {expiresInMinutes} min remaining</small>
+            <StudioWatchConnectStatus athleteName={athleteName} state={activeWatchState} />
           </div>
           <button type="button" className="club-tablet-end" disabled={busy === 'ending'} onClick={endAthlete}>
             <LogOut size={18} /> {busy === 'ending' ? 'Ending…' : 'End athlete session'}
@@ -451,6 +505,13 @@ export default function ClubTabletMode({
           <div className="club-tablet-athletes">
             {filteredAthletes.map((athlete) => {
               const selected = athlete.studioRiderId === selectedRiderId;
+              const selectedWatchState = selected
+                ? clubTabletWatchConnectSelectionState({
+                  claimed: athlete.status === 'claimed',
+                  status: athlete.watchConnect,
+                  now: watchClock,
+                })
+                : null;
               return (
                 <button
                   className={selected ? 'selected' : ''}
@@ -462,6 +523,12 @@ export default function ClubTabletMode({
                   <span>
                     <strong>{clubTabletAthleteDisplayName(athlete)}</strong>
                     <small>{athlete.status === 'claimed' ? 'Claimed TrackLab profile' : 'Studio profile · not claimed yet'}</small>
+                    {selectedWatchState && (
+                      <StudioWatchConnectStatus
+                        athleteName={clubTabletAthleteDisplayName(athlete)}
+                        state={selectedWatchState}
+                      />
+                    )}
                   </span>
                   {selected && <CheckCircle2 size={20} />}
                 </button>

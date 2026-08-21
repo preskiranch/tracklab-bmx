@@ -1,0 +1,88 @@
+.heart-rate-metric {
+  align-items: center;
+  background: linear-gradient(145deg, rgba(85, 20, 35, .96), rgba(27, 12, 19, .96));
+  border: 1px solid rgba(255, 104, 132, .46);
+  border-radius: 12px;
+  box-sizing: border-box;
+  color: #fff;
+  display: inline-flex;
+  gap: 9px;
+  min-height: 54px;
+  min-width: 116px;
+  padding: 8px 12px;
+}
+
+.heart-rate-metric > svg {
+  color: #ff5d7a;
+  flex: 0 0 auto;
+}
+
+.heart-rate-metric > span {
+  display: grid;
+  line-height: 1;
+  min-width: 0;
+}
+
+.heart-rate-metric strong {
+  font-size: 25px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.035em;
+}
+
+.heart-rate-metric small {
+  color: rgba(255, 255, 255, .72);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  line-height: 1.2;
+  margin-top: 3px;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.heart-rate-metric.missing,
+.heart-rate-metric.stale {
+  background: rgba(18, 21, 25, .92);
+  border-color: rgba(255, 255, 255, .16);
+}
+
+.heart-rate-metric.missing > svg,
+.heart-rate-metric.stale > svg {
+  color: rgba(255, 255, 255, .44);
+}
+
+.heart-rate-metric.compact {
+  border-radius: 9px;
+  gap: 6px;
+  min-height: 40px;
+  min-width: 92px;
+  padding: 5px 8px;
+}
+
+.heart-rate-metric.compact strong {
+  font-size: 18px;
+}
+
+.heart-rate-metric.compact small {
+  font-size: 8px;
+  max-width: 82px;
+}
+
+.race-rider-overlay-heart-rate {
+  align-items: center;
+  color: #ff6f87 !important;
+  display: inline-flex !important;
+  font-size: 10px !important;
+  font-weight: 900;
+  gap: 4px;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.race-rider-overlay-heart-rate b {
+  font-size: 12px;
+  line-height: 1;
+}

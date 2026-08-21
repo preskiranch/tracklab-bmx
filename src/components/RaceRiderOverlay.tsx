@@ -9,6 +9,12 @@ import { RiderAvatar } from './RiderAvatar';
 import { NewRecordBadge } from './NewRecordBadge';
 import type { PersonalRecordAchievements } from '../lib/personalRecords';
 import { ghostPlaybackAccent } from '../lib/ghosts';
+import { heartRateReadingState } from './HeartRateMetric';
+
+export type LiveHeartRateByPlayer = Partial<Record<PlayerSlot['id'], {
+  bpm: number | null;
+  recordedAt: number | null;
+}>>;
 
 type DragState =
   | {
@@ -41,6 +47,7 @@ type OverlayEntry = {
   distanceMeters: number;
   finishedAt: number | null;
   kind: 'local' | 'ghost' | 'remote';
+  heartRateBpm: number | null;
 };
 
 type RaceRiderOverlayProps = {
@@ -58,6 +65,7 @@ type RaceRiderOverlayProps = {
   onPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onFullscreenInteraction: () => void;
   newPersonalRecordsByPlayer: PersonalRecordAchievements;
+  heartRateByPlayer?: LiveHeartRateByPlayer;
 };
 
 function ordinal(value: number) {
@@ -102,6 +110,7 @@ export function RaceRiderOverlay({
   onPreferenceChange,
   onFullscreenInteraction,
   newPersonalRecordsByPlayer,
+  heartRateByPlayer = {},
 }: RaceRiderOverlayProps) {
   const [layout, setLayout] = useState<RaceRiderOverlayLayout>(
     () => normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout),
@@ -147,6 +156,10 @@ export function RaceRiderOverlay({
         return [];
       }
 
+      const heartRate = heartRateReadingState(
+        heartRateByPlayer[player.id]?.bpm,
+        heartRateByPlayer[player.id]?.recordedAt,
+      );
       return [{
         id: `local-${player.id}`,
         playerId: player.id,
@@ -160,6 +173,7 @@ export function RaceRiderOverlay({
         distanceMeters: rider.distance,
         finishedAt: rider.finishedAt,
         kind: 'local' as const,
+        heartRateBpm: heartRate.bpm,
       }];
     });
 
@@ -176,6 +190,7 @@ export function RaceRiderOverlay({
       distanceMeters: rider.distance,
       finishedAt: rider.finishedAt,
       kind: 'ghost' as const,
+      heartRateBpm: null,
     }));
 
     const remoteEntries = remoteRaceStates.flatMap((state) => state.riders.map((rider, index) => ({
@@ -191,11 +206,12 @@ export function RaceRiderOverlay({
       distanceMeters: rider.distance,
       finishedAt: rider.finishedAt,
       kind: 'remote' as const,
+      heartRateBpm: null,
     })));
 
     return [...localEntries, ...ghostEntries, ...remoteEntries]
       .sort((left, right) => left.rank - right.rank || right.progressPct - left.progressPct);
-  }, [ghostRiders, players, remoteRaceStates, riders, trackLengthMeters]);
+  }, [ghostRiders, heartRateByPlayer, players, remoteRaceStates, riders, trackLengthMeters]);
   const positionsEstablished = useMemo(
     () => racePositionsAreEstablished(raceState, entries),
     [entries, raceState],
@@ -376,6 +392,11 @@ export function RaceRiderOverlay({
                     ? `${((entry.finishedAt ?? 0) / 1000).toFixed(2)}s finish`
                     : `${entry.progressPct}% track / ${formatSpeedFromKph(entry.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`}
                 </span>
+                {entry.heartRateBpm != null && (
+                  <span className="race-rider-overlay-heart-rate" aria-label={`Heart rate ${entry.heartRateBpm} beats per minute`}>
+                    <b aria-hidden="true">♥</b> {entry.heartRateBpm} BPM
+                  </span>
+                )}
                 {entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId] && (
                   <NewRecordBadge />
                 )}

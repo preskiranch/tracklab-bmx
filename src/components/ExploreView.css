@@ -3,7 +3,7 @@
 .platform-shell.explore-fullscreen .explore-map-grid.split,
 .platform-shell.explore-fullscreen .explore-map-grid.three-way,
 .platform-shell.explore-fullscreen .explore-map-grid.four-way {
-  inset: 52px 0 96px;
+  inset: 52px 0 97px;
   height: auto;
 }
 
@@ -53,4 +53,27 @@
 .platform-shell.explore-fullscreen .explore-rider-strip article span {
   font-size: 11px;
   line-height: 1.15;
+}
+
+.platform-shell.explore-fullscreen .explore-air-instruction {
+  display: none;
+}
+
+.platform-shell.explore-fullscreen .explore-elevation-status {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explore-heart-rate {
+  align-items: center;
+  color: #a74459;
+  display: inline-flex !important;
+  font-weight: 850;
+  gap: 5px;
+}
+
+.explore-heart-rate.missing,
+.explore-heart-rate.stale {
+  color: #7a807b;
 }

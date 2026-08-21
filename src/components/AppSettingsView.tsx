@@ -7,6 +7,7 @@ import {
   speedUnitLabel,
 } from '../units';
 import './AppSettingsView.css';
+import type { ReactNode } from 'react';
 
 type AppSettingsViewProps = {
   speedUnit: SpeedUnit;
@@ -19,6 +20,7 @@ type AppSettingsViewProps = {
   onSpeedUnitChange: (unit: SpeedUnit) => void;
   onDistanceUnitChange: (unit: DistanceUnit) => void;
   onUseRegionalDefaults: () => void;
+  heartRatePanel?: ReactNode;
 };
 
 function regionName(regionCode: string | null) {
@@ -41,6 +43,7 @@ export function AppSettingsView({
   onSpeedUnitChange,
   onDistanceUnitChange,
   onUseRegionalDefaults,
+  heartRatePanel,
 }: AppSettingsViewProps) {
   const region = regionName(regionCode);
   const regionalSpeedLabel = regionalSpeedUnit === 'mph' ? 'MPH' : 'KPH';
@@ -144,6 +147,7 @@ export function AppSettingsView({
           </button>
         </div>
       </section>
+      {heartRatePanel}
     </div>
   );
 }

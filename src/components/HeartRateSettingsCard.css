@@ -1,0 +1,178 @@
+.heart-rate-settings-card {
+  background: #fff;
+  border: 1px solid #e3cbd1;
+  border-radius: 16px;
+  box-shadow: 0 10px 28px rgba(50, 20, 30, .06);
+  padding: clamp(18px, 3vw, 28px);
+}
+
+.heart-rate-settings-card > header {
+  align-items: center;
+  border-bottom: 1px solid #f0e3e6;
+  color: #9f2743;
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 16px;
+}
+
+.heart-rate-settings-card h2 {
+  color: #101828;
+  margin: 3px 0 0;
+}
+
+.heart-rate-settings-body {
+  align-items: center;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  padding: 18px 0;
+}
+
+.heart-rate-settings-state {
+  display: grid;
+  gap: 4px;
+}
+
+.heart-rate-settings-state span,
+.heart-rate-settings-state small {
+  color: #667085;
+  line-height: 1.45;
+}
+
+.heart-rate-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.heart-rate-settings-actions button {
+  align-items: center;
+  background: #f7f5f6;
+  border: 1px solid #d9cdd0;
+  border-radius: 10px;
+  color: #344054;
+  display: inline-flex;
+  font-weight: 800;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 14px;
+}
+
+.heart-rate-settings-actions button.primary {
+  background: #a72b48;
+  border-color: #a72b48;
+  color: #fff;
+}
+
+.heart-rate-settings-actions button.danger {
+  color: #b42318;
+}
+
+.heart-rate-relay-summary {
+  background: #f4fbf6;
+  border: 1px solid #b7dfc0;
+  border-radius: 12px;
+  color: #175d2b;
+  display: grid;
+  gap: 3px;
+  margin-top: 14px;
+  padding: 11px 13px;
+}
+
+.heart-rate-relay-summary.warning {
+  background: #fff8eb;
+  border-color: #f3c778;
+  color: #7a4b00;
+}
+
+.heart-rate-relay-summary span {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.heart-rate-settings-privacy {
+  align-items: flex-start;
+  background: #fff6f7;
+  border: 1px solid #f4d5dc;
+  border-radius: 12px;
+  color: #7a273c;
+  display: flex;
+  gap: 9px;
+  margin-top: 16px;
+  padding: 11px 13px;
+}
+
+.heart-rate-settings-privacy svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.heart-rate-settings-privacy p {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.heart-rate-studio-consent {
+  background: #f7fbff;
+  border: 1px solid #cdddeb;
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 13px;
+}
+
+.heart-rate-studio-consent legend {
+  color: #17324d;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 0 5px;
+}
+
+.heart-rate-studio-consent > p {
+  color: #53677b;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.heart-rate-studio-consent label {
+  align-items: flex-start;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.heart-rate-studio-consent input {
+  height: 20px;
+  margin: 2px 0 0;
+  width: 20px;
+}
+
+.heart-rate-studio-consent label span {
+  display: grid;
+  gap: 2px;
+}
+
+.heart-rate-studio-consent label small {
+  color: #66798a;
+  line-height: 1.4;
+}
+
+@media (max-width: 620px) {
+  .heart-rate-settings-body {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .heart-rate-settings-body .heart-rate-metric {
+    width: 100%;
+  }
+
+  .heart-rate-settings-actions button {
+    justify-content: center;
+    width: 100%;
+  }
+}

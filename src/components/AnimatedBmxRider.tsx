@@ -280,7 +280,9 @@ export function AnimatedBmxRider({ active, cadenceRpm }: AnimatedBmxRiderProps) 
       }
       previousTime = time;
 
-      renderRider(canvasRef.current, riderImage, phaseRef.current);
+      if (riderImage.complete && riderImage.naturalWidth > 0) {
+        renderRider(canvasRef.current, riderImage, phaseRef.current);
+      }
       canvasRef.current.dataset.crankAngleDegrees = (
         (phaseRef.current * 180 / Math.PI) % 360
       ).toFixed(1);
@@ -290,11 +292,11 @@ export function AnimatedBmxRider({ active, cadenceRpm }: AnimatedBmxRiderProps) 
       frameId = requestAnimationFrame(render);
     };
 
-    riderImage.onload = () => {
-      if (cancelled) return;
-      frameId = requestAnimationFrame(render);
-    };
     riderImage.src = riderImageUrl;
+    // Keep the cadence clock independent of image delivery. On a cold or slow
+    // asset load the pull must still begin moving immediately; drawing starts
+    // on the first frame after the rider image becomes available.
+    frameId = requestAnimationFrame(render);
     return () => {
       cancelled = true;
       cancelAnimationFrame(frameId);

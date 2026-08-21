@@ -13,6 +13,7 @@ type StudioRaceEntryProps = {
   accountRiderId?: string;
   canEdit: boolean;
   canManageRiders: boolean;
+  watchConnectStatusByRider?: Readonly<Record<string, string>>;
   onToggleEntry: (deviceId: number) => void;
   onEnterAll: () => void;
   onClearEntries: () => void;
@@ -31,6 +32,7 @@ export function StudioRaceEntry({
   accountRiderId,
   canEdit,
   canManageRiders,
+  watchConnectStatusByRider,
   onToggleEntry,
   onEnterAll,
   onClearEntries,
@@ -182,7 +184,7 @@ export function StudioRaceEntry({
                       photoUrl={assignedRider.photoUrl}
                       accent={player.accent}
                     />
-                    <span>Rider profile</span>
+                    <span>{watchConnectStatusByRider?.[assignedRider.id] ?? 'Rider profile'}</span>
                   </div>
                 ) : null}
               </div>

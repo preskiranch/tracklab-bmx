@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Gauge, Play, RotateCcw, TimerReset, Zap } from 'lucide-react';
+import { Activity, Gauge, HeartPulse, Play, RotateCcw, TimerReset, Zap } from 'lucide-react';
 import {
   addGetPulledSample,
+  addGetPulledSampleThroughEnd,
   createGetPulledAccumulator,
   getPulledCountdownSeconds,
   getPulledDemoMetrics,
@@ -21,6 +22,7 @@ import {
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type {
   BikeSample,
+  HeartRateMeasurement,
   PlayerSlot,
   SpeedUnit,
   StudioRider,
@@ -35,6 +37,145 @@ import {
 } from '../lib/bikeRaceAudio';
 import { PullSledScene } from './PullSledScene';
 import './GetPulledView.css';
+import { HeartRateMetric } from './HeartRateMetric';
+import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
+import { mapHeartRateMeasurementsToActiveClock, summarizeHeartRate } from '../lib/heartRate';
+
+export const getPulledDeviceDisconnectGraceMs = 750;
+
+export type GetPulledSessionArm = Readonly<{
+  sessionId: string;
+  playerId: PlayerSlot['id'];
+  riderId?: string;
+  riderName: string;
+  deviceId: number;
+  deviceLabel?: string;
+  armedAt: number;
+  durationMs: number;
+  airSetting: number;
+}>;
+
+export type GetPulledSessionStart = Readonly<GetPulledSessionArm & {
+  /** Exact Wattbike power-packet clock for the first fresh sample at >= 1 W. */
+  startedAt: number;
+}>;
+
+export type GetPulledSessionCancellation = Readonly<GetPulledSessionArm & {
+  canceledAt: number;
+  phase: 'countdown' | 'armed' | 'active';
+  reason: 'user-cancelled' | 'reset' | 'view-closed' | 'binding-changed' | 'authorization-failed';
+  startedAt?: number;
+}>;
+
+function defaultGetPulledSessionNonce() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
+/** Freezes the exact athlete/bike assignment before the countdown begins. */
+export function createGetPulledSessionArm(
+  player: PlayerSlot,
+  durationMs: number,
+  airSetting: number,
+  armedAt = Date.now(),
+  createNonce: () => string = defaultGetPulledSessionNonce,
+): GetPulledSessionArm | null {
+  if (
+    player.deviceId == null
+    || !Number.isSafeInteger(armedAt)
+    || armedAt < 0
+    || !Number.isSafeInteger(durationMs)
+    || durationMs < 1
+  ) return null;
+  const nonce = createNonce().trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u.test(nonce)) return null;
+  return Object.freeze({
+    sessionId: `get-pulled:${nonce}`,
+    playerId: player.id,
+    ...(player.riderId ? { riderId: player.riderId } : {}),
+    riderName: player.name,
+    deviceId: player.deviceId,
+    ...(player.deviceLabel ? { deviceLabel: player.deviceLabel } : {}),
+    armedAt,
+    durationMs,
+    airSetting,
+  });
+}
+
+export function getPulledSessionStartFromArm(
+  arm: GetPulledSessionArm,
+  startedAt: number,
+): GetPulledSessionStart | null {
+  if (!Number.isSafeInteger(startedAt) || startedAt < arm.armedAt) return null;
+  return Object.freeze({ ...arm, startedAt });
+}
+
+export function getPulledSessionArmMatchesPlayer(
+  arm: GetPulledSessionArm,
+  player: PlayerSlot | null | undefined,
+) {
+  return Boolean(
+    player
+    && arm.playerId === player.id
+    && arm.deviceId === player.deviceId
+    && (arm.riderId ?? null) === (player.riderId ?? null)
+    && arm.riderName === player.name,
+  );
+}
+
+/**
+ * Player slots are presentation seats and may be reindexed when other bikes go
+ * stale. An armed live pull remains bound to its physical device and athlete;
+ * only a real device disconnect or rider reassignment invalidates that arm.
+ */
+export function getPulledSessionArmMatchesLiveBinding(
+  arm: GetPulledSessionArm,
+  connectedPlayers: readonly PlayerSlot[],
+  riderAssignments: StudioRiderAssignments,
+  demoMode: boolean,
+) {
+  const playerOnArmedDevice = connectedPlayers.find(
+    (player) => player.deviceId === arm.deviceId,
+  );
+  if (!playerOnArmedDevice) return false;
+  if (demoMode) return getPulledSessionArmMatchesPlayer(arm, playerOnArmedDevice);
+  return Boolean(arm.riderId && riderAssignments[arm.deviceId] === arm.riderId);
+}
+
+export function createGetPulledSessionCancellation(
+  arm: GetPulledSessionArm,
+  phase: GetPulledSessionCancellation['phase'],
+  reason: GetPulledSessionCancellation['reason'],
+  canceledAt: number,
+  startedAt?: number,
+): GetPulledSessionCancellation | null {
+  if (
+    !Number.isSafeInteger(canceledAt)
+    || canceledAt < arm.armedAt
+    || (startedAt != null && (!Number.isSafeInteger(startedAt) || startedAt < arm.armedAt || startedAt > canceledAt))
+  ) return null;
+  return Object.freeze({
+    ...arm,
+    canceledAt,
+    phase,
+    reason,
+    ...(startedAt != null ? { startedAt } : {}),
+  });
+}
+
+export function bindGetPulledResultToSession(
+  result: GetPulledResult,
+  session: GetPulledSessionStart | null,
+) {
+  return session ? { ...result, id: session.sessionId } : result;
+}
+
+export async function authorizeGetPulledSessionArm(
+  arm: GetPulledSessionArm,
+  authorize?: (session: GetPulledSessionArm) => void | boolean | Promise<void | boolean>,
+) {
+  return (await authorize?.(arm)) !== false;
+}
 
 type GetPulledViewProps = {
   demoMode: boolean;
@@ -49,6 +190,13 @@ type GetPulledViewProps = {
   onComplete: (result: GetPulledResult) => void;
   onFullscreenChange?: (enabled: boolean) => void;
   onLiveStateChange: (state: GetPulledLiveState | null) => void;
+  heartRateByPlayer?: LiveHeartRateByPlayer;
+  onSessionArm?: (session: GetPulledSessionArm) => void | boolean | Promise<void | boolean>;
+  onSessionStart?: (session: GetPulledSessionStart) => void;
+  /** Legacy personal heart-rate relay cleanup callback. */
+  onSessionCancel?: (sessionId: string) => void;
+  onSessionCancelEvent?: (session: GetPulledSessionCancellation) => void;
+  heartRateMeasurements?: readonly HeartRateMeasurement[];
 };
 
 function secondsLabel(seconds: number) {
@@ -76,6 +224,12 @@ export function GetPulledView({
   onComplete,
   onFullscreenChange,
   onLiveStateChange,
+  heartRateByPlayer = {},
+  onSessionArm,
+  onSessionStart,
+  onSessionCancel,
+  onSessionCancelEvent,
+  heartRateMeasurements = [],
 }: GetPulledViewProps) {
   const assignedPlayers = useMemo(
     () => demoMode ? players : applyStudioRiderAssignments(players, riders, riderAssignments),
@@ -113,22 +267,58 @@ export function GetPulledView({
   const [result, setResult] = useState<GetPulledResult | null>(null);
   const accumulatorRef = useRef<GetPulledAccumulator>(createGetPulledAccumulator());
   const phaseRef = useRef<GetPulledPhase>('setup');
-  const armedAtRef = useRef<number | null>(null);
+  const pedalArmedAtRef = useRef<number | null>(null);
   const completedRef = useRef(false);
   const lastCountdownToneRef = useRef<number | null>(null);
+  const bindingLossTimerRef = useRef<number | null>(null);
+  const sessionArmRef = useRef<GetPulledSessionArm | null>(null);
+  const sessionStartRef = useRef<GetPulledSessionStart | null>(null);
+  const sessionInputsRef = useRef<{
+    player: PlayerSlot;
+    durationSeconds: number;
+    airSetting: number;
+    demoMode: boolean;
+  } | null>(null);
+  const samplesByDeviceRef = useRef(samplesByDevice);
+  const onCompleteRef = useRef(onComplete);
+  samplesByDeviceRef.current = samplesByDevice;
+  onCompleteRef.current = onComplete;
+  const sessionCallbacksRef = useRef({ onSessionCancel, onSessionCancelEvent });
+  sessionCallbacksRef.current = { onSessionCancel, onSessionCancelEvent };
+  const viewCleanupCallbacksRef = useRef({ onFullscreenChange, onLiveStateChange });
+  viewCleanupCallbacksRef.current = { onFullscreenChange, onLiveStateChange };
   const selectedPlayer = connectedPlayers.find((player) => player.id === selectedPlayerId) ?? null;
-  const sample = selectedPlayer?.deviceId == null ? undefined : samplesByDevice.get(selectedPlayer.deviceId);
+  const sessionInputs = phase === 'setup' ? null : sessionInputsRef.current;
+  const sessionPlayer = sessionInputs?.player ?? selectedPlayer;
+  const sessionDurationSeconds = sessionInputs?.durationSeconds ?? durationSeconds;
+  const sessionAirSetting = sessionInputs?.airSetting ?? airSetting;
+  const sessionDemoMode = sessionInputs?.demoMode ?? demoMode;
+  const sample = sessionPlayer?.deviceId == null ? undefined : samplesByDevice.get(sessionPlayer.deviceId);
   const metrics = useMemo(() => {
-    if (demoMode && phase === 'active' && startedAt != null) {
-      return getPulledDemoMetrics(now - startedAt, airSetting);
+    if (sessionDemoMode && phase === 'active' && startedAt != null) {
+      return getPulledDemoMetrics(now - startedAt, sessionAirSetting);
     }
     return getPulledMetrics(sample, now);
-  }, [airSetting, demoMode, now, phase, sample, startedAt]);
+  }, [now, phase, sample, sessionAirSetting, sessionDemoMode, startedAt]);
   const elapsedMs = phase === 'active' && startedAt != null
-    ? Math.min(durationSeconds * 1_000, Math.max(0, now - startedAt))
+    ? Math.min(sessionDurationSeconds * 1_000, Math.max(0, now - startedAt))
     : result ? result.durationSeconds * 1_000 : 0;
-  const progress = durationSeconds > 0 ? Math.min(1, elapsedMs / (durationSeconds * 1_000)) : 0;
+  const progress = sessionDurationSeconds > 0
+    ? Math.min(1, elapsedMs / (sessionDurationSeconds * 1_000))
+    : 0;
   const selectedAthleteReady = demoMode || Boolean(selectedPlayer?.riderId);
+  const selectedHeartRate = sessionPlayer ? heartRateByPlayer[sessionPlayer.id] : undefined;
+  const heartRateSummary = useMemo(() => {
+    if (startedAt == null) return null;
+    const endedAt = result?.endedAt ?? Math.min(now, startedAt + sessionDurationSeconds * 1_000);
+    const durationMs = Math.max(0, endedAt - startedAt);
+    const samples = mapHeartRateMeasurementsToActiveClock(heartRateMeasurements, [{
+      startedAt,
+      endedAt,
+      activeElapsedAtStartMs: 0,
+    }]);
+    return summarizeHeartRate(samples, { startElapsedMs: 0, endElapsedMs: durationMs });
+  }, [heartRateMeasurements, now, result?.endedAt, sessionDurationSeconds, startedAt]);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -139,11 +329,44 @@ export function GetPulledView({
     setSelectedPlayerId(connectedPlayers[0]?.id ?? null);
   }, [connectedPlayers, selectedPlayerId]);
 
-  const reset = useCallback(() => {
+  const cancelSession = useCallback((reason: GetPulledSessionCancellation['reason']) => {
+    const arm = sessionArmRef.current;
+    const phaseAtCancel = phaseRef.current;
+    if (
+      !arm
+      || completedRef.current
+      || (phaseAtCancel !== 'countdown' && phaseAtCancel !== 'armed' && phaseAtCancel !== 'active')
+    ) return;
+    completedRef.current = true;
+    const started = sessionStartRef.current;
+    const cancellation = createGetPulledSessionCancellation(
+      arm,
+      phaseAtCancel,
+      reason,
+      Date.now(),
+      started?.startedAt,
+    );
+    if (!cancellation) return;
+    sessionCallbacksRef.current.onSessionCancelEvent?.(cancellation);
+    // Existing personal Apple Watch sessions still receive the original
+    // string-only callback and therefore remain backward compatible.
+    sessionCallbacksRef.current.onSessionCancel?.(arm.sessionId);
+    sessionArmRef.current = null;
+    sessionStartRef.current = null;
+    sessionInputsRef.current = null;
+  }, []);
+
+  const reset = useCallback((reason: GetPulledSessionCancellation['reason'] = 'reset') => {
+    cancelSession(reason);
+    if (bindingLossTimerRef.current != null) window.clearTimeout(bindingLossTimerRef.current);
+    bindingLossTimerRef.current = null;
+    sessionArmRef.current = null;
+    sessionStartRef.current = null;
+    sessionInputsRef.current = null;
     phaseRef.current = 'setup';
     completedRef.current = true;
     accumulatorRef.current = createGetPulledAccumulator();
-    armedAtRef.current = null;
+    pedalArmedAtRef.current = null;
     setPhase('setup');
     setCountdown(getPulledCountdownSeconds);
     setStartedAt(null);
@@ -152,25 +375,99 @@ export function GetPulledView({
     onLiveStateChange(null);
     onFullscreenChange?.(false);
     stopBikeRaceAudio();
-  }, [onFullscreenChange, onLiveStateChange]);
+  }, [cancelSession, onFullscreenChange, onLiveStateChange]);
 
   const primePullAudio = useCallback(() => {
     void primeAudioCues();
     void primeBikeRaceAudio();
   }, []);
 
-  const start = useCallback(() => {
+  useEffect(() => {
+    const arm = sessionArmRef.current;
+    const sessionInFlight = phase === 'countdown' || phase === 'armed' || phase === 'active';
+    if (!arm || !sessionInFlight) {
+      if (bindingLossTimerRef.current != null) window.clearTimeout(bindingLossTimerRef.current);
+      bindingLossTimerRef.current = null;
+      return;
+    }
+    if (getPulledSessionArmMatchesLiveBinding(
+      arm,
+      connectedPlayers,
+      riderAssignments,
+      sessionInputsRef.current?.demoMode ?? demoMode,
+    )) {
+      if (bindingLossTimerRef.current != null) window.clearTimeout(bindingLossTimerRef.current);
+      bindingLossTimerRef.current = null;
+      return;
+    }
+
+    const armedDeviceStillConnected = connectedPlayers.some(
+      (player) => player.deviceId === arm.deviceId,
+    );
+    if (armedDeviceStillConnected) {
+      // The physical bike is still live, so this is a real athlete binding
+      // change rather than transient connector reconciliation.
+      reset('binding-changed');
+      return;
+    }
+    if (bindingLossTimerRef.current != null) return;
+    // Connected-bike lists can briefly omit a device while stale neighboring
+    // seats are compacted or the connector resumes. Require continuous absence
+    // before treating it as a genuine physical disconnect.
+    bindingLossTimerRef.current = window.setTimeout(() => {
+      bindingLossTimerRef.current = null;
+      reset('binding-changed');
+    }, getPulledDeviceDisconnectGraceMs);
+  }, [connectedPlayers, demoMode, phase, reset, riderAssignments]);
+
+  useEffect(() => () => {
+    if (bindingLossTimerRef.current != null) window.clearTimeout(bindingLossTimerRef.current);
+  }, []);
+
+  const start = useCallback(async () => {
     if (
       !selectedPlayer
       || selectedPlayer.deviceId == null
       || (!demoMode && !selectedPlayer.riderId)
       || phaseRef.current !== 'setup'
     ) return;
+    const arm = createGetPulledSessionArm(
+      selectedPlayer,
+      durationSeconds * 1_000,
+      airSetting,
+      Date.now(),
+    );
+    if (!arm) return;
+    accumulatorRef.current = createGetPulledAccumulator();
+    pedalArmedAtRef.current = null;
+    sessionArmRef.current = arm;
+    sessionStartRef.current = null;
+    sessionInputsRef.current = Object.freeze({
+      player: Object.freeze({ ...selectedPlayer }),
+      durationSeconds,
+      airSetting,
+      demoMode,
+    });
+    completedRef.current = false;
+    // Keep the visible setup still while an owner reservation and optional
+    // Watch handoff are pending. The ref phase lets unmount/cancel emit the
+    // exact arm cancellation without starting the countdown behind the dialog.
+    phaseRef.current = 'countdown';
+    let authorized = false;
+    try {
+      authorized = await authorizeGetPulledSessionArm(arm, onSessionArm);
+    } catch {
+      cancelSession('authorization-failed');
+      phaseRef.current = 'setup';
+      return;
+    }
+    if (!authorized || sessionArmRef.current !== arm || completedRef.current) {
+      if (sessionArmRef.current === arm && !completedRef.current) cancelSession('user-cancelled');
+      phaseRef.current = 'setup';
+      return;
+    }
     primePullAudio();
     onFullscreenChange?.(true);
-    accumulatorRef.current = createGetPulledAccumulator();
-    armedAtRef.current = null;
-    completedRef.current = false;
     setResult(null);
     setCountdown(getPulledCountdownSeconds);
     phaseRef.current = 'countdown';
@@ -178,7 +475,7 @@ export function GetPulledView({
     playStartGateTone('tick');
     setPhase('countdown');
     setNow(Date.now());
-  }, [demoMode, onFullscreenChange, primePullAudio, selectedPlayer]);
+  }, [airSetting, cancelSession, demoMode, durationSeconds, onFullscreenChange, onSessionArm, primePullAudio, selectedPlayer]);
 
   useEffect(() => {
     if (phase !== 'countdown') return undefined;
@@ -195,7 +492,7 @@ export function GetPulledView({
         window.clearInterval(timer);
         const nextArmedAt = Date.now();
         accumulatorRef.current = createGetPulledAccumulator();
-        armedAtRef.current = nextArmedAt;
+        pedalArmedAtRef.current = nextArmedAt;
         phaseRef.current = 'armed';
         setStartedAt(null);
         setPhase('armed');
@@ -206,8 +503,12 @@ export function GetPulledView({
   }, [phase]);
 
   const beginPull = useCallback((takeoffAt: number, initialMetrics?: ReturnType<typeof getPulledMetrics>) => {
-    if (phaseRef.current !== 'armed') return;
-    const startedAtSignal = Math.max(armedAtRef.current ?? takeoffAt, takeoffAt);
+    const arm = sessionArmRef.current;
+    const activeInputs = sessionInputsRef.current;
+    if (phaseRef.current !== 'armed' || !arm || !activeInputs) return;
+    const startedAtSignal = Math.max(pedalArmedAtRef.current ?? takeoffAt, takeoffAt);
+    const session = getPulledSessionStartFromArm(arm, startedAtSignal);
+    if (!session) return;
     accumulatorRef.current = initialMetrics
       ? addGetPulledSample(createGetPulledAccumulator(), initialMetrics, startedAtSignal)
       : createGetPulledAccumulator();
@@ -216,68 +517,84 @@ export function GetPulledView({
     setStartedAt(startedAtSignal);
     setPhase('active');
     setNow(startedAtSignal);
-  }, []);
+    sessionStartRef.current = session;
+    onSessionStart?.(session);
+  }, [onSessionStart]);
 
   useEffect(() => {
     if (phase !== 'armed') return undefined;
-    if (demoMode) {
+    if (sessionDemoMode) {
       beginPull(Date.now());
       return undefined;
     }
-    if (!selectedPlayer || selectedPlayer.deviceId == null || armedAtRef.current == null) return undefined;
+    if (!sessionPlayer || sessionPlayer.deviceId == null || pedalArmedAtRef.current == null) return undefined;
     const takeoff = getPulledTakeoffSignal(
-      samplesByDevice.get(selectedPlayer.deviceId),
-      armedAtRef.current,
+      samplesByDevice.get(sessionPlayer.deviceId),
+      pedalArmedAtRef.current,
       Date.now(),
     );
     if (takeoff) beginPull(takeoff.at, takeoff.metrics);
     return undefined;
-  }, [beginPull, demoMode, phase, samplesByDevice, selectedPlayer]);
+  }, [beginPull, phase, samplesByDevice, sessionDemoMode, sessionPlayer]);
 
   useEffect(() => {
-    if (!selectedPlayer) {
+    if (!sessionPlayer) {
       stopBikeRaceAudio();
       return;
     }
     updateGetPulledBikeAudio(
       phase === 'active' && metrics.cadence >= 1,
-      selectedPlayer.id,
+      sessionPlayer.id,
       metrics.cadence,
       metrics.speedKph,
     );
-  }, [metrics.cadence, metrics.speedKph, phase, selectedPlayer]);
+  }, [metrics.cadence, metrics.speedKph, phase, sessionPlayer]);
 
   useEffect(() => {
-    if (phase !== 'active' || startedAt == null || !selectedPlayer) return undefined;
+    if (phase !== 'active' || startedAt == null || !sessionInputsRef.current) return undefined;
     const timer = window.setInterval(() => {
+      if (completedRef.current) return;
+      const activeInputs = sessionInputsRef.current;
+      if (!activeInputs) return;
       const sampleAt = Date.now();
-      const liveMetrics = demoMode
-        ? getPulledDemoMetrics(sampleAt - startedAt, airSetting)
+      const endedAt = startedAt + activeInputs.durationSeconds * 1_000;
+      const liveMetrics = activeInputs.demoMode
+        ? getPulledDemoMetrics(sampleAt - startedAt, activeInputs.airSetting)
         : getPulledMetrics(
-          selectedPlayer.deviceId == null ? undefined : samplesByDevice.get(selectedPlayer.deviceId),
+          activeInputs.player.deviceId == null
+            ? undefined
+            : samplesByDeviceRef.current.get(activeInputs.player.deviceId),
           sampleAt,
         );
-      accumulatorRef.current = addGetPulledSample(accumulatorRef.current, liveMetrics, sampleAt);
-      setNow(sampleAt);
-      if (sampleAt - startedAt < durationSeconds * 1_000 || completedRef.current) return;
-      completedRef.current = true;
-      const endedAt = startedAt + durationSeconds * 1_000;
-      const nextResult = getPulledResultFromAccumulator(
+      accumulatorRef.current = addGetPulledSampleThroughEnd(
         accumulatorRef.current,
-        selectedPlayer,
+        liveMetrics,
+        sampleAt,
+        endedAt,
+      );
+      setNow(Math.min(sampleAt, endedAt));
+      if (sampleAt < endedAt) return;
+      completedRef.current = true;
+      const accumulatedResult = getPulledResultFromAccumulator(
+        accumulatorRef.current,
+        activeInputs.player,
         startedAt,
         endedAt,
-        durationSeconds,
-        airSetting,
+        activeInputs.durationSeconds,
+        activeInputs.airSetting,
       );
+      // The pre-countdown arm ID is also the completion/history ID. This keeps
+      // the existing personal heart-rate finalizer pointed at the exact relay
+      // started by onSessionStart while giving club authorization one stable ID.
+      const nextResult = bindGetPulledResultToSession(accumulatedResult, sessionStartRef.current);
       phaseRef.current = 'results';
       setResult(nextResult);
       setPhase('results');
       setNow(endedAt);
-      onComplete(nextResult);
+      onCompleteRef.current(nextResult);
     }, 100);
     return () => window.clearInterval(timer);
-  }, [airSetting, demoMode, durationSeconds, onComplete, phase, samplesByDevice, selectedPlayer, startedAt]);
+  }, [phase, startedAt]);
 
   useEffect(() => {
     if (phase !== 'results') return undefined;
@@ -286,17 +603,17 @@ export function GetPulledView({
   }, [phase, reset]);
 
   useEffect(() => {
-    if (!selectedPlayer || phase === 'setup') {
+    if (!sessionPlayer || phase === 'setup') {
       onLiveStateChange(null);
       return;
     }
     onLiveStateChange({
       phase,
-      playerId: selectedPlayer.id,
-      ...(selectedPlayer.riderId ? { riderId: selectedPlayer.riderId } : {}),
-      riderName: selectedPlayer.name,
-      durationSeconds,
-      airSetting,
+      playerId: sessionPlayer.id,
+      ...(sessionPlayer.riderId ? { riderId: sessionPlayer.riderId } : {}),
+      riderName: sessionPlayer.name,
+      durationSeconds: sessionDurationSeconds,
+      airSetting: sessionAirSetting,
       elapsedMs,
       distanceMeters: result?.distanceMeters ?? accumulatorRef.current.distanceMeters,
       metrics: result ? {
@@ -307,13 +624,14 @@ export function GetPulledView({
       } : metrics,
       result,
     });
-  }, [airSetting, durationSeconds, elapsedMs, metrics, onLiveStateChange, phase, result, selectedPlayer]);
+  }, [elapsedMs, metrics, onLiveStateChange, phase, result, sessionAirSetting, sessionDurationSeconds, sessionPlayer]);
 
   useEffect(() => () => {
-    onLiveStateChange(null);
-    onFullscreenChange?.(false);
+    cancelSession('view-closed');
+    viewCleanupCallbacksRef.current.onLiveStateChange(null);
+    viewCleanupCallbacksRef.current.onFullscreenChange?.(false);
     stopBikeRaceAudio();
-  }, [onFullscreenChange, onLiveStateChange]);
+  }, [cancelSession]);
 
   const displayed = result ? {
     watts: result.averageWatts,
@@ -332,7 +650,7 @@ export function GetPulledView({
   return (
     <main className="get-pulled-view" aria-label="Get Pulled timed Wattbike test">
       {fullscreen && (phase === 'countdown' || phase === 'armed' || phase === 'active') && (
-        <button className="get-pulled-exit-fullscreen" type="button" onClick={reset}>
+        <button className="get-pulled-exit-fullscreen" type="button" onClick={() => reset('user-cancelled')}>
           <RotateCcw size={18} /> Cancel sprint
         </button>
       )}
@@ -340,7 +658,7 @@ export function GetPulledView({
         <PullSledScene
           active={phase === 'active'}
           cadenceRpm={metrics.cadence}
-          durationSeconds={durationSeconds}
+          durationSeconds={sessionDurationSeconds}
           progress={progress}
           speedKph={metrics.speedKph}
         />
@@ -349,11 +667,11 @@ export function GetPulledView({
             <strong>{phase === 'countdown' ? `0:${String(countdown).padStart(2, '0')}` : `${(elapsedMs / 1_000).toFixed(2)}s`}</strong>
             <small>{phase === 'countdown'
               ? 'Countdown'
-              : phase === 'armed' ? 'Starts on first 1-watt power signal' : `of ${durationSeconds}s pull`}</small>
+              : phase === 'armed' ? 'Starts on first 1-watt power signal' : `of ${sessionDurationSeconds}s pull`}</small>
           </div>
           <div className="get-pulled-phase">
-            <strong>{selectedPlayer?.name ?? 'No athlete selected'}</strong>
-            <small>{phaseLabel(phase)} · Wattbike Air {airSetting}</small>
+            <strong>{sessionPlayer?.name ?? 'No athlete selected'}</strong>
+            <small>{phaseLabel(phase)} · Wattbike Air {sessionAirSetting}</small>
           </div>
         </div>
         {phase === 'countdown' && <div className="get-pulled-countdown"><strong>{countdown}</strong></div>}
@@ -501,15 +819,29 @@ export function GetPulledView({
             <div className="get-pulled-metric"><Activity size={20} /><strong>{displayed.cadence}</strong><small>Cadence rpm</small></div>
             <div className="get-pulled-metric"><Activity size={20} /><strong>{displayed.peakCadence}</strong><small>Peak cadence</small></div>
             <div className="get-pulled-metric"><Gauge size={20} /><strong>{formatSpeedFromKph(displayed.speedKph, speedUnit)}</strong><small>{speedUnitLabel(speedUnit)}</small></div>
+            {result && heartRateSummary?.sampleCount ? (
+              <div className="get-pulled-metric get-pulled-heart-rate-summary">
+                <HeartPulse size={20} />
+                <strong>{Math.round(heartRateSummary.averageBpm ?? 0)}</strong>
+                <small>Average HR · {Math.round(heartRateSummary.peakBpm ?? 0)} BPM peak · {heartRateSummary.coveragePercent}% coverage</small>
+              </div>
+            ) : (
+              <HeartRateMetric
+                bpm={selectedHeartRate?.bpm}
+                recordedAt={selectedHeartRate?.recordedAt}
+                now={now}
+                label={`${sessionPlayer?.name ?? 'Athlete'} heart rate`}
+              />
+            )}
           </section>
           {phase === 'results' && (
-            <div className="get-pulled-actions" aria-label={`Result recorded at Wattbike Air ${airSetting}`}>
-              <button className="primary" type="button" onClick={reset}><RotateCcw size={18} /> Next athlete now</button>
+            <div className="get-pulled-actions" aria-label={`Result recorded at Wattbike Air ${sessionAirSetting}`}>
+              <button className="primary" type="button" onClick={() => reset()}><RotateCcw size={18} /> Next athlete now</button>
             </div>
           )}
         </>
       )}
-      {demoMode && <p className="get-pulled-privacy">Demo pull results are for testing only and are not saved or published.</p>}
+      {sessionDemoMode && <p className="get-pulled-privacy">Demo pull results are for testing only and are not saved or published.</p>}
     </main>
   );
 }

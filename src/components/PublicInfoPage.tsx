@@ -166,6 +166,30 @@ function PrivacyPage() {
                 connected to the bikes.
               </p>
 
+              <h3>Optional Apple Watch heart rate</h3>
+              <p>
+                If you choose to connect Apple Watch heart rate, the TrackLab Watch app asks through Apple Health for
+                permission to read heart-rate samples and to save the indoor-cycling workout that you start. TrackLab
+                receives the beats-per-minute value, the time Apple Watch measured it, and technical sequence and
+                delivery times needed to prevent duplicate or stale readings. Heart rate is used only as a private
+                fitness and training metric; TrackLab does not use it to diagnose, treat, or provide medical advice.
+              </p>
+              <p>
+                Choosing to save heart rate to TrackLab sends those samples to the signed-in rider&apos;s TrackLab account
+                so they can be aligned with active riding time, pauses, pedal zones, and session results. Heart rate is
+                excluded from public leaderboards, ghosts, Friends, multiplayer, AI commentary, advertising, and
+                marketing. TrackLab does not sell heart-rate data or disclose it to advertisers or data brokers. A rider
+                can continue using every training mode without granting Apple Health access.
+              </p>
+              <p>
+                Watch Connect can remember a rider&apos;s approved TrackLab app installation so later training days do not
+                require another invite or setup code. TrackLab stores a random, revocable installation identifier for
+                this purpose, not the Apple Watch serial number or a hardware advertising identifier. The rider still
+                presses <em>Watch Connect</em> on the paired iPhone to start each visible four-hour connection. That
+                connection can cover multiple TrackLab programs and bike reconnects, and it ends automatically after
+                four hours unless the rider ends it sooner.
+              </p>
+
               <h3>Maps, routes, and location</h3>
               <p>
                 TrackLab stores selected tracks, custom routes, mapped ride lines, split routes, pedal zones, camera
@@ -248,6 +272,16 @@ function PrivacyPage() {
                   leaves club training or stops transmitting.
                 </li>
                 <li>
+                  <strong>Apple Watch heart rate and clubs:</strong> saving private heart rate to a rider account does
+                  not give a club access to it. A rider can separately approve a trusted Watch Connect enrollment for one
+                  specific club and claimed rider account. The rider then starts each four-hour studio connection with one
+                  explicit press on the paired iPhone. Sharing current heart rate is a separate optional choice; sharing
+                  saved session summaries also requires the rider&apos;s explicit approval. Friendship, verified default
+                  connections, Club Connect membership, name selection, and bike assignment alone never grant heart-rate
+                  access. The rider can forget the trusted enrollment, and the rider or club owner can disconnect studio
+                  sharing without deleting the athlete&apos;s club membership. Raw and between-effort samples remain private.
+                </li>
+                <li>
                   <strong>Google mapping services:</strong> map tiles, places, route endpoints, route geometry,
                   Street View, and elevation requests are handled by the Google mapping services used by the feature.
                 </li>
@@ -292,6 +326,17 @@ function PrivacyPage() {
                 <li>Race commentary and ambient track sound each have an on/off control.</li>
                 <li>Ghost replay analytics have a separate sharing choice.</li>
                 <li>Training sessions can be exported as JSON or CSV from the account calendar.</li>
+                <li>
+                  Apple Watch heart rate is optional. After one-time setup, you press <em>Watch Connect</em> on the paired
+                  iPhone to start a visible four-hour connection, can end it early from TrackLab, and can use TrackLab
+                  without it. You can change Apple Health permission later in the system Health or Settings app.
+                </li>
+                <li>
+                  Revoking Apple Health access stops future collection but does not automatically erase heart-rate
+                  samples already saved to TrackLab. Heart rate remains visible in the rider&apos;s private session history
+                  and is deliberately excluded from generic session JSON/CSV and public or club exports. Contact support
+                  for a separate verified health-data export or deletion request while self-service controls remain unavailable.
+                </li>
                 <li>You can sign out to end the current browser or app session.</li>
               </ul>
               <p>
@@ -320,6 +365,16 @@ function PrivacyPage() {
                 guarantee absolute security.
               </p>
               <p>
+                Saved heart-rate samples are stored in the authenticated rider&apos;s private heart-rate stream. TrackLab
+                links only the exact active-time portions of that stream to a completed training session; samples measured
+                between short studio efforts remain private to the rider and are not included in the club&apos;s saved-session
+                view. Heart-rate records currently follow the general account-retention policy above rather than a separate
+                automatic deletion schedule. They are transmitted over encrypted connections, and TrackLab does not store
+                personal health information in iCloud. Until session and account deletion are available in the app, a rider
+                may contact support to export or request deletion of saved heart-rate data. Ending an Apple Watch workout or
+                revoking Apple Health permission does not by itself delete a previously synchronized TrackLab record.
+              </p>
+              <p>
                 Friend connections are deleted when either account removes the connection. TrackLab retains a suppression
                 record after a verified default connection is removed or blocked so that connection is not silently added
                 again. Blocks remain until the blocking account removes them. Answered requests, claimed or expired invite
@@ -344,6 +399,11 @@ function PrivacyPage() {
                 Friend discovery, invitations, and connection controls do not independently verify a rider&apos;s age. A
                 parent or guardian should supervise a minor&apos;s discovery setting, friend requests, shared invitations,
                 blocks, and reports.
+              </p>
+              <p>
+                Apple Watch heart rate and any live studio sharing must not be enabled for a minor without the permission
+                and supervision required from their parent or guardian. A coach, club owner, friendship, or bike assignment
+                cannot substitute for that authorization.
               </p>
             </div>
           </section>
