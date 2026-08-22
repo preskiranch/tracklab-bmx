@@ -11,6 +11,8 @@ import {
   watchConnectStatusLabel,
   type WatchConnectViewState,
 } from '../lib/watchConnect';
+import type { HeartRateLiveEvent } from '../lib/heartRateCloud';
+import { HeartRateMetric, heartRateReadingState } from './HeartRateMetric';
 import {
   trackLabTestFlightUrl,
   watchAppInstallInstructions,
@@ -39,6 +41,9 @@ export type WatchConnectCardProps = Readonly<{
   onTargetChange?: (value: string) => void;
   retryWhileConnecting?: boolean;
   showWatchInstall?: boolean;
+  latestHeartRate?: HeartRateLiveEvent | null;
+  now?: number;
+  observer?: boolean;
 }>;
 
 export function WatchConnectCard({
@@ -63,6 +68,9 @@ export function WatchConnectCard({
   onTargetChange,
   retryWhileConnecting = false,
   showWatchInstall = false,
+  latestHeartRate = null,
+  now = Date.now(),
+  observer = false,
 }: WatchConnectCardProps) {
   const connecting = state.phase === 'connecting';
   const syncing = state.phase === 'syncing';
@@ -82,6 +90,11 @@ export function WatchConnectCard({
   const savedSummaryConsentRequired = context === 'studio' && !enrolled && !sessionStudioConsent;
   const identity = athleteName.trim() || 'This athlete';
   const studio = studioName?.trim() || 'this studio';
+  const remoteReading = heartRateReadingState(
+    latestHeartRate?.bpm,
+    latestHeartRate?.recordedAt,
+    now,
+  );
 
   return (
     <section
@@ -127,11 +140,37 @@ export function WatchConnectCard({
         <strong>{connected ? 'Ready all session' : state.detail}</strong>
         {connected && <span>{state.detail}</span>}
         <small>
-          {enrolled
+          {observer
+            ? enrolled
+              ? 'This Watch is remembered. When four hours ends, press Watch Connect once on the paired iPhone.'
+              : 'Set up Watch Connect once on the paired iPhone. This device will recognize it automatically.'
+            : enrolled
             ? 'This Watch is remembered. When four hours ends, press Watch Connect—setup will not repeat.'
             : 'First time only: approve Apple Health and let TrackLab remember this Watch.'}
         </small>
       </div>
+
+      {observer && connected && (
+        <div className="watch-connect-card-remote-reading">
+          <HeartRateMetric
+            bpm={latestHeartRate?.bpm}
+            compact
+            label={`${identity} heart rate through paired iPhone`}
+            now={now}
+            recordedAt={latestHeartRate?.recordedAt}
+          />
+          <span>
+            <strong>{remoteReading.state === 'live'
+              ? 'Live through iPhone'
+              : remoteReading.state === 'stale'
+                ? 'Signal interrupted'
+                : 'Waiting for heart rate'}</strong>
+            <small>{remoteReading.state === 'live'
+              ? 'This fresh reading follows the signed-in athlete across TrackLab programs.'
+              : 'Keep the paired iPhone and Apple Watch nearby and online. The four-hour connection stays active.'}</small>
+          </span>
+        </div>
+      )}
 
       {context === 'studio' && !enrolled && (
         <fieldset className="watch-connect-card-consent">
@@ -219,7 +258,7 @@ export function WatchConnectCard({
       <div className="watch-connect-card-privacy">
         <ShieldCheck aria-hidden="true" size={17} />
         <p>
-          The connection belongs only to {identity}’s claimed profile—not a bike or tablet. Raw and idle heart rate stay private. Disconnecting or reconnecting a Wattbike does not end this four-hour Watch session.
+          The connection belongs only to {identity}’s claimed profile—not a bike or tablet. Raw and idle heart rate stay private. {observer ? 'This device receives only the latest fresh BPM for that signed-in profile. ' : ''}Disconnecting or reconnecting a Wattbike does not end this four-hour Watch session.
         </p>
       </div>
       {enrolled && onForgetWatch && (

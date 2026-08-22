@@ -110,10 +110,28 @@ describe('studio Watch Connect selection', () => {
         state: 'connected',
         connectedUntil: now + watchConnectSessionDurationMs,
         remainingMs: watchConnectSessionDurationMs,
+        liveSharingEnabled: true,
       },
       now,
     });
     expect(state.label).toBe('Connected · 4h 0m left');
     expect(state.detail).toContain('every program');
+  });
+
+  it('makes an active Watch with private live sharing explicit', () => {
+    const state = clubTabletWatchConnectSelectionState({
+      claimed: true,
+      status: {
+        recognized: true,
+        state: 'connected',
+        connectedUntil: now + watchConnectSessionDurationMs,
+        remainingMs: watchConnectSessionDurationMs,
+        liveSharingEnabled: false,
+      },
+      now,
+    });
+    expect(state.phase).toBe('connected');
+    expect(state.label).toBe('Watch connected · live sharing off');
+    expect(state.detail).toContain('live BPM stays private');
   });
 });

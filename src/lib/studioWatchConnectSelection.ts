@@ -109,6 +109,15 @@ export function clubTabletWatchConnectSelectionState({
     ? watchConnectRemainingMs(status.connectedUntil, now)
     : 0;
   if (status?.state === 'connected' && status.recognized && status.connectedUntil != null && remainingMs > 0) {
+    if (!status.liveSharingEnabled) {
+      return {
+        phase: 'connected',
+        label: 'Watch connected · live sharing off',
+        detail: 'This Watch is recognized, but live BPM stays private until the athlete enables Live BPM sharing on the paired iPhone.',
+        connectedUntil: status.connectedUntil,
+        remainingMs,
+      };
+    }
     return {
       phase: 'connected',
       label: `Connected · ${formatWatchConnectTimeRemaining(remainingMs)}`,

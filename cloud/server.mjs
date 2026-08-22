@@ -2830,7 +2830,11 @@ const heartRateStudioInvitationTtlMs = Number.isFinite(configuredHeartRateStudio
 const heartRateIngestTokenTtlMs = 7 * 24 * 60 * 60 * 1000;
 const heartRateStudioBlockIngestTtlMs = 12 * 60 * 60 * 1000;
 const heartRateAccountBlockDrainTtlMs = 10 * 60 * 1000;
-const heartRateLiveFreshnessMs = 15_000;
+// Match the shared client freshness contract exactly. A reading the UI must
+// hide should not still cross the network as "live" for another device.
+const heartRateLiveFreshnessMs = 10_000;
+const heartRateLiveFutureSkewMs = 2_000;
+const heartRateLiveAuthorizationTtlMs = 30_000;
 const maxHeartRateSamplesPerStream = 1_000_000;
 
 function createHeartRateCode() {
@@ -3219,6 +3223,14 @@ function notifyHeartRateLive(stream, sample, receivedAt = Date.now()) {
     stream.accountBlockStopRequestedAt != null
     && receivedAt >= stream.accountBlockStopRequestedAt
   ) return;
+  // Delayed background batches remain valid private history, but an old sensor
+  // timestamp must never be presented as a current pulse. Likewise, tolerate
+  // only a small amount of device clock skew into the future for live display.
+  if (
+    sample.recordedAt <= receivedAt - heartRateLiveFreshnessMs
+    || sample.recordedAt > receivedAt + heartRateLiveFutureSkewMs
+  ) return;
+  const freshUntil = sample.recordedAt + heartRateLiveFreshnessMs;
   const personalPayload = {
     streamId: stream.id,
     sessionId: stream.sessionId,
@@ -3229,7 +3241,7 @@ function notifyHeartRateLive(stream, sample, receivedAt = Date.now()) {
     recordedAt: sample.recordedAt,
     activeElapsedMs: sample.activeElapsedMs,
     receivedAt,
-    freshUntil: receivedAt + heartRateLiveFreshnessMs,
+    freshUntil,
   };
   const ownerStreams = heartRateOwnerLiveStreams.get(stream.ownerProfileKey);
   ownerStreams?.forEach((response) => {
@@ -3247,7 +3259,7 @@ function notifyHeartRateLive(stream, sample, receivedAt = Date.now()) {
     bpm: sample.bpm,
     recordedAt: sample.recordedAt,
     receivedAt,
-    freshUntil: receivedAt + heartRateLiveFreshnessMs,
+    freshUntil,
   };
   const clubStreams = heartRateClubLiveStreams.get(stream.clubId);
   clubStreams?.forEach((response) => {
@@ -3622,6 +3634,8 @@ async function loadClubTabletRoster(device) {
             state: watchConnect.state,
             connectedUntil: watchConnect.connection?.connectedUntil ?? null,
             remainingMs: watchConnect.connection?.remainingMs ?? 0,
+            liveSharingEnabled: watchConnect.enrollment?.state === 'trusted'
+              && watchConnect.enrollment.liveStudioConsent === true,
           },
         } : {}),
         ...(photoUrl ? { photoUrl } : {}),
@@ -3708,6 +3722,16 @@ function pruneClubTabletSessions(now = Date.now()) {
       || session.maxExpiresAt <= now
     ) stopClubTabletSession(session);
   }
+}
+
+function clubTabletSessionIsCurrent(session, now = Date.now()) {
+  return Boolean(
+    session
+    && clubTabletSessionsByTokenHash.get(session.tokenHash) === session
+    && clubTabletSessionTokenHashByDeviceId.get(session.deviceId) === session.tokenHash
+    && session.expiresAt > now
+    && session.maxExpiresAt > now,
+  );
 }
 
 async function loadClubTabletSessionByHash(sessionTokenHash, { renew = false } = {}) {
@@ -7316,6 +7340,7 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
       writeJson(response, 503, { error: 'The private heart-rate stream could not be created.' });
       return;
     }
+    invalidateHeartRateWatchStatusSnapshot(stream.ownerProfileKey);
     writeJson(response, 201, { stream: publicHeartRateStream(stream) }, { 'Cache-Control': 'no-store' });
     return;
   }
@@ -7411,7 +7436,18 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
     const { acceptedSequences } = writeResult;
     const acceptedSet = new Set(acceptedSequences);
     const latestAccepted = [...sanitized.samples].reverse().find((sample) => acceptedSet.has(sample.sequence));
-    if (latestAccepted) notifyHeartRateLive(stream, latestAccepted, now);
+    if (latestAccepted) {
+      // Revalidate once more after the serialized write. The pre-lock stream
+      // (and even the in-lock snapshot) can be stale if studio consent,
+      // membership, or the four-hour connection was revoked concurrently.
+      const publishAt = Date.now();
+      const publishableStream = await persistence.loadHeartRateStreamForIngestToken(
+        stream.id,
+        ingestTokenHash,
+        publishAt,
+      );
+      if (publishableStream) notifyHeartRateLive(publishableStream, latestAccepted, publishAt);
+    }
     writeJson(response, 200, {
       accepted: acceptedSequences.length,
       duplicates: sanitized.repeatedInBatch
@@ -7586,6 +7622,89 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
     )) return;
   }
 
+  if (pathname === '/api/heart-rate/watch-connect/tablet-live') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    // This lookup validates the exact current athlete/device token without
+    // renewing its idle or absolute expiry. Switching athletes, stopping the
+    // session, or revoking the tablet therefore cuts this read off immediately.
+    const tabletSession = await loadClubTabletSessionFromRequest(request);
+    if (!tabletSession) {
+      writeJson(response, 401, {
+        error: 'This club tablet athlete session expired or ended.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateReadRateLimiter,
+      120,
+      `heart-rate-watch-tablet-live:${tabletSession.tokenHash}`,
+    )) return;
+    const identity = await clubTabletMemberAndProfile(tabletSession);
+    if (
+      !identity
+      || identity.member.status !== 'claimed'
+      || !String(identity.member.athleteProfileKey || '').startsWith('user:')
+      || identity.member.athleteProfileKey !== identity.profileKey
+    ) {
+      writeJson(response, 403, {
+        error: 'Live Watch heart rate requires this selected athlete to have a claimed TrackLab account.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const { enrollments, connections } = await loadHeartRateWatchStatusSnapshot(identity.profileKey);
+    const enrollment = enrollments.find((candidate) => (
+      candidate.scope === 'studio'
+      && candidate.clubId === tabletSession.clubId
+      && candidate.studioRiderId === tabletSession.studioRiderId
+      && candidate.revokedAt == null
+      && candidate.membershipActive !== false
+      && candidate.liveStudioConsent === true
+    )) ?? null;
+    const connection = enrollment
+      ? connections.find((candidate) => candidate.enrollmentId === enrollment.id) ?? null
+      : null;
+    const projected = publicHeartRateWatchConnection(connection, enrollment, now);
+    const candidate = projected?.state === 'connected'
+      ? await persistence.loadLatestStudioTabletHeartRateReading({
+        athleteProfileKey: identity.profileKey,
+        clubId: tabletSession.clubId,
+        studioRiderId: tabletSession.studioRiderId,
+        freshAfter: now - heartRateLiveFreshnessMs,
+        now,
+      })
+      : null;
+    // The database read above yields. Re-check the in-memory exact session
+    // synchronously before writing so a completed athlete switch, stop, idle/
+    // max expiry, or device revoke cannot receive the former athlete's BPM.
+    const respondAt = Date.now();
+    if (!clubTabletSessionIsCurrent(tabletSession, respondAt)) {
+      writeJson(response, 401, {
+        error: 'This club tablet athlete session expired or ended.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const reading = candidate && candidate.recordedAt + heartRateLiveFreshnessMs > respondAt
+      && candidate.recordedAt <= respondAt + heartRateLiveFutureSkewMs
+      ? {
+        studioRiderId: candidate.studioRiderId,
+        bpm: candidate.bpm,
+        recordedAt: candidate.recordedAt,
+        receivedAt: candidate.receivedAt,
+        freshUntil: candidate.recordedAt + heartRateLiveFreshnessMs,
+      }
+      : null;
+    writeJson(response, 200, {
+      reading,
+      freshnessMs: heartRateLiveFreshnessMs,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
   if (pathname === '/api/heart-rate/watch-connect/tablet-status') {
     if (request.method !== 'GET') {
       writeJson(response, 405, { error: 'Method not allowed' });
@@ -7642,6 +7761,9 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
         state,
         connectedUntil: projected?.connectedUntil ?? null,
         remainingMs: projected?.remainingMs ?? 0,
+        // Consent state only; no account, enrollment, stream, or pairing
+        // identity crosses the shared-tablet boundary.
+        liveSharingEnabled: enrollment?.liveStudioConsent === true,
       },
     }, { 'Cache-Control': 'no-store' });
     return;
@@ -8702,6 +8824,49 @@ async function handleHeartRateAccountBlockApi(request, response, requestUrl) {
 
 async function handleHeartRateApi(request, response, requestUrl) {
   const pathname = requestUrl.pathname;
+  if (pathname === '/api/heart-rate/live/latest') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const profileKey = authProfileKey(session.user);
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateReadRateLimiter,
+      120,
+      `heart-rate-live-latest:${profileKey}`,
+    )) return;
+    const now = Date.now();
+    const candidate = await persistence.loadLatestHeartRateLiveReading(
+      profileKey,
+      now - heartRateLiveFreshnessMs,
+      now,
+    );
+    const reading = candidate && candidate.recordedAt + heartRateLiveFreshnessMs > now
+      && candidate.recordedAt <= now + heartRateLiveFutureSkewMs
+      ? {
+        streamId: candidate.streamId,
+        sessionId: candidate.sessionId,
+        relayScope: candidate.relayScope || 'session',
+        riderId: candidate.riderId,
+        playerId: candidate.playerId ?? null,
+        bpm: candidate.bpm,
+        recordedAt: candidate.recordedAt,
+        activeElapsedMs: candidate.activeElapsedMs,
+        receivedAt: candidate.receivedAt,
+        freshUntil: candidate.recordedAt + heartRateLiveFreshnessMs,
+      }
+      : null;
+    writeJson(response, 200, {
+      reading,
+      freshnessMs: heartRateLiveFreshnessMs,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
   if (pathname === '/api/heart-rate/live') {
     if (request.method !== 'GET') {
       writeJson(response, 405, { error: 'Method not allowed' });
@@ -8735,6 +8900,12 @@ async function handleHeartRateApi(request, response, requestUrl) {
     });
     response.flushHeaders?.();
     addHeartRateLiveStream(streamsByKey, streamKey, response);
+    // EventSource reconnects automatically. Closing on a short authorization
+    // lease forces every long-lived live reader to re-present a still-valid
+    // account session instead of retaining access indefinitely after logout.
+    const authorizationTimer = setTimeout(() => response.end(), heartRateLiveAuthorizationTtlMs);
+    authorizationTimer.unref?.();
+    response.once('close', () => clearTimeout(authorizationTimer));
     trainingHistoryEvent(response, 'ready', {
       connectedAt: Date.now(),
       scope: clubId ? 'club-live-consent' : 'athlete-private',

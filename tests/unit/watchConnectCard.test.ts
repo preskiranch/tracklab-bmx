@@ -127,6 +127,69 @@ describe('WatchConnectCard', () => {
     expect(markup).not.toContain('<button');
   });
 
+  it('shows a fresh remote BPM without exposing iPhone-only controls', () => {
+    const now = 20_000;
+    const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
+      athleteName: 'Mason Fleming',
+      enrolled: true,
+      observer: true,
+      now,
+      latestHeartRate: {
+        streamId: 'stream-one',
+        sessionId: 'watch-connect:one',
+        relayScope: 'account-block',
+        riderId: 'account:mason',
+        playerId: null,
+        bpm: 153,
+        recordedAt: now - 500,
+        receivedAt: now - 100,
+        activeElapsedMs: 1_000,
+      },
+      state: {
+        phase: 'connected',
+        connectedUntil: now + 14_000_000,
+        remainingMs: 14_000_000,
+        detail: 'Live through the paired iPhone.',
+      },
+    }));
+    expect(markup).toContain('153 beats per minute');
+    expect(markup).toContain('Live through iPhone');
+    expect(markup).not.toContain('>Disconnect</button>');
+    expect(markup).not.toContain('>Forget Watch</button>');
+    expect(markup).not.toContain('Watch Connect</button>');
+  });
+
+  it('removes a remote BPM after ten seconds while keeping the connection active', () => {
+    const now = 30_001;
+    const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
+      athleteName: 'Mason Fleming',
+      enrolled: true,
+      observer: true,
+      now,
+      latestHeartRate: {
+        streamId: 'stream-one',
+        sessionId: 'watch-connect:one',
+        relayScope: 'account-block',
+        riderId: 'account:mason',
+        playerId: null,
+        bpm: 153,
+        recordedAt: 20_000,
+        receivedAt: 30_000,
+        activeElapsedMs: 1_000,
+      },
+      state: {
+        phase: 'connected',
+        connectedUntil: now + 14_000_000,
+        remainingMs: 14_000_000,
+        detail: 'Live through the paired iPhone.',
+      },
+    }));
+    expect(markup).toContain('Connected');
+    expect(markup).toContain('Signal interrupted');
+    expect(markup).toContain('data-heart-rate-state="stale"');
+    expect(markup).not.toContain('153 beats per minute');
+  });
+
   it('gives an iPhone a clear retry after showing the exact missing Watch app reason', () => {
     const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
       athleteName: 'Mason Fleming',

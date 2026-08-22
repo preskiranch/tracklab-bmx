@@ -28,6 +28,11 @@ import {
   type WatchConnectCloudSnapshot,
 } from '../lib/watchConnectCloud';
 import {
+  mergeLiveHeartRateEvent,
+  subscribeToHeartRateLive,
+  type HeartRateLiveEvent,
+} from '../lib/heartRateCloud';
+import {
   resolveWatchConnectViewState,
   type WatchConnectConnection,
   type WatchConnectEnrollment,
@@ -57,8 +62,10 @@ export type WatchConnectCoordinatorProps = Readonly<{
   studioContexts?: readonly StudioContext[];
   ownedStudio?: OwnedStudioContext | null;
   preferPersonal?: boolean;
+  latestHeartRate?: HeartRateLiveEvent | null;
   onLegacyRelaySuppressionChange?: (suppressed: boolean) => void;
   onCapabilityChange?: (capable: boolean) => void;
+  onLiveHeartRateReadingsChange?: (readings: Record<string, HeartRateLiveEvent>) => void;
   onMessage?: (message: string) => void;
 }>;
 
@@ -100,6 +107,37 @@ export function unavailableWatchConnectDetail(
   return availability?.platform === 'iphone'
     ? availability.reason || 'Check this iPhone\'s Apple Watch connection.'
     : 'Open TrackLab on the paired iPhone and press Watch Connect.';
+}
+
+export function watchConnectReadOnlyObserver(
+  availability: NativeHeartRateAvailability | null,
+) {
+  return availability != null && availability.platform !== 'iphone';
+}
+
+export function activeWatchConnectTarget(
+  snapshot: WatchConnectCloudSnapshot,
+  now = Date.now(),
+) {
+  const trustedEnrollmentIds = new Set(snapshot.enrollments
+    .filter((candidate) => candidate.state === 'trusted')
+    .map((candidate) => candidate.id));
+  return [...snapshot.connections]
+    .filter((candidate) => (
+      trustedEnrollmentIds.has(candidate.enrollmentId)
+      && (candidate.state === 'connecting' || candidate.state === 'connected')
+      && candidate.connectedUntil > now
+    ))
+    .sort((left, right) => right.connectedAt - left.connectedAt)[0] ?? null;
+}
+
+export function watchConnectHeartRateForConnection(
+  latest: HeartRateLiveEvent | null,
+  connection: WatchConnectConnection | null,
+) {
+  return latest && connection && latest.sessionId === `watch-connect:${connection.id}`
+    ? latest
+    : null;
 }
 
 export function watchConnectLegacyHeartRateIsBusy(
@@ -256,8 +294,10 @@ export function WatchConnectCoordinator({
   studioContexts = [],
   ownedStudio = null,
   preferPersonal = false,
+  latestHeartRate = null,
   onLegacyRelaySuppressionChange,
   onCapabilityChange,
+  onLiveHeartRateReadingsChange,
   onMessage,
 }: WatchConnectCoordinatorProps) {
   const [snapshot, setSnapshot] = useState<WatchConnectCloudSnapshot>(emptySnapshot);
@@ -308,18 +348,25 @@ export function WatchConnectCoordinator({
     () => newestConnection(snapshot, enrollment),
     [enrollment, snapshot],
   );
-  const onPairedIPhone = availability?.platform === 'iphone'
+  const onIPhone = availability?.platform === 'iphone';
+  const onPairedIPhone = onIPhone
     && availability.supported === true;
+  const readOnlyObserver = watchConnectReadOnlyObserver(availability);
   const nativeDisplayState = nativeState ? nativeResultFromState(nativeState) : null;
   const viewState = resolveWatchConnectViewState({
     enrollment,
     connection,
-    nativeState: nativeDisplayState,
+    nativeState: readOnlyObserver ? null : nativeDisplayState,
     requiresNativeMatch: onPairedIPhone,
     busy,
     now,
   });
-  const platformViewState = !onPairedIPhone && (viewState.phase === 'connect' || viewState.phase === 'ended')
+  const platformViewState = readOnlyObserver && viewState.phase === 'connected'
+    ? {
+      ...viewState,
+      detail: 'Connected through the paired iPhone. Ready on this device for every TrackLab program during this four-hour session.',
+    }
+    : !onPairedIPhone && (viewState.phase === 'connect' || viewState.phase === 'ended')
     ? {
       ...viewState,
       detail: unavailableWatchConnectDetail(availability),
@@ -390,26 +437,36 @@ export function WatchConnectCoordinator({
   }, [nativeState?.connectedUntil, nativeState?.connectionId, snapshot.connections]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    if (!readOnlyObserver || hydratedAccountId !== accountId) return;
+    const active = activeWatchConnectTarget(snapshot, now);
+    if (active) setTargetClubId(active.scope === 'studio' ? active.clubId : null);
+  }, [accountId, hydratedAccountId, now, readOnlyObserver, snapshot]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
 
   const refresh = useCallback(async () => {
     if (authStatus !== 'signed-in' || !accountId) return;
     const requestedAccountId = accountId;
-    const nativePlatform = availability?.platform === 'iphone' || availability?.platform === 'ipad';
+    const nativePlatform = availability?.platform === 'iphone';
     const [cloudResult, nativeResult] = await Promise.allSettled([
       loadWatchConnect(),
       nativePlatform ? getWatchConnectState() : Promise.resolve(null),
     ]);
     if (!watchConnectAccountRequestIsCurrent(requestedAccountId, currentAccountIdRef.current)) return;
-    if (nativeResult.status === 'fulfilled' && nativeResult.value) {
+    if (watchConnectReadOnlyObserver(availability)) {
+      setNativeState(null);
+      setCapable(true);
+      onCapabilityChange?.(true);
+    } else if (nativeResult.status === 'fulfilled' && nativeResult.value) {
       const native = nativeResult.value;
       setNativeState(native);
       const nextCapable = watchConnectNativeCapability(native);
       setCapable(nextCapable);
       onCapabilityChange?.(nextCapable);
-    } else if (availability != null && !nativePlatform) {
+    } else if (availability != null) {
       setCapable(false);
       onCapabilityChange?.(false);
     }
@@ -453,6 +510,34 @@ export function WatchConnectCoordinator({
     setCapable(null);
     setActionDetail('');
   }, [accountId]);
+
+  useEffect(() => {
+    let readings: Readonly<Record<string, HeartRateLiveEvent>> = {};
+    onLiveHeartRateReadingsChange?.({});
+    if (authStatus !== 'signed-in' || !accountId) return undefined;
+    const expectedRiderId = `account:${accountId}`;
+    let disposed = false;
+    const deliver = (event: HeartRateLiveEvent, exactRiderId?: string) => {
+      if (disposed) return;
+      const next = mergeLiveHeartRateEvent(readings, event, {
+        ...(exactRiderId ? { expectedRiderId: exactRiderId } : {}),
+      });
+      if (next === readings) return;
+      readings = next;
+      onLiveHeartRateReadingsChange?.({ ...next });
+    };
+    const unsubscribePersonal = subscribeToHeartRateLive(
+      (event) => deliver(event, expectedRiderId),
+    );
+    const unsubscribeClub = ownedStudio?.clubId
+      ? subscribeToHeartRateLive(deliver, { clubId: ownedStudio.clubId })
+      : () => undefined;
+    return () => {
+      disposed = true;
+      unsubscribePersonal();
+      unsubscribeClub();
+    };
+  }, [accountId, authStatus, onLiveHeartRateReadingsChange, ownedStudio?.clubId]);
 
   useEffect(() => {
     // A remembered connection owns all heart-rate routing for this account,
@@ -766,20 +851,23 @@ export function WatchConnectCoordinator({
       ].includes(nativeState.state)) || Boolean(
         nativeState?.state === 'syncing' && viewState.phase !== 'ended',
       )}
-      targetOptions={studioContexts.length > 0
+      targetOptions={!readOnlyObserver && studioContexts.length > 0
         ? [
           { value: 'personal', label: 'My account' },
           ...studioContexts.map((context) => ({ value: context.clubId, label: context.clubName })),
         ]
         : undefined}
       targetValue={clubId ?? 'personal'}
-      retryWhileConnecting={recoveryRetryConnectionId === connection?.id || watchConnectCanRetryCloudConnection({
+      retryWhileConnecting={!readOnlyObserver && (recoveryRetryConnectionId === connection?.id || watchConnectCanRetryCloudConnection({
         accountId,
         hydratedAccountId,
         connection,
         native: nativeState,
-      })}
-      showWatchInstall={watchAppNeedsInstall(availability)}
+      }))}
+      showWatchInstall={!readOnlyObserver && watchAppNeedsInstall(availability)}
+      latestHeartRate={watchConnectHeartRateForConnection(latestHeartRate, connection)}
+      now={now}
+      observer={readOnlyObserver}
     />}
     {ownedStudio && <OwnerStudioWatchConnectSettings studio={ownedStudio} />}
     </>,

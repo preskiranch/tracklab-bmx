@@ -352,6 +352,26 @@ describe('Watch Connect cloud workflow', () => {
       },
     );
     expect(allModesSamples.status).toBe(200);
+    const latestForOwner = await api('/api/heart-rate/live/latest', {}, athlete.cookie);
+    expect(latestForOwner.status).toBe(200);
+    const latestForOwnerText = await latestForOwner.text();
+    expect(latestForOwnerText).not.toMatch(/profileKey|pairing|token|samples/i);
+    expect(JSON.parse(latestForOwnerText)).toMatchObject({
+      freshnessMs: 10_000,
+      reading: {
+        streamId: allModesStream.id,
+        sessionId: allModesConnection.credentials.relaySessionId,
+        relayScope: 'account-block',
+        riderId: `account:${athlete.user.id}`,
+        bpm: 146,
+        recordedAt: allModesStartedAt,
+        freshUntil: allModesStartedAt + 10_000,
+      },
+    });
+    const latestForOther = await api('/api/heart-rate/live/latest', {}, other.cookie);
+    expect(latestForOther.status).toBe(200);
+    expect(await latestForOther.json()).toEqual({ reading: null, freshnessMs: 10_000 });
+    expect((await api('/api/heart-rate/live/latest')).status).toBe(401);
     for (let index = 0; index < allModeSessionIds.length; index += 1) {
       const history = await api(
         `/api/heart-rate/streams?sessionId=${encodeURIComponent(allModeSessionIds[index])}`,
@@ -412,6 +432,9 @@ describe('Watch Connect cloud workflow', () => {
     expect((await afterLegacySignout.json() as any).connections.find((candidate: any) => (
       candidate.id === allModesConnection.connection.id
     )).state).toBe('revoked');
+    const latestAfterRevoke = await api('/api/heart-rate/live/latest', {}, athlete.cookie);
+    expect(latestAfterRevoke.status).toBe(200);
+    expect(await latestAfterRevoke.json()).toEqual({ reading: null, freshnessMs: 10_000 });
     const revokedToken = await api(
       `/api/heart-rate/streams/${encodeURIComponent(allModesStream.id)}/samples`,
       {
@@ -438,6 +461,7 @@ describe('Watch Connect cloud workflow', () => {
     const owner = await register('watch-connect-owner@tracklab.test', 'Watch Studio Owner');
     const athlete = await register('watch-connect-studio-athlete@tracklab.test', 'Studio Watch Athlete');
     const studioRiderId = `watch-rider-${Date.now()}`;
+    const unclaimedStudioRiderId = `watch-unclaimed-rider-${Date.now()}`;
     const now = Date.now();
 
     const rosterSave = await api('/api/user-data', {
@@ -446,6 +470,11 @@ describe('Watch Connect cloud workflow', () => {
         studioRiders: [{
           id: studioRiderId,
           name: 'Studio Watch Athlete',
+          createdAt: now,
+          updatedAt: now,
+        }, {
+          id: unclaimedStudioRiderId,
+          name: 'Unclaimed Tablet Athlete',
           createdAt: now,
           updatedAt: now,
         }],
@@ -626,8 +655,93 @@ describe('Watch Connect cloud workflow', () => {
       recognized: true,
       state: 'connected',
       connectedUntil: connected.connection.connectedUntil,
+      liveSharingEnabled: true,
     });
     expect(JSON.stringify(tabletAthlete.watchConnect)).not.toMatch(/profile|token|bpm|bike/i);
+
+    const tabletSessionResponse = await api('/api/club-tablet/sessions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tablet.deviceToken}` },
+      body: JSON.stringify({ studioRiderId, bikeDeviceId: 'WatchTabletBike1' }),
+    });
+    expect(tabletSessionResponse.status).toBe(201);
+    const tabletSession = await tabletSessionResponse.json() as any;
+    const tabletSessionHeaders = {
+      'X-TrackLab-Club-Tablet-Session': tabletSession.sessionToken,
+    };
+    expect((await api('/api/heart-rate/watch-connect/tablet-live')).status).toBe(401);
+    expect((await api('/api/heart-rate/live/latest', {
+      headers: tabletSessionHeaders,
+    })).status).toBe(403);
+    expect((await api('/api/heart-rate/live', {
+      headers: tabletSessionHeaders,
+    })).status).toBe(403);
+    const tabletStatus = await api('/api/heart-rate/watch-connect/tablet-status', {
+      headers: tabletSessionHeaders,
+    });
+    expect(tabletStatus.status).toBe(200);
+    expect(await tabletStatus.json()).toEqual({
+      watchConnect: {
+        recognized: true,
+        state: 'connected',
+        connectedUntil: connected.connection.connectedUntil,
+        remainingMs: expect.any(Number),
+        liveSharingEnabled: true,
+      },
+    });
+    const tabletLive = await api('/api/heart-rate/watch-connect/tablet-live', {
+      headers: tabletSessionHeaders,
+    });
+    expect(tabletLive.status).toBe(200);
+    const tabletLiveText = await tabletLive.text();
+    expect(tabletLiveText).not.toMatch(/account|profile|stream|sessionId|pairing|token|samples/i);
+    expect(JSON.parse(tabletLiveText)).toMatchObject({
+      freshnessMs: 10_000,
+      reading: {
+        studioRiderId,
+        bpm: 152,
+        recordedAt: studioStartedAt,
+        freshUntil: studioStartedAt + 10_000,
+      },
+    });
+    const tabletSessionAfterReads = await api('/api/club-tablet/sessions', {
+      headers: tabletSessionHeaders,
+    });
+    expect(tabletSessionAfterReads.status).toBe(200);
+    expect((await tabletSessionAfterReads.json() as any).session.expiresAt)
+      .toBe(tabletSession.session.expiresAt);
+
+    const disableLiveSharing = await api('/api/heart-rate/watch-connect/enrollments', {
+      method: 'POST',
+      body: JSON.stringify({
+        requestId: requestId('studio-disable-live-sharing'),
+        installId: installId('b'),
+        scope: 'studio',
+        clubId: membership.clubId,
+        liveStudioConsent: false,
+        sessionStudioConsent: true,
+      }),
+    }, athlete.cookie);
+    expect(disableLiveSharing.status).toBe(200);
+    const tabletStatusWithoutLiveConsent = await api('/api/heart-rate/watch-connect/tablet-status', {
+      headers: tabletSessionHeaders,
+    });
+    expect(tabletStatusWithoutLiveConsent.status).toBe(200);
+    expect(await tabletStatusWithoutLiveConsent.json()).toMatchObject({
+      watchConnect: {
+        recognized: true,
+        state: 'connected',
+        liveSharingEnabled: false,
+      },
+    });
+    const tabletLiveWithoutConsent = await api('/api/heart-rate/watch-connect/tablet-live', {
+      headers: tabletSessionHeaders,
+    });
+    expect(tabletLiveWithoutConsent.status).toBe(200);
+    expect(await tabletLiveWithoutConsent.json()).toEqual({
+      reading: null,
+      freshnessMs: 10_000,
+    });
 
     const wrongOwner = await register(
       'watch-connect-wrong-studio-owner@tracklab.test',
@@ -689,6 +803,46 @@ describe('Watch Connect cloud workflow', () => {
     });
     expect(JSON.stringify(disconnectedAthlete)).not.toMatch(/profile|token|bpm|bike/i);
 
+    const tabletLiveAfterOwnerRevoke = await api('/api/heart-rate/watch-connect/tablet-live', {
+      headers: tabletSessionHeaders,
+    });
+    expect(tabletLiveAfterOwnerRevoke.status).toBe(200);
+    expect(await tabletLiveAfterOwnerRevoke.json()).toEqual({
+      reading: null,
+      freshnessMs: 10_000,
+    });
+
+    const switchedTabletSessionResponse = await api('/api/club-tablet/sessions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tablet.deviceToken}` },
+      body: JSON.stringify({
+        studioRiderId: unclaimedStudioRiderId,
+        bikeDeviceId: 'WatchTabletBike2',
+      }),
+    });
+    expect(switchedTabletSessionResponse.status).toBe(201);
+    const switchedTabletSession = await switchedTabletSessionResponse.json() as any;
+    expect((await api('/api/heart-rate/watch-connect/tablet-live', {
+      headers: tabletSessionHeaders,
+    })).status).toBe(401);
+    expect((await api('/api/heart-rate/watch-connect/tablet-live', {
+      headers: {
+        'X-TrackLab-Club-Tablet-Session': switchedTabletSession.sessionToken,
+      },
+    })).status).toBe(403);
+    const stoppedTabletSession = await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: {
+        'X-TrackLab-Club-Tablet-Session': switchedTabletSession.sessionToken,
+      },
+    });
+    expect(stoppedTabletSession.status).toBe(200);
+    expect((await api('/api/heart-rate/watch-connect/tablet-live', {
+      headers: {
+        'X-TrackLab-Club-Tablet-Session': switchedTabletSession.sessionToken,
+      },
+    })).status).toBe(401);
+
     const tabletRosterAfterDisconnect = await api('/api/club-tablet/roster', {
       headers: { Authorization: `Bearer ${tablet.deviceToken}` },
     });
@@ -698,6 +852,7 @@ describe('Watch Connect cloud workflow', () => {
       recognized: false,
       state: 'not-set-up',
       remainingMs: 0,
+      liveSharingEnabled: false,
     });
     const summariesAfterDisconnect = await api(
       `/api/heart-rate/club-streams?clubId=${encodeURIComponent(membership.clubId)}&sessionId=${encodeURIComponent(studioTrainingSessionId)}`,
@@ -785,7 +940,26 @@ describe('Watch Connect cloud workflow', () => {
     expect(reenrolledTabletAthlete.watchConnect).toMatchObject({
       recognized: true,
       state: 'ready',
+      liveSharingEnabled: true,
     });
+
+    const deviceRevokeSessionResponse = await api('/api/club-tablet/sessions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tablet.deviceToken}` },
+      body: JSON.stringify({ studioRiderId, bikeDeviceId: 'WatchTabletBike3' }),
+    });
+    expect(deviceRevokeSessionResponse.status).toBe(201);
+    const deviceRevokeSession = await deviceRevokeSessionResponse.json() as any;
+    const revokeTabletDevice = await api('/api/club-tablet/devices', {
+      method: 'DELETE',
+      body: JSON.stringify({ deviceId: tablet.device.id }),
+    }, ownerCookie);
+    expect(revokeTabletDevice.status).toBe(200);
+    expect((await api('/api/heart-rate/watch-connect/tablet-live', {
+      headers: {
+        'X-TrackLab-Club-Tablet-Session': deviceRevokeSession.sessionToken,
+      },
+    })).status).toBe(401);
 
     const revokeMembership = await api('/api/club-connect/revoke', {
       method: 'POST',
@@ -861,6 +1035,112 @@ describe('Watch Connect cloud workflow', () => {
     expect(connections).toHaveLength(2);
     expect(connections.find((candidate) => candidate.id === first.connection?.id)?.stoppedReason)
       .toBe('expired');
+  });
+
+  it('projects sensor-time freshness at the exact ten-second boundary while retaining private uploads', async () => {
+    const base = 40_000_000;
+    const setupStream = async (label: string) => {
+      const profileKey = `user:live-boundary-${label}`;
+      const enrollmentId = `live-boundary-enrollment-${label}`;
+      const tokenHash = `live-boundary-token-${label}`;
+      const enrollment = await persistence.createOrRefreshHeartRateWatchEnrollment({
+        id: enrollmentId,
+        ownerProfileKey: profileKey,
+        requestId: `live-boundary-enrollment-request-${label}`,
+        installIdHash: `live-boundary-install-${label}`,
+        scope: 'personal',
+        clubId: null,
+        studioRiderId: null,
+        liveStudioConsent: false,
+        sessionStudioConsent: false,
+        now: base,
+      });
+      expect(enrollment.status).toBe('created');
+      const connection = await persistence.createHeartRateWatchConnection({
+        id: `live-boundary-connection-${label}`,
+        enrollmentId,
+        ownerProfileKey: profileKey,
+        requestId: `live-boundary-connect-request-${label}`,
+        installIdHash: `live-boundary-install-${label}`,
+        pairingId: `live-boundary-pairing-${label}`,
+        relaySessionId: `watch-connect:live-boundary-${label}`,
+        riderId: `account:live-boundary-${label}`,
+        pairCodeHash: `live-boundary-code-${label}`,
+        ingestTokenHash: tokenHash,
+        connectedUntil: base + persistence.heartRateWatchConnectDurationMs,
+        now: base,
+      });
+      expect(connection.status).toBe('created');
+      const streamId = `live-boundary-stream-${label}`;
+      const stream = await persistence.createHeartRateStream(
+        connection.pairing!.id,
+        tokenHash,
+        streamId,
+        base,
+        base,
+      );
+      expect(stream?.id).toBe(streamId);
+      return { profileKey, streamId, tokenHash };
+    };
+
+    const boundary = await setupStream('fresh');
+    const sensorRecordedAt = base + 1_000;
+    expect(await persistence.insertHeartRateSamples(boundary.streamId, boundary.tokenHash, [{
+      sequence: 0,
+      recordedAt: sensorRecordedAt,
+      activeElapsedMs: 1_000,
+      bpm: 145,
+    }], sensorRecordedAt)).toEqual([0]);
+    await expect(persistence.loadLatestHeartRateLiveReading(
+      boundary.profileKey,
+      sensorRecordedAt - 1,
+      sensorRecordedAt + 9_999,
+    )).resolves.toMatchObject({ bpm: 145, recordedAt: sensorRecordedAt });
+    await expect(persistence.loadLatestHeartRateLiveReading(
+      boundary.profileKey,
+      sensorRecordedAt,
+      sensorRecordedAt + 10_000,
+    )).resolves.toBeNull();
+
+    const delayed = await setupStream('delayed');
+    expect(await persistence.insertHeartRateSamples(delayed.streamId, delayed.tokenHash, [{
+      sequence: 0,
+      recordedAt: base + 1_000,
+      activeElapsedMs: 1_000,
+      bpm: 146,
+    }], base + 30_000)).toEqual([0]);
+    await expect(persistence.loadLatestHeartRateLiveReading(
+      delayed.profileKey,
+      base + 20_000,
+      base + 30_000,
+    )).resolves.toBeNull();
+    await expect(persistence.loadHeartRateSamples(delayed.streamId)).resolves.toEqual([{
+      sequence: 0,
+      recordedAt: base + 1_000,
+      activeElapsedMs: 1_000,
+      bpm: 146,
+    }]);
+
+    const future = await setupStream('future');
+    expect(await persistence.insertHeartRateSamples(future.streamId, future.tokenHash, [{
+      sequence: 0,
+      recordedAt: base + 3_001,
+      activeElapsedMs: 3_001,
+      bpm: 147,
+    }], base)).toEqual([0]);
+    await expect(persistence.loadLatestHeartRateLiveReading(
+      future.profileKey,
+      base - 10_000,
+      base,
+    )).resolves.toBeNull();
+    // It must stay non-live even after wall-clock time catches up. Receipt-time
+    // validation prevents a future-dated offline batch from becoming a pulse.
+    await expect(persistence.loadLatestHeartRateLiveReading(
+      future.profileKey,
+      base - 6_000,
+      base + 4_000,
+    )).resolves.toBeNull();
+    await expect(persistence.loadHeartRateSamples(future.streamId)).resolves.toHaveLength(1);
   });
 
   it('coalesces a valid Watch status burst and rejects excess requests before authentication', async () => {

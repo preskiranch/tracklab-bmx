@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
+  activeWatchConnectTarget,
   defaultWatchConnectClubId,
   watchConnectAccountRequestIsCurrent,
   watchConnectCanRetryCloudConnection,
@@ -11,6 +12,8 @@ import {
   watchConnectSuppressesLegacyRelay,
   watchConnectStudioConsentForStart,
   unavailableWatchConnectDetail,
+  watchConnectReadOnlyObserver,
+  watchConnectHeartRateForConnection,
 } from '../../src/components/WatchConnectCoordinator';
 
 describe('WatchConnectCoordinator native adapter', () => {
@@ -118,6 +121,95 @@ describe('WatchConnectCoordinator native adapter', () => {
       minimumIOS: '17.0',
       minimumWatchOS: '10.0',
     })).toBe('Open TrackLab on the paired iPhone and press Watch Connect.');
+  });
+
+  it('treats iPad and web as read-only cloud observers, never as Watch controllers', () => {
+    expect(watchConnectReadOnlyObserver({
+      version: 1,
+      supported: false,
+      platform: 'ipad',
+      paired: false,
+      watchAppInstalled: false,
+      healthDataAvailable: true,
+      minimumIOS: '17.0',
+      minimumWatchOS: '10.0',
+    })).toBe(true);
+    expect(watchConnectReadOnlyObserver({
+      version: 1,
+      supported: true,
+      platform: 'iphone',
+      paired: true,
+      watchAppInstalled: true,
+      healthDataAvailable: true,
+      minimumIOS: '17.0',
+      minimumWatchOS: '10.0',
+    })).toBe(false);
+  });
+
+  it('selects the active cloud connection scope for a secondary device', () => {
+    const enrollment = {
+      id: 'studio-enrollment',
+      scope: 'studio' as const,
+      clubId: 'club-one',
+      studioRiderId: 'rider-one',
+      state: 'trusted' as const,
+      liveStudioConsent: true,
+      sessionStudioConsent: true,
+      createdAt: 10,
+      updatedAt: 10,
+    };
+    const connection = {
+      id: 'studio-connection',
+      enrollmentId: enrollment.id,
+      scope: 'studio' as const,
+      clubId: 'club-one',
+      studioRiderId: 'rider-one',
+      state: 'connected' as const,
+      connectedAt: 100,
+      connectedUntil: 20_000,
+      remainingMs: 19_900,
+      liveStudioConsent: true,
+      sessionStudioConsent: true,
+    };
+    expect(activeWatchConnectTarget({
+      enrollments: [enrollment],
+      connections: [connection],
+    }, 1_000)).toEqual(connection);
+    expect(activeWatchConnectTarget({
+      enrollments: [enrollment],
+      connections: [connection],
+    }, 21_000)).toBeNull();
+  });
+
+  it('never carries a fresh BPM across Watch Connect session boundaries', () => {
+    const connection = {
+      id: 'connection-current',
+      enrollmentId: 'enrollment-one',
+      scope: 'personal' as const,
+      clubId: null,
+      studioRiderId: null,
+      state: 'connected' as const,
+      connectedAt: 100,
+      connectedUntil: 20_000,
+      remainingMs: 19_900,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+    };
+    const reading = {
+      streamId: 'stream-one',
+      sessionId: 'watch-connect:connection-previous',
+      relayScope: 'account-block' as const,
+      riderId: 'account:one',
+      playerId: null,
+      bpm: 160,
+      recordedAt: 1_000,
+      activeElapsedMs: 500,
+    };
+    expect(watchConnectHeartRateForConnection(reading, connection)).toBeNull();
+    expect(watchConnectHeartRateForConnection({
+      ...reading,
+      sessionId: 'watch-connect:connection-current',
+    }, connection)?.bpm).toBe(160);
   });
 
   it('refreshes paired/install availability when native WCSession activation completes', () => {

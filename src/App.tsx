@@ -2255,51 +2255,6 @@ export default function App() {
   }, [authStatus, authUser?.id, clubTabletKioskMode, handleFriendNetworkChange]);
 
   useEffect(() => {
-    if (authStatus !== 'signed-in' || !authUser?.id || clubTabletKioskMode) {
-      setLiveHeartRateByRider({});
-      return undefined;
-    }
-    let disposed = false;
-    let unsubscribe: () => void = () => undefined;
-    void import('./lib/heartRateCloud').then(({ subscribeToHeartRateLive }) => {
-      if (disposed) return;
-      unsubscribe = subscribeToHeartRateLive((event) => {
-        setLiveHeartRateByRider((current) => {
-          const previous = current[event.riderId];
-          if (previous && previous.recordedAt > event.recordedAt) return current;
-          return { ...current, [event.riderId]: event };
-        });
-      });
-    });
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, [authStatus, authUser?.id, clubTabletKioskMode]);
-
-  useEffect(() => {
-    if (authStatus !== 'signed-in' || !authUser?.id || clubTabletKioskMode || !ownedClub?.id) {
-      return undefined;
-    }
-    let disposed = false;
-    let unsubscribe: () => void = () => undefined;
-    void import('./lib/heartRateCloud').then(({ subscribeToHeartRateLive }) => {
-      if (disposed) return;
-      unsubscribe = subscribeToHeartRateLive((event) => {
-        setLiveHeartRateByRider((current) => {
-          const previous = current[event.riderId];
-          if (previous && previous.recordedAt > event.recordedAt) return current;
-          return { ...current, [event.riderId]: event };
-        });
-      }, { clubId: ownedClub.id });
-    });
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, [authStatus, authUser?.id, clubTabletKioskMode, ownedClub?.id]);
-
-  useEffect(() => {
     if (
       !['monitor', 'race', 'straight-sprint', 'get-pulled', 'explore'].includes(appMode)
       || authStatus !== 'signed-in'
@@ -8467,10 +8422,20 @@ export default function App() {
   }, [authMode, authPasswordDraft, profileEmailDraft, profileNameDraft]);
 
   const handleSignOut = useCallback(async () => {
+    const ownsNativeHeartRateWriter = heartRate.availability?.platform === 'iphone'
+      || (heartRate.availability == null && Boolean(
+        heartRate.status?.sessionId
+        || heartRate.watchConnect?.connectionId
+        || heartRate.relayState?.configured
+        || (heartRate.relayState?.sessions.length ?? 0) > 0
+        || (heartRate.relayState?.queuedCount ?? 0) > 0
+        || (heartRate.relayState?.pendingSampleCount ?? 0) > 0,
+      ));
     const unsyncedHeartRate = Boolean(
-      heartRate.relayState?.configured
+      ownsNativeHeartRateWriter
+      && (heartRate.relayState?.configured
       || (heartRate.relayState?.queuedCount ?? 0) > 0
-      || (heartRate.relayState?.pendingSampleCount ?? 0) > 0,
+      || (heartRate.relayState?.pendingSampleCount ?? 0) > 0),
     );
     if (
       !clubTabletKioskMode
@@ -8486,6 +8451,8 @@ export default function App() {
     heartRateAccountHydrationGenerationRef.current += 1;
     heartRateAccountHydrationRef.current = null;
     setHeartRateHydratedAccountId(null);
+    setLiveHeartRateByRider({});
+    heartRate.clearSamples();
     const liveClubSelection = clubTrainingSelection;
     const pendingHeartRateStarts = [...heartRateRelayStartPromisesRef.current.entries()];
     pendingHeartRateStarts.forEach(([sessionId]) => {
@@ -8532,71 +8499,73 @@ export default function App() {
     if (pendingHeartRateAccountBlockAction) {
       await pendingHeartRateAccountBlockAction.catch(() => undefined);
     }
-    const heartRateCloudApi = await import('./lib/heartRateCloud');
-    const serverPairingIds = authUser?.id
-      ? await heartRateCloudApi.loadHeartRatePairings().then((pairings) => pairings
-        .filter((pairing) => (
-          pairing.riderId === `account:${authUser.id}` && pairing.revokedAt == null
-        ))
-        .map((pairing) => pairing.id)).catch(() => [] as string[])
-      : [];
-    const heartRateSessionIds = new Set([
-      ...heartRatePairingIdsBySessionRef.current.keys(),
-      ...(heartRate.relayState?.sessions.map((session) => session.sessionId) ?? []),
-      ...(activeHeartRateRelaySessionRef.current ? [activeHeartRateRelaySessionRef.current] : []),
-    ]);
-    const heartRatePairingIds = new Set([
-      ...heartRatePairingIdsBySessionRef.current.values(),
-      ...heartRateKnownPairingIdsRef.current,
-      ...serverPairingIds,
-      ...(activeHeartRatePairingIdRef.current ? [activeHeartRatePairingIdRef.current] : []),
-    ]);
-    await import('./lib/watchConnectActions').then(({ stopWatchConnectForAccountBoundary }) => (
-      stopWatchConnectForAccountBoundary({
-        getNativeState: async () => {
-          const state = await heartRate.getWatchConnectState();
-          return {
-            state: state.state,
-            scope: state.scope,
-            connectionId: state.connectionId,
-            sessionId: state.sessionId,
-            connectedUntil: state.connectedUntil,
-            remainingMs: state.remainingMs,
-            requiresUserStart: state.requiresUserStart,
-            workoutReady: state.workoutReady,
-            relayConfigured: state.relayConfigured,
-            ...(state.reason ? { reason: state.reason } : {}),
-          };
-        },
-        stopNative: async () => {
-          const state = await heartRate.stopWatchConnect();
-          return {
-            state: state.state,
-            scope: state.scope,
-            connectionId: state.connectionId,
-            sessionId: state.sessionId,
-            connectedUntil: state.connectedUntil,
-            remainingMs: state.remainingMs,
-            requiresUserStart: state.requiresUserStart,
-            workoutReady: state.workoutReady,
-            relayConfigured: state.relayConfigured,
-            ...(state.reason ? { reason: state.reason } : {}),
-          };
-        },
-      })
-    )).catch(() => undefined);
-    const clearedRelays = await heartRate.clearAllRelays().catch(() => ({
-      configured: false,
-      reason: 'Native relay cleanup failed.',
-    }));
-    if (clearedRelays.reason) {
-      await Promise.all([...heartRateSessionIds].map((sessionId) => (
-        heartRate.clearRelay({ sessionId }).catch(() => undefined)
+    if (ownsNativeHeartRateWriter) {
+      const heartRateCloudApi = await import('./lib/heartRateCloud');
+      const serverPairingIds = authUser?.id
+        ? await heartRateCloudApi.loadHeartRatePairings().then((pairings) => pairings
+          .filter((pairing) => (
+            pairing.riderId === `account:${authUser.id}` && pairing.revokedAt == null
+          ))
+          .map((pairing) => pairing.id)).catch(() => [] as string[])
+        : [];
+      const heartRateSessionIds = new Set([
+        ...heartRatePairingIdsBySessionRef.current.keys(),
+        ...(heartRate.relayState?.sessions.map((session) => session.sessionId) ?? []),
+        ...(activeHeartRateRelaySessionRef.current ? [activeHeartRateRelaySessionRef.current] : []),
+      ]);
+      const heartRatePairingIds = new Set([
+        ...heartRatePairingIdsBySessionRef.current.values(),
+        ...heartRateKnownPairingIdsRef.current,
+        ...serverPairingIds,
+        ...(activeHeartRatePairingIdRef.current ? [activeHeartRatePairingIdRef.current] : []),
+      ]);
+      await import('./lib/watchConnectActions').then(({ stopWatchConnectForAccountBoundary }) => (
+        stopWatchConnectForAccountBoundary({
+          getNativeState: async () => {
+            const state = await heartRate.getWatchConnectState();
+            return {
+              state: state.state,
+              scope: state.scope,
+              connectionId: state.connectionId,
+              sessionId: state.sessionId,
+              connectedUntil: state.connectedUntil,
+              remainingMs: state.remainingMs,
+              requiresUserStart: state.requiresUserStart,
+              workoutReady: state.workoutReady,
+              relayConfigured: state.relayConfigured,
+              ...(state.reason ? { reason: state.reason } : {}),
+            };
+          },
+          stopNative: async () => {
+            const state = await heartRate.stopWatchConnect();
+            return {
+              state: state.state,
+              scope: state.scope,
+              connectionId: state.connectionId,
+              sessionId: state.sessionId,
+              connectedUntil: state.connectedUntil,
+              remainingMs: state.remainingMs,
+              requiresUserStart: state.requiresUserStart,
+              workoutReady: state.workoutReady,
+              relayConfigured: state.relayConfigured,
+              ...(state.reason ? { reason: state.reason } : {}),
+            };
+          },
+        })
+      )).catch(() => undefined);
+      const clearedRelays = await heartRate.clearAllRelays().catch(() => ({
+        configured: false,
+        reason: 'Native relay cleanup failed.',
+      }));
+      if (clearedRelays.reason) {
+        await Promise.all([...heartRateSessionIds].map((sessionId) => (
+          heartRate.clearRelay({ sessionId }).catch(() => undefined)
+        )));
+      }
+      await Promise.all([...heartRatePairingIds].map((pairingId) => (
+        heartRateCloudApi.revokeHeartRatePairing(pairingId).catch(() => undefined)
       )));
     }
-    await Promise.all([...heartRatePairingIds].map((pairingId) => (
-      heartRateCloudApi.revokeHeartRatePairing(pairingId).catch(() => undefined)
-    )));
     await Promise.all(pendingMonitorAuthorizations.map((entry) => queueClubMonitorBikeOperation(
       clubMonitorSaveChainsByDeviceRef.current,
       entry.reservation.bikeDeviceId,
@@ -8878,6 +8847,7 @@ export default function App() {
   clubTabletEmergencyExitRef.current = returnToClubTablet;
 
   const handleClubTabletDeviceChange = useCallback((next: ClubTabletDeviceCredential | null) => {
+    setLiveHeartRateByRider({});
     clearRaceCaptureForClubTablet();
     friendGhostAutoSelectPendingRef.current = false;
     setFriendGhostRaceTarget(null);
@@ -8908,6 +8878,7 @@ export default function App() {
   }, [clearRaceCaptureForClubTablet]);
 
   const handleClubTabletSessionChange = useCallback((next: ClubTabletSessionCredential | null) => {
+    setLiveHeartRateByRider({});
     clearRaceCaptureForClubTablet();
     friendGhostAutoSelectPendingRef.current = false;
     setFriendGhostRaceTarget(null);
@@ -8975,6 +8946,10 @@ export default function App() {
   const handleClubTabletSessionExpired = useCallback(() => {
     handleClubTabletSessionChange(null);
   }, [handleClubTabletSessionChange]);
+
+  const handleClubTabletHeartRateReading = useCallback((reading: HeartRateLiveEvent | null) => {
+    setLiveHeartRateByRider(reading ? { [reading.riderId]: reading } : {});
+  }, []);
 
   const handleClubTabletEndAthlete = useCallback(async () => {
     const activeSession = clubTabletSession;
@@ -10197,6 +10172,7 @@ export default function App() {
         onDeviceRevoked={handleClubTabletDeviceRevoked}
         onSessionRenewed={setClubTabletSession}
         onSessionExpired={handleClubTabletSessionExpired}
+        onHeartRateReading={handleClubTabletHeartRateReading}
       />
     </Suspense>
   ) : null;
@@ -10247,8 +10223,12 @@ export default function App() {
         accountName={authUser?.name ?? 'TrackLab athlete'}
         authStatus={authStatus}
         heartRate={heartRate}
+        latestHeartRate={authUser?.id
+          ? liveHeartRateByRider[`account:${authUser.id}`] ?? null
+          : null}
         onCapabilityChange={setWatchConnectCapable}
         onLegacyRelaySuppressionChange={handleLegacyRelaySuppressionChange}
+        onLiveHeartRateReadingsChange={setLiveHeartRateByRider}
         onMessage={setHeartRateMessage}
         ownedStudio={ownedClub ? { clubId: ownedClub.id, clubName: ownedClub.name } : null}
         settingsOpen={settingsMode}
@@ -10264,7 +10244,6 @@ export default function App() {
       />
     </Suspense>
   ) : null;
-
   if (!clubTabletKioskMode && (showMembershipLanding || !accountProfileComplete)) {
     return (
       <>
@@ -11296,7 +11275,7 @@ export default function App() {
                 <Suspense fallback={<div className="explore-loading">Checking Apple Watch…</div>}>
                   <div id="heart-rate-account-block-settings-slot" />
                   <div id="watch" />
-                  <HeartRateSettingsCard
+                  {watchConnectCapable === false && <HeartRateSettingsCard
                     availability={heartRate.availability}
                     status={heartRate.status}
                     relayState={heartRate.relayState}
@@ -11319,7 +11298,7 @@ export default function App() {
                       onLiveConsentChange: (live) => handleHeartRateStudioConsentChange('live', live),
                       onSessionConsentChange: (session) => handleHeartRateStudioConsentChange('session', session),
                     } : undefined}
-                  />
+                  />}
                 </Suspense>
               ) : undefined}
             />
