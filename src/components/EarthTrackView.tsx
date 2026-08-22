@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { GoogleMapsTrackLayer } from './GoogleMapsTrackLayer';
 import { RiderAvatar } from './RiderAvatar';
+import './EarthTrackView.mobile.css';
 import { hasGoogleMapsApiKey, trackCenter } from '../lib/googleMaps';
 import { mapping3DCenterForTrack } from '../lib/googleMaps3d';
 import { trackGoogleMapsUrl } from '../lib/mapLinks';
@@ -161,17 +162,6 @@ const startTreeLamps = [
   { className: 'yellow', label: 'Yellow two' },
   { className: 'green', label: 'Green' },
 ] as const;
-
-const inlineRaceControlStyle: CSSProperties = {
-  position: 'static',
-  top: 'auto',
-  right: 'auto',
-  bottom: 'auto',
-  left: 'auto',
-  margin: 0,
-  transform: 'none',
-  pointerEvents: 'auto',
-};
 
 function StartTreeLight({ activeIndex }: { activeIndex: 0 | 1 | 2 | 3 | null }) {
   return (
@@ -517,36 +507,14 @@ export function EarthTrackView({
           <div
             className="race-top-left-controls"
             aria-label="Fullscreen race controls"
-            style={{
-              position: 'fixed',
-              zIndex: 2147483000,
-              top: 'max(14px, calc(env(safe-area-inset-top, 0px) + 14px))',
-              left: 'max(14px, calc(env(safe-area-inset-left, 0px) + 14px))',
-              display: 'grid',
-              maxWidth: 'min(520px, calc(100vw - 28px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)))',
-              gap: '8px',
-              justifyItems: 'start',
-              pointerEvents: 'none',
-            }}
           >
-            <div className="race-top-left-header" style={{
-              display: 'flex',
-              maxWidth: '100%',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: '8px',
-              pointerEvents: 'none',
-            }}>
-              <div className="earth-overlay top-left" style={{
-                ...inlineRaceControlStyle,
-                minHeight: '42px',
-                background: 'rgba(255, 255, 255, 0.9)',
-              }}>
+            <div className="race-top-left-header">
+              <div className="earth-overlay top-left race-status-overlay">
                 <span className={`race-dot ${raceState}`} />
                 <strong>{raceState === 'racing' ? 'Live Race' : raceState === 'finished' ? 'Session Complete' : 'Ready'}</strong>
               </div>
               {canCancelRace && (
-                <button className="race-cancel-overlay" style={inlineRaceControlStyle} type="button" onClick={onCancelRace}>
+                <button className="race-cancel-overlay" type="button" onClick={onCancelRace}>
                   <X size={18} />
                   Cancel Race
                 </button>
@@ -554,17 +522,9 @@ export function EarthTrackView({
             </div>
 
             {canPauseStartCountdown && (
-              <div className="race-top-left-actions" style={{
-                display: 'flex',
-                maxWidth: '100%',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                gap: '8px',
-                pointerEvents: 'none',
-              }}>
+              <div className="race-top-left-actions">
                 <button
                   className={`race-countdown-pause-overlay${startCountdownPaused ? ' paused' : ''}`}
-                  style={inlineRaceControlStyle}
                   type="button"
                   onClick={onStartCountdownPauseToggle}
                   aria-pressed={startCountdownPaused}
@@ -574,11 +534,6 @@ export function EarthTrackView({
                 </button>
                 <button
                   className="race-countdown-pause-overlay race-force-start-overlay"
-                  style={{
-                    ...inlineRaceControlStyle,
-                    borderColor: 'rgba(216, 255, 62, 0.88)',
-                    background: 'rgba(35, 76, 23, 0.94)',
-                  }}
                   type="button"
                   onClick={onStartCountdownForceStart}
                 >
@@ -589,13 +544,7 @@ export function EarthTrackView({
             )}
 
             {raceDistanceMeters != null && raceState !== 'ready' && (
-              <div className="race-countdown-pause-overlay race-sprint-info-overlay" style={{
-                ...inlineRaceControlStyle,
-                minWidth: '126px',
-                justifyContent: 'flex-start',
-                textAlign: 'left',
-                pointerEvents: 'none',
-              }}>
+              <div className="race-countdown-pause-overlay race-sprint-info-overlay">
                 <span>
                   {formatDistanceMeters(raceDistanceMeters, distanceUnit)} Sprint
                   <br />

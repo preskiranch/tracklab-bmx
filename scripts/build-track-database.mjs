@@ -83,9 +83,12 @@ function normalizeHttpUrl(value) {
   }
 
   const trimmed = String(value).trim();
+  if (!trimmed || trimmed.length > 2_048) {
+    return undefined;
+  }
   const candidate = /^https?:\/\//i.test(trimmed)
     ? trimmed
-    : /^(?:www\.)?facebook\.com\//i.test(trimmed)
+    : /^(?:(?:[a-z0-9-]+\.)*(?:facebook|instagram)\.com)(?:[/?#]|$)/i.test(trimmed)
       ? `https://${trimmed}`
       : undefined;
   if (!candidate) {
@@ -94,7 +97,12 @@ function normalizeHttpUrl(value) {
 
   try {
     const url = new URL(candidate);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? candidate : undefined;
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:')
+      && url.hostname
+      && !url.username
+      && !url.password
+    ) ? url.toString() : undefined;
   } catch {
     return undefined;
   }
@@ -110,6 +118,28 @@ function isFacebookUrl(value) {
   return hostname === 'facebook.com' || hostname.endsWith('.facebook.com');
 }
 
+function isInstagramUrl(value) {
+  const normalized = normalizeHttpUrl(value);
+  if (!normalized) {
+    return false;
+  }
+
+  const hostname = new URL(normalized).hostname.toLowerCase();
+  return hostname === 'instagram.com' || hostname.endsWith('.instagram.com');
+}
+
+function normalizeSocialUrl(value, service) {
+  const normalized = normalizeHttpUrl(value);
+  const valid = service === 'facebook' ? isFacebookUrl(normalized) : isInstagramUrl(normalized);
+  if (!valid) {
+    return undefined;
+  }
+
+  const url = new URL(normalized);
+  url.protocol = 'https:';
+  return url.toString();
+}
+
 function normalizeTrack(track) {
   const lengthMeters = Number(track.lengthMeters ?? 350);
   const id = track.id || slug(`${track.country || 'unknown'}-${track.state || 'track'}-${track.name}`);
@@ -120,10 +150,13 @@ function normalizeTrack(track) {
   const latitude = Number.isFinite(Number(track.latitude)) ? Number(track.latitude) : Number(locatorPoint?.lat);
   const longitude = Number.isFinite(Number(track.longitude)) ? Number(track.longitude) : Number(locatorPoint?.lng);
   const normalizedWebsiteUrl = normalizeHttpUrl(track.websiteUrl);
-  const normalizedFacebookUrl = normalizeHttpUrl(track.facebookUrl);
-  const websiteUrl = isFacebookUrl(normalizedWebsiteUrl) ? undefined : normalizedWebsiteUrl;
-  const facebookUrl = normalizedFacebookUrl
-    ?? (isFacebookUrl(normalizedWebsiteUrl) ? normalizedWebsiteUrl : undefined);
+  const normalizedFacebookUrl = normalizeSocialUrl(track.facebookUrl, 'facebook');
+  const normalizedInstagramUrl = normalizeSocialUrl(track.instagramUrl, 'instagram');
+  const websiteUrl = isFacebookUrl(normalizedWebsiteUrl) || isInstagramUrl(normalizedWebsiteUrl)
+    ? undefined
+    : normalizedWebsiteUrl;
+  const facebookUrl = normalizedFacebookUrl ?? normalizeSocialUrl(normalizedWebsiteUrl, 'facebook');
+  const instagramUrl = normalizedInstagramUrl ?? normalizeSocialUrl(normalizedWebsiteUrl, 'instagram');
 
   return {
     id,
@@ -151,7 +184,7 @@ function normalizeTrack(track) {
     coordinateAccuracy: track.coordinateAccuracy,
     websiteUrl,
     facebookUrl,
-    instagramUrl: track.instagramUrl,
+    instagramUrl,
     lengthMeters,
     elevationMeters: Number(track.elevationMeters ?? 0),
     surface: track.surface ?? 'BMX race track',
@@ -453,6 +486,7 @@ const locatorFields = [
   'longitude',
   'websiteUrl',
   'facebookUrl',
+  'instagramUrl',
 ];
 const locatorDatabase = {
   generatedAt,

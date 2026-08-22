@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Apple, ExternalLink, Globe2, MapPin, Navigation, Search, Users } from 'lucide-react';
+import { Apple, ExternalLink, Globe2, Instagram, MapPin, Navigation, Search, Users } from 'lucide-react';
 import {
   trackAppleMapsUrl,
   trackGoogleMapsUrl,
   trackGoogleEarthUrl,
 } from '../lib/mapLinks';
+import { trackExternalLinks } from '../lib/trackExternalLinks';
 import type { TrackLocatorRecord, TrackRecord } from '../types';
 import { PublicTrackMap } from './PublicTrackMap';
 
@@ -16,19 +17,6 @@ type PublicTrackLocatorProps = {
 const allCountries = 'All countries';
 const allRegions = 'All states / regions';
 const maximumVisibleResults = 24;
-
-function isFacebookUrl(value?: string) {
-  if (!value) {
-    return false;
-  }
-
-  try {
-    const hostname = new URL(value).hostname.toLowerCase();
-    return hostname === 'facebook.com' || hostname.endsWith('.facebook.com');
-  } catch {
-    return false;
-  }
-}
 
 function trackLocation(track: TrackLocatorRecord) {
   return [track.city, track.state, track.country].filter(Boolean).join(', ');
@@ -122,11 +110,7 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
     ?? (filteredTracks.length > 0
       ? filteredTracks[0]
       : sortedTracks.find((track) => track.id === selectedTrackId) ?? sortedTracks[0] ?? null);
-  const selectedWebsiteUrl = selectedTrack?.websiteUrl && !isFacebookUrl(selectedTrack.websiteUrl)
-    ? selectedTrack.websiteUrl
-    : undefined;
-  const selectedFacebookUrl = selectedTrack?.facebookUrl
-    ?? (isFacebookUrl(selectedTrack?.websiteUrl) ? selectedTrack?.websiteUrl : undefined);
+  const selectedExternalLinks = selectedTrack ? trackExternalLinks(selectedTrack) : {};
 
   useEffect(() => {
     if (!directoryReady || !selectedTrack || selectedTrack.id === selectedTrackId) {
@@ -225,6 +209,30 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
             {selectedTrack ? (
               <>
                 <PublicTrackMap track={selectedTrack} />
+                {(selectedExternalLinks.websiteUrl
+                  || selectedExternalLinks.facebookUrl
+                  || selectedExternalLinks.instagramUrl) && (
+                  <nav
+                    className="public-track-official-links"
+                    aria-label={`Official links for ${selectedTrack.name}`}
+                  >
+                    {selectedExternalLinks.websiteUrl && (
+                      <a href={selectedExternalLinks.websiteUrl} target="_blank" rel="noopener noreferrer">
+                        <Globe2 size={17} /> Official Website
+                      </a>
+                    )}
+                    {selectedExternalLinks.facebookUrl && (
+                      <a href={selectedExternalLinks.facebookUrl} target="_blank" rel="noopener noreferrer">
+                        <Users size={17} /> Facebook
+                      </a>
+                    )}
+                    {selectedExternalLinks.instagramUrl && (
+                      <a href={selectedExternalLinks.instagramUrl} target="_blank" rel="noopener noreferrer">
+                        <Instagram size={17} /> Instagram
+                      </a>
+                    )}
+                  </nav>
+                )}
                 <div className="public-track-details">
                   <div>
                     <span className="eyebrow">Selected track</span>
@@ -233,23 +241,13 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                     <small>Listed by {selectedTrack.source}</small>
                   </div>
                   <div className="public-track-actions" aria-label={`Track links for ${selectedTrack.name}`}>
-                    {selectedWebsiteUrl && (
-                      <a href={selectedWebsiteUrl} target="_blank" rel="noreferrer">
-                        <Globe2 size={16} /> Official Website
-                      </a>
-                    )}
-                    {selectedFacebookUrl && (
-                      <a href={selectedFacebookUrl} target="_blank" rel="noreferrer">
-                        <Users size={16} /> Facebook
-                      </a>
-                    )}
-                    <a href={trackAppleMapsUrl(selectedTrack)} target="_blank" rel="noreferrer">
+                    <a href={trackAppleMapsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
                       <Apple size={16} /> Apple Maps
                     </a>
-                    <a href={trackGoogleMapsUrl(selectedTrack)} target="_blank" rel="noreferrer">
+                    <a href={trackGoogleMapsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
                       <Navigation size={16} /> Google Maps
                     </a>
-                    <a href={trackGoogleEarthUrl(selectedTrack)} target="_blank" rel="noreferrer">
+                    <a href={trackGoogleEarthUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
                       <ExternalLink size={16} /> Open Earth
                     </a>
                   </div>
