@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
-import { FriendsView, friendGhostDetail, friendInviteTokenFromHref } from '../../src/components/FriendsView';
+import { FriendsView, friendGhostDetail, friendInviteTokenFromHref, preloadFriendsView } from '../../src/components/FriendsView';
 import {
   clearQueuedFriendRequests,
   createFriendsApi,
@@ -232,6 +232,41 @@ describe('TrackLab friends client', () => {
       expect.objectContaining({ url: '/api/friends/reports', method: 'POST', body: { profileId: 'rider-5', reason: 'spam' } }),
       expect.objectContaining({ url: '/api/friends/invites/claim', method: 'POST', body: { token: 'secure-token' } }),
     ]));
+  });
+
+  it('warms and deduplicates the primary Friends hub data for instant remounts', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input), 'https://tracklab.test');
+      if (url.pathname === '/api/friends') {
+        return jsonResponse({ items: [profile({ relationship: 'friend' })], total: 1, nextCursor: null });
+      }
+      if (url.pathname === '/api/friends/requests') {
+        return jsonResponse({ items: [], total: 0, nextCursor: null });
+      }
+      if (url.pathname === '/api/friends/privacy') {
+        return jsonResponse({ privacy: { discoverable: false, profile: { id: 'me', handle: 'me', displayName: 'Me' } } });
+      }
+      throw new Error(`Unexpected preload request: ${url.pathname}`);
+    });
+    const api = createFriendsApi(fetcher as unknown as typeof fetch);
+
+    const first = preloadFriendsView('me', api);
+    const concurrent = preloadFriendsView('me', api);
+    await Promise.all([first, concurrent]);
+    await preloadFriendsView('me', api);
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls.map(([input]) => new URL(String(input), 'https://tracklab.test').pathname)).toEqual([
+      '/api/friends',
+      '/api/friends/requests',
+      '/api/friends/privacy',
+    ]);
+    expect(new URL(String(fetcher.mock.calls[1]?.[0]), 'https://tracklab.test').searchParams.get('direction')).toBe('incoming');
+    const markup = renderToStaticMarkup(createElement(FriendsView, { currentProfileId: 'me', api }));
+    expect(markup).toContain('Fast Rider');
+    expect(markup).not.toContain('Loading riders');
+    await preloadFriendsView('another-account', api);
+    expect(fetcher).toHaveBeenCalledTimes(6);
   });
 
   it('keeps discoverability off unless the server explicitly opts the rider in', () => {
