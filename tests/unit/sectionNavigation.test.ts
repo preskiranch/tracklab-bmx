@@ -43,15 +43,19 @@ describe('sidebar section navigation', () => {
   });
 
   it('offers a direct Watch Connect entry that opens and targets its Settings panel', () => {
+    const settingsLabelIndex = appSource.indexOf('<Settings size={17} /> Settings');
+    expect(settingsLabelIndex).toBeGreaterThan(-1);
+    const settingsButton = appSource.slice(appSource.lastIndexOf('<button', settingsLabelIndex), appSource.indexOf('</button>', settingsLabelIndex));
     const labelIndex = appSource.indexOf('Watch Connect\n              </button>');
     expect(labelIndex).toBeGreaterThan(-1);
     const button = appSource.slice(appSource.lastIndexOf('<button', labelIndex), appSource.indexOf('</button>', labelIndex));
+    expect(settingsButton).toContain('onClick={handleHeartRateAccountBlockOpenSettings}');
     expect(button).toContain('handleHeartRateAccountBlockOpenSettings(true)');
-    expect(appSource.match(/> Settings\s*<\/button>/g)).toBeNull();
     const legacyHandler = appSource.slice(
       appSource.indexOf('const handleHeartRateAccountBlockOpenSettings'),
       appSource.indexOf('}, []);', appSource.indexOf('const handleHeartRateAccountBlockOpenSettings')),
     );
-    expect(legacyHandler).toContain("if (watch) location.hash = 'watch'");
+    expect(legacyHandler).toContain('setSidebarMoreOpen(false)');
+    expect(legacyHandler).toContain("if (watch === true) location.hash = 'watch'");
   });
 });
