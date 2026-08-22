@@ -462,10 +462,17 @@ extension HeartRateCoordinator: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
-        // Availability is queried by the web layer. Never surface Watch
-        // connectivity errors as a workout failure before a workout starts.
+        // Apple only guarantees paired/install flags after activation. Re-emit
+        // the current status so the web layer refreshes availability instead of
+        // leaving Watch Connect unavailable until the athlete taps retry.
         if activationState == .activated {
-            WatchConnectSessionManager.shared.recoverAtLaunch()
+            DispatchQueue.main.async {
+                WatchConnectSessionManager.shared.recoverAtLaunch()
+                let status = self.latestStatus
+                self.notifyObservers { observer in
+                    observer.heartRateCoordinator(self, didChange: status)
+                }
+            }
         }
     }
 

@@ -127,6 +127,22 @@ describe('WatchConnectCard', () => {
     expect(markup).not.toContain('<button');
   });
 
+  it('gives an iPhone a clear retry after showing the exact missing Watch app reason', () => {
+    const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
+      athleteName: 'Mason Fleming',
+      state: {
+        phase: 'connect',
+        connectedUntil: null,
+        remainingMs: 0,
+        detail: 'Install the TrackLab BMX companion app on Apple Watch.',
+      },
+      onCheckAgain: vi.fn(),
+    }));
+    expect(markup).toContain('Install the TrackLab BMX companion app on Apple Watch.');
+    expect(markup).toContain('Check again');
+    expect(markup).toContain('tabindex="-1"');
+  });
+
   it('offers the same Watch Connect button if automatic reload recovery needs retry', () => {
     const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
       athleteName: 'Mason Fleming',

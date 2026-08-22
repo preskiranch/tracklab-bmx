@@ -9,6 +9,11 @@
   padding: 14px;
 }
 
+.watch-connect-card:focus-visible {
+  outline: 3px solid #245f96;
+  outline-offset: 3px;
+}
+
 .watch-connect-card > header {
   align-items: center;
   display: grid;

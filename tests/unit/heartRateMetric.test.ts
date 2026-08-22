@@ -70,4 +70,22 @@ describe('HeartRateSettingsCard', () => {
     expect(html).toContain('do not change Friends access');
     expect(html).not.toContain('checked=""');
   });
+
+  it('labels the read-only details as Watch status beside Watch Connect', () => {
+    const html = renderToStaticMarkup(createElement(HeartRateSettingsCard, {
+      availability: null,
+      status: null,
+      readingState: 'checking',
+      latest: null,
+      showWorkoutActions: false,
+      onStart: () => undefined,
+      onPause: () => undefined,
+      onResume: () => undefined,
+      onEnd: () => undefined,
+      onRetry: () => undefined,
+    }));
+    expect(html).toContain('Connection details');
+    expect(html).toContain('Watch status');
+    expect(html).not.toContain('<h2 id="heart-rate-settings-heading">Apple Watch heart rate</h2>');
+  });
 });

@@ -81,8 +81,8 @@ export function HeartRateSettingsCard({
     <section className="heart-rate-settings-card" aria-labelledby="heart-rate-settings-heading">
       <header>
         <div>
-          <span className="eyebrow">Optional sensor</span>
-          <h2 id="heart-rate-settings-heading">Apple Watch heart rate</h2>
+          <span className="eyebrow">{showWorkoutActions ? 'Optional sensor' : 'Connection details'}</span>
+          <h2 id="heart-rate-settings-heading">{showWorkoutActions ? 'Apple Watch heart rate' : 'Watch status'}</h2>
         </div>
         <HeartPulse size={24} />
       </header>

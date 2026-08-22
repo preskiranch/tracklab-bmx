@@ -24,6 +24,7 @@ export type WatchConnectCardProps = Readonly<{
   busy?: boolean;
   disabled?: boolean;
   onConnect?: () => void;
+  onCheckAgain?: () => void;
   onDisconnect?: () => void;
   onForgetWatch?: () => void;
   onLiveStudioConsentChange?: (enabled: boolean) => void;
@@ -46,6 +47,7 @@ export function WatchConnectCard({
   busy = false,
   disabled = false,
   onConnect,
+  onCheckAgain,
   onDisconnect,
   onForgetWatch,
   onLiveStudioConsentChange,
@@ -80,6 +82,7 @@ export function WatchConnectCard({
       aria-busy={connecting || syncing || busy || undefined}
       aria-label={`${identity} Watch Connect`}
       className={`watch-connect-card ${state.phase}`}
+      tabIndex={-1}
     >
       <header>
         <span className="watch-connect-card-icon"><HeartPulse aria-hidden="true" size={21} /></span>
@@ -164,6 +167,11 @@ export function WatchConnectCard({
               ? <RefreshCw aria-hidden="true" size={17} />
               : <Watch aria-hidden="true" size={17} />}
             {actionLabel}
+          </button>
+        )}
+        {!showConnect && onCheckAgain && !connecting && !syncing && (
+          <button disabled={disabled || busy} onClick={onCheckAgain} type="button">
+            <RefreshCw aria-hidden="true" size={17} /> Check again
           </button>
         )}
         {(connecting || syncing) && !(connecting && showConnect) && (

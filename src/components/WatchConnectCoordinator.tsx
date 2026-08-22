@@ -8,6 +8,7 @@ import {
 import { createPortal } from 'react-dom';
 import type { UseHeartRateResult } from '../hooks/useHeartRate';
 import type {
+  NativeHeartRateAvailability,
   NativeHeartRateRelaySnapshot,
   NativeHeartRateStatus,
   NativeWatchConnectState,
@@ -36,7 +37,7 @@ import { reconcileWatchConnectAccount } from '../lib/watchConnectReconciliation'
 import { WatchConnectCard } from './WatchConnectCard';
 import { OwnerStudioWatchConnectSettings } from './OwnerStudioWatchConnectSettings';
 
-export const watchConnectSettingsSlotId = 'watch-connect-settings-slot';
+export const watchConnectSettingsSlotId = 'watch';
 
 export type StudioContext = Readonly<{
   clubId: string;
@@ -90,6 +91,14 @@ export function watchConnectNativeCapability(state: NativeWatchConnectState) {
     || reason.includes('unimplemented')
     || reason.includes('does not have an implementation')
   ));
+}
+
+export function unavailableWatchConnectDetail(
+  availability: NativeHeartRateAvailability | null,
+) {
+  return availability?.platform === 'iphone'
+    ? availability.reason || 'Check this iPhone\'s Apple Watch connection.'
+    : 'Open TrackLab on the paired iPhone and press Watch Connect.';
 }
 
 export function watchConnectLegacyHeartRateIsBusy(
@@ -283,6 +292,7 @@ export function WatchConnectCoordinator({
     startWatchConnect,
     stopWatchConnect,
     watchConnect,
+    refreshAvailability,
   } = heartRate;
 
   const selectedStudioContext = studioContexts.find((context) => context.clubId === targetClubId)
@@ -309,7 +319,10 @@ export function WatchConnectCoordinator({
     now,
   });
   const platformViewState = !onPairedIPhone && (viewState.phase === 'connect' || viewState.phase === 'ended')
-    ? { ...viewState, detail: 'Open TrackLab on the paired iPhone and press Watch Connect.' }
+    ? {
+      ...viewState,
+      detail: unavailableWatchConnectDetail(availability),
+    }
     : viewState;
   const cardState = actionDetail && platformViewState.phase !== 'connected'
     ? { ...platformViewState, detail: actionDetail }
@@ -320,6 +333,29 @@ export function WatchConnectCoordinator({
       ? document.getElementById(watchConnectSettingsSlotId)
       : null);
   }, [settingsOpen]);
+
+  useEffect(() => {
+    if (
+      !portalTarget
+      || typeof window === 'undefined'
+      || window.location.hash !== `#${watchConnectSettingsSlotId}`
+    ) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const card = portalTarget.querySelector<HTMLElement>('.watch-connect-card');
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const action = card.querySelector<HTMLButtonElement>(
+        '.watch-connect-card-actions button:not(:disabled)',
+      );
+      (action ?? card).focus({ preventScroll: true });
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${window.location.pathname}${window.location.search}`,
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [capable, portalTarget]);
 
   useEffect(() => {
     setNativeState(watchConnect);
@@ -701,6 +737,9 @@ export function WatchConnectCoordinator({
       enrolled={Boolean(enrollment)}
       liveStudioConsent={enrollment?.liveStudioConsent ?? liveStudioConsent}
       onConnect={onPairedIPhone ? () => { void connect(); } : undefined}
+      onCheckAgain={availability?.platform === 'iphone' && availability.supported === false
+        ? () => { void refreshAvailability(); }
+        : undefined}
       onDisconnect={onPairedIPhone && connection?.state === 'connected'
         ? () => { void disconnect(); }
         : undefined}
