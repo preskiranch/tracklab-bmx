@@ -54,21 +54,21 @@ async function expectStableAcrossFrames(locator: Locator) {
   }
 }
 
-function riderCards() {
-  return ['Rasheen The Machine Hicks', 'Maya Torres', 'Jordan Lee', 'Avery Brooks']
+function riderCards(positionsPending = false) {
+  return ['Gwen Hodge', 'Rasheen The Machine Hicks', 'Kira Boustead', 'Candace “Baby Cakes” Hicks']
     .map((name, index) => `
-      <article class="race-rider-overlay-card" style="--player-color:${['#2aa8ff', '#ffd83d', '#7ade36', '#ff4d4d'][index]}">
+      <article class="race-rider-overlay-card${positionsPending ? ' positions-pending' : ''}" style="--player-color:${['#2aa8ff', '#ffd83d', '#7ade36', '#ff4d4d'][index]}">
         <div class="race-rider-overlay-summary">
           <span class="rider-avatar race-rider-overlay-avatar">${name.slice(0, 1)}</span>
           <span class="race-rider-overlay-badge">P${index + 1}</span>
           <span class="race-rider-overlay-identity"><strong>${name}</strong><span>76% track / 21 MPH</span></span>
         </div>
-        <div class="race-rider-overlay-place"><strong>${index + 1}${index === 0 ? 'st' : index === 1 ? 'nd' : index === 2 ? 'rd' : 'th'}</strong><span>Place</span></div>
+        ${positionsPending ? '' : `<div class="race-rider-overlay-place"><strong>${index + 1}${index === 0 ? 'st' : index === 1 ? 'nd' : index === 2 ? 'rd' : 'th'}</strong><span>Place</span></div>`}
       </article>
     `).join('');
 }
 
-function raceMarkup(overlayHeight: number) {
+function raceMarkup(overlayHeight: number, positionsPending = false) {
   return `
     <main class="platform-shell race-fullscreen">
       <section class="platform-main">
@@ -89,11 +89,14 @@ function raceMarkup(overlayHeight: number) {
                     </div>
                     <div class="race-countdown-pause-overlay race-sprint-info-overlay"><span>500 ft Sprint<br><small>Wattbike Air 5</small></span></div>
                   </div>
-                  <button class="race-camera-lock-overlay locked" aria-label="Race layout locked">Layout Locked</button>
+                  <button class="race-camera-lock-overlay locked" aria-label="Race layout locked"><svg aria-hidden="true" width="17" height="17"></svg><span>Layout Locked</span></button>
+                  ${positionsPending
+                    ? '<div class="race-staging-countdown" aria-label="Race staging countdown"><strong>5</strong><span>Adjust the view, then return to your bike</span></div>'
+                    : '<div class="start-tree-light" aria-label="BMX start tree light"><span class="tree-lamp red"></span><span class="tree-lamp yellow"></span><span class="tree-lamp yellow"></span><span class="tree-lamp green"></span></div>'}
                   <div class="earth-overlay bottom-left"><span>Angle 55 deg</span><span>Heading 20 deg</span><span>Satellite</span></div>
                   <div class="race-rider-overlay locked" aria-label="Race rider positions" style="--overlay-x:4%;--overlay-y:70%;--overlay-width:940px;--overlay-height:${overlayHeight}px">
                     <div class="race-rider-overlay-toolbar"><div class="race-rider-overlay-handle">Rider positions</div></div>
-                    <div class="race-rider-overlay-grid">${riderCards()}</div>
+                    <div class="race-rider-overlay-grid">${riderCards(positionsPending)}</div>
                   </div>
                 </div>
               </section>
@@ -156,11 +159,16 @@ function gameArenaMarkup() {
 
 test('keeps satellite race controls and rider data inside iPhone portrait and landscape', async ({ page }) => {
   for (const viewport of [
-    { width: 390, height: 844, columns: 2, overlayHeight: 340 },
-    { width: 844, height: 390, columns: 4, overlayHeight: 220 },
+    { width: 390, height: 844, columns: 2, overlayHeight: 340, positionsPending: false },
+    { width: 844, height: 390, columns: 4, overlayHeight: 220, positionsPending: false },
+    { width: 844, height: 390, columns: 4, overlayHeight: 220, positionsPending: true },
+    { width: 852, height: 393, columns: 4, overlayHeight: 220, positionsPending: false },
+    { width: 852, height: 393, columns: 4, overlayHeight: 220, positionsPending: true },
+    { width: 932, height: 430, columns: 4, overlayHeight: 220, positionsPending: false },
+    { width: 932, height: 430, columns: 4, overlayHeight: 220, positionsPending: true },
   ]) {
     await page.setViewportSize(viewport);
-    await page.setContent(raceMarkup(viewport.overlayHeight));
+    await page.setContent(raceMarkup(viewport.overlayHeight, viewport.positionsPending));
     await installTrackStyles(page);
 
     await expectViewportLocked(page, page.locator('.platform-shell'));
@@ -168,22 +176,105 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
     await expectInsideViewport(page, page.getByLabel('Fullscreen race controls'));
     await expectInsideViewport(page, page.getByLabel('Race layout locked'));
     await expectInsideViewport(page, page.getByLabel('Race rider positions'));
+    if (viewport.width > viewport.height) {
+      const topControlHeights = await page.getByLabel('Fullscreen race controls').locator('button').evaluateAll((buttons) => (
+        buttons.map((button) => button.getBoundingClientRect().height)
+      ));
+      expect(topControlHeights.every((height) => height >= 44)).toBe(true);
+      const lockBounds = await page.getByLabel('Race layout locked').boundingBox();
+      expect(lockBounds?.width).toBeCloseTo(44, 0);
+      expect(lockBounds?.height).toBeCloseTo(44, 0);
+    }
 
     const gridColumns = await page.locator('.race-rider-overlay-grid').evaluate((grid) => (
       getComputedStyle(grid).gridTemplateColumns.split(' ').length
     ));
     expect(gridColumns).toBe(viewport.columns);
-    const cardsFit = await page.getByLabel('Race rider positions').evaluate((panel) => {
+    const compactLayout = await page.getByLabel('Race rider positions').evaluate((panel) => {
       const bounds = panel.getBoundingClientRect();
-      return [...panel.querySelectorAll('.race-rider-overlay-card')].every((card) => {
-        const cardBounds = card.getBoundingClientRect();
-        return cardBounds.left >= bounds.left - 0.5
-          && cardBounds.right <= bounds.right + 0.5
-          && cardBounds.top >= bounds.top - 0.5
-          && cardBounds.bottom <= bounds.bottom + 0.5;
-      });
+      const cards = [...panel.querySelectorAll('.race-rider-overlay-card')];
+      return {
+        height: bounds.height,
+        viewportHeight: window.innerHeight,
+        cardsFit: cards.every((card) => {
+          const cardBounds = card.getBoundingClientRect();
+          return cardBounds.left >= bounds.left - 0.5
+            && cardBounds.right <= bounds.right + 0.5
+            && cardBounds.top >= bounds.top - 0.5
+            && cardBounds.bottom <= bounds.bottom + 0.5;
+        }),
+        contentChecks: cards.map((card) => {
+          const summary = card.querySelector<HTMLElement>('.race-rider-overlay-summary')!;
+          const avatar = card.querySelector<HTMLElement>('.race-rider-overlay-avatar')!;
+          const badge = card.querySelector<HTMLElement>('.race-rider-overlay-badge')!;
+          const identity = card.querySelector<HTMLElement>('.race-rider-overlay-identity')!;
+          const name = identity.querySelector<HTMLElement>('strong')!;
+          const metric = identity.querySelector<HTMLElement>('span')!;
+          const summaryBounds = summary.getBoundingClientRect();
+          const avatarBounds = avatar.getBoundingClientRect();
+          const badgeBounds = badge.getBoundingClientRect();
+          const identityBounds = identity.getBoundingClientRect();
+          const badgeOverlapsIdentity = badgeBounds.right > identityBounds.left + 0.5
+            && badgeBounds.left < identityBounds.right - 0.5
+            && badgeBounds.bottom > identityBounds.top + 0.5
+            && badgeBounds.top < identityBounds.bottom - 0.5;
+          const place = card.querySelector<HTMLElement>('.race-rider-overlay-place');
+          return {
+            summaryFits: summary.scrollHeight <= summary.clientHeight + 1,
+            identityFits: identity.scrollHeight <= identity.clientHeight + 1,
+            nameFits: name.scrollHeight <= name.clientHeight + 1,
+            metricFits: metric.scrollWidth <= metric.clientWidth + 1,
+            avatarClear: avatarBounds.right <= identityBounds.left + 0.5,
+            badgeClear: !badgeOverlapsIdentity,
+            rowsClear: !place || summaryBounds.bottom <= place.getBoundingClientRect().top + 0.5,
+          };
+        }),
+      };
     });
-    expect(cardsFit).toBe(true);
+    expect(compactLayout.cardsFit).toBe(true);
+    if (viewport.width > viewport.height) {
+      expect(compactLayout.contentChecks).toEqual(compactLayout.contentChecks.map(() => ({
+        summaryFits: true,
+        identityFits: true,
+        nameFits: true,
+        metricFits: true,
+        avatarClear: true,
+        badgeClear: true,
+        rowsClear: true,
+      })));
+      expect(compactLayout.height / compactLayout.viewportHeight).toBeLessThanOrEqual(0.385);
+      const overlayBounds = await page.getByLabel('Race rider positions').boundingBox();
+      expect(viewport.width - (overlayBounds?.x ?? 0) - (overlayBounds?.width ?? viewport.width)).toBeGreaterThanOrEqual(51.5);
+      expect(viewport.height - (overlayBounds?.y ?? 0) - (overlayBounds?.height ?? viewport.height)).toBeGreaterThanOrEqual(27.5);
+      if (viewport.positionsPending) {
+        await expect(page.locator('.race-rider-overlay-card.positions-pending')).toHaveCount(4);
+        await expect(page.locator('.race-rider-overlay-place')).toHaveCount(0);
+        const countdown = page.getByLabel('Race staging countdown');
+        await expectInsideViewport(page, countdown);
+        const doesNotIntersectOverlay = await countdown.evaluate((countdownElement) => {
+          const countdownBounds = countdownElement.getBoundingClientRect();
+          const overlayBounds = document.querySelector<HTMLElement>('.race-rider-overlay')!.getBoundingClientRect();
+          return countdownBounds.bottom <= overlayBounds.top - 4;
+        });
+        expect(doesNotIntersectOverlay).toBe(true);
+      } else {
+        const startTree = page.getByLabel('BMX start tree light');
+        await expectInsideViewport(page, startTree);
+        const treeClearsControls = await startTree.evaluate((treeElement) => {
+          const treeBounds = treeElement.getBoundingClientRect();
+          const controlsBounds = document.querySelector<HTMLElement>('.race-top-left-controls')!.getBoundingClientRect();
+          const lockBounds = document.querySelector<HTMLElement>('.race-camera-lock-overlay')!.getBoundingClientRect();
+          const intersects = (left: DOMRect, right: DOMRect) => left.right > right.left
+            && left.left < right.right
+            && left.bottom > right.top
+            && left.top < right.bottom;
+          return !intersects(treeBounds, controlsBounds) && !intersects(treeBounds, lockBounds);
+        });
+        expect(treeClearsControls).toBe(true);
+      }
+    } else {
+      expect(compactLayout.height).toBeGreaterThanOrEqual(340);
+    }
     await expectStableAcrossFrames(page.locator('.earth-stage'));
   }
 });

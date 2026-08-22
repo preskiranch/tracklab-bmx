@@ -23,6 +23,7 @@ type DragState =
       startX: number;
       startY: number;
       layout: RaceRiderOverlayLayout;
+      requestedLayout: RaceRiderOverlayLayout;
       captureTarget: HTMLElement;
     }
   | {
@@ -31,6 +32,7 @@ type DragState =
       startX: number;
       startY: number;
       layout: RaceRiderOverlayLayout;
+      requestedLayout: RaceRiderOverlayLayout;
       captureTarget: HTMLElement;
     };
 
@@ -68,9 +70,35 @@ type RaceRiderOverlayProps = {
   heartRateByPlayer?: LiveHeartRateByPlayer;
 };
 
+function raceRiderOverlayUsesCompactLandscape(containerWidth: number, containerHeight: number) {
+  return containerWidth > containerHeight
+    && containerWidth <= 1000
+    && containerHeight <= 500;
+}
+
 export function raceRiderOverlayMinimumHeight(containerWidth: number, containerHeight: number) {
-  const compactLandscape = containerWidth > containerHeight && containerHeight <= 500;
-  return containerWidth <= 900 && !compactLandscape ? 340 : 190;
+  if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
+    return 132;
+  }
+  return containerWidth <= 900 ? 340 : 190;
+}
+
+export function raceRiderOverlayMaximumHeight(containerWidth: number, containerHeight: number) {
+  if (!raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.max(132, Math.min(148, Math.round(containerHeight * 0.34)));
+}
+
+export function raceRiderOverlayPreferenceForViewport(
+  requested: RaceRiderOverlayLayout,
+  presented: RaceRiderOverlayLayout,
+  containerWidth: number,
+  containerHeight: number,
+) {
+  return raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)
+    ? { ...requested, locked: presented.locked }
+    : presented;
 }
 
 function ordinal(value: number) {
@@ -87,10 +115,14 @@ function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | nu
     container.clientWidth,
     container.clientHeight,
   );
+  const maximumHeight = raceRiderOverlayMaximumHeight(
+    container.clientWidth,
+    container.clientHeight,
+  );
   const width = Math.max(320, Math.min(layout.width, Math.max(320, container.clientWidth - 24)));
   const height = Math.max(
     minimumHeight,
-    Math.min(layout.height, Math.max(minimumHeight, container.clientHeight - 24)),
+    Math.min(layout.height, maximumHeight, Math.max(minimumHeight, container.clientHeight - 24)),
   );
   const maxX = Math.max(0, 1 - (width / Math.max(1, container.clientWidth)));
   const maxY = Math.max(0, 1 - (height / Math.max(1, container.clientHeight)));
@@ -249,8 +281,17 @@ export function RaceRiderOverlay({
   const finishDrag = useCallback(() => {
     const drag = dragRef.current;
     if (drag) {
-      requestedLayoutRef.current = layoutRef.current;
-      onPreferenceChange(trackId, layoutRef.current);
+      const container = overlayRef.current?.parentElement ?? null;
+      const nextPreference = container
+        ? raceRiderOverlayPreferenceForViewport(
+          drag.requestedLayout,
+          layoutRef.current,
+          container.clientWidth,
+          container.clientHeight,
+        )
+        : layoutRef.current;
+      requestedLayoutRef.current = nextPreference;
+      onPreferenceChange(trackId, nextPreference);
       if (drag.captureTarget.hasPointerCapture?.(drag.pointerId)) {
         drag.captureTarget.releasePointerCapture(drag.pointerId);
       }
@@ -317,6 +358,7 @@ export function RaceRiderOverlay({
       startX: event.clientX,
       startY: event.clientY,
       layout,
+      requestedLayout: requestedLayoutRef.current,
       captureTarget: event.currentTarget,
     };
   };
@@ -335,6 +377,7 @@ export function RaceRiderOverlay({
       startX: event.clientX,
       startY: event.clientY,
       layout,
+      requestedLayout: requestedLayoutRef.current,
       captureTarget: event.currentTarget,
     };
   };
@@ -344,11 +387,12 @@ export function RaceRiderOverlay({
       return;
     }
     dragRef.current = null;
-    const next = { ...layout, locked: !layout.locked };
-    requestedLayoutRef.current = next;
-    layoutRef.current = next;
-    setLayout(next);
-    onPreferenceChange(trackId, next);
+    const nextPreference = { ...requestedLayoutRef.current, locked: !layout.locked };
+    const nextLayout = clampLayout(nextPreference, overlayRef.current?.parentElement ?? null);
+    requestedLayoutRef.current = nextPreference;
+    layoutRef.current = nextLayout;
+    setLayout(nextLayout);
+    onPreferenceChange(trackId, nextPreference);
   };
 
   if (!visible || entries.length === 0) {
