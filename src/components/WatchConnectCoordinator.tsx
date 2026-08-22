@@ -36,6 +36,7 @@ import {
 import { reconcileWatchConnectAccount } from '../lib/watchConnectReconciliation';
 import { WatchConnectCard } from './WatchConnectCard';
 import { OwnerStudioWatchConnectSettings } from './OwnerStudioWatchConnectSettings';
+import { watchAppNeedsInstall } from './watchAppInstall';
 
 export const watchConnectSettingsSlotId = 'watch';
 
@@ -778,6 +779,7 @@ export function WatchConnectCoordinator({
         connection,
         native: nativeState,
       })}
+      showWatchInstall={watchAppNeedsInstall(availability)}
     />}
     {ownedStudio && <OwnerStudioWatchConnectSettings studio={ownedStudio} />}
     </>,

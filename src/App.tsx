@@ -1938,6 +1938,7 @@ export default function App() {
     lastRaceWasSprintRef.current = appMode === 'straight-sprint';
   }
   const resultsMode = appMode === 'results';
+  const settingsMode = appMode === 'settings';
   const raceWorkspaceMode = appMode === 'straight-sprint'
     || (resultsMode && lastRaceWasSprintRef.current) ? 'straight-sprint' : 'race';
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
@@ -2395,9 +2396,11 @@ export default function App() {
     setShowMembershipLanding(true);
   }, []);
 
-  const handleHeartRateAccountBlockOpenSettings = useCallback(() => {
+  const handleHeartRateAccountBlockOpenSettings = useCallback((watch?: unknown) => {
     setShowMembershipLanding(false);
     setAppMode('settings');
+    setSidebarMoreOpen(false);
+    if (watch === true) location.hash = 'watch';
   }, []);
 
   const handleHeartRateStudioRelayConfigure = useCallback(async (
@@ -2883,7 +2886,7 @@ export default function App() {
   }, [refreshClubTrainingMemberships]);
 
   useEffect(() => {
-    if (appMode === 'club-monitor' && clubTrainingStatus !== 'loading' && !clubOwnerActive) {
+    if (clubMonitorReleasesLocalBikes && clubTrainingStatus !== 'loading' && !clubOwnerActive) {
       setAppMode('profile');
     }
   }, [appMode, clubOwnerActive, clubTrainingStatus]);
@@ -9509,7 +9512,7 @@ export default function App() {
   }, [appMode, exploreRideFullscreen]);
 
   useEffect(() => {
-    const utilityModeActive = appMode === 'get-pulled' || appMode === 'monitor' || appMode === 'club-monitor';
+    const utilityModeActive = appMode === 'get-pulled' || appMode === 'monitor' || clubMonitorReleasesLocalBikes;
     if (!utilityModeActive && utilityFullscreen) {
       setUtilityFullscreen(false);
       releaseBrowserFullscreen();
@@ -10217,7 +10220,7 @@ export default function App() {
         authStatus={authStatus}
         accountId={authUser?.id ?? null}
         kioskMode={clubTabletKioskMode}
-        settingsOpen={appMode === 'settings' && watchConnectCapable === false}
+        settingsOpen={settingsMode && watchConnectCapable === false}
         hydratedAccountId={heartRateHydratedAccountId}
         heartRate={heartRate}
         accountHydrationRef={heartRateAccountHydrationRef}
@@ -10248,7 +10251,7 @@ export default function App() {
         onLegacyRelaySuppressionChange={handleLegacyRelaySuppressionChange}
         onMessage={setHeartRateMessage}
         ownedStudio={ownedClub ? { clubId: ownedClub.id, clubName: ownedClub.name } : null}
-        settingsOpen={appMode === 'settings'}
+        settingsOpen={settingsMode}
         preferPersonal={Boolean(ownedClub)}
         studioContext={watchConnectStudioMembership ? {
           clubId: watchConnectStudioMembership.clubId,
@@ -10666,7 +10669,7 @@ export default function App() {
               </div>
             </div>
           </section>
-        ) : appMode === 'settings' || appMode === 'friends' || resultsMode ? null : appMode === 'get-pulled' ? (
+        ) : settingsMode || appMode === 'friends' || resultsMode ? null : appMode === 'get-pulled' ? (
           <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Get Pulled setup workflow">
             <div className="workflow-heading">
               <span>Get Pulled</span>
@@ -10987,7 +10990,7 @@ export default function App() {
             Results
           </button>
           <button
-            className={sidebarMoreOpen || appMode === 'settings' ? 'selected' : ''}
+            className={sidebarMoreOpen || settingsMode ? 'selected' : ''}
             type="button"
             aria-expanded={sidebarMoreOpen}
             onClick={() => setSidebarMoreOpen((open) => !open)}
@@ -10997,20 +11000,10 @@ export default function App() {
           </button>
           {sidebarMoreOpen && (
             <div className="side-nav-more">
-              <button
-                type="button"
-                onClick={() => {
-                  setAppMode('settings');
-                  setSidebarMoreOpen(false);
-                }}
-              >
+              <button type="button" onClick={handleHeartRateAccountBlockOpenSettings}>
                 <Settings size={17} /> Settings
               </button>
-              <button onClick={() => {
-                setAppMode('settings');
-                setSidebarMoreOpen(false);
-                location.hash = 'watch';
-              }}>
+              <button onClick={() => handleHeartRateAccountBlockOpenSettings(true)}>
                 Watch Connect
               </button>
               <button type="button" onClick={() => setShowMembershipLanding(true)}>
@@ -11024,7 +11017,7 @@ export default function App() {
               </button>
               {clubOwnerActive && (
                 <>
-                  <button className={appMode === 'club-monitor' ? 'selected' : ''} type="button" onClick={() => openFullscreenUtility('club-monitor')}>
+                  <button className={clubMonitorReleasesLocalBikes ? 'selected' : ''} type="button" onClick={() => openFullscreenUtility('club-monitor')}>
                     <Radio size={17} /> Club Live Monitor
                   </button>
                   <button className={appMode === 'club-tablet' ? 'selected' : ''} type="button" onClick={() => setAppMode('club-tablet')}>
@@ -11125,7 +11118,7 @@ export default function App() {
                 <small>Find riders, manage requests, and invite people you already know</small>
               </span>
             </div>
-          ) : appMode === 'settings' ? (
+          ) : settingsMode ? (
             <div className="explore-topbar-heading">
               <Settings size={20} />
               <span>
@@ -11133,7 +11126,7 @@ export default function App() {
                 <small>Your saved display and unit preferences</small>
               </span>
             </div>
-          ) : resultsMode ? null : appMode === 'club-monitor' ? (
+          ) : resultsMode ? null : clubMonitorReleasesLocalBikes ? (
             <div className="explore-topbar-heading">
               <Radio size={20} />
               <span>
@@ -11286,7 +11279,7 @@ export default function App() {
               onRaceGhost={handleRaceFriendGhost}
             />
           </Suspense>
-        ) : appMode === 'settings' ? (
+        ) : settingsMode ? (
           <Suspense fallback={<div className="explore-loading">Loading settings…</div>}>
             <AppSettingsView
               speedUnit={speedUnit}

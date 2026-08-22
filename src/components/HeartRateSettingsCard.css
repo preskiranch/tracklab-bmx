@@ -45,7 +45,8 @@
   gap: 9px;
 }
 
-.heart-rate-settings-actions button {
+.heart-rate-settings-actions button,
+.heart-rate-settings-actions a {
   align-items: center;
   background: #f7f5f6;
   border: 1px solid #d9cdd0;
@@ -56,12 +57,25 @@
   gap: 7px;
   min-height: 44px;
   padding: 10px 14px;
+  text-decoration: none;
 }
 
-.heart-rate-settings-actions button.primary {
+.heart-rate-settings-actions button.primary,
+.heart-rate-settings-actions a.primary {
   background: #a72b48;
   border-color: #a72b48;
   color: #fff;
+}
+
+.heart-rate-settings-actions a:focus-visible {
+  outline: 3px solid #245f96;
+  outline-offset: 2px;
+}
+
+.heart-rate-settings-install-help {
+  color: #667085;
+  flex-basis: 100%;
+  line-height: 1.45;
 }
 
 .heart-rate-settings-actions button.danger {
@@ -171,7 +185,8 @@
     width: 100%;
   }
 
-  .heart-rate-settings-actions button {
+  .heart-rate-settings-actions button,
+  .heart-rate-settings-actions a {
     justify-content: center;
     width: 100%;
   }

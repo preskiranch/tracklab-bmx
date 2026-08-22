@@ -137,8 +137,12 @@ describe('WatchConnectCard', () => {
         detail: 'Install the TrackLab BMX companion app on Apple Watch.',
       },
       onCheckAgain: vi.fn(),
+      showWatchInstall: true,
     }));
     expect(markup).toContain('Install the TrackLab BMX companion app on Apple Watch.');
+    expect(markup).toContain('Install Watch App');
+    expect(markup).toContain('href="https://testflight.apple.com/"');
+    expect(markup).toContain('scroll to Information, then tap Install beside Apple Watch');
     expect(markup).toContain('Check again');
     expect(markup).toContain('tabindex="-1"');
   });
