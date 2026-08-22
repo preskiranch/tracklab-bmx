@@ -67,6 +67,7 @@ import {
 } from './httpSecurity.mjs';
 import { fetchExploreElevationProfile } from './exploreElevation.mjs';
 import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
+import { createAuthSessionCache } from './authSessionCache.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(__dirname, '..');
@@ -81,6 +82,7 @@ const friendEventStreams = new Map();
 const heartRateOwnerLiveStreams = new Map();
 const heartRateClubLiveStreams = new Map();
 const heartRateStreamWriteChains = new Map();
+const heartRateWatchStatusSnapshots = new Map();
 let friendEventStreamCount = 0;
 const rooms = new Map();
 const challenges = new Map();
@@ -121,6 +123,30 @@ const defaultAdminAccountEmail = 'preskiranch@gmail.com';
 const authCookieName = 'tracklab_session';
 const authSessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 const authSessionTouchIntervalMs = 5 * 60 * 1000;
+// Friends and Watch status share a short, bounded personal-session cache so a
+// section change does not add another PostgreSQL round trip. Privileged and
+// general routes only coalesce in-flight lookups, preserving immediate account
+// entitlement changes; logout and kiosk takeover clear both caches.
+const authSessionCacheTtlMs = 5_000;
+const maxAuthSessionCacheEntries = 2_048;
+const heartRateWatchStatusSnapshotTtlMs = 2_000;
+const maxHeartRateWatchStatusSnapshotEntries = 2_048;
+const authSessionLookups = createAuthSessionCache({
+  ttlMs: 0,
+  touchIntervalMs: authSessionTouchIntervalMs,
+  maxEntries: maxAuthSessionCacheEntries,
+  onOutcome: (outcome) => {
+    cloudTelemetry.increment('tracklab_auth_session_cache_total', { cache: 'inflight', outcome });
+  },
+});
+const personalAuthSessions = createAuthSessionCache({
+  ttlMs: authSessionCacheTtlMs,
+  touchIntervalMs: authSessionTouchIntervalMs,
+  maxEntries: maxAuthSessionCacheEntries,
+  onOutcome: (outcome) => {
+    cloudTelemetry.increment('tracklab_auth_session_cache_total', { cache: 'personal', outcome });
+  },
+});
 const billingCheckoutMaxAgeMs = 60 * 60 * 1000;
 const transientStateMaxAgeMs = 6 * 60 * 60 * 1000;
 const scryptAsync = promisify(scryptCallback);
@@ -137,6 +163,10 @@ const friendReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const friendMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const friendRequestRateLimiter = createRateLimiter({ windowMs: 24 * 60 * 60 * 1000 });
 const heartRateReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+// This admission limiter runs before database-backed authentication. It keeps
+// a broken native polling loop from consuming every PostgreSQL connection and
+// delaying unrelated sections such as Friends.
+const heartRateStatusAdmissionRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const heartRateMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const heartRateIngestRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const clubMonitorHistoryRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -435,6 +465,12 @@ function tokenHash(token) {
   return createHash('sha256').update(token).digest('hex');
 }
 
+function authCredentialRateLimitKey(request) {
+  const token = cookieValue(request, authCookieName);
+  // Never place a reusable credential in a limiter key or telemetry label.
+  return token ? `session:${tokenHash(token).slice(0, 24)}` : 'anonymous';
+}
+
 function createSessionToken() {
   return randomBytes(32).toString('base64url');
 }
@@ -503,32 +539,46 @@ function clubAthleteDisplayName(fullNameValue, nicknameValue, fallbackName) {
 
 async function createSignedInResponse(request, response, user, statusCode = 200) {
   const token = createSessionToken();
+  const sessionId = randomUUID();
   const expiresAt = new Date(Date.now() + authSessionMaxAgeSeconds * 1000).toISOString();
-  await persistence.createAuthSession({
-    id: randomUUID(),
+  const sessionStored = await persistence.createAuthSession({
+    id: sessionId,
     userId: user.id,
     tokenHash: tokenHash(token),
     expiresAt,
   });
+  if (!sessionStored) {
+    writeJson(response, 503, { error: 'The secure sign-in session could not be stored. Try again.' });
+    return;
+  }
+  const cachedSession = {
+    sessionId,
+    expiresAt,
+    lastSeen: new Date().toISOString(),
+    user,
+  };
+  authSessionLookups.remember(tokenHash(token), cachedSession);
+  personalAuthSessions.remember(tokenHash(token), cachedSession);
   setAuthCookie(response, request, token);
   response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
   response.end(JSON.stringify({ user: publicAuthUser(user) }));
 }
 
-async function currentAuthSession(request) {
+async function currentAuthSession(request, sessionCache = authSessionLookups) {
   const token = cookieValue(request, authCookieName);
   if (!token) {
     return null;
   }
 
-  const session = await persistence.findAuthSession(tokenHash(token));
+  const hash = tokenHash(token);
+  const session = await sessionCache.load(hash, persistence.findAuthSession);
   if (!session?.user) {
     return null;
   }
 
   const lastSeenAt = Date.parse(session.lastSeen ?? '');
   if (!Number.isFinite(lastSeenAt) || Date.now() - lastSeenAt >= authSessionTouchIntervalMs) {
-    void persistence.touchAuthSession(tokenHash(token));
+    sessionCache.scheduleTouch(hash, session, persistence.touchAuthSession);
   }
   return { ...session, token };
 }
@@ -552,7 +602,12 @@ async function requireAccountFriendSession(request, response) {
     writeJson(response, 403, { error: 'Friend settings are available only from a rider’s personal account.' });
     return null;
   }
-  return requireAuthSession(request, response);
+  const session = await currentAuthSession(request, personalAuthSessions);
+  if (!session?.user) {
+    writeJson(response, 401, { error: 'Sign in to continue.' });
+    return null;
+  }
+  return session;
 }
 
 async function requirePersonalHeartRateSession(request, response) {
@@ -564,7 +619,12 @@ async function requirePersonalHeartRateSession(request, response) {
     writeJson(response, 403, { error: 'Heart-rate settings are available only from the athlete’s personal account.' });
     return null;
   }
-  return requireAuthSession(request, response);
+  const session = await currentAuthSession(request, personalAuthSessions);
+  if (!session?.user) {
+    writeJson(response, 401, { error: 'Sign in to continue.' });
+    return null;
+  }
+  return session;
 }
 
 async function requireClubMonitorOwnerSession(request, response) {
@@ -2824,6 +2884,66 @@ function normalizeHeartRateWatchInstallId(value) {
 
 function heartRateWatchInstallIdHash(installId) {
   return tokenHash(`heart-rate-watch-install:${normalizeHeartRateWatchInstallId(installId)}`);
+}
+
+function invalidateHeartRateWatchStatusSnapshot(profileKey) {
+  const normalizedProfileKey = String(profileKey || '').trim();
+  if (normalizedProfileKey) {
+    heartRateWatchStatusSnapshots.delete(normalizedProfileKey);
+  }
+}
+
+function pruneHeartRateWatchStatusSnapshots(now = Date.now()) {
+  for (const [profileKey, entry] of heartRateWatchStatusSnapshots) {
+    if (!entry.pending && entry.expiresAt <= now) {
+      heartRateWatchStatusSnapshots.delete(profileKey);
+    }
+  }
+  while (heartRateWatchStatusSnapshots.size > maxHeartRateWatchStatusSnapshotEntries) {
+    const oldestProfileKey = heartRateWatchStatusSnapshots.keys().next().value;
+    if (!oldestProfileKey) break;
+    heartRateWatchStatusSnapshots.delete(oldestProfileKey);
+  }
+}
+
+function loadHeartRateWatchStatusSnapshot(profileKey) {
+  const normalizedProfileKey = String(profileKey || '').trim();
+  const now = Date.now();
+  const existing = heartRateWatchStatusSnapshots.get(normalizedProfileKey);
+  if (existing?.value && existing.expiresAt > now) {
+    return Promise.resolve(existing.value);
+  }
+  if (existing?.pending) {
+    return existing.pending;
+  }
+
+  const entry = {
+    value: null,
+    expiresAt: 0,
+    pending: null,
+  };
+  cloudTelemetry.increment('tracklab_heart_rate_watch_status_loads_total');
+  const pending = Promise.all([
+    persistence.loadHeartRateWatchEnrollments(normalizedProfileKey),
+    persistence.loadHeartRateWatchConnections(normalizedProfileKey),
+  ]).then(([enrollments, connections]) => {
+    const value = { enrollments, connections };
+    if (heartRateWatchStatusSnapshots.get(normalizedProfileKey) === entry) {
+      entry.value = value;
+      entry.expiresAt = Date.now() + heartRateWatchStatusSnapshotTtlMs;
+      entry.pending = null;
+    }
+    return value;
+  }, (error) => {
+    if (heartRateWatchStatusSnapshots.get(normalizedProfileKey) === entry) {
+      heartRateWatchStatusSnapshots.delete(normalizedProfileKey);
+    }
+    throw error;
+  });
+  entry.pending = pending;
+  heartRateWatchStatusSnapshots.set(normalizedProfileKey, entry);
+  pruneHeartRateWatchStatusSnapshots(now);
+  return pending;
 }
 
 function publicHeartRateWatchEnrollment(enrollment) {
@@ -7456,6 +7576,16 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
   const pathname = requestUrl.pathname;
   const now = Date.now();
 
+  if (pathname === '/api/heart-rate/watch-connect' && request.method === 'GET') {
+    if (!enforceRateLimit(
+      request,
+      response,
+      heartRateStatusAdmissionRateLimiter,
+      12,
+      `heart-rate-watch-status-admission:${authCredentialRateLimitKey(request)}`,
+    )) return;
+  }
+
   if (pathname === '/api/heart-rate/watch-connect/tablet-status') {
     if (request.method !== 'GET') {
       writeJson(response, 405, { error: 'Method not allowed' });
@@ -7487,10 +7617,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       }, { 'Cache-Control': 'no-store' });
       return;
     }
-    const [enrollments, connections] = await Promise.all([
-      persistence.loadHeartRateWatchEnrollments(identity.profileKey),
-      persistence.loadHeartRateWatchConnections(identity.profileKey),
-    ]);
+    const { enrollments, connections } = await loadHeartRateWatchStatusSnapshot(identity.profileKey);
     const enrollment = enrollments.find((candidate) => (
       candidate.scope === 'studio'
       && candidate.clubId === tabletSession.clubId
@@ -7529,17 +7656,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
-    if (!enforceRateLimit(
-      request,
-      response,
-      heartRateReadRateLimiter,
-      240,
-      `heart-rate-watch-status:${profileKey}`,
-    )) return;
-    const [enrollments, connections] = await Promise.all([
-      persistence.loadHeartRateWatchEnrollments(profileKey),
-      persistence.loadHeartRateWatchConnections(profileKey),
-    ]);
+    const { enrollments, connections } = await loadHeartRateWatchStatusSnapshot(profileKey);
     const enrollmentById = new Map(enrollments.map((enrollment) => [enrollment.id, enrollment]));
     writeJson(response, 200, {
       enrollments: enrollments.map(publicHeartRateWatchEnrollment),
@@ -7611,6 +7728,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       });
       return;
     }
+    invalidateHeartRateWatchStatusSnapshot(revoked.enrollment?.ownerProfileKey);
     const projection = await persistence.loadHeartRateWatchStudioProjection(profileKey, clubId);
     const athlete = projection?.find((row) => row.studioRiderId === revoked.studioRiderId) ?? null;
     if (!athlete) {
@@ -7724,6 +7842,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       writeJson(response, 409, { error: 'That Watch Connect setup request conflicts with an earlier request.' });
       return;
     }
+    invalidateHeartRateWatchStatusSnapshot(profileKey);
     writeJson(response, result.status === 'created' ? 201 : 200, {
       enrollment: publicHeartRateWatchEnrollment({ ...result.enrollment, membershipActive: true }),
       replayed: result.status === 'replayed',
@@ -7753,6 +7872,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       writeJson(response, 404, { error: 'That trusted Watch Connect setup was not found.' });
       return;
     }
+    invalidateHeartRateWatchStatusSnapshot(profileKey);
     writeJson(response, 200, {
       enrollment: publicHeartRateWatchEnrollment({ ...enrollment, membershipActive: true }),
     }, { 'Cache-Control': 'no-store' });
@@ -7819,6 +7939,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       writeJson(response, 409, { error: 'That Watch Connect request conflicts with an earlier request.' });
       return;
     }
+    invalidateHeartRateWatchStatusSnapshot(profileKey);
     const connection = publicHeartRateWatchConnection(result.connection, {
       ...result.enrollment,
       membershipActive: true,
@@ -7859,6 +7980,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       writeJson(response, 404, { error: 'That Watch Connect session was not found.' });
       return;
     }
+    invalidateHeartRateWatchStatusSnapshot(profileKey);
     const enrollments = await persistence.loadHeartRateWatchEnrollments(profileKey);
     const enrollment = enrollments.find((candidate) => candidate.id === connection.enrollmentId) ?? null;
     writeJson(response, 200, {
@@ -7909,6 +8031,7 @@ async function handleHeartRatePairingApi(request, response, requestUrl) {
       writeJson(response, 409, { error: 'This heart-rate pairing code is invalid, expired, revoked, or already claimed.' });
       return;
     }
+    invalidateHeartRateWatchStatusSnapshot(profileKey);
     writeJson(response, 200, {
       ingestToken,
       ingestExpiresAt: pairing.ingestExpiresAt,
@@ -8014,6 +8137,7 @@ async function handleHeartRatePairingApi(request, response, requestUrl) {
   }
   if (request.method === 'DELETE') {
     const revoked = await persistence.revokeHeartRatePairing(profileKey, pairingId, now);
+    invalidateHeartRateWatchStatusSnapshot(profileKey);
     writeJson(response, 200, { pairing: publicHeartRatePairing(revoked) }, { 'Cache-Control': 'no-store' });
     return;
   }
@@ -8056,6 +8180,7 @@ async function handleHeartRatePairingApi(request, response, requestUrl) {
     writeJson(response, 409, { error: 'This heart-rate pairing can no longer be updated.' });
     return;
   }
+  invalidateHeartRateWatchStatusSnapshot(profileKey);
   writeJson(response, 200, { pairing: publicHeartRatePairing(updated) }, { 'Cache-Control': 'no-store' });
 }
 
@@ -10286,7 +10411,10 @@ async function serveStatic(request, response) {
 
     const token = cookieValue(request, authCookieName);
     if (token) {
-      await persistence.deleteAuthSession(tokenHash(token));
+      const hash = tokenHash(token);
+      authSessionLookups.forget(hash);
+      personalAuthSessions.forget(hash);
+      await persistence.deleteAuthSession(hash);
     }
     clearAuthCookie(response, request);
     writeJson(response, 200, { ok: true });
@@ -10294,10 +10422,12 @@ async function serveStatic(request, response) {
   }
 
   if (requestUrl.pathname === '/api/friends' || requestUrl.pathname.startsWith('/api/friends/')) {
+    const friendAuthStartedAt = performance.now();
     const session = await requireAccountFriendSession(request, response);
     if (!session) {
       return;
     }
+    const friendAuthDurationMs = performance.now() - friendAuthStartedAt;
     const userId = session.user.id;
     const isRead = request.method === 'GET' || request.method === 'HEAD';
     const rateAllowed = isRead
@@ -10341,7 +10471,9 @@ async function serveStatic(request, response) {
     }
     if (requestUrl.pathname === '/api/friends/privacy') {
       if (request.method === 'GET') {
-        const currentUser = await persistence.findAuthUserById(userId) ?? session.user;
+        // Authentication already loaded the current account row. Re-querying
+        // it here added a full database round trip to every Friends mount.
+        const currentUser = session.user;
         writeJson(response, 200, {
           privacy: {
             discoverable: currentUser.friendDiscoverable === true,
@@ -10365,6 +10497,8 @@ async function serveStatic(request, response) {
           writeJson(response, 503, { error: 'Friend privacy could not be saved.' });
           return;
         }
+        authSessionLookups.refreshUser(updated);
+        personalAuthSessions.refreshUser(updated);
         writeJson(response, 200, {
           privacy: {
             discoverable: updated.friendDiscoverable === true,
@@ -10383,15 +10517,18 @@ async function serveStatic(request, response) {
 
     if (requestUrl.pathname === '/api/friends' && request.method === 'GET') {
       const page = friendPageOptions(requestUrl);
-      const [items, total] = await Promise.all([
-        persistence.listAccountFriends(userId, page),
-        persistence.countAccountFriends(userId, page),
-      ]);
+      const dataStartedAt = performance.now();
+      const { items, total } = await persistence.loadAccountFriendsPage(userId, page);
+      const dataDurationMs = performance.now() - dataStartedAt;
+      cloudTelemetry.observe('tracklab_friends_list_duration_ms', dataDurationMs);
       writeJson(response, 200, friendPageEnvelope(
         items.map((profile) => publicFriendProfile(profile, 'friend')).filter(Boolean),
         total,
         page,
-      ), { 'Cache-Control': 'no-store' });
+      ), {
+        'Cache-Control': 'no-store',
+        'Server-Timing': `auth;dur=${friendAuthDurationMs.toFixed(1)}, friends;dur=${dataDurationMs.toFixed(1)}`,
+      });
       return;
     }
 
@@ -10399,15 +10536,18 @@ async function serveStatic(request, response) {
       if (request.method === 'GET') {
         const direction = requestUrl.searchParams.get('direction') === 'outgoing' ? 'outgoing' : 'incoming';
         const page = friendPageOptions(requestUrl);
-        const [items, total] = await Promise.all([
-          persistence.listAccountFriendRequests(userId, direction, page),
-          persistence.countAccountFriendRequests(userId, direction, page),
-        ]);
+        const dataStartedAt = performance.now();
+        const { items, total } = await persistence.loadAccountFriendRequestsPage(userId, direction, page);
+        const dataDurationMs = performance.now() - dataStartedAt;
+        cloudTelemetry.observe('tracklab_friend_requests_list_duration_ms', dataDurationMs, { direction });
         writeJson(response, 200, friendPageEnvelope(
           items.map(publicFriendRequest).filter(Boolean),
           total,
           page,
-        ), { 'Cache-Control': 'no-store' });
+        ), {
+          'Cache-Control': 'no-store',
+          'Server-Timing': `auth;dur=${friendAuthDurationMs.toFixed(1)}, friends;dur=${dataDurationMs.toFixed(1)}`,
+        });
         return;
       }
       if (request.method === 'POST') {
@@ -10974,13 +11114,14 @@ async function serveStatic(request, response) {
         return;
       }
       const deviceToken = createSessionToken();
+      const authorizingSessionHash = tokenHash(authSession.token);
       const device = await persistence.enrollClubTabletDevice({
         id: randomUUID(),
         ownerProfileKey,
         ownerUserId: authSession.user.id,
         name: sanitizeText(payload?.name, 'Club Tablet', 80),
         tokenHash: tokenHash(deviceToken),
-        authSessionTokenHash: tokenHash(authSession.token),
+        authSessionTokenHash: authorizingSessionHash,
       });
       if (!device) {
         writeJson(response, 503, { error: 'Club Tablet enrollment could not be completed.' });
@@ -10989,6 +11130,8 @@ async function serveStatic(request, response) {
       // The browser becomes a shared kiosk at enrollment. Retiring the
       // authorizing server session and clearing its cookie before 201 prevents
       // any owner/admin identity from remaining usable on that tablet.
+      authSessionLookups.forget(authorizingSessionHash);
+      personalAuthSessions.forget(authorizingSessionHash);
       clearAuthCookie(response, request);
       writeJson(response, 201, {
         device: publicClubTabletDevice(device),

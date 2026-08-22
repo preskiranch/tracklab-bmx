@@ -149,6 +149,8 @@ function userDataUpsertStatement() {
 }
 
 export const persistenceTestHooks = Object.freeze({
+  accountFriendsPageStatement,
+  accountFriendRequestsPageStatement,
   userDataUpsertStatement,
 });
 
@@ -555,10 +557,10 @@ export async function createAuthSession(session) {
       createdAt: new Date().toISOString(),
       lastSeen: new Date().toISOString(),
     });
-    return;
+    return true;
   }
 
-  await query(
+  const result = await query(
     `INSERT INTO ${schema}.auth_sessions (id, user_id, token_hash, expires_at)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (token_hash) DO UPDATE SET
@@ -567,9 +569,13 @@ export async function createAuthSession(session) {
        last_seen = now()`,
     [session.id, session.userId, session.tokenHash, session.expiresAt],
   );
+  return Boolean(result);
 }
 
 export async function findAuthSession(tokenHash) {
+  cloudTelemetry.increment('tracklab_auth_session_lookups_total', {
+    backend: pool ? 'postgres' : 'memory',
+  });
   if (!pool) {
     const session = cloneAuthSession(memoryAuthSessionsByToken.get(tokenHash));
     if (!session || Date.parse(session.expiresAt) <= Date.now()) {
@@ -8323,10 +8329,74 @@ export async function ensureOfficialFriendships(userId = '') {
   return [...changedUserIds];
 }
 
-export async function listAccountFriends(userId, { offset = 0, limit = 25, searchText = '' } = {}) {
+function accountFriendsPageStatement() {
+  return `WITH friend_edges AS MATERIALIZED (
+       SELECT user_id_b AS friend_id, source, created_at
+       FROM ${schema}.account_friendships WHERE user_id_a = $1
+       UNION ALL
+       SELECT user_id_a AS friend_id, source, created_at
+       FROM ${schema}.account_friendships WHERE user_id_b = $1
+     ), matching_friends AS MATERIALIZED (
+       SELECT
+         friend.id AS profile_id,
+         friend.display_name,
+         friend.username,
+         official.kind AS official_type,
+         edge.source AS friendship_source,
+         edge.created_at AS connected_at
+       FROM friend_edges AS edge
+       JOIN ${schema}.auth_users AS friend ON friend.id = edge.friend_id
+       LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = friend.id
+       WHERE $4 = ''
+          OR friend.username ILIKE '%' || $4 || '%' ESCAPE '\\'
+          OR friend.display_name ILIKE '%' || $4 || '%' ESCAPE '\\'
+     ), paged_friends AS (
+       SELECT *
+       FROM matching_friends
+       ORDER BY connected_at DESC, profile_id
+       OFFSET $2 LIMIT $3
+     ), friend_total AS (
+       SELECT count(*)::integer AS total FROM matching_friends
+     )
+     SELECT
+       friend.profile_id,
+       friend.display_name,
+       friend.username,
+       friend.official_type,
+       profile_data.account_profile ->> 'photoUrl' AS photo_url,
+       friend.friendship_source,
+       friend.connected_at,
+       recent_ghost.id AS ghost_id,
+       recent_ghost.track_id AS ghost_track_id,
+       recent_ghost.track_name AS ghost_track_name,
+       recent_ghost.route_variant_id AS ghost_route_variant_id,
+       recent_ghost.lap_count AS ghost_lap_count,
+       recent_ghost.finish_time_ms AS ghost_finish_time_ms,
+       recent_ghost.summary AS ghost_summary,
+       friend_total.total AS total_count
+     FROM friend_total
+     LEFT JOIN paged_friends AS friend ON true
+     LEFT JOIN ${schema}.user_data AS profile_data
+       ON profile_data.guest_key = 'user:' || friend.profile_id
+     LEFT JOIN LATERAL (
+       SELECT
+         id, track_id, track_name, route_variant_id, lap_count, finish_time_ms,
+         jsonb_build_object(
+           'sprintDistanceFeet', summary -> 'sprintDistanceFeet',
+           'sprintAirSetting', summary -> 'sprintAirSetting'
+         ) AS summary
+       FROM ${schema}.ghost_laps
+       WHERE owner_key = 'user:' || friend.profile_id AND race_source = 'live'
+       ORDER BY saved_at DESC, finish_time_ms ASC, id
+       LIMIT 1
+     ) AS recent_ghost ON friend.friendship_source <> 'official'
+     ORDER BY friend.connected_at DESC NULLS LAST, friend.profile_id`;
+}
+
+export async function loadAccountFriendsPage(userId, { offset = 0, limit = 25, searchText = '' } = {}) {
   const normalizedSearch = String(searchText || '').trim().toLowerCase();
   if (!pool) {
-    return [...memoryAccountFriendships.values()]
+    const matches = [...memoryAccountFriendships.values()]
       .filter((friendship) => friendship.userIdA === userId || friendship.userIdB === userId)
       .filter((friendship) => {
         if (!normalizedSearch) return true;
@@ -8335,7 +8405,8 @@ export async function listAccountFriends(userId, { offset = 0, limit = 25, searc
         return String(friend?.username || '').toLowerCase().includes(normalizedSearch)
           || String(friend?.displayName || '').toLowerCase().includes(normalizedSearch);
       })
-      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const items = matches
       .slice(offset, offset + limit)
       .map((friendship) => {
         const friendId = friendship.userIdA === userId ? friendship.userIdB : friendship.userIdA;
@@ -8349,51 +8420,14 @@ export async function listAccountFriends(userId, { offset = 0, limit = 25, searc
         });
       })
       .filter(Boolean);
+    return { items, total: matches.length };
   }
 
   const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
-  const result = await query(
-    `WITH friend_edges AS (
-       SELECT user_id_b AS friend_id, source, created_at
-       FROM ${schema}.account_friendships WHERE user_id_a = $1
-       UNION ALL
-       SELECT user_id_a AS friend_id, source, created_at
-       FROM ${schema}.account_friendships WHERE user_id_b = $1
-     )
-     SELECT
-       friend.id AS profile_id,
-       friend.display_name,
-       friend.username,
-       official.kind AS official_type,
-       profile_data.account_profile ->> 'photoUrl' AS photo_url,
-       edge.source AS friendship_source,
-       edge.created_at AS connected_at,
-       recent_ghost.id AS ghost_id,
-       recent_ghost.track_id AS ghost_track_id,
-       recent_ghost.track_name AS ghost_track_name,
-       recent_ghost.route_variant_id AS ghost_route_variant_id,
-       recent_ghost.lap_count AS ghost_lap_count,
-       recent_ghost.finish_time_ms AS ghost_finish_time_ms,
-       recent_ghost.summary AS ghost_summary
-     FROM friend_edges AS edge
-     JOIN ${schema}.auth_users AS friend ON friend.id = edge.friend_id
-     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = friend.id
-     LEFT JOIN ${schema}.user_data AS profile_data ON profile_data.guest_key = 'user:' || friend.id
-     LEFT JOIN LATERAL (
-       SELECT id, track_id, track_name, route_variant_id, lap_count, finish_time_ms, summary
-       FROM ${schema}.ghost_laps
-       WHERE owner_key = 'user:' || friend.id AND race_source = 'live'
-       ORDER BY saved_at DESC, finish_time_ms ASC, id
-       LIMIT 1
-     ) AS recent_ghost ON edge.source <> 'official'
-     WHERE $4 = ''
-        OR friend.username ILIKE '%' || $4 || '%' ESCAPE '\\'
-        OR friend.display_name ILIKE '%' || $4 || '%' ESCAPE '\\'
-     ORDER BY edge.created_at DESC, friend.id
-     OFFSET $2 LIMIT $3`,
-    [userId, offset, limit, escapedSearch],
-  );
-  return (result?.rows ?? []).map((row) => accountProfileFromRow(row, {
+  const result = await query(accountFriendsPageStatement(), [userId, offset, limit, escapedSearch]);
+  const rows = result?.rows ?? [];
+  const total = Number(rows[0]?.total_count) || 0;
+  const items = rows.filter((row) => row.profile_id).map((row) => accountProfileFromRow(row, {
     friendshipSource: row.friendship_source,
     connectedAt: new Date(row.connected_at).toISOString(),
     photoUrl: row.photo_url ?? '',
@@ -8407,13 +8441,52 @@ export async function listAccountFriends(userId, { offset = 0, limit = 25, searc
       summary: row.ghost_summary,
     }),
   }));
+  return { items, total };
 }
 
-export async function listAccountFriendRequests(userId, direction, { offset = 0, limit = 25, searchText = '' } = {}) {
+export async function listAccountFriends(userId, options = {}) {
+  return (await loadAccountFriendsPage(userId, options)).items;
+}
+
+function accountFriendRequestsPageStatement(direction) {
+  const incoming = direction !== 'outgoing';
+  const ownerColumn = incoming ? 'request.to_user_id' : 'request.from_user_id';
+  const otherColumn = incoming ? 'request.from_user_id' : 'request.to_user_id';
+  return `WITH matching_requests AS MATERIALIZED (
+       SELECT
+         request.id AS request_id,
+         request.created_at,
+         other.id AS profile_id,
+         other.display_name,
+         other.username,
+         official.kind AS official_type
+       FROM ${schema}.account_friend_requests AS request
+       JOIN ${schema}.auth_users AS other ON other.id = ${otherColumn}
+       LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = other.id
+       WHERE ${ownerColumn} = $1 AND request.status = 'pending'
+         AND (
+           $4 = ''
+           OR other.username ILIKE '%' || $4 || '%' ESCAPE '\\'
+           OR other.display_name ILIKE '%' || $4 || '%' ESCAPE '\\'
+         )
+     ), paged_requests AS (
+       SELECT * FROM matching_requests
+       ORDER BY created_at DESC, request_id DESC
+       OFFSET $2 LIMIT $3
+     ), request_total AS (
+       SELECT count(*)::integer AS total FROM matching_requests
+     )
+     SELECT request.*, request_total.total AS total_count
+     FROM request_total
+     LEFT JOIN paged_requests AS request ON true
+     ORDER BY request.created_at DESC NULLS LAST, request.request_id DESC`;
+}
+
+export async function loadAccountFriendRequestsPage(userId, direction, { offset = 0, limit = 25, searchText = '' } = {}) {
   const incoming = direction !== 'outgoing';
   const normalizedSearch = String(searchText || '').trim().toLowerCase();
   if (!pool) {
-    return [...memoryAccountFriendRequests.values()]
+    const matches = [...memoryAccountFriendRequests.values()]
       .filter((request) => request.status === 'pending')
       .filter((request) => incoming ? request.toUserId === userId : request.fromUserId === userId)
       .filter((request) => {
@@ -8423,7 +8496,8 @@ export async function listAccountFriendRequests(userId, direction, { offset = 0,
         return String(other?.username || '').toLowerCase().includes(normalizedSearch)
           || String(other?.displayName || '').toLowerCase().includes(normalizedSearch);
       })
-      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const items = matches
       .slice(offset, offset + limit)
       .map((request) => {
         const otherId = incoming ? request.fromUserId : request.toUserId;
@@ -8434,38 +8508,27 @@ export async function listAccountFriendRequests(userId, direction, { offset = 0,
           createdAt: request.createdAt,
         };
       });
+    return { items, total: matches.length };
   }
 
-  const ownerColumn = incoming ? 'request.to_user_id' : 'request.from_user_id';
-  const otherColumn = incoming ? 'request.from_user_id' : 'request.to_user_id';
   const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
   const result = await query(
-    `SELECT
-       request.id AS request_id,
-       request.created_at,
-       other.id AS profile_id,
-       other.display_name,
-       other.username,
-       official.kind AS official_type
-     FROM ${schema}.account_friend_requests AS request
-     JOIN ${schema}.auth_users AS other ON other.id = ${otherColumn}
-     LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = other.id
-     WHERE ${ownerColumn} = $1 AND request.status = 'pending'
-       AND (
-         $4 = ''
-         OR other.username ILIKE '%' || $4 || '%' ESCAPE '\\'
-         OR other.display_name ILIKE '%' || $4 || '%' ESCAPE '\\'
-       )
-     ORDER BY request.created_at DESC, request.id DESC
-     OFFSET $2 LIMIT $3`,
+    accountFriendRequestsPageStatement(direction),
     [userId, offset, limit, escapedSearch],
   );
-  return (result?.rows ?? []).map((row) => ({
+  const rows = result?.rows ?? [];
+  const total = Number(rows[0]?.total_count) || 0;
+  const items = rows.filter((row) => row.request_id).map((row) => ({
     requestId: row.request_id,
     direction: incoming ? 'incoming' : 'outgoing',
     profile: accountProfileFromRow(row),
     createdAt: new Date(row.created_at).toISOString(),
   }));
+  return { items, total };
+}
+
+export async function listAccountFriendRequests(userId, direction, options = {}) {
+  return (await loadAccountFriendRequestsPage(userId, direction, options)).items;
 }
 
 export async function searchAccountProfiles(userId, searchText, { offset = 0, limit = 25 } = {}) {

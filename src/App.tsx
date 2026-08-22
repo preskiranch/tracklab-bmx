@@ -371,18 +371,24 @@ const MembershipLanding = lazy(() => import('./components/MembershipLanding').th
   default: module.MembershipLanding,
 })));
 
-const SessionControlPanel = lazy(() => import('./components/SessionControlPanel')
-  .then((module) => ({ default: module.SessionControlPanel })));
-const AnalyticsPanel = lazy(() => import('./components/AnalyticsPanel')
-  .then((module) => ({ default: module.AnalyticsPanel })));
-const ClubOwnerUtilityMode = lazy(() => import('./components/ClubOwnerUtilityMode')
-  .then((module) => ({ default: module.ClubOwnerUtilityMode })));
-const MonitorView = lazy(() => import('./components/MonitorView')
-  .then((module) => ({ default: module.MonitorView })));
-const AccountProfileView = lazy(() => import('./components/AccountProfileView')
-  .then((module) => ({ default: module.AccountProfileView })));
-const AppSettingsView = lazy(() => import('./components/AppSettingsView')
-  .then((module) => ({ default: module.AppSettingsView })));
+const loadSessionControlPanel = () => import('./components/SessionControlPanel')
+  .then((module) => ({ default: module.SessionControlPanel }));
+const SessionControlPanel = lazy(loadSessionControlPanel);
+const loadAnalyticsPanel = () => import('./components/AnalyticsPanel')
+  .then((module) => ({ default: module.AnalyticsPanel }));
+const AnalyticsPanel = lazy(loadAnalyticsPanel);
+const loadClubOwnerUtilityMode = () => import('./components/ClubOwnerUtilityMode')
+  .then((module) => ({ default: module.ClubOwnerUtilityMode }));
+const ClubOwnerUtilityMode = lazy(loadClubOwnerUtilityMode);
+const loadMonitorView = () => import('./components/MonitorView')
+  .then((module) => ({ default: module.MonitorView }));
+const MonitorView = lazy(loadMonitorView);
+const loadAccountProfileView = () => import('./components/AccountProfileView')
+  .then((module) => ({ default: module.AccountProfileView }));
+const AccountProfileView = lazy(loadAccountProfileView);
+const loadAppSettingsView = () => import('./components/AppSettingsView')
+  .then((module) => ({ default: module.AppSettingsView }));
+const AppSettingsView = lazy(loadAppSettingsView);
 const HeartRateSettingsCard = lazy(() => import('./components/HeartRateSettingsCard')
   .then((module) => ({ default: module.HeartRateSettingsCard })));
 const HeartRateAccountBlockCoordinator = lazy(() => import('./components/HeartRateAccountBlockCoordinator')
@@ -395,8 +401,8 @@ const StudioHeartRateBlockOverlay = lazy(() => import('./components/StudioHeartR
   .then((module) => ({ default: module.StudioHeartRateBlockOverlay })));
 const ClubOwnerTrainingPreparationDialog = lazy(() => import('./components/ClubOwnerTrainingPreparationDialog')
   .then((module) => ({ default: module.ClubOwnerTrainingPreparationDialog })));
-const FriendsView = lazy(() => import('./components/FriendsView')
-  .then((module) => ({ default: module.FriendsView })));
+const loadFriendsView = () => import('./components/FriendsView');
+const FriendsView = lazy(() => loadFriendsView().then((module) => ({ default: module.FriendsView })));
 const DiagnosticsPanel = lazy(() => import('./components/DiagnosticsPanel')
   .then((module) => ({ default: module.DiagnosticsPanel })));
 const DeveloperToolsPanel = lazy(() => import('./components/DeveloperToolsPanel')
@@ -406,12 +412,14 @@ const ClubLiveAthleteBridge = lazy(() => import('./components/ClubLiveAthleteBri
 const ClubLiveAccessNotice = lazy(() => import('./components/ClubLiveAccessNotice'));
 const ClubTabletMode = lazy(() => import('./components/ClubTabletMode'));
 const ClubTabletRuntime = lazy(() => import('./components/ClubTabletRuntime'));
-const EarthTrackView = lazy(() => import('./components/EarthTrackView').then((module) => ({
+const loadEarthTrackView = () => import('./components/EarthTrackView').then((module) => ({
   default: module.EarthTrackView,
-})));
-const MultiplayerPanel = lazy(() => import('./components/MultiplayerPanel').then((module) => ({
+}));
+const EarthTrackView = lazy(loadEarthTrackView);
+const loadMultiplayerPanel = () => import('./components/MultiplayerPanel').then((module) => ({
   default: module.MultiplayerPanel,
-})));
+}));
+const MultiplayerPanel = lazy(loadMultiplayerPanel);
 
 const defaultTrack = trackCatalog.find((track) => track.id === 'chula-vista-elite-bmx') ?? trackCatalog[0];
 const customRouteInitialZoom = 18;
@@ -2067,7 +2075,10 @@ export default function App() {
   });
   const heartRateNativeSupported = heartRate.availability?.supported ?? null;
   const heartRateRelayStateReady = heartRate.relayState != null;
-  const friendsApi = useMemo(() => createFriendsApi(), []);
+  const friendsApi = useMemo(() => createFriendsApi(), [authUser?.id]);
+  const handleLegacyRelaySuppressionChange = useCallback((suppressed: boolean) => {
+    watchConnectSuppressLegacyRelayRef.current = suppressed;
+  }, []);
   const clubTabletDeviceActive = Boolean(
     clubTabletDevice
     && clubTabletDeviceStatus === 'active'
@@ -2603,11 +2614,9 @@ export default function App() {
 
     let cancelled = false;
     const refreshPendingRequests = () => {
-      void Promise.all([
-        friendsApi.listRequests({ direction: 'incoming', limit: 1 }),
-        friendsApi.listFriends({ limit: 1 }),
-      ])
-        .then(([requestPage, friendPage]) => {
+      void loadFriendsView()
+        .then(({ preloadFriendsView }) => preloadFriendsView(authUser.id, friendsApi, true))
+        .then(({ requestPage, friendPage }) => {
           if (cancelled) return;
           setPendingFriendRequestCount(requestPage.incomingTotal);
           if (friendCountRef.current != null && friendCountRef.current !== friendPage.total) {
@@ -2632,6 +2641,15 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, [authUser, clubTabletKioskMode, friendNetworkRefreshRevision, friendsApi]);
+
+  useEffect(() => {
+    if (!authUser || clubTabletKioskMode) return undefined;
+    const timerId = window.setTimeout(() => { void Promise.allSettled([
+      loadAccountProfileView(), loadAppSettingsView(), loadEarthTrackView(), loadAnalyticsPanel(),
+      loadSessionControlPanel(), loadMultiplayerPanel(), loadClubOwnerUtilityMode(), loadMonitorView(),
+    ]); }, 500);
+    return () => window.clearTimeout(timerId);
+  }, [authUser, clubTabletKioskMode]);
 
   const mergeStudioRidersForProfile = useCallback((
     profileKey: string,
@@ -10222,9 +10240,7 @@ export default function App() {
         authStatus={authStatus}
         heartRate={heartRate}
         onCapabilityChange={setWatchConnectCapable}
-        onLegacyRelaySuppressionChange={(suppressed) => {
-          watchConnectSuppressLegacyRelayRef.current = suppressed;
-        }}
+        onLegacyRelaySuppressionChange={handleLegacyRelaySuppressionChange}
         onMessage={setHeartRateMessage}
         ownedStudio={ownedClub ? { clubId: ownedClub.id, clubName: ownedClub.name } : null}
         settingsOpen={appMode === 'settings'}
@@ -10917,7 +10933,6 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setAppMode(raceWorkspaceMode);
               window.setTimeout(() => document.querySelector('.pairing-rail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
             }}
           >
@@ -11218,6 +11233,7 @@ export default function App() {
         ) : appMode === 'friends' && authUser ? (
           <Suspense fallback={<div className="explore-loading">Loading your TrackLab friends…</div>}>
             <FriendsView
+              key={authUser.id}
               currentProfileId={authUser.id}
               api={friendsApi}
               distanceUnit={distanceUnit}

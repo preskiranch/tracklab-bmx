@@ -1728,6 +1728,14 @@ describe('cloud API trust boundaries', () => {
           headers: { Origin: baseUrl, Cookie: authorizingCookie },
         });
         expect(retiredOwnerDevices.status).toBe(401);
+        const retiredFriends = await fetch(`${baseUrl}/api/friends`, {
+          headers: { Origin: baseUrl, Cookie: authorizingCookie },
+        });
+        expect(retiredFriends.status).toBe(401);
+        const retiredWatchConnect = await fetch(`${baseUrl}/api/heart-rate/watch-connect`, {
+          headers: { Origin: baseUrl, Cookie: authorizingCookie },
+        });
+        expect(retiredWatchConnect.status).toBe(401);
         const independentMonitorIdentity = await fetch(`${baseUrl}/api/auth/me`, {
           headers: { Origin: baseUrl, Cookie: monitorCookie },
         });

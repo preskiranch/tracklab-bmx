@@ -223,6 +223,8 @@ describe('authenticated Friends API', () => {
         },
       },
     });
+    const emptyFriends = await json(await request('/api/friends?limit=20', { cookie: alice.cookie }));
+    expect(emptyFriends).toEqual({ items: [], nextCursor: null, total: 0 });
 
     const bob = await register('bob-friends@tracklab.test', 'Bob Rider');
     let response = await request('/api/friends/requests', {
@@ -243,6 +245,9 @@ describe('authenticated Friends API', () => {
       body: { discoverable: true },
     });
     expect(response.status).toBe(200);
+    expect(await json(await request('/api/friends/privacy', { cookie: bob.cookie }))).toMatchObject({
+      privacy: { discoverable: true, profile: { id: bob.user.id } },
+    });
 
     response = await request(`/api/friends/search?q=${encodeURIComponent(`@${bob.user.username}`)}&limit=20`, { cookie: alice.cookie });
     const search = await json(response);
@@ -306,7 +311,11 @@ describe('authenticated Friends API', () => {
       body: { email: 'preskiranch@gmail.com', name: 'Impostor', password: 'friends-test-password' },
     })).status).toBe(403);
     const club = await register('preskiranch@gmail.com', 'Preski Ranch BMX Club');
-    let aliceFriends = await json(await request('/api/friends?limit=20', { cookie: alice.cookie }));
+    const initialFriendsResponse = await request('/api/friends?limit=20', { cookie: alice.cookie });
+    expect(initialFriendsResponse.headers.get('server-timing')).toMatch(
+      /^auth;dur=\d+\.\d, friends;dur=\d+\.\d$/,
+    );
+    let aliceFriends = await json(initialFriendsResponse);
     expect(aliceFriends.items).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: bob.user.id,
@@ -498,6 +507,12 @@ describe('authenticated Friends API', () => {
       cookie: alice.cookie,
     }));
     expect(secondPage.items).toHaveLength(1);
+    const outOfRangeCursor = Buffer.from(JSON.stringify({ version: 1, offset: 999 }), 'utf8').toString('base64url');
+    const outOfRangePage = await json(await request(
+      `/api/friends?limit=1&cursor=${encodeURIComponent(outOfRangeCursor)}`,
+      { cookie: alice.cookie },
+    ));
+    expect(outOfRangePage).toEqual({ items: [], nextCursor: null, total: 3 });
 
     expect((await request(`/api/friends/${club.user.id}`, {
       cookie: alice.cookie,

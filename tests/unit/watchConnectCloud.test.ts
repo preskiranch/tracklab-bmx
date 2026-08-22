@@ -6,6 +6,7 @@ import * as persistence from '../../cloud/persistence.mjs';
 let child: ChildProcess;
 let baseUrl = '';
 let serverOutput = '';
+const metricsToken = 'watch-connect-test-metrics-token';
 
 async function availablePort() {
   return new Promise<number>((resolve, reject) => {
@@ -45,9 +46,10 @@ function api(pathname: string, init: RequestInit = {}, cookie = '') {
   });
 }
 
-async function register(email: string, name: string) {
+async function register(email: string, name: string, forwardedFor = '') {
   const response = await api('/api/auth/register', {
     method: 'POST',
+    headers: forwardedFor ? { 'X-Forwarded-For': forwardedFor } : {},
     body: JSON.stringify({ email, name, password: 'tracklab-test-password' }),
   });
   expect(response.status).toBe(201);
@@ -80,6 +82,7 @@ beforeAll(async () => {
       DATABASE_URL: '',
       OPENAI_API_KEY: '',
       TRACKLAB_ADMIN_EMAILS: 'watch-connect-owner@tracklab.test',
+      TRACKLAB_METRICS_TOKEN: metricsToken,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -858,5 +861,58 @@ describe('Watch Connect cloud workflow', () => {
     expect(connections).toHaveLength(2);
     expect(connections.find((candidate) => candidate.id === first.connection?.id)?.stoppedReason)
       .toBe('expired');
+  });
+
+  it('coalesces a valid Watch status burst and rejects excess requests before authentication', async () => {
+    const metricValue = async (name: string, labels = '') => {
+      const response = await api('/api/metrics', {
+        headers: { 'X-TrackLab-Metrics-Token': metricsToken },
+      });
+      expect(response.status).toBe(200);
+      const body = await response.text();
+      const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escapedLabels = labels.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return Number(body.match(new RegExp(`${escapedName}${escapedLabels}\\s+(\\d+)`))?.[1] ?? 0);
+    };
+
+    const floodAccount = await register(
+      'watch-connect-status-flood@tracklab.test',
+      'Watch Status Flood',
+      '198.51.100.238',
+    );
+    const statusLoadsBefore = await metricValue('tracklab_heart_rate_watch_status_loads_total');
+    const validResponses = await Promise.all(Array.from({ length: 13 }, () => (
+      api('/api/heart-rate/watch-connect', {
+        headers: { 'X-Forwarded-For': '198.51.100.239' },
+      }, floodAccount.cookie)
+    )));
+
+    expect(validResponses.filter((response) => response.status === 200)).toHaveLength(12);
+    expect(validResponses.filter((response) => response.status === 429)).toHaveLength(1);
+    expect(validResponses.find((response) => response.status === 429)?.headers.get('ratelimit-limit'))
+      .toBe('12');
+    // One load represents the two bounded persistence reads (enrollments and
+    // connections); the other admitted requests share its in-flight promise.
+    expect(await metricValue('tracklab_heart_rate_watch_status_loads_total'))
+      .toBe(statusLoadsBefore + 1);
+
+    const invalidCookie = 'tracklab_session=watch-status-overload-regression-token';
+    const lookupsBefore = await metricValue(
+      'tracklab_auth_session_lookups_total',
+      '{backend="memory"}',
+    );
+    const responses: Response[] = [];
+    for (let index = 0; index < 13; index += 1) {
+      responses.push(await api('/api/heart-rate/watch-connect', {
+        headers: { 'X-Forwarded-For': '198.51.100.240' },
+      }, invalidCookie));
+    }
+
+    expect(responses.slice(0, 12).every((response) => response.status === 401)).toBe(true);
+    expect(responses[12].status).toBe(429);
+    expect(responses[12].headers.get('ratelimit-limit')).toBe('12');
+    expect(responses[12].headers.get('retry-after')).toMatch(/^\d+$/);
+    expect(await metricValue('tracklab_auth_session_lookups_total', '{backend="memory"}'))
+      .toBe(lookupsBefore + 12);
   });
 });

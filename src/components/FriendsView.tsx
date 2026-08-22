@@ -83,6 +83,66 @@ const blankRequestPage: FriendRequestPage = {
   total: 0,
 };
 
+type CachedFriendValue<T> = {
+  value?: T;
+  loadedAt?: number;
+  pending?: Promise<T>;
+};
+
+type FriendHubCache = {
+  friends: CachedFriendValue<FriendPage<FriendProfile>>;
+  requestCount: CachedFriendValue<FriendRequestPage>;
+  requests: CachedFriendValue<FriendRequestPage>;
+  suggestions: CachedFriendValue<FriendPage<FriendSuggestion>>;
+  invites: CachedFriendValue<FriendInviteMetadata[]>;
+  privacy: CachedFriendValue<FriendPrivacy>;
+};
+
+const friendHubCacheByApi = new WeakMap<FriendsApi, Map<string, FriendHubCache>>();
+const friendHubFreshMs = 30_000;
+
+function friendHubCache(api: FriendsApi, profileId: string) {
+  let accountCaches = friendHubCacheByApi.get(api);
+  if (!accountCaches) {
+    accountCaches = new Map();
+    friendHubCacheByApi.set(api, accountCaches);
+  }
+  let cache = accountCaches.get(profileId);
+  if (!cache) {
+    cache = { friends: {}, requestCount: {}, requests: {}, suggestions: {}, invites: {}, privacy: {} };
+    accountCaches.set(profileId, cache);
+  }
+  return cache;
+}
+
+function cachedFriendLoad<T>(slot: CachedFriendValue<T>, load: () => Promise<T>, force = false) {
+  if (slot.pending) return slot.pending;
+  if (!force && slot.value !== undefined && Date.now() - (slot.loadedAt ?? 0) < friendHubFreshMs) {
+    return Promise.resolve(slot.value);
+  }
+  const pending = load().then((value) => {
+    slot.value = value;
+    slot.loadedAt = Date.now();
+    return value;
+  }).finally(() => {
+    if (slot.pending === pending) slot.pending = undefined;
+  });
+  slot.pending = pending;
+  return pending;
+}
+
+export function preloadFriendsView(currentProfileId: string, api: FriendsApi, force = false) {
+  const cache = friendHubCache(api, currentProfileId);
+  const friends = cachedFriendLoad(cache.friends, () => api.listFriends(), force);
+  const requests = cachedFriendLoad(
+    cache.requestCount,
+    () => api.listRequests({ direction: 'incoming', limit: 1 }),
+    force,
+  );
+  void cachedFriendLoad(cache.privacy, () => api.getPrivacy(), force).catch(() => undefined);
+  return Promise.all([friends, requests]).then(([friendPage, requestPage]) => ({ friendPage, requestPage }));
+}
+
 const tabs: Array<{ id: FriendsTab; label: string; icon: typeof UsersRound }> = [
   { id: 'friends', label: 'Friends', icon: UsersRound },
   { id: 'requests', label: 'Requests', icon: Inbox },
@@ -268,14 +328,15 @@ export function FriendsView({
   distanceUnit = 'ft',
 }: FriendsViewProps) {
   const friendsApi = useMemo(() => api ?? createFriendsApi(), [api]);
+  const hubCache = useMemo(() => friendHubCache(friendsApi, currentProfileId), [currentProfileId, friendsApi]);
   const [activeTab, setActiveTab] = useState<FriendsTab>(initialTab);
   const [searchDraft, setSearchDraft] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [friends, setFriends] = useState(blankProfilePage);
-  const [requests, setRequests] = useState(blankRequestPage);
-  const [suggestions, setSuggestions] = useState(blankSuggestionPage);
+  const [friends, setFriends] = useState(() => hubCache.friends.value ?? blankProfilePage);
+  const [requests, setRequests] = useState(() => hubCache.requests.value ?? blankRequestPage);
+  const [suggestions, setSuggestions] = useState(() => hubCache.suggestions.value ?? blankSuggestionPage);
   const [invite, setInvite] = useState<FriendInvite | null>(null);
-  const [activeInvites, setActiveInvites] = useState<FriendInviteMetadata[]>([]);
+  const [activeInvites, setActiveInvites] = useState<FriendInviteMetadata[]>(() => hubCache.invites.value ?? []);
   const [loadingTabs, setLoadingTabs] = useState<Set<FriendsTab>>(() => new Set());
   const [loadingMore, setLoadingMore] = useState(false);
   const [actionKeys, setActionKeys] = useState<Set<string>>(() => new Set());
@@ -289,11 +350,19 @@ export function FriendsView({
   const [blockedOpen, setBlockedOpen] = useState(false);
   const [blockedProfiles, setBlockedProfiles] = useState(blankProfilePage);
   const [blockedLoading, setBlockedLoading] = useState(false);
-  const [privacy, setPrivacy] = useState<FriendPrivacy>({ discoverable: false, profile: null });
-  const [privacyLoading, setPrivacyLoading] = useState(true);
+  const [privacy, setPrivacy] = useState<FriendPrivacy>(() => hubCache.privacy.value ?? { discoverable: false, profile: null });
+  const [privacyLoading, setPrivacyLoading] = useState(() => hubCache.privacy.value === undefined);
   const [privacySaving, setPrivacySaving] = useState(false);
   const [claimRetryToken, setClaimRetryToken] = useState(0);
   const requestSequenceRef = useRef<Record<FriendsTab, number>>({ friends: 0, requests: 0, suggestions: 0, invite: 0 });
+  const loadedTabsRef = useRef<Record<FriendsTab, boolean>>({
+    friends: hubCache.friends.value !== undefined,
+    requests: hubCache.requests.value !== undefined,
+    suggestions: hubCache.suggestions.value !== undefined,
+    invite: hubCache.invites.value !== undefined,
+  });
+  const refreshTokenRef = useRef(refreshToken);
+  const privacyRefreshTokenRef = useRef(refreshToken);
   const claimedTokenRef = useRef('');
   const queueOwnerRef = useRef(currentProfileId);
   const tabRefs = useRef<Partial<Record<FriendsTab, HTMLButtonElement | null>>>({});
@@ -303,11 +372,29 @@ export function FriendsView({
   const blockedDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const activateTab = useCallback((id: FriendsTab) => {
+    if (id === 'friends' && hubCache.friends.value) setFriends(hubCache.friends.value);
+    if (id === 'requests' && hubCache.requests.value) setRequests(hubCache.requests.value);
+    if (id === 'suggestions' && hubCache.suggestions.value) setSuggestions(hubCache.suggestions.value);
+    if (id === 'invite' && hubCache.invites.value) setActiveInvites(hubCache.invites.value);
+    loadedTabsRef.current[id] = (id === 'friends' ? hubCache.friends.value
+      : id === 'requests' ? hubCache.requests.value
+        : id === 'suggestions' ? hubCache.suggestions.value
+          : hubCache.invites.value) !== undefined;
     setActiveTab(id);
     setSearchDraft('');
     setSearchQuery('');
     setError('');
-  }, []);
+  }, [hubCache]);
+
+  const preloadTab = useCallback((id: FriendsTab) => {
+    if (id === 'requests') {
+      void cachedFriendLoad(hubCache.requests, () => friendsApi.listRequests()).catch(() => undefined);
+    } else if (id === 'suggestions') {
+      void cachedFriendLoad(hubCache.suggestions, () => friendsApi.listSuggestions()).catch(() => undefined);
+    } else if (id === 'invite') {
+      void cachedFriendLoad(hubCache.invites, () => friendsApi.listActiveInvites()).catch(() => undefined);
+    }
+  }, [friendsApi, hubCache]);
 
   const handleTabKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>, id: FriendsTab) => {
     const currentIndex = tabs.findIndex((tab) => tab.id === id);
@@ -376,13 +463,17 @@ export function FriendsView({
   }, [blockedOpen, reportingProfile]);
 
   useEffect(() => {
-    onPendingCountChange?.(requests.incomingTotal);
-  }, [onPendingCountChange, requests.incomingTotal]);
+    const incomingTotal = hubCache.requests.value?.incomingTotal
+      ?? hubCache.requestCount.value?.incomingTotal;
+    if (incomingTotal != null) onPendingCountChange?.(incomingTotal);
+  }, [hubCache, onPendingCountChange, requests.incomingTotal]);
 
   useEffect(() => {
     let active = true;
-    setPrivacyLoading(true);
-    void friendsApi.getPrivacy()
+    const force = privacyRefreshTokenRef.current !== refreshToken;
+    privacyRefreshTokenRef.current = refreshToken;
+    if (hubCache.privacy.value === undefined) setPrivacyLoading(true);
+    void cachedFriendLoad(hubCache.privacy, () => friendsApi.getPrivacy(), force)
       .then((nextPrivacy) => {
         if (active) setPrivacy(nextPrivacy);
       })
@@ -393,7 +484,7 @@ export function FriendsView({
         if (active) setPrivacyLoading(false);
       });
     return () => { active = false; };
-  }, [currentProfileId, friendsApi, refreshToken]);
+  }, [currentProfileId, friendsApi, hubCache, refreshToken]);
 
   const changeDiscoverability = useCallback(async () => {
     const nextValue = !privacy.discoverable;
@@ -401,7 +492,10 @@ export function FriendsView({
     setError('');
     try {
       const saved = await friendsApi.updatePrivacy(nextValue);
-      setPrivacy((current) => ({ ...saved, profile: saved.profile ?? current.profile }));
+      const nextPrivacy = { ...saved, profile: saved.profile ?? privacy.profile };
+      hubCache.privacy.value = nextPrivacy;
+      hubCache.privacy.loadedAt = Date.now();
+      setPrivacy(nextPrivacy);
       setMessage(saved.discoverable
         ? 'Riders can now find you in search and trusted suggestions.'
         : 'You are hidden from rider search and suggestions. Secure invites still work.');
@@ -410,7 +504,7 @@ export function FriendsView({
     } finally {
       setPrivacySaving(false);
     }
-  }, [friendsApi, privacy.discoverable]);
+  }, [friendsApi, hubCache, privacy.discoverable, privacy.profile]);
 
   const setTabLoading = useCallback((tab: FriendsTab, loading: boolean) => {
     setLoadingTabs((current) => {
@@ -420,14 +514,17 @@ export function FriendsView({
     });
   }, []);
 
-  const loadFriends = useCallback(async (append = false) => {
+  const loadFriends = useCallback(async (append = false, force = false) => {
     const cursor = append ? friends.nextCursor : null;
     const sequence = ++requestSequenceRef.current.friends;
-    append ? setLoadingMore(true) : setTabLoading('friends', true);
+    append ? setLoadingMore(true) : (!loadedTabsRef.current.friends || Boolean(searchQuery)) && setTabLoading('friends', true);
     setError('');
     try {
-      const page = await friendsApi.listFriends({ query: searchQuery, cursor });
+      const page = !append && !searchQuery
+        ? await cachedFriendLoad(hubCache.friends, () => friendsApi.listFriends(), force)
+        : await friendsApi.listFriends({ query: searchQuery, cursor });
       if (sequence !== requestSequenceRef.current.friends) return;
+      loadedTabsRef.current.friends = true;
       setFriends((current) => ({
         ...page,
         items: append ? appendUnique(current.items, page.items, (item) => item.id) : page.items,
@@ -440,18 +537,21 @@ export function FriendsView({
         setLoadingMore(false);
       }
     }
-  }, [friends.nextCursor, friendsApi, searchQuery, setTabLoading]);
+  }, [friends.nextCursor, friendsApi, hubCache, searchQuery, setTabLoading]);
 
-  const loadRequests = useCallback(async (append = false, direction: 'incoming' | 'outgoing' | 'all' = 'all') => {
+  const loadRequests = useCallback(async (append = false, direction: 'incoming' | 'outgoing' | 'all' = 'all', force = false) => {
     const cursor = append
       ? direction === 'incoming' ? requests.incomingNextCursor : requests.outgoingNextCursor
       : null;
     const sequence = ++requestSequenceRef.current.requests;
-    append ? setLoadingMore(true) : setTabLoading('requests', true);
+    append ? setLoadingMore(true) : (!loadedTabsRef.current.requests || Boolean(searchQuery)) && setTabLoading('requests', true);
     setError('');
     try {
-      const page = await friendsApi.listRequests({ query: searchQuery, cursor, direction });
+      const page = !append && !searchQuery && direction === 'all'
+        ? await cachedFriendLoad(hubCache.requests, () => friendsApi.listRequests(), force)
+        : await friendsApi.listRequests({ query: searchQuery, cursor, direction });
       if (sequence !== requestSequenceRef.current.requests) return;
+      loadedTabsRef.current.requests = true;
       setRequests((current) => append ? {
         incoming: direction === 'incoming' ? appendUnique(current.incoming, page.incoming, (item) => item.id) : current.incoming,
         outgoing: direction === 'outgoing' ? appendUnique(current.outgoing, page.outgoing, (item) => item.id) : current.outgoing,
@@ -471,16 +571,19 @@ export function FriendsView({
         setLoadingMore(false);
       }
     }
-  }, [friendsApi, requests.incomingNextCursor, requests.outgoingNextCursor, searchQuery, setTabLoading]);
+  }, [friendsApi, hubCache, requests.incomingNextCursor, requests.outgoingNextCursor, searchQuery, setTabLoading]);
 
-  const loadSuggestions = useCallback(async (append = false) => {
+  const loadSuggestions = useCallback(async (append = false, force = false) => {
     const cursor = append ? suggestions.nextCursor : null;
     const sequence = ++requestSequenceRef.current.suggestions;
-    append ? setLoadingMore(true) : setTabLoading('suggestions', true);
+    append ? setLoadingMore(true) : (!loadedTabsRef.current.suggestions || Boolean(searchQuery)) && setTabLoading('suggestions', true);
     setError('');
     try {
-      const page = await friendsApi.listSuggestions({ query: searchQuery, cursor });
+      const page = !append && !searchQuery
+        ? await cachedFriendLoad(hubCache.suggestions, () => friendsApi.listSuggestions(), force)
+        : await friendsApi.listSuggestions({ query: searchQuery, cursor });
       if (sequence !== requestSequenceRef.current.suggestions) return;
+      loadedTabsRef.current.suggestions = true;
       setSuggestions((current) => ({
         ...page,
         items: append ? appendUnique(current.items, page.items, (item) => item.profile.id) : page.items,
@@ -493,15 +596,16 @@ export function FriendsView({
         setLoadingMore(false);
       }
     }
-  }, [friendsApi, searchQuery, setTabLoading, suggestions.nextCursor]);
+  }, [friendsApi, hubCache, searchQuery, setTabLoading, suggestions.nextCursor]);
 
-  const loadInvite = useCallback(async () => {
+  const loadInvite = useCallback(async (force = false) => {
     const sequence = ++requestSequenceRef.current.invite;
-    setTabLoading('invite', true);
+    if (!loadedTabsRef.current.invite) setTabLoading('invite', true);
     setError('');
     try {
-      const nextInvites = await friendsApi.listActiveInvites();
+      const nextInvites = await cachedFriendLoad(hubCache.invites, () => friendsApi.listActiveInvites(), force);
       if (sequence === requestSequenceRef.current.invite) {
+        loadedTabsRef.current.invite = true;
         setActiveInvites(nextInvites);
         setInvite((current) => current && nextInvites.some((candidate) => candidate.id === current.id)
           ? current
@@ -512,29 +616,26 @@ export function FriendsView({
     } finally {
       if (sequence === requestSequenceRef.current.invite) setTabLoading('invite', false);
     }
-  }, [friendsApi, setTabLoading]);
+  }, [friendsApi, hubCache, setTabLoading]);
 
-  const refreshActiveTab = useCallback(() => {
-    if (activeTab === 'friends') return loadFriends(false);
-    if (activeTab === 'requests') return loadRequests(false);
-    if (activeTab === 'suggestions') return loadSuggestions(false);
-    return loadInvite();
+  const refreshActiveTab = useCallback((force = false) => {
+    if (activeTab === 'friends') return loadFriends(false, force);
+    if (activeTab === 'requests') return loadRequests(false, 'all', force);
+    if (activeTab === 'suggestions') return loadSuggestions(false, force);
+    return loadInvite(force);
   }, [activeTab, loadFriends, loadInvite, loadRequests, loadSuggestions]);
 
   useEffect(() => {
-    void refreshActiveTab();
+    const force = refreshTokenRef.current !== refreshToken;
+    refreshTokenRef.current = refreshToken;
+    void refreshActiveTab(force);
   }, [activeTab, searchQuery, refreshToken]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (activeTab !== 'requests') void loadRequests(false);
-  }, [refreshToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handleFocus = () => {
       if (document.visibilityState === 'visible') {
         setClaimRetryToken((current) => current + 1);
-        void refreshActiveTab();
-        if (activeTab !== 'requests') void loadRequests(false);
+        void refreshActiveTab(true);
       }
     };
     window.addEventListener('focus', handleFocus);
@@ -543,7 +644,7 @@ export function FriendsView({
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleFocus);
     };
-  }, [activeTab, loadRequests, refreshActiveTab]);
+  }, [refreshActiveTab]);
 
   useEffect(() => {
     const flushQueue = async () => {
@@ -551,8 +652,8 @@ export function FriendsView({
       setQueuedTargetIds(new Set(result.remaining.map((request) => request.targetProfileId)));
       if (result.sent > 0) {
         setMessage(`${result.sent} saved friend request${result.sent === 1 ? '' : 's'} sent.`);
-        void loadRequests(false);
-        if (activeTab === 'suggestions') void loadSuggestions(false);
+        void loadRequests(false, 'all', true);
+        if (activeTab === 'suggestions') void loadSuggestions(false, true);
       }
     };
     const handleOnline = () => {
@@ -575,8 +676,8 @@ export function FriendsView({
         setMessage('Friend connection added. Welcome to their TrackLab network.');
         onFriendGraphChange?.();
         setActiveTab('friends');
-        void loadFriends(false);
-        void loadRequests(false);
+        void loadFriends(false, true);
+        void loadRequests(false, 'all', true);
         if (friendInviteToken == null) removeInviteTokenFromUrl();
       })
       .catch((claimError) => {
@@ -607,9 +708,9 @@ export function FriendsView({
       await task();
       setMessage(successMessage);
       if (friendGraphChanged) onFriendGraphChange?.();
-      if (reload.includes('friends')) void loadFriends(false);
-      if (reload.includes('requests')) void loadRequests(false);
-      if (reload.includes('suggestions')) void loadSuggestions(false);
+      if (reload.includes('friends')) void loadFriends(false, true);
+      if (reload.includes('requests')) void loadRequests(false, 'all', true);
+      if (reload.includes('suggestions')) void loadSuggestions(false, true);
       return true;
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : 'That friend action could not be completed.');
@@ -631,8 +732,8 @@ export function FriendsView({
     try {
       await friendsApi.sendFriendRequest(profile.id, clientRequestId);
       setMessage(`Friend request sent to ${profile.displayName}. They can accept it whenever they sign in.`);
-      void loadRequests(false);
-      void loadSuggestions(false);
+      void loadRequests(false, 'all', true);
+      void loadSuggestions(false, true);
     } catch (sendError) {
       if (isNetworkFailure(sendError)) {
         const queued = queueFriendRequest(currentProfileId, profile.id, clientRequestId);
@@ -710,7 +811,7 @@ export function FriendsView({
       const nextInvite = await friendsApi.getInvite();
       setInvite(nextInvite);
       setMessage('Secure invitation created. Send it to one intended rider.');
-      await loadInvite();
+      await loadInvite(true);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'A secure invitation could not be created.');
     } finally {
@@ -730,7 +831,7 @@ export function FriendsView({
       await friendsApi.revokeInvite(invite.id);
       setInvite(null);
       setMessage('Invitation revoked. You can create a new one when you are ready.');
-      await loadInvite();
+      await loadInvite(true);
     } catch (revokeError) {
       setError(revokeError instanceof Error ? revokeError.message : 'That invitation could not be revoked.');
     } finally {
@@ -753,7 +854,7 @@ export function FriendsView({
       const revoked = await friendsApi.revokeAllInvites();
       setInvite(null);
       setMessage(`${revoked} invitation link${revoked === 1 ? '' : 's'} revoked.`);
-      await loadInvite();
+      await loadInvite(true);
     } catch (revokeError) {
       setError(revokeError instanceof Error ? revokeError.message : 'Your invitation links could not be revoked.');
     } finally {
@@ -826,7 +927,9 @@ export function FriendsView({
                 tabIndex={activeTab === id ? 0 : -1}
                 className={activeTab === id ? 'selected' : ''}
                 onClick={() => activateTab(id)}
+                onFocus={() => preloadTab(id)}
                 onKeyDown={(event) => handleTabKeyDown(event, id)}
+                onPointerEnter={() => preloadTab(id)}
               >
                 <Icon size={18} aria-hidden="true" />
                 <span>{label}</span>

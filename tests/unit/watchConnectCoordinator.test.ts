@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   defaultWatchConnectClubId,
   watchConnectAccountRequestIsCurrent,
@@ -12,6 +13,13 @@ import {
 } from '../../src/components/WatchConnectCoordinator';
 
 describe('WatchConnectCoordinator native adapter', () => {
+  it('keeps the App suppression callback stable so ordinary rerenders do not restart 15-second polling', () => {
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    expect(appSource).toMatch(/const handleLegacyRelaySuppressionChange = useCallback\([\s\S]*?\}, \[\]\);/);
+    expect(appSource).toContain('onLegacyRelaySuppressionChange={handleLegacyRelaySuppressionChange}');
+    expect(appSource).not.toMatch(/onLegacyRelaySuppressionChange=\{\(suppressed\)/);
+  });
+
   it('uses the exact nested Watch Connect connection, session, and deadline', () => {
     expect(watchConnectNativeResultFromState({
       version: 1,
