@@ -1932,6 +1932,14 @@ export default function App() {
       ? 'club-tablet'
       : initialTrack.countryCode === 'CUSTOM' ? 'straight-sprint' : 'race',
   );
+  const lastRaceWasSprintRef = useRef(false);
+  const raceWorkspaceActive = appMode === 'race' || appMode === 'straight-sprint';
+  if (raceWorkspaceActive) {
+    lastRaceWasSprintRef.current = appMode === 'straight-sprint';
+  }
+  const resultsMode = appMode === 'results';
+  const raceWorkspaceMode = appMode === 'straight-sprint'
+    || (resultsMode && lastRaceWasSprintRef.current) ? 'straight-sprint' : 'race';
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
   const [showMembershipLanding, setShowMembershipLanding] = useState(
     () => !initialClubTabletDeviceRef.current && initialMembershipRef.current?.tier === 'visitor',
@@ -3194,7 +3202,7 @@ export default function App() {
     () => catalogTracks.find((track) => track.id === selectedTrackId) ?? availableTracks[0] ?? defaultTrack,
     [availableTracks, catalogTracks, selectedTrackId],
   );
-  const raceCameraPreferenceKey = appMode === 'straight-sprint'
+  const raceCameraPreferenceKey = raceWorkspaceMode === 'straight-sprint'
     ? straightSprintCameraPreferenceKey(selectedTrack.id, straightSprintDistanceFeet)
     : selectedTrack.id;
   useEffect(() => {
@@ -3287,11 +3295,11 @@ export default function App() {
     : 0;
   const straightSprintMappedFeet = Math.round(straightSprintMappedRouteLengthMeters / 0.3048);
   const straightSprintDistanceMeters = straightSprintFeetToMeters(straightSprintDistanceFeet);
-  const straightSprintRouteReady = appMode !== 'straight-sprint'
+  const straightSprintRouteReady = raceWorkspaceMode !== 'straight-sprint'
     || straightSprintMappedRouteLengthMeters + 0.5 >= straightSprintDistanceMeters;
-  const straightSprintMaximumRouteReady = appMode !== 'straight-sprint'
+  const straightSprintMaximumRouteReady = raceWorkspaceMode !== 'straight-sprint'
     || straightSprintMappedRouteLengthMeters + 0.5 >= straightSprintFeetToMeters(straightSprintMaximumFeet);
-  const effectiveRouteLengthMeters = appMode === 'straight-sprint'
+  const effectiveRouteLengthMeters = raceWorkspaceMode === 'straight-sprint'
     ? straightSprintDistanceMeters
     : baseRouteLengthMeters * (isLoopTrack ? lapCount : 1);
 
@@ -3889,7 +3897,7 @@ export default function App() {
         ? appMode
         : null;
     const connected = new Set(connectedDeviceIds);
-    const modePlayers = appMode === 'race' || appMode === 'straight-sprint'
+    const modePlayers = raceWorkspaceActive
       ? lockedRacePlayers ?? []
       : appMode === 'explore' || appMode === 'get-pulled' ? explorePlayers : activePlayers;
     const lockedByPlayer = new Map(modePlayers.map((player) => [player.id, player]));
@@ -4148,8 +4156,8 @@ export default function App() {
     });
   }, [persistRaceViewPreferences]);
   const ghostRouteVariantId = effectiveTrack.activeRouteVariantId ?? (hasDualStartRoutes ? raceRouteVariantId : undefined);
-  const activeSprintDistanceFeet = appMode === 'straight-sprint' ? straightSprintDistanceFeet : undefined;
-  const activeSprintAirSetting = appMode === 'straight-sprint' ? straightSprintAirSetting : undefined;
+  const activeSprintDistanceFeet = raceWorkspaceMode === 'straight-sprint' ? straightSprintDistanceFeet : undefined;
+  const activeSprintAirSetting = raceWorkspaceMode === 'straight-sprint' ? straightSprintAirSetting : undefined;
   const eventGhostLaps = useMemo(
     () => ghostsForTrackRoute(
       ghostLaps,
@@ -4401,7 +4409,7 @@ export default function App() {
     newPersonalRecordsByPlayer,
     lapCount: isLoopTrack ? lapCount : 1,
     reactionTimesByPlayer,
-    straightSprint: appMode === 'straight-sprint',
+    straightSprint: raceWorkspaceMode === 'straight-sprint',
     onRecentLinesChange: handleRaceCommentaryRecentLinesChange,
   });
   useEffect(() => {
@@ -5591,7 +5599,7 @@ export default function App() {
       setGhostLaps([]);
       void import('./lib/clubTablet').then(({ loadClubTabletGhosts }) => loadClubTabletGhosts(
         selectedTrack.id,
-        appMode === 'straight-sprint'
+        raceWorkspaceMode === 'straight-sprint'
           ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
           : undefined,
         clubTabletSession,
@@ -5620,7 +5628,7 @@ export default function App() {
       selectedTrack.id,
       cloudProfileKey,
       friendKeys,
-      appMode === 'straight-sprint'
+      raceWorkspaceMode === 'straight-sprint'
         ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
         : undefined,
       focusedFriendGhost,
@@ -5644,7 +5652,6 @@ export default function App() {
       cancelled = true;
     };
   }, [
-    appMode,
     cloudProfileKey,
     clubTabletProfileKey,
     clubTabletKioskMode,
@@ -5655,6 +5662,7 @@ export default function App() {
     friendGhostRaceTarget?.profileId,
     friendGhostRaceTarget?.trackId,
     friendGraphRevision,
+    raceWorkspaceMode,
     selectedTrack.id,
     straightSprintAirSetting,
     straightSprintDistanceFeet,
@@ -9460,7 +9468,7 @@ export default function App() {
 
   const monitorHeartRateOverlayPlayer = monitorHeartRateOverlayPlayerId == null
     ? null
-    : (appMode === 'race' || appMode === 'straight-sprint' ? racePlayers : explorePlayers)
+    : (raceWorkspaceActive ? racePlayers : explorePlayers)
       .find((player) => player.id === monitorHeartRateOverlayPlayerId) ?? null;
   const monitorHeartRateOverlayRiderId = monitorHeartRateOverlayPlayer?.riderId ?? null;
   const monitorHeartRateOverlayAction = monitorHeartRateOverlayRiderId
@@ -9741,9 +9749,7 @@ export default function App() {
     scheduleStagingCountdown(startingTrackId, sequenceId);
   };
 
-  const clubOwnerPreparationDialogVisible = (
-    appMode === 'race' || appMode === 'straight-sprint'
-  ) && (
+  const clubOwnerPreparationDialogVisible = raceWorkspaceActive && (
     clubOwnerRacePreparation.phase === 'authorizing'
     || clubOwnerRacePreparation.phase === 'ready'
     || (clubOwnerRacePreparation.phase === 'error' && raceState !== 'racing')
@@ -10026,12 +10032,11 @@ export default function App() {
   const connectedBikeDisplayCount = demoMode ? demoBikeCount : activePlayers.length;
   const workflowConnectionReady = demoMode || activePlayers.length > 0;
   const workflowRaceEntryReady = demoMode || racePlayers.length > 0;
-  const sessionTrackAvailable = appMode !== 'straight-sprint' || selectedTrack.countryCode === 'CUSTOM';
+  const sessionTrackAvailable = raceWorkspaceMode !== 'straight-sprint' || selectedTrack.countryCode === 'CUSTOM';
   const workflowMapReady = sessionTrackAvailable
     && effectiveTrack.routeStatus === 'user-mapped'
     && straightSprintRouteReady;
   const workflowRaceReady = workflowConnectionReady && workflowRaceEntryReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
-  const raceWorkspaceMode: AppMode = appMode === 'straight-sprint' ? 'straight-sprint' : 'race';
   const hasStartHereSplitChoices = racePlayers.length > 0 && (effectiveTrack.splitSections?.length ?? 0) > 0;
   const canChooseStartHereSplitLine = raceState !== 'racing' && !startGateStatus.active;
   const canEditLiveRaceEntry = !demoMode && raceState !== 'racing' && !startGateStatus.active;
@@ -10053,7 +10058,7 @@ export default function App() {
     },
     {
       kind: 'action',
-      label: appMode === 'straight-sprint' ? 'Pick Sprint' : 'Pick Track',
+      label: raceWorkspaceMode === 'straight-sprint' ? 'Pick Sprint' : 'Pick Track',
       detail: sessionTrackAvailable ? selectedTrack.name : 'Create a custom location',
       state: sessionTrackAvailable ? 'complete' : 'next',
       onClick: () => {
@@ -10069,7 +10074,7 @@ export default function App() {
       kind: 'action' as const,
       label: 'Map Zones',
       detail: workflowMapReady
-        ? appMode === 'straight-sprint'
+        ? raceWorkspaceMode === 'straight-sprint'
           ? `${formatDistanceMeters(
             straightSprintFeetToMeters(straightSprintMappedFeet),
             distanceUnit,
@@ -10107,17 +10112,17 @@ export default function App() {
       kind: 'action',
       label: workflowRaceReady
         ? raceState === 'finished'
-          ? appMode === 'straight-sprint' ? 'Sprint Again' : 'Race Again'
-          : appMode === 'straight-sprint'
+          ? raceWorkspaceMode === 'straight-sprint' ? 'Sprint Again' : 'Race Again'
+          : raceWorkspaceMode === 'straight-sprint'
             ? demoMode ? 'Start Demo Sprint' : 'Start Live Sprint'
             : demoMode ? 'Start Demo Race' : 'Start Live Race'
-        : appMode === 'straight-sprint' ? 'Sprint' : 'Race',
+        : raceWorkspaceMode === 'straight-sprint' ? 'Sprint' : 'Race',
       detail: workflowRaceReady
         ? 'Ready'
         : !sessionTrackAvailable
           ? 'Create sprint first'
           : !workflowMapReady
-          ? appMode === 'straight-sprint' && effectiveTrack.routeStatus === 'user-mapped'
+          ? raceWorkspaceMode === 'straight-sprint' && effectiveTrack.routeStatus === 'user-mapped'
             ? `Map at least ${formatDistanceMeters(straightSprintDistanceMeters, distanceUnit)}`
             : 'Map first'
           : !workflowConnectionReady
@@ -10310,6 +10315,34 @@ export default function App() {
       </>
     );
   }
+
+  const analyticsPanel = (
+    <Suspense fallback={<div className="panel-section">Loading post-race analysis…</div>}>
+      <AnalyticsPanel
+        track={effectiveTrack}
+        players={racePlayers}
+        raceSummary={raceSummary}
+        selectedMetrics={selectedMetrics}
+        reactionTimesByPlayer={reactionTimesByPlayer}
+        speedUnit={speedUnit}
+        distanceUnit={distanceUnit}
+        activeZones={activeZones}
+        raceCapture={raceCapture}
+        ghostLaps={availableGhostLaps}
+        selectedGhostIds={selectedGhostIds}
+        studioRiders={availableStudioRiders}
+        sprintConfiguration={raceWorkspaceMode === 'straight-sprint'
+          ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
+          : undefined}
+        newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
+        onRaceCaptureJsonExport={exportRaceCaptureJson}
+        onRaceCaptureCsvExport={exportRaceCaptureCsv}
+        onGhostToggle={toggleGhostLap}
+        onGhostClear={clearSelectedGhosts}
+        heartRateByPlayer={raceHeartRateByPlayer}
+      />
+    </Suspense>
+  );
 
   return (
     <div
@@ -10633,7 +10666,7 @@ export default function App() {
               </div>
             </div>
           </section>
-        ) : appMode === 'settings' || appMode === 'friends' ? null : appMode === 'get-pulled' ? (
+        ) : appMode === 'settings' || appMode === 'friends' || resultsMode ? null : appMode === 'get-pulled' ? (
           <section className="sidebar-workflow explore-sidebar-workflow" aria-label="Get Pulled setup workflow">
             <div className="workflow-heading">
               <span>Get Pulled</span>
@@ -10687,13 +10720,13 @@ export default function App() {
         ) : (
         <section
           className="sidebar-workflow"
-          aria-label={appMode === 'straight-sprint'
+          aria-label={raceWorkspaceMode === 'straight-sprint'
             ? 'Straight Sprint setup workflow'
             : 'BMX Race Intervals setup workflow'}
         >
           <div className="workflow-heading">
-            <span>{appMode === 'straight-sprint' ? 'Straight Sprint' : 'BMX Race Intervals'}</span>
-            <small>{appMode === 'straight-sprint' ? 'Custom sprint course' : 'Normal session order'}</small>
+            <span>{raceWorkspaceMode === 'straight-sprint' ? 'Straight Sprint' : 'BMX Race Intervals'}</span>
+            <small>{raceWorkspaceMode === 'straight-sprint' ? 'Custom sprint course' : 'Normal session order'}</small>
           </div>
           <div className="workflow-list">
             {workflowSteps.map((step, index) => {
@@ -10940,10 +10973,14 @@ export default function App() {
             Riders
           </button>
           <button
+            className={resultsMode ? 'selected' : ''}
             type="button"
             onClick={() => {
-              setAppMode(raceWorkspaceMode);
-              window.setTimeout(() => document.querySelector('.analytics-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+              if (raceWorkspaceActive) {
+                document.querySelector('.analytics-panel')?.scrollIntoView();
+              } else {
+                setAppMode('results');
+              }
             }}
           >
             <BarChart3 size={17} />
@@ -11090,7 +11127,7 @@ export default function App() {
                 <small>Your saved display and unit preferences</small>
               </span>
             </div>
-          ) : appMode === 'club-monitor' ? (
+          ) : resultsMode ? null : appMode === 'club-monitor' ? (
             <div className="explore-topbar-heading">
               <Radio size={20} />
               <span>
@@ -11171,7 +11208,7 @@ export default function App() {
             </label>
           )}
 
-          {(appMode === 'race' || appMode === 'straight-sprint') && (
+          {raceWorkspaceActive && (
           <div
             className="race-readiness-strip"
             aria-label={appMode === 'straight-sprint' ? 'Straight Sprint readiness' : 'Race readiness'}
@@ -11306,6 +11343,8 @@ export default function App() {
             onClubProfileComplete={handleClubProfileComplete}
           />
           </Suspense>
+        ) : resultsMode ? (
+          analyticsPanel
         ) : appMode === 'club-monitor' && clubOwnerActive ? (
           <Suspense fallback={<div className="explore-loading">Opening Club Live Monitor…</div>}>
             <ClubLiveMonitor
@@ -11552,31 +11591,7 @@ export default function App() {
                   </Suspense>
                 </div>
 
-                <Suspense fallback={<div className="panel-section">Loading post-race analysis…</div>}>
-                  <AnalyticsPanel
-                    track={effectiveTrack}
-                    players={racePlayers}
-                    raceSummary={raceSummary}
-                    selectedMetrics={selectedMetrics}
-                    reactionTimesByPlayer={reactionTimesByPlayer}
-                    speedUnit={speedUnit}
-                    distanceUnit={distanceUnit}
-                    activeZones={activeZones}
-                    raceCapture={raceCapture}
-                    ghostLaps={availableGhostLaps}
-                    selectedGhostIds={selectedGhostIds}
-                    studioRiders={availableStudioRiders}
-                    sprintConfiguration={appMode === 'straight-sprint'
-                      ? { distanceFeet: straightSprintDistanceFeet, airSetting: straightSprintAirSetting }
-                      : undefined}
-                    newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
-                    onRaceCaptureJsonExport={exportRaceCaptureJson}
-                    onRaceCaptureCsvExport={exportRaceCaptureCsv}
-                    onGhostToggle={toggleGhostLap}
-                    onGhostClear={clearSelectedGhosts}
-                    heartRateByPlayer={raceHeartRateByPlayer}
-                  />
-                </Suspense>
+                {analyticsPanel}
               </div>
 
               <div className="dashboard-secondary-column">

@@ -20,4 +20,25 @@ describe('sidebar section navigation', () => {
     expect(ridersButton).toContain("document.querySelector('.pairing-rail')");
     expect(ridersButton).not.toContain('setAppMode(');
   });
+
+  it('opens lightweight results from other sections without mounting the race workspace', () => {
+    const resultsButton = navigationButtonSource('<BarChart3 size={17} />', 'Results');
+    const resultsBranchStart = appSource.lastIndexOf(') : resultsMode ? (');
+    const resultsBranch = appSource.slice(
+      resultsBranchStart,
+      appSource.indexOf(") : appMode === 'club-monitor'", resultsBranchStart),
+    );
+
+    expect(resultsButton).toContain("setAppMode('results')");
+    expect(resultsButton).toContain("className={resultsMode ? 'selected' : ''}");
+    expect(resultsButton).toContain('if (raceWorkspaceActive)');
+    expect(resultsBranch).toContain('analyticsPanel');
+    expect(resultsBranch).not.toMatch(/EarthTrackView|SessionControlPanel|MultiplayerPanel/);
+  });
+
+  it('keeps the last sprint configuration when results open from another section', () => {
+    expect(appSource).toContain("const resultsMode = appMode === 'results';");
+    expect(appSource).toMatch(/const raceWorkspaceMode =[\s\S]*?resultsMode[\s\S]*?lastRaceWasSprintRef\.current/);
+    expect(appSource).toMatch(/sprintConfiguration=\{raceWorkspaceMode === 'straight-sprint'[\s\S]*?straightSprintAirSetting/);
+  });
 });
