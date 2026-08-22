@@ -2395,9 +2395,10 @@ export default function App() {
     setShowMembershipLanding(true);
   }, []);
 
-  const handleHeartRateAccountBlockOpenSettings = useCallback(() => {
+  const handleHeartRateAccountBlockOpenSettings = useCallback((watch = false) => {
     setShowMembershipLanding(false);
     setAppMode('settings');
+    if (watch) location.hash = 'watch';
   }, []);
 
   const handleHeartRateStudioRelayConfigure = useCallback(async (
@@ -10997,19 +10998,9 @@ export default function App() {
           </button>
           {sidebarMoreOpen && (
             <div className="side-nav-more">
-              <button
-                type="button"
-                onClick={() => {
-                  setAppMode('settings');
-                  setSidebarMoreOpen(false);
-                }}
-              >
-                <Settings size={17} /> Settings
-              </button>
               <button onClick={() => {
-                setAppMode('settings');
+                handleHeartRateAccountBlockOpenSettings(true);
                 setSidebarMoreOpen(false);
-                location.hash = 'watch';
               }}>
                 Watch Connect
               </button>
