@@ -36,6 +36,34 @@ describe('HeartRateMetric', () => {
 });
 
 describe('HeartRateSettingsCard', () => {
+  it('links a paired iPhone to supported TestFlight install steps when the Watch app is missing', () => {
+    const html = renderToStaticMarkup(createElement(HeartRateSettingsCard, {
+      availability: {
+        version: 1,
+        supported: false,
+        platform: 'iphone',
+        paired: true,
+        watchAppInstalled: false,
+        healthDataAvailable: true,
+        minimumIOS: '17.0',
+        minimumWatchOS: '10.0',
+        reason: 'Install the TrackLab BMX companion app on Apple Watch.',
+      },
+      status: { version: 1, state: 'unavailable', sessionId: null, at: 10_000 },
+      readingState: 'unavailable',
+      latest: null,
+      onStart: () => undefined,
+      onPause: () => undefined,
+      onResume: () => undefined,
+      onEnd: () => undefined,
+      onRetry: () => undefined,
+    }));
+    expect(html).toContain('Install Watch App');
+    expect(html).toContain('href="https://testflight.apple.com/"');
+    expect(html).toContain('scroll to Information, then tap Install beside Apple Watch');
+    expect(html).toContain('Check again');
+  });
+
   it('keeps both studio-sharing choices explicit and separate from Friends', () => {
     const html = renderToStaticMarkup(createElement(HeartRateSettingsCard, {
       availability: {
@@ -87,5 +115,6 @@ describe('HeartRateSettingsCard', () => {
     expect(html).toContain('Connection details');
     expect(html).toContain('Watch status');
     expect(html).not.toContain('<h2 id="heart-rate-settings-heading">Apple Watch heart rate</h2>');
+    expect(html).not.toContain('Install Watch App');
   });
 });

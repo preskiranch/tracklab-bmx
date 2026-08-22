@@ -11,6 +11,10 @@ import {
   watchConnectStatusLabel,
   type WatchConnectViewState,
 } from '../lib/watchConnect';
+import {
+  trackLabTestFlightUrl,
+  watchAppInstallInstructions,
+} from './watchAppInstall';
 import './WatchConnectCard.css';
 
 export type WatchConnectCardProps = Readonly<{
@@ -34,6 +38,7 @@ export type WatchConnectCardProps = Readonly<{
   targetDisabled?: boolean;
   onTargetChange?: (value: string) => void;
   retryWhileConnecting?: boolean;
+  showWatchInstall?: boolean;
 }>;
 
 export function WatchConnectCard({
@@ -57,6 +62,7 @@ export function WatchConnectCard({
   targetDisabled = false,
   onTargetChange,
   retryWhileConnecting = false,
+  showWatchInstall = false,
 }: WatchConnectCardProps) {
   const connecting = state.phase === 'connecting';
   const syncing = state.phase === 'syncing';
@@ -156,6 +162,17 @@ export function WatchConnectCard({
       )}
 
       <div className="watch-connect-card-actions">
+        {!showConnect && showWatchInstall && (
+          <a
+            aria-label="Install TrackLab BMX on Apple Watch with TestFlight"
+            className="primary"
+            href={trackLabTestFlightUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <Watch aria-hidden="true" size={17} /> Install Watch App
+          </a>
+        )}
         {showConnect && (
           <button
             className="primary"
@@ -186,6 +203,12 @@ export function WatchConnectCard({
           </button>
         )}
       </div>
+
+      {showWatchInstall && (
+        <small className="watch-connect-card-install-help">
+          {watchAppInstallInstructions}
+        </small>
+      )}
 
       {savedSummaryConsentRequired && (
         <small className="watch-connect-card-required" role="status">

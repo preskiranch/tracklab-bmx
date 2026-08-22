@@ -1,4 +1,4 @@
-import { HeartPulse, Pause, Play, RotateCcw, ShieldCheck, Square } from 'lucide-react';
+import { HeartPulse, Pause, Play, RotateCcw, ShieldCheck, Square, Watch } from 'lucide-react';
 import type { HeartRateMeasurement } from '../types';
 import type {
   HeartRateReadingState,
@@ -9,6 +9,11 @@ import type {
   NativeHeartRateStatus,
 } from '../lib/nativeHeartRate';
 import { HeartRateMetric } from './HeartRateMetric';
+import {
+  trackLabTestFlightUrl,
+  watchAppInstallInstructions,
+  watchAppNeedsInstall,
+} from './watchAppInstall';
 import './HeartRateSettingsCard.css';
 
 type HeartRateSettingsCardProps = {
@@ -70,6 +75,7 @@ export function HeartRateSettingsCard({
     && status?.state !== 'launching'
     && status?.state !== 'connecting'
     && status?.state !== 'ending';
+  const showWatchInstall = showWorkoutActions && watchAppNeedsInstall(availability);
   const detail = message.trim()
     || status?.message
     || availability?.reason
@@ -105,6 +111,17 @@ export function HeartRateSettingsCard({
       </div>
 
       {showWorkoutActions && <div className="heart-rate-settings-actions">
+        {showWatchInstall && (
+          <a
+            aria-label="Install TrackLab BMX on Apple Watch with TestFlight"
+            className="primary"
+            href={trackLabTestFlightUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <Watch aria-hidden="true" size={17} /> Install Watch App
+          </a>
+        )}
         {canStart && (
           <button className="primary" type="button" disabled={busy} onClick={onStart}>
             <Play size={17} /> Start Watch workout
@@ -129,6 +146,11 @@ export function HeartRateSettingsCard({
           <button type="button" disabled={busy} onClick={onRetry}>
             <RotateCcw size={16} /> Check again
           </button>
+        )}
+        {showWatchInstall && (
+          <small className="heart-rate-settings-install-help">
+            {watchAppInstallInstructions}
+          </small>
         )}
       </div>}
 
