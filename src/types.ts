@@ -950,6 +950,8 @@ export type TrackRecord = {
   websiteUrl?: string;
   facebookUrl?: string;
   instagramUrl?: string;
+  federationName?: string;
+  federationUrl?: string;
   lengthMeters: number;
   elevationMeters: number;
   surface: string;
@@ -985,4 +987,6 @@ export type TrackLocatorRecord = Pick<TrackRecord,
   | 'websiteUrl'
   | 'facebookUrl'
   | 'instagramUrl'
+  | 'federationName'
+  | 'federationUrl'
 >;

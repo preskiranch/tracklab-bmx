@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Apple, ExternalLink, Globe2, Instagram, MapPin, Navigation, Search, Users } from 'lucide-react';
+import { Apple, ExternalLink, Globe2, Instagram, Landmark, MapPin, Navigation, Search, Users } from 'lucide-react';
 import {
   trackAppleMapsUrl,
   trackGoogleMapsUrl,
@@ -211,7 +211,8 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                 <PublicTrackMap track={selectedTrack} />
                 {(selectedExternalLinks.websiteUrl
                   || selectedExternalLinks.facebookUrl
-                  || selectedExternalLinks.instagramUrl) && (
+                  || selectedExternalLinks.instagramUrl
+                  || selectedExternalLinks.federationUrl) && (
                   <nav
                     className="public-track-official-links"
                     aria-label={`Official links for ${selectedTrack.name}`}
@@ -229,6 +230,17 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                     {selectedExternalLinks.instagramUrl && (
                       <a href={selectedExternalLinks.instagramUrl} target="_blank" rel="noopener noreferrer">
                         <Instagram size={17} /> Instagram
+                      </a>
+                    )}
+                    {selectedExternalLinks.federationUrl && selectedExternalLinks.federationName && (
+                      <a
+                        className="public-track-federation-link"
+                        href={selectedExternalLinks.federationUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Federation: ${selectedExternalLinks.federationName}`}
+                      >
+                        <Landmark size={17} /> {selectedExternalLinks.federationName}
                       </a>
                     )}
                   </nav>

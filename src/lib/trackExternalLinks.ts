@@ -4,16 +4,22 @@ type TrackLinkSource = Pick<TrackRecord,
   | 'websiteUrl'
   | 'facebookUrl'
   | 'instagramUrl'
+  | 'federationName'
+  | 'federationUrl'
 > | Pick<TrackLocatorRecord,
   | 'websiteUrl'
   | 'facebookUrl'
   | 'instagramUrl'
+  | 'federationName'
+  | 'federationUrl'
 >;
 
 export type TrackExternalLinks = {
   websiteUrl?: string;
   facebookUrl?: string;
   instagramUrl?: string;
+  federationName?: string;
+  federationUrl?: string;
 };
 
 const maximumExternalUrlLength = 2_048;
@@ -75,6 +81,10 @@ export function trackExternalLinks(track: TrackLinkSource): TrackExternalLinks {
     ?? websiteFacebookUrl;
   const instagramUrl = safeServiceUrl(track.instagramUrl, 'instagram')
     ?? websiteInstagramUrl;
+  const federationName = typeof track.federationName === 'string'
+    ? track.federationName.trim()
+    : '';
+  const federationUrl = safeExternalHttpUrl(track.federationUrl);
 
   return {
     ...(!websiteFacebookUrl && !websiteInstagramUrl && candidateWebsiteUrl
@@ -82,5 +92,6 @@ export function trackExternalLinks(track: TrackLinkSource): TrackExternalLinks {
       : {}),
     ...(facebookUrl ? { facebookUrl } : {}),
     ...(instagramUrl ? { instagramUrl } : {}),
+    ...(federationName && federationUrl ? { federationName, federationUrl } : {}),
   };
 }

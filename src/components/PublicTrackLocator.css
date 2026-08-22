@@ -254,15 +254,23 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
+  min-width: 0;
   min-height: 44px;
-  padding: 0 13px;
+  padding: 8px 13px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.1);
   color: #ffffff;
   font-size: 14px;
   font-weight: 850;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: center;
   text-decoration: none;
+}
+
+.public-track-official-links a svg {
+  flex: 0 0 auto;
 }
 
 .public-track-official-links a:hover {
@@ -398,5 +406,9 @@
 
   .public-track-actions a {
     min-width: 0;
+  }
+
+  .public-track-official-links .public-track-federation-link {
+    grid-column: 1 / -1;
   }
 }
