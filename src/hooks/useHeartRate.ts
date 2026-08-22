@@ -205,6 +205,12 @@ export function useHeartRate(options: UseHeartRateOptions = {}): UseHeartRateRes
         setStatus(nextStatus);
         if (nextStatus.watchConnect) setWatchConnect(nextStatus.watchConnect);
         setNow(Date.now());
+        // WCSession may finish activating after the first availability check.
+        // Native republishes status at that boundary so paired/install state is
+        // refreshed automatically and the Watch Connect action can appear.
+        void client.getAvailability().then((nextAvailability) => {
+          if (!cancelled) setAvailability(nextAvailability);
+        }).catch(() => undefined);
       }),
       client.addRelayStatusListener((nextRelayState) => {
         if (cancelled) return;

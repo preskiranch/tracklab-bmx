@@ -10998,7 +10998,6 @@ export default function App() {
           {sidebarMoreOpen && (
             <div className="side-nav-more">
               <button
-                className={appMode === 'settings' ? 'selected' : ''}
                 type="button"
                 onClick={() => {
                   setAppMode('settings');
@@ -11006,6 +11005,13 @@ export default function App() {
                 }}
               >
                 <Settings size={17} /> Settings
+              </button>
+              <button onClick={() => {
+                setAppMode('settings');
+                setSidebarMoreOpen(false);
+                location.hash = 'watch';
+              }}>
+                Watch Connect
               </button>
               <button type="button" onClick={() => setShowMembershipLanding(true)}>
                 <Globe2 size={17} /> Community
@@ -11296,7 +11302,7 @@ export default function App() {
               heartRatePanel={authUser ? (
                 <Suspense fallback={<div className="explore-loading">Checking Apple Watch…</div>}>
                   <div id="heart-rate-account-block-settings-slot" />
-                  <div id="watch-connect-settings-slot" />
+                  <div id="watch" />
                   <HeartRateSettingsCard
                     availability={heartRate.availability}
                     status={heartRate.status}

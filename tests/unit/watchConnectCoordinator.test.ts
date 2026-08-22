@@ -10,6 +10,7 @@ import {
   watchConnectNeedsCredentialRecovery,
   watchConnectSuppressesLegacyRelay,
   watchConnectStudioConsentForStart,
+  unavailableWatchConnectDetail,
 } from '../../src/components/WatchConnectCoordinator';
 
 describe('WatchConnectCoordinator native adapter', () => {
@@ -93,6 +94,40 @@ describe('WatchConnectCoordinator native adapter', () => {
       relayConfigured: false,
       reason: 'Watch Connect status could not be checked. Not implemented on ios.',
     })).toBe(false);
+  });
+
+  it('shows the native iPhone setup reason instead of a misleading device handoff', () => {
+    expect(unavailableWatchConnectDetail({
+      version: 1,
+      supported: false,
+      platform: 'iphone',
+      paired: true,
+      watchAppInstalled: false,
+      healthDataAvailable: true,
+      minimumIOS: '17.0',
+      minimumWatchOS: '10.0',
+      reason: 'Install the TrackLab BMX companion app on Apple Watch.',
+    })).toBe('Install the TrackLab BMX companion app on Apple Watch.');
+    expect(unavailableWatchConnectDetail({
+      version: 1,
+      supported: false,
+      platform: 'ipad',
+      paired: false,
+      watchAppInstalled: false,
+      healthDataAvailable: true,
+      minimumIOS: '17.0',
+      minimumWatchOS: '10.0',
+    })).toBe('Open TrackLab on the paired iPhone and press Watch Connect.');
+  });
+
+  it('refreshes paired/install availability when native WCSession activation completes', () => {
+    const hookSource = readFileSync(new URL('../../src/hooks/useHeartRate.ts', import.meta.url), 'utf8');
+    const nativeSource = readFileSync(
+      new URL('../../ios/App/App/HeartRateCoordinator.swift', import.meta.url),
+      'utf8',
+    );
+    expect(nativeSource).toMatch(/activationDidComplete[\s\S]*?activationState == \.activated[\s\S]*?notifyObservers/);
+    expect(hookSource).toMatch(/addStatusListener[\s\S]*?client\.getAvailability\(\)[\s\S]*?setAvailability/);
   });
 
   it('auto-selects one athlete studio and asks when there are multiple choices', () => {
