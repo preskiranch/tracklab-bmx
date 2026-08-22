@@ -1,14 +1,19 @@
 import { readFile } from 'node:fs/promises';
+import { validateFederationPair, validateFederationRegistry } from './lib/track-federations.mjs';
 
 const databasePath = new URL('../public/data/track-database.json', import.meta.url);
 const locatorDatabasePath = new URL('../public/data/track-locator.json', import.meta.url);
+const federationsPath = new URL('../data/federations.json', import.meta.url);
 const database = JSON.parse(await readFile(databasePath, 'utf8'));
 const locatorDatabase = JSON.parse(await readFile(locatorDatabasePath, 'utf8'));
+const federationRegistry = JSON.parse(await readFile(federationsPath, 'utf8'));
 const providers = new Map((database.providers ?? []).map((provider) => [provider.id, provider]));
 const tracks = database.tracks ?? [];
 const errors = [];
 const warnings = [];
 const ids = new Set();
+
+errors.push(...validateFederationRegistry(federationRegistry));
 
 function isHttpUrl(value) {
   try {
@@ -71,6 +76,10 @@ for (const track of tracks) {
   if (track.instagramUrl && !isServiceUrl(track.instagramUrl, 'instagram')) {
     errors.push(`${label}: invalid instagramUrl`);
   }
+  errors.push(...validateFederationPair(track, label));
+  if (!String(track.federationName ?? '').trim()) {
+    errors.push(`${label}: missing federation assignment`);
+  }
   if (track.providerId && !providers.has(track.providerId)) {
     errors.push(`${label}: unknown providerId ${track.providerId}`);
   }
@@ -107,7 +116,7 @@ for (const track of tracks) {
     errors.push(`${track.id}: missing from public locator`);
     continue;
   }
-  for (const field of ['websiteUrl', 'facebookUrl', 'instagramUrl']) {
+  for (const field of ['websiteUrl', 'facebookUrl', 'instagramUrl', 'federationName', 'federationUrl']) {
     if (locatorTrack[field] !== track[field]) {
       errors.push(`${track.id}: public locator does not preserve ${field}`);
     }
@@ -132,6 +141,10 @@ for (const track of locatorTracks) {
   }
   if (track.instagramUrl && !isServiceUrl(track.instagramUrl, 'instagram')) {
     errors.push(`${label}: public locator has invalid instagramUrl`);
+  }
+  errors.push(...validateFederationPair(track, `public locator ${label}`));
+  if (!String(track.federationName ?? '').trim()) {
+    errors.push(`${label}: public locator is missing federation assignment`);
   }
 }
 

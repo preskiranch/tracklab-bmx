@@ -282,6 +282,9 @@ test('public landing page exposes the global track locator without an account', 
   const officialWebsite = locator.getByRole('link', { name: 'Official Website' });
   await expect(officialWebsite).toHaveAttribute('href', 'https://www.adfcc.asn.au/');
   await expect(officialWebsite).toHaveAttribute('rel', 'noopener noreferrer');
+  const federationLink = locator.getByRole('link', { name: 'Federation: AusCycling' });
+  await expect(federationLink).toHaveAttribute('href', 'https://auscycling.org.au/');
+  await expect(federationLink).toHaveAttribute('rel', 'noopener noreferrer');
   await expect(locator.locator('.public-track-map + .public-track-official-links')).toBeVisible();
   await expect(page).toHaveURL(/locator=auscycling-adf-cycling-club/);
 
@@ -293,12 +296,31 @@ test('public landing page exposes the global track locator without an account', 
   await page.setViewportSize({ width: 390, height: 844 });
   await locator.scrollIntoViewIfNeeded();
   await expect(locator.getByRole('link', { name: 'Official Website' })).toBeVisible();
+  await expect(locator.getByRole('link', { name: 'Federation: AusCycling' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Apple Maps' })).toBeVisible();
   await expect(locator.getByRole('link', { name: 'Google Maps' })).toBeVisible();
+  const officialLinksFitPhone = await locator.locator('.public-track-official-links').evaluate((element) => (
+    element.scrollWidth <= element.clientWidth
+  ));
+  expect(officialLinksFitPhone).toBe(true);
   await page.screenshot({
     fullPage: false,
     path: testInfo.outputPath('public-track-locator-mobile.png'),
   });
+
+  await locator.getByLabel('Search tracks').fill('Bicicross Parque Araucano');
+  await locator.getByRole('button', { name: /Bicicross Parque Araucano/ }).click();
+  const longFederationLink = locator.getByRole('link', {
+    name: 'Federation: Federación Deportiva Nacional de Ciclismo de Chile',
+  });
+  const [longFederationBox, officialLinksBox] = await Promise.all([
+    longFederationLink.boundingBox(),
+    locator.locator('.public-track-official-links').boundingBox(),
+  ]);
+  expect(longFederationBox).not.toBeNull();
+  expect(officialLinksBox).not.toBeNull();
+  expect(longFederationBox!.height).toBeLessThanOrEqual(60);
+  expect(longFederationBox!.width).toBeGreaterThan(officialLinksBox!.width * 0.9);
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await locator.getByLabel('Search tracks').fill('Air Time BMX');
@@ -310,6 +332,10 @@ test('public landing page exposes the global track locator without an account', 
   await expect(locator.getByRole('link', { name: 'Instagram' })).toHaveAttribute(
     'href',
     'https://www.instagram.com/airtimebmx',
+  );
+  await expect(locator.getByRole('link', { name: 'Federation: USA BMX' })).toHaveAttribute(
+    'href',
+    'https://www.usabmx.com/',
   );
   await expect(locator.locator('.public-track-map')).toHaveAttribute('aria-label', 'Satellite view of Air Time BMX');
   await expect(locator.getByRole('link', { name: 'Official Website' })).toHaveCount(0);

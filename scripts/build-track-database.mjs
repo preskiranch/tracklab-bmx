@@ -3,10 +3,12 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib';
 import ts from 'typescript';
+import { applyFederationRegistry, validateFederationRegistry } from './lib/track-federations.mjs';
 
 const repoRoot = new URL('..', import.meta.url);
 const importsDir = new URL('../data/imports/', import.meta.url);
 const providersPath = new URL('../data/providers.json', import.meta.url);
+const federationsPath = new URL('../data/federations.json', import.meta.url);
 const seedCatalogPath = new URL('../src/data/trackCatalog.ts', import.meta.url);
 const outputPath = new URL('../public/data/track-database.json', import.meta.url);
 const brotliOutputPath = new URL('../public/data/track-database.json.br', import.meta.url);
@@ -185,6 +187,8 @@ function normalizeTrack(track) {
     websiteUrl,
     facebookUrl,
     instagramUrl,
+    federationName: track.federationName,
+    federationUrl: track.federationUrl,
     lengthMeters,
     elevationMeters: Number(track.elevationMeters ?? 0),
     surface: track.surface ?? 'BMX race track',
@@ -238,6 +242,8 @@ const provenanceFields = [
   'websiteUrl',
   'facebookUrl',
   'instagramUrl',
+  'federationName',
+  'federationUrl',
   'sourceRecord',
 ];
 
@@ -401,11 +407,17 @@ async function loadImportedTracks() {
   return imports.flat();
 }
 
-const [providers, seedTracks, importedTracks] = await Promise.all([
+const [providers, federationRegistry, seedTracks, importedTracks] = await Promise.all([
   readFile(providersPath, 'utf8').then(JSON.parse),
+  readFile(federationsPath, 'utf8').then(JSON.parse),
   loadSeedCatalog(),
   loadImportedTracks(),
 ]);
+
+const federationRegistryErrors = validateFederationRegistry(federationRegistry);
+if (federationRegistryErrors.length > 0) {
+  throw new Error(`Invalid federation registry:\n- ${federationRegistryErrors.join('\n- ')}`);
+}
 
 const providersById = new Map(providers.map((provider) => [provider.id, provider]));
 const sourceProviderIds = new Map([
@@ -440,7 +452,10 @@ const byId = new Map();
   byId.set(track.id, existing ? mergeTrack(existing, track) : track);
 });
 
-const catalogTracks = dedupeCatalogTracks([...byId.values()]);
+const catalogTracks = applyFederationRegistry(
+  dedupeCatalogTracks([...byId.values()]),
+  federationRegistry,
+);
 
 const databaseBody = {
   providerCount: providers.length,
@@ -487,6 +502,8 @@ const locatorFields = [
   'websiteUrl',
   'facebookUrl',
   'instagramUrl',
+  'federationName',
+  'federationUrl',
 ];
 const locatorDatabase = {
   generatedAt,
