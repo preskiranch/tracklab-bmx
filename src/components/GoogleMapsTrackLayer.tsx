@@ -423,6 +423,29 @@ function refreshSatelliteTiles(google: GoogleMapsRuntime, map: GoogleMap, camera
   applyCamera(map, cameraForTrack(camera, track));
 }
 
+type EarthCameraRef = {
+  current: Partial<EarthCamera>;
+};
+
+type RepaintTimerScheduler = (callback: () => void, delayMs: number) => number;
+
+const satelliteRepaintDelaysMs = [0, 90, 260, 700, 1400];
+
+export function scheduleSatelliteTileRepaints(
+  google: GoogleMapsRuntime,
+  map: GoogleMap,
+  cameraRef: EarthCameraRef,
+  track: TrackRecord,
+  scheduleTimer: RepaintTimerScheduler,
+) {
+  return satelliteRepaintDelaysMs.map((delayMs) => scheduleTimer(() => {
+    // Rotation can update the authoritative camera between repaint passes. Read
+    // the ref inside each callback so an older pass cannot restore stale map
+    // center, zoom, heading, or tilt after the newer camera has been applied.
+    refreshSatelliteTiles(google, map, cameraRef.current, track);
+  }, delayMs));
+}
+
 function distanceLabelIcon(text: string) {
   const width = 168;
   const svg = `
@@ -1399,10 +1422,13 @@ export function GoogleMapsTrackLayer({
       return undefined;
     }
 
-    const repaintCamera = cameraForTrack(cameraRef.current, track);
-    const repaintTimers = [0, 90, 260, 700, 1400].map((delayMs) => (
-      window.setTimeout(() => refreshSatelliteTiles(google, map, repaintCamera, track), delayMs)
-    ));
+    const repaintTimers = scheduleSatelliteTileRepaints(
+      google,
+      map,
+      cameraRef,
+      track,
+      (callback, delayMs) => window.setTimeout(callback, delayMs),
+    );
 
     return () => {
       repaintTimers.forEach((timer) => window.clearTimeout(timer));
@@ -1537,7 +1563,9 @@ export function GoogleMapsTrackLayer({
       const hasSavedView = Boolean(savedTrackCamera.center && typeof savedTrackCamera.zoom === 'number');
       if (hasSavedView) {
         applyCamera(map, savedTrackCamera);
-        window.requestAnimationFrame(() => applyCamera(map, savedTrackCamera));
+        window.requestAnimationFrame(() => {
+          applyCamera(map, cameraForTrack(cameraRef.current, track));
+        });
       } else {
         const bounds = new google.maps.LatLngBounds();
         trackBoundsPoints(track).forEach((point) => bounds.extend(point));
@@ -1786,7 +1814,7 @@ export function GoogleMapsTrackLayer({
       }
       releaseTimer = window.setTimeout(() => {
         if (cameraSyncReleaseTimerRef.current === releaseTimer) {
-          applyCamera(map, savedCamera);
+          applyCamera(map, cameraForTrack(cameraRef.current, track));
           cameraSyncReleaseTimerRef.current = null;
           suppressCameraSyncRef.current = false;
         }
