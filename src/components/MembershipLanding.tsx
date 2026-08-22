@@ -10,6 +10,7 @@ import {
 } from '../lib/membership';
 import type { TrackRecord } from '../types';
 import { PublicTrackLocator } from './PublicTrackLocator';
+import './PublicTrackLocator.css';
 
 type CheckoutStatus = 'idle' | 'loading' | 'error';
 

@@ -417,10 +417,10 @@ function cameraForTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
 function refreshSatelliteTiles(google: GoogleMapsRuntime, map: GoogleMap, camera: Partial<EarthCamera>, track: TrackRecord) {
   map.setOptions({ mapTypeId: 'satellite' });
   google.maps.event?.trigger(map, 'resize');
-  applyCamera(map, cameraForTrack({
-    ...camera,
-    center: camera.center ?? trackCenter(track),
-  }, track));
+  // A resize should preserve the camera that is already on screen. Forcing a
+  // fallback center here made each delayed satellite repaint visibly jump
+  // between fitBounds and the catalog center on narrow/rotating viewports.
+  applyCamera(map, cameraForTrack(camera, track));
 }
 
 function distanceLabelIcon(text: string) {
@@ -1410,6 +1410,71 @@ export function GoogleMapsTrackLayer({
   }, [status, track.id]);
 
   useEffect(() => {
+    const google = googleRef.current;
+    const map = mapRef.current;
+    const container = containerRef.current;
+    if (!google || !map || !container || status !== 'ready' || typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    let frameRequest: number | null = null;
+    let releaseTimer: number | null = null;
+    let previousWidth = container.clientWidth;
+    let previousHeight = container.clientHeight;
+    const observer = new ResizeObserver((entries) => {
+      const bounds = entries[0]?.contentRect;
+      const width = bounds?.width ?? container.clientWidth;
+      const height = bounds?.height ?? container.clientHeight;
+      if (
+        width < 1
+        || height < 1
+        || (Math.abs(width - previousWidth) < 0.5 && Math.abs(height - previousHeight) < 0.5)
+      ) {
+        return;
+      }
+
+      previousWidth = width;
+      previousHeight = height;
+      if (frameRequest != null) {
+        window.cancelAnimationFrame(frameRequest);
+      }
+      frameRequest = window.requestAnimationFrame(() => {
+        frameRequest = null;
+        suppressCameraSyncRef.current = true;
+        refreshSatelliteTiles(google, map, cameraRef.current, track);
+        if (cameraSyncReleaseTimerRef.current != null) {
+          window.clearTimeout(cameraSyncReleaseTimerRef.current);
+        }
+        releaseTimer = window.setTimeout(() => {
+          if (cameraSyncReleaseTimerRef.current === releaseTimer) {
+            cameraSyncReleaseTimerRef.current = null;
+            suppressCameraSyncRef.current = false;
+          }
+          releaseTimer = null;
+        }, 160);
+        cameraSyncReleaseTimerRef.current = releaseTimer;
+      });
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      if (frameRequest != null) {
+        window.cancelAnimationFrame(frameRequest);
+      }
+      if (releaseTimer != null) {
+        if (cameraSyncReleaseTimerRef.current === releaseTimer) {
+          window.clearTimeout(releaseTimer);
+          cameraSyncReleaseTimerRef.current = null;
+        }
+      }
+      if (cameraSyncReleaseTimerRef.current == null) {
+        suppressCameraSyncRef.current = false;
+      }
+    };
+  }, [status, track]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || status !== 'ready' || !onEarthCameraChange) {
       return undefined;
@@ -1703,34 +1768,53 @@ export function GoogleMapsTrackLayer({
       return undefined;
     }
 
-    const frameTimers: number[] = [];
-    const releaseTimers: number[] = [];
+    let firstFrameRequest: number | null = null;
+    let secondFrameRequest: number | null = null;
+    let releaseTimer: number | null = null;
     const frameRaceRoute = () => {
       const bounds = new google.maps.LatLngBounds();
       route.forEach((point) => bounds.extend(point));
       suppressCameraSyncRef.current = true;
       google.maps.event?.trigger(map, 'resize');
-      map.fitBounds(bounds, 16);
-
-      const restoreCamera = () => {
-        applyCamera(map, cameraForTrack(cameraRef.current, track));
-      };
-      restoreCamera();
-      window.requestAnimationFrame(restoreCamera);
-      releaseTimers.push(window.setTimeout(() => {
-        restoreCamera();
-        suppressCameraSyncRef.current = false;
-      }, 240));
+      const savedCamera = cameraForTrack(cameraRef.current, track);
+      if (!savedCamera.center || savedCamera.zoom == null) {
+        map.fitBounds(bounds, 16);
+      }
+      applyCamera(map, savedCamera);
+      if (cameraSyncReleaseTimerRef.current != null) {
+        window.clearTimeout(cameraSyncReleaseTimerRef.current);
+      }
+      releaseTimer = window.setTimeout(() => {
+        if (cameraSyncReleaseTimerRef.current === releaseTimer) {
+          applyCamera(map, savedCamera);
+          cameraSyncReleaseTimerRef.current = null;
+          suppressCameraSyncRef.current = false;
+        }
+        releaseTimer = null;
+      }, 240);
+      cameraSyncReleaseTimerRef.current = releaseTimer;
     };
 
-    [0, 180, 440].forEach((delayMs) => {
-      frameTimers.push(window.setTimeout(frameRaceRoute, delayMs));
+    firstFrameRequest = window.requestAnimationFrame(() => {
+      secondFrameRequest = window.requestAnimationFrame(frameRaceRoute);
     });
 
     return () => {
-      frameTimers.forEach((timer) => window.clearTimeout(timer));
-      releaseTimers.forEach((timer) => window.clearTimeout(timer));
-      suppressCameraSyncRef.current = false;
+      if (firstFrameRequest != null) {
+        window.cancelAnimationFrame(firstFrameRequest);
+      }
+      if (secondFrameRequest != null) {
+        window.cancelAnimationFrame(secondFrameRequest);
+      }
+      if (releaseTimer != null) {
+        if (cameraSyncReleaseTimerRef.current === releaseTimer) {
+          window.clearTimeout(releaseTimer);
+          cameraSyncReleaseTimerRef.current = null;
+        }
+      }
+      if (cameraSyncReleaseTimerRef.current == null) {
+        suppressCameraSyncRef.current = false;
+      }
     };
   }, [raceViewFullscreen, status, track]);
 

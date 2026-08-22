@@ -68,6 +68,11 @@ type RaceRiderOverlayProps = {
   heartRateByPlayer?: LiveHeartRateByPlayer;
 };
 
+export function raceRiderOverlayMinimumHeight(containerWidth: number, containerHeight: number) {
+  const compactLandscape = containerWidth > containerHeight && containerHeight <= 500;
+  return containerWidth <= 900 && !compactLandscape ? 340 : 190;
+}
+
 function ordinal(value: number) {
   const suffix = value === 1 ? 'st' : value === 2 ? 'nd' : value === 3 ? 'rd' : 'th';
   return `${value}${suffix}`;
@@ -78,7 +83,10 @@ function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | nu
     return layout;
   }
 
-  const minimumHeight = container.clientWidth <= 900 ? 340 : 190;
+  const minimumHeight = raceRiderOverlayMinimumHeight(
+    container.clientWidth,
+    container.clientHeight,
+  );
   const width = Math.max(320, Math.min(layout.width, Math.max(320, container.clientWidth - 24)));
   const height = Math.max(
     minimumHeight,
@@ -118,6 +126,7 @@ export function RaceRiderOverlay({
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const layoutRef = useRef(layout);
+  const requestedLayoutRef = useRef(layout);
 
   useEffect(() => {
     layoutRef.current = layout;
@@ -125,29 +134,49 @@ export function RaceRiderOverlay({
 
   useEffect(() => {
     const next = normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout);
-    layoutRef.current = next;
-    setLayout(next);
+    requestedLayoutRef.current = next;
+    const presented = clampLayout(next, overlayRef.current?.parentElement ?? null);
+    layoutRef.current = presented;
+    setLayout(presented);
   }, [preference, trackId]);
 
   useEffect(() => {
     if (!visible) {
-      return;
+      return undefined;
     }
 
-    const nextLayout = clampLayout(layout, overlayRef.current?.parentElement ?? null);
-    if (
-      nextLayout.width !== layout.width
-      || nextLayout.height !== layout.height
-      || nextLayout.xPct !== layout.xPct
-      || nextLayout.yPct !== layout.yPct
-    ) {
+    const container = overlayRef.current?.parentElement ?? null;
+    if (!container) {
+      return undefined;
+    }
+
+    const syncLayoutToViewport = () => {
+      const nextLayout = clampLayout(requestedLayoutRef.current, container);
+      const currentLayout = layoutRef.current;
+      if (
+        nextLayout.width === currentLayout.width
+        && nextLayout.height === currentLayout.height
+        && nextLayout.xPct === currentLayout.xPct
+        && nextLayout.yPct === currentLayout.yPct
+        && nextLayout.locked === currentLayout.locked
+      ) {
+        return;
+      }
+
       layoutRef.current = nextLayout;
       setLayout(nextLayout);
-      if (canEditLayout && !layout.locked) {
-        onPreferenceChange(trackId, nextLayout);
-      }
+    };
+
+    syncLayoutToViewport();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', syncLayoutToViewport);
+      return () => window.removeEventListener('resize', syncLayoutToViewport);
     }
-  }, [canEditLayout, layout, onPreferenceChange, trackId, visible]);
+
+    const resizeObserver = new ResizeObserver(syncLayoutToViewport);
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, [trackId, visible]);
 
   const entries = useMemo<OverlayEntry[]>(() => {
     const localEntries = riders.flatMap((rider) => {
@@ -220,6 +249,7 @@ export function RaceRiderOverlay({
   const finishDrag = useCallback(() => {
     const drag = dragRef.current;
     if (drag) {
+      requestedLayoutRef.current = layoutRef.current;
       onPreferenceChange(trackId, layoutRef.current);
       if (drag.captureTarget.hasPointerCapture?.(drag.pointerId)) {
         drag.captureTarget.releasePointerCapture(drag.pointerId);
@@ -246,6 +276,7 @@ export function RaceRiderOverlay({
         xPct: drag.layout.xPct + ((event.clientX - drag.startX) / Math.max(1, rect.width)),
         yPct: drag.layout.yPct + ((event.clientY - drag.startY) / Math.max(1, rect.height)),
       }, container);
+      requestedLayoutRef.current = next;
       layoutRef.current = next;
       setLayout(next);
       return;
@@ -256,6 +287,7 @@ export function RaceRiderOverlay({
       width: drag.layout.width + (event.clientX - drag.startX),
       height: drag.layout.height + (event.clientY - drag.startY),
     }, container);
+    requestedLayoutRef.current = next;
     layoutRef.current = next;
     setLayout(next);
   }, []);
@@ -313,6 +345,7 @@ export function RaceRiderOverlay({
     }
     dragRef.current = null;
     const next = { ...layout, locked: !layout.locked };
+    requestedLayoutRef.current = next;
     layoutRef.current = next;
     setLayout(next);
     onPreferenceChange(trackId, next);

@@ -19,6 +19,15 @@ function isHttpUrl(value) {
   }
 }
 
+function isServiceUrl(value, service) {
+  if (!isHttpUrl(value)) {
+    return false;
+  }
+
+  const hostname = new URL(value).hostname.toLowerCase();
+  return hostname === `${service}.com` || hostname.endsWith(`.${service}.com`);
+}
+
 function isOfficial(track) {
   return ['official-track-directory', 'federation-directory'].includes(track.verificationStatus);
 }
@@ -56,6 +65,12 @@ for (const track of tracks) {
   if (track.facebookUrl && !isHttpUrl(track.facebookUrl)) {
     errors.push(`${label}: invalid facebookUrl`);
   }
+  if (track.facebookUrl && !isServiceUrl(track.facebookUrl, 'facebook')) {
+    errors.push(`${label}: facebookUrl is not hosted by Facebook`);
+  }
+  if (track.instagramUrl && !isServiceUrl(track.instagramUrl, 'instagram')) {
+    errors.push(`${label}: invalid instagramUrl`);
+  }
   if (track.providerId && !providers.has(track.providerId)) {
     errors.push(`${label}: unknown providerId ${track.providerId}`);
   }
@@ -85,10 +100,17 @@ const locatorTracks = Array.isArray(locatorDatabase.tracks) ? locatorDatabase.tr
 if (Number(locatorDatabase.trackCount) !== tracks.length || locatorTracks.length !== tracks.length) {
   errors.push(`public locator contains ${locatorTracks.length} of ${tracks.length} tracks`);
 }
-const locatorIds = new Set(locatorTracks.map((track) => track.id));
+const locatorTracksById = new Map(locatorTracks.map((track) => [track.id, track]));
 for (const track of tracks) {
-  if (!locatorIds.has(track.id)) {
+  const locatorTrack = locatorTracksById.get(track.id);
+  if (!locatorTrack) {
     errors.push(`${track.id}: missing from public locator`);
+    continue;
+  }
+  for (const field of ['websiteUrl', 'facebookUrl', 'instagramUrl']) {
+    if (locatorTrack[field] !== track[field]) {
+      errors.push(`${track.id}: public locator does not preserve ${field}`);
+    }
   }
 }
 for (const track of locatorTracks) {
@@ -104,6 +126,12 @@ for (const track of locatorTracks) {
   }
   if (track.facebookUrl && !isHttpUrl(track.facebookUrl)) {
     errors.push(`${label}: public locator has invalid facebookUrl`);
+  }
+  if (track.facebookUrl && !isServiceUrl(track.facebookUrl, 'facebook')) {
+    errors.push(`${label}: public locator facebookUrl is not hosted by Facebook`);
+  }
+  if (track.instagramUrl && !isServiceUrl(track.instagramUrl, 'instagram')) {
+    errors.push(`${label}: public locator has invalid instagramUrl`);
   }
 }
 

@@ -24,11 +24,17 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
+  width: 100%;
+  max-width: 100%;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
+  overflow-x: clip;
   background: #eef2f4;
+  overscroll-behavior-x: none;
 }
 
 html.tracklab-race-active,
@@ -82,7 +88,7 @@ h3 {
 select,
 input[type="text"],
 .chat-form input {
-  min-height: 38px;
+  min-height: 44px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #ffffff;
@@ -99,7 +105,11 @@ input:focus {
 .platform-shell {
   display: grid;
   grid-template-columns: 286px minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
   min-height: 100vh;
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 .membership-page {
@@ -363,322 +373,6 @@ input:focus {
   display: grid;
   gap: 10px;
   padding: 18px;
-}
-
-.public-locator-band {
-  margin: 24px -24px 0;
-  padding: 28px 24px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  background: #ffffff;
-}
-
-.public-locator-inner {
-  width: min(1180px, 100%);
-  margin: 0 auto;
-}
-
-.public-locator-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 18px;
-}
-
-.public-locator-header .eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.public-locator-header h2 {
-  margin-top: 5px;
-  font-size: 30px;
-}
-
-.public-locator-header p {
-  max-width: 720px;
-  margin-top: 7px;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.public-locator-header > strong {
-  flex: 0 0 auto;
-  padding: 8px 10px;
-  border: 1px solid rgba(101, 214, 54, 0.42);
-  border-radius: 7px;
-  background: rgba(101, 214, 54, 0.1);
-  color: #24571a;
-  font-size: 13px;
-}
-
-.public-locator-layout {
-  display: grid;
-  grid-template-columns: minmax(290px, 360px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  height: clamp(540px, 68vh, 680px);
-  min-height: 540px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #f8fafb;
-}
-
-.public-locator-search-panel {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  padding: 16px;
-  border-right: 1px solid var(--line);
-  background: #ffffff;
-}
-
-.public-track-search,
-.public-locator-filters label {
-  display: grid;
-  gap: 6px;
-}
-
-.public-track-search > span,
-.public-locator-filters label > span {
-  color: #516171;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.public-track-search > div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 0 11px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: #ffffff;
-  color: #617181;
-}
-
-.public-track-search > div:focus-within {
-  border-color: #2d8fe8;
-  box-shadow: 0 0 0 3px rgba(45, 143, 232, 0.14);
-}
-
-.public-track-search input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 750;
-  outline: 0;
-}
-
-.public-track-search input:focus {
-  box-shadow: none;
-}
-
-.public-locator-filters {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.public-locator-filters select {
-  width: 100%;
-  min-width: 0;
-  padding: 0 8px;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.public-track-results-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 16px 0 8px;
-}
-
-.public-track-results-heading strong {
-  font-size: 12px;
-}
-
-.public-track-results-heading span {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.public-track-results {
-  display: grid;
-  align-content: start;
-  gap: 6px;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.public-track-results button {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: #f5f7f9;
-  color: var(--ink);
-  text-align: left;
-}
-
-.public-track-results button:hover {
-  border-color: var(--line-strong);
-  background: #ffffff;
-}
-
-.public-track-results button.selected {
-  border-color: rgba(101, 214, 54, 0.68);
-  background: #f1faed;
-  box-shadow: inset 3px 0 0 var(--lime);
-}
-
-.public-track-results button strong,
-.public-track-results button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.public-track-results button strong {
-  font-size: 13px;
-}
-
-.public-track-results button span {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.public-locator-preview {
-  display: grid;
-  grid-template-rows: minmax(420px, 1fr) auto;
-  min-width: 0;
-  min-height: 0;
-  background: #0b1117;
-}
-
-.public-track-map {
-  position: relative;
-  min-width: 0;
-  min-height: 420px;
-  overflow: hidden;
-  background: #18222c;
-}
-
-.public-track-map-canvas {
-  position: absolute;
-  inset: 0;
-}
-
-.public-track-map-status {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 6px;
-  padding: 20px;
-  background: #18222c;
-  color: #ffffff;
-  text-align: center;
-}
-
-.public-track-map-status span {
-  color: #b8c4ce;
-  font-size: 12px;
-}
-
-.public-track-details {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  min-width: 0;
-  padding: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
-  color: #ffffff;
-}
-
-.public-track-details > div:first-child {
-  min-width: 0;
-}
-
-.public-track-details h3 {
-  margin-top: 3px;
-  font-size: 19px;
-}
-
-.public-track-details p,
-.public-track-details small {
-  display: block;
-  margin-top: 4px;
-  overflow: hidden;
-  color: #c2ccd5;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.public-track-actions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 7px;
-}
-
-.public-track-actions a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 900;
-  text-decoration: none;
-}
-
-.public-track-actions a:hover {
-  border-color: rgba(101, 214, 54, 0.72);
-  background: rgba(101, 214, 54, 0.14);
-}
-
-.public-track-empty {
-  display: grid;
-  min-height: 90px;
-  place-items: center;
-  padding: 18px;
-  color: var(--muted);
-  font-size: 12px;
-  text-align: center;
-}
-
-.public-locator-band + .profile-gate {
-  margin-top: 18px;
 }
 
 .status-metric {
@@ -2317,7 +2011,7 @@ input:focus {
 .side-nav button {
   justify-content: flex-start;
   gap: 10px;
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 10px;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -2375,7 +2069,7 @@ input:focus {
 .race-readiness-strip span {
   padding: 5px 9px;
   border-right: 1px solid #354252;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 850;
 }
 
@@ -2410,7 +2104,7 @@ input:focus {
 
 .track-selectors span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -7569,11 +7263,12 @@ input:focus {
   .brand-lockup {
     order: 1;
     padding: 12px;
+    padding-top: max(12px, env(safe-area-inset-top));
   }
 
   .side-nav {
     position: sticky;
-    top: 0;
+    top: env(safe-area-inset-top);
     z-index: 50;
     order: 2;
     grid-template-columns: repeat(5, 1fr);
@@ -7583,10 +7278,15 @@ input:focus {
   }
 
   .side-nav button {
+    flex-direction: column;
     justify-content: center;
     gap: 4px;
-    padding: 0 4px;
-    font-size: 10px;
+    min-height: 58px;
+    padding: 4px 2px;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
   }
 
   .connection-card {
@@ -7623,11 +7323,18 @@ input:focus {
   }
 
   .race-readiness-strip {
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow-x: hidden;
   }
 
   .race-readiness-strip span {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
+  }
+
+  .race-readiness-strip button {
+    flex: 1 1 100%;
+    min-height: 44px;
+    margin-left: 0;
   }
 
   .membership-page {
@@ -7643,60 +7350,6 @@ input:focus {
   .membership-nav-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .public-locator-band {
-    margin: 18px -12px 0;
-    padding: 20px 12px;
-  }
-
-  .public-locator-header,
-  .public-track-details {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .public-locator-header h2 {
-    font-size: 26px;
-  }
-
-  .public-locator-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
-    height: auto;
-    min-height: 0;
-  }
-
-  .public-locator-search-panel {
-    max-height: 500px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .public-locator-filters {
-    grid-template-columns: 1fr;
-  }
-
-  .public-locator-preview {
-    grid-template-rows: 360px auto;
-  }
-
-  .public-track-map {
-    min-height: 360px;
-  }
-
-  .public-track-details {
-    gap: 12px;
-  }
-
-  .public-track-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
-  }
-
-  .public-track-actions a {
-    min-width: 0;
   }
 
   .profile-gate,
@@ -7842,12 +7495,12 @@ input:focus {
 }
 
 .explore-topbar-heading strong {
-  font-size: 16px;
+  font-size: 18px;
 }
 
 .explore-topbar-heading small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .explore-sidebar-workflow .workflow-step {
@@ -8942,10 +8595,6 @@ input:focus {
 }
 
 @media (max-width: 720px) {
-  .side-nav {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
   .explore-topbar-heading {
     width: 100%;
   }
@@ -9015,6 +8664,14 @@ input:focus {
 }
 
 @media (max-width: 480px) {
+  .side-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .side-nav button {
+    font-size: 13px;
+  }
+
   .explore-mode-switch {
     grid-template-columns: 1fr;
   }

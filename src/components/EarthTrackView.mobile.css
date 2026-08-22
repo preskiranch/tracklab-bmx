@@ -1,0 +1,437 @@
+/*
+ * Full-screen track styles live with the lazy EarthTrackView chunk so phone
+ * fixes do not increase the application's initial CSS payload.
+ */
+
+.race-top-left-controls {
+  position: fixed;
+  z-index: 2147483000;
+  top: max(14px, calc(env(safe-area-inset-top, 0px) + 14px));
+  left: max(14px, calc(env(safe-area-inset-left, 0px) + 14px));
+  display: grid;
+  max-width: min(
+    520px,
+    calc(100vw - 28px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+  );
+  gap: 8px;
+  justify-items: start;
+  pointer-events: none;
+}
+
+.race-top-left-header,
+.race-top-left-actions {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.race-top-left-controls .earth-overlay,
+.race-top-left-controls .race-cancel-overlay,
+.race-top-left-controls .race-countdown-pause-overlay {
+  position: static;
+  inset: auto;
+  margin: 0;
+  transform: none;
+  pointer-events: auto;
+}
+
+.race-top-left-controls .race-status-overlay {
+  min-height: 42px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.race-top-left-controls .race-force-start-overlay {
+  border-color: rgba(216, 255, 62, 0.88);
+  background: rgba(35, 76, 23, 0.94);
+}
+
+.race-top-left-controls .race-sprint-info-overlay {
+  min-width: 126px;
+  justify-content: flex-start;
+  text-align: left;
+  pointer-events: none;
+}
+
+.platform-shell.race-fullscreen,
+.platform-shell.map-fullscreen {
+  width: 100%;
+  max-width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.platform-shell.map-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 2147480000;
+}
+
+.race-fullscreen .platform-main,
+.race-fullscreen .dashboard-grid,
+.race-fullscreen .dashboard-primary-column,
+.race-fullscreen .race-canvas-shell,
+.race-fullscreen .earth-panel,
+.race-fullscreen .earth-stage,
+.map-fullscreen .platform-main,
+.map-fullscreen .dashboard-grid,
+.map-fullscreen .dashboard-primary-column,
+.map-fullscreen .race-canvas-shell,
+.map-fullscreen .earth-panel,
+.map-fullscreen .earth-stage {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.race-fullscreen .dashboard-grid,
+.map-fullscreen .dashboard-grid {
+  margin: 0;
+  padding: 0;
+}
+
+.race-fullscreen .earth-stage,
+.map-fullscreen .earth-stage {
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  border-radius: 0;
+  overscroll-behavior: none;
+}
+
+.race-fullscreen .google-map-layer,
+.race-fullscreen .google-map-3d-shell,
+.map-fullscreen .google-map-layer,
+.map-fullscreen .google-map-3d-shell {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.map-fullscreen .dashboard-secondary-column {
+  width: 0;
+  height: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+}
+
+.map-fullscreen .control-panel {
+  top: max(8px, calc(env(safe-area-inset-top, 0px) + 8px));
+  right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
+  width: min(
+    380px,
+    calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px)
+  );
+  max-width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px);
+  max-height: calc(
+    100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px
+  );
+  overscroll-behavior: contain;
+}
+
+.map-fullscreen .map-edit-toolbar {
+  top: max(8px, calc(env(safe-area-inset-top, 0px) + 8px));
+  left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px));
+  max-width: calc(100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px);
+  flex-wrap: wrap;
+}
+
+.map-fullscreen .map-camera-pad {
+  left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px));
+  bottom: max(64px, calc(env(safe-area-inset-bottom, 0px) + 64px));
+}
+
+.map-fullscreen .earth-overlay.bottom-left {
+  left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px));
+  bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+  max-width: calc(100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px);
+}
+
+.race-fullscreen .race-rider-overlay {
+  --race-overlay-safe-width: calc(
+    100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px
+  );
+  --race-overlay-safe-height: calc(
+    100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px
+  );
+  left: clamp(
+    calc(env(safe-area-inset-left, 0px) + 8px),
+    var(--overlay-x),
+    calc(100% - min(var(--overlay-width), var(--race-overlay-safe-width)) - env(safe-area-inset-right, 0px) - 8px)
+  );
+  top: clamp(
+    calc(env(safe-area-inset-top, 0px) + 8px),
+    var(--overlay-y),
+    calc(100% - min(var(--overlay-height), var(--race-overlay-safe-height)) - env(safe-area-inset-bottom, 0px) - 8px)
+  );
+  width: min(var(--overlay-width), var(--race-overlay-safe-width));
+  height: min(var(--overlay-height), var(--race-overlay-safe-height));
+  max-width: var(--race-overlay-safe-width);
+  max-height: var(--race-overlay-safe-height);
+}
+
+@media (max-width: 600px) {
+  .race-top-left-controls {
+    top: max(8px, calc(env(safe-area-inset-top, 0px) + 8px));
+    right: max(58px, calc(env(safe-area-inset-right, 0px) + 58px));
+    left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px));
+    max-width: none;
+    gap: 6px;
+  }
+
+  .race-top-left-header,
+  .race-top-left-actions {
+    display: grid;
+    grid-template-columns: max-content max-content;
+    gap: 6px;
+  }
+
+  .race-top-left-controls .earth-overlay,
+  .race-top-left-controls .race-cancel-overlay,
+  .race-top-left-controls .race-countdown-pause-overlay {
+    min-height: 44px;
+    padding-right: 10px;
+    padding-left: 10px;
+    gap: 6px;
+    font-size: 11px;
+  }
+
+  .race-top-left-controls .race-sprint-info-overlay {
+    min-width: 112px;
+  }
+
+  .race-fullscreen .race-camera-lock-overlay,
+  .race-fullscreen .race-room-voice-overlay {
+    top: max(8px, calc(env(safe-area-inset-top, 0px) + 8px));
+    right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
+    left: auto;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+
+  .race-fullscreen .race-room-voice-overlay {
+    top: max(58px, calc(env(safe-area-inset-top, 0px) + 58px));
+  }
+
+  .race-fullscreen .earth-overlay.bottom-left {
+    display: none;
+  }
+
+  .race-fullscreen .race-staging-countdown {
+    top: 48%;
+    width: min(220px, calc(100% - 32px));
+    min-width: 0;
+    transform: translate(-50%, -50%);
+  }
+
+  .race-fullscreen .start-tree-light {
+    top: 26%;
+    width: 48px;
+    gap: 6px;
+    padding: 8px 7px;
+    transform: translate(-50%, -50%) scale(1.3);
+    transform-origin: center;
+  }
+
+  .map-fullscreen .earth-overlay.bottom-left {
+    gap: 5px;
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+
+  .map-fullscreen .map-edit-toolbar button span {
+    display: none;
+  }
+
+  .map-fullscreen .map-edit-toolbar button {
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .game-arena-hud {
+    right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px)) !important;
+    bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 8px)) !important;
+    left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px)) !important;
+    min-height: min(42dvh, 330px) !important;
+    padding: 6px !important;
+  }
+
+  .game-arena-hud-header {
+    min-height: 22px !important;
+    padding: 0 3px 5px !important;
+  }
+
+  .game-arena-hud-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 4px !important;
+    min-height: calc(min(42dvh, 330px) - 39px) !important;
+  }
+
+  .game-arena-hud-card {
+    grid-template-rows: minmax(0, 1fr) minmax(38px, 0.7fr) !important;
+  }
+
+  .game-arena-hud-summary {
+    gap: 4px !important;
+    padding: 4px !important;
+  }
+
+  .game-arena-hud-place {
+    min-height: 38px;
+    margin: 0 4px 4px !important;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .race-top-left-controls {
+    top: max(8px, calc(env(safe-area-inset-top, 0px) + 8px));
+    left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px));
+    gap: 5px;
+  }
+
+  .race-top-left-header,
+  .race-top-left-actions {
+    gap: 5px;
+  }
+
+  .race-top-left-controls .earth-overlay,
+  .race-top-left-controls .race-cancel-overlay,
+  .race-top-left-controls .race-countdown-pause-overlay {
+    min-height: 40px;
+    padding-right: 9px;
+    padding-left: 9px;
+    font-size: 11px;
+  }
+
+  .race-fullscreen .earth-overlay.bottom-left {
+    display: none;
+  }
+
+  .race-fullscreen .race-rider-overlay {
+    min-height: 190px;
+  }
+
+  .race-fullscreen .race-rider-overlay-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
+  }
+
+  .race-fullscreen .race-rider-overlay-card {
+    grid-template-rows: minmax(0, 1fr) 48px;
+    padding: 4px;
+  }
+
+  .race-fullscreen .race-rider-overlay-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .race-fullscreen .race-rider-overlay-identity strong {
+    font-size: 13px;
+  }
+
+  .race-fullscreen .race-rider-overlay-identity span {
+    font-size: 10px;
+  }
+
+  .race-fullscreen .race-rider-overlay-place strong {
+    font-size: 30px;
+  }
+
+  .race-fullscreen .race-staging-countdown {
+    top: 50%;
+    min-width: 190px;
+    padding: 8px 12px;
+    transform: translate(-50%, -50%);
+  }
+
+  .race-fullscreen .race-staging-countdown strong {
+    font-size: 34px;
+  }
+
+  .race-fullscreen .start-tree-light {
+    top: 24%;
+    width: 44px;
+    gap: 5px;
+    padding: 7px 6px;
+    transform: translate(-50%, -50%) scale(1.05);
+    transform-origin: center;
+  }
+
+  .map-fullscreen .control-panel {
+    width: min(
+      340px,
+      calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 16px)
+    );
+  }
+
+  .map-fullscreen .map-camera-pad {
+    bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+  }
+
+  .map-fullscreen .earth-overlay.bottom-left {
+    right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
+    left: auto;
+    max-width: min(50%, 360px);
+    padding: 5px 7px;
+    font-size: 10px;
+  }
+
+  .game-arena-hud {
+    right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px)) !important;
+    bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 8px)) !important;
+    left: max(8px, calc(env(safe-area-inset-left, 0px) + 8px)) !important;
+    min-height: 132px !important;
+    padding: 5px !important;
+  }
+
+  .game-arena-hud-header {
+    min-height: 20px !important;
+    padding: 0 3px 4px !important;
+  }
+
+  .game-arena-hud-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 4px !important;
+    min-height: 98px !important;
+  }
+
+  .game-arena-hud-card {
+    grid-template-rows: minmax(0, 1fr) 40px !important;
+  }
+
+  .game-arena-hud-summary {
+    gap: 3px !important;
+    padding: 3px !important;
+  }
+
+  .game-arena-hud-summary .rider-avatar {
+    width: 30px;
+    height: 30px;
+  }
+
+  .game-arena-hud-place {
+    margin: 0 3px 3px !important;
+  }
+}

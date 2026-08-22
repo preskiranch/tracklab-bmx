@@ -279,7 +279,10 @@ test('public landing page exposes the global track locator without an account', 
   await expect(websiteTrack).toBeVisible();
   await websiteTrack.click();
   await expect(locator.getByRole('heading', { name: 'ADF Cycling Club' })).toBeVisible();
-  await expect(locator.getByRole('link', { name: 'Official Website' })).toHaveAttribute('href', 'https://www.adfcc.asn.au/');
+  const officialWebsite = locator.getByRole('link', { name: 'Official Website' });
+  await expect(officialWebsite).toHaveAttribute('href', 'https://www.adfcc.asn.au/');
+  await expect(officialWebsite).toHaveAttribute('rel', 'noopener noreferrer');
+  await expect(locator.locator('.public-track-map + .public-track-official-links')).toBeVisible();
   await expect(page).toHaveURL(/locator=auscycling-adf-cycling-club/);
 
   await page.screenshot({
@@ -304,6 +307,11 @@ test('public landing page exposes the global track locator without an account', 
     'href',
     'https://www.facebook.com/airtimebmx.reedley/',
   );
+  await expect(locator.getByRole('link', { name: 'Instagram' })).toHaveAttribute(
+    'href',
+    'https://www.instagram.com/airtimebmx',
+  );
+  await expect(locator.locator('.public-track-map')).toHaveAttribute('aria-label', 'Satellite view of Air Time BMX');
   await expect(locator.getByRole('link', { name: 'Official Website' })).toHaveCount(0);
 });
 

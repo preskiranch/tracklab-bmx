@@ -13,10 +13,17 @@ type PublicTrackMapProps = {
   track: TrackLocatorRecord;
 };
 
-function locatorCenter(track: TrackLocatorRecord): LatLngLiteral {
+function locatorCenter(track: TrackLocatorRecord): LatLngLiteral | null {
   const lat = Number(track.latitude);
   const lng = Number(track.longitude);
-  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : { lat: 0, lng: 0 };
+  return Number.isFinite(lat)
+    && lat >= -90
+    && lat <= 90
+    && Number.isFinite(lng)
+    && lng >= -180
+    && lng <= 180
+    ? { lat, lng }
+    : null;
 }
 
 function locatorBounds(center: LatLngLiteral) {
@@ -42,6 +49,8 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
     }
 
     let cancelled = false;
+    let tileTimeout: number | undefined;
+    let tilesLoadedListener: { remove: () => void } | undefined;
     setStatus('loading');
 
     loadGoogleMaps()
@@ -51,7 +60,11 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
         }
 
         const center = locatorCenter(track);
-        const map = new google.maps.Map(containerRef.current, {
+        if (!center) {
+          setStatus('error');
+          return;
+        }
+        const map = mapRef.current ?? new google.maps.Map(containerRef.current, {
           cameraControl: true,
           center,
           clickableIcons: false,
@@ -60,33 +73,52 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
           fullscreenControl: false,
           gestureHandling: 'greedy',
           heading: 0,
-          headingInteractionEnabled: true,
+          headingInteractionEnabled: false,
           isFractionalZoomEnabled: true,
           keyboardShortcuts: true,
           mapTypeControl: false,
           mapTypeId: 'satellite',
-          renderingType: google.maps.RenderingType?.VECTOR,
-          rotateControl: true,
+          rotateControl: false,
           scaleControl: true,
           streetViewControl: false,
-          tilt: 45,
-          tiltInteractionEnabled: true,
+          tilt: 0,
+          tiltInteractionEnabled: false,
           zoom: 18,
           zoomControl: true,
         });
+        mapRef.current = map;
+
+        const marker = markerRef.current ?? new google.maps.Marker({ map, position: center });
+        marker.setMap(map);
+        marker.setPosition(center);
+        marker.setTitle?.(track.name);
+        markerRef.current = marker;
+
+        tilesLoadedListener = map.addListener('tilesloaded', () => {
+          if (cancelled) {
+            return;
+          }
+          if (tileTimeout !== undefined) {
+            window.clearTimeout(tileTimeout);
+          }
+          tilesLoadedListener?.remove();
+          tilesLoadedListener = undefined;
+          setStatus('ready');
+        });
+        tileTimeout = window.setTimeout(() => {
+          if (!cancelled) {
+            tilesLoadedListener?.remove();
+            tilesLoadedListener = undefined;
+            setStatus('error');
+          }
+        }, 15_000);
+
+        google.maps.event?.trigger(map, 'resize');
         const bounds = new google.maps.LatLngBounds();
         locatorBounds(center).forEach((point) => bounds.extend(point));
         map.fitBounds(bounds, 42);
         map.setHeading(0);
-        map.setTilt(45);
-
-        mapRef.current = map;
-        markerRef.current = new google.maps.Marker({
-          map,
-          position: center,
-          title: track.name,
-        });
-        setStatus('ready');
+        map.setTilt(0);
       })
       .catch(() => {
         if (!cancelled) {
@@ -96,11 +128,18 @@ export function PublicTrackMap({ track }: PublicTrackMapProps) {
 
     return () => {
       cancelled = true;
-      markerRef.current?.setMap(null);
-      markerRef.current = null;
-      mapRef.current = null;
+      tilesLoadedListener?.remove();
+      if (tileTimeout !== undefined) {
+        window.clearTimeout(tileTimeout);
+      }
     };
-  }, [track]);
+  }, [track.id, track.latitude, track.longitude, track.name]);
+
+  useEffect(() => () => {
+    markerRef.current?.setMap(null);
+    markerRef.current = null;
+    mapRef.current = null;
+  }, []);
 
   return (
     <div className="public-track-map" aria-label={`Satellite view of ${track.name}`}>

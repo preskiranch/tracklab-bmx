@@ -398,6 +398,7 @@ function GameArenaHud({
 
   return (
     <section
+      className="game-arena-hud"
       aria-label="Game arena rider data"
       style={{
         position: 'absolute',
@@ -422,7 +423,7 @@ function GameArenaHud({
         pointerEvents: 'none',
         backgroundImage: 'linear-gradient(115deg, transparent 0 35%, rgba(255,255,255,.18) 45%, transparent 55% 100%), repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 7px)',
       }} />
-      <header style={{
+      <header className="game-arena-hud-header" style={{
         position: 'relative',
         zIndex: 1,
         display: 'flex',
@@ -440,7 +441,7 @@ function GameArenaHud({
         <span>TrackLab Live Timing</span>
         <span>{formatDistanceMeters(raceDistanceMeters, distanceUnit)} sprint</span>
       </header>
-      <div style={{
+      <div className="game-arena-hud-grid" style={{
         position: 'relative',
         zIndex: 1,
         display: 'grid',
@@ -466,7 +467,7 @@ function GameArenaHud({
                 boxShadow: `inset 0 0 18px ${rider.accent}20, 0 5px 12px rgba(0,0,0,.34)`,
               }}
             >
-              <div style={{
+              <div className="game-arena-hud-summary" style={{
                 display: 'grid',
                 gridTemplateColumns: 'auto auto minmax(0, 1fr)',
                 minWidth: 0,
@@ -490,7 +491,7 @@ function GameArenaHud({
                   fontSize: 'clamp(13px, 1.2vw, 18px)',
                   fontWeight: 1000,
                 }}>P{rider.playerId}</strong>
-                <div style={{ display: 'grid', minWidth: 0, gap: '2px' }}>
+                <div className="game-arena-hud-identity" style={{ display: 'grid', minWidth: 0, gap: '2px' }}>
                   <strong style={{
                     overflow: 'hidden',
                     fontSize: 'clamp(13px, 1.3vw, 20px)',
@@ -515,7 +516,7 @@ function GameArenaHud({
                   )}
                 </div>
               </div>
-              <div style={{
+              <div className="game-arena-hud-place" style={{
                 display: 'flex',
                 minHeight: 0,
                 alignItems: 'center',
