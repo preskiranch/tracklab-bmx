@@ -22,6 +22,7 @@ describe('Watch Connect tablet client', () => {
         state: 'connected',
         connectedUntil,
         remainingMs: watchConnectSessionDurationMs,
+        liveSharingEnabled: true,
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
@@ -31,6 +32,7 @@ describe('Watch Connect tablet client', () => {
       state: 'connected',
       connectedUntil,
       remainingMs: watchConnectSessionDurationMs,
+      liveSharingEnabled: true,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/heart-rate/watch-connect/tablet-status',

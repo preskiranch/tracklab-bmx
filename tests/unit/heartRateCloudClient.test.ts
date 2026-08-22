@@ -1,16 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createHeartRateAccountBlock,
+  loadLatestHeartRateLive,
+  loadLatestStudioTabletHeartRate,
   loadClubHeartRateSummaryHistory,
   loadHeartRateAccountBlocks,
   loadHeartRatePairings,
   loadHeartRateStudioBlocks,
   loadPrivateHeartRateSessionHistory,
+  heartRateLiveFreshnessMs,
+  heartRateLiveMaximumFutureSkewMs,
+  mergeLiveHeartRateEvent,
   normalizeHeartRateLiveEvent,
   recoverHeartRateAccountBlockHandoff,
+  subscribeToHeartRateLive,
   stopHeartRateAccountBlock,
   stopHeartRateStudioBlock,
 } from '../../src/lib/heartRateCloud';
+import { defaultHeartRateFreshnessMs } from '../../src/lib/heartRate';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -429,5 +436,186 @@ describe('private heart-rate history cloud client', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
     await expect(loadHeartRateStudioBlocks('club-1')).resolves.toEqual([]);
+  });
+});
+
+describe('cross-device live heart-rate cloud client', () => {
+  it('merges only exact, ordered readings inside the shared sensor-time boundary', () => {
+    expect(heartRateLiveFreshnessMs).toBe(defaultHeartRateFreshnessMs);
+    const now = 100_000;
+    const event = {
+      streamId: 'stream-merge',
+      sessionId: 'watch-connect:merge',
+      relayScope: 'account-block' as const,
+      riderId: 'account:rider-1',
+      playerId: null,
+      bpm: 148,
+      recordedAt: now - heartRateLiveFreshnessMs + 1,
+      receivedAt: now,
+      freshUntil: now + 1,
+      activeElapsedMs: 10_000,
+    };
+    const accepted = mergeLiveHeartRateEvent({}, event, {
+      expectedRiderId: 'account:rider-1',
+      now,
+    });
+    expect(accepted['account:rider-1']).toEqual(event);
+    expect(mergeLiveHeartRateEvent(accepted, {
+      ...event,
+      riderId: 'account:rider-2',
+      bpm: 200,
+      receivedAt: now + 1,
+    }, { expectedRiderId: 'account:rider-1', now })).toBe(accepted);
+    expect(mergeLiveHeartRateEvent({}, {
+      ...event,
+      recordedAt: now - heartRateLiveFreshnessMs,
+      freshUntil: now + 1,
+    }, { now })).toEqual({});
+    expect(mergeLiveHeartRateEvent({}, {
+      ...event,
+      recordedAt: now + heartRateLiveMaximumFutureSkewMs + 1,
+      freshUntil: now + 10_000,
+    }, { now })).toEqual({});
+    expect(mergeLiveHeartRateEvent({}, {
+      ...event,
+      // Fresh at read time, but it was more than two seconds in the future
+      // when received and therefore can never later become a live pulse.
+      recordedAt: now - 1_000,
+      receivedAt: now - 5_000,
+      freshUntil: now + 9_000,
+    }, { now })).toEqual({});
+  });
+
+  it('loads one fresh exact-account snapshot and rejects an expired projection', async () => {
+    const now = Date.now();
+    const reading = {
+      streamId: 'stream-live-1',
+      sessionId: 'watch-connect:connection-1',
+      relayScope: 'account-block',
+      riderId: 'account:rider-1',
+      playerId: null,
+      bpm: 147,
+      recordedAt: now - 250,
+      activeElapsedMs: 9_750,
+      receivedAt: now - 200,
+      freshUntil: now + 9_750,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ reading, freshnessMs: 10_000 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        reading: { ...reading, freshUntil: now },
+        freshnessMs: 10_000,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadLatestHeartRateLive()).resolves.toEqual(reading);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/heart-rate/live/latest',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+    await expect(loadLatestHeartRateLive()).resolves.toBeNull();
+  });
+
+  it('uses only the exact tablet athlete-session header and rejects a rider mismatch', async () => {
+    const now = Date.now();
+    const sessionToken = 't'.repeat(43);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        reading: {
+          studioRiderId: 'studio-rider-1',
+          bpm: 153,
+          recordedAt: now - 100,
+          receivedAt: now - 50,
+          freshUntil: now + 9_900,
+        },
+        freshnessMs: 10_000,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        reading: {
+          studioRiderId: 'different-rider',
+          bpm: 160,
+          recordedAt: now,
+          receivedAt: now,
+          freshUntil: now + 10_000,
+        },
+        freshnessMs: 10_000,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(loadLatestStudioTabletHeartRate(sessionToken, 'studio-rider-1'))
+      .resolves.toEqual({
+        studioRiderId: 'studio-rider-1',
+        bpm: 153,
+        recordedAt: now - 100,
+        receivedAt: now - 50,
+        freshUntil: now + 9_900,
+      });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/heart-rate/watch-connect/tablet-live',
+      expect.objectContaining({
+        cache: 'no-store',
+        headers: expect.objectContaining({
+          'X-TrackLab-Club-Tablet-Session': sessionToken,
+        }),
+      }),
+    );
+    await expect(loadLatestStudioTabletHeartRate(sessionToken, 'studio-rider-1'))
+      .resolves.toBeNull();
+  });
+
+  it('bootstraps personal live BPM by snapshot when EventSource is unavailable', async () => {
+    const now = Date.now();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      reading: {
+        streamId: 'stream-fallback',
+        sessionId: 'watch-connect:fallback',
+        relayScope: 'account-block',
+        riderId: 'account:rider-1',
+        playerId: null,
+        bpm: 149,
+        recordedAt: now,
+        activeElapsedMs: 1_000,
+        receivedAt: now,
+        freshUntil: now + 10_000,
+      },
+      freshnessMs: 10_000,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    vi.stubGlobal('EventSource', undefined);
+    const listener = vi.fn();
+
+    const unsubscribe = subscribeToHeartRateLive(listener);
+    try {
+      await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+        streamId: 'stream-fallback',
+        bpm: 149,
+      })));
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('never replaces a consented club subscription with a personal snapshot', () => {
+    const fetchMock = vi.fn();
+    let openedUrl = '';
+    let closed = false;
+    class FakeEventSource {
+      constructor(url: string) { openedUrl = url; }
+      addEventListener() {}
+      removeEventListener() {}
+      close() { closed = true; }
+    }
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('EventSource', FakeEventSource);
+
+    const unsubscribe = subscribeToHeartRateLive(vi.fn(), { clubId: 'club-1' });
+    expect(openedUrl).toBe('/api/heart-rate/live?clubId=club-1');
+    expect(fetchMock).not.toHaveBeenCalled();
+    unsubscribe();
+    expect(closed).toBe(true);
   });
 });

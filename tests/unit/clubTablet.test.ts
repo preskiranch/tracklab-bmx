@@ -91,13 +91,33 @@ describe('Club Tablet client state', () => {
     expect(normalizeClubTabletRoster({
       device: deviceCredential.device,
       athletes: [
-        { studioRiderId: 'rider-2', riderName: 'Zoey', claimed: true },
+        {
+          studioRiderId: 'rider-2',
+          riderName: 'Zoey',
+          claimed: true,
+          watchConnect: {
+            recognized: true,
+            state: 'connected',
+            connectedUntil: Date.now() + 60_000,
+            remainingMs: 60_000,
+            liveSharingEnabled: true,
+          },
+        },
         { studioRiderId: 'rider-1', riderName: 'Alex', claimed: false },
         { studioRiderId: '', riderName: 'Invalid' },
       ],
     })?.athletes).toEqual([
       expect.objectContaining({ studioRiderId: 'rider-1', riderName: 'Alex', status: 'unclaimed' }),
-      expect.objectContaining({ studioRiderId: 'rider-2', riderName: 'Zoey', status: 'claimed' }),
+      expect.objectContaining({
+        studioRiderId: 'rider-2',
+        riderName: 'Zoey',
+        status: 'claimed',
+        watchConnect: expect.objectContaining({
+          recognized: true,
+          state: 'connected',
+          liveSharingEnabled: true,
+        }),
+      }),
     ]);
   });
 

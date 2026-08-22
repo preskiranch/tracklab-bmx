@@ -13,6 +13,11 @@ import {
   type ClubTabletRoster,
   type ClubTabletSessionCredential,
 } from '../lib/clubTablet';
+import {
+  loadLatestStudioTabletHeartRate,
+  mergeLiveHeartRateEvent,
+  type HeartRateLiveEvent,
+} from '../lib/heartRateCloud';
 
 export type ClubTabletDeviceStatus = 'idle' | 'checking' | 'active' | 'error' | 'revoked';
 
@@ -26,6 +31,7 @@ type ClubTabletRuntimeProps = {
   onDeviceRevoked: () => void;
   onSessionRenewed: (session: ClubTabletSessionCredential) => void;
   onSessionExpired: () => void;
+  onHeartRateReading: (reading: HeartRateLiveEvent | null) => void;
 };
 
 function authorizationEnded(error: unknown) {
@@ -42,6 +48,7 @@ export default function ClubTabletRuntime({
   onDeviceRevoked,
   onSessionRenewed,
   onSessionExpired,
+  onHeartRateReading,
 }: ClubTabletRuntimeProps) {
   const lastActivityAtRef = useRef(Date.now());
   const activityVersionRef = useRef(0);
@@ -177,6 +184,65 @@ export default function ClubTabletRuntime({
       window.clearTimeout(timer);
     };
   }, [onSessionExpired, onSessionRenewed, roster?.athletes, session?.sessionToken]);
+
+  useEffect(() => {
+    onHeartRateReading(null);
+    if (!session) return undefined;
+    const expectedRiderId = session.session.studioRiderId;
+    const controller = new AbortController();
+    let cancelled = false;
+    let requestActive = false;
+    let readings: Readonly<Record<string, HeartRateLiveEvent>> = {};
+    const refresh = async () => {
+      if (cancelled || requestActive) return;
+      requestActive = true;
+      try {
+        const reading = await loadLatestStudioTabletHeartRate(
+          session.sessionToken,
+          expectedRiderId,
+          { signal: controller.signal },
+        );
+        if (cancelled) return;
+        if (!reading || reading.studioRiderId !== expectedRiderId) {
+          readings = {};
+          onHeartRateReading(null);
+          return;
+        }
+        const event: HeartRateLiveEvent = {
+          streamId: 'club-tablet-live',
+          sessionId: 'club-tablet-athlete-session',
+          relayScope: 'studio-block',
+          riderId: expectedRiderId,
+          studioRiderId: expectedRiderId,
+          playerId: null,
+          bpm: reading.bpm,
+          recordedAt: reading.recordedAt,
+          receivedAt: reading.receivedAt,
+          freshUntil: reading.freshUntil,
+          activeElapsedMs: null,
+        };
+        const next = mergeLiveHeartRateEvent(readings, event, { expectedRiderId });
+        if (next === readings) return;
+        readings = next;
+        onHeartRateReading(event);
+      } catch (error) {
+        if (!cancelled && (error as Error).name !== 'AbortError') {
+          readings = {};
+          onHeartRateReading(null);
+        }
+      } finally {
+        requestActive = false;
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 4_000);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(timer);
+      onHeartRateReading(null);
+    };
+  }, [onHeartRateReading, session?.session.studioRiderId, session?.sessionToken]);
 
   return null;
 }

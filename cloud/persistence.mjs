@@ -2019,6 +2019,25 @@ export async function createOrRefreshHeartRateWatchEnrollment(options) {
         : false;
       existing.lastVerifiedAt = now;
       existing.updatedAt = now;
+      // Enrollment consent is authoritative for the still-running four-hour
+      // connection. Propagate it to that connection's ingest projection so a
+      // concurrent upload cannot keep emitting the former club consent.
+      for (const connection of memoryHeartRateWatchConnections.values()) {
+        if (connection.enrollmentId !== existing.id || connection.stoppedAt != null) continue;
+        const pairing = memoryHeartRatePairings.get(connection.pairingId);
+        if (pairing && pairing.revokedAt == null) {
+          pairing.liveStudioConsent = existing.liveStudioConsent;
+          pairing.sessionStudioConsent = existing.sessionStudioConsent;
+          pairing.updatedAt = now;
+        }
+        const streamId = memoryHeartRateStreamIdByPairingId.get(connection.pairingId);
+        const stream = streamId ? memoryHeartRateStreams.get(streamId) : null;
+        if (stream && stream.finalizedAt == null) {
+          stream.liveStudioConsent = existing.liveStudioConsent;
+          stream.sessionStudioConsent = existing.sessionStudioConsent;
+          stream.updatedAt = now;
+        }
+      }
       return { status: 'trusted', enrollment: publicMemoryHeartRateWatchEnrollment(existing) };
     }
     if (existing) revokeMemoryHeartRateWatchEnrollment(existing, now, 'device-replaced');
@@ -2090,6 +2109,8 @@ export async function createOrRefreshHeartRateWatchEnrollment(options) {
       );
       const existing = existingResult.rows[0];
       if (existing?.install_id_hash === options.installIdHash) {
+        const liveStudioConsent = options.scope === 'studio' && Boolean(options.liveStudioConsent);
+        const sessionStudioConsent = options.scope === 'studio' && Boolean(options.sessionStudioConsent);
         const refreshed = await client.query(
           `UPDATE ${schema}.heart_rate_watch_enrollments
            SET live_studio_consent = $2, session_studio_consent = $3,
@@ -2098,10 +2119,32 @@ export async function createOrRefreshHeartRateWatchEnrollment(options) {
            WHERE id = $1 RETURNING *`,
           [
             existing.id,
-            options.scope === 'studio' && Boolean(options.liveStudioConsent),
-            options.scope === 'studio' && Boolean(options.sessionStudioConsent),
+            liveStudioConsent,
+            sessionStudioConsent,
             now,
           ],
+        );
+        await client.query(
+          `UPDATE ${schema}.heart_rate_pairings AS pairings
+           SET live_studio_consent = $2, session_studio_consent = $3,
+             updated_at = to_timestamp($4 / 1000.0)
+           FROM ${schema}.heart_rate_watch_connections AS connections
+           WHERE connections.enrollment_id = $1
+             AND connections.stopped_at IS NULL
+             AND pairings.id = connections.pairing_id
+             AND pairings.revoked_at IS NULL`,
+          [existing.id, liveStudioConsent, sessionStudioConsent, now],
+        );
+        await client.query(
+          `UPDATE ${schema}.heart_rate_streams AS streams
+           SET live_studio_consent = $2, session_studio_consent = $3,
+             updated_at = to_timestamp($4 / 1000.0)
+           FROM ${schema}.heart_rate_watch_connections AS connections
+           WHERE connections.enrollment_id = $1
+             AND connections.stopped_at IS NULL
+             AND streams.pairing_id = connections.pairing_id
+             AND streams.finalized_at IS NULL`,
+          [existing.id, liveStudioConsent, sessionStudioConsent, now],
         );
         return { status: 'trusted', enrollment: heartRateWatchEnrollmentFromRow(refreshed.rows[0]) };
       }
@@ -4008,7 +4051,13 @@ export async function insertHeartRateSamples(streamId, ingestTokenHash, samples,
     const accepted = [];
     samples.forEach((sample) => {
       if (stored.has(sample.sequence)) return;
-      stored.set(sample.sequence, cloneJson(sample, sample));
+      stored.set(sample.sequence, {
+        ...cloneJson(sample, sample),
+        // Kept internal so a second signed-in device can bootstrap the same
+        // freshness window as the live event without exposing server metadata
+        // through the raw-sample history endpoint.
+        _receivedAt: now,
+      });
       accepted.push(sample.sequence);
     });
     memoryHeartRateSamplesByStreamId.set(streamId, stored);
@@ -4067,7 +4116,10 @@ export async function loadHeartRateSamples(streamId) {
   if (!pool) {
     return [...(memoryHeartRateSamplesByStreamId.get(streamId)?.values() ?? [])]
       .sort((left, right) => left.activeElapsedMs - right.activeElapsedMs || left.sequence - right.sequence)
-      .map((sample) => cloneJson(sample, sample));
+      .map((sample) => {
+        const { _receivedAt: _privateReceivedAt, ...visible } = sample;
+        return cloneJson(visible, visible);
+      });
   }
   const result = await query(
     `SELECT sequence, recorded_at, active_elapsed_ms, bpm
@@ -4082,9 +4134,12 @@ export async function loadHeartRateSamples(streamId) {
 export async function loadLatestHeartRateSample(streamId) {
   if (!pool) {
     const samples = [...(memoryHeartRateSamplesByStreamId.get(streamId)?.values() ?? [])];
-    return samples.length > 0
-      ? cloneJson(samples.reduce((latest, sample) => sample.sequence > latest.sequence ? sample : latest), samples[0])
-      : null;
+    if (samples.length === 0) return null;
+    const latest = samples.reduce((current, sample) => (
+      sample.sequence > current.sequence ? sample : current
+    ), samples[0]);
+    const { _receivedAt: _privateReceivedAt, ...visible } = latest;
+    return cloneJson(visible, visible);
   }
   const result = await query(
     `SELECT sequence, recorded_at, active_elapsed_ms, bpm
@@ -4095,6 +4150,269 @@ export async function loadLatestHeartRateSample(streamId) {
     [streamId],
   );
   return heartRateSampleFromRow(result?.rows?.[0]);
+}
+
+/**
+ * Returns one freshness-bounded owner reading for cross-device recovery.
+ * This deliberately projects one sample only: no pairing/enrollment identity,
+ * ingest credential, profile key, or raw sample history leaves persistence.
+ */
+export async function loadLatestHeartRateLiveReading(
+  ownerProfileKey,
+  freshAfter,
+  now = Date.now(),
+) {
+  if (!pool) {
+    const candidates = [];
+    for (const stream of memoryHeartRateStreams.values()) {
+      if (
+        stream.ownerProfileKey !== ownerProfileKey
+        || stream.finalizedAt != null
+        || stream.studioBlockStoppedAt != null
+        || (stream.relayExpiresAt ?? 0) <= now
+        || (
+          stream.accountBlockStopRequestedAt != null
+          && stream.accountBlockStopRequestedAt <= now
+        )
+      ) continue;
+      const pairing = memoryHeartRatePairings.get(stream.pairingId);
+      if (
+        !pairing
+        || pairing.ownerProfileKey !== ownerProfileKey
+        || pairing.claimedAt == null
+        || pairing.revokedAt != null
+        || (pairing.ingestExpiresAt ?? 0) <= now
+        || pairing.studioBlockStoppedAt != null
+        || (
+          pairing.accountBlockStopRequestedAt != null
+          && pairing.accountBlockStopRequestedAt <= now
+        )
+      ) continue;
+      const samples = [...(memoryHeartRateSamplesByStreamId.get(stream.id)?.values() ?? [])];
+      if (samples.length === 0) continue;
+      const sample = samples.reduce((current, candidate) => (
+        candidate.sequence > current.sequence ? candidate : current
+      ), samples[0]);
+      const receivedAt = Number(sample._receivedAt);
+      if (
+        !Number.isFinite(receivedAt)
+        || receivedAt > now + 60_000
+        || sample.recordedAt <= receivedAt - 10_000
+        || sample.recordedAt > receivedAt + 2_000
+        || sample.recordedAt <= freshAfter
+        || sample.recordedAt > now + 2_000
+      ) continue;
+      candidates.push({ stream, sample, receivedAt });
+    }
+    const latest = candidates.sort((left, right) => (
+      right.receivedAt - left.receivedAt
+      || right.sample.sequence - left.sample.sequence
+    ))[0];
+    if (!latest) return null;
+    return cloneJson({
+      streamId: latest.stream.id,
+      sessionId: latest.stream.sessionId,
+      relayScope: latest.stream.relayScope || 'session',
+      riderId: latest.stream.riderId,
+      playerId: latest.stream.playerId ?? null,
+      bpm: latest.sample.bpm,
+      recordedAt: latest.sample.recordedAt,
+      activeElapsedMs: latest.sample.activeElapsedMs,
+      receivedAt: latest.receivedAt,
+    }, null);
+  }
+
+  const result = await query(
+    `SELECT streams.id AS stream_id, streams.session_id, streams.relay_scope,
+       streams.rider_id, streams.player_id, samples.bpm, samples.recorded_at,
+       samples.active_elapsed_ms, samples.received_at
+     FROM ${schema}.heart_rate_streams AS streams
+     JOIN ${schema}.heart_rate_pairings AS pairings
+       ON pairings.id = streams.pairing_id
+     JOIN LATERAL (
+       SELECT bpm, recorded_at, active_elapsed_ms, received_at, sequence
+       FROM ${schema}.heart_rate_samples
+       WHERE stream_id = streams.id
+       ORDER BY sequence DESC
+       LIMIT 1
+     ) AS samples ON true
+     WHERE streams.owner_profile_key = $1
+       AND pairings.owner_profile_key = $1
+       AND streams.finalized_at IS NULL
+       AND streams.studio_block_stopped_at IS NULL
+       AND pairings.studio_block_stopped_at IS NULL
+       AND pairings.claimed_at IS NOT NULL
+       AND pairings.revoked_at IS NULL
+       AND COALESCE(streams.relay_expires_at, pairings.ingest_expires_at) > to_timestamp($3 / 1000.0)
+       AND pairings.ingest_expires_at > to_timestamp($3 / 1000.0)
+       AND (
+         streams.account_block_stop_requested_at IS NULL
+         OR streams.account_block_stop_requested_at > to_timestamp($3 / 1000.0)
+       )
+       AND (
+         pairings.account_block_stop_requested_at IS NULL
+         OR pairings.account_block_stop_requested_at > to_timestamp($3 / 1000.0)
+       )
+       AND samples.recorded_at > to_timestamp($2 / 1000.0)
+       AND samples.recorded_at <= to_timestamp(($3 + 2000) / 1000.0)
+       AND samples.recorded_at > samples.received_at - interval '10 seconds'
+       AND samples.recorded_at <= samples.received_at + interval '2 seconds'
+       AND samples.received_at <= to_timestamp(($3 + 60000) / 1000.0)
+     ORDER BY samples.received_at DESC, samples.sequence DESC
+     LIMIT 1`,
+    [ownerProfileKey, freshAfter, now],
+  );
+  const row = result?.rows?.[0];
+  if (!row) return null;
+  return {
+    streamId: row.stream_id,
+    sessionId: row.session_id,
+    relayScope: row.relay_scope || 'session',
+    riderId: row.rider_id,
+    playerId: row.player_id == null ? null : Number(row.player_id),
+    bpm: Number(row.bpm),
+    recordedAt: new Date(row.recorded_at).getTime(),
+    activeElapsedMs: Number(row.active_elapsed_ms),
+    receivedAt: new Date(row.received_at).getTime(),
+  };
+}
+
+/**
+ * Consent-gated projection for one claimed athlete selected on one active club
+ * tablet session. Account rider IDs and all personal-scope streams are omitted.
+ */
+export async function loadLatestStudioTabletHeartRateReading({
+  athleteProfileKey,
+  clubId,
+  studioRiderId,
+  freshAfter,
+  now = Date.now(),
+}) {
+  if (!pool) {
+    const member = memoryClubMembers.get(clubMemberKey(clubId, studioRiderId));
+    if (
+      member?.status !== 'claimed'
+      || member.athleteProfileKey !== athleteProfileKey
+    ) return null;
+    const candidates = [];
+    for (const stream of memoryHeartRateStreams.values()) {
+      if (
+        stream.ownerProfileKey !== athleteProfileKey
+        || stream.relayScope !== 'studio-block'
+        || stream.clubId !== clubId
+        || stream.studioRiderId !== studioRiderId
+        || !stream.liveStudioConsent
+        || stream.finalizedAt != null
+        || stream.studioBlockStoppedAt != null
+        || (stream.relayExpiresAt ?? 0) <= now
+        || (
+          stream.accountBlockStopRequestedAt != null
+          && stream.accountBlockStopRequestedAt <= now
+        )
+      ) continue;
+      const pairing = memoryHeartRatePairings.get(stream.pairingId);
+      if (
+        !pairing
+        || pairing.ownerProfileKey !== athleteProfileKey
+        || pairing.relayScope !== 'studio-block'
+        || pairing.clubId !== clubId
+        || pairing.studioRiderId !== studioRiderId
+        || !pairing.liveStudioConsent
+        || pairing.claimedAt == null
+        || pairing.revokedAt != null
+        || pairing.studioBlockStoppedAt != null
+        || (pairing.ingestExpiresAt ?? 0) <= now
+        || (
+          pairing.accountBlockStopRequestedAt != null
+          && pairing.accountBlockStopRequestedAt <= now
+        )
+      ) continue;
+      const samples = [...(memoryHeartRateSamplesByStreamId.get(stream.id)?.values() ?? [])];
+      if (samples.length === 0) continue;
+      const sample = samples.reduce((current, candidate) => (
+        candidate.sequence > current.sequence ? candidate : current
+      ), samples[0]);
+      const receivedAt = Number(sample._receivedAt);
+      if (
+        !Number.isFinite(receivedAt)
+        || receivedAt > now + 60_000
+        || sample.recordedAt <= receivedAt - 10_000
+        || sample.recordedAt > receivedAt + 2_000
+        || sample.recordedAt <= freshAfter
+        || sample.recordedAt > now + 2_000
+      ) continue;
+      candidates.push({ sample, receivedAt });
+    }
+    const latest = candidates.sort((left, right) => (
+      right.receivedAt - left.receivedAt
+      || right.sample.sequence - left.sample.sequence
+    ))[0];
+    return latest ? cloneJson({
+      studioRiderId,
+      bpm: latest.sample.bpm,
+      recordedAt: latest.sample.recordedAt,
+      receivedAt: latest.receivedAt,
+    }, null) : null;
+  }
+
+  const result = await query(
+    `SELECT samples.bpm, samples.recorded_at, samples.received_at, samples.sequence
+     FROM ${schema}.heart_rate_streams AS streams
+     JOIN ${schema}.heart_rate_pairings AS pairings
+       ON pairings.id = streams.pairing_id
+     JOIN ${schema}.club_members AS members
+       ON members.club_id = streams.club_id
+       AND members.studio_rider_id = streams.studio_rider_id
+     JOIN LATERAL (
+       SELECT bpm, recorded_at, received_at, sequence
+       FROM ${schema}.heart_rate_samples
+       WHERE stream_id = streams.id
+       ORDER BY sequence DESC
+       LIMIT 1
+     ) AS samples ON true
+     WHERE streams.owner_profile_key = $1
+       AND streams.relay_scope = 'studio-block'
+       AND streams.club_id = $2
+       AND streams.studio_rider_id = $3
+       AND streams.live_studio_consent = true
+       AND streams.finalized_at IS NULL
+       AND streams.studio_block_stopped_at IS NULL
+       AND pairings.owner_profile_key = $1
+       AND pairings.relay_scope = 'studio-block'
+       AND pairings.club_id = $2
+       AND pairings.studio_rider_id = $3
+       AND pairings.live_studio_consent = true
+       AND pairings.claimed_at IS NOT NULL
+       AND pairings.revoked_at IS NULL
+       AND pairings.studio_block_stopped_at IS NULL
+       AND COALESCE(streams.relay_expires_at, pairings.ingest_expires_at) > to_timestamp($5 / 1000.0)
+       AND pairings.ingest_expires_at > to_timestamp($5 / 1000.0)
+       AND (
+         streams.account_block_stop_requested_at IS NULL
+         OR streams.account_block_stop_requested_at > to_timestamp($5 / 1000.0)
+       )
+       AND (
+         pairings.account_block_stop_requested_at IS NULL
+         OR pairings.account_block_stop_requested_at > to_timestamp($5 / 1000.0)
+       )
+       AND members.status = 'claimed'
+       AND members.athlete_profile_key = $1
+       AND samples.recorded_at > to_timestamp($4 / 1000.0)
+       AND samples.recorded_at <= to_timestamp(($5 + 2000) / 1000.0)
+       AND samples.recorded_at > samples.received_at - interval '10 seconds'
+       AND samples.recorded_at <= samples.received_at + interval '2 seconds'
+       AND samples.received_at <= to_timestamp(($5 + 60000) / 1000.0)
+     ORDER BY samples.received_at DESC, samples.sequence DESC
+     LIMIT 1`,
+    [athleteProfileKey, clubId, studioRiderId, freshAfter, now],
+  );
+  const row = result?.rows?.[0];
+  return row ? {
+    studioRiderId,
+    bpm: Number(row.bpm),
+    recordedAt: new Date(row.recorded_at).getTime(),
+    receivedAt: new Date(row.received_at).getTime(),
+  } : null;
 }
 
 export async function finalizeHeartRateStream(

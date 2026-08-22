@@ -3,6 +3,7 @@ import type {
   PrivateHeartRateSummary,
   PrivateHeartRateZoneSummary,
 } from '../types';
+import { clubTabletSessionHeader } from './clubTabletStorage';
 
 export type HeartRateActivityType =
   | 'bmx-race'
@@ -102,6 +103,52 @@ export type HeartRateLiveEvent = Readonly<{
   freshUntil?: number;
   activeElapsedMs: number | null;
 }>;
+
+export type StudioTabletHeartRateReading = Readonly<{
+  studioRiderId: string;
+  bpm: number;
+  recordedAt: number;
+  receivedAt: number;
+  freshUntil: number;
+}>;
+
+export const heartRateLiveFreshnessMs = 10_000;
+export const heartRateLiveMaximumFutureSkewMs = 2_000;
+
+function heartRateLiveEventOrder(event: HeartRateLiveEvent) {
+  return event.receivedAt ?? event.recordedAt;
+}
+
+/**
+ * Applies one exact-rider, sensor-fresh event without letting a delayed fetch
+ * or reconnect move any athlete back to an older reading.
+ */
+export function mergeLiveHeartRateEvent(
+  current: Readonly<Record<string, HeartRateLiveEvent>>,
+  event: HeartRateLiveEvent,
+  options: Readonly<{ expectedRiderId?: string; now?: number }> = {},
+) {
+  const now = options.now ?? Date.now();
+  if (options.expectedRiderId && event.riderId !== options.expectedRiderId) return current;
+  if (
+    event.recordedAt > now + heartRateLiveMaximumFutureSkewMs
+    || now - event.recordedAt >= heartRateLiveFreshnessMs
+    || heartRateLiveEventOrder(event) > now + heartRateLiveMaximumFutureSkewMs
+    || (event.receivedAt != null && (
+      event.recordedAt <= event.receivedAt - heartRateLiveFreshnessMs
+      || event.recordedAt > event.receivedAt + heartRateLiveMaximumFutureSkewMs
+    ))
+    || (event.freshUntil != null && event.freshUntil <= now)
+  ) return current;
+  const previous = current[event.riderId];
+  if (previous) {
+    const previousOrder = heartRateLiveEventOrder(previous);
+    const nextOrder = heartRateLiveEventOrder(event);
+    if (nextOrder < previousOrder) return current;
+    if (nextOrder === previousOrder && event.recordedAt <= previous.recordedAt) return current;
+  }
+  return { ...current, [event.riderId]: event };
+}
 
 export type CreateHeartRatePairingInput = Readonly<{
   sessionId: string;
@@ -1402,27 +1449,183 @@ export async function loadHeartRateSamples(streamId: string) {
   return { stream, samples };
 }
 
+export const heartRateLiveSnapshotPollMs = 5_000;
+
+/**
+ * Loads one freshness-bounded reading for the exact signed-in account. The
+ * endpoint never returns raw history, pairing details, or ingest credentials.
+ */
+export async function loadLatestHeartRateLive(
+  options: { signal?: AbortSignal } = {},
+): Promise<HeartRateLiveEvent | null> {
+  const response = await fetch('/api/heart-rate/live/latest', {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  const payload = await jsonResponse<{ reading?: unknown; freshnessMs?: unknown }>(
+    response,
+    'Latest heart-rate reading',
+  );
+  if (payload.reading == null) return null;
+  const reading = normalizeHeartRateLiveEvent(payload.reading);
+  const now = Date.now();
+  if (
+    !reading
+    || reading.freshUntil !== reading.recordedAt + heartRateLiveFreshnessMs
+    || reading.recordedAt > now + heartRateLiveMaximumFutureSkewMs
+    || now - reading.recordedAt >= heartRateLiveFreshnessMs
+    || (reading.receivedAt != null
+      && reading.receivedAt > now + heartRateLiveMaximumFutureSkewMs)
+    || (reading.receivedAt != null && (
+      reading.recordedAt <= reading.receivedAt - heartRateLiveFreshnessMs
+      || reading.recordedAt > reading.receivedAt + heartRateLiveMaximumFutureSkewMs
+    ))
+  ) {
+    return null;
+  }
+  return reading;
+}
+
+/**
+ * Loads only the explicitly shared fresh BPM for the exact athlete currently
+ * selected by an active Studio Connect tablet session. This is a one-shot
+ * fetch rather than a club-wide stream and never falls back to personal BPM.
+ */
+export async function loadLatestStudioTabletHeartRate(
+  sessionToken: string,
+  expectedStudioRiderId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<StudioTabletHeartRateReading | null> {
+  const token = sessionToken.trim();
+  const studioRiderId = expectedStudioRiderId.trim();
+  if (token.length < 32 || !studioRiderId || studioRiderId.length > 160) {
+    throw new Error('Choose the athlete on this tablet again.');
+  }
+  const response = await fetch('/api/heart-rate/watch-connect/tablet-live', {
+    cache: 'no-store',
+    headers: {
+      Accept: 'application/json',
+      [clubTabletSessionHeader]: token,
+    },
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  const payload = await jsonResponse<{ reading?: unknown; freshnessMs?: unknown }>(
+    response,
+    'Tablet live heart-rate reading',
+  );
+  if (payload.reading == null) return null;
+  if (!payload.reading || typeof payload.reading !== 'object' || Array.isArray(payload.reading)) {
+    throw new Error('Tablet live heart rate returned an invalid reading.');
+  }
+  const item = payload.reading as Record<string, unknown>;
+  const returnedRiderId = identifier(item.studioRiderId);
+  const bpm = finiteNumber(item.bpm);
+  const recordedAt = nullableTimestamp(item.recordedAt);
+  const receivedAt = nullableTimestamp(item.receivedAt);
+  const freshUntil = nullableTimestamp(item.freshUntil);
+  const now = Date.now();
+  if (
+    returnedRiderId !== studioRiderId
+    || bpm == null
+    || bpm < 20
+    || bpm > 260
+    || recordedAt == null
+    || receivedAt == null
+    || freshUntil == null
+    || freshUntil !== recordedAt + heartRateLiveFreshnessMs
+    || recordedAt > now + heartRateLiveMaximumFutureSkewMs
+    || now - recordedAt >= heartRateLiveFreshnessMs
+    || receivedAt > now + heartRateLiveMaximumFutureSkewMs
+    || recordedAt <= receivedAt - heartRateLiveFreshnessMs
+    || recordedAt > receivedAt + heartRateLiveMaximumFutureSkewMs
+  ) return null;
+  return {
+    studioRiderId: returnedRiderId,
+    bpm: Math.round(bpm * 10) / 10,
+    recordedAt,
+    receivedAt,
+    freshUntil,
+  };
+}
+
 export function subscribeToHeartRateLive(
   listener: (event: HeartRateLiveEvent) => void,
   options: { clubId?: string; onError?: () => void } = {},
 ) {
-  if (typeof EventSource === 'undefined') return () => undefined;
   const params = new URLSearchParams();
   if (options.clubId) params.set('clubId', options.clubId);
-  const source = new EventSource(`/api/heart-rate/live${params.size ? `?${params}` : ''}`);
+  const source = typeof EventSource === 'undefined'
+    ? null
+    : new EventSource(`/api/heart-rate/live${params.size ? `?${params}` : ''}`);
+  let closed = false;
+  let snapshotInFlight: Promise<void> | null = null;
+  let snapshotErrorNotified = false;
+  let deliveredByRider: Readonly<Record<string, HeartRateLiveEvent>> = {};
+  const snapshotAbort = new AbortController();
+  const deliver = (normalized: HeartRateLiveEvent) => {
+    const next = mergeLiveHeartRateEvent(deliveredByRider, normalized);
+    if (next === deliveredByRider) return;
+    deliveredByRider = next;
+    listener(next[normalized.riderId]);
+  };
   const receive = (event: MessageEvent) => {
     try {
       const normalized = normalizeHeartRateLiveEvent(JSON.parse(event.data));
-      if (normalized) listener(normalized);
+      if (normalized) deliver(normalized);
     } catch {
       // A malformed health event is ignored rather than shown under the wrong rider.
     }
   };
-  source.addEventListener('heart-rate', receive as EventListener);
-  if (options.onError) source.addEventListener('error', options.onError);
+  const refreshSnapshot = () => {
+    // Studio/club live data remains SSE-only and consent-gated. Never replace
+    // that projection with the signed-in account's private snapshot.
+    if (closed || options.clubId || snapshotInFlight) return snapshotInFlight;
+    snapshotInFlight = loadLatestHeartRateLive({ signal: snapshotAbort.signal })
+      .then((reading) => {
+        snapshotErrorNotified = false;
+        if (!closed && reading) deliver(reading);
+      })
+      .catch((error: unknown) => {
+        if (
+          closed
+          || (error instanceof DOMException && error.name === 'AbortError')
+          || snapshotErrorNotified
+        ) return;
+        snapshotErrorNotified = true;
+        options.onError?.();
+      })
+      .finally(() => {
+        snapshotInFlight = null;
+      });
+    return snapshotInFlight;
+  };
+  const ready = () => { void refreshSnapshot(); };
+  source?.addEventListener('heart-rate', receive as EventListener);
+  source?.addEventListener('ready', ready as EventListener);
+  if (options.onError) source?.addEventListener('error', options.onError);
+  if (!options.clubId) void refreshSnapshot();
+  const pollTimer = options.clubId
+    ? null
+    : globalThis.setInterval(() => { void refreshSnapshot(); }, heartRateLiveSnapshotPollMs);
+  const visibilityChanged = () => {
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      void refreshSnapshot();
+    }
+  };
+  if (!options.clubId && typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', visibilityChanged);
+  }
   return () => {
-    source.removeEventListener('heart-rate', receive as EventListener);
-    if (options.onError) source.removeEventListener('error', options.onError);
-    source.close();
+    closed = true;
+    snapshotAbort.abort();
+    if (pollTimer != null) globalThis.clearInterval(pollTimer);
+    if (!options.clubId && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', visibilityChanged);
+    }
+    source?.removeEventListener('heart-rate', receive as EventListener);
+    source?.removeEventListener('ready', ready as EventListener);
+    if (options.onError) source?.removeEventListener('error', options.onError);
+    source?.close();
   };
 }

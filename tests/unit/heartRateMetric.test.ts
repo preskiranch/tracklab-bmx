@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { HeartRateMetric, heartRateReadingState, liveHeartRateFreshnessMs } from '../../src/components/HeartRateMetric';
 import { HeartRateSettingsCard } from '../../src/components/HeartRateSettingsCard';
 
@@ -116,5 +117,34 @@ describe('HeartRateSettingsCard', () => {
     expect(html).toContain('Watch status');
     expect(html).not.toContain('<h2 id="heart-rate-settings-heading">Apple Watch heart rate</h2>');
     expect(html).not.toContain('Install Watch App');
+  });
+
+  it('never labels an iPad cloud reader as unavailable', () => {
+    const html = renderToStaticMarkup(createElement(HeartRateSettingsCard, {
+      availability: {
+        version: 1,
+        supported: false,
+        platform: 'ipad',
+        paired: false,
+        watchAppInstalled: false,
+        healthDataAvailable: true,
+        minimumIOS: '17.0',
+        minimumWatchOS: '10.0',
+      },
+      status: { version: 1, state: 'unavailable', sessionId: null, at: 10_000 },
+      readingState: 'unavailable',
+      latest: null,
+      showWorkoutActions: false,
+      onStart: () => undefined,
+      onPause: () => undefined,
+      onResume: () => undefined,
+      onEnd: () => undefined,
+      onRetry: () => undefined,
+    }));
+    expect(html).toContain('Waiting for paired iPhone');
+    expect(html).not.toContain('Unavailable on this device');
+
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    expect(appSource).toContain('{watchConnectCapable === false && <HeartRateSettingsCard');
   });
 });

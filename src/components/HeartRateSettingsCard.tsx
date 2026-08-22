@@ -39,14 +39,21 @@ type HeartRateSettingsCardProps = {
   };
 };
 
-function stateLabel(readingState: HeartRateReadingState) {
+function stateLabel(
+  readingState: HeartRateReadingState,
+  availability: NativeHeartRateAvailability | null,
+) {
   if (readingState === 'live') return 'Live from Apple Watch';
   if (readingState === 'paused') return 'Workout paused';
   if (readingState === 'connecting') return 'Connecting to Apple Watch';
   if (readingState === 'stale') return 'Reading interrupted';
   if (readingState === 'missing') return 'Waiting for a heart-rate reading';
   if (readingState === 'error') return 'Apple Watch needs attention';
-  if (readingState === 'unavailable') return 'Unavailable on this device';
+  if (readingState === 'unavailable') {
+    return availability?.platform === 'ipad'
+      ? 'Waiting for paired iPhone'
+      : 'Apple Watch unavailable';
+  }
   if (readingState === 'checking') return 'Checking Apple Watch';
   return 'Ready to start';
 }
@@ -100,7 +107,7 @@ export function HeartRateSettingsCard({
           label="Apple Watch heart rate"
         />
         <div className="heart-rate-settings-state" role="status" aria-live="polite">
-          <strong>{stateLabel(readingState)}</strong>
+          <strong>{stateLabel(readingState, availability)}</strong>
           <span>{detail}</span>
           {availability?.supported && (
             <small>

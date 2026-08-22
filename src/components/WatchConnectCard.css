@@ -101,6 +101,31 @@
   color: #5b6974;
 }
 
+.watch-connect-card-remote-reading {
+  align-items: center;
+  background: #f5f8fa;
+  border: 1px solid #dde6eb;
+  border-radius: 11px;
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+}
+
+.watch-connect-card-remote-reading > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.watch-connect-card-remote-reading > span strong {
+  font-size: 12px;
+}
+
+.watch-connect-card-remote-reading > span small {
+  color: #596872;
+  line-height: 1.4;
+}
+
 .watch-connect-card-actions {
   display: flex;
   flex-wrap: wrap;
@@ -290,6 +315,11 @@
 
   .watch-connect-card-actions button {
     width: 100%;
+  }
+
+  .watch-connect-card-remote-reading {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

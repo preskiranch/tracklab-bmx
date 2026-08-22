@@ -101,6 +101,32 @@ async function waitForEvent(stream: EventStream, eventName: string, timeoutMs = 
   throw new Error(`Timed out waiting for ${eventName}.`);
 }
 
+async function expectNoEvent(stream: EventStream, eventName: string, timeoutMs = 250) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const separator = stream.buffer.indexOf('\n\n');
+    if (separator >= 0) {
+      const block = stream.buffer.slice(0, separator);
+      stream.buffer = stream.buffer.slice(separator + 2);
+      const event = block.match(/^event:\s*(.+)$/m)?.[1]?.trim();
+      if (event === eventName) throw new Error(`Unexpected ${eventName} event.`);
+      continue;
+    }
+    const remaining = Math.max(1, deadline - Date.now());
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      stream.reader.read().then((chunk) => ({ kind: 'chunk' as const, chunk })),
+      new Promise<{ kind: 'timeout' }>((resolve) => {
+        timeout = setTimeout(() => resolve({ kind: 'timeout' }), remaining);
+      }),
+    ]);
+    if (timeout) clearTimeout(timeout);
+    if (result.kind === 'timeout') return;
+    if (result.chunk.done) return;
+    stream.buffer += stream.decoder.decode(result.chunk.value, { stream: true }).replace(/\r\n/g, '\n');
+  }
+}
+
 beforeAll(async () => {
   const port = await availablePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -191,7 +217,9 @@ describe('private Apple Watch heart-rate cloud relay', () => {
     }, athlete.cookie);
     expect(replayedClaim.status).toBe(409);
 
-    const startedAt = Date.now();
+    // Model sensor samples that have already happened. Future-dated batches
+    // are retained privately but intentionally never projected as live BPM.
+    const startedAt = Date.now() - 10_000;
     const streamResponse = await api('/api/heart-rate/streams', {
       method: 'POST',
       headers: { Authorization: `Bearer ${claimBody.ingestToken}` },
@@ -502,4 +530,115 @@ describe('private Apple Watch heart-rate cloud relay', () => {
     );
     expect(athleteStillOwnsSamples.status).toBe(200);
   }, 20_000);
+
+  it('stores delayed and future batches privately without projecting them as live', async () => {
+    const athlete = await register(
+      `heart-rate-live-freshness-${Date.now()}@tracklab.test`,
+      'Live Freshness Athlete',
+    );
+    const createRelay = async (label: string, startedAt: number) => {
+      const sessionId = `live-freshness-${label}-${Date.now()}`;
+      const pairingResponse = await api('/api/heart-rate/pairings', {
+        method: 'POST',
+        body: JSON.stringify({
+          sessionId,
+          activityType: 'straight-sprint',
+          riderId: `account:${athlete.user.id}`,
+          playerId: 1,
+        }),
+      }, athlete.cookie);
+      expect(pairingResponse.status).toBe(201);
+      const pairing = await pairingResponse.json() as any;
+      const claimResponse = await api('/api/heart-rate/pairings/claim', {
+        method: 'POST',
+        body: JSON.stringify({ pairCode: pairing.pairCode }),
+      }, athlete.cookie);
+      expect(claimResponse.status).toBe(200);
+      const claim = await claimResponse.json() as any;
+      const streamResponse = await api('/api/heart-rate/streams', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${claim.ingestToken}` },
+        body: JSON.stringify({ startedAt }),
+      });
+      expect(streamResponse.status).toBe(201);
+      return {
+        ingestToken: claim.ingestToken as string,
+        streamId: (await streamResponse.json() as any).stream.id as string,
+      };
+    };
+
+    const delayedRecordedAt = Date.now() - 30_000;
+    const delayed = await createRelay('delayed', delayedRecordedAt);
+    const delayedEvents = await openLiveStream(athlete.cookie);
+    await waitForEvent(delayedEvents, 'ready');
+    const delayedUpload = await api(`/api/heart-rate/streams/${delayed.streamId}/samples`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${delayed.ingestToken}` },
+      body: JSON.stringify({ samples: [{
+        sequence: 0,
+        recordedAt: delayedRecordedAt,
+        activeElapsedMs: 0,
+        bpm: 141,
+      }] }),
+    });
+    expect(delayedUpload.status).toBe(200);
+    await expectNoEvent(delayedEvents, 'heart-rate');
+    delayedEvents.controller.abort();
+    const delayedSamples = await api(
+      `/api/heart-rate/streams/${delayed.streamId}/samples`,
+      {},
+      athlete.cookie,
+    );
+    expect((await delayedSamples.json() as any).samples).toEqual([
+      expect.objectContaining({ bpm: 141 }),
+    ]);
+    expect(await (await api('/api/heart-rate/live/latest', {}, athlete.cookie)).json())
+      .toEqual({ reading: null, freshnessMs: 10_000 });
+
+    const future = await createRelay('future', Date.now());
+    const futureEvents = await openLiveStream(athlete.cookie);
+    await waitForEvent(futureEvents, 'ready');
+    const exactFutureRecordedAt = Date.now() + 2_000;
+    const exactFutureUpload = await api(`/api/heart-rate/streams/${future.streamId}/samples`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${future.ingestToken}` },
+      body: JSON.stringify({ samples: [{
+        sequence: 0,
+        recordedAt: exactFutureRecordedAt,
+        activeElapsedMs: 0,
+        bpm: 142,
+      }] }),
+    });
+    expect(exactFutureUpload.status).toBe(200);
+    expect(await waitForEvent(futureEvents, 'heart-rate')).toMatchObject({
+      streamId: future.streamId,
+      bpm: 142,
+    });
+
+    const tooFutureRecordedAt = Date.now() + 5_000;
+    const futureUpload = await api(`/api/heart-rate/streams/${future.streamId}/samples`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${future.ingestToken}` },
+      body: JSON.stringify({ samples: [{
+        sequence: 1,
+        recordedAt: tooFutureRecordedAt,
+        activeElapsedMs: 1,
+        bpm: 143,
+      }] }),
+    });
+    expect(futureUpload.status).toBe(200);
+    await expectNoEvent(futureEvents, 'heart-rate');
+    futureEvents.controller.abort();
+    const storedFutureSamples = await api(
+      `/api/heart-rate/streams/${future.streamId}/samples`,
+      {},
+      athlete.cookie,
+    );
+    expect((await storedFutureSamples.json() as any).samples).toEqual([
+      expect.objectContaining({ sequence: 0, bpm: 142 }),
+      expect.objectContaining({ sequence: 1, bpm: 143 }),
+    ]);
+    expect(await (await api('/api/heart-rate/live/latest', {}, athlete.cookie)).json())
+      .toEqual({ reading: null, freshnessMs: 10_000 });
+  });
 });

@@ -35,6 +35,7 @@ export type ClubTabletWatchConnectStatus = {
   state: 'not-set-up' | 'ready' | 'connected' | 'expired';
   connectedUntil: number | null;
   remainingMs: number;
+  liveSharingEnabled: boolean;
 };
 
 export type ClubTabletRoster = {
@@ -153,6 +154,9 @@ export function normalizeClubTabletWatchConnectStatus(value: unknown): ClubTable
     state,
     connectedUntil,
     remainingMs,
+    // Older roster snapshots omit the field and therefore fail closed until
+    // the exact athlete-session status endpoint confirms explicit consent.
+    liveSharingEnabled: item.liveSharingEnabled === true,
   };
 }
 
