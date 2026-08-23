@@ -269,9 +269,9 @@ test('public landing page exposes the global track locator without an account', 
   expect(locatorToolHeight).toBeGreaterThanOrEqual(540);
   expect(locatorToolHeight).toBeLessThanOrEqual(680);
   await expect(locator.getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
-  await expect(locator.getByRole('link', { name: 'Apple Maps' })).toHaveAttribute('href', /maps\.apple\.com/);
-  await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/search/);
-  await expect(locator.getByRole('link', { name: 'Open Earth' })).toHaveAttribute('href', /earth\.google\.com/);
+  await expect(locator.getByRole('link', { name: 'Apple Maps' })).toHaveAttribute('href', /maps\.apple\.com.*daddr=/);
+  await expect(locator.getByRole('link', { name: 'Google Maps' })).toHaveAttribute('href', /google\.com\/maps\/dir\/.*destination=/);
+  await expect(locator.getByRole('link', { name: /Google Earth—not turn-by-turn directions/ })).toHaveAttribute('href', /earth\.google\.com/);
   await expect(locator.getByText('Needs manual mapping')).toHaveCount(0);
 
   await locator.getByLabel('Search tracks').fill('ADF Cycling Club');
@@ -332,6 +332,10 @@ test('public landing page exposes the global track locator without an account', 
   await expect(locator.getByRole('link', { name: 'Instagram' })).toHaveAttribute(
     'href',
     'https://www.instagram.com/airtimebmx',
+  );
+  await expect(locator.getByRole('link', { name: 'Call Air Time BMX at 559-426-9367' })).toHaveAttribute(
+    'href',
+    'tel:5594269367',
   );
   await expect(locator.getByRole('link', { name: 'Federation: USA BMX' })).toHaveAttribute(
     'href',

@@ -2041,6 +2041,143 @@ input:focus {
   background: #f7f9fb;
 }
 
+.watch-connect-indicator-slot {
+  display: contents;
+}
+
+.watch-connect-indicator {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 9px;
+  border: 1px solid #ccd6dd;
+  border-radius: 8px;
+  background: #f4f7f9;
+  color: #40505d;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.15;
+  cursor: pointer;
+}
+
+.watch-connect-indicator-icon {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: #dfe6ea;
+}
+
+.watch-connect-indicator-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-connect-indicator-cue {
+  display: grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.74);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.watch-connect-indicator.live {
+  border-color: #71c955;
+  background: #e5f8df;
+  color: #176a33;
+}
+
+.watch-connect-indicator.live .watch-connect-indicator-icon {
+  background: #bff0af;
+}
+
+.watch-connect-indicator.disconnected {
+  border-color: #e2a3a3;
+  background: #fff0f0;
+  color: #8f2525;
+}
+
+.watch-connect-indicator.disconnected .watch-connect-indicator-icon {
+  background: #ffd3d3;
+}
+
+.watch-connect-indicator.connecting,
+.watch-connect-indicator.syncing {
+  border-color: #e3c16d;
+  background: #fff7df;
+  color: #73510d;
+}
+
+.watch-connect-indicator.connecting .watch-connect-indicator-icon,
+.watch-connect-indicator.syncing .watch-connect-indicator-icon {
+  background: #ffe6a3;
+}
+
+.watch-connect-indicator:hover {
+  filter: brightness(0.98);
+}
+
+.watch-connect-indicator:focus-visible {
+  outline: 3px solid #245f96;
+  outline-offset: 2px;
+}
+
+.watch-connect-indicator-slot.fullscreen {
+  position: fixed;
+  top: max(124px, calc(env(safe-area-inset-top, 0px) + 124px));
+  right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
+  z-index: 2147483002;
+  display: block;
+  pointer-events: none;
+}
+
+.watch-connect-indicator-slot.fullscreen .watch-connect-indicator {
+  justify-content: center;
+  gap: 0;
+  width: 44px;
+  min-width: 44px;
+  padding: 7px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(12px);
+  cursor: default;
+}
+
+.watch-connect-indicator-slot.fullscreen .watch-connect-indicator-label,
+.watch-connect-indicator-slot.fullscreen .watch-connect-indicator-cue {
+  display: none;
+}
+
+.platform-shell.map-fullscreen:not(.race-fullscreen)
+  .watch-connect-indicator-slot.fullscreen {
+  top: max(8px, calc(env(safe-area-inset-top, 0px) + 8px));
+  right: max(8px, calc(env(safe-area-inset-right, 0px) + 8px));
+}
+
+.platform-shell.map-fullscreen:not(.race-fullscreen)
+  .control-panel {
+  top: max(62px, calc(env(safe-area-inset-top, 0px) + 62px));
+  max-height: calc(
+    100dvh
+    - env(safe-area-inset-top, 0px)
+    - env(safe-area-inset-bottom, 0px)
+    - 70px
+  );
+}
+
 .platform-main {
   min-width: 0;
   padding: 16px;

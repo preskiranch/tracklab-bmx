@@ -38,12 +38,15 @@ import {
   type WatchConnectScope,
 } from '../lib/watchConnect';
 import { reconcileWatchConnectAccount } from '../lib/watchConnectReconciliation';
+import { resolveWatchConnectIndicatorState } from '../lib/watchConnectIndicator';
 import { WatchConnectCard } from './WatchConnectCard';
+import { WatchConnectIndicator } from './WatchConnectIndicator';
 import { OwnerStudioWatchConnectSettings } from './OwnerStudioWatchConnectSettings';
 import { watchAppNeedsInstall } from './watchAppInstall';
 
 export const watchConnectSettingsAnchorId = 'watch';
 export const watchConnectSettingsSlotId = 'watch-connect-settings-slot';
+export const watchConnectIndicatorSlotId = 'watch-connect-indicator-slot';
 
 export type StudioContext = Readonly<{
   clubId: string;
@@ -67,6 +70,7 @@ export type WatchConnectCoordinatorProps = Readonly<{
   onCapabilityChange?: (capable: boolean) => void;
   onLiveHeartRateReadingsChange?: (readings: Record<string, HeartRateLiveEvent>) => void;
   onMessage?: (message: string) => void;
+  onOpenSettings?: () => void;
 }>;
 
 const emptySnapshot: WatchConnectCloudSnapshot = Object.freeze({
@@ -288,6 +292,13 @@ export function watchConnectAccountBoundarySealKey({
   ]);
 }
 
+export function watchConnectCoordinatorBoundarySealKey({
+  startInFlight,
+  ...input
+}: Parameters<typeof watchConnectAccountBoundarySealKey>[0] & { startInFlight: boolean }) {
+  return startInFlight ? null : watchConnectAccountBoundarySealKey(input);
+}
+
 export function watchConnectStudioConsentForStart(
   enrollment: WatchConnectEnrollment | null,
   live: boolean,
@@ -388,6 +399,7 @@ export function WatchConnectCoordinator({
   onCapabilityChange,
   onLiveHeartRateReadingsChange,
   onMessage,
+  onOpenSettings = () => undefined,
 }: WatchConnectCoordinatorProps) {
   const [snapshot, setSnapshot] = useState<WatchConnectCloudSnapshot>(emptySnapshot);
   const [nativeState, setNativeState] = useState<NativeWatchConnectState | null>(heartRate.watchConnect);
@@ -398,6 +410,7 @@ export function WatchConnectCoordinator({
   const [actionDetail, setActionDetail] = useState('');
   const [now, setNow] = useState(Date.now());
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [indicatorTarget, setIndicatorTarget] = useState<HTMLElement | null>(null);
   const [liveStudioConsent, setLiveStudioConsent] = useState(false);
   const [sessionStudioConsent, setSessionStudioConsent] = useState(false);
   const [recoveryRetryConnectionId, setRecoveryRetryConnectionId] = useState<string | null>(null);
@@ -415,6 +428,7 @@ export function WatchConnectCoordinator({
   const refreshRequestGenerationRef = useRef(0);
   const accountBoundarySealRequestKeyRef = useRef<string | null>(null);
   const recoveryAttemptedConnectionRef = useRef<string | null>(null);
+  const unmatchedLiveSessionRefreshRef = useRef<string | null>(null);
   const currentAccountIdRef = useRef(accountId);
   const accountGenerationRef = useRef(0);
   const generationAccountIdRef = useRef(accountId);
@@ -477,6 +491,29 @@ export function WatchConnectCoordinator({
   const cardState = actionDetail && platformViewState.phase !== 'connected'
     ? { ...platformViewState, detail: actionDetail }
     : platformViewState;
+  const exactLiveHeartRate = watchConnectHeartRateForConnection(latestHeartRate, connection);
+  const indicatorState = resolveWatchConnectIndicatorState({
+    accountId,
+    hydratedAccountId,
+    capable,
+    enrollment,
+    connection,
+    native: nativeState,
+    readOnlyObserver,
+    event: exactLiveHeartRate,
+    busy: actionBusy,
+    now,
+  });
+
+  // The coordinator is also mounted on the membership landing page, before
+  // the signed-in shell exists. Re-check after each render so the indicator
+  // attaches as soon as that shell replaces the landing page.
+  useEffect(() => {
+    const nextTarget = typeof document === 'undefined'
+      ? null
+      : document.getElementById(watchConnectIndicatorSlotId);
+    setIndicatorTarget((current) => current === nextTarget ? current : nextTarget);
+  });
 
   useEffect(() => {
     setPortalTarget(settingsOpen && typeof document !== 'undefined'
@@ -591,6 +628,7 @@ export function WatchConnectCoordinator({
     setSessionStudioConsent(false);
     requestIdsRef.current = null;
     recoveryAttemptedConnectionRef.current = null;
+    unmatchedLiveSessionRefreshRef.current = null;
     setRecoveryRetryConnectionId(null);
     // contextsKey avoids resetting the choice when App recreates the array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -668,6 +706,27 @@ export function WatchConnectCoordinator({
   ]);
 
   useEffect(() => {
+    if (
+      !readOnlyObserver
+      || !accountId
+      || hydratedAccountId !== accountId
+      || latestHeartRate?.riderId !== `account:${accountId}`
+      || !latestHeartRate.sessionId.startsWith('watch-connect:')
+    ) return;
+    const sessionId = latestHeartRate.sessionId;
+    const connectionId = sessionId.slice('watch-connect:'.length);
+    if (snapshot.connections.some((candidate) => candidate.id === connectionId)) {
+      if (unmatchedLiveSessionRefreshRef.current === sessionId) {
+        unmatchedLiveSessionRefreshRef.current = null;
+      }
+      return;
+    }
+    if (unmatchedLiveSessionRefreshRef.current === sessionId) return;
+    unmatchedLiveSessionRefreshRef.current = sessionId;
+    void refresh().catch(() => undefined);
+  }, [accountId, hydratedAccountId, latestHeartRate, readOnlyObserver, refresh, snapshot.connections]);
+
+  useEffect(() => {
     if (authStatus !== 'signed-in' || !accountId) {
       setSnapshot(emptySnapshot);
       setActionDetail('');
@@ -695,6 +754,7 @@ export function WatchConnectCoordinator({
     connectPromiseRef.current = null;
     accountBoundarySealRequestKeyRef.current = null;
     recoveryAttemptedConnectionRef.current = null;
+    unmatchedLiveSessionRefreshRef.current = null;
     setRecoveryRetryConnectionId(null);
     setSnapshot(emptySnapshot);
     setHydratedAccountId(null);
@@ -746,10 +806,18 @@ export function WatchConnectCoordinator({
     }));
   }, [accountId, capable, hydratedAccountId, nativeState, onLegacyRelaySuppressionChange, snapshot]);
 
-  const accountBoundarySealKey = watchConnectAccountBoundarySealKey({
+  const pendingStartConnection = pendingStartConnectionRef.current;
+  const boundaryConnections = pendingStartConnection
+    ? [
+      pendingStartConnection,
+      ...snapshot.connections.filter((candidate) => candidate.id !== pendingStartConnection.id),
+    ]
+    : snapshot.connections;
+  const accountBoundarySealKey = watchConnectCoordinatorBoundarySealKey({
+    startInFlight: Boolean(connectPromiseRef.current),
     accountId,
     hydratedAccountId,
-    connections: snapshot.connections,
+    connections: boundaryConnections,
     native: nativeState,
   });
   const sealEarlierSession = useCallback(async (sealKey: string) => {
@@ -804,6 +872,11 @@ export function WatchConnectCoordinator({
   useEffect(() => {
     const pending = pendingStartConnectionRef.current;
     if (!pending || !nativeState || !accountId || hydratedAccountId !== accountId) return;
+    // startWatchConnectAction owns rollback until its native promise settles.
+    // In particular, the optimistic server identity can render while native is
+    // still inactive; treating that instant as terminal would cancel the same
+    // start before Apple Watch has a chance to answer.
+    if (connectPromiseRef.current) return;
     const requestedAccountId = accountId;
     const requestedAccountGeneration = accountGenerationRef.current;
     const requestIsCurrent = () => watchConnectCoordinatorRequestIsCurrent(
@@ -828,7 +901,6 @@ export function WatchConnectCoordinator({
     const terminal = ['error', 'reconnect', 'inactive'].includes(nativeState.state);
     const mismatchedActive = ['connecting', 'connected'].includes(nativeState.state) && !exact;
     if (!terminal && !mismatchedActive) return;
-    pendingStartConnectionRef.current = null;
     setBusy(true);
     void (async () => {
       if (nativeState.connectionId === pending.id) await stopWatchConnect().catch(() => undefined);
@@ -839,6 +911,9 @@ export function WatchConnectCoordinator({
         ...current,
         connections: [stopped, ...current.connections.filter((item) => item.id !== stopped.id)],
       }));
+      if (pendingStartConnectionRef.current?.id === pending.id) {
+        pendingStartConnectionRef.current = null;
+      }
       setActionDetail(nativeState.reason || 'Watch did not connect. Press Watch Connect to try again.');
     })().catch((error: unknown) => {
       if (requestIsCurrent()) setActionDetail(error instanceof Error ? error.message : String(error));
@@ -892,6 +967,12 @@ export function WatchConnectCoordinator({
         enrollmentRequestId: requestIdsRef.current.enrollment,
         connectionRequestId: requestIdsRef.current.connection,
       }, {
+        onConnectionCreated: ({ connection: preparedConnection }) => {
+          if (!actionIsCurrent()) return;
+          // This ref write must precede startNative. Native iOS can emit its
+          // exact `connecting` event synchronously, before that promise returns.
+          pendingStartConnectionRef.current = preparedConnection;
+        },
         getIdentity: async () => {
           const identity = await getWatchConnectIdentity();
           if (!identity) throw new Error('Use the TrackLab iPhone app paired with this Apple Watch.');
@@ -902,6 +983,9 @@ export function WatchConnectCoordinator({
         stopNative: async () => nativeResultFromState(await stopWatchConnect()),
       });
       if (!actionIsCurrent()) {
+        if (pendingStartConnectionRef.current?.id === started.connection.id) {
+          pendingStartConnectionRef.current = null;
+        }
         if (started.native.connectionId === started.connection.id) {
           const liveNative = await getWatchConnectState().catch(() => null);
           if (
@@ -1079,12 +1163,21 @@ export function WatchConnectCoordinator({
   }, [accountId, connection, disconnect, enrollment, onPairedIPhone]);
 
   if (
-    !portalTarget
-    || authStatus !== 'signed-in'
+    authStatus !== 'signed-in'
     || !accountId
   ) return null;
-  return createPortal(
+  return (
     <>
+    {indicatorTarget && createPortal(
+      <WatchConnectIndicator
+        state={indicatorState}
+        onOpenSettings={indicatorTarget.classList.contains('fullscreen')
+          ? undefined
+          : onOpenSettings}
+      />,
+      indicatorTarget,
+    )}
+    {portalTarget && createPortal(<>
     {capable === true && <WatchConnectCard
       athleteName={accountName}
       busy={actionBusy}
@@ -1135,13 +1228,13 @@ export function WatchConnectCoordinator({
         native: nativeState,
       }))}
       showWatchInstall={!readOnlyObserver && watchAppNeedsInstall(availability)}
-      latestHeartRate={watchConnectHeartRateForConnection(latestHeartRate, connection)}
+      latestHeartRate={exactLiveHeartRate}
       now={now}
       observer={readOnlyObserver}
     />}
     {ownedStudio && <OwnerStudioWatchConnectSettings studio={ownedStudio} />}
-    </>,
-    portalTarget,
+    </>, portalTarget)}
+    </>
   );
 }
 

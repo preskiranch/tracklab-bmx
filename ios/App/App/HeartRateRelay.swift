@@ -495,11 +495,14 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
     }
 
     func pause(at date: Date = Date()) {
+        guard let clockAt = Self.epochMilliseconds(
+            date.timeIntervalSince1970 * 1_000
+        ) else { return }
         workQueue.async {
             guard let activeSessionId = self.state.activeSessionId else { return }
             self.pauseRelay(
                 sessionId: activeSessionId,
-                at: Int64((date.timeIntervalSince1970 * 1_000).rounded()),
+                at: clockAt,
                 activeElapsedOverride: nil,
                 source: .workout
             )
@@ -507,11 +510,14 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
     }
 
     func resume(at date: Date = Date()) {
+        guard let clockAt = Self.epochMilliseconds(
+            date.timeIntervalSince1970 * 1_000
+        ) else { return }
         workQueue.async {
             guard let activeSessionId = self.state.activeSessionId else { return }
             self.resumeRelay(
                 sessionId: activeSessionId,
-                at: Int64((date.timeIntervalSince1970 * 1_000).rounded()),
+                at: clockAt,
                 activeElapsedOverride: nil,
                 source: .workout
             )
@@ -712,7 +718,12 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
         at date: Date = Date(),
         completion: @escaping (Result<[String: Any], Error>) -> Void
     ) {
-        let requestedEndedAt = Int64((date.timeIntervalSince1970 * 1_000).rounded())
+        guard let requestedEndedAt = Self.epochMilliseconds(
+            date.timeIntervalSince1970 * 1_000
+        ) else {
+            completion(.failure(HeartRateRelayError.invalidFinalization))
+            return
+        }
         workQueue.async {
             guard let activeSessionId = self.state.activeSessionId,
                   let relay = self.state.sessions[activeSessionId],
@@ -1766,9 +1777,10 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
     }
 
     private static func epochMilliseconds(_ value: Double) -> Int64? {
+        let maximumAccepted = Double(nowMilliseconds() + 60_000)
         guard value.isFinite,
               value >= 0,
-              value <= Double(Int64.max) else {
+              value <= maximumAccepted else {
             return nil
         }
         return Int64(value.rounded())

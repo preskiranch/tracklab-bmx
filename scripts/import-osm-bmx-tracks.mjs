@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { normalizeTrackContactFields } from './lib/track-contact-fields.mjs';
 
 const outputPath = new URL('../data/imports/openstreetmap-bmx-global.json', import.meta.url);
 const cachePath = new URL('../data/geocode-cache/openstreetmap-bmx-global.json', import.meta.url);
@@ -620,6 +621,9 @@ function normalizedTrack(element, config, reverse) {
   const state = override.state ?? country.state ?? reverse?.state ?? city ?? config.name;
   const address = override.address ?? fallbackAddress(tags, reverse, config, coords);
   const source = override.source ?? 'OpenStreetMap Overpass';
+  const contactFields = normalizeTrackContactFields({
+    sourceRecord: { osmTags: tags },
+  });
 
   return {
     id: override.id ?? `osm-${slug(country.countryCode)}-${slug(name)}-${element.type}-${element.id}`,
@@ -644,7 +648,7 @@ function normalizedTrack(element, config, reverse) {
     longitude: coords.longitude,
     coordinateSource: 'OpenStreetMap Overpass geometry center',
     coordinateAccuracy: element.type === 'node' ? 'osm-node' : 'osm-center',
-    websiteUrl: tags.website,
+    ...contactFields,
     lengthMeters: 350,
     elevationMeters: 0,
     surface: tags.surface ? `BMX Racing track (${tags.surface})` : 'BMX Racing track',

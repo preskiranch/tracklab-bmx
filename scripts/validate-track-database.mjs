@@ -1,12 +1,25 @@
 import { readFile } from 'node:fs/promises';
+import {
+  isNormalizedPhoneNumber,
+  isServiceUrl,
+} from './lib/track-contact-fields.mjs';
 import { validateFederationPair, validateFederationRegistry } from './lib/track-federations.mjs';
+import {
+  validateTrackSocialAuditManifest,
+  validateTrackSocialLinkParity,
+  validateTrackSocialLinkRegistry,
+} from './lib/track-social-links.mjs';
 
 const databasePath = new URL('../public/data/track-database.json', import.meta.url);
 const locatorDatabasePath = new URL('../public/data/track-locator.json', import.meta.url);
 const federationsPath = new URL('../data/federations.json', import.meta.url);
+const socialLinksPath = new URL('../data/track-social-links.json', import.meta.url);
+const socialAuditPath = new URL('../data/audits/track-social-audit.json', import.meta.url);
 const database = JSON.parse(await readFile(databasePath, 'utf8'));
 const locatorDatabase = JSON.parse(await readFile(locatorDatabasePath, 'utf8'));
 const federationRegistry = JSON.parse(await readFile(federationsPath, 'utf8'));
+const socialLinkRegistry = JSON.parse(await readFile(socialLinksPath, 'utf8'));
+const socialAuditManifest = JSON.parse(await readFile(socialAuditPath, 'utf8'));
 const providers = new Map((database.providers ?? []).map((provider) => [provider.id, provider]));
 const tracks = database.tracks ?? [];
 const errors = [];
@@ -14,6 +27,12 @@ const warnings = [];
 const ids = new Set();
 
 errors.push(...validateFederationRegistry(federationRegistry));
+errors.push(...validateTrackSocialLinkRegistry(socialLinkRegistry, tracks));
+errors.push(...validateTrackSocialLinkParity(socialLinkRegistry, tracks));
+errors.push(...validateTrackSocialAuditManifest(socialAuditManifest, socialLinkRegistry, tracks));
+if (socialAuditManifest.catalogGeneratedAt !== database.generatedAt) {
+  errors.push('track social-link audit: catalogGeneratedAt does not match the generated database');
+}
 
 function isHttpUrl(value) {
   try {
@@ -22,15 +41,6 @@ function isHttpUrl(value) {
   } catch {
     return false;
   }
-}
-
-function isServiceUrl(value, service) {
-  if (!isHttpUrl(value)) {
-    return false;
-  }
-
-  const hostname = new URL(value).hostname.toLowerCase();
-  return hostname === `${service}.com` || hostname.endsWith(`.${service}.com`);
 }
 
 function isOfficial(track) {
@@ -76,6 +86,15 @@ for (const track of tracks) {
   if (track.instagramUrl && !isServiceUrl(track.instagramUrl, 'instagram')) {
     errors.push(`${label}: invalid instagramUrl`);
   }
+  if (track.tiktokUrl !== undefined && !isServiceUrl(track.tiktokUrl, 'tiktok')) {
+    errors.push(`${label}: invalid tiktokUrl`);
+  }
+  if (track.youtubeUrl !== undefined && !isServiceUrl(track.youtubeUrl, 'youtube')) {
+    errors.push(`${label}: invalid youtubeUrl`);
+  }
+  if (track.phoneNumber !== undefined && !isNormalizedPhoneNumber(track.phoneNumber)) {
+    errors.push(`${label}: invalid phoneNumber`);
+  }
   errors.push(...validateFederationPair(track, label));
   if (!String(track.federationName ?? '').trim()) {
     errors.push(`${label}: missing federation assignment`);
@@ -110,13 +129,23 @@ if (Number(locatorDatabase.trackCount) !== tracks.length || locatorTracks.length
   errors.push(`public locator contains ${locatorTracks.length} of ${tracks.length} tracks`);
 }
 const locatorTracksById = new Map(locatorTracks.map((track) => [track.id, track]));
+errors.push(...validateTrackSocialLinkParity(socialLinkRegistry, locatorTracks, 'public locator'));
 for (const track of tracks) {
   const locatorTrack = locatorTracksById.get(track.id);
   if (!locatorTrack) {
     errors.push(`${track.id}: missing from public locator`);
     continue;
   }
-  for (const field of ['websiteUrl', 'facebookUrl', 'instagramUrl', 'federationName', 'federationUrl']) {
+  for (const field of [
+    'websiteUrl',
+    'facebookUrl',
+    'instagramUrl',
+    'tiktokUrl',
+    'youtubeUrl',
+    'phoneNumber',
+    'federationName',
+    'federationUrl',
+  ]) {
     if (locatorTrack[field] !== track[field]) {
       errors.push(`${track.id}: public locator does not preserve ${field}`);
     }
@@ -141,6 +170,15 @@ for (const track of locatorTracks) {
   }
   if (track.instagramUrl && !isServiceUrl(track.instagramUrl, 'instagram')) {
     errors.push(`${label}: public locator has invalid instagramUrl`);
+  }
+  if (track.tiktokUrl !== undefined && !isServiceUrl(track.tiktokUrl, 'tiktok')) {
+    errors.push(`${label}: public locator has invalid tiktokUrl`);
+  }
+  if (track.youtubeUrl !== undefined && !isServiceUrl(track.youtubeUrl, 'youtube')) {
+    errors.push(`${label}: public locator has invalid youtubeUrl`);
+  }
+  if (track.phoneNumber !== undefined && !isNormalizedPhoneNumber(track.phoneNumber)) {
+    errors.push(`${label}: public locator has invalid phoneNumber`);
   }
   errors.push(...validateFederationPair(track, `public locator ${label}`));
   if (!String(track.federationName ?? '').trim()) {

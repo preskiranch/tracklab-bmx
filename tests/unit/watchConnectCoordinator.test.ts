@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import type { NativeWatchConnectState } from '../../src/lib/nativeHeartRate';
+import {
+  runWatchConnectSingleFlight,
+  startWatchConnectAction,
+} from '../../src/lib/watchConnectActions';
+import type { WatchConnectConnection } from '../../src/lib/watchConnect';
 import {
   activeWatchConnectTarget,
   defaultWatchConnectClubId,
@@ -8,6 +14,7 @@ import {
   watchConnectAccountRequestIsCurrent,
   watchConnectCanRetryCloudConnection,
   watchConnectCoordinatorRequestIsCurrent,
+  watchConnectCoordinatorBoundarySealKey,
   watchConnectLegacyHeartRateIsBusy,
   watchConnectNativeCapability,
   watchConnectNativeResultFromState,
@@ -142,6 +149,215 @@ describe('WatchConnectCoordinator native adapter', () => {
       connections: [connection],
       native,
     })).toBeNull();
+  });
+
+  it('recognizes a just-created pending connection before native start resolves', () => {
+    const connectedAt = Date.now();
+    const pending = {
+      id: 'connection-new-start',
+      enrollmentId: 'enrollment-new-start',
+      scope: 'personal' as const,
+      clubId: null,
+      studioRiderId: null,
+      state: 'connecting' as const,
+      connectedAt,
+      connectedUntil: connectedAt + 14_400_000,
+      remainingMs: 14_400_000,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+    };
+    const nativeConnecting = {
+      version: 1 as const,
+      state: 'connecting' as const,
+      scope: 'personal' as const,
+      connectionId: pending.id,
+      sessionId: `watch-connect:${pending.id}`,
+      connectedUntil: pending.connectedUntil,
+      remainingMs: pending.remainingMs,
+      requiresUserStart: false,
+      workoutReady: false,
+      relayConfigured: true,
+    };
+    const input = {
+      accountId: 'account-current',
+      hydratedAccountId: 'account-current',
+      native: nativeConnecting,
+    };
+    expect(watchConnectAccountBoundarySealKey({ ...input, connections: [] })).toBeTruthy();
+    expect(watchConnectAccountBoundarySealKey({
+      ...input,
+      connections: [pending],
+    })).toBeNull();
+  });
+
+  it('keeps a failed start identity through synchronous native syncing until authoritative stop, with zero privacy clears', async () => {
+    const clearAllRelays = vi.fn(async () => undefined);
+    const connectedAt = Date.now();
+    const pending: WatchConnectConnection = {
+      id: 'connection-failed-new-start',
+      enrollmentId: 'enrollment-failed-new-start',
+      scope: 'personal',
+      clubId: null,
+      studioRiderId: null,
+      state: 'connecting',
+      connectedAt,
+      connectedUntil: connectedAt + 14_400_000,
+      remainingMs: 14_400_000,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+    };
+    const nativeInactive: NativeWatchConnectState = {
+      version: 1,
+      state: 'inactive',
+      scope: null,
+      connectionId: null,
+      sessionId: null,
+      connectedUntil: null,
+      remainingMs: 0,
+      requiresUserStart: true,
+      workoutReady: false,
+      relayConfigured: false,
+    };
+    const nativeConnecting: NativeWatchConnectState = {
+      version: 1,
+      state: 'connecting',
+      scope: pending.scope,
+      connectionId: pending.id,
+      sessionId: `watch-connect:${pending.id}`,
+      connectedUntil: pending.connectedUntil,
+      remainingMs: pending.remainingMs,
+      requiresUserStart: false,
+      workoutReady: false,
+      relayConfigured: true,
+    };
+    const nativeSyncing: NativeWatchConnectState = {
+      ...nativeConnecting,
+      state: 'syncing',
+      remainingMs: 0,
+    };
+    const enrollment = {
+      id: pending.enrollmentId,
+      scope: pending.scope,
+      clubId: null,
+      studioRiderId: null,
+      state: 'trusted' as const,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+      createdAt: connectedAt,
+      updatedAt: connectedAt,
+    };
+    const authoritativeStopped: WatchConnectConnection = {
+      ...pending,
+      state: 'stopped',
+      remainingMs: 0,
+    };
+    const operationHolder = { current: null as Promise<unknown> | null };
+    let preparedIdentity: WatchConnectConnection | null = null;
+    let snapshotConnections: WatchConnectConnection[] = [];
+    let nativeState: NativeWatchConnectState = nativeInactive;
+    const observedSealKeys: Array<string | null> = [];
+    const reconcileBoundary = () => {
+      const prepared = preparedIdentity;
+      const connections = prepared
+        ? [prepared, ...snapshotConnections.filter((candidate) => candidate.id !== prepared.id)]
+        : snapshotConnections;
+      const key = watchConnectCoordinatorBoundarySealKey({
+        startInFlight: Boolean(operationHolder.current),
+        accountId: 'account-current',
+        hydratedAccountId: 'account-current',
+        connections,
+        native: nativeState,
+      });
+      observedSealKeys.push(key);
+      if (key) void clearAllRelays();
+    };
+    let rejectNativeStart!: (reason: Error) => void;
+    let signalNativeStart!: () => void;
+    const nativeStartEntered = new Promise<void>((resolve) => { signalNativeStart = resolve; });
+
+    const operation = runWatchConnectSingleFlight(operationHolder, () => startWatchConnectAction({
+      scope: 'personal',
+      baseUrl: 'https://tracklab.example',
+      enrollmentRequestId: 'watch-connect-enrollment-failed-ordering',
+      connectionRequestId: 'watch-connect-connection-failed-ordering',
+    }, {
+      getIdentity: async () => ({ version: 1, installId: `wci_${'a'.repeat(64)}` }),
+      getNativeState: async () => nativeState,
+      enroll: async () => ({ enrollment, replayed: false }),
+      createConnection: async () => ({
+        connection: pending,
+        credentials: {
+          connectionId: pending.id,
+          pairingId: 'pairing-failed-ordering',
+          relaySessionId: `watch-connect:${pending.id}`,
+          ingestToken: 'private-test-token',
+          expiresAt: pending.connectedUntil,
+        },
+        replayed: false,
+      }),
+      onConnectionCreated: ({ connection: prepared }) => {
+        preparedIdentity = prepared;
+      },
+      startNative: () => {
+        // This is the real problematic ordering: native publishes exact B
+        // synchronously, before the native-start promise settles.
+        nativeState = nativeConnecting;
+        reconcileBoundary();
+        signalNativeStart();
+        return new Promise((_, reject) => { rejectNativeStart = reject; });
+      },
+      stopNative: async () => {
+        nativeState = nativeSyncing;
+        reconcileBoundary();
+        return nativeSyncing;
+      },
+      disconnectConnection: async () => authoritativeStopped,
+    }));
+
+    await nativeStartEntered;
+    expect(preparedIdentity).toBe(pending);
+    expect(operationHolder.current).toBe(operation);
+    expect(clearAllRelays).not.toHaveBeenCalled();
+
+    rejectNativeStart(new Error('Apple Watch stopped before start completed.'));
+    await expect(operation).rejects.toThrow('Apple Watch stopped before start completed.');
+    await Promise.resolve();
+    expect(operationHolder.current).toBeNull();
+    expect(nativeState.state).toBe('syncing');
+
+    // The coordinator catch can still receive the old cloud snapshot. Exact B
+    // stays prepared, so it cannot be mistaken for a previous account.
+    reconcileBoundary();
+    expect(preparedIdentity).toBe(pending);
+
+    // Only the authoritative stopped snapshot permits terminal reconciliation
+    // to release the prepared identity.
+    snapshotConnections = [authoritativeStopped];
+    reconcileBoundary();
+    expect(preparedIdentity).toBe(pending);
+    preparedIdentity = null;
+    reconcileBoundary();
+
+    expect(observedSealKeys).toEqual([null, null, null, null, null]);
+    expect(preparedIdentity).toBeNull();
+    expect(clearAllRelays).not.toHaveBeenCalled();
+
+    const source = readFileSync(
+      new URL('../../src/components/WatchConnectCoordinator.tsx', import.meta.url),
+      'utf8',
+    );
+    const pendingEffect = source.slice(
+      source.indexOf('const pending = pendingStartConnectionRef.current;'),
+      source.indexOf('const connect = useCallback', source.indexOf('const pending = pendingStartConnectionRef.current;')),
+    );
+    const terminalReconciliation = pendingEffect.slice(pendingEffect.indexOf('const terminal ='));
+    expect(terminalReconciliation.indexOf('const { connection: stopped }'))
+      .toBeLessThan(terminalReconciliation.indexOf('pendingStartConnectionRef.current = null'));
+    const actionCatch = source.slice(
+      source.indexOf('} catch (error) {', source.indexOf('const connect = useCallback')),
+      source.indexOf('} finally {', source.indexOf('} catch (error) {', source.indexOf('const connect = useCallback'))),
+    );
+    expect(actionCatch).not.toContain('pendingStartConnectionRef.current = null');
   });
 
   it('seals unmatched error and reconnect identities but keeps exact same-account history', () => {

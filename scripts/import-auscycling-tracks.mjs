@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import { normalizePhoneNumber } from './lib/track-contact-fields.mjs';
 
 const sourceUrl = 'https://auscycling.org.au/find-a-club';
 const apiBase = 'https://func-prod-finder-api.azurewebsites.net/api/v2/public-api/club-finder';
@@ -97,6 +98,7 @@ const tracks = clubs
       coordinateSource: 'AusCycling Club Finder API',
       coordinateAccuracy: location.isApproximate ? 'provider-approximate' : 'provider-coordinate',
       websiteUrl: clean(club.website) || undefined,
+      phoneNumber: normalizePhoneNumber(club.phone),
       lengthMeters: 350,
       elevationMeters: 0,
       surface: 'BMX Racing club location',

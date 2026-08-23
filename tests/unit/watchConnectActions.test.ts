@@ -127,6 +127,39 @@ describe('Watch Connect actions', () => {
     });
   });
 
+  it('publishes the credential-free server identity before native can emit connecting', async () => {
+    const order: string[] = [];
+    const onConnectionCreated = vi.fn((prepared) => {
+      order.push('server-created');
+      expect(prepared).toEqual({ enrollment, connection });
+      expect(JSON.stringify(prepared)).not.toContain('private-ingest-token');
+    });
+    const startNative = vi.fn(async () => {
+      order.push('native-start');
+      return {
+        state: 'connected' as const,
+        scope: 'personal' as const,
+        connectionId: connection.id,
+        sessionId: `watch-connect:${connection.id}`,
+        connectedUntil: connection.connectedUntil,
+        remainingMs: watchConnectSessionDurationMs,
+        requiresUserStart: false,
+        workoutReady: true,
+        relayConfigured: true,
+      };
+    });
+
+    await startWatchConnectAction({
+      scope: 'personal',
+      baseUrl: 'https://tracklab.example',
+      enrollmentRequestId: 'watch-connect-enroll-ordering',
+      connectionRequestId: 'watch-connect-session-ordering',
+    }, dependencies({ onConnectionCreated, startNative }));
+
+    expect(order).toEqual(['server-created', 'native-start']);
+    expect(onConnectionCreated).toHaveBeenCalledOnce();
+  });
+
   it('does first studio setup once, then reconnects after reload and five hours with saved consent', async () => {
     const studioEnrollment: WatchConnectEnrollment = {
       ...enrollment,

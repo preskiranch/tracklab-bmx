@@ -10252,6 +10252,7 @@ export default function App() {
         onLegacyRelaySuppressionChange={handleLegacyRelaySuppressionChange}
         onLiveHeartRateReadingsChange={setLiveHeartRateByRider}
         onMessage={setHeartRateMessage}
+        onOpenSettings={() => handleHeartRateAccountBlockOpenSettings(true)}
         ownedStudio={ownedClub ? { clubId: ownedClub.id, clubName: ownedClub.name } : null}
         settingsOpen={settingsMode}
         preferPersonal={Boolean(ownedClub)}
@@ -10368,6 +10369,9 @@ export default function App() {
       {heartRateStudioInviteDialog}
       {heartRateAccountBlockCoordinator}
       {watchConnectCoordinator}
+      {!clubTabletKioskMode && (
+        raceViewFullscreen || mappingFullscreen || exploreRideFullscreen || utilityFullscreen
+      ) && <div className="watch-connect-indicator-slot fullscreen" id="watch-connect-indicator-slot" />}
       {clubOwnerPreparationDialogVisible && (
         <Suspense fallback={null}>
           <ClubOwnerTrainingPreparationDialog
@@ -10895,6 +10899,9 @@ export default function App() {
             </>
           ) : (
           <>
+          {!(
+            raceViewFullscreen || mappingFullscreen || exploreRideFullscreen || utilityFullscreen
+          ) && <div className="watch-connect-indicator-slot" id="watch-connect-indicator-slot" />}
           <button
             className={appMode === 'profile' ? 'selected' : ''}
             type="button"

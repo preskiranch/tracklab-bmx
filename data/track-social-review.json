@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-08-23",
+  "policy": "Only account/channel links directly exposed by an exact track, club, or facility page are eligible; platform, municipality, media, and general BMX channels are rejected.",
+  "decisions": [
+    {
+      "trackId": "osm-it-agsm-aim-bmx-olympic-arena-verona-way-624493127",
+      "service": "youtube",
+      "url": "https://www.youtube.com/channel/UC-9aN-onsm7yt5cdJwXzsSw",
+      "decision": "verified",
+      "reason": "The exact Team BMX Verona website links this channel, whose official page title is Team BMX Verona."
+    },
+    {
+      "trackId": "auscycling-big-rivers-bmx-club-12e815",
+      "service": "youtube",
+      "url": "https://www.youtube.com/user/TeamAppVideos",
+      "decision": "rejected",
+      "reason": "The channel belongs to the Team App hosting platform, not Big Rivers BMX Club."
+    },
+    {
+      "trackId": "osm-de-bikeparcours-friedrichshafen-way-131972185",
+      "service": "youtube",
+      "url": "https://www.youtube.com/user/StadtFN",
+      "decision": "rejected",
+      "reason": "The channel is the general City of Friedrichshafen account, not a track or BMX club account."
+    },
+    {
+      "trackId": "osm-nl-bmx-apeldoorn-node-2685595929",
+      "service": "youtube",
+      "url": "https://youtube.com/@BMX-Apeldoorn",
+      "decision": "verified",
+      "reason": "The exact BMX Apeldoorn website labels this YouTube link and the channel title is BMX Apeldoorn."
+    },
+    {
+      "trackId": "auscycling-bsx-bicycle-supercross-inc-12e959",
+      "service": "youtube",
+      "url": "https://www.youtube.com/channel/UCjYzgIsxr7FUNrj7-O9U38g",
+      "decision": "rejected",
+      "reason": "The channel is eciimports and is not identified as the BSX track or club account."
+    },
+    {
+      "trackId": "auscycling-bsx-bicycle-supercross-inc-12e959",
+      "service": "youtube",
+      "url": "https://www.youtube.com/user/bmxultradotcom",
+      "decision": "rejected",
+      "reason": "The channel is the general BMXUltra media account, not the BSX track or club account."
+    },
+    {
+      "trackId": "osm-es-circuito-bmx-show-time-way-321854699",
+      "service": "youtube",
+      "url": "https://www.youtube.com/user/SHOWTIMEBMXTV",
+      "decision": "verified",
+      "reason": "The exact club site calls this the organizing Show Time BMX club channel and its title is ShowTime BMX."
+    },
+    {
+      "trackId": "osm-gb-cornwall-bmx-racing-club-way-573584821",
+      "service": "youtube",
+      "url": "https://www.youtube.com/channel/UCXAW6I6WLmigwjP0zPFrh0w",
+      "decision": "verified",
+      "reason": "The exact Cornwall BMX site labels this YouTube link; the channel identifies itself as Cornwall BMX Racing Club, UK."
+    },
+    {
+      "trackId": "osm-nl-f-c-c-ammersoyen-way-154664016",
+      "service": "youtube",
+      "url": "https://www.youtube.com/user/FilmFCCAmmersoyen",
+      "decision": "verified",
+      "reason": "The exact F.C.C. Ammersoyen website links the FilmFCCAmmersoyen channel."
+    },
+    {
+      "trackId": "osm-nl-fcv-de-lochsprinters-node-5821253397",
+      "service": "youtube",
+      "url": "https://www.youtube.com/user/Lochsprinters",
+      "decision": "verified",
+      "reason": "The exact club site says to follow it on YouTube and links the FCV de Lochsprinters channel."
+    },
+    {
+      "trackId": "auscycling-happy-valley-bmx-club-12e87f",
+      "service": "youtube",
+      "url": "https://www.youtube.com/@SWIBMX",
+      "decision": "verified",
+      "reason": "The exact facility site states it is home to Happy Valley BMX Club and links the Sam Willoughby International BMX Facility channel."
+    },
+    {
+      "trackId": "auscycling-macarthur-bmx-club-12eaa5",
+      "service": "youtube",
+      "url": "https://www.youtube.com/channel/UC2mlgif8G5xITWIfLr1gCyw",
+      "decision": "verified",
+      "reason": "The exact Macarthur BMX site labels this YouTube link; the channel title is Macarthur Pirates BMX."
+    },
+    {
+      "trackId": "auscycling-mildura-bmx-club-12e9bd",
+      "service": "youtube",
+      "url": "https://youtube.com/@MilduraStorm",
+      "decision": "verified",
+      "reason": "The exact Mildura BMX site links this account and the channel title is Mildura Storm BMX Club."
+    },
+    {
+      "trackId": "auscycling-northern-bmx-club-12e9c9",
+      "service": "tiktok",
+      "url": "https://www.tiktok.com/@northernbmx",
+      "decision": "verified",
+      "reason": "The exact Northern BMX Club website labels and links the matching @northernbmx TikTok account."
+    },
+    {
+      "trackId": "osm-de-rad-cross-bahn-way-1314335920",
+      "service": "youtube",
+      "url": "https://www.youtube.com/user/StadtVerl",
+      "decision": "rejected",
+      "reason": "The channel is the general official City of Verl account, not the Rad-Cross-Bahn or a BMX club account."
+    },
+    {
+      "trackId": "osm-gb-royston-bmx-club-way-187037812",
+      "service": "youtube",
+      "url": "https://youtube.com/@roystonrocketsbmx",
+      "decision": "verified",
+      "reason": "The exact Royston Rockets site links this channel, which identifies itself as Royston Rockets BMX Racing Club."
+    },
+    {
+      "trackId": "auscycling-southern-city-bmx-club-12e855",
+      "service": "youtube",
+      "url": "https://www.youtube.com/channel/UCbmWeRYLVx-nfdaTL5Xidww",
+      "decision": "verified",
+      "reason": "The exact Southern City BMX Club site links this channel and its title exactly matches the club."
+    },
+    {
+      "trackId": "bmxnz-southland-bmx-club",
+      "service": "youtube",
+      "url": "https://www.youtube.com/user/cometosouthland",
+      "decision": "rejected",
+      "reason": "The channel belongs to the general Southland regional tourism organization, not Southland BMX Club or Elizabeth Park."
+    },
+    {
+      "trackId": "osm-it-team-bmx-panther-boys-padova-node-7687784145",
+      "service": "youtube",
+      "url": "https://www.youtube.com/@BMXRvideo",
+      "decision": "rejected",
+      "reason": "The target is BMXR.it, a general Italian BMX racing video channel, not the Panther Boys Padova track or club account."
+    },
+    {
+      "trackId": "auscycling-western-sydney-bmx-club-12eb4d",
+      "service": "tiktok",
+      "url": "https://tiktok.com/@westernsydneybmxclub",
+      "decision": "verified",
+      "reason": "The exact Western Sydney BMX Club website links the matching @westernsydneybmxclub TikTok account."
+    },
+    {
+      "trackId": "auscycling-western-sydney-bmx-club-12eb4d",
+      "service": "youtube",
+      "url": "https://youtube.com/@WesternSydneyBMXClub",
+      "decision": "verified",
+      "reason": "The exact Western Sydney BMX Club website links the matching @WesternSydneyBMXClub channel."
+    }
+  ]
+}

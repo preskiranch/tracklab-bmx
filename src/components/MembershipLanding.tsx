@@ -90,6 +90,7 @@ export function MembershipLanding({
           </div>
         </div>
         <div className="membership-nav-actions">
+          <div className="watch-connect-indicator-slot" id="watch-connect-indicator-slot" />
           <a className="secondary-button" href="#track-locator">
             <MapPinned size={16} />
             Find a Track

@@ -46,4 +46,26 @@ OpenStreetMap-derived records are subject to the Open Database License. Source U
 
 `npm run tracks:build` rebuilds compressed catalog assets and fails when it finds duplicate IDs, invalid coordinates, invalid source URLs, unknown providers, or an official/federation record without an address and source provenance.
 
+Optional track contact fields are `facebookUrl`, `instagramUrl`, `tiktokUrl`,
+`youtubeUrl`, and `phoneNumber`. Facebook and Instagram continue to come from
+normalized source metadata. TikTok and YouTube are fail-closed: normal builds
+remove unreviewed imported values, then overlay only the exact track/account
+pairs in `data/track-social-links.json`. Account-content URLs, lookalike hosts,
+ambiguous facilities, generic federation/media channels, and unreviewed
+duplicates are rejected.
+Phone numbers retain safe source formatting for display, while the UI derives a
+digits-only `tel:` target with at most one leading `+`. Missing or ambiguous
+contacts are omitted. The USA BMX refresh verifies a track microsite's embedded
+track ID and name before accepting its primary contact phone; the normal catalog
+build never performs that live lookup. AusCycling phones come from its official
+Club Finder API, and supplemental OpenStreetMap phone tags remain attributed to
+their original OSM record.
+
+`npm run tracks:social:audit` is the explicit network-enabled enrichment step.
+It evaluates all 1,305 catalog records, follows only retained exact source pages
+and exact USA BMX microsites, records exclusions and network errors, and writes
+the reviewed registry plus `data/audits/track-social-audit.json`. The ordinary
+`tracks:build` path remains deterministic and offline, and validation requires
+the full and locator databases to match the reviewed registry exactly.
+
 The generated database includes coverage totals by country and verification status. Public mappings saved by users continue to be synchronized independently through the TrackLab cloud mapping API.

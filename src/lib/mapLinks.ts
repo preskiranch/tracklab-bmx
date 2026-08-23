@@ -28,6 +28,19 @@ export function trackAppleMapsUrl(track: MapLinkTrack) {
   return url.toString();
 }
 
+export function trackGoogleMapsDirectionsUrl(track: MapLinkTrack) {
+  const url = new URL('https://www.google.com/maps/dir/');
+  url.searchParams.set('api', '1');
+  url.searchParams.set('destination', coordinatePair(track));
+  return url.toString();
+}
+
+export function trackAppleMapsDirectionsUrl(track: MapLinkTrack) {
+  const url = new URL('https://maps.apple.com/');
+  url.searchParams.set('daddr', coordinatePair(track));
+  return url.toString();
+}
+
 export function trackGoogleEarthUrl(track: MapLinkTrack) {
   return `https://earth.google.com/web/search/${encodeURIComponent(coordinatePair(track))}`;
 }

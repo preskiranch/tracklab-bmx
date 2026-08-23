@@ -405,15 +405,30 @@ final class HeartRateCoordinator: NSObject {
             session.stopActivity(with: Date())
             return
         }
+        if expectedSessionId.hasPrefix("watch-connect:"),
+           !WatchConnectSessionManager.shared.shouldAwaitMirroredReconnect(
+               workoutSessionId: expectedSessionId
+           ) {
+            // HealthKit may deliver a replacement mirror after Watch-ended,
+            // expiry, an explicit stop, or an account boundary. The persisted
+            // four-hour lifecycle is authoritative over that late transport.
+            session.stopActivity(with: Date())
+            return
+        }
         if let existingHandler = mirroredWorkoutHandler {
             if existingHandler.owns(session) { return }
-            if [.active, .paused].contains(latestStatus.state) {
+            if existingHandler.isInvalidated {
+                // A HealthKit replacement mirror can arrive before the old
+                // handler's queued main-thread disconnect cleanup. Retire only
+                // that already-invalid transport and accept the replacement.
+                mirroredWorkoutHandler = nil
+                mirroredHandlerToken = nil
+            } else {
+                // A genuinely concurrent live mirror is not a replacement.
+                // Stopping the candidate preserves the authoritative handler.
                 session.stopActivity(with: Date())
                 return
             }
-            mirroredWorkoutHandler = nil
-            mirroredHandlerToken = nil
-            existingHandler.quarantine()
         }
         let handlerToken = UUID()
         let handler = MirroredWorkoutHandler(
@@ -428,10 +443,11 @@ final class HeartRateCoordinator: NSObject {
                     handlerToken: handlerToken
                 )
             },
-            onState: { [weak self] state, message in
+            onState: { [weak self] state, message, transitionDate in
                 self?.updateMirroredStatus(
                     state,
                     message: message,
+                    at: transitionDate,
                     expectedSessionId: expectedSessionId,
                     generation: generation,
                     handlerToken: handlerToken
@@ -439,6 +455,14 @@ final class HeartRateCoordinator: NSObject {
             },
             onIdentityMismatch: { [weak self] in
                 self?.rejectMirroredIdentity(
+                    expectedSessionId: expectedSessionId,
+                    generation: generation,
+                    handlerToken: handlerToken
+                )
+            },
+            onDisconnect: { [weak self] errorMessage in
+                self?.handleMirroredDisconnect(
+                    errorMessage: errorMessage,
                     expectedSessionId: expectedSessionId,
                     generation: generation,
                     handlerToken: handlerToken
@@ -507,6 +531,7 @@ final class HeartRateCoordinator: NSObject {
     private func updateMirroredStatus(
         _ state: TrackLabHeartRateState,
         message: String?,
+        at transitionDate: Date,
         expectedSessionId: String,
         generation: UUID,
         handlerToken: UUID
@@ -515,7 +540,7 @@ final class HeartRateCoordinator: NSObject {
             guard self.activeSessionId == expectedSessionId,
                   self.activeGeneration == generation,
                   self.mirroredHandlerToken == handlerToken else { return }
-            self.updateStatus(state, message: message)
+            self.updateStatus(state, message: message, at: transitionDate)
         }
     }
 
@@ -528,13 +553,71 @@ final class HeartRateCoordinator: NSObject {
         DispatchQueue.main.async {
             guard self.activeSessionId == expectedSessionId,
                   self.activeGeneration == generation,
-                  self.mirroredHandlerToken == handlerToken else { return }
+                  self.mirroredHandlerToken == handlerToken,
+                  [.launching, .connecting, .active, .paused].contains(
+                    self.latestStatus.state
+                  ) else { return }
             self.mirroredWorkoutHandler = nil
             self.mirroredHandlerToken = nil
             self.updateStatus(
                 .connecting,
                 message: "Ignored an Apple Watch workout from an earlier connection."
             )
+        }
+    }
+
+    /// A mirrored iPhone session is only a transport endpoint for the primary
+    /// workout that remains authoritative on Apple Watch. HealthKit invalidates
+    /// this mirrored object when transport drops and automatically delivers a
+    /// new one through `workoutSessionMirroringStartHandler` if the Watch
+    /// workout is still running. Keep the exact account/session generation
+    /// alive, discard only the invalid transport object, and wait for that
+    /// replacement instead of stopping the athlete's Watch workout.
+    @available(iOS 17.0, *)
+    private func handleMirroredDisconnect(
+        errorMessage: String?,
+        expectedSessionId: String,
+        generation: UUID,
+        handlerToken: UUID
+    ) {
+        DispatchQueue.main.async {
+            guard self.activeSessionId == expectedSessionId,
+                  self.activeGeneration == generation,
+                  self.mirroredHandlerToken == handlerToken,
+                  [.launching, .connecting, .active, .paused].contains(
+                    self.latestStatus.state
+                  ) else { return }
+            self.mirroredWorkoutHandler?.detachInvalidTransport()
+            self.mirroredWorkoutHandler = nil
+            self.mirroredHandlerToken = nil
+            if !expectedSessionId.hasPrefix("watch-connect:") {
+                let detail = errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let message: String
+                if let detail, !detail.isEmpty {
+                    message = "Apple Watch connection interrupted. \(detail)"
+                } else {
+                    message = "Apple Watch connection interrupted."
+                }
+                // Legacy account/studio workouts have no durable four-hour
+                // lifecycle that can authorize an indefinite reconnect state.
+                // Report the lost transport honestly instead of retaining an
+                // active status with no handler. HealthKit can still deliver a
+                // replacement mirror for this exact generation, which will
+                // move the coordinator back to active when it arrives.
+                self.updateStatus(.error, message: message, manageRelayLifecycle: false)
+                return
+            }
+            guard WatchConnectSessionManager.shared.shouldAwaitMirroredReconnect(
+                workoutSessionId: expectedSessionId
+            ) else { return }
+            let detail = errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let message: String
+            if let detail, !detail.isEmpty {
+                message = "Apple Watch connection interrupted. Reconnecting… \(detail)"
+            } else {
+                message = "Apple Watch connection interrupted. Reconnecting…"
+            }
+            self.updateStatus(.connecting, message: message, manageRelayLifecycle: false)
         }
     }
 
@@ -550,13 +633,13 @@ final class HeartRateCoordinator: NSObject {
     private func updateStatus(
         _ state: TrackLabHeartRateState,
         message: String?,
-        manageRelayLifecycle: Bool = true
+        manageRelayLifecycle: Bool = true,
+        at transitionDate: Date = Date()
     ) {
-        let transitionDate = Date()
         if manageRelayLifecycle {
             switch state {
             case .active:
-                HeartRateRelay.shared.resume()
+                HeartRateRelay.shared.resume(at: transitionDate)
             case .paused:
                 HeartRateRelay.shared.pause(at: transitionDate)
             case .ending, .ended:
@@ -767,19 +850,23 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
     private let requiresSessionIdentity: Bool
     private let decoder = JSONDecoder()
     private let onSample: (HeartRateWireSample) -> Void
-    private let onState: (TrackLabHeartRateState, String?) -> Void
+    private let onState: (TrackLabHeartRateState, String?, Date) -> Void
     private let onIdentityMismatch: () -> Void
+    private let onDisconnect: (String?) -> Void
+    private let invalidationLock = NSLock()
     private var identityVerified: Bool
     private var identityRejected = false
     private var pendingLiveState: TrackLabHeartRateState?
+    private var pendingLiveTransitionDate: Date?
 
     init(
         session: HKWorkoutSession,
         sessionId: String?,
         requiresSessionIdentity: Bool,
         onSample: @escaping (HeartRateWireSample) -> Void,
-        onState: @escaping (TrackLabHeartRateState, String?) -> Void,
-        onIdentityMismatch: @escaping () -> Void
+        onState: @escaping (TrackLabHeartRateState, String?, Date) -> Void,
+        onIdentityMismatch: @escaping () -> Void,
+        onDisconnect: @escaping (String?) -> Void
     ) {
         self.session = session
         self.sessionId = sessionId
@@ -788,12 +875,23 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
         self.onSample = onSample
         self.onState = onState
         self.onIdentityMismatch = onIdentityMismatch
+        self.onDisconnect = onDisconnect
         super.init()
         session.delegate = self
     }
 
     func owns(_ candidate: HKWorkoutSession) -> Bool {
         session === candidate
+    }
+
+    /// HealthKit disconnect callbacks are not guaranteed to wait for the
+    /// coordinator's main-queue cleanup. This lock-protected state lets the
+    /// main-thread accept path distinguish an invalid old transport from a
+    /// genuinely concurrent live mirror.
+    var isInvalidated: Bool {
+        invalidationLock.lock()
+        defer { invalidationLock.unlock() }
+        return identityRejected
     }
 
     func pause() {
@@ -809,9 +907,16 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
     }
 
     func quarantine() {
-        guard !identityRejected else { return }
-        identityRejected = true
+        guard markInvalidatedIfNeeded() else { return }
         session.stopActivity(with: Date())
+    }
+
+    /// The system has already invalidated this mirrored transport object. Do
+    /// not call `stopActivity`: that command controls the primary Watch workout
+    /// and would turn a recoverable radio/transport interruption into a real
+    /// workout end.
+    func detachInvalidTransport() {
+        _ = markInvalidatedIfNeeded()
     }
 
     func workoutSession(
@@ -820,7 +925,7 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
         from fromState: HKWorkoutSessionState,
         date: Date
     ) {
-        guard !identityRejected else { return }
+        guard !isInvalidated else { return }
         let mapped: (TrackLabHeartRateState, String?)
         switch toState {
         case .running:
@@ -841,40 +946,45 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
         if !identityVerified {
             if [.active, .paused].contains(mapped.0) {
                 pendingLiveState = mapped.0
+                pendingLiveTransitionDate = date
             }
             if [.ending, .ended].contains(mapped.0) {
                 quarantine()
                 onIdentityMismatch()
                 return
             }
-            onState(.connecting, "Verifying this Apple Watch connection…")
+            onState(.connecting, "Verifying this Apple Watch connection…", date)
             return
         }
-        onState(mapped.0, mapped.1)
+        onState(mapped.0, mapped.1, date)
     }
 
     func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
-        guard !identityRejected else { return }
+        guard !isInvalidated else { return }
         if !identityVerified {
             quarantine()
             onIdentityMismatch()
             return
         }
-        onState(.error, error.localizedDescription)
+        onState(.error, error.localizedDescription, Date())
     }
 
     func workoutSession(
         _ workoutSession: HKWorkoutSession,
         didReceiveDataFromRemoteWorkoutSession data: [Data]
     ) {
-        guard !identityRejected else { return }
+        guard !isInvalidated else { return }
         data.forEach { payload in
-            guard !identityRejected else { return }
+            guard !isInvalidated else { return }
+            let maximumMeasuredAt = Date().timeIntervalSince1970 * 1_000 + 60_000
             guard let sample = try? decoder.decode(HeartRateWireSample.self, from: payload),
                   sample.version == HeartRateWireSample.currentVersion,
                   sample.bpm.isFinite,
                   sample.bpm >= 20,
-                  sample.bpm <= 260 else {
+                  sample.bpm <= 260,
+                  sample.measuredAt.isFinite,
+                  sample.measuredAt >= 0,
+                  sample.measuredAt <= maximumMeasuredAt else {
                 return
             }
             if let receivedSessionId = sample.sessionId,
@@ -898,7 +1008,15 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
             }
             if !identityVerified {
                 identityVerified = true
-                onState(pendingLiveState == .paused ? .paused : .active, nil)
+                let transitionDate = pendingLiveTransitionDate
+                    ?? Date(timeIntervalSince1970: sample.measuredAt / 1_000)
+                onState(
+                    pendingLiveState == .paused ? .paused : .active,
+                    nil,
+                    transitionDate
+                )
+                pendingLiveState = nil
+                pendingLiveTransitionDate = nil
             }
             if sample.sessionId == nil, let sessionId {
                 onSample(HeartRateWireSample(
@@ -918,12 +1036,20 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
         _ workoutSession: HKWorkoutSession,
         didDisconnectFromRemoteDeviceWithError error: Error?
     ) {
-        guard !identityRejected else { return }
-        if !identityVerified {
-            quarantine()
-            onIdentityMismatch()
-            return
-        }
-        onState(error == nil ? .ended : .error, error?.localizedDescription)
+        guard markInvalidatedIfNeeded() else { return }
+        // Apple documents this mirrored session as invalid after the callback;
+        // the primary Watch workout remains running and HealthKit retries the
+        // mirror automatically. A transport disconnect is not proof of an
+        // identity mismatch, even when it occurs before the first sample.
+        onDisconnect(error?.localizedDescription)
+    }
+
+    @discardableResult
+    private func markInvalidatedIfNeeded() -> Bool {
+        invalidationLock.lock()
+        defer { invalidationLock.unlock() }
+        guard !identityRejected else { return false }
+        identityRejected = true
+        return true
     }
 }

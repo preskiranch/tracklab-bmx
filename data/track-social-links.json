@@ -1,0 +1,268 @@
+{
+  "schemaVersion": 1,
+  "auditedAt": "2026-08-23T21:45:34.552Z",
+  "tracksEvaluated": 1305,
+  "links": [
+    {
+      "trackId": "auscycling-happy-valley-bmx-club-12e87f",
+      "youtube": {
+        "url": "https://www.youtube.com/@SWIBMX",
+        "sourceUrl": "https://www.swibmx.au/",
+        "requestedSourceUrl": "https://www.swibmx.au/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor",
+            "anchorText": "YouTub"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "YouTub"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "auscycling-macarthur-bmx-club-12eaa5",
+      "youtube": {
+        "url": "https://www.youtube.com/channel/UC2mlgif8G5xITWIfLr1gCyw",
+        "sourceUrl": "https://macarthurbmx.com.au/",
+        "requestedSourceUrl": "https://macarthurbmx.com.au/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor",
+            "anchorText": "Youtube"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "Youtube"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "auscycling-mildura-bmx-club-12e9bd",
+      "youtube": {
+        "url": "https://youtube.com/@MilduraStorm",
+        "sourceUrl": "https://www.mildurabmx.com.au/",
+        "requestedSourceUrl": "https://www.mildurabmx.com.au/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "@MilduraStorm"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "auscycling-northern-bmx-club-12e9c9",
+      "tiktok": {
+        "url": "https://www.tiktok.com/@northernbmx",
+        "sourceUrl": "https://www.nbmx.com.au/",
+        "requestedSourceUrl": "http://www.nbmx.com.au/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "TikTok"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "auscycling-southern-city-bmx-club-12e855",
+      "youtube": {
+        "url": "https://www.youtube.com/channel/UCbmWeRYLVx-nfdaTL5Xidww",
+        "sourceUrl": "https://www.southerncitybmx.com.au/",
+        "requestedSourceUrl": "https://www.southerncitybmx.com.au/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "White YouTube Icon"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "auscycling-western-sydney-bmx-club-12eb4d",
+      "tiktok": {
+        "url": "https://tiktok.com/@westernsydneybmxclub",
+        "sourceUrl": "https://wsbmx.org.au/",
+        "requestedSourceUrl": "https://wsbmx.org.au/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "@westernsydneybmxclub?_t=8a7pKQTBDCk&_r=1"
+          }
+        ]
+      },
+      "youtube": {
+        "url": "https://youtube.com/@WesternSydneyBMXClub",
+        "sourceUrl": "https://wsbmx.org.au/",
+        "requestedSourceUrl": "https://wsbmx.org.au/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "@WesternSydneyBMXClub"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "osm-es-circuito-bmx-show-time-way-321854699",
+      "youtube": {
+        "url": "https://www.youtube.com/user/SHOWTIMEBMXTV",
+        "sourceUrl": "http://showtimebmx.blogspot.com/",
+        "requestedSourceUrl": "http://showtimebmx.blogspot.com.es/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor",
+            "anchorText": "&nbsp;a través del canal de Youtube del club organizador, el&nbsp;Show Time BMX"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "a través del canal de Youtube del club organizador, el Show Time BMX"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "osm-gb-cornwall-bmx-racing-club-way-573584821",
+      "youtube": {
+        "url": "https://www.youtube.com/channel/UCXAW6I6WLmigwjP0zPFrh0w",
+        "sourceUrl": "https://cornwallbmx.co.uk/",
+        "requestedSourceUrl": "https://www.cornwallbmx.co.uk/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor",
+            "anchorText": "Youtube"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "Youtube"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "osm-gb-royston-bmx-club-way-187037812",
+      "youtube": {
+        "url": "https://youtube.com/@roystonrocketsbmx",
+        "sourceUrl": "https://roystonrockets.co.uk/",
+        "requestedSourceUrl": "https://roystonrockets.co.uk/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor"
+          },
+          {
+            "method": "browser-anchor"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "osm-it-agsm-aim-bmx-olympic-arena-verona-way-624493127",
+      "youtube": {
+        "url": "https://www.youtube.com/channel/UC-9aN-onsm7yt5cdJwXzsSw",
+        "sourceUrl": "https://www.teambmxverona.it/",
+        "requestedSourceUrl": "https://www.teambmxverona.it/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor"
+          },
+          {
+            "method": "browser-anchor"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "osm-nl-bmx-apeldoorn-node-2685595929",
+      "youtube": {
+        "url": "https://youtube.com/@BMX-Apeldoorn",
+        "sourceUrl": "https://www.bmxapeldoorn.nl/",
+        "requestedSourceUrl": "https://www.bmxapeldoorn.nl/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor",
+            "anchorText": "YouTube"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "YouTube"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "osm-nl-f-c-c-ammersoyen-way-154664016",
+      "youtube": {
+        "url": "https://www.youtube.com/user/FilmFCCAmmersoyen",
+        "sourceUrl": "https://www.fcc-ammersoyen.nl/",
+        "requestedSourceUrl": "https://www.fcc-ammersoyen.nl/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "YouTube - White Circle"
+          }
+        ]
+      }
+    },
+    {
+      "trackId": "osm-nl-fcv-de-lochsprinters-node-5821253397",
+      "youtube": {
+        "url": "https://www.youtube.com/user/Lochsprinters",
+        "sourceUrl": "https://lochsprinters.nl/",
+        "requestedSourceUrl": "https://lochsprinters.nl/",
+        "sourceKind": "exact-official-website",
+        "evidence": [
+          {
+            "method": "html-anchor",
+            "anchorText": "Youtube"
+          },
+          {
+            "method": "html-anchor",
+            "anchorText": "Volg ons op Youtube"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "Youtube"
+          },
+          {
+            "method": "browser-anchor",
+            "anchorText": "Volg ons op Youtube"
+          }
+        ]
+      }
+    }
+  ]
+}

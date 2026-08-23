@@ -1,8 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Apple, ExternalLink, Globe2, Instagram, Landmark, MapPin, Navigation, Search, Users } from 'lucide-react';
 import {
-  trackAppleMapsUrl,
-  trackGoogleMapsUrl,
+  Apple,
+  ExternalLink,
+  Globe2,
+  Instagram,
+  Landmark,
+  MapPin,
+  Music2,
+  Navigation,
+  Phone,
+  Search,
+  Users,
+  Youtube,
+} from 'lucide-react';
+import {
+  trackAppleMapsDirectionsUrl,
+  trackGoogleMapsDirectionsUrl,
   trackGoogleEarthUrl,
 } from '../lib/mapLinks';
 import { trackExternalLinks } from '../lib/trackExternalLinks';
@@ -148,7 +161,9 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
             <h2 id="public-track-locator-title">Find a BMX racing track</h2>
             <p>Search verified federation directories and community track records, then inspect each track in your preferred mapping app.</p>
           </div>
-          <strong>{directoryReady ? `${directoryTracks.length.toLocaleString()} tracks` : 'Loading directory'}</strong>
+          <strong>{directoryReady
+            ? `${directoryTracks.length.toLocaleString()} ${directoryTracks.length === 1 ? 'track' : 'tracks'}`
+            : 'Loading directory'}</strong>
         </header>
 
         <div className="public-locator-layout">
@@ -212,10 +227,13 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                 {(selectedExternalLinks.websiteUrl
                   || selectedExternalLinks.facebookUrl
                   || selectedExternalLinks.instagramUrl
+                  || selectedExternalLinks.tiktokUrl
+                  || selectedExternalLinks.youtubeUrl
+                  || selectedExternalLinks.phoneHref
                   || selectedExternalLinks.federationUrl) && (
                   <nav
                     className="public-track-official-links"
-                    aria-label={`Official links for ${selectedTrack.name}`}
+                    aria-label={`Social and contact links for ${selectedTrack.name}`}
                   >
                     {selectedExternalLinks.websiteUrl && (
                       <a href={selectedExternalLinks.websiteUrl} target="_blank" rel="noopener noreferrer">
@@ -230,6 +248,25 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                     {selectedExternalLinks.instagramUrl && (
                       <a href={selectedExternalLinks.instagramUrl} target="_blank" rel="noopener noreferrer">
                         <Instagram size={17} /> Instagram
+                      </a>
+                    )}
+                    {selectedExternalLinks.tiktokUrl && (
+                      <a href={selectedExternalLinks.tiktokUrl} target="_blank" rel="noopener noreferrer">
+                        <Music2 size={17} /> TikTok
+                      </a>
+                    )}
+                    {selectedExternalLinks.youtubeUrl && (
+                      <a href={selectedExternalLinks.youtubeUrl} target="_blank" rel="noopener noreferrer">
+                        <Youtube size={17} /> YouTube
+                      </a>
+                    )}
+                    {selectedExternalLinks.phoneHref && selectedExternalLinks.phoneNumber && (
+                      <a
+                        className="public-track-phone-link"
+                        href={selectedExternalLinks.phoneHref}
+                        aria-label={`Call ${selectedTrack.name} at ${selectedExternalLinks.phoneNumber}`}
+                      >
+                        <Phone size={17} /> {selectedExternalLinks.phoneNumber}
                       </a>
                     )}
                     {selectedExternalLinks.federationUrl && selectedExternalLinks.federationName && (
@@ -252,16 +289,32 @@ export function PublicTrackLocator({ catalogReady, tracks }: PublicTrackLocatorP
                     <p>{selectedTrack.address ?? trackLocation(selectedTrack)}</p>
                     <small>Listed by {selectedTrack.source}</small>
                   </div>
-                  <div className="public-track-actions" aria-label={`Track links for ${selectedTrack.name}`}>
-                    <a href={trackAppleMapsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
-                      <Apple size={16} /> Apple Maps
-                    </a>
-                    <a href={trackGoogleMapsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
-                      <Navigation size={16} /> Google Maps
-                    </a>
-                    <a href={trackGoogleEarthUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
-                      <ExternalLink size={16} /> Open Earth
-                    </a>
+                  <div className="public-track-link-groups" aria-label={`Map links for ${selectedTrack.name}`}>
+                    <div className="public-track-link-group" role="group" aria-label={`Directions to ${selectedTrack.name}`}>
+                      <span>Directions</span>
+                      <div className="public-track-actions">
+                        <a href={trackAppleMapsDirectionsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
+                          <Apple size={16} /> Apple Maps
+                        </a>
+                        <a href={trackGoogleMapsDirectionsUrl(selectedTrack)} target="_blank" rel="noopener noreferrer">
+                          <Navigation size={16} /> Google Maps
+                        </a>
+                      </div>
+                    </div>
+                    <div className="public-track-link-group public-track-earth-group" role="group" aria-label="Explore in 3D—not directions">
+                      <span>Explore in 3D</span>
+                      <div className="public-track-actions">
+                        <a
+                          href={trackGoogleEarthUrl(selectedTrack)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`Explore ${selectedTrack.name} in Google Earth—not turn-by-turn directions`}
+                        >
+                          <ExternalLink size={16} /> Google Earth
+                        </a>
+                      </div>
+                      <small>3D exploration—not turn-by-turn directions.</small>
+                    </div>
                   </div>
                 </div>
               </>

@@ -950,6 +950,9 @@ export type TrackRecord = {
   websiteUrl?: string;
   facebookUrl?: string;
   instagramUrl?: string;
+  tiktokUrl?: string;
+  youtubeUrl?: string;
+  phoneNumber?: string;
   federationName?: string;
   federationUrl?: string;
   lengthMeters: number;
@@ -987,6 +990,9 @@ export type TrackLocatorRecord = Pick<TrackRecord,
   | 'websiteUrl'
   | 'facebookUrl'
   | 'instagramUrl'
+  | 'tiktokUrl'
+  | 'youtubeUrl'
+  | 'phoneNumber'
   | 'federationName'
   | 'federationUrl'
 >;

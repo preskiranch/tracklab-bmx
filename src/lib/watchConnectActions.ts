@@ -33,6 +33,15 @@ export type WatchConnectNativeResult = Readonly<{
 export type WatchConnectActionDependencies = Readonly<{
   getIdentity: () => Promise<WatchConnectIdentity>;
   getNativeState?: () => Promise<WatchConnectNativeResult>;
+  /**
+   * Publishes the credential-free server identity before native iOS starts.
+   * The coordinator uses this exact connection to recognize the synchronous
+   * `connecting` status that startNative may emit before its promise resolves.
+   */
+  onConnectionCreated?: (prepared: Readonly<{
+    enrollment: WatchConnectEnrollment;
+    connection: WatchConnectConnection;
+  }>) => void;
   startNative: (input: WatchConnectNativeStartInput) => Promise<WatchConnectNativeResult>;
   stopNative: () => Promise<WatchConnectNativeResult>;
   enroll?: typeof enrollWatchConnect;
@@ -151,6 +160,14 @@ export async function startWatchConnectAction(
   } catch (error) {
     throw startError(error, true);
   }
+  // Native start can synchronously publish `connecting` through the Capacitor
+  // listener before startNative resolves. Expose only the non-secret server
+  // identity first so that status is recognized as this account's new start,
+  // never mistaken for an earlier account that needs privacy cleanup.
+  dependencies.onConnectionCreated?.({
+    enrollment: enrolled.enrollment,
+    connection: started.connection,
+  });
   let native: WatchConnectNativeResult | null = null;
   try {
     native = await dependencies.startNative({

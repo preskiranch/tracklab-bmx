@@ -4,11 +4,18 @@ import { promisify } from 'node:util';
 import { brotliCompress, constants as zlibConstants, gzip } from 'node:zlib';
 import ts from 'typescript';
 import { applyFederationRegistry, validateFederationRegistry } from './lib/track-federations.mjs';
+import { normalizeTrackContactFields } from './lib/track-contact-fields.mjs';
+import {
+  applyTrackSocialLinkRegistry,
+  validateTrackSocialLinkParity,
+  validateTrackSocialLinkRegistry,
+} from './lib/track-social-links.mjs';
 
 const repoRoot = new URL('..', import.meta.url);
 const importsDir = new URL('../data/imports/', import.meta.url);
 const providersPath = new URL('../data/providers.json', import.meta.url);
 const federationsPath = new URL('../data/federations.json', import.meta.url);
+const socialLinksPath = new URL('../data/track-social-links.json', import.meta.url);
 const seedCatalogPath = new URL('../src/data/trackCatalog.ts', import.meta.url);
 const outputPath = new URL('../public/data/track-database.json', import.meta.url);
 const brotliOutputPath = new URL('../public/data/track-database.json.br', import.meta.url);
@@ -79,69 +86,6 @@ function fallbackGeometry(track) {
   return { outline, centerline };
 }
 
-function normalizeHttpUrl(value) {
-  if (!value) {
-    return undefined;
-  }
-
-  const trimmed = String(value).trim();
-  if (!trimmed || trimmed.length > 2_048) {
-    return undefined;
-  }
-  const candidate = /^https?:\/\//i.test(trimmed)
-    ? trimmed
-    : /^(?:(?:[a-z0-9-]+\.)*(?:facebook|instagram)\.com)(?:[/?#]|$)/i.test(trimmed)
-      ? `https://${trimmed}`
-      : undefined;
-  if (!candidate) {
-    return undefined;
-  }
-
-  try {
-    const url = new URL(candidate);
-    return (
-      (url.protocol === 'http:' || url.protocol === 'https:')
-      && url.hostname
-      && !url.username
-      && !url.password
-    ) ? url.toString() : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isFacebookUrl(value) {
-  const normalized = normalizeHttpUrl(value);
-  if (!normalized) {
-    return false;
-  }
-
-  const hostname = new URL(normalized).hostname.toLowerCase();
-  return hostname === 'facebook.com' || hostname.endsWith('.facebook.com');
-}
-
-function isInstagramUrl(value) {
-  const normalized = normalizeHttpUrl(value);
-  if (!normalized) {
-    return false;
-  }
-
-  const hostname = new URL(normalized).hostname.toLowerCase();
-  return hostname === 'instagram.com' || hostname.endsWith('.instagram.com');
-}
-
-function normalizeSocialUrl(value, service) {
-  const normalized = normalizeHttpUrl(value);
-  const valid = service === 'facebook' ? isFacebookUrl(normalized) : isInstagramUrl(normalized);
-  if (!valid) {
-    return undefined;
-  }
-
-  const url = new URL(normalized);
-  url.protocol = 'https:';
-  return url.toString();
-}
-
 function normalizeTrack(track) {
   const lengthMeters = Number(track.lengthMeters ?? 350);
   const id = track.id || slug(`${track.country || 'unknown'}-${track.state || 'track'}-${track.name}`);
@@ -151,14 +95,7 @@ function normalizeTrack(track) {
   const locatorPoint = track.startGate ?? centerline[0] ?? outline[0];
   const latitude = Number.isFinite(Number(track.latitude)) ? Number(track.latitude) : Number(locatorPoint?.lat);
   const longitude = Number.isFinite(Number(track.longitude)) ? Number(track.longitude) : Number(locatorPoint?.lng);
-  const normalizedWebsiteUrl = normalizeHttpUrl(track.websiteUrl);
-  const normalizedFacebookUrl = normalizeSocialUrl(track.facebookUrl, 'facebook');
-  const normalizedInstagramUrl = normalizeSocialUrl(track.instagramUrl, 'instagram');
-  const websiteUrl = isFacebookUrl(normalizedWebsiteUrl) || isInstagramUrl(normalizedWebsiteUrl)
-    ? undefined
-    : normalizedWebsiteUrl;
-  const facebookUrl = normalizedFacebookUrl ?? normalizeSocialUrl(normalizedWebsiteUrl, 'facebook');
-  const instagramUrl = normalizedInstagramUrl ?? normalizeSocialUrl(normalizedWebsiteUrl, 'instagram');
+  const contactFields = normalizeTrackContactFields(track);
 
   return {
     id,
@@ -184,9 +121,7 @@ function normalizeTrack(track) {
     longitude: Number.isFinite(longitude) ? longitude : undefined,
     coordinateSource: track.coordinateSource,
     coordinateAccuracy: track.coordinateAccuracy,
-    websiteUrl,
-    facebookUrl,
-    instagramUrl,
+    ...contactFields,
     federationName: track.federationName,
     federationUrl: track.federationUrl,
     lengthMeters,
@@ -242,6 +177,9 @@ const provenanceFields = [
   'websiteUrl',
   'facebookUrl',
   'instagramUrl',
+  'tiktokUrl',
+  'youtubeUrl',
+  'phoneNumber',
   'federationName',
   'federationUrl',
   'sourceRecord',
@@ -407,9 +345,10 @@ async function loadImportedTracks() {
   return imports.flat();
 }
 
-const [providers, federationRegistry, seedTracks, importedTracks] = await Promise.all([
+const [providers, federationRegistry, socialLinkRegistry, seedTracks, importedTracks] = await Promise.all([
   readFile(providersPath, 'utf8').then(JSON.parse),
   readFile(federationsPath, 'utf8').then(JSON.parse),
+  readFile(socialLinksPath, 'utf8').then(JSON.parse),
   loadSeedCatalog(),
   loadImportedTracks(),
 ]);
@@ -452,10 +391,23 @@ const byId = new Map();
   byId.set(track.id, existing ? mergeTrack(existing, track) : track);
 });
 
-const catalogTracks = applyFederationRegistry(
+const baseCatalogTracks = applyFederationRegistry(
   dedupeCatalogTracks([...byId.values()]),
   federationRegistry,
 );
+const socialLinkRegistryErrors = validateTrackSocialLinkRegistry(socialLinkRegistry, baseCatalogTracks);
+if (socialLinkRegistryErrors.length > 0) {
+  throw new Error(`Invalid track social-link registry:\n- ${socialLinkRegistryErrors.join('\n- ')}`);
+}
+const catalogTracks = applyTrackSocialLinkRegistry(baseCatalogTracks, socialLinkRegistry);
+const socialLinkParityErrors = validateTrackSocialLinkParity(
+  socialLinkRegistry,
+  catalogTracks,
+  'generated track database',
+);
+if (socialLinkParityErrors.length > 0) {
+  throw new Error(`Invalid generated track social links:\n- ${socialLinkParityErrors.join('\n- ')}`);
+}
 
 const databaseBody = {
   providerCount: providers.length,
@@ -502,6 +454,9 @@ const locatorFields = [
   'websiteUrl',
   'facebookUrl',
   'instagramUrl',
+  'tiktokUrl',
+  'youtubeUrl',
+  'phoneNumber',
   'federationName',
   'federationUrl',
 ];

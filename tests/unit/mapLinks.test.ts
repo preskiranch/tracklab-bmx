@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { trackCatalog } from '../../src/data/trackCatalog';
 import {
+  trackAppleMapsDirectionsUrl,
   trackAppleMapsUrl,
+  trackGoogleMapsDirectionsUrl,
   trackGoogleMapsUrl,
   trackGoogleEarthUrl,
 } from '../../src/lib/mapLinks';
@@ -31,6 +33,25 @@ describe('public track map links', () => {
     expect(url.searchParams.has('daddr')).toBe(false);
   });
 
+  it('opens turn-by-turn directions to the selected track in Google Maps', () => {
+    const url = new URL(trackGoogleMapsDirectionsUrl(track));
+
+    expect(url.origin).toBe('https://www.google.com');
+    expect(url.pathname).toBe('/maps/dir/');
+    expect(url.searchParams.get('api')).toBe('1');
+    expect(url.searchParams.get('destination')).toBe(destination);
+    expect(url.searchParams.has('query')).toBe(false);
+  });
+
+  it('opens turn-by-turn directions to the selected track in Apple Maps', () => {
+    const url = new URL(trackAppleMapsDirectionsUrl(track));
+
+    expect(url.origin).toBe('https://maps.apple.com');
+    expect(url.searchParams.get('daddr')).toBe(destination);
+    expect(url.searchParams.has('ll')).toBe(false);
+    expect(url.searchParams.has('q')).toBe(false);
+  });
+
   it('builds a Google Earth location link', () => {
     expect(decodeURIComponent(trackGoogleEarthUrl(track))).toContain(destination);
   });
@@ -49,7 +70,9 @@ describe('public track map links', () => {
       longitude: center.lng,
     };
     const url = new URL(trackGoogleMapsUrl(locatorTrack));
+    const directionsUrl = new URL(trackGoogleMapsDirectionsUrl(locatorTrack));
 
     expect(url.searchParams.get('query')).toBe(`${center.lat},${center.lng}`);
+    expect(directionsUrl.searchParams.get('destination')).toBe(`${center.lat},${center.lng}`);
   });
 });

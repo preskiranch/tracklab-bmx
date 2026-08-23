@@ -32,6 +32,7 @@
     "tracks:import:official": "npm run tracks:import:usabmx && npm run tracks:import:ffc && npm run tracks:import:bmxnz && npm run tracks:import:auscycling",
     "tracks:build": "node scripts/build-track-database.mjs && node scripts/validate-track-database.mjs",
     "tracks:validate": "node scripts/validate-track-database.mjs",
+    "tracks:social:audit": "node scripts/audit-track-social-links.mjs",
     "billing:square:setup": "node scripts/setup-square-billing.mjs",
     "billing:square:sync-render": "node scripts/sync-render-square-env.mjs",
     "commentary:research:usabmx": "python3 scripts/analyze-usabmx-commentary.py --years 2024 2025 2026 --playlist-end 900 --output data/commentary/usabmx-national-analysis.json",

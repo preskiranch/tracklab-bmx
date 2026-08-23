@@ -1,7 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import {
+  extractUsaBmxMicrositeContact,
+  isSafeUsaBmxMicrositeResponseUrl,
+  usaBmxMicrositeUrl,
+} from './lib/usa-bmx-microsite.mjs';
 
 const endpoint = 'https://www.usabmx.com/api/backend/bmx-tracks';
 const outputPath = new URL('../data/imports/usa-bmx-official.json', import.meta.url);
+const micrositeConcurrency = 6;
 const countryMap = {
   CAN: { country: 'Canada', countryCode: 'CA', region: 'North America', source: 'USA BMX / BMX Canada' },
   CUW: { country: 'Curacao', countryCode: 'CW', region: 'Caribbean', source: 'USA BMX' },
@@ -91,7 +97,7 @@ function cleanAddress(record) {
   return [record.address_line_1, locality].filter(Boolean).join(', ');
 }
 
-function normalize(record) {
+function normalize(record, micrositeContact) {
   const country = countryMap[record.country] ?? {
     country: titleCase(record.country),
     countryCode: String(record.country ?? '').slice(0, 2).toUpperCase(),
@@ -122,6 +128,7 @@ function normalize(record) {
     coordinateAccuracy: 'provider-coordinate',
     facebookUrl: record.facebook_url ?? undefined,
     instagramUrl: record.instagram_url ?? undefined,
+    phoneNumber: micrositeContact?.phoneNumber,
     lengthMeters: 350,
     elevationMeters: 0,
     surface: record.indoor ? 'Indoor BMX race track' : 'Outdoor BMX race track',
@@ -131,8 +138,66 @@ function normalize(record) {
       endpoint,
       id: record.id,
       xrefTrackNumber: record.xref_track_number,
+      ...(micrositeContact?.phoneNumber ? {
+        contactSource: 'USA BMX track microsite __NEXT_DATA__',
+        contactSourceUrl: micrositeContact.sourceUrl,
+        contactSourceField: 'msHomepageData.hero_section.primary_contact_phone',
+      } : {}),
     },
   };
+}
+
+async function mapWithConcurrency(values, concurrency, mapper) {
+  const results = new Array(values.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index]);
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, values.length) },
+    () => worker(),
+  ));
+  return results;
+}
+
+async function fetchMicrositeContact(record) {
+  const expectedUrl = usaBmxMicrositeUrl(record);
+  if (!expectedUrl) {
+    return undefined;
+  }
+
+  try {
+    const response = await fetch(expectedUrl, {
+      headers: {
+        Accept: 'text/html',
+        'User-Agent': 'TrackLabBMX/0.1 (official USA BMX track contact import)',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15_000),
+    });
+    const expectedPath = new URL(expectedUrl).pathname.replace(/\/$/u, '');
+    const responsePath = new URL(response.url).pathname.replace(/\/$/u, '');
+    if (
+      !response.ok
+      || !isSafeUsaBmxMicrositeResponseUrl(response.url)
+      || responsePath !== expectedPath
+    ) {
+      return undefined;
+    }
+
+    const contentLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > 2_000_000) {
+      return undefined;
+    }
+    const contact = extractUsaBmxMicrositeContact(await response.text(), record);
+    return contact?.matched ? { ...contact, sourceUrl: response.url } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 const response = await fetch(`${endpoint}?page=1&limit=0`);
@@ -141,9 +206,15 @@ if (!response.ok) {
 }
 
 const payload = await response.json();
-const tracks = (payload.data ?? [])
-  .filter((track) => track.active !== false && track.name && track.latitude && track.longitude)
-  .map(normalize)
+const activeRecords = (payload.data ?? [])
+  .filter((track) => track.active !== false && track.name && track.latitude && track.longitude);
+const micrositeContacts = await mapWithConcurrency(
+  activeRecords,
+  micrositeConcurrency,
+  fetchMicrositeContact,
+);
+const tracks = activeRecords
+  .map((record, index) => normalize(record, micrositeContacts[index]))
   .sort((a, b) => a.country.localeCompare(b.country) || a.state.localeCompare(b.state) || a.name.localeCompare(b.name));
 
 await mkdir(new URL('../data/imports/', import.meta.url), { recursive: true });
@@ -156,3 +227,7 @@ await writeFile(outputPath, `${JSON.stringify({
 }, null, 2)}\n`);
 
 console.log(`Imported ${tracks.length} USA BMX/BMX Canada locator records into ${outputPath.pathname}`);
+console.log(
+  `Verified ${micrositeContacts.filter((contact) => contact?.matched).length} exact-match USA BMX track microsites; `
+  + `imported ${micrositeContacts.filter((contact) => contact?.phoneNumber).length} primary phone numbers.`,
+);
