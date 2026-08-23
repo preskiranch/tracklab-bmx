@@ -127,6 +127,7 @@ describe('social audit completeness and network boundaries', () => {
       osmImportTracks,
     )).toEqual([]);
     expect(manifest.schemaVersion).toBe(2);
+    expect(manifest).not.toHaveProperty('catalogGeneratedAt');
     expect(manifest.auditSourceDigest).toBe(
       trackSocialAuditSourceDigest(fullTracks, osmImportTracks),
     );
@@ -172,6 +173,9 @@ describe('social audit completeness and network boundaries', () => {
     );
 
     const catalogIds = new Set(fullTracks.map((track) => track.id));
+    expect(osmImportTracks.filter((track: any) => (
+      !catalogIds.has(track.id) && track.sourceRecord?.osmTags?.url
+    ))).toHaveLength(2);
     const changedExcludedOsm = osmImportTracks.map((track: any) => (
       !catalogIds.has(track.id) && track.sourceRecord?.osmTags?.url
         ? {
