@@ -1410,6 +1410,100 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           WHERE scope = 'studio'`,
       ],
     },
+    {
+      version: 24,
+      name: 'add private per account recovery alerts and summary only learning',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.recovery_alert_preferences (
+          owner_profile_key TEXT PRIMARY KEY,
+          owner_user_id TEXT UNIQUE NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          mode TEXT NOT NULL DEFAULT 'off' CHECK (
+            mode IN ('off', 'timer', 'heart-rate', 'smart')
+          ),
+          timer_seconds INTEGER NOT NULL DEFAULT 120 CHECK (
+            timer_seconds BETWEEN 30 AND 1800
+          ),
+          target_bpm INTEGER NOT NULL DEFAULT 120 CHECK (
+            target_bpm BETWEEN 40 AND 220
+          ),
+          minimum_seconds INTEGER NOT NULL DEFAULT 30 CHECK (
+            minimum_seconds BETWEEN 15 AND 600
+          ),
+          maximum_seconds INTEGER NOT NULL DEFAULT 600 CHECK (
+            maximum_seconds BETWEEN 30 AND 1800
+          ),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CHECK (maximum_seconds >= minimum_seconds),
+          CHECK (mode <> 'smart' OR maximum_seconds >= timer_seconds)
+        )`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.recovery_alert_episodes (
+          id TEXT PRIMARY KEY,
+          owner_profile_key TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          request_id TEXT NOT NULL,
+          request_fingerprint TEXT NOT NULL,
+          activity_type TEXT NOT NULL CHECK (
+            activity_type IN ('bmx-race', 'straight-sprint', 'get-pulled')
+          ),
+          session_id TEXT NOT NULL,
+          repetition_id TEXT NOT NULL,
+          mode TEXT NOT NULL CHECK (mode IN ('timer', 'heart-rate', 'smart')),
+          timer_seconds INTEGER NOT NULL CHECK (timer_seconds BETWEEN 30 AND 1800),
+          target_bpm INTEGER CHECK (target_bpm BETWEEN 40 AND 220),
+          minimum_seconds INTEGER NOT NULL CHECK (minimum_seconds BETWEEN 15 AND 600),
+          maximum_seconds INTEGER NOT NULL CHECK (maximum_seconds BETWEEN 30 AND 1800),
+          started_at TIMESTAMPTZ NOT NULL,
+          not_before_at TIMESTAMPTZ NOT NULL,
+          planned_ready_at TIMESTAMPTZ,
+          fallback_at TIMESTAMPTZ NOT NULL,
+          ready_at TIMESTAMPTZ,
+          ready_reason TEXT,
+          explanation TEXT NOT NULL,
+          confidence TEXT NOT NULL CHECK (confidence IN ('fixed', 'provisional', 'personalized')),
+          learning_episode_count INTEGER NOT NULL DEFAULT 0 CHECK (learning_episode_count >= 0),
+          effort_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+          recovery_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+          fresh_sample_count INTEGER NOT NULL DEFAULT 0 CHECK (fresh_sample_count >= 0),
+          below_target_started_at TIMESTAMPTZ,
+          last_hr_recorded_at TIMESTAMPTZ,
+          last_hr_stream_id TEXT,
+          alerted_at TIMESTAMPTZ,
+          alert_trigger TEXT CHECK (
+            alert_trigger IS NULL OR alert_trigger IN ('target', 'planned', 'fallback', 'manual')
+          ),
+          cancelled_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (owner_profile_key, request_id),
+          UNIQUE (owner_profile_key, activity_type, session_id, repetition_id),
+          CHECK (maximum_seconds >= minimum_seconds),
+          CHECK (mode <> 'smart' OR maximum_seconds >= timer_seconds),
+          CHECK (not_before_at >= started_at),
+          CHECK (fallback_at >= not_before_at),
+          CHECK (
+            planned_ready_at IS NULL
+            OR (planned_ready_at >= not_before_at AND planned_ready_at <= fallback_at)
+          ),
+          CHECK (ready_at IS NULL OR (ready_at >= started_at AND ready_at <= fallback_at)),
+          CHECK (cancelled_at IS NULL OR cancelled_at >= started_at),
+          CHECK (
+            (mode = 'timer' AND target_bpm IS NULL AND planned_ready_at IS NOT NULL)
+            OR (mode = 'heart-rate' AND target_bpm IS NOT NULL AND planned_ready_at IS NULL)
+            OR (mode = 'smart' AND target_bpm IS NOT NULL AND planned_ready_at IS NOT NULL)
+          )
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_recovery_alert_owner_active
+          ON ${schema}.recovery_alert_episodes
+          (owner_profile_key, started_at DESC, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_recovery_alert_owner_learning
+          ON ${schema}.recovery_alert_episodes
+          (owner_profile_key, activity_type, ready_at DESC)
+          WHERE ready_reason = 'heart-rate-target' AND cancelled_at IS NULL`,
+      ],
+    },
   ];
 }
 

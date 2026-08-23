@@ -308,6 +308,45 @@ describe('database migration runner', () => {
     expect(statements).not.toContain('bike_device_id');
   });
 
+  it('adds private account recovery schedules and summary-only Smart learning', () => {
+    const recoveryAlertMigration = databaseMigrations().find((candidate) => candidate.version === 24);
+    const statements = recoveryAlertMigration?.statements.join('\n') ?? '';
+
+    expect(recoveryAlertMigration).toMatchObject({
+      version: 24,
+      name: 'add private per account recovery alerts and summary only learning',
+    });
+    expect(statements).toContain('recovery_alert_preferences');
+    expect(statements).toContain('recovery_alert_episodes');
+    expect(statements).toContain("mode IN ('off', 'timer', 'heart-rate', 'smart')");
+    expect(statements).toContain("activity_type IN ('bmx-race', 'straight-sprint', 'get-pulled')");
+    expect(statements).toContain('not_before_at TIMESTAMPTZ NOT NULL');
+    expect(statements).toContain('planned_ready_at TIMESTAMPTZ');
+    expect(statements).toContain('fallback_at TIMESTAMPTZ NOT NULL');
+    expect(statements).toContain('ready_at TIMESTAMPTZ');
+    expect(statements).toContain("effort_summary JSONB NOT NULL DEFAULT '{}'::jsonb");
+    expect(statements).toContain("recovery_summary JSONB NOT NULL DEFAULT '{}'::jsonb");
+    expect(statements).not.toContain('bpm_samples');
+    expect(statements).not.toContain('heart_rate_samples');
+    expect(statements).toContain('UNIQUE (owner_profile_key, request_id)');
+    expect(statements).toContain('UNIQUE (owner_profile_key, activity_type, session_id, repetition_id)');
+    expect(statements).toContain('REFERENCES tracklab.auth_users(id) ON DELETE CASCADE');
+  });
+
+  it('rolls back the complete Recovery Alert migration if any v24 statement fails', async () => {
+    const recoveryAlertMigration = databaseMigrations().find((candidate) => candidate.version === 24);
+    if (!recoveryAlertMigration) throw new Error('Recovery Alert migration is missing.');
+    const database = fakeDatabase({ failOn: 'idx_tracklab_recovery_alert_owner_learning' });
+
+    await expect(runDatabaseMigrations(database.pool, { migrations: [recoveryAlertMigration] }))
+      .rejects.toThrow('simulated migration failure');
+
+    const commands = database.calls.map((call) => call.text);
+    expect(commands).toContain('ROLLBACK');
+    expect(commands.some((command) => command.startsWith('INSERT INTO tracklab.schema_migrations'))).toBe(false);
+    expect(commands.at(-1)).toBe('SELECT pg_advisory_unlock(hashtext($1))');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();

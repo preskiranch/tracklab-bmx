@@ -404,6 +404,9 @@ final class HeartRateCoordinator: NSObject {
             at: transitionDate
         )
         latestStatus = status
+        RecoveryAlertManager.shared.setWatchWorkoutActive(
+            [.active, .paused].contains(state)
+        )
         resolveWorkoutReadyWaiters(with: status)
         WatchConnectSessionManager.shared.observeWorkoutStatus(status)
         notifyObservers { $0.heartRateCoordinator(self, didChange: status) }
@@ -483,11 +486,33 @@ extension HeartRateCoordinator: WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        if RecoveryAlertManager.shared.handleWatchMessage(message) { return }
         WatchConnectSessionManager.shared.handleWatchEndedEvent(message)
     }
 
+    func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        if RecoveryAlertManager.shared.handleWatchMessage(message, replyHandler: replyHandler) {
+            return
+        }
+        WatchConnectSessionManager.shared.handleWatchEndedEvent(message)
+        replyHandler([
+            "version": HeartRateWireSample.currentVersion,
+            "accepted": false,
+            "cueOwner": "phone",
+        ])
+    }
+
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        if RecoveryAlertManager.shared.handleWatchMessage(userInfo) { return }
         WatchConnectSessionManager.shared.handleWatchEndedEvent(userInfo)
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        RecoveryAlertManager.shared.setWatchConnectivityReachable(session.isReachable)
     }
 }
 

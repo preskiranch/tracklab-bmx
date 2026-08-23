@@ -33,6 +33,17 @@ struct WatchWorkoutView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
 
+            if workout.recoveryPhase != "idle" {
+                Label(
+                    workout.recoveryMessage,
+                    systemImage: workout.recoveryPhase == "ready" ? "checkmark.circle.fill" : "timer"
+                )
+                .font(workout.recoveryPhase == "ready" ? .headline : .caption2)
+                .foregroundStyle(workout.recoveryPhase == "ready" ? .green : .secondary)
+                .multilineTextAlignment(.center)
+                .accessibilityLabel("Recovery Alert, \(workout.recoveryMessage)")
+            }
+
             controls
         }
         .padding(.horizontal, 8)

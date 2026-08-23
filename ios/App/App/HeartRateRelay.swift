@@ -20,6 +20,7 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
     private static let maximumRelaySessions = 16
     private static let maximumClockSegments = 2_048
     private static let finalSampleGraceMilliseconds: Int64 = 5_000
+    private static let maximumFinalizingAcknowledgementFailures = 2
     fileprivate static let maximumActiveDurationMs = 604_800_000
 
     private let workQueue = DispatchQueue(label: "com.preskilranch.tracklabbmx.heart-rate-relay.state")
@@ -422,6 +423,74 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
                 }
                 return
             }
+        }
+    }
+
+    /// Queues the Watch READY acknowledgement beside the protected heart-rate
+    /// outbox. Samples are always selected first, so the threshold-crossing
+    /// heart-rate batch reaches the server before its token-bound ACK. A 409 is
+    /// retryable because it means that authoritative sample has not arrived yet.
+    func enqueueRecoveryAcknowledgement(
+        event: RecoveryAlertWireEvent,
+        transportSessionId: String,
+        fallbackAt: Int64
+    ) {
+        guard event.isValid,
+              fallbackAt >= event.triggeredAt,
+              let normalizedSessionId = Self.validatedSessionId(transportSessionId) else { return }
+        workQueue.async {
+            guard self.state.sessions[normalizedSessionId]?.configuration != nil else { return }
+            var acknowledgements = self.state.recoveryAcknowledgements ?? []
+            if acknowledgements.contains(where: {
+                $0.transportSessionId == normalizedSessionId
+                    && $0.matchesSchedule(event)
+            }) { return }
+            // Add time deliberately creates a second recovery cycle under the
+            // same episode IDs. Never let its READY ACK be suppressed by the
+            // stale pre-extension schedule.
+            acknowledgements.removeAll {
+                $0.transportSessionId == normalizedSessionId
+                    && $0.matchesEpisode(event)
+            }
+            guard acknowledgements.count < 32 else { return }
+            let acknowledgementExpiresAt = min(
+                event.trigger == .target ? fallbackAt : event.triggeredAt + 60_000,
+                WatchConnectSessionManager.shared.connectedUntil(
+                    for: normalizedSessionId
+                ) ?? Int64.max
+            )
+            guard acknowledgementExpiresAt >= event.triggeredAt else { return }
+            acknowledgements.append(RelayRecoveryAcknowledgement(
+                event: event,
+                transportSessionId: normalizedSessionId,
+                expiresAt: acknowledgementExpiresAt
+            ))
+            self.state.recoveryAcknowledgements = acknowledgements
+            if let activeJob = self.state.activeJob,
+               activeJob.sessionId == normalizedSessionId,
+               activeJob.kind == .finalize {
+                // READY may arrive in the narrow window after finalize was
+                // selected but before its upload completes. Preempt that job
+                // so the durable ACK still keeps samples -> ACK -> finalize.
+                self.cancelUploadTasks(jobId: activeJob.id)
+                self.removePayload(for: activeJob)
+                self.state.activeJob = nil
+            }
+            self.persistState()
+            self.processIfPossible()
+        }
+    }
+
+    func discardRecoveryAcknowledgements(for plan: RecoveryAlertWirePlan) {
+        workQueue.async {
+            self.state.recoveryAcknowledgements?.removeAll {
+                $0.accountId == plan.accountId
+                    && $0.recoveryId == plan.recoveryId
+                    && $0.repetitionId == plan.repetitionId
+                    && $0.sessionId == plan.sessionId
+            }
+            self.persistState()
+            self.processIfPossible()
         }
     }
 
@@ -1024,6 +1093,7 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
         }
 
         let now = Date().timeIntervalSince1970 * 1_000
+        state.recoveryAcknowledgements?.removeAll { Double($0.expiresAt) <= now }
         var earliestRetryAt: Double?
         let sessionIds = state.sessions.keys.sorted { lhs, rhs in
             guard lhs != rhs else { return false }
@@ -1049,6 +1119,16 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
                     reason: "invalidState"
                 )
                 continue
+            }
+            if configuration.finalization != nil {
+                let acknowledgementDeadline = (relay.finalizeNotBefore ?? Int64(now.rounded()))
+                    + Self.finalSampleGraceMilliseconds
+                state.recoveryAcknowledgements?.removeAll {
+                    $0.transportSessionId == sessionId
+                        && ($0.consecutiveFailures
+                                >= Self.maximumFinalizingAcknowledgementFailures
+                            || Int64(now.rounded()) >= acknowledgementDeadline)
+                }
             }
             if let nextAttemptAt = relay.nextAttemptAt, nextAttemptAt > now {
                 earliestRetryAt = min(earliestRetryAt ?? nextAttemptAt, nextAttemptAt)
@@ -1087,6 +1167,34 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
                         ),
                         try JSONEncoder().encode(RelaySampleBatch(samples: batch))
                     )
+                } else if let acknowledgement = (state.recoveryAcknowledgements ?? [])
+                    .filter({ $0.transportSessionId == sessionId })
+                    .sorted(by: { $0.triggeredAt < $1.triggeredAt })
+                    .first {
+                    if let nextAttemptAt = acknowledgement.nextAttemptAt,
+                       nextAttemptAt > now {
+                        earliestRetryAt = min(earliestRetryAt ?? nextAttemptAt, nextAttemptAt)
+                        prepared = nil
+                    } else {
+                        prepared = (
+                            RelayJob(
+                                sessionId: sessionId,
+                                recoveryAcknowledgementId: acknowledgement.id
+                            ),
+                            try request(
+                                configuration: configuration,
+                                token: token,
+                                pathComponents: [
+                                    "api", "recovery-alert", "episodes",
+                                    acknowledgement.recoveryId, "ack",
+                                ],
+                                timeoutInterval: 5
+                            ),
+                            try JSONSerialization.data(
+                                withJSONObject: acknowledgement.payloadDictionary
+                            )
+                        )
+                    }
                 } else if let finalization = configuration.finalization,
                           let streamId = configuration.streamId {
                     if let finalizeNotBefore = relay.finalizeNotBefore,
@@ -1147,7 +1255,8 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
     private func request(
         configuration: RelayConfiguration,
         token: String,
-        pathComponents: [String]
+        pathComponents: [String],
+        timeoutInterval: TimeInterval? = nil
     ) throws -> URLRequest {
         guard var url = URL(string: configuration.baseURL) else {
             throw HeartRateRelayError.invalidConfiguration
@@ -1158,6 +1267,7 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        if let timeoutInterval { request.timeoutInterval = timeoutInterval }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -1180,18 +1290,31 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
 
         guard error == nil, let httpResponse = response as? HTTPURLResponse else {
             persistState()
-            scheduleRetry(sessionId: activeJob.sessionId)
+            if activeJob.kind == .recoveryAck {
+                scheduleRecoveryAcknowledgementRetry(job: activeJob)
+            } else {
+                scheduleRetry(sessionId: activeJob.sessionId)
+            }
             return
         }
 
         switch httpResponse.statusCode {
         case 200..<300:
             handleSuccessfulJob(activeJob, data: data)
+        case 409 where activeJob.kind == .recoveryAck:
+            // The Watch may reach 12 seconds before its final HR sample batch
+            // is accepted. Keep the ACK durable until the server can verify it.
+            persistState()
+            scheduleRecoveryAcknowledgementRetry(job: activeJob)
         case 401, 403:
             removeRelayAfterTerminalFailure(
                 sessionId: activeJob.sessionId,
                 reason: "credentialRejected"
             )
+            processIfPossible()
+        case 404 where activeJob.kind == .recoveryAck:
+            removeRecoveryAcknowledgement(for: activeJob)
+            persistState()
             processIfPossible()
         case 404 where activeJob.kind != .create:
             if var relay = state.sessions[activeJob.sessionId],
@@ -1206,12 +1329,21 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
             processIfPossible()
         case 408, 425, 429, 500...599:
             persistState()
-            scheduleRetry(sessionId: activeJob.sessionId)
+            if activeJob.kind == .recoveryAck {
+                scheduleRecoveryAcknowledgementRetry(job: activeJob)
+            } else {
+                scheduleRetry(sessionId: activeJob.sessionId)
+            }
         default:
-            removeRelayAfterTerminalFailure(
-                sessionId: activeJob.sessionId,
-                reason: "requestRejected"
-            )
+            if activeJob.kind == .recoveryAck {
+                removeRecoveryAcknowledgement(for: activeJob)
+                persistState()
+            } else {
+                removeRelayAfterTerminalFailure(
+                    sessionId: activeJob.sessionId,
+                    reason: "requestRejected"
+                )
+            }
             processIfPossible()
         }
     }
@@ -1245,6 +1377,9 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
             }
         case .finalize:
             state.sessions.removeValue(forKey: job.sessionId)
+            state.recoveryAcknowledgements?.removeAll {
+                $0.transportSessionId == job.sessionId
+            }
             if state.activeSessionId == job.sessionId {
                 state.activeSessionId = nil
             }
@@ -1253,11 +1388,30 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
             processIfPossible()
             publishRelayState(reason: "synced")
             return
+        case .recoveryAck:
+            removeRecoveryAcknowledgement(for: job)
         }
         relay.consecutiveFailures = 0
         relay.nextAttemptAt = nil
         state.sessions[job.sessionId] = relay
         persistState()
+        if job.kind == .samples {
+            // Let the main-thread manager consume the authoritative directive
+            // before selecting the next outbox job. If that transition queues
+            // a READY ACK, workQueue FIFO then guarantees samples -> ACK ->
+            // finalize, without relying on foreground JavaScript.
+            RecoveryAlertManager.shared.applyRelayDirective(
+                data,
+                transportSessionId: job.sessionId
+            ) { [weak self] in
+                guard let self else { return }
+                self.workQueue.async {
+                    self.processIfPossible()
+                    self.publishRelayState(reason: "progress")
+                }
+            }
+            return
+        }
         processIfPossible()
         publishRelayState(reason: "progress")
     }
@@ -1282,8 +1436,49 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
         }
     }
 
+    private func scheduleRecoveryAcknowledgementRetry(job: RelayJob) {
+        guard let acknowledgementId = job.recoveryAcknowledgementId,
+              var acknowledgements = state.recoveryAcknowledgements,
+              let index = acknowledgements.firstIndex(where: { $0.id == acknowledgementId }) else {
+            processIfPossible()
+            return
+        }
+        let finalizing = state.sessions[job.sessionId]?.configuration?.finalization != nil
+        let failureLimit = finalizing
+            ? Self.maximumFinalizingAcknowledgementFailures
+            : 12
+        let nextFailureCount = acknowledgements[index].consecutiveFailures + 1
+        guard acknowledgements[index].expiresAt > Self.nowMilliseconds(),
+              nextFailureCount < failureLimit else {
+            acknowledgements.remove(at: index)
+            state.recoveryAcknowledgements = acknowledgements
+            persistState()
+            processIfPossible()
+            return
+        }
+        acknowledgements[index].consecutiveFailures = nextFailureCount
+        let delays: [Double] = finalizing ? [1] : [1, 2, 5, 10, 15, 30, 60]
+        let delay = delays[min(
+            acknowledgements[index].consecutiveFailures - 1,
+            delays.count - 1
+        )]
+        acknowledgements[index].nextAttemptAt = Date().timeIntervalSince1970 * 1_000
+            + delay * 1_000
+        state.recoveryAcknowledgements = acknowledgements
+        persistState()
+        workQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.processIfPossible()
+        }
+    }
+
+    private func removeRecoveryAcknowledgement(for job: RelayJob) {
+        guard let acknowledgementId = job.recoveryAcknowledgementId else { return }
+        state.recoveryAcknowledgements?.removeAll { $0.id == acknowledgementId }
+    }
+
     private func removeRelayAfterTerminalFailure(sessionId: String, reason: String) {
         state.sessions.removeValue(forKey: sessionId)
+        state.recoveryAcknowledgements?.removeAll { $0.transportSessionId == sessionId }
         if state.activeSessionId == sessionId {
             state.activeSessionId = nil
         }
@@ -1441,9 +1636,16 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
            sanitized.sessions[activeSessionId]?.configuration?.finalization == nil {
             sanitized.activeSessionId = activeSessionId
         }
+        sanitized.recoveryAcknowledgements = decoded.recoveryAcknowledgements?.filter {
+            $0.isValid && sanitized.sessions[$0.transportSessionId] != nil
+        }.prefix(32).map { $0 }
         if let activeJob = decoded.activeJob,
            sanitized.sessions[activeJob.sessionId] != nil,
-           activeJob.isValidForRecovery {
+           activeJob.isValidForRecovery,
+           activeJob.kind != .recoveryAck
+                || sanitized.recoveryAcknowledgements?.contains(where: {
+                    $0.id == activeJob.recoveryAcknowledgementId
+                }) == true {
             sanitized.activeJob = activeJob
         }
         return sanitized
@@ -1515,6 +1717,10 @@ final class HeartRateRelay: NSObject, @unchecked Sendable {
             assert(state.sessions[activeJob.sessionId] != nil)
             assert(activeJob.isValidForRecovery)
         }
+        assert((state.recoveryAcknowledgements ?? []).count <= 32)
+        assert((state.recoveryAcknowledgements ?? []).allSatisfy {
+            $0.isValid && state.sessions[$0.transportSessionId] != nil
+        })
         for (sessionId, relay) in state.sessions {
             assert(relay.configuration?.sessionId == sessionId)
             assert(relay.samples.count <= Self.maximumOutboxSamples)
@@ -1756,6 +1962,9 @@ private struct RelayPersistedState: Codable {
     var activeSessionId: String?
     var sessions: [String: RelaySessionState] = [:]
     var activeJob: RelayJob?
+    // Optional keeps the version-5 file backward compatible with builds that
+    // predate Recovery Alert acknowledgements.
+    var recoveryAcknowledgements: [RelayRecoveryAcknowledgement]?
 }
 
 private struct RelaySessionState: Codable {
@@ -1833,6 +2042,98 @@ private struct RelayFinalization: Codable {
     let zoneWindows: [HeartRateRelayZone]?
 }
 
+private struct RelayRecoveryAcknowledgement: Codable {
+    let id: String
+    let transportSessionId: String
+    let accountId: String
+    let recoveryId: String
+    let repetitionId: String
+    let sessionId: String
+    let issuedAt: Int64
+    let mode: RecoveryAlertWireMode
+    let notBeforeAt: Int64
+    let plannedReadyAt: Int64?
+    let fallbackAt: Int64
+    let targetBpm: Double?
+    let trigger: RecoveryAlertWireTrigger
+    let triggeredAt: Int64
+    let expiresAt: Int64
+    var consecutiveFailures: Int
+    var nextAttemptAt: Double?
+
+    init(event: RecoveryAlertWireEvent, transportSessionId: String, expiresAt: Int64) {
+        id = UUID().uuidString
+        self.transportSessionId = transportSessionId
+        accountId = event.accountId
+        recoveryId = event.recoveryId
+        repetitionId = event.repetitionId
+        sessionId = event.sessionId
+        issuedAt = event.issuedAt
+        mode = event.mode
+        notBeforeAt = event.notBeforeAt
+        plannedReadyAt = event.plannedReadyAt
+        fallbackAt = event.fallbackAt
+        targetBpm = event.targetBpm
+        trigger = event.trigger
+        triggeredAt = event.triggeredAt
+        self.expiresAt = expiresAt
+        consecutiveFailures = 0
+        nextAttemptAt = nil
+    }
+
+    var isValid: Bool {
+        !id.isEmpty
+            && RecoveryAlertWirePlan.validId(transportSessionId)
+            && RecoveryAlertWirePlan.validAccountId(accountId)
+            && RecoveryAlertWirePlan.validId(recoveryId)
+            && RecoveryAlertWirePlan.validId(repetitionId)
+            && RecoveryAlertWirePlan.validId(sessionId)
+            && issuedAt >= 0
+            && notBeforeAt >= 0
+            && fallbackAt >= notBeforeAt
+            && plannedReadyAt.map({ $0 >= notBeforeAt && $0 <= fallbackAt }) != false
+            && targetBpm.map({ $0.isFinite && $0 >= 30 && $0 <= 240 }) != false
+            && (mode != .heartRate || targetBpm != nil)
+            && triggeredAt >= 0
+            && expiresAt >= triggeredAt
+            && consecutiveFailures >= 0
+            && consecutiveFailures <= 12
+            && nextAttemptAt.map({ $0.isFinite && $0 >= 0 }) != false
+    }
+
+    var payloadDictionary: [String: Any] {
+        [
+            "accountId": accountId,
+            "repetitionId": repetitionId,
+            "sessionId": sessionId,
+            "issuedAt": Double(issuedAt),
+            "mode": mode.rawValue,
+            "notBeforeAt": Double(notBeforeAt),
+            "plannedReadyAt": plannedReadyAt.map(Double.init) ?? NSNull(),
+            "fallbackAt": Double(fallbackAt),
+            "targetBpm": targetBpm ?? NSNull(),
+            "trigger": trigger.rawValue,
+            "triggeredAt": Double(triggeredAt),
+        ]
+    }
+
+    func matchesEpisode(_ event: RecoveryAlertWireEvent) -> Bool {
+        accountId == event.accountId
+            && recoveryId == event.recoveryId
+            && repetitionId == event.repetitionId
+            && sessionId == event.sessionId
+    }
+
+    func matchesSchedule(_ event: RecoveryAlertWireEvent) -> Bool {
+        matchesEpisode(event)
+            && mode == event.mode
+            && notBeforeAt == event.notBeforeAt
+            && plannedReadyAt == event.plannedReadyAt
+            && fallbackAt == event.fallbackAt
+            && targetBpm == event.targetBpm
+    }
+}
+
 struct HeartRateRelayZone: Codable {
     let zoneId: String
     let zoneName: String?
@@ -1882,6 +2183,7 @@ private struct RelayJob: Codable {
         case create
         case samples
         case finalize
+        case recoveryAck
     }
 
     let id: String
@@ -1891,6 +2193,7 @@ private struct RelayJob: Codable {
     let lastSequence: Int?
     let lastRecordedAt: Int64?
     let lastActiveElapsedMs: Int?
+    let recoveryAcknowledgementId: String?
     var payloadFileName: String?
 
     init(sessionId: String, kind: Kind, sequences: [Int]) {
@@ -1901,6 +2204,7 @@ private struct RelayJob: Codable {
         self.lastSequence = nil
         self.lastRecordedAt = nil
         self.lastActiveElapsedMs = nil
+        self.recoveryAcknowledgementId = nil
         self.payloadFileName = nil
     }
 
@@ -1912,6 +2216,19 @@ private struct RelayJob: Codable {
         self.lastSequence = samples.last?.sequence
         self.lastRecordedAt = samples.last?.recordedAt
         self.lastActiveElapsedMs = samples.last?.activeElapsedMs
+        self.recoveryAcknowledgementId = nil
+        self.payloadFileName = nil
+    }
+
+    init(sessionId: String, recoveryAcknowledgementId: String) {
+        self.id = UUID().uuidString
+        self.sessionId = sessionId
+        self.kind = .recoveryAck
+        self.sequences = []
+        self.lastSequence = nil
+        self.lastRecordedAt = nil
+        self.lastActiveElapsedMs = nil
+        self.recoveryAcknowledgementId = recoveryAcknowledgementId
         self.payloadFileName = nil
     }
 
@@ -1944,11 +2261,19 @@ private struct RelayJob: Codable {
                 && lastSequence == sequences.last
                 && lastRecordedAt != nil
                 && lastActiveElapsedMs != nil
+                && recoveryAcknowledgementId == nil
         case .create, .finalize:
             return sequences.isEmpty
                 && lastSequence == nil
                 && lastRecordedAt == nil
                 && lastActiveElapsedMs == nil
+                && recoveryAcknowledgementId == nil
+        case .recoveryAck:
+            return sequences.isEmpty
+                && lastSequence == nil
+                && lastRecordedAt == nil
+                && lastActiveElapsedMs == nil
+                && recoveryAcknowledgementId.map(RecoveryAlertWirePlan.validId) == true
         }
     }
 }

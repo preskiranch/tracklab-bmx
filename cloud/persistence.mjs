@@ -53,6 +53,8 @@ const memoryHeartRateTrainingSegments = new Map();
 const memoryHeartRateTrainingSegmentBindings = new Map();
 const memoryHeartRateWatchEnrollments = new Map();
 const memoryHeartRateWatchConnections = new Map();
+const memoryRecoveryAlertPreferences = new Map();
+const memoryRecoveryAlertEpisodes = new Map();
 const memoryClubMonitorSprintAuthorizations = new Map();
 const memoryClubMonitorSprintAuthorizationIdByTokenHash = new Map();
 const memoryClubGroupTrainingAuthorizations = new Map();
@@ -4150,6 +4152,105 @@ export async function loadLatestHeartRateSample(streamId) {
     [streamId],
   );
   return heartRateSampleFromRow(result?.rows?.[0]);
+}
+
+const recentHeartRateSamplesSql = `SELECT sequence, recorded_at, active_elapsed_ms, bpm, received_at
+  FROM (
+    SELECT DISTINCT ON (recorded_at)
+      sequence, recorded_at, active_elapsed_ms, bpm, received_at
+    FROM ${schema}.heart_rate_samples
+    WHERE stream_id = $1
+      AND recorded_at >= received_at - interval '10 seconds'
+      AND recorded_at <= received_at + interval '2 seconds'
+      AND (
+        $3::double precision IS NULL
+        OR recorded_at < to_timestamp($3 / 1000.0)
+        OR ($4::boolean AND recorded_at = to_timestamp($3 / 1000.0))
+      )
+      AND NOT (sequence = ANY($5::bigint[]))
+    ORDER BY recorded_at, received_at, sequence
+  ) AS valid_unique_clock
+  ORDER BY recorded_at DESC, sequence DESC
+  LIMIT $2`;
+
+function recentHeartRateSamplesFromRows(rows) {
+  return (rows ?? []).map((row) => {
+    const sample = heartRateSampleFromRow(row);
+    return sample ? { ...sample, _receivedAt: new Date(row.received_at).getTime() } : null;
+  }).filter(Boolean).reverse();
+}
+
+async function loadRecentHeartRateSamplesWithQuery(
+  execute,
+  streamId,
+  boundedLimit,
+  upperRecordedAt,
+  includeUpperBound,
+  excludedSequences,
+) {
+  const result = await execute(recentHeartRateSamplesSql, [
+    streamId,
+    boundedLimit,
+    upperRecordedAt,
+    includeUpperBound,
+    excludedSequences,
+  ]);
+  return recentHeartRateSamplesFromRows(result?.rows);
+}
+
+/** Private bounded window used for server/Watch recovery-decision parity. */
+export async function loadRecentHeartRateSamples(
+  streamId,
+  limit = 5,
+  upperRecordedAt = null,
+  includeUpperBound = false,
+  excludedSequences = [],
+) {
+  const boundedLimit = Math.max(2, Math.min(5, Math.round(Number(limit) || 5)));
+  const boundedUpperRecordedAt = Number.isFinite(Number(upperRecordedAt))
+    ? Number(upperRecordedAt)
+    : null;
+  const excluded = new Set(
+    excludedSequences.filter((sequence) => Number.isSafeInteger(Number(sequence))).map(Number),
+  );
+  if (!pool) {
+    const valid = [...(memoryHeartRateSamplesByStreamId.get(streamId)?.values() ?? [])]
+      .filter((sample) => {
+        const originalReceivedAt = Number(sample._receivedAt);
+        return (
+          boundedUpperRecordedAt == null
+          || sample.recordedAt < boundedUpperRecordedAt
+          || (includeUpperBound && sample.recordedAt === boundedUpperRecordedAt)
+        )
+          && !excluded.has(Number(sample.sequence))
+          && Number.isFinite(originalReceivedAt)
+          && sample.recordedAt >= originalReceivedAt - recoveryHeartRateFreshnessMs
+          && sample.recordedAt <= originalReceivedAt + recoveryHeartRateFutureSkewMs;
+      }).sort((left, right) => (
+        left.recordedAt - right.recordedAt
+        || Number(left._receivedAt) - Number(right._receivedAt)
+        || left.sequence - right.sequence
+      ));
+    const firstValidByRecordedAt = new Map();
+    valid.forEach((sample) => {
+      if (!firstValidByRecordedAt.has(sample.recordedAt)) {
+        firstValidByRecordedAt.set(sample.recordedAt, sample);
+      }
+    });
+    return [...firstValidByRecordedAt.values()]
+      .sort((left, right) => right.recordedAt - left.recordedAt || right.sequence - left.sequence)
+      .slice(0, boundedLimit)
+      .reverse()
+      .map((sample) => cloneJson(sample, sample));
+  }
+  return loadRecentHeartRateSamplesWithQuery(
+    query,
+    streamId,
+    boundedLimit,
+    boundedUpperRecordedAt,
+    Boolean(includeUpperBound),
+    [...excluded],
+  );
 }
 
 /**
@@ -11657,4 +11758,789 @@ export async function loadMap3DUsage({ monthlyAllowance = 5000, now = new Date()
     topTracks: fromJson(row.top_tracks, []),
     daily: fromJson(row.daily, []),
   }, safeAllowance);
+}
+
+function recoveryAlertPreferenceFromRow(row) {
+  return row ? {
+    mode: row.mode,
+    timerSeconds: Number(row.timer_seconds),
+    targetBpm: Number(row.target_bpm),
+    minimumSeconds: Number(row.minimum_seconds),
+    maximumSeconds: Number(row.maximum_seconds),
+    updatedAt: new Date(row.updated_at).getTime(),
+  } : null;
+}
+
+function recoveryAlertEpisodeFromRow(row) {
+  return row ? {
+    id: row.id,
+    ownerProfileKey: row.owner_profile_key,
+    requestId: row.request_id,
+    requestFingerprint: row.request_fingerprint,
+    activityType: row.activity_type,
+    sessionId: row.session_id,
+    repetitionId: row.repetition_id,
+    mode: row.mode,
+    timerSeconds: Number(row.timer_seconds),
+    targetBpm: row.target_bpm == null ? null : Number(row.target_bpm),
+    minimumSeconds: Number(row.minimum_seconds),
+    maximumSeconds: Number(row.maximum_seconds),
+    startedAt: new Date(row.started_at).getTime(),
+    notBeforeAt: new Date(row.not_before_at).getTime(),
+    plannedReadyAt: row.planned_ready_at == null ? null : new Date(row.planned_ready_at).getTime(),
+    fallbackAt: new Date(row.fallback_at).getTime(),
+    readyAt: row.ready_at == null ? null : new Date(row.ready_at).getTime(),
+    readyReason: row.ready_reason ?? null,
+    explanation: row.explanation,
+    confidence: row.confidence,
+    learningEpisodeCount: Number(row.learning_episode_count) || 0,
+    effortSummary: fromJson(row.effort_summary, {}),
+    recoverySummary: fromJson(row.recovery_summary, {}),
+    freshSampleCount: Number(row.fresh_sample_count) || 0,
+    belowTargetStartedAt: row.below_target_started_at == null
+      ? null
+      : new Date(row.below_target_started_at).getTime(),
+    lastHeartRateRecordedAt: row.last_hr_recorded_at == null
+      ? null
+      : new Date(row.last_hr_recorded_at).getTime(),
+    lastHeartRateStreamId: row.last_hr_stream_id ?? null,
+    alertedAt: row.alerted_at == null ? null : new Date(row.alerted_at).getTime(),
+    alertTrigger: row.alert_trigger ?? null,
+    cancelledAt: row.cancelled_at == null ? null : new Date(row.cancelled_at).getTime(),
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+  } : null;
+}
+
+function cloneRecoveryEpisode(episode) {
+  return episode ? cloneJson(episode, episode) : null;
+}
+
+function recoveryOwnerUserId(ownerProfileKey) {
+  return String(ownerProfileKey || '').startsWith('user:')
+    ? String(ownerProfileKey).slice('user:'.length)
+    : '';
+}
+
+export async function loadRecoveryAlertPreference(ownerProfileKey) {
+  if (!pool) {
+    return cloneJson(memoryRecoveryAlertPreferences.get(ownerProfileKey), null);
+  }
+  const result = await query(
+    `SELECT * FROM ${schema}.recovery_alert_preferences WHERE owner_profile_key = $1 LIMIT 1`,
+    [ownerProfileKey],
+  );
+  return recoveryAlertPreferenceFromRow(result?.rows?.[0]);
+}
+
+export async function saveRecoveryAlertPreference(ownerProfileKey, preference, now = Date.now()) {
+  if (!pool) {
+    const saved = { ...cloneJson(preference, preference), updatedAt: now };
+    memoryRecoveryAlertPreferences.set(ownerProfileKey, saved);
+    return cloneJson(saved, saved);
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.recovery_alert_preferences (
+       owner_profile_key, owner_user_id, mode, timer_seconds, target_bpm, minimum_seconds,
+       maximum_seconds, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8 / 1000.0), to_timestamp($8 / 1000.0))
+     ON CONFLICT (owner_profile_key) DO UPDATE SET
+       mode = EXCLUDED.mode,
+       timer_seconds = EXCLUDED.timer_seconds,
+       target_bpm = EXCLUDED.target_bpm,
+       minimum_seconds = EXCLUDED.minimum_seconds,
+       maximum_seconds = EXCLUDED.maximum_seconds,
+       updated_at = EXCLUDED.updated_at
+     RETURNING *`,
+    [
+      ownerProfileKey,
+      recoveryOwnerUserId(ownerProfileKey),
+      preference.mode,
+      preference.timerSeconds,
+      preference.targetBpm,
+      preference.minimumSeconds,
+      preference.maximumSeconds,
+      now,
+    ],
+  );
+  return recoveryAlertPreferenceFromRow(result?.rows?.[0]);
+}
+
+export async function loadRecoveryLearningSummaries(ownerProfileKey, activityType, targetBpm, limit = 12) {
+  const boundedLimit = Math.max(2, Math.min(50, Math.round(Number(limit) || 12)));
+  if (!pool) {
+    return [...memoryRecoveryAlertEpisodes.values()]
+      .filter((episode) => (
+        episode.ownerProfileKey === ownerProfileKey
+        && episode.activityType === activityType
+        && episode.targetBpm === targetBpm
+        && episode.cancelledAt == null
+        && episode.readyReason === 'heart-rate-target'
+        && Number(episode.recoverySummary?.recoverySeconds) > 0
+        && Number(episode.recoverySummary?.sampleCount) >= 3
+      ))
+      .sort((left, right) => right.readyAt - left.readyAt)
+      .slice(0, boundedLimit)
+      .reverse()
+      .map((episode) => ({
+        recoverySeconds: Number(episode.recoverySummary.recoverySeconds),
+        sampleCount: Number(episode.recoverySummary.sampleCount),
+        effortSummary: cloneJson(episode.effortSummary, {}),
+      }));
+  }
+  // Learning deliberately reads only bounded episode summaries. It never joins
+  // the raw heart_rate_samples table or exposes another account's history.
+  const result = await query(
+    `SELECT recovery_summary, effort_summary
+     FROM ${schema}.recovery_alert_episodes
+     WHERE owner_profile_key = $1
+       AND activity_type = $2
+       AND target_bpm = $3
+       AND cancelled_at IS NULL
+       AND ready_reason = 'heart-rate-target'
+       AND COALESCE((recovery_summary ->> 'sampleCount')::integer, 0) >= 3
+     ORDER BY ready_at DESC
+     LIMIT $4`,
+    [ownerProfileKey, activityType, targetBpm, boundedLimit],
+  );
+  return (result?.rows ?? []).reverse().map((row) => ({
+    recoverySeconds: Number(fromJson(row.recovery_summary, {}).recoverySeconds),
+    sampleCount: Number(fromJson(row.recovery_summary, {}).sampleCount),
+    effortSummary: fromJson(row.effort_summary, {}),
+  })).filter((summary) => Number.isFinite(summary.recoverySeconds) && summary.recoverySeconds > 0);
+}
+
+function sameRecoveryRequest(episode, candidate) {
+  return episode.requestFingerprint === candidate.requestFingerprint
+    && episode.activityType === candidate.activityType
+    && episode.sessionId === candidate.sessionId
+    && episode.repetitionId === candidate.repetitionId
+    && episode.startedAt === candidate.startedAt;
+}
+
+function compareRecoveryEpisodeAuthority(left, right) {
+  return right.startedAt - left.startedAt
+    || right.createdAt - left.createdAt
+    || right.updatedAt - left.updatedAt
+    || String(right.id).localeCompare(String(left.id));
+}
+
+function latestMemoryRecoveryAlertEpisode(ownerProfileKey) {
+  return [...memoryRecoveryAlertEpisodes.values()]
+    .filter((episode) => episode.ownerProfileKey === ownerProfileKey)
+    .sort(compareRecoveryEpisodeAuthority)[0] ?? null;
+}
+
+export async function createRecoveryAlertEpisode(
+  ownerProfileKey,
+  candidate,
+  now = Date.now(),
+  revisionAt = Math.max(now, candidate.startedAt),
+) {
+  if (!pool) {
+    const replay = [...memoryRecoveryAlertEpisodes.values()].find((episode) => (
+      episode.ownerProfileKey === ownerProfileKey
+      && (episode.requestId === candidate.requestId || (
+        episode.activityType === candidate.activityType
+        && episode.sessionId === candidate.sessionId
+        && episode.repetitionId === candidate.repetitionId
+      ))
+    ));
+    if (replay) {
+      return {
+        episode: cloneRecoveryEpisode(replay),
+        replayed: sameRecoveryRequest(replay, candidate),
+        conflict: !sameRecoveryRequest(replay, candidate),
+      };
+    }
+    const latest = latestMemoryRecoveryAlertEpisode(ownerProfileKey);
+    const staleArrival = latest != null && candidate.startedAt < latest.startedAt;
+    if (!staleArrival) {
+      for (const episode of memoryRecoveryAlertEpisodes.values()) {
+        const stillRecovering = episode.readyAt == null
+          && (episode.plannedReadyAt == null || episode.plannedReadyAt > now)
+          && episode.fallbackAt > now;
+        if (episode.ownerProfileKey === ownerProfileKey && episode.cancelledAt == null && stillRecovering) {
+          episode.cancelledAt = Math.max(episode.startedAt, now);
+          episode.updatedAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
+        }
+      }
+    }
+    const stored = {
+      ...cloneJson(candidate, candidate),
+      ownerProfileKey,
+      readyAt: null,
+      readyReason: null,
+      recoverySummary: {},
+      freshSampleCount: 0,
+      belowTargetStartedAt: null,
+      lastHeartRateRecordedAt: null,
+      lastHeartRateStreamId: null,
+      alertedAt: null,
+      alertTrigger: null,
+      cancelledAt: staleArrival ? Math.max(candidate.startedAt, now) : null,
+      createdAt: now,
+      updatedAt: revisionAt,
+    };
+    memoryRecoveryAlertEpisodes.set(stored.id, stored);
+    return { episode: cloneRecoveryEpisode(stored), replayed: false, conflict: false };
+  }
+  return withPersistenceLock(`recovery-alert:${ownerProfileKey}`, async (client) => {
+    const existing = await client.query(
+      `SELECT * FROM ${schema}.recovery_alert_episodes
+       WHERE owner_profile_key = $1
+         AND (
+           request_id = $2
+           OR (activity_type = $3 AND session_id = $4 AND repetition_id = $5)
+         )
+       ORDER BY created_at DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [ownerProfileKey, candidate.requestId, candidate.activityType, candidate.sessionId, candidate.repetitionId],
+    );
+    const replay = recoveryAlertEpisodeFromRow(existing.rows[0]);
+    if (replay) {
+      const matches = sameRecoveryRequest(replay, candidate);
+      return { episode: replay, replayed: matches, conflict: !matches };
+    }
+    const latestResult = await client.query(
+      `SELECT * FROM ${schema}.recovery_alert_episodes
+       WHERE owner_profile_key = $1
+       ORDER BY started_at DESC, created_at DESC, id DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [ownerProfileKey],
+    );
+    const latest = recoveryAlertEpisodeFromRow(latestResult.rows[0]);
+    const staleArrival = latest != null && candidate.startedAt < latest.startedAt;
+    if (!staleArrival) {
+      await client.query(
+        `UPDATE ${schema}.recovery_alert_episodes
+         SET cancelled_at = GREATEST(started_at, to_timestamp($2 / 1000.0)),
+           updated_at = GREATEST(
+             updated_at + interval '1 millisecond',
+             started_at,
+             to_timestamp($2 / 1000.0)
+           )
+         WHERE owner_profile_key = $1
+           AND cancelled_at IS NULL
+           AND ready_at IS NULL
+           AND (planned_ready_at IS NULL OR planned_ready_at > to_timestamp($2 / 1000.0))
+           AND fallback_at > to_timestamp($2 / 1000.0)`,
+        [ownerProfileKey, now],
+      );
+    }
+    const inserted = await client.query(
+      `INSERT INTO ${schema}.recovery_alert_episodes (
+         id, owner_profile_key, owner_user_id, request_id, request_fingerprint, activity_type,
+         session_id, repetition_id, mode, timer_seconds, target_bpm,
+         minimum_seconds, maximum_seconds, started_at, not_before_at,
+         planned_ready_at, fallback_at, explanation, confidence,
+         learning_episode_count, effort_summary, cancelled_at, created_at, updated_at
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+         to_timestamp($14 / 1000.0), to_timestamp($15 / 1000.0),
+         CASE WHEN $16::double precision IS NULL THEN NULL ELSE to_timestamp($16 / 1000.0) END,
+         to_timestamp($17 / 1000.0), $18, $19, $20, $21::jsonb,
+         CASE WHEN $22::double precision IS NULL THEN NULL ELSE to_timestamp($22 / 1000.0) END,
+         clock_timestamp(), to_timestamp($23 / 1000.0)
+       ) RETURNING *`,
+      [
+        candidate.id,
+        ownerProfileKey,
+        recoveryOwnerUserId(ownerProfileKey),
+        candidate.requestId,
+        candidate.requestFingerprint,
+        candidate.activityType,
+        candidate.sessionId,
+        candidate.repetitionId,
+        candidate.mode,
+        candidate.timerSeconds,
+        candidate.targetBpm,
+        candidate.minimumSeconds,
+        candidate.maximumSeconds,
+        candidate.startedAt,
+        candidate.notBeforeAt,
+        candidate.plannedReadyAt,
+        candidate.fallbackAt,
+        candidate.explanation,
+        candidate.confidence,
+        candidate.learningEpisodeCount,
+        json(candidate.effortSummary),
+        staleArrival ? Math.max(candidate.startedAt, now) : null,
+        revisionAt,
+      ],
+    );
+    return {
+      episode: recoveryAlertEpisodeFromRow(inserted.rows[0]),
+      replayed: false,
+      conflict: false,
+    };
+  });
+}
+
+export async function loadRecoveryAlertEpisode(ownerProfileKey, episodeId) {
+  if (!pool) {
+    const episode = memoryRecoveryAlertEpisodes.get(episodeId);
+    return episode?.ownerProfileKey === ownerProfileKey ? cloneRecoveryEpisode(episode) : null;
+  }
+  const result = await query(
+    `SELECT * FROM ${schema}.recovery_alert_episodes
+     WHERE id = $1 AND owner_profile_key = $2 LIMIT 1`,
+    [episodeId, ownerProfileKey],
+  );
+  return recoveryAlertEpisodeFromRow(result?.rows?.[0]);
+}
+
+const recoveryAlertActiveVisibilityMs = 60 * 60 * 1_000;
+
+function recoveryAlertEpisodeStillVisible(episode, now) {
+  if (!episode) return false;
+  const anchor = episode.cancelledAt == null
+    ? episode.fallbackAt
+    : Math.max(episode.fallbackAt, episode.updatedAt);
+  return now <= anchor + recoveryAlertActiveVisibilityMs;
+}
+
+export async function loadActiveRecoveryAlertEpisode(ownerProfileKey, now = Date.now()) {
+  if (!pool) {
+    const episode = latestMemoryRecoveryAlertEpisode(ownerProfileKey);
+    return episode?.cancelledAt == null && recoveryAlertEpisodeStillVisible(episode, now)
+      ? cloneRecoveryEpisode(episode)
+      : null;
+  }
+  const result = await query(
+    `SELECT * FROM ${schema}.recovery_alert_episodes
+     WHERE owner_profile_key = $1
+     ORDER BY started_at DESC, created_at DESC, id DESC LIMIT 1`,
+    [ownerProfileKey],
+  );
+  const episode = recoveryAlertEpisodeFromRow(result?.rows?.[0]);
+  return episode?.cancelledAt == null && recoveryAlertEpisodeStillVisible(episode, now) ? episode : null;
+}
+
+export async function loadLatestRecoveryAlertEpisode(ownerProfileKey) {
+  if (!pool) {
+    const episode = latestMemoryRecoveryAlertEpisode(ownerProfileKey);
+    return cloneRecoveryEpisode(episode);
+  }
+  const result = await query(
+    `SELECT * FROM ${schema}.recovery_alert_episodes
+     WHERE owner_profile_key = $1
+     ORDER BY started_at DESC, created_at DESC, id DESC LIMIT 1`,
+    [ownerProfileKey],
+  );
+  return recoveryAlertEpisodeFromRow(result?.rows?.[0]);
+}
+
+function updateMemoryRecoveryEpisode(episode, action, options, now, revisionAt) {
+  if (!episode || episode.cancelledAt != null) return null;
+  if (action === 'stop') {
+    episode.cancelledAt = Math.max(episode.startedAt, now);
+  } else if (action === 'start-anyway') {
+    const readyAt = Math.max(episode.startedAt, Math.min(episode.fallbackAt, now));
+    episode.readyAt = readyAt;
+    episode.readyReason = 'manual-start';
+    // Manual readiness is already acknowledged by the athlete. Persist the
+    // trigger so another signed-in device treats it as a silent completion,
+    // never as a new notification/haptic request.
+    episode.alertedAt = readyAt;
+    episode.alertTrigger = 'manual';
+    episode.explanation = 'Started manually. Begin only when you feel ready.';
+    episode.belowTargetStartedAt = null;
+  } else if (action === 'add-time') {
+    const seconds = options.seconds;
+    const extensionMs = seconds * 1_000;
+    const absoluteLimit = episode.startedAt + 1_800_000;
+    const nextFallback = Math.min(absoluteLimit, Math.max(now, episode.fallbackAt) + extensionMs);
+    if (nextFallback <= episode.fallbackAt) return null;
+    if (episode.plannedReadyAt != null) {
+      episode.plannedReadyAt = Math.min(nextFallback, Math.max(now, episode.plannedReadyAt) + extensionMs);
+    }
+    episode.fallbackAt = nextFallback;
+    episode.readyAt = null;
+    episode.readyReason = null;
+    episode.alertedAt = null;
+    episode.alertTrigger = null;
+    episode.belowTargetStartedAt = null;
+    episode.explanation = 'Recovery extended. Start when the next alert appears and you feel ready.';
+  }
+  episode.updatedAt = revisionAt;
+  return episode;
+}
+
+export async function updateRecoveryAlertEpisode(ownerProfileKey, episodeId, action, options = {}, now = Date.now()) {
+  if (!pool) {
+    const episode = memoryRecoveryAlertEpisodes.get(episodeId);
+    if (!episode || episode.ownerProfileKey !== ownerProfileKey) return null;
+    const revisionAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
+    return cloneRecoveryEpisode(updateMemoryRecoveryEpisode(episode, action, options, now, revisionAt));
+  }
+  return withPersistenceLock(`recovery-alert:${ownerProfileKey}`, async (client) => {
+    const loaded = await client.query(
+      `SELECT * FROM ${schema}.recovery_alert_episodes
+       WHERE id = $1 AND owner_profile_key = $2 LIMIT 1 FOR UPDATE`,
+      [episodeId, ownerProfileKey],
+    );
+    const episode = recoveryAlertEpisodeFromRow(loaded.rows[0]);
+    if (!episode || episode.cancelledAt != null) return null;
+    const revisionAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
+    if (action === 'stop') {
+      const result = await client.query(
+        `UPDATE ${schema}.recovery_alert_episodes
+         SET cancelled_at = GREATEST(started_at, to_timestamp($3 / 1000.0)),
+           updated_at = to_timestamp($4 / 1000.0)
+         WHERE id = $1 AND owner_profile_key = $2 RETURNING *`,
+        [episodeId, ownerProfileKey, now, revisionAt],
+      );
+      return recoveryAlertEpisodeFromRow(result.rows[0]);
+    }
+    if (action === 'start-anyway') {
+      const readyAt = Math.max(episode.startedAt, Math.min(episode.fallbackAt, now));
+      const result = await client.query(
+        `UPDATE ${schema}.recovery_alert_episodes
+         SET ready_at = to_timestamp($3 / 1000.0), ready_reason = 'manual-start',
+           alerted_at = to_timestamp($3 / 1000.0), alert_trigger = 'manual',
+           explanation = 'Started manually. Begin only when you feel ready.',
+           below_target_started_at = NULL, updated_at = to_timestamp($4 / 1000.0)
+         WHERE id = $1 AND owner_profile_key = $2 RETURNING *`,
+        [episodeId, ownerProfileKey, readyAt, revisionAt],
+      );
+      return recoveryAlertEpisodeFromRow(result.rows[0]);
+    }
+    if (action !== 'add-time') return null;
+    const extensionMs = options.seconds * 1_000;
+    const absoluteLimit = episode.startedAt + 1_800_000;
+    const nextFallback = Math.min(absoluteLimit, Math.max(now, episode.fallbackAt) + extensionMs);
+    if (nextFallback <= episode.fallbackAt) return null;
+    const nextPlanned = episode.plannedReadyAt == null
+      ? null
+      : Math.min(nextFallback, Math.max(now, episode.plannedReadyAt) + extensionMs);
+    const result = await client.query(
+      `UPDATE ${schema}.recovery_alert_episodes
+       SET fallback_at = to_timestamp($3 / 1000.0),
+         planned_ready_at = CASE WHEN $4::double precision IS NULL
+           THEN NULL ELSE to_timestamp($4 / 1000.0) END,
+         ready_at = NULL, ready_reason = NULL, alerted_at = NULL, alert_trigger = NULL,
+         below_target_started_at = NULL,
+         explanation = 'Recovery extended. Start when the next alert appears and you feel ready.',
+         updated_at = to_timestamp($5 / 1000.0)
+       WHERE id = $1 AND owner_profile_key = $2 RETURNING *`,
+      [episodeId, ownerProfileKey, nextFallback, nextPlanned, revisionAt],
+    );
+    return recoveryAlertEpisodeFromRow(result.rows[0]);
+  });
+}
+
+const recoveryHeartRateFreshnessMs = 10_000;
+const recoveryHeartRateFutureSkewMs = 2_000;
+const recoveryHeartRateMaximumGapMs = 6_000;
+const recoveryHeartRateSustainedMs = 12_000;
+
+function recoveryMedianBpm(samples) {
+  const values = samples.map((sample) => sample.bpm).sort((left, right) => left - right);
+  if (values.length === 0) return null;
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+}
+
+function applyRecoverySampleToEpisode(episode, streamId, sample, decisionWindow, receivedAt) {
+  if (
+    !episode
+    || episode.cancelledAt != null
+    || episode.readyAt != null
+    || !['heart-rate', 'smart'].includes(episode.mode)
+    || episode.targetBpm == null
+    || receivedAt >= episode.fallbackAt
+    || sample.recordedAt > episode.fallbackAt
+  ) return false;
+
+  // Stored window points are deliberately revisited to calculate the rolling
+  // median. Ignore those already-accounted-for points before applying live
+  // freshness rules to the newly accepted tail sample.
+  if (episode.lastHeartRateRecordedAt != null && sample.recordedAt <= episode.lastHeartRateRecordedAt) {
+    return false;
+  }
+  // Match the Watch engine: new sensor timing that is too early, stale, or too
+  // far in the future fails closed and breaks any in-progress sustained hold.
+  if (
+    receivedAt < episode.notBeforeAt
+    || sample.recordedAt < episode.notBeforeAt
+    || sample.recordedAt < receivedAt - recoveryHeartRateFreshnessMs
+    || sample.recordedAt > receivedAt + recoveryHeartRateFutureSkewMs
+  ) {
+    const changed = episode.belowTargetStartedAt != null;
+    episode.belowTargetStartedAt = null;
+    return changed;
+  }
+  episode.freshSampleCount += 1;
+  const previousAt = episode.lastHeartRateRecordedAt;
+  episode.lastHeartRateRecordedAt = sample.recordedAt;
+  episode.lastHeartRateStreamId = streamId;
+  const eligibleDecisionWindow = decisionWindow.filter((candidate) => (
+    candidate.recordedAt >= episode.notBeforeAt
+    && Number(candidate._receivedAt) >= episode.notBeforeAt
+  ));
+  const smoothedBpm = eligibleDecisionWindow.length >= 2
+    ? recoveryMedianBpm(eligibleDecisionWindow)
+    : null;
+  if (smoothedBpm != null && smoothedBpm <= episode.targetBpm) {
+    if (
+      episode.belowTargetStartedAt == null
+      || previousAt == null
+      || sample.recordedAt - previousAt > recoveryHeartRateMaximumGapMs
+    ) episode.belowTargetStartedAt = sample.recordedAt;
+    if (sample.recordedAt - episode.belowTargetStartedAt >= recoveryHeartRateSustainedMs) {
+      episode.readyAt = sample.recordedAt;
+      episode.readyReason = 'heart-rate-target';
+      episode.explanation = 'Recovery target reached — start when you feel ready.';
+      episode.recoverySummary = {
+        recoverySeconds: Math.round((sample.recordedAt - episode.startedAt) / 100) / 10,
+        sampleCount: episode.freshSampleCount,
+        sustainedTargetSeconds: recoveryHeartRateSustainedMs / 1_000,
+      };
+    }
+  } else {
+    episode.belowTargetStartedAt = null;
+  }
+  return true;
+}
+
+async function buildRecoveryHeartRateEvaluations(
+  episode,
+  streamId,
+  evaluationSamples,
+  receivedAt,
+  execute = null,
+) {
+  if (evaluationSamples.length === 0) return [];
+  const acceptedSequences = evaluationSamples
+    .map((sample) => Number(sample.sequence))
+    .filter((sequence) => Number.isSafeInteger(sequence));
+  const cursorAt = episode.lastHeartRateRecordedAt;
+  const upperRecordedAt = cursorAt ?? evaluationSamples[0].recordedAt;
+  const includeUpperBound = cursorAt != null;
+  // The ingest endpoint stores the accepted batch first. Exclude those exact
+  // sequences while seeding so a same-clock retry cannot replace the prior
+  // Watch point. When a cursor exists, include its equal timestamp and choose
+  // the earliest receipt-valid sequence for that sensor clock.
+  const storedWindow = execute
+    ? await loadRecentHeartRateSamplesWithQuery(
+      execute,
+      streamId,
+      4,
+      upperRecordedAt,
+      includeUpperBound,
+      acceptedSequences,
+    )
+    : await loadRecentHeartRateSamples(
+      streamId,
+      4,
+      upperRecordedAt,
+      includeUpperBound,
+      acceptedSequences,
+    );
+  let rollingWindow = storedWindow.filter((sample) => {
+    const originalReceivedAt = Number(sample._receivedAt);
+    return Number.isFinite(originalReceivedAt)
+      && sample.recordedAt >= originalReceivedAt - recoveryHeartRateFreshnessMs
+      && sample.recordedAt <= originalReceivedAt + recoveryHeartRateFutureSkewMs
+      && sample.recordedAt >= receivedAt - recoveryHeartRateFreshnessMs;
+  }).sort((left, right) => (
+    left.recordedAt - right.recordedAt
+    || Number(left.sequence ?? 0) - Number(right.sequence ?? 0)
+  )).slice(-4);
+  let contiguousStart = rollingWindow.length > 0 ? rollingWindow.length - 1 : 0;
+  while (
+    contiguousStart > 0
+    && rollingWindow[contiguousStart].recordedAt
+      - rollingWindow[contiguousStart - 1].recordedAt <= recoveryHeartRateMaximumGapMs
+  ) contiguousStart -= 1;
+  rollingWindow = rollingWindow.slice(contiguousStart);
+  return evaluationSamples.map((sample) => {
+    const originalReceivedAt = Number(sample._receivedAt);
+    const receiptValid = Number.isFinite(originalReceivedAt)
+      && sample.recordedAt >= originalReceivedAt - recoveryHeartRateFreshnessMs
+      && sample.recordedAt <= originalReceivedAt + recoveryHeartRateFutureSkewMs;
+    const previous = rollingWindow.at(-1);
+    // Invalid points reset only the sustained hold in the episode evaluator.
+    // Non-increasing valid points are ignored before they touch this window.
+    // A valid clock gap over six seconds clears both, matching Watch.
+    if (
+      receiptValid
+      && (cursorAt == null || sample.recordedAt > cursorAt)
+      && (!previous || sample.recordedAt > previous.recordedAt)
+    ) {
+      if (
+        previous
+        && sample.recordedAt - previous.recordedAt > recoveryHeartRateMaximumGapMs
+      ) rollingWindow = [];
+      rollingWindow.push(sample);
+      rollingWindow = rollingWindow.filter((candidate) => (
+        candidate.recordedAt >= originalReceivedAt - recoveryHeartRateFreshnessMs
+      )).slice(-5);
+    }
+    return {
+      sample,
+      receivedAt: originalReceivedAt,
+      decisionWindow: [...rollingWindow],
+    };
+  });
+}
+
+export async function applyRecoveryHeartRateSamples(
+  ownerProfileKey,
+  streamId,
+  samples,
+  receivedAt = Date.now(),
+) {
+  const evaluationSamples = [...samples]
+    .map((sample) => ({
+      ...sample,
+      _receivedAt: Number.isFinite(Number(sample._receivedAt))
+        ? Number(sample._receivedAt)
+        : receivedAt,
+    }))
+    .sort((left, right) => (
+      left.recordedAt - right.recordedAt
+      || Number(left.sequence ?? 0) - Number(right.sequence ?? 0)
+    ));
+  if (!pool) {
+    const episode = latestMemoryRecoveryAlertEpisode(ownerProfileKey);
+    if (!episode || episode.cancelledAt != null) return episode ? cloneRecoveryEpisode(episode) : null;
+    const evaluations = await buildRecoveryHeartRateEvaluations(
+      episode,
+      streamId,
+      evaluationSamples,
+      receivedAt,
+    );
+    const priorUpdatedAt = episode.updatedAt;
+    let changed = false;
+    evaluations.forEach((evaluation) => {
+      changed = applyRecoverySampleToEpisode(
+        episode,
+        streamId,
+        evaluation.sample,
+        evaluation.decisionWindow,
+        evaluation.receivedAt,
+      ) || changed;
+    });
+    if (changed) episode.updatedAt = Math.max(receivedAt, episode.startedAt, priorUpdatedAt + 1);
+    return cloneRecoveryEpisode(episode);
+  }
+  return withPersistenceLock(`recovery-alert:${ownerProfileKey}`, async (client) => {
+    const loaded = await client.query(
+      `SELECT * FROM ${schema}.recovery_alert_episodes
+       WHERE owner_profile_key = $1
+       ORDER BY started_at DESC, created_at DESC, id DESC LIMIT 1 FOR UPDATE`,
+      [ownerProfileKey],
+    );
+    const episode = recoveryAlertEpisodeFromRow(loaded.rows[0]);
+    if (!episode || episode.cancelledAt != null) return episode;
+    const evaluations = await buildRecoveryHeartRateEvaluations(
+      episode,
+      streamId,
+      evaluationSamples,
+      receivedAt,
+      (text, params) => client.query(text, params),
+    );
+    const priorUpdatedAt = episode.updatedAt;
+    let changed = false;
+    evaluations.forEach((evaluation) => {
+      changed = applyRecoverySampleToEpisode(
+        episode,
+        streamId,
+        evaluation.sample,
+        evaluation.decisionWindow,
+        evaluation.receivedAt,
+      ) || changed;
+    });
+    if (!changed) return episode;
+    const revisionAt = Math.max(receivedAt, episode.startedAt, priorUpdatedAt + 1);
+    const updated = await client.query(
+      `UPDATE ${schema}.recovery_alert_episodes
+       SET ready_at = CASE WHEN $3::double precision IS NULL
+           THEN NULL ELSE to_timestamp($3 / 1000.0) END,
+         ready_reason = $4,
+         explanation = $5,
+         recovery_summary = $6::jsonb,
+         fresh_sample_count = $7,
+         below_target_started_at = CASE WHEN $8::double precision IS NULL
+           THEN NULL ELSE to_timestamp($8 / 1000.0) END,
+         last_hr_recorded_at = CASE WHEN $9::double precision IS NULL
+           THEN NULL ELSE to_timestamp($9 / 1000.0) END,
+         last_hr_stream_id = $10,
+         updated_at = to_timestamp($11 / 1000.0)
+       WHERE id = $1 AND owner_profile_key = $2 RETURNING *`,
+      [
+        episode.id,
+        ownerProfileKey,
+        episode.readyAt,
+        episode.readyReason,
+        episode.explanation,
+        json(episode.recoverySummary),
+        episode.freshSampleCount,
+        episode.belowTargetStartedAt,
+        episode.lastHeartRateRecordedAt,
+        episode.lastHeartRateStreamId,
+        revisionAt,
+      ],
+    );
+    return recoveryAlertEpisodeFromRow(updated.rows[0]);
+  });
+}
+
+export async function acknowledgeRecoveryAlert(
+  ownerProfileKey,
+  episodeId,
+  trigger,
+  triggeredAt,
+  now = Date.now(),
+) {
+  if (!pool) {
+    const episode = memoryRecoveryAlertEpisodes.get(episodeId);
+    if (!episode || episode.ownerProfileKey !== ownerProfileKey || episode.cancelledAt != null) return null;
+    if (episode.alertedAt == null) {
+      episode.alertedAt = triggeredAt;
+      episode.alertTrigger = trigger;
+      // triggeredAt is a sensor/device event clock, not a server revision.
+      episode.updatedAt = Math.max(now, episode.startedAt, episode.updatedAt + 1);
+    }
+    return cloneRecoveryEpisode(episode);
+  }
+  const result = await query(
+    `UPDATE ${schema}.recovery_alert_episodes
+     SET alerted_at = COALESCE(alerted_at, to_timestamp($4 / 1000.0)),
+       alert_trigger = COALESCE(alert_trigger, $3),
+       updated_at = CASE WHEN alerted_at IS NULL
+         THEN GREATEST(updated_at + interval '1 millisecond', to_timestamp($5 / 1000.0))
+         ELSE updated_at END
+     WHERE id = $1 AND owner_profile_key = $2 AND cancelled_at IS NULL
+     RETURNING *`,
+    [episodeId, ownerProfileKey, trigger, triggeredAt, now],
+  );
+  return recoveryAlertEpisodeFromRow(result?.rows?.[0]);
+}
+
+/** Used by account-erasure flows; PostgreSQL also cascades directly from auth_users. */
+export async function deleteRecoveryAlertData(ownerProfileKey) {
+  if (!pool) {
+    memoryRecoveryAlertPreferences.delete(ownerProfileKey);
+    for (const [episodeId, episode] of memoryRecoveryAlertEpisodes.entries()) {
+      if (episode.ownerProfileKey === ownerProfileKey) memoryRecoveryAlertEpisodes.delete(episodeId);
+    }
+    return true;
+  }
+  const result = await query(
+    `WITH deleted_preferences AS (
+       DELETE FROM ${schema}.recovery_alert_preferences WHERE owner_profile_key = $1 RETURNING owner_profile_key
+     ), deleted_episodes AS (
+       DELETE FROM ${schema}.recovery_alert_episodes WHERE owner_profile_key = $1 RETURNING owner_profile_key
+     )
+     SELECT
+       (SELECT count(*)::integer FROM deleted_preferences) AS preferences,
+       (SELECT count(*)::integer FROM deleted_episodes) AS episodes`,
+    [ownerProfileKey],
+  );
+  return Boolean(result);
 }

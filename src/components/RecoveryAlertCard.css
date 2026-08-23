@@ -1,0 +1,427 @@
+.recovery-alert-card {
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 14px;
+  padding: 14px;
+  border: 1px solid #d8dee5;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(20, 31, 45, .06);
+  color: #101828;
+  box-sizing: border-box;
+}
+
+.recovery-alert-card.is-ready {
+  border-color: #8ed16c;
+  background: linear-gradient(135deg, #f7fff2, #fff);
+}
+
+.recovery-alert-heading,
+.recovery-alert-status,
+.recovery-alert-save-row,
+.recovery-alert-actions,
+.recovery-alert-input-unit {
+  display: flex;
+  align-items: center;
+}
+
+.recovery-alert-heading {
+  gap: 10px;
+}
+
+.recovery-alert-heading > span:nth-child(2),
+.recovery-alert-status > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.recovery-alert-heading strong,
+.recovery-alert-status strong {
+  font-size: 17px;
+  line-height: 1.25;
+  font-weight: 900;
+}
+
+.recovery-alert-heading small,
+.recovery-alert-status small {
+  color: #667085;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 650;
+}
+
+.recovery-alert-icon {
+  display: grid;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  background: #ecf8e7;
+  color: #32791c;
+}
+
+.recovery-alert-mode-badge {
+  margin-left: auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #344054;
+  font-size: 12px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.recovery-alert-mode-badge:not(.mode-off) {
+  background: #eaf8e4;
+  color: #286416;
+}
+
+.recovery-alert-setup,
+.recovery-alert-active {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e6e9ed;
+}
+
+.recovery-alert-mode-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recovery-alert-mode-options button,
+.recovery-alert-actions button,
+.recovery-alert-save-row button {
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid #cfd6de;
+  border-radius: 10px;
+  background: #f8fafb;
+  color: #253142;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 850;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.recovery-alert-mode-options button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.recovery-alert-mode-options button.selected {
+  border-color: #76b95b;
+  background: #edf9e8;
+  color: #235f13;
+  box-shadow: inset 0 0 0 1px #76b95b;
+}
+
+.recovery-alert-mode-options button:focus-visible,
+.recovery-alert-actions button:focus-visible,
+.recovery-alert-save-row button:focus-visible,
+.recovery-alert-fields input:focus-visible,
+.recovery-alert-fields select:focus-visible {
+  outline: 3px solid rgba(62, 137, 35, .28);
+  outline-offset: 2px;
+}
+
+.recovery-alert-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.recovery-alert-fields label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: #475467;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.recovery-alert-fields input,
+.recovery-alert-fields select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid #cfd6de;
+  border-radius: 9px;
+  background: #fff;
+  color: #101828;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.recovery-alert-input-unit {
+  position: relative;
+}
+
+.recovery-alert-input-unit input {
+  padding-right: 54px;
+}
+
+.recovery-alert-input-unit b {
+  position: absolute;
+  right: 12px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.recovery-alert-explainer {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 7px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 10px;
+  border-radius: 9px;
+  background: #f5f7fa;
+  color: #475467;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 650;
+}
+
+.recovery-alert-explainer svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.recovery-alert-save-row {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recovery-alert-save-row p {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.recovery-alert-save-row button.primary,
+.recovery-alert-actions button:first-child {
+  border-color: #1e2b3b;
+  background: #111827;
+  color: #fff;
+}
+
+.recovery-alert-mode-options button:disabled,
+.recovery-alert-actions button:disabled,
+.recovery-alert-save-row button:disabled {
+  cursor: default;
+  opacity: .56;
+}
+
+.recovery-alert-active {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.recovery-alert-status {
+  min-width: 0;
+  gap: 10px;
+}
+
+.recovery-alert-status > svg {
+  flex: 0 0 auto;
+  color: #438b29;
+}
+
+.recovery-alert-confidence {
+  color: #397327 !important;
+}
+
+.recovery-alert-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.recovery-alert-actions button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+}
+
+.recovery-alert-actions button.quiet {
+  border-color: transparent;
+  background: transparent;
+  color: #667085;
+}
+
+.recovery-alert-upgrade-note,
+.recovery-alert-message {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.recovery-alert-upgrade-note {
+  background: #fff7e6;
+  color: #765214;
+}
+
+.recovery-alert-message {
+  background: #eef6ff;
+  color: #245b8d;
+}
+
+.race-fullscreen .recovery-alert-card:not(.has-active),
+.utility-fullscreen .recovery-alert-card:not(.has-active) {
+  display: none;
+}
+
+.race-fullscreen .recovery-alert-card.has-active,
+.utility-fullscreen .recovery-alert-card.has-active {
+  position: fixed;
+  z-index: 2147483000;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  display: block;
+  width: min(440px, calc(100vw - 32px));
+  margin: 0;
+  padding: 10px 14px;
+  transform: translateX(-50%);
+  border-color: rgba(142, 209, 108, .8);
+  background: rgba(10, 18, 29, .94);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .32);
+  color: #fff;
+  pointer-events: none;
+}
+
+.race-fullscreen .recovery-alert-card.has-active .recovery-alert-heading,
+.race-fullscreen .recovery-alert-card.has-active .recovery-alert-actions,
+.race-fullscreen .recovery-alert-card.has-active .recovery-alert-upgrade-note,
+.race-fullscreen .recovery-alert-card.has-active .recovery-alert-message,
+.utility-fullscreen .recovery-alert-card.has-active .recovery-alert-heading,
+.utility-fullscreen .recovery-alert-card.has-active .recovery-alert-actions,
+.utility-fullscreen .recovery-alert-card.has-active .recovery-alert-upgrade-note,
+.utility-fullscreen .recovery-alert-card.has-active .recovery-alert-message {
+  display: none;
+}
+
+.race-fullscreen .recovery-alert-card.has-active .recovery-alert-active,
+.utility-fullscreen .recovery-alert-card.has-active .recovery-alert-active {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.race-fullscreen .recovery-alert-card.has-active .recovery-alert-status,
+.utility-fullscreen .recovery-alert-card.has-active .recovery-alert-status {
+  justify-content: center;
+  color: #fff;
+  text-align: center;
+}
+
+.race-fullscreen .recovery-alert-card.has-active .recovery-alert-status small,
+.utility-fullscreen .recovery-alert-card.has-active .recovery-alert-status small {
+  color: #d9e3eb;
+}
+
+@media (max-width: 720px) {
+  .recovery-alert-card {
+    padding: 12px;
+    border-radius: 12px;
+  }
+
+  .recovery-alert-heading {
+    align-items: flex-start;
+  }
+
+  .recovery-alert-heading small {
+    font-size: 13px;
+  }
+
+  .recovery-alert-mode-badge {
+    display: none;
+  }
+
+  .recovery-alert-mode-options,
+  .recovery-alert-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .recovery-alert-active {
+    grid-template-columns: 1fr;
+  }
+
+  .recovery-alert-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .recovery-alert-actions button.quiet {
+    grid-column: 1 / -1;
+  }
+
+  .recovery-alert-save-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recovery-alert-save-row button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 390px) {
+  .recovery-alert-mode-options button {
+    font-size: 13px;
+  }
+
+  .recovery-alert-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .recovery-alert-card {
+    padding: 10px 12px;
+  }
+
+  .recovery-alert-heading small,
+  .recovery-alert-upgrade-note {
+    display: none;
+  }
+
+  .recovery-alert-setup,
+  .recovery-alert-active {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+
+  .race-fullscreen .recovery-alert-card.has-active,
+  .utility-fullscreen .recovery-alert-card.has-active {
+    top: max(120px, calc(env(safe-area-inset-top) + 96px));
+    width: min(380px, calc(100vw - 120px));
+    padding: 7px 11px;
+  }
+
+  .race-fullscreen .recovery-alert-card.has-active .recovery-alert-status small,
+  .utility-fullscreen .recovery-alert-card.has-active .recovery-alert-status small {
+    display: none;
+  }
+}

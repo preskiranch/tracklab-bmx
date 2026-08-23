@@ -9,6 +9,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // HealthKit may launch the companion in the background when the Watch
         // begins mirroring. Install the handler before the web view is created.
+        RecoveryAlertManager.shared.configureAtLaunch()
         HeartRateCoordinator.shared.configureAtLaunch()
         return true
     }

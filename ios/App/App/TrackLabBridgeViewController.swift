@@ -6,5 +6,6 @@ final class TrackLabBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(HeartRatePlugin())
+        bridge?.registerPluginInstance(RecoveryAlertPlugin())
     }
 }

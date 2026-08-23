@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const iphonePortrait = { width: 390, height: 844 };
 
-async function mockSignedInRacer(page: Page) {
+async function mockSignedInRacer(page: Page, activeRecoveryEpisode: Record<string, unknown> | null = null) {
   const now = Date.now();
   const user = {
     id: 'mobile-shell-racer',
@@ -42,6 +42,41 @@ async function mockSignedInRacer(page: Page) {
     contentType: 'application/json',
     body: JSON.stringify({ ghosts: [] }),
   }));
+  const recoveryAccountId = `recacct_${'a'.repeat(32)}`;
+  let recoveryPreference = {
+    mode: 'off',
+    timerSeconds: 120,
+    targetBpm: 115,
+    minimumSeconds: 30,
+    maximumSeconds: 600,
+    updatedAt: now,
+  };
+  await page.route('**/api/recovery-alert/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('/episodes/active')) {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ accountId: recoveryAccountId, episode: activeRecoveryEpisode }),
+      });
+      return;
+    }
+    if (path.endsWith('/preferences')) {
+      if (request.method() === 'PATCH') {
+        recoveryPreference = {
+          ...recoveryPreference,
+          ...request.postDataJSON(),
+          updatedAt: Date.now(),
+        };
+      }
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ accountId: recoveryAccountId, preference: recoveryPreference }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"not mocked"}' });
+  });
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 }
 
@@ -114,6 +149,108 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
     navigation.getBoundingClientRect().top
   ));
   expect(stickyTop).toBeGreaterThanOrEqual(0);
+});
+
+test('Recovery Alert stays simple, readable, and available in all three sprint programs', async ({ page }) => {
+  await page.setViewportSize(iphonePortrait);
+  await mockSignedInRacer(page);
+  await page.goto('/?track=oak-creek-bmx');
+  await openSignedInApp(page);
+
+  const card = page.getByRole('region', { name: 'Recovery Alert' });
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Off', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Timer', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Heart Rate', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Smart', exact: true })).toBeVisible();
+
+  await card.getByRole('button', { name: 'Timer', exact: true }).click();
+  await card.getByLabel('Recovery time').selectOption('60');
+  await card.getByRole('button', { name: 'Save Recovery Alert' }).click();
+  await expect(card).toContainText('Saved for Race Intervals, Straight Sprint, and Get Pulled.');
+
+  const layout = await card.evaluate((element) => ({
+    documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    cardFits: element.scrollWidth <= element.clientWidth,
+    smallestButton: Math.min(...[...element.querySelectorAll('button')]
+      .map((button) => button.getBoundingClientRect().height)),
+    titleSize: Number.parseFloat(getComputedStyle(element.querySelector('strong')!).fontSize),
+  }));
+  expect(layout.documentFits).toBe(true);
+  expect(layout.cardFits).toBe(true);
+  expect(layout.smallestButton).toBeGreaterThanOrEqual(44);
+  expect(layout.titleSize).toBeGreaterThanOrEqual(17);
+
+  const navigation = page.getByRole('navigation', { name: 'Primary' });
+  await navigation.getByRole('button', { name: 'Straight Sprint', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Recovery Alert' })).toContainText('Timer');
+  await navigation.getByRole('button', { name: 'Get Pulled', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Recovery Alert' })).toContainText('Timer');
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const ipadLayout = await page.getByRole('region', { name: 'Recovery Alert' }).evaluate((element) => ({
+    documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    cardFits: element.scrollWidth <= element.clientWidth,
+    smallestButton: Math.min(...[...element.querySelectorAll('button')]
+      .map((button) => button.getBoundingClientRect().height)),
+  }));
+  expect(ipadLayout.documentFits).toBe(true);
+  expect(ipadLayout.cardFits).toBe(true);
+  expect(ipadLayout.smallestButton).toBeGreaterThanOrEqual(44);
+});
+
+test('active Recovery Alert remains visible as a compact fullscreen cue', async ({ page }) => {
+  const now = Date.now();
+  await page.setViewportSize({ width: 844, height: 390 });
+  await mockSignedInRacer(page, {
+    id: 'recovery-fullscreen',
+    activityType: 'bmx-race',
+    sessionId: 'race-fullscreen',
+    repetitionId: 'race-fullscreen-rider',
+    mode: 'timer',
+    state: 'recovering',
+    startedAt: now - 10_000,
+    notBeforeAt: now - 1_000,
+    plannedReadyAt: now + 50_000,
+    fallbackAt: now + 50_000,
+    readyAt: null,
+    targetBpm: null,
+    reason: 'fixed-timer',
+    explanation: 'Your fixed recovery time.',
+    confidence: 'fixed',
+    learningEpisodeCount: 0,
+    alertedAt: null,
+    alertTrigger: null,
+    updatedAt: now,
+  });
+  await page.goto('/?track=oak-creek-bmx');
+  await openSignedInApp(page);
+
+  const card = page.getByRole('region', { name: 'Recovery Alert' });
+  await expect(card).toContainText('Recovering');
+  await page.locator('.platform-shell').evaluate((shell) => shell.classList.add('race-fullscreen'));
+  await expect(card).toBeVisible();
+  const raceLayout = await card.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      top: bounds.top,
+      bottom: bounds.bottom,
+      width: bounds.width,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      actionsHidden: getComputedStyle(element.querySelector('.recovery-alert-actions')!).display === 'none',
+    };
+  });
+  expect(raceLayout.top).toBeGreaterThanOrEqual(0);
+  expect(raceLayout.bottom).toBeLessThanOrEqual(raceLayout.viewportHeight);
+  expect(raceLayout.width).toBeLessThan(raceLayout.viewportWidth);
+  expect(raceLayout.actionsHidden).toBe(true);
+
+  await page.locator('.platform-shell').evaluate((shell) => {
+    shell.classList.remove('race-fullscreen');
+    shell.classList.add('utility-fullscreen');
+  });
+  await expect(card).toBeVisible();
 });
 
 test('public track locator text remains legible in iPhone portrait', async ({ page }) => {

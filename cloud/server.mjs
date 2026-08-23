@@ -2836,6 +2836,273 @@ const heartRateLiveFreshnessMs = 10_000;
 const heartRateLiveFutureSkewMs = 2_000;
 const heartRateLiveAuthorizationTtlMs = 30_000;
 const maxHeartRateSamplesPerStream = 1_000_000;
+const recoveryAlertModes = new Set(['off', 'timer', 'heart-rate', 'smart']);
+const recoveryAlertActivityTypes = new Set(['bmx-race', 'straight-sprint', 'get-pulled']);
+const recoveryAlertDefaultPreference = Object.freeze({
+  mode: 'off',
+  timerSeconds: 120,
+  targetBpm: 120,
+  minimumSeconds: 30,
+  maximumSeconds: 600,
+  updatedAt: 0,
+});
+const recoveryHeartRateSustainedSeconds = 12;
+const recoverySmartProvisionalEpisodeCount = 2;
+const recoverySmartPersonalizedEpisodeCount = 6;
+const recoveryAlertDirectiveVisibilityMs = 60 * 60 * 1_000;
+
+function strictRecoveryInteger(value, minimum, maximum) {
+  if (typeof value !== 'number') return null;
+  const number = value;
+  return Number.isSafeInteger(number) && number >= minimum && number <= maximum ? number : null;
+}
+
+function recoveryIdentifier(value, maximumLength = 160) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized
+    && normalized.length <= maximumLength
+    && /^[a-zA-Z0-9][a-zA-Z0-9:._-]*$/u.test(normalized)
+    ? normalized
+    : '';
+}
+
+function recoveryRequestId(value) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return /^[a-zA-Z0-9_-]{24,160}$/u.test(normalized) ? normalized : '';
+}
+
+function recoveryIdentifierExposesOwner(value, session, ownerProfileKey) {
+  const normalized = String(value || '').toLowerCase();
+  if (!normalized) return false;
+  // Recovery wire identifiers are operational nonces, never profile labels.
+  if (/(?:^|[:_-])(?:account|user)[:_-]/u.test(normalized)) return true;
+  return [session?.user?.id, ownerProfileKey]
+    .map((candidate) => String(candidate || '').trim().toLowerCase())
+    .filter((candidate) => candidate.length >= 8)
+    .some((candidate) => normalized.includes(candidate));
+}
+
+function recoveryPreferenceValue(value) {
+  const stored = value && typeof value === 'object' ? value : {};
+  const mode = recoveryAlertModes.has(stored.mode)
+    ? stored.mode
+    : recoveryAlertDefaultPreference.mode;
+  const timerSeconds = strictRecoveryInteger(stored.timerSeconds, 30, 1_800)
+    ?? recoveryAlertDefaultPreference.timerSeconds;
+  const minimumSeconds = strictRecoveryInteger(stored.minimumSeconds, 15, 600)
+    ?? recoveryAlertDefaultPreference.minimumSeconds;
+  const boundedMaximumSeconds = strictRecoveryInteger(stored.maximumSeconds, 30, 1_800)
+    ?? recoveryAlertDefaultPreference.maximumSeconds;
+  return {
+    mode,
+    timerSeconds,
+    targetBpm: strictRecoveryInteger(stored.targetBpm, 40, 220)
+      ?? recoveryAlertDefaultPreference.targetBpm,
+    minimumSeconds,
+    maximumSeconds: Math.max(
+      boundedMaximumSeconds,
+      minimumSeconds,
+      mode === 'smart' ? timerSeconds : 0,
+    ),
+    updatedAt: Number.isSafeInteger(stored.updatedAt) && stored.updatedAt >= 0 ? stored.updatedAt : 0,
+  };
+}
+
+function sanitizeRecoveryPreferencePatch(value, current) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const allowed = new Set(['mode', 'timerSeconds', 'targetBpm', 'minimumSeconds', 'maximumSeconds']);
+  const keys = Object.keys(value);
+  if (keys.length === 0 || keys.some((key) => !allowed.has(key))) return null;
+  const next = { ...recoveryPreferenceValue(current) };
+  if ('mode' in value) {
+    if (!recoveryAlertModes.has(value.mode)) return null;
+    next.mode = value.mode;
+  }
+  const integerFields = [
+    ['timerSeconds', 30, 1_800],
+    ['targetBpm', 40, 220],
+    ['minimumSeconds', 15, 600],
+    ['maximumSeconds', 30, 1_800],
+  ];
+  for (const [field, minimum, maximum] of integerFields) {
+    if (!(field in value)) continue;
+    const parsed = strictRecoveryInteger(value[field], minimum, maximum);
+    if (parsed == null) return null;
+    next[field] = parsed;
+  }
+  if (next.mode === 'smart') {
+    next.maximumSeconds = Math.max(
+      next.maximumSeconds,
+      next.minimumSeconds,
+      next.timerSeconds,
+    );
+  } else if (next.maximumSeconds < next.minimumSeconds) return null;
+  delete next.updatedAt;
+  return next;
+}
+
+const recoveryEffortBounds = Object.freeze({
+  workDurationMs: [100, 30 * 60 * 1_000],
+  finishTimeMs: [100, 30 * 60 * 1_000],
+  averagePowerWatts: [0, 3_000],
+  peakPowerWatts: [0, 5_000],
+  peakCadenceRpm: [0, 300],
+  peakSpeedMps: [0, 50],
+});
+
+function sanitizeRecoveryEffortSummary(value) {
+  if (value == null) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (Object.keys(value).some((key) => !(key in recoveryEffortBounds))) return null;
+  const summary = {};
+  for (const [key, [minimum, maximum]] of Object.entries(recoveryEffortBounds)) {
+    if (value[key] == null) continue;
+    if (typeof value[key] !== 'number') return null;
+    const number = value[key];
+    if (!Number.isFinite(number) || number < minimum || number > maximum) return null;
+    summary[key] = Math.round(number * 100) / 100;
+  }
+  return summary;
+}
+
+function recoveryEffortScore(summary = {}) {
+  const factors = [
+    summary.averagePowerWatts == null ? null : summary.averagePowerWatts / 600,
+    summary.peakPowerWatts == null ? null : summary.peakPowerWatts / 1_500,
+    summary.peakCadenceRpm == null ? null : summary.peakCadenceRpm / 180,
+    summary.peakSpeedMps == null ? null : summary.peakSpeedMps / 15,
+    summary.workDurationMs == null ? null : summary.workDurationMs / 60_000,
+    summary.finishTimeMs == null ? null : 15_000 / summary.finishTimeMs,
+  ].filter((factor) => factor != null);
+  return factors.length === 0
+    ? 1
+    : Math.max(0.5, Math.min(2, factors.reduce((sum, factor) => sum + factor, 0) / factors.length));
+}
+
+function recoveryMedian(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function smartRecoveryPlan(preference, history, effortSummary) {
+  const maximumSeconds = Math.max(preference.maximumSeconds, preference.timerSeconds);
+  const clean = history.filter((item) => (
+    Number.isFinite(item.recoverySeconds)
+    && item.recoverySeconds >= preference.minimumSeconds
+    && item.recoverySeconds <= maximumSeconds
+    && Number.isInteger(item.sampleCount)
+    && item.sampleCount >= 3
+  )).slice(-12);
+  if (clean.length < recoverySmartProvisionalEpisodeCount) {
+    return {
+      plannedSeconds: Math.max(
+        preference.minimumSeconds,
+        Math.min(maximumSeconds, preference.timerSeconds),
+      ),
+      confidence: 'fixed',
+      learningEpisodeCount: clean.length,
+      reason: 'smart-learning-fixed-fallback',
+      explanation: clean.length === 0
+        ? 'Learning your recovery pattern. Using your fixed recovery time for now.'
+        : 'One clean recovery recorded. Using your fixed recovery time until there is enough history.',
+    };
+  }
+  const base = recoveryMedian(clean.map((item) => item.recoverySeconds));
+  const historicalEffort = recoveryMedian(clean.map((item) => recoveryEffortScore(item.effortSummary)));
+  const adjustment = historicalEffort > 0
+    ? Math.max(0.8, Math.min(1.2, recoveryEffortScore(effortSummary) / historicalEffort))
+    : 1;
+  const plannedSeconds = Math.max(
+    preference.minimumSeconds,
+    Math.min(maximumSeconds, Math.round(base * adjustment)),
+  );
+  const confidence = clean.length >= recoverySmartPersonalizedEpisodeCount
+    ? 'personalized'
+    : 'provisional';
+  return {
+    plannedSeconds,
+    confidence,
+    learningEpisodeCount: clean.length,
+    reason: 'smart-personalized-estimate',
+    explanation: confidence === 'personalized'
+      ? `Based on ${clean.length} recent clean recoveries and this repetition’s effort.`
+      : `Early estimate based on ${clean.length} clean recoveries; TrackLab is still learning.`,
+  };
+}
+
+function recoveryEpisodePublic(episode, now = Date.now()) {
+  if (!episode) return null;
+  let state = 'recovering';
+  let readyAt = episode.readyAt ?? null;
+  let reason = episode.readyReason ?? (episode.mode === 'timer'
+    ? 'timer-running'
+    : episode.mode === 'heart-rate'
+      ? 'heart-rate-recovery'
+      : episode.confidence === 'fixed'
+        ? 'smart-learning-fixed-fallback'
+        : 'smart-personalized-estimate');
+  let explanation = episode.explanation;
+  if (episode.cancelledAt != null) {
+    state = 'cancelled';
+    reason = 'stopped';
+    explanation = 'Recovery Alert stopped.';
+  } else if (episode.readyAt != null) {
+    state = 'ready';
+  } else if (episode.plannedReadyAt != null && episode.plannedReadyAt <= now) {
+    state = 'ready';
+    readyAt = episode.plannedReadyAt;
+    reason = episode.mode === 'timer' ? 'timer-elapsed' : 'smart-prediction';
+    explanation = episode.mode === 'timer'
+      ? 'Recovery timer complete — start when you feel ready.'
+      : `${episode.explanation} Start when you feel ready.`;
+  } else if (episode.fallbackAt <= now) {
+    state = 'fallback-timer';
+    reason = 'fixed-fallback';
+    explanation = 'Maximum recovery time reached — start when you feel ready.';
+  }
+  return {
+    id: episode.id,
+    activityType: episode.activityType,
+    sessionId: episode.sessionId,
+    repetitionId: episode.repetitionId,
+    mode: episode.mode,
+    state,
+    startedAt: episode.startedAt,
+    notBeforeAt: episode.notBeforeAt,
+    plannedReadyAt: episode.plannedReadyAt ?? null,
+    fallbackAt: episode.fallbackAt,
+    readyAt,
+    targetBpm: episode.targetBpm ?? null,
+    reason,
+    explanation,
+    confidence: episode.confidence,
+    learningEpisodeCount: episode.learningEpisodeCount,
+    alertedAt: episode.alertedAt ?? null,
+    alertTrigger: episode.alertTrigger ?? null,
+    updatedAt: episode.updatedAt,
+  };
+}
+
+function recoveryAccountId(ownerProfileKey) {
+  return `recacct_${createHash('sha256')
+    .update('tracklab-recovery-account\0')
+    .update(ownerProfileKey)
+    .digest('hex')
+    .slice(0, 32)}`;
+}
+
+function recoveryAlertDirective(ownerProfileKey, episode, now = Date.now()) {
+  const visibilityAnchor = episode?.cancelledAt == null
+    ? episode?.fallbackAt
+    : Math.max(episode?.fallbackAt ?? 0, episode?.updatedAt ?? 0);
+  if (!episode || now > visibilityAnchor + recoveryAlertDirectiveVisibilityMs) return null;
+  const visible = recoveryEpisodePublic(episode, now);
+  return visible
+    ? { version: 1, accountId: recoveryAccountId(ownerProfileKey), issuedAt: visible.updatedAt, ...visible }
+    : null;
+}
 
 function createHeartRateCode() {
   const bytes = randomBytes(8);
@@ -7279,6 +7546,379 @@ async function handleClientMessage(client, rawMessage) {
   }
 }
 
+async function handleRecoveryAlertApi(request, response, requestUrl) {
+  const pathname = requestUrl.pathname;
+  const now = Date.now();
+
+  if (pathname === '/api/recovery-alert/preferences') {
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const ownerProfileKey = authProfileKey(session.user);
+    const accountId = recoveryAccountId(ownerProfileKey);
+    if (request.method === 'GET') {
+      const stored = await persistence.loadRecoveryAlertPreference(ownerProfileKey);
+      writeJson(response, 200, {
+        accountId,
+        preference: recoveryPreferenceValue(stored),
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method !== 'PATCH' && request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, heartRateMutationRateLimiter, 120, `recovery-pref:${ownerProfileKey}`)) return;
+    const current = recoveryPreferenceValue(await persistence.loadRecoveryAlertPreference(ownerProfileKey));
+    const payload = await readJsonBody(request, 8_000);
+    const next = sanitizeRecoveryPreferencePatch(payload, current);
+    if (!next) {
+      writeJson(response, 400, {
+        error: 'Choose a valid Recovery Alert mode, timer, target, and minimum/maximum recovery time.',
+      });
+      return;
+    }
+    const saved = await persistence.saveRecoveryAlertPreference(ownerProfileKey, next, now);
+    if (!saved) {
+      writeJson(response, 503, { error: 'Recovery Alert settings could not be saved.' });
+      return;
+    }
+    writeJson(response, 200, { accountId, preference: recoveryPreferenceValue(saved) }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/recovery-alert/episodes') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const ownerProfileKey = authProfileKey(session.user);
+    if (!enforceRateLimit(request, response, heartRateMutationRateLimiter, 480, `recovery-create:${ownerProfileKey}`)) return;
+    const payload = await readJsonBody(request, 16_000);
+    const requestId = recoveryRequestId(payload?.requestId);
+    const activityType = recoveryAlertActivityTypes.has(payload?.activityType) ? payload.activityType : '';
+    const sessionId = recoveryIdentifier(payload?.sessionId);
+    const repetitionId = recoveryIdentifier(payload?.repetitionId);
+    const finishedAt = heartRateTimestamp(payload?.finishedAt);
+    const effortSummary = sanitizeRecoveryEffortSummary(payload?.effortSummary);
+    const exposesOwnerIdentity = [requestId, sessionId, repetitionId]
+      .some((value) => recoveryIdentifierExposesOwner(value, session, ownerProfileKey));
+    if (
+      !requestId || !activityType || !sessionId || !repetitionId || finishedAt == null
+      || finishedAt < now - 10 * 60 * 1_000 || finishedAt > now + heartRateLiveFutureSkewMs
+      || effortSummary == null || exposesOwnerIdentity
+    ) {
+      writeJson(response, 400, { error: 'Recovery Alert needs one valid, recently finished repetition.' });
+      return;
+    }
+    const preference = recoveryPreferenceValue(await persistence.loadRecoveryAlertPreference(ownerProfileKey));
+    const accountId = recoveryAccountId(ownerProfileKey);
+    if (preference.mode === 'off') {
+      const activeEpisode = await persistence.loadActiveRecoveryAlertEpisode(ownerProfileKey, now);
+      writeJson(response, 200, {
+        accountId,
+        episode: null,
+        activeEpisode: recoveryEpisodePublic(activeEpisode, now),
+        replayed: false,
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    let plannedSeconds = null;
+    let confidence = 'fixed';
+    let learningEpisodeCount = 0;
+    let explanation = preference.mode === 'timer'
+      ? 'Recovery timer running. Start when the alert appears and you feel ready.'
+      : 'Waiting for your recovery heart-rate target. Start when you feel ready.';
+    if (preference.mode === 'timer') {
+      plannedSeconds = preference.timerSeconds;
+    } else if (preference.mode === 'smart') {
+      const history = await persistence.loadRecoveryLearningSummaries(
+        ownerProfileKey,
+        activityType,
+        preference.targetBpm,
+        12,
+      );
+      const plan = smartRecoveryPlan(preference, history, effortSummary);
+      plannedSeconds = plan.plannedSeconds;
+      confidence = plan.confidence;
+      learningEpisodeCount = plan.learningEpisodeCount;
+      explanation = plan.explanation;
+    }
+    // A fixed Timer always honors the visible timer choice. minimumSeconds is
+    // only the earliest sensor/model recommendation for Heart Rate and Smart.
+    const notBeforeAt = preference.mode === 'timer'
+      ? finishedAt
+      : finishedAt + preference.minimumSeconds * 1_000;
+    const fallbackAt = preference.mode === 'timer'
+      ? finishedAt + plannedSeconds * 1_000
+      : finishedAt + preference.maximumSeconds * 1_000;
+    const plannedReadyAt = plannedSeconds == null
+      ? null
+      : Math.min(fallbackAt, Math.max(notBeforeAt, finishedAt + plannedSeconds * 1_000));
+    const requestFingerprint = createHash('sha256').update(JSON.stringify({
+      activityType,
+      sessionId,
+      repetitionId,
+      finishedAt,
+      effortSummary,
+    })).digest('hex');
+    const created = await persistence.createRecoveryAlertEpisode(ownerProfileKey, {
+      id: `recovery_${randomUUID()}`,
+      requestId,
+      requestFingerprint,
+      activityType,
+      sessionId,
+      repetitionId,
+      mode: preference.mode,
+      timerSeconds: preference.timerSeconds,
+      targetBpm: preference.mode === 'timer' ? null : preference.targetBpm,
+      minimumSeconds: preference.minimumSeconds,
+      maximumSeconds: preference.maximumSeconds,
+      startedAt: finishedAt,
+      notBeforeAt,
+      plannedReadyAt,
+      fallbackAt,
+      explanation,
+      confidence,
+      learningEpisodeCount,
+      effortSummary,
+    }, now, Math.max(now, finishedAt));
+    if (!created?.episode) {
+      writeJson(response, 503, { error: 'Recovery Alert could not be started.' });
+      return;
+    }
+    if (created.conflict) {
+      writeJson(response, 409, { error: 'That recovery request was already used for another repetition.' });
+      return;
+    }
+    // Keep the submitted request's exact idempotent result in `episode`, but
+    // separately project the latest authoritative account state. A delayed
+    // retry for repetition 1 must never replace repetition 2 in another
+    // device after repetition 2 has already committed.
+    const activeEpisode = await persistence.loadActiveRecoveryAlertEpisode(ownerProfileKey, now);
+    writeJson(response, created.replayed ? 200 : 201, {
+      accountId,
+      episode: recoveryEpisodePublic(created.episode, now),
+      activeEpisode: recoveryEpisodePublic(activeEpisode, now),
+      replayed: created.replayed,
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (pathname === '/api/recovery-alert/episodes/active') {
+    if (request.method !== 'GET') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const ownerProfileKey = authProfileKey(session.user);
+    const episode = await persistence.loadActiveRecoveryAlertEpisode(ownerProfileKey, now);
+    writeJson(response, 200, {
+      accountId: recoveryAccountId(ownerProfileKey),
+      episode: recoveryEpisodePublic(episode, now),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const actionMatch = /^\/api\/recovery-alert\/episodes\/([^/]+)\/actions$/.exec(pathname);
+  if (actionMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const ownerProfileKey = authProfileKey(session.user);
+    const episodeId = recoveryIdentifier(actionMatch[1]);
+    const existing = episodeId ? await persistence.loadRecoveryAlertEpisode(ownerProfileKey, episodeId) : null;
+    if (!existing) {
+      writeJson(response, 404, { error: 'That recovery period was not found.' });
+      return;
+    }
+    const payload = await readJsonBody(request, 8_000);
+    const action = ['add-time', 'start-anyway', 'stop'].includes(payload?.action) ? payload.action : '';
+    const seconds = action === 'add-time' ? strictRecoveryInteger(payload?.seconds, 15, 600) : null;
+    if (!action || (action === 'add-time' && seconds == null)) {
+      writeJson(response, 400, { error: 'Choose Add time, Start anyway, or Stop.' });
+      return;
+    }
+    const updated = await persistence.updateRecoveryAlertEpisode(
+      ownerProfileKey,
+      episodeId,
+      action,
+      { seconds },
+      Math.max(now, existing.startedAt),
+    );
+    if (!updated) {
+      writeJson(response, 409, { error: 'That recovery period cannot be changed.' });
+      return;
+    }
+    writeJson(response, 200, {
+      accountId: recoveryAccountId(ownerProfileKey),
+      episode: recoveryEpisodePublic(updated, now),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const heartRateMatch = /^\/api\/recovery-alert\/episodes\/([^/]+)\/heart-rate$/.exec(pathname);
+  if (heartRateMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const ownerProfileKey = authProfileKey(session.user);
+    const episodeId = recoveryIdentifier(heartRateMatch[1]);
+    const episode = episodeId ? await persistence.loadRecoveryAlertEpisode(ownerProfileKey, episodeId) : null;
+    if (!episode) {
+      writeJson(response, 404, { error: 'That recovery period was not found.' });
+      return;
+    }
+    const payload = await readJsonBody(request, 8_000);
+    const streamId = recoveryIdentifier(payload?.streamId);
+    const bpm = strictRecoveryInteger(payload?.bpm, 20, 260);
+    const recordedAt = heartRateTimestamp(payload?.recordedAt);
+    const stream = streamId ? await persistence.loadHeartRateStreamById(ownerProfileKey, streamId) : null;
+    const latestStoredSample = stream ? await persistence.loadLatestHeartRateSample(stream.id) : null;
+    if (
+      !stream || stream.finalizedAt != null || (stream.relayExpiresAt ?? 0) <= now
+      || bpm == null || recordedAt == null
+      || recordedAt <= now - heartRateLiveFreshnessMs || recordedAt > now + heartRateLiveFutureSkewMs
+      || latestStoredSample?.recordedAt !== recordedAt || latestStoredSample?.bpm !== bpm
+    ) {
+      writeJson(response, 409, { error: 'A fresh accepted Apple Watch reading for this account is required.' });
+      return;
+    }
+    const updated = await persistence.applyRecoveryHeartRateSamples(
+      ownerProfileKey,
+      stream.id,
+      [{ bpm, recordedAt }],
+      now,
+    );
+    if (!updated || updated.id !== episode.id) {
+      writeJson(response, 409, { error: 'That Apple Watch reading does not match the active recovery period.' });
+      return;
+    }
+    writeJson(response, 200, {
+      accountId: recoveryAccountId(ownerProfileKey),
+      episode: recoveryEpisodePublic(updated, now),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const ackMatch = /^\/api\/recovery-alert\/episodes\/([^/]+)\/ack$/.exec(pathname);
+  if (ackMatch) {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const ingestToken = requestBearerToken(request);
+    const pairing = ingestToken.length >= 32
+      ? await persistence.loadHeartRatePairingByIngestTokenHash(heartRateIngestTokenHash(ingestToken), now)
+      : null;
+    if (!pairing?.ownerProfileKey) {
+      writeJson(response, 401, { error: 'Apple Watch recovery authorization is invalid or expired.' });
+      return;
+    }
+    const ownerProfileKey = pairing.ownerProfileKey;
+    const episodeId = recoveryIdentifier(ackMatch[1]);
+    const episode = episodeId ? await persistence.loadRecoveryAlertEpisode(ownerProfileKey, episodeId) : null;
+    if (!episode) {
+      writeJson(response, 404, { error: 'That recovery period was not found.' });
+      return;
+    }
+    const payload = await readJsonBody(request, 8_000);
+    const accountId = recoveryIdentifier(payload?.accountId, 96);
+    const sessionId = recoveryIdentifier(payload?.sessionId);
+    const repetitionId = recoveryIdentifier(payload?.repetitionId);
+    const trigger = ['target', 'planned', 'fallback'].includes(payload?.trigger) ? payload.trigger : '';
+    const triggeredAt = heartRateTimestamp(payload?.triggeredAt);
+    const issuedAt = strictRecoveryInteger(payload?.issuedAt, 0, Number.MAX_SAFE_INTEGER);
+    const mode = ['timer', 'heart-rate', 'smart'].includes(payload?.mode) ? payload.mode : '';
+    const notBeforeAt = strictRecoveryInteger(payload?.notBeforeAt, 0, Number.MAX_SAFE_INTEGER);
+    const plannedReadyAt = payload?.plannedReadyAt == null
+      ? null
+      : strictRecoveryInteger(payload.plannedReadyAt, 0, Number.MAX_SAFE_INTEGER);
+    const fallbackAt = strictRecoveryInteger(payload?.fallbackAt, 0, Number.MAX_SAFE_INTEGER);
+    const targetBpm = payload?.targetBpm == null
+      ? null
+      : strictRecoveryInteger(payload.targetBpm, 40, 220);
+    const expectedAt = trigger === 'target'
+      ? episode.readyAt
+      : trigger === 'planned'
+        ? episode.plannedReadyAt
+        : episode.fallbackAt;
+    if (
+      accountId !== recoveryAccountId(ownerProfileKey)
+      || sessionId !== episode.sessionId
+      || repetitionId !== episode.repetitionId
+      || issuedAt == null || issuedAt > episode.updatedAt
+      || mode !== episode.mode
+      || notBeforeAt !== episode.notBeforeAt
+      || plannedReadyAt !== episode.plannedReadyAt
+      || fallbackAt !== episode.fallbackAt
+      || targetBpm !== episode.targetBpm
+      || !trigger || triggeredAt == null || expectedAt == null
+      || (trigger === 'target' && episode.readyReason !== 'heart-rate-target')
+      || triggeredAt < expectedAt - heartRateLiveFutureSkewMs
+      || triggeredAt > now + 60_000
+      || episode.cancelledAt != null
+    ) {
+      writeJson(response, 409, { error: 'That Apple Watch recovery alert does not match the active schedule.' });
+      return;
+    }
+    const acknowledged = await persistence.acknowledgeRecoveryAlert(
+      ownerProfileKey,
+      episode.id,
+      trigger,
+      triggeredAt,
+      now,
+    );
+    writeJson(response, 200, {
+      recoveryAlert: recoveryAlertDirective(ownerProfileKey, acknowledged, now),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const deleteMatch = /^\/api\/recovery-alert\/episodes\/([^/]+)$/.exec(pathname);
+  if (deleteMatch) {
+    if (request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const session = await requirePersonalHeartRateSession(request, response);
+    if (!session) return;
+    const ownerProfileKey = authProfileKey(session.user);
+    const episodeId = recoveryIdentifier(deleteMatch[1]);
+    const existing = episodeId ? await persistence.loadRecoveryAlertEpisode(ownerProfileKey, episodeId) : null;
+    if (!existing) {
+      writeJson(response, 404, { error: 'That recovery period was not found.' });
+      return;
+    }
+    const stopped = await persistence.updateRecoveryAlertEpisode(
+      ownerProfileKey,
+      episodeId,
+      'stop',
+      {},
+      Math.max(now, existing.startedAt),
+    );
+    if (!stopped) {
+      writeJson(response, 409, { error: 'That recovery period is already stopped.' });
+      return;
+    }
+    writeJson(response, 200, {
+      accountId: recoveryAccountId(ownerProfileKey),
+      episode: recoveryEpisodePublic(stopped, now),
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  writeJson(response, 404, { error: 'Recovery Alert endpoint not found.' });
+}
+
 async function handleHeartRateStreamApi(request, response, requestUrl) {
   const pathname = requestUrl.pathname;
   const now = Date.now();
@@ -7405,12 +8045,23 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
           || firstNewTailSample.recordedAt < latestStoredSample.recordedAt
         )
       ) return { backwardClock: true, acceptedSequences: [] };
+      const sampleReceivedAt = Date.now();
       const acceptedSequences = await persistence.insertHeartRateSamples(
         stream.id,
         ingestTokenHash,
         sanitized.samples,
-        Date.now(),
+        sampleReceivedAt,
       );
+      const acceptedSet = new Set(acceptedSequences);
+      const acceptedSamples = sanitized.samples.filter((sample) => acceptedSet.has(sample.sequence));
+      if (acceptedSamples.length > 0) {
+        await persistence.applyRecoveryHeartRateSamples(
+          currentStream.ownerProfileKey,
+          currentStream.id,
+          acceptedSamples,
+          sampleReceivedAt,
+        );
+      }
       if (['studio-block', 'account-block'].includes(currentStream.relayScope)) {
         try {
           await persistence.reconcileHeartRateTrainingSegmentBindingsForStream(stream.id, Date.now());
@@ -7419,7 +8070,8 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
           cloudTelemetry.warn('heart_rate.continuous_segment_refresh_failed', { status: 'failed' });
         }
       }
-      return { acceptedSequences };
+      const recoveryEpisode = await persistence.loadLatestRecoveryAlertEpisode(currentStream.ownerProfileKey);
+      return { acceptedSequences, recoveryEpisode, recoveryOwnerProfileKey: currentStream.ownerProfileKey };
     });
     if (writeResult.authorizationFailed) {
       writeJson(response, 401, { error: 'This heart-rate stream authorization is invalid, expired, or revoked.' });
@@ -7454,6 +8106,13 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
         + sanitized.samples.length
         - acceptedSequences.length
         + sanitized.clippedAfterAccountStop,
+      ...(writeResult.recoveryEpisode ? {
+        recoveryAlert: recoveryAlertDirective(
+          writeResult.recoveryOwnerProfileKey,
+          writeResult.recoveryEpisode,
+          Date.now(),
+        ),
+      } : {}),
     }, { 'Cache-Control': 'no-store' });
     return;
   }
@@ -9733,6 +10392,10 @@ async function serveStatic(request, response) {
     });
     if (request.method === 'GET') response.end(body);
     else response.end();
+    return;
+  }
+  if (requestUrl.pathname.startsWith('/api/recovery-alert')) {
+    await handleRecoveryAlertApi(request, response, requestUrl);
     return;
   }
   if (requestUrl.pathname.startsWith('/api/heart-rate')) {

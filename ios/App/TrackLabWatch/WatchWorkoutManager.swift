@@ -23,6 +23,8 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     @Published private(set) var state: WatchWorkoutState = .idle
     @Published private(set) var heartRateBpm: Double?
     @Published private(set) var message = "Ready to connect"
+    @Published private(set) var recoveryPhase = "idle"
+    @Published private(set) var recoveryMessage = "Recovery Alert ready"
 
     private let healthStore = HKHealthStore()
     private let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate)!
@@ -44,6 +46,12 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
 
     private override init() {
         super.init()
+        WatchRecoveryAlertEngine.shared.onStateChange = { [weak self] phase, message in
+            DispatchQueue.main.async {
+                self?.recoveryPhase = phase
+                self?.recoveryMessage = message
+            }
+        }
         restoreWatchConnectDeadline()
         if WCSession.isSupported() {
             let connectivity = WCSession.default
@@ -263,6 +271,9 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.state = state
             self.message = message
+            WatchRecoveryAlertEngine.shared.setWorkoutOwnsCue(
+                [.active, .paused].contains(state)
+            )
         }
     }
 
@@ -437,7 +448,17 @@ extension WatchWorkoutManager: WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        if WatchRecoveryAlertEngine.shared.handle(message) { return }
         applyWatchConnectContext(message)
+    }
+
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        if WatchRecoveryAlertEngine.shared.handle(userInfo) { return }
+        applyWatchConnectContext(userInfo)
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        WatchRecoveryAlertEngine.shared.connectivityReachabilityDidChange(session.isReachable)
     }
 }
 
@@ -490,6 +511,7 @@ extension WatchWorkoutManager: HKLiveWorkoutBuilderDelegate {
         guard bpm.isFinite, bpm >= 20, bpm <= 260 else { return }
         DispatchQueue.main.async {
             self.heartRateBpm = bpm
+            WatchRecoveryAlertEngine.shared.ingestHeartRate(bpm, measuredAt: measuredAt)
         }
         publishHeartRate(bpm, measuredAt: measuredAt)
     }

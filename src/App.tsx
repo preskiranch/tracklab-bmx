@@ -13,20 +13,14 @@ import {
   BarChart3,
   Bike,
   Bluetooth,
-  Code2,
   Compass,
   Gauge,
-  Globe2,
   LogOut,
   MapPinned,
-  Minus,
-  Plus,
-  PlayCircle,
   Radio,
   RefreshCcw,
   Route,
   Settings,
-  StopCircle,
   TabletSmartphone,
   Usb,
   UserCircle,
@@ -75,7 +69,6 @@ import {
   updateBikeRaceAudio,
 } from './lib/bikeRaceAudio';
 import { safeSetLocalStorage } from './lib/browserStorage';
-import { redactPrivatePower } from './lib/privatePower';
 import {
   bootstrapNativeBluetooth,
   getNativeBluetoothBootstrapStatus,
@@ -395,6 +388,10 @@ const HeartRateAccountBlockCoordinator = lazy(() => import('./components/HeartRa
   .then((module) => ({ default: module.HeartRateAccountBlockCoordinator })));
 const WatchConnectCoordinator = lazy(() => import('./components/WatchConnectCoordinator')
   .then((module) => ({ default: module.WatchConnectCoordinator })));
+const RecoveryAlertCoordinator = lazy(() => import('./components/RecoveryAlertCoordinator'));
+const clearNativeRecoveryBoundary = () => import('./lib/nativeRecoveryAlerts')
+  .then(({ nativeRecoveryAlerts }) => nativeRecoveryAlerts.clearAllEpisodes())
+  .catch(() => undefined);
 const HeartRateStudioInviteDialog = lazy(() => import('./components/HeartRateStudioInviteDialog')
   .then((module) => ({ default: module.HeartRateStudioInviteDialog })));
 const StudioHeartRateBlockOverlay = lazy(() => import('./components/StudioHeartRateBlockOverlay')
@@ -2851,9 +2848,16 @@ export default function App() {
     setAuthStatus('loading');
 
     readCurrentAuthUser()
-      .then((user) => {
+      .then(async (user) => {
         if (cancelled) {
           return;
+        }
+
+        if (!user) {
+          // An authoritative signed-out bootstrap must remove a prior native
+          // account restored before the server session check completed.
+          await clearNativeRecoveryBoundary();
+          if (cancelled) return;
         }
 
         setAuthUser(user);
@@ -2869,8 +2873,9 @@ export default function App() {
           setCheckoutBikeSeats(1);
         }
       })
-      .catch((error: Error) => {
+      .catch(async (error: Error) => {
         console.warn(`Could not restore TrackLab login: ${error.message}`);
+        await clearNativeRecoveryBoundary();
         if (!cancelled) {
           setAuthUser(null);
           setAuthStatus('signed-out');
@@ -7364,14 +7369,16 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const exportRaceCaptureJson = () => {
+  const exportRaceCaptureJson = async () => {
     if (!raceCapture) {
       return;
     }
+    const capture = raceCapture;
+    const { redactPrivatePower } = await import('./lib/privatePower');
 
     downloadTextFile(
-      raceCaptureFilename(raceCapture, 'json'),
-      JSON.stringify(redactPrivatePower(raceCapture), null, 2),
+      raceCaptureFilename(capture, 'json'),
+      JSON.stringify(redactPrivatePower(capture), null, 2),
       'application/json',
     );
   };
@@ -8398,6 +8405,10 @@ export default function App() {
         throw new Error('TrackLab did not return an account.');
       }
 
+      // A signed-out device may still hold a prior athlete's native recovery
+      // record. Clear it before committing this newly authenticated account;
+      // RecoveryAlertCoordinator will then bind and rehydrate the exact user.
+      await clearNativeRecoveryBoundary();
       setAuthUser(user);
       setAuthStatus('signed-in');
       setMembership(user.membership);
@@ -8605,6 +8616,11 @@ export default function App() {
         .then(({ stopClubLiveSession }) => stopClubLiveSession(liveClubSelection, { keepalive: true }))
         .catch(() => undefined);
     }
+    // Recovery notifications are device-local and can also be scheduled on an
+    // iPad, independently of the iPhone heart-rate writer. Clear them after
+    // relay shutdown and immediately before logout so an in-flight A response
+    // cannot recreate A's alert at the A -> B account boundary.
+    await clearNativeRecoveryBoundary();
     try {
       await logoutAuthUser();
     } catch (error) {
@@ -10541,7 +10557,7 @@ export default function App() {
                   }}
                   disabled={bridgeButtonDisabled}
                 >
-                  {bridgeRunning ? <StopCircle size={16} /> : <PlayCircle size={16} />}
+                  <span aria-hidden="true">{bridgeRunning ? '■' : '▶'}</span>
                   <span>{bridgeButtonLabel}</span>
                 </button>
               )}
@@ -10732,7 +10748,7 @@ export default function App() {
                           onClick={() => setLapCount((current) => Math.max(1, current - 1))}
                           disabled={lapCount <= 1 || lapControlsDisabled}
                         >
-                          <Minus size={14} />
+                          <span aria-hidden="true">−</span>
                         </button>
                         <span aria-live="polite">
                           <b>{lapCount}</b> {lapCount === 1 ? 'lap' : 'laps'}
@@ -10744,7 +10760,7 @@ export default function App() {
                           onClick={() => setLapCount((current) => Math.min(20, current + 1))}
                           disabled={lapCount >= 20 || lapControlsDisabled}
                         >
-                          <Plus size={14} />
+                          <span aria-hidden="true">+</span>
                         </button>
                       </span>
                     </span>
@@ -10986,7 +11002,7 @@ export default function App() {
                 Watch Connect
               </button>
               <button type="button" onClick={() => setShowMembershipLanding(true)}>
-                <Globe2 size={17} /> Community
+                <span aria-hidden="true">◎</span> Community
               </button>
               <button type="button" onClick={openTrackLocator}>
                 <MapPinned size={17} /> Track Locator
@@ -11020,7 +11036,7 @@ export default function App() {
                     <Route size={17} /> Tracks & Maps
                   </button>
                   <button className={appMode === 'developer' ? 'selected' : ''} type="button" onClick={() => setAppMode('developer')}>
-                    <Code2 size={17} /> Developer Tools
+                    <span aria-hidden="true">&lt;/&gt;</span> Developer Tools
                   </button>
                 </>
               )}
@@ -11210,6 +11226,22 @@ export default function App() {
           </div>
           )}
         </header>
+
+        {authUser
+          && !clubTabletKioskMode
+          && !demoMode
+          && (raceWorkspaceActive || appMode === 'get-pulled') && (
+          <Suspense fallback={null}>
+            <RecoveryAlertCoordinator
+              accountId={authUser.id}
+              mode={appMode}
+              raceCapture={raceCapture}
+              raceRiders={riders}
+              getPulledResult={getPulledLiveState?.result ?? null}
+              latestHeartRate={liveHeartRateByRider[`account:${authUser.id}`] ?? null}
+            />
+          </Suspense>
+        )}
 
         {appMode === 'club-tablet' ? (
           <Suspense fallback={<div className="explore-loading">Opening Club Tablet…</div>}>
