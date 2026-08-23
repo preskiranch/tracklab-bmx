@@ -11105,20 +11105,20 @@ export async function pruneExpiredData(now = Date.now()) {
   const [sessions, checkouts, invitations, pairings, monitorAuthorizations] = await Promise.all([
     query(
       `DELETE FROM ${schema}.auth_sessions
-       WHERE expires_at <= $1
+       WHERE expires_at <= $1::timestamptz
        RETURNING id`,
       [cutoff],
     ),
     query(
       `DELETE FROM ${schema}.billing_checkouts
-       WHERE expires_at <= $1
-          OR (claimed_at IS NOT NULL AND claimed_at <= $1 - interval '7 days')
+       WHERE expires_at <= $1::timestamptz
+          OR (claimed_at IS NOT NULL AND claimed_at <= $1::timestamptz - interval '7 days')
        RETURNING state_hash`,
       [cutoff],
     ),
     query(
       `DELETE FROM ${schema}.heart_rate_studio_invitations
-       WHERE COALESCE(revoked_at, claimed_at, expires_at) <= $1 - interval '7 days'
+       WHERE COALESCE(revoked_at, claimed_at, expires_at) <= $1::timestamptz - interval '7 days'
        RETURNING id`,
       [cutoff],
     ),
@@ -11126,9 +11126,9 @@ export async function pruneExpiredData(now = Date.now()) {
       `DELETE FROM ${schema}.heart_rate_pairings AS pairings
        WHERE (
          pairings.claimed_at IS NULL
-         AND pairings.pair_code_expires_at <= $1 - interval '1 day'
+         AND pairings.pair_code_expires_at <= $1::timestamptz - interval '1 day'
        ) OR (
-         pairings.revoked_at <= $1 - interval '30 days'
+         pairings.revoked_at <= $1::timestamptz - interval '30 days'
          AND NOT EXISTS (
            SELECT 1 FROM ${schema}.heart_rate_streams AS streams
            WHERE streams.pairing_id = pairings.id
@@ -11139,13 +11139,13 @@ export async function pruneExpiredData(now = Date.now()) {
     ),
     query(
       `DELETE FROM ${schema}.club_monitor_sprint_authorizations
-       WHERE COALESCE(consumed_at, revoked_at, expires_at) <= $1 - interval '7 days'
+       WHERE COALESCE(consumed_at, revoked_at, expires_at) <= $1::timestamptz - interval '7 days'
        RETURNING id`,
       [cutoff],
     ),
     query(
       `DELETE FROM ${schema}.heart_rate_training_segment_bindings
-       WHERE expires_at <= $1`,
+       WHERE expires_at <= $1::timestamptz`,
       [cutoff],
     ),
   ]);
