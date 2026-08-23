@@ -4,11 +4,17 @@ struct WatchWorkoutView: View {
     @EnvironmentObject private var workout: WatchWorkoutManager
 
     var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            content(at: timeline.date)
+        }
+    }
+
+    private func content(at now: Date) -> some View {
         VStack(spacing: 10) {
             Text("Watch Connect")
                 .font(.headline)
 
-            if let bpm = workout.heartRateBpm {
+            if let bpm = workout.displayedHeartRateBpm(at: now) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Image(systemName: "heart.fill")
                         .foregroundStyle(.red)

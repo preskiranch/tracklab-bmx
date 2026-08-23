@@ -1143,7 +1143,7 @@ describe('Watch Connect cloud workflow', () => {
     await expect(persistence.loadHeartRateSamples(future.streamId)).resolves.toHaveLength(1);
   });
 
-  it('coalesces a valid Watch status burst and rejects excess requests before authentication', async () => {
+  it('admits same-account multi-device Watch polling, coalesces status loads, and caps pre-auth work', async () => {
     const metricValue = async (name: string, labels = '') => {
       const response = await api('/api/metrics', {
         headers: { 'X-TrackLab-Metrics-Token': metricsToken },
@@ -1161,16 +1161,27 @@ describe('Watch Connect cloud workflow', () => {
       '198.51.100.238',
     );
     const statusLoadsBefore = await metricValue('tracklab_heart_rate_watch_status_loads_total');
-    const validResponses = await Promise.all(Array.from({ length: 13 }, () => (
-      api('/api/heart-rate/watch-connect', {
-        headers: { 'X-Forwarded-For': '198.51.100.239' },
-      }, floodAccount.cookie)
-    )));
+    const validResponses = await Promise.all(
+      ['iPhone', 'iPad', 'Web'].flatMap((surface) => (
+        Array.from({ length: 20 }, () => api('/api/heart-rate/watch-connect', {
+          headers: {
+            'User-Agent': `TrackLab-${surface}`,
+            'X-Forwarded-For': '198.51.100.239',
+          },
+        }, floodAccount.cookie))
+      )),
+    );
+    const validOverflow = await api('/api/heart-rate/watch-connect', {
+      headers: {
+        'User-Agent': 'TrackLab-iPhone',
+        'X-Forwarded-For': '198.51.100.239',
+      },
+    }, floodAccount.cookie);
 
-    expect(validResponses.filter((response) => response.status === 200)).toHaveLength(12);
-    expect(validResponses.filter((response) => response.status === 429)).toHaveLength(1);
-    expect(validResponses.find((response) => response.status === 429)?.headers.get('ratelimit-limit'))
-      .toBe('12');
+    expect(validResponses).toHaveLength(60);
+    expect(validResponses.every((response) => response.status === 200)).toBe(true);
+    expect(validOverflow.status).toBe(429);
+    expect(validOverflow.headers.get('ratelimit-limit')).toBe('60');
     // One load represents the two bounded persistence reads (enrollments and
     // connections); the other admitted requests share its in-flight promise.
     expect(await metricValue('tracklab_heart_rate_watch_status_loads_total'))
@@ -1182,17 +1193,17 @@ describe('Watch Connect cloud workflow', () => {
       '{backend="memory"}',
     );
     const responses: Response[] = [];
-    for (let index = 0; index < 13; index += 1) {
+    for (let index = 0; index < 61; index += 1) {
       responses.push(await api('/api/heart-rate/watch-connect', {
         headers: { 'X-Forwarded-For': '198.51.100.240' },
       }, invalidCookie));
     }
 
-    expect(responses.slice(0, 12).every((response) => response.status === 401)).toBe(true);
-    expect(responses[12].status).toBe(429);
-    expect(responses[12].headers.get('ratelimit-limit')).toBe('12');
-    expect(responses[12].headers.get('retry-after')).toMatch(/^\d+$/);
+    expect(responses.slice(0, 60).every((response) => response.status === 401)).toBe(true);
+    expect(responses[60].status).toBe(429);
+    expect(responses[60].headers.get('ratelimit-limit')).toBe('60');
+    expect(responses[60].headers.get('retry-after')).toMatch(/^\d+$/);
     expect(await metricValue('tracklab_auth_session_lookups_total', '{backend="memory"}'))
-      .toBe(lookupsBefore + 12);
+      .toBe(lookupsBefore + 60);
   });
 });

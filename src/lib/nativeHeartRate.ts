@@ -12,6 +12,12 @@ export const nativeHeartRateStatusEvent = 'heartRateStatus';
 export const nativeHeartRateRelayStatusEvent = 'heartRateRelayStatus';
 export const nativeHeartRateContractVersion = 1 as const;
 export const watchConnectMaximumDurationMs = 4 * 60 * 60 * 1_000;
+/**
+ * A server-created connection is exactly four hours long. Apple devices with
+ * automatic time disabled can still trail the server slightly, so allow a
+ * small, explicit offset while the server credential remains authoritative.
+ */
+export const watchConnectMaximumClockSkewMs = 5 * 1_000;
 export const watchConnectLatestBuildReason = 'Install the latest TrackLab build to use Watch Connect.';
 
 export type NativeHeartRatePlatform = 'iphone' | 'ipad' | 'other';
@@ -858,9 +864,9 @@ export function createNativeHeartRateClient({
         || !ingestToken
         || ingestToken.length > 8_192
         || /\s/u.test(ingestToken)
-        || !Number.isFinite(expiresAt)
+        || !Number.isSafeInteger(expiresAt)
         || expiresAt <= now
-        || expiresAt - now > watchConnectMaximumDurationMs
+        || expiresAt - now > watchConnectMaximumDurationMs + watchConnectMaximumClockSkewMs
       ) {
         return {
           ...inactiveWatchConnect('Watch Connect received an invalid four-hour connection.'),

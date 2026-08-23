@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { WatchConnectCard } from '../../src/components/WatchConnectCard';
 import {
+  watchConnectHeartRateForConnection,
   watchConnectReadOnlyObserver,
 } from '../../src/components/WatchConnectCoordinator';
 import {
@@ -114,7 +115,7 @@ describe('iPad Watch relay regression boundaries', () => {
     expect(writerExpression).not.toContain("platform === 'other'");
   });
 
-  it('shows cloud-connected BPM on an iPad observer without writer controls', () => {
+  it('relays one exact-account iPhone sample to an iPad observer, then rejects foreign and stale data', () => {
     const enrollment: WatchConnectEnrollment = {
       id: 'enrollment-personal',
       scope: 'personal',
@@ -160,12 +161,34 @@ describe('iPad Watch relay regression boundaries', () => {
     expect(watchConnectReadOnlyObserver(iPadAvailability)).toBe(true);
     expect(state.phase).toBe('connected');
 
+    // Model the paired iPhone's account-scoped cloud event before the iPad
+    // consumes it. Both the account fence and four-hour connection fence must
+    // match before the observer card may render a BPM.
+    const iPhoneCloudSample = liveReading();
+    const cloudReadings = mergeLiveHeartRateEvent({}, iPhoneCloudSample, {
+      expectedRiderId: 'account:athlete-one',
+      now,
+    });
+    const observerReading = watchConnectHeartRateForConnection(
+      cloudReadings['account:athlete-one'] ?? null,
+      connection,
+    );
+    expect(observerReading?.bpm).toBe(164);
+    expect(mergeLiveHeartRateEvent(cloudReadings, liveReading({
+      riderId: 'account:athlete-two',
+      bpm: 201,
+      receivedAt: now,
+    }), {
+      expectedRiderId: 'account:athlete-one',
+      now,
+    })).toBe(cloudReadings);
+
     const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
       athleteName: 'Athlete One',
       state,
       enrolled: true,
       observer: true,
-      latestHeartRate: liveReading(),
+      latestHeartRate: observerReading,
       now,
     }));
     expect(markup).toContain('Connected · 4h 0m left');
@@ -173,6 +196,17 @@ describe('iPad Watch relay regression boundaries', () => {
     expect(markup).toContain('Live through iPhone');
     expect(markup).not.toContain('<button');
     expect(markup).not.toContain('Install Watch App');
+
+    const staleMarkup = renderToStaticMarkup(createElement(WatchConnectCard, {
+      athleteName: 'Athlete One',
+      state,
+      enrolled: true,
+      observer: true,
+      latestHeartRate: observerReading,
+      now: now + defaultHeartRateFreshnessMs + 1,
+    }));
+    expect(staleMarkup).toContain('Signal interrupted');
+    expect(staleMarkup).not.toContain('164 beats per minute');
   });
 
   it('keeps sensor time in player readings and gates account-wide revoke to the writer role', () => {

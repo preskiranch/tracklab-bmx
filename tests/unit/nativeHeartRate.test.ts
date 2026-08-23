@@ -6,6 +6,8 @@ import {
   normalizeNativeHeartRateStatus,
   normalizeNativeWatchConnectIdentity,
   normalizeNativeWatchConnectState,
+  watchConnectMaximumClockSkewMs,
+  watchConnectMaximumDurationMs,
   type NativeHeartRatePlugin,
   type NativeWatchConnectStart,
 } from '../../src/lib/nativeHeartRate';
@@ -503,6 +505,59 @@ describe('native Apple Watch heart-rate adapter', () => {
       state: 'disconnecting',
     });
     expect(stopWatchConnect).toHaveBeenCalledOnce();
+  });
+
+  it('accepts an exact server four-hour deadline when the iPhone clock trails within the bounded skew', async () => {
+    const { plugin, startWatchConnect } = fakePlugin();
+    const client = createNativeHeartRateClient({ capacitor: fakeCapacitor(true), plugin });
+    const serverNow = Date.UTC(2026, 7, 23, 12);
+    const phoneNow = serverNow - watchConnectMaximumClockSkewMs + 1;
+    const expiresAt = serverNow + watchConnectMaximumDurationMs;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(phoneNow);
+
+    try {
+      await expect(client.startWatchConnect({
+        scope: 'personal',
+        connectionId: 'connection-clock-skew',
+        pairingId: 'pairing-clock-skew',
+        relaySessionId: 'watch-connect:connection-clock-skew',
+        baseUrl: 'https://tracklab-bmx.onrender.com',
+        ingestToken: 'private-native-ingest-token',
+        expiresAt,
+      })).resolves.toMatchObject({
+        state: 'connected',
+        connectedUntil: expiresAt,
+      });
+      expect(startWatchConnect).toHaveBeenCalledOnce();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('rejects a four-hour deadline beyond the explicit clock-skew bound', async () => {
+    const { plugin, startWatchConnect } = fakePlugin();
+    const client = createNativeHeartRateClient({ capacitor: fakeCapacitor(true), plugin });
+    const serverNow = Date.UTC(2026, 7, 23, 12);
+    const phoneNow = serverNow - watchConnectMaximumClockSkewMs - 1;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(phoneNow);
+
+    try {
+      await expect(client.startWatchConnect({
+        scope: 'personal',
+        connectionId: 'connection-excessive-skew',
+        pairingId: 'pairing-excessive-skew',
+        relaySessionId: 'watch-connect:connection-excessive-skew',
+        baseUrl: 'https://tracklab-bmx.onrender.com',
+        ingestToken: 'private-native-ingest-token',
+        expiresAt: serverNow + watchConnectMaximumDurationMs,
+      })).resolves.toMatchObject({
+        state: 'error',
+        reason: 'Watch Connect received an invalid four-hour connection.',
+      });
+      expect(startWatchConnect).not.toHaveBeenCalled();
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('does not resolve Watch Connect while native is still waiting for the mirrored workout', async () => {

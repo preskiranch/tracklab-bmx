@@ -165,8 +165,11 @@ const friendRequestRateLimiter = createRateLimiter({ windowMs: 24 * 60 * 60 * 10
 const heartRateReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 // This admission limiter runs before database-backed authentication. It keeps
 // a broken native polling loop from consuming every PostgreSQL connection and
-// delaying unrelated sections such as Friends.
+// delaying unrelated sections such as Friends. The one-minute budget supports
+// the same account polling from an iPhone, iPad, and web surface while still
+// bounding unauthenticated work by the credential-and-IP admission key.
 const heartRateStatusAdmissionRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
+const heartRateWatchStatusAdmissionLimit = 60;
 const heartRateMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const heartRateIngestRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const clubMonitorHistoryRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
@@ -8276,7 +8279,7 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
       request,
       response,
       heartRateStatusAdmissionRateLimiter,
-      12,
+      heartRateWatchStatusAdmissionLimit,
       `heart-rate-watch-status-admission:${authCredentialRateLimitKey(request)}`,
     )) return;
   }

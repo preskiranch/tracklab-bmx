@@ -82,19 +82,31 @@ public final class HeartRatePlugin: CAPPlugin, CAPBridgedPlugin, HeartRateCoordi
             call.reject("Watch Connect received an invalid connection.")
             return
         }
-        let connectedAt = Int64((Date().timeIntervalSince1970 * 1_000).rounded())
+        let observedAt = Int64((Date().timeIntervalSince1970 * 1_000).rounded())
+        guard rawExpiresAt >= 0,
+              rawExpiresAt < Double(Int64.max) else {
+            call.reject("Watch Connect received an invalid connection.")
+            return
+        }
         let connectedUntil = Int64(rawExpiresAt.rounded())
-        guard connectedUntil > connectedAt,
-              connectedUntil - connectedAt <= WatchConnectSessionManager.maximumDurationMilliseconds else {
+        guard connectedUntil > observedAt,
+              connectedUntil <= observedAt
+                + WatchConnectSessionManager.maximumDurationMilliseconds
+                + WatchConnectSessionManager.maximumClockSkewMilliseconds else {
             call.reject("Watch Connect requires a new four-hour connection.")
             return
         }
+        // The cloud contract issues an exact four-hour connection. Deriving
+        // its start from that signed credential keeps persisted duration
+        // authoritative even when this iPhone's wall clock trails the server.
+        let connectedAt = connectedUntil
+            - WatchConnectSessionManager.maximumDurationMilliseconds
         guard let startToken = beginWatchConnectStart() else {
             call.reject("Watch Connect is already connecting.")
             return
         }
 
-        let effectiveConnectedAt = WatchConnectSessionManager.shared.prepare(
+        let effectiveRelayStartedAt = WatchConnectSessionManager.shared.prepare(
             scope: scope,
             connectionId: connectionId,
             pairingId: pairingId,
@@ -124,7 +136,9 @@ public final class HeartRatePlugin: CAPPlugin, CAPBridgedPlugin, HeartRateCoordi
                     switch readyResult {
                     case .failure(let error):
                         WatchConnectSessionManager.shared.fail(error.localizedDescription)
-                        _ = HeartRateCoordinator.shared.endWorkout()
+                        _ = HeartRateCoordinator.shared.endWorkout(
+                            sessionId: workoutSessionId
+                        )
                         self.finishWatchConnectStart(startToken)
                         call.reject(error.localizedDescription)
                     case .success:
@@ -133,7 +147,7 @@ public final class HeartRatePlugin: CAPPlugin, CAPBridgedPlugin, HeartRateCoordi
                             ingestToken: ingestToken,
                             sessionId: relaySessionId,
                             scope: scope == .personal ? .accountBlock : .studioBlock,
-                            startedAt: Double(effectiveConnectedAt),
+                            startedAt: Double(effectiveRelayStartedAt),
                             activeElapsedAtStartMs: 0
                         ) { relayResult in
                             DispatchQueue.main.async {
@@ -144,13 +158,15 @@ public final class HeartRatePlugin: CAPPlugin, CAPBridgedPlugin, HeartRateCoordi
                                 switch relayResult {
                                 case .success(let relayState):
                                     HeartRateCoordinator.shared.replayRecentSamples(
-                                        since: Double(effectiveConnectedAt)
+                                        since: Double(effectiveRelayStartedAt)
                                     )
                                     guard relayState["configured"] as? Bool == true else {
                                         WatchConnectSessionManager.shared.fail(
                                             "Watch Connect could not configure its private relay."
                                         )
-                                        _ = HeartRateCoordinator.shared.endWorkout()
+                                        _ = HeartRateCoordinator.shared.endWorkout(
+                                            sessionId: workoutSessionId
+                                        )
                                         self.finishWatchConnectStart(startToken)
                                         call.reject("Watch Connect could not configure its private relay.")
                                         return
@@ -160,7 +176,9 @@ public final class HeartRatePlugin: CAPPlugin, CAPBridgedPlugin, HeartRateCoordi
                                     call.resolve(WatchConnectSessionManager.shared.stateDictionary())
                                 case .failure(let error):
                                     WatchConnectSessionManager.shared.fail(error.localizedDescription)
-                                    _ = HeartRateCoordinator.shared.endWorkout()
+                                    _ = HeartRateCoordinator.shared.endWorkout(
+                                        sessionId: workoutSessionId
+                                    )
                                     self.finishWatchConnectStart(startToken)
                                     call.reject(error.localizedDescription)
                                 }
@@ -174,8 +192,14 @@ public final class HeartRatePlugin: CAPPlugin, CAPBridgedPlugin, HeartRateCoordi
 
     @objc public func stopWatchConnect(_ call: CAPPluginCall) {
         cancelWatchConnectStart()
+        let workoutSessionId = WatchConnectSessionManager.shared.workoutSessionIdForCancellation()
         WatchConnectSessionManager.shared.disconnect()
-        call.resolve(WatchConnectSessionManager.shared.stateDictionary())
+        HeartRateCoordinator.shared.cancelWorkoutLaunchAndStop(
+            sessionId: workoutSessionId,
+            reason: "Watch Connect stopped."
+        ) {
+            call.resolve(WatchConnectSessionManager.shared.stateDictionary())
+        }
     }
 
     @objc public func getRelayState(_ call: CAPPluginCall) {
@@ -373,20 +397,26 @@ public final class HeartRatePlugin: CAPPlugin, CAPBridgedPlugin, HeartRateCoordi
 
     @objc public func clearAllRelays(_ call: CAPPluginCall) {
         cancelWatchConnectStart()
+        let workoutSessionId = WatchConnectSessionManager.shared.workoutSessionIdForCancellation()
         let watchConnectState = WatchConnectSessionManager.shared.stateDictionary()
         if watchConnectState["state"] as? String != TrackLabWatchConnectPhase.inactive.rawValue {
             WatchConnectSessionManager.shared.disconnect(
                 reason: "Watch Connect stopped at this account boundary."
             )
         }
-        HeartRateRelay.shared.clearForAccountBoundary { result in
-            DispatchQueue.main.async {
-                WatchConnectSessionManager.shared.clearSessionForAccountBoundary()
-                switch result {
-                case .success(let relayState):
-                    call.resolve(relayState)
-                case .failure(let error):
-                    call.reject(error.localizedDescription)
+        HeartRateCoordinator.shared.cancelWorkoutLaunchAndStop(
+            sessionId: workoutSessionId,
+            reason: "Watch Connect stopped at this account boundary."
+        ) {
+            HeartRateRelay.shared.clearForAccountBoundary { result in
+                DispatchQueue.main.async {
+                    WatchConnectSessionManager.shared.clearSessionForAccountBoundary()
+                    switch result {
+                    case .success(let relayState):
+                        call.resolve(relayState)
+                    case .failure(let error):
+                        call.reject(error.localizedDescription)
+                    }
                 }
             }
         }

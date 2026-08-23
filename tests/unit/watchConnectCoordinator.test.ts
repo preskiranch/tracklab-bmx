@@ -3,8 +3,11 @@ import { readFileSync } from 'node:fs';
 import {
   activeWatchConnectTarget,
   defaultWatchConnectClubId,
+  runWatchConnectKeyedSingleFlight,
+  watchConnectAccountBoundarySealKey,
   watchConnectAccountRequestIsCurrent,
   watchConnectCanRetryCloudConnection,
+  watchConnectCoordinatorRequestIsCurrent,
   watchConnectLegacyHeartRateIsBusy,
   watchConnectNativeCapability,
   watchConnectNativeResultFromState,
@@ -17,6 +20,176 @@ import {
 } from '../../src/components/WatchConnectCoordinator';
 
 describe('WatchConnectCoordinator native adapter', () => {
+  it('seals one unmatched native identity only once across disconnecting phases', async () => {
+    const foreignNative = {
+      version: 1 as const,
+      state: 'connected' as const,
+      scope: 'personal' as const,
+      connectionId: 'connection-earlier',
+      sessionId: 'watch-connect:connection-earlier',
+      connectedUntil: 14_400_100,
+      remainingMs: 14_400_000,
+      requiresUserStart: false,
+      workoutReady: true,
+      relayConfigured: true,
+    };
+    const input = {
+      accountId: 'account-current',
+      hydratedAccountId: 'account-current',
+      connections: [],
+      native: foreignNative,
+    };
+    const connectedKey = watchConnectAccountBoundarySealKey(input);
+    const syncingKey = watchConnectAccountBoundarySealKey({
+      ...input,
+      native: {
+        ...foreignNative,
+        state: 'syncing' as const,
+        remainingMs: 0,
+        workoutReady: false,
+      },
+    });
+    expect(connectedKey).toBeTruthy();
+    expect(syncingKey).toBe(connectedKey);
+
+    const flights = new Map<string, Promise<string>>();
+    let release = (_value: string) => undefined;
+    let calls = 0;
+    const first = runWatchConnectKeyedSingleFlight(flights, connectedKey!, () => {
+      calls += 1;
+      return new Promise<string>((resolve) => { release = resolve; });
+    }, true);
+    const duplicate = runWatchConnectKeyedSingleFlight(flights, syncingKey!, async () => {
+      calls += 1;
+      return 'duplicate';
+    }, true);
+    expect(duplicate).toBe(first);
+    expect(calls).toBe(1);
+    release('sealed');
+    await expect(first).resolves.toBe('sealed');
+    await expect(runWatchConnectKeyedSingleFlight(flights, connectedKey!, async () => {
+      calls += 1;
+      return 'late duplicate';
+    }, true)).resolves.toBe('sealed');
+    expect(calls).toBe(1);
+  });
+
+  it('allows an explicit boundary-seal retry after failure and a new identity after success', async () => {
+    const flights = new Map<string, Promise<string>>();
+    await expect(runWatchConnectKeyedSingleFlight(
+      flights,
+      'account-one:earlier-one',
+      async () => { throw new Error('temporary cleanup failure'); },
+      true,
+    )).rejects.toThrow('temporary cleanup failure');
+    expect(flights.size).toBe(0);
+    await expect(runWatchConnectKeyedSingleFlight(
+      flights,
+      'account-one:earlier-one',
+      async () => 'retried',
+      true,
+    )).resolves.toBe('retried');
+    await expect(runWatchConnectKeyedSingleFlight(
+      flights,
+      'account-two:earlier-two',
+      async () => 'new account sealed',
+      true,
+    )).resolves.toBe('new account sealed');
+  });
+
+  it('fences stale coordinator completions by both account and generation', () => {
+    expect(watchConnectCoordinatorRequestIsCurrent('account-one', 'account-one', 4, 4)).toBe(true);
+    expect(watchConnectCoordinatorRequestIsCurrent('account-one', 'account-two', 4, 4)).toBe(false);
+    expect(watchConnectCoordinatorRequestIsCurrent('account-one', 'account-one', 4, 5)).toBe(false);
+  });
+
+  it('does not seal before hydration or when native matches current cloud state', () => {
+    const connectedAt = Date.now();
+    const native = {
+      version: 1 as const,
+      state: 'connected' as const,
+      scope: 'personal' as const,
+      connectionId: 'connection-current',
+      sessionId: 'watch-connect:connection-current',
+      connectedUntil: connectedAt + 14_400_000,
+      remainingMs: 14_400_000,
+      requiresUserStart: false,
+      workoutReady: true,
+      relayConfigured: true,
+    };
+    const connection = {
+      id: native.connectionId,
+      enrollmentId: 'enrollment-current',
+      scope: 'personal' as const,
+      clubId: null,
+      studioRiderId: null,
+      state: 'connected' as const,
+      connectedAt,
+      connectedUntil: native.connectedUntil,
+      remainingMs: native.remainingMs,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+    };
+    expect(watchConnectAccountBoundarySealKey({
+      accountId: 'account-current',
+      hydratedAccountId: null,
+      connections: [],
+      native,
+    })).toBeNull();
+    expect(watchConnectAccountBoundarySealKey({
+      accountId: 'account-current',
+      hydratedAccountId: 'account-current',
+      connections: [connection],
+      native,
+    })).toBeNull();
+  });
+
+  it('seals unmatched error and reconnect identities but keeps exact same-account history', () => {
+    const connectedAt = Date.now();
+    const native = {
+      version: 1 as const,
+      state: 'error' as const,
+      scope: 'personal' as const,
+      connectionId: 'connection-earlier',
+      sessionId: 'watch-connect:connection-earlier',
+      connectedUntil: connectedAt + 14_400_000,
+      remainingMs: 0,
+      requiresUserStart: true,
+      workoutReady: false,
+      relayConfigured: true,
+      reason: 'Watch Connect must reconnect before recording more heart rate.',
+    };
+    const input = {
+      accountId: 'account-current',
+      hydratedAccountId: 'account-current',
+      connections: [],
+      native,
+    };
+    expect(watchConnectAccountBoundarySealKey(input)).toBeTruthy();
+    expect(watchConnectAccountBoundarySealKey({
+      ...input,
+      native: { ...native, state: 'reconnect' as const, relayConfigured: false },
+    })).toBeTruthy();
+
+    const exactHistorical = {
+      id: native.connectionId,
+      enrollmentId: 'enrollment-current',
+      scope: native.scope,
+      clubId: null,
+      studioRiderId: null,
+      state: 'expired' as const,
+      connectedAt,
+      connectedUntil: native.connectedUntil,
+      remainingMs: 0,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+    };
+    expect(watchConnectAccountBoundarySealKey({
+      ...input,
+      connections: [exactHistorical],
+    })).toBeNull();
+  });
+
   it('keeps the App suppression callback stable so ordinary rerenders do not restart 15-second polling', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
     expect(appSource).toMatch(/const handleLegacyRelaySuppressionChange = useCallback\([\s\S]*?\}, \[\]\);/);

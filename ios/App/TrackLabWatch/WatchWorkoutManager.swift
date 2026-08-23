@@ -14,14 +14,23 @@ enum WatchWorkoutState: String {
     case error
 }
 
+private struct WatchConnectContextTombstone: Codable, Equatable {
+    let contextId: String?
+    let connectionId: String
+    let workoutSessionId: String
+}
+
 /// Runs the primary indoor-cycling workout on Apple Watch. An active HealthKit
 /// workout keeps high-frequency heart-rate collection alive while the display
 /// is lowered and mirrors versioned samples to the paired iPhone.
 final class WatchWorkoutManager: NSObject, ObservableObject {
     static let shared = WatchWorkoutManager()
+    static let displayedHeartRateFreshnessSeconds: TimeInterval = 15
+    private static let displayedHeartRateFutureToleranceSeconds: TimeInterval = 2
 
     @Published private(set) var state: WatchWorkoutState = .idle
     @Published private(set) var heartRateBpm: Double?
+    @Published private(set) var heartRateMeasuredAt: Date?
     @Published private(set) var message = "Ready to connect"
     @Published private(set) var recoveryPhase = "idle"
     @Published private(set) var recoveryMessage = "Recovery Alert ready"
@@ -33,8 +42,14 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     private let watchConnectUntilDefaultsKey = "TrackLabWatchConnectConnectedUntil"
     private let watchConnectConnectionDefaultsKey = "TrackLabWatchConnectConnectionId"
     private let watchConnectWorkoutDefaultsKey = "TrackLabWatchConnectWorkoutSessionId"
+    private let watchConnectContextDefaultsKey = "TrackLabWatchConnectContextId"
+    private let watchConnectTombstonesDefaultsKey = "TrackLabWatchConnectContextTombstonesV1"
     private let watchConnectContextKind = "tracklab-watch-connect"
+    private let watchConnectContextVersion = 1
+    private let watchConnectConnectAction = "connect"
+    private let watchConnectClearAction = "clear"
     private let watchConnectEndedKind = "tracklab-watch-connect-ended"
+    private let maximumWatchConnectTombstones = 16
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
     private var sequence = 0
@@ -42,6 +57,8 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     private var connectedUntil: Date?
     private var watchConnectConnectionId: String?
     private var watchConnectWorkoutSessionId: String?
+    private var watchConnectContextId: String?
+    private var watchConnectTombstones: [WatchConnectContextTombstone] = []
     private var expiryTimer: DispatchSourceTimer?
 
     private override init() {
@@ -52,6 +69,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                 self?.recoveryMessage = message
             }
         }
+        restoreWatchConnectTombstones()
         restoreWatchConnectDeadline()
         if WCSession.isSupported() {
             let connectivity = WCSession.default
@@ -73,6 +91,16 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             guard self.session == nil || self.state == .ended || self.state == .error else {
                 return
             }
+            if WCSession.isSupported() {
+                // Application context is latest-value state and is not
+                // guaranteed to be delivered again after an older workout
+                // finishes. Re-read it for every new launch so a queued retry
+                // uses the current connection identity rather than stale A.
+                self.applyWatchConnectContext(
+                    WCSession.default.receivedApplicationContext
+                )
+            }
+            self.clearDisplayedHeartRate()
             self.state = .authorizing
             self.message = "Requesting Apple Health access…"
             // Every new workout gets a fresh hard four-hour cap. A valid
@@ -255,7 +283,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         sequence += 1
         UserDefaults.standard.set(sequence, forKey: sequenceDefaultsKey)
         let sample = HeartRateWireSample(
-            sessionId: nil,
+            sessionId: watchConnectWorkoutSessionId,
             sequence: sequence,
             bpm: bpm,
             measuredAt: measuredAt
@@ -267,8 +295,26 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         }
     }
 
+    func displayedHeartRateBpm(at now: Date = Date()) -> Double? {
+        guard [.active, .paused].contains(state),
+              let heartRateBpm,
+              let heartRateMeasuredAt else { return nil }
+        let age = now.timeIntervalSince(heartRateMeasuredAt)
+        guard age >= -Self.displayedHeartRateFutureToleranceSeconds,
+              age <= Self.displayedHeartRateFreshnessSeconds else { return nil }
+        return heartRateBpm
+    }
+
+    private func clearDisplayedHeartRate() {
+        heartRateBpm = nil
+        heartRateMeasuredAt = nil
+    }
+
     private func update(state: WatchWorkoutState, message: String) {
         DispatchQueue.main.async {
+            if [.idle, .authorizing, .ended, .error].contains(state) {
+                self.clearDisplayedHeartRate()
+            }
             self.state = state
             self.message = message
             WatchRecoveryAlertEngine.shared.setWorkoutOwnsCue(
@@ -285,17 +331,91 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             return
         }
         guard context["kind"] as? String == watchConnectContextKind,
-              let rawConnectedUntil = Self.doubleValue(context["connectedUntil"]),
-              rawConnectedUntil.isFinite,
               let connectionId = context["connectionId"] as? String,
               !connectionId.isEmpty,
               let workoutSessionId = context["workoutSessionId"] as? String,
               !workoutSessionId.isEmpty else { return }
+        let rawVersion = Self.doubleValue(context["version"])
+        if let rawVersion,
+           (!rawVersion.isFinite || rawVersion != Double(watchConnectContextVersion)) {
+            return
+        }
+        let action = context["action"] as? String ?? watchConnectConnectAction
+        let contextId = (context["contextId"] as? String).flatMap {
+            $0.isEmpty ? nil : $0
+        }
+        if action == watchConnectClearAction {
+            guard rawVersion != nil else { return }
+            rememberWatchConnectTombstone(
+                contextId: contextId,
+                connectionId: connectionId,
+                workoutSessionId: workoutSessionId
+            )
+            guard watchConnectContextMatchesCurrent(
+                contextId: contextId,
+                connectionId: connectionId,
+                workoutSessionId: workoutSessionId
+            ) else { return }
+            // The iPhone has already invalidated this exact relay generation.
+            // Clear the live sample tag even if an overlapping legacy workout
+            // has started, so its next sample is nil and can bind only to that
+            // legacy launch. Workout saving remains owned by HealthKit.
+            clearWatchConnectDeadline()
+            return
+        }
+        guard action == watchConnectConnectAction,
+              let rawConnectedUntil = Self.doubleValue(context["connectedUntil"]),
+              rawConnectedUntil.isFinite,
+              rawConnectedUntil >= 0,
+              rawConnectedUntil < Double(Int64.max) else { return }
+        let hasLiveSession = session != nil && ![.ended, .error].contains(state)
+        if rawVersion == nil {
+            let matchesCurrent = watchConnectContextMatchesCurrent(
+                contextId: nil,
+                connectionId: connectionId,
+                workoutSessionId: workoutSessionId
+            )
+            guard hasLiveSession, matchesCurrent else {
+                // Build 9 left an unversioned latest-value context behind.
+                // It can describe a genuinely recovered active workout, but
+                // it must never seed a later ordinary workout or extend its
+                // fallback deadline after an account boundary.
+                if matchesCurrent {
+                    clearWatchConnectDeadline()
+                }
+                return
+            }
+        }
+        guard !watchConnectContextIsTombstoned(
+            contextId: contextId,
+            connectionId: connectionId,
+            workoutSessionId: workoutSessionId
+        ) else { return }
         let deadline = Date(timeIntervalSince1970: rawConnectedUntil / 1_000)
+        if deadline <= Date() {
+            rememberWatchConnectTombstone(
+                contextId: contextId,
+                connectionId: connectionId,
+                workoutSessionId: workoutSessionId
+            )
+            if watchConnectContextMatchesCurrent(
+                contextId: contextId,
+                connectionId: connectionId,
+                workoutSessionId: workoutSessionId
+            ) {
+                if hasLiveSession {
+                    end(at: deadline)
+                } else {
+                    clearWatchConnectDeadline()
+                }
+            }
+            return
+        }
         let hasMismatchedIdentity = watchConnectWorkoutSessionId.map { $0 != workoutSessionId } == true
             || watchConnectConnectionId.map { $0 != connectionId } == true
+            || (contextId != nil && watchConnectContextId.map { $0 != contextId } == true)
         if hasMismatchedIdentity {
-            if session != nil {
+            if hasLiveSession {
                 return
             }
             if let connectedUntil,
@@ -306,25 +426,93 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                 return
             }
         }
-        let exactDeadline = session != nil && watchConnectWorkoutSessionId == workoutSessionId
+        let exactDeadline = hasLiveSession && watchConnectWorkoutSessionId == workoutSessionId
             ? min(deadline, connectedUntil ?? deadline)
             : deadline
         setWatchConnectDeadline(
             exactDeadline,
             connectionId: connectionId,
-            workoutSessionId: workoutSessionId
+            workoutSessionId: workoutSessionId,
+            contextId: contextId
         )
-        if deadline <= Date(), session != nil {
-            end(at: deadline)
-        } else if state == .idle {
+        if state == .idle {
             update(state: .idle, message: "Watch Connect ready")
         }
+    }
+
+    private func watchConnectContextMatchesCurrent(
+        contextId: String?,
+        connectionId: String,
+        workoutSessionId: String
+    ) -> Bool {
+        if let contextId, let watchConnectContextId {
+            return contextId == watchConnectContextId
+        }
+        return connectionId == watchConnectConnectionId
+            && workoutSessionId == watchConnectWorkoutSessionId
+    }
+
+    private func watchConnectContextIsTombstoned(
+        contextId: String?,
+        connectionId: String,
+        workoutSessionId: String
+    ) -> Bool {
+        if let contextId {
+            return watchConnectTombstones.contains { $0.contextId == contextId }
+        }
+        return watchConnectTombstones.contains {
+            $0.connectionId == connectionId
+                && $0.workoutSessionId == workoutSessionId
+        }
+    }
+
+    private func rememberWatchConnectTombstone(
+        contextId: String?,
+        connectionId: String,
+        workoutSessionId: String
+    ) {
+        let tombstone = WatchConnectContextTombstone(
+            contextId: contextId,
+            connectionId: connectionId,
+            workoutSessionId: workoutSessionId
+        )
+        if let contextId {
+            watchConnectTombstones.removeAll { $0.contextId == contextId }
+        } else {
+            watchConnectTombstones.removeAll { $0 == tombstone }
+        }
+        watchConnectTombstones.append(tombstone)
+        if watchConnectTombstones.count > maximumWatchConnectTombstones {
+            watchConnectTombstones.removeFirst(
+                watchConnectTombstones.count - maximumWatchConnectTombstones
+            )
+        }
+        persistWatchConnectTombstones()
+    }
+
+    private func restoreWatchConnectTombstones() {
+        guard let data = UserDefaults.standard.data(
+            forKey: watchConnectTombstonesDefaultsKey
+        ), let restored = try? JSONDecoder().decode(
+            [WatchConnectContextTombstone].self,
+            from: data
+        ) else {
+            UserDefaults.standard.removeObject(forKey: watchConnectTombstonesDefaultsKey)
+            return
+        }
+        watchConnectTombstones = Array(restored.suffix(maximumWatchConnectTombstones))
+    }
+
+    private func persistWatchConnectTombstones() {
+        guard let data = try? JSONEncoder().encode(watchConnectTombstones) else { return }
+        UserDefaults.standard.set(data, forKey: watchConnectTombstonesDefaultsKey)
     }
 
     private func setWatchConnectDeadline(
         _ deadline: Date,
         connectionId: String?,
-        workoutSessionId: String?
+        workoutSessionId: String?,
+        contextId: String? = nil
     ) {
         let maximum = Date(timeIntervalSinceNow: 4 * 60 * 60)
         connectedUntil = min(deadline, maximum)
@@ -341,6 +529,10 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             watchConnectWorkoutSessionId = workoutSessionId
             UserDefaults.standard.set(workoutSessionId, forKey: watchConnectWorkoutDefaultsKey)
         }
+        if let contextId {
+            watchConnectContextId = contextId
+            UserDefaults.standard.set(contextId, forKey: watchConnectContextDefaultsKey)
+        }
         scheduleWatchConnectExpiry()
     }
 
@@ -351,6 +543,9 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         )
         watchConnectWorkoutSessionId = UserDefaults.standard.string(
             forKey: watchConnectWorkoutDefaultsKey
+        )
+        watchConnectContextId = UserDefaults.standard.string(
+            forKey: watchConnectContextDefaultsKey
         )
         guard raw.isFinite, raw > 0 else { return }
         let restored = Date(timeIntervalSince1970: raw / 1_000)
@@ -393,9 +588,11 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         connectedUntil = nil
         watchConnectConnectionId = nil
         watchConnectWorkoutSessionId = nil
+        watchConnectContextId = nil
         UserDefaults.standard.removeObject(forKey: watchConnectUntilDefaultsKey)
         UserDefaults.standard.removeObject(forKey: watchConnectConnectionDefaultsKey)
         UserDefaults.standard.removeObject(forKey: watchConnectWorkoutDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: watchConnectContextDefaultsKey)
     }
 
     /// `transferUserInfo` survives a temporarily unreachable companion. The
@@ -409,12 +606,15 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         if connectivity.activationState == .notActivated {
             connectivity.activate()
         }
-        let event: [String: Any] = [
+        var event: [String: Any] = [
             "kind": watchConnectEndedKind,
             "connectionId": connectionId,
             "workoutSessionId": workoutSessionId,
             "endedAt": endedAt.timeIntervalSince1970 * 1_000,
         ]
+        if let watchConnectContextId {
+            event["contextId"] = watchConnectContextId
+        }
         connectivity.transferUserInfo(event)
         if connectivity.isReachable {
             connectivity.sendMessage(event, replyHandler: nil, errorHandler: nil)
@@ -511,6 +711,7 @@ extension WatchWorkoutManager: HKLiveWorkoutBuilderDelegate {
         guard bpm.isFinite, bpm >= 20, bpm <= 260 else { return }
         DispatchQueue.main.async {
             self.heartRateBpm = bpm
+            self.heartRateMeasuredAt = measuredAt
             WatchRecoveryAlertEngine.shared.ingestHeartRate(bpm, measuredAt: measuredAt)
         }
         publishHeartRate(bpm, measuredAt: measuredAt)

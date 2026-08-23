@@ -27,6 +27,12 @@ private struct TrackLabWatchConnectPersistedSession: Codable {
     var pairingId: String
     var relaySessionId: String
     var workoutSessionId: String
+    /// Per-native-start generation used only to order WatchConnectivity
+    /// connect/clear envelopes. It is not an account or relay credential.
+    var contextId: String?
+    /// Local relay start retained across retries. `connectedAt` is the
+    /// authoritative server start derived from the exact four-hour deadline.
+    var relayStartedAt: Int64?
     var connectedAt: Int64
     var connectedUntil: Int64
     var workoutReady: Bool
@@ -47,10 +53,17 @@ extension Notification.Name {
 final class WatchConnectSessionManager: @unchecked Sendable {
     static let shared = WatchConnectSessionManager()
     static let maximumDurationMilliseconds: Int64 = 4 * 60 * 60 * 1_000
+    // Keep this inside the cloud relay's live-sample freshness window. It is
+    // only intended to absorb request latency at the exact four-hour edge,
+    // never to treat a materially incorrect device clock as authoritative.
+    static let maximumClockSkewMilliseconds: Int64 = 5 * 1_000
 
     private static let persistedSessionKey = "TrackLabWatchConnectSessionV1"
     fileprivate static let installMarkerKey = "TrackLabWatchConnectInstallMarkerV1"
     private static let contextKind = "tracklab-watch-connect"
+    private static let contextVersion = 1
+    private static let connectContextAction = "connect"
+    private static let clearContextAction = "clear"
     private static let endedEventKind = "tracklab-watch-connect-ended"
 
     private let queue = DispatchQueue(label: "com.preskilranch.tracklabbmx.watch-connect")
@@ -62,6 +75,10 @@ final class WatchConnectSessionManager: @unchecked Sendable {
 
     private init() {
         session = Self.loadSession(from: defaults)
+        if session?.contextId == nil {
+            session?.contextId = UUID().uuidString
+            persistLocked()
+        }
     }
 
     func installIdentity() throws -> [String: Any] {
@@ -91,13 +108,20 @@ final class WatchConnectSessionManager: @unchecked Sendable {
                 && existing?.pairingId == pairingId
                 && existing?.relaySessionId == relaySessionId
                 && existing?.connectedUntil == connectedUntil
-            let effectiveConnectedAt = isSameConnection
-                ? existing?.connectedAt ?? connectedAt
-                : connectedAt
+            let effectiveRelayStartedAt = isSameConnection
+                ? existing?.relayStartedAt ?? existing?.connectedAt ?? connectedAt
+                : min(connectedAt, Self.nowMilliseconds())
             let recoveredWorkoutReady = isSameConnection
                 && existing?.workoutReady == true
             let recoveredWatchLaunchAccepted = isSameConnection
                 && existing?.watchLaunchAccepted == true
+            let canReuseContext = isSameConnection
+                && existing.map {
+                    [.connecting, .connected, .error].contains($0.phase)
+                } == true
+            let contextId = canReuseContext
+                ? existing?.contextId ?? UUID().uuidString
+                : UUID().uuidString
             self.expiryTimer?.cancel()
             self.expiryTimer = nil
             self.expirationInFlight = false
@@ -108,7 +132,9 @@ final class WatchConnectSessionManager: @unchecked Sendable {
                 pairingId: pairingId,
                 relaySessionId: relaySessionId,
                 workoutSessionId: "watch-connect:\(pairingId)",
-                connectedAt: effectiveConnectedAt,
+                contextId: contextId,
+                relayStartedAt: effectiveRelayStartedAt,
+                connectedAt: connectedAt,
                 connectedUntil: connectedUntil,
                 workoutReady: recoveredWorkoutReady,
                 watchLaunchAccepted: recoveredWatchLaunchAccepted,
@@ -119,7 +145,7 @@ final class WatchConnectSessionManager: @unchecked Sendable {
             self.publishLocked()
             self.sendWatchContextLocked()
             self.scheduleExpiryLocked()
-            return effectiveConnectedAt
+            return effectiveRelayStartedAt
         }
     }
 
@@ -167,6 +193,13 @@ final class WatchConnectSessionManager: @unchecked Sendable {
                   session.connectedUntil > Self.nowMilliseconds() else { return false }
             return session.watchLaunchAccepted || session.workoutReady
         }
+    }
+
+    /// Captures the private workout identity before a stop changes the public
+    /// lifecycle phase. Callers use it only to cancel that exact generation;
+    /// it is never exposed to JavaScript.
+    func workoutSessionIdForCancellation() -> String? {
+        queue.sync { session?.workoutSessionId }
     }
 
     func recoverAtLaunch() {
@@ -260,8 +293,9 @@ final class WatchConnectSessionManager: @unchecked Sendable {
 
     func disconnect(reason: String? = nil) {
         queue.sync {
-            guard var session = self.session,
-                  [.connecting, .connected, .error].contains(session.phase),
+            guard var session = self.session else { return }
+            self.sendWatchClearContextLocked(for: session)
+            guard [.connecting, .connected, .error].contains(session.phase),
                   !self.expirationInFlight else { return }
             self.expirationInFlight = true
             session.phase = .disconnecting
@@ -281,6 +315,9 @@ final class WatchConnectSessionManager: @unchecked Sendable {
             guard event["kind"] as? String == Self.endedEventKind,
                   let connectionId = event["connectionId"] as? String,
                   let workoutSessionId = event["workoutSessionId"] as? String,
+                  let eventContextId = (event["contextId"] as? String).flatMap({
+                      $0.isEmpty ? nil : $0
+                  }),
                   let rawEndedAt = Self.doubleValue(event["endedAt"]),
                   rawEndedAt.isFinite,
                   rawEndedAt >= 0,
@@ -288,19 +325,24 @@ final class WatchConnectSessionManager: @unchecked Sendable {
                   var session = self.session,
                   session.connectionId == connectionId,
                   session.workoutSessionId == workoutSessionId,
+                  session.contextId == nil || session.contextId == eventContextId,
                   [.connecting, .connected, .error].contains(session.phase),
                   !self.expirationInFlight else { return }
             self.expirationInFlight = true
             self.expiryTimer?.cancel()
             self.expiryTimer = nil
+            self.sendWatchClearContextLocked(for: session)
             session.phase = .disconnecting
             session.reason = nil
             self.session = session
             self.persistLocked()
             self.publishLocked()
+            let localNow = Self.nowMilliseconds()
+            let relayStartedAt = session.relayStartedAt
+                ?? min(session.connectedAt, localNow)
             let endedAt = max(
-                session.connectedAt,
-                min(Int64(rawEndedAt.rounded()), session.connectedUntil)
+                relayStartedAt,
+                min(Int64(rawEndedAt.rounded()), session.connectedUntil, localNow)
             )
             self.finalizeLocked(at: endedAt)
         }
@@ -311,6 +353,9 @@ final class WatchConnectSessionManager: @unchecked Sendable {
     /// another account and the previous connection can no longer appear live.
     func clearSessionForAccountBoundary() {
         queue.sync {
+            if let session = self.session {
+                self.sendWatchClearContextLocked(for: session)
+            }
             self.expiryTimer?.cancel()
             self.expiryTimer = nil
             self.expirationInFlight = false
@@ -343,7 +388,10 @@ final class WatchConnectSessionManager: @unchecked Sendable {
         expiryTimer = nil
         guard let session,
               [.connecting, .connected].contains(session.phase) else { return }
-        let remaining = session.connectedUntil - Self.nowMilliseconds()
+        let remaining = min(
+            Self.maximumDurationMilliseconds,
+            session.connectedUntil - Self.nowMilliseconds()
+        )
         if remaining <= 0 {
             expireLocked(reason: "The four-hour Watch Connect session ended.")
             return
@@ -369,7 +417,14 @@ final class WatchConnectSessionManager: @unchecked Sendable {
         self.session = session
         persistLocked()
         publishLocked()
-        finalizeLocked(at: session.connectedUntil)
+        sendWatchClearContextLocked(for: session)
+        let localNow = Self.nowMilliseconds()
+        let relayStartedAt = session.relayStartedAt
+            ?? min(session.connectedAt, localNow)
+        finalizeLocked(at: max(
+            relayStartedAt,
+            min(localNow, session.connectedUntil)
+        ))
     }
 
     private func finalizeLocked(at endedAt: Int64) {
@@ -380,7 +435,9 @@ final class WatchConnectSessionManager: @unchecked Sendable {
         ) { [weak self] result in
             guard let self else { return }
             DispatchQueue.main.async {
-                _ = HeartRateCoordinator.shared.endWorkout()
+                _ = HeartRateCoordinator.shared.endWorkout(
+                    sessionId: session.workoutSessionId
+                )
             }
             self.queue.async {
                 self.expirationInFlight = false
@@ -402,16 +459,40 @@ final class WatchConnectSessionManager: @unchecked Sendable {
 
     private func sendWatchContextLocked() {
         guard let session, WCSession.isSupported() else { return }
-        let connectivity = WCSession.default
-        if connectivity.activationState == .notActivated {
-            connectivity.activate()
-        }
         let context: [String: Any] = [
             "kind": Self.contextKind,
+            "version": Self.contextVersion,
+            "action": Self.connectContextAction,
+            "contextId": session.contextId ?? "",
             "connectionId": session.connectionId,
             "workoutSessionId": session.workoutSessionId,
             "connectedUntil": Double(session.connectedUntil),
         ]
+        deliverWatchContextLocked(context)
+    }
+
+    private func sendWatchClearContextLocked(
+        for session: TrackLabWatchConnectPersistedSession
+    ) {
+        guard WCSession.isSupported() else { return }
+        let context: [String: Any] = [
+            "kind": Self.contextKind,
+            "version": Self.contextVersion,
+            "action": Self.clearContextAction,
+            "contextId": session.contextId ?? "",
+            "connectionId": session.connectionId,
+            "workoutSessionId": session.workoutSessionId,
+            "connectedUntil": Double(session.connectedUntil),
+            "clearedAt": Double(Self.nowMilliseconds()),
+        ]
+        deliverWatchContextLocked(context)
+    }
+
+    private func deliverWatchContextLocked(_ context: [String: Any]) {
+        let connectivity = WCSession.default
+        if connectivity.activationState == .notActivated {
+            connectivity.activate()
+        }
         try? connectivity.updateApplicationContext(context)
         if connectivity.isReachable {
             connectivity.sendMessage(context, replyHandler: nil, errorHandler: nil)
@@ -433,7 +514,10 @@ final class WatchConnectSessionManager: @unchecked Sendable {
                 "relayConfigured": false,
             ]
         }
-        let remaining = max(0, session.connectedUntil - now)
+        let remaining = min(
+            Self.maximumDurationMilliseconds,
+            max(0, session.connectedUntil - now)
+        )
         var result: [String: Any] = [
             "version": 1,
             "state": session.phase.rawValue,

@@ -54,8 +54,10 @@ final class HeartRateCoordinator: NSObject {
     private let recentSampleWindowMs: Double = 30_000
     private let maximumRecentSamples = 120
     private var workoutReadyWaiters: [UUID: WorkoutReadyWaiter] = [:]
-    private var launchInFlightSessionId: String?
+    private var launchInFlight: WorkoutLaunchRequest?
     private var activeSessionId: String?
+    private var activeGeneration: UUID?
+    private var mirroredHandlerToken: UUID?
     private var latestStatus = TrackLabHeartRateStatus(
         state: .idle,
         sessionId: nil,
@@ -79,6 +81,7 @@ final class HeartRateCoordinator: NSObject {
         WatchConnectSessionManager.shared.recoverAtLaunch()
         if let recoveredSessionId = WatchConnectSessionManager.shared.recoverableWorkoutSessionId() {
             activeSessionId = recoveredSessionId
+            activeGeneration = UUID()
             updateStatus(.connecting, message: "Recovering Apple Watch workout…")
         }
 
@@ -184,8 +187,7 @@ final class HeartRateCoordinator: NSObject {
 
         let trimmedSessionId = sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let requestedSessionId = trimmedSessionId?.isEmpty == false ? trimmedSessionId : nil
-        if let requestedSessionId,
-           launchInFlightSessionId == requestedSessionId {
+        if launchInFlight != nil {
             completion(.failure(HeartRateCoordinatorError.watchLaunchInProgress))
             return
         }
@@ -199,13 +201,24 @@ final class HeartRateCoordinator: NSObject {
             completion(.success(state()))
             return
         }
+        if let staleHandler = mirroredWorkoutHandler {
+            mirroredWorkoutHandler = nil
+            mirroredHandlerToken = nil
+            staleHandler.quarantine()
+        }
         clearRecentSamples()
         activeSessionId = requestedSessionId ?? UUID().uuidString
         guard let launchSessionId = activeSessionId else {
             completion(.failure(HeartRateCoordinatorError.watchLaunchFailed))
             return
         }
-        launchInFlightSessionId = launchSessionId
+        let launch = WorkoutLaunchRequest(
+            sessionId: launchSessionId,
+            generation: UUID(),
+            completion: completion
+        )
+        activeGeneration = launch.generation
+        launchInFlight = launch
         updateStatus(.launching, message: "Opening TrackLab BMX on Apple Watch…")
 
         let configuration = HKWorkoutConfiguration()
@@ -215,24 +228,30 @@ final class HeartRateCoordinator: NSObject {
         healthStore.startWatchApp(with: configuration) { [weak self] success, error in
             guard let self else { return }
             DispatchQueue.main.async {
-                guard self.launchInFlightSessionId == launchSessionId else { return }
-                self.launchInFlightSessionId = nil
+                guard self.launchInFlight === launch,
+                      self.activeGeneration == launch.generation,
+                      self.activeSessionId == launch.sessionId else { return }
+                self.launchInFlight = nil
                 if let error {
                     self.updateStatus(.error, message: error.localizedDescription)
-                    completion(.failure(error))
+                    self.activeSessionId = nil
+                    self.activeGeneration = nil
+                    launch.finish(.failure(error))
                     return
                 }
                 guard success else {
                     let error = HeartRateCoordinatorError.watchLaunchFailed
                     self.updateStatus(.error, message: error.localizedDescription)
-                    completion(.failure(error))
+                    self.activeSessionId = nil
+                    self.activeGeneration = nil
+                    launch.finish(.failure(error))
                     return
                 }
                 WatchConnectSessionManager.shared.markWatchLaunchAccepted(
-                    workoutSessionId: launchSessionId
+                    workoutSessionId: launch.sessionId
                 )
                 self.updateStatus(.connecting, message: "Waiting for Apple Watch heart rate…")
-                completion(.success(self.state()))
+                launch.finish(.success(self.state()))
             }
         }
     }
@@ -291,14 +310,75 @@ final class HeartRateCoordinator: NSObject {
         return state()
     }
 
-    func endWorkout() -> [String: Any] {
-        guard #available(iOS 17.0, *), let handler = mirroredWorkoutHandler else {
+    func endWorkout(sessionId expectedSessionId: String? = nil) -> [String: Any] {
+        if let expectedSessionId,
+           activeSessionId != expectedSessionId {
+            return state()
+        }
+        if let launch = launchInFlight,
+           expectedSessionId == nil || launch.sessionId == expectedSessionId {
+            launchInFlight = nil
+            launch.finish(.failure(HeartRateCoordinatorError.watchLaunchCancelled))
+        }
+        guard #available(iOS 17.0, *),
+              let handler = mirroredWorkoutHandler,
+              expectedSessionId == nil || handler.sessionId == expectedSessionId else {
             updateStatus(.ended, message: nil)
+            activeSessionId = nil
+            activeGeneration = nil
             return state()
         }
         updateStatus(.ending, message: "Saving workout on Apple Watch…")
         handler.stop()
         return state()
+    }
+
+    /// Invalidates an exact Watch Connect launch generation before stopping
+    /// its mirrored workout. The removed request owns its callback, so a late
+    /// HealthKit launch completion cannot resolve it twice or rebind a later
+    /// account's workout.
+    func cancelWorkoutLaunchAndStop(
+        sessionId expectedSessionId: String?,
+        reason: String,
+        completion: @escaping () -> Void
+    ) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.cancelWorkoutLaunchAndStop(
+                    sessionId: expectedSessionId,
+                    reason: reason,
+                    completion: completion
+                )
+            }
+            return
+        }
+        guard let expectedSessionId else {
+            completion()
+            return
+        }
+
+        if let launch = launchInFlight,
+           launch.sessionId == expectedSessionId {
+            launchInFlight = nil
+            launch.finish(.failure(HeartRateCoordinatorError.watchLaunchCancelled))
+        }
+        guard activeSessionId == expectedSessionId else {
+            completion()
+            return
+        }
+
+        if #available(iOS 17.0, *),
+           mirroredWorkoutHandler?.sessionId == expectedSessionId {
+            let handler = mirroredWorkoutHandler
+            mirroredWorkoutHandler = nil
+            mirroredHandlerToken = nil
+            handler?.quarantine()
+        }
+        activeGeneration = nil
+        updateStatus(.ended, message: reason, manageRelayLifecycle: false)
+        activeSessionId = nil
+        clearRecentSamples()
+        completion()
     }
 
     /// Replays only the in-memory samples measured after a TrackLab mode's
@@ -314,24 +394,92 @@ final class HeartRateCoordinator: NSObject {
 
     @available(iOS 17.0, *)
     private func acceptMirroredWorkout(_ session: HKWorkoutSession) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.acceptMirroredWorkout(session)
+            }
+            return
+        }
+        guard let expectedSessionId = activeSessionId,
+              let generation = activeGeneration else {
+            session.stopActivity(with: Date())
+            return
+        }
+        if let existingHandler = mirroredWorkoutHandler {
+            if existingHandler.owns(session) { return }
+            if [.active, .paused].contains(latestStatus.state) {
+                session.stopActivity(with: Date())
+                return
+            }
+            mirroredWorkoutHandler = nil
+            mirroredHandlerToken = nil
+            existingHandler.quarantine()
+        }
+        let handlerToken = UUID()
         let handler = MirroredWorkoutHandler(
             session: session,
-            sessionId: activeSessionId,
-            onSample: { [weak self] sample in self?.receive(sample) },
-            onState: { [weak self] state, message in self?.updateStatus(state, message: message) }
+            sessionId: expectedSessionId,
+            requiresSessionIdentity: expectedSessionId.hasPrefix("watch-connect:"),
+            onSample: { [weak self] sample in
+                self?.receive(
+                    sample,
+                    expectedSessionId: expectedSessionId,
+                    generation: generation,
+                    handlerToken: handlerToken
+                )
+            },
+            onState: { [weak self] state, message in
+                self?.updateMirroredStatus(
+                    state,
+                    message: message,
+                    expectedSessionId: expectedSessionId,
+                    generation: generation,
+                    handlerToken: handlerToken
+                )
+            },
+            onIdentityMismatch: { [weak self] in
+                self?.rejectMirroredIdentity(
+                    expectedSessionId: expectedSessionId,
+                    generation: generation,
+                    handlerToken: handlerToken
+                )
+            }
         )
+        mirroredHandlerToken = handlerToken
         mirroredWorkoutHandler = handler
         updateStatus(.connecting, message: "Apple Watch workout connected.")
     }
 
-    private func receive(_ sample: HeartRateWireSample) {
-        let receivedAt = Date().timeIntervalSince1970 * 1_000
-        let resolvedSessionId = sample.sessionId
-            ?? activeSessionId
-            ?? HeartRateRelay.shared.configuredSessionId()
-        if activeSessionId == nil {
-            activeSessionId = resolvedSessionId
+    private func receive(
+        _ sample: HeartRateWireSample,
+        expectedSessionId: String,
+        generation: UUID,
+        handlerToken: UUID
+    ) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.receive(
+                    sample,
+                    expectedSessionId: expectedSessionId,
+                    generation: generation,
+                    handlerToken: handlerToken
+                )
+            }
+            return
         }
+        guard activeSessionId == expectedSessionId,
+              activeGeneration == generation,
+              mirroredHandlerToken == handlerToken else { return }
+        if let receivedSessionId = sample.sessionId,
+           receivedSessionId != expectedSessionId {
+            return
+        }
+        if expectedSessionId.hasPrefix("watch-connect:"),
+           sample.sessionId == nil {
+            return
+        }
+        let receivedAt = Date().timeIntervalSince1970 * 1_000
+        let resolvedSessionId = sample.sessionId ?? expectedSessionId
         let resolved = HeartRateWireSample(
             sessionId: resolvedSessionId,
             sequence: sample.sequence,
@@ -356,6 +504,40 @@ final class HeartRateCoordinator: NSObject {
         notifyObservers { $0.heartRateCoordinator(self, didReceive: dictionary) }
     }
 
+    private func updateMirroredStatus(
+        _ state: TrackLabHeartRateState,
+        message: String?,
+        expectedSessionId: String,
+        generation: UUID,
+        handlerToken: UUID
+    ) {
+        DispatchQueue.main.async {
+            guard self.activeSessionId == expectedSessionId,
+                  self.activeGeneration == generation,
+                  self.mirroredHandlerToken == handlerToken else { return }
+            self.updateStatus(state, message: message)
+        }
+    }
+
+    @available(iOS 17.0, *)
+    private func rejectMirroredIdentity(
+        expectedSessionId: String,
+        generation: UUID,
+        handlerToken: UUID
+    ) {
+        DispatchQueue.main.async {
+            guard self.activeSessionId == expectedSessionId,
+                  self.activeGeneration == generation,
+                  self.mirroredHandlerToken == handlerToken else { return }
+            self.mirroredWorkoutHandler = nil
+            self.mirroredHandlerToken = nil
+            self.updateStatus(
+                .connecting,
+                message: "Ignored an Apple Watch workout from an earlier connection."
+            )
+        }
+    }
+
     private func completeUnavailable(
         _ message: String,
         completion: @escaping (Result<[String: Any], Error>) -> Void
@@ -365,34 +547,40 @@ final class HeartRateCoordinator: NSObject {
         completion(.failure(error))
     }
 
-    private func updateStatus(_ state: TrackLabHeartRateState, message: String?) {
+    private func updateStatus(
+        _ state: TrackLabHeartRateState,
+        message: String?,
+        manageRelayLifecycle: Bool = true
+    ) {
         let transitionDate = Date()
-        switch state {
-        case .active:
-            HeartRateRelay.shared.resume()
-        case .paused:
-            HeartRateRelay.shared.pause(at: transitionDate)
-        case .ending, .ended:
-            // A rider can stop from either the iPhone UI or directly on Watch.
-            // Studio and private account blocks follow that continuous workout
-            // lifecycle; personal sessions remain paused for JavaScript to
-            // finalize with authoritative pedal-zone windows.
-            HeartRateRelay.shared.finalizeContinuousBlockAtWorkoutEnd(
-                at: transitionDate
-            ) { result in
-                let handled: Bool
-                switch result {
-                case .success(let relayState):
-                    handled = relayState["handled"] as? Bool == true
-                case .failure:
-                    handled = false
+        if manageRelayLifecycle {
+            switch state {
+            case .active:
+                HeartRateRelay.shared.resume()
+            case .paused:
+                HeartRateRelay.shared.pause(at: transitionDate)
+            case .ending, .ended:
+                // A rider can stop from either the iPhone UI or directly on Watch.
+                // Studio and private account blocks follow that continuous workout
+                // lifecycle; personal sessions remain paused for JavaScript to
+                // finalize with authoritative pedal-zone windows.
+                HeartRateRelay.shared.finalizeContinuousBlockAtWorkoutEnd(
+                    at: transitionDate
+                ) { result in
+                    let handled: Bool
+                    switch result {
+                    case .success(let relayState):
+                        handled = relayState["handled"] as? Bool == true
+                    case .failure:
+                        handled = false
+                    }
+                    if !handled {
+                        HeartRateRelay.shared.pause(at: transitionDate)
+                    }
                 }
-                if !handled {
-                    HeartRateRelay.shared.pause(at: transitionDate)
-                }
+            case .idle, .launching, .connecting, .unavailable, .error:
+                break
             }
-        case .idle, .launching, .connecting, .unavailable, .error:
-            break
         }
         if state == .ended {
             clearRecentSamples()
@@ -520,6 +708,7 @@ private enum HeartRateCoordinatorError: LocalizedError {
     case unavailable(String)
     case watchLaunchFailed
     case watchLaunchInProgress
+    case watchLaunchCancelled
     case workoutReadyTimedOut
     case workoutEndedBeforeReady
 
@@ -531,6 +720,8 @@ private enum HeartRateCoordinatorError: LocalizedError {
             return "TrackLab BMX could not start the workout on Apple Watch."
         case .watchLaunchInProgress:
             return "Watch Connect is already opening on Apple Watch."
+        case .watchLaunchCancelled:
+            return "Watch Connect start was cancelled."
         case .workoutReadyTimedOut:
             return "Watch Connect timed out before the Apple Watch workout became active."
         case .workoutEndedBeforeReady:
@@ -544,26 +735,65 @@ private struct WorkoutReadyWaiter {
     let completion: (Result<TrackLabHeartRateStatus, Error>) -> Void
 }
 
+/// A launch completion is consumed exactly once. HealthKit may return after an
+/// account boundary, so object identity—not a reusable session string—is the
+/// authority for the one callback allowed to finish this request.
+private final class WorkoutLaunchRequest {
+    let sessionId: String
+    let generation: UUID
+    private var completion: ((Result<[String: Any], Error>) -> Void)?
+
+    init(
+        sessionId: String,
+        generation: UUID,
+        completion: @escaping (Result<[String: Any], Error>) -> Void
+    ) {
+        self.sessionId = sessionId
+        self.generation = generation
+        self.completion = completion
+    }
+
+    func finish(_ result: Result<[String: Any], Error>) {
+        guard let completion else { return }
+        self.completion = nil
+        completion(result)
+    }
+}
+
 @available(iOS 17.0, *)
 private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
     private let session: HKWorkoutSession
-    private let sessionId: String?
+    let sessionId: String?
+    private let requiresSessionIdentity: Bool
     private let decoder = JSONDecoder()
     private let onSample: (HeartRateWireSample) -> Void
     private let onState: (TrackLabHeartRateState, String?) -> Void
+    private let onIdentityMismatch: () -> Void
+    private var identityVerified: Bool
+    private var identityRejected = false
+    private var pendingLiveState: TrackLabHeartRateState?
 
     init(
         session: HKWorkoutSession,
         sessionId: String?,
+        requiresSessionIdentity: Bool,
         onSample: @escaping (HeartRateWireSample) -> Void,
-        onState: @escaping (TrackLabHeartRateState, String?) -> Void
+        onState: @escaping (TrackLabHeartRateState, String?) -> Void,
+        onIdentityMismatch: @escaping () -> Void
     ) {
         self.session = session
         self.sessionId = sessionId
+        self.requiresSessionIdentity = requiresSessionIdentity
+        self.identityVerified = sessionId == nil
         self.onSample = onSample
         self.onState = onState
+        self.onIdentityMismatch = onIdentityMismatch
         super.init()
         session.delegate = self
+    }
+
+    func owns(_ candidate: HKWorkoutSession) -> Bool {
+        session === candidate
     }
 
     func pause() {
@@ -578,31 +808,58 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
         session.stopActivity(with: Date())
     }
 
+    func quarantine() {
+        guard !identityRejected else { return }
+        identityRejected = true
+        session.stopActivity(with: Date())
+    }
+
     func workoutSession(
         _ workoutSession: HKWorkoutSession,
         didChangeTo toState: HKWorkoutSessionState,
         from fromState: HKWorkoutSessionState,
         date: Date
     ) {
+        guard !identityRejected else { return }
+        let mapped: (TrackLabHeartRateState, String?)
         switch toState {
         case .running:
-            onState(.active, nil)
+            mapped = (.active, nil)
         case .paused:
-            onState(.paused, nil)
+            mapped = (.paused, nil)
         case .stopped:
-            onState(.ending, "Saving workout on Apple Watch…")
+            mapped = (.ending, "Saving workout on Apple Watch…")
         case .ended:
-            onState(.ended, nil)
+            mapped = (.ended, nil)
         case .prepared:
-            onState(.connecting, "Apple Watch workout is prepared.")
+            mapped = (.connecting, "Apple Watch workout is prepared.")
         case .notStarted:
-            onState(.connecting, "Waiting for Apple Watch workout…")
+            mapped = (.connecting, "Waiting for Apple Watch workout…")
         @unknown default:
-            onState(.connecting, nil)
+            mapped = (.connecting, nil)
         }
+        if !identityVerified {
+            if [.active, .paused].contains(mapped.0) {
+                pendingLiveState = mapped.0
+            }
+            if [.ending, .ended].contains(mapped.0) {
+                quarantine()
+                onIdentityMismatch()
+                return
+            }
+            onState(.connecting, "Verifying this Apple Watch connection…")
+            return
+        }
+        onState(mapped.0, mapped.1)
     }
 
     func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
+        guard !identityRejected else { return }
+        if !identityVerified {
+            quarantine()
+            onIdentityMismatch()
+            return
+        }
         onState(.error, error.localizedDescription)
     }
 
@@ -610,13 +867,38 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
         _ workoutSession: HKWorkoutSession,
         didReceiveDataFromRemoteWorkoutSession data: [Data]
     ) {
+        guard !identityRejected else { return }
         data.forEach { payload in
+            guard !identityRejected else { return }
             guard let sample = try? decoder.decode(HeartRateWireSample.self, from: payload),
                   sample.version == HeartRateWireSample.currentVersion,
                   sample.bpm.isFinite,
                   sample.bpm >= 20,
                   sample.bpm <= 260 else {
                 return
+            }
+            if let receivedSessionId = sample.sessionId,
+               receivedSessionId != sessionId {
+                if requiresSessionIdentity {
+                    quarantine()
+                    onIdentityMismatch()
+                }
+                // A legacy workout can briefly inherit the previous account's
+                // Watch Connect application context before its clear envelope
+                // arrives. Drop that foreign sample but keep waiting; the next
+                // nil legacy sample can safely establish the requested session.
+                return
+            }
+            if requiresSessionIdentity {
+                guard sample.sessionId != nil else {
+                    // The Watch may begin measuring just before application
+                    // context arrives. Do not bind or relay those samples.
+                    return
+                }
+            }
+            if !identityVerified {
+                identityVerified = true
+                onState(pendingLiveState == .paused ? .paused : .active, nil)
             }
             if sample.sessionId == nil, let sessionId {
                 onSample(HeartRateWireSample(
@@ -636,6 +918,12 @@ private final class MirroredWorkoutHandler: NSObject, HKWorkoutSessionDelegate {
         _ workoutSession: HKWorkoutSession,
         didDisconnectFromRemoteDeviceWithError error: Error?
     ) {
+        guard !identityRejected else { return }
+        if !identityVerified {
+            quarantine()
+            onIdentityMismatch()
+            return
+        }
         onState(error == nil ? .ended : .error, error?.localizedDescription)
     }
 }

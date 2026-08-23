@@ -74,10 +74,10 @@ describe('iOS required-reason API declarations', () => {
     }
   });
 
-  it('keeps iOS and embedded Watch Debug and Release builds on build 9', () => {
+  it('keeps iOS and embedded Watch Debug and Release builds on build 10', () => {
     const buildNumbers = [...xcodeProject.matchAll(
       /CURRENT_PROJECT_VERSION = (\d+);/g,
     )].map((match) => match[1]);
-    expect(buildNumbers).toEqual(['9', '9', '9', '9']);
+    expect(buildNumbers).toEqual(['10', '10', '10', '10']);
   });
 });

@@ -18,7 +18,6 @@ import {
   finishWatchConnectDisconnect,
   runWatchConnectSingleFlight,
   startWatchConnectAction,
-  stopWatchConnectAction,
   WatchConnectStartError,
   type WatchConnectNativeResult,
 } from '../lib/watchConnectActions';
@@ -74,6 +73,39 @@ const emptySnapshot: WatchConnectCloudSnapshot = Object.freeze({
   enrollments: [],
   connections: [],
 });
+
+// The coordinator moves between the account-completion and full-app trees
+// while profile data hydrates. Keep the native privacy operation keyed at the
+// module boundary so that remount cannot issue a second clearAllRelays call.
+// Successful keys stay sealed for this webview lifetime; failed keys are
+// removed so the visible Watch Connect action can retry explicitly.
+const watchConnectAccountBoundarySealFlights = new Map<string, Promise<void>>();
+
+/**
+ * Coalesces one operation for a stable privacy/account key. A successful
+ * account-boundary seal remains remembered until the key changes; ordinary
+ * refreshes opt out so the next scheduled poll can run normally.
+ */
+export function runWatchConnectKeyedSingleFlight<T>(
+  flights: Map<string, Promise<T>>,
+  key: string,
+  action: () => Promise<T>,
+  retainSuccess = false,
+) {
+  const active = flights.get(key);
+  if (active) return active;
+  const operation = action();
+  flights.set(key, operation);
+  void operation.then(
+    () => {
+      if (!retainSuccess && flights.get(key) === operation) flights.delete(key);
+    },
+    () => {
+      if (flights.get(key) === operation) flights.delete(key);
+    },
+  );
+  return operation;
+}
 
 function nativeResultFromState(state: NativeWatchConnectState): WatchConnectNativeResult {
   return {
@@ -203,6 +235,59 @@ export function watchConnectAccountRequestIsCurrent(
   return requestedAccountId === currentAccountId;
 }
 
+export function watchConnectCoordinatorRequestIsCurrent(
+  requestedAccountId: string,
+  currentAccountId: string | null,
+  requestedGeneration: number,
+  currentGeneration: number,
+) {
+  return watchConnectAccountRequestIsCurrent(requestedAccountId, currentAccountId)
+    && requestedGeneration === currentGeneration;
+}
+
+export function watchConnectAccountBoundarySealKey({
+  accountId,
+  hydratedAccountId,
+  connections,
+  native,
+}: {
+  accountId: string | null;
+  hydratedAccountId: string | null;
+  connections: readonly WatchConnectConnection[];
+  native: NativeWatchConnectState | null;
+}) {
+  if (!accountId || hydratedAccountId !== accountId || !native?.connectionId
+    || !native.sessionId || native.connectedUntil == null) return null;
+  const reconciliation = reconcileWatchConnectAccount({
+    accountId,
+    hydratedAccountId,
+    connections,
+    native,
+  });
+  const exactHistoricalIdentity = connections.some((connection) => (
+    connection.id === native.connectionId
+    && connection.scope === native.scope
+    && connection.connectedUntil === native.connectedUntil
+    && `watch-connect:${connection.id}` === native.sessionId
+  ));
+  // Native error/reconnect states still retain the prior credential identity.
+  // Reconciliation intentionally treats those as restartable for the same
+  // account; at an account boundary, however, an unmatched identity must be
+  // sealed before the new account can create a connection.
+  if (
+    reconciliation !== 'foreign-native-session'
+    && (!['error', 'reconnect'].includes(native.state) || exactHistoricalIdentity)
+  ) return null;
+  // Phase is intentionally excluded: connected -> disconnecting -> syncing is
+  // one native identity and must never trigger another account-boundary seal.
+  return JSON.stringify([
+    accountId,
+    native.connectionId,
+    native.sessionId,
+    native.connectedUntil,
+  ]);
+}
+
 export function watchConnectStudioConsentForStart(
   enrollment: WatchConnectEnrollment | null,
   live: boolean,
@@ -309,6 +394,7 @@ export function WatchConnectCoordinator({
   const [hydratedAccountId, setHydratedAccountId] = useState<string | null>(null);
   const [capable, setCapable] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sealingEarlierSession, setSealingEarlierSession] = useState(false);
   const [actionDetail, setActionDetail] = useState('');
   const [now, setNow] = useState(Date.now());
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
@@ -325,11 +411,21 @@ export function WatchConnectCoordinator({
   const previousAccountIdRef = useRef(accountId);
   const pendingStartConnectionRef = useRef<WatchConnectConnection | null>(null);
   const connectPromiseRef = useRef<Promise<void> | null>(null);
+  const refreshFlightsRef = useRef(new Map<string, Promise<void>>());
+  const refreshRequestGenerationRef = useRef(0);
+  const accountBoundarySealRequestKeyRef = useRef<string | null>(null);
   const recoveryAttemptedConnectionRef = useRef<string | null>(null);
   const currentAccountIdRef = useRef(accountId);
+  const accountGenerationRef = useRef(0);
+  const generationAccountIdRef = useRef(accountId);
+  if (generationAccountIdRef.current !== accountId) {
+    generationAccountIdRef.current = accountId;
+    accountGenerationRef.current += 1;
+  }
   currentAccountIdRef.current = accountId;
   const {
     availability,
+    clearAllRelays,
     relayState,
     status,
     getWatchConnectIdentity,
@@ -352,17 +448,19 @@ export function WatchConnectCoordinator({
     () => newestConnection(snapshot, enrollment),
     [enrollment, snapshot],
   );
+  const availabilityKnown = availability != null;
   const onIPhone = availability?.platform === 'iphone';
   const onPairedIPhone = onIPhone
     && availability.supported === true;
   const readOnlyObserver = watchConnectReadOnlyObserver(availability);
   const nativeDisplayState = nativeState ? nativeResultFromState(nativeState) : null;
+  const actionBusy = busy || sealingEarlierSession;
   const viewState = resolveWatchConnectViewState({
     enrollment,
     connection,
     nativeState: readOnlyObserver ? null : nativeDisplayState,
     requiresNativeMatch: onPairedIPhone,
-    busy,
+    busy: actionBusy,
     now,
   });
   const platformViewState = readOnlyObserver && viewState.phase === 'connected'
@@ -521,34 +619,53 @@ export function WatchConnectCoordinator({
     return () => window.clearInterval(timer);
   }, []);
 
-  const refresh = useCallback(async () => {
-    if (authStatus !== 'signed-in' || !accountId) return;
+  const refresh = useCallback(() => {
+    if (authStatus !== 'signed-in' || !accountId) return Promise.resolve();
     const requestedAccountId = accountId;
-    const nativePlatform = availability?.platform === 'iphone';
-    const [cloudResult, nativeResult] = await Promise.allSettled([
-      loadWatchConnect(),
-      nativePlatform ? getWatchConnectState() : Promise.resolve(null),
-    ]);
-    if (!watchConnectAccountRequestIsCurrent(requestedAccountId, currentAccountIdRef.current)) return;
-    if (watchConnectReadOnlyObserver(availability)) {
-      setNativeState(null);
-      setCapable(true);
-      onCapabilityChange?.(true);
-    } else if (nativeResult.status === 'fulfilled' && nativeResult.value) {
-      const native = nativeResult.value;
-      setNativeState(native);
-      const nextCapable = watchConnectNativeCapability(native);
-      setCapable(nextCapable);
-      onCapabilityChange?.(nextCapable);
-    } else if (availability != null) {
-      setCapable(false);
-      onCapabilityChange?.(false);
-    }
-    if (cloudResult.status === 'rejected') throw cloudResult.reason;
-    setSnapshot(cloudResult.value);
-    setHydratedAccountId(requestedAccountId);
-    setNow(Date.now());
-  }, [accountId, authStatus, availability, getWatchConnectState, onCapabilityChange]);
+    const requestedAccountGeneration = accountGenerationRef.current;
+    const platformKey = onIPhone ? 'iphone' : readOnlyObserver ? 'observer' : 'unknown';
+    const refreshKey = `${requestedAccountGeneration}:${requestedAccountId}:${platformKey}`;
+    return runWatchConnectKeyedSingleFlight(refreshFlightsRef.current, refreshKey, async () => {
+      const requestedRefreshGeneration = refreshRequestGenerationRef.current + 1;
+      refreshRequestGenerationRef.current = requestedRefreshGeneration;
+      const [cloudResult, nativeResult] = await Promise.allSettled([
+        loadWatchConnect(),
+        onIPhone ? getWatchConnectState() : Promise.resolve(null),
+      ]);
+      if (!watchConnectCoordinatorRequestIsCurrent(
+        requestedAccountId,
+        currentAccountIdRef.current,
+        requestedAccountGeneration,
+        accountGenerationRef.current,
+      ) || requestedRefreshGeneration !== refreshRequestGenerationRef.current) return;
+      if (readOnlyObserver) {
+        setNativeState(null);
+        setCapable(true);
+        onCapabilityChange?.(true);
+      } else if (nativeResult.status === 'fulfilled' && nativeResult.value) {
+        const native = nativeResult.value;
+        setNativeState(native);
+        const nextCapable = watchConnectNativeCapability(native);
+        setCapable(nextCapable);
+        onCapabilityChange?.(nextCapable);
+      } else if (availabilityKnown) {
+        setCapable(false);
+        onCapabilityChange?.(false);
+      }
+      if (cloudResult.status === 'rejected') throw cloudResult.reason;
+      setSnapshot(cloudResult.value);
+      setHydratedAccountId(requestedAccountId);
+      setNow(Date.now());
+    });
+  }, [
+    accountId,
+    authStatus,
+    availabilityKnown,
+    getWatchConnectState,
+    onCapabilityChange,
+    onIPhone,
+    readOnlyObserver,
+  ]);
 
   useEffect(() => {
     if (authStatus !== 'signed-in' || !accountId) {
@@ -576,12 +693,15 @@ export function WatchConnectCoordinator({
     requestIdsRef.current = null;
     pendingStartConnectionRef.current = null;
     connectPromiseRef.current = null;
+    accountBoundarySealRequestKeyRef.current = null;
     recoveryAttemptedConnectionRef.current = null;
     setRecoveryRetryConnectionId(null);
     setSnapshot(emptySnapshot);
     setHydratedAccountId(null);
     setNativeState(null);
     setCapable(null);
+    setBusy(false);
+    setSealingEarlierSession(false);
     setActionDetail('');
   }, [accountId]);
 
@@ -626,25 +746,72 @@ export function WatchConnectCoordinator({
     }));
   }, [accountId, capable, hydratedAccountId, nativeState, onLegacyRelaySuppressionChange, snapshot]);
 
+  const accountBoundarySealKey = watchConnectAccountBoundarySealKey({
+    accountId,
+    hydratedAccountId,
+    connections: snapshot.connections,
+    native: nativeState,
+  });
+  const sealEarlierSession = useCallback(async (sealKey: string) => {
+    if (!accountId) return;
+    const requestedAccountId = accountId;
+    const requestedAccountGeneration = accountGenerationRef.current;
+    accountBoundarySealRequestKeyRef.current = sealKey;
+    setSealingEarlierSession(true);
+    setActionDetail('Securing an earlier Watch session privately…');
+    try {
+      await runWatchConnectKeyedSingleFlight(watchConnectAccountBoundarySealFlights, sealKey, async () => {
+        const cleared = await clearAllRelays();
+        if (cleared.reason) throw new Error(cleared.reason);
+      }, true);
+      const nextNativeState = await getWatchConnectState();
+      if (!watchConnectCoordinatorRequestIsCurrent(
+        requestedAccountId,
+        currentAccountIdRef.current,
+        requestedAccountGeneration,
+        accountGenerationRef.current,
+      ) || accountBoundarySealRequestKeyRef.current !== sealKey) return;
+      setNativeState(nextNativeState);
+      setActionDetail('Earlier Watch data is syncing privately. Press Watch Connect to start a new four-hour session.');
+    } catch (error) {
+      if (watchConnectCoordinatorRequestIsCurrent(
+        requestedAccountId,
+        currentAccountIdRef.current,
+        requestedAccountGeneration,
+        accountGenerationRef.current,
+      ) && accountBoundarySealRequestKeyRef.current === sealKey) {
+        const reason = error instanceof Error ? error.message : String(error);
+        setActionDetail(`An earlier Watch session could not be secured privately. Press Watch Connect to try again. ${reason}`);
+      }
+      throw error;
+    } finally {
+      if (watchConnectCoordinatorRequestIsCurrent(
+        requestedAccountId,
+        currentAccountIdRef.current,
+        requestedAccountGeneration,
+        accountGenerationRef.current,
+      ) && accountBoundarySealRequestKeyRef.current === sealKey) {
+        setSealingEarlierSession(false);
+      }
+    }
+  }, [accountId, clearAllRelays, getWatchConnectState]);
+
   useEffect(() => {
-    if (!onPairedIPhone || authStatus !== 'signed-in') return;
-    if (reconcileWatchConnectAccount({
-      accountId,
-      hydratedAccountId,
-      connections: snapshot.connections,
-      native: nativeState,
-    }) !== 'foreign-native-session') return;
-    // Finalize a foreign-account native session before this account can use or
-    // display Watch data. The encrypted finalized outbox remains drainable.
-    void stopWatchConnect().then((status) => {
-      setNativeState(status);
-      setActionDetail('Previous-account Watch data is syncing privately. Press Watch Connect when it finishes.');
-    }).catch(() => undefined);
-  }, [accountId, authStatus, hydratedAccountId, nativeState, onPairedIPhone, snapshot.connections, stopWatchConnect]);
+    if (!onPairedIPhone || authStatus !== 'signed-in' || !accountBoundarySealKey) return;
+    void sealEarlierSession(accountBoundarySealKey).catch(() => undefined);
+  }, [accountBoundarySealKey, authStatus, onPairedIPhone, sealEarlierSession]);
 
   useEffect(() => {
     const pending = pendingStartConnectionRef.current;
-    if (!pending || !nativeState || hydratedAccountId !== accountId) return;
+    if (!pending || !nativeState || !accountId || hydratedAccountId !== accountId) return;
+    const requestedAccountId = accountId;
+    const requestedAccountGeneration = accountGenerationRef.current;
+    const requestIsCurrent = () => watchConnectCoordinatorRequestIsCurrent(
+      requestedAccountId,
+      currentAccountIdRef.current,
+      requestedAccountGeneration,
+      accountGenerationRef.current,
+    );
     const exact = nativeState.scope === pending.scope
       && nativeState.connectionId === pending.id
       && nativeState.sessionId === `watch-connect:${pending.id}`
@@ -665,27 +832,26 @@ export function WatchConnectCoordinator({
     setBusy(true);
     void (async () => {
       if (nativeState.connectionId === pending.id) await stopWatchConnect().catch(() => undefined);
+      if (!requestIsCurrent()) return;
       const { connection: stopped } = await finishWatchConnectDisconnect(pending, {});
+      if (!requestIsCurrent()) return;
       setSnapshot((current) => ({
         ...current,
         connections: [stopped, ...current.connections.filter((item) => item.id !== stopped.id)],
       }));
       setActionDetail(nativeState.reason || 'Watch did not connect. Press Watch Connect to try again.');
     })().catch((error: unknown) => {
-      setActionDetail(error instanceof Error ? error.message : String(error));
-    }).finally(() => setBusy(false));
+      if (requestIsCurrent()) setActionDetail(error instanceof Error ? error.message : String(error));
+    }).finally(() => {
+      if (requestIsCurrent()) setBusy(false);
+    });
   }, [accountId, hydratedAccountId, nativeState, snapshot.connections, stopWatchConnect]);
 
   const connect = useCallback((automaticRecovery = false) => {
     if (!onPairedIPhone) return Promise.resolve();
     return runWatchConnectSingleFlight(connectPromiseRef, async () => {
-      if (reconcileWatchConnectAccount({
-        accountId,
-        hydratedAccountId,
-        connections: snapshot.connections,
-        native: nativeState,
-      }) === 'foreign-native-session') {
-        setActionDetail('Previous-account Watch data is syncing privately. Try again when it finishes.');
+      if (accountBoundarySealKey) {
+        await sealEarlierSession(accountBoundarySealKey).catch(() => undefined);
         return;
       }
       if (watchConnectLegacyHeartRateIsBusy(status, relayState)) {
@@ -695,6 +861,13 @@ export function WatchConnectCoordinator({
         return;
       }
       const actionAccountId = accountId;
+      const actionAccountGeneration = accountGenerationRef.current;
+      const actionIsCurrent = () => watchConnectCoordinatorRequestIsCurrent(
+        actionAccountId ?? '',
+        currentAccountIdRef.current,
+        actionAccountGeneration,
+        accountGenerationRef.current,
+      );
       setBusy(true);
       setActionDetail('Connecting…');
       requestIdsRef.current ??= {
@@ -728,9 +901,14 @@ export function WatchConnectCoordinator({
         startNative: async (options) => nativeResultFromState(await startWatchConnect(options)),
         stopNative: async () => nativeResultFromState(await stopWatchConnect()),
       });
-      if (currentAccountIdRef.current !== actionAccountId) {
+      if (!actionIsCurrent()) {
         if (started.native.connectionId === started.connection.id) {
-          await stopWatchConnect().catch(() => undefined);
+          const liveNative = await getWatchConnectState().catch(() => null);
+          if (
+            liveNative?.connectionId === started.connection.id
+            && liveNative.sessionId === `watch-connect:${started.connection.id}`
+            && liveNative.connectedUntil === started.connection.connectedUntil
+          ) await stopWatchConnect().catch(() => undefined);
         }
         return;
       }
@@ -767,7 +945,7 @@ export function WatchConnectCoordinator({
         : 'Confirm TrackLab on Apple Watch to finish connecting.');
       onMessage?.('Watch Connect started for four hours.');
       } catch (error) {
-        if (!watchConnectAccountRequestIsCurrent(actionAccountId ?? '', currentAccountIdRef.current)) return;
+        if (!actionIsCurrent()) return;
         if (automaticRecovery && connection?.state === 'connecting') {
           setRecoveryRetryConnectionId(connection.id);
         }
@@ -778,12 +956,13 @@ export function WatchConnectCoordinator({
         onMessage?.(error instanceof Error ? error.message : String(error));
         await refresh().catch(() => undefined);
       } finally {
-        setBusy(false);
+        if (actionIsCurrent()) setBusy(false);
       }
     });
   }, [
     clubId,
     accountId,
+    accountBoundarySealKey,
     connection,
     getWatchConnectIdentity,
     getWatchConnectState,
@@ -795,6 +974,7 @@ export function WatchConnectCoordinator({
     relayState,
     refresh,
     scope,
+    sealEarlierSession,
     sessionStudioConsent,
     snapshot.connections,
     startWatchConnect,
@@ -823,25 +1003,32 @@ export function WatchConnectCoordinator({
   }, [accountId, connect, connection, enrollment, hydratedAccountId, nativeState, now]);
 
   const disconnect = useCallback(async (forgetEnrollmentId: string | null = null) => {
-    if (!connection || !onPairedIPhone) return;
+    if (!connection || !onPairedIPhone || !accountId) return;
+    const requestedAccountId = accountId;
+    const requestedAccountGeneration = accountGenerationRef.current;
+    const requestIsCurrent = () => watchConnectCoordinatorRequestIsCurrent(
+      requestedAccountId,
+      currentAccountIdRef.current,
+      requestedAccountGeneration,
+      accountGenerationRef.current,
+    );
     setBusy(true);
     setActionDetail('Syncing…');
     try {
-      const stopped = await stopWatchConnectAction(connection, {
-        getIdentity: async () => {
-          throw new Error('Identity is not needed while disconnecting.');
-        },
-        startNative: async () => {
-          throw new Error('Start is not available while disconnecting.');
-        },
-        stopNative: async () => nativeResultFromState(await stopWatchConnect()),
-      });
+      const native = nativeResultFromState(await stopWatchConnect());
+      if (native.state === 'error') {
+        throw new Error(native.reason || 'Watch Connect could not stop safely.');
+      }
+      if (!requestIsCurrent()) return;
+      const stopped = await finishWatchConnectDisconnect(connection, {});
+      if (!requestIsCurrent()) return;
       setSnapshot((current) => ({
         ...current,
         connections: [stopped.connection, ...current.connections.filter((item) => item.id !== stopped.connection.id)],
       }));
       if (forgetEnrollmentId) {
         const forgotten = await forgetWatchConnectEnrollment(forgetEnrollmentId);
+        if (!requestIsCurrent()) return;
         setSnapshot((current) => ({
           ...current,
           enrollments: [forgotten, ...current.enrollments.filter((item) => item.id !== forgotten.id)],
@@ -849,14 +1036,14 @@ export function WatchConnectCoordinator({
       }
       setActionDetail(forgetEnrollmentId ? 'Watch forgotten.' : 'Session ended.');
     } catch (error) {
-      setActionDetail(error instanceof Error ? error.message : String(error));
+      if (requestIsCurrent()) setActionDetail(error instanceof Error ? error.message : String(error));
     } finally {
-      setBusy(false);
+      if (requestIsCurrent()) setBusy(false);
     }
-  }, [connection, onPairedIPhone, stopWatchConnect]);
+  }, [accountId, connection, onPairedIPhone, stopWatchConnect]);
 
   const forget = useCallback(async () => {
-    if (!enrollment || !onPairedIPhone) return;
+    if (!enrollment || !onPairedIPhone || !accountId) return;
     if (typeof window !== 'undefined' && !window.confirm(
       'Forget this Apple Watch? You will approve Apple Health and studio sharing again next time.',
     )) return;
@@ -867,20 +1054,29 @@ export function WatchConnectCoordinator({
       await disconnect(enrollment.id);
       return;
     }
+    const requestedAccountId = accountId;
+    const requestedAccountGeneration = accountGenerationRef.current;
+    const requestIsCurrent = () => watchConnectCoordinatorRequestIsCurrent(
+      requestedAccountId,
+      currentAccountIdRef.current,
+      requestedAccountGeneration,
+      accountGenerationRef.current,
+    );
     setBusy(true);
     try {
       const forgotten = await forgetWatchConnectEnrollment(enrollment.id);
+      if (!requestIsCurrent()) return;
       setSnapshot((current) => ({
         ...current,
         enrollments: [forgotten, ...current.enrollments.filter((item) => item.id !== forgotten.id)],
       }));
       setActionDetail('Watch forgotten.');
     } catch (error) {
-      setActionDetail(error instanceof Error ? error.message : String(error));
+      if (requestIsCurrent()) setActionDetail(error instanceof Error ? error.message : String(error));
     } finally {
-      setBusy(false);
+      if (requestIsCurrent()) setBusy(false);
     }
-  }, [connection, disconnect, enrollment, onPairedIPhone]);
+  }, [accountId, connection, disconnect, enrollment, onPairedIPhone]);
 
   if (
     !portalTarget
@@ -891,7 +1087,7 @@ export function WatchConnectCoordinator({
     <>
     {capable === true && <WatchConnectCard
       athleteName={accountName}
-      busy={busy}
+      busy={actionBusy}
       context={scope === 'studio' ? 'studio' : 'personal'}
       disabled={hydratedAccountId !== accountId}
       enrolled={Boolean(enrollment)}
@@ -918,7 +1114,7 @@ export function WatchConnectCoordinator({
       sessionStudioConsent={enrollment?.sessionStudioConsent ?? sessionStudioConsent}
       state={cardState}
       studioName={selectedStudioContext?.clubName}
-      targetDisabled={busy || Boolean(nativeState && [
+      targetDisabled={actionBusy || Boolean(nativeState && [
         'connecting',
         'connected',
         'disconnecting',

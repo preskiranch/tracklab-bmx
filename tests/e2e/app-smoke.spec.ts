@@ -1022,6 +1022,380 @@ test('iPhone Watch Connect opens a truthful fallback while the Settings chunk is
   await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('');
 });
 
+test('iPhone seals one earlier Watch session once and keeps its finalized outbox draining', async ({ page }) => {
+  const now = Date.now();
+  const connectedUntil = now + 4 * 60 * 60 * 1_000;
+  const earlierConnectionId = 'connection-earlier-account';
+  const earlierSessionId = `watch-connect:${earlierConnectionId}`;
+  const authUser = {
+    id: 'watch-boundary-current',
+    profileKey: 'user:watch-boundary-current',
+    email: 'watch-boundary-current@tracklab.test',
+    name: 'Watch Boundary Rider',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 1, updatedAt: now },
+  };
+  let watchStatusGets = 0;
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(({ deadline, connectionId, sessionId }) => {
+    type NativeCallback = (payload: unknown) => void;
+    type BoundaryTestWindow = typeof window & {
+      webkit?: { messageHandlers: { bridge: { postMessage: (message: unknown) => void } } };
+      Capacitor?: {
+        PluginHeaders: Array<{
+          name: string;
+          methods: Array<{ name: string; rtype: 'promise' | 'callback' }>;
+        }>;
+        nativePromise: (plugin: string, method: string, options?: unknown) => Promise<unknown>;
+        nativeCallback: (
+          plugin: string,
+          method: string,
+          options: { eventName?: string; callbackId?: string },
+          callback?: NativeCallback,
+        ) => Promise<string>;
+      };
+      __watchBoundaryTest?: {
+        emitIdentityChurn: () => void;
+        finishSeal: () => void;
+        startFailingForeignIdentity: () => void;
+        snapshot: () => {
+          availabilityCalls: number;
+          clearCalls: number;
+          publicState: string;
+          queuedSessionIds: string[];
+          oldOutboxFinalized: boolean;
+        };
+      };
+    };
+    const nativeWindow = window as BoundaryTestWindow;
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+    });
+    nativeWindow.webkit = { messageHandlers: { bridge: { postMessage: () => undefined } } };
+
+    const availability = {
+      version: 1,
+      supported: true,
+      platform: 'iphone',
+      paired: true,
+      watchAppInstalled: true,
+      healthDataAvailable: true,
+      minimumIOS: '17.0',
+      minimumWatchOS: '10.0',
+    };
+    const inactiveWatchState = () => ({
+      version: 1,
+      state: 'inactive',
+      scope: null,
+      connectionId: null,
+      sessionId: null,
+      connectedUntil: null,
+      remainingMs: 0,
+      requiresUserStart: true,
+      workoutReady: false,
+      relayConfigured: false,
+    });
+    let watchState = {
+      version: 1,
+      state: 'connected',
+      scope: 'personal',
+      connectionId,
+      sessionId,
+      connectedUntil: deadline,
+      remainingMs: Math.max(0, deadline - Date.now()),
+      requiresUserStart: false,
+      workoutReady: true,
+      relayConfigured: true,
+    };
+    let relayState = {
+      version: 3,
+      configured: true,
+      syncing: false,
+      clearing: false,
+      queuedSessionIds: [] as string[],
+      queuedCount: 0,
+      pendingSampleCount: 3,
+      droppedSampleCount: 0,
+      sessionId,
+      scope: 'account-block',
+      sessions: [{
+        sessionId,
+        scope: 'account-block',
+        state: 'active',
+        finalized: false,
+        pendingSampleCount: 3,
+        droppedSampleCount: 0,
+        streamCreated: true,
+      }],
+    };
+    const listeners = new Map<string, Map<string, NativeCallback>>();
+    let listenerSequence = 0;
+    let availabilityCalls = 0;
+    let clearCalls = 0;
+    let nextClearFailure: string | null = null;
+    let finishPendingSeal: (() => void) | null = null;
+    const emitStatus = (phase: 'connected' | 'syncing') => {
+      watchState = {
+        ...watchState,
+        state: phase,
+        remainingMs: phase === 'connected' ? Math.max(0, deadline - Date.now()) : 0,
+        workoutReady: phase === 'connected',
+      };
+      const status = {
+        version: 1,
+        state: 'idle',
+        sessionId: null,
+        at: Date.now(),
+        watchConnect: { ...watchState },
+      };
+      listeners.get('heartRateStatus')?.forEach((callback) => callback(status));
+    };
+
+    nativeWindow.__watchBoundaryTest = {
+      emitIdentityChurn: () => {
+        emitStatus('connected');
+        emitStatus('syncing');
+        emitStatus('connected');
+        emitStatus('syncing');
+      },
+      finishSeal: () => finishPendingSeal?.(),
+      startFailingForeignIdentity: () => {
+        watchState = {
+          ...watchState,
+          state: 'error',
+          connectionId: 'connection-unsecured-account',
+          sessionId: 'watch-connect:connection-unsecured-account',
+          connectedUntil: deadline + 1,
+          remainingMs: 0,
+          requiresUserStart: true,
+          workoutReady: false,
+          relayConfigured: true,
+        };
+        nextClearFailure = 'Temporary native cleanup failure.';
+        const status = {
+          version: 1,
+          state: 'idle',
+          sessionId: null,
+          at: Date.now(),
+          watchConnect: { ...watchState },
+        };
+        listeners.get('heartRateStatus')?.forEach((callback) => callback(status));
+      },
+      snapshot: () => ({
+        availabilityCalls,
+        clearCalls,
+        publicState: watchState.state,
+        queuedSessionIds: [...relayState.queuedSessionIds],
+        oldOutboxFinalized: relayState.sessions.some((session) => (
+          session.sessionId === sessionId && session.finalized
+        )),
+      }),
+    };
+
+    const promiseMethods = [
+      'getAvailability',
+      'getState',
+      'getRelayState',
+      'getWatchConnectIdentity',
+      'getWatchConnectState',
+      'startWatchConnect',
+      'stopWatchConnect',
+      'startWorkout',
+      'pauseWorkout',
+      'resumeWorkout',
+      'endWorkout',
+      'configureRelay',
+      'pauseRelay',
+      'resumeRelay',
+      'finalizeRelay',
+      'clearRelay',
+      'clearAllRelays',
+    ];
+    nativeWindow.Capacitor = {
+      PluginHeaders: [{
+        name: 'TrackLabHeartRate',
+        methods: [
+          ...promiseMethods.map((name) => ({ name, rtype: 'promise' as const })),
+          { name: 'addListener', rtype: 'callback' },
+          { name: 'removeListener', rtype: 'callback' },
+        ],
+      }],
+      nativePromise: async (_plugin, method) => {
+        if (method === 'getAvailability') {
+          availabilityCalls += 1;
+          return { ...availability };
+        }
+        if (method === 'getState') {
+          return {
+            version: 1,
+            state: 'idle',
+            sessionId: null,
+            at: Date.now(),
+            watchConnect: { ...watchState },
+          };
+        }
+        if (method === 'getWatchConnectState') return { ...watchState };
+        if (method === 'getRelayState') {
+          return {
+            ...relayState,
+            queuedSessionIds: [...relayState.queuedSessionIds],
+            sessions: relayState.sessions.map((session) => ({ ...session })),
+          };
+        }
+        if (method === 'clearAllRelays') {
+          clearCalls += 1;
+          if (nextClearFailure) {
+            const reason = nextClearFailure;
+            nextClearFailure = null;
+            return { configured: false, reason };
+          }
+          return new Promise((resolve) => {
+            finishPendingSeal = () => {
+              finishPendingSeal = null;
+              watchState = inactiveWatchState();
+              relayState = {
+                version: 3,
+                configured: false,
+                syncing: true,
+                clearing: false,
+                queuedSessionIds: [sessionId],
+                queuedCount: 1,
+                pendingSampleCount: 3,
+                droppedSampleCount: 0,
+                sessions: [{
+                  sessionId,
+                  scope: 'account-block',
+                  state: 'queued',
+                  finalized: true,
+                  pendingSampleCount: 3,
+                  droppedSampleCount: 0,
+                  streamCreated: true,
+                }],
+              };
+              resolve({ configured: false, queued: true });
+            };
+          });
+        }
+        if (method === 'getWatchConnectIdentity') {
+          return { version: 1, installId: `wci_${'1'.repeat(64)}` };
+        }
+        return {};
+      },
+      nativeCallback: async (_plugin, method, options, callback) => {
+        if (method === 'addListener' && options.eventName && callback) {
+          const callbackId = `${options.eventName}-${listenerSequence += 1}`;
+          const eventListeners = listeners.get(options.eventName) ?? new Map<string, NativeCallback>();
+          eventListeners.set(callbackId, callback);
+          listeners.set(options.eventName, eventListeners);
+          return callbackId;
+        }
+        if (method === 'removeListener' && options.eventName && options.callbackId) {
+          listeners.get(options.eventName)?.delete(options.callbackId);
+        }
+        return options.callbackId ?? 'listener-removed';
+      },
+    };
+  }, { deadline: connectedUntil, connectionId: earlierConnectionId, sessionId: earlierSessionId });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: [],
+        accountProfile: { updatedAt: now },
+      }),
+    });
+  });
+  await page.route('**/api/heart-rate/watch-connect', async (route) => {
+    if (route.request().method() === 'GET') watchStatusGets += 1;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ enrollments: [], connections: [] }),
+    });
+  });
+  await page.route('**/api/heart-rate/account-blocks', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ blocks: [] }) });
+  });
+  await page.route('**/api/heart-rate/pairings', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pairings: [] }) });
+  });
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  await page.goto('/?track=black-mountain-bmx');
+  await openSignedInAppIfNeeded(page);
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __watchBoundaryTest?: { snapshot: () => { clearCalls: number } } })
+      .__watchBoundaryTest?.snapshot().clearCalls ?? 0
+  ))).toBe(1);
+  const baselineWatchStatusGets = watchStatusGets;
+  await page.evaluate(() => (
+    window as typeof window & { __watchBoundaryTest?: { emitIdentityChurn: () => void } }
+  ).__watchBoundaryTest?.emitIdentityChurn());
+  await expect.poll(() => page.evaluate(() => (
+    (window as typeof window & { __watchBoundaryTest?: { snapshot: () => { availabilityCalls: number } } })
+      .__watchBoundaryTest?.snapshot().availabilityCalls ?? 0
+  ))).toBeGreaterThanOrEqual(5);
+  await page.waitForTimeout(500);
+  expect(watchStatusGets).toBeLessThanOrEqual(baselineWatchStatusGets + 1);
+  expect(await page.evaluate(() => (
+    (window as typeof window & { __watchBoundaryTest?: { snapshot: () => { clearCalls: number } } })
+      .__watchBoundaryTest?.snapshot().clearCalls ?? 0
+  ))).toBe(1);
+
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Watch Connect', exact: true }).click();
+  const card = page.getByRole('region', { name: 'Watch Boundary Rider Watch Connect' });
+  await expect(card).toBeVisible();
+  await page.evaluate(() => (
+    window as typeof window & { __watchBoundaryTest?: { finishSeal: () => void } }
+  ).__watchBoundaryTest?.finishSeal());
+  await expect(card.getByText(
+    'Earlier Watch data is syncing privately. Press Watch Connect to start a new four-hour session.',
+    { exact: true },
+  )).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Watch Connect', exact: true })).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & {
+      __watchBoundaryTest?: {
+        snapshot: () => {
+          clearCalls: number;
+          publicState: string;
+          queuedSessionIds: string[];
+          oldOutboxFinalized: boolean;
+        };
+      };
+    }
+  ).__watchBoundaryTest?.snapshot())).toMatchObject({
+    clearCalls: 1,
+    publicState: 'inactive',
+    queuedSessionIds: [earlierSessionId],
+    oldOutboxFinalized: true,
+  });
+
+  await page.evaluate(() => (
+    window as typeof window & {
+      __watchBoundaryTest?: { startFailingForeignIdentity: () => void };
+    }
+  ).__watchBoundaryTest?.startFailingForeignIdentity());
+  await expect(card.getByText(
+    'An earlier Watch session could not be secured privately. Press Watch Connect to try again. Temporary native cleanup failure.',
+    { exact: true },
+  )).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Watch Connect', exact: true })).toBeEnabled();
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => (
+    (window as typeof window & { __watchBoundaryTest?: { snapshot: () => { clearCalls: number } } })
+      .__watchBoundaryTest?.snapshot().clearCalls ?? 0
+  ))).toBe(2);
+});
+
 test('Get Pulled runs a six-second countdown and keeps Air records separated', async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   await page.addInitScript(() => {
