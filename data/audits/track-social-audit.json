@@ -1,7 +1,7 @@
 {
   "auditedAt": "2026-08-23T21:45:34.552Z",
-  "schemaVersion": 1,
-  "catalogGeneratedAt": "2026-08-23T21:36:52.513Z",
+  "schemaVersion": 2,
+  "auditSourceDigest": "sha256:a60f99be9adb7f94cd16508cb05a78e786cdd9e5208e78c4007f1e1ac014d028",
   "policy": {
     "exactSourcesOnly": true,
     "acceptedTikTokPaths": "/@account",

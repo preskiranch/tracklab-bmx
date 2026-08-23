@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import {
   normalizeExternalHttpUrl,
@@ -12,6 +13,12 @@ const sourceKinds = new Set([
   'exact-bmxnz-source-page',
   'retained-source-metadata',
 ]);
+
+function compareStrings(left, right) {
+  const lhs = String(left);
+  const rhs = String(right);
+  return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+}
 
 function retainedSourceUrlValues(track) {
   const values = [];
@@ -32,7 +39,7 @@ function retainedSourceUrlValues(track) {
     add('sourceRecord.coordinateEvidence.url', track.sourceRecord?.coordinateEvidence?.url);
     add('sourceRecord.sourcePage', track.sourceRecord?.sourcePage);
   }
-  return values.sort((left, right) => left.field.localeCompare(right.field));
+  return values.sort((left, right) => compareStrings(left.field, right.field));
 }
 
 function retainedSocialMetadataValues(track) {
@@ -45,7 +52,58 @@ function retainedSocialMetadataValues(track) {
       field: `sourceRecord.osmTags.${field}`,
       value: tags[field],
     }]
-  )).sort((left, right) => left.field.localeCompare(right.field));
+  )).sort((left, right) => compareStrings(left.field, right.field));
+}
+
+function canonicalJsonValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalJsonValue);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value)
+      .sort(compareStrings)
+      .map((key) => [key, canonicalJsonValue(value[key])]));
+  }
+  return value;
+}
+
+/**
+ * Stable identity for every retained source that can influence the social
+ * audit. Derived map geometry and the volatile generatedAt timestamp are
+ * deliberately excluded, so macOS/Linux floating-point output cannot stale a
+ * reviewed manifest when its source association is unchanged. OSM URLs that
+ * were deduplicated out of the catalog remain inputs because the audit must
+ * explicitly classify them as excluded rather than silently forget them.
+ */
+export function trackSocialAuditSourceDigest(tracks, osmImportTracks = []) {
+  const catalogProjection = tracks.map((track) => ({
+    id: track.id ?? null,
+    name: track.name ?? null,
+    providerId: track.providerId ?? null,
+    sourceUrl: track.sourceUrl ?? null,
+    sourceRecordId: track.sourceRecord?.id ?? null,
+    retainedSourceUrls: retainedSourceUrlValues(track),
+    retainedSocialMetadata: retainedSocialMetadataValues(track),
+    tiktokUrl: track.tiktokUrl ?? null,
+    youtubeUrl: track.youtubeUrl ?? null,
+    socialLinkProvenance: track.sourceRecord?.socialLinkProvenance ?? null,
+  })).sort((left, right) => compareStrings(left.id, right.id));
+  const catalogTrackIds = new Set(tracks.map((track) => track.id));
+  const excludedOsmProjection = osmImportTracks.flatMap((track) => {
+    const value = track.sourceRecord?.osmTags?.url;
+    return catalogTrackIds.has(track.id) || value === undefined ? [] : [{
+      id: track.id ?? null,
+      name: track.name ?? null,
+      field: 'sourceRecord.osmTags.url',
+      value,
+    }];
+  }).sort((left, right) => compareStrings(left.id, right.id));
+  return `sha256:${createHash('sha256')
+    .update(JSON.stringify(canonicalJsonValue({
+      catalog: catalogProjection,
+      excludedOsmRetainedUrls: excludedOsmProjection,
+    })))
+    .digest('hex')}`;
 }
 
 const reservedHostnameSuffixes = [
@@ -302,14 +360,22 @@ export function validateTrackSocialLinkParity(registry, tracks, label = 'track d
   return errors;
 }
 
-export function validateTrackSocialAuditManifest(manifest, registry, tracks) {
+export function validateTrackSocialAuditManifest(
+  manifest,
+  registry,
+  tracks,
+  osmImportTracks = [],
+) {
   const errors = [];
   const trackIds = new Set(tracks.map((track) => track.id));
   const tracksById = new Map(tracks.map((track) => [track.id, track]));
   const records = Array.isArray(manifest?.records) ? manifest.records : [];
   const recordIds = new Set();
-  if (manifest?.schemaVersion !== 1) {
-    errors.push('track social-link audit: schemaVersion must be 1');
+  if (manifest?.schemaVersion !== 2) {
+    errors.push('track social-link audit: schemaVersion must be 2');
+  }
+  if (manifest?.auditSourceDigest !== trackSocialAuditSourceDigest(tracks, osmImportTracks)) {
+    errors.push('track social-link audit: auditSourceDigest does not match retained audit sources');
   }
   if (records.length !== tracks.length || Number(manifest?.summary?.tracksEvaluated) !== tracks.length) {
     errors.push(`track social-link audit: must contain ${tracks.length} track records`);

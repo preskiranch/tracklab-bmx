@@ -15,11 +15,13 @@ const locatorDatabasePath = new URL('../public/data/track-locator.json', import.
 const federationsPath = new URL('../data/federations.json', import.meta.url);
 const socialLinksPath = new URL('../data/track-social-links.json', import.meta.url);
 const socialAuditPath = new URL('../data/audits/track-social-audit.json', import.meta.url);
+const osmImportPath = new URL('../data/imports/openstreetmap-bmx-global.json', import.meta.url);
 const database = JSON.parse(await readFile(databasePath, 'utf8'));
 const locatorDatabase = JSON.parse(await readFile(locatorDatabasePath, 'utf8'));
 const federationRegistry = JSON.parse(await readFile(federationsPath, 'utf8'));
 const socialLinkRegistry = JSON.parse(await readFile(socialLinksPath, 'utf8'));
 const socialAuditManifest = JSON.parse(await readFile(socialAuditPath, 'utf8'));
+const osmImport = JSON.parse(await readFile(osmImportPath, 'utf8'));
 const providers = new Map((database.providers ?? []).map((provider) => [provider.id, provider]));
 const tracks = database.tracks ?? [];
 const errors = [];
@@ -29,10 +31,12 @@ const ids = new Set();
 errors.push(...validateFederationRegistry(federationRegistry));
 errors.push(...validateTrackSocialLinkRegistry(socialLinkRegistry, tracks));
 errors.push(...validateTrackSocialLinkParity(socialLinkRegistry, tracks));
-errors.push(...validateTrackSocialAuditManifest(socialAuditManifest, socialLinkRegistry, tracks));
-if (socialAuditManifest.catalogGeneratedAt !== database.generatedAt) {
-  errors.push('track social-link audit: catalogGeneratedAt does not match the generated database');
-}
+errors.push(...validateTrackSocialAuditManifest(
+  socialAuditManifest,
+  socialLinkRegistry,
+  tracks,
+  osmImport.tracks ?? [],
+));
 
 function isHttpUrl(value) {
   try {

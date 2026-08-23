@@ -4,6 +4,7 @@ import {
   applyTrackSocialLinkRegistry,
   isPublicIpAddress,
   normalizePublicHttpUrl,
+  trackSocialAuditSourceDigest,
   validateTrackSocialAuditManifest,
   validateTrackSocialLinkParity,
   validateTrackSocialLinkRegistry,
@@ -21,18 +22,21 @@ let registry: any;
 let manifest: any;
 let fullTracks: SocialTrack[];
 let locatorTracks: SocialTrack[];
+let osmImportTracks: SocialTrack[];
 
 beforeAll(async () => {
-  const [registryJson, manifestJson, databaseJson, locatorJson] = await Promise.all([
+  const [registryJson, manifestJson, databaseJson, locatorJson, osmImportJson] = await Promise.all([
     readFile(new URL('../../data/track-social-links.json', import.meta.url), 'utf8'),
     readFile(new URL('../../data/audits/track-social-audit.json', import.meta.url), 'utf8'),
     readFile(new URL('../../public/data/track-database.json', import.meta.url), 'utf8'),
     readFile(new URL('../../public/data/track-locator.json', import.meta.url), 'utf8'),
+    readFile(new URL('../../data/imports/openstreetmap-bmx-global.json', import.meta.url), 'utf8'),
   ]);
   registry = JSON.parse(registryJson);
   manifest = JSON.parse(manifestJson);
   fullTracks = JSON.parse(databaseJson).tracks;
   locatorTracks = JSON.parse(locatorJson).tracks;
+  osmImportTracks = JSON.parse(osmImportJson).tracks;
 });
 
 describe('reviewed track social-link registry', () => {
@@ -116,7 +120,16 @@ describe('reviewed track social-link registry', () => {
 
 describe('social audit completeness and network boundaries', () => {
   it('records a final result for every catalog track and exactly backs the registry', () => {
-    expect(validateTrackSocialAuditManifest(manifest, registry, fullTracks)).toEqual([]);
+    expect(validateTrackSocialAuditManifest(
+      manifest,
+      registry,
+      fullTracks,
+      osmImportTracks,
+    )).toEqual([]);
+    expect(manifest.schemaVersion).toBe(2);
+    expect(manifest.auditSourceDigest).toBe(
+      trackSocialAuditSourceDigest(fullTracks, osmImportTracks),
+    );
     expect(manifest.records).toHaveLength(1_305);
     expect(new Set(manifest.records.map((record: any) => record.trackId)).size).toBe(1_305);
     expect(manifest.summary.pendingCandidates).toBe(0);
@@ -130,6 +143,55 @@ describe('social audit completeness and network boundaries', () => {
     expect(manifest.summary.uniquePagesRequested).toBe(426);
     expect(manifest.summary.candidatesFound).toBe(21);
     expect(manifest.summary.rejectedCandidates).toBe(7);
+  });
+
+  it('binds the audit to stable source associations, not generated timestamps or geometry', () => {
+    const digest = trackSocialAuditSourceDigest(fullTracks, osmImportTracks);
+    const platformVariant = [...fullTracks].reverse().map((track: any) => ({
+      ...track,
+      generatedAt: '2099-01-01T00:00:00.000Z',
+      centerline: [[Number.EPSILON, -Number.EPSILON]],
+      outline: [[-Number.EPSILON, Number.EPSILON]],
+    }));
+    expect(trackSocialAuditSourceDigest(
+      platformVariant,
+      [...osmImportTracks].reverse(),
+    )).toBe(digest);
+
+    const changedSource = platformVariant.map((track: any, index) => (
+      index === 0 ? { ...track, sourceUrl: `${track.sourceUrl}?changed=1` } : track
+    ));
+    expect(trackSocialAuditSourceDigest(changedSource, osmImportTracks)).not.toBe(digest);
+    expect(validateTrackSocialAuditManifest(
+      manifest,
+      registry,
+      changedSource,
+      osmImportTracks,
+    )).toEqual(
+      expect.arrayContaining([expect.stringContaining('auditSourceDigest does not match')]),
+    );
+
+    const catalogIds = new Set(fullTracks.map((track) => track.id));
+    const changedExcludedOsm = osmImportTracks.map((track: any) => (
+      !catalogIds.has(track.id) && track.sourceRecord?.osmTags?.url
+        ? {
+            ...track,
+            sourceRecord: {
+              ...track.sourceRecord,
+              osmTags: { ...track.sourceRecord.osmTags, url: `${track.sourceRecord.osmTags.url}#changed` },
+            },
+          }
+        : track
+    ));
+    expect(trackSocialAuditSourceDigest(fullTracks, changedExcludedOsm)).not.toBe(digest);
+    expect(validateTrackSocialAuditManifest(
+      manifest,
+      registry,
+      fullTracks,
+      changedExcludedOsm,
+    )).toEqual(
+      expect.arrayContaining([expect.stringContaining('auditSourceDigest does not match')]),
+    );
   });
 
   it('blocks private, reserved, credentialed, and custom-port audit targets', () => {

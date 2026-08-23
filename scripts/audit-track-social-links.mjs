@@ -10,6 +10,7 @@ import {
 import {
   isPublicIpAddress,
   normalizePublicHttpUrl,
+  trackSocialAuditSourceDigest,
 } from './lib/track-social-links.mjs';
 
 const databasePath = new URL('../public/data/track-database.json', import.meta.url);
@@ -912,8 +913,8 @@ const summary = {
   duplicateVerifiedUrls: duplicateVerifiedUrls.length,
 };
 const manifestBody = {
-  schemaVersion: 1,
-  catalogGeneratedAt: database.generatedAt,
+  schemaVersion: 2,
+  auditSourceDigest: trackSocialAuditSourceDigest(tracks, osmImport.tracks ?? []),
   policy: {
     exactSourcesOnly: true,
     acceptedTikTokPaths: '/@account',
