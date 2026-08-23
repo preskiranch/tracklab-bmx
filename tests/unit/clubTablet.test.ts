@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearStoredClubTabletSession,
@@ -74,6 +75,34 @@ afterEach(() => {
 });
 
 describe('Club Tablet client state', () => {
+  it('leaves enrollment verification to the runtime and starts kiosk sign-out only once', () => {
+    const modeSource = readFileSync(
+      new URL('../../src/components/ClubTabletMode.tsx', import.meta.url),
+      'utf8',
+    );
+    const authorizeStart = modeSource.indexOf('const authorizeTablet = async () =>');
+    const authorizeEnd = modeSource.indexOf('const startAthlete = async () =>', authorizeStart);
+    const authorizeSource = modeSource.slice(authorizeStart, authorizeEnd);
+    expect(authorizeStart).toBeGreaterThanOrEqual(0);
+    expect(authorizeEnd).toBeGreaterThan(authorizeStart);
+    expect(authorizeSource).toContain('onDeviceChange(credential)');
+    expect(authorizeSource).not.toContain('loadClubTabletRoster(');
+    expect(authorizeSource).not.toContain('onRosterChange(');
+
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    expect(appSource).toContain('const clubTabletAutoSignOutStartedRef = useRef(false);');
+    const guardStart = appSource.indexOf('if (!clubTabletKioskMode) {', appSource.indexOf('const handleSignOut'));
+    const guardEnd = appSource.indexOf('}, [authUser, clubTabletKioskMode, handleSignOut]);', guardStart);
+    const guardSource = appSource.slice(guardStart, guardEnd);
+    expect(guardStart).toBeGreaterThanOrEqual(0);
+    expect(guardEnd).toBeGreaterThan(guardStart);
+    expect(guardSource).toContain('clubTabletAutoSignOutStartedRef.current = false;');
+    expect(guardSource).toContain('if (!authUser || clubTabletAutoSignOutStartedRef.current) return;');
+    expect(guardSource).toContain('clubTabletAutoSignOutStartedRef.current = true;');
+    expect(guardSource.indexOf('clubTabletAutoSignOutStartedRef.current = true;'))
+      .toBeLessThan(guardSource.indexOf('void handleSignOut()'));
+  });
+
   it('keeps Wattbike pairing locked until server authorization is active', () => {
     expect(clubTabletBikeAccessReady('checking', false)).toBe(false);
     expect(clubTabletBikeAccessReady('error', false)).toBe(false);

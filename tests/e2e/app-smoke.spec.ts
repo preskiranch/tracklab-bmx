@@ -6350,6 +6350,8 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   };
   let enrollmentRequest: unknown = null;
   let rosterAuthorization = '';
+  let rosterRequests = 0;
+  let logoutRequests = 0;
   let failNextRosterAuthorization = false;
   let sessionRequest: unknown = null;
   let sessionDeletes = 0;
@@ -6410,6 +6412,10 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
   });
+  await page.route('**/api/auth/logout', async (route) => {
+    logoutRequests += 1;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
   await page.route('**/api/user-data*', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -6461,6 +6467,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     });
   });
   await page.route('**/api/club-tablet/roster', async (route) => {
+    rosterRequests += 1;
     rosterAuthorization = route.request().headers().authorization ?? '';
     await new Promise((resolve) => setTimeout(resolve, 175));
     if (failNextRosterAuthorization) {
@@ -6506,10 +6513,15 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
 
   await page.getByLabel('Tablet name').fill(tabletDevice.name);
   await page.getByRole('button', { name: 'Authorize this tablet', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Verifying tablet authorization…' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
   expect(enrollmentRequest).toEqual({ name: tabletDevice.name });
+  await page.waitForTimeout(250);
+  expect(rosterRequests).toBeGreaterThanOrEqual(1);
+  expect(rosterRequests).toBeLessThanOrEqual(2);
   expect(rosterAuthorization).toBe('Bearer tablet-device-token');
+  await expect.poll(() => logoutRequests).toBe(1);
+  await page.waitForTimeout(250);
+  expect(logoutRequests).toBe(1);
 
   const primaryNav = page.getByRole('navigation', { name: 'Primary' });
   await expect(primaryNav.getByRole('button')).toHaveCount(1);
@@ -6561,12 +6573,18 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  await expect.poll(() => logoutRequests).toBe(2);
+  await page.waitForTimeout(250);
+  expect(logoutRequests).toBe(2);
   await expect(page.getByRole('navigation', { name: 'Primary' }).getByRole('button')).toHaveCount(1);
   await expect(page.getByRole('button', { name: /Rasheen Hicks/ })).toBeVisible();
 
   failNextRosterAuthorization = true;
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Could not verify this club tablet' })).toBeVisible();
+  await expect.poll(() => logoutRequests).toBe(3);
+  await page.waitForTimeout(250);
+  expect(logoutRequests).toBe(3);
   await expect(page.getByRole('button', { name: 'Pair a Wattbike' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Retry authorization', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Verifying tablet authorization…' })).toBeVisible();

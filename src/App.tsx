@@ -1899,6 +1899,7 @@ export default function App() {
     getNativeBluetoothBootstrapStatus,
   );
   const clubTabletEmergencyExitRef = useRef<() => void>(() => undefined);
+  const clubTabletAutoSignOutStartedRef = useRef(false);
   const clubTrainingRequestGenerationRef = useRef(0);
   const activeClubProfileKeyRef = useRef<string | null>(null);
   const [studioRiderAssignments, setStudioRiderAssignments] = useState<StudioRiderAssignments>({});
@@ -8646,7 +8647,12 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (!clubTabletKioskMode || !authUser) return;
+    if (!clubTabletKioskMode) {
+      clubTabletAutoSignOutStartedRef.current = false;
+      return;
+    }
+    if (!authUser || clubTabletAutoSignOutStartedRef.current) return;
+    clubTabletAutoSignOutStartedRef.current = true;
     // Enrollment immediately converts this browser into a student-safe kiosk;
     // the owner's cookie and profile state are removed behind the locked UI.
     void handleSignOut().finally(() => {

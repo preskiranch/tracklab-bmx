@@ -233,8 +233,7 @@ export default function ClubTabletMode({
     try {
       const credential = await enrollClubTablet(tabletName);
       onDeviceChange(credential);
-      onRosterChange(await loadClubTabletRoster(credential));
-      setMessage('Tablet authorized. Its Wattbike pairing will stay saved between athlete sessions.');
+      setMessage('Tablet saved. Verifying authorization…');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not authorize this tablet.');
     } finally {
