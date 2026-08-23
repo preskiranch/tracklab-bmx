@@ -918,6 +918,110 @@ test('account display units persist across Settings and reload', async ({ page }
   await expect(page.getByRole('button', { name: /Feet ft \/ miles/ })).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('iPhone Watch Connect opens a truthful fallback while the Settings chunk is still loading', async ({ page }) => {
+  const now = Date.now();
+  const authUser = {
+    id: 'watch-connect-missing-bridge',
+    profileKey: 'user:watch-connect-missing-bridge',
+    email: 'watch-connect-missing-bridge@tracklab.test',
+    name: 'Watch Connect Rider',
+    admin: false,
+    membership: { tier: 'racer', bikeSeats: 1, updatedAt: now },
+  };
+  let releaseSettingsChunk: () => void = () => undefined;
+  const settingsChunkGate = new Promise<void>((resolve) => {
+    releaseSettingsChunk = () => resolve();
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+    });
+  });
+  await page.route('**/assets/AppSettingsView-*.js', async (route) => {
+    await settingsChunkGate;
+    await route.continue();
+  });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+  });
+  await page.route('**/api/user-data*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: {},
+        customRoutes: [],
+        bikeProfiles: [],
+        studioRiders: [],
+        accountProfile: { updatedAt: now },
+      }),
+    });
+  });
+  await page.route('**/api/heart-rate/watch-connect', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ enrollments: [], connections: [] }),
+    });
+  });
+  await page.route('**/api/heart-rate/account-blocks', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ blocks: [] }) });
+  });
+  await page.route('**/api/heart-rate/pairings', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pairings: [] }) });
+  });
+  await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+  const expectPanelBelowStickyNavigation = async () => {
+    await expect.poll(() => page.evaluate(() => {
+      const panel = document.querySelector<HTMLElement>('.heart-rate-account-block');
+      const navigation = document.querySelector<HTMLElement>('.side-nav');
+      if (!panel || !navigation) return Number.NEGATIVE_INFINITY;
+      return panel.getBoundingClientRect().top - navigation.getBoundingClientRect().bottom;
+    })).toBeGreaterThanOrEqual(8);
+  };
+
+  try {
+    await page.goto('/?track=black-mountain-bmx');
+    await openSignedInAppIfNeeded(page);
+    await page.getByRole('button', { name: 'More', exact: true }).click();
+    await page.getByRole('button', { name: 'Watch Connect', exact: true }).click();
+
+    await expect(page.getByText('Loading settings…', { exact: true })).toBeVisible();
+    const unavailablePanel = page.getByRole('region', { name: 'Private Apple Watch heart-rate block' });
+    await expect(unavailablePanel).toBeVisible();
+    await expect(unavailablePanel).toBeInViewport();
+    await expect(unavailablePanel).toBeFocused();
+    await expectPanelBelowStickyNavigation();
+    await expect(page.getByRole('heading', { name: 'Heart rate on every signed-in device' })).toBeVisible();
+    await expect(page.getByText('Unavailable here', { exact: true })).toBeVisible();
+    await expect(unavailablePanel.getByText(
+      'Apple Watch heart rate is available only in the native TrackLab app on a compatible iPhone.',
+      { exact: true },
+    )).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('');
+    await expect.poll(async () => (
+      (await unavailablePanel.getByRole('button', { name: 'Retry' }).boundingBox())?.height ?? 0
+    )).toBeGreaterThanOrEqual(44);
+    await expect.poll(() => unavailablePanel.evaluate((element) => (
+      window.getComputedStyle(element).outlineStyle
+    ))).toBe('solid');
+    await expect.poll(() => page.evaluate(() => (
+      document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    ))).toBe(true);
+  } finally {
+    releaseSettingsChunk();
+  }
+
+  await expect(page.getByRole('heading', { name: 'Display & units' })).toBeVisible();
+  const unavailablePanel = page.getByRole('region', { name: 'Private Apple Watch heart-rate block' });
+  await expect(unavailablePanel).toBeInViewport();
+  await expect(unavailablePanel).toBeFocused();
+  await expectPanelBelowStickyNavigation();
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe('');
+});
+
 test('Get Pulled runs a six-second countdown and keeps Air records separated', async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   await page.addInitScript(() => {

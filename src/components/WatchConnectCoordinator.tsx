@@ -43,7 +43,8 @@ import { WatchConnectCard } from './WatchConnectCard';
 import { OwnerStudioWatchConnectSettings } from './OwnerStudioWatchConnectSettings';
 import { watchAppNeedsInstall } from './watchAppInstall';
 
-export const watchConnectSettingsSlotId = 'watch';
+export const watchConnectSettingsAnchorId = 'watch';
+export const watchConnectSettingsSlotId = 'watch-connect-settings-slot';
 
 export type StudioContext = Readonly<{
   clubId: string;
@@ -95,6 +96,9 @@ export function watchConnectNativeCapability(state: NativeWatchConnectState) {
   const reason = state.reason?.toLowerCase() ?? '';
   return !(state.state === 'inactive' && (
     reason.includes('install the latest tracklab build')
+    || reason.includes('newer tracklab app build with the native heart-rate bridge')
+    || reason.includes('available only in the native tracklab app')
+    || reason.includes('unavailable in this tracklab app build')
     || reason.includes('not implemented')
     || reason.includes('unimplemented')
     || reason.includes('does not have an implementation')
@@ -386,24 +390,94 @@ export function WatchConnectCoordinator({
     if (
       !portalTarget
       || typeof window === 'undefined'
-      || window.location.hash !== `#${watchConnectSettingsSlotId}`
     ) return undefined;
-    const frame = window.requestAnimationFrame(() => {
-      const card = portalTarget.querySelector<HTMLElement>('.watch-connect-card');
+    const anchor = portalTarget.closest<HTMLElement>(`#${watchConnectSettingsAnchorId}`);
+    const settingsRoot = anchor?.closest<HTMLElement>('.platform-main');
+    if (!anchor || !settingsRoot) return undefined;
+
+    let followingDirectNavigation = false;
+    let frame: number | null = null;
+    let settleTimer: number | null = null;
+    const settingsAreLoading = () => [...settingsRoot.querySelectorAll('.explore-loading')]
+      .some((element) => element.textContent?.trim() === 'Loading settings…');
+    const stopFollowing = () => {
+      followingDirectNavigation = false;
+      if (settleTimer != null) window.clearTimeout(settleTimer);
+      settleTimer = null;
+    };
+    const scrollAndFocus = () => {
+      frame = null;
+      if (!followingDirectNavigation) return;
+      const watchCard = anchor.querySelector<HTMLElement>('.watch-connect-card');
+      const fallbackCard = anchor.querySelector<HTMLElement>(
+        '.heart-rate-account-block, .heart-rate-settings-card',
+      );
+      const card = watchCard ?? fallbackCard;
       if (!card) return;
-      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      const action = card.querySelector<HTMLButtonElement>(
+      card.scrollIntoView({ behavior: 'auto', block: 'start' });
+      const navigation = document.querySelector<HTMLElement>('.side-nav');
+      if (navigation) {
+        const navigationStyle = window.getComputedStyle(navigation);
+        const navigationRect = navigation.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        if (
+          ['fixed', 'sticky'].includes(navigationStyle.position)
+          && navigationRect.bottom > cardRect.top
+          && navigationRect.top < cardRect.bottom
+          && navigationRect.right > cardRect.left
+          && navigationRect.left < cardRect.right
+        ) {
+          window.scrollBy({
+            behavior: 'auto',
+            top: cardRect.top - navigationRect.bottom - 12,
+          });
+        }
+      }
+      const action = watchCard?.querySelector<HTMLButtonElement>(
         '.watch-connect-card-actions button:not(:disabled)',
       );
-      (action ?? card).focus({ preventScroll: true });
-      window.history.replaceState(
-        window.history.state,
-        '',
-        `${window.location.pathname}${window.location.search}`,
-      );
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [capable, portalTarget]);
+      const focusTarget = action ?? card;
+      if (!action && !card.hasAttribute('tabindex')) card.tabIndex = -1;
+      focusTarget.focus({ preventScroll: true });
+      if (window.location.hash === `#${watchConnectSettingsAnchorId}`) {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}${window.location.search}`,
+        );
+      }
+      if (!settingsAreLoading()) {
+        if (settleTimer != null) window.clearTimeout(settleTimer);
+        settleTimer = window.setTimeout(stopFollowing, 300);
+      }
+    };
+    const schedule = () => {
+      if (!followingDirectNavigation || frame != null) return;
+      frame = window.requestAnimationFrame(scrollAndFocus);
+    };
+    const beginFollowing = () => {
+      if (window.location.hash !== `#${watchConnectSettingsAnchorId}`) return;
+      followingDirectNavigation = true;
+      if (settleTimer != null) window.clearTimeout(settleTimer);
+      settleTimer = null;
+      schedule();
+    };
+    const mutations = new MutationObserver(schedule);
+    mutations.observe(settingsRoot, { childList: true, subtree: true });
+    const resize = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(schedule);
+    resize?.observe(settingsRoot);
+    window.addEventListener('hashchange', beginFollowing);
+    beginFollowing();
+    return () => {
+      window.removeEventListener('hashchange', beginFollowing);
+      mutations.disconnect();
+      resize?.disconnect();
+      if (frame != null) window.cancelAnimationFrame(frame);
+      if (settleTimer != null) window.clearTimeout(settleTimer);
+    };
+  }, [portalTarget]);
 
   useEffect(() => {
     setNativeState(watchConnect);

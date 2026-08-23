@@ -97,6 +97,19 @@ describe('WatchConnectCoordinator native adapter', () => {
       relayConfigured: false,
       reason: 'Watch Connect status could not be checked. Not implemented on ios.',
     })).toBe(false);
+    expect(watchConnectNativeCapability({
+      version: 1,
+      state: 'inactive',
+      scope: null,
+      connectionId: null,
+      sessionId: null,
+      connectedUntil: null,
+      remainingMs: 0,
+      requiresUserStart: true,
+      workoutReady: false,
+      relayConfigured: false,
+      reason: 'Apple Watch heart rate requires a newer TrackLab app build with the native heart-rate bridge.',
+    })).toBe(false);
   });
 
   it('shows the native iPhone setup reason instead of a misleading device handoff', () => {

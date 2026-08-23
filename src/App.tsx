@@ -11004,7 +11004,7 @@ export default function App() {
               <button type="button" onClick={handleHeartRateAccountBlockOpenSettings}>
                 <Settings size={17} /> Settings
               </button>
-              <button onClick={() => handleHeartRateAccountBlockOpenSettings(true)}>
+              <button type="button" onClick={() => handleHeartRateAccountBlockOpenSettings(true)}>
                 Watch Connect
               </button>
               <button type="button" onClick={() => setShowMembershipLanding(true)}>
@@ -11297,22 +11297,26 @@ export default function App() {
             />
           </Suspense>
         ) : settingsMode ? (
-          <Suspense fallback={<div className="explore-loading">Loading settings…</div>}>
-            <AppSettingsView
-              speedUnit={speedUnit}
-              distanceUnit={distanceUnit}
-              regionalSpeedUnit={regionalUnits.speedUnit}
-              regionalDistanceUnit={regionalUnits.distanceUnit}
-              regionCode={regionalUnitRegion}
-              cloudStatus={unitPreferencesSyncStatus}
-              cloudMessage={unitPreferencesSyncMessage}
-              onSpeedUnitChange={handleSpeedUnitChange}
-              onDistanceUnitChange={handleDistanceUnitChange}
-              onUseRegionalDefaults={handleRegionalUnitDefaults}
-              heartRatePanel={authUser ? (
+          <>
+            <Suspense fallback={<div className="explore-loading">Loading settings…</div>}>
+              <AppSettingsView
+                speedUnit={speedUnit}
+                distanceUnit={distanceUnit}
+                regionalSpeedUnit={regionalUnits.speedUnit}
+                regionalDistanceUnit={regionalUnits.distanceUnit}
+                regionCode={regionalUnitRegion}
+                cloudStatus={unitPreferencesSyncStatus}
+                cloudMessage={unitPreferencesSyncMessage}
+                onSpeedUnitChange={handleSpeedUnitChange}
+                onDistanceUnitChange={handleDistanceUnitChange}
+                onUseRegionalDefaults={handleRegionalUnitDefaults}
+              />
+            </Suspense>
+            {authUser && <div className="app-settings-view">
+              <div id="watch" style={{ display: 'grid', gap: 16 }}>
+                <div id="heart-rate-account-block-settings-slot" style={{ display: 'contents' }} />
+                <div id="watch-connect-settings-slot" style={{ display: 'contents' }} />
                 <Suspense fallback={<div className="explore-loading">Checking Apple Watch…</div>}>
-                  <div id="heart-rate-account-block-settings-slot" />
-                  <div id="watch" />
                   {watchConnectCapable === false && <HeartRateSettingsCard
                     availability={heartRate.availability}
                     status={heartRate.status}
@@ -11338,9 +11342,9 @@ export default function App() {
                     } : undefined}
                   />}
                 </Suspense>
-              ) : undefined}
-            />
-          </Suspense>
+              </div>
+            </div>}
+          </>
         ) : appMode === 'profile' && authUser ? (
           <Suspense fallback={<div className="explore-loading">Loading your profile and training history…</div>}>
           <AccountProfileView

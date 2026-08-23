@@ -2046,6 +2046,16 @@ input:focus {
   padding: 16px;
 }
 
+.platform-main .heart-rate-account-block:focus,
+.platform-main .heart-rate-account-block:focus-visible {
+  outline: 3px solid #245f96;
+  outline-offset: 3px;
+}
+
+.platform-main .heart-rate-account-block-actions button {
+  min-height: 44px;
+}
+
 .platform-topbar {
   display: flex;
   flex-wrap: wrap;
