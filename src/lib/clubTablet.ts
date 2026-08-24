@@ -1,6 +1,7 @@
 import {
   clearStoredClubTabletDevice,
   clearStoredClubTabletSession,
+  clearStoredClubTabletSessionIfCurrent,
   clubTabletSessionMatchesCurrentDevice,
   clubTabletSessionHeaders,
   clubTabletOutboxStorageKey,
@@ -288,7 +289,7 @@ export async function endClubTabletSession(credential = readStoredClubTabletSess
       headers: clubTabletSessionHeaders(credential.sessionToken),
     });
   } finally {
-    clearStoredClubTabletSession();
+    clearStoredClubTabletSessionIfCurrent(credential);
   }
 }
 

@@ -33,6 +33,7 @@ import {
   type ClubTabletWatchConnectStatus,
 } from '../lib/clubTablet';
 import type { AppMode } from '../types';
+import type { HeartRateLiveEvent } from '../lib/heartRateCloud';
 import type { NativeBluetoothBootstrapStatus } from '../lib/nativeBluetoothBootstrap';
 import type { ClubTabletDeviceStatus } from './ClubTabletRuntime';
 import { loadClubTabletWatchConnectStatus } from '../lib/watchConnectCloud';
@@ -47,23 +48,24 @@ type ClubTabletBike = {
 
 type ClubTabletModeProps = {
   canAuthorize: boolean;
-  deviceCredential: ClubTabletDeviceCredential | null;
-  deviceStatus: ClubTabletDeviceStatus;
-  accessReady: boolean;
+  device: ClubTabletDeviceCredential | null;
+  status: ClubTabletDeviceStatus;
+  ready: boolean;
   roster: ClubTabletRoster | null;
-  sessionCredential: ClubTabletSessionCredential | null;
+  session: ClubTabletSessionCredential | null;
+  hr: Readonly<Record<string, HeartRateLiveEvent>>;
   bikes: ClubTabletBike[];
-  bluetoothSupported: boolean;
-  bluetoothBusy: boolean;
-  authorizedBikeCount: number;
-  nativeBluetoothStatus: NativeBluetoothBootstrapStatus;
-  onDeviceChange: (device: ClubTabletDeviceCredential | null) => void;
-  onRosterChange: (roster: ClubTabletRoster | null) => void;
-  onSessionChange: (session: ClubTabletSessionCredential | null) => void;
-  onOpenBikePairing: () => void;
-  onReconnectSavedBikes: () => Promise<void> | void;
-  onRetryAuthorization: () => void;
-  onOpenProgram: (mode: Extract<AppMode, 'race' | 'straight-sprint' | 'explore' | 'get-pulled'>) => void;
+  btSupported: boolean;
+  btBusy: boolean;
+  bikeCount: number;
+  nativeStatus: NativeBluetoothBootstrapStatus;
+  setDevice: (device: ClubTabletDeviceCredential | null) => void;
+  setRoster: (roster: ClubTabletRoster | null) => void;
+  setSession: (session: ClubTabletSessionCredential | null) => void;
+  openPairing: () => void;
+  reconnectBikes: () => Promise<void> | void;
+  retryAuthorization: () => void;
+  openProgram: (mode: Extract<AppMode, 'race' | 'straight-sprint' | 'explore' | 'get-pulled'>) => void;
 };
 
 export function clubTabletBikeAccessReady(
@@ -77,6 +79,21 @@ export function clubTabletWatchStatusRequestIsCurrent(requestKey: string, curren
   return Boolean(requestKey) && requestKey === currentKey;
 }
 
+export function clubTabletFreshHeartRateReading(
+  reading: HeartRateLiveEvent | null | undefined,
+  now = Date.now(),
+) {
+  if (
+    !reading
+    || reading.freshUntil == null
+    || reading.freshUntil !== reading.recordedAt + 10_000
+    || reading.freshUntil <= now
+    || reading.recordedAt > now + 2_000
+    || now - reading.recordedAt >= 10_000
+  ) return null;
+  return reading;
+}
+
 function bikeLabel(bike: ClubTabletBike) {
   const suffix = String(Math.round(bike.deviceId)).slice(-3).padStart(3, '0');
   return `${bike.label || 'Wattbike'} · PM ${suffix}`;
@@ -84,23 +101,24 @@ function bikeLabel(bike: ClubTabletBike) {
 
 export default function ClubTabletMode({
   canAuthorize,
-  deviceCredential,
-  deviceStatus,
-  accessReady,
+  device: deviceCredential,
+  status: deviceStatus,
+  ready: accessReady,
   roster,
-  sessionCredential,
+  session: sessionCredential,
+  hr,
   bikes,
-  bluetoothSupported,
-  bluetoothBusy,
-  authorizedBikeCount,
-  nativeBluetoothStatus,
-  onDeviceChange,
-  onRosterChange,
-  onSessionChange,
-  onOpenBikePairing,
-  onReconnectSavedBikes,
-  onRetryAuthorization,
-  onOpenProgram,
+  btSupported: bluetoothSupported,
+  btBusy: bluetoothBusy,
+  bikeCount: authorizedBikeCount,
+  nativeStatus: nativeBluetoothStatus,
+  setDevice: onDeviceChange,
+  setRoster: onRosterChange,
+  setSession: onSessionChange,
+  openPairing: onOpenBikePairing,
+  reconnectBikes: onReconnectSavedBikes,
+  retryAuthorization: onRetryAuthorization,
+  openProgram: onOpenProgram,
 }: ClubTabletModeProps) {
   const [tabletName, setTabletName] = useState(() => {
     const platform = navigator.platform?.trim();
@@ -121,6 +139,10 @@ export default function ClubTabletMode({
   const activeSession = sessionCredential && sessionCredential.session.expiresAt > Date.now()
     ? sessionCredential
     : null;
+  const heartRateReading = clubTabletFreshHeartRateReading(
+    activeSession ? hr[activeSession.session.studioRiderId] : null,
+    watchClock,
+  );
   const sessionAthlete = activeSession
     ? roster?.athletes.find((athlete) => athlete.studioRiderId === activeSession.session.studioRiderId)
     : null;
@@ -150,7 +172,7 @@ export default function ClubTabletMode({
   }, [filteredAthletes, selectedRiderId]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setWatchClock(Date.now()), 30_000);
+    const timer = window.setInterval(() => setWatchClock(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -265,15 +287,19 @@ export default function ClubTabletMode({
   };
 
   const endAthlete = async () => {
+    const endingSession = sessionCredential;
     setBusy('ending');
     setMessage(null);
+    // Remove the selected identity and its BPM before the network request. A
+    // slow or offline DELETE must never leave the former athlete visible on a
+    // shared tablet.
+    onSessionChange(null);
+    setSelectedRiderId('');
     try {
-      await endClubTabletSession(sessionCredential);
+      await endClubTabletSession(endingSession);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'The athlete was cleared locally.');
     } finally {
-      onSessionChange(null);
-      setSelectedRiderId('');
       setBusy('idle');
       setMessage('Athlete signed out. The Wattbike remains paired to this tablet for the next student.');
     }
@@ -450,6 +476,20 @@ export default function ClubTabletMode({
             <p>{activeSession.session.clubName} · {bikeLabel({ deviceId: activeSession.session.bikeDeviceId, label: bikes.find((bike) => bike.deviceId === activeSession.session.bikeDeviceId)?.label ?? 'Wattbike' })}</p>
             <small><Clock3 size={13} /> Secure session renews automatically · about {expiresInMinutes} min remaining</small>
             <StudioWatchConnectStatus athleteName={athleteName} state={activeWatchState} />
+            {activeWatchState.phase === 'connected'
+              && (watchStatus ?? sessionAthlete?.watchConnect)?.liveSharingEnabled === true && (
+                <span
+                  aria-label={heartRateReading
+                    ? `${athleteName} heart rate: ${Math.round(heartRateReading.bpm)} beats per minute, live now`
+                    : `${athleteName} heart rate: No recent reading`}
+                  aria-live="polite"
+                  className={`club-tablet-heart-rate ${heartRateReading ? 'live' : 'waiting'}`}
+                  role="status"
+                >
+                  <strong>{heartRateReading ? `${Math.round(heartRateReading.bpm)} BPM` : '—'}</strong>
+                  <small>{heartRateReading ? 'Live from Apple Watch' : 'No recent reading'}</small>
+                </span>
+              )}
           </div>
           <button type="button" className="club-tablet-end" disabled={busy === 'ending'} onClick={endAthlete}>
             <LogOut size={18} /> {busy === 'ending' ? 'Ending…' : 'End athlete session'}

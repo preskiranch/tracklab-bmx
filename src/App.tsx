@@ -8996,16 +8996,13 @@ export default function App() {
 
   const handleClubTabletEndAthlete = useCallback(async () => {
     const activeSession = clubTabletSession;
-    returnToClubTablet();
-    try {
-      if (activeSession) {
-        const { endClubTabletSession } = await import('./lib/clubTablet');
-        await endClubTabletSession(activeSession);
-      }
-    } finally {
-      handleClubTabletSessionChange(null);
-    }
-  }, [clubTabletSession, handleClubTabletSessionChange, returnToClubTablet]);
+    // Clear the selected identity and its projected BPM synchronously. The
+    // server DELETE may finish after another athlete has already started.
+    handleClubTabletSessionChange(null);
+    if (!activeSession) return;
+    const { endClubTabletSession } = await import('./lib/clubTablet');
+    await endClubTabletSession(activeSession).catch(() => undefined);
+  }, [clubTabletSession, handleClubTabletSessionChange]);
 
   const shareMultiplayerInvite = useCallback(() => {
     if (!multiplayer.inviteUrl) {
@@ -11284,28 +11281,29 @@ export default function App() {
           <Suspense fallback={<div className="explore-loading">Opening Club Tablet…</div>}>
             <ClubTabletMode
               canAuthorize={clubOwnerActive && !clubTabletDevice}
-              deviceCredential={clubTabletDevice}
-              deviceStatus={clubTabletDeviceStatus}
-              accessReady={clubTabletDeviceActive}
+              device={clubTabletDevice}
+              status={clubTabletDeviceStatus}
+              ready={clubTabletDeviceActive}
               roster={clubTabletRoster}
-              sessionCredential={clubTabletSessionActive ? clubTabletSession : null}
-              bikes={connectedBikeDevices.map(({ deviceId, label }) => ({ deviceId, label }))}
-              bluetoothSupported={bluetooth.supported}
-              bluetoothBusy={bluetooth.connection === 'connecting'}
-              authorizedBikeCount={bluetooth.authorizedCount}
-              nativeBluetoothStatus={nativeBluetoothStatus}
-              onDeviceChange={handleClubTabletDeviceChange}
-              onRosterChange={handleClubTabletRosterChange}
-              onSessionChange={handleClubTabletSessionChange}
-              onOpenBikePairing={() => {
+              session={clubTabletSessionActive ? clubTabletSession : null}
+              hr={liveHeartRateByRider}
+              bikes={connectedBikeDevices}
+              btSupported={bluetooth.supported}
+              btBusy={bluetooth.connection === 'connecting'}
+              bikeCount={bluetooth.authorizedCount}
+              nativeStatus={nativeBluetoothStatus}
+              setDevice={handleClubTabletDeviceChange}
+              setRoster={handleClubTabletRosterChange}
+              setSession={handleClubTabletSessionChange}
+              openPairing={() => {
                 if (!clubTabletDeviceActive || nativeBluetoothFailed || !bluetooth.supported) return;
                 setBluetoothPairingOpen(true);
               }}
-              onReconnectSavedBikes={async () => {
+              reconnectBikes={async () => {
                 await bluetooth.reconnectSavedBikes();
               }}
-              onRetryAuthorization={retryClubTabletAuthorization}
-              onOpenProgram={(mode) => {
+              retryAuthorization={retryClubTabletAuthorization}
+              openProgram={(mode) => {
                 setMappingMode(false);
                 if (mode === 'race') openBmxRaceIntervals();
                 else if (mode === 'straight-sprint') openStraightSprint();

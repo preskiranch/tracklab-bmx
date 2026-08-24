@@ -870,6 +870,9 @@ describe('Watch Connect cloud workflow', () => {
     expect((await api('/api/heart-rate/watch-connect/tablet-live', {
       headers: tabletSessionHeaders,
     })).status).toBe(401);
+    expect((await api('/api/heart-rate/watch-connect/tablet-status', {
+      headers: tabletSessionHeaders,
+    })).status).toBe(401);
     expect((await api('/api/heart-rate/watch-connect/tablet-live', {
       headers: {
         'X-TrackLab-Club-Tablet-Session': switchedTabletSession.sessionToken,
@@ -1186,6 +1189,103 @@ describe('Watch Connect cloud workflow', () => {
       base + 4_000,
     )).resolves.toBeNull();
     await expect(persistence.loadHeartRateSamples(future.streamId)).resolves.toHaveLength(1);
+  });
+
+  it('projects tablet BPM only from the exact active studio Watch connection pairing', async () => {
+    const now = Date.now();
+    const suffix = `${now}-${Math.random().toString(16).slice(2)}`;
+    const ownerProfileKey = `user:tablet-owner-${suffix}`;
+    const athleteProfileKey = `user:tablet-athlete-${suffix}`;
+    const clubId = `tablet-club-${suffix}`;
+    const studioRiderId = `tablet-rider-${suffix}`;
+    const club = await persistence.ensureClub(ownerProfileKey, 'Tablet Test Club', clubId);
+    await persistence.ensureClubRosterMember(ownerProfileKey, studioRiderId, 'Tablet Athlete');
+    const inviteTokenHash = `tablet-invite-${suffix}`;
+    await persistence.saveClubInvite({
+      club,
+      studioRiderId,
+      riderName: 'Tablet Athlete',
+      inviteId: `tablet-invite-id-${suffix}`,
+      tokenHash: inviteTokenHash,
+      expiresAt: now + 60_000,
+    });
+    await expect(persistence.claimClubInvite(
+      inviteTokenHash,
+      athleteProfileKey,
+      'Tablet Athlete',
+    )).resolves.toEqual({ clubId, studioRiderId });
+
+    const enrollmentId = `tablet-enrollment-${suffix}`;
+    const enrollment = await persistence.createOrRefreshHeartRateWatchEnrollment({
+      id: enrollmentId,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `tablet-enrollment-request-${suffix}`,
+      installIdHash: `tablet-install-${suffix}`,
+      scope: 'studio',
+      clubId,
+      studioRiderId,
+      liveStudioConsent: true,
+      sessionStudioConsent: false,
+      now,
+    });
+    expect(enrollment.status).toBe('created');
+    const connectionId = `tablet-connection-${suffix}`;
+    const pairingId = `tablet-pairing-${suffix}`;
+    const tokenHash = `tablet-token-${suffix}`;
+    const connection = await persistence.createHeartRateWatchConnection({
+      id: connectionId,
+      enrollmentId,
+      ownerProfileKey: athleteProfileKey,
+      requestId: `tablet-connect-request-${suffix}`,
+      installIdHash: `tablet-install-${suffix}`,
+      pairingId,
+      relaySessionId: `watch-connect:${connectionId}`,
+      riderId: `account:tablet-athlete-${suffix}`,
+      pairCodeHash: `tablet-code-${suffix}`,
+      ingestTokenHash: tokenHash,
+      connectedUntil: now + persistence.heartRateWatchConnectDurationMs,
+      now,
+    });
+    expect(connection.status).toBe('created');
+    const streamId = `tablet-stream-${suffix}`;
+    expect(await persistence.createHeartRateStream(
+      pairingId,
+      tokenHash,
+      streamId,
+      now,
+      now,
+    )).toMatchObject({ id: streamId, relayScope: 'studio-block' });
+    expect(await persistence.insertHeartRateSamples(streamId, tokenHash, [{
+      sequence: 0,
+      recordedAt: now + 100,
+      activeElapsedMs: 100,
+      bpm: 154,
+    }], now + 100)).toEqual([0]);
+
+    const exact = {
+      athleteProfileKey,
+      clubId,
+      studioRiderId,
+      watchConnectionId: connectionId,
+      watchEnrollmentId: enrollmentId,
+      pairingId,
+      freshAfter: now - 9_000,
+      now: now + 200,
+    };
+    await expect(persistence.loadLatestStudioTabletHeartRateReading(exact))
+      .resolves.toMatchObject({ studioRiderId, bpm: 154, recordedAt: now + 100 });
+    await expect(persistence.loadLatestStudioTabletHeartRateReading({
+      ...exact,
+      pairingId: `different-pairing-${suffix}`,
+    })).resolves.toBeNull();
+    await expect(persistence.loadLatestStudioTabletHeartRateReading({
+      ...exact,
+      watchConnectionId: `different-connection-${suffix}`,
+    })).resolves.toBeNull();
+    await expect(persistence.loadLatestStudioTabletHeartRateReading({
+      ...exact,
+      watchEnrollmentId: `different-enrollment-${suffix}`,
+    })).resolves.toBeNull();
   });
 
   it('attaches exact private history after a Watch signal freezes without making the stale BPM live', async () => {

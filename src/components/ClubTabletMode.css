@@ -110,6 +110,9 @@
 .club-tablet-active-card .eyebrow,
 .club-tablet-active-card small { display: flex; align-items: center; gap: 6px; }
 .club-tablet-active-card small { margin-top: 7px; color: #60705c; }
+.club-tablet-heart-rate { display: flex; width: fit-content; align-items: baseline; gap: 7px; margin-top: 10px; padding: 7px 10px; border-radius: 10px; background: #eef3eb; color: #52604e; }
+.club-tablet-heart-rate.live { background: #e6f8df; color: #276c18; }
+.club-tablet-heart-rate small { margin: 0; color: inherit; }
 .club-tablet-end { border-color: #efb0a8; color: #a52d20; }
 .club-tablet-programs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 19px; }
 .club-tablet-programs button { display: flex; min-width: 0; align-items: center; gap: 13px; padding: 18px; border: 1px solid #cbd5c6; border-radius: 16px; background: #142019; color: #fff; text-align: left; }

@@ -8785,6 +8785,9 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
         athleteProfileKey: identity.profileKey,
         clubId: tabletSession.clubId,
         studioRiderId: tabletSession.studioRiderId,
+        watchConnectionId: connection.id,
+        watchEnrollmentId: enrollment.id,
+        pairingId: connection.pairingId,
         freshAfter: now - heartRateLiveFreshnessMs,
         now,
       })
@@ -8866,6 +8869,12 @@ async function handleHeartRateWatchConnectApi(request, response, requestUrl) {
         : enrollment
           ? 'ready'
           : 'not-set-up';
+    if (!clubTabletSessionIsCurrent(tabletSession, Date.now())) {
+      writeJson(response, 401, {
+        error: 'This club tablet athlete session expired or ended.',
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
     writeJson(response, 200, {
       watchConnect: {
         recognized: Boolean(enrollment),

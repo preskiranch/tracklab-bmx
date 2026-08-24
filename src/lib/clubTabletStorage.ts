@@ -288,6 +288,27 @@ export function clearStoredClubTabletSession() {
   }
 }
 
+/**
+ * Clears an athlete identity only while it is still the exact session that
+ * initiated the cleanup. A delayed sign-out response for athlete A must never
+ * erase athlete B after the shared tablet has already switched sessions.
+ */
+export function clearStoredClubTabletSessionIfCurrent(
+  credential: ClubTabletSessionCredential | null | undefined,
+) {
+  if (!credential || typeof window === 'undefined') return false;
+  const stored = normalizeClubTabletSessionCredential(
+    readStorage(window.sessionStorage, clubTabletSessionStorageKey),
+  );
+  if (
+    !stored
+    || stored.deviceId !== credential.deviceId
+    || stored.sessionToken !== credential.sessionToken
+  ) return false;
+  clearStoredClubTabletSession();
+  return true;
+}
+
 export function currentClubTabletSessionToken() {
   return readStoredClubTabletSession()?.sessionToken ?? '';
 }

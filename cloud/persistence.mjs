@@ -4540,19 +4540,41 @@ export async function loadLatestStudioTabletHeartRateReading({
   athleteProfileKey,
   clubId,
   studioRiderId,
+  watchConnectionId,
+  watchEnrollmentId,
+  pairingId,
   freshAfter,
   now = Date.now(),
 }) {
   if (!pool) {
     const member = memoryClubMembers.get(clubMemberKey(clubId, studioRiderId));
+    const watchConnection = memoryHeartRateWatchConnections.get(watchConnectionId);
+    const watchEnrollment = memoryHeartRateWatchEnrollments.get(watchEnrollmentId);
     if (
       member?.status !== 'claimed'
       || member.athleteProfileKey !== athleteProfileKey
+      || !watchConnection
+      || watchConnection.enrollmentId !== watchEnrollmentId
+      || watchConnection.pairingId !== pairingId
+      || watchConnection.ownerProfileKey !== athleteProfileKey
+      || watchConnection.scope !== 'studio'
+      || watchConnection.clubId !== clubId
+      || watchConnection.studioRiderId !== studioRiderId
+      || watchConnection.stoppedAt != null
+      || watchConnection.connectedUntil <= now
+      || !watchEnrollment
+      || watchEnrollment.ownerProfileKey !== athleteProfileKey
+      || watchEnrollment.scope !== 'studio'
+      || watchEnrollment.clubId !== clubId
+      || watchEnrollment.studioRiderId !== studioRiderId
+      || watchEnrollment.revokedAt != null
+      || !watchEnrollment.liveStudioConsent
     ) return null;
     const candidates = [];
     for (const stream of memoryHeartRateStreams.values()) {
       if (
         stream.ownerProfileKey !== athleteProfileKey
+        || stream.pairingId !== pairingId
         || stream.relayScope !== 'studio-block'
         || stream.clubId !== clubId
         || stream.studioRiderId !== studioRiderId
@@ -4568,6 +4590,7 @@ export async function loadLatestStudioTabletHeartRateReading({
       const pairing = memoryHeartRatePairings.get(stream.pairingId);
       if (
         !pairing
+        || pairing.id !== pairingId
         || pairing.ownerProfileKey !== athleteProfileKey
         || pairing.relayScope !== 'studio-block'
         || pairing.clubId !== clubId
@@ -4615,6 +4638,10 @@ export async function loadLatestStudioTabletHeartRateReading({
      FROM ${schema}.heart_rate_streams AS streams
      JOIN ${schema}.heart_rate_pairings AS pairings
        ON pairings.id = streams.pairing_id
+     JOIN ${schema}.heart_rate_watch_connections AS watch_connections
+       ON watch_connections.pairing_id = pairings.id
+     JOIN ${schema}.heart_rate_watch_enrollments AS watch_enrollments
+       ON watch_enrollments.id = watch_connections.enrollment_id
      JOIN ${schema}.club_members AS members
        ON members.club_id = streams.club_id
        AND members.studio_rider_id = streams.studio_rider_id
@@ -4629,6 +4656,7 @@ export async function loadLatestStudioTabletHeartRateReading({
        AND streams.relay_scope = 'studio-block'
        AND streams.club_id = $2
        AND streams.studio_rider_id = $3
+       AND streams.pairing_id = $6
        AND streams.live_studio_consent = true
        AND streams.finalized_at IS NULL
        AND streams.studio_block_stopped_at IS NULL
@@ -4636,30 +4664,55 @@ export async function loadLatestStudioTabletHeartRateReading({
        AND pairings.relay_scope = 'studio-block'
        AND pairings.club_id = $2
        AND pairings.studio_rider_id = $3
+       AND pairings.id = $6
        AND pairings.live_studio_consent = true
        AND pairings.claimed_at IS NOT NULL
        AND pairings.revoked_at IS NULL
        AND pairings.studio_block_stopped_at IS NULL
-       AND COALESCE(streams.relay_expires_at, pairings.ingest_expires_at) > to_timestamp($5 / 1000.0)
-       AND pairings.ingest_expires_at > to_timestamp($5 / 1000.0)
+       AND watch_connections.id = $4
+       AND watch_connections.enrollment_id = $5
+       AND watch_connections.owner_profile_key = $1
+       AND watch_connections.scope = 'studio'
+       AND watch_connections.club_id = $2
+       AND watch_connections.studio_rider_id = $3
+       AND watch_connections.stopped_at IS NULL
+       AND watch_connections.connected_until > to_timestamp($8 / 1000.0)
+       AND watch_enrollments.id = $5
+       AND watch_enrollments.owner_profile_key = $1
+       AND watch_enrollments.scope = 'studio'
+       AND watch_enrollments.club_id = $2
+       AND watch_enrollments.studio_rider_id = $3
+       AND watch_enrollments.revoked_at IS NULL
+       AND watch_enrollments.live_studio_consent = true
+       AND COALESCE(streams.relay_expires_at, pairings.ingest_expires_at) > to_timestamp($8 / 1000.0)
+       AND pairings.ingest_expires_at > to_timestamp($8 / 1000.0)
        AND (
          streams.account_block_stop_requested_at IS NULL
-         OR streams.account_block_stop_requested_at > to_timestamp($5 / 1000.0)
+         OR streams.account_block_stop_requested_at > to_timestamp($8 / 1000.0)
        )
        AND (
          pairings.account_block_stop_requested_at IS NULL
-         OR pairings.account_block_stop_requested_at > to_timestamp($5 / 1000.0)
+         OR pairings.account_block_stop_requested_at > to_timestamp($8 / 1000.0)
        )
        AND members.status = 'claimed'
        AND members.athlete_profile_key = $1
-       AND samples.recorded_at > to_timestamp($4 / 1000.0)
-       AND samples.recorded_at <= to_timestamp(($5 + 2000) / 1000.0)
+       AND samples.recorded_at > to_timestamp($7 / 1000.0)
+       AND samples.recorded_at <= to_timestamp(($8 + 2000) / 1000.0)
        AND samples.recorded_at > samples.received_at - interval '10 seconds'
        AND samples.recorded_at <= samples.received_at + interval '2 seconds'
-       AND samples.received_at <= to_timestamp(($5 + 60000) / 1000.0)
+       AND samples.received_at <= to_timestamp(($8 + 60000) / 1000.0)
      ORDER BY samples.received_at DESC, samples.sequence DESC
      LIMIT 1`,
-    [athleteProfileKey, clubId, studioRiderId, freshAfter, now],
+    [
+      athleteProfileKey,
+      clubId,
+      studioRiderId,
+      watchConnectionId,
+      watchEnrollmentId,
+      pairingId,
+      freshAfter,
+      now,
+    ],
   );
   const row = result?.rows?.[0];
   return row ? {

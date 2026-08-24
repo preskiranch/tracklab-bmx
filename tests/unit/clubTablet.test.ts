@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearStoredClubTabletSession,
   clubTabletOutboxStorageKey,
+  endClubTabletSession,
   flushClubTabletOutbox,
   normalizeClubTabletDeviceCredential,
   normalizeClubTabletRoster,
@@ -15,7 +16,12 @@ import {
   type ClubTabletDeviceCredential,
   type ClubTabletSessionCredential,
 } from '../../src/lib/clubTablet';
-import { clubTabletBikeAccessReady } from '../../src/components/ClubTabletMode';
+import {
+  clubTabletBikeAccessReady,
+  clubTabletFreshHeartRateReading,
+} from '../../src/components/ClubTabletMode';
+import { expireClubTabletSessionLocallyFirst } from '../../src/components/ClubTabletRuntime';
+import type { HeartRateLiveEvent } from '../../src/lib/heartRateCloud';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -161,6 +167,85 @@ describe('Club Tablet client state', () => {
 
     expect(readStoredClubTabletSession()).toBeNull();
     expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
+  });
+
+  it('does not let a delayed athlete A sign-out erase athlete B on the same tablet', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    storeClubTabletSession(sessionCredential);
+    let finishDelete: ((response: Response) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      finishDelete = resolve;
+    })));
+
+    const ending = endClubTabletSession(sessionCredential);
+    clearStoredClubTabletSession();
+    const athleteB: ClubTabletSessionCredential = {
+      ...sessionCredential,
+      sessionToken: 'athlete-session-token-b',
+      session: {
+        ...sessionCredential.session,
+        studioRiderId: 'rider-2',
+        riderName: 'Rider Two',
+      },
+    };
+    storeClubTabletSession(athleteB);
+    finishDelete?.(new Response(JSON.stringify({ stopped: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await ending;
+    expect(readStoredClubTabletSession()).toMatchObject(athleteB);
+  });
+
+  it('clears an idle athlete and BPM before a stalled remote stop', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    storeClubTabletSession(sessionCredential);
+    const events: string[] = [];
+    let finishRemote: (() => void) | null = null;
+    const remoteFinished = new Promise<void>((resolve) => { finishRemote = resolve; });
+
+    expireClubTabletSessionLocallyFirst(
+      sessionCredential,
+      () => events.push('session-cleared'),
+      (reading) => events.push(reading == null ? 'bpm-cleared' : 'unexpected-reading'),
+      async () => {
+        events.push('remote-started');
+        await remoteFinished;
+        events.push('remote-finished');
+      },
+    );
+
+    expect(readStoredClubTabletSession()).toBeNull();
+    expect(events).toEqual(['bpm-cleared', 'session-cleared', 'remote-started']);
+    finishRemote?.();
+    await vi.waitFor(() => expect(events).toContain('remote-finished'));
+  });
+
+  it('expires a cached tablet BPM at the exact ten-second boundary', () => {
+    const reading: HeartRateLiveEvent = {
+      streamId: 'club-tablet-live',
+      sessionId: 'club-tablet-athlete-session',
+      relayScope: 'studio-block',
+      riderId: 'studio-rider-1',
+      studioRiderId: 'studio-rider-1',
+      playerId: null,
+      bpm: 155,
+      recordedAt: 1_000,
+      receivedAt: 1_000,
+      freshUntil: 11_000,
+      activeElapsedMs: null,
+    };
+
+    expect(clubTabletFreshHeartRateReading(reading, 10_999)).toBe(reading);
+    expect(clubTabletFreshHeartRateReading(reading, 11_000)).toBeNull();
+    expect(clubTabletFreshHeartRateReading({ ...reading, freshUntil: 11_001 }, 2_000)).toBeNull();
   });
 
   it('sends the connected Wattbike identifier as an opaque server ID and keeps it numeric locally', async () => {

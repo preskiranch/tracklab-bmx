@@ -6969,6 +6969,13 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       riderName: 'Rasheen “The Machine” Hicks',
       athleteName: 'Rasheen Hicks',
       status: 'claimed',
+      watchConnect: {
+        recognized: true,
+        state: 'connected',
+        connectedUntil: now + 4 * 60 * 60_000,
+        remainingMs: 4 * 60 * 60_000,
+        liveSharingEnabled: true,
+      },
     },
   ];
   const session = {
@@ -6987,6 +6994,10 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   let failNextRosterAuthorization = false;
   let sessionRequest: unknown = null;
   let sessionDeletes = 0;
+  let tabletLiveRequests = 0;
+  let tabletLiveSessionHeader = '';
+  let tabletLiveReadingAvailable = true;
+  let finishSessionDelete: (() => void) | null = null;
 
   await page.addInitScript(() => {
     const packet = new ArrayBuffer(6);
@@ -7123,7 +7134,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
         status: 201,
         contentType: 'application/json',
         body: JSON.stringify({
-          sessionToken: 'tablet-athlete-session-token',
+          sessionToken: 'tablet-athlete-session-token-rasheen-123456',
           session,
           heartbeatTtlMs: 120_000,
           pollAfterMs: 30_000,
@@ -7132,9 +7143,36 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       return;
     }
     sessionDeletes += 1;
+    await new Promise<void>((resolve) => { finishSessionDelete = resolve; });
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ stopped: true }),
+    });
+  });
+  await page.route('**/api/heart-rate/watch-connect/tablet-status', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ watchConnect: athletes[1].watchConnect }),
+    });
+  });
+  await page.route('**/api/heart-rate/watch-connect/tablet-live', async (route) => {
+    tabletLiveRequests += 1;
+    tabletLiveSessionHeader = route.request().headers()['x-tracklab-club-tablet-session'] ?? '';
+    // Start just inside the freshness window so the card must age itself to
+    // "No recent reading" before the four-second network poll runs again.
+    const recordedAt = Date.now() - 9_000;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        freshnessMs: 10_000,
+        reading: tabletLiveReadingAvailable ? {
+          studioRiderId: 'studio-rasheen',
+          bpm: 156,
+          recordedAt,
+          receivedAt: recordedAt,
+          freshUntil: recordedAt + 10_000,
+        } : null,
+      }),
     });
   });
 
@@ -7184,11 +7222,29 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(programs.getByRole('button', { name: /Straight Sprint/ })).toBeVisible();
   await expect(programs.getByRole('button', { name: /Explore the World/ })).toBeVisible();
   await expect(programs.getByRole('button', { name: /Get Pulled/ })).toBeVisible();
+  await expect(page.getByRole('status', {
+    name: /Rasheen Hicks heart rate: 156 beats per minute/,
+  })).toBeVisible();
+  await expect.poll(() => tabletLiveRequests).toBeGreaterThanOrEqual(1);
+  expect(tabletLiveSessionHeader).toBe('tablet-athlete-session-token-rasheen-123456');
+  await expect(page.getByRole('button', { name: /heart rate|BPM/i })).toHaveCount(0);
+  tabletLiveReadingAvailable = false;
+  await expect(page.getByRole('status', {
+    name: /Rasheen Hicks heart rate: No recent reading/,
+  })).toBeVisible({ timeout: 7_000 });
 
   await page.locator('.club-tablet-active-card')
     .getByRole('button', { name: 'End athlete session', exact: true })
     .click();
+  // Shared-screen identity and BPM disappear before the DELETE round-trip;
+  // an offline sign-out cannot leave the former athlete visible.
   await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  await expect(page.getByRole('status', { name: /Rasheen Hicks heart rate/ })).toHaveCount(0);
+  await expect.poll(() => sessionDeletes).toBe(1);
+  expect(await page.evaluate(() => (
+    window.sessionStorage.getItem('tracklab.club-tablet-athlete-session.v1')
+  ))).toBeNull();
+  finishSessionDelete?.();
   await expect(page.getByText('Athlete signed out. The Wattbike remains paired to this tablet for the next student.')).toBeVisible();
   expect(sessionDeletes).toBe(1);
   expect(await page.evaluate(() => ({

@@ -3,6 +3,7 @@ import {
   ClubTabletRequestError,
   clearStoredClubTabletDevice,
   clearStoredClubTabletSession,
+  clearStoredClubTabletSessionIfCurrent,
   endClubTabletSession,
   flushClubTabletOutbox,
   loadClubTabletRoster,
@@ -20,6 +21,18 @@ import {
 } from '../lib/heartRateCloud';
 
 export type ClubTabletDeviceStatus = 'idle' | 'checking' | 'active' | 'error' | 'revoked';
+
+export function expireClubTabletSessionLocallyFirst(
+  session: ClubTabletSessionCredential,
+  onSessionExpired: () => void,
+  onHeartRateReading: (reading: HeartRateLiveEvent | null) => void,
+  stopRemote: (credential: ClubTabletSessionCredential) => Promise<unknown> = endClubTabletSession,
+) {
+  clearStoredClubTabletSessionIfCurrent(session);
+  onHeartRateReading(null);
+  onSessionExpired();
+  void stopRemote(session).catch(() => undefined);
+}
 
 type ClubTabletRuntimeProps = {
   device: ClubTabletDeviceCredential;
@@ -124,22 +137,21 @@ export default function ClubTabletRuntime({
     let ending = false;
     const idleTimeoutMs = Math.max(60_000, session.heartbeatTtlMs - 15_000);
 
-    const expireIdentity = async () => {
+    const expireIdentity = () => {
       if (ending || cancelled) return;
       ending = true;
-      try {
-        await endClubTabletSession(session);
-      } catch {
-        clearStoredClubTabletSession();
-      }
-      if (!cancelled) onSessionExpired();
+      expireClubTabletSessionLocallyFirst(
+        session,
+        onSessionExpired,
+        onHeartRateReading,
+      );
     };
 
     const renew = async () => {
       if (cancelled) return;
       const idleForMs = Date.now() - lastActivityAtRef.current;
       if (idleForMs >= idleTimeoutMs) {
-        await expireIdentity();
+        expireIdentity();
         return;
       }
       if (lastRenewedActivityVersion === activityVersionRef.current) {
@@ -183,7 +195,7 @@ export default function ClubTabletRuntime({
       controller?.abort();
       window.clearTimeout(timer);
     };
-  }, [onSessionExpired, onSessionRenewed, roster?.athletes, session?.sessionToken]);
+  }, [onHeartRateReading, onSessionExpired, onSessionRenewed, roster?.athletes, session?.sessionToken]);
 
   useEffect(() => {
     onHeartRateReading(null);
