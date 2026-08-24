@@ -165,13 +165,20 @@ export function sanitizeBikeMetricPatch(patch: BikeMetricPatch) {
   if (patch.battery !== undefined) {
     next.battery = cleanBikeBattery(patch.battery);
   }
+  // Cadence, watts, and sensor speed in one notification describe one motion
+  // sample. If its cadence is impossible, fail the motion packet as a unit so
+  // its correlated watts cannot start a sprint against an older valid cadence.
+  // A notification that genuinely contains watts alone remains valid.
+  if (cadenceWasRejected) {
+    return next;
+  }
   if (patch.cadence !== undefined) {
     const cadence = cleanBikeCadenceRpm(patch.cadence);
     if (cadence != null) {
       next.cadence = cadence;
     }
   }
-  if (patch.speedKph !== undefined && !cadenceWasRejected) {
+  if (patch.speedKph !== undefined) {
     const speedKph = cleanBikeSpeedKph(patch.speedKph);
     if (speedKph != null) {
       next.speedKph = speedKph;
@@ -196,7 +203,10 @@ export function sanitizeBikeSample(sample: BikeSample) {
   const watts = cleanBikeWatts(sample.watts) ?? 0;
   const cadence = sample.cadence == null ? null : cleanBikeCadenceRpm(sample.cadence);
   const cadenceWasRejected = sample.cadence != null && cadence == null;
-  const speedKph = cadenceWasRejected || sample.speedKph == null
+  if (cadenceWasRejected) {
+    return null;
+  }
+  const speedKph = sample.speedKph == null
     ? null
     : cleanBikeSpeedKph(sample.speedKph);
 

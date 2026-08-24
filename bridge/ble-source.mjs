@@ -171,7 +171,7 @@ export function parseIndoorBikeData(data) {
     if (cadence != null) {
       sample.cadence = cadence;
     } else {
-      delete sample.speedKph;
+      return {};
     }
     offset += 2;
   }
@@ -253,7 +253,10 @@ export function parseCyclingPowerMeasurement(data, deviceId, crankCache) {
       view.getUint16(offset, true),
       view.getUint16(offset + 2, true),
     );
-    if (cadence != null) {
+    if (cadence === null) {
+      return {};
+    }
+    if (cadence !== undefined) {
       sample.cadence = cadence;
     }
   }
@@ -293,10 +296,11 @@ export function parseCscMeasurement(data, deviceId, crankCache, wheelCache, whee
       view.getUint16(offset, true),
       view.getUint16(offset + 2, true),
     );
-    if (cadence != null) {
+    if (cadence === null) {
+      return {};
+    }
+    if (cadence !== undefined) {
       sample.cadence = cadence;
-    } else if (cadence === null) {
-      delete sample.speedKph;
     }
   }
 

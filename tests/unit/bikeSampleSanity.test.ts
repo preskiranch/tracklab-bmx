@@ -26,8 +26,9 @@ describe('bike sample sanitization', () => {
     expect(cleanBikeBattery(101)).toBeUndefined();
   });
 
-  it('drops an invalid cadence patch so it cannot refresh the last valid cadence timestamp', () => {
-    expect(sanitizeBikeMetricPatch({ cadence: 200.01, watts: 740 })).toEqual({ watts: 740 });
+  it('fails a correlated motion packet closed while preserving independent watts-only updates', () => {
+    expect(sanitizeBikeMetricPatch({ cadence: 200.01, watts: 740, speedKph: 31 })).toEqual({});
+    expect(sanitizeBikeMetricPatch({ watts: 740 })).toEqual({ watts: 740 });
   });
 
   it('validates recorded meter-per-second aliases without changing their units', () => {
@@ -70,9 +71,12 @@ describe('bike sample sanitization', () => {
       ...base,
       cadence: 923_334,
       cadenceAt: 2_000,
-    })).toMatchObject({
+    })).toBeNull();
+    expect(sanitizeBikeSample({
+      ...base,
       cadence: null,
-      cadenceAt: undefined,
-    });
+      watts: 741,
+      wattsAt: 2_000,
+    })).toMatchObject({ cadence: null, watts: 741, wattsAt: 2_000 });
   });
 });

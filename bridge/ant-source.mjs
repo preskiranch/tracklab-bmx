@@ -170,20 +170,23 @@ export function normalizeAntSample(profileId, eventName, raw, previousSample) {
   ]);
   const cadence = rawCadence == null ? null : cleanWattbikeCadenceRpm(rawCadence);
   const cadenceWasRejected = rawCadence != null && cadence == null;
-  const rawMeasuredSpeedKph = cadenceWasRejected ? null : speedKphFromRaw(raw);
+  // Power and cadence on this event are one motion sample. Do not combine its
+  // power with a previously valid cadence when this cadence is impossible.
+  if (cadenceWasRejected) {
+    return null;
+  }
+  const rawMeasuredSpeedKph = speedKphFromRaw(raw);
   const measuredSpeedKph = rawMeasuredSpeedKph == null
     ? null
     : acceptedWattbikeSpeedKph(rawMeasuredSpeedKph);
   const estimatedSpeedKph = measuredSpeedKph == null
-    ? cadenceWasRejected ? null : estimateSpeedKphFromDrive({ watts, cadence }, previousSample, now)
+    ? estimateSpeedKphFromDrive({ watts, cadence }, previousSample, now)
     : null;
   const speedCandidateKph = measuredSpeedKph ?? estimatedSpeedKph;
   const speedKph = speedCandidateKph == null ? null : acceptedWattbikeSpeedKph(speedCandidateKph);
-  const speedSource = cadenceWasRejected
-    ? previousSample?.speedSource
-    : measuredSpeedKph != null
-      ? 'measured'
-      : (speedKph == null ? previousSample?.speedSource : 'estimated');
+  const speedSource = measuredSpeedKph != null
+    ? 'measured'
+    : (speedKph == null ? previousSample?.speedSource : 'estimated');
 
   if (watts == null && cadence == null && speedKph == null) {
     return null;
