@@ -23,6 +23,9 @@ describe('44/16 BMX rollout', () => {
   it('converts cadence into deterministic road speed', () => {
     expect(bmxSpeedKphFromCadence(0)).toBe(0);
     expect(bmxSpeedKphFromCadence(100)).toBeCloseTo(26.3328, 4);
+    expect(bmxSpeedKphFromCadence(200)).toBeCloseTo(52.6657, 4);
+    expect(bmxSpeedKphFromCadence(200.01)).toBe(0);
+    expect(bmxSpeedKphFromCadence(923_334)).toBe(0);
   });
 
   it('converts a target velocity back to the cadence required by the same rollout', () => {
@@ -50,5 +53,8 @@ describe('44/16 BMX rollout', () => {
   it('reports cadence rollout as the minimum peak speed without changing course average speed', () => {
     expect(reportedBmxTopSpeedKph(171, 44.8)).toBeCloseTo(bmxSpeedKphFromCadence(171), 6);
     expect(reportedBmxTopSpeedKph(120, 50)).toBe(50);
+    expect(reportedBmxTopSpeedKph(923_334, 48.24)).toBe(48.24);
+    expect(reportedBmxTopSpeedKph(120, 151_080.1)).toBeCloseTo(bmxSpeedKphFromCadence(120), 6);
+    expect(reportedBmxTopSpeedKph(200, 83)).toBe(83);
   });
 });

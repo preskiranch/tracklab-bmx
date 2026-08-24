@@ -4,21 +4,36 @@ import {
   cleanBikeCadenceRpm,
   cleanBikeSpeedKph,
   cleanBikeWatts,
+  maximumAcceptedWattbikeCadenceRpm,
+  recordedBikeMetricsAreAccepted,
   sanitizeBikeMetricPatch,
   sanitizeBikeSample,
 } from '../../src/lib/bikeSampleSanity';
 import type { BikeSample } from '../../src/types';
 
 describe('bike sample sanitization', () => {
-  it('rejects invalid metrics without capping legitimate high cadence', () => {
+  it('accepts 200 RPM exactly and rejects any higher cadence without clamping', () => {
     expect(cleanBikeWatts(-1)).toBeNull();
     expect(cleanBikeWatts(4001)).toBeNull();
     expect(cleanBikeCadenceRpm(Number.NaN)).toBeNull();
     expect(cleanBikeCadenceRpm(-1)).toBeNull();
-    expect(cleanBikeCadenceRpm(261)).toBe(261);
-    expect(cleanBikeCadenceRpm(420.4)).toBe(420);
+    expect(maximumAcceptedWattbikeCadenceRpm).toBe(200);
+    expect(cleanBikeCadenceRpm(maximumAcceptedWattbikeCadenceRpm)).toBe(200);
+    expect(cleanBikeCadenceRpm(200.01)).toBeNull();
+    expect(cleanBikeCadenceRpm(201)).toBeNull();
+    expect(cleanBikeCadenceRpm(923_334)).toBeNull();
     expect(cleanBikeSpeedKph(81)).toBeNull();
     expect(cleanBikeBattery(101)).toBeUndefined();
+  });
+
+  it('drops an invalid cadence patch so it cannot refresh the last valid cadence timestamp', () => {
+    expect(sanitizeBikeMetricPatch({ cadence: 200.01, watts: 740 })).toEqual({ watts: 740 });
+  });
+
+  it('validates recorded meter-per-second aliases without changing their units', () => {
+    expect(recordedBikeMetricsAreAccepted({ peakSpeedMps: 83 / 3.6 })).toBe(true);
+    expect(recordedBikeMetricsAreAccepted({ peakSpeedMps: (83 / 3.6) + 0.01 })).toBe(false);
+    expect(recordedBikeMetricsAreAccepted({ averageSpeedMps: 20, peakSpeedMps: 19 })).toBe(false);
   });
 
   it('retains valid values while omitting invalid patch fields', () => {
@@ -50,6 +65,14 @@ describe('bike sample sanitization', () => {
       cadenceAt: 1_000,
       speedKph: 24,
       speedAt: 1_000,
+    });
+    expect(sanitizeBikeSample({
+      ...base,
+      cadence: 923_334,
+      cadenceAt: 2_000,
+    })).toMatchObject({
+      cadence: null,
+      cadenceAt: undefined,
     });
   });
 });

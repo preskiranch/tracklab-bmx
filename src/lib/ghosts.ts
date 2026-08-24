@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import { safeSetLocalStorage } from './browserStorage';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
+import { acceptedTrainingSpeedKph, recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
 import {
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
@@ -114,8 +115,12 @@ function sanitizeGhostPoint(value: unknown): GhostLapPoint | null {
   const point = value as Partial<GhostLapPoint>;
   const elapsedMs = Math.max(0, Math.round(finiteNumber(point.elapsedMs, Number.NaN)));
   const distanceMeters = Math.max(0, finiteNumber(point.distanceMeters, Number.NaN));
-  const velocityMps = Math.max(0, finiteNumber(point.velocityMps, 0));
-  if (!Number.isFinite(elapsedMs) || !Number.isFinite(distanceMeters)) {
+  const velocityMps = finiteNumber(point.velocityMps, 0);
+  if (
+    !Number.isFinite(elapsedMs)
+    || !Number.isFinite(distanceMeters)
+    || acceptedTrainingSpeedKph(velocityMps * 3.6) == null
+  ) {
     return null;
   }
 
@@ -141,11 +146,31 @@ export function sanitizeGhostLap(value: unknown): GhostLap | null {
 
   const raw = value as Partial<GhostLap>;
   const finishTimeMs = Math.round(finiteNumber(raw.finishTimeMs, Number.NaN));
-  const points = Array.isArray(raw.points)
-    ? raw.points.slice(0, maxGhostPoints).map(sanitizeGhostPoint).filter((point): point is GhostLapPoint => point != null)
-    : [];
+  const rawPoints = Array.isArray(raw.points) ? raw.points.slice(0, maxGhostPoints) : [];
+  const points = rawPoints
+    .map(sanitizeGhostPoint)
+    .filter((point): point is GhostLapPoint => point != null);
+  const summaryMetricsAccepted = recordedBikeMetricsAreAccepted(raw.summary);
+  const zoneMetricsAccepted = recordedBikeMetricsAreAccepted(raw.zoneResults);
+  const pointSpeedWasRejected = rawPoints.some((point) => (
+    point != null
+    && typeof point === 'object'
+    && (point as Partial<GhostLapPoint>).velocityMps != null
+    && acceptedTrainingSpeedKph(Number((point as Partial<GhostLapPoint>).velocityMps) * 3.6) == null
+  ));
 
-  if (!raw.id || !raw.trackId || !raw.ownerKey || !raw.riderName || !Number.isFinite(finishTimeMs) || finishTimeMs <= 0 || points.length < 2) {
+  if (
+    !raw.id
+    || !raw.trackId
+    || !raw.ownerKey
+    || !raw.riderName
+    || !Number.isFinite(finishTimeMs)
+    || finishTimeMs <= 0
+    || points.length < 2
+    || !summaryMetricsAccepted
+    || !zoneMetricsAccepted
+    || pointSpeedWasRejected
+  ) {
     return null;
   }
 

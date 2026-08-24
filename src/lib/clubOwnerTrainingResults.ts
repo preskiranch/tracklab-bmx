@@ -5,6 +5,11 @@ import type {
   ClubOwnerTrainingAuthorization,
   ClubOwnerTrainingRiderWindow,
 } from './clubOwnerTrainingHistory';
+import {
+  acceptedTrainingSpeedMph,
+  maximumAcceptedTrainingSpeedKph,
+  maximumAcceptedWattbikeCadenceRpm,
+} from './bikeSampleSanity';
 
 export type ClubOwnerTrainingActivityType = Exclude<TrainingActivityType, 'monitor-sprint'>;
 
@@ -269,8 +274,18 @@ function sanitizeRaceSummary(row: Record<string, unknown>) {
   if (summary.rank > 4 || summary.sampleCount > 1_000_000) {
     throw new Error(`Player ${player} race rank or sample count is outside the four-bike result.`);
   }
-  assertBoundedMetricPair(summary.averageSpeedKph, summary.topSpeedKph, 200, `Player ${player} speed`);
-  assertBoundedMetricPair(summary.averageCadence, summary.topCadence, 320, `Player ${player} cadence`);
+  assertBoundedMetricPair(
+    summary.averageSpeedKph,
+    summary.topSpeedKph,
+    maximumAcceptedTrainingSpeedKph,
+    `Player ${player} speed`,
+  );
+  assertBoundedMetricPair(
+    summary.averageCadence,
+    summary.topCadence,
+    maximumAcceptedWattbikeCadenceRpm,
+    `Player ${player} cadence`,
+  );
   assertBoundedMetricPair(summary.averageWatts, summary.topWatts, 5_000, `Player ${player} power`);
   return summary;
 }
@@ -288,7 +303,7 @@ function assertBoundedMetricPair(
 
 function sanitizeZoneRider(row: Record<string, unknown>) {
   const player = playerId(row.playerId, 'Zone rider');
-  return {
+  const rider = {
     playerId: player,
     sampleCount: safeInteger(row.sampleCount, `Player ${player} zone sample count`),
     entryElapsedMs: optionalFiniteNumber(row.entryElapsedMs, `Player ${player} zone entry`),
@@ -301,6 +316,25 @@ function sanitizeZoneRider(row: Record<string, unknown>) {
     topWatts: optionalFiniteNumber(row.topWatts, `Player ${player} zone top power`),
     averageWatts: optionalFiniteNumber(row.averageWatts, `Player ${player} zone average power`),
   };
+  assertBoundedMetricPair(
+    rider.averageSpeedKph,
+    rider.topSpeedKph,
+    maximumAcceptedTrainingSpeedKph,
+    `Player ${player} zone speed`,
+  );
+  assertBoundedMetricPair(
+    rider.averageCadence,
+    rider.topCadence,
+    maximumAcceptedWattbikeCadenceRpm,
+    `Player ${player} zone cadence`,
+  );
+  assertBoundedMetricPair(
+    rider.averageWatts,
+    rider.topWatts,
+    5_000,
+    `Player ${player} zone power`,
+  );
+  return rider;
 }
 
 function sanitizeRaceZones(rawZones: unknown, assignments: readonly ClubOwnerTrainingAssignment[]) {
@@ -507,8 +541,18 @@ function sanitizeGetPulledRider(row: Record<string, unknown>) {
     averageSpeedKph: finiteNumber(row.averageSpeedKph, `Player ${player} average speed`),
     peakSpeedKph: finiteNumber(row.peakSpeedKph, `Player ${player} peak speed`),
   };
-  assertBoundedMetricPair(rider.averageSpeedKph, rider.peakSpeedKph, 160, `Player ${player} speed`);
-  assertBoundedMetricPair(rider.averageCadence, rider.peakCadence, 320, `Player ${player} cadence`);
+  assertBoundedMetricPair(
+    rider.averageSpeedKph,
+    rider.peakSpeedKph,
+    maximumAcceptedTrainingSpeedKph,
+    `Player ${player} speed`,
+  );
+  assertBoundedMetricPair(
+    rider.averageCadence,
+    rider.peakCadence,
+    maximumAcceptedWattbikeCadenceRpm,
+    `Player ${player} cadence`,
+  );
   assertBoundedMetricPair(rider.averageWatts, rider.peakWatts, 5_000, `Player ${player} power`);
   return rider;
 }
@@ -570,10 +614,16 @@ function getPulledBuild(
 
 function sanitizeExploreRider(row: Record<string, unknown>) {
   const player = playerId(row.playerId, 'Explore rider');
+  const averageSpeedMph = acceptedTrainingSpeedMph(
+    finiteNumber(row.averageSpeedMph, `Player ${player} Explore average speed`),
+  );
+  if (averageSpeedMph == null) {
+    throw new Error(`Player ${player} Explore average speed is outside the supported recording range.`);
+  }
   return {
     playerId: player,
     distanceMeters: finiteNumber(row.distanceMeters, `Player ${player} Explore distance`),
-    averageSpeedMph: finiteNumber(row.averageSpeedMph, `Player ${player} Explore average speed`),
+    averageSpeedMph,
   };
 }
 

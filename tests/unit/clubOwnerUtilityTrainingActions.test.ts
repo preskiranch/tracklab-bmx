@@ -178,7 +178,7 @@ describe('club owner utility training actions', () => {
       averageWatts: 650,
       peakWatts: 1_200,
       averageCadence: 150,
-      peakCadence: 210,
+      peakCadence: 200,
       averageSpeedKph: 42,
       peakSpeedKph: 58,
     });
@@ -211,7 +211,7 @@ describe('club owner utility training actions', () => {
         name: `Untrusted display ${assignment.playerId}`,
         colorName: 'lime',
         accent: '#74e430',
-        distanceMeters: 1_000 - index * 50,
+        distanceMeters: 20 - index * 2,
         velocityMps: 0,
         cadence: 0,
         watts: 0,
@@ -241,8 +241,8 @@ describe('club owner utility training actions', () => {
       { startedAt: 5_000, endedAt: 6_000, activeElapsedAtStartMs: 2_000 },
     ]);
     const riders = session.details.riders as Array<{ playerId: number; averageSpeedMph: number }>;
-    expect(riders[0].averageSpeedMph).toBeCloseTo((1_000 / 1609.344) / (1_500 / 3_600_000), 8);
-    expect(riders[1].averageSpeedMph).toBeCloseTo((950 / 1609.344) / (3_000 / 3_600_000), 8);
+    expect(riders[0].averageSpeedMph).toBeCloseTo((20 / 1609.344) / (1_500 / 3_600_000), 8);
+    expect(riders[1].averageSpeedMph).toBeCloseTo((18 / 1609.344) / (3_000 / 3_600_000), 8);
     expect(JSON.stringify(session)).not.toContain('Untrusted display');
   });
 

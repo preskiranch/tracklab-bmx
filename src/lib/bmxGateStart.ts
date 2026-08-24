@@ -4,22 +4,21 @@ export const bmxCStartBackoffMeters = 0.0762;
 export const bmxCStartReleaseMs = 180;
 export type CStartOffsetsByPlayer = Partial<Record<PlayerId, number>>;
 
-function metricArrivedSince(sample: BikeSample, metricAt: number | undefined, since: number) {
-  return (metricAt ?? sample.at) >= since;
+function metricArrivedAt(sample: BikeSample, metricAt: number | undefined) {
+  return metricAt ?? sample.at;
+}
+
+export function latestBikeDriveSignalAt(sample: BikeSample | undefined) {
+  if (!sample) return 0;
+  return Math.max(
+    (sample.cadence ?? 0) > 0 ? metricArrivedAt(sample, sample.cadenceAt) : 0,
+    (sample.speedKph ?? 0) > 0 ? metricArrivedAt(sample, sample.speedAt) : 0,
+    sample.watts > 0 ? metricArrivedAt(sample, sample.wattsAt) : 0,
+  );
 }
 
 export function bikeSampleHasDriveSignalSince(sample: BikeSample | undefined, since: number) {
-  if (!sample || since <= 0) {
-    return false;
-  }
-
-  return (
-    (sample.cadence ?? 0) > 0 && metricArrivedSince(sample, sample.cadenceAt, since)
-  ) || (
-    (sample.speedKph ?? 0) > 0 && metricArrivedSince(sample, sample.speedAt, since)
-  ) || (
-    sample.watts > 0 && metricArrivedSince(sample, sample.wattsAt, since)
-  );
+  return since > 0 && latestBikeDriveSignalAt(sample) >= since;
 }
 
 export function cStartVisualDistance(distanceMeters: number, backoffMeters = 0) {

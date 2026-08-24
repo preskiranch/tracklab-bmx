@@ -58,6 +58,32 @@ describe('race physics input gating', () => {
     expect(rider.distance).toBe(0);
   });
 
+  it('does not derive speed, distance, or a finish from over-limit cadence', () => {
+    const riders = createInitialRiders([player]);
+    const corruptCadenceSample = {
+      ...sample(10_000),
+      watts: 0,
+      cadence: 923_334,
+    };
+    const rider = stepRiders(
+      riders,
+      [player],
+      new Map([[58701, corruptCadenceSample]]),
+      0.1,
+      9_000,
+      1,
+      {},
+      [],
+      [],
+      10_000,
+    )[0];
+
+    expect(rider.driveSource).toBe('coast');
+    expect(rider.velocity).toBe(0);
+    expect(rider.distance).toBe(0);
+    expect(rider.finishedAt).toBeNull();
+  });
+
   it('does not reuse a moving sample captured before the gate drop', () => {
     const riders = createInitialRiders([player]);
     const rider = stepRiders(

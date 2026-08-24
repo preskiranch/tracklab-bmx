@@ -79,11 +79,13 @@ import {
   clearRaceCaptureAtIdentityBoundary,
   clearStoredRaceCaptureAtIdentityBoundary,
 } from './lib/raceCapturePrivacy';
+import { acceptedRaceCapture } from './lib/raceCaptureSanity';
 import { supportsDragStripGameArena } from './lib/dragStripGameArena';
 import {
   bikeSampleHasDriveSignalSince,
   bmxCStartBackoffMeters,
   bmxCStartReleaseMs,
+  latestBikeDriveSignalAt,
   type CStartOffsetsByPlayer,
 } from './lib/bmxGateStart';
 import {
@@ -1347,7 +1349,9 @@ function readStoredRaceCapture(): RaceCapture | null {
       return null;
     }
 
-    return parsed;
+    const accepted = acceptedRaceCapture(parsed);
+    if (!accepted) window.localStorage.removeItem(raceCaptureStorageKey);
+    return accepted;
   } catch {
     return null;
   }
@@ -1488,10 +1492,6 @@ const idleStartGateStatus: StartGateStatus = {
 };
 
 const startTreeLabels = ['RED', 'YELLOW 1', 'YELLOW 2', 'GREEN'] as const;
-
-function isReactionBikeSample(sample: { cadence: number | null; speedKph: number | null; watts: number }) {
-  return (sample.cadence ?? 0) > 0 || (sample.speedKph ?? 0) > 0 || sample.watts > 0;
-}
 
 function isGoogleLocationPermissionError(message: string) {
   return /REQUEST_DENIED|blocked|not allowed|not authorized|places\.googleapis\.com|Geocoding Service/i.test(message);
@@ -3597,7 +3597,7 @@ export default function App() {
   const clubTabletBikeActivityAt = useMemo(() => {
     if (!clubTabletSessionActive || !clubTabletSession) return 0;
     const sample = connectedBikeSamples.get(clubTabletSession.session.bikeDeviceId);
-    return sample && (sample.watts > 0 || (sample.cadence ?? 0) > 0) ? sample.at : 0;
+    return latestBikeDriveSignalAt(sample);
   }, [clubTabletSession, clubTabletSessionActive, connectedBikeSamples]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
   const liveBikeDeviceIds = useMemo(() => {
@@ -3926,6 +3926,7 @@ export default function App() {
         : observedAccountHeartRate ?? null;
   const heartRateByPlayer = useMemo<LiveHeartRateByPlayer>(() => {
     const next: LiveHeartRateByPlayer = {};
+    if (demoMode) return next;
     const nativeWorkoutOwnedByAccount = nativeHeartRateWorkoutBelongsToAccount(
       heartRate.status?.sessionId,
       authUser?.id,
@@ -3957,6 +3958,7 @@ export default function App() {
     accountHeartRateRiderId,
     accountLiveHeartRate,
     authUser,
+    demoMode,
     explorePlayers,
     heartRate.latest,
     heartRate.status?.sessionId,
@@ -4878,11 +4880,12 @@ export default function App() {
         }
 
         const sample = samplesByDevice.get(player.deviceId);
-        if (!sample || sample.at < reactionStartAt || !isReactionBikeSample(sample)) {
+        const driveSignalAt = latestBikeDriveSignalAt(sample);
+        if (driveSignalAt < reactionStartAt) {
           return;
         }
 
-        next[player.id] = Math.max(0, sample.at - reactionStartAt);
+        next[player.id] = driveSignalAt - reactionStartAt;
         changed = true;
       });
 
@@ -5916,7 +5919,7 @@ export default function App() {
   }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer]);
 
   useEffect(() => {
-    if (raceState !== 'finished' || !raceCapture || raceCapture.status !== 'finished') return;
+    if (demoMode || raceState !== 'finished' || !raceCapture || raceCapture.status !== 'finished') return;
     const sessionId = activeRaceSessionIdRef.current ?? raceCapture.sessionId;
     const startedAt = raceCapture.startedAt ?? raceCapture.createdAt;
     const endedAt = raceCapture.endedAt ?? Date.now();
@@ -5964,7 +5967,7 @@ export default function App() {
       activeDurationMs: Math.max(0, endedAt - startedAt),
       zones: zoneWindows,
     });
-  }, [authUser, finalizeHeartRateRelay, heartRate.measurements, raceCapture, racePlayers, raceState]);
+  }, [authUser, demoMode, finalizeHeartRateRelay, heartRate.measurements, raceCapture, racePlayers, raceState]);
 
   const saveClubOwnerRaceGroup = useCallback(async (
     capture: RaceCapture,
@@ -7386,10 +7389,10 @@ export default function App() {
   };
 
   const exportRaceCaptureJson = async () => {
-    if (!raceCapture) {
+    const capture = acceptedRaceCapture(raceCapture);
+    if (!capture) {
       return;
     }
-    const capture = raceCapture;
     const { redactPrivatePower } = await import('./lib/privatePower');
 
     downloadTextFile(
@@ -7400,13 +7403,14 @@ export default function App() {
   };
 
   const exportRaceCaptureCsv = () => {
-    if (!raceCapture) {
+    const capture = acceptedRaceCapture(raceCapture);
+    if (!capture) {
       return;
     }
 
     downloadTextFile(
-      raceCaptureFilename(raceCapture, 'csv'),
-      raceCaptureToCsv(raceCapture),
+      raceCaptureFilename(capture, 'csv'),
+      raceCaptureToCsv(capture),
       'text/csv',
     );
   };

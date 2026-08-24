@@ -1,4 +1,5 @@
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
+import { acceptedBikeSpeedKph } from './bikeSampleSanity';
 import type { AppMode, BikeSample, PlayerSlot, RaceState, RiderState } from '../types';
 
 export const raceFinishCountdownMs = 10_000;
@@ -44,17 +45,17 @@ export function detectFalseStart(
       continue;
     }
 
+    const acceptedSpeedKph = acceptedBikeSpeedKph(sample.speedKph);
     if (
-      sample.speedKph != null
-      && Number.isFinite(sample.speedKph)
+      acceptedSpeedKph != null
       && metricIsFreshFromCadence(sample, sample.speedAt, cadenceStartedAt, now)
-      && sample.speedKph >= falseStartSpeedThresholdKph
+      && acceptedSpeedKph >= falseStartSpeedThresholdKph
     ) {
       return {
         playerId: player.id,
         playerName: player.name,
         deviceId: player.deviceId,
-        speedKph: sample.speedKph,
+        speedKph: acceptedSpeedKph,
         source: 'speed',
       };
     }

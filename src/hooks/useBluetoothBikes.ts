@@ -195,7 +195,12 @@ function parseIndoorBikeData(view: DataView): PartialBikeSample {
   }
 
   if ((flags & 0x04) !== 0 && hasBytes(view, offset, 2)) {
-    sample.cadence = cleanBikeCadenceRpm(view.getUint16(offset, true) / 2) ?? undefined;
+    const cadence = cleanBikeCadenceRpm(view.getUint16(offset, true) / 2);
+    if (cadence != null) {
+      sample.cadence = cadence;
+    } else {
+      delete sample.speedKph;
+    }
     offset += 2;
   }
 
@@ -254,13 +259,13 @@ function cadenceFromCrankDeltas(
   cache.set(deviceId, { eventTime, revolutions });
 
   if (!previous) {
-    return null;
+    return undefined;
   }
 
   const revolutionDelta = positiveDelta(revolutions, previous.revolutions, 65536);
   const timeDeltaTicks = positiveDelta(eventTime, previous.eventTime, 65536);
   if (revolutionDelta <= 0 || timeDeltaTicks <= 0) {
-    return null;
+    return undefined;
   }
 
   const cadence = (revolutionDelta / (timeDeltaTicks / 1024)) * 60;
@@ -364,7 +369,10 @@ function parseCscMeasurement(
     view.getUint16(offset + 2, true),
   );
 
-  return cadence == null ? {} : { cadence };
+  if (cadence == null) {
+    return {};
+  }
+  return { cadence };
 }
 
 export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothBikeOptions = {}): BluetoothBikeSnapshot {

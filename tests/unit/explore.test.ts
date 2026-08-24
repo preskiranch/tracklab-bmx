@@ -20,9 +20,9 @@ import {
   stepExploreLiveVelocity,
 } from '../../src/lib/explore';
 import { exploreBikeAudioMode } from '../../src/lib/bikeRaceAudio';
-import { restoreExploreRidersPaused } from '../../src/hooks/useExploreRide';
+import { acceptedExploreLiveMetrics, restoreExploreRidersPaused } from '../../src/hooks/useExploreRide';
 import { formatExploreDistanceMeters } from '../../src/units';
-import type { ExploreRider } from '../../src/types';
+import type { BikeSample, ExploreRider } from '../../src/types';
 
 function rider(id: number, distanceMeters: number): ExploreRider {
   return {
@@ -185,6 +185,38 @@ describe('Explore demo rider pacing', () => {
 });
 
 describe('Explore live Wattbike physics', () => {
+  it('does not reuse stale cadence when fresh power packets keep arriving', () => {
+    const sample: BikeSample = {
+      deviceId: 1,
+      label: 'Wattbike 1',
+      watts: 500,
+      wattsAt: 10_000,
+      cadence: 120,
+      cadenceAt: 6_000,
+      at: 10_000,
+      signal: 1,
+    };
+
+    expect(acceptedExploreLiveMetrics(sample, 10_000)).toMatchObject({
+      sampleIsFresh: true,
+      cadenceIsFresh: false,
+      wattsIsFresh: true,
+      cadence: 0,
+      watts: 500,
+      driveActive: false,
+    });
+    expect(acceptedExploreLiveMetrics({
+      ...sample,
+      cadence: 200,
+      cadenceAt: 10_000,
+    }, 10_000)).toMatchObject({ cadence: 200, driveActive: true });
+    expect(acceptedExploreLiveMetrics({
+      ...sample,
+      cadence: 200.01,
+      cadenceAt: 10_000,
+    }, 10_000)).toMatchObject({ cadence: 0, driveActive: false });
+  });
+
   it('requires rider power as well as cadence before the Wattbike propels the rider', () => {
     expect(exploreLiveDriveActive(92, 400)).toBe(true);
     expect(exploreLiveDriveActive(92, 0)).toBe(false);

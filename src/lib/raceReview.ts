@@ -9,6 +9,12 @@ import type {
   TrackZone,
 } from '../types';
 import { reportedBmxTopSpeedKph } from '../game/bmxRollout';
+import {
+  acceptedBikeCadenceRpm,
+  acceptedTrainingSpeedKph,
+  cleanBikeCadenceRpm,
+  cleanTrainingSpeedKph,
+} from './bikeSampleSanity';
 
 type RaceMetricPoint = {
   elapsedMs: number;
@@ -63,8 +69,8 @@ function framePoint(
   return {
     elapsedMs: Math.max(0, startedAt == null ? frame.elapsedMs : frame.at - startedAt),
     distanceMeters: Math.max(0, rider.distanceMeters),
-    speedKph: finiteOrNull(rider.velocityMps * 3.6),
-    cadence: finiteOrNull(rider.rawCadence),
+    speedKph: cleanTrainingSpeedKph(rider.velocityMps * 3.6),
+    cadence: cleanBikeCadenceRpm(rider.rawCadence),
     watts: finiteOrNull(rider.rawWatts),
   };
 }
@@ -89,10 +95,10 @@ function samplePoint(sample: RaceCaptureSample, startedAt: number | null): RaceM
   return {
     elapsedMs: Math.max(0, startedAt == null ? sample.elapsedMs : sample.at - startedAt),
     distanceMeters: Math.max(0, sample.riderDistanceMeters),
-    speedKph: finiteOrNull(
+    speedKph: cleanTrainingSpeedKph(
       sample.riderVelocityMps == null ? sample.speedKph : sample.riderVelocityMps * 3.6,
     ),
-    cadence: finiteOrNull(sample.cadence),
+    cadence: cleanBikeCadenceRpm(sample.cadence),
     watts: finiteOrNull(sample.watts),
   };
 }
@@ -285,15 +291,19 @@ export function raceSummaryWithCapturedMetrics(
     const cadenceValues = valuesFor(points, 'cadence');
     const wattsValues = valuesFor(points, 'watts');
     const deviceLabel = capture.samples.find((sample) => sample.playerId === entry.playerId)?.deviceLabel;
+    const capturedTopSpeedKph = reportedTopSpeedForPoints(points);
+    const capturedAverageSpeedKph = average(speedValues);
+    const capturedTopCadence = maximum(cadenceValues);
+    const capturedAverageCadence = average(cadenceValues);
 
     return {
       ...entry,
       deviceLabel: deviceLabel ?? entry.deviceLabel,
       sampleCount: Math.max(entry.sampleCount, points.length),
-      topSpeedKph: reportedTopSpeedForPoints(points) ?? entry.topSpeedKph,
-      averageSpeedKph: average(speedValues) ?? entry.averageSpeedKph,
-      topCadence: maximum(cadenceValues) ?? entry.topCadence,
-      averageCadence: average(cadenceValues) ?? entry.averageCadence,
+      topSpeedKph: capturedTopSpeedKph ?? acceptedTrainingSpeedKph(entry.topSpeedKph),
+      averageSpeedKph: capturedAverageSpeedKph ?? acceptedTrainingSpeedKph(entry.averageSpeedKph),
+      topCadence: capturedTopCadence ?? acceptedBikeCadenceRpm(entry.topCadence),
+      averageCadence: capturedAverageCadence ?? acceptedBikeCadenceRpm(entry.averageCadence),
       topWatts: maximum(wattsValues) ?? entry.topWatts,
       averageWatts: average(wattsValues) ?? entry.averageWatts,
     };

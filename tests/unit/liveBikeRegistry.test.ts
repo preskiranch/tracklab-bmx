@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bikeMetricIsLive,
   bikeSampleIsLive,
   selectRaceBikeDevices,
   upsertBoundedBikeSample,
@@ -24,6 +25,13 @@ describe('live bike registry', () => {
     expect(bikeSampleIsLive(sample(1, 9_000), 10_000, 3_800)).toBe(true);
     expect(bikeSampleIsLive(sample(1, 6_000), 10_000, 3_800)).toBe(false);
     expect(bikeSampleIsLive(sample(1, 12_000), 10_000, 3_800)).toBe(false);
+  });
+
+  it('does not relabel preserved cadence as live when only another metric advances', () => {
+    const retained = { ...sample(1, 10_000), cadenceAt: 6_000, wattsAt: 10_000 };
+    expect(bikeSampleIsLive(retained, 10_000, 3_800)).toBe(true);
+    expect(bikeMetricIsLive(retained.cadenceAt, 10_000, 3_800)).toBe(false);
+    expect(bikeMetricIsLive(6_200, 10_000, 3_800)).toBe(true);
   });
 
   it('deduplicates devices, filters disconnected entries, and prefers primary power devices', () => {

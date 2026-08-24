@@ -1,5 +1,6 @@
 import type { TrainingActivityType } from '../types';
 import { maxBillingBikeSeats } from './membership';
+import { acceptedTrainingSpeedKph, cleanBikeCadenceRpm } from './bikeSampleSanity';
 import {
   clubTabletSessionHeaders,
   currentClubTabletSessionToken,
@@ -88,15 +89,18 @@ function normalizeProgress(value: unknown): ClubLiveProgress {
   };
 }
 
-function normalizeMetrics(value: unknown): ClubLiveMetrics {
+function normalizeMetrics(value: unknown): ClubLiveMetrics | null {
   const candidate = value && typeof value === 'object'
     ? value as Partial<ClubLiveMetrics>
     : {};
   const position = Number(candidate.position);
+  const cadence = cleanBikeCadenceRpm(candidate.cadence ?? 0);
+  const speedKph = acceptedTrainingSpeedKph(candidate.speedKph ?? 0);
+  if (cadence == null || speedKph == null) return null;
   return {
     watts: Math.round(nonNegativeNumber(candidate.watts)),
-    cadence: Math.round(nonNegativeNumber(candidate.cadence)),
-    speedKph: nonNegativeNumber(candidate.speedKph),
+    cadence,
+    speedKph,
     distanceMeters: nonNegativeNumber(candidate.distanceMeters),
     elapsedMs: nonNegativeNumber(candidate.elapsedMs),
     position: Number.isFinite(position) && position > 0 ? Math.round(position) : null,
@@ -123,6 +127,8 @@ export function normalizeClubLiveSession(value: unknown): ClubLiveSession | null
   const trackName = optionalText(candidate.trackName);
   const destinationLabel = optionalText(candidate.destinationLabel);
   const startedAt = Number(candidate.startedAt);
+  const metrics = normalizeMetrics(candidate.metrics);
+  if (!metrics) return null;
   return {
     id,
     clubId,
@@ -132,7 +138,7 @@ export function normalizeClubLiveSession(value: unknown): ClubLiveSession | null
     activityType: normalizeActivityType(candidate.activityType),
     status: normalizeStatus(candidate.status),
     progress: normalizeProgress(candidate.progress),
-    metrics: normalizeMetrics(candidate.metrics),
+    metrics,
     updatedAt,
     expiresAt,
     multiplayer: candidate.multiplayer === true,

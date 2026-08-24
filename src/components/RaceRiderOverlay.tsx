@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { GripHorizontal, Lock, Unlock } from 'lucide-react';
-import type { GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RaceRiderOverlayLayout, RaceState, RiderState, SpeedUnit } from '../types';
+import type { BikeSample, GhostPlaybackRider, MultiplayerRaceState, PlayerSlot, RaceRiderOverlayLayout, RaceState, RiderState, SpeedUnit } from '../types';
 import { defaultRaceRiderOverlayLayout, normalizeRaceRiderOverlayLayout } from '../lib/raceViewPreferences';
 import { racePositionsAreEstablished } from '../lib/racePositionDisplay';
 import { raceProgressPercent } from '../lib/raceProgress';
@@ -10,10 +10,12 @@ import { NewRecordBadge } from './NewRecordBadge';
 import type { PersonalRecordAchievements } from '../lib/personalRecords';
 import { ghostPlaybackAccent } from '../lib/ghosts';
 import { heartRateReadingState } from './HeartRateMetric';
+import { demoHeartRateReadingForBikeSample } from '../lib/demoHeartRate';
 
 export type LiveHeartRateByPlayer = Partial<Record<PlayerSlot['id'], {
   bpm: number | null;
   recordedAt: number | null;
+  source?: 'apple-watch' | 'demo-simulated';
 }>>;
 
 type DragState =
@@ -50,6 +52,7 @@ type OverlayEntry = {
   finishedAt: number | null;
   kind: 'local' | 'ghost' | 'remote';
   heartRateBpm: number | null;
+  heartRateSimulated: boolean;
 };
 
 type RaceRiderOverlayProps = {
@@ -68,6 +71,7 @@ type RaceRiderOverlayProps = {
   onFullscreenInteraction: () => void;
   newPersonalRecordsByPlayer: PersonalRecordAchievements;
   heartRateByPlayer?: LiveHeartRateByPlayer;
+  samplesByDevice?: Map<number, BikeSample>;
 };
 
 function raceRiderOverlayUsesCompactLandscape(containerWidth: number, containerHeight: number) {
@@ -151,6 +155,7 @@ export function RaceRiderOverlay({
   onFullscreenInteraction,
   newPersonalRecordsByPlayer,
   heartRateByPlayer = {},
+  samplesByDevice = new Map(),
 }: RaceRiderOverlayProps) {
   const [layout, setLayout] = useState<RaceRiderOverlayLayout>(
     () => normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout),
@@ -217,9 +222,12 @@ export function RaceRiderOverlay({
         return [];
       }
 
+      const heartRateReading = demoHeartRateReadingForBikeSample(
+        player.deviceId == null ? null : samplesByDevice.get(player.deviceId),
+      ) ?? heartRateByPlayer[player.id];
       const heartRate = heartRateReadingState(
-        heartRateByPlayer[player.id]?.bpm,
-        heartRateByPlayer[player.id]?.recordedAt,
+        heartRateReading?.bpm,
+        heartRateReading?.recordedAt,
       );
       return [{
         id: `local-${player.id}`,
@@ -235,6 +243,7 @@ export function RaceRiderOverlay({
         finishedAt: rider.finishedAt,
         kind: 'local' as const,
         heartRateBpm: heartRate.bpm,
+        heartRateSimulated: heartRateReading?.source === 'demo-simulated',
       }];
     });
 
@@ -252,6 +261,7 @@ export function RaceRiderOverlay({
       finishedAt: rider.finishedAt,
       kind: 'ghost' as const,
       heartRateBpm: null,
+      heartRateSimulated: false,
     }));
 
     const remoteEntries = remoteRaceStates.flatMap((state) => state.riders.map((rider, index) => ({
@@ -268,11 +278,12 @@ export function RaceRiderOverlay({
       finishedAt: rider.finishedAt,
       kind: 'remote' as const,
       heartRateBpm: null,
+      heartRateSimulated: false,
     })));
 
     return [...localEntries, ...ghostEntries, ...remoteEntries]
       .sort((left, right) => left.rank - right.rank || right.progressPct - left.progressPct);
-  }, [ghostRiders, heartRateByPlayer, players, remoteRaceStates, riders, trackLengthMeters]);
+  }, [ghostRiders, heartRateByPlayer, players, remoteRaceStates, riders, samplesByDevice, trackLengthMeters]);
   const positionsEstablished = useMemo(
     () => racePositionsAreEstablished(raceState, entries),
     [entries, raceState],
@@ -470,8 +481,11 @@ export function RaceRiderOverlay({
                     : `${entry.progressPct}% track / ${formatSpeedFromKph(entry.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`}
                 </span>
                 {entry.heartRateBpm != null && (
-                  <span className="race-rider-overlay-heart-rate" aria-label={`Heart rate ${entry.heartRateBpm} beats per minute`}>
-                    <b aria-hidden="true">♥</b> {entry.heartRateBpm} BPM
+                  <span
+                    className="race-rider-overlay-heart-rate"
+                    aria-label={`${entry.heartRateSimulated ? 'Simulated heart rate' : 'Heart rate'} ${entry.heartRateBpm} beats per minute`}
+                  >
+                    <b aria-hidden="true">♥</b> {entry.heartRateSimulated ? 'Simulated · ' : ''}{entry.heartRateBpm} BPM
                   </span>
                 )}
                 {entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId] && (

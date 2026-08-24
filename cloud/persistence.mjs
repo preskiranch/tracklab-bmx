@@ -1,6 +1,11 @@
 import pg from 'pg';
 import { runDatabaseMigrations } from './migrations.mjs';
 import { cloudTelemetry } from './telemetry.mjs';
+import {
+  maximumAcceptedTrainingSpeedKph,
+  maximumAcceptedTrainingSpeedMph,
+  maximumAcceptedWattbikeCadenceRpm,
+} from '../bridge/bike-metric-sanity.mjs';
 
 const { Pool } = pg;
 
@@ -98,6 +103,135 @@ function fromJson(value, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function raceResultMetric(entry, camelKey, snakeKey) {
+  return entry?.[camelKey] ?? entry?.[snakeKey] ?? null;
+}
+
+function acceptedOptionalRaceMetric(value, maximum) {
+  if (value == null) return true;
+  const metric = Number(value);
+  return Number.isFinite(metric) && metric >= 0 && metric <= maximum;
+}
+
+function storedRaceResultHasAcceptedBikeMetrics(entry) {
+  const topCadence = raceResultMetric(entry, 'topCadence', 'top_cadence');
+  const averageCadence = raceResultMetric(entry, 'averageCadence', 'average_cadence');
+  const topSpeedKph = raceResultMetric(entry, 'topSpeedKph', 'top_speed_kph');
+  const averageSpeedKph = raceResultMetric(entry, 'averageSpeedKph', 'average_speed_kph');
+  return acceptedOptionalRaceMetric(topCadence, maximumAcceptedWattbikeCadenceRpm)
+    && acceptedOptionalRaceMetric(averageCadence, maximumAcceptedWattbikeCadenceRpm)
+    && acceptedOptionalRaceMetric(topSpeedKph, maximumAcceptedTrainingSpeedKph)
+    && acceptedOptionalRaceMetric(averageSpeedKph, maximumAcceptedTrainingSpeedKph)
+    && (topCadence == null || averageCadence == null || Number(averageCadence) <= Number(topCadence))
+    && (topSpeedKph == null || averageSpeedKph == null || Number(averageSpeedKph) <= Number(topSpeedKph));
+}
+
+function raceResultGroupKey(entry) {
+  const dedupeKey = String(entry?.dedupeKey ?? entry?.dedupe_key ?? '');
+  const guestKey = String(entry?.guestKey ?? entry?.guest_key ?? '');
+  const playerId = String(entry?.playerId ?? entry?.player_id ?? '');
+  const suffix = guestKey && playerId ? `:${guestKey}:${playerId}` : '';
+  return suffix && dedupeKey.endsWith(suffix)
+    ? dedupeKey.slice(0, -suffix.length)
+    : dedupeKey.replace(/:[^:]+$/u, '');
+}
+
+function corruptRaceResultGroupKeys(entries) {
+  return new Set(entries
+    .filter((entry) => !storedRaceResultHasAcceptedBikeMetrics(entry))
+    .map(raceResultGroupKey)
+    .filter(Boolean));
+}
+
+function acceptedRaceResultBikeMetricsSql(alias = 'race_results') {
+  return `(${alias}.top_cadence IS NULL OR ${alias}.top_cadence BETWEEN 0 AND ${maximumAcceptedWattbikeCadenceRpm})
+    AND (${alias}.average_cadence IS NULL OR ${alias}.average_cadence BETWEEN 0 AND ${maximumAcceptedWattbikeCadenceRpm})
+    AND (${alias}.top_speed_kph IS NULL OR ${alias}.top_speed_kph BETWEEN 0 AND ${maximumAcceptedTrainingSpeedKph})
+    AND (${alias}.average_speed_kph IS NULL OR ${alias}.average_speed_kph BETWEEN 0 AND ${maximumAcceptedTrainingSpeedKph})
+    AND (${alias}.top_cadence IS NULL OR ${alias}.average_cadence IS NULL OR ${alias}.average_cadence <= ${alias}.top_cadence)
+    AND (${alias}.top_speed_kph IS NULL OR ${alias}.average_speed_kph IS NULL OR ${alias}.average_speed_kph <= ${alias}.top_speed_kph)`;
+}
+
+function acceptedWholeRaceResultGroupSql(alias = 'race_results') {
+  return `${acceptedRaceResultBikeMetricsSql(alias)}
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ${schema}.race_results AS corrupt_sibling
+      WHERE left(
+        corrupt_sibling.dedupe_key,
+        length(corrupt_sibling.dedupe_key)
+          - length(':' || corrupt_sibling.guest_key || ':' || corrupt_sibling.player_id::text)
+      ) = left(
+        ${alias}.dedupe_key,
+        length(${alias}.dedupe_key)
+          - length(':' || ${alias}.guest_key || ':' || ${alias}.player_id::text)
+      )
+        AND NOT (${acceptedRaceResultBikeMetricsSql('corrupt_sibling')})
+    )`;
+}
+
+const storedCadenceMetricKeys = new Set([
+  'averagecadence', 'cadence', 'cadencerpm', 'lastrawcadence', 'peakcadence',
+  'peakcadencerpm', 'rawcadence', 'topcadence',
+]);
+const storedSpeedMetricKeys = new Set([
+  'averagespeedkph', 'peakspeedkph', 'rawspeedkph', 'speedkph', 'topspeedkph',
+]);
+const storedSpeedMphMetricKeys = new Set([
+  'averagespeedmph', 'peakspeedmph', 'rawspeedmph', 'speedmph', 'topspeedmph',
+]);
+const storedSpeedMpsMetricKeys = new Set([
+  'averagespeedmps', 'peakspeedmps', 'rawspeedmps', 'ridervelocitymps', 'speedmps',
+  'topspeedmps', 'velocitymps',
+]);
+
+function storedBikeMetricsAreAccepted(value, depth = 0) {
+  if (depth > 32) return false;
+  if (Array.isArray(value)) return value.every((entry) => storedBikeMetricsAreAccepted(entry, depth + 1));
+  if (!value || typeof value !== 'object') return true;
+  const entries = Object.entries(value);
+  const metrics = new Map(entries.map(([key, nested]) => (
+    [key.replace(/[^a-z0-9]/gi, '').toLowerCase(), nested]
+  )));
+  const pairAccepted = (averageKey, peakKeys) => peakKeys.every((peakKey) => {
+    const average = metrics.get(averageKey);
+    const peak = metrics.get(peakKey);
+    return average == null || peak == null || Number(average) <= Number(peak);
+  });
+  if (
+    !pairAccepted('averagecadence', ['topcadence', 'peakcadence'])
+    || !pairAccepted('averagespeedkph', ['topspeedkph', 'peakspeedkph'])
+    || !pairAccepted('averagespeedmph', ['topspeedmph', 'peakspeedmph'])
+    || !pairAccepted('averagespeedmps', ['topspeedmps', 'peakspeedmps'])
+  ) return false;
+  return entries.every(([key, nested]) => {
+    const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (storedCadenceMetricKeys.has(normalizedKey)) {
+      return acceptedOptionalRaceMetric(nested, maximumAcceptedWattbikeCadenceRpm);
+    }
+    if (storedSpeedMetricKeys.has(normalizedKey)) {
+      return acceptedOptionalRaceMetric(nested, maximumAcceptedTrainingSpeedKph);
+    }
+    if (storedSpeedMphMetricKeys.has(normalizedKey)) {
+      return acceptedOptionalRaceMetric(nested, maximumAcceptedTrainingSpeedMph);
+    }
+    if (storedSpeedMpsMetricKeys.has(normalizedKey)) {
+      return acceptedOptionalRaceMetric(Number(nested) * 3.6, maximumAcceptedTrainingSpeedKph);
+    }
+    return storedBikeMetricsAreAccepted(nested, depth + 1);
+  });
+}
+
+function storedGhostHasAcceptedBikeMetrics(row) {
+  const points = fromJson(row?.points, []);
+  return storedBikeMetricsAreAccepted(fromJson(row?.summary, null))
+    && storedBikeMetricsAreAccepted(fromJson(row?.zone_results ?? row?.zoneResults, []))
+    && (!Array.isArray(points) || points.every((point) => (
+      point?.velocityMps == null
+      || acceptedOptionalRaceMetric(Number(point.velocityMps) * 3.6, maximumAcceptedTrainingSpeedKph)
+    )));
 }
 
 function cloneJson(value, fallback) {
@@ -967,6 +1101,8 @@ export async function saveUserData(guestKey, patch) {
 
 function trainingSessionFromRow(row) {
   if (!row) return null;
+  const details = fromJson(row.details, {});
+  if (!storedBikeMetricsAreAccepted(details)) return null;
   return {
     id: row.id,
     activityType: row.activity_type,
@@ -978,7 +1114,7 @@ function trainingSessionFromRow(row) {
     ...(row.track_id ? { trackId: row.track_id } : {}),
     ...(row.track_name ? { trackName: row.track_name } : {}),
     source: row.source === 'imported' ? 'imported' : 'live',
-    details: fromJson(row.details, {}),
+    details,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
     ...(row.profile_key ? { _profileKey: row.profile_key } : {}),
@@ -1001,6 +1137,7 @@ function enrichMemoryClubTrainingSession(session) {
 }
 
 export async function saveTrainingSession(profileKey, session) {
+  if (!storedBikeMetricsAreAccepted(session?.details)) return null;
   const saved = {
     ...cloneJson(session, session),
     _profileKey: profileKey,
@@ -1066,7 +1203,9 @@ export async function loadTrainingSessionById(profileKey, id) {
   if (!profileKey || !id) return null;
   if (!pool) {
     const session = memoryTrainingSessions.get(`${profileKey}:${id}`);
-    return session ? cloneJson(enrichMemoryClubTrainingSession(session), session) : null;
+    return session && storedBikeMetricsAreAccepted(session.details)
+      ? cloneJson(enrichMemoryClubTrainingSession(session), session)
+      : null;
   }
   const result = await query(
     `SELECT sessions.*, clubs.name AS club_name, members.rider_name AS club_rider_name
@@ -1074,7 +1213,8 @@ export async function loadTrainingSessionById(profileKey, id) {
      LEFT JOIN ${schema}.clubs AS clubs ON clubs.id = sessions.club_id
      LEFT JOIN ${schema}.club_members AS members
        ON members.club_id = sessions.club_id AND members.studio_rider_id = sessions.studio_rider_id
-     WHERE sessions.profile_key = $1 AND sessions.id = $2
+    WHERE sessions.profile_key = $1 AND sessions.id = $2
+       AND ${acceptedRecordedBikeMetricsSql('sessions.details')}
      LIMIT 1`,
     [profileKey, id],
   );
@@ -7999,11 +8139,24 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
   let sessions;
   let raceEntries;
   if (!pool) {
+    const allRaceEntries = [...memoryLocalRaceResults.values()];
+    const corruptRaceGroups = corruptRaceResultGroupKeys(allRaceEntries);
     sessions = [...memoryTrainingSessions.entries()]
-      .filter(([key, session]) => key.startsWith(`${profileKey}:`) && session.startedAt >= from && session.startedAt <= to)
+      .filter(([key, session]) => (
+        key.startsWith(`${profileKey}:`)
+        && session.startedAt >= from
+        && session.startedAt <= to
+        && storedBikeMetricsAreAccepted(session.details)
+      ))
       .map(([, session]) => cloneJson(enrichMemoryClubTrainingSession(session), session));
-    raceEntries = [...memoryLocalRaceResults.values()]
-      .filter((entry) => entry.guestKey === profileKey && Date.parse(entry.createdAt) >= from && Date.parse(entry.createdAt) <= to);
+    raceEntries = allRaceEntries
+      .filter((entry) => (
+        entry.guestKey === profileKey
+        && Date.parse(entry.createdAt) >= from
+        && Date.parse(entry.createdAt) <= to
+        && storedRaceResultHasAcceptedBikeMetrics(entry)
+        && !corruptRaceGroups.has(raceResultGroupKey(entry))
+      ));
   } else {
     const [sessionResult, raceResult] = await Promise.all([
       query(
@@ -8015,6 +8168,7 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
          WHERE sessions.profile_key = $1
            AND sessions.started_at >= to_timestamp($2 / 1000.0)
            AND sessions.started_at <= to_timestamp($3 / 1000.0)
+           AND ${acceptedRecordedBikeMetricsSql('sessions.details')}
          ORDER BY sessions.started_at DESC LIMIT $4`,
         [profileKey, from, to, safeLimit],
       ),
@@ -8024,8 +8178,14 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
            average_cadence, top_watts, average_watts, summary, created_at
          FROM ${schema}.race_results
          WHERE guest_key = $1 AND created_at >= to_timestamp($2 / 1000.0) AND created_at <= to_timestamp($3 / 1000.0)
+           AND ${acceptedWholeRaceResultGroupSql('race_results')}
          ORDER BY created_at DESC LIMIT $4`,
-        [profileKey, from, to, safeLimit * 4],
+        [
+          profileKey,
+          from,
+          to,
+          safeLimit * 4,
+        ],
       ),
     ]);
     sessions = (sessionResult?.rows ?? []).map(trainingSessionFromRow).filter(Boolean);
@@ -8063,6 +8223,7 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
         && session._profileKey !== ownerProfileKey
         && session.startedAt >= from
         && session.startedAt <= to
+        && storedBikeMetricsAreAccepted(session.details)
       ))
       .map((session) => cloneJson(enrichMemoryClubTrainingSession(session), session))
       .sort((left, right) => right.startedAt - left.startedAt)
@@ -8078,6 +8239,7 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
        AND sessions.profile_key <> $1
        AND sessions.started_at >= to_timestamp($2 / 1000.0)
        AND sessions.started_at <= to_timestamp($3 / 1000.0)
+       AND ${acceptedRecordedBikeMetricsSql('sessions.details')}
      ORDER BY sessions.started_at DESC LIMIT $4`,
     [ownerProfileKey, from, to, safeLimit],
   );
@@ -8965,7 +9127,7 @@ function memoryAccountProfile(user, extras = {}) {
 }
 
 function friendGhostPreviewFromRow(row) {
-  if (!row?.id || !row?.track_id || !row?.track_name) return null;
+  if (!row?.id || !row?.track_id || !row?.track_name || !storedGhostHasAcceptedBikeMetrics(row)) return null;
   const finishTimeMs = Math.round(Number(row.finish_time_ms));
   if (!Number.isFinite(finishTimeMs) || finishTimeMs <= 0) return null;
   const storedSummary = fromJson(row.summary, null);
@@ -8990,7 +9152,11 @@ function friendGhostPreviewFromRow(row) {
 function memoryRecentLiveGhostPreview(userId) {
   const ownerKey = `user:${userId}`;
   const recent = [...memoryGhostLaps.values()]
-    .filter((ghost) => ghost.owner_key === ownerKey && ghost.race_source === 'live')
+    .filter((ghost) => (
+      ghost.owner_key === ownerKey
+      && ghost.race_source === 'live'
+      && storedGhostHasAcceptedBikeMetrics(ghost)
+    ))
     .sort((left, right) => (
       Date.parse(right.saved_at) - Date.parse(left.saved_at)
       || left.finish_time_ms - right.finish_time_ms
@@ -9634,6 +9800,7 @@ function accountFriendsPageStatement() {
          ) AS summary
        FROM ${schema}.ghost_laps
        WHERE owner_key = 'user:' || friend.profile_id AND race_source = 'live'
+         AND ${acceptedGhostBikeMetricsSql('ghost_laps')}
        ORDER BY saved_at DESC, finish_time_ms ASC, id
        LIMIT 1
      ) AS recent_ghost ON friend.friendship_source <> 'official'
@@ -11640,16 +11807,22 @@ export async function loadLeaderboards(trackId, limit = 10) {
   const safeLimit = Math.max(1, Math.min(50, Math.round(Number(limit) || 10)));
   if (!pool) {
     const metricDefinitions = {
-      rpm: { field: 'topCadence', unit: 'RPM', factor: 1 },
-      speed: { field: 'topSpeedKph', unit: 'MPH', factor: 0.621371 },
+      rpm: {
+        field: 'topCadence', unit: 'RPM', factor: 1, maximum: maximumAcceptedWattbikeCadenceRpm,
+      },
+      speed: {
+        field: 'topSpeedKph', unit: 'MPH', factor: 0.621371, maximum: maximumAcceptedTrainingSpeedKph,
+      },
     };
     return Object.fromEntries(Object.entries(metricDefinitions).map(([metric, definition]) => {
       const bestByRider = new Map();
       [...memoryLocalRaceResults.values()]
-        .filter((entry) => entry.trackId === trackId)
+        .filter((entry) => entry.trackId === trackId && storedRaceResultHasAcceptedBikeMetrics(entry))
         .forEach((entry) => {
-          const rawValue = Number(entry[definition.field]);
-          if (!Number.isFinite(rawValue)) {
+          const storedValue = entry[definition.field];
+          if (storedValue == null) return;
+          const rawValue = Number(storedValue);
+          if (!Number.isFinite(rawValue) || rawValue < 0 || rawValue > definition.maximum) {
             return;
           }
           const riderKey = `${entry.guestKey}:${entry.riderName.toLocaleLowerCase()}`;
@@ -11675,13 +11848,23 @@ export async function loadLeaderboards(trackId, limit = 10) {
        SELECT DISTINCT ON (guest_key, rider_name)
          rider_name, top_cadence AS value, created_at, summary->>'photoUrl' AS photo_url
        FROM ${schema}.race_results
-       WHERE track_id = $1 AND top_cadence IS NOT NULL
+       WHERE track_id = $1 AND top_cadence BETWEEN 0 AND $3
+         AND (average_cadence IS NULL OR average_cadence BETWEEN 0 AND $3)
+         AND (top_speed_kph IS NULL OR top_speed_kph BETWEEN 0 AND $4)
+         AND (average_speed_kph IS NULL OR average_speed_kph BETWEEN 0 AND $4)
+         AND (average_cadence IS NULL OR average_cadence <= top_cadence)
+         AND (top_speed_kph IS NULL OR average_speed_kph IS NULL OR average_speed_kph <= top_speed_kph)
        ORDER BY guest_key, rider_name, top_cadence DESC, created_at DESC
      ), speed_bests AS (
        SELECT DISTINCT ON (guest_key, rider_name)
          rider_name, top_speed_kph AS value, created_at, summary->>'photoUrl' AS photo_url
        FROM ${schema}.race_results
-       WHERE track_id = $1 AND top_speed_kph IS NOT NULL
+       WHERE track_id = $1 AND top_speed_kph BETWEEN 0 AND $4
+         AND (top_cadence IS NULL OR top_cadence BETWEEN 0 AND $3)
+         AND (average_cadence IS NULL OR average_cadence BETWEEN 0 AND $3)
+         AND (average_speed_kph IS NULL OR average_speed_kph BETWEEN 0 AND $4)
+         AND (top_cadence IS NULL OR average_cadence IS NULL OR average_cadence <= top_cadence)
+         AND (average_speed_kph IS NULL OR average_speed_kph <= top_speed_kph)
        ORDER BY guest_key, rider_name, top_speed_kph DESC, created_at DESC
      )
      SELECT 'rpm' AS metric, rider_name, value, created_at, photo_url
@@ -11689,7 +11872,7 @@ export async function loadLeaderboards(trackId, limit = 10) {
      UNION ALL
      SELECT 'speed' AS metric, rider_name, value, created_at, photo_url
      FROM (SELECT * FROM speed_bests ORDER BY value DESC LIMIT $2) AS speed_leaders`,
-    [trackId, safeLimit],
+    [trackId, safeLimit, maximumAcceptedWattbikeCadenceRpm, maximumAcceptedTrainingSpeedKph],
   );
 
   const boards = { rpm: [], speed: [] };
@@ -11781,12 +11964,16 @@ export async function loadPreRaceRiderStats(trackId, profileKeys, riderNames) {
     return [];
   }
   if (!pool) {
+    const allRaceEntries = [...memoryLocalRaceResults.values()];
+    const corruptRaceGroups = corruptRaceResultGroupKeys(allRaceEntries);
     const nameKeys = new Set(names.map((name) => name.toLocaleLowerCase()));
-    const matching = [...memoryLocalRaceResults.values()]
+    const matching = allRaceEntries
       .filter((entry) => (
         entry.trackId === trackId
         && personalKeys.includes(entry.guestKey)
         && nameKeys.has(entry.riderName.toLocaleLowerCase())
+        && storedRaceResultHasAcceptedBikeMetrics(entry)
+        && !corruptRaceGroups.has(raceResultGroupKey(entry))
       ))
       .sort((left, right) => (
         (right.sequence ?? 0) - (left.sequence ?? 0)
@@ -11829,6 +12016,7 @@ export async function loadPreRaceRiderStats(trackId, profileKeys, riderNames) {
        WHERE track_id = $1
          AND guest_key = ANY($2::text[])
          AND lower(rider_name) = ANY($3::text[])
+         AND ${acceptedWholeRaceResultGroupSql('race_results')}
      ), aggregates AS (
        SELECT
          lower(rider_name) AS rider_key,
@@ -11853,7 +12041,11 @@ export async function loadPreRaceRiderStats(trackId, profileKeys, riderNames) {
      SELECT aggregates.*, COALESCE(streaks.current_win_streak, 0) AS current_win_streak
      FROM aggregates
      LEFT JOIN streaks USING (rider_key)`,
-    [trackId, personalKeys, names.map((name) => name.toLocaleLowerCase())],
+    [
+      trackId,
+      personalKeys,
+      names.map((name) => name.toLocaleLowerCase()),
+    ],
   );
   return (result?.rows ?? []).map((row) => ({
     name: row.rider_name,
@@ -12029,6 +12221,94 @@ function routeKey(routeVariantId, lapCount = 1, distanceFeet, airSetting) {
   return distance != null && air != null ? `${base}:sprint:${distance}ft:air:${air}` : base;
 }
 
+function acceptedGhostObjectMetricSql(objectSql, key, maximum) {
+  return `(CASE
+    WHEN NOT (${objectSql} ? '${key}') OR ${objectSql}->'${key}' = 'null'::jsonb THEN TRUE
+    WHEN jsonb_typeof(${objectSql}->'${key}') = 'number'
+      THEN (${objectSql}->>'${key}')::numeric BETWEEN 0 AND ${Number(maximum)}
+    ELSE FALSE
+  END)`;
+}
+
+function acceptedGhostObjectPairSql(objectSql, averageKey, peakKey) {
+  return `(CASE
+    WHEN NOT (${objectSql} ? '${averageKey}') OR ${objectSql}->'${averageKey}' = 'null'::jsonb
+      OR NOT (${objectSql} ? '${peakKey}') OR ${objectSql}->'${peakKey}' = 'null'::jsonb THEN TRUE
+    WHEN jsonb_typeof(${objectSql}->'${averageKey}') = 'number'
+      AND jsonb_typeof(${objectSql}->'${peakKey}') = 'number'
+      THEN (${objectSql}->>'${averageKey}')::numeric <= (${objectSql}->>'${peakKey}')::numeric
+    ELSE FALSE
+  END)`;
+}
+
+function acceptedGhostMetricObjectSql(objectSql) {
+  return [
+    acceptedGhostObjectMetricSql(objectSql, 'cadence', maximumAcceptedWattbikeCadenceRpm),
+    acceptedGhostObjectMetricSql(objectSql, 'cadenceRpm', maximumAcceptedWattbikeCadenceRpm),
+    acceptedGhostObjectMetricSql(objectSql, 'lastRawCadence', maximumAcceptedWattbikeCadenceRpm),
+    acceptedGhostObjectMetricSql(objectSql, 'rawCadence', maximumAcceptedWattbikeCadenceRpm),
+    acceptedGhostObjectMetricSql(objectSql, 'topCadence', maximumAcceptedWattbikeCadenceRpm),
+    acceptedGhostObjectMetricSql(objectSql, 'peakCadence', maximumAcceptedWattbikeCadenceRpm),
+    acceptedGhostObjectMetricSql(objectSql, 'peakCadenceRpm', maximumAcceptedWattbikeCadenceRpm),
+    acceptedGhostObjectMetricSql(objectSql, 'averageCadence', maximumAcceptedWattbikeCadenceRpm),
+    acceptedGhostObjectMetricSql(objectSql, 'rawSpeedKph', maximumAcceptedTrainingSpeedKph),
+    acceptedGhostObjectMetricSql(objectSql, 'speedKph', maximumAcceptedTrainingSpeedKph),
+    acceptedGhostObjectMetricSql(objectSql, 'topSpeedKph', maximumAcceptedTrainingSpeedKph),
+    acceptedGhostObjectMetricSql(objectSql, 'peakSpeedKph', maximumAcceptedTrainingSpeedKph),
+    acceptedGhostObjectMetricSql(objectSql, 'averageSpeedKph', maximumAcceptedTrainingSpeedKph),
+    acceptedGhostObjectMetricSql(objectSql, 'rawSpeedMph', maximumAcceptedTrainingSpeedMph),
+    acceptedGhostObjectMetricSql(objectSql, 'speedMph', maximumAcceptedTrainingSpeedMph),
+    acceptedGhostObjectMetricSql(objectSql, 'topSpeedMph', maximumAcceptedTrainingSpeedMph),
+    acceptedGhostObjectMetricSql(objectSql, 'peakSpeedMph', maximumAcceptedTrainingSpeedMph),
+    acceptedGhostObjectMetricSql(objectSql, 'averageSpeedMph', maximumAcceptedTrainingSpeedMph),
+    acceptedGhostObjectMetricSql(objectSql, 'rawSpeedMps', maximumAcceptedTrainingSpeedKph / 3.6),
+    acceptedGhostObjectMetricSql(objectSql, 'riderVelocityMps', maximumAcceptedTrainingSpeedKph / 3.6),
+    acceptedGhostObjectMetricSql(objectSql, 'speedMps', maximumAcceptedTrainingSpeedKph / 3.6),
+    acceptedGhostObjectMetricSql(objectSql, 'topSpeedMps', maximumAcceptedTrainingSpeedKph / 3.6),
+    acceptedGhostObjectMetricSql(objectSql, 'peakSpeedMps', maximumAcceptedTrainingSpeedKph / 3.6),
+    acceptedGhostObjectMetricSql(objectSql, 'averageSpeedMps', maximumAcceptedTrainingSpeedKph / 3.6),
+    acceptedGhostObjectMetricSql(objectSql, 'velocityMps', maximumAcceptedTrainingSpeedKph / 3.6),
+    acceptedGhostObjectPairSql(objectSql, 'averageCadence', 'topCadence'),
+    acceptedGhostObjectPairSql(objectSql, 'averageCadence', 'peakCadence'),
+    acceptedGhostObjectPairSql(objectSql, 'averageSpeedKph', 'topSpeedKph'),
+    acceptedGhostObjectPairSql(objectSql, 'averageSpeedKph', 'peakSpeedKph'),
+    acceptedGhostObjectPairSql(objectSql, 'averageSpeedMph', 'topSpeedMph'),
+    acceptedGhostObjectPairSql(objectSql, 'averageSpeedMph', 'peakSpeedMph'),
+    acceptedGhostObjectPairSql(objectSql, 'averageSpeedMps', 'topSpeedMps'),
+    acceptedGhostObjectPairSql(objectSql, 'averageSpeedMps', 'peakSpeedMps'),
+  ].join('\n             AND ');
+}
+
+function acceptedRecordedBikeMetricsSql(jsonSql) {
+  const root = `COALESCE(${jsonSql}, '{}'::jsonb)`;
+  const node = 'recorded_metric_node.value';
+  return `(${acceptedGhostMetricObjectSql(root)})
+    AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_path_query(${root}, 'lax $.**') AS recorded_metric_node(value)
+      WHERE jsonb_typeof(${node}) = 'object'
+        AND NOT (${acceptedGhostMetricObjectSql(node)})
+    )`;
+}
+
+function acceptedGhostBikeMetricsSql(alias = 'ghost_laps') {
+  const summary = `COALESCE(${alias}.summary, '{}'::jsonb)`;
+  const zoneNode = 'ghost_metric_node.value';
+  const maximumVelocityMps = maximumAcceptedTrainingSpeedKph / 3.6;
+  return `(${acceptedGhostMetricObjectSql(summary)})
+             AND NOT EXISTS (
+               SELECT 1
+               FROM jsonb_path_query(COALESCE(${alias}.zone_results, '[]'::jsonb), 'lax $.**')
+                 AS ghost_metric_node(value)
+               WHERE jsonb_typeof(${zoneNode}) = 'object'
+                 AND NOT (${acceptedGhostMetricObjectSql(zoneNode)})
+             )
+             AND NOT jsonb_path_exists(
+               COALESCE(${alias}.points, '[]'::jsonb),
+               'lax $[*].velocityMps ? (@ != null && (@.type() != "number" || @ < 0 || @ > ${maximumVelocityMps}))'
+             )`;
+}
+
 function redactPrivatePower(value) {
   if (Array.isArray(value)) return value.map(redactPrivatePower);
   if (!value || typeof value !== 'object') return value;
@@ -12038,6 +12318,7 @@ function redactPrivatePower(value) {
 }
 
 function ghostFromRow(row, source = 'top', includeAnalytics = false) {
+  if (!storedGhostHasAcceptedBikeMetrics(row)) return null;
   const medalRank = Number(row.medal_rank);
   const storedSummary = fromJson(row.summary, null);
   const visibleSummary = includeAnalytics
@@ -12125,6 +12406,7 @@ export async function saveGhostLap(ghost) {
     let changed = false;
     if (
       !current
+      || !storedGhostHasAcceptedBikeMetrics(current)
       || next.finish_time_ms < current.finish_time_ms
       || (next.finish_time_ms === current.finish_time_ms
         && Date.parse(next.saved_at) > Date.parse(current.saved_at))
@@ -12159,7 +12441,8 @@ export async function saveGhostLap(ghost) {
       points = EXCLUDED.points,
       saved_at = EXCLUDED.saved_at,
       updated_at = now()
-    WHERE EXCLUDED.finish_time_ms < ${schema}.ghost_laps.finish_time_ms
+    WHERE NOT (${acceptedGhostBikeMetricsSql(`${schema}.ghost_laps`)})
+       OR EXCLUDED.finish_time_ms < ${schema}.ghost_laps.finish_time_ms
        OR (EXCLUDED.finish_time_ms = ${schema}.ghost_laps.finish_time_ms AND EXCLUDED.saved_at > ${schema}.ghost_laps.saved_at)
     RETURNING *`,
     [
@@ -12235,6 +12518,7 @@ export async function loadGhostLaps(
       .filter((row) => (
         row.track_id === trackId
         && row.race_source === 'live'
+        && storedGhostHasAcceptedBikeMetrics(row)
         && (!requestedSprintRouteSuffix
           || row.route_key.endsWith(requestedSprintRouteSuffix.slice(1)))
       ))
@@ -12270,6 +12554,7 @@ export async function loadGhostLaps(
              DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
            FROM ${schema}.ghost_laps AS ghost_laps
            WHERE track_id = $1 AND race_source = 'live'
+             AND ${acceptedGhostBikeMetricsSql('ghost_laps')}
              AND ($3::text IS NULL OR route_key LIKE $3)
          ) AS ranked
          ORDER BY finish_time_ms ASC, saved_at DESC, id
@@ -12304,6 +12589,7 @@ export async function loadGhostLaps(
          FROM ${schema}.ghost_laps AS ghost_laps
          JOIN explicit_friend_keys AS friend ON friend.friend_key = ghost_laps.owner_key
          WHERE ghost_laps.track_id = $1 AND ghost_laps.race_source = 'live'
+           AND ${acceptedGhostBikeMetricsSql('ghost_laps')}
            AND ($4::text IS NULL OR ghost_laps.route_key LIKE $4)
          ORDER BY
            CASE WHEN ghost_laps.id = $5::text
@@ -12326,6 +12612,7 @@ export async function loadGhostLaps(
         `SELECT ghost_laps.*, NULL::integer AS medal_rank
          FROM ${schema}.ghost_laps AS ghost_laps
          WHERE ghost_laps.track_id = $1 AND ghost_laps.race_source = 'live'
+           AND ${acceptedGhostBikeMetricsSql('ghost_laps')}
            AND ghost_laps.owner_key = ANY($2::text[])
            AND ($3::text IS NULL OR ghost_laps.route_key LIKE $3)
          ORDER BY ghost_laps.finish_time_ms ASC, ghost_laps.saved_at DESC, ghost_laps.id
@@ -12333,9 +12620,9 @@ export async function loadGhostLaps(
         [trackId, personalKeys, requestedSprintRouteSuffix, personalLimit],
       ) : Promise.resolve(null),
     ]);
-    globalRows = globalResult?.rows ?? [];
-    friendRows = friendResult?.rows ?? [];
-    personalRows = personalResult?.rows ?? [];
+    globalRows = (globalResult?.rows ?? []).filter(storedGhostHasAcceptedBikeMetrics);
+    friendRows = (friendResult?.rows ?? []).filter(storedGhostHasAcceptedBikeMetrics);
+    personalRows = (personalResult?.rows ?? []).filter(storedGhostHasAcceptedBikeMetrics);
     for (const row of friendRows) authorizedFriends.add(row.owner_key);
   }
 
@@ -12348,14 +12635,15 @@ export async function loadGhostLaps(
     || Date.parse(right.saved_at) - Date.parse(left.saved_at)
     || String(left.id).localeCompare(String(right.id))
   ));
-  return rows.map((row) => {
+  return rows.flatMap((row) => {
     const source = personal.has(row.owner_key)
       ? 'personal'
       : authorizedFriends.has(row.owner_key)
         ? 'friend'
         : 'top';
     const includeAnalytics = personal.has(row.owner_key) || Boolean(row.analytics_public);
-    return ghostFromRow(row, source, includeAnalytics);
+    const ghost = ghostFromRow(row, source, includeAnalytics);
+    return ghost ? [ghost] : [];
   });
 }
 
@@ -12382,6 +12670,7 @@ export async function loadPersonalGhostLaps(
          DENSE_RANK() OVER (PARTITION BY route_key ORDER BY finish_time_ms ASC) AS medal_rank
        FROM ${schema}.ghost_laps AS ghost_laps
        WHERE track_id = $1 AND race_source = 'live'
+         AND ${acceptedGhostBikeMetricsSql('ghost_laps')}
          AND ($3::text IS NULL OR route_key LIKE $3)
      ) AS ranked
      WHERE owner_key = ANY($2::text[])
@@ -12396,6 +12685,7 @@ export async function loadPersonalGhostLaps(
       .filter((row) => (
         row.track_id === trackId
         && row.race_source === 'live'
+        && storedGhostHasAcceptedBikeMetrics(row)
         && (!requestedSprintRouteSuffix
           || row.route_key.endsWith(requestedSprintRouteSuffix.slice(1)))
       ))
@@ -12413,9 +12703,12 @@ export async function loadPersonalGhostLaps(
     const selected = new Set(personalKeys);
     rows = allRows.filter((row) => selected.has(row.owner_key)).slice(0, safeLimit);
   } else {
-    rows = result?.rows ?? [];
+    rows = (result?.rows ?? []).filter(storedGhostHasAcceptedBikeMetrics);
   }
-  return rows.map((row) => ghostFromRow(row, 'personal', true));
+  return rows.flatMap((row) => {
+    const ghost = ghostFromRow(row, 'personal', true);
+    return ghost ? [ghost] : [];
+  });
 }
 
 function map3DUsageWindow(now = new Date()) {
@@ -12714,6 +13007,7 @@ export async function loadRecoveryLearningSummaries(ownerProfileKey, activityTyp
         && episode.readyReason === 'heart-rate-target'
         && Number(episode.recoverySummary?.recoverySeconds) > 0
         && Number(episode.recoverySummary?.sampleCount) >= 3
+        && storedBikeMetricsAreAccepted(episode.effortSummary)
       ))
       .sort((left, right) => right.readyAt - left.readyAt)
       .slice(0, boundedLimit)
@@ -12735,6 +13029,7 @@ export async function loadRecoveryLearningSummaries(ownerProfileKey, activityTyp
        AND cancelled_at IS NULL
        AND ready_reason = 'heart-rate-target'
        AND COALESCE((recovery_summary ->> 'sampleCount')::integer, 0) >= 3
+       AND ${acceptedRecordedBikeMetricsSql('effort_summary')}
      ORDER BY ready_at DESC
      LIMIT $4`,
     [ownerProfileKey, activityType, targetBpm, boundedLimit],

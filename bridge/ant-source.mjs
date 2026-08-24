@@ -1,4 +1,8 @@
 import { EventEmitter } from 'node:events';
+import {
+  acceptedWattbikeSpeedKph,
+  cleanWattbikeCadenceRpm,
+} from './bike-metric-sanity.mjs';
 
 const defaultProfileIds = ['power', 'fitness', 'speed-cadence', 'cadence', 'speed', 'raw'];
 const commonMetricEvents = ['fitnessData', 'powerData', 'speedData', 'cadenceData'];
@@ -106,10 +110,6 @@ function speedKphFromRaw(raw) {
   return null;
 }
 
-function speedSourceFromRaw(raw) {
-  return speedKphFromRaw(raw) == null ? null : 'measured';
-}
-
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -125,7 +125,7 @@ function estimateSpeedKphFromDrive(rawMetrics, previousSample, now) {
   const baseDriveKph = finiteNumber(process.env.WATTBIKE_ANT_BASE_DRIVE_KPH) ?? defaultBaseDriveKph;
   const minDriveWatts = finiteNumber(process.env.WATTBIKE_ANT_MIN_DRIVE_WATTS) ?? defaultMinDriveWatts;
   const minDriveCadence = finiteNumber(process.env.WATTBIKE_ANT_MIN_DRIVE_CADENCE) ?? defaultMinDriveCadence;
-  const previousKph = finiteNumber(previousSample?.speedKph) ?? 0;
+  const previousKph = acceptedWattbikeSpeedKph(previousSample?.speedKph) ?? 0;
   const previousAt = finiteNumber(previousSample?.speedAt ?? previousSample?.at) ?? now;
   const dt = clamp((now - previousAt) / 1000, 0.08, 1.4);
   const watts = finiteNumber(rawMetrics.watts) ?? 0;
@@ -147,7 +147,7 @@ function estimateSpeedKphFromDrive(rawMetrics, previousSample, now) {
   return previousKph + (targetKph - previousKph) * alpha;
 }
 
-function normalizeAntSample(profileId, eventName, raw, previousSample) {
+export function normalizeAntSample(profileId, eventName, raw, previousSample) {
   const now = Date.now();
   const deviceId = firstNumber(raw, ['DeviceId', 'DeviceID', 'deviceId', 'id']);
   if (deviceId == null) {
@@ -162,18 +162,28 @@ function normalizeAntSample(profileId, eventName, raw, previousSample) {
     'computedPower',
     'watts',
   ]);
-  const cadence = firstNumber(raw, [
+  const rawCadence = firstNumber(raw, [
     'Cadence',
     'InstantaneousCadence',
     'CalculatedCadence',
     'cadence',
   ]);
-  const measuredSpeedKph = speedKphFromRaw(raw);
+  const cadence = rawCadence == null ? null : cleanWattbikeCadenceRpm(rawCadence);
+  const cadenceWasRejected = rawCadence != null && cadence == null;
+  const rawMeasuredSpeedKph = cadenceWasRejected ? null : speedKphFromRaw(raw);
+  const measuredSpeedKph = rawMeasuredSpeedKph == null
+    ? null
+    : acceptedWattbikeSpeedKph(rawMeasuredSpeedKph);
   const estimatedSpeedKph = measuredSpeedKph == null
-    ? estimateSpeedKphFromDrive({ watts, cadence }, previousSample, now)
+    ? cadenceWasRejected ? null : estimateSpeedKphFromDrive({ watts, cadence }, previousSample, now)
     : null;
-  const speedKph = measuredSpeedKph ?? estimatedSpeedKph;
-  const speedSource = speedSourceFromRaw(raw) ?? (speedKph == null ? previousSample?.speedSource : 'estimated');
+  const speedCandidateKph = measuredSpeedKph ?? estimatedSpeedKph;
+  const speedKph = speedCandidateKph == null ? null : acceptedWattbikeSpeedKph(speedCandidateKph);
+  const speedSource = cadenceWasRejected
+    ? previousSample?.speedSource
+    : measuredSpeedKph != null
+      ? 'measured'
+      : (speedKph == null ? previousSample?.speedSource : 'estimated');
 
   if (watts == null && cadence == null && speedKph == null) {
     return null;

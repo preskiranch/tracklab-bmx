@@ -19,6 +19,7 @@ import {
   type ClubTabletSession,
   type ClubTabletSessionCredential,
 } from './clubTabletStorage';
+import { recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
 
 export * from './clubTabletStorage';
 
@@ -153,6 +154,10 @@ export async function flushClubTabletOutbox(credential = readStoredClubTabletSes
   if (!credential || !clubTabletSessionMatchesCurrentDevice(credential)) return 0;
   let sent = 0;
   for (const entry of readClubTabletOutbox().filter((candidate) => outboxEntryMatchesSession(candidate, credential))) {
+    if (!recordedBikeMetricsAreAccepted(entry.payload)) {
+      writeClubTabletOutbox(readClubTabletOutbox().filter((candidate) => candidate.id !== entry.id));
+      continue;
+    }
     try {
       await sendClubTabletOutboxEntry(entry, credential);
       sent += 1;

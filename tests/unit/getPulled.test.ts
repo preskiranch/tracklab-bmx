@@ -148,6 +148,12 @@ describe('Get Pulled test math and record categories', () => {
       cadence: 0,
       speedKph: 0,
     });
+    expect(getPulledMetrics(sample({ watts: 940, cadence: 923_334 }), 1_000)).toEqual({
+      live: true,
+      watts: 940,
+      cadence: 0,
+      speedKph: 0,
+    });
   });
 
   it('ramps demo pulls from rest and uses the same 44/16 rollout speed', () => {
@@ -203,6 +209,16 @@ describe('Get Pulled test math and record categories', () => {
       },
     });
 
+    expect(getPulledTakeoffSignal(sample({
+      at: 11_300,
+      cadenceAt: 11_300,
+      wattsAt: 11_300,
+      cadence: 923_334,
+      watts: 1,
+    }), armedAt, 11_310)).toMatchObject({
+      metrics: { cadence: 0, speedKph: 0 },
+    });
+
     const arm = createGetPulledSessionArm(player, 6_000, 8, 10_000, () => 'first-watt');
     const session = getPulledSessionStartFromArm(arm!, takeoff!.at);
     expect(session).toMatchObject({
@@ -246,5 +262,21 @@ describe('Get Pulled test math and record categories', () => {
 
     expect(accumulator.lastAt).toBe(2_000);
     expect(accumulator.distanceMeters).toBeCloseTo(1, 8);
+  });
+
+  it('drops an invalid cadence sample without advancing its integration clock', () => {
+    const boundary = addGetPulledSample(
+      createGetPulledAccumulator(),
+      { live: true, watts: 500, cadence: 200, speedKph: 52.6 },
+      1_000,
+    );
+    const rejected = addGetPulledSample(
+      boundary,
+      { live: true, watts: 500, cadence: 200.01, speedKph: 151_080.1 },
+      1_500,
+    );
+    expect(boundary).toMatchObject({ sampleCount: 1, peakCadence: 200, lastAt: 1_000 });
+    expect(rejected).toBe(boundary);
+    expect(rejected.distanceMeters).toBe(boundary.distanceMeters);
   });
 });

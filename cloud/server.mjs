@@ -51,6 +51,14 @@ import { createCommentaryCapacity } from './commentaryCapacity.mjs';
 import { createCommentarySpeechCache } from './commentarySpeechCache.mjs';
 import { instrumentHttpRequest, prometheusContentType } from '../shared/telemetry.mjs';
 import {
+  acceptedWattbikeCadenceRpm,
+  acceptedTrainingSpeedKph,
+  acceptedTrainingSpeedMph,
+  cleanWattbikeCadenceRpm,
+  maximumAcceptedWattbikeCadenceRpm,
+  maximumAcceptedTrainingSpeedKph,
+} from '../bridge/bike-metric-sanity.mjs';
+import {
   createRacerSubscriptionCheckout,
   racerMonthlyCents,
   squareCheckoutConfigStatus,
@@ -330,6 +338,19 @@ function pruneTransientState(now = Date.now()) {
 function sanitizeText(value, fallback, maxLength = 80) {
   const text = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
   return (text || fallback).slice(0, maxLength);
+}
+
+function nullableAcceptedWattbikeCadence(value) {
+  return value == null ? null : acceptedWattbikeCadenceRpm(value);
+}
+
+function nullableAcceptedTrainingSpeed(value) {
+  return value == null ? null : acceptedTrainingSpeedKph(value);
+}
+
+function acceptedTrainingVelocityMps(value) {
+  const velocityMps = Number(value);
+  return acceptedTrainingSpeedKph(velocityMps * 3.6) == null ? null : velocityMps;
 }
 
 function sanitizeRiderPhotoDataUrl(value) {
@@ -1650,6 +1671,18 @@ function sanitizeLocalRaceResult(value, index) {
     && sprintAirSetting >= 1
     && sprintAirSetting <= 10
   );
+  const topSpeedKph = acceptedTrainingSpeedKph(value.topSpeedKph ?? 0);
+  const averageSpeedKph = acceptedTrainingSpeedKph(value.averageSpeedKph ?? 0);
+  const topCadence = acceptedWattbikeCadenceRpm(value.topCadence ?? 0);
+  const averageCadence = acceptedWattbikeCadenceRpm(value.averageCadence ?? 0);
+  if (
+    topSpeedKph == null
+    || averageSpeedKph == null
+    || averageSpeedKph > topSpeedKph
+    || topCadence == null
+    || averageCadence == null
+    || averageCadence > topCadence
+  ) return null;
   return {
     playerId,
     riderName: sanitizeText(value.riderName, `Rider ${playerId}`, 64),
@@ -1658,10 +1691,10 @@ function sanitizeLocalRaceResult(value, index) {
     rank,
     finishTimeMs,
     distanceMeters: Math.max(0, finiteNumber(value.distanceMeters, 0)),
-    topSpeedKph: Math.max(0, finiteNumber(value.topSpeedKph, 0)),
-    averageSpeedKph: Math.max(0, finiteNumber(value.averageSpeedKph, 0)),
-    topCadence: Math.max(0, finiteNumber(value.topCadence, 0)),
-    averageCadence: Math.max(0, finiteNumber(value.averageCadence, 0)),
+    topSpeedKph,
+    averageSpeedKph,
+    topCadence,
+    averageCadence,
     topWatts: Math.max(0, finiteNumber(value.topWatts, 0)),
     averageWatts: Math.max(0, finiteNumber(value.averageWatts, 0)),
   };
@@ -2744,6 +2777,104 @@ function stripPrivateHeartRateFields(value, depth = 0) {
   )));
 }
 
+const recordedCadenceMetricKeys = new Set([
+  'averagecadence',
+  'cadence',
+  'cadencerpm',
+  'lastrawcadence',
+  'peakcadence',
+  'peakcadencerpm',
+  'rawcadence',
+  'topcadence',
+]);
+const recordedSpeedMetricKeys = new Set([
+  'averagespeedkph',
+  'peakspeedkph',
+  'rawspeedkph',
+  'speedkph',
+  'topspeedkph',
+]);
+const recordedSpeedMphMetricKeys = new Set([
+  'averagespeedmph',
+  'peakspeedmph',
+  'rawspeedmph',
+  'speedmph',
+  'topspeedmph',
+]);
+const recordedSpeedMpsMetricKeys = new Set([
+  'averagespeedmps',
+  'peakspeedmps',
+  'rawspeedmps',
+  'ridervelocitymps',
+  'speedmps',
+  'topspeedmps',
+  'velocitymps',
+]);
+
+function recordedBikeMetricsAreAccepted(value, depth = 0) {
+  if (depth > 32) return false;
+  if (Array.isArray(value)) {
+    return value.every((entry) => recordedBikeMetricsAreAccepted(entry, depth + 1));
+  }
+  if (!value || typeof value !== 'object') return true;
+  const entries = Object.entries(value);
+  const metrics = new Map(entries.map(([key, nested]) => (
+    [key.replace(/[^a-z0-9]/gi, '').toLowerCase(), nested]
+  )));
+  const pairAccepted = (averageKey, peakKeys) => peakKeys.every((peakKey) => {
+    const average = metrics.get(averageKey);
+    const peak = metrics.get(peakKey);
+    return average == null || peak == null || Number(average) <= Number(peak);
+  });
+  if (
+    !pairAccepted('averagecadence', ['topcadence', 'peakcadence'])
+    || !pairAccepted('averagespeedkph', ['topspeedkph', 'peakspeedkph'])
+    || !pairAccepted('averagespeedmph', ['topspeedmph', 'peakspeedmph'])
+    || !pairAccepted('averagespeedmps', ['topspeedmps', 'peakspeedmps'])
+  ) return false;
+  return entries.every(([key, nested]) => {
+    const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (recordedCadenceMetricKeys.has(normalizedKey)) {
+      return nested == null || acceptedWattbikeCadenceRpm(nested) != null;
+    }
+    if (recordedSpeedMetricKeys.has(normalizedKey)) {
+      return nested == null || acceptedTrainingSpeedKph(nested) != null;
+    }
+    if (recordedSpeedMphMetricKeys.has(normalizedKey)) {
+      return nested == null || acceptedTrainingSpeedMph(nested) != null;
+    }
+    if (recordedSpeedMpsMetricKeys.has(normalizedKey)) {
+      return nested == null || acceptedTrainingSpeedKph(Number(nested) * 3.6) != null;
+    }
+    return recordedBikeMetricsAreAccepted(nested, depth + 1);
+  });
+}
+
+function sanitizeRecordedBikeMetrics(value, depth = 0) {
+  if (depth > 32) return null;
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeRecordedBikeMetrics(entry, depth + 1));
+  }
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => {
+    const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (recordedCadenceMetricKeys.has(normalizedKey)) {
+      return [key, nullableAcceptedWattbikeCadence(nested)];
+    }
+    if (recordedSpeedMetricKeys.has(normalizedKey)) {
+      return [key, nullableAcceptedTrainingSpeed(nested)];
+    }
+    if (recordedSpeedMphMetricKeys.has(normalizedKey)) {
+      return [key, nested == null ? null : acceptedTrainingSpeedMph(nested)];
+    }
+    if (recordedSpeedMpsMetricKeys.has(normalizedKey)) {
+      const speedMps = Number(nested);
+      return [key, nested == null || acceptedTrainingSpeedKph(speedMps * 3.6) == null ? null : speedMps];
+    }
+    return [key, sanitizeRecordedBikeMetrics(nested, depth + 1)];
+  }));
+}
+
 function sanitizeTrainingSession(value) {
   if (!value || typeof value !== 'object') {
     return null;
@@ -2761,7 +2892,7 @@ function sanitizeTrainingSession(value) {
     ? value.details
     : {};
   const { club: _untrustedClubDetails, ...untrustedDetails } = submittedDetails;
-  const details = stripPrivateHeartRateFields(untrustedDetails);
+  const details = sanitizeRecordedBikeMetrics(stripPrivateHeartRateFields(untrustedDetails));
   return {
     id,
     activityType,
@@ -2790,7 +2921,7 @@ function publicTrainingSession(session, clubRole) {
   } = session;
   const privateHealthRedactedSession = {
     ...publicSession,
-    details: stripPrivateHeartRateFields(publicSession.details ?? {}),
+    details: sanitizeRecordedBikeMetrics(stripPrivateHeartRateFields(publicSession.details ?? {})),
   };
   const visiblePublicSession = clubRole === 'owner'
     ? { ...privateHealthRedactedSession, details: redactPrivatePower(privateHealthRedactedSession.details) }
@@ -3149,8 +3280,8 @@ const recoveryEffortBounds = Object.freeze({
   finishTimeMs: [100, 30 * 60 * 1_000],
   averagePowerWatts: [0, 3_000],
   peakPowerWatts: [0, 5_000],
-  peakCadenceRpm: [0, 300],
-  peakSpeedMps: [0, 50],
+  peakCadenceRpm: [0, maximumAcceptedWattbikeCadenceRpm],
+  peakSpeedMps: [0, maximumAcceptedTrainingSpeedKph / 3.6],
 });
 
 function sanitizeRecoveryEffortSummary(value) {
@@ -3191,8 +3322,12 @@ function recoveryMedian(values) {
 
 function smartRecoveryPlan(preference, history, effortSummary) {
   const maximumSeconds = Math.max(preference.maximumSeconds, preference.timerSeconds);
-  const clean = history.filter((item) => (
-    Number.isFinite(item.recoverySeconds)
+  const clean = history.map((item) => ({
+    ...item,
+    effortSummary: sanitizeRecoveryEffortSummary(item.effortSummary),
+  })).filter((item) => (
+    item.effortSummary != null
+    && Number.isFinite(item.recoverySeconds)
     && item.recoverySeconds >= preference.minimumSeconds
     && item.recoverySeconds <= maximumSeconds
     && Number.isInteger(item.sampleCount)
@@ -4344,6 +4479,8 @@ function sanitizeClubTabletRaceSummary(entry, tabletSession, playerId) {
 
 function sanitizeClubTabletExploreRider(entry, tabletSession, playerId) {
   if (!entry || typeof entry !== 'object' || clubTabletPlayerId(entry.playerId) !== playerId) return null;
+  const averageSpeedMph = acceptedTrainingSpeedMph(entry.averageSpeedMph ?? 0);
+  if (averageSpeedMph == null) return null;
   return {
     playerId,
     riderId: tabletSession.studioRiderId,
@@ -4352,12 +4489,24 @@ function sanitizeClubTabletExploreRider(entry, tabletSession, playerId) {
     riderName: tabletSession.riderName,
     ...(tabletSession.photoUrl ? { photoUrl: tabletSession.photoUrl } : {}),
     distanceMeters: boundedNumber(entry.distanceMeters, 0, 2_000_000),
-    averageSpeedMph: boundedNumber(entry.averageSpeedMph, 0, 150),
+    averageSpeedMph,
   };
 }
 
 function sanitizeClubTabletGetPulledRider(entry, tabletSession, playerId) {
   if (!entry || typeof entry !== 'object' || clubTabletPlayerId(entry.playerId) !== playerId) return null;
+  const averageCadence = acceptedWattbikeCadenceRpm(entry.averageCadence ?? 0);
+  const peakCadence = acceptedWattbikeCadenceRpm(entry.peakCadence ?? 0);
+  const averageSpeedKph = acceptedTrainingSpeedKph(entry.averageSpeedKph ?? 0);
+  const peakSpeedKph = acceptedTrainingSpeedKph(entry.peakSpeedKph ?? 0);
+  if (
+    averageCadence == null
+    || peakCadence == null
+    || averageCadence > peakCadence
+    || averageSpeedKph == null
+    || peakSpeedKph == null
+    || averageSpeedKph > peakSpeedKph
+  ) return null;
   return {
     playerId,
     riderId: tabletSession.studioRiderId,
@@ -4368,10 +4517,10 @@ function sanitizeClubTabletGetPulledRider(entry, tabletSession, playerId) {
     distanceMeters: boundedNumber(entry.distanceMeters, 0, 10_000),
     averageWatts: Math.round(boundedNumber(entry.averageWatts, 0, 5_000)),
     peakWatts: Math.round(boundedNumber(entry.peakWatts, 0, 5_000)),
-    averageCadence: Math.round(Math.max(0, finiteNumber(entry.averageCadence, 0))),
-    peakCadence: Math.round(Math.max(0, finiteNumber(entry.peakCadence, 0))),
-    averageSpeedKph: boundedNumber(entry.averageSpeedKph, 0, 150),
-    peakSpeedKph: boundedNumber(entry.peakSpeedKph, 0, 150),
+    averageCadence,
+    peakCadence,
+    averageSpeedKph,
+    peakSpeedKph,
   };
 }
 
@@ -4662,9 +4811,9 @@ function canonicalClubGroupTrainingTitle(session) {
 function validClubGroupRaceMetrics(summary, { dnf = false } = {}) {
   return summary
     && (dnf ? summary.finishTimeMs == null : summary.finishTimeMs > 0)
-    && summary.topSpeedKph <= 200
+    && summary.topSpeedKph <= maximumAcceptedTrainingSpeedKph
     && summary.averageSpeedKph <= summary.topSpeedKph
-    && summary.topCadence <= 320
+    && summary.topCadence <= maximumAcceptedWattbikeCadenceRpm
     && summary.averageCadence <= summary.topCadence
     && summary.topWatts <= 5_000
     && summary.averageWatts <= summary.topWatts;
@@ -4704,8 +4853,8 @@ function validRawClubGroupZoneResults(value, playerId, distanceMeters, { dnf = f
       !Number.isSafeInteger(rider.sampleCount)
       || rider.sampleCount < 0
       || rider.sampleCount > 1_000_000
-      || !validClubGroupZoneMetricPair(rider.averageSpeedKph, rider.topSpeedKph, 200)
-      || !validClubGroupZoneMetricPair(rider.averageCadence, rider.topCadence, 320)
+      || !validClubGroupZoneMetricPair(rider.averageSpeedKph, rider.topSpeedKph, maximumAcceptedTrainingSpeedKph)
+      || !validClubGroupZoneMetricPair(rider.averageCadence, rider.topCadence, maximumAcceptedWattbikeCadenceRpm)
       || !validClubGroupZoneMetricPair(rider.averageWatts, rider.topWatts, 5_000)
     ) return false;
     const entry = rider.entryElapsedMs;
@@ -4776,8 +4925,8 @@ function validClubGroupZoneResults(zoneResults, playerId, durationMs, distanceMe
       || !Number.isInteger(rider.sampleCount)
       || rider.sampleCount < 0
       || rider.sampleCount > 1_000_000
-      || !validClubGroupZoneMetricPair(rider.averageSpeedKph, rider.topSpeedKph, 200)
-      || !validClubGroupZoneMetricPair(rider.averageCadence, rider.topCadence, 320)
+      || !validClubGroupZoneMetricPair(rider.averageSpeedKph, rider.topSpeedKph, maximumAcceptedTrainingSpeedKph)
+      || !validClubGroupZoneMetricPair(rider.averageCadence, rider.topCadence, maximumAcceptedWattbikeCadenceRpm)
       || !validClubGroupZoneMetricPair(rider.averageWatts, rider.topWatts, 5_000)
     ) return false;
     const times = [rider.entryElapsedMs, rider.exitElapsedMs, rider.durationMs];
@@ -4804,9 +4953,9 @@ function validClubGroupGetPulledMetrics(rider) {
     && rider.averageWatts <= rider.peakWatts
     && rider.peakWatts <= 5_000
     && rider.averageCadence <= rider.peakCadence
-    && rider.peakCadence <= 320
+    && rider.peakCadence <= maximumAcceptedWattbikeCadenceRpm
     && rider.averageSpeedKph <= rider.peakSpeedKph
-    && rider.peakSpeedKph <= 160;
+    && rider.peakSpeedKph <= maximumAcceptedTrainingSpeedKph;
 }
 
 function sanitizeClubGroupTrainingCompletions(authorization, sharedSession, value, now = Date.now()) {
@@ -4943,7 +5092,9 @@ function sanitizeClubGroupTrainingCompletions(authorization, sharedSession, valu
       durationMs = heartRateActiveClockDuration(activeClockSegments, endedAt - assignment.startedAt);
       const rider = scoped.details?.riders?.[0];
       if (!rider || durationMs <= 0) return null;
-      rider.averageSpeedMph = (rider.distanceMeters / 1609.344) / (durationMs / 3_600_000);
+      const averageSpeedMph = (rider.distanceMeters / 1609.344) / (durationMs / 3_600_000);
+      if (acceptedTrainingSpeedMph(averageSpeedMph) == null) return null;
+      rider.averageSpeedMph = averageSpeedMph;
       rider.resultStatus = window.resultStatus;
       scoped.details.activeClockSegments = activeClockSegments;
     }
@@ -5135,10 +5286,10 @@ function sanitizeClubMonitorSprintResult(value, binding, now = Date.now()) {
   const distanceMeters = requiredClubMonitorMetric(value.distanceMeters, 0, 20_000);
   const averageWatts = requiredClubMonitorMetric(value.averageWatts, 0, 5_000);
   const peakWatts = requiredClubMonitorMetric(value.peakWatts, 0, 5_000);
-  const averageCadence = requiredClubMonitorMetric(value.averageCadence, 0, 320);
-  const peakCadence = requiredClubMonitorMetric(value.peakCadence, 0, 320);
-  const averageSpeedKph = requiredClubMonitorMetric(value.averageSpeedKph, 0, 160);
-  const peakSpeedKph = requiredClubMonitorMetric(value.peakSpeedKph, 0, 160);
+  const averageCadence = requiredClubMonitorMetric(value.averageCadence, 0, maximumAcceptedWattbikeCadenceRpm);
+  const peakCadence = requiredClubMonitorMetric(value.peakCadence, 0, maximumAcceptedWattbikeCadenceRpm);
+  const averageSpeedKph = requiredClubMonitorMetric(value.averageSpeedKph, 0, maximumAcceptedTrainingSpeedKph);
+  const peakSpeedKph = requiredClubMonitorMetric(value.peakSpeedKph, 0, maximumAcceptedTrainingSpeedKph);
   if (
     !Number.isSafeInteger(startedAt)
     || startedAt !== binding.startedAt
@@ -5331,10 +5482,13 @@ function sanitizeClubLiveProgress(value) {
 
 function sanitizeClubLiveMetrics(value) {
   const input = value && typeof value === 'object' ? value : {};
+  const cadence = cleanWattbikeCadenceRpm(input.cadence ?? 0);
+  const speedKph = acceptedTrainingSpeedKph(input.speedKph ?? 0);
+  if (cadence == null || speedKph == null) return null;
   return {
     watts: Math.round(boundedNumber(input.watts, 0, 5_000)),
-    cadence: Math.max(0, finiteNumber(input.cadence, 0)),
-    speedKph: boundedNumber(input.speedKph, 0, 200),
+    cadence,
+    speedKph,
     distanceMeters: boundedNumber(input.distanceMeters, 0, 10_000_000),
     elapsedMs: boundedNumber(input.elapsedMs, 0, 24 * 60 * 60 * 1000),
     ...(Number.isFinite(Number(input.position)) ? {
@@ -5370,6 +5524,8 @@ function sanitizeClubLiveSnapshot(payload, membership, user, now = Date.now(), p
     `${activityType}-${studioRiderId}-${startedAt}`,
     160,
   );
+  const metrics = sanitizeClubLiveMetrics(payload?.metrics);
+  if (!metrics) return null;
   return {
     id: clubLiveSessionKey(clubId, studioRiderId),
     clubId,
@@ -5380,7 +5536,7 @@ function sanitizeClubLiveSnapshot(payload, membership, user, now = Date.now(), p
     activityType,
     status,
     progress: sanitizeClubLiveProgress(payload?.progress),
-    metrics: sanitizeClubLiveMetrics(payload?.metrics),
+    metrics,
     ...(sanitizeText(payload?.trackName, '', 160) ? {
       trackName: sanitizeText(payload.trackName, '', 160),
     } : {}),
@@ -5788,7 +5944,12 @@ function sanitizeGhostPoint(value) {
 
   const elapsedMs = Math.max(0, Math.round(finiteNumber(value.elapsedMs, Number.NaN)));
   const distanceMeters = Math.max(0, finiteNumber(value.distanceMeters, Number.NaN));
-  if (!Number.isFinite(elapsedMs) || !Number.isFinite(distanceMeters)) {
+  const velocityMps = finiteNumber(value.velocityMps, 0);
+  if (
+    !Number.isFinite(elapsedMs)
+    || !Number.isFinite(distanceMeters)
+    || acceptedTrainingVelocityMps(velocityMps) == null
+  ) {
     return null;
   }
 
@@ -5799,7 +5960,7 @@ function sanitizeGhostPoint(value) {
   return {
     elapsedMs,
     distanceMeters: Number(distanceMeters.toFixed(2)),
-    velocityMps: Number(Math.max(0, finiteNumber(value.velocityMps, 0)).toFixed(2)),
+    velocityMps: Number(velocityMps.toFixed(2)),
     phase: value.phase === 'airborne' || value.phase === 'landing' ? value.phase : 'pedaling',
     pitch: Number(finiteNumber(value.pitch, 0).toFixed(3)),
     rank: Math.max(1, Math.min(64, Math.round(finiteNumber(value.rank, 1)))),
@@ -5841,10 +6002,10 @@ function sanitizeGhostZoneResult(value) {
         entryElapsedMs: nullableGhostMetric(rider.entryElapsedMs),
         exitElapsedMs: nullableGhostMetric(rider.exitElapsedMs),
         durationMs: nullableGhostMetric(rider.durationMs),
-        topSpeedKph: nullableGhostMetric(rider.topSpeedKph),
-        averageSpeedKph: nullableGhostMetric(rider.averageSpeedKph),
-        topCadence: nullableGhostMetric(rider.topCadence),
-        averageCadence: nullableGhostMetric(rider.averageCadence),
+        topSpeedKph: nullableAcceptedTrainingSpeed(rider.topSpeedKph),
+        averageSpeedKph: nullableAcceptedTrainingSpeed(rider.averageSpeedKph),
+        topCadence: nullableAcceptedWattbikeCadence(rider.topCadence),
+        averageCadence: nullableAcceptedWattbikeCadence(rider.averageCadence),
         topWatts: nullableGhostMetric(rider.topWatts),
         averageWatts: nullableGhostMetric(rider.averageWatts),
       }];
@@ -5861,9 +6022,17 @@ function sanitizeGhostLapPayload(value, profileKey) {
   const ownerKey = sanitizeGuestKey(value.ownerKey ?? profileKey, profileKey);
   const riderName = sanitizeText(value.riderName, '', 80);
   const finishTimeMs = Math.round(finiteNumber(value.finishTimeMs, Number.NaN));
-  const points = Array.isArray(value.points)
-    ? value.points.slice(0, 900).map(sanitizeGhostPoint).filter(Boolean).sort((left, right) => left.elapsedMs - right.elapsedMs)
-    : [];
+  const rawPoints = Array.isArray(value.points) ? value.points.slice(0, 900) : [];
+  const pointSpeedWasRejected = rawPoints.some((point) => (
+    point != null
+    && typeof point === 'object'
+    && point.velocityMps != null
+    && acceptedTrainingVelocityMps(point.velocityMps) == null
+  ));
+  const points = rawPoints
+    .map(sanitizeGhostPoint)
+    .filter(Boolean)
+    .sort((left, right) => left.elapsedMs - right.elapsedMs);
   const lapCount = Math.max(1, Math.min(20, Math.round(finiteNumber(value.lapCount, 1))));
   const zoneResults = Array.isArray(value.zoneResults)
     ? value.zoneResults.slice(0, 500).map(sanitizeGhostZoneResult).filter(Boolean)
@@ -5890,6 +6059,9 @@ function sanitizeGhostLapPayload(value, profileKey) {
     || !Number.isFinite(finishTimeMs)
     || finishTimeMs <= 0
     || points.length < 2
+    || pointSpeedWasRejected
+    || !recordedBikeMetricsAreAccepted(value.summary)
+    || !recordedBikeMetricsAreAccepted(value.zoneResults)
   ) {
     return null;
   }
@@ -5915,18 +6087,25 @@ function sanitizeGhostLapPayload(value, profileKey) {
     savedAt: Math.max(0, Math.round(finiteNumber(value.savedAt, Date.now()))),
     analyticsPublic: Boolean(value.analyticsPublic),
     medalRank: null,
-    summary: stripPrivateHeartRateFields(
+    summary: sanitizeRecordedBikeMetrics(stripPrivateHeartRateFields(
       value.summary && typeof value.summary === 'object' ? value.summary : {},
-    ),
+    )),
     zoneResults,
     points,
   };
 }
 
 function publicGhostLap(value) {
-  return value && typeof value === 'object'
-    ? stripPrivateHeartRateFields(value)
-    : value;
+  if (
+    !value
+    || typeof value !== 'object'
+    || !recordedBikeMetricsAreAccepted(value.summary)
+    || !recordedBikeMetricsAreAccepted(value.zoneResults)
+    || (Array.isArray(value.points) && value.points.some((point) => (
+      point?.velocityMps != null && acceptedTrainingVelocityMps(point.velocityMps) == null
+    )))
+  ) return null;
+  return sanitizeRecordedBikeMetrics(stripPrivateHeartRateFields(value));
 }
 
 function readJsonBody(request, maxBytes = 1_000_000) {
@@ -6112,12 +6291,24 @@ function sanitizeExploreState(value, client, room) {
 
   const allowedRiderCount = roomRacerSeatCountForMember(room, client.id);
   const routeDistanceMeters = room.exploreRoute.distanceMeters;
-  const riders = Array.isArray(value.riders)
-    ? value.riders.slice(0, allowedRiderCount).map((rider, index) => {
+  const submittedRiders = Array.isArray(value.riders)
+    ? value.riders.slice(0, allowedRiderCount)
+    : [];
+  if (submittedRiders.some((rider) => (
+    (rider?.cadence != null && acceptedWattbikeCadenceRpm(rider.cadence) == null)
+    || acceptedTrainingVelocityMps(rider?.velocityMps ?? 0) == null
+  ))) {
+    // Reject the whole packet so an anomalous cadence cannot replace the last
+    // good multiplayer position with a zeroed or fabricated rider state.
+    return null;
+  }
+  const riders = submittedRiders
+    .map((rider, index) => {
       const colorName = ['lime', 'red', 'blue', 'yellow'].includes(rider?.colorName)
         ? rider.colorName
         : ['lime', 'red', 'blue', 'yellow'][index % 4];
       const photoUrl = sanitizeRiderPhotoDataUrl(rider?.photoUrl);
+      const cadence = nullableAcceptedWattbikeCadence(rider?.cadence);
       return {
         id: sanitizeText(rider?.id, `${client.id}:${index + 1}`, 120),
         clientId: client.id,
@@ -6127,10 +6318,8 @@ function sanitizeExploreState(value, client, room) {
         colorName,
         accent: sanitizeText(rider?.accent, '#7ade36', 24),
         distanceMeters: Math.max(0, Math.min(routeDistanceMeters, finiteNumber(rider?.distanceMeters, 0))),
-        velocityMps: Math.max(0, Math.min(60, finiteNumber(rider?.velocityMps, 0))),
-        cadence: rider?.cadence == null
-          ? null
-          : Math.max(0, finiteNumber(rider.cadence, 0)),
+        velocityMps: acceptedTrainingVelocityMps(rider?.velocityMps ?? 0),
+        cadence,
         signal: Math.max(0, Math.min(1, finiteNumber(rider?.signal, 0))),
         recommendedAirSetting: Math.max(
           1,
@@ -6139,8 +6328,7 @@ function sanitizeExploreState(value, client, room) {
         finishedAt: nullableFiniteNumber(rider?.finishedAt),
         at: Date.now(),
       };
-    })
-    : [];
+    });
 
   return {
     sessionId: sanitizeText(value.sessionId, room.exploreSession?.id ?? `${room.id}:${routeId}`, 120),
@@ -6184,10 +6372,6 @@ function sanitizeRaceSummaryEntry(value, index) {
     const number = nullableFiniteNumber(metric);
     return number == null ? null : Math.max(0, Math.min(max, number));
   };
-  const nullableCadence = (metric) => {
-    const number = nullableFiniteNumber(metric);
-    return number == null ? null : Math.max(0, number);
-  };
 
   return {
     playerId,
@@ -6200,11 +6384,27 @@ function sanitizeRaceSummaryEntry(value, index) {
     thirtyFootTimeMs: nullableMetric(value.thirtyFootTimeMs, 60 * 1000),
     distanceMeters: Math.max(0, Math.min(100_000, finiteNumber(value.distanceMeters, 0))),
     sampleCount: Math.max(0, Math.min(1_000_000, Math.round(finiteNumber(value.sampleCount, 0)))),
-    topSpeedKph: nullableMetric(value.topSpeedKph, 160),
-    averageSpeedKph: nullableMetric(value.averageSpeedKph, 160),
-    topCadence: nullableCadence(value.topCadence),
-    averageCadence: nullableCadence(value.averageCadence),
+    topSpeedKph: nullableAcceptedTrainingSpeed(value.topSpeedKph),
+    averageSpeedKph: nullableAcceptedTrainingSpeed(value.averageSpeedKph),
+    topCadence: nullableAcceptedWattbikeCadence(value.topCadence),
+    averageCadence: nullableAcceptedWattbikeCadence(value.averageCadence),
   };
+}
+
+function raceSummaryBikeMetricsAreAccepted(value) {
+  if (!value || typeof value !== 'object') return false;
+  const topCadence = value.topCadence;
+  const averageCadence = value.averageCadence;
+  const topSpeedKph = value.topSpeedKph;
+  const averageSpeedKph = value.averageSpeedKph;
+  if (
+    (topCadence != null && acceptedWattbikeCadenceRpm(topCadence) == null)
+    || (averageCadence != null && acceptedWattbikeCadenceRpm(averageCadence) == null)
+    || (topSpeedKph != null && acceptedTrainingSpeedKph(topSpeedKph) == null)
+    || (averageSpeedKph != null && acceptedTrainingSpeedKph(averageSpeedKph) == null)
+  ) return false;
+  return (topCadence == null || averageCadence == null || Number(averageCadence) <= Number(topCadence))
+    && (topSpeedKph == null || averageSpeedKph == null || Number(averageSpeedKph) <= Number(topSpeedKph));
 }
 
 function sanitizeRaceState(value, client, room) {
@@ -6217,8 +6417,24 @@ function sanitizeRaceState(value, client, room) {
     (room.raceStates.get(client.id)?.riders ?? [])
       .map((rider) => [rider.id, sanitizeRiderPhotoDataUrl(rider.photoUrl)]),
   );
-  const riders = Array.isArray(value.riders)
-    ? value.riders.slice(0, allowedRiderCount).map((rider, index) => {
+  const submittedRiders = Array.isArray(value.riders)
+    ? value.riders.slice(0, allowedRiderCount)
+    : [];
+  if (submittedRiders.some((rider) => (
+    (rider?.cadence != null && acceptedWattbikeCadenceRpm(rider.cadence) == null)
+    || acceptedTrainingVelocityMps(rider?.velocity ?? 0) == null
+    || (rider?.speedKph != null && acceptedTrainingSpeedKph(rider.speedKph) == null)
+  ))) {
+    return null;
+  }
+  const submittedSummary = Array.isArray(value.summary)
+    ? value.summary.slice(0, allowedRiderCount)
+    : [];
+  if (submittedSummary.some((summary) => !raceSummaryBikeMetricsAreAccepted(summary))) {
+    return null;
+  }
+  const riders = submittedRiders
+    .map((rider, index) => {
       const colorName = ['lime', 'red', 'blue', 'yellow'].includes(rider?.colorName)
         ? rider.colorName
         : ['lime', 'red', 'blue', 'yellow'][index % 4];
@@ -6226,6 +6442,7 @@ function sanitizeRaceState(value, client, room) {
       const photoUrl = Object.prototype.hasOwnProperty.call(rider ?? {}, 'photoUrl')
         ? sanitizeRiderPhotoDataUrl(rider?.photoUrl)
         : previousRiderPhotos.get(riderId) ?? '';
+      const cadence = nullableAcceptedWattbikeCadence(rider?.cadence);
 
       return {
         id: riderId,
@@ -6235,20 +6452,19 @@ function sanitizeRaceState(value, client, room) {
         colorName,
         accent: sanitizeText(rider?.accent, '#7ade36', 24),
         distance: Math.max(0, finiteNumber(rider?.distance, 0)),
-        velocity: Math.max(0, finiteNumber(rider?.velocity, 0)),
+        velocity: acceptedTrainingVelocityMps(rider?.velocity ?? 0),
         boost: Math.max(0, Math.min(1, finiteNumber(rider?.boost, 0))),
         air: Math.max(0, finiteNumber(rider?.air, 0)),
         pitch: Math.max(-45, Math.min(45, finiteNumber(rider?.pitch, 0))),
         phase: ['pedaling', 'airborne', 'landing'].includes(rider?.phase) ? rider.phase : 'pedaling',
         rank: Math.max(1, Math.min(64, Math.round(finiteNumber(rider?.rank, index + 1)))),
         finishedAt: nullableFiniteNumber(rider?.finishedAt),
-        cadence: nullableFiniteNumber(rider?.cadence),
-        speedKph: nullableFiniteNumber(rider?.speedKph),
+        cadence,
+        speedKph: nullableAcceptedTrainingSpeed(rider?.speedKph),
         signal: Math.max(0, Math.min(1, finiteNumber(rider?.signal, 0))),
         sampleAt: nullableFiniteNumber(rider?.sampleAt),
       };
-    })
-    : [];
+    });
 
   return {
     sessionId: sanitizeText(value.sessionId, `${room.id}:${client.guestKey}:${value.trackId ?? room.track.id}`, 160),
@@ -6259,9 +6475,8 @@ function sanitizeRaceState(value, client, room) {
     raceState: ['ready', 'racing', 'finished'].includes(value.raceState) ? value.raceState : 'ready',
     at: Date.now(),
     riders,
-    summary: Array.isArray(value.summary)
-      ? value.summary
-        .slice(0, allowedRiderCount)
+    summary: submittedSummary.length > 0
+      ? submittedSummary
         .map(sanitizeRaceSummaryEntry)
         .filter(Boolean)
       : [],
@@ -10506,6 +10721,10 @@ async function handleClubGroupTrainingHistoryApi(request, response, requestUrl) 
       return;
     }
     const payload = await readJsonBody(request, 900_000);
+    if (!recordedBikeMetricsAreAccepted(payload?.session?.details)) {
+      writeJson(response, 400, { error: 'Assigned-session bike metrics are outside the accepted recording range.' });
+      return;
+    }
     if (!exactObjectKeys(payload, new Set(['authorizationId', 'session', 'riderWindows']))) {
       writeJson(response, 400, { error: 'Submit only the authorized shared session and exact rider finish windows.' });
       return;
@@ -12726,6 +12945,10 @@ async function serveStatic(request, response) {
       return;
     }
     const payload = await readJsonBody(request, 900_000);
+    if (!recordedBikeMetricsAreAccepted(payload?.session?.details)) {
+      writeJson(response, 400, { error: 'The completed activity contains invalid bike metrics.' });
+      return;
+    }
     const trainingSession = sanitizeTrainingSession(payload?.session);
     const scopedSession = trainingSession && scopeTrainingSessionToClubTabletAthlete(
       trainingSession,
@@ -12871,7 +13094,7 @@ async function serveStatic(request, response) {
       writeJson(response, 200, {
         trackId,
         persistence: persistence.persistenceEnabled(),
-        ghosts: ghosts.map(publicGhostLap),
+        ghosts: ghosts.map(publicGhostLap).filter(Boolean),
       }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -13406,6 +13629,10 @@ async function serveStatic(request, response) {
 
     if (request.method === 'POST') {
       const payload = await readJsonBody(request, 900_000);
+      if (!recordedBikeMetricsAreAccepted(payload?.session?.details)) {
+        writeJson(response, 400, { error: 'The training session contains invalid bike metrics.' });
+        return;
+      }
       const trainingSession = sanitizeTrainingSession(payload?.session);
       if (!trainingSession) {
         writeJson(response, 400, { error: 'A valid TrackLab training session is required.' });
@@ -13579,7 +13806,7 @@ async function serveStatic(request, response) {
       writeJson(response, 200, {
         trackId,
         persistence: persistence.persistenceEnabled(),
-        ghosts: ghosts.map(publicGhostLap),
+        ghosts: ghosts.map(publicGhostLap).filter(Boolean),
       });
       return;
     }
@@ -13632,13 +13859,17 @@ async function serveStatic(request, response) {
     const sessionId = sanitizeText(payload?.sessionId, '', 160);
     const trackId = sanitizeText(payload?.trackId, '', 140);
     const trackName = sanitizeText(payload?.trackName, '', 140);
-    const summaries = Array.isArray(payload?.summaries)
-      ? payload.summaries
-        .slice(0, maxRaceBikeCount)
-        .map(sanitizeLocalRaceResult)
-        .filter(Boolean)
+    const submittedSummaries = Array.isArray(payload?.summaries)
+      ? payload.summaries.slice(0, maxRaceBikeCount)
       : [];
-    if (!sessionId || !trackId || !trackName || summaries.length === 0) {
+    const summaries = submittedSummaries.map(sanitizeLocalRaceResult);
+    if (
+      !sessionId
+      || !trackId
+      || !trackName
+      || summaries.length === 0
+      || summaries.some((summary) => summary == null)
+    ) {
       writeJson(response, 400, { error: 'A session, track, and finished race summaries are required.' });
       return;
     }

@@ -15,6 +15,7 @@ type HeartRateMetricProps = {
   label?: string;
   compact?: boolean;
   className?: string;
+  simulated?: boolean;
 };
 
 function validBpm(value: number | null | undefined) {
@@ -59,6 +60,7 @@ export function HeartRateMetric({
   label = 'Heart rate',
   compact = false,
   className = '',
+  simulated = false,
 }: HeartRateMetricProps) {
   const reading = heartRateReadingState(bpm, recordedAt, now);
 
@@ -66,16 +68,17 @@ export function HeartRateMetric({
     <div
       className={`heart-rate-metric ${reading.state}${compact ? ' compact' : ''}${className ? ` ${className}` : ''}`}
       data-heart-rate-state={reading.state}
+      data-heart-rate-source={simulated ? 'demo-simulated' : 'apple-watch'}
       role="status"
       aria-live="polite"
       aria-label={reading.bpm == null
         ? `${label}: ${reading.detail}`
-        : `${label}: ${reading.bpm} beats per minute, ${reading.detail}`}
+        : `${simulated ? 'Simulated ' : ''}${label}: ${reading.bpm} beats per minute, ${reading.detail}`}
     >
       <HeartPulse aria-hidden="true" size={compact ? 17 : 21} />
       <span>
         <strong>{reading.bpm ?? '—'}</strong>
-        <small>{reading.bpm == null ? reading.detail : 'BPM'}</small>
+        <small>{reading.bpm == null ? reading.detail : simulated ? 'Simulated BPM' : 'BPM'}</small>
       </span>
     </div>
   );

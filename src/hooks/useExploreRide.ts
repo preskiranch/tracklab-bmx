@@ -20,6 +20,7 @@ import type {
   PlayerSlot,
 } from '../types';
 import type { HeartRateActiveClockSegment } from '../lib/heartRate';
+import { cleanBikeCadenceRpm, cleanBikeWatts } from '../lib/bikeSampleSanity';
 
 export type ExploreRideStatus = 'ready' | 'riding' | 'paused' | 'finished';
 
@@ -40,6 +41,28 @@ export type ExploreRideRestoreState = {
 };
 
 const exploreSampleFreshMs = 3_000;
+
+export function acceptedExploreLiveMetrics(sample: BikeSample | undefined, now: number) {
+  const sampleIsFresh = Boolean(sample && now - sample.at <= exploreSampleFreshMs);
+  const cadenceRecordedAt = sample ? sample.cadenceAt ?? sample.at : 0;
+  const wattsRecordedAt = sample ? sample.wattsAt ?? sample.at : 0;
+  const cadenceIsFresh = Boolean(
+    sample
+    && sample.cadence != null
+    && now - cadenceRecordedAt <= exploreSampleFreshMs,
+  );
+  const wattsIsFresh = Boolean(sample && now - wattsRecordedAt <= exploreSampleFreshMs);
+  const cadence = cadenceIsFresh ? cleanBikeCadenceRpm(sample?.cadence) ?? 0 : 0;
+  const watts = wattsIsFresh ? cleanBikeWatts(sample?.watts) ?? 0 : 0;
+  return {
+    sampleIsFresh,
+    cadenceIsFresh,
+    wattsIsFresh,
+    cadence,
+    watts,
+    driveActive: cadenceIsFresh && wattsIsFresh && exploreLiveDriveActive(cadence, watts),
+  };
+}
 
 function initialExploreRiders(
   clientId: string,
@@ -262,15 +285,15 @@ export function useExploreRide({
       setRiders((current) => current.map((rider) => {
         const player = ridePlayersRef.current.find((item) => item.id === rider.playerId);
         const sample = player?.deviceId == null ? undefined : samplesRef.current.get(player.deviceId);
-        const sampleIsFresh = Boolean(sample && now - sample.at <= exploreSampleFreshMs);
+        const liveMetrics = acceptedExploreLiveMetrics(sample, now);
         const demoMotion = demoModeRef.current
           ? exploreDemoRiderMotion(rider.playerId, exploreElapsedSeconds)
           : null;
         const demoTargetVelocityMps = (demoMotion?.speedMph ?? 0) * 0.44704;
         const demoTargetCadence = exploreCadenceRpmFromVelocityMps(demoTargetVelocityMps);
-        const liveCadence = sampleIsFresh ? Math.max(0, sample?.cadence ?? 0) : 0;
-        const liveWatts = sampleIsFresh ? Math.max(0, sample?.watts ?? 0) : 0;
-        const liveDriveActive = sampleIsFresh && exploreLiveDriveActive(liveCadence, liveWatts);
+        const liveCadence = liveMetrics.cadence;
+        const liveWatts = liveMetrics.watts;
+        const liveDriveActive = liveMetrics.driveActive;
         const cadence = demoMotion
           ? (demoMotion.pedaling ? demoTargetCadence : 0)
           : liveDriveActive ? liveCadence : 0;
@@ -301,13 +324,13 @@ export function useExploreRide({
           ...(player?.photoUrl ? { photoUrl: player.photoUrl } : {}),
           distanceMeters,
           velocityMps: finished ? 0 : velocityMps,
-          cadence: demoMotion || sampleIsFresh ? cadence : null,
+          cadence: demoMotion || liveMetrics.cadenceIsFresh ? cadence : null,
           watts: demoMotion
             ? (demoMotion.pedaling ? Math.round(95 + demoMotion.speedMph * 6.5) : 0)
             : liveWatts,
           signal: demoMotion
             ? 0.96
-            : sampleIsFresh ? Math.max(0, Math.min(1, sample?.signal ?? 0)) : 0,
+            : liveMetrics.sampleIsFresh ? Math.max(0, Math.min(1, sample?.signal ?? 0)) : 0,
           recommendedAirSetting,
           finishedAt: finished ? rider.finishedAt ?? now : null,
           at: now,

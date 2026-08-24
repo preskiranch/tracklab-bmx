@@ -1,3 +1,8 @@
+import {
+  maximumAcceptedTrainingSpeedKph,
+  maximumAcceptedWattbikeCadenceRpm,
+} from './bikeSampleSanity';
+
 export type RecoveryMode = 'off' | 'timer' | 'heart-rate' | 'smart';
 
 export type RecoveryActivityType = 'bmx-race' | 'straight-sprint' | 'get-pulled';
@@ -148,8 +153,8 @@ const effortBounds = Object.freeze({
   finishTimeMs: [100, 30 * 60 * 1_000],
   averagePowerWatts: [0, 3_000],
   peakPowerWatts: [0, 5_000],
-  peakCadenceRpm: [0, 300],
-  peakSpeedMps: [0, 50],
+  peakCadenceRpm: [0, maximumAcceptedWattbikeCadenceRpm],
+  peakSpeedMps: [0, maximumAcceptedTrainingSpeedKph / 3.6],
 } as const);
 
 /** Returns null when a supplied aggregate is malformed or outside strict physical bounds. */

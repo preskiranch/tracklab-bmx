@@ -1220,13 +1220,22 @@ describe('cloud API trust boundaries', () => {
     expect(duplicateRoomState.room).toMatchObject({ racerCount: 1, racerSeatCount: 1 });
 
     const raceSyncStart = primarySocket.messages.length;
+    const duplicateRaceSyncStart = duplicateSocket.messages.length;
     primarySocket.socket.send(JSON.stringify({
       type: 'race-sync',
       state: {
         sessionId: 'club-live-temporary-race',
         trackId: 'club-live-track',
         raceState: 'racing',
-        riders: [{ id: 'maya-live', playerId: 1, name: 'Maya Torres', distance: 20 }],
+        riders: [{
+          id: 'maya-live',
+          playerId: 1,
+          name: 'Maya Torres',
+          distance: 20,
+          velocity: 5,
+          cadence: 200,
+          speedKph: 18,
+        }],
         summary: [],
       },
     }));
@@ -1235,6 +1244,44 @@ describe('cloud API trust boundaries', () => {
       (message) => message.type === 'race-sync' && message.state?.sessionId === 'club-live-temporary-race',
       raceSyncStart,
     );
+    await waitForSocketMessage(
+      duplicateSocket,
+      (message) => message.type === 'race-sync'
+        && message.state?.sessionId === 'club-live-temporary-race',
+      duplicateRaceSyncStart,
+    );
+
+    const retainedStateStart = duplicateSocket.messages.length;
+    primarySocket.socket.send(JSON.stringify({
+      type: 'race-sync',
+      state: {
+        sessionId: 'club-live-temporary-race',
+        trackId: 'club-live-track',
+        raceState: 'racing',
+        riders: [{
+          id: 'maya-live',
+          playerId: 1,
+          name: 'Maya Torres',
+          distance: 9_999,
+          velocity: 999,
+          cadence: 200.01,
+          speedKph: 151_080.1,
+        }],
+        summary: [],
+      },
+    }));
+    primarySocket.socket.send(JSON.stringify({ type: 'latency', rttMs: 10, clockOffsetMs: 0 }));
+    const retainedRoomState = await waitForSocketMessage(
+      duplicateSocket,
+      (message) => message.type === 'room-state'
+        && message.raceStates?.some(
+          (state: { sessionId?: string }) => state.sessionId === 'club-live-temporary-race',
+        ),
+      retainedStateStart,
+    );
+    expect(retainedRoomState.raceStates.find(
+      (state: { sessionId?: string }) => state.sessionId === 'club-live-temporary-race',
+    )?.riders[0]).toMatchObject({ distance: 20, cadence: 200, speedKph: 18 });
 
     // The athlete's access poll renews the short-lived seat grant. The owner
     // monitor is a read-only optional display and is not the authorization.

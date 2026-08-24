@@ -65,6 +65,21 @@ describe('Club Live Monitor client state', () => {
     expect(sessions[0]).not.toHaveProperty('roomId');
   });
 
+  it('accepts the 200 RPM Explore boundary and drops anomalous live metrics', () => {
+    const boundary = {
+      ...baseSession,
+      activityType: 'explore' as const,
+      metrics: { ...baseSession.metrics, cadence: 200, speedKph: 82.8 },
+    };
+    expect(normalizeClubLiveSessions({ sessions: [boundary] })).toHaveLength(1);
+    expect(normalizeClubLiveSessions({
+      sessions: [{ ...boundary, metrics: { ...boundary.metrics, cadence: 200.01 } }],
+    })).toEqual([]);
+    expect(normalizeClubLiveSessions({
+      sessions: [{ ...boundary, metrics: { ...boundary.metrics, speedKph: 83.01 } }],
+    })).toEqual([]);
+  });
+
   it('expires monitor tiles from the independent client clock', () => {
     const expired = { ...baseSession, id: 'expired', expiresAt: 9_999 };
     const live = { ...baseSession, id: 'live', studioRiderId: 'rider-2', expiresAt: 10_001 };

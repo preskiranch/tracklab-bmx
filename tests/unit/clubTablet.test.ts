@@ -231,6 +231,41 @@ describe('Club Tablet client state', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('quarantines a legacy metric spike without blocking the next valid tablet upload', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    storeClubTabletSession(sessionCredential);
+    const common = {
+      kind: 'race',
+      deviceId: sessionCredential.deviceId,
+      clubId: sessionCredential.session.clubId,
+      studioRiderId: sessionCredential.session.studioRiderId,
+      createdAt: Date.now(),
+      attempts: 0,
+    };
+    sessionStorage.setItem(clubTabletOutboxStorageKey, JSON.stringify([{
+      ...common,
+      id: 'legacy-spike',
+      payload: { summaries: [{ playerId: 1, topCadence: 923_334, topSpeedKph: 151_080.1 }] },
+    }, {
+      ...common,
+      id: 'valid-race',
+      payload: { summaries: [{ playerId: 1, topCadence: 200, topSpeedKph: 83 }] },
+    }]));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(flushClubTabletOutbox(sessionCredential)).resolves.toBe(1);
+    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.body).toContain('"topCadence":200');
+  });
+
   it('purges pending athlete artifacts on sign-out without erasing tablet enrollment', async () => {
     const localStorage = new MemoryStorage();
     const sessionStorage = new MemoryStorage();

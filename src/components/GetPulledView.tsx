@@ -40,6 +40,10 @@ import './GetPulledView.css';
 import { HeartRateMetric } from './HeartRateMetric';
 import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
 import { mapHeartRateMeasurementsToActiveClock, summarizeHeartRate } from '../lib/heartRate';
+import {
+  demoHeartRateEffort,
+  demoHeartRateReading,
+} from '../lib/demoHeartRate';
 
 export const getPulledDeviceDisconnectGraceMs = 750;
 
@@ -307,9 +311,27 @@ export function GetPulledView({
     ? Math.min(1, elapsedMs / (sessionDurationSeconds * 1_000))
     : 0;
   const selectedAthleteReady = demoMode || Boolean(selectedPlayer?.riderId);
-  const selectedHeartRate = sessionPlayer ? heartRateByPlayer[sessionPlayer.id] : undefined;
+  const demoHeartRate = sessionDemoMode && sessionPlayer?.deviceId != null
+    ? demoHeartRateReading({
+        deviceId: sessionPlayer.deviceId,
+        phase: phase === 'active' ? 'active' : phase === 'results' ? 'recovery' : 'rest',
+        elapsedMs: phase === 'results' && result
+          ? Math.max(0, now - result.endedAt)
+          : elapsedMs,
+        activeDurationMs: result?.durationSeconds == null
+          ? elapsedMs
+          : result.durationSeconds * 1_000,
+        effort: demoHeartRateEffort(
+          result?.averageWatts ?? metrics.watts,
+          result?.averageCadence ?? metrics.cadence,
+        ),
+        recordedAt: now,
+      })
+    : null;
+  const selectedHeartRate = demoHeartRate
+    ?? (sessionPlayer ? heartRateByPlayer[sessionPlayer.id] : undefined);
   const heartRateSummary = useMemo(() => {
-    if (startedAt == null) return null;
+    if (sessionDemoMode || startedAt == null) return null;
     const endedAt = result?.endedAt ?? Math.min(now, startedAt + sessionDurationSeconds * 1_000);
     const durationMs = Math.max(0, endedAt - startedAt);
     const samples = mapHeartRateMeasurementsToActiveClock(heartRateMeasurements, [{
@@ -318,7 +340,7 @@ export function GetPulledView({
       activeElapsedAtStartMs: 0,
     }]);
     return summarizeHeartRate(samples, { startElapsedMs: 0, endElapsedMs: durationMs });
-  }, [heartRateMeasurements, now, result?.endedAt, sessionDurationSeconds, startedAt]);
+  }, [heartRateMeasurements, now, result?.endedAt, sessionDemoMode, sessionDurationSeconds, startedAt]);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -603,6 +625,12 @@ export function GetPulledView({
   }, [phase, reset]);
 
   useEffect(() => {
+    if (phase !== 'results' || !sessionDemoMode) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [phase, sessionDemoMode]);
+
+  useEffect(() => {
     if (!sessionPlayer || phase === 'setup') {
       onLiveStateChange(null);
       return;
@@ -831,6 +859,7 @@ export function GetPulledView({
                 recordedAt={selectedHeartRate?.recordedAt}
                 now={now}
                 label={`${sessionPlayer?.name ?? 'Athlete'} heart rate`}
+                simulated={selectedHeartRate?.source === 'demo-simulated'}
               />
             )}
           </section>

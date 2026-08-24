@@ -324,7 +324,7 @@ describe('owner assigned multi-bike training history', () => {
       distanceMeters: rider.playerId === 4 ? 315 : 360,
       topSpeedKph: 55 + rider.playerId,
       averageSpeedKph: 42,
-      topCadence: 210 + rider.playerId,
+      topCadence: 190 + rider.playerId,
       averageCadence: 170,
       topWatts: 1_500 + rider.playerId,
       averageWatts: 900,
@@ -346,7 +346,7 @@ describe('owner assigned multi-bike training history', () => {
           durationMs: dnfOpenZone || dnfUnenteredZone ? null : 300,
           topSpeedKph: 50 + rider.playerId,
           averageSpeedKph: 40,
-          topCadence: 200 + rider.playerId,
+          topCadence: 190 + rider.playerId,
           averageCadence: 160,
           topWatts: 1_400 + rider.playerId,
           averageWatts: 850,
@@ -453,7 +453,7 @@ describe('owner assigned multi-bike training history', () => {
       distanceMeters: 44.196,
       topSpeedKph: 51,
       averageSpeedKph: 39,
-      topCadence: 205,
+      topCadence: 195,
       averageCadence: 160,
       topWatts: 1_400,
       averageWatts: 820,
@@ -674,7 +674,7 @@ describe('owner assigned multi-bike training history', () => {
             averageWatts: 700,
             peakWatts: 1_250,
             averageCadence: 160,
-            peakCadence: 220,
+            peakCadence: 200,
             averageSpeedKph: 42,
             peakSpeedKph: 58,
           }],
@@ -801,7 +801,7 @@ describe('owner assigned multi-bike training history', () => {
               averageWatts: 680,
               peakWatts: 1_200,
               averageCadence: 155,
-              peakCadence: 215,
+              peakCadence: 195,
               averageSpeedKph: 40,
               peakSpeedKph: 56,
             }],
@@ -860,7 +860,7 @@ describe('owner assigned multi-bike training history', () => {
         startedAt: Math.min(...exploreStarts.values()),
         endedAt: Math.max(...exploreWindows.map((window: any) => window.endedAt)),
         durationMs: 4_000,
-        distanceMeters: 1_200,
+        distanceMeters: 70,
         trackId: 'v22-explore-route',
         trackName: 'V22 Explore Route',
         details: {
@@ -873,19 +873,28 @@ describe('owner assigned multi-bike training history', () => {
             playerId: rider.playerId,
             riderId: riders[(rider.playerId) % riders.length].studioRiderId,
             name: `LEAK-EXPLORE-${rider.playerId}`,
-            distanceMeters: 1_000 + rider.playerId * 100,
-            averageSpeedMph: 999,
+            distanceMeters: 60 + rider.playerId * 5,
+            averageSpeedMph: 20 + rider.playerId,
           })),
         },
       },
       riderWindows: exploreWindows,
     };
+    const invalidExploreBody = structuredClone(exploreBody);
+    invalidExploreBody.session.details.riders[0].averageSpeedMph = 999;
+    const invalidExploreComplete = await api('/api/club-live/assigned-training-sessions', {
+      method: 'POST',
+      headers: { 'X-TrackLab-Group-Completion-Token': exploreGroup.credential.completionToken },
+      body: JSON.stringify(invalidExploreBody),
+    }, owner.cookie);
+    expect(invalidExploreComplete.status).toBe(400);
+
     const exploreComplete = await api('/api/club-live/assigned-training-sessions', {
       method: 'POST',
       headers: { 'X-TrackLab-Group-Completion-Token': exploreGroup.credential.completionToken },
       body: JSON.stringify(exploreBody),
     }, owner.cookie);
-    expect(exploreComplete.status).toBe(201);
+    expect(exploreComplete.status, await exploreComplete.clone().text()).toBe(201);
     const exploreSaved = await exploreComplete.json() as any;
     expect(exploreSaved.sessions).toHaveLength(2);
     exploreSaved.sessions.forEach((savedSession: any) => {
@@ -896,7 +905,7 @@ describe('owner assigned multi-bike training history', () => {
         expect.objectContaining({ activeElapsedAtStartMs: 0 }),
         expect.objectContaining({ activeElapsedAtStartMs: 2_000 }),
       ]);
-      expect(savedSession.details.riders[0].averageSpeedMph).toBeLessThan(1_000);
+      expect(savedSession.details.riders[0].averageSpeedMph).toBeLessThan(40);
       expect(JSON.stringify(savedSession)).not.toContain('LEAK-');
     });
 

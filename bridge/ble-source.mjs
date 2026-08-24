@@ -1,4 +1,8 @@
 import { EventEmitter } from 'node:events';
+import {
+  acceptedWattbikeSpeedKph,
+  cleanWattbikeCadenceRpm,
+} from './bike-metric-sanity.mjs';
 
 const characteristicUuids = {
   batteryLevel: '2a19',
@@ -109,16 +113,16 @@ function cadenceFromCrankDeltas(cache, deviceId, revolutions, eventTime) {
   cache.set(deviceId, { eventTime, revolutions });
 
   if (!previous) {
-    return null;
+    return undefined;
   }
 
   const revolutionDelta = positiveDelta(revolutions, previous.revolutions, 65536);
   const timeDeltaTicks = positiveDelta(eventTime, previous.eventTime, 65536);
   if (revolutionDelta <= 0 || timeDeltaTicks <= 0) {
-    return null;
+    return undefined;
   }
 
-  return Math.round((revolutionDelta / (timeDeltaTicks / 1024)) * 60);
+  return cleanWattbikeCadenceRpm((revolutionDelta / (timeDeltaTicks / 1024)) * 60);
 }
 
 function speedFromWheelDeltas(cache, deviceId, revolutions, eventTime, wheelCircumferenceMeters) {
@@ -142,7 +146,7 @@ function readUint24(view, offset) {
   return view.getUint8(offset) + (view.getUint8(offset + 1) << 8) + (view.getUint8(offset + 2) << 16);
 }
 
-function parseIndoorBikeData(data) {
+export function parseIndoorBikeData(data) {
   const view = dataViewFromBuffer(data);
   if (!hasBytes(view, 0, 2)) {
     return {};
@@ -153,7 +157,8 @@ function parseIndoorBikeData(data) {
   const sample = {};
 
   if ((flags & 0x01) === 0 && hasBytes(view, offset, 2)) {
-    sample.speedKph = Number((view.getUint16(offset, true) / 100).toFixed(2));
+    const speedKph = acceptedWattbikeSpeedKph(view.getUint16(offset, true) / 100);
+    if (speedKph != null) sample.speedKph = Number(speedKph.toFixed(2));
     offset += 2;
   }
 
@@ -162,7 +167,12 @@ function parseIndoorBikeData(data) {
   }
 
   if ((flags & 0x04) !== 0 && hasBytes(view, offset, 2)) {
-    sample.cadence = Math.round(view.getUint16(offset, true) / 2);
+    const cadence = cleanWattbikeCadenceRpm(view.getUint16(offset, true) / 2);
+    if (cadence != null) {
+      sample.cadence = cadence;
+    } else {
+      delete sample.speedKph;
+    }
     offset += 2;
   }
 
@@ -211,7 +221,7 @@ function parseIndoorBikeData(data) {
   return sample;
 }
 
-function parseCyclingPowerMeasurement(data, deviceId, crankCache) {
+export function parseCyclingPowerMeasurement(data, deviceId, crankCache) {
   const view = dataViewFromBuffer(data);
   if (!hasBytes(view, 0, 4)) {
     return {};
@@ -251,7 +261,7 @@ function parseCyclingPowerMeasurement(data, deviceId, crankCache) {
   return sample;
 }
 
-function parseCscMeasurement(data, deviceId, crankCache, wheelCache, wheelCircumferenceMeters) {
+export function parseCscMeasurement(data, deviceId, crankCache, wheelCache, wheelCircumferenceMeters) {
   const view = dataViewFromBuffer(data);
   if (!hasBytes(view, 0, 1)) {
     return {};
@@ -269,8 +279,9 @@ function parseCscMeasurement(data, deviceId, crankCache, wheelCache, wheelCircum
       view.getUint16(offset + 4, true),
       wheelCircumferenceMeters,
     );
-    if (speedKph != null) {
-      sample.speedKph = speedKph;
+    const acceptedSpeedKph = speedKph == null ? null : acceptedWattbikeSpeedKph(speedKph);
+    if (acceptedSpeedKph != null) {
+      sample.speedKph = acceptedSpeedKph;
     }
     offset += 6;
   }
@@ -284,6 +295,8 @@ function parseCscMeasurement(data, deviceId, crankCache, wheelCache, wheelCircum
     );
     if (cadence != null) {
       sample.cadence = cadence;
+    } else if (cadence === null) {
+      delete sample.speedKph;
     }
   }
 
@@ -392,7 +405,10 @@ export function createBleSource(options = {}) {
     const { deviceId, label, signal } = rememberDevice(peripheral, true);
     const previous = lastSamplesByDevice.get(deviceId);
     const hasWatts = Object.hasOwn(partial, 'watts');
-    const hasCadence = Object.hasOwn(partial, 'cadence');
+    const cleanedCadence = Object.hasOwn(partial, 'cadence')
+      ? cleanWattbikeCadenceRpm(partial.cadence)
+      : null;
+    const hasCadence = cleanedCadence != null;
     const hasSpeed = Object.hasOwn(partial, 'speedKph');
     const hasBattery = Object.hasOwn(partial, 'battery');
 
@@ -402,7 +418,7 @@ export function createBleSource(options = {}) {
       deviceId,
       label,
       watts: hasWatts ? Math.max(0, Math.round(partial.watts ?? 0)) : previous?.watts ?? 0,
-      cadence: hasCadence ? Math.max(0, Math.round(partial.cadence ?? 0)) : previous?.cadence ?? null,
+      cadence: hasCadence ? cleanedCadence : previous?.cadence ?? null,
       speedKph: hasSpeed ? Math.max(0, rounded(partial.speedKph ?? 0, 1)) : previous?.speedKph ?? null,
       wattsAt: hasWatts ? now : previous?.wattsAt,
       cadenceAt: hasCadence ? now : previous?.cadenceAt,

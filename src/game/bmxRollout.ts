@@ -1,3 +1,5 @@
+import { acceptedBikeCadenceRpm, acceptedTrainingSpeedKph } from '../lib/bikeSampleSanity';
+
 export const bmxRolloutConfig = {
   wheelDiameterInches: 20,
   frontSprocketTeeth: 44,
@@ -25,7 +27,8 @@ export const bmxDemoCadenceCompressionRatio = 0.2;
 export const bmxDemoMaximumSpeedMph = 30;
 
 export function bmxVelocityMpsFromCadence(cadenceRpm: number | null | undefined) {
-  return Math.max(0, cadenceRpm ?? 0) / 60 * bmxRolloutMetersPerCrankRevolution;
+  const cadence = acceptedBikeCadenceRpm(cadenceRpm) ?? 0;
+  return cadence / 60 * bmxRolloutMetersPerCrankRevolution;
 }
 
 export function bmxCadenceRpmFromVelocityMps(velocityMps: number | null | undefined) {
@@ -58,6 +61,6 @@ export function reportedBmxTopSpeedKph(
 ) {
   return Math.max(
     bmxSpeedKphFromCadence(topCadenceRpm),
-    Math.max(0, courseTopSpeedKph ?? 0),
+    acceptedTrainingSpeedKph(courseTopSpeedKph) ?? 0,
   );
 }

@@ -236,7 +236,7 @@ describe('owner-operated Monitor View athlete history', () => {
       averageWatts: 640,
       peakWatts: 1_250,
       averageCadence: 156,
-      peakCadence: 211,
+      peakCadence: 200,
       averageSpeedKph: 40.2,
       peakSpeedKph: 54.3,
     };
@@ -621,7 +621,7 @@ describe('owner-operated Monitor View athlete history', () => {
           riderId: riderOne,
           riderName: 'Monitor Athlete',
           averageCadence: 156,
-          peakCadence: 211,
+          peakCadence: 200,
         }],
       },
     });
@@ -757,7 +757,7 @@ describe('owner-operated Monitor View athlete history', () => {
               distanceMeters: 72.5,
               topSpeedKph: 54.3,
               averageSpeedKph: 40.2,
-              topCadence: 211,
+              topCadence: 200,
               averageCadence: 156,
               topWatts: 1_250,
               averageWatts: 640,
@@ -939,7 +939,7 @@ describe('owner-operated Monitor View athlete history', () => {
     expect(athleteSession).toMatchObject({
       club: { id: clubId, studioRiderId: riderOne, role: 'athlete' },
       details: {
-        riders: [{ averageWatts: 640, peakWatts: 1_250, peakCadence: 211 }],
+        riders: [{ averageWatts: 640, peakWatts: 1_250, peakCadence: 200 }],
       },
     });
 
@@ -950,7 +950,7 @@ describe('owner-operated Monitor View athlete history', () => {
     ));
     expect(clubSession).toMatchObject({
       club: { id: clubId, studioRiderId: riderOne, role: 'owner' },
-      details: { riders: [{ peakCadence: 211 }] },
+      details: { riders: [{ peakCadence: 200 }] },
     });
     expect(clubSession.details.riders[0]).not.toHaveProperty('peakWatts');
     const secondHistory = await api('/api/training-sessions', {}, secondAthlete.cookie);

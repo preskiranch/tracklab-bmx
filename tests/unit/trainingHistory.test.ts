@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TrainingSession } from '../../src/types';
 import {
+  sanitizeRecordedBikeMetrics,
   trainingSessionCsv,
   trainingSessionRaceSummaries,
   trainingSessionReactionTimes,
@@ -99,5 +100,53 @@ describe('training history metric access', () => {
     expect(csv).toContain('"Zone ID","Zone","Zone type"');
     expect(csv).toContain('"zone-drive-one","Drive one","pedal"');
     expect(csv).toContain('"13","300","1180","880","43.1","37.4","181","168.2","1210","920.4"');
+  });
+
+  it('fails closed when presenting or exporting legacy astronomical bike metrics', () => {
+    const session = mappedIntervalSession();
+    const summary = (session.details.summaries as Array<Record<string, unknown>>)[0];
+    summary.topSpeedKph = 243_139.8;
+    summary.averageSpeedKph = 9.4;
+    summary.topCadence = 923_334;
+    summary.averageCadence = 68_458.7;
+    const zoneRider = (session.details.zoneResults as Array<{
+      riders: Array<Record<string, unknown>>;
+    }>)[0].riders[0];
+    zoneRider.topSpeedKph = 151_080.1;
+    zoneRider.topCadence = 923_334;
+
+    expect(trainingSessionRaceSummaries(session)[0]).toMatchObject({
+      topSpeedKph: null,
+      averageSpeedKph: 9.4,
+      topCadence: null,
+      averageCadence: null,
+    });
+    expect(trainingSessionZoneResults(session)[0].riders[0]).toMatchObject({
+      topSpeedKph: null,
+      topCadence: null,
+    });
+
+    const csv = trainingSessionCsv(session);
+    expect(csv).not.toContain('243139.8');
+    expect(csv).not.toContain('151080.1');
+    expect(csv).not.toContain('923334');
+    expect(csv).not.toContain('68458.7');
+    expect(sanitizeRecordedBikeMetrics({ cadence: 200, speedKph: 80 })).toEqual({
+      cadence: 200,
+      speedKph: 80,
+    });
+    expect(sanitizeRecordedBikeMetrics({ cadence: 200, speedKph: 83 })).toEqual({
+      cadence: 200,
+      speedKph: 83,
+    });
+    expect(sanitizeRecordedBikeMetrics({ averageSpeedMph: 999 })).toEqual({
+      averageSpeedMph: null,
+    });
+    expect(sanitizeRecordedBikeMetrics({ cadence: 200.01, speedKph: 83.01 })).toEqual({
+      cadence: null,
+      speedKph: null,
+    });
+    expect(sanitizeRecordedBikeMetrics({ peakSpeedMps: 20 })).toEqual({ peakSpeedMps: 20 });
+    expect(sanitizeRecordedBikeMetrics({ peakSpeedMps: 999 })).toEqual({ peakSpeedMps: null });
   });
 });

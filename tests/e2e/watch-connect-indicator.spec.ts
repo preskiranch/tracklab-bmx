@@ -507,6 +507,16 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
   await startRace.click();
   const shell = page.locator('.platform-shell');
   await expect(shell).toHaveClass(/race-fullscreen/);
+  const demoHeartRates = page.locator('.race-rider-overlay-heart-rate');
+  await expect(demoHeartRates).toHaveCount(4);
+  for (let index = 0; index < 4; index += 1) {
+    await expect(demoHeartRates.nth(index)).toContainText(/Simulated · \d+ BPM/);
+    await expect(demoHeartRates.nth(index)).toHaveAttribute(
+      'aria-label',
+      /Simulated heart rate \d+ beats per minute/,
+    );
+  }
+  await expect(page.locator('.race-rider-overlay')).not.toContainText('152 BPM');
   const fullscreenStatus = page.locator(
     '.watch-connect-indicator-slot.fullscreen [data-watch-connect-status]',
   );

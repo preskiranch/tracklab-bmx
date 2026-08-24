@@ -6,7 +6,8 @@ import {
   type ClubLiveAccess,
   type ClubLiveSnapshot,
 } from '../lib/clubLive';
-import { bikeSampleIsLive } from '../lib/liveBikeRegistry';
+import { bikeMetricIsLive, bikeSampleIsLive } from '../lib/liveBikeRegistry';
+import { acceptedTrainingSpeedKph, cleanBikeCadenceRpm } from '../lib/bikeSampleSanity';
 import { liveBikeTimeoutMs } from '../data';
 import type { GetPulledLiveState } from '../lib/getPulled';
 import type {
@@ -94,6 +95,9 @@ export function ClubLiveAthleteBridge({
 
     if (appMode === 'get-pulled') {
       if (!getPulled || getPulled.riderId !== accountRiderId) return null;
+      const cadence = cleanBikeCadenceRpm(getPulled.metrics.cadence);
+      const speedKph = acceptedTrainingSpeedKph(getPulled.metrics.speedKph);
+      if (cadence == null || speedKph == null) return null;
       const durationMs = Math.max(1, getPulled.durationSeconds * 1_000);
       const fraction = Math.min(1, Math.max(0, getPulled.elapsedMs / durationMs));
       const status = getPulled.phase === 'active'
@@ -112,8 +116,8 @@ export function ClubLiveAthleteBridge({
         },
         metrics: {
           watts: Math.max(0, Math.round(getPulled.metrics.watts)),
-          cadence: Math.max(0, Math.round(getPulled.metrics.cadence)),
-          speedKph: Math.max(0, getPulled.metrics.speedKph),
+          cadence,
+          speedKph,
           distanceMeters: Math.max(0, getPulled.distanceMeters),
           elapsedMs: Math.max(0, getPulled.elapsedMs),
           position: 1,
@@ -130,6 +134,9 @@ export function ClubLiveAthleteBridge({
       const rider = explore?.riders.find((candidate) => candidate.riderId === accountRiderId)
         ?? (tabletSessionActive ? undefined : explore?.riders[0]);
       if (!rider || rider.signal <= 0 || now - rider.at > liveBikeTimeoutMs) return null;
+      const cadence = cleanBikeCadenceRpm(rider.cadence ?? 0);
+      const speedKph = acceptedTrainingSpeedKph(rider.velocityMps * 3.6);
+      if (cadence == null || speedKph == null) return null;
       const routeDistance = Math.max(0, explore?.route?.distanceMeters ?? 0);
       const distanceMeters = Math.max(0, rider.distanceMeters);
       const fraction = routeDistance > 0 ? Math.min(1, distanceMeters / routeDistance) : 0;
@@ -152,8 +159,8 @@ export function ClubLiveAthleteBridge({
         },
         metrics: {
           watts: Math.max(0, Math.round(rider.watts ?? 0)),
-          cadence: Math.max(0, Math.round(rider.cadence ?? 0)),
-          speedKph: Math.max(0, rider.velocityMps * 3.6),
+          cadence,
+          speedKph,
           distanceMeters,
           elapsedMs: Math.max(0, explore?.elapsedMs ?? 0),
           position: explore
@@ -175,6 +182,11 @@ export function ClubLiveAthleteBridge({
     const sample = player?.deviceId == null ? undefined : race.samplesByDevice.get(player.deviceId);
     const liveSample = bikeSampleIsLive(sample, now, liveBikeTimeoutMs) ? sample : undefined;
     if (!player || !rider || !liveSample) return null;
+    const cadence = cleanBikeCadenceRpm(
+      bikeMetricIsLive(liveSample.cadenceAt, now, liveBikeTimeoutMs) ? liveSample.cadence : 0,
+    );
+    const speedKph = acceptedTrainingSpeedKph(rider.velocity * 3.6);
+    if (cadence == null || speedKph == null) return null;
     const distanceMeters = Math.max(0, Math.min(race.courseLengthMeters, rider.distance));
     const fraction = race.courseLengthMeters > 0 ? Math.min(1, distanceMeters / race.courseLengthMeters) : 0;
     const participantCount = multiplayerActive
@@ -197,8 +209,8 @@ export function ClubLiveAthleteBridge({
       },
       metrics: {
         watts: Math.max(0, Math.round(liveSample.watts ?? rider.lastWatts ?? 0)),
-        cadence: Math.max(0, Math.round(liveSample.cadence ?? rider.lastRawCadence ?? 0)),
-        speedKph: Math.max(0, rider.velocity * 3.6),
+        cadence,
+        speedKph,
         distanceMeters,
         elapsedMs: startedAt ? Math.max(0, now - startedAt) : 0,
         position: rider.rank ?? null,

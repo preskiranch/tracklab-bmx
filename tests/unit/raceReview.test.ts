@@ -213,6 +213,60 @@ describe('post-race pedal-zone results', () => {
     expect((lowerCadenceRider?.topSpeedKph ?? 0) / 1.609344).toBeCloseTo(28, 2);
   });
 
+  it('excludes corrupt cadence from race history and cadence-derived peak speed', () => {
+    const capture = baseCapture();
+    capture.players = [capture.players[0]];
+    capture.summary = [{
+      ...capture.summary[0],
+      sampleCount: 0,
+      topSpeedKph: null,
+      averageSpeedKph: null,
+      topCadence: null,
+      averageCadence: null,
+    }];
+    capture.frames = [
+      frame(1_000, [
+        { playerId: 1, distanceMeters: 0, speedKph: 0, cadence: 0, watts: 0 },
+      ]),
+      frame(2_000, [
+        { playerId: 1, distanceMeters: 20, speedKph: 30, cadence: 100, watts: 500 },
+      ]),
+      frame(3_000, [
+        { playerId: 1, distanceMeters: 40, speedKph: 32, cadence: 923_334, watts: 600 },
+      ]),
+    ];
+
+    const [summary] = raceSummaryWithCapturedMetrics(capture, capture.summary);
+    const [zone] = buildRaceZoneResults(capture);
+
+    expect(summary.topCadence).toBe(100);
+    expect(summary.averageCadence).toBe(50);
+    expect(summary.topSpeedKph).toBe(32);
+    expect(zone.riders[0].topCadence).toBe(100);
+    expect(zone.riders[0].topSpeedKph).toBe(31);
+  });
+
+  it('does not revive corrupt legacy summary fallbacks when no valid capture points remain', () => {
+    const capture = baseCapture();
+    capture.players = [capture.players[0]];
+    capture.frames = [];
+    capture.samples = [];
+    capture.summary = [{
+      ...capture.summary[0],
+      topSpeedKph: 243_139.8,
+      averageSpeedKph: 9.4,
+      topCadence: 923_334,
+      averageCadence: 68_458.7,
+    }];
+
+    const [summary] = raceSummaryWithCapturedMetrics(capture, capture.summary);
+
+    expect(summary.topSpeedKph).toBeNull();
+    expect(summary.averageSpeedKph).toBe(9.4);
+    expect(summary.topCadence).toBeNull();
+    expect(summary.averageCadence).toBeNull();
+  });
+
   it('interpolates narrow zone boundaries when raw samples skip across the zone', () => {
     const capture = baseCapture();
     capture.players = [capture.players[0]];

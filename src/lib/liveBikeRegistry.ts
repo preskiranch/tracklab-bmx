@@ -7,18 +7,27 @@ type RaceBikeDeviceOptions = {
   maxDevices: number;
 };
 
+export function bikeMetricIsLive(
+  metricAt: number | undefined,
+  now: number,
+  timeoutMs: number,
+  futureClockSkewMs = defaultFutureClockSkewMs,
+) {
+  if (!Number.isFinite(metricAt)) {
+    return false;
+  }
+
+  const ageMs = now - Number(metricAt);
+  return ageMs >= -futureClockSkewMs && ageMs <= timeoutMs;
+}
+
 export function bikeSampleIsLive(
   sample: BikeSample | undefined,
   now: number,
   timeoutMs: number,
   futureClockSkewMs = defaultFutureClockSkewMs,
 ) {
-  if (!sample || !Number.isFinite(sample.at)) {
-    return false;
-  }
-
-  const ageMs = now - sample.at;
-  return ageMs >= -futureClockSkewMs && ageMs <= timeoutMs;
+  return bikeMetricIsLive(sample?.at, now, timeoutMs, futureClockSkewMs);
 }
 
 export function connectedDeviceFromBikeSample(sample: BikeSample): ConnectedBikeDevice {

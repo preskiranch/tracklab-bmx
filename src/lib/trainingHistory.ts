@@ -1,5 +1,12 @@
 import type { RaceSummaryEntry, RaceZoneResult, TrainingActivityType, TrainingSession } from '../types';
 import { readStoredClubTabletSession } from './clubTabletStorage';
+import {
+  acceptedBikeCadenceRpm,
+  acceptedTrainingSpeedKph,
+  acceptedTrainingSpeedMph,
+  recordedBikeMetricKind,
+} from './bikeSampleSanity';
+export { recordedBikeMetricsAreAccepted } from './bikeSampleSanity';
 
 export type TrainingHistoryResponse = {
   sessions: TrainingSession[];
@@ -30,8 +37,41 @@ export type TrainingSessionRaceSummary = Partial<RaceSummaryEntry> & {
   riderName?: string;
 };
 
+export function sanitizeRecordedBikeMetrics(value: unknown, depth = 0): unknown {
+  if (depth > 32) return null;
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeRecordedBikeMetrics(entry, depth + 1));
+  }
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => {
+    const metricKind = recordedBikeMetricKind(key);
+    if (metricKind === 'cadence') {
+      return [key, nested == null ? null : acceptedBikeCadenceRpm(nested)];
+    }
+    if (metricKind === 'speed-kph') {
+      return [key, nested == null ? null : acceptedTrainingSpeedKph(nested)];
+    }
+    if (metricKind === 'speed-mph') {
+      return [key, nested == null ? null : acceptedTrainingSpeedMph(nested)];
+    }
+    if (metricKind === 'speed-mps') {
+      const speedMps = Number(nested);
+      return [key, nested == null || acceptedTrainingSpeedKph(speedMps * 3.6) == null ? null : speedMps];
+    }
+    return [key, sanitizeRecordedBikeMetrics(nested, depth + 1)];
+  }));
+}
+
+function sanitizedTrainingSession(session: TrainingSession): TrainingSession {
+  return {
+    ...session,
+    details: sanitizeRecordedBikeMetrics(session.details) as Record<string, unknown>,
+  };
+}
+
 export function trainingSessionRaceSummaries(session: TrainingSession): TrainingSessionRaceSummary[] {
-  const summaries = (session.details as { summaries?: unknown }).summaries;
+  const summaries = (sanitizeRecordedBikeMetrics(session.details) as { summaries?: unknown }).summaries;
   if (!Array.isArray(summaries)) return [];
   return summaries.filter((summary): summary is TrainingSessionRaceSummary => Boolean(
     summary
@@ -41,7 +81,7 @@ export function trainingSessionRaceSummaries(session: TrainingSession): Training
 }
 
 export function trainingSessionZoneResults(session: TrainingSession): RaceZoneResult[] {
-  const zoneResults = (session.details as { zoneResults?: unknown }).zoneResults;
+  const zoneResults = (sanitizeRecordedBikeMetrics(session.details) as { zoneResults?: unknown }).zoneResults;
   if (!Array.isArray(zoneResults)) return [];
   return zoneResults.filter((zone): zone is RaceZoneResult => Boolean(
     zone
@@ -93,7 +133,9 @@ function normalizeTrainingSession(value: Partial<TrainingSession>): TrainingSess
     ...(typeof value.trackName === 'string' && value.trackName ? { trackName: value.trackName } : {}),
     source: value.source === 'imported' ? 'imported' : 'live',
     ...(value.club && typeof value.club === 'object' ? { club: value.club } : {}),
-    details: value.details && typeof value.details === 'object' ? value.details : {},
+    details: value.details && typeof value.details === 'object'
+      ? sanitizeRecordedBikeMetrics(value.details) as Record<string, unknown>
+      : {},
     createdAt: Number(value.createdAt) || startedAt,
     updatedAt: Number(value.updatedAt) || endedAt,
   };
@@ -199,8 +241,9 @@ function csvCell(value: unknown) {
 }
 
 export function trainingSessionCsv(session: TrainingSession) {
-  const reactionTimes = trainingSessionReactionTimes(session);
-  const summaryRows = trainingSessionRaceSummaries(session).map((summary) => {
+  const safeSession = sanitizedTrainingSession(session);
+  const reactionTimes = trainingSessionReactionTimes(safeSession);
+  const summaryRows = trainingSessionRaceSummaries(safeSession).map((summary) => {
     return [
       summary.playerId,
       summary.riderId ?? '',
@@ -219,7 +262,7 @@ export function trainingSessionCsv(session: TrainingSession) {
       summary.averageWatts ?? '',
     ];
   });
-  const zoneRows = trainingSessionZoneResults(session).flatMap((zone) => zone.riders.map((rider) => [
+  const zoneRows = trainingSessionZoneResults(safeSession).flatMap((zone) => zone.riders.map((rider) => [
     zone.zoneId,
     zone.zoneName,
     zone.zoneType,
@@ -238,16 +281,16 @@ export function trainingSessionCsv(session: TrainingSession) {
     rider.averageWatts ?? '',
   ]));
   const rows: Array<[string, unknown]> = [
-    ['Session ID', session.id],
-    ['Activity', session.activityType],
-    ['Title', session.title],
-    ['Started', new Date(session.startedAt).toISOString()],
-    ['Ended', new Date(session.endedAt).toISOString()],
-    ['Duration seconds', session.durationMs / 1_000],
-    ['Distance meters', Number(session.distanceMeters.toFixed(2))],
-    ['Track', session.trackName ?? ''],
-    ['Training owner', session.club ? `${session.club.name} / ${session.club.riderName}` : 'Personal'],
-    ['Details', session.details],
+    ['Session ID', safeSession.id],
+    ['Activity', safeSession.activityType],
+    ['Title', safeSession.title],
+    ['Started', new Date(safeSession.startedAt).toISOString()],
+    ['Ended', new Date(safeSession.endedAt).toISOString()],
+    ['Duration seconds', safeSession.durationMs / 1_000],
+    ['Distance meters', Number(safeSession.distanceMeters.toFixed(2))],
+    ['Track', safeSession.trackName ?? ''],
+    ['Training owner', safeSession.club ? `${safeSession.club.name} / ${safeSession.club.riderName}` : 'Personal'],
+    ['Details', safeSession.details],
   ];
   const sections = [`Field,Value\n${rows.map((row) => row.map(csvCell).join(',')).join('\n')}`];
   if (summaryRows.length > 0) {
@@ -274,11 +317,12 @@ export function trainingSessionCsv(session: TrainingSession) {
 }
 
 export function downloadTrainingSession(session: TrainingSession, format: 'json' | 'csv') {
-  const day = new Date(session.startedAt).toISOString().slice(0, 10);
-  const base = `tracklab-${session.activityType}-${day}-${session.id.replace(/[^a-z0-9_-]+/gi, '-').slice(0, 48)}`;
+  const safeSession = sanitizedTrainingSession(session);
+  const day = new Date(safeSession.startedAt).toISOString().slice(0, 10);
+  const base = `tracklab-${safeSession.activityType}-${day}-${safeSession.id.replace(/[^a-z0-9_-]+/gi, '-').slice(0, 48)}`;
   if (format === 'json') {
-    downloadFile(`${base}.json`, 'application/json', `${JSON.stringify(session, null, 2)}\n`);
+    downloadFile(`${base}.json`, 'application/json', `${JSON.stringify(safeSession, null, 2)}\n`);
     return;
   }
-  downloadFile(`${base}.csv`, 'text/csv;charset=utf-8', trainingSessionCsv(session));
+  downloadFile(`${base}.csv`, 'text/csv;charset=utf-8', trainingSessionCsv(safeSession));
 }

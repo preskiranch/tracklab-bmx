@@ -27,6 +27,19 @@ describe('HeartRateMetric', () => {
     expect(reading.bpm).toBeNull();
   });
 
+  it('visibly and accessibly distinguishes simulated demo BPM', () => {
+    const html = renderToStaticMarkup(createElement(HeartRateMetric, {
+      bpm: 142,
+      recordedAt: 10_000,
+      now: 10_000,
+      label: 'Demo Rider 1 heart rate',
+      simulated: true,
+    }));
+    expect(html).toContain('Simulated BPM');
+    expect(html).toContain('Simulated Demo Rider 1 heart rate: 142 beats per minute');
+    expect(html).toContain('data-heart-rate-source="demo-simulated"');
+  });
+
   it('renders missing and implausible values as an em dash instead of zero BPM', () => {
     for (const bpm of [null, 0, 261, Number.NaN]) {
       const html = renderToStaticMarkup(createElement(HeartRateMetric, { bpm, recordedAt: 10_000, now: 10_000 }));

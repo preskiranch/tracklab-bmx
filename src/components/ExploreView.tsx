@@ -120,6 +120,7 @@ import { RiderAvatar } from './RiderAvatar';
 import './ExploreView.css';
 import { heartRateReadingState } from './HeartRateMetric';
 import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
+import { demoHeartRateReadingForBikeSample } from '../lib/demoHeartRate';
 
 type ExploreViewProps = {
   developerMode: boolean;
@@ -2479,10 +2480,17 @@ export function ExploreView({
                   const gradeStatus = elevationRecoveryStatus === 'loading'
                     ? 'Grade loading…'
                     : 'Grade unavailable · Retrying every 15s';
+                  const heartRatePlayer = players.find((player) => player.id === rider.playerId);
+                  const heartRateReading = demoHeartRateReadingForBikeSample(
+                    heartRatePlayer?.deviceId == null
+                      ? null
+                      : samplesByDevice.get(heartRatePlayer.deviceId),
+                  ) ?? heartRateByPlayer[rider.playerId];
                   const heartRate = heartRateReadingState(
-                    heartRateByPlayer[rider.playerId]?.bpm,
-                    heartRateByPlayer[rider.playerId]?.recordedAt,
+                    heartRateReading?.bpm,
+                    heartRateReading?.recordedAt,
                   );
+                  const heartRateSimulated = heartRateReading?.source === 'demo-simulated';
                   return (
                     <article style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
                       {rider.photoUrl
@@ -2505,9 +2513,16 @@ export function ExploreView({
                           )}{' '}
                           {speedUnitLabel(speedUnit)}
                         </span>
-                        <span className={`explore-heart-rate ${heartRate.state}`}>
+                        <span
+                          className={`explore-heart-rate ${heartRate.state}`}
+                          aria-label={heartRate.bpm == null
+                            ? `Heart rate: ${heartRate.detail}`
+                            : `${heartRateSimulated ? 'Simulated heart rate' : 'Heart rate'} ${heartRate.bpm} beats per minute`}
+                        >
                           <HeartPulse size={14} aria-hidden="true" />
-                          {heartRate.bpm == null ? heartRate.detail : `${heartRate.bpm} BPM`}
+                          {heartRate.bpm == null
+                            ? heartRate.detail
+                            : `${heartRateSimulated ? 'Simulated · ' : ''}${heartRate.bpm} BPM`}
                         </span>
                         <span
                           className="explore-air-status"

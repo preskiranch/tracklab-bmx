@@ -299,6 +299,43 @@ describe('Explore ride checkpoints', () => {
     expect(loadExploreRideCheckpoint('athlete-b@example.com')).toBeNull();
   });
 
+  it('keeps the 200 RPM boundary but cannot resume anomalous cadence-driven motion', () => {
+    installStorage();
+    const boundary = saveExploreRideCheckpoint('boundary', {
+      route: route(),
+      riders: [{ ...rider(), cadence: 200, velocityMps: 23 }],
+      elapsedMs: 1_000,
+      savedAt: 1_700_000_124_000,
+    });
+    expect(boundary?.riders[0]).toMatchObject({ cadence: 200, velocityMps: 23 });
+
+    const corrupt = saveExploreRideCheckpoint('corrupt-cadence', {
+      route: route(),
+      riders: [{ ...rider(), cadence: 923_334, velocityMps: 50 }],
+      elapsedMs: 1_000,
+      savedAt: 1_700_000_124_000,
+    });
+    expect(corrupt).toBeNull();
+
+    const corruptSpeedOnly = saveExploreRideCheckpoint('corrupt-speed', {
+      route: route(),
+      riders: [{ ...rider(), cadence: null, velocityMps: 50 }],
+      elapsedMs: 1_000,
+      savedAt: 1_700_000_124_000,
+    });
+    expect(corruptSpeedOnly).toBeNull();
+
+    const values = installStorage();
+    values.set('tracklab-explore-ride-checkpoint-v1:legacy-distance', JSON.stringify({
+      version: 1,
+      route: route(),
+      riders: [{ ...rider(5_200), cadence: 923_334, velocityMps: 50 }],
+      elapsedMs: 1_000,
+      savedAt: 1_700_000_124_000,
+    }));
+    expect(loadExploreRideCheckpoint('legacy-distance')).toBeNull();
+  });
+
   it('does not restore corrupt or already-completed rides', () => {
     const values = installStorage();
     values.set('tracklab-explore-ride-checkpoint-v1:broken', '{nope');

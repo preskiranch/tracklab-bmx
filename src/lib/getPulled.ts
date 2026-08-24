@@ -1,5 +1,10 @@
 import { liveBikeTimeoutMs } from '../data';
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
+import {
+  acceptedTrainingSpeedKph,
+  cleanBikeCadenceRpm,
+  cleanBikeWatts,
+} from './bikeSampleSanity';
 import type { BikeSample, PlayerSlot } from '../types';
 
 export const getPulledPresetSeconds = [3, 6, 30] as const;
@@ -79,7 +84,9 @@ function metricFresh(sample: BikeSample | undefined, at: number | undefined, now
 
 export function getPulledMetrics(sample: BikeSample | undefined, now = Date.now()): GetPulledMetrics {
   const watts = metricFresh(sample, sample?.wattsAt, now) ? Math.max(0, sample?.watts ?? 0) : 0;
-  const cadence = metricFresh(sample, sample?.cadenceAt, now) ? Math.max(0, sample?.cadence ?? 0) : 0;
+  const cadence = metricFresh(sample, sample?.cadenceAt, now)
+    ? cleanBikeCadenceRpm(sample?.cadence) ?? 0
+    : 0;
   const idleNoise = watts < 1 && cadence <= 15;
   const cleanWatts = idleNoise ? 0 : Math.round(watts);
   const cleanCadence = idleNoise ? 0 : Math.round(cadence);
@@ -113,7 +120,7 @@ export function getPulledTakeoffSignal(
 
   const cadenceAt = sample.cadenceAt ?? sample.at;
   const cadence = metricFresh(sample, sample.cadenceAt, now) && cadenceAt >= armedAt
-    ? Math.max(0, Math.round(sample.cadence ?? 0))
+    ? cleanBikeCadenceRpm(sample.cadence) ?? 0
     : 0;
   return {
     at: Math.min(now, Math.max(armedAt, wattsAt)),
@@ -158,17 +165,21 @@ export function addGetPulledSample(
   metrics: GetPulledMetrics,
   at: number,
 ): GetPulledAccumulator {
+  const watts = cleanBikeWatts(metrics.watts);
+  const cadence = cleanBikeCadenceRpm(metrics.cadence);
+  const speedKph = acceptedTrainingSpeedKph(metrics.speedKph);
+  if (watts == null || cadence == null || speedKph == null) return accumulator;
   const previousAt = accumulator.lastAt;
   const deltaSeconds = previousAt == null ? 0 : Math.min(0.5, Math.max(0, at - previousAt) / 1_000);
   return {
     sampleCount: accumulator.sampleCount + 1,
-    wattsTotal: accumulator.wattsTotal + metrics.watts,
-    cadenceTotal: accumulator.cadenceTotal + metrics.cadence,
-    speedKphTotal: accumulator.speedKphTotal + metrics.speedKph,
-    peakWatts: Math.max(accumulator.peakWatts, metrics.watts),
-    peakCadence: Math.max(accumulator.peakCadence, metrics.cadence),
-    peakSpeedKph: Math.max(accumulator.peakSpeedKph, metrics.speedKph),
-    distanceMeters: accumulator.distanceMeters + (metrics.speedKph / 3.6) * deltaSeconds,
+    wattsTotal: accumulator.wattsTotal + watts,
+    cadenceTotal: accumulator.cadenceTotal + cadence,
+    speedKphTotal: accumulator.speedKphTotal + speedKph,
+    peakWatts: Math.max(accumulator.peakWatts, watts),
+    peakCadence: Math.max(accumulator.peakCadence, cadence),
+    peakSpeedKph: Math.max(accumulator.peakSpeedKph, speedKph),
+    distanceMeters: accumulator.distanceMeters + (speedKph / 3.6) * deltaSeconds,
     lastAt: at,
   };
 }

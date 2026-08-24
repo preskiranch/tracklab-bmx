@@ -2,13 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createInitialRiders, stepRiders, type BranchChoicesByPlayer } from '../game/physics';
 import { nextRaceFinishDeadline } from '../lib/raceLifecycle';
 import { reportedBmxTopSpeedKph } from '../game/bmxRollout';
+import {
+  acceptedTrainingSpeedKph,
+  cleanBikeCadenceRpm,
+  cleanBikeWatts,
+} from '../lib/bikeSampleSanity';
 import type { SplitRouteDecisionPoint } from '../lib/trackMapping';
 import type { BikeSample, PlayerSlot, RaceState, RaceSummaryEntry, RiderState, TrackZone } from '../types';
 
-type RaceMetricAccumulator = {
+export type RaceMetricAccumulator = {
   deviceLabel: string;
   sampleCount: number;
   lastSampleAt: number;
+  lastCadenceAt: number;
+  lastWattsAt: number;
   topSpeedKph: number;
   speedTotalKph: number;
   speedSamples: number;
@@ -20,11 +27,13 @@ type RaceMetricAccumulator = {
   wattsSamples: number;
 };
 
-function createMetricAccumulator(label: string): RaceMetricAccumulator {
+export function createMetricAccumulator(label: string): RaceMetricAccumulator {
   return {
     deviceLabel: label,
     sampleCount: 0,
     lastSampleAt: 0,
+    lastCadenceAt: 0,
+    lastWattsAt: 0,
     topSpeedKph: 0,
     speedTotalKph: 0,
     speedSamples: 0,
@@ -43,6 +52,47 @@ function average(total: number, samples: number) {
 
 function metricIsFromRace(sample: BikeSample, metricAt: number | undefined, raceStartedAt: number) {
   return (metricAt ?? sample.at) >= raceStartedAt;
+}
+
+export function recordRaceMetricSample(
+  stats: RaceMetricAccumulator,
+  sample: BikeSample,
+  courseSpeedKph: number | null,
+  raceStartedAt: number,
+) {
+  if (sample.at < raceStartedAt || sample.at === stats.lastSampleAt) return stats;
+  const cadenceAt = sample.cadenceAt ?? sample.at;
+  const cadenceIsNew = metricIsFromRace(sample, sample.cadenceAt, raceStartedAt)
+    && cadenceAt > stats.lastCadenceAt
+    && sample.cadence != null;
+  const cadenceRpm = cadenceIsNew ? cleanBikeCadenceRpm(sample.cadence) : null;
+  const wattsAt = sample.wattsAt ?? sample.at;
+  const wattsIsNew = metricIsFromRace(sample, sample.wattsAt, raceStartedAt)
+    && wattsAt > stats.lastWattsAt;
+  const watts = wattsIsNew ? cleanBikeWatts(sample.watts) : null;
+  const speedKph = courseSpeedKph == null ? null : acceptedTrainingSpeedKph(courseSpeedKph);
+
+  stats.deviceLabel = sample.label;
+  stats.sampleCount += 1;
+  stats.lastSampleAt = sample.at;
+  if (speedKph != null) {
+    stats.topSpeedKph = Math.max(stats.topSpeedKph, reportedBmxTopSpeedKph(cadenceRpm, speedKph));
+    stats.speedTotalKph += speedKph;
+    stats.speedSamples += 1;
+  }
+  if (cadenceRpm != null) {
+    stats.topCadence = Math.max(stats.topCadence, cadenceRpm);
+    stats.cadenceTotal += cadenceRpm;
+    stats.cadenceSamples += 1;
+    stats.lastCadenceAt = cadenceAt;
+  }
+  if (watts != null) {
+    stats.topWatts = Math.max(stats.topWatts, watts);
+    stats.wattsTotal += watts;
+    stats.wattsSamples += 1;
+    stats.lastWattsAt = wattsAt;
+  }
+  return stats;
 }
 
 function recordRaceSamples(
@@ -65,39 +115,10 @@ function recordRaceSamples(
     const rider = riders.find((item) => item.playerId === player.id);
     const stats = statsByPlayer.get(player.id) ?? createMetricAccumulator(sample.label);
     const courseSpeedKph = rider && rider.velocity > 0 ? rider.velocity * 3.6 : null;
-    const cadenceIsFromRace = metricIsFromRace(sample, sample.cadenceAt, raceStartedAt)
-      && sample.cadence != null
-      && Number.isFinite(sample.cadence);
-    const cadenceRpm = cadenceIsFromRace ? sample.cadence : null;
-
-    stats.deviceLabel = sample.label;
-    stats.sampleCount += 1;
-    stats.lastSampleAt = sample.at;
-
-    if (courseSpeedKph != null && Number.isFinite(courseSpeedKph)) {
-      stats.topSpeedKph = Math.max(
-        stats.topSpeedKph,
-        reportedBmxTopSpeedKph(cadenceRpm, courseSpeedKph),
-      );
-      // Average speed remains the honest course velocity implied by distance
-      // and time. Only the peak reconciles a brief cadence peak to 44/16.
-      stats.speedTotalKph += courseSpeedKph;
-      stats.speedSamples += 1;
-    }
-
-    if (cadenceRpm != null) {
-      stats.topCadence = Math.max(stats.topCadence, cadenceRpm);
-      stats.cadenceTotal += cadenceRpm;
-      stats.cadenceSamples += 1;
-    }
-
-    if (metricIsFromRace(sample, sample.wattsAt, raceStartedAt) && Number.isFinite(sample.watts)) {
-      stats.topWatts = Math.max(stats.topWatts, sample.watts);
-      stats.wattsTotal += sample.watts;
-      stats.wattsSamples += 1;
-    }
-
-    statsByPlayer.set(player.id, stats);
+    statsByPlayer.set(
+      player.id,
+      recordRaceMetricSample(stats, sample, courseSpeedKph, raceStartedAt),
+    );
   });
 }
 

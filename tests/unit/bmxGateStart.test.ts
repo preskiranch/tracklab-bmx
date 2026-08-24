@@ -3,6 +3,7 @@ import {
   bikeSampleHasDriveSignalSince,
   bmxCStartBackoffMeters,
   cStartVisualDistance,
+  latestBikeDriveSignalAt,
 } from '../../src/lib/bmxGateStart';
 import type { BikeSample } from '../../src/types';
 
@@ -48,5 +49,32 @@ describe('BMX gate start presentation', () => {
       speedKph: 24,
       speedAt: 9_999,
     }), 10_000)).toBe(false);
+  });
+
+  it('does not treat a fresh zero-watt packet as fresh retained cadence', () => {
+    const retained = bikeSample({
+      at: 10_010,
+      cadence: 90,
+      cadenceAt: 9_999,
+      watts: 0,
+      wattsAt: 10_010,
+      speedKph: 0,
+      speedAt: 10_010,
+    });
+    expect(latestBikeDriveSignalAt(retained)).toBe(9_999);
+    expect(bikeSampleHasDriveSignalSince(retained, 10_000)).toBe(false);
+  });
+
+  it('keeps the accepted drive time when a later unrelated packet advances the sample clock', () => {
+    const merged = bikeSample({
+      at: 10_100,
+      cadence: 90,
+      cadenceAt: 10_001,
+      watts: 0,
+      wattsAt: 10_100,
+      speedKph: 0,
+      speedAt: 10_100,
+    });
+    expect(latestBikeDriveSignalAt(merged) - 10_000).toBe(1);
   });
 });

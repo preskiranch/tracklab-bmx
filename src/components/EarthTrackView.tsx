@@ -662,6 +662,7 @@ export function EarthTrackView({
               onFullscreenInteraction={onRaceFullscreenInteraction}
               newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
               heartRateByPlayer={heartRateByPlayer}
+              samplesByDevice={samplesByDevice}
             />
           </Suspense>
         )}

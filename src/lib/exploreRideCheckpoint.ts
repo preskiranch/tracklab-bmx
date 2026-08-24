@@ -10,6 +10,10 @@ import type {
 import type { HeartRateActiveClockSegment } from './heartRate';
 import { sanitizeRecentExploreRoute } from './exploreRecentRoutes';
 import { sanitizeClubOwnerTrainingCheckpoint } from './clubOwnerTrainingCoordinator';
+import {
+  acceptedBikeCadenceRpm,
+  acceptedTrainingSpeedKph,
+} from './bikeSampleSanity';
 
 const exploreRideCheckpointStoragePrefix = 'tracklab-explore-ride-checkpoint-v1';
 const validPlayerIds = new Set<PlayerSlot['id']>([1, 2, 3, 4]);
@@ -112,9 +116,11 @@ function sanitizeRider(value: unknown, route: ExploreRoute): ExploreRider | null
     return null;
   }
 
-  const cadence = rider.cadence == null
-    ? null
-    : Math.max(0, Math.min(400, finiteNumber(rider.cadence)));
+  const cadence = rider.cadence == null ? null : acceptedBikeCadenceRpm(rider.cadence);
+  const cadenceWasRejected = rider.cadence != null && cadence == null;
+  const velocityMps = finiteNumber(rider.velocityMps);
+  const velocityWasRejected = acceptedTrainingSpeedKph(velocityMps * 3.6) == null;
+  if (cadenceWasRejected || velocityWasRejected) return null;
   const recommendedAirSetting = rider.recommendedAirSetting == null
     ? undefined
     : Math.max(1, Math.min(10, Math.round(finiteNumber(rider.recommendedAirSetting, 1))));
@@ -136,7 +142,7 @@ function sanitizeRider(value: unknown, route: ExploreRoute): ExploreRider | null
     colorName: rider.colorName as PlayerColorName,
     accent: rider.accent.slice(0, 80),
     distanceMeters: Math.max(0, Math.min(route.distanceMeters, finiteNumber(rider.distanceMeters))),
-    velocityMps: Math.max(0, Math.min(50, finiteNumber(rider.velocityMps))),
+    velocityMps,
     cadence,
     watts: Math.max(0, Math.min(5_000, finiteNumber(rider.watts))),
     signal: Math.max(0, Math.min(1, finiteNumber(rider.signal))),
@@ -371,12 +377,13 @@ export function sanitizeExploreRideCheckpoint(value: unknown): ExploreRideCheckp
     return null;
   }
 
-  const riders = checkpoint.riders
+  const riderCandidates = checkpoint.riders.slice(0, 4);
+  const riders = riderCandidates
     .flatMap((candidate) => {
       const rider = sanitizeRider(candidate, route);
       return rider ? [rider] : [];
     })
-    .slice(0, 4);
+  ;
   const elapsedMs = Math.max(0, finiteNumber(checkpoint.elapsedMs));
   const savedAt = Math.max(0, finiteNumber(checkpoint.savedAt));
   const sessionId = sanitizeSessionId(checkpoint.sessionId);
@@ -394,6 +401,7 @@ export function sanitizeExploreRideCheckpoint(value: unknown): ExploreRideCheckp
   const studioBinding = sanitizeStudioBinding(checkpoint.studioBinding, riders, sessionId);
   if (
     riders.length === 0
+    || riders.length !== riderCandidates.length
     || savedAt <= 0
     || riders.every((rider) => rider.distanceMeters >= route.distanceMeters - 0.01)
   ) {

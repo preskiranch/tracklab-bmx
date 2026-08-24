@@ -98,6 +98,13 @@ describe('Recovery Alert memory persistence parity', () => {
     expect(recentWindow).toContain('_receivedAt: new Date(row.received_at).getTime()');
     expect(source).toContain('candidate.startedAt < latest.startedAt');
     expect(source).toContain('ORDER BY started_at DESC, created_at DESC, id DESC');
+    const learningWindow = source.slice(
+      source.indexOf('export async function loadRecoveryLearningSummaries'),
+      source.indexOf('function sameRecoveryRequest'),
+    );
+    expect(learningWindow).toContain('storedBikeMetricsAreAccepted(episode.effortSummary)');
+    expect(learningWindow).toContain("acceptedRecordedBikeMetricsSql('effort_summary')");
+    expect(source).toContain("acceptedGhostObjectMetricSql(objectSql, 'peakSpeedMps'");
   });
 
   it('records a delayed older first delivery without replacing the newer repetition', async () => {
@@ -459,6 +466,25 @@ describe('Recovery Alert memory persistence parity', () => {
     await deleteRecoveryAlertData(owner);
     expect(await loadRecoveryAlertPreference(owner)).toBeNull();
     expect(await loadRecoveryAlertEpisode(owner, first.id)).toBeNull();
+  });
+
+  it('quarantines legacy recovery learning with an astronomical MPS peak', async () => {
+    const owner = `user:recovery-corrupt-mps-${Date.now()}`;
+    const startedAt = 1_500_000;
+    const episode = {
+      ...candidate('recovery_memory_corrupt_mps', `${'z'.repeat(32)}`, startedAt, 'rep-corrupt-mps'),
+      effortSummary: { peakSpeedMps: 999 },
+    };
+    await createRecoveryAlertEpisode(owner, episode, startedAt);
+    const { streamId, tokenHash } = await createPrivateWatchStream(owner, startedAt, `corrupt-mps-${Date.now()}`);
+    for (let sequence = 0; sequence < 5; sequence += 1) {
+      const offset = 16_000 + sequence * 4_000;
+      const at = startedAt + offset;
+      const sample = { sequence, bpm: 110, recordedAt: at, activeElapsedMs: offset };
+      expect(await insertHeartRateSamples(streamId, tokenHash, [sample], at)).toEqual([sequence]);
+      await applyRecoveryHeartRateSamples(owner, streamId, [sample], at);
+    }
+    expect(await loadRecoveryLearningSummaries(owner, 'bmx-race', 120)).toEqual([]);
   });
 
   it('matches the Watch rolling median through a noisy above-target spike', async () => {

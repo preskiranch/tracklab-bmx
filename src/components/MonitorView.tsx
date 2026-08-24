@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Bike, Gauge, HeartPulse, Minimize2, RadioTower, Signal, Zap } from 'lucide-react';
 import { liveBikeTimeoutMs } from '../data';
 import { bmxSpeedKphFromCadence } from '../game/bmxRollout';
+import {
+  cleanBikeCadenceRpm,
+  maximumAcceptedWattbikeCadenceRpm,
+} from '../lib/bikeSampleSanity';
 import { wattbikeMonitorLastThree } from '../lib/bikeProfileIdentity';
+import { demoHeartRateReadingForBikeSample } from '../lib/demoHeartRate';
 import { formatSpeedFromKph, speedUnitLabel } from '../units';
 import type { BikeSample, PlayerSlot, SpeedUnit } from '../types';
 import { PullSledScene } from './PullSledScene';
@@ -82,7 +87,7 @@ type MonitorMetrics = {
 // Elite BMX cadence can be exceptionally high, but a Wattbike flywheel packet in
 // the thousands is not a rider measurement. Keep generous headroom above the
 // expected human range while rejecting the post-sprint runaway values outright.
-export const monitorMaximumCadenceRpm = 320;
+export const monitorMaximumCadenceRpm = maximumAcceptedWattbikeCadenceRpm;
 // Rotate an unused arm before the server's 15-minute reservation expires, so a
 // rider can never begin against a stale one-use authorization.
 export const monitorSprintArmLifetimeMs = 10 * 60 * 1000;
@@ -172,10 +177,9 @@ export function monitorMetrics(sample: BikeSample | undefined, now = Date.now())
   const cadenceFresh = metricIsFresh(sample, sample?.cadenceAt, now);
   const watts = wattsFresh ? sample?.watts ?? 0 : 0;
   const rawCadence = cadenceFresh ? sample?.cadence ?? 0 : 0;
-  const cadenceIsPlausible = Number.isFinite(rawCadence)
-    && rawCadence >= 0
-    && rawCadence <= monitorMaximumCadenceRpm;
-  const cadence = cadenceIsPlausible ? rawCadence : 0;
+  const cleanedCadence = cleanBikeCadenceRpm(rawCadence);
+  const cadenceIsPlausible = cleanedCadence != null;
+  const cadence = cleanedCadence ?? 0;
   const bmxSpeedKph = bmxSpeedKphFromCadence(cadence);
   const idleNoise = watts < 1 && cadence <= 15;
 
@@ -563,11 +567,14 @@ export function MonitorView({
               : sprintResult
                 ? Math.min(1, sprintDurationSeconds(sprintResult, now) / monitorTravelSeconds)
                 : 0;
+            const heartRateReading = demoHeartRateReadingForBikeSample(sample)
+              ?? heartRateByPlayer[player.id];
             const heartRate = heartRateReadingState(
-              heartRateByPlayer[player.id]?.bpm,
-              heartRateByPlayer[player.id]?.recordedAt,
+              heartRateReading?.bpm,
+              heartRateReading?.recordedAt,
               now,
             );
+            const heartRateSimulated = heartRateReading?.source === 'demo-simulated';
             const historyStatus = historyStatusByPlayer[player.id];
             const studioHeartRate = studioHeartRateByPlayer[player.id];
             const studioHeartRateLabel = studioHeartRate?.phase === 'watch-ready'
@@ -651,10 +658,17 @@ export function MonitorView({
                     <span>{sample?.source.toUpperCase() ?? '--'}</span>
                     <small>{formatAge(sample, now)}</small>
                   </div>
-                  <div className={`monitor-heart-rate ${heartRate.state}`}>
+                  <div
+                    className={`monitor-heart-rate ${heartRate.state}`}
+                    aria-label={heartRate.bpm == null
+                      ? `Heart rate: ${heartRate.detail}`
+                      : `${heartRateSimulated ? 'Simulated heart rate' : 'Heart rate'} ${heartRate.bpm} beats per minute`}
+                  >
                     <HeartPulse size={18} />
                     <span>{heartRate.bpm ?? '—'}</span>
-                    <small>{heartRate.bpm == null ? heartRate.detail : 'Heart BPM'}</small>
+                    <small>{heartRate.bpm == null
+                      ? heartRate.detail
+                      : heartRateSimulated ? 'Simulated heart BPM' : 'Heart BPM'}</small>
                   </div>
                 </div>
 

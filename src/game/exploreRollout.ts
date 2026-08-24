@@ -1,3 +1,5 @@
+import { acceptedBikeCadenceRpm } from '../lib/bikeSampleSanity';
+
 export const exploreRolloutConfig = {
   frontChainringTeeth: 54,
   rearCogTeeth: 17,
@@ -12,7 +14,8 @@ export const exploreRolloutFeetPerCrankRevolution =
   exploreRolloutConfig.rolloutMetersPerCrankRevolution * 3.28084;
 
 export function exploreVelocityMpsFromCadence(cadenceRpm: number | null | undefined) {
-  return Math.max(0, cadenceRpm ?? 0) / 60
+  const cadence = acceptedBikeCadenceRpm(cadenceRpm) ?? 0;
+  return cadence / 60
     * exploreRolloutConfig.rolloutMetersPerCrankRevolution;
 }
 

@@ -122,6 +122,11 @@ describe('false-start detection', () => {
     });
   });
 
+  it('does not false-start from a corrupt measured-speed packet', () => {
+    const sample = bikeSample({ speedKph: 151_080.1, cadence: null });
+    expect(detectFalseStart([player], new Map([[58701, sample]]), 10_000, 10_100)).toBeNull();
+  });
+
   it('detects BMX rollout speed derived from cadence', () => {
     const sample = bikeSample({ speedKph: null, cadence: 20 });
     expect(detectFalseStart([player], new Map([[58701, sample]]), 10_000, 10_100)).toMatchObject({

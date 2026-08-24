@@ -127,6 +127,32 @@ describe('ghost lap categories and privacy metadata', () => {
     expect(mergeGhostLaps([], [demoGhost])).toEqual([]);
   });
 
+  it('quarantines legacy ghosts created from corrupt cadence or speed', () => {
+    const corruptSummary = {
+      ...rawGhost(1, 'Corrupt summary'),
+      finishTimeMs: 1,
+      summary: { topCadence: 923_334, averageCadence: 68_458.7, topSpeedKph: 151_080.1 },
+    };
+    const corruptPoint = {
+      ...rawGhost(1, 'Corrupt point'),
+      finishTimeMs: 1,
+      points: [
+        rawGhost(1).points[0],
+        { ...rawGhost(1).points[1], velocityMps: 41_966.7 },
+      ],
+    };
+    const boundary = {
+      ...rawGhost(1, 'Boundary rider'),
+      summary: { topCadence: 200, averageCadence: 200, topSpeedKph: 83, averageSpeedKph: 83 },
+      points: rawGhost(1).points.map((point) => ({ ...point, velocityMps: 83 / 3.6 })),
+    };
+
+    expect(sanitizeGhostLap(corruptSummary)).toBeNull();
+    expect(sanitizeGhostLap(corruptPoint)).toBeNull();
+    expect(sanitizeGhostLap(boundary)).not.toBeNull();
+    expect(mergeGhostLaps([], [corruptSummary, corruptPoint])).toEqual([]);
+  });
+
   it('preserves a safe rider photo for ranked ghost cards', () => {
     const ghost = rawGhost(1) as ReturnType<typeof rawGhost> & { photoUrl?: string };
     ghost.photoUrl = 'data:image/jpeg;base64,QUJDRA==';
