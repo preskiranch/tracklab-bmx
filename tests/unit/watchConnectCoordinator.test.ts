@@ -8,7 +8,9 @@ import {
 import type { WatchConnectConnection } from '../../src/lib/watchConnect';
 import {
   activeWatchConnectTarget,
+  cleanupStaleWatchConnectStart,
   defaultWatchConnectClubId,
+  nativeWatchConnectHeartRate,
   runWatchConnectKeyedSingleFlight,
   watchConnectAccountBoundarySealKey,
   watchConnectAccountRequestIsCurrent,
@@ -108,6 +110,91 @@ describe('WatchConnectCoordinator native adapter', () => {
     expect(watchConnectCoordinatorRequestIsCurrent('account-one', 'account-one', 4, 4)).toBe(true);
     expect(watchConnectCoordinatorRequestIsCurrent('account-one', 'account-two', 4, 4)).toBe(false);
     expect(watchConnectCoordinatorRequestIsCurrent('account-one', 'account-one', 4, 5)).toBe(false);
+    expect(watchConnectCoordinatorRequestIsCurrent(
+      'account-one', 'account-one', 4, 4, 'loading',
+    )).toBe(false);
+  });
+
+  it('cleans a deferred start after logout with only its exact cloud and pairing identities', async () => {
+    const connection: WatchConnectConnection = {
+      id: 'connection-a',
+      enrollmentId: 'enrollment-a',
+      scope: 'personal',
+      clubId: null,
+      studioRiderId: null,
+      state: 'connecting',
+      connectedAt: 1_000,
+      connectedUntil: 20_000,
+      remainingMs: 19_000,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+    };
+    const stopNative = vi.fn(async () => undefined);
+    const disconnectConnection = vi.fn(async () => undefined);
+    const revokePairing = vi.fn(async () => undefined);
+    await cleanupStaleWatchConnectStart({
+      connection,
+      pairingId: 'pairing-a',
+      getNativeState: async () => ({
+        version: 1,
+        state: 'connected',
+        scope: 'personal',
+        connectionId: connection.id,
+        sessionId: `watch-connect:${connection.id}`,
+        connectedUntil: connection.connectedUntil,
+        remainingMs: connection.remainingMs,
+        requiresUserStart: false,
+        workoutReady: true,
+        relayConfigured: true,
+      }),
+      stopNative,
+      disconnectConnection,
+      revokePairing,
+    });
+    expect(stopNative).toHaveBeenCalledOnce();
+    expect(disconnectConnection).toHaveBeenCalledWith('connection-a');
+    expect(revokePairing).toHaveBeenCalledWith('pairing-a');
+  });
+
+  it('does not stop account B when account A start resolves after a same-mount switch', async () => {
+    const connection: WatchConnectConnection = {
+      id: 'connection-a',
+      enrollmentId: 'enrollment-a',
+      scope: 'personal',
+      clubId: null,
+      studioRiderId: null,
+      state: 'connecting',
+      connectedAt: 1_000,
+      connectedUntil: 20_000,
+      remainingMs: 19_000,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+    };
+    const stopNative = vi.fn(async () => undefined);
+    const disconnectConnection = vi.fn(async () => undefined);
+    const revokePairing = vi.fn(async () => undefined);
+    await cleanupStaleWatchConnectStart({
+      connection,
+      pairingId: 'pairing-a',
+      getNativeState: async () => ({
+        version: 1,
+        state: 'connected',
+        scope: 'personal',
+        connectionId: 'connection-b',
+        sessionId: 'watch-connect:connection-b',
+        connectedUntil: 30_000,
+        remainingMs: 29_000,
+        requiresUserStart: false,
+        workoutReady: true,
+        relayConfigured: true,
+      }),
+      stopNative,
+      disconnectConnection,
+      revokePairing,
+    });
+    expect(stopNative).not.toHaveBeenCalled();
+    expect(disconnectConnection).toHaveBeenCalledWith('connection-a');
+    expect(revokePairing).toHaveBeenCalledWith('pairing-a');
   });
 
   it('does not seal before hydration or when native matches current cloud state', () => {
@@ -612,6 +699,77 @@ describe('WatchConnectCoordinator native adapter', () => {
       ...reading,
       sessionId: 'watch-connect:connection-current',
     }, connection)?.bpm).toBe(160);
+
+  });
+
+  it('projects native BPM only for the exact known pairing and active connection generation', () => {
+    const now = 10_000;
+    const connection: WatchConnectConnection = {
+      id: 'connection-current',
+      enrollmentId: 'enrollment-one',
+      scope: 'personal',
+      clubId: null,
+      studioRiderId: null,
+      state: 'connected',
+      connectedAt: 1_000,
+      connectedUntil: 20_000,
+      remainingMs: 10_000,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+    };
+    const latest = {
+      source: 'apple-watch' as const,
+      sessionId: 'watch-connect:pair-one',
+      sequence: 1,
+      bpm: 152,
+      recordedAt: now - 500,
+      receivedAt: now - 400,
+    };
+    const status = {
+      version: 1 as const,
+      state: 'active' as const,
+      sessionId: latest.sessionId,
+      at: now,
+      watchConnect: {
+        version: 1 as const,
+        state: 'connected' as const,
+        scope: 'personal' as const,
+        connectionId: connection.id,
+        sessionId: `watch-connect:${connection.id}`,
+        connectedUntil: connection.connectedUntil,
+        remainingMs: connection.remainingMs,
+        requiresUserStart: false,
+        workoutReady: true,
+        relayConfigured: true,
+      },
+    };
+    const resolve = (overrides: Partial<Parameters<typeof nativeWatchConnectHeartRate>[0]> = {}) => (
+      nativeWatchConnectHeartRate({
+        accountId: 'one',
+        connection,
+        knownPairingIds: new Set(['pair-one']),
+        latest,
+        status,
+        readOnlyObserver: false,
+        now,
+        ...overrides,
+      })
+    );
+
+    expect(resolve()).toMatchObject({
+      streamId: '',
+      sessionId: 'watch-connect:connection-current',
+      riderId: 'account:one',
+      bpm: 152,
+    });
+    expect(resolve({ knownPairingIds: new Set(['pair']) })).toBeNull();
+    expect(resolve({ latest: { ...latest, sessionId: 'watch-connect:pair-two' } })).toBeNull();
+    expect(resolve({ status: {
+      ...status,
+      watchConnect: { ...status.watchConnect, connectionId: 'connection-next' },
+    } })).toBeNull();
+    expect(resolve({ readOnlyObserver: true })).toBeNull();
+    expect(resolve({ latest: { ...latest, recordedAt: now - 10_001 } })).toBeNull();
   });
 
   it('refreshes paired/install availability when native WCSession activation completes', () => {

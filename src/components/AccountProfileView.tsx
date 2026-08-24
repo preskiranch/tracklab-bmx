@@ -45,8 +45,9 @@ import {
 import type { AuthUser } from '../lib/auth';
 import {
   loadClubHeartRateSummaryHistory,
-  loadPrivateHeartRateSessionHistory,
+  loadPrivateHeartRateSessionHistoryResult,
   type ClubHeartRateHistoryItem,
+  type PrivateHeartRateAttachmentStatus,
   type PrivateHeartRateHistoryItem,
   type HeartRateStream,
 } from '../lib/heartRateCloud';
@@ -308,16 +309,24 @@ function activeClockLabel(value: number) {
 }
 
 export type PrivateHeartRateHistoryState = 'loading' | 'ready' | 'error';
+export const privateHeartRateSyncPollLimit = 20;
+
+export function privateHeartRateSyncPollDelay(attempt: number) {
+  if (!Number.isInteger(attempt) || attempt < 0 || attempt >= privateHeartRateSyncPollLimit) return null;
+  return Math.min(10_000, 2_000 + attempt * 1_000);
+}
 
 export function PrivateHeartRateHistoryPanel({
   state,
   streams,
+  attachmentStatus = 'not-recorded',
   error = '',
   onRetry,
   sharingLabel,
 }: {
   state: PrivateHeartRateHistoryState;
   streams: readonly HeartRateHistorySummaryStream[];
+  attachmentStatus?: PrivateHeartRateAttachmentStatus;
   error?: string;
   onRetry?: () => void;
   sharingLabel?: string;
@@ -339,17 +348,22 @@ export function PrivateHeartRateHistoryPanel({
           {onRetry && <button type="button" onClick={onRetry}><RefreshCw size={13} /> Try again</button>}
         </div>
       ) : streams.length === 0 ? (
-        <p className="private-heart-rate-message">
-          {sharingLabel
+        <div className="private-heart-rate-message" role={attachmentStatus === 'syncing' ? 'status' : undefined}>
+          <span>{sharingLabel
             ? 'The rider did not share an Apple Watch summary for this club session.'
-            : 'No Apple Watch heart-rate data was saved for this session.'}
-        </p>
+            : attachmentStatus === 'syncing'
+              ? 'Apple Watch heart-rate data is still syncing for this session.'
+              : 'No Apple Watch heart-rate data was saved for this session.'}</span>
+          {!sharingLabel && attachmentStatus === 'syncing' && onRetry && (
+            <button type="button" onClick={onRetry}><RefreshCw size={13} /> Check again</button>
+          )}
+        </div>
       ) : (
         <div className="private-heart-rate-streams">
           {streams.map((stream, index) => (
             <div className="private-heart-rate-stream" key={stream.id}>
               {streams.length > 1 && <strong className="private-heart-rate-segment">Watch segment {index + 1}</strong>}
-              {stream.summary ? (
+              {stream.summary && stream.summary.sampleCount > 0 ? (
                 <dl className="private-heart-rate-metrics">
                   <div><dt>Minimum</dt><dd>{heartRateMetric(stream.summary.minimumBpm)}</dd></div>
                   <div><dt>Average</dt><dd>{heartRateMetric(stream.summary.averageBpm)}</dd></div>
@@ -367,10 +381,10 @@ export function PrivateHeartRateHistoryPanel({
                 </div>
               )}
 
-              {stream.zoneSummaries.length > 0 && (
+              {stream.zoneSummaries.some((zone) => zone.summary.sampleCount > 0) && (
                 <div className="private-heart-rate-zones">
                   <strong>Heart rate by pedal zone</strong>
-                  {stream.zoneSummaries.map((zone) => (
+                  {stream.zoneSummaries.filter((zone) => zone.summary.sampleCount > 0).map((zone) => (
                     <article key={`${stream.id}:${zone.zoneId}`}>
                       <div>
                         <strong>{zone.zoneName || zone.zoneId}</strong>
@@ -407,31 +421,65 @@ function PrivateHeartRateHistoryForSession({
   const clubTarget = useMemo(() => clubHeartRateHistoryTarget(session), [session]);
   const [state, setState] = useState<PrivateHeartRateHistoryState>('loading');
   const [streams, setStreams] = useState<readonly HeartRateHistorySummaryStream[]>([]);
+  const [attachmentStatus, setAttachmentStatus] = useState<PrivateHeartRateAttachmentStatus>('not-recorded');
   const [error, setError] = useState('');
   const [retryRevision, setRetryRevision] = useState(0);
+  const syncPollCountRef = useRef(0);
+  const loadTargetRef = useRef('');
 
   useEffect(() => {
     if (!sessionId && !clubTarget) return undefined;
     let cancelled = false;
-    setState('loading');
+    let syncTimer: number | null = null;
+    const loadTarget = clubTarget
+      ? `club:${clubTarget.clubId}:${clubTarget.sessionId}`
+      : `private:${sessionId}`;
+    if (loadTargetRef.current !== loadTarget) {
+      loadTargetRef.current = loadTarget;
+      syncPollCountRef.current = 0;
+      setStreams([]);
+      setAttachmentStatus('not-recorded');
+      setState('loading');
+    } else {
+      // Background sync checks retain the current truthful content instead of
+      // flashing the whole result card back to a loading state.
+      setState((current) => current === 'error' ? 'loading' : current);
+    }
     setError('');
     const request = clubTarget
-      ? loadClubHeartRateSummaryHistory(clubTarget.clubId, clubTarget.sessionId)
-      : loadPrivateHeartRateSessionHistory(sessionId!);
+      ? loadClubHeartRateSummaryHistory(clubTarget.clubId, clubTarget.sessionId).then((items) => ({
+        items,
+        status: 'saved' as const,
+      }))
+      : loadPrivateHeartRateSessionHistoryResult(sessionId!);
     void request
       .then((next) => {
         if (cancelled) return;
-        setStreams(next);
+        setStreams(next.items);
+        setAttachmentStatus(next.status);
         setState('ready');
+        const delayMs = !clubTarget && next.status === 'syncing'
+          ? privateHeartRateSyncPollDelay(syncPollCountRef.current)
+          : null;
+        if (delayMs != null) {
+          syncPollCountRef.current += 1;
+          syncTimer = window.setTimeout(() => {
+            if (!cancelled) setRetryRevision((revision) => revision + 1);
+          }, delayMs);
+        } else if (next.status !== 'syncing') {
+          syncPollCountRef.current = 0;
+        }
       })
       .catch((loadError: unknown) => {
         if (cancelled) return;
         setStreams([]);
+        setAttachmentStatus('not-recorded');
         setError(loadError instanceof Error ? loadError.message : String(loadError));
         setState('error');
       });
     return () => {
       cancelled = true;
+      if (syncTimer != null) window.clearTimeout(syncTimer);
     };
   }, [clubTarget, refreshKey, retryRevision, sessionId]);
 
@@ -440,9 +488,13 @@ function PrivateHeartRateHistoryForSession({
     <PrivateHeartRateHistoryPanel
       state={state}
       streams={streams}
+      attachmentStatus={attachmentStatus}
       error={error}
       sharingLabel={clubTarget ? `Shared with ${clubTarget.clubName} by rider consent` : undefined}
-      onRetry={() => setRetryRevision((revision) => revision + 1)}
+      onRetry={() => {
+        syncPollCountRef.current = 0;
+        setRetryRevision((revision) => revision + 1);
+      }}
     />
   );
 }

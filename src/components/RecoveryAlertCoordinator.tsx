@@ -128,6 +128,20 @@ export function recoverySubmissionCanRetry(attempt: number) {
   return attempt <= 6;
 }
 
+export function recoveryHeartRateCanSubmit(
+  episode: RecoveryEpisode | null,
+  latest: RecoveryLatestHeartRate | null,
+  now = Date.now(),
+) {
+  return Boolean(
+    episode
+    && (episode.mode === 'heart-rate' || episode.mode === 'smart')
+    && latest?.streamId
+    && latest.recordedAt >= episode.startedAt
+    && now - latest.recordedAt <= 10_000,
+  );
+}
+
 export function retainPendingRecoveryFinishSignals(
   pending: ReadonlyMap<string, RecoveryFinishSignal>,
   observed: readonly RecoveryFinishSignal[],
@@ -540,13 +554,7 @@ export function RecoveryAlertCoordinator({
   }, [accountId, finishSignalKey, preference?.mode, retryRevision]);
 
   useEffect(() => {
-    if (
-      !episode
-      || (episode.mode !== 'heart-rate' && episode.mode !== 'smart')
-      || !latestHeartRate
-      || latestHeartRate.recordedAt < episode.startedAt
-      || Date.now() - latestHeartRate.recordedAt > 10_000
-    ) return;
+    if (!episode || !latestHeartRate || !recoveryHeartRateCanSubmit(episode, latestHeartRate)) return;
     const submissionKey = `${episode.id}:${latestHeartRate.streamId}:${latestHeartRate.recordedAt}`;
     if (submittingHeartRateRef.current === submissionKey) return;
     submittingHeartRateRef.current = submissionKey;

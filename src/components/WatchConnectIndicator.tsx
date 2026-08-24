@@ -7,7 +7,9 @@ export type WatchConnectIndicatorProps = Readonly<{
 }>;
 
 export function WatchConnectIndicator({ state, onOpenSettings }: WatchConnectIndicatorProps) {
-  const accessibleLabel = `${state.label}. ${state.detail}${onOpenSettings
+  const accessibleLabel = `${state.label}${state.bpm == null
+    ? ''
+    : `, ${state.bpm} beats per minute`}. ${state.detail}${onOpenSettings
     ? ' Open Watch Connect settings.'
     : ''}`;
   const cue = state.phase === 'live' || state.phase === 'connected'
@@ -22,8 +24,12 @@ export function WatchConnectIndicator({ state, onOpenSettings }: WatchConnectInd
   const contents = <>
     <span className="watch-connect-indicator-icon" aria-hidden="true">
       <Watch size={17} strokeWidth={2.5} />
+      {state.bpm != null && <b>{state.bpm}</b>}
     </span>
-    <span className="watch-connect-indicator-label">{state.label}</span>
+    <span className="watch-connect-indicator-label">
+      <span>{state.label}</span>
+      {state.bpm != null && <strong>{state.bpm} BPM</strong>}
+    </span>
     <span className="watch-connect-indicator-cue" aria-hidden="true">{cue}</span>
   </>;
   return onOpenSettings ? (

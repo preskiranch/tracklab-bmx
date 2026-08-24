@@ -1611,14 +1611,8 @@ export function nativeHeartRateWorkoutBelongsToAccount(
 ) {
   if (!workoutSessionId || !accountId) return false;
   if (workoutSessionId.startsWith(`watch-block:${accountId}:`)) return true;
-  const accountBlockPairingId = workoutSessionId.startsWith('watch-account-block:')
-    ? workoutSessionId.slice('watch-account-block:'.length)
-    : '';
-  if (accountBlockPairingId && knownPairingIds.has(accountBlockPairingId)) return true;
-  const studioPairingId = workoutSessionId.startsWith('watch-studio-block:')
-    ? workoutSessionId.slice('watch-studio-block:'.length)
-    : '';
-  return Boolean(studioPairingId && knownPairingIds.has(studioPairingId));
+  const pairing = /^watch-(?:account|studio)-block:(.+)$/.exec(workoutSessionId);
+  return Boolean(pairing && knownPairingIds.has(pairing[1]));
 }
 
 export function personalMonitorSavedStatus(
@@ -1777,6 +1771,7 @@ export default function App() {
   const heartRateAccountBlockCoveredSessionIdsRef = useRef<Set<string>>(new Set());
   const heartRateAccountBlockObservedRelayIdsRef = useRef<Set<string>>(new Set());
   const heartRateAccountBlockActionPromiseRef = useRef<Promise<void> | null>(null);
+  const watchConnectActionPromisesRef = useRef<Set<Promise<void>>>(new Set());
   const heartRateAccountHydrationRef = useRef<{
     accountId: string;
     promise: Promise<boolean>;
@@ -1969,6 +1964,7 @@ export default function App() {
     session: false,
   });
   const [liveHeartRateByRider, setLiveHeartRateByRider] = useState<Record<string, HeartRateLiveEvent>>({});
+  const [watchConnectAccountHeartRate, setWatchConnectAccountHeartRate] = useState<HeartRateLiveEvent | null>();
   const [monitorHistoryStatusByPlayer, setMonitorHistoryStatusByPlayer] = useState<Partial<Record<
     PlayerSlot['id'],
     MonitorSprintHistoryStatus
@@ -2174,7 +2170,7 @@ export default function App() {
           if (reconciliation.activeSessionId) {
             heartRateAccountBlockObservedRelayIdsRef.current.add(reconciliation.activeSessionId);
           }
-          setHeartRateMessage('Restored the private account Apple Watch block. Exact TrackLab session windows will attach automatically.');
+          setHeartRateMessage('Restored private Apple Watch coverage.');
         } else if (reconciliation.activePairing) {
           setHeartRateStudioConsent({
             live: reconciliation.activePairing.liveStudioConsent,
@@ -2195,11 +2191,11 @@ export default function App() {
 
         setHeartRateHydratedAccountId(accountId);
         if (reconciliation.activeSessionId && reconciliation.activePairing?.relayScope !== 'account-block') {
-          setHeartRateMessage('Restored the private Apple Watch relay for the active TrackLab session.');
+          setHeartRateMessage('Restored this session’s private Watch relay.');
         } else if (clearedAccountBoundarySessions.some(Boolean)) {
-          setHeartRateMessage('Removed an unfinished Apple Watch relay that could not be safely matched to this account. Finalized private uploads were left intact.');
+          setHeartRateMessage('Removed a Watch relay that did not match this account.');
         } else if (reconciliation.foreignQueuedSessionCount > 0) {
-          setHeartRateMessage('Private Apple Watch data from another account is still finishing its original cloud sync and will not appear in this account.');
+          setHeartRateMessage('Another account’s Watch data is finishing its private sync.');
         }
         return true;
       } catch (error) {
@@ -2420,7 +2416,7 @@ export default function App() {
       live: claim.pairing.liveStudioConsent,
       session: claim.pairing.sessionStudioConsent,
     });
-    setHeartRateMessage('Apple Watch is connected for this studio training block. Each sprint will use only its exact first-watt-to-finish heart-rate window.');
+    setHeartRateMessage('Apple Watch is connected for this studio block.');
   }, [heartRate]);
 
   const handleHeartRateStudioConsentChange = useCallback((
@@ -2429,7 +2425,7 @@ export default function App() {
   ) => {
     const pairingId = activeHeartRatePairingIdRef.current;
     if (!pairingId) {
-      setHeartRateMessage('Reconnect the active Apple Watch session before changing studio heart-rate sharing. No server consent was changed.');
+      setHeartRateMessage('Reconnect Apple Watch before changing studio sharing. No consent changed.');
       return;
     }
     const previous = heartRateStudioConsent;
@@ -3915,9 +3911,21 @@ export default function App() {
     if (clubOwnerTrainingGroupRef.current?.request.activityType === 'explore') return;
     void cancelActiveClubOwnerTrainingGroup({ keepalive: true }).catch(() => undefined);
   }, [cancelActiveClubOwnerTrainingGroup]);
+  const accountHeartRateRiderId = authUser ? `account:${authUser.id}` : null;
+  const observedAccountHeartRate = accountHeartRateRiderId
+    ? liveHeartRateByRider[accountHeartRateRiderId]
+    : null;
+  const accountLiveHeartRate = !accountHeartRateRiderId
+    ? null
+    : watchConnectAccountHeartRate !== undefined
+      ? watchConnectAccountHeartRate?.riderId === accountHeartRateRiderId
+        ? watchConnectAccountHeartRate
+        : null
+      : observedAccountHeartRate?.sessionId.startsWith('watch-connect:')
+        ? null
+        : observedAccountHeartRate ?? null;
   const heartRateByPlayer = useMemo<LiveHeartRateByPlayer>(() => {
     const next: LiveHeartRateByPlayer = {};
-    const accountRiderId = authUser ? `account:${authUser.id}` : null;
     const nativeWorkoutOwnedByAccount = nativeHeartRateWorkoutBelongsToAccount(
       heartRate.status?.sessionId,
       authUser?.id,
@@ -3928,28 +3936,35 @@ export default function App() {
 
     candidateById.forEach((player) => {
       if (!player.riderId) return;
-      const cloudReading = liveHeartRateByRider[player.riderId];
-      const nativeReading = player.riderId === accountRiderId
+      const cloudReading = player.riderId === accountHeartRateRiderId
+        ? accountLiveHeartRate
+        : liveHeartRateByRider[player.riderId];
+      const nativeReading = player.riderId === accountHeartRateRiderId
+        && watchConnectAccountHeartRate === undefined
         && heartRateHydratedAccountId === authUser?.id
         && nativeWorkoutOwnedByAccount
+        && heartRate.readingState === 'live'
+        && heartRate.latest?.sessionId === heartRate.status?.sessionId
         ? heartRate.latest
         : null;
       const latest = nativeReading && (!cloudReading || nativeReading.recordedAt >= cloudReading.recordedAt)
-        ? { bpm: nativeReading.bpm, recordedAt: nativeReading.recordedAt }
-        : cloudReading
-          ? { bpm: cloudReading.bpm, recordedAt: cloudReading.recordedAt }
-          : null;
+        ? nativeReading
+        : cloudReading;
       if (latest) next[player.id] = latest;
     });
     return next;
   }, [
+    accountHeartRateRiderId,
+    accountLiveHeartRate,
     authUser,
     explorePlayers,
     heartRate.latest,
     heartRate.status?.sessionId,
+    heartRate.readingState,
     heartRateHydratedAccountId,
     liveHeartRateByRider,
     racePlayers,
+    watchConnectAccountHeartRate,
   ]);
   const cloudProfileKey = authUser?.profileKey ?? multiplayer.profile.guestKey;
   const exploreRecentRouteHistoryScope = resolveExploreRecentRouteHistoryScope({
@@ -8467,6 +8482,7 @@ export default function App() {
     heartRate.clearSamples();
     const liveClubSelection = clubTrainingSelection;
     const pendingHeartRateStarts = [...heartRateRelayStartPromisesRef.current.entries()];
+    const pendingWatchConnectActions = [...watchConnectActionPromisesRef.current];
     pendingHeartRateStarts.forEach(([sessionId]) => {
       cancelledHeartRateRelaySessionsRef.current.add(sessionId);
     });
@@ -8513,24 +8529,6 @@ export default function App() {
     }
     if (ownsNativeHeartRateWriter) {
       const heartRateCloudApi = await import('./lib/heartRateCloud');
-      const serverPairingIds = authUser?.id
-        ? await heartRateCloudApi.loadHeartRatePairings().then((pairings) => pairings
-          .filter((pairing) => (
-            pairing.riderId === `account:${authUser.id}` && pairing.revokedAt == null
-          ))
-          .map((pairing) => pairing.id)).catch(() => [] as string[])
-        : [];
-      const heartRateSessionIds = new Set([
-        ...heartRatePairingIdsBySessionRef.current.keys(),
-        ...(heartRate.relayState?.sessions.map((session) => session.sessionId) ?? []),
-        ...(activeHeartRateRelaySessionRef.current ? [activeHeartRateRelaySessionRef.current] : []),
-      ]);
-      const heartRatePairingIds = new Set([
-        ...heartRatePairingIdsBySessionRef.current.values(),
-        ...heartRateKnownPairingIdsRef.current,
-        ...serverPairingIds,
-        ...(activeHeartRatePairingIdRef.current ? [activeHeartRatePairingIdRef.current] : []),
-      ]);
       await import('./lib/watchConnectActions').then(({ stopWatchConnectForAccountBoundary }) => (
         stopWatchConnectForAccountBoundary({
           getNativeState: async () => {
@@ -8565,6 +8563,25 @@ export default function App() {
           },
         })
       )).catch(() => undefined);
+      await Promise.allSettled(pendingWatchConnectActions);
+      const serverPairingIds = authUser?.id
+        ? await heartRateCloudApi.loadHeartRatePairings().then((pairings) => pairings
+          .filter((pairing) => (
+            pairing.riderId === `account:${authUser.id}` && pairing.revokedAt == null
+          ))
+          .map((pairing) => pairing.id)).catch(() => [] as string[])
+        : [];
+      const heartRateSessionIds = new Set([
+        ...heartRatePairingIdsBySessionRef.current.keys(),
+        ...(heartRate.relayState?.sessions.map((session) => session.sessionId) ?? []),
+        ...(activeHeartRateRelaySessionRef.current ? [activeHeartRateRelaySessionRef.current] : []),
+      ]);
+      const heartRatePairingIds = new Set([
+        ...heartRatePairingIdsBySessionRef.current.values(),
+        ...heartRateKnownPairingIdsRef.current,
+        ...serverPairingIds,
+        ...(activeHeartRatePairingIdRef.current ? [activeHeartRatePairingIdRef.current] : []),
+      ]);
       const clearedRelays = await heartRate.clearAllRelays().catch(() => ({
         configured: false,
         reason: 'Native relay cleanup failed.',
@@ -10241,6 +10258,7 @@ export default function App() {
   const watchConnectCoordinator = !clubTabletKioskMode ? (
     <Suspense fallback={null}>
       <WatchConnectCoordinator
+        actionPromises={watchConnectActionPromisesRef.current}
         accountId={authUser?.id ?? null}
         accountName={authUser?.name ?? 'TrackLab athlete'}
         authStatus={authStatus}
@@ -10248,6 +10266,8 @@ export default function App() {
         latestHeartRate={authUser?.id
           ? liveHeartRateByRider[`account:${authUser.id}`] ?? null
           : null}
+        knownPairingIds={heartRateKnownPairingIdsRef.current}
+        onAccountLiveHeartRateChange={setWatchConnectAccountHeartRate}
         onCapabilityChange={setWatchConnectCapable}
         onLegacyRelaySuppressionChange={handleLegacyRelaySuppressionChange}
         onLiveHeartRateReadingsChange={setLiveHeartRateByRider}
@@ -11251,7 +11271,7 @@ export default function App() {
               raceCapture={raceCapture}
               raceRiders={riders}
               getPulledResult={getPulledLiveState?.result ?? null}
-              latestHeartRate={liveHeartRateByRider[`account:${authUser.id}`] ?? null}
+              latestHeartRate={accountLiveHeartRate}
             />
           </Suspense>
         )}

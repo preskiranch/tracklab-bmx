@@ -41,6 +41,7 @@ export type WatchConnectActionDependencies = Readonly<{
   onConnectionCreated?: (prepared: Readonly<{
     enrollment: WatchConnectEnrollment;
     connection: WatchConnectConnection;
+    pairingId: string;
   }>) => void;
   startNative: (input: WatchConnectNativeStartInput) => Promise<WatchConnectNativeResult>;
   stopNative: () => Promise<WatchConnectNativeResult>;
@@ -111,6 +112,7 @@ export async function startWatchConnectAction(
 ): Promise<Readonly<{
   enrollment: WatchConnectEnrollment;
   connection: WatchConnectConnection;
+  pairingId: string;
   native: WatchConnectNativeResult;
 }>> {
   if (input.scope === 'studio' && input.sessionStudioConsent !== true) {
@@ -167,6 +169,7 @@ export async function startWatchConnectAction(
   dependencies.onConnectionCreated?.({
     enrollment: enrolled.enrollment,
     connection: started.connection,
+    pairingId: started.credentials.pairingId,
   });
   let native: WatchConnectNativeResult | null = null;
   try {
@@ -198,6 +201,7 @@ export async function startWatchConnectAction(
   return {
     enrollment: enrolled.enrollment,
     connection: started.connection,
+    pairingId: started.credentials.pairingId,
     native,
   };
 }

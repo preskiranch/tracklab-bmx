@@ -3825,6 +3825,23 @@ async function attachAccountBlockHeartRateToTrainingSession(profileKey, session)
   });
 }
 
+async function reconcilePrivateHeartRateTrainingSession(profileKey, session) {
+  if (!profileKey || !session?.id || session.source !== 'live') {
+    return { status: 'not-recorded', segment: null };
+  }
+  let attachment = await attachAccountBlockHeartRateToTrainingSession(profileKey, session);
+  if (attachment.status === 'no-block' && session._clubId && session._studioRiderId) {
+    attachment = await attachStudioBlockHeartRateToTrainingSession(profileKey, session);
+  }
+  return attachment;
+}
+
+function privateHeartRateAttachmentStatus(items, attachment) {
+  if (items.some((item) => item?.finalizedAt == null)) return 'syncing';
+  if (items.length > 0) return 'saved';
+  return attachment?.status === 'pending' ? 'syncing' : 'not-recorded';
+}
+
 function heartRateZoneSummaries(samples, windows) {
   return windows.map((window) => {
     const zoneSamples = samples.filter((sample) => (
@@ -7931,13 +7948,30 @@ async function handleHeartRateStreamApi(request, response, requestUrl) {
       if (!session) return;
       const sessionId = sanitizeText(requestUrl.searchParams.get('sessionId'), '', 160);
       const profileKey = authProfileKey(session.user);
+      const trainingSession = sessionId
+        ? await persistence.loadTrainingSessionById(profileKey, sessionId)
+        : null;
+      // A continuous Watch stream and the result POST can cross in flight. Re-run
+      // the exact account/session/time-window attachment on owner history reads so
+      // a late Watch stream or a transient ingest delay cannot strand a result.
+      const attachment = trainingSession
+        ? await reconcilePrivateHeartRateTrainingSession(profileKey, trainingSession)
+        : { status: 'not-recorded', segment: null };
       const [streams, segments] = await Promise.all([
         persistence.loadHeartRateStreams(profileKey, sessionId || null),
         persistence.loadHeartRateTrainingSegments(profileKey, sessionId || null),
       ]);
+      const publicStreams = streams.map(publicHeartRateStream);
+      const publicSegments = segments.map(publicHeartRateTrainingSegment);
       writeJson(response, 200, {
-        streams: streams.map(publicHeartRateStream),
-        segments: segments.map(publicHeartRateTrainingSegment),
+        streams: publicStreams,
+        segments: publicSegments,
+        attachment: {
+          status: privateHeartRateAttachmentStatus(
+            [...publicStreams, ...publicSegments],
+            attachment,
+          ),
+        },
       }, { 'Cache-Control': 'no-store' });
       return;
     }

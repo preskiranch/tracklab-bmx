@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as persistence from '../../cloud/persistence.mjs';
@@ -256,8 +257,8 @@ describe('Watch Connect cloud workflow', () => {
         method: 'POST',
         headers: { Authorization: `Bearer ${reconnect.credentials.ingestToken}` },
         body: JSON.stringify({
-          endedAt: reconnectStartedAt + 1_000,
-          activeDurationMs: 1_000,
+          endedAt: reconnectStartedAt,
+          activeDurationMs: 0,
           samples: [{
             sequence: 0,
             recordedAt: reconnectStartedAt,
@@ -285,13 +286,6 @@ describe('Watch Connect cloud workflow', () => {
     expect(immediateAfterWatchStop.status).toBe(201);
     const allModesConnection = await immediateAfterWatchStop.json() as any;
     const allModesStartedAt = Date.now();
-    const allModesStreamResponse = await api('/api/heart-rate/streams', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${allModesConnection.credentials.ingestToken}` },
-      body: JSON.stringify({ startedAt: allModesStartedAt }),
-    });
-    expect(allModesStreamResponse.status).toBe(201);
-    const allModesStream = (await allModesStreamResponse.json() as any).stream;
     await new Promise((resolve) => setTimeout(resolve, 5));
     const allModesEndedAt = Date.now();
     const activityTypes = [
@@ -323,6 +317,7 @@ describe('Watch Connect cloud workflow', () => {
                 playerId: 1,
                 finishTimeMs: allModesEndedAt - allModesStartedAt,
                 cadence: 100,
+                averageBpm: 999,
               }],
               activeClockSegments: [{
                 startedAt: allModesStartedAt,
@@ -334,8 +329,30 @@ describe('Watch Connect cloud workflow', () => {
         }),
       }, athlete.cookie);
       expect(save.status).toBe(201);
-      expect((await save.json() as any).heartRate.status).toBe('created');
+      const savedBody = await save.json() as any;
+      expect(savedBody.heartRate.status).toBe('pending');
+      expect(JSON.stringify(savedBody.session)).not.toMatch(/heart.?rate|health.?kit|bpm|"HR"/i);
+      const pendingHistory = await api(
+        `/api/heart-rate/streams?sessionId=${encodeURIComponent(sessionId)}`,
+        {},
+        athlete.cookie,
+      );
+      expect(pendingHistory.status).toBe(200);
+      expect(await pendingHistory.json()).toMatchObject({
+        streams: [],
+        segments: [],
+        attachment: { status: 'syncing' },
+      });
     }
+    // The continuous Watch stream can arrive after the result POST. Every
+    // exact private result binding above must reconcile when it does.
+    const allModesStreamResponse = await api('/api/heart-rate/streams', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${allModesConnection.credentials.ingestToken}` },
+      body: JSON.stringify({ startedAt: allModesStartedAt - 1 }),
+    });
+    expect(allModesStreamResponse.status).toBe(201);
+    const allModesStream = (await allModesStreamResponse.json() as any).stream;
     const allModesSamples = await api(
       `/api/heart-rate/streams/${encodeURIComponent(allModesStream.id)}/samples`,
       {
@@ -344,9 +361,19 @@ describe('Watch Connect cloud workflow', () => {
         body: JSON.stringify({
           samples: [{
             sequence: 0,
-            recordedAt: allModesStartedAt,
+            recordedAt: allModesStartedAt - 1,
             activeElapsedMs: 0,
+            bpm: 111,
+          }, {
+            sequence: 1,
+            recordedAt: allModesEndedAt,
+            activeElapsedMs: allModesEndedAt - allModesStartedAt + 1,
             bpm: 146,
+          }, {
+            sequence: 2,
+            recordedAt: allModesEndedAt + 1,
+            activeElapsedMs: allModesEndedAt - allModesStartedAt + 2,
+            bpm: 199,
           }],
         }),
       },
@@ -363,9 +390,9 @@ describe('Watch Connect cloud workflow', () => {
         sessionId: allModesConnection.credentials.relaySessionId,
         relayScope: 'account-block',
         riderId: `account:${athlete.user.id}`,
-        bpm: 146,
-        recordedAt: allModesStartedAt,
-        freshUntil: allModesStartedAt + 10_000,
+        bpm: 199,
+        recordedAt: allModesEndedAt + 1,
+        freshUntil: allModesEndedAt + 10_001,
       },
     });
     const latestForOther = await api('/api/heart-rate/live/latest', {}, other.cookie);
@@ -380,14 +407,32 @@ describe('Watch Connect cloud workflow', () => {
       );
       expect(history.status).toBe(200);
       const historyBody = await history.json() as any;
+      expect(historyBody.attachment).toEqual({ status: 'saved' });
       expect(historyBody.segments).toEqual([
         expect.objectContaining({
           activityType: activityTypes[index],
           relayScope: 'account-block',
           trainingSessionId: allModeSessionIds[index],
+          summary: expect.objectContaining({
+            sampleCount: 1,
+            minimumBpm: 146,
+            averageBpm: 146,
+            peakBpm: 146,
+          }),
         }),
       ]);
     }
+    const wrongAccountSameSession = await api(
+      `/api/heart-rate/streams?sessionId=${encodeURIComponent(allModeSessionIds[3])}`,
+      {},
+      other.cookie,
+    );
+    expect(wrongAccountSameSession.status).toBe(200);
+    expect(await wrongAccountSameSession.json()).toEqual({
+      streams: [],
+      segments: [],
+      attachment: { status: 'not-recorded' },
+    });
 
     const legacyBlocksBefore = await api('/api/heart-rate/account-blocks', {}, athlete.cookie);
     expect(legacyBlocksBefore.status).toBe(200);
@@ -1141,6 +1186,660 @@ describe('Watch Connect cloud workflow', () => {
       base + 4_000,
     )).resolves.toBeNull();
     await expect(persistence.loadHeartRateSamples(future.streamId)).resolves.toHaveLength(1);
+  });
+
+  it('attaches exact private history after a Watch signal freezes without making the stale BPM live', async () => {
+    const base = 80_000_000;
+    const suffix = `${Date.now()}-${Math.random()}`;
+    const profileKey = `user:frozen-history-${suffix}`;
+    const otherProfileKey = `user:frozen-history-other-${suffix}`;
+    const enrollmentId = `frozen-history-enrollment-${suffix}`;
+    const pairingId = `frozen-history-pairing-${suffix}`;
+    const streamId = `frozen-history-stream-${suffix}`;
+    const tokenHash = `frozen-history-token-${suffix}`;
+    const enrollment = await persistence.createOrRefreshHeartRateWatchEnrollment({
+      id: enrollmentId,
+      ownerProfileKey: profileKey,
+      requestId: `frozen-history-enroll-request-${suffix}`,
+      installIdHash: `frozen-history-install-${suffix}`,
+      scope: 'personal',
+      clubId: null,
+      studioRiderId: null,
+      liveStudioConsent: false,
+      sessionStudioConsent: false,
+      now: base,
+    });
+    expect(enrollment.status).toBe('created');
+    const connection = await persistence.createHeartRateWatchConnection({
+      id: `frozen-history-connection-${suffix}`,
+      enrollmentId,
+      ownerProfileKey: profileKey,
+      requestId: `frozen-history-connect-request-${suffix}`,
+      installIdHash: `frozen-history-install-${suffix}`,
+      pairingId,
+      relaySessionId: `watch-connect:frozen-history-${suffix}`,
+      riderId: `account:frozen-history-${suffix}`,
+      pairCodeHash: `frozen-history-code-${suffix}`,
+      ingestTokenHash: tokenHash,
+      connectedUntil: base + persistence.heartRateWatchConnectDurationMs,
+      now: base,
+    });
+    expect(connection.status).toBe('created');
+    expect(await persistence.createHeartRateStream(
+      pairingId,
+      tokenHash,
+      streamId,
+      base,
+      base,
+    )).toMatchObject({ id: streamId, relayScope: 'account-block' });
+    expect(await persistence.insertHeartRateSamples(streamId, tokenHash, [{
+      sequence: 0,
+      recordedAt: base + 1_000,
+      activeElapsedMs: 1_000,
+      bpm: 151,
+    }], base + 1_000)).toEqual([0]);
+
+    const frozenAt = base + 40_000;
+    await expect(persistence.loadLatestHeartRateLiveReading(
+      profileKey,
+      frozenAt - 10_000,
+      frozenAt,
+    )).resolves.toBeNull();
+    const attached = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: profileKey,
+      trainingSessionId: `get-pulled:frozen-${suffix}`,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: base + 500,
+      endedAt: base + 2_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: frozenAt,
+    });
+    expect(attached).toMatchObject({
+      status: 'created',
+      segment: {
+        ownerProfileKey: profileKey,
+        relayScope: 'account-block',
+        summary: {
+          sampleCount: 1,
+          minimumBpm: 151,
+          averageBpm: 151,
+          peakBpm: 151,
+        },
+      },
+    });
+
+    await expect(persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: otherProfileKey,
+      trainingSessionId: `get-pulled:frozen-${suffix}`,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: base + 500,
+      endedAt: base + 2_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: frozenAt,
+    })).resolves.toEqual({ status: 'no-block', segment: null });
+    await expect(persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: profileKey,
+      trainingSessionId: `get-pulled:before-stream-${suffix}`,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: base - 2_000,
+      endedAt: base - 1_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: frozenAt,
+    })).resolves.toEqual({ status: 'no-block', segment: null });
+
+    const zeroSample = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: profileKey,
+      trainingSessionId: `get-pulled:no-sample-${suffix}`,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: base + 3_000,
+      endedAt: base + 4_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: frozenAt,
+    });
+    expect(zeroSample).toMatchObject({
+      status: 'created',
+      segment: {
+        // Wall time alone cannot close a continuous Watch stream that can still
+        // deliver a delayed sample for this exact result window.
+        finalizedAt: null,
+        summary: {
+          sampleCount: 0,
+          minimumBpm: null,
+          averageBpm: null,
+          peakBpm: null,
+        },
+      },
+    });
+  });
+
+  it('selects exact-window reconnect evidence and safely repairs a zero-sample segment', async () => {
+    const createReconnectPair = async (
+      label: string,
+      base: number,
+      afterOldStop: ((context: any) => Promise<any>) | null = null,
+    ) => {
+      const suffix = `${label}-${Date.now()}-${Math.random()}`;
+      const profileKey = `user:history-reconnect-${suffix}`;
+      const enrollmentId = `history-reconnect-enrollment-${suffix}`;
+      const installIdHash = `history-reconnect-install-${suffix}`;
+      expect((await persistence.createOrRefreshHeartRateWatchEnrollment({
+        id: enrollmentId,
+        ownerProfileKey: profileKey,
+        requestId: `history-reconnect-enroll-${suffix}`,
+        installIdHash,
+        scope: 'personal',
+        clubId: null,
+        studioRiderId: null,
+        liveStudioConsent: false,
+        sessionStudioConsent: false,
+        now: base,
+      })).status).toBe('created');
+
+      const connect = async (generation: string, connectedAt: number) => {
+        const connectionId = `history-reconnect-connection-${generation}-${suffix}`;
+        const pairingId = `history-reconnect-pairing-${generation}-${suffix}`;
+        const streamId = `history-reconnect-stream-${generation}-${suffix}`;
+        const tokenHash = `history-reconnect-token-${generation}-${suffix}`;
+        const connectedUntil = connectedAt + persistence.heartRateWatchConnectDurationMs;
+        const connection = await persistence.createHeartRateWatchConnection({
+          id: connectionId,
+          enrollmentId,
+          ownerProfileKey: profileKey,
+          requestId: `history-reconnect-connect-${generation}-${suffix}`,
+          installIdHash,
+          pairingId,
+          relaySessionId: `watch-connect:${connectionId}`,
+          riderId: `account:${suffix}`,
+          pairCodeHash: `history-reconnect-code-${generation}-${suffix}`,
+          ingestTokenHash: tokenHash,
+          connectedUntil,
+          now: connectedAt,
+        });
+        expect(connection.status).toBe('created');
+        expect(await persistence.createHeartRateStream(
+          pairingId,
+          tokenHash,
+          streamId,
+          connectedAt,
+          connectedAt,
+        )).toMatchObject({ id: streamId, relayScope: 'account-block' });
+        return { connectionId, pairingId, streamId, tokenHash, connectedUntil };
+      };
+
+      const old = await connect('old', base);
+      expect(await persistence.stopHeartRateWatchConnection(
+        profileKey,
+        old.connectionId,
+        base + 5_000,
+      )).toMatchObject({ id: old.connectionId, stoppedAt: base + 5_000 });
+      const checkpoint = afterOldStop ? await afterOldStop({ profileKey, old }) : null;
+      const recent = await connect('new', base + 5_001);
+      return { profileKey, old, recent, checkpoint };
+    };
+
+    const rankedBase = 120_000_000;
+    const ranked = await createReconnectPair('ranked', rankedBase);
+    expect(await persistence.insertHeartRateSamples(ranked.old.streamId, ranked.old.tokenHash, [{
+      sequence: 0,
+      recordedAt: rankedBase + 3_000,
+      activeElapsedMs: 3_000,
+      bpm: 148,
+    }], rankedBase + 6_000)).toEqual([0]);
+    // More recent reconnect activity during a paused clock (plus one sample
+    // outside the wall window) must not shadow the older stream's one admitted
+    // active-clock sample.
+    expect(await persistence.insertHeartRateSamples(ranked.recent.streamId, ranked.recent.tokenHash, [{
+      sequence: 0,
+      recordedAt: rankedBase + 6_000,
+      activeElapsedMs: 1_000,
+      bpm: 201,
+    }, {
+      sequence: 1,
+      recordedAt: rankedBase + 7_000,
+      activeElapsedMs: 2_000,
+      bpm: 202,
+    }, {
+      sequence: 2,
+      recordedAt: rankedBase + 10_001,
+      activeElapsedMs: 5_001,
+      bpm: 203,
+    }], rankedBase + 10_002)).toEqual([0, 1, 2]);
+    const rankedActiveClockSegments = [{
+      startedAt: rankedBase + 1_000,
+      endedAt: rankedBase + 4_000,
+      activeElapsedAtStartMs: 0,
+    }, {
+      startedAt: rankedBase + 8_000,
+      endedAt: rankedBase + 10_000,
+      activeElapsedAtStartMs: 3_000,
+    }];
+    const rankedSessionId = `get-pulled:history-ranked-${Date.now()}`;
+    const rankedSegment = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: ranked.profileKey,
+      trainingSessionId: rankedSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: rankedBase + 1_000,
+      endedAt: rankedBase + 10_000,
+      zoneWindows: [],
+      activeClockSegments: rankedActiveClockSegments,
+      now: rankedBase + 30_000,
+    });
+    expect(rankedSegment).toMatchObject({
+      status: 'created',
+      segment: {
+        streamId: ranked.old.streamId,
+        pairingId: ranked.old.pairingId,
+        finalizedAt: null,
+        summary: {
+          sampleCount: 1,
+          minimumBpm: 148,
+          averageBpm: 148,
+          peakBpm: 148,
+        },
+      },
+    });
+    await expect(persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: `user:wrong-history-owner-${Date.now()}`,
+      trainingSessionId: rankedSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: rankedBase + 1_000,
+      endedAt: rankedBase + 10_000,
+      zoneWindows: [],
+      activeClockSegments: rankedActiveClockSegments,
+      now: rankedBase + 30_000,
+    })).resolves.toEqual({ status: 'no-block', segment: null });
+
+    const tieBase = 130_000_000;
+    const tieSessionId = `get-pulled:history-tie-${Date.now()}`;
+    const tieOptions = {
+      trainingSessionId: tieSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: tieBase + 1_000,
+      endedAt: tieBase + 10_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+    } as const;
+    const tie = await createReconnectPair('tie', tieBase, async ({ profileKey, old }) => (
+      persistence.createHeartRateTrainingSegmentForAccountSession({
+        ...tieOptions,
+        athleteProfileKey: profileKey,
+        // Model an old wall-clock-finalized zero row from the prior release.
+        // The explicit clock is then moved back into the authorized drain below
+        // to prove equal-zero reconnect selection prefers and reopens this row.
+        now: tieBase + 5_000 + persistence.heartRateWatchConnectDrainMs + 1,
+      }).then((segment) => ({ segment, old }))
+    ));
+    expect(tie.checkpoint.segment).toMatchObject({
+      status: 'created',
+      segment: {
+        streamId: tie.old.streamId,
+        finalizedAt: tieBase + 5_000 + persistence.heartRateWatchConnectDrainMs + 1,
+        summary: { sampleCount: 0 },
+      },
+    });
+    const reopenedTie = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      ...tieOptions,
+      athleteProfileKey: tie.profileKey,
+      now: tieBase + 30_000,
+    });
+    expect(reopenedTie).toMatchObject({
+      status: 'updated',
+      segment: {
+        id: tie.checkpoint.segment.segment.id,
+        streamId: tie.old.streamId,
+        finalizedAt: null,
+        summary: { sampleCount: 0 },
+      },
+    });
+    expect(await persistence.insertHeartRateSamples(tie.old.streamId, tie.old.tokenHash, [{
+      sequence: 0,
+      recordedAt: tieBase + 4_000,
+      activeElapsedMs: 4_000,
+      bpm: 153,
+    }], tieBase + 30_001)).toEqual([0]);
+    const improvedTie = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      ...tieOptions,
+      athleteProfileKey: tie.profileKey,
+      now: tieBase + 30_002,
+    });
+    expect(improvedTie).toMatchObject({
+      status: 'updated',
+      segment: {
+        id: tie.checkpoint.segment.segment.id,
+        streamId: tie.old.streamId,
+        finalizedAt: null,
+        summary: { sampleCount: 1, averageBpm: 153 },
+      },
+    });
+
+    const repairBase = Date.now();
+    const repair = await createReconnectPair('repair', repairBase);
+    const repairSessionId = `get-pulled:history-repair-${Date.now()}`;
+    const zero = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: repair.profileKey,
+      trainingSessionId: repairSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: repairBase + 1_000,
+      endedAt: repairBase + 10_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: repairBase + 30_000,
+    });
+    expect(zero).toMatchObject({
+      status: 'created',
+      segment: {
+        streamId: repair.recent.streamId,
+        finalizedAt: null,
+        summary: { sampleCount: 0 },
+      },
+    });
+    const stableSegmentId = zero.segment!.id;
+    expect(await persistence.insertHeartRateSamples(repair.old.streamId, repair.old.tokenHash, [{
+      sequence: 0,
+      // This delayed upload was recorded before the old connection stopped and
+      // improves the exact result window without weakening the stop boundary.
+      recordedAt: repairBase + 4_000,
+      activeElapsedMs: 4_000,
+      bpm: 155,
+    }], repairBase + 30_001)).toEqual([0]);
+    expect(await persistence.finalizeHeartRateStream(
+      repair.old.streamId,
+      repair.old.tokenHash,
+      {
+        endedAt: repairBase + 5_000,
+        activeDurationMs: 5_000,
+        summary: {},
+        zoneSummaries: [],
+        finalizedAt: repairBase + 30_001,
+      },
+    )).toMatchObject({ id: repair.old.streamId, finalizedAt: repairBase + 30_001 });
+    const repaired = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: repair.profileKey,
+      trainingSessionId: repairSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: repairBase + 1_000,
+      endedAt: repairBase + 10_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: repairBase + 30_002,
+    });
+    expect(repaired).toMatchObject({
+      status: 'updated',
+      segment: {
+        id: stableSegmentId,
+        streamId: repair.old.streamId,
+        pairingId: repair.old.pairingId,
+        // The newer overlapping reconnect is still ingest-open, so the best
+        // current summary remains retryable until every candidate is settled.
+        finalizedAt: null,
+        summary: {
+          sampleCount: 1,
+          minimumBpm: 155,
+          averageBpm: 155,
+          peakBpm: 155,
+        },
+      },
+    });
+    const loadedWhileReconnectOpen = await persistence.loadHeartRateTrainingSegments(
+      repair.profileKey,
+      repairSessionId,
+    );
+    expect(loadedWhileReconnectOpen).toEqual([
+      expect.objectContaining({
+        id: stableSegmentId,
+        streamId: repair.old.streamId,
+        finalizedAt: null,
+        summary: expect.objectContaining({ sampleCount: 1, averageBpm: 155 }),
+      }),
+    ]);
+    const repairRelayDeadline = repair.recent.connectedUntil
+      + persistence.heartRateWatchConnectDrainMs;
+    const settledRepair = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: repair.profileKey,
+      trainingSessionId: repairSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: repairBase + 1_000,
+      endedAt: repairBase + 10_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+      now: repairRelayDeadline + 1,
+    });
+    expect(settledRepair).toMatchObject({
+      status: 'updated',
+      segment: {
+        id: stableSegmentId,
+        streamId: repair.old.streamId,
+        finalizedAt: repairRelayDeadline + 1,
+        summary: { sampleCount: 1, averageBpm: 155 },
+      },
+    });
+    await expect(persistence.createHeartRateTrainingSegmentForAccountSession({
+      athleteProfileKey: repair.profileKey,
+      trainingSessionId: repairSessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: repairBase + 1_000,
+      endedAt: repairBase + 10_000,
+      zoneWindows: [],
+      activeClockSegments: [{
+        startedAt: repairBase + 1_000,
+        endedAt: repairBase + 10_000,
+        activeElapsedAtStartMs: 0,
+      }],
+      now: repairBase + 30_003,
+    })).resolves.toEqual({ status: 'conflict', segment: null });
+
+    const expirySessionId = `get-pulled:history-expiry-${Date.now()}`;
+    const expiryOptions = {
+      athleteProfileKey: repair.profileKey,
+      trainingSessionId: expirySessionId,
+      activityType: 'get-pulled',
+      playerId: 1,
+      startedAt: repairBase + 11_000,
+      endedAt: repairBase + 12_000,
+      zoneWindows: [],
+      activeClockSegments: [],
+    } as const;
+    const beforeExpiry = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      ...expiryOptions,
+      now: repairBase + 30_004,
+    });
+    expect(beforeExpiry).toMatchObject({
+      status: 'created',
+      segment: { streamId: repair.recent.streamId, finalizedAt: null, summary: { sampleCount: 0 } },
+    });
+    const relayDeadline = repair.recent.connectedUntil + persistence.heartRateWatchConnectDrainMs;
+    const afterExpiry = await persistence.createHeartRateTrainingSegmentForAccountSession({
+      ...expiryOptions,
+      now: relayDeadline + 1,
+    });
+    expect(afterExpiry).toMatchObject({
+      status: 'updated',
+      segment: {
+        id: beforeExpiry.segment!.id,
+        streamId: repair.recent.streamId,
+        finalizedAt: relayDeadline + 1,
+        summary: { sampleCount: 0 },
+      },
+    });
+    await expect(persistence.createHeartRateTrainingSegmentForAccountSession({
+      ...expiryOptions,
+      trainingSessionId: `get-pulled:post-expiry-${Date.now()}`,
+      startedAt: relayDeadline + 1,
+      endedAt: relayDeadline + 2,
+      now: relayDeadline + 3,
+    })).resolves.toEqual({ status: 'no-block', segment: null });
+  });
+
+  it('keeps an old zero-sample result syncing until a late exact end sample is saved', async () => {
+    const athlete = await register(
+      `watch-connect-late-result-${Date.now()}@tracklab.test`,
+      'Watch Late Result',
+      '198.51.100.242',
+    );
+    const trustedInstall = installId('c');
+    const enrollmentResponse = await api('/api/heart-rate/watch-connect/enrollments', {
+      method: 'POST',
+      body: JSON.stringify({
+        requestId: requestId('late-result-enroll'),
+        installId: trustedInstall,
+        scope: 'personal',
+      }),
+    }, athlete.cookie);
+    expect(enrollmentResponse.status).toBe(201);
+    const enrollment = await enrollmentResponse.json() as any;
+    const connectionResponse = await api('/api/heart-rate/watch-connect/connections', {
+      method: 'POST',
+      body: JSON.stringify({
+        requestId: requestId('late-result-connect'),
+        enrollmentId: enrollment.enrollment.id,
+        installId: trustedInstall,
+      }),
+    }, athlete.cookie);
+    expect(connectionResponse.status).toBe(201);
+    const connection = await connectionResponse.json() as any;
+    const endedAt = Date.now() - 20_000;
+    const startedAt = endedAt - 6_000;
+    const streamResponse = await api('/api/heart-rate/streams', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${connection.credentials.ingestToken}` },
+      body: JSON.stringify({ startedAt: startedAt - 1 }),
+    });
+    expect(streamResponse.status).toBe(201);
+    const stream = (await streamResponse.json() as any).stream;
+    const trainingSessionId = `watch-connect-late-result-${Date.now()}`;
+    const savedResponse = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: trainingSessionId,
+          activityType: 'get-pulled',
+          title: 'Late Watch result',
+          startedAt,
+          endedAt,
+          durationMs: endedAt - startedAt,
+          distanceMeters: 10,
+          source: 'live',
+          createdAt: startedAt,
+          details: {},
+        },
+      }),
+    }, athlete.cookie);
+    expect(savedResponse.status).toBe(201);
+    expect((await savedResponse.json() as any).heartRate).toMatchObject({
+      status: 'created',
+      segment: { finalizedAt: null, summary: { sampleCount: 0 } },
+    });
+    const pendingResponse = await api(
+      `/api/heart-rate/streams?sessionId=${encodeURIComponent(trainingSessionId)}`,
+      {},
+      athlete.cookie,
+    );
+    expect(pendingResponse.status).toBe(200);
+    expect(await pendingResponse.json()).toMatchObject({
+      attachment: { status: 'syncing' },
+      segments: [{ finalizedAt: null, summary: { sampleCount: 0 } }],
+    });
+
+    const sampleResponse = await api(
+      `/api/heart-rate/streams/${encodeURIComponent(stream.id)}/samples`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${connection.credentials.ingestToken}` },
+        body: JSON.stringify({
+          samples: [{
+            sequence: 0,
+            recordedAt: endedAt,
+            activeElapsedMs: endedAt - startedAt,
+            bpm: 157,
+          }],
+        }),
+      },
+    );
+    expect(sampleResponse.status).toBe(200);
+    expect(await sampleResponse.json()).toEqual({ accepted: 1, duplicates: 0 });
+    const savedHistoryResponse = await api(
+      `/api/heart-rate/streams?sessionId=${encodeURIComponent(trainingSessionId)}`,
+      {},
+      athlete.cookie,
+    );
+    expect(savedHistoryResponse.status).toBe(200);
+    expect(await savedHistoryResponse.json()).toMatchObject({
+      attachment: { status: 'saved' },
+      segments: [{
+        streamId: stream.id,
+        summary: {
+          sampleCount: 1,
+          minimumBpm: 157,
+          averageBpm: 157,
+          peakBpm: 157,
+        },
+      }],
+    });
+  });
+
+  it('keeps PostgreSQL history association independent from stream freshness', () => {
+    const source = readFileSync(new URL('../../cloud/persistence.mjs', import.meta.url), 'utf8');
+    const associationSource = source.slice(
+      source.indexOf('async function upsertHeartRateTrainingSegmentWithClient'),
+      source.indexOf('async function createHeartRateTrainingSegmentForBlockWithClient'),
+    );
+
+    const selectionSource = associationSource.slice(0, associationSource.indexOf('const streamRow'));
+    expect(associationSource).not.toContain('streams.updated_at >=');
+    expect(selectionSource.match(/FROM \$\{schema\}\.heart_rate_samples AS ranked_samples/g))
+      .toHaveLength(2);
+    expect(selectionSource.match(/ranked_samples\.recorded_at >=/g)).toHaveLength(4);
+    expect(selectionSource.match(/ranked_samples\.recorded_at <=/g)).toHaveLength(2);
+    expect(selectionSource).toContain(
+      '[athleteProfileKey, startedAt, endedAt, json(activeClockSegments), trainingSessionId]',
+    );
+    expect(selectionSource).toMatch(
+      /athleteProfileKey,\s+clubId,\s+studioRiderId,\s+startedAt,\s+endedAt,\s+json\(activeClockSegments\),\s+trainingSessionId/,
+    );
+    expect(selectionSource).not.toContain('[athleteProfileKey, startedAt, endedAt, now]');
+    expect(selectionSource).not.toContain('[athleteProfileKey, clubId, studioRiderId, startedAt, endedAt, now]');
+    expect(selectionSource.match(/jsonb_array_elements\(\$[46]::jsonb\)/g)).toHaveLength(2);
+    expect(selectionSource.match(/existing_segment\.training_session_id = \$[57]/g)).toHaveLength(2);
+    expect(associationSource.match(/streams\.owner_profile_key = \$1/g)).toHaveLength(2);
+    expect(associationSource.match(/streams\.started_at <=/g)).toHaveLength(2);
+    expect(associationSource).toContain('SET stream_id = EXCLUDED.stream_id');
+    expect(associationSource).toContain("jsonb_typeof(EXCLUDED.summary -> 'sampleCount') = 'number'");
+    expect(associationSource).toContain('heart_rate_training_segments.active_clock_segments = EXCLUDED.active_clock_segments');
+    expect(associationSource).not.toContain('endedAt + 15_000');
+
+    const memorySelectionSource = source.slice(
+      source.indexOf('function eligibleMemoryStudioBlockStream'),
+      source.indexOf('function memoryHeartRateAccountBlockPairingAvailable'),
+    );
+    expect(memorySelectionSource.match(/compareMemoryHeartRateStreamsForTrainingWindow/g))
+      .toHaveLength(2);
+    expect(memorySelectionSource.match(/relayExpiresAt \?\? 0\) > startedAt/g))
+      .toHaveLength(2);
+    const settlementSource = source.slice(
+      source.indexOf('export async function refreshHeartRateTrainingSegmentsForStream'),
+      source.indexOf('async function linkHeartRateStreamsToTrainingSession'),
+    );
+    expect(settlementSource).not.toContain("interval '15 seconds'");
+    expect(settlementSource.match(/openHeartRateTrainingSegmentCandidateSql/g)).toHaveLength(4);
+    expect(settlementSource.match(/candidate_closing_samples\.recorded_at >= segments\.ended_at/g))
+      .toHaveLength(1);
+    expect(settlementSource.match(/AND NOT EXISTS \(\$\{openHeartRateTrainingSegmentCandidateSql\}\)/g))
+      .toHaveLength(2);
   });
 
   it('admits same-account multi-device Watch polling, coalesces status loads, and caps pre-auth work', async () => {

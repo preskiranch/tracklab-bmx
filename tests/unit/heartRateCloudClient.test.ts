@@ -8,6 +8,7 @@ import {
   loadHeartRatePairings,
   loadHeartRateStudioBlocks,
   loadPrivateHeartRateSessionHistory,
+  loadPrivateHeartRateSessionHistoryResult,
   heartRateLiveFreshnessMs,
   heartRateLiveMaximumFutureSkewMs,
   mergeLiveHeartRateEvent,
@@ -160,6 +161,32 @@ describe('private heart-rate history cloud client', () => {
 
     await expect(loadPrivateHeartRateSessionHistory(' ')).rejects.toThrow(/valid training session/i);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves the private late-sync state without treating an empty response as final no-data', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      streams: [],
+      segments: [],
+      attachment: { status: 'syncing' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    await expect(loadPrivateHeartRateSessionHistoryResult('get-pulled-session-1')).resolves.toEqual({
+      items: [],
+      status: 'syncing',
+    });
+  });
+
+  it('fails closed when an empty or malformed response claims heart-rate history was saved', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      streams: [],
+      segments: [],
+      attachment: { status: 'saved' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    await expect(loadPrivateHeartRateSessionHistoryResult('race-session-1')).resolves.toEqual({
+      items: [],
+      status: 'not-recorded',
+    });
   });
 
   it('loads the exact Monitor sprint slice from a continuous studio block without exposing raw samples', async () => {

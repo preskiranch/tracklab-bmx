@@ -18,6 +18,7 @@ import {
   nativeRecoveryScheduleRequired,
   raceRecoveryFinishSignals,
   retainPendingRecoveryFinishSignals,
+  recoveryHeartRateCanSubmit,
   recoverySubmissionCanRetry,
   recoverySubmissionRetryDelayMs,
 } from '../../src/components/RecoveryAlertCoordinator';
@@ -138,6 +139,16 @@ describe('Recovery Alert individual finish lifecycle', () => {
     const source = readFileSync(new URL('../../src/components/RecoveryAlertCoordinator.tsx', import.meta.url), 'utf8');
     expect(source).toContain('finishSignalKey, preference?.mode, retryRevision');
     expect(source).not.toContain('accountId, finishSignals, preference');
+  });
+
+  it('displays local Watch BPM without submitting it before an exact cloud stream exists', () => {
+    const active = episode({ mode: 'heart-rate' });
+    const local = { streamId: '', bpm: 152, recordedAt: 10_500 };
+    expect(recoveryHeartRateCanSubmit(active, local, 11_000)).toBe(false);
+    expect(recoveryHeartRateCanSubmit(active, { ...local, streamId: 'stream-current' }, 11_000)).toBe(true);
+
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    expect(appSource).toContain('latestHeartRate={accountLiveHeartRate}');
   });
 
   it('retains a vanished finish signal through retry and bounds pending memory', () => {

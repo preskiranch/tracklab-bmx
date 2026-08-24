@@ -385,7 +385,11 @@ describe('private continuous account heart-rate blocks', () => {
       other.cookie,
     );
     expect(otherHistory.status).toBe(200);
-    expect(await otherHistory.json()).toEqual({ streams: [], segments: [] });
+    expect(await otherHistory.json()).toEqual({
+      streams: [],
+      segments: [],
+      attachment: { status: 'not-recorded' },
+    });
     expect((await api(`/api/heart-rate/streams/${stream.id}/samples`, {}, other.cookie)).status).toBe(404);
     expect((await api(
       `/api/heart-rate/club-streams?clubId=untrusted-club&sessionId=${encodeURIComponent(trainingSessionId)}`,

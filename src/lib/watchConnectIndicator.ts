@@ -3,6 +3,7 @@ import {
   heartRateLiveFreshnessMs,
   heartRateLiveMaximumFutureSkewMs,
 } from './heartRateCloud';
+import { maximumHeartRateBpm, minimumHeartRateBpm } from './heartRate';
 import type { NativeWatchConnectState } from './nativeHeartRate';
 import {
   watchConnectRemainingMs,
@@ -22,14 +23,16 @@ export type WatchConnectIndicatorState = Readonly<{
   phase: WatchConnectIndicatorPhase;
   label: string;
   detail: string;
+  bpm: number | null;
 }>;
 
 function state(
   phase: WatchConnectIndicatorPhase,
   label: string,
   detail: string,
+  bpm: number | null = null,
 ): WatchConnectIndicatorState {
-  return { phase, label, detail };
+  return { phase, label, detail, bpm };
 }
 
 export function watchConnectLiveEventIsFresh({
@@ -47,6 +50,9 @@ export function watchConnectLiveEventIsFresh({
     !event
     || event.riderId !== `account:${accountId}`
     || event.sessionId !== `watch-connect:${connection.id}`
+    || !Number.isFinite(event.bpm)
+    || event.bpm < minimumHeartRateBpm
+    || event.bpm > maximumHeartRateBpm
     || event.recordedAt > now + heartRateLiveMaximumFutureSkewMs
     || now - event.recordedAt >= heartRateLiveFreshnessMs
     || (event.receivedAt != null && (
@@ -148,6 +154,7 @@ export function resolveWatchConnectIndicatorState({
       readOnlyObserver
         ? 'Live through the paired iPhone.'
       : 'Apple Watch heart rate is live.',
+      Math.round(event!.bpm),
     );
   }
   if (!readOnlyObserver && native?.state === 'connecting') {

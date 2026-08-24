@@ -89,6 +89,11 @@ export type HeartRateTrainingSegment = Readonly<{
 
 export type PrivateHeartRateHistoryItem = HeartRateStream | HeartRateTrainingSegment;
 export type ClubHeartRateHistoryItem = ClubHeartRateSummaryStream | HeartRateTrainingSegment;
+export type PrivateHeartRateAttachmentStatus = 'syncing' | 'saved' | 'not-recorded';
+export type PrivateHeartRateSessionHistory = Readonly<{
+  items: readonly PrivateHeartRateHistoryItem[];
+  status: PrivateHeartRateAttachmentStatus;
+}>;
 
 export type HeartRateLiveEvent = Readonly<{
   streamId: string;
@@ -1356,7 +1361,9 @@ export async function loadHeartRateStreams(sessionId?: string) {
  * training-session identity. The server enforces account ownership; the exact
  * client-side filter prevents a malformed response from crossing sessions.
  */
-export async function loadPrivateHeartRateSessionHistory(sessionId: string) {
+export async function loadPrivateHeartRateSessionHistoryResult(
+  sessionId: string,
+): Promise<PrivateHeartRateSessionHistory> {
   const normalizedSessionId = sessionId.trim();
   if (!normalizedSessionId || normalizedSessionId.length > 160) {
     throw new Error('A valid training session is required to load private heart rate.');
@@ -1366,7 +1373,11 @@ export async function loadPrivateHeartRateSessionHistory(sessionId: string) {
     cache: 'no-store',
     headers: { Accept: 'application/json' },
   });
-  const payload = await jsonResponse<{ streams?: unknown; segments?: unknown }>(response, 'Private heart-rate history');
+  const payload = await jsonResponse<{
+    streams?: unknown;
+    segments?: unknown;
+    attachment?: { status?: unknown };
+  }>(response, 'Private heart-rate history');
   const streams = Array.isArray(payload.streams)
     ? payload.streams.flatMap((value) => {
       const stream = normalizeStream(value);
@@ -1379,8 +1390,19 @@ export async function loadPrivateHeartRateSessionHistory(sessionId: string) {
       return segment?.trainingSessionId === normalizedSessionId ? [segment] : [];
     })
     : [];
-  return ([...streams, ...segments] satisfies PrivateHeartRateHistoryItem[])
+  const items = ([...streams, ...segments] satisfies PrivateHeartRateHistoryItem[])
     .sort((left, right) => left.startedAt - right.startedAt);
+  const reportedStatus = payload.attachment?.status;
+  const status: PrivateHeartRateAttachmentStatus = items.length === 0
+    ? reportedStatus === 'syncing' ? 'syncing' : 'not-recorded'
+    : reportedStatus === 'syncing' || items.some((item) => item.finalizedAt == null)
+      ? 'syncing'
+      : 'saved';
+  return { items, status };
+}
+
+export async function loadPrivateHeartRateSessionHistory(sessionId: string) {
+  return (await loadPrivateHeartRateSessionHistoryResult(sessionId)).items;
 }
 
 /** Loads consented summary-only health data for an authenticated club owner. */

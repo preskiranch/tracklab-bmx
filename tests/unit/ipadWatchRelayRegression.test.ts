@@ -209,7 +209,7 @@ describe('iPad Watch relay regression boundaries', () => {
     expect(staleMarkup).not.toContain('164 beats per minute');
   });
 
-  it('keeps sensor time in player readings and gates account-wide revoke to the writer role', () => {
+  it('keeps the complete exact event in player readings and gates account-wide revoke to the writer role', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
     const playerReadings = appSource.slice(
       appSource.indexOf('const heartRateByPlayer = useMemo'),
@@ -218,9 +218,10 @@ describe('iPad Watch relay regression boundaries', () => {
     expect(playerReadings).toMatch(
       /nativeReading\.recordedAt >= cloudReading\.recordedAt/,
     );
-    expect(playerReadings).toContain('recordedAt: nativeReading.recordedAt');
-    expect(playerReadings).toContain('recordedAt: cloudReading.recordedAt');
-    expect(playerReadings).not.toContain('receivedAt');
+    expect(playerReadings).toContain('player.riderId === accountHeartRateRiderId');
+    expect(playerReadings).toContain('heartRate.latest?.sessionId === heartRate.status?.sessionId');
+    expect(playerReadings).toContain('if (latest) next[player.id] = latest');
+    expect(playerReadings).not.toContain('next[player.id] = {');
 
     const signOut = sourceBlock(appSource, 'const handleSignOut = useCallback(async () =>');
     expect(signOut).toContain("heartRate.availability?.platform === 'iphone'");

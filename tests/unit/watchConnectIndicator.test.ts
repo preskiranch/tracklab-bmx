@@ -78,16 +78,22 @@ function resolve(overrides: Partial<Parameters<typeof resolveWatchConnectIndicat
 
 describe('global Watch Connect indicator', () => {
   it('calls BPM live only for an exact fresh account/session and paired-iPhone identity', () => {
-    expect(resolve()).toMatchObject({ phase: 'live', label: 'Watch live' });
+    expect(resolve()).toMatchObject({ phase: 'live', label: 'Watch live', bpm: 151 });
     expect(resolve({ native: { ...native, connectionId: 'foreign' } })).toMatchObject({
       phase: 'disconnected',
       label: 'Watch disconnected',
     });
     expect(resolve({ event: { ...event, riderId: 'account:athlete-two' } })).toMatchObject({
       phase: 'connected',
+      bpm: null,
     });
     expect(resolve({ event: { ...event, sessionId: 'watch-connect:foreign' } })).toMatchObject({
       phase: 'connected',
+      bpm: null,
+    });
+    expect(resolve({ event: { ...event, bpm: 261 } })).toMatchObject({
+      phase: 'connected',
+      bpm: null,
     });
   });
 
@@ -243,6 +249,8 @@ describe('global Watch Connect indicator', () => {
     }));
     expect(markup).toContain('data-watch-connect-status="live"');
     expect(markup).toContain('Watch live');
+    expect(markup).toContain('151 BPM');
+    expect(markup).toContain('151 beats per minute');
     expect(markup).toContain('✓');
     expect(markup).toContain('Open Watch Connect settings');
     expect(markup).toContain('aria-live="polite"');
@@ -255,6 +263,8 @@ describe('global Watch Connect indicator', () => {
     expect(connectedMarkup).toContain('Watch connected');
     expect(connectedMarkup).toContain('Waiting for a fresh heart rate reading');
     expect(connectedMarkup).toContain('✓');
+    expect(connectedMarkup).not.toContain('BPM');
+    expect(connectedMarkup).not.toContain('beats per minute');
   });
 
   it('renders fullscreen status without a navigation action', () => {

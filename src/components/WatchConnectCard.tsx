@@ -150,18 +150,18 @@ export function WatchConnectCard({
         </small>
       </div>
 
-      {observer && connected && (
+      {connected && (
         <div className="watch-connect-card-remote-reading">
           <HeartRateMetric
             bpm={latestHeartRate?.bpm}
             compact
-            label={`${identity} heart rate through paired iPhone`}
+            label={`${identity} Apple Watch heart rate${observer ? ' through paired iPhone' : ''}`}
             now={now}
             recordedAt={latestHeartRate?.recordedAt}
           />
           <span>
             <strong>{remoteReading.state === 'live'
-              ? 'Live through iPhone'
+              ? observer ? 'Live through iPhone' : 'Live from Apple Watch'
               : remoteReading.state === 'stale'
                 ? 'Signal interrupted'
                 : 'Waiting for heart rate'}</strong>

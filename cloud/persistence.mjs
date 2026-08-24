@@ -4686,6 +4686,110 @@ function heartRateTrainingSegmentBindingMatches(left, right) {
     && json(left.activeClockSegments ?? []) === json(right.activeClockSegments ?? []);
 }
 
+function memoryHeartRateStreamWindowSampleCount(
+  stream,
+  startedAt,
+  endedAt,
+  activeClockSegments,
+) {
+  const samples = [...(memoryHeartRateSamplesByStreamId.get(stream.id)?.values() ?? [])];
+  return heartRateTrainingSegmentSummaries(
+    samples,
+    startedAt,
+    endedAt,
+    [],
+    activeClockSegments,
+  ).summary.sampleCount;
+}
+
+function compareMemoryHeartRateStreamsForTrainingWindow(
+  left,
+  right,
+  startedAt,
+  endedAt,
+  activeClockSegments,
+  preferredStreamId,
+) {
+  // A reconnect creates a new stream with an independent sequence/active clock.
+  // Keep one provenance-safe stream and prefer the one with the most exact-window
+  // evidence; never merge samples from separate reconnects into one segment.
+  return memoryHeartRateStreamWindowSampleCount(right, startedAt, endedAt, activeClockSegments)
+    - memoryHeartRateStreamWindowSampleCount(left, startedAt, endedAt, activeClockSegments)
+    || Number(right.id === preferredStreamId) - Number(left.id === preferredStreamId)
+    || right.startedAt - left.startedAt
+    || right.id.localeCompare(left.id);
+}
+
+function earliestHeartRateDeadline(...values) {
+  const deadlines = values.filter((value) => Number.isFinite(value));
+  return deadlines.length > 0 ? Math.min(...deadlines) : null;
+}
+
+function heartRateStreamIngestOpen(stream, now, pairing = null) {
+  if (
+    !stream
+    || stream.finalizedAt != null
+    || pairing?.revokedAt != null
+    || stream.studioBlockStoppedAt != null
+    || pairing?.studioBlockStoppedAt != null
+  ) return false;
+  const relayExpiresAt = earliestHeartRateDeadline(
+    stream.relayExpiresAt,
+    pairing?.ingestExpiresAt,
+  );
+  if ((relayExpiresAt ?? 0) <= now) return false;
+  const stopRequestedAt = earliestHeartRateDeadline(
+    stream.accountBlockStopRequestedAt,
+    pairing?.accountBlockStopRequestedAt,
+  );
+  const drainExpiresAt = earliestHeartRateDeadline(
+    stream.accountBlockDrainExpiresAt,
+    pairing?.accountBlockDrainExpiresAt,
+  ) ?? stopRequestedAt;
+  return stopRequestedAt == null || (drainExpiresAt ?? 0) > now;
+}
+
+function heartRateTrainingSegmentSourceClosed(stream, latestRecordedAt, endedAt, now, pairing = null) {
+  return stream?.finalizedAt != null
+    || latestRecordedAt >= endedAt
+    || !heartRateStreamIngestOpen(stream, now, pairing);
+}
+
+function heartRateTrainingSegmentFinalizedAt(
+  existingFinalizedAt,
+  stream,
+  latestRecordedAt,
+  endedAt,
+  now,
+  pairing = null,
+  allEligibleSourcesSettled = null,
+) {
+  const sourceClosed = allEligibleSourcesSettled ?? heartRateTrainingSegmentSourceClosed(
+    stream,
+    latestRecordedAt,
+    endedAt,
+    now,
+    pairing,
+  );
+  return sourceClosed ? existingFinalizedAt ?? now : null;
+}
+
+function heartRateTrainingSegmentMatchesOptions(segment, options) {
+  const relayScope = options.relayScope === 'account-block' ? 'account-block' : 'studio-block';
+  return segment.ownerProfileKey === options.athleteProfileKey
+    && segment.relayScope === relayScope
+    && (segment.clubId ?? null) === (relayScope === 'account-block' ? null : options.clubId ?? null)
+    && (segment.studioRiderId ?? null) === (
+      relayScope === 'account-block' ? null : options.studioRiderId ?? null
+    )
+    && segment.trainingSessionId === options.trainingSessionId
+    && segment.activityType === options.activityType
+    && (segment.playerId ?? null) === (options.playerId ?? null)
+    && segment.startedAt === options.startedAt
+    && segment.endedAt === options.endedAt
+    && json(segment.activeClockSegments ?? []) === json(options.activeClockSegments ?? []);
+}
+
 function saveMemoryHeartRateTrainingSegmentBinding(options) {
   const now = options.now ?? Date.now();
   const next = heartRateTrainingSegmentBinding(options, now);
@@ -4750,22 +4854,31 @@ async function upsertHeartRateTrainingSegmentBindingWithClient(client, options) 
   return result.rows[0] ?? null;
 }
 
-function eligibleMemoryStudioBlockStream({
+function eligibleMemoryStudioBlockStreams({
   athleteProfileKey,
   clubId,
   studioRiderId,
   startedAt,
   endedAt,
-  now,
+  activeClockSegments = [],
+  preferredStreamId = null,
 }) {
   const member = memoryClubMembers.get(clubMemberKey(clubId, studioRiderId));
   if (
     member?.status !== 'claimed'
     || member.athleteProfileKey !== athleteProfileKey
-  ) return null;
+  ) return [];
   return [...memoryHeartRateStreams.values()]
     .filter((stream) => {
       const pairing = memoryHeartRatePairings.get(stream.pairingId);
+      const stopRequestedAt = earliestHeartRateDeadline(
+        stream.accountBlockStopRequestedAt,
+        pairing?.accountBlockStopRequestedAt,
+      );
+      const relayExpiresAt = earliestHeartRateDeadline(
+        stream.relayExpiresAt,
+        pairing?.ingestExpiresAt,
+      );
       return stream.ownerProfileKey === athleteProfileKey
         && stream.clubId === clubId
         && stream.studioRiderId === studioRiderId
@@ -4776,31 +4889,42 @@ function eligibleMemoryStudioBlockStream({
         && pairing.revokedAt == null
         && pairing.studioBlockStoppedAt == null
         && stream.studioBlockStoppedAt == null
-        && (
-          pairing.accountBlockStopRequestedAt == null
-          || startedAt < pairing.accountBlockStopRequestedAt
-        )
+        && (stopRequestedAt == null || startedAt < stopRequestedAt)
+        && pairing.sessionStudioConsent
         && stream.sessionStudioConsent
-        && (
-          stream.finalizedAt != null
-          || (
-            (stream.relayExpiresAt ?? pairing.ingestExpiresAt ?? 0) > now
-            && stream.updatedAt >= now - 30_000
-          )
-        );
+        // Current-time freshness is not historical authorization. The effective
+        // relay deadline only needs to cover the result start; source closure
+        // below decides whether the attached segment is still syncing.
+        && (relayExpiresAt ?? 0) > startedAt;
     })
-    .sort((left, right) => right.startedAt - left.startedAt)[0] ?? null;
+    .sort((left, right) => compareMemoryHeartRateStreamsForTrainingWindow(
+      left,
+      right,
+      startedAt,
+      endedAt,
+      activeClockSegments,
+      preferredStreamId,
+    ));
 }
 
-function eligibleMemoryAccountBlockStream({
+function eligibleMemoryAccountBlockStreams({
   athleteProfileKey,
   startedAt,
   endedAt,
-  now,
+  activeClockSegments = [],
+  preferredStreamId = null,
 }) {
   return [...memoryHeartRateStreams.values()]
     .filter((stream) => {
       const pairing = memoryHeartRatePairings.get(stream.pairingId);
+      const stopRequestedAt = earliestHeartRateDeadline(
+        stream.accountBlockStopRequestedAt,
+        pairing?.accountBlockStopRequestedAt,
+      );
+      const relayExpiresAt = earliestHeartRateDeadline(
+        stream.relayExpiresAt,
+        pairing?.ingestExpiresAt,
+      );
       return stream.ownerProfileKey === athleteProfileKey
         && stream.clubId == null
         && stream.studioRiderId == null
@@ -4811,23 +4935,73 @@ function eligibleMemoryAccountBlockStream({
         && pairing.relayScope === 'account-block'
         && pairing.claimedAt != null
         && pairing.revokedAt == null
-        && (
-          pairing.accountBlockStopRequestedAt == null
-          || startedAt < pairing.accountBlockStopRequestedAt
-        )
+        && (stopRequestedAt == null || startedAt < stopRequestedAt)
         && !pairing.liveStudioConsent
         && !pairing.sessionStudioConsent
         && !stream.liveStudioConsent
         && !stream.sessionStudioConsent
-        && (
-          stream.finalizedAt != null
-          || (
-            (stream.relayExpiresAt ?? pairing.ingestExpiresAt ?? 0) > now
-            && stream.updatedAt >= now - 30_000
-          )
-        );
+        // Do not strand already-authorized private history after the relay's
+        // natural expiry; new post-expiry result windows still fail closed.
+        && (relayExpiresAt ?? 0) > startedAt;
     })
-    .sort((left, right) => right.startedAt - left.startedAt)[0] ?? null;
+    .sort((left, right) => compareMemoryHeartRateStreamsForTrainingWindow(
+      left,
+      right,
+      startedAt,
+      endedAt,
+      activeClockSegments,
+      preferredStreamId,
+    ));
+}
+
+function memoryHeartRateTrainingSegmentSourcesSettled(streams, endedAt, now) {
+  return streams.every((candidate) => {
+    const candidateLatestRecordedAt = [
+      ...(memoryHeartRateSamplesByStreamId.get(candidate.id)?.values() ?? []),
+    ].reduce((latest, sample) => Math.max(latest, sample.recordedAt), 0);
+    return heartRateTrainingSegmentSourceClosed(
+      candidate,
+      candidateLatestRecordedAt,
+      endedAt,
+      now,
+      memoryHeartRatePairings.get(candidate.pairingId),
+    );
+  });
+}
+
+function eligibleMemoryHeartRateTrainingSegmentStreams(segment) {
+  const options = {
+    athleteProfileKey: segment.ownerProfileKey,
+    startedAt: segment.startedAt,
+    endedAt: segment.endedAt,
+    activeClockSegments: segment.activeClockSegments ?? [],
+    preferredStreamId: segment.streamId,
+  };
+  return segment.relayScope === 'account-block'
+    ? eligibleMemoryAccountBlockStreams(options)
+    : eligibleMemoryStudioBlockStreams({
+      ...options,
+      clubId: segment.clubId,
+      studioRiderId: segment.studioRiderId,
+    });
+}
+
+function memoryHeartRateTrainingSegmentSettled(segment, now) {
+  const streams = eligibleMemoryHeartRateTrainingSegmentStreams(segment);
+  if (streams.length > 0) {
+    return memoryHeartRateTrainingSegmentSourcesSettled(streams, segment.endedAt, now);
+  }
+  const stream = memoryHeartRateStreams.get(segment.streamId);
+  const latestRecordedAt = [
+    ...(memoryHeartRateSamplesByStreamId.get(segment.streamId)?.values() ?? []),
+  ].reduce((latest, sample) => Math.max(latest, sample.recordedAt), 0);
+  return heartRateTrainingSegmentSourceClosed(
+    stream,
+    latestRecordedAt,
+    segment.endedAt,
+    now,
+    stream ? memoryHeartRatePairings.get(stream.pairingId) : null,
+  );
 }
 
 function memoryHeartRateAccountBlockPairingAvailable({
@@ -4966,20 +5140,42 @@ function upsertMemoryHeartRateTrainingSegment({
   activeClockSegments = [],
   now = Date.now(),
 }) {
-  const stream = relayScope === 'account-block'
-    ? eligibleMemoryAccountBlockStream({ athleteProfileKey, startedAt, endedAt, now })
-    : eligibleMemoryStudioBlockStream({
+  const key = memoryHeartRateTrainingSegmentKey(athleteProfileKey, trainingSessionId);
+  const existing = memoryHeartRateTrainingSegments.get(key);
+  const options = {
+    relayScope,
+    athleteProfileKey,
+    clubId,
+    studioRiderId,
+    trainingSessionId,
+    activityType,
+    playerId,
+    startedAt,
+    endedAt,
+    activeClockSegments,
+  };
+  if (existing && !heartRateTrainingSegmentMatchesOptions(existing, options)) {
+    return { status: 'conflict', segment: null };
+  }
+  const streams = relayScope === 'account-block'
+    ? eligibleMemoryAccountBlockStreams({
+      athleteProfileKey,
+      startedAt,
+      endedAt,
+      activeClockSegments,
+      preferredStreamId: existing?.streamId,
+    })
+    : eligibleMemoryStudioBlockStreams({
       athleteProfileKey,
       clubId,
       studioRiderId,
       startedAt,
       endedAt,
-      now,
+      activeClockSegments,
+      preferredStreamId: existing?.streamId,
     });
+  const stream = streams[0] ?? null;
   if (!stream) return { status: 'no-stream', segment: null };
-  const key = memoryHeartRateTrainingSegmentKey(athleteProfileKey, trainingSessionId);
-  const existing = memoryHeartRateTrainingSegments.get(key);
-  if (existing && existing.streamId !== stream.id) return { status: 'conflict', segment: null };
   const samples = [...(memoryHeartRateSamplesByStreamId.get(stream.id)?.values() ?? [])];
   const summaries = heartRateTrainingSegmentSummaries(
     samples,
@@ -4988,9 +5184,19 @@ function upsertMemoryHeartRateTrainingSegment({
     zoneWindows,
     activeClockSegments,
   );
+  if (
+    existing
+    && existing.streamId !== stream.id
+    && summaries.summary.sampleCount <= Number(existing.summary?.sampleCount ?? 0)
+  ) return { status: 'conflict', segment: null };
   const latestRecordedAt = samples.reduce(
     (latest, sample) => Math.max(latest, sample.recordedAt),
     0,
+  );
+  const allEligibleSourcesSettled = memoryHeartRateTrainingSegmentSourcesSettled(
+    streams,
+    endedAt,
+    now,
   );
   const segment = existing ?? {
     id: heartRateTrainingSegmentId(stream.id, trainingSessionId),
@@ -5015,13 +5221,19 @@ function upsertMemoryHeartRateTrainingSegment({
     updatedAt: now,
   };
   Object.assign(segment, {
+    streamId: stream.id,
+    pairingId: stream.pairingId,
     activeDurationMs: summaries.activeDurationMs,
     summary: summaries.summary,
     zoneSummaries: summaries.zoneSummaries,
-    finalizedAt: segment.finalizedAt ?? (
-      stream.finalizedAt != null || latestRecordedAt >= endedAt || now >= endedAt + 15_000
-        ? now
-        : null
+    finalizedAt: heartRateTrainingSegmentFinalizedAt(
+      segment.finalizedAt,
+      stream,
+      latestRecordedAt,
+      endedAt,
+      now,
+      memoryHeartRatePairings.get(stream.pairingId),
+      allEligibleSourcesSettled,
     ),
     studioVisible: relayScope === 'studio-block' && Boolean(stream.sessionStudioConsent),
     updatedAt: now,
@@ -5046,7 +5258,10 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
 }) {
   const streamResult = relayScope === 'account-block'
     ? await client.query(
-      `SELECT streams.*
+      `SELECT streams.*,
+         (SELECT MAX(latest_samples.recorded_at)
+          FROM ${schema}.heart_rate_samples AS latest_samples
+          WHERE latest_samples.stream_id = streams.id) AS latest_recorded_at
        FROM ${schema}.heart_rate_streams AS streams
        JOIN ${schema}.heart_rate_pairings AS pairings ON pairings.id = streams.pairing_id
        WHERE streams.owner_profile_key = $1
@@ -5070,19 +5285,54 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
            OR to_timestamp($2 / 1000.0) < pairings.account_block_stop_requested_at
          )
          AND (
-           streams.finalized_at IS NOT NULL
-           OR (
-             COALESCE(streams.relay_expires_at, pairings.ingest_expires_at) > to_timestamp($4 / 1000.0)
-             AND streams.updated_at >= to_timestamp(($4 - 30000) / 1000.0)
-           )
+           streams.account_block_stop_requested_at IS NULL
+           OR to_timestamp($2 / 1000.0) < streams.account_block_stop_requested_at
          )
-       ORDER BY streams.started_at DESC, streams.id DESC
-       LIMIT 1
+         AND COALESCE(
+           LEAST(streams.relay_expires_at, pairings.ingest_expires_at),
+           streams.relay_expires_at,
+           pairings.ingest_expires_at
+         ) > to_timestamp($2 / 1000.0)
+       ORDER BY (
+         SELECT COUNT(*)
+         FROM ${schema}.heart_rate_samples AS ranked_samples
+         WHERE ranked_samples.stream_id = streams.id
+           AND ranked_samples.recorded_at >= to_timestamp($2 / 1000.0)
+           AND ranked_samples.recorded_at <= to_timestamp($3 / 1000.0)
+           AND (
+             jsonb_array_length($4::jsonb) = 0
+             OR EXISTS (
+               SELECT 1 FROM jsonb_array_elements($4::jsonb) AS clock_segment
+               WHERE ranked_samples.recorded_at >= to_timestamp(
+                   (clock_segment ->> 'startedAt')::double precision / 1000.0
+                 )
+                 AND (
+                   ranked_samples.recorded_at < to_timestamp(
+                     (clock_segment ->> 'endedAt')::double precision / 1000.0
+                   )
+                   OR (
+                     (clock_segment ->> 'endedAt')::double precision = $3
+                     AND ranked_samples.recorded_at = to_timestamp($3 / 1000.0)
+                   )
+                 )
+             )
+           )
+       ) DESC, (
+         streams.id = COALESCE((
+           SELECT existing_segment.stream_id
+           FROM ${schema}.heart_rate_training_segments AS existing_segment
+           WHERE existing_segment.training_profile_key = $1
+             AND existing_segment.training_session_id = $5
+         ), '')
+       ) DESC, streams.started_at DESC, streams.id DESC
        FOR UPDATE OF streams`,
-      [athleteProfileKey, startedAt, endedAt, now],
+      [athleteProfileKey, startedAt, endedAt, json(activeClockSegments), trainingSessionId],
     )
     : await client.query(
-      `SELECT streams.*
+      `SELECT streams.*,
+         (SELECT MAX(latest_samples.recorded_at)
+          FROM ${schema}.heart_rate_samples AS latest_samples
+          WHERE latest_samples.stream_id = streams.id) AS latest_recorded_at
        FROM ${schema}.heart_rate_streams AS streams
        JOIN ${schema}.heart_rate_pairings AS pairings ON pairings.id = streams.pairing_id
        JOIN ${schema}.club_members AS members
@@ -5102,24 +5352,78 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
            pairings.account_block_stop_requested_at IS NULL
            OR to_timestamp($4 / 1000.0) < pairings.account_block_stop_requested_at
          )
-         AND streams.session_studio_consent = true
          AND (
-           streams.finalized_at IS NOT NULL
-           OR (
-             COALESCE(streams.relay_expires_at, pairings.ingest_expires_at) > to_timestamp($6 / 1000.0)
-             AND streams.updated_at >= to_timestamp(($6 - 30000) / 1000.0)
-           )
+           streams.account_block_stop_requested_at IS NULL
+           OR to_timestamp($4 / 1000.0) < streams.account_block_stop_requested_at
          )
+         AND pairings.session_studio_consent = true
+         AND streams.session_studio_consent = true
+         AND COALESCE(
+           LEAST(streams.relay_expires_at, pairings.ingest_expires_at),
+           streams.relay_expires_at,
+           pairings.ingest_expires_at
+         ) > to_timestamp($4 / 1000.0)
          AND members.status = 'claimed'
          AND members.athlete_profile_key = $1
-       ORDER BY streams.started_at DESC, streams.id DESC
-       LIMIT 1
+       ORDER BY (
+         SELECT COUNT(*)
+         FROM ${schema}.heart_rate_samples AS ranked_samples
+         WHERE ranked_samples.stream_id = streams.id
+           AND ranked_samples.recorded_at >= to_timestamp($4 / 1000.0)
+           AND ranked_samples.recorded_at <= to_timestamp($5 / 1000.0)
+           AND (
+             jsonb_array_length($6::jsonb) = 0
+             OR EXISTS (
+               SELECT 1 FROM jsonb_array_elements($6::jsonb) AS clock_segment
+               WHERE ranked_samples.recorded_at >= to_timestamp(
+                   (clock_segment ->> 'startedAt')::double precision / 1000.0
+                 )
+                 AND (
+                   ranked_samples.recorded_at < to_timestamp(
+                     (clock_segment ->> 'endedAt')::double precision / 1000.0
+                   )
+                   OR (
+                     (clock_segment ->> 'endedAt')::double precision = $5
+                     AND ranked_samples.recorded_at = to_timestamp($5 / 1000.0)
+                   )
+                 )
+             )
+           )
+       ) DESC, (
+         streams.id = COALESCE((
+           SELECT existing_segment.stream_id
+           FROM ${schema}.heart_rate_training_segments AS existing_segment
+           WHERE existing_segment.training_profile_key = $1
+             AND existing_segment.training_session_id = $7
+         ), '')
+       ) DESC, streams.started_at DESC, streams.id DESC
        FOR UPDATE OF streams`,
-      [athleteProfileKey, clubId, studioRiderId, startedAt, endedAt, now],
+      [
+        athleteProfileKey,
+        clubId,
+        studioRiderId,
+        startedAt,
+        endedAt,
+        json(activeClockSegments),
+        trainingSessionId,
+      ],
     );
-  const streamRow = streamResult.rows[0];
+  const streamRows = streamResult.rows;
+  const streamRow = streamRows[0];
   if (!streamRow) return { status: 'no-stream', segment: null };
   const stream = heartRateStreamFromRow(streamRow);
+  const allEligibleSourcesSettled = streamRows.every((candidateRow) => {
+    const candidate = heartRateStreamFromRow(candidateRow);
+    const candidateLatestRecordedAt = candidateRow.latest_recorded_at
+      ? new Date(candidateRow.latest_recorded_at).getTime()
+      : 0;
+    return heartRateTrainingSegmentSourceClosed(
+      candidate,
+      candidateLatestRecordedAt,
+      endedAt,
+      now,
+    );
+  });
   const sampleResult = await client.query(
     `SELECT sequence, recorded_at, active_elapsed_ms, bpm
      FROM ${schema}.heart_rate_samples
@@ -5148,11 +5452,15 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
   const latestRecordedAt = latestSampleResult.rows[0]?.recorded_at
     ? new Date(latestSampleResult.rows[0].recorded_at).getTime()
     : null;
-  const finalizedAt = stream.finalizedAt != null
-    || (latestRecordedAt != null && latestRecordedAt >= endedAt)
-    || now >= endedAt + 15_000
-    ? now
-    : null;
+  const finalizedAt = heartRateTrainingSegmentFinalizedAt(
+    null,
+    stream,
+    latestRecordedAt ?? 0,
+    endedAt,
+    now,
+    null,
+    allEligibleSourcesSettled,
+  );
   const segmentResult = await client.query(
     `INSERT INTO ${schema}.heart_rate_training_segments (
        id, stream_id, pairing_id, owner_profile_key, relay_scope, club_id, studio_rider_id,
@@ -5167,16 +5475,42 @@ async function upsertHeartRateTrainingSegmentWithClient(client, {
        $18, to_timestamp($19 / 1000.0), to_timestamp($19 / 1000.0)
      )
      ON CONFLICT (training_profile_key, training_session_id) DO UPDATE
-       SET summary = EXCLUDED.summary,
+       SET stream_id = EXCLUDED.stream_id,
+         pairing_id = EXCLUDED.pairing_id,
+         summary = EXCLUDED.summary,
          zone_summaries = EXCLUDED.zone_summaries,
-         finalized_at = COALESCE(
-           ${schema}.heart_rate_training_segments.finalized_at,
-           EXCLUDED.finalized_at
-         ),
+         finalized_at = CASE
+           WHEN EXCLUDED.finalized_at IS NULL THEN NULL
+           ELSE COALESCE(
+             ${schema}.heart_rate_training_segments.finalized_at,
+             EXCLUDED.finalized_at
+           )
+         END,
          studio_visible = EXCLUDED.studio_visible,
          updated_at = EXCLUDED.updated_at
-       WHERE ${schema}.heart_rate_training_segments.stream_id = EXCLUDED.stream_id
+       WHERE ${schema}.heart_rate_training_segments.owner_profile_key = EXCLUDED.owner_profile_key
+         AND ${schema}.heart_rate_training_segments.relay_scope = EXCLUDED.relay_scope
+         AND ${schema}.heart_rate_training_segments.club_id IS NOT DISTINCT FROM EXCLUDED.club_id
+         AND ${schema}.heart_rate_training_segments.studio_rider_id IS NOT DISTINCT FROM EXCLUDED.studio_rider_id
+         AND ${schema}.heart_rate_training_segments.training_profile_key = EXCLUDED.training_profile_key
+         AND ${schema}.heart_rate_training_segments.training_session_id = EXCLUDED.training_session_id
+         AND ${schema}.heart_rate_training_segments.activity_type = EXCLUDED.activity_type
+         AND ${schema}.heart_rate_training_segments.player_id IS NOT DISTINCT FROM EXCLUDED.player_id
+         AND ${schema}.heart_rate_training_segments.started_at = EXCLUDED.started_at
+         AND ${schema}.heart_rate_training_segments.ended_at = EXCLUDED.ended_at
          AND ${schema}.heart_rate_training_segments.active_clock_segments = EXCLUDED.active_clock_segments
+         AND (
+           ${schema}.heart_rate_training_segments.stream_id = EXCLUDED.stream_id
+           OR CASE
+             WHEN jsonb_typeof(EXCLUDED.summary -> 'sampleCount') = 'number'
+               THEN (EXCLUDED.summary ->> 'sampleCount')::integer
+             ELSE 0
+           END > CASE
+             WHEN jsonb_typeof(${schema}.heart_rate_training_segments.summary -> 'sampleCount') = 'number'
+               THEN (${schema}.heart_rate_training_segments.summary ->> 'sampleCount')::integer
+             ELSE 0
+           END
+         )
      RETURNING *, (xmax = 0) AS inserted`,
     [
       heartRateTrainingSegmentId(stream.id, trainingSessionId),
@@ -5386,12 +5720,21 @@ export async function refreshHeartRateTrainingSegmentsForStream(streamId, now = 
       );
       segment.summary = summaries.summary;
       segment.zoneSummaries = summaries.zoneSummaries;
-      segment.finalizedAt = segment.finalizedAt ?? (
-        stream.finalizedAt != null
-        || latestRecordedAt >= segment.endedAt
-        || now >= segment.endedAt + 15_000
-          ? now
-          : null
+      const eligibleStreams = eligibleMemoryHeartRateTrainingSegmentStreams(segment);
+      segment.finalizedAt = heartRateTrainingSegmentFinalizedAt(
+        segment.finalizedAt,
+        stream,
+        latestRecordedAt,
+        segment.endedAt,
+        now,
+        memoryHeartRatePairings.get(stream.pairingId),
+        eligibleStreams.length > 0
+          ? memoryHeartRateTrainingSegmentSourcesSettled(
+            eligibleStreams,
+            segment.endedAt,
+            now,
+          )
+          : null,
       );
       segment.studioVisible = stream.relayScope === 'studio-block' && Boolean(stream.sessionStudioConsent);
       segment.updatedAt = now;
@@ -5436,22 +5779,23 @@ export async function refreshHeartRateTrainingSegmentsForStream(streamId, now = 
         zoneWindows,
         existing.activeClockSegments ?? [],
       );
-      const finalizedAt = existing.finalizedAt ?? (
-        stream.finalizedAt != null
-        || latestRecordedAt >= existing.endedAt
-        || now >= existing.endedAt + 15_000
-          ? now
-          : null
+      const finalizedAt = heartRateTrainingSegmentFinalizedAt(
+        existing.finalizedAt,
+        stream,
+        latestRecordedAt,
+        existing.endedAt,
+        now,
       );
       const updated = await client.query(
-        `UPDATE ${schema}.heart_rate_training_segments
+        `UPDATE ${schema}.heart_rate_training_segments AS segments
          SET summary = $2::jsonb, zone_summaries = $3::jsonb,
            finalized_at = CASE
-             WHEN $4::bigint IS NULL THEN finalized_at
-             ELSE COALESCE(finalized_at, to_timestamp($4 / 1000.0))
+             WHEN EXISTS (${openHeartRateTrainingSegmentCandidateSql}) THEN NULL
+             WHEN $4::bigint IS NULL THEN NULL
+             ELSE COALESCE(segments.finalized_at, to_timestamp($4 / 1000.0))
            END,
            studio_visible = $5, updated_at = to_timestamp($6 / 1000.0)
-         WHERE id = $1 RETURNING *`,
+         WHERE segments.id = $1 RETURNING segments.*`,
         [
           existing.id,
           json(summaries.summary),
@@ -5467,15 +5811,97 @@ export async function refreshHeartRateTrainingSegmentsForStream(streamId, now = 
   });
 }
 
+const openHeartRateTrainingSegmentCandidateSql = `SELECT 1
+  FROM ${schema}.heart_rate_streams AS candidate_streams
+  JOIN ${schema}.heart_rate_pairings AS candidate_pairings
+    ON candidate_pairings.id = candidate_streams.pairing_id
+  LEFT JOIN ${schema}.club_members AS candidate_members
+    ON candidate_members.club_id = candidate_streams.club_id
+    AND candidate_members.studio_rider_id = candidate_streams.studio_rider_id
+  WHERE candidate_streams.owner_profile_key = segments.owner_profile_key
+    AND candidate_pairings.owner_profile_key = segments.owner_profile_key
+    AND candidate_streams.relay_scope = segments.relay_scope
+    AND candidate_pairings.relay_scope = segments.relay_scope
+    AND candidate_streams.started_at <= segments.ended_at
+    AND (candidate_streams.ended_at IS NULL OR candidate_streams.ended_at >= segments.started_at)
+    AND candidate_pairings.claimed_at IS NOT NULL
+    AND candidate_pairings.revoked_at IS NULL
+    AND candidate_pairings.studio_block_stopped_at IS NULL
+    AND candidate_streams.studio_block_stopped_at IS NULL
+    AND (
+      candidate_pairings.account_block_stop_requested_at IS NULL
+      OR segments.started_at < candidate_pairings.account_block_stop_requested_at
+    )
+    AND (
+      candidate_streams.account_block_stop_requested_at IS NULL
+      OR segments.started_at < candidate_streams.account_block_stop_requested_at
+    )
+    AND COALESCE(
+      LEAST(candidate_streams.relay_expires_at, candidate_pairings.ingest_expires_at),
+      candidate_streams.relay_expires_at,
+      candidate_pairings.ingest_expires_at
+    ) > segments.started_at
+    AND (
+      (
+        segments.relay_scope = 'account-block'
+        AND candidate_streams.club_id IS NULL
+        AND candidate_streams.studio_rider_id IS NULL
+        AND candidate_pairings.club_id IS NULL
+        AND candidate_pairings.studio_rider_id IS NULL
+        AND candidate_streams.live_studio_consent = false
+        AND candidate_streams.session_studio_consent = false
+        AND candidate_pairings.live_studio_consent = false
+        AND candidate_pairings.session_studio_consent = false
+      ) OR (
+        segments.relay_scope = 'studio-block'
+        AND candidate_streams.club_id = segments.club_id
+        AND candidate_streams.studio_rider_id = segments.studio_rider_id
+        AND candidate_pairings.club_id = segments.club_id
+        AND candidate_pairings.studio_rider_id = segments.studio_rider_id
+        AND candidate_streams.session_studio_consent = true
+        AND candidate_pairings.session_studio_consent = true
+        AND candidate_members.status = 'claimed'
+        AND candidate_members.athlete_profile_key = segments.owner_profile_key
+      )
+    )
+    AND candidate_streams.finalized_at IS NULL
+    AND COALESCE(
+      LEAST(candidate_streams.relay_expires_at, candidate_pairings.ingest_expires_at),
+      candidate_streams.relay_expires_at,
+      candidate_pairings.ingest_expires_at
+    ) > now()
+    AND (
+      COALESCE(
+        candidate_streams.account_block_stop_requested_at,
+        candidate_pairings.account_block_stop_requested_at
+      ) IS NULL
+      OR COALESCE(
+        LEAST(
+          candidate_streams.account_block_drain_expires_at,
+          candidate_pairings.account_block_drain_expires_at
+        ),
+        candidate_streams.account_block_drain_expires_at,
+        candidate_pairings.account_block_drain_expires_at,
+        LEAST(
+          candidate_streams.account_block_stop_requested_at,
+          candidate_pairings.account_block_stop_requested_at
+        ),
+        candidate_streams.account_block_stop_requested_at,
+        candidate_pairings.account_block_stop_requested_at
+      ) > now()
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM ${schema}.heart_rate_samples AS candidate_closing_samples
+      WHERE candidate_closing_samples.stream_id = candidate_streams.id
+        AND candidate_closing_samples.recorded_at >= segments.ended_at
+    )`;
+
 export async function loadHeartRateTrainingSegments(ownerProfileKey, sessionId = null) {
   if (!pool) {
     const now = Date.now();
     memoryHeartRateTrainingSegments.forEach((segment) => {
-      if (
-        segment.ownerProfileKey === ownerProfileKey
-        && segment.finalizedAt == null
-        && now >= segment.endedAt + 15_000
-      ) {
+      if (segment.ownerProfileKey !== ownerProfileKey || segment.finalizedAt != null) return;
+      if (memoryHeartRateTrainingSegmentSettled(segment, now)) {
         segment.finalizedAt = now;
         segment.updatedAt = now;
       }
@@ -5489,10 +5915,10 @@ export async function loadHeartRateTrainingSegments(ownerProfileKey, sessionId =
       .map((segment) => cloneJson(segment, segment));
   }
   await query(
-    `UPDATE ${schema}.heart_rate_training_segments
+    `UPDATE ${schema}.heart_rate_training_segments AS segments
      SET finalized_at = now(), updated_at = now()
-     WHERE owner_profile_key = $1 AND finalized_at IS NULL
-       AND ended_at <= now() - interval '15 seconds'`,
+     WHERE segments.owner_profile_key = $1 AND segments.finalized_at IS NULL
+       AND NOT EXISTS (${openHeartRateTrainingSegmentCandidateSql})`,
     [ownerProfileKey],
   );
   const result = await query(
@@ -5510,11 +5936,8 @@ export async function loadClubHeartRateTrainingSegments(clubId, sessionId = null
   if (!pool) {
     const now = Date.now();
     memoryHeartRateTrainingSegments.forEach((segment) => {
-      if (
-        segment.clubId === clubId
-        && segment.finalizedAt == null
-        && now >= segment.endedAt + 15_000
-      ) {
+      if (segment.clubId !== clubId || segment.finalizedAt != null) return;
+      if (memoryHeartRateTrainingSegmentSettled(segment, now)) {
         segment.finalizedAt = now;
         segment.updatedAt = now;
       }
@@ -5530,10 +5953,10 @@ export async function loadClubHeartRateTrainingSegments(clubId, sessionId = null
       .map((segment) => cloneJson(segment, segment));
   }
   await query(
-    `UPDATE ${schema}.heart_rate_training_segments
+    `UPDATE ${schema}.heart_rate_training_segments AS segments
      SET finalized_at = now(), updated_at = now()
-     WHERE club_id = $1 AND finalized_at IS NULL
-       AND ended_at <= now() - interval '15 seconds'`,
+     WHERE segments.club_id = $1 AND segments.finalized_at IS NULL
+       AND NOT EXISTS (${openHeartRateTrainingSegmentCandidateSql})`,
     [clubId],
   );
   const result = await query(

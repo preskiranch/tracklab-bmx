@@ -271,6 +271,7 @@
 .private-heart-rate-owner { justify-content: flex-end; gap: 4px; color: #315b20; font-size: 10px; font-weight: 850; text-align: right; }
 .private-heart-rate-owner > svg { flex: 0 0 auto; }
 .private-heart-rate-message { margin: 0; color: #667085; font-size: 12px; }
+.private-heart-rate-history > .private-heart-rate-message,
 .private-heart-rate-stream .private-heart-rate-message { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .private-heart-rate-message.error { justify-content: space-between; gap: 8px; color: #b42318; }
 .private-heart-rate-message button {

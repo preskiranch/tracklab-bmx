@@ -10,6 +10,8 @@ import type {
 import {
   PrivateHeartRateHistoryPanel,
   clubHeartRateHistoryTarget,
+  privateHeartRateSyncPollDelay,
+  privateHeartRateSyncPollLimit,
   privateHeartRateSessionId,
 } from '../../src/components/AccountProfileView';
 
@@ -57,12 +59,14 @@ function markup(
   streams: readonly PrivateHeartRateHistoryItem[],
   error = '',
   sharingLabel?: string,
+  attachmentStatus?: 'syncing' | 'saved' | 'not-recorded',
 ) {
   return renderToStaticMarkup(createElement(PrivateHeartRateHistoryPanel, {
     state,
     streams,
     error,
     sharingLabel,
+    attachmentStatus,
     onRetry: () => undefined,
   }));
 }
@@ -78,7 +82,16 @@ const pendingStudioSegment: HeartRateTrainingSegment = {
   startedAt: 20_000,
   endedAt: 26_000,
   activeDurationMs: 6_000,
-  summary: null,
+  summary: {
+    sampleCount: 0,
+    coverageMs: 0,
+    coveragePercent: 0,
+    firstSampleElapsedMs: null,
+    lastSampleElapsedMs: null,
+    minimumBpm: null,
+    averageBpm: null,
+    peakBpm: null,
+  },
   zoneSummaries: [],
   finalizedAt: null,
 };
@@ -130,6 +143,22 @@ describe('owner-only Account profile heart-rate history', () => {
     const error = markup('error', [], 'Network interrupted');
     expect(error).toContain('Private heart-rate history is temporarily unavailable');
     expect(error).toContain('Try again');
+  });
+
+  it('keeps a late Watch attachment visibly syncing and retryable instead of declaring no data', () => {
+    const html = markup('ready', [], '', undefined, 'syncing');
+
+    expect(html).toContain('Apple Watch heart-rate data is still syncing for this session.');
+    expect(html).toContain('Check again');
+    expect(html).not.toContain('No Apple Watch heart-rate data was saved');
+  });
+
+  it('uses a bounded sync polling cadence and stops after the final attempt', () => {
+    expect(privateHeartRateSyncPollDelay(0)).toBe(2_000);
+    expect(privateHeartRateSyncPollDelay(8)).toBe(10_000);
+    expect(privateHeartRateSyncPollDelay(privateHeartRateSyncPollLimit - 1)).toBe(10_000);
+    expect(privateHeartRateSyncPollDelay(privateHeartRateSyncPollLimit)).toBeNull();
+    expect(privateHeartRateSyncPollDelay(-1)).toBeNull();
   });
 
   it('shows a studio sprint slice as pending until its late-sample grace period is finalized', () => {

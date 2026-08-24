@@ -119,6 +119,13 @@ describe('Monitor studio heart-rate coordinator', () => {
     expect(nativeHeartRateWorkoutBelongsToAccount(
       'watch-studio-block:pair-other', 'rider-one', new Set(['pair-one']),
     )).toBe(false);
+    expect(nativeHeartRateWorkoutBelongsToAccount(
+      'watch-connect:pair-one-extra', 'rider-one', new Set(['pair-one']),
+    )).toBe(false);
+    expect(nativeHeartRateWorkoutBelongsToAccount(
+      'watch-connect:', 'rider-one', new Set(['']),
+    )).toBe(false);
+
   });
 
   it('keeps session persistence distinct from Watch heart-rate sync state', () => {

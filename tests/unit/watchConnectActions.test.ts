@@ -108,12 +108,14 @@ describe('Watch Connect actions', () => {
 
   it('performs enrollment, server connection, and native start from one press', async () => {
     const deps = dependencies();
-    await expect(startWatchConnectAction({
+    const result = await startWatchConnectAction({
       scope: 'personal',
       baseUrl: 'https://tracklab.example',
       enrollmentRequestId: 'watch-connect-enroll-123456789',
       connectionRequestId: 'watch-connect-session-123456789',
-    }, deps)).resolves.toMatchObject({ enrollment, connection });
+    }, deps);
+    expect(result).toMatchObject({ enrollment, connection, pairingId: 'pairing-1' });
+    expect(JSON.stringify(result)).not.toContain('private-ingest-token');
 
     expect(deps.enroll).toHaveBeenCalledWith(expect.objectContaining({ installId, scope: 'personal' }));
     expect(deps.startNative).toHaveBeenCalledWith({
@@ -131,7 +133,7 @@ describe('Watch Connect actions', () => {
     const order: string[] = [];
     const onConnectionCreated = vi.fn((prepared) => {
       order.push('server-created');
-      expect(prepared).toEqual({ enrollment, connection });
+      expect(prepared).toEqual({ enrollment, connection, pairingId: 'pairing-1' });
       expect(JSON.stringify(prepared)).not.toContain('private-ingest-token');
     });
     const startNative = vi.fn(async () => {

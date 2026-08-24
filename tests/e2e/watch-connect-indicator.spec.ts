@@ -1,4 +1,53 @@
 import { expect, test, type Page } from '@playwright/test';
+import { WebSocket, WebSocketServer } from 'ws';
+
+async function createWatchBikeBridge(deviceId = 58701) {
+  const url = new URL(process.env.PLAYWRIGHT_BRIDGE_URL ?? 'ws://127.0.0.1:19787');
+  const clients = new Set<WebSocket>();
+  const server = await new Promise<WebSocketServer>((resolve, reject) => {
+    const candidate = new WebSocketServer({ host: url.hostname, port: Number(url.port) });
+    candidate.once('listening', () => resolve(candidate));
+    candidate.once('error', reject);
+  });
+  const sample = () => JSON.stringify({
+    type: 'bike-sample',
+    at: Date.now(),
+    source: 'bluetooth',
+    deviceId,
+    label: `WattbikePM250${deviceId}`,
+    watts: 0,
+    cadence: 0,
+    speedKph: 0,
+    signal: 90,
+  });
+  server.on('connection', (socket) => {
+    clients.add(socket);
+    socket.send(JSON.stringify({
+      type: 'bridge-status',
+      mode: 'bluetooth',
+      sourceState: 'running',
+      message: 'Mock connector running.',
+      connectedDevices: [{
+        deviceId,
+        label: `WattbikePM250${deviceId}`,
+        connected: true,
+        source: 'bluetooth',
+        signal: 90,
+        at: Date.now(),
+      }],
+    }));
+    socket.send(sample());
+    socket.on('close', () => clients.delete(socket));
+  });
+  const timer = setInterval(() => clients.forEach((socket) => {
+    if (socket.readyState === WebSocket.OPEN) socket.send(sample());
+  }), 150);
+  return async () => {
+    clearInterval(timer);
+    clients.forEach((socket) => socket.terminate());
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  };
+}
 
 function signedInUser(id: string, name: string) {
   return {
@@ -47,7 +96,8 @@ async function openApp(page: Page) {
 test('same-account iPad separates an active Watch session from heart-rate freshness', async ({ page }) => {
   test.setTimeout(45_000);
   const user = signedInUser('ipad-watch-indicator', 'iPad Watch Rider');
-  const connectionId = 'connection-ipad-live';
+  let connectionId = 'connection-ipad-live';
+  let readingConnectionId = connectionId;
   const enrollmentId = 'enrollment-ipad-live';
   const clockNow = Date.now();
   const connectedAt = clockNow - 60_000;
@@ -97,9 +147,9 @@ test('same-account iPad separates an active Watch session from heart-rate freshn
     contentType: 'application/json',
     body: JSON.stringify({
       freshnessMs: 10_000,
-      reading: connectionState === 'connected' ? {
+      reading: {
         streamId: 'stream-ipad-live',
-        sessionId: `watch-connect:${connectionId}`,
+        sessionId: `watch-connect:${readingConnectionId}`,
         relayScope: 'account-block',
         riderId: `account:${user.id}`,
         playerId: null,
@@ -108,7 +158,7 @@ test('same-account iPad separates an active Watch session from heart-rate freshn
         receivedAt: sampleRecordedAt + 100,
         freshUntil: sampleRecordedAt + 10_000,
         activeElapsedMs: 30_000,
-      } : null,
+      },
     }),
   }));
 
@@ -117,8 +167,31 @@ test('same-account iPad separates an active Watch session from heart-rate freshn
   const indicator = page.locator('[data-watch-connect-status]').filter({ visible: true });
   await expect(indicator).toHaveAttribute('data-watch-connect-status', 'live');
   await expect(indicator).toContainText('Watch live');
+  await expect(indicator).toContainText('148 BPM');
+  await expect(indicator).toHaveAttribute('aria-label', /148 beats per minute/);
   await expect(indicator).toHaveAttribute('aria-label', /Live through the paired iPhone/);
   await expect.poll(async () => (await indicator.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+  await page.getByRole('button', { name: 'My Profile', exact: true }).click();
+  await expect(indicator).toContainText('148 BPM');
+  await page.getByRole('button', { name: 'Results', exact: true }).click();
+  await expect(indicator).toContainText('148 BPM');
+
+  // Reconnecting from A to B must clear A immediately, even while A remains
+  // fresh in the latest-reading response. Only B can repopulate program UI.
+  connectionId = 'connection-ipad-next';
+  for (let poll = 0; poll < 3; poll += 1) {
+    sampleRecordedAt += 5_000;
+    await page.clock.fastForward(5_000);
+  }
+  const nextConnection = page.locator('[data-watch-connect-status]').filter({ visible: true });
+  await expect(nextConnection).toHaveAttribute('data-watch-connect-status', 'connected');
+  await expect(nextConnection).not.toContainText('148 BPM');
+  await expect(nextConnection).not.toHaveAttribute('aria-label', /beats per minute/);
+  readingConnectionId = connectionId;
+  sampleRecordedAt += 5_000;
+  await page.clock.fastForward(5_000);
+  await expect(nextConnection).toContainText('148 BPM');
 
   // The stale sample is no longer usable, but the exact unexpired cloud session
   // remains connected without a reload or a new connection response.
@@ -127,7 +200,7 @@ test('same-account iPad separates an active Watch session from heart-rate freshn
   await expect(indicator).toContainText('Watch connected');
   await expect(indicator).toHaveAttribute('aria-label', /Waiting for a fresh heart rate reading/);
 
-  sampleRecordedAt = clockNow + 11_000;
+  sampleRecordedAt += 11_000;
   await page.reload();
   await openApp(page);
   const refreshed = page.locator('[data-watch-connect-status]').filter({ visible: true });
@@ -138,10 +211,12 @@ test('same-account iPad separates an active Watch session from heart-rate freshn
   await expect(readOnlyCard.getByRole('button', { name: /Disconnect|Watch Connect/ })).toHaveCount(0);
 
   connectionState = 'stopped';
-  await page.reload();
-  await openApp(page);
-  await expect(page.locator('[data-watch-connect-status]').filter({ visible: true }))
-    .toHaveAttribute('data-watch-connect-status', 'disconnected');
+  readingConnectionId = 'connection-after-stop';
+  sampleRecordedAt += 5_000;
+  await page.clock.fastForward(5_000);
+  const stopped = page.locator('[data-watch-connect-status]').filter({ visible: true });
+  await expect(stopped).toHaveAttribute('data-watch-connect-status', 'disconnected');
+  await expect(stopped).not.toContainText('148 BPM');
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);
@@ -159,9 +234,11 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
   const connectedAt = Date.now();
   const connectedUntil = connectedAt + 4 * 60 * 60 * 1_000;
   let started = false;
+  const closeBikeBridge = await createWatchBikeBridge();
 
+  try {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.addInitScript(({ deadline, id }) => {
+  await page.addInitScript(({ deadline, id, pairing }) => {
     type Callback = (payload: unknown) => void;
     type TestWindow = typeof window & {
       webkit?: { messageHandlers: { bridge: { postMessage: (message: unknown) => void } } };
@@ -182,6 +259,7 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
       configurable: true,
       get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
     });
+    window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
     testWindow.webkit = { messageHandlers: { bridge: { postMessage: () => undefined } } };
     const listeners = new Map<string, Map<string, Callback>>();
     let sequence = 0;
@@ -202,10 +280,19 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
     });
     const emit = () => listeners.get('heartRateStatus')?.forEach((callback) => callback({
       version: 1,
-      state: 'idle',
-      sessionId: null,
+      state: phase === 'connected' ? 'active' : phase === 'connecting' ? 'connecting' : 'idle',
+      sessionId: phase === 'inactive' ? null : `watch-connect:${pairing}`,
       at: Date.now(),
       watchConnect: state(),
+    }));
+    const emitSample = () => listeners.get('heartRateSample')?.forEach((callback) => callback({
+      version: 1,
+      source: 'apple-watch',
+      sessionId: `watch-connect:${pairing}`,
+      sequence: 1,
+      bpm: 152,
+      measuredAt: Date.now(),
+      receivedAt: Date.now(),
     }));
     const promiseMethods = [
       'getAvailability', 'getState', 'getRelayState', 'getWatchConnectIdentity',
@@ -263,6 +350,7 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
           startCalls += 1;
           phase = 'connecting';
           emit();
+          emitSample();
           // Reproduce the device ordering: the listener reaches React before
           // the native promise resolves.
           await new Promise((resolve) => window.setTimeout(resolve, 150));
@@ -297,7 +385,7 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
         return options.callbackId ?? 'removed';
       },
     };
-  }, { deadline: connectedUntil, id: connectionId });
+  }, { deadline: connectedUntil, id: connectionId, pairing: 'pairing-iphone-new' });
   await routeSignedInShell(page, user);
   await page.route('**/api/heart-rate/watch-connect/enrollments', (route) => route.fulfill({
     contentType: 'application/json',
@@ -375,23 +463,11 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
     } : { enrollments: [], connections: [] }),
   }));
   await page.route('**/api/heart-rate/live/latest', (route) => {
-    const recordedAt = Date.now();
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         freshnessMs: 10_000,
-        reading: started ? {
-          streamId: 'stream-iphone-new',
-          sessionId: `watch-connect:${connectionId}`,
-          relayScope: 'account-block',
-          riderId: `account:${user.id}`,
-          playerId: null,
-          bpm: 152,
-          recordedAt,
-          receivedAt: recordedAt,
-          freshUntil: recordedAt + 10_000,
-          activeElapsedMs: 2_000,
-        } : null,
+        reading: null,
       }),
     });
   });
@@ -408,12 +484,21 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
     }
   ).__watchOrdering?.snapshot())).toEqual({ clearCalls: 0, startCalls: 1, phase: 'connected' });
   await expect(card.getByText(/Connected ·/)).toBeVisible();
+  await expect(card.getByLabel(/152 beats per minute/)).toBeVisible();
   const indicator = page.locator('[data-watch-connect-status]').filter({ visible: true });
   await expect(indicator).toHaveAttribute('data-watch-connect-status', 'live');
   await expect.poll(async () => (await indicator.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);
+
+  await page.getByRole('button', { name: 'Get Pulled', exact: true }).click();
+  const pull = page.getByLabel('Get Pulled timed Wattbike test');
+  const athlete = pull.getByRole('combobox', { name: /Athlete assigned to/ });
+  await athlete.selectOption(`account:${user.id}`);
+  await pull.getByRole('button', { name: /Start 3 seconds pull/ }).click();
+  await expect(pull.getByLabel(/152 beats per minute/)).toBeVisible();
+  await pull.getByRole('button', { name: 'Cancel sprint', exact: true }).click();
 
   await page.getByRole('button', { name: 'BMX Race Intervals', exact: true }).click();
   await page.getByLabel('Connection method').getByRole('button', { name: 'Demo' }).click();
@@ -429,6 +514,10 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
   await expect(fullscreenStatus).toHaveAttribute('data-watch-connect-status', 'live');
   await expect(fullscreenStatus).toHaveCSS('pointer-events', 'none');
   await expect(fullscreenStatus.getByRole('button')).toHaveCount(0);
+  await expect(fullscreenStatus.locator('.watch-connect-indicator-icon b')).toHaveText('152');
+  await expect(fullscreenStatus.locator('.watch-connect-indicator-icon b')).toBeVisible();
+  await expect(fullscreenStatus).toHaveAttribute('aria-label', /152 beats per minute/);
+  await expect(fullscreenStatus).toHaveCSS('width', '44px');
   await expect(shell).toHaveClass(/race-fullscreen/);
 
   await page.evaluate(() => {
@@ -451,6 +540,234 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
     expect(watchBox!.y).toBeGreaterThanOrEqual(voiceBox!.y + voiceBox!.height + 8);
   };
   await expectVoiceClearance();
+  } finally {
+    await closeBikeBridge();
+  }
+});
+
+test('sign-out waits for a deferred Watch start to clean account A before logout', async ({ page }) => {
+  test.setTimeout(45_000);
+  const user = signedInUser('watch-signout-a', 'Watch Signout A');
+  const enrollmentId = 'enrollment-signout-a';
+  const connectionId = 'connection-signout-a';
+  const pairingId = 'pairing-signout-a';
+  const connectedAt = Date.now();
+  const connectedUntil = connectedAt + 4 * 60 * 60 * 1_000;
+  let releaseCreate!: () => void;
+  const createGate = new Promise<void>((resolve) => { releaseCreate = resolve; });
+  let createRequested = false;
+  let createResolved = false;
+  let logoutRequests = 0;
+  const mutationSessions: string[] = [];
+  let session = 'account-a';
+
+  await page.addInitScript(() => {
+    type Callback = (payload: unknown) => void;
+    type TestWindow = typeof window & {
+      webkit?: { messageHandlers: { bridge: { postMessage: () => void } } };
+      Capacitor?: {
+        PluginHeaders: Array<{ name: string; methods: Array<{ name: string; rtype: 'promise' | 'callback' }> }>;
+        nativePromise: (_plugin: string, method: string) => Promise<unknown>;
+        nativeCallback: (
+          _plugin: string,
+          method: string,
+          options: { eventName?: string; callbackId?: string },
+          callback?: Callback,
+        ) => Promise<string>;
+      };
+      __watchSignout?: { startCalls: () => number };
+    };
+    const testWindow = window as TestWindow;
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
+    });
+    testWindow.webkit = { messageHandlers: { bridge: { postMessage: () => undefined } } };
+    let startCalls = 0;
+    let callbackSequence = 0;
+    const inactive = () => ({
+      version: 1,
+      state: 'inactive',
+      scope: null,
+      connectionId: null,
+      sessionId: null,
+      connectedUntil: null,
+      remainingMs: 0,
+      requiresUserStart: true,
+      workoutReady: false,
+      relayConfigured: false,
+    });
+    const methods = [
+      'getAvailability', 'getState', 'getRelayState', 'getWatchConnectIdentity',
+      'getWatchConnectState', 'startWatchConnect', 'stopWatchConnect',
+      'startWorkout', 'pauseWorkout', 'resumeWorkout', 'endWorkout',
+      'configureRelay', 'pauseRelay', 'resumeRelay', 'finalizeRelay',
+      'clearRelay', 'clearAllRelays',
+    ];
+    testWindow.__watchSignout = { startCalls: () => startCalls };
+    testWindow.Capacitor = {
+      PluginHeaders: [{
+        name: 'TrackLabHeartRate',
+        methods: [
+          ...methods.map((name) => ({ name, rtype: 'promise' as const })),
+          { name: 'addListener', rtype: 'callback' },
+          { name: 'removeListener', rtype: 'callback' },
+        ],
+      }],
+      nativePromise: async (_plugin, method) => {
+        if (method === 'getAvailability') return {
+          version: 1,
+          supported: true,
+          platform: 'iphone',
+          paired: true,
+          watchAppInstalled: true,
+          healthDataAvailable: true,
+          minimumIOS: '17.0',
+          minimumWatchOS: '10.0',
+        };
+        if (method === 'getState') return {
+          version: 1,
+          state: 'idle',
+          sessionId: null,
+          at: Date.now(),
+          watchConnect: inactive(),
+        };
+        if (method === 'getWatchConnectState' || method === 'stopWatchConnect') return inactive();
+        if (method === 'getWatchConnectIdentity') {
+          return { version: 1, installId: `wci_${'7'.repeat(64)}` };
+        }
+        if (method === 'getRelayState') return {
+          version: 3,
+          configured: false,
+          syncing: false,
+          clearing: false,
+          queuedSessionIds: [],
+          queuedCount: 0,
+          pendingSampleCount: 0,
+          droppedSampleCount: 0,
+          sessions: [],
+        };
+        if (method === 'startWatchConnect') {
+          startCalls += 1;
+          return inactive();
+        }
+        if (method === 'clearAllRelays') return { configured: false };
+        return {};
+      },
+      nativeCallback: async (_plugin, method, options) => (
+        method === 'addListener' ? `listener-${callbackSequence += 1}` : options.callbackId ?? 'removed'
+      ),
+    };
+  });
+  await routeSignedInShell(page, user);
+  await page.route('**/api/heart-rate/watch-connect/enrollments', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      enrollment: {
+        id: enrollmentId,
+        scope: 'personal',
+        clubId: null,
+        studioRiderId: null,
+        state: 'trusted',
+        liveStudioConsent: false,
+        sessionStudioConsent: false,
+        createdAt: connectedAt,
+        updatedAt: connectedAt,
+      },
+      replayed: false,
+    }),
+  }));
+  await page.route('**/api/heart-rate/watch-connect/connections', async (route) => {
+    createRequested = true;
+    await createGate;
+    createResolved = true;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        connection: {
+          id: connectionId,
+          enrollmentId,
+          scope: 'personal',
+          clubId: null,
+          studioRiderId: null,
+          state: 'connected',
+          connectedAt,
+          connectedUntil,
+          remainingMs: connectedUntil - connectedAt,
+          liveStudioConsent: false,
+          sessionStudioConsent: false,
+        },
+        credentials: {
+          connectionId,
+          pairingId,
+          relaySessionId: `watch-connect:${connectionId}`,
+          ingestToken: 'private-signout-token',
+          expiresAt: connectedUntil,
+        },
+        replayed: false,
+      }),
+    });
+  });
+  await page.route(`**/api/heart-rate/watch-connect/connections/${connectionId}`, (route) => {
+    mutationSessions.push(`${session}:connection:${connectionId}`);
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ connection: {
+        id: connectionId,
+        enrollmentId,
+        scope: 'personal',
+        clubId: null,
+        studioRiderId: null,
+        state: 'stopped',
+        connectedAt,
+        connectedUntil,
+        remainingMs: 0,
+        liveStudioConsent: false,
+        sessionStudioConsent: false,
+      } }),
+    });
+  });
+  await page.route(`**/api/heart-rate/pairings/${pairingId}`, (route) => {
+    mutationSessions.push(`${session}:pairing:${pairingId}`);
+    return route.fulfill({ contentType: 'application/json', body: '{}' });
+  });
+  await page.route('**/api/heart-rate/watch-connect', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(createResolved ? {
+      enrollments: [],
+      connections: [],
+    } : { enrollments: [], connections: [] }),
+  }));
+  await page.route('**/api/heart-rate/live/latest', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ freshnessMs: 10_000, reading: null }),
+  }));
+  await page.route('**/api/auth/logout', (route) => {
+    logoutRequests += 1;
+    mutationSessions.push(`${session}:logout`);
+    session = 'signed-out';
+    return route.fulfill({ contentType: 'application/json', body: '{}' });
+  });
+
+  await page.goto('/?track=air-time-bmx');
+  await openApp(page);
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('button', { name: 'Watch Connect', exact: true }).click();
+  const card = page.getByRole('region', { name: 'Watch Signout A Watch Connect' });
+  await card.getByRole('button', { name: 'Watch Connect', exact: true }).click();
+  await expect.poll(() => createRequested).toBe(true);
+  await page.getByRole('button', { name: 'Sign Out', exact: true }).click();
+  await expect.poll(() => logoutRequests).toBe(0);
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __watchSignout?: { startCalls: () => number } }
+  ).__watchSignout?.startCalls())).toBe(0);
+
+  releaseCreate();
+  await expect.poll(() => logoutRequests).toBe(1);
+  expect(mutationSessions).toContain(`account-a:connection:${connectionId}`);
+  expect(mutationSessions).toContain(`account-a:pairing:${pairingId}`);
+  expect(mutationSessions.at(-1)).toBe('account-a:logout');
+  expect(mutationSessions.some((entry) => entry.startsWith('signed-out:'))).toBe(false);
 });
 
 test('fullscreen Watch status stays clear of race voice and mapping controls', async ({ page }) => {
