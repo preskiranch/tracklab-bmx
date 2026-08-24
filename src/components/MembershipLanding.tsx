@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Activity, Bike, CreditCard, Globe2, Lock, LogIn, MapPinned, Play, Radio, Users } from 'lucide-react';
 import type { AuthMode } from '../lib/auth';
 import {
@@ -35,7 +36,7 @@ type MembershipLandingProps = {
   onProfileNameChange: (name: string) => void;
   onProfileEmailChange: (email: string) => void;
   onProfilePasswordChange: (password: string) => void;
-  onProfileSubmit: () => void;
+  onProfileSubmit: () => boolean | Promise<boolean>;
   onSignOut: () => void;
   onJoinFree: () => void;
   onEnterApp: () => void;
@@ -76,6 +77,28 @@ export function MembershipLanding({
   const monthlyCents = racerMonthlyCents(bikeSeats);
   const isMember = membership.tier !== 'visitor';
   const creatingAccount = authMode === 'register';
+  const profileSubmitPendingRef = useRef(false);
+  const consumeLocator = () => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('locator')) {
+      url.searchParams.delete('locator');
+      if (url.hash === '#track-locator') url.hash = '';
+      window.history.replaceState(window.history.state, '', url);
+    }
+  };
+  const enterFromLocator = (action: () => void) => {
+    consumeLocator();
+    action();
+  };
+  const submitProfile = async () => {
+    if (profileSubmitPendingRef.current) return;
+    profileSubmitPendingRef.current = true;
+    try {
+      if (await onProfileSubmit()) consumeLocator();
+    } finally {
+      profileSubmitPendingRef.current = false;
+    }
+  };
 
   return (
     <main className="membership-page">
@@ -100,7 +123,7 @@ export function MembershipLanding({
               Sign Out
             </button>
           )}
-          <button className="secondary-button" type="button" onClick={onEnterApp} disabled={!profileComplete}>
+          <button className="secondary-button" type="button" onClick={() => enterFromLocator(onEnterApp)} disabled={!profileComplete}>
             Open App
           </button>
         </div>
@@ -118,12 +141,12 @@ export function MembershipLanding({
             Wattbikes, create private rooms, join challenges, and save performance data.
           </p>
           <div className="membership-cta-row">
-            <button className="primary-button" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>
+            <button className="primary-button" type="button" onClick={profileComplete ? () => enterFromLocator(onJoinFree) : () => { void submitProfile(); }} disabled={!profileComplete && authLoading}>
               <Users size={17} />
               {profileComplete ? 'Join Free' : creatingAccount ? 'Create Free Account' : 'Sign In'}
             </button>
             {isAdminProfile && (
-              <button className="secondary-button" type="button" onClick={onStartDemo} disabled={!profileComplete}>
+              <button className="secondary-button" type="button" onClick={() => enterFromLocator(onStartDemo)} disabled={!profileComplete}>
                 <Play size={17} />
                 Demo Race
               </button>
@@ -147,7 +170,7 @@ export function MembershipLanding({
         </aside>
       </section>
 
-      <PublicTrackLocator catalogReady={catalogReady} tracks={tracks} />
+      <PublicTrackLocator accountId={profileComplete ? profileEmail : null} catalogReady={catalogReady} tracks={tracks} />
 
       <section className={`profile-gate ${profileComplete ? 'complete' : ''}`} aria-label="Required profile">
         <div>
@@ -162,7 +185,7 @@ export function MembershipLanding({
           className="profile-gate-form"
           onSubmit={(event) => {
             event.preventDefault();
-            onProfileSubmit();
+            void submitProfile();
           }}
         >
           {profileComplete ? (
@@ -253,7 +276,7 @@ export function MembershipLanding({
             <li>Public track directory</li>
             <li>Community profile</li>
           </ul>
-          <button className="secondary-button full-width" type="button" onClick={profileComplete ? onJoinFree : onProfileSubmit}>
+          <button className="secondary-button full-width" type="button" onClick={profileComplete ? () => enterFromLocator(onJoinFree) : () => { void submitProfile(); }} disabled={!profileComplete && authLoading}>
             {isMember ? 'Use Free Access' : 'Create Free Membership'}
           </button>
         </article>
@@ -307,7 +330,7 @@ export function MembershipLanding({
             <li>Random online challenges</li>
             <li>Post-race analytics</li>
           </ul>
-          <button className="secondary-button full-width" type="button" onClick={onEnterApp} disabled={!profileComplete}>
+          <button className="secondary-button full-width" type="button" onClick={() => enterFromLocator(onEnterApp)} disabled={!profileComplete}>
             <Lock size={16} />
             Open Dashboard
           </button>

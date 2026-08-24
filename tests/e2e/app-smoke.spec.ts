@@ -361,6 +361,12 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
       updatedAt: Date.now(),
     },
   };
+  let registered = false;
+  let registerRequests = 0;
+  let releaseRegistration: (() => void) | undefined;
+  const registrationGate = new Promise<void>((resolve) => {
+    releaseRegistration = resolve;
+  });
   page.on('console', (message) => {
     if (message.type() !== 'error') {
       return;
@@ -375,10 +381,13 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ user: null }),
+      body: JSON.stringify({ user: registered ? authUser : null }),
     });
   });
   await page.route('**/api/auth/register', async (route) => {
+    registerRequests += 1;
+    await registrationGate;
+    registered = true;
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
@@ -389,17 +398,29 @@ test('first-run profile flow opens the TrackLab dashboard', async ({ page }, tes
   // production key intentionally rejects Playwright's localhost referrer.
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());
 
-  await page.goto('/');
+  await page.goto('/?locator=north-bay-bmx-napa-valley#track-locator');
 
   await expect(page).toHaveTitle(/TrackLab|BMX|Wattbike/i);
   await expect(page.getByRole('heading', { name: 'TrackLab BMX' }).first()).toBeVisible();
   await expect(page.getByLabel('Required profile')).toBeVisible();
+  await expect(page.locator('#track-locator').getByRole('heading', { name: 'North Bay BMX' })).toBeVisible();
 
   await page.getByLabel('Name').fill('Playwright Rider');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill('playwright-pass-2026');
-  await page.getByRole('button', { name: 'Create Account', exact: true }).click();
+  const createAccount = page.getByLabel('Required profile').locator('button[type="submit"]');
+  await expect(createAccount).toHaveText(/Create Account/);
+  await createAccount.evaluate((button) => {
+    button.click();
+    button.click();
+  });
+  await expect.poll(() => registerRequests).toBe(1);
+  await expect(createAccount).toBeDisabled();
+  releaseRegistration?.();
 
+  await expect(page.getByLabel('Race controls')).toBeVisible();
+  await expect(page).not.toHaveURL(/locator=/);
+  await page.reload();
   await expect(page.getByLabel('Race controls')).toBeVisible();
   await expect(page.locator('.race-control-dock')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Straight Sprint', exact: true })).toBeVisible();
@@ -454,6 +475,8 @@ test('Friends hub shows removable official connections and private account disco
   let discoverable = false;
   let incomingPending = true;
   let activeInvite = false;
+  let unreadTrackShareOpened = false;
+  let readTrackShareDismissed = false;
   const friendMutations: string[] = [];
   const ghostRequests: string[] = [];
   const friendGhostPreview = {
@@ -497,6 +520,78 @@ test('Friends hub shows removable official connections and private account disco
     });
 
     if (url.pathname === '/api/friends/events') {
+      await route.fulfill({ status: 204, body: '' });
+      return;
+    }
+    if (url.pathname === '/api/friends/track-shares' && method === 'GET') {
+      const shares = [{
+        id: 'shared-oak-mountain',
+        trackId: 'oak-mountain-bmx',
+        trackName: 'Oak Mountain BMX',
+        trackLocation: 'Pelham, Alabama',
+        sender: {
+          id: 'ghost-friend',
+          handle: 'ghost.friend',
+          displayName: 'Ghost Friend',
+          email: 'must-not-render@tracklab.test',
+        },
+        createdAt: '2026-08-23T18:00:00.000Z',
+        openedAt: unreadTrackShareOpened ? '2026-08-23T18:05:00.000Z' : null,
+      }, ...(friendMutations.includes('request:accepted') ? [{
+        id: 'shared-rock-hill',
+        trackId: 'rock-hill-bmx-supercross',
+        trackName: 'Rock Hill BMX Supercross',
+        trackLocation: 'Rock Hill, South Carolina',
+        sender: {
+          id: 'request-rider',
+          handle: 'request.rider',
+          displayName: 'Request Rider',
+        },
+        createdAt: '2026-08-23T19:00:00.000Z',
+        openedAt: null,
+      }] : []), ...(!readTrackShareDismissed ? [{
+        id: 'shared-apple-valley',
+        trackId: 'apple-valley-bmx-moto-park',
+        trackName: 'Apple Valley BMX Moto Park',
+        trackLocation: 'Apple Valley, California',
+        sender: {
+          id: 'official-founder',
+          handle: 'tracklab-founder',
+          displayName: 'TrackLab Founder',
+        },
+        createdAt: '2026-08-22T18:00:00.000Z',
+        openedAt: '2026-08-22T18:05:00.000Z',
+      }] : [])];
+      const unreadTotal = shares.filter((share) => !share.openedAt).length;
+      await json({
+        items: url.searchParams.get('unread') === '1'
+          ? shares.filter((share) => !share.openedAt)
+          : shares,
+        nextCursor: null,
+        total: shares.length,
+        unreadTotal,
+      });
+      return;
+    }
+    if (url.pathname === '/api/friends/track-shares/shared-oak-mountain/open' && method === 'POST') {
+      unreadTrackShareOpened = true;
+      friendMutations.push('track-share:opened');
+      await json({
+        share: {
+          id: 'shared-oak-mountain',
+          trackId: 'oak-mountain-bmx',
+          trackName: 'Oak Mountain BMX',
+          trackLocation: 'Pelham, Alabama',
+          sender: { id: 'ghost-friend', handle: 'ghost.friend', displayName: 'Ghost Friend' },
+          createdAt: '2026-08-23T18:00:00.000Z',
+          openedAt: '2026-08-23T18:05:00.000Z',
+        },
+      });
+      return;
+    }
+    if (url.pathname === '/api/friends/track-shares/shared-apple-valley' && method === 'DELETE') {
+      readTrackShareDismissed = true;
+      friendMutations.push('track-share:dismissed');
       await route.fulfill({ status: 204, body: '' });
       return;
     }
@@ -687,8 +782,8 @@ test('Friends hub shows removable official connections and private account disco
   await page.goto('/?track=rock-hill-bmx-supercross');
   await openSignedInAppIfNeeded(page);
 
-  await expect(page.getByRole('button', { name: /Friends.*pending friend request/ })).toBeVisible();
-  await page.getByRole('button', { name: /Friends.*pending friend request/ }).click();
+  await expect(page.getByRole('button', { name: /Friends.*new/ })).toBeVisible();
+  await page.getByRole('button', { name: /Friends.*new/ }).click();
   await expect(page.getByRole('heading', { name: 'Friends', exact: true })).toBeVisible();
   await expect(page.getByText('Preski Ranch', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Official TrackLab club')).toBeVisible();
@@ -725,13 +820,24 @@ test('Friends hub shows removable official connections and private account disco
   const friendsTab = page.getByRole('tab', { name: /^Friends/ });
   const requestsTab = page.getByRole('tab', { name: /^Requests/ });
   const suggestionsTab = page.getByRole('tab', { name: 'Suggestions', exact: true });
+  const sharedTracksTab = page.getByRole('tab', { name: /^Shared tracks/ });
   const inviteTab = page.getByRole('tab', { name: 'Invite', exact: true });
   const friendsPanel = page.getByRole('tabpanel');
   await expect(friendsPanel).toHaveAttribute('id', 'friends-panel');
-  await expect(page.getByRole('tab')).toHaveCount(4);
-  for (const tab of [friendsTab, requestsTab, suggestionsTab, inviteTab]) {
+  await expect(page.getByRole('tab')).toHaveCount(5);
+  for (const tab of [friendsTab, requestsTab, suggestionsTab, sharedTracksTab, inviteTab]) {
     await expect(tab).toHaveAttribute('aria-controls', 'friends-panel');
   }
+  for (const viewport of [{ width: 721, height: 1024 }, { width: 768, height: 1024 }]) {
+    await page.setViewportSize(viewport);
+    for (const tab of [friendsTab, requestsTab, suggestionsTab, sharedTracksTab, inviteTab]) {
+      const box = await tab.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   await friendsTab.focus();
   await expect(friendsTab).toBeFocused();
@@ -750,8 +856,11 @@ test('Friends hub shows removable official connections and private account disco
   await inviteTab.press('ArrowRight');
   await expect(friendsTab).toBeFocused();
   await expect(page.locator('[role="tab"][tabindex="0"]')).toHaveCount(1);
-  await expect(page.locator('[role="tab"][tabindex="-1"]')).toHaveCount(3);
+  await expect(page.locator('[role="tab"][tabindex="-1"]')).toHaveCount(4);
 
+  await sharedTracksTab.click();
+  await expect(page.getByText('Oak Mountain BMX', { exact: true })).toBeVisible();
+  await expect(page.getByText('Rock Hill BMX Supercross', { exact: true })).toHaveCount(0);
   await requestsTab.click();
   await page.getByRole('button', { name: 'Accept', exact: true }).click();
   await expect(page.getByText(/You and Request Rider are now friends/)).toBeVisible();
@@ -780,6 +889,29 @@ test('Friends hub shows removable official connections and private account disco
   await closeBlockedRiders.click();
   await expect(blockedRidersTrigger).toBeFocused();
 
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await sharedTracksTab.click();
+  await expect(sharedTracksTab.getByLabel('2 shared-tracks')).toBeVisible();
+  await expect(page.getByPlaceholder('Find a rider by name or @handle')).toHaveCount(0);
+  await expect(page.getByText('Rock Hill BMX Supercross', { exact: true })).toBeVisible();
+  await expect(page.getByText('Oak Mountain BMX', { exact: true })).toBeVisible();
+  await expect(page.locator('.friends-view').getByText('must-not-render@tracklab.test')).toHaveCount(0);
+  const oakMountainShare = page.locator('.friend-track-share-card').filter({ hasText: 'Oak Mountain BMX' });
+  const appleValleyShare = page.locator('.friend-track-share-card').filter({ hasText: 'Apple Valley BMX Moto Park' });
+  await expect(appleValleyShare).toContainText('TrackLab Founder');
+  const dismissSharedTrack = appleValleyShare.getByRole('button', { name: 'Dismiss', exact: true });
+  const openSharedTrack = oakMountainShare.getByRole('link', { name: 'Open track', exact: true });
+  for (const control of [openSharedTrack, dismissSharedTrack]) {
+    await expect.poll(async () => (await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  await dismissSharedTrack.click();
+  await expect(appleValleyShare).toHaveCount(0);
+  expect(friendMutations).toContain('track-share:dismissed');
+  await expect(openSharedTrack).toHaveAttribute(
+    'href',
+    /\?locator=oak-mountain-bmx#track-locator$/,
+  );
+
   await inviteTab.click();
   await expect(page.getByText('0 active invitation links')).toBeVisible();
   await page.getByRole('button', { name: 'Create a new secure invite' }).click();
@@ -794,7 +926,7 @@ test('Friends hub shows removable official connections and private account disco
   expect(friendMutations).toContain('invite:revoked');
 
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const control of [discoverySwitch, inviteTab, blockedRidersTrigger]) {
+  for (const control of [discoverySwitch, sharedTracksTab, inviteTab, blockedRidersTrigger]) {
     await expect.poll(async () => (await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await expect.poll(async () => (await control.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44);
   }
@@ -808,6 +940,12 @@ test('Friends hub shows removable official connections and private account disco
   await expect(page.getByText('Friend connection added. Welcome to their TrackLab network.')).toBeVisible();
   await expect(page).not.toHaveURL(/friendInvite=/);
   expect(friendMutations).toContain('invite:claimed-token');
+
+  await sharedTracksTab.click();
+  await page.locator('.friend-track-share-card').filter({ hasText: 'Oak Mountain BMX' })
+    .getByRole('link', { name: 'Open track', exact: true }).click();
+  await expect(page).toHaveURL(/\?locator=oak-mountain-bmx#track-locator$/);
+  await expect.poll(() => friendMutations).toContain('track-share:opened');
 });
 
 test('account display units persist across Settings and reload', async ({ page }, testInfo) => {

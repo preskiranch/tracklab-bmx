@@ -973,13 +973,10 @@ function splitSectionPreviewFromDraft(draft: DraftTrackSplit): TrackSplitSection
   };
 }
 
+const currentSearchParam = (name: string) => new URLSearchParams(location.search).get(name);
+
 function readRequestedTrackId() {
-  try {
-    const requestedTrackId = new URLSearchParams(window.location.search).get('track')?.trim();
-    return requestedTrackId ? requestedTrackId : null;
-  } catch {
-    return null;
-  }
+  return currentSearchParam('track')?.trim() || null;
 }
 
 function findInitialTrack(requestedTrackId: string | null, customRoutes: TrackRecord[] = []) {
@@ -1936,7 +1933,10 @@ export default function App() {
     || (resultsMode && lastRaceWasSprintRef.current) ? 'straight-sprint' : 'race';
   const [membership, setMembership] = useState<MembershipState>(() => initialMembershipRef.current ?? createMembership('visitor'));
   const [showMembershipLanding, setShowMembershipLanding] = useState(
-    () => !initialClubTabletDeviceRef.current && initialMembershipRef.current?.tier === 'visitor',
+    () => !initialClubTabletDeviceRef.current && (
+      initialMembershipRef.current?.tier === 'visitor'
+      || currentSearchParam('locator') != null
+    ),
   );
   const [checkoutBikeSeats, setCheckoutBikeSeats] = useState(() => clampBillingBikeSeats(initialMembershipRef.current?.bikeSeats ?? 1));
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus>('idle');
@@ -2576,9 +2576,9 @@ export default function App() {
     const refreshPendingRequests = () => {
       void loadFriendsView()
         .then(({ preloadFriendsView }) => preloadFriendsView(authUser.id, friendsApi, true))
-        .then(({ requestPage, friendPage }) => {
+        .then(({ pendingTotal, friendPage }) => {
           if (cancelled) return;
-          setPendingFriendRequestCount(requestPage.incomingTotal);
+          setPendingFriendRequestCount(pendingTotal);
           if (friendCountRef.current != null && friendCountRef.current !== friendPage.total) {
             setFriendGraphRevision((current) => current + 1);
           }
@@ -2891,13 +2891,13 @@ export default function App() {
   }, [membership]);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).has('room')) {
+    if (currentSearchParam('room') != null) {
       setPlayMode('multiplayer');
     }
   }, []);
 
   useEffect(() => {
-    const hasClubInvite = new URLSearchParams(window.location.search).has('clubInvite')
+    const hasClubInvite = currentSearchParam('clubInvite') != null
       || new URLSearchParams(window.location.hash.replace(/^#/, '')).has('clubInvite');
     if (authUser && hasClubInvite) {
       setShowMembershipLanding(false);
@@ -2934,12 +2934,12 @@ export default function App() {
           window.history.replaceState(window.history.state, '', handoffHref);
           setHeartRateStudioInviteCode(inviteCode);
           setHeartRateStudioInviteOpen(true);
-        })
+        }, { onTrackLocator: () => !disposed && setShowMembershipLanding(true) })
       )).then((handle) => {
         listener = handle;
         if (disposed) void handle.remove();
       }).catch((error: unknown) => {
-        console.warn(`Could not listen for native heart-rate handoffs: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`Native link listener failed: ${error instanceof Error ? error.message : String(error)}`);
       });
     return () => {
       disposed = true;
@@ -3139,7 +3139,7 @@ export default function App() {
   }, [catalogDatabaseReady, catalogTracks, selectedCountry, selectedState, selectedTrackId]);
 
   useEffect(() => {
-    if (initialUrlTrackPending) {
+    if (initialUrlTrackPending || currentSearchParam('locator') != null) {
       return;
     }
 
@@ -10944,7 +10944,7 @@ export default function App() {
             <UserPlus size={17} />
             Friends
             {pendingFriendRequestCount > 0 && (
-              <span className="side-nav-count" style={sideNavCountStyle} aria-label={`${pendingFriendRequestCount} pending friend request${pendingFriendRequestCount === 1 ? '' : 's'}`}>
+              <span className="side-nav-count" style={sideNavCountStyle} aria-label={`${pendingFriendRequestCount} new`}>
                 {pendingFriendRequestCount > 99 ? '99+' : pendingFriendRequestCount}
               </span>
             )}

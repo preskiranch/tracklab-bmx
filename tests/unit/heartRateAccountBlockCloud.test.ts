@@ -104,6 +104,10 @@ describe('private continuous account heart-rate blocks', () => {
         }),
         expect.objectContaining({
           '/': '/',
+          '?': { locator: '*' },
+        }),
+        expect.objectContaining({
+          '/': '/',
           '#': 'heartRateAccountBlock=*',
         }),
       ]));

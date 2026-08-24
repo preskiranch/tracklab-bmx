@@ -4,6 +4,7 @@ import {
   heartRateStudioInviteCodeFromAppLink,
   listenForHeartRateAccountBlockAppLinks,
   listenForHeartRateStudioInviteAppLinks,
+  trackLocatorIdFromAppLink,
 } from '../../src/lib/nativeAppLinks';
 
 describe('TrackLab native universal links', () => {
@@ -85,5 +86,53 @@ describe('TrackLab native universal links', () => {
     });
     expect(onHandoff).toHaveBeenCalledWith('ABCD-EFGH');
     expect(onHandoff).not.toHaveBeenCalledWith(expect.stringContaining('https://'));
+  });
+
+  it('accepts only a safe public track ID on the exact production root link', () => {
+    expect(trackLocatorIdFromAppLink(
+      'https://tracklab-bmx.onrender.com/?locator=apple-valley-bmx-moto-park#track-locator',
+    )).toBe('apple-valley-bmx-moto-park');
+    expect(trackLocatorIdFromAppLink(
+      'https://tracklab-bmx.onrender.com/track?locator=apple-valley-bmx-moto-park',
+    )).toBe('');
+    expect(trackLocatorIdFromAppLink(
+      'https://tracklab-bmx.onrender.com.evil.test/?locator=apple-valley-bmx-moto-park',
+    )).toBe('');
+    expect(trackLocatorIdFromAppLink(
+      `https://tracklab-bmx.onrender.com/?locator=${'x'.repeat(141)}`,
+    )).toBe('');
+    expect(trackLocatorIdFromAppLink(
+      'https://tracklab-bmx.onrender.com/?locator=track%2Fprivate',
+    )).toBe('');
+  });
+
+  it('deduplicates overlapping cold/event delivery but reopens the same track later', async () => {
+    let listener: ((event: { url: string }) => void) | null = null;
+    const onTrackLocator = vi.fn();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    await listenForHeartRateStudioInviteAppLinks(vi.fn(), {
+      isNativePlatform: () => true,
+      addListener: vi.fn(async (_name, nextListener) => {
+        listener = nextListener;
+        return { remove: async () => undefined };
+      }),
+      getLaunchUrl: vi.fn(async () => ({
+        url: 'https://tracklab-bmx.onrender.com/?locator=apple-valley-bmx-moto-park#track-locator',
+      })),
+      onTrackLocator,
+    });
+    await Promise.resolve();
+    expect(onTrackLocator).toHaveBeenCalledWith('apple-valley-bmx-moto-park');
+    expect(onTrackLocator).not.toHaveBeenCalledWith(expect.stringContaining('https://'));
+    listener?.({
+      url: 'https://tracklab-bmx.onrender.com/?locator=apple-valley-bmx-moto-park#track-locator',
+    });
+    expect(onTrackLocator).toHaveBeenCalledTimes(1);
+    now.mockReturnValue(11_001);
+    listener?.({
+      url: 'https://tracklab-bmx.onrender.com/?locator=apple-valley-bmx-moto-park#track-locator',
+    });
+    expect(onTrackLocator).toHaveBeenCalledTimes(2);
+    now.mockRestore();
   });
 });

@@ -162,6 +162,7 @@ const clubTabletRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const friendReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const friendMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const friendRequestRateLimiter = createRateLimiter({ windowMs: 24 * 60 * 60 * 1000 });
+const friendTrackShareRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const heartRateReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 // This admission limiter runs before database-backed authentication. It keeps
 // a broken native polling loop from consuming every PostgreSQL connection and
@@ -228,6 +229,8 @@ const friendInviteTtlMs = 7 * 24 * 60 * 60 * 1000;
 const maxFriendEventStreamsPerAccount = 6;
 const maxFriendEventStreamsTotal = 1_000;
 const maxFriendEventStreamWritableBytes = 64 * 1024;
+const maxAccountTrackFavorites = 500;
+let publicTrackCatalogPromise = null;
 const officialFriendKindsByEmail = new Map([
   ['preskiranch@gmail.com', 'club'],
   ['rasheen25@gmail.com', 'founder'],
@@ -342,6 +345,127 @@ function sanitizeRiderPhotoDataUrl(value) {
     return '';
   }
   return `data:image/${match[1].toLowerCase()};base64,${match[2]}`;
+}
+
+function sanitizePublicHttpUrl(value) {
+  if (typeof value !== 'string') return '';
+  const candidate = value.trim();
+  if (!candidate || candidate.length > 2_048) return '';
+  try {
+    const parsed = new URL(candidate);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:')
+      && !parsed.username && !parsed.password
+      ? candidate
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+function sanitizePublicTrackSnapshot(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const id = sanitizeText(value.id, '', 140);
+  const name = sanitizeText(value.name, '', 160);
+  const latitude = Number(value.latitude);
+  const longitude = Number(value.longitude);
+  if (
+    !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,139}$/.test(id)
+    || !name
+    || !Number.isFinite(latitude) || latitude < -90 || latitude > 90
+    || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
+  ) {
+    return null;
+  }
+  const optionalText = (key, maxLength) => {
+    const text = sanitizeText(value[key], '', maxLength);
+    return text ? { [key]: text } : {};
+  };
+  const optionalUrl = (key) => {
+    const url = sanitizePublicHttpUrl(value[key]);
+    return url ? { [key]: url } : {};
+  };
+  const countryCode = sanitizeText(value.countryCode, '', 2).toUpperCase();
+  const locationLabel = sanitizeText(
+    value.address,
+    [value.city, value.state, value.country].map((part) => sanitizeText(part, '', 100)).filter(Boolean).join(', '),
+    220,
+  );
+  return Object.freeze({
+    id,
+    name,
+    ...optionalText('country', 100),
+    ...(countryCode ? { countryCode } : {}),
+    ...optionalText('state', 100),
+    ...optionalText('region', 100),
+    ...optionalText('source', 120),
+    ...optionalText('address', 220),
+    ...optionalText('city', 100),
+    ...optionalText('county', 100),
+    ...optionalText('district', 100),
+    ...optionalText('postalCode', 32),
+    ...(locationLabel ? { locationLabel } : {}),
+    latitude,
+    longitude,
+    ...optionalUrl('websiteUrl'),
+    ...optionalUrl('facebookUrl'),
+    ...optionalUrl('instagramUrl'),
+    ...optionalUrl('tiktokUrl'),
+    ...optionalUrl('youtubeUrl'),
+    ...optionalText('phoneNumber', 40),
+    ...optionalText('federationName', 120),
+    ...optionalUrl('federationUrl'),
+  });
+}
+
+async function loadPublicTrackCatalog() {
+  if (!publicTrackCatalogPromise) {
+    publicTrackCatalogPromise = (async () => {
+      let lastError = null;
+      for (const catalogPath of [
+        path.join(distDirectory, 'data', 'track-locator.json'),
+        path.join(rootDirectory, 'public', 'data', 'track-locator.json'),
+      ]) {
+        try {
+          const parsed = JSON.parse(await readFile(catalogPath, 'utf8'));
+          if (!Array.isArray(parsed?.tracks)) throw new Error('Track catalog is missing its tracks array.');
+          const catalog = new Map();
+          for (const candidate of parsed.tracks) {
+            const snapshot = sanitizePublicTrackSnapshot(candidate);
+            if (!snapshot || catalog.has(snapshot.id)) continue;
+            catalog.set(snapshot.id, snapshot);
+          }
+          if (catalog.size === 0) throw new Error('Track catalog contains no valid tracks.');
+          return catalog;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError ?? new Error('Track catalog is unavailable.');
+    })().catch((error) => {
+      publicTrackCatalogPromise = null;
+      throw error;
+    });
+  }
+  return publicTrackCatalogPromise;
+}
+
+function decodePublicTrackId(encodedValue) {
+  let decoded = '';
+  try {
+    decoded = decodeURIComponent(encodedValue);
+  } catch {
+    return '';
+  }
+  return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,139}$/.test(decoded) ? decoded : '';
+}
+
+async function canonicalPublicTrack(trackId) {
+  try {
+    return (await loadPublicTrackCatalog()).get(trackId) ?? null;
+  } catch (error) {
+    cloudTelemetry.warn('track_catalog.load_failed', { error });
+    throw new HttpRequestError(503, 'The TrackLab track directory is temporarily unavailable.');
+  }
 }
 
 function sanitizeGuestKey(value, fallback) {
@@ -613,6 +737,23 @@ async function requireAccountFriendSession(request, response) {
   return session;
 }
 
+async function requirePersonalTrackSession(request, response) {
+  if (
+    request.tracklabClubTabletSession
+    || String(request.headers['x-tracklab-club-tablet-session'] || '').trim()
+    || /^Bearer\s+/i.test(String(request.headers.authorization || ''))
+  ) {
+    writeJson(response, 403, { error: 'Saved tracks are available only from a rider’s personal account.' });
+    return null;
+  }
+  const session = await currentAuthSession(request, personalAuthSessions);
+  if (!session?.user) {
+    writeJson(response, 401, { error: 'Sign in to continue.' });
+    return null;
+  }
+  return session;
+}
+
 async function requirePersonalHeartRateSession(request, response) {
   if (
     request.tracklabClubTabletSession
@@ -649,6 +790,11 @@ function authProfileKey(user) {
 function sanitizeAccountProfileId(value) {
   const id = sanitizeText(value, '', 80);
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]{5,79}$/.test(id) ? id : '';
+}
+
+function sanitizeTrackShareId(value) {
+  const id = sanitizeText(value, '', 180);
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]{5,179}$/.test(id) ? id : '';
 }
 
 function friendPageOptions(requestUrl) {
@@ -735,6 +881,21 @@ function notifyFriendGraphProfiles(profileIds) {
   });
 }
 
+function notifyFriendTrackShareProfiles(profileIds) {
+  const targets = new Set([...profileIds]
+    .map((profileId) => sanitizeAccountProfileId(profileId))
+    .filter(Boolean));
+  targets.forEach((profileId) => {
+    const streams = friendEventStreams.get(profileId);
+    streams?.forEach((response) => {
+      if (!writeFriendEventStream(response, 'event: track-shares-invalidated\ndata: {}\n\n')) {
+        removeFriendEventStream(profileId, response);
+        response.end();
+      }
+    });
+  });
+}
+
 function publicFriendGhostPreview(value) {
   if (!value || typeof value !== 'object') return null;
   const id = sanitizeText(value.id, '', 180);
@@ -792,6 +953,7 @@ function publicFriendProfile(profile, relationship = profile?.relationship || 'n
     online: Boolean(liveClient),
     available: Boolean(liveClient?.available),
     hasGhost: Boolean(ghostPreview),
+    canShareTrack: relationship === 'friend' && profile.friendshipSource !== 'official',
     ...(ghostPreview ? { ghostPreview } : {}),
     mutualFriendCount: Math.max(0, Math.round(Number(profile.mutualFriendCount) || 0)),
     relationship,
@@ -799,6 +961,44 @@ function publicFriendProfile(profile, relationship = profile?.relationship || 'n
     ...(profile.officialType ? { officialKind: profile.officialType } : {}),
     ...(profile.connectedAt ? { connectedAt: profile.connectedAt } : {}),
     ...(profile.blockedAt ? { blockedAt: profile.blockedAt } : {}),
+  };
+}
+
+function publicTrackShareIdentity(profile) {
+  if (!profile?.profileId || !profile?.username || !profile?.displayName) return null;
+  const photoUrl = sanitizeRiderPhotoDataUrl(profile.photoUrl);
+  return {
+    id: profile.profileId,
+    handle: profile.username,
+    displayName: profile.displayName,
+    ...(photoUrl ? { photoUrl } : {}),
+  };
+}
+
+function publicTrackFavorite(favorite, canonicalTrack = null) {
+  const track = canonicalTrack ?? sanitizePublicTrackSnapshot(favorite?.trackSnapshot);
+  if (!favorite?.trackId || !track || track.id !== favorite.trackId) return null;
+  return {
+    trackId: favorite.trackId,
+    track,
+    createdAt: favorite.createdAt,
+    updatedAt: favorite.updatedAt,
+  };
+}
+
+function publicTrackShare(share, identityKind) {
+  const track = sanitizePublicTrackSnapshot(share?.trackSnapshot);
+  const identity = publicTrackShareIdentity(share?.profile);
+  if (!share?.id || !share?.trackId || !track || track.id !== share.trackId || !identity) return null;
+  return {
+    id: share.id,
+    trackId: share.trackId,
+    track,
+    trackName: track.name,
+    trackLocation: track.locationLabel ?? '',
+    [identityKind]: identity,
+    createdAt: share.updatedAt ?? share.createdAt,
+    openedAt: share.openedAt ?? null,
   };
 }
 
@@ -10416,6 +10616,10 @@ async function serveStatic(request, response) {
             comment: 'Open an athlete-specific TrackLab studio heart-rate invitation.',
           }, {
             '/': '/',
+            '?': { locator: '*' },
+            comment: 'Open a public BMX track inside the TrackLab directory.',
+          }, {
+            '/': '/',
             '#': 'heartRateAccountBlock=*',
             comment: 'Open a private same-account Apple Watch handoff without sending its code to the server.',
           }],
@@ -11292,6 +11496,82 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (
+    requestUrl.pathname === '/api/track-favorites'
+    || requestUrl.pathname.startsWith('/api/track-favorites/')
+  ) {
+    const session = await requirePersonalTrackSession(request, response);
+    if (!session) return;
+    const userId = session.user.id;
+    const isRead = request.method === 'GET' || request.method === 'HEAD';
+    if (!enforceRateLimit(
+      request,
+      response,
+      isRead ? friendReadRateLimiter : friendMutationRateLimiter,
+      isRead ? 180 : 120,
+      `track-favorites-${isRead ? 'read' : 'write'}:${userId}`,
+    )) {
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/track-favorites') {
+      if (request.method !== 'GET') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const favorites = await persistence.listAccountTrackFavorites(userId, {
+        limit: maxAccountTrackFavorites,
+      });
+      const catalog = await loadPublicTrackCatalog().catch((error) => {
+        cloudTelemetry.warn('track_catalog.load_failed', { error });
+        throw new HttpRequestError(503, 'The TrackLab track directory is temporarily unavailable.');
+      });
+      const publicFavorites = favorites
+        .map((favorite) => publicTrackFavorite(favorite, catalog.get(favorite.trackId)))
+        .filter(Boolean);
+      writeJson(response, 200, {
+        trackIds: publicFavorites.map((favorite) => favorite.trackId),
+        favorites: publicFavorites,
+      }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const favoriteMatch = /^\/api\/track-favorites\/([^/]+)$/.exec(requestUrl.pathname);
+    const trackId = favoriteMatch ? decodePublicTrackId(favoriteMatch[1]) : '';
+    if (!trackId) {
+      writeJson(response, 400, { error: 'Choose a valid BMX track.' });
+      return;
+    }
+    const track = await canonicalPublicTrack(trackId);
+    if (!track) {
+      writeJson(response, 404, { error: 'That BMX track is not in the TrackLab directory.' });
+      return;
+    }
+    if (request.method === 'PUT') {
+      const favorite = await persistence.upsertAccountTrackFavorite({
+        userId,
+        trackId,
+        trackSnapshot: track,
+        limit: maxAccountTrackFavorites,
+      });
+      if (!favorite) {
+        writeJson(response, 409, { error: `You can save up to ${maxAccountTrackFavorites} favorite tracks.` });
+        return;
+      }
+      writeJson(response, 200, { favorite: publicTrackFavorite(favorite, track) }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    if (request.method === 'DELETE') {
+      const removed = await persistence.removeAccountTrackFavorite(userId, trackId);
+      writeJson(response, 200, { removed, trackId }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/friends' || requestUrl.pathname.startsWith('/api/friends/')) {
     const friendAuthStartedAt = performance.now();
     const session = await requireAccountFriendSession(request, response);
@@ -11340,6 +11620,131 @@ async function serveStatic(request, response) {
       response.once('close', () => removeFriendEventStream(userId, response));
       return;
     }
+
+    if (requestUrl.pathname === '/api/friends/track-shares') {
+      if (request.method === 'GET') {
+        const page = friendPageOptions(requestUrl);
+        const unreadOnly = requestUrl.searchParams.get('unread') === '1';
+        const [shares, counts] = await Promise.all([
+          persistence.listAccountTrackShares(userId, {
+            offset: page.offset,
+            limit: page.limit,
+            unreadOnly,
+          }),
+          persistence.countAccountTrackShares(userId),
+        ]);
+        const items = shares.map((share) => publicTrackShare(share, 'sender')).filter(Boolean);
+        const pageTotal = unreadOnly ? counts.unreadTotal : counts.total;
+        const nextOffset = page.offset + shares.length;
+        writeJson(response, 200, {
+          items,
+          nextCursor: nextOffset < pageTotal
+            ? Buffer.from(JSON.stringify({ version: 1, offset: nextOffset }), 'utf8').toString('base64url')
+            : null,
+          total: counts.total,
+          unreadTotal: counts.unreadTotal,
+        }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (request.method === 'POST') {
+        const payload = await readJsonBody(request, 20_000);
+        const recipientUserId = sanitizeAccountProfileId(payload?.recipientProfileId);
+        const trackId = decodePublicTrackId(String(payload?.trackId || ''));
+        const clientRequestId = sanitizeTrackShareId(payload?.clientRequestId) || randomUUID();
+        if (!recipientUserId || recipientUserId === userId || !trackId) {
+          writeJson(response, 400, { error: 'Choose a valid friend and BMX track.' });
+          return;
+        }
+        if (!enforceRateLimit(
+          request,
+          response,
+          friendTrackShareRateLimiter,
+          6,
+          `friend-track-share:${userId}:${recipientUserId}`,
+        )) {
+          return;
+        }
+        if (!enforceRateLimit(
+          request,
+          response,
+          friendTrackShareRateLimiter,
+          30,
+          `friend-track-share:${userId}:all-recipients`,
+        )) {
+          return;
+        }
+        const track = await canonicalPublicTrack(trackId);
+        if (!track) {
+          writeJson(response, 404, { error: 'That BMX track is not in the TrackLab directory.' });
+          return;
+        }
+        const saved = await persistence.createAccountTrackShare({
+          id: clientRequestId,
+          senderUserId: userId,
+          recipientUserId,
+          trackId,
+          trackSnapshot: track,
+        });
+        const recipientShare = publicTrackShare(saved, 'recipient');
+        const sender = publicTrackShareIdentity({
+          profileId: session.user.id,
+          username: session.user.username,
+          displayName: session.user.displayName,
+        });
+        if (!recipientShare || !sender) {
+          writeJson(response, 409, {
+            error: 'Tracks can be shared only with an explicitly connected friend who has not blocked you.',
+          }, { 'Cache-Control': 'no-store' });
+          return;
+        }
+        const share = { ...recipientShare, sender };
+        notifyFriendTrackShareProfiles([recipientUserId]);
+        writeJson(response, 201, { share }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const trackShareOpenMatch = /^\/api\/friends\/track-shares\/([a-zA-Z0-9._-]{6,180})\/open$/.exec(
+      requestUrl.pathname,
+    );
+    if (trackShareOpenMatch) {
+      if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const opened = await persistence.openAccountTrackShare(userId, trackShareOpenMatch[1]);
+      const share = publicTrackShare(opened, 'sender');
+      if (!share) {
+        writeJson(response, 404, { error: 'That shared track is no longer available.' });
+        return;
+      }
+      notifyFriendTrackShareProfiles([userId]);
+      writeJson(response, 200, { share }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const trackShareDeleteMatch = /^\/api\/friends\/track-shares\/([a-zA-Z0-9._-]{6,180})$/.exec(
+      requestUrl.pathname,
+    );
+    if (trackShareDeleteMatch) {
+      if (request.method !== 'DELETE') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const removed = await persistence.deleteAccountTrackShare(userId, trackShareDeleteMatch[1]);
+      if (!removed) {
+        writeJson(response, 404, { error: 'That shared track is no longer available.' });
+        return;
+      }
+      notifyFriendTrackShareProfiles([userId]);
+      writeJson(response, 200, { removed: true, id: trackShareDeleteMatch[1] }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+
     if (requestUrl.pathname === '/api/friends/privacy') {
       if (request.method === 'GET') {
         // Authentication already loaded the current account row. Re-querying
@@ -11561,6 +11966,7 @@ async function serveStatic(request, response) {
           return;
         }
         notifyFriendGraphProfiles([userId, profileId]);
+        notifyFriendTrackShareProfiles([userId, profileId]);
         await refreshRealtimeBlockState([userId, profileId], { addBlockedPair: [userId, profileId] });
         writeJson(response, 201, { blocked: publicFriendProfile(blocked, 'blocked') }, { 'Cache-Control': 'no-store' });
         return;
@@ -11717,6 +12123,7 @@ async function serveStatic(request, response) {
       }
       notifyFriendProfile(friend.profileId, { event: 'friend-removed', profileId: userId });
       notifyFriendGraphProfiles([userId, friend.profileId]);
+      notifyFriendTrackShareProfiles([userId, friend.profileId]);
       writeJson(response, 200, { friend: publicFriendProfile(friend, 'none') }, { 'Cache-Control': 'no-store' });
       return;
     }

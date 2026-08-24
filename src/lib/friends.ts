@@ -28,6 +28,7 @@ export type FriendProfile = {
   mutualFriendCount: number;
   relationship: FriendRelationship;
   officialKind?: FriendOfficialKind;
+  canShareTrack?: boolean;
 };
 
 export type FriendRequestDirection = 'incoming' | 'outgoing';
@@ -230,6 +231,7 @@ export function normalizeFriendProfile(value: unknown): FriendProfile | null {
     mutualFriendCount: safeCount(raw.mutualFriendCount),
     relationship: relationship(raw.relationship),
     ...(officialKind(raw.officialKind ?? raw.officialType) ? { officialKind: officialKind(raw.officialKind ?? raw.officialType) } : {}),
+    ...(raw.canShareTrack === true ? { canShareTrack: true } : {}),
   };
 }
 
@@ -542,9 +544,11 @@ export function subscribeToFriendNetworkEvents(onInvalidated: () => void) {
   // sleep, network changes, server restarts, and EventSource reconnects.
   stream.addEventListener('open', handleInvalidation);
   stream.addEventListener('graph-invalidated', handleInvalidation);
+  stream.addEventListener('track-shares-invalidated', handleInvalidation);
   return () => {
     stream.removeEventListener('open', handleInvalidation);
     stream.removeEventListener('graph-invalidated', handleInvalidation);
+    stream.removeEventListener('track-shares-invalidated', handleInvalidation);
     stream.close();
   };
 }

@@ -102,7 +102,7 @@
   background: #f5f7f4;
   border-bottom: 1px solid #dfe6dc;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   padding: 7px;
 }
 
@@ -117,7 +117,7 @@
   font-weight: 800;
   gap: 7px;
   justify-content: center;
-  min-height: 43px;
+  min-height: 44px;
   padding: 8px 12px;
 }
 
@@ -253,6 +253,59 @@
 .friend-suggestion-note span { display: grid; }
 .friend-suggestion-note small { color: #667085; }
 
+.friend-track-share-list { display: grid; gap: 10px; }
+.friend-track-share-card {
+  align-items: center;
+  background: #fbfcfb;
+  border: 1px solid #e0e6dd;
+  border-radius: 13px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 14px;
+}
+.friend-track-share-card.unread {
+  background: linear-gradient(135deg, #f4ffed, #fbfcfb 74%);
+  border-color: #9bdc76;
+  box-shadow: inset 4px 0 #68c831;
+}
+.friend-track-share-icon {
+  align-items: center;
+  background: #e9f8df;
+  border-radius: 10px;
+  color: #3c8c18;
+  display: flex;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+.friend-track-share-copy { display: grid; min-width: 0; }
+.friend-track-share-copy h2 { font-size: 18px; }
+.friend-track-share-copy > p { color: #667085; margin: 0 0 8px; }
+.friend-track-share-sender { align-items: center; color: #667085; display: flex; gap: 8px; min-width: 0; }
+.friend-track-share-sender .rider-avatar { flex: 0 0 30px; font-size: 10px; height: 30px; width: 30px; }
+.friend-track-share-sender small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friend-track-share-actions { align-items: stretch; display: flex; gap: 7px; }
+.friend-track-share-actions > a,
+.friend-track-share-actions > button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #cdd6cb;
+  border-radius: 8px;
+  color: #344054;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 5px;
+  justify-content: center;
+  min-height: 44px;
+  padding: 7px 10px;
+  text-decoration: none;
+}
+.friend-track-share-actions > a.primary { background: #7ade36; border-color: #67c22d; color: #13250b; }
+.friend-track-share-actions > button:disabled { opacity: .58; }
+
 .friend-invite-panel { align-items: center; display: grid; gap: 28px; grid-template-columns: minmax(0, 1fr) auto; min-height: 310px; padding: 8px clamp(0px, 2vw, 18px); }
 .friend-invite-management { align-items: center; background: #f6f8f5; border: 1px solid #d6ded2; border-radius: 11px; display: flex; gap: 16px; grid-column: 1 / -1; justify-content: space-between; padding: 12px 14px; }
 .friend-invite-management > span { display: grid; gap: 2px; }
@@ -300,6 +353,11 @@
   .friend-qr-card { justify-self: center; }
 }
 
+@media (max-width: 900px) {
+  .friends-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .friends-tabs button { justify-content: flex-start; min-width: 0; }
+}
+
 @media (any-pointer: coarse), (max-width: 580px) {
   .friends-view button,
   .friends-view summary {
@@ -340,12 +398,14 @@
 @media (max-width: 580px) {
   .friends-view { gap: 10px; padding-bottom: 20px; }
   .friends-hero { padding: 17px; }
-  .friends-tabs { grid-template-columns: repeat(2, 1fr); }
-  .friends-tabs button { justify-content: flex-start; }
   .friends-search { margin: 14px 14px 0; }
   .friends-status { margin: 10px 14px 0; }
   .friends-tab-panel { padding: 14px; }
   .friend-profile-card { align-items: stretch; grid-template-columns: 1fr; }
+  .friend-track-share-card { align-items: stretch; grid-template-columns: auto minmax(0, 1fr); }
+  .friend-track-share-actions { grid-column: 1 / -1; padding-left: 54px; }
+  .friend-track-share-actions > a,
+  .friend-track-share-actions > button { flex: 1; min-height: 44px; }
   .friend-card-actions { justify-content: flex-start; padding-left: 63px; }
   .friend-more-actions div { left: 0; right: auto; }
   .friend-invite-link { grid-template-columns: auto minmax(0, 1fr); }

@@ -3,11 +3,13 @@ import {
   Bike,
   Check,
   Copy,
+  ExternalLink,
   Flag,
   Inbox,
   Link2,
   LoaderCircle,
   LockKeyhole,
+  MapPinned,
   QrCode,
   Search,
   Share2,
@@ -52,14 +54,22 @@ import {
   type FriendsApi,
   type FriendSuggestion,
 } from '../lib/friends';
+import { trackLocatorShareUrl } from '../lib/mapLinks';
+import {
+  createTrackSharesApi,
+  type TrackShare,
+  type TrackSharePage,
+  type TrackSharesApi,
+} from '../lib/trackShares';
 import { RiderAvatar } from './RiderAvatar';
 import './FriendsView.css';
 
-export type FriendsTab = 'friends' | 'requests' | 'suggestions' | 'invite';
+export type FriendsTab = 'friends' | 'requests' | 'suggestions' | 'shared-tracks' | 'invite';
 
 export type FriendsViewProps = {
   currentProfileId: string;
   api?: FriendsApi;
+  trackSharesApi?: TrackSharesApi;
   initialTab?: FriendsTab;
   refreshToken?: string | number;
   friendInviteToken?: string | null;
@@ -73,6 +83,7 @@ export type FriendsViewProps = {
 
 const blankProfilePage: FriendPage<FriendProfile> = { items: [], nextCursor: null, total: 0 };
 const blankSuggestionPage: FriendPage<FriendSuggestion> = { items: [], nextCursor: null, total: 0 };
+const blankTrackSharePage: TrackSharePage = { items: [], nextCursor: null, total: 0, unreadTotal: 0 };
 const blankRequestPage: FriendRequestPage = {
   incoming: [],
   outgoing: [],
@@ -87,6 +98,10 @@ type CachedFriendValue<T> = {
   value?: T;
   loadedAt?: number;
   pending?: Promise<T>;
+  refreshPending?: Promise<T>;
+  queuedRefresh?: Promise<T>;
+  generation?: number;
+  pendingGeneration?: number;
 };
 
 type FriendHubCache = {
@@ -98,8 +113,15 @@ type FriendHubCache = {
   privacy: CachedFriendValue<FriendPrivacy>;
 };
 
+type TrackShareHubCache = {
+  count: CachedFriendValue<TrackSharePage>;
+  received: CachedFriendValue<TrackSharePage>;
+};
+
 const friendHubCacheByApi = new WeakMap<FriendsApi, Map<string, FriendHubCache>>();
+const trackShareHubCacheByApi = new WeakMap<TrackSharesApi, Map<string, TrackShareHubCache>>();
 const friendHubFreshMs = 30_000;
+const defaultTrackSharesApi = createTrackSharesApi();
 
 function friendHubCache(api: FriendsApi, profileId: string) {
   let accountCaches = friendHubCacheByApi.get(api);
@@ -115,38 +137,101 @@ function friendHubCache(api: FriendsApi, profileId: string) {
   return cache;
 }
 
-function cachedFriendLoad<T>(slot: CachedFriendValue<T>, load: () => Promise<T>, force = false) {
-  if (slot.pending) return slot.pending;
-  if (!force && slot.value !== undefined && Date.now() - (slot.loadedAt ?? 0) < friendHubFreshMs) {
-    return Promise.resolve(slot.value);
+function trackShareHubCache(api: TrackSharesApi, profileId: string) {
+  let accountCaches = trackShareHubCacheByApi.get(api);
+  if (!accountCaches) {
+    accountCaches = new Map();
+    trackShareHubCacheByApi.set(api, accountCaches);
   }
+  let cache = accountCaches.get(profileId);
+  if (!cache) {
+    cache = { count: {}, received: {} };
+    accountCaches.set(profileId, cache);
+  }
+  return cache;
+}
+
+function startCachedFriendLoad<T>(slot: CachedFriendValue<T>, load: () => Promise<T>, refresh: boolean) {
+  const generation = (slot.generation ?? 0) + 1;
+  slot.generation = generation;
+  slot.pendingGeneration = generation;
   const pending = load().then((value) => {
-    slot.value = value;
-    slot.loadedAt = Date.now();
+    if (slot.generation === generation) {
+      slot.value = value;
+      slot.loadedAt = Date.now();
+    }
     return value;
   }).finally(() => {
-    if (slot.pending === pending) slot.pending = undefined;
+    if (slot.pending === pending) {
+      slot.pending = undefined;
+      slot.pendingGeneration = undefined;
+    }
+    if (slot.refreshPending === pending) slot.refreshPending = undefined;
   });
   slot.pending = pending;
+  if (refresh) slot.refreshPending = pending;
   return pending;
 }
 
-export function preloadFriendsView(currentProfileId: string, api: FriendsApi, force = false) {
+function cachedFriendLoad<T>(slot: CachedFriendValue<T>, load: () => Promise<T>, force = false) {
+  if (slot.queuedRefresh) return slot.queuedRefresh;
+  if (slot.pending) {
+    if (!force && slot.pendingGeneration === slot.generation) return slot.pending;
+    const active = slot.pending;
+    slot.generation = (slot.generation ?? 0) + 1;
+    const queuedRefresh = active.catch(() => undefined).then(() => {
+      if (slot.queuedRefresh === queuedRefresh) slot.queuedRefresh = undefined;
+      return startCachedFriendLoad(slot, load, true);
+    });
+    slot.queuedRefresh = queuedRefresh;
+    return queuedRefresh;
+  }
+  if (!force && slot.value !== undefined && Date.now() - (slot.loadedAt ?? 0) < friendHubFreshMs) {
+    return Promise.resolve(slot.value);
+  }
+  return startCachedFriendLoad(slot, load, force);
+}
+
+function invalidateCachedFriendValue<T>(slot: CachedFriendValue<T>) {
+  slot.value = undefined;
+  slot.loadedAt = undefined;
+  slot.generation = (slot.generation ?? 0) + 1;
+}
+
+export function preloadFriendsView(
+  currentProfileId: string,
+  api: FriendsApi,
+  force = false,
+  sharesApi: TrackSharesApi = defaultTrackSharesApi,
+) {
   const cache = friendHubCache(api, currentProfileId);
+  const sharesCache = trackShareHubCache(sharesApi, currentProfileId);
   const friends = cachedFriendLoad(cache.friends, () => api.listFriends(), force);
   const requests = cachedFriendLoad(
     cache.requestCount,
     () => api.listRequests({ direction: 'incoming', limit: 1 }),
     force,
   );
+  const trackShares = cachedFriendLoad(
+    sharesCache.count,
+    () => sharesApi.listReceived({ unread: true, limit: 1 }),
+    force,
+  ).catch(() => blankTrackSharePage);
+  if (force) invalidateCachedFriendValue(sharesCache.received);
   void cachedFriendLoad(cache.privacy, () => api.getPrivacy(), force).catch(() => undefined);
-  return Promise.all([friends, requests]).then(([friendPage, requestPage]) => ({ friendPage, requestPage }));
+  return Promise.all([friends, requests, trackShares]).then(([friendPage, requestPage, trackSharePage]) => ({
+    friendPage,
+    requestPage,
+    trackSharePage,
+    pendingTotal: requestPage.incomingTotal + trackSharePage.unreadTotal,
+  }));
 }
 
 const tabs: Array<{ id: FriendsTab; label: string; icon: typeof UsersRound }> = [
   { id: 'friends', label: 'Friends', icon: UsersRound },
   { id: 'requests', label: 'Requests', icon: Inbox },
   { id: 'suggestions', label: 'Suggestions', icon: Sparkles },
+  { id: 'shared-tracks', label: 'Shared tracks', icon: MapPinned },
   { id: 'invite', label: 'Invite', icon: UserRoundPlus },
 ];
 
@@ -174,6 +259,7 @@ function tabEmptyCopy(tab: FriendsTab, searching: boolean) {
   if (searching) return 'No riders match that name or handle.';
   if (tab === 'friends') return 'Your friend list is ready for its first rider.';
   if (tab === 'requests') return 'You have no friend requests right now.';
+  if (tab === 'shared-tracks') return 'Tracks your friends share with you will appear here.';
   return 'No suggestions are available yet. Try searching for a rider.';
 }
 
@@ -298,8 +384,8 @@ function LoadingCards() {
 function EmptyState({ tab, searching }: { tab: FriendsTab; searching: boolean }) {
   return (
     <div className="friend-empty-state">
-      {searching ? <Search size={28} /> : <UsersRound size={28} />}
-      <strong>{searching ? 'No match found' : 'Nothing waiting'}</strong>
+      {searching ? <Search size={28} /> : tab === 'shared-tracks' ? <MapPinned size={28} /> : <UsersRound size={28} />}
+      <strong>{searching ? 'No match found' : tab === 'shared-tracks' ? 'No shared tracks yet' : 'Nothing waiting'}</strong>
       <span>{tabEmptyCopy(tab, searching)}</span>
     </div>
   );
@@ -317,6 +403,7 @@ function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () =>
 export function FriendsView({
   currentProfileId,
   api,
+  trackSharesApi,
   initialTab = 'friends',
   refreshToken = 0,
   friendInviteToken = null,
@@ -328,13 +415,22 @@ export function FriendsView({
   distanceUnit = 'ft',
 }: FriendsViewProps) {
   const friendsApi = useMemo(() => api ?? createFriendsApi(), [api]);
+  const sharesApi = useMemo(() => trackSharesApi ?? defaultTrackSharesApi, [trackSharesApi]);
   const hubCache = useMemo(() => friendHubCache(friendsApi, currentProfileId), [currentProfileId, friendsApi]);
+  const sharesCache = useMemo(
+    () => trackShareHubCache(sharesApi, currentProfileId),
+    [currentProfileId, sharesApi],
+  );
   const [activeTab, setActiveTab] = useState<FriendsTab>(initialTab);
   const [searchDraft, setSearchDraft] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [friends, setFriends] = useState(() => hubCache.friends.value ?? blankProfilePage);
   const [requests, setRequests] = useState(() => hubCache.requests.value ?? blankRequestPage);
   const [suggestions, setSuggestions] = useState(() => hubCache.suggestions.value ?? blankSuggestionPage);
+  const [sharedTracks, setSharedTracks] = useState(() => sharesCache.received.value ?? blankTrackSharePage);
+  const [unreadTrackShareCount, setUnreadTrackShareCount] = useState(
+    () => sharesCache.received.value?.unreadTotal ?? sharesCache.count.value?.unreadTotal ?? 0,
+  );
   const [invite, setInvite] = useState<FriendInvite | null>(null);
   const [activeInvites, setActiveInvites] = useState<FriendInviteMetadata[]>(() => hubCache.invites.value ?? []);
   const [loadingTabs, setLoadingTabs] = useState<Set<FriendsTab>>(() => new Set());
@@ -354,14 +450,22 @@ export function FriendsView({
   const [privacyLoading, setPrivacyLoading] = useState(() => hubCache.privacy.value === undefined);
   const [privacySaving, setPrivacySaving] = useState(false);
   const [claimRetryToken, setClaimRetryToken] = useState(0);
-  const requestSequenceRef = useRef<Record<FriendsTab, number>>({ friends: 0, requests: 0, suggestions: 0, invite: 0 });
+  const requestSequenceRef = useRef<Record<FriendsTab, number>>({
+    friends: 0,
+    requests: 0,
+    suggestions: 0,
+    'shared-tracks': 0,
+    invite: 0,
+  });
   const loadedTabsRef = useRef<Record<FriendsTab, boolean>>({
     friends: hubCache.friends.value !== undefined,
     requests: hubCache.requests.value !== undefined,
     suggestions: hubCache.suggestions.value !== undefined,
+    'shared-tracks': sharesCache.received.value !== undefined,
     invite: hubCache.invites.value !== undefined,
   });
   const refreshTokenRef = useRef(refreshToken);
+  const trackShareCountRefreshTokenRef = useRef(refreshToken);
   const privacyRefreshTokenRef = useRef(refreshToken);
   const claimedTokenRef = useRef('');
   const queueOwnerRef = useRef(currentProfileId);
@@ -375,26 +479,30 @@ export function FriendsView({
     if (id === 'friends' && hubCache.friends.value) setFriends(hubCache.friends.value);
     if (id === 'requests' && hubCache.requests.value) setRequests(hubCache.requests.value);
     if (id === 'suggestions' && hubCache.suggestions.value) setSuggestions(hubCache.suggestions.value);
+    if (id === 'shared-tracks' && sharesCache.received.value) setSharedTracks(sharesCache.received.value);
     if (id === 'invite' && hubCache.invites.value) setActiveInvites(hubCache.invites.value);
     loadedTabsRef.current[id] = (id === 'friends' ? hubCache.friends.value
       : id === 'requests' ? hubCache.requests.value
         : id === 'suggestions' ? hubCache.suggestions.value
-          : hubCache.invites.value) !== undefined;
+          : id === 'shared-tracks' ? sharesCache.received.value
+            : hubCache.invites.value) !== undefined;
     setActiveTab(id);
     setSearchDraft('');
     setSearchQuery('');
     setError('');
-  }, [hubCache]);
+  }, [hubCache, sharesCache]);
 
   const preloadTab = useCallback((id: FriendsTab) => {
     if (id === 'requests') {
       void cachedFriendLoad(hubCache.requests, () => friendsApi.listRequests()).catch(() => undefined);
     } else if (id === 'suggestions') {
       void cachedFriendLoad(hubCache.suggestions, () => friendsApi.listSuggestions()).catch(() => undefined);
+    } else if (id === 'shared-tracks') {
+      void cachedFriendLoad(sharesCache.received, () => sharesApi.listReceived()).catch(() => undefined);
     } else if (id === 'invite') {
       void cachedFriendLoad(hubCache.invites, () => friendsApi.listActiveInvites()).catch(() => undefined);
     }
-  }, [friendsApi, hubCache]);
+  }, [friendsApi, hubCache, sharesApi, sharesCache]);
 
   const handleTabKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>, id: FriendsTab) => {
     const currentIndex = tabs.findIndex((tab) => tab.id === id);
@@ -464,9 +572,29 @@ export function FriendsView({
 
   useEffect(() => {
     const incomingTotal = hubCache.requests.value?.incomingTotal
-      ?? hubCache.requestCount.value?.incomingTotal;
-    if (incomingTotal != null) onPendingCountChange?.(incomingTotal);
-  }, [hubCache, onPendingCountChange, requests.incomingTotal]);
+      ?? hubCache.requestCount.value?.incomingTotal
+      ?? requests.incomingTotal;
+    onPendingCountChange?.(incomingTotal + unreadTrackShareCount);
+  }, [hubCache, onPendingCountChange, requests.incomingTotal, unreadTrackShareCount]);
+
+  useEffect(() => {
+    let active = true;
+    const force = trackShareCountRefreshTokenRef.current !== refreshToken;
+    trackShareCountRefreshTokenRef.current = refreshToken;
+    if (force) {
+      invalidateCachedFriendValue(sharesCache.received);
+      loadedTabsRef.current['shared-tracks'] = false;
+      setSharedTracks(blankTrackSharePage);
+    }
+    void cachedFriendLoad(
+      sharesCache.count,
+      () => sharesApi.listReceived({ unread: true, limit: 1 }),
+      force,
+    ).then((page) => {
+      if (active) setUnreadTrackShareCount(page.unreadTotal);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [currentProfileId, refreshToken, sharesApi, sharesCache]);
 
   useEffect(() => {
     let active = true;
@@ -598,6 +726,43 @@ export function FriendsView({
     }
   }, [friendsApi, hubCache, searchQuery, setTabLoading, suggestions.nextCursor]);
 
+  const loadSharedTracks = useCallback(async (append = false, force = false) => {
+    const cursor = append ? sharedTracks.nextCursor : null;
+    const sequence = ++requestSequenceRef.current['shared-tracks'];
+    append
+      ? setLoadingMore(true)
+      : !loadedTabsRef.current['shared-tracks'] && setTabLoading('shared-tracks', true);
+    setError('');
+    try {
+      const page = !append
+        ? await cachedFriendLoad(sharesCache.received, () => sharesApi.listReceived(), force)
+        : await sharesApi.listReceived({ cursor });
+      if (sequence !== requestSequenceRef.current['shared-tracks']) return;
+      loadedTabsRef.current['shared-tracks'] = true;
+      setUnreadTrackShareCount(page.unreadTotal);
+      sharesCache.count.value = { ...blankTrackSharePage, unreadTotal: page.unreadTotal };
+      sharesCache.count.loadedAt = Date.now();
+      setSharedTracks((current) => {
+        const next = {
+          ...page,
+          items: append ? appendUnique(current.items, page.items, (item) => item.id) : page.items,
+        };
+        sharesCache.received.value = next;
+        sharesCache.received.loadedAt = Date.now();
+        return next;
+      });
+    } catch (loadError) {
+      if (sequence === requestSequenceRef.current['shared-tracks']) {
+        setError(loadError instanceof Error ? loadError.message : 'Shared tracks could not be loaded.');
+      }
+    } finally {
+      if (sequence === requestSequenceRef.current['shared-tracks']) {
+        setTabLoading('shared-tracks', false);
+        setLoadingMore(false);
+      }
+    }
+  }, [sharedTracks.nextCursor, sharesApi, sharesCache, setTabLoading]);
+
   const loadInvite = useCallback(async (force = false) => {
     const sequence = ++requestSequenceRef.current.invite;
     if (!loadedTabsRef.current.invite) setTabLoading('invite', true);
@@ -622,8 +787,9 @@ export function FriendsView({
     if (activeTab === 'friends') return loadFriends(false, force);
     if (activeTab === 'requests') return loadRequests(false, 'all', force);
     if (activeTab === 'suggestions') return loadSuggestions(false, force);
+    if (activeTab === 'shared-tracks') return loadSharedTracks(false, force);
     return loadInvite(force);
-  }, [activeTab, loadFriends, loadInvite, loadRequests, loadSuggestions]);
+  }, [activeTab, loadFriends, loadInvite, loadRequests, loadSharedTracks, loadSuggestions]);
 
   useEffect(() => {
     const force = refreshTokenRef.current !== refreshToken;
@@ -866,6 +1032,66 @@ export function FriendsView({
     }
   }, [activeInvites.length, friendsApi, loadInvite]);
 
+  const markTrackShareOpened = useCallback((share: TrackShare) => {
+    if (!share.openedAt) {
+      const openedAt = new Date().toISOString();
+      setSharedTracks((current) => {
+        const next = {
+          ...current,
+          unreadTotal: Math.max(0, current.unreadTotal - 1),
+          items: current.items.map((item) => item.id === share.id ? { ...item, openedAt } : item),
+        };
+        sharesCache.received.value = next;
+        sharesCache.received.loadedAt = Date.now();
+        return next;
+      });
+      setUnreadTrackShareCount((current) => {
+        const next = Math.max(0, current - 1);
+        sharesCache.count.value = { ...blankTrackSharePage, unreadTotal: next };
+        sharesCache.count.loadedAt = Date.now();
+        return next;
+      });
+    }
+    void sharesApi.markOpened(share.id).catch(() => undefined);
+  }, [sharesApi, sharesCache]);
+
+  const dismissTrackShare = useCallback(async (share: TrackShare) => {
+    const key = `track-share:dismiss:${share.id}`;
+    setActionKeys((current) => new Set(current).add(key));
+    setError('');
+    try {
+      await sharesApi.dismiss(share.id);
+      setSharedTracks((current) => {
+        const next = {
+          ...current,
+          items: current.items.filter((item) => item.id !== share.id),
+          total: Math.max(0, current.total - 1),
+          unreadTotal: Math.max(0, current.unreadTotal - (share.openedAt ? 0 : 1)),
+        };
+        sharesCache.received.value = next;
+        sharesCache.received.loadedAt = Date.now();
+        return next;
+      });
+      if (!share.openedAt) {
+        setUnreadTrackShareCount((current) => {
+          const next = Math.max(0, current - 1);
+          sharesCache.count.value = { ...blankTrackSharePage, unreadTotal: next };
+          sharesCache.count.loadedAt = Date.now();
+          return next;
+        });
+      }
+      setMessage(`Shared track from ${share.sender.displayName} dismissed.`);
+    } catch (dismissError) {
+      setError(dismissError instanceof Error ? dismissError.message : 'That shared track could not be dismissed.');
+    } finally {
+      setActionKeys((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  }, [sharesApi, sharesCache]);
+
   const allRequests = requests.incoming.length + requests.outgoing.length;
   const statusMessage = error || message;
 
@@ -914,7 +1140,9 @@ export function FriendsView({
               ? requests.incomingTotal
               : id === 'friends'
                 ? friends.total
-                : id === 'invite' ? activeInvites.length : 0;
+                : id === 'shared-tracks'
+                  ? unreadTrackShareCount
+                  : id === 'invite' ? activeInvites.length : 0;
             return (
               <button
                 id={`friends-tab-${id}`}
@@ -939,7 +1167,7 @@ export function FriendsView({
           })}
         </div>
 
-        {activeTab !== 'invite' && (
+        {activeTab !== 'invite' && activeTab !== 'shared-tracks' && (
           <label className="friends-search">
             <Search size={19} aria-hidden="true" />
             <span className="sr-only">{searchPlaceholder(activeTab)}</span>
@@ -1138,6 +1366,56 @@ export function FriendsView({
                 </div>
               )}
               {suggestions.nextCursor && <LoadMoreButton loading={loadingMore} onClick={() => void loadSuggestions(true)} />}
+            </>
+          )}
+
+          {activeTab === 'shared-tracks' && !loadingTabs.has('shared-tracks') && (
+            <>
+              {sharedTracks.items.length === 0 ? <EmptyState tab="shared-tracks" searching={false} /> : (
+                <div className="friend-track-share-list">
+                  {sharedTracks.items.map((share) => {
+                    const href = trackLocatorShareUrl(share.trackId);
+                    const senderName = share.sender.displayName || `@${share.sender.handle}`;
+                    return (
+                      <article
+                        key={share.id}
+                        className={`friend-track-share-card ${share.openedAt ? '' : 'unread'}`}
+                      >
+                        <span className="friend-track-share-icon" aria-hidden="true"><MapPinned size={21} /></span>
+                        <div className="friend-track-share-copy">
+                          <span className="eyebrow">{share.openedAt ? 'Shared track' : 'New shared track'}</span>
+                          <h2>{share.trackName}</h2>
+                          {share.trackLocation && <p>{share.trackLocation}</p>}
+                          <span className="friend-track-share-sender">
+                            <RiderAvatar name={senderName} photoUrl={share.sender.photoUrl} />
+                            <small>
+                              Shared by <strong>{senderName}</strong> · @{share.sender.handle} · {readableDate(share.createdAt)}
+                            </small>
+                          </span>
+                        </div>
+                        <div className="friend-track-share-actions">
+                          {href && (
+                            <a className="primary" href={href} onClick={() => markTrackShareOpened(share)}>
+                              <ExternalLink size={15} aria-hidden="true" /> Open track
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            disabled={actionKeys.has(`track-share:dismiss:${share.id}`)}
+                            onClick={() => void dismissTrackShare(share)}
+                          >
+                            <X size={15} aria-hidden="true" />
+                            {actionKeys.has(`track-share:dismiss:${share.id}`) ? 'Dismissing…' : 'Dismiss'}
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+              {sharedTracks.nextCursor && (
+                <LoadMoreButton loading={loadingMore} onClick={() => void loadSharedTracks(true)} />
+              )}
             </>
           )}
 

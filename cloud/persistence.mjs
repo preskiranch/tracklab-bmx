@@ -73,6 +73,9 @@ const memoryFriendReports = new Map();
 const memoryFriendInvitesByHash = new Map();
 const memoryOfficialFriendKindByUserId = new Map();
 const memoryReconciledOfficialFriendUserIds = new Set();
+const memoryAccountTrackFavorites = new Map();
+const memoryAccountTrackShares = new Map();
+const memoryAccountTrackShareIdByParticipantsAndTrack = new Map();
 const memoryGroupsById = new Map();
 const memoryGroupMembersByKey = new Map();
 const memoryGroupInvitesById = new Map();
@@ -153,6 +156,9 @@ function userDataUpsertStatement() {
 export const persistenceTestHooks = Object.freeze({
   accountFriendsPageStatement,
   accountFriendRequestsPageStatement,
+  accountTrackShareCreateStatement,
+  accountTrackShareOpenStatement,
+  accountTrackSharesListStatement,
   userDataUpsertStatement,
 });
 
@@ -183,6 +189,14 @@ function accountPair(userIdA, userIdB) {
 
 function accountPairKey(userIdA, userIdB) {
   return accountPair(userIdA, userIdB).join(':');
+}
+
+function accountTrackFavoriteKey(userId, trackId) {
+  return JSON.stringify([String(userId), String(trackId)]);
+}
+
+function accountTrackShareKey(senderUserId, recipientUserId, trackId) {
+  return JSON.stringify([String(senderUserId), String(recipientUserId), String(trackId)]);
 }
 
 function normalizedUsername(displayName, userId) {
@@ -9015,6 +9029,397 @@ function memoryFriendIds(userId, { includeOfficial = true } = {}) {
   return ids;
 }
 
+function accountTrackFavoriteRecord(row) {
+  if (!row?.track_id) return null;
+  return {
+    trackId: row.track_id,
+    trackSnapshot: cloneJson(row.track_snapshot, {}),
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+function accountTrackShareRecord(row, profile = null) {
+  if (!row?.id || !row?.track_id) return null;
+  return {
+    id: row.id,
+    senderUserId: row.sender_user_id,
+    recipientUserId: row.recipient_user_id,
+    trackId: row.track_id,
+    trackSnapshot: cloneJson(row.track_snapshot, {}),
+    openedAt: row.opened_at ? new Date(row.opened_at).toISOString() : null,
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+    ...(profile ? { profile } : {}),
+  };
+}
+
+function memoryTrackShareProfile(userId) {
+  return memoryAccountProfile(memoryAuthUsersById.get(userId), {
+    photoUrl: memoryUserDataByGuestKey.get(`user:${userId}`)?.accountProfile?.photoUrl ?? '',
+  });
+}
+
+function memoryHasExplicitFriendship(userIdA, userIdB) {
+  const friendship = memoryAccountFriendships.get(accountPairKey(userIdA, userIdB));
+  return Boolean(friendship && friendship.source !== 'official' && !memoryUsersAreBlocked(userIdA, userIdB));
+}
+
+function removeMemoryTrackSharesForPair(userIdA, userIdB) {
+  for (const [shareId, share] of memoryAccountTrackShares) {
+    if (accountPairKey(share.senderUserId, share.recipientUserId) !== accountPairKey(userIdA, userIdB)) {
+      continue;
+    }
+    memoryAccountTrackShares.delete(shareId);
+    memoryAccountTrackShareIdByParticipantsAndTrack.delete(
+      accountTrackShareKey(share.senderUserId, share.recipientUserId, share.trackId),
+    );
+  }
+}
+
+export async function listAccountTrackFavorites(userId, { limit = 500 } = {}) {
+  const boundedLimit = Math.max(1, Math.min(500, Math.round(Number(limit)) || 500));
+  if (!pool) {
+    return [...memoryAccountTrackFavorites.values()]
+      .filter((favorite) => favorite.userId === userId)
+      .sort((left, right) => (
+        Date.parse(right.createdAt) - Date.parse(left.createdAt)
+        || String(left.trackId).localeCompare(String(right.trackId))
+      ))
+      .slice(0, boundedLimit)
+      .map((favorite) => ({
+        trackId: favorite.trackId,
+        trackSnapshot: cloneJson(favorite.trackSnapshot, {}),
+        createdAt: favorite.createdAt,
+        updatedAt: favorite.updatedAt,
+      }));
+  }
+  const result = await query(
+    `SELECT track_id, track_snapshot, created_at, updated_at
+     FROM ${schema}.account_track_favorites
+     WHERE user_id = $1
+     ORDER BY created_at DESC, track_id
+     LIMIT $2`,
+    [userId, boundedLimit],
+  );
+  return (result?.rows ?? []).map(accountTrackFavoriteRecord).filter(Boolean);
+}
+
+export async function upsertAccountTrackFavorite({ userId, trackId, trackSnapshot, limit = 500 }) {
+  if (!userId || !trackId || !trackSnapshot || typeof trackSnapshot !== 'object' || Array.isArray(trackSnapshot)) {
+    return null;
+  }
+  const boundedLimit = Math.max(1, Math.min(500, Math.round(Number(limit)) || 500));
+  if (!pool) {
+    const key = accountTrackFavoriteKey(userId, trackId);
+    const existing = memoryAccountTrackFavorites.get(key);
+    if (!existing) {
+      const count = [...memoryAccountTrackFavorites.values()]
+        .filter((favorite) => favorite.userId === userId).length;
+      if (count >= boundedLimit) return null;
+    }
+    const now = new Date().toISOString();
+    const favorite = {
+      userId,
+      trackId,
+      trackSnapshot: cloneJson(trackSnapshot, {}),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    memoryAccountTrackFavorites.set(key, favorite);
+    return {
+      trackId,
+      trackSnapshot: cloneJson(favorite.trackSnapshot, {}),
+      createdAt: favorite.createdAt,
+      updatedAt: favorite.updatedAt,
+    };
+  }
+  const result = await withPersistenceLock(`track-favorites:${userId}`, (client) => client.query(
+    `INSERT INTO ${schema}.account_track_favorites (
+       user_id, track_id, track_snapshot, created_at, updated_at
+     )
+     SELECT $1, $2, $3::jsonb, now(), now()
+     WHERE EXISTS (
+       SELECT 1 FROM ${schema}.account_track_favorites
+       WHERE user_id = $1 AND track_id = $2
+     ) OR (
+       SELECT count(*) < $4 FROM ${schema}.account_track_favorites WHERE user_id = $1
+     )
+     ON CONFLICT (user_id, track_id) DO UPDATE SET
+       track_snapshot = EXCLUDED.track_snapshot,
+       updated_at = now()
+     RETURNING track_id, track_snapshot, created_at, updated_at`,
+    [userId, trackId, json(trackSnapshot), boundedLimit],
+  ));
+  return accountTrackFavoriteRecord(result?.rows?.[0]);
+}
+
+export async function removeAccountTrackFavorite(userId, trackId) {
+  if (!userId || !trackId) return false;
+  if (!pool) {
+    return memoryAccountTrackFavorites.delete(accountTrackFavoriteKey(userId, trackId));
+  }
+  const result = await query(
+    `DELETE FROM ${schema}.account_track_favorites
+     WHERE user_id = $1 AND track_id = $2
+     RETURNING track_id`,
+    [userId, trackId],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+function accountTrackShareCreateStatement() {
+  return `WITH eligible AS (
+       SELECT recipient.id, recipient.display_name, recipient.username
+       FROM ${schema}.auth_users AS recipient
+       JOIN ${schema}.account_friendships AS friendship
+         ON friendship.user_id_a = LEAST($2, recipient.id)
+        AND friendship.user_id_b = GREATEST($2, recipient.id)
+        AND friendship.source <> 'official'
+       WHERE recipient.id = $3
+         AND recipient.id <> $2
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = $2 AND block.blocked_user_id = recipient.id)
+              OR (block.blocker_user_id = recipient.id AND block.blocked_user_id = $2)
+         )
+     ), saved AS (
+       INSERT INTO ${schema}.account_track_shares (
+         id, sender_user_id, recipient_user_id, track_id, track_snapshot,
+         opened_at, created_at, updated_at
+       )
+       SELECT $1, $2, eligible.id, $4, $5::jsonb, NULL, now(), now()
+       FROM eligible
+       ON CONFLICT (sender_user_id, recipient_user_id, track_id) DO UPDATE SET
+         track_snapshot = EXCLUDED.track_snapshot,
+         opened_at = NULL,
+         updated_at = now()
+       RETURNING *
+     )
+     SELECT saved.*, recipient.id AS profile_id, recipient.display_name, recipient.username,
+       profile_data.account_profile ->> 'photoUrl' AS photo_url
+     FROM saved
+     JOIN ${schema}.auth_users AS recipient ON recipient.id = saved.recipient_user_id
+     LEFT JOIN ${schema}.user_data AS profile_data
+       ON profile_data.guest_key = 'user:' || recipient.id`;
+}
+
+function accountTrackSharesListStatement() {
+  return `SELECT share.*, sender.id AS profile_id, sender.display_name, sender.username,
+       profile_data.account_profile ->> 'photoUrl' AS photo_url
+     FROM ${schema}.account_track_shares AS share
+     JOIN ${schema}.auth_users AS sender ON sender.id = share.sender_user_id
+     JOIN ${schema}.account_friendships AS friendship
+       ON friendship.user_id_a = LEAST(share.sender_user_id, share.recipient_user_id)
+      AND friendship.user_id_b = GREATEST(share.sender_user_id, share.recipient_user_id)
+      AND friendship.source <> 'official'
+     LEFT JOIN ${schema}.user_data AS profile_data
+       ON profile_data.guest_key = 'user:' || sender.id
+     WHERE share.recipient_user_id = $1
+       AND ($4::boolean = false OR share.opened_at IS NULL)
+       AND NOT EXISTS (
+         SELECT 1 FROM ${schema}.friend_blocks AS block
+         WHERE (block.blocker_user_id = share.sender_user_id AND block.blocked_user_id = share.recipient_user_id)
+            OR (block.blocker_user_id = share.recipient_user_id AND block.blocked_user_id = share.sender_user_id)
+       )
+     ORDER BY share.updated_at DESC, share.id DESC
+     LIMIT $2 OFFSET $3`;
+}
+
+function accountTrackShareOpenStatement() {
+  return `WITH opened AS (
+       UPDATE ${schema}.account_track_shares AS share
+       SET opened_at = COALESCE(share.opened_at, now())
+       FROM ${schema}.account_friendships AS friendship
+       WHERE share.id = $1
+         AND share.recipient_user_id = $2
+         AND friendship.user_id_a = LEAST(share.sender_user_id, share.recipient_user_id)
+         AND friendship.user_id_b = GREATEST(share.sender_user_id, share.recipient_user_id)
+         AND friendship.source <> 'official'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = share.sender_user_id AND block.blocked_user_id = share.recipient_user_id)
+              OR (block.blocker_user_id = share.recipient_user_id AND block.blocked_user_id = share.sender_user_id)
+         )
+       RETURNING share.*
+     )
+     SELECT opened.*, sender.id AS profile_id, sender.display_name, sender.username,
+       profile_data.account_profile ->> 'photoUrl' AS photo_url
+     FROM opened
+     JOIN ${schema}.auth_users AS sender ON sender.id = opened.sender_user_id
+     LEFT JOIN ${schema}.user_data AS profile_data
+       ON profile_data.guest_key = 'user:' || sender.id`;
+}
+
+export async function createAccountTrackShare({
+  id,
+  senderUserId,
+  recipientUserId,
+  trackId,
+  trackSnapshot,
+}) {
+  if (
+    !id || !senderUserId || !recipientUserId || senderUserId === recipientUserId
+    || !trackId || !trackSnapshot || typeof trackSnapshot !== 'object' || Array.isArray(trackSnapshot)
+  ) {
+    return null;
+  }
+  if (!pool) {
+    if (!memoryAuthUsersById.has(recipientUserId) || !memoryHasExplicitFriendship(senderUserId, recipientUserId)) {
+      return null;
+    }
+    const key = accountTrackShareKey(senderUserId, recipientUserId, trackId);
+    const existingId = memoryAccountTrackShareIdByParticipantsAndTrack.get(key);
+    const existing = existingId ? memoryAccountTrackShares.get(existingId) : null;
+    if (!existing && memoryAccountTrackShares.has(id)) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    const share = {
+      id: existing?.id ?? id,
+      senderUserId,
+      recipientUserId,
+      trackId,
+      trackSnapshot: cloneJson(trackSnapshot, {}),
+      openedAt: null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    memoryAccountTrackShares.set(share.id, share);
+    memoryAccountTrackShareIdByParticipantsAndTrack.set(key, share.id);
+    return {
+      ...share,
+      trackSnapshot: cloneJson(share.trackSnapshot, {}),
+      profile: memoryTrackShareProfile(recipientUserId),
+    };
+  }
+  const result = await withAccountPairTransaction(senderUserId, recipientUserId, (client) => client.query(
+    accountTrackShareCreateStatement(),
+    [id, senderUserId, recipientUserId, trackId, json(trackSnapshot)],
+  ));
+  const row = result?.rows?.[0];
+  return accountTrackShareRecord(row, accountProfileFromRow(row, { photoUrl: row?.photo_url ?? '' }));
+}
+
+export async function listAccountTrackShares(
+  recipientUserId,
+  { limit = 100, offset = 0, unreadOnly = false } = {},
+) {
+  const boundedLimit = Math.max(1, Math.min(100, Math.round(Number(limit)) || 100));
+  const boundedOffset = Math.max(0, Math.min(1_000_000, Math.round(Number(offset)) || 0));
+  if (!pool) {
+    return [...memoryAccountTrackShares.values()]
+      .filter((share) => (
+        share.recipientUserId === recipientUserId
+        && memoryHasExplicitFriendship(share.senderUserId, share.recipientUserId)
+        && (!unreadOnly || !share.openedAt)
+      ))
+      .sort((left, right) => (
+        Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+        || String(right.id).localeCompare(String(left.id))
+      ))
+      .slice(boundedOffset, boundedOffset + boundedLimit)
+      .map((share) => ({
+        ...share,
+        trackSnapshot: cloneJson(share.trackSnapshot, {}),
+        profile: memoryTrackShareProfile(share.senderUserId),
+      }));
+  }
+  const result = await query(
+    accountTrackSharesListStatement(),
+    [recipientUserId, boundedLimit, boundedOffset, unreadOnly === true],
+  );
+  return (result?.rows ?? []).map((row) => accountTrackShareRecord(
+    row,
+    accountProfileFromRow(row, { photoUrl: row.photo_url ?? '' }),
+  )).filter(Boolean);
+}
+
+export async function countAccountTrackShares(recipientUserId) {
+  if (!pool) {
+    const visible = [...memoryAccountTrackShares.values()].filter((share) => (
+      share.recipientUserId === recipientUserId
+      && memoryHasExplicitFriendship(share.senderUserId, share.recipientUserId)
+    ));
+    return {
+      total: visible.length,
+      unreadTotal: visible.filter((share) => !share.openedAt).length,
+    };
+  }
+  const result = await query(
+    `SELECT count(*)::integer AS total,
+       count(*) FILTER (WHERE share.opened_at IS NULL)::integer AS unread_total
+     FROM ${schema}.account_track_shares AS share
+     JOIN ${schema}.account_friendships AS friendship
+       ON friendship.user_id_a = LEAST(share.sender_user_id, share.recipient_user_id)
+      AND friendship.user_id_b = GREATEST(share.sender_user_id, share.recipient_user_id)
+      AND friendship.source <> 'official'
+     WHERE share.recipient_user_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM ${schema}.friend_blocks AS block
+         WHERE (block.blocker_user_id = share.sender_user_id AND block.blocked_user_id = share.recipient_user_id)
+            OR (block.blocker_user_id = share.recipient_user_id AND block.blocked_user_id = share.sender_user_id)
+       )`,
+    [recipientUserId],
+  );
+  return {
+    total: Number(result?.rows?.[0]?.total) || 0,
+    unreadTotal: Number(result?.rows?.[0]?.unread_total) || 0,
+  };
+}
+
+export async function openAccountTrackShare(recipientUserId, shareId) {
+  if (!recipientUserId || !shareId) return null;
+  if (!pool) {
+    const share = memoryAccountTrackShares.get(shareId);
+    if (
+      !share || share.recipientUserId !== recipientUserId
+      || !memoryHasExplicitFriendship(share.senderUserId, share.recipientUserId)
+    ) {
+      return null;
+    }
+    if (!share.openedAt) share.openedAt = new Date().toISOString();
+    return {
+      ...share,
+      trackSnapshot: cloneJson(share.trackSnapshot, {}),
+      profile: memoryTrackShareProfile(share.senderUserId),
+    };
+  }
+  const lookup = await query(
+    `SELECT sender_user_id FROM ${schema}.account_track_shares
+     WHERE id = $1 AND recipient_user_id = $2 LIMIT 1`,
+    [shareId, recipientUserId],
+  );
+  const senderUserId = lookup?.rows?.[0]?.sender_user_id;
+  if (!senderUserId) return null;
+  const result = await withAccountPairTransaction(senderUserId, recipientUserId, (client) => client.query(
+    accountTrackShareOpenStatement(),
+    [shareId, recipientUserId],
+  ));
+  const row = result?.rows?.[0];
+  return accountTrackShareRecord(row, accountProfileFromRow(row, { photoUrl: row?.photo_url ?? '' }));
+}
+
+export async function deleteAccountTrackShare(recipientUserId, shareId) {
+  if (!recipientUserId || !shareId) return false;
+  if (!pool) {
+    const share = memoryAccountTrackShares.get(shareId);
+    if (!share || share.recipientUserId !== recipientUserId) return false;
+    memoryAccountTrackShares.delete(shareId);
+    memoryAccountTrackShareIdByParticipantsAndTrack.delete(
+      accountTrackShareKey(share.senderUserId, share.recipientUserId, share.trackId),
+    );
+    return true;
+  }
+  const result = await query(
+    `DELETE FROM ${schema}.account_track_shares
+     WHERE id = $1 AND recipient_user_id = $2
+     RETURNING id`,
+    [shareId, recipientUserId],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
 function memoryUsersShareClaimedClub(userIdA, userIdB) {
   const profileKeyA = `user:${userIdA}`;
   const profileKeyB = `user:${userIdB}`;
@@ -10078,6 +10483,7 @@ export async function removeAccountFriend(userId, friendUserId) {
       return null;
     }
     memoryAccountFriendships.delete(pairKey);
+    removeMemoryTrackSharesForPair(userIdA, userIdB);
     if (
       friendship.source === 'official'
       || memoryOfficialFriendKindByUserId.has(userId)
@@ -10099,6 +10505,9 @@ export async function removeAccountFriend(userId, friendUserId) {
        DELETE FROM ${schema}.account_friendships
        WHERE user_id_a = $1 AND user_id_b = $2
        RETURNING source
+     ), track_shares_removed AS (
+       DELETE FROM ${schema}.account_track_shares
+       WHERE sender_user_id IN ($1, $2) AND recipient_user_id IN ($1, $2)
      ), legacy_removed AS (
        DELETE FROM ${schema}.friendships
        WHERE (guest_key_a = 'user:' || $1 AND guest_key_b = 'user:' || $2)
@@ -10145,6 +10554,7 @@ export async function blockAccountProfile(userId, blockedUserId) {
       createdAt: new Date().toISOString(),
     });
     memoryAccountFriendships.delete(pairKey);
+    removeMemoryTrackSharesForPair(userIdA, userIdB);
     for (const request of memoryAccountFriendRequests.values()) {
       if (request.status === 'pending' && accountPairKey(request.fromUserId, request.toUserId) === pairKey) {
         request.status = 'blocked';
@@ -10180,6 +10590,9 @@ export async function blockAccountProfile(userId, blockedUserId) {
      ), removed AS (
        DELETE FROM ${schema}.account_friendships
        WHERE user_id_a = LEAST($1, $2) AND user_id_b = GREATEST($1, $2)
+     ), track_shares_removed AS (
+       DELETE FROM ${schema}.account_track_shares
+       WHERE sender_user_id IN ($1, $2) AND recipient_user_id IN ($1, $2)
      ), legacy_removed AS (
        DELETE FROM ${schema}.friendships
        WHERE (guest_key_a = 'user:' || $1 AND guest_key_b = 'user:' || $2)

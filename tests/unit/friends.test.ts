@@ -19,6 +19,11 @@ import {
   type FriendProfile,
   type FriendsApi,
 } from '../../src/lib/friends';
+import {
+  createTrackSharesApi,
+  normalizeTrackShare,
+  type TrackSharesApi,
+} from '../../src/lib/trackShares';
 
 function profile(overrides: Partial<FriendProfile> = {}): FriendProfile {
   return {
@@ -91,11 +96,118 @@ describe('TrackLab friends client', () => {
       username: 'backend.handle',
       displayName: 'Backend Rider',
       officialType: 'club',
+      canShareTrack: true,
     })).toMatchObject({
       id: 'backend-rider',
       handle: 'backend.handle',
       officialKind: 'club',
+      canShareTrack: true,
     });
+  });
+
+  it('normalizes received track shares without retaining private or executable sender fields', () => {
+    const normalized = normalizeTrackShare({
+      id: ' share-1 ',
+      trackId: 'usabmx:oak-mountain',
+      trackName: ' Oak Mountain BMX ',
+      trackLocation: '<b>Pelham, Alabama</b>',
+      sender: {
+        id: ' friend-1 ',
+        handle: '@friend rider!',
+        displayName: ' Friend Rider ',
+        photoUrl: 'javascript:alert(1)',
+        email: 'private@example.com',
+        liveLocation: { latitude: 1, longitude: 2 },
+      },
+      createdAt: '2026-08-23T20:00:00.000Z',
+      openedAt: null,
+      heartRate: 190,
+    });
+
+    expect(normalized).toEqual({
+      id: 'share-1',
+      trackId: 'usabmx:oak-mountain',
+      trackName: 'Oak Mountain BMX',
+      trackLocation: '<b>Pelham, Alabama</b>',
+      sender: {
+        id: 'friend-1',
+        handle: 'friendrider',
+        displayName: 'Friend Rider',
+      },
+      createdAt: '2026-08-23T20:00:00.000Z',
+      openedAt: null,
+    });
+    expect(normalized?.sender).not.toHaveProperty('email');
+    expect(normalized).not.toHaveProperty('heartRate');
+    expect(normalizeTrackShare({
+      id: 'bad-share',
+      trackId: 'javascript:alert(1)',
+      trackName: 'Unsafe',
+      sender: { id: 'friend-1', handle: 'friend', displayName: 'Friend' },
+      createdAt: '2026-08-23T20:00:00.000Z',
+    })).toBeNull();
+  });
+
+  it('uses the received track-share contract for list, send, open, and dismiss', async () => {
+    const calls: Array<{ url: string; method: string; body: unknown; keepalive: boolean }> = [];
+    const item = {
+      id: 'share-1',
+      trackId: 'usabmx:oak-mountain',
+      trackName: 'Oak Mountain BMX',
+      trackLocation: 'Pelham, Alabama',
+      sender: { id: 'friend-1', handle: 'friend.one', displayName: 'Friend One' },
+      createdAt: '2026-08-23T20:00:00.000Z',
+      openedAt: null,
+    };
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({
+        url,
+        method,
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        keepalive: init?.keepalive === true,
+      });
+      if (method === 'DELETE') return new Response(null, { status: 204 });
+      if (method === 'POST' && url.endsWith('/open')) {
+        return jsonResponse({ share: { ...item, openedAt: '2026-08-23T20:01:00.000Z' } });
+      }
+      if (method === 'POST') return jsonResponse({ share: item });
+      return jsonResponse({ items: [item], nextCursor: 'next', total: 4, unreadTotal: 3 });
+    }) as unknown as typeof fetch;
+    const api = createTrackSharesApi(fetcher);
+
+    expect(await api.listReceived({ cursor: 'cursor-1', limit: 9, unread: true })).toMatchObject({
+      items: [expect.objectContaining({ id: 'share-1', trackId: 'usabmx:oak-mountain' })],
+      nextCursor: 'next',
+      total: 4,
+      unreadTotal: 3,
+    });
+    await api.send('friend-1', 'usabmx:oak-mountain', 'request-1');
+    await api.markOpened('share-1');
+    await api.dismiss('share-1');
+
+    expect(calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        url: '/api/friends/track-shares?cursor=cursor-1&unread=1&limit=9',
+        method: 'GET',
+      }),
+      expect.objectContaining({
+        url: '/api/friends/track-shares',
+        method: 'POST',
+        body: {
+          recipientProfileId: 'friend-1',
+          trackId: 'usabmx:oak-mountain',
+          clientRequestId: 'request-1',
+        },
+      }),
+      expect.objectContaining({
+        url: '/api/friends/track-shares/share-1/open',
+        method: 'POST',
+        keepalive: true,
+      }),
+      expect.objectContaining({ url: '/api/friends/track-shares/share-1', method: 'DELETE' }),
+    ]));
   });
 
   it('keeps only the race setup fields from an authorized friend ghost preview', () => {
@@ -249,12 +361,20 @@ describe('TrackLab friends client', () => {
       throw new Error(`Unexpected preload request: ${url.pathname}`);
     });
     const api = createFriendsApi(fetcher as unknown as typeof fetch);
+    const sharesApi: TrackSharesApi = {
+      listReceived: vi.fn(async () => ({ ...blankTrackShares, unreadTotal: 2 })),
+      send: vi.fn(),
+      markOpened: vi.fn(),
+      dismiss: vi.fn(),
+    };
 
-    const first = preloadFriendsView('me', api);
-    const concurrent = preloadFriendsView('me', api);
+    const first = preloadFriendsView('me', api, false, sharesApi);
+    const concurrent = preloadFriendsView('me', api, false, sharesApi);
     await Promise.all([first, concurrent]);
-    await preloadFriendsView('me', api);
+    const warm = await preloadFriendsView('me', api, false, sharesApi);
 
+    expect(warm.trackSharePage.unreadTotal).toBe(2);
+    expect(sharesApi.listReceived).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(fetcher.mock.calls.map(([input]) => new URL(String(input), 'https://tracklab.test').pathname)).toEqual([
       '/api/friends',
@@ -262,11 +382,73 @@ describe('TrackLab friends client', () => {
       '/api/friends/privacy',
     ]);
     expect(new URL(String(fetcher.mock.calls[1]?.[0]), 'https://tracklab.test').searchParams.get('direction')).toBe('incoming');
-    const markup = renderToStaticMarkup(createElement(FriendsView, { currentProfileId: 'me', api }));
+    const markup = renderToStaticMarkup(createElement(FriendsView, {
+      currentProfileId: 'me',
+      api,
+      trackSharesApi: sharesApi,
+    }));
     expect(markup).toContain('Fast Rider');
     expect(markup).not.toContain('Loading riders');
-    await preloadFriendsView('another-account', api);
+    await preloadFriendsView('another-account', api, false, sharesApi);
     expect(fetcher).toHaveBeenCalledTimes(6);
+    expect(sharesApi.listReceived).toHaveBeenCalledTimes(2);
+  });
+
+  it('queues one fresh shared-track read when invalidation arrives during an older request', async () => {
+    const api = {
+      listFriends: vi.fn(async () => ({ items: [], nextCursor: null, total: 0 })),
+      listRequests: vi.fn(async () => blankRequests),
+      getPrivacy: vi.fn(async () => ({ discoverable: false, profile: null })),
+    } as unknown as FriendsApi;
+    let resolveOld = (_page: typeof blankTrackShares) => undefined;
+    const oldPage = new Promise<typeof blankTrackShares>((resolve) => { resolveOld = resolve; });
+    const newPage = { ...blankTrackShares, unreadTotal: 1, total: 1 };
+    const sharesApi: TrackSharesApi = {
+      listReceived: vi.fn()
+        .mockImplementationOnce(() => oldPage)
+        .mockResolvedValue(newPage),
+      send: vi.fn(),
+      markOpened: vi.fn(),
+      dismiss: vi.fn(),
+    };
+
+    const oldLoad = preloadFriendsView('refresh-rider', api, false, sharesApi);
+    const forcedLoad = preloadFriendsView('refresh-rider', api, true, sharesApi);
+    expect(sharesApi.listReceived).toHaveBeenCalledTimes(1);
+    resolveOld(blankTrackShares);
+
+    await expect(oldLoad).resolves.toMatchObject({ trackSharePage: { unreadTotal: 0 } });
+    await expect(forcedLoad).resolves.toMatchObject({ trackSharePage: { unreadTotal: 1 } });
+    expect(sharesApi.listReceived).toHaveBeenCalledTimes(2);
+    await expect(preloadFriendsView('refresh-rider', api, false, sharesApi))
+      .resolves.toMatchObject({ trackSharePage: { unreadTotal: 1 } });
+    expect(sharesApi.listReceived).toHaveBeenCalledTimes(2);
+  });
+
+  it('queues another shared-track read when a second invalidation arrives during refresh', async () => {
+    const api = {
+      listFriends: vi.fn(async () => ({ items: [], nextCursor: null, total: 0 })),
+      listRequests: vi.fn(async () => blankRequests),
+      getPrivacy: vi.fn(async () => ({ discoverable: false, profile: null })),
+    } as unknown as FriendsApi;
+    let resolveFirst = (_page: typeof blankTrackShares) => undefined;
+    const firstPage = new Promise<typeof blankTrackShares>((resolve) => { resolveFirst = resolve; });
+    const newestPage = { ...blankTrackShares, unreadTotal: 2, total: 2 };
+    const sharesApi: TrackSharesApi = {
+      listReceived: vi.fn().mockImplementationOnce(() => firstPage).mockResolvedValue(newestPage),
+      send: vi.fn(),
+      markOpened: vi.fn(),
+      dismiss: vi.fn(),
+    };
+
+    const first = preloadFriendsView('refresh-burst-rider', api, true, sharesApi);
+    const trailing = preloadFriendsView('refresh-burst-rider', api, true, sharesApi);
+    expect(sharesApi.listReceived).toHaveBeenCalledTimes(1);
+    resolveFirst(blankTrackShares);
+
+    await expect(first).resolves.toMatchObject({ trackSharePage: { unreadTotal: 0 } });
+    await expect(trailing).resolves.toMatchObject({ trackSharePage: { unreadTotal: 2 } });
+    expect(sharesApi.listReceived).toHaveBeenCalledTimes(2);
   });
 
   it('keeps discoverability off unless the server explicitly opts the rider in', () => {
@@ -341,11 +523,13 @@ describe('TrackLab friends client', () => {
     expect(stream?.url).toBe('/api/friends/events');
     stream?.dispatch('open');
     stream?.dispatch('graph-invalidated');
-    expect(invalidated).toHaveBeenCalledTimes(2);
+    stream?.dispatch('track-shares-invalidated');
+    expect(invalidated).toHaveBeenCalledTimes(3);
 
     unsubscribe();
     stream?.dispatch('graph-invalidated');
-    expect(invalidated).toHaveBeenCalledTimes(2);
+    stream?.dispatch('track-shares-invalidated');
+    expect(invalidated).toHaveBeenCalledTimes(3);
     expect(stream?.close).toHaveBeenCalledOnce();
   });
 
@@ -371,7 +555,7 @@ describe('TrackLab friends client', () => {
     expect(readQueuedFriendRequests('owner-a')).toEqual([]);
   });
 
-  it('renders an accessible default-off discovery control and the four network sections', () => {
+  it('renders an accessible default-off discovery control and the five network sections', () => {
     const api: FriendsApi = {
       listFriends: vi.fn(async () => ({ items: [], nextCursor: null, total: 0 })),
       listRequests: vi.fn(async () => ({ ...blankRequests })),
@@ -393,7 +577,18 @@ describe('TrackLab friends client', () => {
       unblockProfile: vi.fn(async () => undefined),
       reportProfile: vi.fn(async () => undefined),
     };
-    const markup = renderToStaticMarkup(createElement(FriendsView, { currentProfileId: 'me', api, initialTab: 'invite' }));
+    const trackSharesApi: TrackSharesApi = {
+      listReceived: vi.fn(async () => blankTrackShares),
+      send: vi.fn(),
+      markOpened: vi.fn(),
+      dismiss: vi.fn(),
+    };
+    const markup = renderToStaticMarkup(createElement(FriendsView, {
+      currentProfileId: 'me',
+      api,
+      trackSharesApi,
+      initialTab: 'invite',
+    }));
 
     expect(markup).toContain('role="switch"');
     expect(markup).toContain('aria-checked="false"');
@@ -403,13 +598,14 @@ describe('TrackLab friends client', () => {
     expect(markup).toContain('>Friends<');
     expect(markup).toContain('>Requests<');
     expect(markup).toContain('>Suggestions<');
+    expect(markup).toContain('>Shared tracks<');
     expect(markup).toContain('>Invite<');
     expect(markup).toContain('0 active invitation links');
     expect(markup).toContain('Revoke all links');
-    expect(markup.match(/role="tab"/g)).toHaveLength(4);
-    expect(markup.match(/aria-controls="friends-panel"/g)).toHaveLength(4);
+    expect(markup.match(/role="tab"/g)).toHaveLength(5);
+    expect(markup.match(/aria-controls="friends-panel"/g)).toHaveLength(5);
     expect(markup.match(/tabindex="0"/g)).toHaveLength(1);
-    expect(markup.match(/tabindex="-1"/g)).toHaveLength(3);
+    expect(markup.match(/tabindex="-1"/g)).toHaveLength(4);
     expect(markup).toContain('id="friends-panel"');
     expect(markup).not.toMatch(/(?:aria-controls|id)="friends-panel-(?:friends|requests|suggestions|invite)"/);
   });
@@ -419,6 +615,7 @@ describe('TrackLab friends client', () => {
 
     expect(css).toContain('@media (any-pointer: coarse), (max-width: 580px)');
     expect(css).toMatch(/\.friends-view button,\s*\.friends-view summary\s*{[^}]*min-height:\s*44px;/);
+    expect(css).toMatch(/\.friend-track-share-actions > a,[\s\S]*?\.friend-track-share-actions > button\s*{[^}]*min-height:\s*44px;/);
     expect(css).toMatch(/\.friends-privacy-note \.friends-privacy-switch,\s*\.friends-privacy-note \.friends-privacy-switch\.on\s*{[^}]*height:\s*44px;[^}]*width:\s*52px;/);
   });
 });
@@ -431,4 +628,11 @@ const blankRequests = {
   incomingNextCursor: null,
   outgoingNextCursor: null,
   total: 0,
+};
+
+const blankTrackShares = {
+  items: [],
+  nextCursor: null,
+  total: 0,
+  unreadTotal: 0,
 };

@@ -174,6 +174,10 @@ describe('owner-operated Monitor View athlete history', () => {
             comment: 'Open an athlete-specific TrackLab studio heart-rate invitation.',
           }, {
             '/': '/',
+            '?': { locator: '*' },
+            comment: 'Open a public BMX track inside the TrackLab directory.',
+          }, {
+            '/': '/',
             '#': 'heartRateAccountBlock=*',
             comment: 'Open a private same-account Apple Watch handoff without sending its code to the server.',
           }],
