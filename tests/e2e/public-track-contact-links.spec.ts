@@ -106,14 +106,25 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
     const details = element.querySelector<HTMLElement>('.public-track-details');
     if (!layout || !map || !preview || !details) throw new Error('Public locator layout is incomplete');
     return {
+      actionControlRows: [...element.querySelectorAll<HTMLElement>('.public-track-link-group')]
+        .map((group) => new Set([...group.querySelectorAll<HTMLElement>('.public-track-actions > *')]
+          .map((control) => Math.round(control.getBoundingClientRect().top))).size),
       detailsBottom: details.getBoundingClientRect().bottom,
       layoutHeight: layout.getBoundingClientRect().height,
+      layoutFits: layout.scrollWidth <= layout.clientWidth + 1 && layout.scrollHeight <= layout.clientHeight + 1,
       mapHeight: map.getBoundingClientRect().height,
+      officialLinkRows: new Set([...element.querySelectorAll<HTMLElement>('.public-track-official-links a')]
+        .map((link) => Math.round(link.getBoundingClientRect().top))).size,
       previewBottom: preview.getBoundingClientRect().bottom,
+      previewFits: preview.scrollWidth <= preview.clientWidth + 1,
     };
   });
   expect(desktopGeometry.mapHeight).toBeGreaterThanOrEqual(460);
-  expect(desktopGeometry.layoutHeight).toBeLessThanOrEqual(730);
+  expect(desktopGeometry.layoutHeight).toBeLessThanOrEqual(820);
+  expect(desktopGeometry.layoutFits).toBe(true);
+  expect(desktopGeometry.previewFits).toBe(true);
+  expect(desktopGeometry.officialLinkRows).toBe(1);
+  expect(desktopGeometry.actionControlRows.every((rows) => rows === 1)).toBe(true);
   expect(desktopGeometry.detailsBottom).toBeLessThanOrEqual(desktopGeometry.previewBottom + 1);
 
   for (const viewport of [

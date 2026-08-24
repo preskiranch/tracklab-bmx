@@ -285,9 +285,9 @@
 }
 
 .public-track-official-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 6px;
   padding: 12px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.14);
   background: #101923;
@@ -300,7 +300,7 @@
   gap: 7px;
   min-width: 0;
   min-height: 44px;
-  padding: 8px 9px;
+  padding: 4px 7px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.1);
@@ -396,9 +396,18 @@
 }
 
 .public-track-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
+  width: 100%;
+}
+
+.public-track-save-group .public-track-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.public-track-earth-group .public-track-actions {
+  grid-template-columns: 1fr;
 }
 
 .public-track-actions a,
@@ -416,6 +425,9 @@
   color: #ffffff;
   font-size: 13px;
   font-weight: 900;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  text-align: center;
   text-decoration: none;
 }
 
