@@ -178,6 +178,65 @@ test('favorites, friend sharing, and canonical track links stay exact and respon
     await expect(locator.getByRole('heading', { name: track.name })).toBeVisible();
   }
 
+  await locator.getByLabel('Search tracks').fill(favoriteTrack.name);
+  await expect(locator.getByText('1 found', { exact: true })).toBeVisible();
+  for (const viewport of [
+    { width: 1280, height: 960, minimumMapHeight: 460, desktop: true },
+    { width: 1024, height: 768, minimumMapHeight: 360, desktop: false },
+    { width: 390, height: 844, minimumMapHeight: 360, desktop: false },
+  ]) {
+    await page.setViewportSize(viewport);
+    const geometry = await locator.evaluate((element) => {
+      const bounds = (selector: string) => {
+        const match = element.querySelector<HTMLElement>(selector);
+        if (!match) throw new Error(`Missing responsive locator element: ${selector}`);
+        const box = match.getBoundingClientRect();
+        return {
+          bottom: box.bottom,
+          height: box.height,
+          left: box.left,
+          right: box.right,
+          top: box.top,
+        };
+      };
+      const layout = element.querySelector<HTMLElement>('.public-locator-layout');
+      const preview = element.querySelector<HTMLElement>('.public-locator-preview');
+      if (!layout || !preview) throw new Error('Missing responsive locator shell');
+      const previewBounds = preview.getBoundingClientRect();
+      const controls = [...element.querySelectorAll<HTMLElement>(
+        '.public-track-official-links a, .public-track-actions a, .public-track-actions button',
+      )].map((control) => {
+        const box = control.getBoundingClientRect();
+        return {
+          height: box.height,
+          insidePreview: box.left >= previewBounds.left - 1 && box.right <= previewBounds.right + 1,
+        };
+      });
+      return {
+        actionGroupTops: [...element.querySelectorAll<HTMLElement>('.public-track-link-group')]
+          .map((group) => Math.round(group.getBoundingClientRect().top)),
+        details: bounds('.public-track-details'),
+        documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        layoutHeight: layout.getBoundingClientRect().height,
+        layoutFits: layout.scrollWidth <= layout.clientWidth + 1,
+        map: bounds('.public-track-map'),
+        preview: bounds('.public-locator-preview'),
+        previewFits: preview.scrollWidth <= preview.clientWidth + 1,
+        controls,
+      };
+    });
+    expect(geometry.map.height).toBeGreaterThanOrEqual(viewport.minimumMapHeight);
+    expect(geometry.documentFits).toBe(true);
+    expect(geometry.layoutFits).toBe(true);
+    expect(geometry.previewFits).toBe(true);
+    expect(geometry.details.bottom).toBeLessThanOrEqual(geometry.preview.bottom + 1);
+    expect(geometry.controls.every((control) => control.height >= 44 && control.insidePreview)).toBe(true);
+    if (viewport.desktop) {
+      expect(geometry.layoutHeight).toBeLessThanOrEqual(730);
+      expect(new Set(geometry.actionGroupTops).size).toBe(1);
+    }
+  }
+
   await locator.getByRole('button', { name: 'Share with friend' }).click();
   const dialog = page.getByRole('dialog', { name: favoriteTrack.name });
   await expect(dialog.getByText('Explicit Friend')).toBeVisible();

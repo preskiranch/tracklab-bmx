@@ -38,6 +38,7 @@ const noContactTrack = {
 };
 
 test('track contacts and map actions stay clear, callable, and responsive', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 960 });
   await page.route('**/api/auth/me', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: null }) });
   });
@@ -54,6 +55,8 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   await page.goto(`/?locator=${contactTrack.id}`);
 
   const locator = page.locator('#track-locator');
+  await locator.getByLabel('Search tracks').fill(contactTrack.name);
+  await expect(locator.getByText('1 found', { exact: true })).toBeVisible();
   const contacts = locator.getByRole('navigation', {
     name: `Social and contact links for ${contactTrack.name}`,
   });
@@ -89,13 +92,33 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
   await expect(earth.getByText('3D exploration—not turn-by-turn directions.')).toBeVisible();
   await expect(directions.getByRole('link', { name: /Google Earth/ })).toHaveCount(0);
 
-  const actionTargets = locator.locator('.public-track-official-links a, .public-track-actions a');
+  const actionTargets = locator.locator(
+    '.public-track-official-links a, .public-track-actions a, .public-track-actions button',
+  );
   const desktopTargetHeights = await actionTargets.evaluateAll((links) => (
     links.map((link) => Math.round(link.getBoundingClientRect().height))
   ));
   expect(desktopTargetHeights.every((height) => height >= 44)).toBe(true);
+  const desktopGeometry = await locator.evaluate((element) => {
+    const layout = element.querySelector<HTMLElement>('.public-locator-layout');
+    const map = element.querySelector<HTMLElement>('.public-track-map');
+    const preview = element.querySelector<HTMLElement>('.public-locator-preview');
+    const details = element.querySelector<HTMLElement>('.public-track-details');
+    if (!layout || !map || !preview || !details) throw new Error('Public locator layout is incomplete');
+    return {
+      detailsBottom: details.getBoundingClientRect().bottom,
+      layoutHeight: layout.getBoundingClientRect().height,
+      mapHeight: map.getBoundingClientRect().height,
+      previewBottom: preview.getBoundingClientRect().bottom,
+    };
+  });
+  expect(desktopGeometry.mapHeight).toBeGreaterThanOrEqual(460);
+  expect(desktopGeometry.layoutHeight).toBeLessThanOrEqual(730);
+  expect(desktopGeometry.detailsBottom).toBeLessThanOrEqual(desktopGeometry.previewBottom + 1);
 
   for (const viewport of [
+    { width: 560, height: 900 },
+    { width: 561, height: 900 },
     { width: 721, height: 900 },
     { width: 768, height: 1024 },
     { width: 900, height: 700 },
@@ -120,6 +143,16 @@ test('track contacts and map actions stay clear, callable, and responsive', asyn
       })(),
     }));
     expect(overflow).toEqual({ document: 0, preview: 0 });
+    const responsiveTargets = await actionTargets.evaluateAll((controls) => controls.map((control) => ({
+      controlHeight: control.getBoundingClientRect().height,
+      iconWidths: [...control.querySelectorAll('svg')].map((icon) => icon.getBoundingClientRect().width),
+    })));
+    expect(responsiveTargets.every(({ controlHeight }) => controlHeight >= 44)).toBe(true);
+    if ([561, 768, 1024].includes(viewport.width)) {
+      expect(responsiveTargets.every(({ iconWidths }) => (
+        iconWidths.length > 0 && iconWidths.every((width) => width >= 15)
+      ))).toBe(true);
+    }
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
