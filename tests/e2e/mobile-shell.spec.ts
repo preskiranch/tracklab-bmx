@@ -155,9 +155,13 @@ test('Recovery Alert stays simple, readable, and available in all three sprint p
   await page.setViewportSize(iphonePortrait);
   await mockSignedInRacer(page);
   let savedTimerSeconds: unknown;
+  let savedRecoveryPreference: Record<string, unknown> | undefined;
+  let recoverySaveCount = 0;
   page.on('request', (request) => {
     if (request.method() !== 'PATCH' || !request.url().endsWith('/preferences')) return;
-    savedTimerSeconds = (request.postDataJSON() as Record<string, unknown>).timerSeconds;
+    savedRecoveryPreference = request.postDataJSON() as Record<string, unknown>;
+    savedTimerSeconds = savedRecoveryPreference.timerSeconds;
+    recoverySaveCount += 1;
   });
   await page.goto('/?track=oak-creek-bmx');
   await openSignedInApp(page);
@@ -172,10 +176,74 @@ test('Recovery Alert stays simple, readable, and available in all three sprint p
   await card.getByRole('button', { name: 'Timer', exact: true }).click();
   const recoveryMinutes = card.getByLabel('Recovery time in minutes', { exact: true });
   await expect(recoveryMinutes).toHaveAttribute('step', '1');
-  await recoveryMinutes.fill('7');
+  await recoveryMinutes.selectText();
+  await recoveryMinutes.press('Backspace');
+  await expect(recoveryMinutes).toHaveValue('');
+  await expect(recoveryMinutes).toHaveAttribute('aria-invalid', 'true');
+  await expect(card.getByRole('button', { name: 'Save Recovery Alert' })).toBeDisabled();
+  await recoveryMinutes.blur();
+  await expect(recoveryMinutes).toHaveValue('2');
+  await expect(recoveryMinutes).toHaveAttribute('aria-invalid', 'false');
+  expect(savedTimerSeconds).toBeUndefined();
+  await recoveryMinutes.selectText();
+  await recoveryMinutes.press('Backspace');
+  await recoveryMinutes.pressSequentially('7');
+  await expect(recoveryMinutes).toHaveAttribute('aria-invalid', 'false');
   await card.getByRole('button', { name: 'Save Recovery Alert' }).click();
   await expect(card).toContainText('Saved for Race Intervals, Straight Sprint, and Get Pulled.');
   await expect.poll(() => savedTimerSeconds).toBe(420);
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await card.getByRole('button', { name: 'Heart Rate', exact: true }).click();
+  const earliestAlert = card.getByLabel('Earliest alert in minutes', { exact: true });
+  const recoverySaveButton = card.getByRole('button', { name: 'Save Recovery Alert' });
+  await expect(earliestAlert).toHaveValue('1');
+  await earliestAlert.selectText();
+  await earliestAlert.press('Backspace');
+  await expect(earliestAlert).toHaveValue('');
+  await expect(earliestAlert).toHaveAttribute('aria-invalid', 'true');
+  await expect(recoverySaveButton).toBeDisabled();
+  await recoverySaveButton.click({ force: true });
+  await expect(earliestAlert).toHaveValue('1');
+  expect(recoverySaveCount).toBe(1);
+  await earliestAlert.selectText();
+  await earliestAlert.press('Backspace');
+  await expect(earliestAlert).toHaveValue('');
+  await earliestAlert.pressSequentially('7');
+  await expect(earliestAlert).toHaveAttribute('aria-invalid', 'false');
+  await recoverySaveButton.click();
+  await expect.poll(() => savedRecoveryPreference?.minimumSeconds).toBe(420);
+  expect(Number(savedRecoveryPreference?.maximumSeconds)).toBeGreaterThanOrEqual(420);
+
+  await earliestAlert.selectText();
+  await earliestAlert.press('Backspace');
+  await earliestAlert.pressSequentially('99');
+  await expect(earliestAlert).toHaveAttribute('aria-invalid', 'true');
+  await expect(recoverySaveButton).toBeDisabled();
+  await earliestAlert.press('Enter');
+  await expect(earliestAlert).toHaveValue('9');
+  expect(recoverySaveCount).toBe(2);
+  await earliestAlert.selectText();
+  await earliestAlert.press('Backspace');
+  await earliestAlert.pressSequentially('7');
+  await earliestAlert.selectText();
+  await earliestAlert.press('Backspace');
+  await expect(earliestAlert).toHaveValue('');
+  const timerBackup = card.getByLabel('Timer backup in minutes', { exact: true });
+  await timerBackup.evaluate((element) => {
+    const input = element as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '9');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(timerBackup).toHaveValue('9');
+  await expect(earliestAlert).toHaveValue('');
+  await expect(earliestAlert).toHaveAttribute('aria-invalid', 'true');
+  await expect(recoverySaveButton).toBeDisabled();
+  expect(recoverySaveCount).toBe(2);
+  await earliestAlert.press('Enter');
+  await expect(earliestAlert).toHaveValue('7');
+  await expect(recoverySaveButton).toBeEnabled();
 
   const layout = await card.evaluate((element) => ({
     documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -191,9 +259,9 @@ test('Recovery Alert stays simple, readable, and available in all three sprint p
 
   const navigation = page.getByRole('navigation', { name: 'Primary' });
   await navigation.getByRole('button', { name: 'Straight Sprint', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Recovery Alert' })).toContainText('Timer');
+  await expect(page.getByRole('region', { name: 'Recovery Alert' })).toContainText('Heart Rate');
   await navigation.getByRole('button', { name: 'Get Pulled', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Recovery Alert' })).toContainText('Timer');
+  await expect(page.getByRole('region', { name: 'Recovery Alert' })).toContainText('Heart Rate');
 
   await page.setViewportSize({ width: 1024, height: 768 });
   const ipadLayout = await page.getByRole('region', { name: 'Recovery Alert' }).evaluate((element) => ({

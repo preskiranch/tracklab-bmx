@@ -47,6 +47,12 @@ import {
 
 export const getPulledDeviceDisconnectGraceMs = 750;
 
+export function getPulledSecondsFromInput(value: string) {
+  if (value.trim() === '') return null;
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric >= 1 && numeric <= 300 ? numeric : null;
+}
+
 export type GetPulledSessionArm = Readonly<{
   sessionId: string;
   playerId: PlayerSlot['id'];
@@ -264,6 +270,7 @@ export function GetPulledView({
   const [airSetting, setAirSetting] = useState(1);
   const [customSeconds, setCustomSeconds] = useState('10');
   const [customSelected, setCustomSelected] = useState(false);
+  const [customSecondsInvalidBlur, setCustomSecondsInvalidBlur] = useState(false);
   const [phase, setPhase] = useState<GetPulledPhase>('setup');
   const [countdown, setCountdown] = useState(getPulledCountdownSeconds);
   const [now, setNow] = useState(Date.now());
@@ -311,6 +318,8 @@ export function GetPulledView({
     ? Math.min(1, elapsedMs / (sessionDurationSeconds * 1_000))
     : 0;
   const selectedAthleteReady = demoMode || Boolean(selectedPlayer?.riderId);
+  const customSecondsInvalid = customSelected
+    && (customSecondsInvalidBlur || getPulledSecondsFromInput(customSeconds) == null);
   const demoHeartRate = sessionDemoMode && sessionPlayer?.deviceId != null
     ? demoHeartRateReading({
         deviceId: sessionPlayer.deviceId,
@@ -451,6 +460,7 @@ export function GetPulledView({
       !selectedPlayer
       || selectedPlayer.deviceId == null
       || (!demoMode && !selectedPlayer.riderId)
+      || customSecondsInvalid
       || phaseRef.current !== 'setup'
     ) return;
     const arm = createGetPulledSessionArm(
@@ -497,7 +507,7 @@ export function GetPulledView({
     playStartGateTone('tick');
     setPhase('countdown');
     setNow(Date.now());
-  }, [airSetting, cancelSession, demoMode, durationSeconds, onFullscreenChange, onSessionArm, primePullAudio, selectedPlayer]);
+  }, [airSetting, cancelSession, customSecondsInvalid, demoMode, durationSeconds, onFullscreenChange, onSessionArm, primePullAudio, selectedPlayer]);
 
   useEffect(() => {
     if (phase !== 'countdown') return undefined;
@@ -732,7 +742,9 @@ export function GetPulledView({
                 </button>
               ))}
               <button className={customSelected ? 'selected' : ''} type="button" onClick={() => {
-                setDurationSeconds(normalizeGetPulledSeconds(customSeconds));
+                const nextSeconds = getPulledSecondsFromInput(customSeconds) ?? durationSeconds;
+                setCustomSeconds(String(nextSeconds));
+                setDurationSeconds(nextSeconds);
                 setCustomSelected(true);
               }}>Custom</button>
             </div>
@@ -745,9 +757,27 @@ export function GetPulledView({
                   max={300}
                   type="number"
                   value={customSeconds}
+                  aria-invalid={customSecondsInvalid}
                   onChange={(event) => {
-                    setCustomSeconds(event.target.value);
-                    setDurationSeconds(normalizeGetPulledSeconds(event.target.value));
+                    const value = event.target.value;
+                    setCustomSeconds(value);
+                    const nextSeconds = getPulledSecondsFromInput(value);
+                    setCustomSecondsInvalidBlur(nextSeconds == null);
+                    if (nextSeconds != null) setDurationSeconds(nextSeconds);
+                  }}
+                  onBlur={() => {
+                    const parsedSeconds = getPulledSecondsFromInput(customSeconds);
+                    const nextSeconds = parsedSeconds ?? durationSeconds;
+                    setCustomSeconds(String(nextSeconds));
+                    setDurationSeconds(nextSeconds);
+                    if (parsedSeconds == null) setTimeout(() => setCustomSecondsInvalidBlur(false), 0);
+                    else setCustomSecondsInvalidBlur(false);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
                   }}
                 />
                 <span>seconds</span>
@@ -829,7 +859,7 @@ export function GetPulledView({
             <button
               className="primary"
               type="button"
-              disabled={!selectedAthleteReady}
+              disabled={!selectedAthleteReady || customSecondsInvalid}
               onPointerDown={primePullAudio}
               onClick={start}
             >

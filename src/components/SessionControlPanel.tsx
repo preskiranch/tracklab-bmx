@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import {
   Activity,
   Bike,
@@ -72,6 +72,17 @@ export function formatStraightSprintFeet(feet: number, distanceUnit: DistanceUni
 
 export function formatProSetMinimumSpeed(speedUnit: SpeedUnit) {
   return `${formatSpeedFromKph(proSplitMinimumMph * 1.609344, speedUnit)} ${speedUnitLabel(speedUnit)}`;
+}
+
+export function mappingRestSecondsFromInput(value: string) {
+  if (value.trim() === '') return null;
+  const seconds = Number(value);
+  return Number.isFinite(seconds)
+    && seconds >= 0
+    && seconds <= 30
+    && Number.isInteger(seconds * 2)
+    ? seconds
+    : null;
 }
 
 function splitBranchInteriorPoints(
@@ -341,6 +352,17 @@ export function SessionControlPanel({
   const [pendingCustomRouteDeleteId, setPendingCustomRouteDeleteId] = useState<string | null>(null);
   const [customRouteFilter, setCustomRouteFilter] = useState('');
   const [mappingToolsCollapsed, setMappingToolsCollapsed] = useState(false);
+  const [mappingRestInput, setMappingRestInput] = useState(String(mappingRestSeconds));
+  const [mappingRestInvalidBlur, setMappingRestInvalidBlur] = useState(false);
+  const mappingRestFocused = useRef(false);
+  useEffect(() => {
+    if (!mappingRestFocused.current || !mappingMode) {
+      mappingRestFocused.current = false;
+      setMappingRestInput(String(mappingRestSeconds));
+      setMappingRestInvalidBlur(false);
+    }
+  }, [mappingMode, mappingRestSeconds]);
+  const mappingRestInvalid = mappingRestInvalidBlur || mappingRestSecondsFromInput(mappingRestInput) == null;
   const hasMappedRoute = track.routeStatus === 'user-mapped';
   const canStart = sessionTrackAvailable
     && !startGateActive
@@ -349,7 +371,7 @@ export function SessionControlPanel({
     && hasMappedRoute
     && (!showCustomRoutes || straightSprintMappedFeet >= straightSprintDistanceFeet);
   const canCancel = startGateActive || raceState === 'racing';
-  const canSaveMapping = draftPointCount >= 2;
+  const canSaveMapping = draftPointCount >= 2 && !mappingRestInvalid;
   const activeMappingToolLabel = mappingEditMode === 'navigate'
     ? 'Move map'
     : mappingEditMode === 'draw'
@@ -1092,12 +1114,37 @@ export function SessionControlPanel({
                 <label className="number-field">
                   <span>Rest gap</span>
                   <input
+                    aria-label="Rest gap in seconds"
                     type="number"
                     min="0"
                     max="30"
                     step="0.5"
-                    value={mappingRestSeconds}
-                    onChange={(event) => onMappingRestSecondsChange(Number(event.target.value))}
+                    inputMode="decimal"
+                    value={mappingRestInput}
+                    aria-invalid={mappingRestInvalid}
+                    onFocus={() => { mappingRestFocused.current = true; }}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setMappingRestInput(value);
+                      const seconds = mappingRestSecondsFromInput(value);
+                      setMappingRestInvalidBlur(seconds == null);
+                      if (seconds != null) onMappingRestSecondsChange(seconds);
+                    }}
+                    onBlur={() => {
+                      const parsedSeconds = mappingRestSecondsFromInput(mappingRestInput);
+                      const nextSeconds = parsedSeconds ?? mappingRestSeconds;
+                      setMappingRestInput(String(nextSeconds));
+                      if (nextSeconds !== mappingRestSeconds) onMappingRestSecondsChange(nextSeconds);
+                      if (parsedSeconds == null) setTimeout(() => setMappingRestInvalidBlur(false), 0);
+                      else setMappingRestInvalidBlur(false);
+                      mappingRestFocused.current = false;
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                    }}
                   />
                   <small>sec</small>
                 </label>

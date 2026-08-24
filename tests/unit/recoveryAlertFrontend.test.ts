@@ -7,6 +7,7 @@ import {
   recoveryAlertDisplay,
   recoveryDraftFromPreferences,
   recoveryMinutesFromSeconds,
+  recoverySecondsFromMinuteInput,
   recoverySecondsFromMinutes,
   smartRecoveryBackupSeconds,
 } from '../../src/components/RecoveryAlertCard';
@@ -367,6 +368,11 @@ describe('Recovery Alert status and setup UI', () => {
     expect(recoveryMinutesFromSeconds(90)).toBe(2);
     expect(recoveryMinutesFromSeconds(1_800)).toBe(30);
     expect(recoveryMinutesFromSeconds(900, 60, 10)).toBe(10);
+    expect(recoverySecondsFromMinuteInput('')).toBeNull();
+    expect(recoverySecondsFromMinuteInput('not-a-time')).toBeNull();
+    expect(recoverySecondsFromMinuteInput('7')).toBe(420);
+    expect(recoverySecondsFromMinuteInput('7.4')).toBeNull();
+    expect(recoverySecondsFromMinuteInput('31')).toBeNull();
 
     expect(recoveryDraftFromPreferences({
       ...preference,

@@ -10,12 +10,22 @@ import { formatRaceReviewSplitDistance } from '../../src/components/RaceReviewPa
 import {
   formatProSetMinimumSpeed,
   formatStraightSprintFeet,
+  mappingRestSecondsFromInput,
 } from '../../src/components/SessionControlPanel';
 import { formatMultiplayerProSetMinimumSpeed } from '../../src/components/MultiplayerPanel';
 import { straightSprintConfigurationKey } from '../../src/lib/straightSprint';
 import { proSplitMinimumMph } from '../../src/lib/trackMapping';
 
 describe('race panel unit presentation', () => {
+  it('keeps the committed mapping rest gap while its editable field is empty or invalid', () => {
+    expect(mappingRestSecondsFromInput('')).toBeNull();
+    expect(mappingRestSecondsFromInput('invalid')).toBeNull();
+    expect(mappingRestSecondsFromInput('7')).toBe(7);
+    expect(mappingRestSecondsFromInput('7.4')).toBeNull();
+    expect(mappingRestSecondsFromInput('7.5')).toBe(7.5);
+    expect(mappingRestSecondsFromInput('31')).toBeNull();
+  });
+
   it('formats canonical sprint feet in the selected display unit', () => {
     expect(formatStraightSprintFeet(300, 'ft')).toBe('300 ft');
     expect(formatStraightSprintFeet(300, 'm')).toBe('91 m');

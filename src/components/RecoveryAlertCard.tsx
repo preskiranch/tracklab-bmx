@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react';
 import {
   BellRing,
   Brain,
@@ -74,6 +75,18 @@ export function recoverySecondsFromMinutes(
   ) * 60;
 }
 
+export function recoverySecondsFromMinuteInput(
+  value: unknown,
+  minimumMinutes = 1,
+  maximumMinutes = 30,
+) {
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric >= minimumMinutes && numeric <= maximumMinutes
+    ? numeric * 60
+    : null;
+}
+
 function wholeMinuteRecoverySeconds(value: unknown, fallbackSeconds = 120, maximumMinutes = 30) {
   return recoveryMinutesFromSeconds(value, fallbackSeconds, maximumMinutes) * 60;
 }
@@ -119,6 +132,7 @@ type RecoveryMinutesFieldProps = Readonly<{
   minimumMinutes?: number;
   maximumMinutes?: number;
   onChange: (seconds: number) => void;
+  onValidityChange: (field: string, valid: boolean) => void;
 }>;
 
 function RecoveryMinutesField({
@@ -128,7 +142,21 @@ function RecoveryMinutesField({
   minimumMinutes = 1,
   maximumMinutes = 30,
   onChange,
+  onValidityChange,
 }: RecoveryMinutesFieldProps) {
+  const committedMinutes = recoveryMinutesFromSeconds(seconds, fallbackSeconds, maximumMinutes);
+  const [inputValue, setInputValue] = useState(String(committedMinutes));
+  useEffect(() => {
+    setInputValue(String(committedMinutes));
+    onValidityChange(label, true);
+  }, [committedMinutes, label, onValidityChange]);
+  useEffect(() => () => onValidityChange(label, true), [label, onValidityChange]);
+  const inputValid = recoverySecondsFromMinuteInput(
+    inputValue,
+    minimumMinutes,
+    maximumMinutes,
+  ) != null;
+
   return (
     <label>
       <span>{label}</span>
@@ -140,13 +168,39 @@ function RecoveryMinutesField({
           min={minimumMinutes}
           max={maximumMinutes}
           step={1}
-          value={recoveryMinutesFromSeconds(seconds, fallbackSeconds, maximumMinutes)}
-          onChange={(event) => onChange(recoverySecondsFromMinutes(
-            event.target.value,
-            fallbackSeconds,
-            minimumMinutes,
-            maximumMinutes,
-          ))}
+          value={inputValue}
+          aria-invalid={!inputValid}
+          onChange={(event) => {
+            const value = event.target.value;
+            setInputValue(value);
+            const nextSeconds = recoverySecondsFromMinuteInput(
+              value,
+              minimumMinutes,
+              maximumMinutes,
+            );
+            onValidityChange(label, nextSeconds != null);
+            if (nextSeconds != null) onChange(nextSeconds);
+          }}
+          onBlur={() => {
+            const nextSeconds = recoverySecondsFromMinuteInput(
+              inputValue,
+              minimumMinutes,
+              maximumMinutes,
+            );
+            setInputValue(String(nextSeconds == null ? committedMinutes : nextSeconds / 60));
+            if (nextSeconds == null) {
+              setTimeout(() => onValidityChange(label, true), 0);
+            } else {
+              onValidityChange(label, true);
+              if (nextSeconds !== seconds) onChange(nextSeconds);
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
         />
         <b>MIN</b>
       </span>
@@ -251,6 +305,16 @@ export function RecoveryAlertCard({
   onStartAnyway,
   onStop,
 }: RecoveryAlertCardProps) {
+  const [invalidDurationInputs, setInvalidDurationInputs] = useState<ReadonlySet<string>>(() => new Set());
+  const onDurationInputValidityChange = useCallback((field: string, valid: boolean) => {
+    setInvalidDurationInputs((current) => {
+      if (current.has(field) === !valid) return current;
+      const next = new Set(current);
+      if (valid) next.delete(field);
+      else next.add(field);
+      return next;
+    });
+  }, []);
   const display = episode ? recoveryAlertDisplay(episode, now, latestHeartRate) : null;
   const preferencesChanged = !savedPreferences
     || draft.mode !== savedPreferences.mode
@@ -335,6 +399,7 @@ export function RecoveryAlertCard({
               <RecoveryMinutesField
                 label="Recovery time"
                 seconds={draft.timerSeconds}
+                onValidityChange={onDurationInputValidityChange}
                 onChange={(timerSeconds) => onDraftChange({ ...draft, timerSeconds })}
               />
             </div>
@@ -365,6 +430,7 @@ export function RecoveryAlertCard({
                 seconds={draft.maximumSeconds}
                 fallbackSeconds={600}
                 minimumMinutes={recoveryMinutesFromSeconds(draft.minimumSeconds, 60, 10)}
+                onValidityChange={onDurationInputValidityChange}
                 onChange={(maximumSeconds) => onDraftChange({ ...draft, maximumSeconds })}
               />
               <RecoveryMinutesField
@@ -372,6 +438,7 @@ export function RecoveryAlertCard({
                 seconds={draft.minimumSeconds}
                 fallbackSeconds={60}
                 maximumMinutes={10}
+                onValidityChange={onDurationInputValidityChange}
                 onChange={(minimumSeconds) => onDraftChange({
                   ...draft,
                   minimumSeconds,
@@ -389,6 +456,7 @@ export function RecoveryAlertCard({
               <RecoveryMinutesField
                 label="Starting recovery time"
                 seconds={draft.timerSeconds}
+                onValidityChange={onDurationInputValidityChange}
                 onChange={(timerSeconds) => onDraftChange({
                   ...draft,
                   timerSeconds,
@@ -422,6 +490,7 @@ export function RecoveryAlertCard({
                 seconds={draft.minimumSeconds}
                 fallbackSeconds={60}
                 maximumMinutes={10}
+                onValidityChange={onDurationInputValidityChange}
                 onChange={(minimumSeconds) => onDraftChange({
                   ...draft,
                   minimumSeconds,
@@ -440,6 +509,7 @@ export function RecoveryAlertCard({
                   recoveryMinutesFromSeconds(draft.timerSeconds),
                   recoveryMinutesFromSeconds(draft.minimumSeconds, 60, 10),
                 )}
+                onValidityChange={onDurationInputValidityChange}
                 onChange={(maximumSeconds) => onDraftChange({ ...draft, maximumSeconds })}
               />
               <p className="recovery-alert-explainer">
@@ -453,7 +523,7 @@ export function RecoveryAlertCard({
             <button
               className="primary"
               type="button"
-              disabled={loading || saving || !preferencesChanged}
+              disabled={loading || saving || !preferencesChanged || invalidDurationInputs.size > 0}
               onClick={onSave}
             >
               {saving ? 'Saving…' : draft.mode === 'off' ? 'Save Off' : 'Save Recovery Alert'}

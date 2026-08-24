@@ -17,6 +17,7 @@ import {
   createGetPulledSessionArm,
   createGetPulledSessionCancellation,
   getPulledSessionArmMatchesLiveBinding,
+  getPulledSecondsFromInput,
   getPulledSessionStartFromArm,
 } from '../../src/components/GetPulledView';
 import type { BikeSample, PlayerSlot } from '../../src/types';
@@ -43,6 +44,14 @@ const player: PlayerSlot = {
 };
 
 describe('Get Pulled test math and record categories', () => {
+  it('keeps the committed pull time while an editable duration is empty or invalid', () => {
+    expect(getPulledSecondsFromInput('')).toBeNull();
+    expect(getPulledSecondsFromInput('invalid')).toBeNull();
+    expect(getPulledSecondsFromInput('12')).toBe(12);
+    expect(getPulledSecondsFromInput('12.5')).toBeNull();
+    expect(getPulledSecondsFromInput('600')).toBeNull();
+  });
+
   it('allocates the immutable athlete/bike arm before countdown and cancels that same ID', () => {
     const arm = createGetPulledSessionArm(player, 6_000, 8, 10_000, () => 'arm-1');
     expect(arm).toEqual({
