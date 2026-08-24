@@ -98,7 +98,13 @@ describe('private individual Recovery Alert API', () => {
     expect(defaultsResponse.status).toBe(200);
     const defaults = await defaultsResponse.json() as any;
     expect(defaults.accountId).toMatch(/^recacct_[a-f0-9]{32}$/);
-    expect(defaults.preference).toMatchObject({ mode: 'off', timerSeconds: 120, targetBpm: 120 });
+    expect(defaults.preference).toMatchObject({
+      mode: 'off',
+      timerSeconds: 600,
+      targetBpm: 120,
+      minimumSeconds: 60,
+      maximumSeconds: 600,
+    });
     expect(JSON.stringify(defaults)).not.toContain(athlete.user.id);
 
     const offFinish = Date.now();

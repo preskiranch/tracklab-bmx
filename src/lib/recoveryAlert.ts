@@ -68,9 +68,9 @@ export type RecoveryAlertDirective = Readonly<{
 
 export const defaultRecoveryAlertPreference: RecoveryAlertPreference = Object.freeze({
   mode: 'off',
-  timerSeconds: 120,
+  timerSeconds: 600,
   targetBpm: 120,
-  minimumSeconds: 30,
+  minimumSeconds: 60,
   maximumSeconds: 600,
   updatedAt: 0,
 });

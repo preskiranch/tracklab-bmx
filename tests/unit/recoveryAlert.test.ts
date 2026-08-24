@@ -10,6 +10,11 @@ import {
 
 describe('Recovery Alert domain', () => {
   it('supports Off, Timer, Heart Rate, and Smart with bounded account preferences', () => {
+    expect(defaultRecoveryAlertPreference).toMatchObject({
+      timerSeconds: 600,
+      minimumSeconds: 60,
+      maximumSeconds: 600,
+    });
     for (const mode of ['off', 'timer', 'heart-rate', 'smart'] as const) {
       expect(normalizeRecoveryAlertPreference({ mode }).mode).toBe(mode);
     }
@@ -92,7 +97,7 @@ describe('Recovery Alert domain', () => {
       effortSummary: { peakPowerWatts },
     });
     expect(planSmartRecovery(preference, [], {})).toMatchObject({
-      plannedSeconds: 120,
+      plannedSeconds: 600,
       confidence: 'fixed',
       learningEpisodeCount: 0,
       reason: 'smart-learning-fixed-fallback',

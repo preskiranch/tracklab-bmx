@@ -360,6 +360,11 @@ describe('Recovery Alert individual finish lifecycle', () => {
 
 describe('Recovery Alert status and setup UI', () => {
   it('edits whole minutes while preserving the seconds persistence contract', () => {
+    expect(recoveryDraftFromPreferences(null)).toMatchObject({
+      timerSeconds: 600,
+      minimumSeconds: 60,
+      maximumSeconds: 600,
+    });
     expect(recoverySecondsFromMinutes(1)).toBe(60);
     expect(recoverySecondsFromMinutes(7)).toBe(420);
     expect(recoverySecondsFromMinutes(31)).toBe(1_800);
@@ -383,6 +388,11 @@ describe('Recovery Alert status and setup UI', () => {
       timerSeconds: 120,
       minimumSeconds: 60,
       maximumSeconds: 660,
+    });
+
+    expect(recoveryDraftFromPreferences(preference)).toMatchObject({
+      timerSeconds: 120,
+      maximumSeconds: 600,
     });
   });
 
@@ -465,6 +475,10 @@ describe('Recovery Alert status and setup UI', () => {
     expect(setup).toContain('aria-label="Earliest alert in minutes"');
     expect(setup).toContain('aria-label="Timer backup in minutes"');
     expect(setup).toContain('step="1"');
+    expect(setup).toContain('Decrease Starting recovery time by 1 minute');
+    expect(setup).toContain('Increase Starting recovery time by 1 minute');
+    expect(setup).toContain('Decrease Earliest alert by 1 minute');
+    expect(setup).toContain('Increase Timer backup by 1 minute');
     expect(setup).toContain('>MIN</b>');
     expect(setup).not.toContain('Custom seconds');
     expect(setup).toContain('Ready heart rate');
@@ -496,6 +510,7 @@ describe('Recovery Alert status and setup UI', () => {
   it('keeps controls touch-sized and responsive on iPhone and iPad', () => {
     const css = readFileSync(new URL('../../src/components/RecoveryAlertCard.css', import.meta.url), 'utf8');
     expect(css).toContain('min-height: 44px');
+    expect(css).toContain('grid-template-columns: 44px minmax(0, 1fr) 44px');
     expect(css).toContain('@media (max-width: 720px)');
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
     expect(css).toContain('width: 100%');

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const iphonePortrait = { width: 390, height: 844 };
 
@@ -45,9 +45,9 @@ async function mockSignedInRacer(page: Page, activeRecoveryEpisode: Record<strin
   const recoveryAccountId = `recacct_${'a'.repeat(32)}`;
   let recoveryPreference = {
     mode: 'off',
-    timerSeconds: 120,
+    timerSeconds: 600,
     targetBpm: 115,
-    minimumSeconds: 30,
+    minimumSeconds: 60,
     maximumSeconds: 600,
     updatedAt: now,
   };
@@ -86,6 +86,76 @@ async function openSignedInApp(page: Page) {
   await openApp.or(primaryNavigation).first().waitFor({ state: 'visible', timeout: 15_000 });
   if (await openApp.isVisible()) await openApp.click();
   await expect(primaryNavigation).toBeVisible();
+}
+
+async function replaceMinuteValue(field: Locator, value: string) {
+  await field.selectText();
+  await field.press('Backspace');
+  await expect(field).toHaveValue('');
+  await field.pressSequentially(value);
+  await expect(field).toHaveValue(value);
+}
+
+async function exerciseRecoveryMinuteField({
+  card,
+  field,
+  label,
+  initialMinutes,
+  customMinutes,
+  minimumMinutes,
+  maximumMinutes,
+}: {
+  card: Locator;
+  field: Locator;
+  label: string;
+  initialMinutes: number;
+  customMinutes: number;
+  minimumMinutes: number;
+  maximumMinutes: number;
+}) {
+  const decrease = card.getByRole('button', {
+    name: `Decrease ${label} by 1 minute`,
+    exact: true,
+  });
+  const increase = card.getByRole('button', {
+    name: `Increase ${label} by 1 minute`,
+    exact: true,
+  });
+  const save = card.getByRole('button', { name: 'Save Recovery Alert' });
+
+  await expect(field).toHaveValue(String(initialMinutes));
+  await expect(field).toHaveAttribute('step', '1');
+  await expect(decrease).toBeVisible();
+  await expect(increase).toBeVisible();
+
+  if (initialMinutes === minimumMinutes) {
+    await expect(decrease).toBeDisabled();
+    await increase.click();
+    await expect(field).toHaveValue(String(initialMinutes + 1));
+    await decrease.click();
+  } else {
+    await decrease.click();
+    await expect(field).toHaveValue(String(initialMinutes - 1));
+    await increase.click();
+  }
+  await expect(field).toHaveValue(String(initialMinutes));
+
+  await field.press('ArrowUp');
+  await expect(field).toHaveValue(String(initialMinutes + 1));
+  await field.press('ArrowDown');
+  await expect(field).toHaveValue(String(initialMinutes));
+
+  await field.selectText();
+  await field.press('Backspace');
+  await expect(field).toHaveValue('');
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  await expect(save).toBeDisabled();
+  await field.pressSequentially(String(customMinutes));
+  await expect(field).toHaveValue(String(customMinutes));
+  await expect(field).toHaveAttribute('aria-invalid', 'false');
+  if (customMinutes === maximumMinutes) await expect(increase).toBeDisabled();
+
+  await replaceMinuteValue(field, String(initialMinutes));
 }
 
 test('iPhone portrait shell is fixed-width with readable navigation and headers', async ({ page }) => {
@@ -182,7 +252,7 @@ test('Recovery Alert stays simple, readable, and available in all three sprint p
   await expect(recoveryMinutes).toHaveAttribute('aria-invalid', 'true');
   await expect(card.getByRole('button', { name: 'Save Recovery Alert' })).toBeDisabled();
   await recoveryMinutes.blur();
-  await expect(recoveryMinutes).toHaveValue('2');
+  await expect(recoveryMinutes).toHaveValue('10');
   await expect(recoveryMinutes).toHaveAttribute('aria-invalid', 'false');
   expect(savedTimerSeconds).toBeUndefined();
   await recoveryMinutes.selectText();
@@ -273,6 +343,123 @@ test('Recovery Alert stays simple, readable, and available in all three sprint p
   expect(ipadLayout.documentFits).toBe(true);
   expect(ipadLayout.cardFits).toBe(true);
   expect(ipadLayout.smallestButton).toBeGreaterThanOrEqual(44);
+});
+
+test('all Recovery minute controls default safely and accept exact one-minute edits', async ({ page }) => {
+  await page.setViewportSize(iphonePortrait);
+  await mockSignedInRacer(page);
+  let recoverySaveCount = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'PATCH' && request.url().endsWith('/preferences')) {
+      recoverySaveCount += 1;
+    }
+  });
+  await page.goto('/?track=oak-creek-bmx');
+  await openSignedInApp(page);
+
+  const card = page.getByRole('region', { name: 'Recovery Alert' });
+  await card.getByRole('button', { name: 'Timer', exact: true }).click();
+  const recoveryTime = card.getByLabel('Recovery time in minutes', { exact: true });
+  await exerciseRecoveryMinuteField({
+    card,
+    field: recoveryTime,
+    label: 'Recovery time',
+    initialMinutes: 10,
+    customMinutes: 12,
+    minimumMinutes: 1,
+    maximumMinutes: 30,
+  });
+
+  await card.getByRole('button', { name: 'Heart Rate', exact: true }).click();
+  const heartRateBackup = card.getByLabel('Timer backup in minutes', { exact: true });
+  const heartRateEarliest = card.getByLabel('Earliest alert in minutes', { exact: true });
+  await expect(heartRateBackup).toHaveValue('10');
+  await expect(heartRateEarliest).toHaveValue('1');
+  await exerciseRecoveryMinuteField({
+    card,
+    field: heartRateBackup,
+    label: 'Timer backup',
+    initialMinutes: 10,
+    customMinutes: 12,
+    minimumMinutes: 1,
+    maximumMinutes: 30,
+  });
+  await exerciseRecoveryMinuteField({
+    card,
+    field: heartRateEarliest,
+    label: 'Earliest alert',
+    initialMinutes: 1,
+    customMinutes: 10,
+    minimumMinutes: 1,
+    maximumMinutes: 10,
+  });
+
+  await replaceMinuteValue(heartRateEarliest, '7');
+  await replaceMinuteValue(heartRateBackup, '7');
+  await expect(card.getByRole('button', {
+    name: 'Decrease Timer backup by 1 minute',
+    exact: true,
+  })).toBeDisabled();
+  await replaceMinuteValue(heartRateEarliest, '1');
+  await replaceMinuteValue(heartRateBackup, '10');
+
+  await card.getByRole('button', { name: 'Smart', exact: true }).click();
+  const smartStarting = card.getByLabel('Starting recovery time in minutes', { exact: true });
+  const smartEarliest = card.getByLabel('Earliest alert in minutes', { exact: true });
+  const smartBackup = card.getByLabel('Timer backup in minutes', { exact: true });
+  await expect(smartStarting).toHaveValue('10');
+  await expect(smartEarliest).toHaveValue('1');
+  await expect(smartBackup).toHaveValue('10');
+  await exerciseRecoveryMinuteField({
+    card,
+    field: smartStarting,
+    label: 'Starting recovery time',
+    initialMinutes: 10,
+    customMinutes: 12,
+    minimumMinutes: 1,
+    maximumMinutes: 30,
+  });
+  await replaceMinuteValue(smartBackup, '10');
+  await exerciseRecoveryMinuteField({
+    card,
+    field: smartEarliest,
+    label: 'Earliest alert',
+    initialMinutes: 1,
+    customMinutes: 10,
+    minimumMinutes: 1,
+    maximumMinutes: 10,
+  });
+  await exerciseRecoveryMinuteField({
+    card,
+    field: smartBackup,
+    label: 'Timer backup',
+    initialMinutes: 10,
+    customMinutes: 12,
+    minimumMinutes: 10,
+    maximumMinutes: 30,
+  });
+
+  await card.getByRole('button', {
+    name: 'Increase Starting recovery time by 1 minute',
+    exact: true,
+  }).click();
+  await expect(smartStarting).toHaveValue('11');
+  await expect(smartBackup).toHaveValue('11');
+  await expect(card.getByRole('button', {
+    name: 'Decrease Timer backup by 1 minute',
+    exact: true,
+  })).toBeDisabled();
+
+  const layout = await card.evaluate((element) => ({
+    documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    cardFits: element.scrollWidth <= element.clientWidth,
+    minuteButtons: [...element.querySelectorAll<HTMLElement>('.recovery-alert-minute-controls button')]
+      .map((button) => button.getBoundingClientRect().height),
+  }));
+  expect(layout.documentFits).toBe(true);
+  expect(layout.cardFits).toBe(true);
+  expect(Math.min(...layout.minuteButtons)).toBeGreaterThanOrEqual(44);
+  expect(recoverySaveCount).toBe(0);
 });
 
 test('active Recovery Alert remains visible as a compact fullscreen cue', async ({ page }) => {

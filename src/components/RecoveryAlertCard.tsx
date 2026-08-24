@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   BellRing,
   Brain,
   Clock3,
   HeartPulse,
+  Minus,
   Plus,
   ShieldCheck,
   Square,
@@ -51,7 +52,7 @@ function finiteNumber(value: unknown, fallback: number) {
 
 export function recoveryMinutesFromSeconds(
   value: unknown,
-  fallbackSeconds = 120,
+  fallbackSeconds = 600,
   maximumMinutes = 30,
 ) {
   return Math.max(1, Math.min(
@@ -62,7 +63,7 @@ export function recoveryMinutesFromSeconds(
 
 export function recoverySecondsFromMinutes(
   value: unknown,
-  fallbackSeconds = 120,
+  fallbackSeconds = 600,
   minimumMinutes = 1,
   maximumMinutes = 30,
 ) {
@@ -87,7 +88,7 @@ export function recoverySecondsFromMinuteInput(
     : null;
 }
 
-function wholeMinuteRecoverySeconds(value: unknown, fallbackSeconds = 120, maximumMinutes = 30) {
+function wholeMinuteRecoverySeconds(value: unknown, fallbackSeconds = 600, maximumMinutes = 30) {
   return recoveryMinutesFromSeconds(value, fallbackSeconds, maximumMinutes) * 60;
 }
 
@@ -111,7 +112,7 @@ export function recoveryDraftFromPreferences(
   preferences: RecoveryAlertPreference | null,
 ): RecoveryAlertDraft {
   const mode = preferences?.mode ?? 'off';
-  const timerSeconds = wholeMinuteRecoverySeconds(preferences?.timerSeconds, 120);
+  const timerSeconds = wholeMinuteRecoverySeconds(preferences?.timerSeconds, 600);
   const minimumSeconds = wholeMinuteRecoverySeconds(preferences?.minimumSeconds, 60, 10);
   const maximumSeconds = wholeMinuteRecoverySeconds(preferences?.maximumSeconds, 600);
   return {
@@ -138,73 +139,120 @@ type RecoveryMinutesFieldProps = Readonly<{
 function RecoveryMinutesField({
   label,
   seconds,
-  fallbackSeconds = 120,
+  fallbackSeconds = 600,
   minimumMinutes = 1,
   maximumMinutes = 30,
   onChange,
   onValidityChange,
 }: RecoveryMinutesFieldProps) {
+  const inputId = useId();
   const committedMinutes = recoveryMinutesFromSeconds(seconds, fallbackSeconds, maximumMinutes);
   const [inputValue, setInputValue] = useState(String(committedMinutes));
+  const validityResetTimer = useRef<number | null>(null);
+  const cancelValidityReset = () => {
+    if (validityResetTimer.current == null) return;
+    window.clearTimeout(validityResetTimer.current);
+    validityResetTimer.current = null;
+  };
   useEffect(() => {
     setInputValue(String(committedMinutes));
     onValidityChange(label, true);
   }, [committedMinutes, label, onValidityChange]);
-  useEffect(() => () => onValidityChange(label, true), [label, onValidityChange]);
+  useEffect(() => () => {
+    if (validityResetTimer.current != null) window.clearTimeout(validityResetTimer.current);
+    onValidityChange(label, true);
+  }, [label, onValidityChange]);
   const inputValid = recoverySecondsFromMinuteInput(
     inputValue,
     minimumMinutes,
     maximumMinutes,
   ) != null;
+  const parsedMinutes = inputValid ? Number(inputValue) : committedMinutes;
+  const applyMinuteStep = (direction: -1 | 1) => {
+    cancelValidityReset();
+    const nextMinutes = Math.max(
+      minimumMinutes,
+      Math.min(maximumMinutes, parsedMinutes + direction),
+    );
+    const nextSeconds = nextMinutes * 60;
+    setInputValue(String(nextMinutes));
+    onValidityChange(label, true);
+    if (nextSeconds !== seconds) onChange(nextSeconds);
+  };
 
   return (
-    <label>
-      <span>{label}</span>
-      <span className="recovery-alert-input-unit">
-        <input
-          aria-label={`${label} in minutes`}
-          type="number"
-          inputMode="numeric"
-          min={minimumMinutes}
-          max={maximumMinutes}
-          step={1}
-          value={inputValue}
-          aria-invalid={!inputValid}
-          onChange={(event) => {
-            const value = event.target.value;
-            setInputValue(value);
-            const nextSeconds = recoverySecondsFromMinuteInput(
-              value,
-              minimumMinutes,
-              maximumMinutes,
-            );
-            onValidityChange(label, nextSeconds != null);
-            if (nextSeconds != null) onChange(nextSeconds);
-          }}
-          onBlur={() => {
-            const nextSeconds = recoverySecondsFromMinuteInput(
-              inputValue,
-              minimumMinutes,
-              maximumMinutes,
-            );
-            setInputValue(String(nextSeconds == null ? committedMinutes : nextSeconds / 60));
-            if (nextSeconds == null) {
-              setTimeout(() => onValidityChange(label, true), 0);
-            } else {
-              onValidityChange(label, true);
-              if (nextSeconds !== seconds) onChange(nextSeconds);
-            }
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              event.currentTarget.blur();
-            }
-          }}
-        />
-        <b>MIN</b>
-      </span>
-    </label>
+    <div className="recovery-alert-minute-field">
+      <label htmlFor={inputId}>{label}</label>
+      <div className="recovery-alert-minute-controls">
+        <button
+          type="button"
+          aria-label={`Decrease ${label} by 1 minute`}
+          disabled={inputValid && parsedMinutes <= minimumMinutes}
+          onClick={() => applyMinuteStep(-1)}
+        >
+          <Minus size={20} aria-hidden="true" />
+        </button>
+        <span className="recovery-alert-input-unit">
+          <input
+            id={inputId}
+            aria-label={`${label} in minutes`}
+            type="number"
+            inputMode="numeric"
+            min={minimumMinutes}
+            max={maximumMinutes}
+            step={1}
+            value={inputValue}
+            aria-invalid={!inputValid}
+            onFocus={cancelValidityReset}
+            onChange={(event) => {
+              cancelValidityReset();
+              const value = event.target.value;
+              setInputValue(value);
+              const nextSeconds = recoverySecondsFromMinuteInput(
+                value,
+                minimumMinutes,
+                maximumMinutes,
+              );
+              onValidityChange(label, nextSeconds != null);
+              if (nextSeconds != null) onChange(nextSeconds);
+            }}
+            onBlur={() => {
+              const nextSeconds = recoverySecondsFromMinuteInput(
+                inputValue,
+                minimumMinutes,
+                maximumMinutes,
+              );
+              setInputValue(String(nextSeconds == null ? committedMinutes : nextSeconds / 60));
+              if (nextSeconds == null) {
+                cancelValidityReset();
+                validityResetTimer.current = window.setTimeout(() => {
+                  validityResetTimer.current = null;
+                  onValidityChange(label, true);
+                }, 0);
+              } else {
+                onValidityChange(label, true);
+                if (nextSeconds !== seconds) onChange(nextSeconds);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
+          />
+          <b>MIN</b>
+        </span>
+        <button
+          type="button"
+          aria-label={`Increase ${label} by 1 minute`}
+          disabled={inputValid && parsedMinutes >= maximumMinutes}
+          onClick={() => applyMinuteStep(1)}
+        >
+          <Plus size={20} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
   );
 }
 
