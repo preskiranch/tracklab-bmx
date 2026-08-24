@@ -52,7 +52,7 @@ function finiteNumber(value: unknown, fallback: number) {
 
 export function recoveryMinutesFromSeconds(
   value: unknown,
-  fallbackSeconds = 600,
+  fallbackSeconds = 300,
   maximumMinutes = 30,
 ) {
   return Math.max(1, Math.min(
@@ -63,7 +63,7 @@ export function recoveryMinutesFromSeconds(
 
 export function recoverySecondsFromMinutes(
   value: unknown,
-  fallbackSeconds = 600,
+  fallbackSeconds = 300,
   minimumMinutes = 1,
   maximumMinutes = 30,
 ) {
@@ -88,7 +88,7 @@ export function recoverySecondsFromMinuteInput(
     : null;
 }
 
-function wholeMinuteRecoverySeconds(value: unknown, fallbackSeconds = 600, maximumMinutes = 30) {
+function wholeMinuteRecoverySeconds(value: unknown, fallbackSeconds = 300, maximumMinutes = 30) {
   return recoveryMinutesFromSeconds(value, fallbackSeconds, maximumMinutes) * 60;
 }
 
@@ -112,7 +112,7 @@ export function recoveryDraftFromPreferences(
   preferences: RecoveryAlertPreference | null,
 ): RecoveryAlertDraft {
   const mode = preferences?.mode ?? 'off';
-  const timerSeconds = wholeMinuteRecoverySeconds(preferences?.timerSeconds, 600);
+  const timerSeconds = wholeMinuteRecoverySeconds(preferences?.timerSeconds, 300);
   const minimumSeconds = wholeMinuteRecoverySeconds(preferences?.minimumSeconds, 60, 10);
   const maximumSeconds = wholeMinuteRecoverySeconds(preferences?.maximumSeconds, 600);
   return {
@@ -139,7 +139,7 @@ type RecoveryMinutesFieldProps = Readonly<{
 function RecoveryMinutesField({
   label,
   seconds,
-  fallbackSeconds = 600,
+  fallbackSeconds = 300,
   minimumMinutes = 1,
   maximumMinutes = 30,
   onChange,

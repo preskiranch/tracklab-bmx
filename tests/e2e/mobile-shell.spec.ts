@@ -45,7 +45,7 @@ async function mockSignedInRacer(page: Page, activeRecoveryEpisode: Record<strin
   const recoveryAccountId = `recacct_${'a'.repeat(32)}`;
   let recoveryPreference = {
     mode: 'off',
-    timerSeconds: 600,
+    timerSeconds: 300,
     targetBpm: 115,
     minimumSeconds: 60,
     maximumSeconds: 600,
@@ -252,7 +252,7 @@ test('Recovery Alert stays simple, readable, and available in all three sprint p
   await expect(recoveryMinutes).toHaveAttribute('aria-invalid', 'true');
   await expect(card.getByRole('button', { name: 'Save Recovery Alert' })).toBeDisabled();
   await recoveryMinutes.blur();
-  await expect(recoveryMinutes).toHaveValue('10');
+  await expect(recoveryMinutes).toHaveValue('5');
   await expect(recoveryMinutes).toHaveAttribute('aria-invalid', 'false');
   expect(savedTimerSeconds).toBeUndefined();
   await recoveryMinutes.selectText();
@@ -364,7 +364,7 @@ test('all Recovery minute controls default safely and accept exact one-minute ed
     card,
     field: recoveryTime,
     label: 'Recovery time',
-    initialMinutes: 10,
+    initialMinutes: 5,
     customMinutes: 12,
     minimumMinutes: 1,
     maximumMinutes: 30,
@@ -407,14 +407,14 @@ test('all Recovery minute controls default safely and accept exact one-minute ed
   const smartStarting = card.getByLabel('Starting recovery time in minutes', { exact: true });
   const smartEarliest = card.getByLabel('Earliest alert in minutes', { exact: true });
   const smartBackup = card.getByLabel('Timer backup in minutes', { exact: true });
-  await expect(smartStarting).toHaveValue('10');
+  await expect(smartStarting).toHaveValue('5');
   await expect(smartEarliest).toHaveValue('1');
   await expect(smartBackup).toHaveValue('10');
   await exerciseRecoveryMinuteField({
     card,
     field: smartStarting,
     label: 'Starting recovery time',
-    initialMinutes: 10,
+    initialMinutes: 5,
     customMinutes: 12,
     minimumMinutes: 1,
     maximumMinutes: 30,
@@ -435,16 +435,17 @@ test('all Recovery minute controls default safely and accept exact one-minute ed
     label: 'Timer backup',
     initialMinutes: 10,
     customMinutes: 12,
-    minimumMinutes: 10,
+    minimumMinutes: 5,
     maximumMinutes: 30,
   });
 
+  await replaceMinuteValue(smartBackup, '5');
   await card.getByRole('button', {
     name: 'Increase Starting recovery time by 1 minute',
     exact: true,
   }).click();
-  await expect(smartStarting).toHaveValue('11');
-  await expect(smartBackup).toHaveValue('11');
+  await expect(smartStarting).toHaveValue('6');
+  await expect(smartBackup).toHaveValue('6');
   await expect(card.getByRole('button', {
     name: 'Decrease Timer backup by 1 minute',
     exact: true,

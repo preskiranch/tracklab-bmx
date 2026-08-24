@@ -361,7 +361,7 @@ describe('Recovery Alert individual finish lifecycle', () => {
 describe('Recovery Alert status and setup UI', () => {
   it('edits whole minutes while preserving the seconds persistence contract', () => {
     expect(recoveryDraftFromPreferences(null)).toMatchObject({
-      timerSeconds: 600,
+      timerSeconds: 300,
       minimumSeconds: 60,
       maximumSeconds: 600,
     });

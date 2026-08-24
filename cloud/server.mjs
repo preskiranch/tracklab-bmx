@@ -3174,7 +3174,7 @@ const recoveryAlertModes = new Set(['off', 'timer', 'heart-rate', 'smart']);
 const recoveryAlertActivityTypes = new Set(['bmx-race', 'straight-sprint', 'get-pulled']);
 const recoveryAlertDefaultPreference = Object.freeze({
   mode: 'off',
-  timerSeconds: 600,
+  timerSeconds: 300,
   targetBpm: 120,
   minimumSeconds: 60,
   maximumSeconds: 600,

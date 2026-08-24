@@ -100,7 +100,7 @@ describe('private individual Recovery Alert API', () => {
     expect(defaults.accountId).toMatch(/^recacct_[a-f0-9]{32}$/);
     expect(defaults.preference).toMatchObject({
       mode: 'off',
-      timerSeconds: 600,
+      timerSeconds: 300,
       targetBpm: 120,
       minimumSeconds: 60,
       maximumSeconds: 600,
