@@ -154,6 +154,11 @@ test('iPhone portrait shell is fixed-width with readable navigation and headers'
 test('Recovery Alert stays simple, readable, and available in all three sprint programs', async ({ page }) => {
   await page.setViewportSize(iphonePortrait);
   await mockSignedInRacer(page);
+  let savedTimerSeconds: unknown;
+  page.on('request', (request) => {
+    if (request.method() !== 'PATCH' || !request.url().endsWith('/preferences')) return;
+    savedTimerSeconds = (request.postDataJSON() as Record<string, unknown>).timerSeconds;
+  });
   await page.goto('/?track=oak-creek-bmx');
   await openSignedInApp(page);
 
@@ -165,9 +170,12 @@ test('Recovery Alert stays simple, readable, and available in all three sprint p
   await expect(card.getByRole('button', { name: 'Smart', exact: true })).toBeVisible();
 
   await card.getByRole('button', { name: 'Timer', exact: true }).click();
-  await card.getByLabel('Recovery time').selectOption('60');
+  const recoveryMinutes = card.getByLabel('Recovery time in minutes', { exact: true });
+  await expect(recoveryMinutes).toHaveAttribute('step', '1');
+  await recoveryMinutes.fill('7');
   await card.getByRole('button', { name: 'Save Recovery Alert' }).click();
   await expect(card).toContainText('Saved for Race Intervals, Straight Sprint, and Get Pulled.');
+  await expect.poll(() => savedTimerSeconds).toBe(420);
 
   const layout = await card.evaluate((element) => ({
     documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,

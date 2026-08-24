@@ -10,9 +10,6 @@ import {
 } from 'lucide-react';
 import type { RecoveryAlertPreference, RecoveryEpisode, RecoveryMode } from '../lib/recoveryAlert';
 
-export const recoveryTimerPresetsSeconds = [60, 120, 180, 300] as const;
-export const smartRecoveryBackupPresetsSeconds = [300, 600, 900, 1800] as const;
-
 export type RecoveryAlertDraft = Readonly<{
   mode: RecoveryMode;
   timerSeconds: number;
@@ -51,37 +48,110 @@ function finiteNumber(value: unknown, fallback: number) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-export function clampRecoverySeconds(value: unknown, fallback = 120) {
-  return Math.max(30, Math.min(30 * 60, Math.round(finiteNumber(value, fallback))));
+export function recoveryMinutesFromSeconds(
+  value: unknown,
+  fallbackSeconds = 120,
+  maximumMinutes = 30,
+) {
+  return Math.max(1, Math.min(
+    maximumMinutes,
+    Math.ceil(finiteNumber(value, fallbackSeconds) / 60),
+  ));
+}
+
+export function recoverySecondsFromMinutes(
+  value: unknown,
+  fallbackSeconds = 120,
+  minimumMinutes = 1,
+  maximumMinutes = 30,
+) {
+  return Math.max(
+    minimumMinutes,
+    Math.min(maximumMinutes, Math.round(finiteNumber(
+      value,
+      recoveryMinutesFromSeconds(fallbackSeconds, fallbackSeconds, maximumMinutes),
+    ))),
+  ) * 60;
+}
+
+function wholeMinuteRecoverySeconds(value: unknown, fallbackSeconds = 120, maximumMinutes = 30) {
+  return recoveryMinutesFromSeconds(value, fallbackSeconds, maximumMinutes) * 60;
 }
 
 export function clampRecoveryTargetBpm(value: unknown, fallback = 115) {
   return Math.max(40, Math.min(220, Math.round(finiteNumber(value, fallback))));
 }
 
-export function smartRecoveryBackupSeconds(timerSeconds: number, currentBackupSeconds: number) {
-  const minimum = Math.max(
-    clampRecoverySeconds(timerSeconds),
-    clampRecoverySeconds(currentBackupSeconds, 600),
+export function smartRecoveryBackupSeconds(
+  timerSeconds: number,
+  currentBackupSeconds: number,
+  minimumSeconds = 60,
+) {
+  return Math.max(
+    wholeMinuteRecoverySeconds(timerSeconds),
+    wholeMinuteRecoverySeconds(currentBackupSeconds, 600),
+    wholeMinuteRecoverySeconds(minimumSeconds, 60, 10),
   );
-  return smartRecoveryBackupPresetsSeconds.find((seconds) => seconds >= minimum) ?? 1800;
 }
 
 export function recoveryDraftFromPreferences(
   preferences: RecoveryAlertPreference | null,
 ): RecoveryAlertDraft {
   const mode = preferences?.mode ?? 'off';
-  const timerSeconds = clampRecoverySeconds(preferences?.timerSeconds, 120);
-  const maximumSeconds = clampRecoverySeconds(preferences?.maximumSeconds, 600);
+  const timerSeconds = wholeMinuteRecoverySeconds(preferences?.timerSeconds, 120);
+  const minimumSeconds = wholeMinuteRecoverySeconds(preferences?.minimumSeconds, 60, 10);
+  const maximumSeconds = wholeMinuteRecoverySeconds(preferences?.maximumSeconds, 600);
   return {
     mode,
     timerSeconds,
     targetBpm: clampRecoveryTargetBpm(preferences?.targetBpm, 115),
-    minimumSeconds: clampRecoverySeconds(preferences?.minimumSeconds, 30),
+    minimumSeconds,
     maximumSeconds: mode === 'smart'
-      ? smartRecoveryBackupSeconds(timerSeconds, maximumSeconds)
-      : maximumSeconds,
+      ? smartRecoveryBackupSeconds(timerSeconds, maximumSeconds, minimumSeconds)
+      : Math.max(minimumSeconds, maximumSeconds),
   };
+}
+
+type RecoveryMinutesFieldProps = Readonly<{
+  label: string;
+  seconds: number;
+  fallbackSeconds?: number;
+  minimumMinutes?: number;
+  maximumMinutes?: number;
+  onChange: (seconds: number) => void;
+}>;
+
+function RecoveryMinutesField({
+  label,
+  seconds,
+  fallbackSeconds = 120,
+  minimumMinutes = 1,
+  maximumMinutes = 30,
+  onChange,
+}: RecoveryMinutesFieldProps) {
+  return (
+    <label>
+      <span>{label}</span>
+      <span className="recovery-alert-input-unit">
+        <input
+          aria-label={`${label} in minutes`}
+          type="number"
+          inputMode="numeric"
+          min={minimumMinutes}
+          max={maximumMinutes}
+          step={1}
+          value={recoveryMinutesFromSeconds(seconds, fallbackSeconds, maximumMinutes)}
+          onChange={(event) => onChange(recoverySecondsFromMinutes(
+            event.target.value,
+            fallbackSeconds,
+            minimumMinutes,
+            maximumMinutes,
+          ))}
+        />
+        <b>MIN</b>
+      </span>
+    </label>
+  );
 }
 
 function formatCountdown(totalSeconds: number) {
@@ -182,15 +252,20 @@ export function RecoveryAlertCard({
   onStop,
 }: RecoveryAlertCardProps) {
   const display = episode ? recoveryAlertDisplay(episode, now, latestHeartRate) : null;
-  const timerPreset = recoveryTimerPresetsSeconds.includes(
-    draft.timerSeconds as (typeof recoveryTimerPresetsSeconds)[number],
-  ) ? draft.timerSeconds : 'custom';
   const preferencesChanged = !savedPreferences
     || draft.mode !== savedPreferences.mode
-    || draft.timerSeconds !== savedPreferences.timerSeconds
-    || draft.targetBpm !== savedPreferences.targetBpm
-    || draft.minimumSeconds !== savedPreferences.minimumSeconds
-    || draft.maximumSeconds !== savedPreferences.maximumSeconds;
+    || (draft.mode === 'timer' && draft.timerSeconds !== savedPreferences.timerSeconds)
+    || (draft.mode === 'heart-rate' && (
+      draft.targetBpm !== savedPreferences.targetBpm
+      || draft.minimumSeconds !== savedPreferences.minimumSeconds
+      || draft.maximumSeconds !== savedPreferences.maximumSeconds
+    ))
+    || (draft.mode === 'smart' && (
+      draft.timerSeconds !== savedPreferences.timerSeconds
+      || draft.targetBpm !== savedPreferences.targetBpm
+      || draft.minimumSeconds !== savedPreferences.minimumSeconds
+      || draft.maximumSeconds !== savedPreferences.maximumSeconds
+    ));
 
   return (
     <section className={`recovery-alert-card${episode ? ' has-active' : ''}${display?.ready ? ' is-ready' : ''}`} aria-label="Recovery Alert">
@@ -242,7 +317,11 @@ export function RecoveryAlertCard({
                   ...draft,
                   mode,
                   maximumSeconds: mode === 'smart'
-                    ? smartRecoveryBackupSeconds(draft.timerSeconds, draft.maximumSeconds)
+                    ? smartRecoveryBackupSeconds(
+                      draft.timerSeconds,
+                      draft.maximumSeconds,
+                      draft.minimumSeconds,
+                    )
                     : draft.maximumSeconds,
                 })}
               >
@@ -253,42 +332,11 @@ export function RecoveryAlertCard({
 
           {draft.mode === 'timer' && (
             <div className="recovery-alert-fields">
-              <label>
-                <span>Recovery time</span>
-                <select
-                  value={timerPreset}
-                  onChange={(event) => {
-                    if (event.target.value === 'custom') {
-                      onDraftChange({ ...draft, timerSeconds: 90 });
-                      return;
-                    }
-                    onDraftChange({ ...draft, timerSeconds: clampRecoverySeconds(event.target.value) });
-                  }}
-                >
-                  <option value={60}>1 minute</option>
-                  <option value={120}>2 minutes</option>
-                  <option value={180}>3 minutes</option>
-                  <option value={300}>5 minutes</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </label>
-              {timerPreset === 'custom' && (
-                <label>
-                  <span>Custom seconds</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={30}
-                    max={1800}
-                    step={15}
-                    value={draft.timerSeconds}
-                    onChange={(event) => onDraftChange({
-                      ...draft,
-                      timerSeconds: clampRecoverySeconds(event.target.value),
-                    })}
-                  />
-                </label>
-              )}
+              <RecoveryMinutesField
+                label="Recovery time"
+                seconds={draft.timerSeconds}
+                onChange={(timerSeconds) => onDraftChange({ ...draft, timerSeconds })}
+              />
             </div>
           )}
 
@@ -312,36 +360,24 @@ export function RecoveryAlertCard({
                   <b>BPM</b>
                 </span>
               </label>
-              <label>
-                <span>Timer backup</span>
-                <select
-                  value={draft.maximumSeconds}
-                  onChange={(event) => onDraftChange({
-                    ...draft,
-                    maximumSeconds: clampRecoverySeconds(event.target.value, 600),
-                  })}
-                >
-                  <option value={120}>2 minutes</option>
-                  <option value={180}>3 minutes</option>
-                  <option value={300}>5 minutes</option>
-                  <option value={600}>10 minutes</option>
-                  <option value={900}>15 minutes</option>
-                </select>
-              </label>
-              <label>
-                <span>Earliest alert</span>
-                <select
-                  value={draft.minimumSeconds}
-                  onChange={(event) => onDraftChange({
-                    ...draft,
-                    minimumSeconds: clampRecoverySeconds(event.target.value, 30),
-                  })}
-                >
-                  <option value={30}>30 seconds</option>
-                  <option value={60}>1 minute</option>
-                  <option value={120}>2 minutes</option>
-                </select>
-              </label>
+              <RecoveryMinutesField
+                label="Timer backup"
+                seconds={draft.maximumSeconds}
+                fallbackSeconds={600}
+                minimumMinutes={recoveryMinutesFromSeconds(draft.minimumSeconds, 60, 10)}
+                onChange={(maximumSeconds) => onDraftChange({ ...draft, maximumSeconds })}
+              />
+              <RecoveryMinutesField
+                label="Earliest alert"
+                seconds={draft.minimumSeconds}
+                fallbackSeconds={60}
+                maximumMinutes={10}
+                onChange={(minimumSeconds) => onDraftChange({
+                  ...draft,
+                  minimumSeconds,
+                  maximumSeconds: Math.max(draft.maximumSeconds, minimumSeconds),
+                })}
+              />
               <p className="recovery-alert-explainer">
                 <HeartPulse size={17} aria-hidden="true" /> Use a recovery target for this workout, not a medical resting-heart-rate measurement. TrackLab alerts after a fresh Watch reading holds the target for 12 seconds.
               </p>
@@ -350,55 +386,19 @@ export function RecoveryAlertCard({
 
           {draft.mode === 'smart' && (
             <div className="recovery-alert-fields">
-              <label>
-                <span>Starting recovery time</span>
-                <select
-                  value={timerPreset}
-                  onChange={(event) => {
-                    if (event.target.value === 'custom') {
-                      onDraftChange({
-                        ...draft,
-                        timerSeconds: 90,
-                        maximumSeconds: smartRecoveryBackupSeconds(90, draft.maximumSeconds),
-                      });
-                      return;
-                    }
-                    const timerSeconds = clampRecoverySeconds(event.target.value);
-                    onDraftChange({
-                      ...draft,
-                      timerSeconds,
-                      maximumSeconds: smartRecoveryBackupSeconds(timerSeconds, draft.maximumSeconds),
-                    });
-                  }}
-                >
-                  <option value={60}>1 minute</option>
-                  <option value={120}>2 minutes</option>
-                  <option value={180}>3 minutes</option>
-                  <option value={300}>5 minutes</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </label>
-              {timerPreset === 'custom' && (
-                <label>
-                  <span>Custom seconds</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={30}
-                    max={1800}
-                    step={15}
-                    value={draft.timerSeconds}
-                    onChange={(event) => {
-                      const timerSeconds = clampRecoverySeconds(event.target.value);
-                      onDraftChange({
-                        ...draft,
-                        timerSeconds,
-                        maximumSeconds: smartRecoveryBackupSeconds(timerSeconds, draft.maximumSeconds),
-                      });
-                    }}
-                  />
-                </label>
-              )}
+              <RecoveryMinutesField
+                label="Starting recovery time"
+                seconds={draft.timerSeconds}
+                onChange={(timerSeconds) => onDraftChange({
+                  ...draft,
+                  timerSeconds,
+                  maximumSeconds: smartRecoveryBackupSeconds(
+                    timerSeconds,
+                    draft.maximumSeconds,
+                    draft.minimumSeconds,
+                  ),
+                })}
+              />
               <label>
                 <span>Ready heart rate</span>
                 <span className="recovery-alert-input-unit">
@@ -417,36 +417,31 @@ export function RecoveryAlertCard({
                   <b>BPM</b>
                 </span>
               </label>
-              <label>
-                <span>Earliest alert</span>
-                <select
-                  value={draft.minimumSeconds}
-                  onChange={(event) => onDraftChange({
-                    ...draft,
-                    minimumSeconds: clampRecoverySeconds(event.target.value, 30),
-                  })}
-                >
-                  <option value={30}>30 seconds</option>
-                  <option value={60}>1 minute</option>
-                  <option value={120}>2 minutes</option>
-                </select>
-              </label>
-              <label>
-                <span>Timer backup</span>
-                <select
-                  value={draft.maximumSeconds}
-                  onChange={(event) => onDraftChange({
-                    ...draft,
-                    maximumSeconds: clampRecoverySeconds(event.target.value, 600),
-                  })}
-                >
-                  {smartRecoveryBackupPresetsSeconds.map((seconds) => (
-                    <option key={seconds} value={seconds} disabled={seconds < draft.timerSeconds}>
-                      {seconds / 60} minutes
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <RecoveryMinutesField
+                label="Earliest alert"
+                seconds={draft.minimumSeconds}
+                fallbackSeconds={60}
+                maximumMinutes={10}
+                onChange={(minimumSeconds) => onDraftChange({
+                  ...draft,
+                  minimumSeconds,
+                  maximumSeconds: smartRecoveryBackupSeconds(
+                    draft.timerSeconds,
+                    draft.maximumSeconds,
+                    minimumSeconds,
+                  ),
+                })}
+              />
+              <RecoveryMinutesField
+                label="Timer backup"
+                seconds={draft.maximumSeconds}
+                fallbackSeconds={600}
+                minimumMinutes={Math.max(
+                  recoveryMinutesFromSeconds(draft.timerSeconds),
+                  recoveryMinutesFromSeconds(draft.minimumSeconds, 60, 10),
+                )}
+                onChange={(maximumSeconds) => onDraftChange({ ...draft, maximumSeconds })}
+              />
               <p className="recovery-alert-explainer">
                 <Brain size={17} aria-hidden="true" /> Starts with your chosen recovery time, then learns from your private heart-rate recovery and sprint performance. Use a recovery target, not a medical resting-heart-rate measurement; TrackLab does not claim to measure breathing.
               </p>

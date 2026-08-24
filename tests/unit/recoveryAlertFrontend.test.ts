@@ -6,6 +6,8 @@ import {
   RecoveryAlertCard,
   recoveryAlertDisplay,
   recoveryDraftFromPreferences,
+  recoveryMinutesFromSeconds,
+  recoverySecondsFromMinutes,
   smartRecoveryBackupSeconds,
 } from '../../src/components/RecoveryAlertCard';
 import {
@@ -345,16 +347,62 @@ describe('Recovery Alert individual finish lifecycle', () => {
 });
 
 describe('Recovery Alert status and setup UI', () => {
-  it('keeps Smart starting time visible and never later than its timer backup', () => {
+  it('edits whole minutes while preserving the seconds persistence contract', () => {
+    expect(recoverySecondsFromMinutes(1)).toBe(60);
+    expect(recoverySecondsFromMinutes(7)).toBe(420);
+    expect(recoverySecondsFromMinutes(31)).toBe(1_800);
+    expect(recoverySecondsFromMinutes(-1)).toBe(60);
+    expect(recoveryMinutesFromSeconds(60)).toBe(1);
+    expect(recoveryMinutesFromSeconds(90)).toBe(2);
+    expect(recoveryMinutesFromSeconds(1_800)).toBe(30);
+    expect(recoveryMinutesFromSeconds(900, 60, 10)).toBe(10);
+
+    expect(recoveryDraftFromPreferences({
+      ...preference,
+      timerSeconds: 90,
+      minimumSeconds: 30,
+      maximumSeconds: 601,
+    })).toMatchObject({
+      timerSeconds: 120,
+      minimumSeconds: 60,
+      maximumSeconds: 660,
+    });
+  });
+
+  it('keeps Smart starting time and earliest alert no later than its timer backup', () => {
     expect(smartRecoveryBackupSeconds(120, 300)).toBe(300);
-    expect(smartRecoveryBackupSeconds(420, 300)).toBe(600);
-    expect(smartRecoveryBackupSeconds(1_200, 600)).toBe(1_800);
+    expect(smartRecoveryBackupSeconds(420, 300)).toBe(420);
+    expect(smartRecoveryBackupSeconds(1_200, 600)).toBe(1_200);
+    expect(smartRecoveryBackupSeconds(120, 300, 480)).toBe(480);
     expect(recoveryDraftFromPreferences({
       ...preference,
       mode: 'smart',
       timerSeconds: 900,
       maximumSeconds: 300,
     })).toMatchObject({ timerSeconds: 900, maximumSeconds: 900 });
+  });
+
+  it('offers to save rounded legacy active settings without dirtying an Off preference', () => {
+    const renderSetup = (savedPreferences: RecoveryAlertPreference) => renderToStaticMarkup(
+      createElement(RecoveryAlertCard, {
+        draft: recoveryDraftFromPreferences(savedPreferences),
+        savedPreferences,
+        episode: null,
+        latestHeartRate: null,
+        now: 10_000,
+        loading: false,
+        saving: false,
+        actionBusy: false,
+        message: '',
+        nativeAlertsAvailable: true,
+        ...emptyActions,
+      }),
+    );
+    const legacyHeartRate = renderSetup({ ...preference, mode: 'heart-rate', minimumSeconds: 30 });
+    expect(legacyHeartRate).toContain('<button class="primary" type="button">Save Recovery Alert</button>');
+
+    const off = renderSetup({ ...preference, mode: 'off', minimumSeconds: 30 });
+    expect(off).toContain('<button class="primary" type="button" disabled="">Save Off</button>');
   });
 
   it('uses the requested plain status labels', () => {
@@ -376,7 +424,7 @@ describe('Recovery Alert status and setup UI', () => {
     }), 100_000, null).status).toBe('Ready for next rep');
   });
 
-  it('shows simple modes, presets, Smart target, safeguards, and all manual controls', () => {
+  it('shows simple modes, whole-minute fields, Smart target, safeguards, and all manual controls', () => {
     const setup = renderToStaticMarkup(createElement(RecoveryAlertCard, {
       draft: { ...recoveryDraftFromPreferences(preference), mode: 'smart' },
       savedPreferences: preference,
@@ -396,6 +444,12 @@ describe('Recovery Alert status and setup UI', () => {
     expect(setup).toContain(' Heart Rate</button>');
     expect(setup).toContain(' Smart</button>');
     expect(setup).toContain('Starting recovery time');
+    expect(setup).toContain('aria-label="Starting recovery time in minutes"');
+    expect(setup).toContain('aria-label="Earliest alert in minutes"');
+    expect(setup).toContain('aria-label="Timer backup in minutes"');
+    expect(setup).toContain('step="1"');
+    expect(setup).toContain('>MIN</b>');
+    expect(setup).not.toContain('Custom seconds');
     expect(setup).toContain('Ready heart rate');
     expect(setup).toContain('recovery target, not a medical resting-heart-rate');
     expect(setup).toContain('does not claim to measure breathing');

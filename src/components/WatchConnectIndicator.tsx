@@ -10,7 +10,7 @@ export function WatchConnectIndicator({ state, onOpenSettings }: WatchConnectInd
   const accessibleLabel = `${state.label}. ${state.detail}${onOpenSettings
     ? ' Open Watch Connect settings.'
     : ''}`;
-  const cue = state.phase === 'live'
+  const cue = state.phase === 'live' || state.phase === 'connected'
     ? '✓'
     : state.phase === 'disconnected'
       ? '×'

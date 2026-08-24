@@ -13,6 +13,7 @@ import {
 export type WatchConnectIndicatorPhase =
   | 'checking'
   | 'connecting'
+  | 'connected'
   | 'live'
   | 'syncing'
   | 'disconnected';
@@ -79,10 +80,10 @@ function nativeMatchesConnection(
 }
 
 /**
- * A green indicator means an exact, freshness-bounded Watch sample is flowing
- * for this signed-in account. A four-hour server row alone is never called
- * live. The paired iPhone must also match native identity; an iPad is a
- * read-only observer of the same account-scoped cloud projection.
+ * `connected` describes the exact, unexpired Watch session; `live` additionally
+ * requires a freshness-bounded sample for this signed-in account. The paired
+ * iPhone must also match native identity; an iPad is a read-only observer of
+ * the same account-scoped cloud projection.
  */
 export function resolveWatchConnectIndicatorState({
   accountId,
@@ -130,14 +131,16 @@ export function resolveWatchConnectIndicatorState({
   const exactFreshEvent = Boolean(
     connection && watchConnectLiveEventIsFresh({ accountId, connection, event, now }),
   );
+  const exactActiveSession = Boolean(
+    cloudIdentityActive
+    && connection
+    && (readOnlyObserver || nativeMatchesConnection(native, connection)),
+  );
   // A fresh exact sample is stronger evidence than a cached `connecting` row.
   // This is common immediately after native start and on an iPad when SSE wins
   // the race with its next status snapshot.
   if (
-    cloudIdentityActive
-    && connection
-    && (readOnlyObserver || nativeMatchesConnection(native, connection))
-    && exactFreshEvent
+    exactActiveSession && exactFreshEvent
   ) {
     return state(
       'live',
@@ -173,25 +176,21 @@ export function resolveWatchConnectIndicatorState({
   if (busy) {
     return state('connecting', 'Watch connecting', 'Apple Watch is connecting.');
   }
+  if (exactActiveSession && (!readOnlyObserver || connection?.state === 'connected')) {
+    return state(
+      'connected',
+      'Watch connected',
+      readOnlyObserver
+        ? 'Connected through the paired iPhone. Waiting for a fresh heart rate reading.'
+        : 'Apple Watch is connected. Waiting for a fresh heart rate reading.',
+    );
+  }
   if (connection?.state === 'connecting') {
     return now - connection.connectedAt >= heartRateLiveFreshnessMs
       ? state('disconnected', 'Watch signal lost', 'No fresh Apple Watch reading.')
       : state('connecting', 'Watch connecting', 'Apple Watch is connecting.');
   }
-  const cloudActive = trusted
-    && connection?.state === 'connected'
-    && watchConnectRemainingMs(connection.connectedUntil, now) > 0;
-  if (!cloudActive || !connection) {
-    return state('disconnected', 'Watch disconnected', 'No live Apple Watch connection.');
-  }
-  if (!readOnlyObserver && !nativeMatchesConnection(native, connection)) {
-    return state('disconnected', 'Watch disconnected', 'The paired iPhone lost its Apple Watch connection.');
-  }
-  if (event?.sessionId === `watch-connect:${connection.id}`) {
-    return state('disconnected', 'Watch signal lost', 'No fresh Apple Watch reading.');
-  }
-  if (now - connection.connectedAt >= heartRateLiveFreshnessMs) {
-    return state('disconnected', 'Watch signal lost', 'No fresh Apple Watch reading.');
-  }
-  return state('connecting', 'Waiting for Watch', 'Waiting for the first fresh Apple Watch reading.');
+  return state('disconnected', 'Watch disconnected', readOnlyObserver
+    ? 'No live Apple Watch connection.'
+    : 'The paired iPhone lost its Apple Watch connection.');
 }

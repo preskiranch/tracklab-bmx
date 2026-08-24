@@ -2095,13 +2095,15 @@ input:focus {
   line-height: 1;
 }
 
-.watch-connect-indicator.live {
+.watch-connect-indicator.live,
+.watch-connect-indicator.connected {
   border-color: #71c955;
   background: #e5f8df;
   color: #176a33;
 }
 
-.watch-connect-indicator.live .watch-connect-indicator-icon {
+.watch-connect-indicator.live .watch-connect-indicator-icon,
+.watch-connect-indicator.connected .watch-connect-indicator-icon {
   background: #bff0af;
 }
 

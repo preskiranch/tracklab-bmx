@@ -44,7 +44,7 @@ async function openApp(page: Page) {
   if (await open.isVisible()) await open.click();
 }
 
-test('same-account iPad shows exact live Watch status, then turns red when the sample is stale', async ({ page }) => {
+test('same-account iPad separates an active Watch session from heart-rate freshness', async ({ page }) => {
   test.setTimeout(45_000);
   const user = signedInUser('ipad-watch-indicator', 'iPad Watch Rider');
   const connectionId = 'connection-ipad-live';
@@ -120,11 +120,12 @@ test('same-account iPad shows exact live Watch status, then turns red when the s
   await expect(indicator).toHaveAttribute('aria-label', /Live through the paired iPhone/);
   await expect.poll(async () => (await indicator.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
 
-  // The coordinator's one-second freshness clock must remove green without a
-  // page reload or a new cloud connection response.
+  // The stale sample is no longer usable, but the exact unexpired cloud session
+  // remains connected without a reload or a new connection response.
   await page.clock.fastForward(11_000);
-  await expect(indicator).toHaveAttribute('data-watch-connect-status', 'disconnected');
-  await expect(indicator).toContainText('Watch signal lost');
+  await expect(indicator).toHaveAttribute('data-watch-connect-status', 'connected');
+  await expect(indicator).toContainText('Watch connected');
+  await expect(indicator).toHaveAttribute('aria-label', /Waiting for a fresh heart rate reading/);
 
   sampleRecordedAt = clockNow + 11_000;
   await page.reload();

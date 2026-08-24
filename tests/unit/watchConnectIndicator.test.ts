@@ -77,14 +77,18 @@ function resolve(overrides: Partial<Parameters<typeof resolveWatchConnectIndicat
 }
 
 describe('global Watch Connect indicator', () => {
-  it('turns green only for an exact fresh account/session and exact paired-iPhone native identity', () => {
+  it('calls BPM live only for an exact fresh account/session and paired-iPhone identity', () => {
     expect(resolve()).toMatchObject({ phase: 'live', label: 'Watch live' });
     expect(resolve({ native: { ...native, connectionId: 'foreign' } })).toMatchObject({
       phase: 'disconnected',
       label: 'Watch disconnected',
     });
-    expect(resolve({ event: { ...event, riderId: 'account:athlete-two' } }).phase).not.toBe('live');
-    expect(resolve({ event: { ...event, sessionId: 'watch-connect:foreign' } }).phase).not.toBe('live');
+    expect(resolve({ event: { ...event, riderId: 'account:athlete-two' } })).toMatchObject({
+      phase: 'connected',
+    });
+    expect(resolve({ event: { ...event, sessionId: 'watch-connect:foreign' } })).toMatchObject({
+      phase: 'connected',
+    });
   });
 
   it('lets a same-account iPad observe exact fresh cloud state without gaining native controls', () => {
@@ -100,6 +104,31 @@ describe('global Watch Connect indicator', () => {
     })).toBe(false);
   });
 
+  it('keeps an exact active session connected while stale heart rate remains unusable', () => {
+    const staleEvent = { ...event, recordedAt: now - 10_001, freshUntil: now - 1 };
+    expect(resolve({ event: staleEvent })).toMatchObject({
+      phase: 'connected',
+      label: 'Watch connected',
+      detail: 'Apple Watch is connected. Waiting for a fresh heart rate reading.',
+    });
+    expect(resolve({ native: null, readOnlyObserver: true, event: staleEvent })).toMatchObject({
+      phase: 'connected',
+      label: 'Watch connected',
+      detail: 'Connected through the paired iPhone. Waiting for a fresh heart rate reading.',
+    });
+    expect(watchConnectLiveEventIsFresh({ accountId, connection, event: staleEvent, now }))
+      .toBe(false);
+    expect(resolve({
+      connection: { ...connection, connectedUntil: now },
+      native: { ...native, connectedUntil: now },
+      event: null,
+    })).toMatchObject({ phase: 'disconnected', label: 'Watch disconnected' });
+    expect(resolve({ enrollment: { ...enrollment, state: 'revoked' }, event: null }))
+      .toMatchObject({ phase: 'disconnected', label: 'Watch disconnected' });
+    expect(resolve({ hydratedAccountId: 'athlete-two', event: null }))
+      .toMatchObject({ phase: 'checking', label: 'Watch checking' });
+  });
+
   it('lets exact fresh evidence override a cached connecting row on iPhone and iPad', () => {
     const cachedConnecting = { ...connection, state: 'connecting' as const };
     expect(resolve({ connection: cachedConnecting })).toMatchObject({ phase: 'live' });
@@ -108,6 +137,10 @@ describe('global Watch Connect indicator', () => {
       native: null,
       readOnlyObserver: true,
     })).toMatchObject({ phase: 'live' });
+    expect(resolve({ connection: cachedConnecting, event: null })).toMatchObject({
+      phase: 'connected',
+      label: 'Watch connected',
+    });
   });
 
   it('lets definitive native stop and error states beat the last fresh event', () => {
@@ -179,15 +212,15 @@ describe('global Watch Connect indicator', () => {
     })).toMatchObject({ phase: 'connecting', label: 'Watch connecting' });
   });
 
-  it('uses amber only for a bounded first-sample wait, then red for stale signal or session end', () => {
+  it('separates an active session awaiting heart rate from connection attempts and ended sessions', () => {
     const justConnected = { ...connection, connectedAt: now - 5_000 };
     expect(resolve({ connection: justConnected, event: null })).toMatchObject({
-      phase: 'connecting',
-      label: 'Waiting for Watch',
+      phase: 'connected',
+      label: 'Watch connected',
     });
     expect(resolve({ event: null })).toMatchObject({
-      phase: 'disconnected',
-      label: 'Watch signal lost',
+      phase: 'connected',
+      label: 'Watch connected',
     });
     expect(resolve({
       connection: { ...connection, state: 'connecting' },
@@ -196,7 +229,7 @@ describe('global Watch Connect indicator', () => {
       event: null,
     })).toMatchObject({ phase: 'disconnected', label: 'Watch signal lost' });
     expect(resolve({ event: { ...event, recordedAt: now - 10_001, freshUntil: now - 1 } }))
-      .toMatchObject({ phase: 'disconnected', label: 'Watch signal lost' });
+      .toMatchObject({ phase: 'connected', label: 'Watch connected' });
     expect(resolve({ connection: { ...connection, state: 'stopped' } })).toMatchObject({
       phase: 'disconnected',
       label: 'Watch disconnected',
@@ -213,6 +246,15 @@ describe('global Watch Connect indicator', () => {
     expect(markup).toContain('✓');
     expect(markup).toContain('Open Watch Connect settings');
     expect(markup).toContain('aria-live="polite"');
+
+    const connectedMarkup = renderToStaticMarkup(createElement(WatchConnectIndicator, {
+      state: resolve({ event: null }),
+      onOpenSettings: vi.fn(),
+    }));
+    expect(connectedMarkup).toContain('data-watch-connect-status="connected"');
+    expect(connectedMarkup).toContain('Watch connected');
+    expect(connectedMarkup).toContain('Waiting for a fresh heart rate reading');
+    expect(connectedMarkup).toContain('✓');
   });
 
   it('renders fullscreen status without a navigation action', () => {
