@@ -347,6 +347,39 @@ describe('database migration runner', () => {
     expect(commands.at(-1)).toBe('SELECT pg_advisory_unlock(hashtext($1))');
   });
 
+  it('adds private per-account favorites and durable explicit-friend track shares', () => {
+    const trackSharingMigration = databaseMigrations().find((candidate) => candidate.version === 25);
+    const statements = trackSharingMigration?.statements.join('\n') ?? '';
+
+    expect(trackSharingMigration).toMatchObject({
+      version: 25,
+      name: 'add private track favorites and explicit friend track shares',
+    });
+    expect(statements).toContain('account_track_favorites');
+    expect(statements).toContain('PRIMARY KEY (user_id, track_id)');
+    expect(statements).toContain('account_track_shares');
+    expect(statements).toContain('UNIQUE (sender_user_id, recipient_user_id, track_id)');
+    expect(statements).toContain('CHECK (sender_user_id <> recipient_user_id)');
+    expect(statements).toContain("CHECK (jsonb_typeof(track_snapshot) = 'object')");
+    expect(statements).toContain('REFERENCES tracklab.auth_users(id) ON DELETE CASCADE');
+    expect(statements).toContain('idx_tracklab_account_track_favorites_recent');
+    expect(statements).toContain('idx_tracklab_account_track_shares_recipient_recent');
+  });
+
+  it('rolls back the complete track favorites and shares migration if any v25 statement fails', async () => {
+    const trackSharingMigration = databaseMigrations().find((candidate) => candidate.version === 25);
+    if (!trackSharingMigration) throw new Error('Track favorites migration is missing.');
+    const database = fakeDatabase({ failOn: 'idx_tracklab_account_track_shares_recipient_recent' });
+
+    await expect(runDatabaseMigrations(database.pool, { migrations: [trackSharingMigration] }))
+      .rejects.toThrow('simulated migration failure');
+
+    const commands = database.calls.map((call) => call.text);
+    expect(commands).toContain('ROLLBACK');
+    expect(commands.some((command) => command.startsWith('INSERT INTO tracklab.schema_migrations'))).toBe(false);
+    expect(commands.at(-1)).toBe('SELECT pg_advisory_unlock(hashtext($1))');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();

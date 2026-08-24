@@ -1504,6 +1504,40 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           WHERE ready_reason = 'heart-rate-target' AND cancelled_at IS NULL`,
       ],
     },
+    {
+      version: 25,
+      name: 'add private track favorites and explicit friend track shares',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.account_track_favorites (
+          user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          track_id TEXT NOT NULL CHECK (char_length(track_id) BETWEEN 1 AND 140),
+          track_snapshot JSONB NOT NULL CHECK (jsonb_typeof(track_snapshot) = 'object'),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (user_id, track_id)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_account_track_favorites_recent
+          ON ${schema}.account_track_favorites (user_id, created_at DESC, track_id)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.account_track_shares (
+          id TEXT PRIMARY KEY,
+          sender_user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          recipient_user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          track_id TEXT NOT NULL CHECK (char_length(track_id) BETWEEN 1 AND 140),
+          track_snapshot JSONB NOT NULL CHECK (jsonb_typeof(track_snapshot) = 'object'),
+          opened_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (sender_user_id, recipient_user_id, track_id),
+          CHECK (sender_user_id <> recipient_user_id),
+          CHECK (opened_at IS NULL OR opened_at >= created_at)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_account_track_shares_recipient_recent
+          ON ${schema}.account_track_shares (recipient_user_id, updated_at DESC, id)`,
+      ],
+    },
   ];
 }
 
