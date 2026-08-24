@@ -6811,6 +6811,7 @@ test('club athletes see only their own connection and never the studio roster', 
   const recordedMetrics = page.getByText(/Complete recorded metrics · 1 mapped pedal zone/);
   await expect(recordedMetrics).toBeVisible();
   await recordedMetrics.click();
+  await expect(page.getByText(/Rank 1 · Finish 8\.00s · 30 ft 1\.640s · Reaction 178 ms/)).toBeVisible();
   await expect(page.getByText('First straight drive', { exact: true })).toBeVisible();
   await expect(page.getByText(/Entry\/exit\/duration: 110 ms \/ 490 ms \/ 380 ms/)).toBeVisible();
   await expect(page.getByText(/Cadence avg\/top: 169.5 \/ 181.0 rpm/)).toBeVisible();

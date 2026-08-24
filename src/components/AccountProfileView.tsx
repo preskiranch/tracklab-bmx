@@ -201,7 +201,7 @@ function summarizeSession(session: TrainingSession, distanceUnit: DistanceUnit) 
     ? `${formatDistanceMeters(details.sprintDistanceFeet * 0.3048, distanceUnit)}${details.sprintAirSetting ? ` · Air ${details.sprintAirSetting}` : ''}`
     : '';
   const result = winner?.riderName
-    ? `${winner.riderName}${winner.finishTimeMs ? ` · ${(winner.finishTimeMs / 1_000).toFixed(2)}s` : ''}`
+    ? `${winner.riderName}${winner.finishTimeMs != null ? ` · ${formatProfileRaceTime(winner.finishTimeMs, 2)}` : ''}`
     : '';
   return [sprint, result].filter(Boolean).join(' · ');
 }
@@ -255,6 +255,10 @@ export function formatProfileRecordedDistanceRange(
 
 function recordedMilliseconds(value: number | null | undefined) {
   return value != null && Number.isFinite(value) ? `${Math.round(value)} ms` : '—';
+}
+
+export function formatProfileRaceTime(value: number | null | undefined, precision: 2 | 3) {
+  return value != null && Number.isFinite(value) ? `${(value / 1_000).toFixed(precision)}s` : '—';
 }
 
 function recordedSpeed(value: number | null | undefined, speedUnit: SpeedUnit) {
@@ -524,7 +528,7 @@ function CompleteRecordedMetrics({
           <div key={`summary-${summary.playerId}`} style={{ border: '1px solid #d0d5dd', borderRadius: 8, display: 'grid', gap: 2, padding: 8 }}>
             <strong>{summary.riderName ?? `Rider ${summary.playerId}`}</strong>
             <small>
-              Rank {summary.rank ?? '—'} · Finish {recordedMilliseconds(summary.finishTimeMs)} · {profileSplitDistanceLabel(distanceUnit)} {recordedMilliseconds(summary.thirtyFootTimeMs)} · Reaction {recordedMilliseconds(reactionTimes[String(summary.playerId)])}
+              Rank {summary.rank ?? '—'} · Finish {formatProfileRaceTime(summary.finishTimeMs, 2)} · {profileSplitDistanceLabel(distanceUnit)} {formatProfileRaceTime(summary.thirtyFootTimeMs, 3)} · Reaction {recordedMilliseconds(reactionTimes[String(summary.playerId)])}
             </small>
             <small>Distance {formatProfileRecordedDistance(summary.distanceMeters, distanceUnit)} · {summary.sampleCount ?? 0} analysis points</small>
             <small>Speed avg/top: {recordedSpeed(summary.averageSpeedKph, speedUnit)} / {recordedSpeed(summary.topSpeedKph, speedUnit)}</small>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   displayedProfileSessionTitle,
+  formatProfileRaceTime,
   formatProfileExploreDistance,
   formatProfileHistoryDistance,
   formatProfileRecordedDistance,
@@ -27,6 +28,13 @@ function sprintSession(): TrainingSession {
 }
 
 describe('account profile unit presentation', () => {
+  it('shows persisted millisecond race clocks with their established display precision', () => {
+    expect(formatProfileRaceTime(22_399, 2)).toBe('22.40s');
+    expect(formatProfileRaceTime(4_806, 3)).toBe('4.806s');
+    expect(formatProfileRaceTime(undefined, 2)).toBe('—');
+    expect(formatProfileRaceTime(Number.NaN, 3)).toBe('—');
+  });
+
   it('uses long units for accumulated and Explore distances', () => {
     expect(formatProfileHistoryDistance(2_414, 'ft')).toBe('1.50 mi');
     expect(formatProfileHistoryDistance(2_414, 'm')).toBe('2.41 km');
