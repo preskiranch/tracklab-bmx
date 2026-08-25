@@ -180,8 +180,8 @@
 .friend-profile-identity { align-items: center; display: flex; gap: 11px; min-width: 0; }
 .friend-profile-identity .rider-avatar { flex: 0 0 52px; font-size: 15px; height: 52px; width: 52px; }
 .friend-presence { display: inline-flex; position: relative; }
-.friend-presence::after { background: #98a2b3; border: 2px solid #fff; border-radius: 50%; bottom: 0; content: ''; height: 10px; position: absolute; right: 0; width: 10px; }
-.friend-presence.online::after { background: #54bd23; }
+.friend-presence::after { background: #98a2b3; border: 2px solid #fff; border-radius: 50%; bottom: 0; box-shadow: 0 0 0 1px rgb(16 24 40 / 8%); content: ''; height: 11px; position: absolute; right: 0; width: 11px; }
+.friend-presence.online::after { background: #54bd23; box-shadow: 0 0 0 1px #3a9517, 0 0 0 3px rgb(84 189 35 / 15%); }
 .friend-profile-name { display: grid; min-width: 0; }
 .friend-profile-name > span:not(.friend-name-row),
 .friend-profile-name small { color: #667085; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

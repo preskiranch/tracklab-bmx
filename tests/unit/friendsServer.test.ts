@@ -133,6 +133,12 @@ async function waitForFriendGraphEvent(stream: TestEventStream, timeoutMs = 3_00
   throw new Error('Timed out waiting for graph-invalidated.');
 }
 
+async function expectNoFriendGraphEvent(stream: TestEventStream, timeoutMs = 250) {
+  await expect(waitForFriendGraphEvent(stream, timeoutMs)).rejects.toThrow(
+    /Timed out waiting for graph-invalidated/,
+  );
+}
+
 function closeFriendEventStream(stream: TestEventStream) {
   stream.controller.abort();
   testEventStreams.delete(stream.controller);
@@ -184,6 +190,7 @@ beforeAll(async () => {
       DATABASE_URL: '',
       TRACKLAB_ADMIN_EMAILS: 'preskiranch@gmail.com,rasheen25@gmail.com',
       TRACKLAB_OFFICIAL_ACCOUNT_BOOTSTRAP_TOKEN: officialBootstrapToken,
+      TRACKLAB_FRIEND_PRESENCE_LEASE_MS: '2000',
       OPENAI_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -224,7 +231,7 @@ describe('authenticated Friends API', () => {
       },
     });
     const emptyFriends = await json(await request('/api/friends?limit=20', { cookie: alice.cookie }));
-    expect(emptyFriends).toEqual({ items: [], nextCursor: null, total: 0 });
+    expect(emptyFriends).toEqual({ items: [], nextCursor: null, total: 0, onlineTotal: 0 });
 
     const bob = await register('bob-friends@tracklab.test', 'Bob Rider');
     let response = await request('/api/friends/requests', {
@@ -512,7 +519,7 @@ describe('authenticated Friends API', () => {
       `/api/friends?limit=1&cursor=${encodeURIComponent(outOfRangeCursor)}`,
       { cookie: alice.cookie },
     ));
-    expect(outOfRangePage).toEqual({ items: [], nextCursor: null, total: 3 });
+    expect(outOfRangePage).toEqual({ items: [], nextCursor: null, total: 3, onlineTotal: 0 });
 
     expect((await request(`/api/friends/${club.user.id}`, {
       cookie: alice.cookie,
@@ -700,6 +707,384 @@ describe('authenticated Friends API', () => {
     expect(blocked.items.some((profile: any) => profile.id === charlie.user.id)).toBe(true);
     expect(JSON.stringify(blocked)).not.toMatch(/@gmail\.com|@tracklab\.test/);
   }, 30_000);
+
+  it('publishes privacy-safe official presence with exact totals and first/last-stream invalidations', async () => {
+    const rider = await register(
+      'official-presence-rider@tracklab.test',
+      'Official Presence Rider',
+      '198.51.100.81',
+    );
+    const clubCookie = await login('preskiranch@gmail.com');
+    const riderEvents = await openFriendEventStream(rider.cookie);
+
+    const initiallyOffline = await json(await request('/api/friends?limit=1', { cookie: rider.cookie }));
+    expect(initiallyOffline.onlineTotal).toBe(0);
+    expect(initiallyOffline.items).toHaveLength(1);
+    expect(initiallyOffline.items[0]).toMatchObject({
+      officialKind: expect.stringMatching(/club|founder/),
+      online: false,
+    });
+
+    const clubEventsA = await openFriendEventStream(clubCookie);
+    expect(await waitForFriendGraphEvent(riderEvents)).toEqual({
+      block: 'event: graph-invalidated\ndata: {}',
+      data: {},
+    });
+
+    const clubOnline = await json(await request('/api/friends?limit=20', { cookie: rider.cookie }));
+    expect(clubOnline.onlineTotal).toBe(1);
+    expect(clubOnline.items).toContainEqual(expect.objectContaining({
+      officialKind: 'club',
+      online: true,
+    }));
+
+    // Presence on an auto-added official edge is intentionally asymmetric:
+    // the public club may be visible, but it cannot monitor an ordinary rider.
+    const clubView = await json(await request('/api/friends?limit=50', { cookie: clubCookie }));
+    expect(clubView.items).toContainEqual(expect.objectContaining({
+      id: rider.user.id,
+      online: false,
+      available: false,
+    }));
+    expect(clubView.onlineTotal).toBe(0);
+
+    // Opening a second tab for the already-online club must not cause a second
+    // presence transition or inflate the account-level total.
+    const noSecondConnectEvent = await openFriendEventStream(rider.cookie);
+    const clubEventsB = await openFriendEventStream(clubCookie);
+    await expectNoFriendGraphEvent(noSecondConnectEvent);
+    closeFriendEventStream(noSecondConnectEvent);
+    expect((await json(await request('/api/friends?limit=20', { cookie: rider.cookie }))).onlineTotal).toBe(1);
+
+    const noFirstCloseEvent = await openFriendEventStream(rider.cookie);
+    closeFriendEventStream(clubEventsA);
+    await expectNoFriendGraphEvent(noFirstCloseEvent);
+    closeFriendEventStream(noFirstCloseEvent);
+    expect((await json(await request('/api/friends?limit=20', { cookie: rider.cookie }))).onlineTotal).toBe(1);
+
+    closeFriendEventStream(clubEventsB);
+    expect(await waitForFriendGraphEvent(riderEvents)).toEqual({
+      block: 'event: graph-invalidated\ndata: {}',
+      data: {},
+    });
+    const finallyOffline = await json(await request('/api/friends?limit=20', { cookie: rider.cookie }));
+    expect(finallyOffline.onlineTotal).toBe(0);
+    expect(finallyOffline.items).toContainEqual(expect.objectContaining({
+      officialKind: 'club',
+      online: false,
+    }));
+
+    closeFriendEventStream(riderEvents);
+  }, 30_000);
+
+  it('retires only the exact club-owner presence session when enrolling a shared tablet', async () => {
+    const observer = await register(
+      'tablet-enrollment-presence@tracklab.test',
+      'Tablet Enrollment Observer',
+      '198.51.100.86',
+    );
+    const clubCookieA = await login('preskiranch@gmail.com');
+    const clubCookieB = await login('preskiranch@gmail.com');
+    const observerEvents = await openFriendEventStream(observer.cookie);
+    const clubEventsA = await openFriendEventStream(clubCookieA);
+    await waitForFriendGraphEvent(observerEvents);
+    const clubSocketA = await openTestSocket(clubCookieA);
+    const clubSocketAClosed = new Promise<void>((resolve) => {
+      clubSocketA.socket.once('close', () => resolve());
+    });
+    const clubEventsB = await openFriendEventStream(clubCookieB);
+
+    const noFirstEnrollmentOffline = await openFriendEventStream(observer.cookie);
+    const firstEnrollment = await request('/api/club-tablet/devices', {
+      cookie: clubCookieA,
+      method: 'POST',
+      body: { name: 'Presence Tablet A' },
+    });
+    expect(firstEnrollment.status).toBe(201);
+    await clubSocketAClosed;
+    testSockets.delete(clubSocketA.socket);
+    await expectNoFriendGraphEvent(noFirstEnrollmentOffline);
+    closeFriendEventStream(noFirstEnrollmentOffline);
+    expect((await request('/api/friends', { cookie: clubCookieA })).status).toBe(401);
+    expect((await request('/api/friends', { cookie: clubCookieB })).status).toBe(200);
+    expect((await json(await request('/api/friends?limit=20', {
+      cookie: observer.cookie,
+    }))).onlineTotal).toBe(1);
+
+    const secondEnrollment = await request('/api/club-tablet/devices', {
+      cookie: clubCookieB,
+      method: 'POST',
+      body: { name: 'Presence Tablet B' },
+    });
+    expect(secondEnrollment.status).toBe(201);
+    await waitForFriendGraphEvent(observerEvents);
+    expect((await json(await request('/api/friends?limit=20', {
+      cookie: observer.cookie,
+    }))).onlineTotal).toBe(0);
+
+    closeFriendEventStream(observerEvents);
+    closeFriendEventStream(clubEventsA);
+    closeFriendEventStream(clubEventsB);
+  }, 30_000);
+
+  it('keeps explicit friends online across devices and makes logout session-scoped', async () => {
+    const riderA = await register(
+      'presence-session-a@tracklab.test',
+      'Presence Session A',
+      '198.51.100.82',
+    );
+    const riderB = await register(
+      'presence-session-b@tracklab.test',
+      'Presence Session B',
+      '198.51.100.83',
+    );
+    expect((await request('/api/friends/privacy', {
+      cookie: riderB.cookie,
+      method: 'PATCH',
+      body: { discoverable: true },
+    })).status).toBe(200);
+    const requestId = '88888888-8888-4888-8888-888888888888';
+    expect((await request('/api/friends/requests', {
+      cookie: riderA.cookie,
+      method: 'POST',
+      body: { profileId: riderB.user.id, clientRequestId: requestId },
+    })).status).toBe(201);
+    expect((await request(`/api/friends/requests/${requestId}/accept`, {
+      cookie: riderB.cookie,
+      method: 'POST',
+    })).status).toBe(200);
+
+    const riderAEvents = await openFriendEventStream(riderA.cookie);
+    const riderBEventsA = await openFriendEventStream(riderB.cookie);
+    await waitForFriendGraphEvent(riderAEvents);
+    let riderAFriends = await json(await request('/api/friends?q=Presence%20Session%20B', {
+      cookie: riderA.cookie,
+    }));
+    expect(riderAFriends).toMatchObject({
+      onlineTotal: 1,
+      total: 1,
+      items: [expect.objectContaining({ id: riderB.user.id, online: true })],
+    });
+
+    // SSE and multiplayer are a union. Adding the socket while SSE is live,
+    // then closing SSE while the socket remains, creates no false transition.
+    const noSocketUnionEvent = await openFriendEventStream(riderA.cookie);
+    const riderBFirstSessionSocket = await openTestSocket(riderB.cookie);
+    await expectNoFriendGraphEvent(noSocketUnionEvent);
+    closeFriendEventStream(noSocketUnionEvent);
+    const noSseUnionCloseEvent = await openFriendEventStream(riderA.cookie);
+    closeFriendEventStream(riderBEventsA);
+    await expectNoFriendGraphEvent(noSseUnionCloseEvent);
+    closeFriendEventStream(noSseUnionCloseEvent);
+    riderAFriends = await json(await request('/api/friends?q=Presence%20Session%20B', {
+      cookie: riderA.cookie,
+    }));
+    expect(riderAFriends.onlineTotal).toBe(1);
+    expect(riderAFriends.items[0]).toMatchObject({ id: riderB.user.id, online: true });
+
+    const riderBSecondCookie = await login('presence-session-b@tracklab.test');
+    const noSecondDeviceEvent = await openFriendEventStream(riderA.cookie);
+    const riderBEventsB = await openFriendEventStream(riderBSecondCookie);
+    await expectNoFriendGraphEvent(noSecondDeviceEvent);
+    closeFriendEventStream(noSecondDeviceEvent);
+
+    const noFirstLogoutEvent = await openFriendEventStream(riderA.cookie);
+    expect((await request('/api/auth/logout', {
+      cookie: riderB.cookie,
+      method: 'POST',
+    })).status).toBe(200);
+    await expectNoFriendGraphEvent(noFirstLogoutEvent);
+    closeFriendEventStream(noFirstLogoutEvent);
+    riderAFriends = await json(await request('/api/friends?q=Presence%20Session%20B', {
+      cookie: riderA.cookie,
+    }));
+    expect(riderAFriends.onlineTotal).toBe(1);
+    expect(riderAFriends.items[0]).toMatchObject({ id: riderB.user.id, online: true });
+
+    expect((await request('/api/auth/logout', {
+      cookie: riderBSecondCookie,
+      method: 'POST',
+    })).status).toBe(200);
+    await waitForFriendGraphEvent(riderAEvents);
+    riderAFriends = await json(await request('/api/friends?q=Presence%20Session%20B', {
+      cookie: riderA.cookie,
+    }));
+    expect(riderAFriends.onlineTotal).toBe(0);
+    expect(riderAFriends.items[0]).toMatchObject({ id: riderB.user.id, online: false });
+    testSockets.delete(riderBFirstSessionSocket.socket);
+
+    // A personal-account multiplayer socket is also a live-presence source,
+    // even when the rider does not currently have the Friends view open.
+    const riderBWebSocketCookie = await login('presence-session-b@tracklab.test');
+    const riderBSocket = await openTestSocket(riderBWebSocketCookie);
+    await waitForFriendGraphEvent(riderAEvents);
+    riderAFriends = await json(await request('/api/friends?q=Presence%20Session%20B', {
+      cookie: riderA.cookie,
+    }));
+    expect(riderAFriends.onlineTotal).toBe(1);
+    expect(riderAFriends.items[0]).toMatchObject({ id: riderB.user.id, online: true });
+    riderBSocket.socket.close();
+    await waitForFriendGraphEvent(riderAEvents);
+    riderAFriends = await json(await request('/api/friends?q=Presence%20Session%20B', {
+      cookie: riderA.cookie,
+    }));
+    expect(riderAFriends.onlineTotal).toBe(0);
+    expect(riderAFriends.items[0]).toMatchObject({ id: riderB.user.id, online: false });
+    testSockets.delete(riderBSocket.socket);
+
+    closeFriendEventStream(riderAEvents);
+    closeFriendEventStream(riderBEventsA);
+    closeFriendEventStream(riderBEventsB);
+  }, 30_000);
+
+  it('bounds half-open SSE presence with a renewable authenticated lease', async () => {
+    const riderA = await register(
+      'presence-lease-a@tracklab.test',
+      'Presence Lease A',
+      '198.51.100.84',
+    );
+    const riderB = await register(
+      'presence-lease-b@tracklab.test',
+      'Presence Lease B',
+      '198.51.100.85',
+    );
+    expect((await request('/api/friends/privacy', {
+      cookie: riderB.cookie,
+      method: 'PATCH',
+      body: { discoverable: true },
+    })).status).toBe(200);
+    const requestId = '99999999-9999-4999-8999-999999999999';
+    expect((await request('/api/friends/requests', {
+      cookie: riderA.cookie,
+      method: 'POST',
+      body: { profileId: riderB.user.id, clientRequestId: requestId },
+    })).status).toBe(201);
+    expect((await request(`/api/friends/requests/${requestId}/accept`, {
+      cookie: riderB.cookie,
+      method: 'POST',
+    })).status).toBe(200);
+
+    const riderAEvents = await openFriendEventStream(riderA.cookie);
+    const riderBEventsA = await openFriendEventStream(riderB.cookie);
+    await waitForFriendGraphEvent(riderAEvents);
+    expect((await json(await request('/api/friends?q=Presence%20Lease%20B', {
+      cookie: riderA.cookie,
+    }))).onlineTotal).toBe(1);
+
+    const riderBSecondCookie = await login('presence-lease-b@tracklab.test');
+    const riderBEventsB = await openFriendEventStream(riderBSecondCookie);
+
+    // A normal authenticated Friends poll renews only that exact login
+    // session. It must not extend an abandoned stream from another device.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect((await request('/api/friends?limit=1', { cookie: riderBSecondCookie })).status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect((await json(await request('/api/friends?q=Presence%20Lease%20B', {
+      cookie: riderA.cookie,
+    }))).onlineTotal).toBe(1);
+
+    const noFalseSessionExpiryEvent = await openFriendEventStream(riderA.cookie);
+    await expectNoFriendGraphEvent(noFalseSessionExpiryEvent);
+    closeFriendEventStream(noFalseSessionExpiryEvent);
+
+    // The active second session kept the account online, but once it closes,
+    // the expired first stream cannot keep the account falsely green.
+    closeFriendEventStream(riderBEventsB);
+    await waitForFriendGraphEvent(riderAEvents);
+    const expired = await json(await request('/api/friends?q=Presence%20Lease%20B', {
+      cookie: riderA.cookie,
+    }));
+    expect(expired.onlineTotal).toBe(0);
+    expect(expired.items[0]).toMatchObject({ id: riderB.user.id, online: false });
+
+    closeFriendEventStream(riderAEvents);
+    closeFriendEventStream(riderBEventsA);
+    closeFriendEventStream(riderBEventsB);
+  }, 30_000);
+
+  it('closes SSE and WebSocket presence at the exact authentication-session deadline', async () => {
+    const expiryPort = await availablePort();
+    const expiryBaseUrl = `http://127.0.0.1:${expiryPort}`;
+    const expiryChild = spawn(process.execPath, ['cloud/server.mjs'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PORT: String(expiryPort),
+        DATABASE_URL: '',
+        TRACKLAB_AUTH_SESSION_MAX_AGE_SECONDS: '1',
+        OPENAI_API_KEY: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let expirySocket: WebSocket | null = null;
+    let expiryReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    try {
+      const healthDeadline = Date.now() + 10_000;
+      while (Date.now() < healthDeadline) {
+        try {
+          if ((await fetch(`${expiryBaseUrl}/api/health`)).ok) break;
+        } catch {
+          // The short-lived server may still be binding its port.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const registration = await fetch(`${expiryBaseUrl}/api/auth/register`, {
+        method: 'POST',
+        headers: { Origin: expiryBaseUrl, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'presence-expiry@tracklab.test',
+          name: 'Presence Expiry',
+          password: 'friends-test-password',
+        }),
+      });
+      expect(registration.status).toBe(201);
+      const expiryCookie = String(registration.headers.get('set-cookie')).split(';')[0];
+      const eventResponse = await fetch(`${expiryBaseUrl}/api/friends/events`, {
+        headers: { Cookie: expiryCookie, Accept: 'text/event-stream' },
+      });
+      expect(eventResponse.status).toBe(200);
+      expiryReader = eventResponse.body!.getReader();
+      expect(new TextDecoder().decode((await expiryReader.read()).value)).toContain(': connected');
+
+      expirySocket = new WebSocket(`${expiryBaseUrl.replace(/^http/, 'ws')}/multiplayer`, {
+        headers: { Cookie: expiryCookie, Origin: expiryBaseUrl },
+      });
+      await new Promise<void>((resolve, reject) => {
+        expirySocket!.once('open', resolve);
+        expirySocket!.once('error', reject);
+      });
+      const socketClosed = new Promise<number>((resolve) => {
+        expirySocket!.once('close', (code) => resolve(code));
+      });
+      const streamEnded = (async () => {
+        while (true) {
+          const chunk = await expiryReader!.read();
+          if (chunk.done) return true;
+        }
+      })();
+      const timeout = new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error('Presence sources outlived the auth session.')), 3_000);
+      });
+      expect(await Promise.race([socketClosed, timeout])).toBe(1008);
+      await expect(Promise.race([streamEnded, timeout])).resolves.toBe(true);
+      expect((await fetch(`${expiryBaseUrl}/api/friends`, {
+        headers: { Cookie: expiryCookie },
+      })).status).toBe(401);
+    } finally {
+      expirySocket?.terminate();
+      await expiryReader?.cancel().catch(() => {});
+      if (expiryChild.exitCode == null) {
+        expiryChild.kill('SIGTERM');
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 2_000);
+          expiryChild.once('exit', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        });
+      }
+    }
+  }, 15_000);
 
   it('streams generic account invalidations to both affected riders with bounded connections', async () => {
     const riderA = await register('events-a@tracklab.test', 'Events Rider A', '198.51.100.61');

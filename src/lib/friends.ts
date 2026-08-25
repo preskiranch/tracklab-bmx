@@ -49,6 +49,7 @@ export type FriendPage<T> = {
   items: T[];
   nextCursor: string | null;
   total: number;
+  onlineTotal?: number;
 };
 
 export type FriendRequestPage = {
@@ -269,10 +270,12 @@ function normalizePage<T>(value: unknown, normalizeItem: (item: unknown) => T | 
     ? raw.items.map(normalizeItem).filter((item): item is T => item != null)
     : [];
   const nextCursor = cleanText(raw.nextCursor, 400) || null;
+  const total = Math.max(items.length, safeCount(raw.total));
   return {
     items,
     nextCursor,
-    total: Math.max(items.length, safeCount(raw.total)),
+    total,
+    onlineTotal: Math.min(total, safeCount(raw.onlineTotal)),
   };
 }
 

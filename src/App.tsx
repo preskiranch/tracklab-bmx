@@ -4,6 +4,7 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -226,7 +227,6 @@ import { normalizeRiderPhotoDataUrl } from './lib/riderPhotos';
 import { resolveExploreRecentRouteHistoryScope } from './lib/exploreRecentRoutes';
 import {
   clearQueuedFriendRequests,
-  createFriendsApi,
   subscribeToFriendNetworkEvents,
   type FriendGhostPreview,
   type FriendProfile,
@@ -425,21 +425,6 @@ const customRouteInitialZoom = 18;
 const customRouteInitialAngle = 0;
 const customRouteInitialHeading = 0;
 const connectedBikeDeviceTimeoutMs = 15000;
-const sideNavCountStyle: CSSProperties = {
-  display: 'inline-grid',
-  minWidth: 20,
-  height: 20,
-  marginLeft: 'auto',
-  padding: '0 6px',
-  placeItems: 'center',
-  borderRadius: 999,
-  background: '#e3524f',
-  color: '#fff',
-  fontSize: 10,
-  fontWeight: 900,
-  lineHeight: 1,
-};
-
 type BikeConnectionSource = 'bluetooth' | 'advanced' | 'demo';
 type CheckoutStatus = 'idle' | 'loading' | 'error';
 type SplitBranchId = TrackSplitBranch['id'];
@@ -1993,6 +1978,7 @@ export default function App() {
   }, [clubTrainingSelection?.clubId, clubTrainingSelection?.studioRiderId]);
 
   const [pendingFriendRequestCount, setPendingFriendRequestCount] = useState(0);
+  const [onlineFriendCount, setOnlineFriendCount] = useState(0);
   const [friendGraphRevision, setFriendGraphRevision] = useState(0);
   const [friendNetworkRefreshRevision, setFriendNetworkRefreshRevision] = useState(0);
   const friendCountRef = useRef<number | null>(null);
@@ -2078,7 +2064,6 @@ export default function App() {
   });
   const heartRateNativeSupported = heartRate.availability?.supported ?? null;
   const heartRateRelayStateReady = heartRate.relayState != null;
-  const friendsApi = useMemo(() => createFriendsApi(), [authUser?.id]);
   const handleLegacyRelaySuppressionChange = useCallback((suppressed: boolean) => {
     watchConnectSuppressLegacyRelayRef.current = suppressed;
   }, []);
@@ -2567,18 +2552,17 @@ export default function App() {
 
   useEffect(() => {
     if (!authUser || clubTabletKioskMode) {
-      setPendingFriendRequestCount(0);
-      friendCountRef.current = null;
       return undefined;
     }
 
     let cancelled = false;
     const refreshPendingRequests = () => {
       void loadFriendsView()
-        .then(({ preloadFriendsView }) => preloadFriendsView(authUser.id, friendsApi, true))
+        .then(({ preloadDefaultFriendsView }) => preloadDefaultFriendsView(authUser.id, true))
         .then(({ pendingTotal, friendPage }) => {
           if (cancelled) return;
           setPendingFriendRequestCount(pendingTotal);
+          setOnlineFriendCount(friendPage.onlineTotal ?? 0);
           if (friendCountRef.current != null && friendCountRef.current !== friendPage.total) {
             setFriendGraphRevision((current) => current + 1);
           }
@@ -2600,7 +2584,13 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.clearInterval(intervalId);
     };
-  }, [authUser, clubTabletKioskMode, friendNetworkRefreshRevision, friendsApi]);
+  }, [authUser, clubTabletKioskMode, friendNetworkRefreshRevision]);
+
+  useLayoutEffect(() => {
+    setPendingFriendRequestCount(0);
+    setOnlineFriendCount(0);
+    friendCountRef.current = null;
+  }, [authUser?.id, clubTabletKioskMode]);
 
   useEffect(() => {
     if (!authUser || clubTabletKioskMode) return undefined;
@@ -10945,8 +10935,16 @@ export default function App() {
             <UserPlus size={17} />
             Friends
             {pendingFriendRequestCount > 0 && (
-              <span className="side-nav-count" style={sideNavCountStyle} aria-label={`${pendingFriendRequestCount} new`}>
+              <span className="side-nav-count" aria-label={`${pendingFriendRequestCount} new`}>
                 {pendingFriendRequestCount > 99 ? '99+' : pendingFriendRequestCount}
+              </span>
+            )}
+            {onlineFriendCount > 0 && (
+              <span
+                className="friends-online"
+                aria-label={`${onlineFriendCount} friend${onlineFriendCount === 1 ? '' : 's'} online`}
+              >
+                {onlineFriendCount > 99 ? '99+' : onlineFriendCount}
               </span>
             )}
           </button>
@@ -11317,7 +11315,6 @@ export default function App() {
             <FriendsView
               key={authUser.id}
               currentProfileId={authUser.id}
-              api={friendsApi}
               distanceUnit={distanceUnit}
               refreshToken={friendNetworkRefreshRevision}
               onPendingCountChange={setPendingFriendRequestCount}

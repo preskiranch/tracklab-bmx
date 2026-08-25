@@ -87,6 +87,8 @@ const databaseRequired = process.env.TRACKLAB_REQUIRE_DATABASE === '1';
 const clients = new Map();
 const trainingHistoryStreams = new Map();
 const friendEventStreams = new Map();
+const friendEventStreamSessions = new WeakMap();
+const friendPresenceOnlineProfiles = new Set();
 const heartRateOwnerLiveStreams = new Map();
 const heartRateClubLiveStreams = new Map();
 const heartRateStreamWriteChains = new Map();
@@ -129,7 +131,24 @@ const latencyGoodMs = 90;
 const latencyOkMs = 180;
 const defaultAdminAccountEmail = 'preskiranch@gmail.com';
 const authCookieName = 'tracklab_session';
-const authSessionMaxAgeSeconds = 60 * 60 * 24 * 30;
+const configuredAuthSessionMaxAgeText = String(
+  process.env.TRACKLAB_AUTH_SESSION_MAX_AGE_SECONDS ?? '',
+).trim();
+const configuredAuthSessionMaxAgeSeconds = configuredAuthSessionMaxAgeText
+  ? Number(configuredAuthSessionMaxAgeText)
+  : Number.NaN;
+const authSessionMaxAgeSeconds = Number.isFinite(configuredAuthSessionMaxAgeSeconds)
+  ? Math.max(1, Math.min(60 * 60 * 24 * 30, Math.floor(configuredAuthSessionMaxAgeSeconds)))
+  : 60 * 60 * 24 * 30;
+const configuredFriendPresenceLeaseText = String(
+  process.env.TRACKLAB_FRIEND_PRESENCE_LEASE_MS ?? '',
+).trim();
+const configuredFriendPresenceLeaseMs = configuredFriendPresenceLeaseText
+  ? Number(configuredFriendPresenceLeaseText)
+  : Number.NaN;
+const friendPresenceLeaseMs = Number.isFinite(configuredFriendPresenceLeaseMs)
+  ? Math.max(100, Math.min(5 * 60 * 1000, Math.floor(configuredFriendPresenceLeaseMs)))
+  : 90_000;
 const authSessionTouchIntervalMs = 5 * 60 * 1000;
 // Friends and Watch status share a short, bounded personal-session cache so a
 // section change does not add another PostgreSQL round trip. Privileged and
@@ -854,6 +873,122 @@ function friendPageEnvelope(items, total, { offset, limit }) {
   };
 }
 
+function scheduleDeadline(deadlineAt, callback) {
+  if (!Number.isFinite(deadlineAt)) {
+    queueMicrotask(callback);
+    return () => {};
+  }
+  let timer = null;
+  let cancelled = false;
+  const scheduleNext = () => {
+    if (cancelled) return;
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      callback();
+      return;
+    }
+    // Node timers are signed 32-bit values. Long-lived account sessions need
+    // chained timers rather than an overflowing timeout that fires immediately.
+    timer = setTimeout(scheduleNext, Math.min(remainingMs, 2_000_000_000));
+    timer.unref?.();
+  };
+  scheduleNext();
+  return () => {
+    cancelled = true;
+    if (timer) clearTimeout(timer);
+  };
+}
+
+function activeAccountClients(profileId) {
+  const guestKey = `user:${profileId}`;
+  return [...clients.values()].filter((client) => (
+    client.guestKey === guestKey
+    && client.presenceActive !== false
+    && client.socket?.readyState === WebSocket.OPEN
+  ));
+}
+
+function activeFriendEventStreams(profileId, now = Date.now()) {
+  return [...(friendEventStreams.get(profileId) ?? [])].filter((response) => {
+    const metadata = friendEventStreamSessions.get(response);
+    const expiresAt = metadata?.expiresAt;
+    const presenceUntil = metadata?.presenceUntil;
+    return !response.destroyed
+      && !response.writableEnded
+      && Number.isFinite(expiresAt)
+      && expiresAt > now
+      && Number.isFinite(presenceUntil)
+      && presenceUntil > now;
+  });
+}
+
+function accountProfileIsOnline(profileId) {
+  return activeAccountClients(profileId).length > 0
+    || activeFriendEventStreams(profileId).length > 0;
+}
+
+function syncFriendPresenceTransition(profileId) {
+  const normalizedProfileId = sanitizeAccountProfileId(profileId);
+  if (!normalizedProfileId) return;
+  const wasOnline = friendPresenceOnlineProfiles.has(normalizedProfileId);
+  const isOnline = accountProfileIsOnline(normalizedProfileId);
+  if (wasOnline === isOnline) return;
+  if (isOnline) {
+    friendPresenceOnlineProfiles.add(normalizedProfileId);
+  } else {
+    friendPresenceOnlineProfiles.delete(normalizedProfileId);
+  }
+  void notifyFriendPresenceAudience(normalizedProfileId);
+}
+
+function renewFriendEventPresence(profileId, sessionTokenHash, now = Date.now()) {
+  const streams = friendEventStreams.get(profileId);
+  if (!streams?.size || !sessionTokenHash) return;
+  streams.forEach((response) => {
+    const metadata = friendEventStreamSessions.get(response);
+    if (
+      !metadata
+      || metadata.tokenHash !== sessionTokenHash
+      || metadata.expiresAt <= now
+    ) return;
+    metadata.presenceUntil = Math.min(metadata.expiresAt, now + friendPresenceLeaseMs);
+  });
+  syncFriendPresenceTransition(profileId);
+}
+
+function onlineAccountProfileIds() {
+  const online = new Set(
+    [...clients.values()]
+      .filter((client) => (
+        client.profileId
+        && client.guestKey === `user:${client.profileId}`
+        && client.presenceActive !== false
+        && client.socket?.readyState === WebSocket.OPEN
+      ))
+      .map((client) => client.profileId),
+  );
+  friendEventStreams.forEach((_streams, profileId) => {
+    if (activeFriendEventStreams(profileId).length > 0) online.add(profileId);
+  });
+  return [...online];
+}
+
+function friendPresenceIsVisible(profile, relationship) {
+  return relationship === 'friend'
+    && (profile?.friendshipSource !== 'official' || Boolean(profile?.officialType));
+}
+
+async function notifyFriendPresenceAudience(profileId) {
+  const normalizedProfileId = sanitizeAccountProfileId(profileId);
+  if (!normalizedProfileId) return;
+  try {
+    const audience = await persistence.listAccountFriendPresenceAudience(normalizedProfileId);
+    notifyFriendGraphProfiles(audience);
+  } catch (error) {
+    cloudTelemetry.warn('friends.presence_audience_failed', { profileId: normalizedProfileId, error });
+  }
+}
+
 function notifyFriendProfile(profileId, event) {
   const guestKey = `user:${profileId}`;
   for (const client of clients.values()) {
@@ -866,9 +1001,43 @@ function notifyFriendProfile(profileId, event) {
 function removeFriendEventStream(profileId, response) {
   const streams = friendEventStreams.get(profileId);
   if (!streams?.delete(response)) return;
+  friendEventStreamSessions.get(response)?.cancelExpiry?.();
   friendEventStreamCount = Math.max(0, friendEventStreamCount - 1);
   if (streams.size === 0) friendEventStreams.delete(profileId);
+  friendEventStreamSessions.delete(response);
   cloudTelemetry.setGauge('tracklab_friend_event_streams', friendEventStreamCount);
+  syncFriendPresenceTransition(profileId);
+}
+
+function closeFriendEventStreamsForSession(sessionTokenHash) {
+  if (!sessionTokenHash) return;
+  friendEventStreams.forEach((streams, profileId) => {
+    streams.forEach((response) => {
+      if (friendEventStreamSessions.get(response)?.tokenHash !== sessionTokenHash) return;
+      removeFriendEventStream(profileId, response);
+      response.end();
+    });
+  });
+}
+
+function deactivateAuthenticatedClientsForSession(sessionTokenHash, reason) {
+  if (!sessionTokenHash) return;
+  const affectedProfileIds = new Set();
+  clients.forEach((client) => {
+    if (client.authSessionTokenHash !== sessionTokenHash) return;
+    if (client.presenceActive !== false && client.profileId) {
+      client.presenceActive = false;
+      affectedProfileIds.add(client.profileId);
+    }
+  });
+  affectedProfileIds.forEach((profileId) => {
+    syncFriendPresenceTransition(profileId);
+  });
+  clients.forEach((client) => {
+    if (client.authSessionTokenHash === sessionTokenHash) {
+      client.socket.close(1008, reason);
+    }
+  });
 }
 
 function writeFriendEventStream(response, frame) {
@@ -954,12 +1123,15 @@ function publicFriendProfile(profile, relationship = profile?.relationship || 'n
   if (!profile?.profileId || !profile?.username || !profile?.displayName) {
     return null;
   }
-  // Official-default connections deliberately do not reveal live presence or
-  // private ghost availability. A rider must form a non-official connection
-  // before either permission can be considered elsewhere.
-  const liveClient = profile.friendshipSource === 'official' || relationship !== 'friend'
-    ? null
-    : [...clients.values()].find((client) => client.guestKey === `user:${profile.profileId}`);
+  // An official club/founder is a public destination, so its auto-added
+  // connections may see when it is online. The reverse stays private: an
+  // official account cannot see an ordinary rider's presence through the
+  // auto-added edge. Explicitly accepted friendships reveal presence both ways.
+  const liveClients = friendPresenceIsVisible(profile, relationship)
+    ? activeAccountClients(profile.profileId)
+    : [];
+  const online = friendPresenceIsVisible(profile, relationship)
+    && (liveClients.length > 0 || activeFriendEventStreams(profile.profileId).length > 0);
   const photoUrl = relationship === 'friend'
     && (profile.friendshipSource !== 'official' || profile.officialType)
     ? sanitizeRiderPhotoDataUrl(profile.photoUrl)
@@ -971,8 +1143,8 @@ function publicFriendProfile(profile, relationship = profile?.relationship || 'n
     id: profile.profileId,
     handle: profile.username,
     displayName: profile.displayName,
-    online: Boolean(liveClient),
-    available: Boolean(liveClient?.available),
+    online,
+    available: liveClients.some((client) => client.available),
     hasGhost: Boolean(ghostPreview),
     canShareTrack: relationship === 'friend' && profile.friendshipSource !== 'official',
     ...(ghostPreview ? { ghostPreview } : {}),
@@ -6677,27 +6849,36 @@ function publicMatchInvite(invite) {
 }
 
 function hydrateSocialPresence(socialState) {
-  const onlineByGuestKey = new Map([...clients.values()].map((client) => [client.guestKey, client]));
+  const onlineByGuestKey = new Map();
+  clients.forEach((client) => {
+    if (client.presenceActive === false || client.socket?.readyState !== WebSocket.OPEN) return;
+    const active = onlineByGuestKey.get(client.guestKey) ?? [];
+    active.push(client);
+    onlineByGuestKey.set(client.guestKey, active);
+  });
+  const livePresence = (guestKey) => {
+    const active = onlineByGuestKey.get(guestKey) ?? [];
+    const preferredClient = active.find((client) => client.available) ?? active[0] ?? null;
+    return {
+      online: active.length > 0,
+      riderId: preferredClient?.id ?? null,
+      available: active.some((client) => client.available),
+    };
+  };
   return {
     ...socialState,
     friends: socialState.friends.map((friend) => {
-      const onlineClient = onlineByGuestKey.get(friend.guestKey);
       return {
         ...friend,
-        online: Boolean(onlineClient),
-        riderId: onlineClient?.id ?? null,
-        available: Boolean(onlineClient?.available),
+        ...livePresence(friend.guestKey),
       };
     }),
     groups: socialState.groups.map((group) => ({
       ...group,
       members: group.members.map((member) => {
-        const onlineClient = onlineByGuestKey.get(member.guestKey);
         return {
           ...member,
-          online: Boolean(onlineClient),
-          riderId: onlineClient?.id ?? null,
-          available: Boolean(onlineClient?.available),
+          ...livePresence(member.guestKey),
         };
       }),
     })),
@@ -11718,6 +11899,8 @@ async function serveStatic(request, response) {
       authSessionLookups.forget(hash);
       personalAuthSessions.forget(hash);
       await persistence.deleteAuthSession(hash);
+      deactivateAuthenticatedClientsForSession(hash, 'Signed out');
+      closeFriendEventStreamsForSession(hash);
     }
     clearAuthCookie(response, request);
     writeJson(response, 200, { ok: true });
@@ -11808,6 +11991,7 @@ async function serveStatic(request, response) {
     }
     const friendAuthDurationMs = performance.now() - friendAuthStartedAt;
     const userId = session.user.id;
+    renewFriendEventPresence(userId, tokenHash(session.token));
     const isRead = request.method === 'GET' || request.method === 'HEAD';
     const rateAllowed = isRead
       ? enforceRateLimit(request, response, friendReadRateLimiter, 180, `friends-read:${userId}`)
@@ -11841,11 +12025,26 @@ async function serveStatic(request, response) {
       response.socket?.setKeepAlive(true, 20_000);
       streams.add(response);
       friendEventStreams.set(userId, streams);
+      const eventStreamSession = {
+        tokenHash: tokenHash(session.token),
+        expiresAt: Date.parse(session.expiresAt),
+        presenceUntil: Math.min(
+          Date.parse(session.expiresAt),
+          Date.now() + friendPresenceLeaseMs,
+        ),
+        cancelExpiry: null,
+      };
+      friendEventStreamSessions.set(response, eventStreamSession);
+      eventStreamSession.cancelExpiry = scheduleDeadline(eventStreamSession.expiresAt, () => {
+        removeFriendEventStream(userId, response);
+        response.end();
+      });
       friendEventStreamCount += 1;
       cloudTelemetry.increment('tracklab_friend_event_stream_connections_total');
       cloudTelemetry.setGauge('tracklab_friend_event_streams', friendEventStreamCount);
       writeFriendEventStream(response, ': connected\n\n');
       response.once('close', () => removeFriendEventStream(userId, response));
+      syncFriendPresenceTransition(userId);
       return;
     }
 
@@ -12022,14 +12221,20 @@ async function serveStatic(request, response) {
     if (requestUrl.pathname === '/api/friends' && request.method === 'GET') {
       const page = friendPageOptions(requestUrl);
       const dataStartedAt = performance.now();
-      const { items, total } = await persistence.loadAccountFriendsPage(userId, page);
+      const { items, total, onlineTotal } = await persistence.loadAccountFriendsPage(userId, {
+        ...page,
+        onlineProfileIds: onlineAccountProfileIds(),
+      });
       const dataDurationMs = performance.now() - dataStartedAt;
       cloudTelemetry.observe('tracklab_friends_list_duration_ms', dataDurationMs);
-      writeJson(response, 200, friendPageEnvelope(
-        items.map((profile) => publicFriendProfile(profile, 'friend')).filter(Boolean),
-        total,
-        page,
-      ), {
+      writeJson(response, 200, {
+        ...friendPageEnvelope(
+          items.map((profile) => publicFriendProfile(profile, 'friend')).filter(Boolean),
+          total,
+          page,
+        ),
+        onlineTotal: Math.max(0, Math.round(Number(onlineTotal) || 0)),
+      }, {
         'Cache-Control': 'no-store',
         'Server-Timing': `auth;dur=${friendAuthDurationMs.toFixed(1)}, friends;dur=${dataDurationMs.toFixed(1)}`,
       });
@@ -12638,6 +12843,8 @@ async function serveStatic(request, response) {
       // any owner/admin identity from remaining usable on that tablet.
       authSessionLookups.forget(authorizingSessionHash);
       personalAuthSessions.forget(authorizingSessionHash);
+      deactivateAuthenticatedClientsForSession(authorizingSessionHash, 'Club Tablet enrolled');
+      closeFriendEventStreamsForSession(authorizingSessionHash);
       clearAuthCookie(response, request);
       writeJson(response, 201, {
         device: publicClubTabletDevice(device),
@@ -14081,6 +14288,9 @@ wss.on('connection', (socket, request) => {
       ? authProfileKey(authUser)
       : `club-tablet-session:${tabletSession.tokenHash.slice(0, 24)}`,
     profileId: authUser?.id ?? tabletSession?.profileId ?? '',
+    authSessionTokenHash: authUser ? tokenHash(request.tracklabAuthSession.token) : null,
+    authSessionExpiresAt: authUser ? Date.parse(request.tracklabAuthSession.expiresAt) : null,
+    presenceActive: Boolean(authUser),
     blockedProfileIds: new Set(request.tracklabBlockedProfileIds ?? []),
     socket,
     name: sanitizeText(authUser?.displayName || tabletSession?.athleteName || tabletSession?.riderName, 'TrackLab Rider', 64),
@@ -14107,8 +14317,15 @@ wss.on('connection', (socket, request) => {
     messageCount: 0,
     messageRateViolations: 0,
   };
+  client.cancelAuthSessionExpiry = authUser
+    ? scheduleDeadline(client.authSessionExpiresAt, () => {
+        deactivateAuthenticatedClientsForSession(client.authSessionTokenHash, 'Session expired');
+        closeFriendEventStreamsForSession(client.authSessionTokenHash);
+      })
+    : null;
 
   clients.set(client.id, client);
+  if (authUser) syncFriendPresenceTransition(authUser.id);
   cloudTelemetry.increment('tracklab_websocket_connections_total');
   cloudTelemetry.setGauge('tracklab_websocket_clients', clients.size);
   cloudTelemetry.info('websocket.connected', {
@@ -14154,12 +14371,25 @@ wss.on('connection', (socket, request) => {
     });
   });
   socket.on('close', (code) => {
+    const presenceWasActive = client.presenceActive !== false;
+    client.cancelAuthSessionExpiry?.();
     const friendRefresh = socialStateForClient(client)
       .then((social) => social.friends.map((friend) => friend.guestKey))
       .catch(() => []);
     leaveRoom(client, 'disconnected');
-    void persistence.setProfileOffline(client);
+    client.presenceActive = false;
     clients.delete(client.id);
+    const guestKeyStillOnline = [...clients.values()].some((candidate) => (
+      candidate.guestKey === client.guestKey
+      && candidate.presenceActive !== false
+      && candidate.socket?.readyState === WebSocket.OPEN
+    ));
+    if (!guestKeyStillOnline) {
+      void persistence.setProfileOffline(client);
+    }
+    if (presenceWasActive && client.authSessionTokenHash && client.profileId) {
+      syncFriendPresenceTransition(client.profileId);
+    }
     cloudTelemetry.increment('tracklab_websocket_disconnects_total', { code: String(code) });
     cloudTelemetry.setGauge('tracklab_websocket_clients', clients.size);
     cloudTelemetry.info('websocket.disconnected', {
@@ -14241,7 +14471,24 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 const websocketHeartbeat = setInterval(() => {
+  const now = Date.now();
+  const expiredSessionHashes = new Set(
+    [...clients.values()]
+      .filter((client) => (
+        client.authSessionTokenHash
+        && (
+          !Number.isFinite(client.authSessionExpiresAt)
+          || client.authSessionExpiresAt <= now
+        )
+      ))
+      .map((client) => client.authSessionTokenHash),
+  );
+  expiredSessionHashes.forEach((hash) => {
+    deactivateAuthenticatedClientsForSession(hash, 'Session expired');
+    closeFriendEventStreamsForSession(hash);
+  });
   wss.clients.forEach((socket) => {
+    if (socket.readyState !== WebSocket.OPEN) return;
     if (socket.isAlive === false) {
       socket.terminate();
       return;
@@ -14264,8 +14511,22 @@ const trainingHistoryStreamHeartbeat = setInterval(() => {
 trainingHistoryStreamHeartbeat.unref();
 
 const friendEventStreamHeartbeat = setInterval(() => {
+  const now = Date.now();
   friendEventStreams.forEach((streams, profileId) => {
     streams.forEach((response) => {
+      const metadata = friendEventStreamSessions.get(response);
+      const expiresAt = metadata?.expiresAt;
+      const presenceUntil = metadata?.presenceUntil;
+      if (
+        !Number.isFinite(expiresAt)
+        || expiresAt <= now
+        || !Number.isFinite(presenceUntil)
+        || presenceUntil <= now
+      ) {
+        removeFriendEventStream(profileId, response);
+        response.end();
+        return;
+      }
       if (!writeFriendEventStream(response, ': keepalive\n\n')) {
         removeFriendEventStream(profileId, response);
         response.end();

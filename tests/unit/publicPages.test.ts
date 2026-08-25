@@ -32,5 +32,7 @@ describe('public App Store pages', () => {
     expect(markup).toContain('excluded from generic session JSON/CSV and public or club exports');
     expect(markup).toContain('must not be enabled for a minor without the permission');
     expect(markup).toContain('does not store personal health information in iCloud');
+    expect(markup).toContain('Explicitly accepted friends can see whether the other account is');
+    expect(markup).toContain('An auto-added official connection cannot see an ordinary rider');
   });
 });

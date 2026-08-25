@@ -2018,6 +2018,7 @@ input:focus {
   background: transparent;
   color: #41505d;
   font-weight: 700;
+  position: relative;
 }
 
 .side-nav button.selected {
@@ -2029,6 +2030,45 @@ input:focus {
 .side-nav button:hover {
   border-color: var(--line);
   background: #f7f9fb;
+}
+
+.friends-online,
+.side-nav-count {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 900;
+  height: 20px;
+  justify-content: center;
+  line-height: 1;
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+}
+
+.friends-online {
+  background: #eaf9e2;
+  border: 1px solid #a7dc8c;
+  color: #27620d;
+  gap: 4px;
+}
+
+.friends-online::before {
+  background: #54bd23;
+  border: 1px solid #3a9517;
+  border-radius: 50%;
+  content: '';
+  height: 7px;
+  width: 7px;
+}
+
+.side-nav-count + .friends-online { margin-left: 0; }
+
+.side-nav-count {
+  background: #e3524f;
+  color: #fff;
 }
 
 .side-nav-more {
@@ -7457,6 +7497,24 @@ input:focus {
     line-height: 1.15;
     overflow-wrap: anywhere;
   }
+
+  .friends-online,
+  .side-nav-count {
+    height: 18px;
+    margin-left: 0;
+    min-width: 18px;
+    padding: 0 4px;
+    position: absolute;
+    right: 2px;
+    top: 2px;
+  }
+
+  .friends-online::before {
+    height: 6px;
+    width: 6px;
+  }
+
+  .side-nav-count + .friends-online { right: 32px; }
 
   .connection-card {
     order: 3;

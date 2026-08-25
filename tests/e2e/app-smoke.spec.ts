@@ -715,19 +715,21 @@ test('Friends hub shows removable official connections and private account disco
     if (url.pathname === '/api/friends') {
       await json({
         items: [
-          publicProfile({ id: 'official-club', handle: 'preski-ranch', displayName: 'Preski Ranch', relationship: 'friend', officialKind: 'club', hasGhost: true }),
+          publicProfile({ id: 'official-club', handle: 'preski-ranch', displayName: 'Preski Ranch', relationship: 'friend', officialKind: 'club', hasGhost: true, online: true }),
           publicProfile({ id: 'official-founder', handle: 'tracklab-founder', displayName: 'TrackLab Founder', relationship: 'friend', officialKind: 'founder', hasGhost: true }),
           publicProfile({
             id: 'ghost-friend',
             handle: 'ghost.friend',
             displayName: 'Ghost Friend',
             relationship: 'friend',
+            online: true,
             hasGhost: true,
             ghostPreview: friendGhostPreview,
           }),
         ],
         nextCursor: null,
         total: 3,
+        onlineTotal: 2,
       });
       return;
     }
@@ -794,9 +796,14 @@ test('Friends hub shows removable official connections and private account disco
   await openSignedInAppIfNeeded(page);
 
   await expect(page.getByRole('button', { name: /Friends.*new/ })).toBeVisible();
+  await expect(page.locator('.friends-online')).toHaveText('2');
+  await expect(page.locator('.friends-online')).toHaveAttribute('aria-label', '2 friends online');
+  await expect(page.locator('.side-nav-count')).toHaveAttribute('aria-label', '2 new');
   await page.getByRole('button', { name: /Friends.*new/ }).click();
   await expect(page.getByRole('heading', { name: 'Friends', exact: true })).toBeVisible();
   await expect(page.getByText('Preski Ranch', { exact: true })).toBeVisible();
+  const onlineClubCard = page.locator('.friend-profile-card').filter({ hasText: 'Preski Ranch' });
+  await expect(onlineClubCard.locator('.friend-presence.online')).toHaveAttribute('aria-label', 'Preski Ranch is online');
   await expect(page.getByLabel('Official TrackLab club')).toBeVisible();
   await expect(page.getByText('TrackLab Founder', { exact: true })).toBeVisible();
   await expect(page.getByLabel('TrackLab founder', { exact: true })).toBeVisible();
@@ -941,6 +948,15 @@ test('Friends hub shows removable official connections and private account disco
     await expect.poll(async () => (await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await expect.poll(async () => (await control.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44);
   }
+  await page.locator('.side-nav-count').evaluate((badge) => { badge.textContent = '99+'; });
+  await page.locator('.friends-online').evaluate((badge) => { badge.textContent = '99+'; });
+  const [notificationBadgeBox, onlineBadgeBox] = await Promise.all([
+    page.locator('.side-nav-count').boundingBox(),
+    page.locator('.friends-online').boundingBox(),
+  ]);
+  expect(notificationBadgeBox).not.toBeNull();
+  expect(onlineBadgeBox).not.toBeNull();
+  expect(onlineBadgeBox!.x + onlineBadgeBox!.width).toBeLessThanOrEqual(notificationBadgeBox!.x);
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);

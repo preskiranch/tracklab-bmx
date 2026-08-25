@@ -289,6 +289,7 @@ function userDataUpsertStatement() {
 
 export const persistenceTestHooks = Object.freeze({
   accountFriendsPageStatement,
+  accountFriendPresenceAudienceStatement,
   accountFriendRequestsPageStatement,
   accountTrackShareCreateStatement,
   accountTrackShareOpenStatement,
@@ -9823,6 +9824,11 @@ function accountFriendsPageStatement() {
        OFFSET $2 LIMIT $3
      ), friend_total AS (
        SELECT count(*)::integer AS total FROM matching_friends
+     ), online_total AS (
+       SELECT count(*)::integer AS total
+       FROM matching_friends
+       WHERE profile_id = ANY($5::text[])
+         AND (friendship_source <> 'official' OR official_type IS NOT NULL)
      )
      SELECT
        friend.profile_id,
@@ -9839,8 +9845,10 @@ function accountFriendsPageStatement() {
        recent_ghost.lap_count AS ghost_lap_count,
        recent_ghost.finish_time_ms AS ghost_finish_time_ms,
        recent_ghost.summary AS ghost_summary,
-       friend_total.total AS total_count
+       friend_total.total AS total_count,
+       online_total.total AS online_total_count
      FROM friend_total
+     CROSS JOIN online_total
      LEFT JOIN paged_friends AS friend ON true
      LEFT JOIN ${schema}.user_data AS profile_data
        ON profile_data.guest_key = 'user:' || friend.profile_id
@@ -9860,8 +9868,38 @@ function accountFriendsPageStatement() {
      ORDER BY friend.connected_at DESC NULLS LAST, friend.profile_id`;
 }
 
-export async function loadAccountFriendsPage(userId, { offset = 0, limit = 25, searchText = '' } = {}) {
+function accountFriendPresenceAudienceStatement() {
+  return `WITH target AS (
+       SELECT EXISTS (
+         SELECT 1
+         FROM ${schema}.official_friend_accounts
+         WHERE user_id = $1
+       ) AS is_official
+     ), friend_edges AS MATERIALIZED (
+       SELECT user_id_b AS profile_id, source
+       FROM ${schema}.account_friendships
+       WHERE user_id_a = $1
+       UNION ALL
+       SELECT user_id_a AS profile_id, source
+       FROM ${schema}.account_friendships
+       WHERE user_id_b = $1
+     )
+     SELECT edge.profile_id
+     FROM friend_edges AS edge
+     CROSS JOIN target
+     WHERE edge.source <> 'official' OR target.is_official`;
+}
+
+export async function loadAccountFriendsPage(
+  userId,
+  { offset = 0, limit = 25, searchText = '', onlineProfileIds = [] } = {},
+) {
   const normalizedSearch = String(searchText || '').trim().toLowerCase();
+  const onlineProfileIdSet = new Set(
+    (Array.isArray(onlineProfileIds) ? onlineProfileIds : [])
+      .map((profileId) => String(profileId || ''))
+      .filter(Boolean),
+  );
   if (!pool) {
     const matches = [...memoryAccountFriendships.values()]
       .filter((friendship) => friendship.userIdA === userId || friendship.userIdB === userId)
@@ -9887,13 +9925,28 @@ export async function loadAccountFriendsPage(userId, { offset = 0, limit = 25, s
         });
       })
       .filter(Boolean);
-    return { items, total: matches.length };
+    const onlineTotal = matches.filter((friendship) => {
+      const friendId = friendship.userIdA === userId ? friendship.userIdB : friendship.userIdA;
+      return onlineProfileIdSet.has(friendId)
+        && (
+          friendship.source !== 'official'
+          || memoryOfficialFriendKindByUserId.has(friendId)
+        );
+    }).length;
+    return { items, total: matches.length, onlineTotal };
   }
 
   const escapedSearch = normalizedSearch.replace(/[\\%_]/g, '\\$&');
-  const result = await query(accountFriendsPageStatement(), [userId, offset, limit, escapedSearch]);
+  const result = await query(accountFriendsPageStatement(), [
+    userId,
+    offset,
+    limit,
+    escapedSearch,
+    [...onlineProfileIdSet],
+  ]);
   const rows = result?.rows ?? [];
   const total = Number(rows[0]?.total_count) || 0;
+  const onlineTotal = Number(rows[0]?.online_total_count) || 0;
   const items = rows.filter((row) => row.profile_id).map((row) => accountProfileFromRow(row, {
     friendshipSource: row.friendship_source,
     connectedAt: new Date(row.connected_at).toISOString(),
@@ -9908,11 +9961,28 @@ export async function loadAccountFriendsPage(userId, { offset = 0, limit = 25, s
       summary: row.ghost_summary,
     }),
   }));
-  return { items, total };
+  return { items, total, onlineTotal };
 }
 
 export async function listAccountFriends(userId, options = {}) {
   return (await loadAccountFriendsPage(userId, options)).items;
+}
+
+export async function listAccountFriendPresenceAudience(userId) {
+  if (!pool) {
+    const targetIsOfficial = memoryOfficialFriendKindByUserId.has(userId);
+    return [...memoryAccountFriendships.values()]
+      .filter((friendship) => friendship.userIdA === userId || friendship.userIdB === userId)
+      .filter((friendship) => friendship.source !== 'official' || targetIsOfficial)
+      .map((friendship) => (
+        friendship.userIdA === userId ? friendship.userIdB : friendship.userIdA
+      ));
+  }
+
+  const result = await query(accountFriendPresenceAudienceStatement(), [userId]);
+  return (result?.rows ?? [])
+    .map((row) => String(row.profile_id || ''))
+    .filter(Boolean);
 }
 
 function accountFriendRequestsPageStatement(direction) {

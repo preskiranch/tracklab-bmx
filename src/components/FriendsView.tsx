@@ -121,6 +121,7 @@ type TrackShareHubCache = {
 const friendHubCacheByApi = new WeakMap<FriendsApi, Map<string, FriendHubCache>>();
 const trackShareHubCacheByApi = new WeakMap<TrackSharesApi, Map<string, TrackShareHubCache>>();
 const friendHubFreshMs = 30_000;
+const defaultFriendsApi = createFriendsApi();
 const defaultTrackSharesApi = createTrackSharesApi();
 
 function friendHubCache(api: FriendsApi, profileId: string) {
@@ -225,6 +226,10 @@ export function preloadFriendsView(
     trackSharePage,
     pendingTotal: requestPage.incomingTotal + trackSharePage.unreadTotal,
   }));
+}
+
+export function preloadDefaultFriendsView(currentProfileId: string, force = false) {
+  return preloadFriendsView(currentProfileId, defaultFriendsApi, force);
 }
 
 const tabs: Array<{ id: FriendsTab; label: string; icon: typeof UsersRound }> = [
@@ -332,7 +337,11 @@ function ProfileIdentity({ profile, detail }: { profile: FriendProfile; detail?:
   const officialLabel = officialFriendLabel(profile.officialKind);
   return (
     <div className="friend-profile-identity">
-      <span className={`friend-presence ${profile.online ? 'online' : ''}`} aria-label={profile.online ? 'Online' : 'Offline'}>
+      <span
+        className={`friend-presence ${profile.online ? 'online' : ''}`}
+        aria-label={`${profile.displayName} is ${profile.online ? 'online' : 'offline'}`}
+        title={profile.online ? 'Online now' : 'Offline'}
+      >
         <RiderAvatar name={profile.displayName} photoUrl={profile.photoUrl} />
       </span>
       <div className="friend-profile-name">
@@ -414,7 +423,7 @@ export function FriendsView({
   onOpenProfile,
   distanceUnit = 'ft',
 }: FriendsViewProps) {
-  const friendsApi = useMemo(() => api ?? createFriendsApi(), [api]);
+  const friendsApi = api ?? defaultFriendsApi;
   const sharesApi = useMemo(() => trackSharesApi ?? defaultTrackSharesApi, [trackSharesApi]);
   const hubCache = useMemo(() => friendHubCache(friendsApi, currentProfileId), [currentProfileId, friendsApi]);
   const sharesCache = useMemo(
@@ -1105,7 +1114,7 @@ export function FriendsView({
         </div>
         <div className="friends-privacy-note">
           <LockKeyhole size={19} aria-hidden="true" />
-          <span><strong>Friends, not followers</strong><small>Ordinary requests need approval. Opening a personal invite accepts that connection; the verified club and founder are added when you join. A friend connection does not unlock private rides, live location, or training history.</small></span>
+          <span><strong>Friends, not followers</strong><small>Ordinary requests need approval. Opening a personal invite accepts that connection; the verified club and founder are added when you join. Explicitly accepted friends can see when you are online. Verified club and founder accounts may show a public online status. An auto-added official connection cannot see an ordinary rider&apos;s presence unless that rider explicitly accepts the connection. A friend connection does not unlock private rides, live location, or training history.</small></span>
           <div className="friends-discovery-setting">
             <span>
               <strong>Appear in rider search and trusted suggestions</strong>

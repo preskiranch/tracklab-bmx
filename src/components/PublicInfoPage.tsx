@@ -102,7 +102,7 @@ function PrivacyPage() {
           This notice describes the current TrackLab BMX web and iPhone/iPad app behavior. TrackLab combines
           Wattbike telemetry, mapped tracks, training history, multiplayer rooms, and optional AI commentary.
         </p>
-        <span className="public-info-updated">Last updated August 20, 2026</span>
+        <span className="public-info-updated">Last updated August 24, 2026</span>
       </section>
 
       <section className="public-info-summary" aria-label="Privacy summary">
@@ -245,7 +245,10 @@ function PrivacyPage() {
                   visible to both accounts, and ordinary connected friends can see an optional account profile photo. TrackLab
                   adds the verified Preski Ranch club account and TrackLab founder as default connections; a rider may see
                   those verified accounts&apos; photos, but the default connection does not share the rider&apos;s photo back. You can
-                  remove or block either connection. Friendship by itself does not share
+                  remove or block either connection. Explicitly accepted friends can see whether the other account is
+                  currently online. Verified club and founder accounts may also show their own public online status through
+                  an auto-added connection. An auto-added official connection cannot see an ordinary rider&apos;s online
+                  presence unless that rider explicitly accepts the connection. Friendship by itself does not share
                   private workout history, private pedal-zone analytics, live device location, or current training activity.
                   Information can still be shared through a separate action or feature you choose, such as joining a room,
                   publishing an eligible ghost, or training through Club Connect.

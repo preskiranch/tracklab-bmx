@@ -11,6 +11,7 @@ import {
   normalizeFriendInviteMetadataList,
   normalizeFriendPrivacy,
   normalizeFriendGhostPreview,
+  normalizeFriendPage,
   normalizeFriendProfile,
   officialFriendLabel,
   queueFriendRequest,
@@ -103,6 +104,22 @@ describe('TrackLab friends client', () => {
       officialKind: 'club',
       canShareTrack: true,
     });
+  });
+
+  it('normalizes a truthful online total without exceeding the visible friend total', () => {
+    expect(normalizeFriendPage({
+      items: [
+        profile({ id: 'online-rider', online: true }),
+        profile({ id: 'offline-rider', online: false }),
+      ],
+      total: 2,
+      onlineTotal: 99,
+    })).toMatchObject({ total: 2, onlineTotal: 2 });
+
+    expect(normalizeFriendPage({
+      items: [profile({ online: true })],
+      total: 4,
+    }).onlineTotal).toBe(0);
   });
 
   it('normalizes received track shares without retaining private or executable sender fields', () => {
@@ -594,6 +611,8 @@ describe('TrackLab friends client', () => {
     expect(markup).toContain('aria-checked="false"');
     expect(markup).toContain('Appear in rider search and trusted suggestions');
     expect(markup).toContain('A friend connection does not unlock private rides, live location, or training history');
+    expect(markup).toContain('Explicitly accepted friends can see when you are online');
+    expect(markup).toContain('An auto-added official connection cannot see an ordinary rider');
     expect(markup).toContain('Blocked riders');
     expect(markup).toContain('>Friends<');
     expect(markup).toContain('>Requests<');
