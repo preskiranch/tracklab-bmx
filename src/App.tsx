@@ -1480,6 +1480,15 @@ const startTreeLabels = ['RED', 'YELLOW 1', 'YELLOW 2', 'GREEN'] as const;
 const advancedConnectorMembershipMessage = 'Advanced Connector requires a personal Racer bike membership.';
 const clubBikeAccessUnavailableMessage = 'Club bike access is unavailable. The club may be using all purchased bike seats or its membership may need attention.';
 const unitPreferencesSavingMessage = 'Saving display units to your TrackLab profile.';
+const unitPreferencesMissingMessage = 'Cloud returned no display-unit preference.';
+const unitPreferencesPendingMessage = 'Your latest display-unit change is still syncing.';
+const unitPreferencesNewerMessage = 'A newer display-unit choice from your TrackLab profile was kept.';
+const unitPreferencesSavedMessage = 'Display units saved to your TrackLab profile.';
+const unitPreferencesOfflineMessage = (error: Error) => `Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`;
+const warnCloudSave = (label: string, error: Error) => console.warn(`Could not save ${label} to TrackLab cloud: ${error.message}`);
+const branchOneInstruction = (index: number) => `Draw Branch 1 from Split ${index} to Merge ${index}.`;
+const lazyLoadingFallback = <div className="explore-loading">Loading…</div>;
+const panelLoadingFallback = <div className="panel-section">Loading…</div>;
 
 function isGoogleLocationPermissionError(message: string) {
   return /REQUEST_DENIED|blocked|not allowed|not authorized|places\.googleapis\.com|Geocoding Service/i.test(message);
@@ -2230,6 +2239,15 @@ export default function App() {
     setFriendGraphRevision((current) => current + 1);
     setFriendNetworkRefreshRevision((current) => current + 1);
   }, []);
+
+  const handleNativeNotificationFriendsActivity = useCallback((opened: boolean) => {
+    handleFriendNetworkChange();
+    if (!opened) return;
+    setMappingMode(false);
+    setSidebarMoreOpen(false);
+    setShowMembershipLanding(false);
+    setAppMode('friends');
+  }, [handleFriendNetworkChange]);
 
   useEffect(() => {
     if (authStatus !== 'signed-in' || !authUser?.id || clubTabletKioskMode) return undefined;
@@ -3527,7 +3545,7 @@ export default function App() {
     if (draftSplitBuilder.activeBranch === 'a') {
       if (branchOneStarted < splitBranchMinInteriorPoints) {
         return branchOneStarted === 0
-          ? `Draw Branch 1 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`
+          ? branchOneInstruction(draftSplitBuilder.index)
           : `Keep drawing Branch 1 along the lane contour.`;
       }
 
@@ -3540,7 +3558,7 @@ export default function App() {
 
     if (!branchOneComplete) {
       return branchOneStarted === 0
-        ? `Draw Branch 1 from Split ${draftSplitBuilder.index} to Merge ${draftSplitBuilder.index}.`
+        ? branchOneInstruction(draftSplitBuilder.index)
         : `Finish Branch 1 at Merge ${draftSplitBuilder.index} before starting Branch 2.`;
     }
 
@@ -3991,7 +4009,7 @@ export default function App() {
         .then((data) => {
           if (cloudUserDataLoadedKeyRef.current !== cloudProfileKey) return;
           if (!data.unitPreferences) {
-            throw new Error('Cloud returned no display-unit preference.');
+            throw new Error(unitPreferencesMissingMessage);
           }
 
           const current = unitPreferencesRef.current;
@@ -4005,23 +4023,24 @@ export default function App() {
           setUnitPreferencesSyncStatus('online');
           if (!unitPreferencesMatch(data.unitPreferences, resolved)) {
             setCloudUserDataStatus('loading');
-            setCloudUserDataMessage('Your latest display-unit change is still syncing.');
+            setCloudUserDataMessage(unitPreferencesPendingMessage);
             setUnitPreferencesSyncStatus('loading');
-            setUnitPreferencesSyncMessage('Your latest display-unit change is still syncing.');
+            setUnitPreferencesSyncMessage(unitPreferencesPendingMessage);
           } else if (data.unitPreferences.updatedAt > normalized.updatedAt) {
-            setCloudUserDataMessage('A newer display-unit choice from your TrackLab profile was kept.');
-            setUnitPreferencesSyncMessage('A newer display-unit choice from your TrackLab profile was kept.');
+            setCloudUserDataMessage(unitPreferencesNewerMessage);
+            setUnitPreferencesSyncMessage(unitPreferencesNewerMessage);
           } else {
-            setCloudUserDataMessage('Display units saved to your TrackLab profile.');
-            setUnitPreferencesSyncMessage('Display units saved to your TrackLab profile.');
+            setCloudUserDataMessage(unitPreferencesSavedMessage);
+            setUnitPreferencesSyncMessage(unitPreferencesSavedMessage);
           }
         })
         .catch((error: Error) => {
           if (cloudUserDataLoadedKeyRef.current !== cloudProfileKey) return;
+          const message = unitPreferencesOfflineMessage(error);
           setCloudUserDataStatus('offline');
-          setCloudUserDataMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+          setCloudUserDataMessage(message);
           setUnitPreferencesSyncStatus('offline');
-          setUnitPreferencesSyncMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+          setUnitPreferencesSyncMessage(message);
         });
     }
   }, [applyUnitPreferences, cloudProfileKey]);
@@ -5118,7 +5137,7 @@ export default function App() {
                 .then((savedData) => {
                   if (cancelled || cloudUserDataLoadedKeyRef.current !== cloudProfileKey) return;
                   if (!savedData.unitPreferences) {
-                    throw new Error('Cloud returned no display-unit preference.');
+                    throw new Error(unitPreferencesMissingMessage);
                   }
 
                   const current = unitPreferencesRef.current;
@@ -5130,26 +5149,27 @@ export default function App() {
                   writeStoredUnitPreferences(cloudProfileKey, resolved);
                   if (!unitPreferencesMatch(savedData.unitPreferences, resolved)) {
                     setCloudUserDataStatus('loading');
-                    setCloudUserDataMessage('Your latest display-unit change is still syncing.');
+                    setCloudUserDataMessage(unitPreferencesPendingMessage);
                     setUnitPreferencesSyncStatus('loading');
-                    setUnitPreferencesSyncMessage('Your latest display-unit change is still syncing.');
+                    setUnitPreferencesSyncMessage(unitPreferencesPendingMessage);
                   } else if (savedData.unitPreferences.updatedAt > accountUnitPreferences.updatedAt) {
                     setCloudUserDataStatus('online');
-                    setCloudUserDataMessage('A newer display-unit choice from your TrackLab profile was kept.');
+                    setCloudUserDataMessage(unitPreferencesNewerMessage);
                     setUnitPreferencesSyncStatus('online');
-                    setUnitPreferencesSyncMessage('A newer display-unit choice from your TrackLab profile was kept.');
+                    setUnitPreferencesSyncMessage(unitPreferencesNewerMessage);
                   } else {
                     setUnitPreferencesSyncStatus('online');
-                    setUnitPreferencesSyncMessage('Display units saved to your TrackLab profile.');
+                    setUnitPreferencesSyncMessage(unitPreferencesSavedMessage);
                   }
                 })
                 .catch((error: Error) => {
                   console.warn(`Could not reconcile display units with TrackLab cloud: ${error.message}`);
                   if (!cancelled && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
+                    const message = unitPreferencesOfflineMessage(error);
                     setCloudUserDataStatus('offline');
-                    setCloudUserDataMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+                    setCloudUserDataMessage(message);
                     setUnitPreferencesSyncStatus('offline');
-                    setUnitPreferencesSyncMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+                    setUnitPreferencesSyncMessage(message);
                   }
                 });
             } else {
@@ -5268,7 +5288,7 @@ export default function App() {
             setCloudUserDataStatus('offline');
             setCloudUserDataMessage(`Cloud profile unavailable. Local browser storage is still active. ${error.message}`);
             setUnitPreferencesSyncStatus('offline');
-            setUnitPreferencesSyncMessage(`Display units are saved on this device, but cloud sync is temporarily unavailable. ${error.message}`);
+            setUnitPreferencesSyncMessage(unitPreferencesOfflineMessage(error));
           }
         })
         .finally(() => {
@@ -5313,7 +5333,7 @@ export default function App() {
           .catch((error: Error) => {
             setCloudUserDataStatus('offline');
             setCloudUserDataMessage(`Could not save bike profiles to cloud. ${error.message}`);
-            console.warn(`Could not save bike profiles to TrackLab cloud: ${error.message}`);
+            warnCloudSave('bike profiles', error);
           });
       }
       return;
@@ -5331,7 +5351,7 @@ export default function App() {
         .catch((error: Error) => {
           setCloudUserDataStatus('offline');
           setCloudUserDataMessage(`Could not save bike profiles to cloud. ${error.message}`);
-          console.warn(`Could not save bike profiles to TrackLab cloud: ${error.message}`);
+          warnCloudSave('bike profiles', error);
         });
     }
   }, [bikeProfiles, bridge.connection, cloudProfileKey]);
@@ -5397,7 +5417,7 @@ export default function App() {
           .catch((error: Error) => {
             setCloudUserDataStatus('offline');
             setCloudUserDataMessage(`Could not save custom routes to cloud. ${error.message}`);
-            console.warn(`Could not save custom routes to TrackLab cloud: ${error.message}`);
+            warnCloudSave('custom routes', error);
           });
       }
       return;
@@ -5415,7 +5435,7 @@ export default function App() {
         .catch((error: Error) => {
           setCloudUserDataStatus('offline');
           setCloudUserDataMessage(`Could not save custom routes to cloud. ${error.message}`);
-          console.warn(`Could not save custom routes to TrackLab cloud: ${error.message}`);
+          warnCloudSave('custom routes', error);
         });
     }
   }, [bridge.connection, cloudProfileKey, customRoutes]);
@@ -8638,8 +8658,14 @@ export default function App() {
     // relay shutdown and immediately before logout so an in-flight A response
     // cannot recreate A's alert at the A -> B account boundary.
     await clearNativeRecoveryBoundary();
+    const nativePush = await import('./components/NativeNotificationsCoordinator').catch(() => null);
+    if (nativePush) await nativePush.clearNativePushAccountBoundary(authUser?.id).catch(() => undefined);
     try {
-      await logoutAuthUser();
+      if (nativePush) {
+        await nativePush.logoutThenClearNativePushDeliveredSocialNotifications(logoutAuthUser);
+      } else {
+        await logoutAuthUser();
+      }
     } catch (error) {
       console.warn(`Could not clear TrackLab session: ${error instanceof Error ? error.message : error}`);
     }
@@ -10268,7 +10294,9 @@ export default function App() {
         onLegacyRelaySuppressionChange={handleLegacyRelaySuppressionChange}
         onLiveHeartRateReadingsChange={setLiveHeartRateByRider}
         onMessage={setHeartRateMessage}
+        onNativeNotification={handleNativeNotificationFriendsActivity}
         onOpenSettings={() => handleHeartRateAccountBlockOpenSettings(true)}
+        friendNetworkRefreshRevision={friendNetworkRefreshRevision}
         ownedStudio={ownedClub ? { clubId: ownedClub.id, clubName: ownedClub.name } : null}
         settingsOpen={settingsMode}
         preferPersonal={Boolean(ownedClub)}
@@ -10290,7 +10318,7 @@ export default function App() {
         {heartRateStudioInviteDialog}
         {heartRateAccountBlockCoordinator}
         {watchConnectCoordinator}
-        <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+        <Suspense fallback={lazyLoadingFallback}>
           <MembershipLanding
           membership={membership}
           bikeSeats={checkoutBikeSeats}
@@ -10338,7 +10366,7 @@ export default function App() {
   }
 
   const analyticsPanel = (
-    <Suspense fallback={<div className="panel-section">Loading…</div>}>
+    <Suspense fallback={panelLoadingFallback}>
       <AnalyticsPanel
         track={effectiveTrack}
         players={racePlayers}
@@ -10422,7 +10450,7 @@ export default function App() {
         && monitorHeartRateOverlayPlayer
         && monitorHeartRateOverlayRiderId
         && ownedClub && (
-        <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+        <Suspense fallback={lazyLoadingFallback}>
           <StudioHeartRateBlockOverlay
             action={monitorHeartRateOverlayAction}
             anchorContext={{
@@ -11283,7 +11311,7 @@ export default function App() {
         )}
 
         {appMode === 'club-tablet' ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
             <ClubTabletMode
               canAuthorize={clubOwnerActive && !clubTabletDevice}
               device={clubTabletDevice}
@@ -11318,7 +11346,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'friends' && authUser ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
             <FriendsView
               key={authUser.id}
               currentProfileId={authUser.id}
@@ -11349,6 +11377,7 @@ export default function App() {
               <div id="watch" style={{ display: 'grid', gap: 16 }}>
                 <div id="heart-rate-account-block-settings-slot" style={{ display: 'contents' }} />
                 <div id="watch-connect-settings-slot" style={{ display: 'contents' }} />
+                <div id="native-notifications-settings-slot" style={{ display: 'contents' }} />
                 <Suspense fallback={<div className="explore-loading">Checking Watch…</div>}>
                   {watchConnectCapable === false && <HeartRateSettingsCard
                     availability={heartRate.availability}
@@ -11379,7 +11408,7 @@ export default function App() {
             </div>}
           </>
         ) : appMode === 'profile' && authUser ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
           <AccountProfileView
             key={authUser.id}
             name={authUser.name}
@@ -11399,7 +11428,7 @@ export default function App() {
         ) : resultsMode ? (
           analyticsPanel
         ) : appMode === 'club-monitor' && clubOwnerActive ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
             <ClubLiveMonitor
               studioRiders={activeStudioRiders(activeProfileStudioRiders)}
               speedUnit={speedUnit}
@@ -11409,7 +11438,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'get-pulled' ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
             <ClubOwnerUtilityMode
               {...clubOwnerUtilitySharedProps}
               mode="get-pulled"
@@ -11431,7 +11460,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'explore' ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
             <ClubOwnerUtilityMode
               {...clubOwnerUtilitySharedProps}
               mode="explore"
@@ -11480,7 +11509,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'monitor' ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
             <MonitorView
               players={explorePlayers}
               samplesByDevice={samplesByDevice}
@@ -11499,7 +11528,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'diagnostics' ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
             <DiagnosticsPanel
             bridgeConnection={bridge.connection}
             bridgeMode={bridge.mode}
@@ -11551,7 +11580,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'developer' && developerUiActive ? (
-          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+          <Suspense fallback={lazyLoadingFallback}>
             <DeveloperToolsPanel />
           </Suspense>
         ) : (
@@ -11559,7 +11588,7 @@ export default function App() {
             <div className="dashboard-grid">
               <div className="dashboard-primary-column">
                 <div className="race-canvas-shell">
-                  <Suspense fallback={<div className="explore-loading">Loading…</div>}>
+                  <Suspense fallback={lazyLoadingFallback}>
                   <EarthTrackView
                   track={effectiveTrack}
                   riders={stagedRiders}
@@ -11648,7 +11677,7 @@ export default function App() {
               </div>
 
               <div className="dashboard-secondary-column">
-                <Suspense fallback={<div className="panel-section">Loading…</div>}>
+                <Suspense fallback={panelLoadingFallback}>
                   <SessionControlPanel
                   track={effectiveTrack}
                   selectedMetrics={selectedMetrics}
@@ -11769,7 +11798,7 @@ export default function App() {
                   />
                 </Suspense>
 
-                <Suspense fallback={<div className="panel-section">Loading…</div>}>
+                <Suspense fallback={panelLoadingFallback}>
                   <MultiplayerPanel
                   playMode={playMode}
                   connection={multiplayer.connection}

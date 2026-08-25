@@ -380,6 +380,44 @@ describe('database migration runner', () => {
     expect(commands.at(-1)).toBe('SELECT pg_advisory_unlock(hashtext($1))');
   });
 
+  it('adds session-bound encrypted APNs installations and a transactional private outbox', () => {
+    const pushMigration = databaseMigrations().find((candidate) => candidate.version === 26);
+    const statements = pushMigration?.statements.join('\n') ?? '';
+
+    expect(pushMigration).toMatchObject({
+      version: 26,
+      name: 'add private ios push installations and transactional social alerts',
+    });
+    expect(statements).toContain('push_installations');
+    expect(statements).toContain('auth_session_token_hash TEXT NOT NULL');
+    expect(statements).toContain('REFERENCES tracklab.auth_sessions(token_hash) ON DELETE CASCADE');
+    expect(statements).toContain('token_ciphertext TEXT NOT NULL');
+    expect(statements).toContain('token_fingerprint TEXT NOT NULL');
+    expect(statements).toContain('revision BIGINT NOT NULL DEFAULT 1');
+    expect(statements).not.toContain('device_token');
+    expect(statements).toContain('push_preferences');
+    expect(statements).toContain('live_audio_friend_invites');
+    expect(statements).toContain("'joined'");
+    expect(statements).toContain('push_events');
+    expect(statements).toContain('idempotency_key TEXT UNIQUE NOT NULL');
+    expect(statements).toContain('push_deliveries');
+    expect(statements).toContain('PRIMARY KEY (event_id, installation_id)');
+  });
+
+  it('rolls back all private push tables if any v26 statement fails', async () => {
+    const pushMigration = databaseMigrations().find((candidate) => candidate.version === 26);
+    if (!pushMigration) throw new Error('Private push migration is missing.');
+    const database = fakeDatabase({ failOn: 'idx_tracklab_push_deliveries_retry' });
+
+    await expect(runDatabaseMigrations(database.pool, { migrations: [pushMigration] }))
+      .rejects.toThrow('simulated migration failure');
+
+    const commands = database.calls.map((call) => call.text);
+    expect(commands).toContain('ROLLBACK');
+    expect(commands.some((command) => command.startsWith('INSERT INTO tracklab.schema_migrations'))).toBe(false);
+    expect(commands.at(-1)).toBe('SELECT pg_advisory_unlock(hashtext($1))');
+  });
+
   it('serializes and commits each pending migration exactly once', async () => {
     const migrations = [migration(1), migration(2)];
     const database = fakeDatabase();

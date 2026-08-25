@@ -27,6 +27,13 @@ Render must use Node.js 22 or newer and contain these server-side values:
 | `TRACKLAB_ADMIN_EMAILS` | Comma-separated administrator email allowlist. |
 | `TRACKLAB_OFFICIAL_ACCOUNT_BOOTSTRAP_TOKEN` | A server-only random value of at least 32 characters. It is used only to provision a missing reserved Club or Founder account, then must be rotated or removed. Existing official accounts are bound automatically by the Friends migration. |
 | `TRACKLAB_METRICS_TOKEN` | Long, random secret used only by the metrics collector. |
+| `TRACKLAB_APNS_ENABLED` | Must be `1` for the signed iOS push release. Invalid required startup configuration fails health closed. |
+| `TRACKLAB_APNS_TEAM_ID` / `TRACKLAB_APNS_KEY_ID` | Apple Developer Team ID and APNs token-signing Key ID. |
+| `TRACKLAB_APNS_PRIVATE_KEY` | Server-only P-256 APNs `.p8` key (multiline or base64 PKCS#8). A mounted `TRACKLAB_APNS_PRIVATE_KEY_PATH` may be used instead. |
+| `TRACKLAB_PUSH_TOKEN_ENCRYPTION_KEY` | Exactly 32 random bytes in standard base64; encrypts stored APNs device tokens. |
+| `TRACKLAB_PUSH_TOKEN_FINGERPRINT_KEY` | Separate backed-up installation-identity secret. It must remain stable; see the [APNs runbook](./apns-notifications.md). |
+| `TRACKLAB_PUSH_TOKEN_KEY_VERSION` | Current positive encryption-key version. Start at `1`. |
+| `TRACKLAB_PUSH_TOKEN_PREVIOUS_ENCRYPTION_KEYS` | Optional JSON map of at most four prior versions to 32-byte standard-base64 keys during staged rotation. |
 | `VITE_GOOGLE_MAPS_API_KEY` | Browser-restricted Google Maps JavaScript API key. |
 | `OPENAI_API_KEY` | Optional server-only key for source-backed track research, pre-race reports, natural race wording, and speech. Without it, TrackLab uses verified catalog facts and the browser voice fallback. |
 | `SQUARE_ENVIRONMENT` | `sandbox` during billing acceptance; `production` only after approval. |
@@ -44,6 +51,10 @@ does not exist yet, ordinary public registration for that reserved address is
 rejected. Provision it once through `POST /api/auth/register` with the
 `x-tracklab-official-bootstrap-token` header, confirm the Official badge and
 default connection fan-out, and then rotate or remove the bootstrap token.
+
+Complete the signed-build, secret provisioning, sandbox/production device,
+rotation, health, and rollback procedure in
+[`apns-notifications.md`](./apns-notifications.md) before enabling remote alerts.
 
 ## Pre-Release Gates
 
@@ -90,6 +101,7 @@ returns `200` with `"storage":"postgres"`.
 ```bash
 TRACKLAB_SMOKE_URL=https://staging.example.com \
 TRACKLAB_EXPECT_POSTGRES=1 \
+TRACKLAB_EXPECT_APNS=1 \
 npm run smoke:deployment
 
 TRACKLAB_SMOKE_URL=https://staging.example.com \
@@ -104,7 +116,8 @@ npm run probe:load
 6. For bike or race-engine changes, complete the relevant rows in
    [`hardware-acceptance.md`](./hardware-acceptance.md).
 7. Deploy the same commit to production.
-8. Repeat the production smoke test with `TRACKLAB_EXPECT_POSTGRES=1`.
+8. Repeat the production smoke test with `TRACKLAB_EXPECT_POSTGRES=1` and
+   `TRACKLAB_EXPECT_APNS=1`.
 9. Watch error ratio, p95 latency, persistence failures, WebSocket clients, and
    process restarts for at least 15 minutes.
 

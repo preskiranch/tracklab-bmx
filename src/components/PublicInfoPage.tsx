@@ -102,7 +102,7 @@ function PrivacyPage() {
           This notice describes the current TrackLab BMX web and iPhone/iPad app behavior. TrackLab combines
           Wattbike telemetry, mapped tracks, training history, multiplayer rooms, and optional AI commentary.
         </p>
-        <span className="public-info-updated">Last updated August 24, 2026</span>
+        <span className="public-info-updated">Last updated August 25, 2026</span>
       </section>
 
       <section className="public-info-summary" aria-label="Privacy summary">
@@ -206,6 +206,21 @@ function PrivacyPage() {
                 and sends live audio to the other room racers through real-time connections. The current implementation
                 processes connection-signaling messages but does not create stored voice recordings.
               </p>
+              <p>
+                An explicitly accepted friend who is currently online can send a short-lived request to talk live.
+                The request contains no custom message, expires automatically, and reveals the private audio room only
+                after the invited friend chooses Join. Friend live audio is microphone-off by default, is limited to the
+                two connected friends, is not recorded, and does not create a message history or inbox.
+              </p>
+
+              <h3>Optional app notifications</h3>
+              <p>
+                In the iPhone or iPad app, you can choose notifications for live-audio invitations, friend requests,
+                new friend connections, and shared tracks. TrackLab sends Apple Push Notification service an opaque
+                device token and stores a random app-installation identifier and credential so Apple can deliver the
+                choices enabled for your signed-in personal account. Notification payloads contain a notification type
+                and opaque identifier, not workout, heart-rate, microphone, message, or payment data.
+              </p>
 
               <h3>Technical information</h3>
               <p>
@@ -226,7 +241,8 @@ function PrivacyPage() {
                 <li>Connect up to four Wattbikes and run BMX races, straight sprints, and Explore rides.</li>
                 <li>Create results, non-power leaderboards, records, ghosts, calendar history, and downloadable reports.</li>
                 <li>Provide rider discovery, friend requests, secure friend invitations, suggestions, blocks, and safety reporting.</li>
-                <li>Operate private rooms, room chat, optional voice chat, challenges, and live race state.</li>
+                <li>Operate private rooms, room chat, short-lived friend live-audio alerts, optional voice, challenges, and live race state.</li>
+                <li>Deliver optional account-chosen app alerts through Apple Push Notification service.</li>
                 <li>Load maps, resolve route locations, calculate routes and elevation, and show track information.</li>
                 <li>Generate optional pre-race and live commentary from current race context.</li>
                 <li>Process memberships, prevent misuse, monitor reliability, and troubleshoot the service.</li>
@@ -250,8 +266,10 @@ function PrivacyPage() {
                   an auto-added connection. An auto-added official connection cannot see an ordinary rider&apos;s online
                   presence unless that rider explicitly accepts the connection. Friendship by itself does not share
                   private workout history, private pedal-zone analytics, live device location, or current training activity.
-                  Information can still be shared through a separate action or feature you choose, such as joining a room,
-                  publishing an eligible ghost, or training through Club Connect.
+                  An explicitly accepted online friend can send a short-lived live-audio alert containing their public
+                  display identity; you can decline it without opening the room. Information can still be shared through
+                  a separate action or feature you choose, such as joining a room, publishing an eligible ghost, or
+                  training through Club Connect.
                 </li>
                 <li>
                   <strong>Friend invitation links:</strong> you can create an expiring, single-use link or QR code and send
@@ -283,6 +301,12 @@ function PrivacyPage() {
                   connections, Club Connect membership, name selection, and bike assignment alone never grant heart-rate
                   access. The rider can forget the trusted enrollment, and the rider or club owner can disconnect studio
                   sharing without deleting the athlete&apos;s club membership. Raw and between-effort samples remain private.
+                </li>
+                <li>
+                  <strong>Apple Push Notification service:</strong> if you enable app notifications, TrackLab provides
+                  Apple an opaque device token and a minimal alert for delivery to this app installation. Opening an
+                  alert causes TrackLab to securely refetch current Friends information for the active account; the
+                  alert itself cannot accept an invitation, join live audio, or enable the microphone.
                 </li>
                 <li>
                   <strong>Google mapping services:</strong> map tiles, places, route endpoints, route geometry,
@@ -325,7 +349,11 @@ function PrivacyPage() {
                 <li>You can approve or decline ordinary friend requests, remove friends, and block or report an account.</li>
                 <li>Verified club and founder connections are added by default, but each can be removed or blocked.</li>
                 <li>Current location is requested only after you choose the current-location action.</li>
-                <li>Room microphone access starts only after a racer turns voice chat on.</li>
+                <li>Room and friend-live microphone access starts only after you explicitly turn voice on.</li>
+                <li>
+                  App notification permission is requested only after you choose Enable notifications. You can select
+                  alert types in TrackLab Settings and can turn notification access off later in iOS Settings.
+                </li>
                 <li>Race commentary and ambient track sound each have an on/off control.</li>
                 <li>Ghost replay analytics have a separate sharing choice.</li>
                 <li>
@@ -384,6 +412,11 @@ function PrivacyPage() {
                 revoking Apple Health permission does not by itself delete a previously synchronized TrackLab record.
               </p>
               <p>
+                The app keeps its random notification installation identifier and credential in the iOS Keychain using
+                device-only storage. TrackLab removes the server registration during normal sign-out and does not register
+                personal push alerts in Club Tablet kiosk mode. Apple may retain delivery information under its own terms.
+              </p>
+              <p>
                 Friend connections are deleted when either account removes the connection. TrackLab retains a suppression
                 record after a verified default connection is removed or blocked so that connection is not silently added
                 again. Blocks remain until the blocking account removes them. Answered requests, claimed or expired invite
@@ -407,7 +440,7 @@ function PrivacyPage() {
               <p>
                 Friend discovery, invitations, and connection controls do not independently verify a rider&apos;s age. A
                 parent or guardian should supervise a minor&apos;s discovery setting, friend requests, shared invitations,
-                blocks, and reports.
+                live-audio invitations and microphone use, blocks, and reports.
               </p>
               <p>
                 Apple Watch heart rate and any live studio sharing must not be enabled for a minor without the permission
@@ -499,6 +532,11 @@ function SupportPage() {
             <li>Bluetooth cannot be validated in the iOS Simulator; use a physical device.</li>
             <li>Landscape mode gives the most room for race and Explore overlays.</li>
           </ul>
+          <p>
+            For friend alerts, open TrackLab Settings → Notifications and choose Enable notifications. If access was
+            denied, use Open iOS Settings. Notification taps only open and refresh Friends; joining live audio and
+            turning on the microphone remain separate actions.
+          </p>
         </SupportCard>
 
         <SupportCard icon={<MapPinned aria-hidden="true" />} title="Maps or routes are not loading">
@@ -515,7 +553,8 @@ function SupportPage() {
           <ul>
             <li>Race commentary and ambient track sound have separate toggles.</li>
             <li>TrackLab stays silent if its natural commentary voice is unavailable.</li>
-            <li>Room voice is microphone-off by default and is available only to room racers.</li>
+            <li>Talk live alerts reach explicitly accepted friends while TrackLab shows them online and expire after 90 seconds.</li>
+            <li>Room and two-friend live audio are microphone-off by default; no voice recording or friend inbox is created.</li>
             <li>Allow microphone access only when you want live voice chat.</li>
             <li>Check device volume and silent mode when cadence or gate tones cannot be heard.</li>
           </ul>

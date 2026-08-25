@@ -353,12 +353,8 @@ export function RecoveryAlertCoordinator({
         const nativeAvailable = nativeRecoveryAlerts.isPluginAvailable();
         setNativeAlertsAvailable(nativeAvailable);
         if (nativeAvailable && preferenceResult.preference.mode !== 'off') {
-          let permission = await nativeRecoveryAlerts.getPermissionStatus();
+          const permission = await nativeRecoveryAlerts.getPermissionStatus();
           if (!isCurrentHydration()) return;
-          if (nativeRecoveryPermissionNeedsPrompt(preferenceResult.preference.mode, permission)) {
-            permission = await nativeRecoveryAlerts.requestPermission();
-            if (!isCurrentHydration()) return;
-          }
           const permissionWarning = nativeRecoveryPermissionWarning(
             preferenceResult.preference.mode,
             permission,

@@ -81,11 +81,44 @@ const memoryReconciledOfficialFriendUserIds = new Set();
 const memoryAccountTrackFavorites = new Map();
 const memoryAccountTrackShares = new Map();
 const memoryAccountTrackShareIdByParticipantsAndTrack = new Map();
+const memoryPushInstallations = new Map();
+const memoryPushInstallationIdByFingerprint = new Map();
+const memoryPushPreferences = new Map();
+const memoryPushEvents = new Map();
+const memoryPushEventIdByIdempotencyKey = new Map();
+const memoryPushDeliveries = new Map();
+const memoryLiveAudioFriendInvites = new Map();
+const memoryPersistenceLockTails = new Map();
 const memoryGroupsById = new Map();
 const memoryGroupMembersByKey = new Map();
 const memoryGroupInvitesById = new Map();
 let memoryRaceResultSequence = 0;
 let memoryFriendInviteSequence = 0;
+
+async function withMemoryPersistenceLock(key, operation) {
+  const previous = memoryPersistenceLockTails.get(key) ?? Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const tail = previous.catch(() => {}).then(() => gate);
+  memoryPersistenceLockTails.set(key, tail);
+  await previous.catch(() => {});
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (memoryPersistenceLockTails.get(key) === tail) {
+      memoryPersistenceLockTails.delete(key);
+    }
+  }
+}
+
+function withMemoryPushInstallationLock(installationId, operation) {
+  return withMemoryPersistenceLock(`push-installation:${installationId}`, operation);
+}
+
+function withMemoryAuthSessionLock(authSessionTokenHash, operation) {
+  return withMemoryPersistenceLock(`auth-session:${authSessionTokenHash}`, operation);
+}
 
 function json(value) {
   return JSON.stringify(value ?? null);
@@ -838,10 +871,33 @@ export async function touchAuthSession(tokenHash) {
   );
 }
 
+async function removeMemoryPushInstallationsForSession(authSessionTokenHash) {
+  const installationIds = [...memoryPushInstallations.values()]
+    .filter((installation) => installation.authSessionTokenHash === authSessionTokenHash)
+    .map((installation) => installation.id)
+    .sort();
+  for (const installationId of installationIds) {
+    await withMemoryPushInstallationLock(installationId, async () => {
+      const installation = memoryPushInstallations.get(installationId);
+      if (installation?.authSessionTokenHash !== authSessionTokenHash) return;
+      memoryPushInstallations.delete(installationId);
+      memoryPushInstallationIdByFingerprint.delete(pushInstallationFingerprintKey(installation));
+      for (const [deliveryKey, delivery] of memoryPushDeliveries) {
+        if (delivery.installationId === installationId) memoryPushDeliveries.delete(deliveryKey);
+      }
+    });
+  }
+}
+
 export async function deleteAuthSession(tokenHash) {
   if (!pool) {
-    memoryAuthSessionsByToken.delete(tokenHash);
-    return;
+    return withMemoryAuthSessionLock(tokenHash, async () => {
+      // Removing the session first blocks new dispatch/registration checks;
+      // awaiting each installation lock lets an already-linearized bounded
+      // provider send finish before logout reports success.
+      memoryAuthSessionsByToken.delete(tokenHash);
+      await removeMemoryPushInstallationsForSession(tokenHash);
+    });
   }
 
   await query(
@@ -8485,33 +8541,37 @@ export async function enrollClubTabletDevice({
 }) {
   const now = Date.now();
   if (!pool) {
-    const clubId = memoryClubIdByOwner.get(ownerProfileKey);
-    const authSession = memoryAuthSessionsByToken.get(authSessionTokenHash);
-    if (
-      !clubId
-      || memoryClubTabletDeviceIdByTokenHash.has(tokenHash)
-      || !authSession
-      || authSession.userId !== ownerUserId
-      || Date.parse(authSession.expiresAt) <= now
-    ) {
-      return null;
-    }
-    const device = {
-      id,
-      clubId,
-      name,
-      tokenHash,
-      lastSeenAt: now,
-      revokedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    // These synchronous memory mutations are one enrollment boundary: no
-    // successful device can coexist with the owner session that authorized it.
-    memoryClubTabletDevicesById.set(id, device);
-    memoryClubTabletDeviceIdByTokenHash.set(tokenHash, id);
-    memoryAuthSessionsByToken.delete(authSessionTokenHash);
-    return cloneJson(enrichMemoryClubTabletDevice(device), device);
+    return withMemoryAuthSessionLock(authSessionTokenHash, async () => {
+      const clubId = memoryClubIdByOwner.get(ownerProfileKey);
+      const authSession = memoryAuthSessionsByToken.get(authSessionTokenHash);
+      if (
+        !clubId
+        || memoryClubTabletDeviceIdByTokenHash.has(tokenHash)
+        || !authSession
+        || authSession.userId !== ownerUserId
+        || Date.parse(authSession.expiresAt) <= now
+      ) {
+        return null;
+      }
+      const device = {
+        id,
+        clubId,
+        name,
+        tokenHash,
+        lastSeenAt: now,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      // Retire the personal session before waiting so no new push dispatch or
+      // installation can start. Existing bounded sends hold the per-device
+      // lock and must finish before kiosk enrollment reports success.
+      memoryAuthSessionsByToken.delete(authSessionTokenHash);
+      await removeMemoryPushInstallationsForSession(authSessionTokenHash);
+      memoryClubTabletDevicesById.set(id, device);
+      memoryClubTabletDeviceIdByTokenHash.set(tokenHash, id);
+      return cloneJson(enrichMemoryClubTabletDevice(device), device);
+    });
   }
 
   const ready = await initPersistence();
@@ -9376,6 +9436,27 @@ function memoryHasExplicitFriendship(userIdA, userIdB) {
   return Boolean(friendship && friendship.source !== 'official' && !memoryUsersAreBlocked(userIdA, userIdB));
 }
 
+export async function hasExplicitAccountFriendship(userIdA, userIdB) {
+  if (!userIdA || !userIdB || userIdA === userIdB) return false;
+  if (!pool) return memoryHasExplicitFriendship(userIdA, userIdB);
+  const result = await query(
+    `SELECT 1
+     FROM ${schema}.account_friendships AS friendship
+     WHERE friendship.user_id_a = LEAST($1, $2)
+       AND friendship.user_id_b = GREATEST($1, $2)
+       AND friendship.source <> 'official'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM ${schema}.friend_blocks AS block
+         WHERE (block.blocker_user_id = $1 AND block.blocked_user_id = $2)
+            OR (block.blocker_user_id = $2 AND block.blocked_user_id = $1)
+       )
+     LIMIT 1`,
+    [userIdA, userIdB],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
 function removeMemoryTrackSharesForPair(userIdA, userIdB) {
   for (const [shareId, share] of memoryAccountTrackShares) {
     if (accountPairKey(share.senderUserId, share.recipientUserId) !== accountPairKey(userIdA, userIdB)) {
@@ -9568,6 +9649,7 @@ export async function createAccountTrackShare({
   recipientUserId,
   trackId,
   trackSnapshot,
+  pushEvent = null,
 }) {
   if (
     !id || !senderUserId || !recipientUserId || senderUserId === recipientUserId
@@ -9598,16 +9680,46 @@ export async function createAccountTrackShare({
     };
     memoryAccountTrackShares.set(share.id, share);
     memoryAccountTrackShareIdByParticipantsAndTrack.set(key, share.id);
+    if (pushEvent) {
+      const event = enqueueMemoryPushEvent({
+        ...pushEvent,
+        recipientUserId,
+        actorUserId: senderUserId,
+        kind: 'track_share',
+        objectId: share.id,
+      });
+      if (!event) {
+        if (existing) memoryAccountTrackShares.set(existing.id, existing);
+        else memoryAccountTrackShares.delete(share.id);
+        if (existingId) memoryAccountTrackShareIdByParticipantsAndTrack.set(key, existingId);
+        else memoryAccountTrackShareIdByParticipantsAndTrack.delete(key);
+        return null;
+      }
+    }
     return {
       ...share,
       trackSnapshot: cloneJson(share.trackSnapshot, {}),
       profile: memoryTrackShareProfile(recipientUserId),
     };
   }
-  const result = await withAccountPairTransaction(senderUserId, recipientUserId, (client) => client.query(
-    accountTrackShareCreateStatement(),
-    [id, senderUserId, recipientUserId, trackId, json(trackSnapshot)],
-  ));
+  const result = await withAccountPairTransaction(senderUserId, recipientUserId, async (client) => {
+    const saved = await client.query(
+      accountTrackShareCreateStatement(),
+      [id, senderUserId, recipientUserId, trackId, json(trackSnapshot)],
+    );
+    const row = saved.rows[0];
+    if (row && pushEvent) {
+      const event = await enqueuePushEventWithClient(client, {
+        ...pushEvent,
+        recipientUserId,
+        actorUserId: senderUserId,
+        kind: 'track_share',
+        objectId: row.id,
+      });
+      if (!event) throw new Error('Track share push event could not be created.');
+    }
+    return saved;
+  });
   const row = result?.rows?.[0];
   return accountTrackShareRecord(row, accountProfileFromRow(row, { photoUrl: row?.photo_url ?? '' }));
 }
@@ -9690,6 +9802,7 @@ export async function openAccountTrackShare(recipientUserId, shareId) {
       return null;
     }
     if (!share.openedAt) share.openedAt = new Date().toISOString();
+    await cancelPushEventsForObject('track_share', share.id, 'track-share-opened');
     return {
       ...share,
       trackSnapshot: cloneJson(share.trackSnapshot, {}),
@@ -9703,10 +9816,18 @@ export async function openAccountTrackShare(recipientUserId, shareId) {
   );
   const senderUserId = lookup?.rows?.[0]?.sender_user_id;
   if (!senderUserId) return null;
-  const result = await withAccountPairTransaction(senderUserId, recipientUserId, (client) => client.query(
-    accountTrackShareOpenStatement(),
-    [shareId, recipientUserId],
-  ));
+  const result = await withAccountPairTransaction(senderUserId, recipientUserId, async (client) => {
+    const opened = await client.query(accountTrackShareOpenStatement(), [shareId, recipientUserId]);
+    if (opened.rows[0]) {
+      await client.query(
+        `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+           leased_until = NULL, last_error_code = 'track-share-opened', updated_at = now()
+         WHERE kind = 'track_share' AND object_id = $1 AND state IN ('pending', 'leased')`,
+        [shareId],
+      );
+    }
+    return opened;
+  });
   const row = result?.rows?.[0];
   return accountTrackShareRecord(row, accountProfileFromRow(row, { photoUrl: row?.photo_url ?? '' }));
 }
@@ -9720,15 +9841,1691 @@ export async function deleteAccountTrackShare(recipientUserId, shareId) {
     memoryAccountTrackShareIdByParticipantsAndTrack.delete(
       accountTrackShareKey(share.senderUserId, share.recipientUserId, share.trackId),
     );
+    await cancelPushEventsForObject('track_share', share.id, 'track-share-deleted');
+    return true;
+  }
+  const result = await withPersistenceLock(`track-share:${shareId}`, async (client) => {
+    const removed = await client.query(
+      `DELETE FROM ${schema}.account_track_shares
+       WHERE id = $1 AND recipient_user_id = $2
+       RETURNING id`,
+      [shareId, recipientUserId],
+    );
+    if (removed.rows[0]) {
+      await client.query(
+        `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+           leased_until = NULL, last_error_code = 'track-share-deleted', updated_at = now()
+         WHERE kind = 'track_share' AND object_id = $1 AND state IN ('pending', 'leased')`,
+        [shareId],
+      );
+    }
+    return removed;
+  });
+  return Boolean(result?.rows?.[0]);
+}
+
+const maximumActivePushInstallationsPerAccount = 10;
+const pushInstallationActiveLeaseMs = 30 * 24 * 60 * 60 * 1_000;
+const pushEventKinds = new Set([
+  'live_audio_invite',
+  'friend_request',
+  'friend_connection',
+  'track_share',
+]);
+const defaultPushPreferences = Object.freeze({
+  liveAudio: true,
+  friendRequests: true,
+  friendConnections: true,
+  trackShares: true,
+});
+
+function pushInstallationFingerprintKey(value) {
+  return `${value.topic}\0${value.environment}\0${value.tokenFingerprint}`;
+}
+
+function pushInstallationRecord(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id ?? row.userId,
+    authSessionTokenHash: row.auth_session_token_hash ?? row.authSessionTokenHash,
+    credentialHash: row.credential_hash ?? row.credentialHash,
+    platform: 'ios',
+    environment: row.environment,
+    topic: row.topic,
+    tokenCiphertext: row.token_ciphertext ?? row.tokenCiphertext,
+    tokenNonce: row.token_nonce ?? row.tokenNonce,
+    tokenTag: row.token_tag ?? row.tokenTag,
+    tokenKeyVersion: Number(row.token_key_version ?? row.tokenKeyVersion) || 1,
+    tokenFingerprint: row.token_fingerprint ?? row.tokenFingerprint,
+    permissionStatus: row.permission_status ?? row.permissionStatus ?? 'granted',
+    protocolVersion: Number(row.protocol_version ?? row.protocolVersion) || 1,
+    appBuild: row.app_build ?? row.appBuild ?? '',
+    osVersion: row.os_version ?? row.osVersion ?? '',
+    revision: Math.max(1, Number(row.revision) || 1),
+    registeredAt: new Date(row.registered_at ?? row.registeredAt).toISOString(),
+    lastSeenAt: new Date(row.last_seen_at ?? row.lastSeenAt).toISOString(),
+    disabledAt: row.disabled_at == null && row.disabledAt == null
+      ? null
+      : new Date(row.disabled_at ?? row.disabledAt).toISOString(),
+    invalidatedAt: row.invalidated_at == null && row.invalidatedAt == null
+      ? null
+      : new Date(row.invalidated_at ?? row.invalidatedAt).toISOString(),
+    createdAt: new Date(row.created_at ?? row.createdAt).toISOString(),
+    updatedAt: new Date(row.updated_at ?? row.updatedAt).toISOString(),
+  };
+}
+
+function pushPreferencesRecord(row) {
+  return row ? {
+    liveAudio: row.live_audio ?? row.liveAudio ?? true,
+    friendRequests: row.friend_requests ?? row.friendRequests ?? true,
+    friendConnections: row.friend_connections ?? row.friendConnections ?? true,
+    trackShares: row.track_shares ?? row.trackShares ?? true,
+  } : { ...defaultPushPreferences };
+}
+
+function activeMemoryPushInstallation(installation, now = Date.now()) {
+  const session = memoryAuthSessionsByToken.get(installation?.authSessionTokenHash);
+  return Boolean(
+    installation
+    && installation.permissionStatus === 'granted'
+    && !installation.disabledAt
+    && !installation.invalidatedAt
+    && Date.parse(installation.lastSeenAt) > now - pushInstallationActiveLeaseMs
+    && session?.userId === installation.userId
+    && Date.parse(session.expiresAt) > now
+  );
+}
+
+export async function registerPushInstallation(candidate, now = Date.now()) {
+  if (
+    !candidate?.id || !candidate.userId || !candidate.authSessionTokenHash
+    || !candidate.credentialHash || candidate.platform !== 'ios'
+    || !['sandbox', 'production'].includes(candidate.environment)
+    || !candidate.topic || !candidate.tokenCiphertext || !candidate.tokenNonce
+    || !candidate.tokenTag || !candidate.tokenFingerprint
+    || candidate.permissionStatus !== 'granted'
+  ) return { status: 'unavailable', installation: null };
+  const clock = new Date(now).toISOString();
+  if (!pool) {
+    return withMemoryPushInstallationLock(candidate.id, async () => {
+      const session = memoryAuthSessionsByToken.get(candidate.authSessionTokenHash);
+      if (
+        !session
+        || session.userId !== candidate.userId
+        || Date.parse(session.expiresAt) <= now
+      ) return { status: 'unavailable', installation: null };
+      const existing = memoryPushInstallations.get(candidate.id);
+      if (existing && existing.credentialHash !== candidate.credentialHash) {
+        return { status: 'unavailable', installation: null };
+      }
+      const fingerprintKey = pushInstallationFingerprintKey(candidate);
+      const conflictingId = memoryPushInstallationIdByFingerprint.get(fingerprintKey);
+      if (conflictingId && conflictingId !== candidate.id) {
+        return { status: 'unavailable', installation: null };
+      }
+      const activeCount = [...memoryPushInstallations.values()].filter((installation) => (
+        installation.id !== candidate.id
+        && installation.userId === candidate.userId
+        && activeMemoryPushInstallation(installation, now)
+      )).length;
+      if (activeCount >= maximumActivePushInstallationsPerAccount) {
+        return { status: 'limit', installation: null };
+      }
+      if (existing) {
+        memoryPushInstallationIdByFingerprint.delete(pushInstallationFingerprintKey(existing));
+        for (const delivery of memoryPushDeliveries.values()) {
+          const event = memoryPushEvents.get(delivery.eventId);
+          if (
+            delivery.installationId === existing.id
+            && event?.recipientUserId !== candidate.userId
+            && ['pending', 'leased'].includes(delivery.state)
+          ) {
+            delivery.state = 'cancelled';
+            delivery.updatedAt = clock;
+          }
+        }
+      }
+      const installation = {
+        ...candidate,
+        platform: 'ios',
+        tokenKeyVersion: Math.max(1, Math.round(Number(candidate.tokenKeyVersion) || 1)),
+        protocolVersion: Math.max(1, Math.round(Number(candidate.protocolVersion) || 1)),
+        appBuild: String(candidate.appBuild || '').slice(0, 80),
+        osVersion: String(candidate.osVersion || '').slice(0, 80),
+        revision: (Math.max(0, Number(existing?.revision) || 0) + 1),
+        registeredAt: clock,
+        lastSeenAt: clock,
+        disabledAt: null,
+        invalidatedAt: null,
+        createdAt: existing?.createdAt ?? clock,
+        updatedAt: clock,
+      };
+      memoryPushInstallations.set(installation.id, installation);
+      memoryPushInstallationIdByFingerprint.set(fingerprintKey, installation.id);
+      if (!memoryPushPreferences.has(candidate.userId)) {
+        memoryPushPreferences.set(candidate.userId, { ...defaultPushPreferences, updatedAt: clock });
+      }
+      return { status: 'saved', installation: pushInstallationRecord(installation) };
+    });
+  }
+  const result = await withPersistenceLock(`push-installation:${candidate.id}`, async (client) => {
+    // Distinct installation ids for one account must share this lock so their
+    // active-count checks cannot all observe the same ninth device and exceed
+    // the ten-device cap. Fingerprint locking also turns cross-account token
+    // collisions into the same generic unavailable result.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `push-installation-user:${candidate.userId}`,
+    ]);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `push-installation-fingerprint:${candidate.topic}:${candidate.environment}:${candidate.tokenFingerprint}`,
+    ]);
+    const session = await client.query(
+      `SELECT token_hash FROM ${schema}.auth_sessions
+       WHERE token_hash = $1 AND user_id = $2 AND expires_at > now()
+       FOR UPDATE`,
+      [candidate.authSessionTokenHash, candidate.userId],
+    );
+    if (!session.rows[0]) return { status: 'unavailable', row: null };
+    const existing = await client.query(
+      `SELECT id, credential_hash FROM ${schema}.push_installations WHERE id = $1 FOR UPDATE`,
+      [candidate.id],
+    );
+    if (existing.rows[0] && existing.rows[0].credential_hash !== candidate.credentialHash) {
+      return { status: 'unavailable', row: null };
+    }
+    const fingerprintConflict = await client.query(
+      `SELECT id FROM ${schema}.push_installations
+       WHERE topic = $1 AND environment = $2 AND token_fingerprint = $3 AND id <> $4
+       LIMIT 1 FOR UPDATE`,
+      [candidate.topic, candidate.environment, candidate.tokenFingerprint, candidate.id],
+    );
+    if (fingerprintConflict.rows[0]) return { status: 'unavailable', row: null };
+    const active = await client.query(
+      `SELECT count(*)::integer AS total
+       FROM ${schema}.push_installations AS installation
+       JOIN ${schema}.auth_sessions AS session
+         ON session.token_hash = installation.auth_session_token_hash
+        AND session.user_id = installation.user_id
+        AND session.expires_at > now()
+       WHERE installation.user_id = $1 AND installation.id <> $2
+         AND installation.permission_status = 'granted'
+         AND installation.disabled_at IS NULL AND installation.invalidated_at IS NULL
+         AND installation.last_seen_at > now() - interval '30 days'`,
+      [candidate.userId, candidate.id],
+    );
+    if (Number(active.rows[0]?.total) >= maximumActivePushInstallationsPerAccount) {
+      return { status: 'limit', row: null };
+    }
+    const saved = await client.query(
+      `INSERT INTO ${schema}.push_installations (
+         id, user_id, auth_session_token_hash, credential_hash, platform,
+         environment, topic, token_ciphertext, token_nonce, token_tag,
+         token_key_version, token_fingerprint, permission_status,
+         protocol_version, app_build, os_version, revision, registered_at, last_seen_at,
+         disabled_at, invalidated_at, created_at, updated_at
+       ) VALUES (
+         $1, $2, $3, $4, 'ios', $5, $6, $7, $8, $9, $10, $11,
+         'granted', $12, $13, $14, 1, now(), now(), NULL, NULL, now(), now()
+       )
+       ON CONFLICT (id) DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         auth_session_token_hash = EXCLUDED.auth_session_token_hash,
+         environment = EXCLUDED.environment,
+         topic = EXCLUDED.topic,
+         token_ciphertext = EXCLUDED.token_ciphertext,
+         token_nonce = EXCLUDED.token_nonce,
+         token_tag = EXCLUDED.token_tag,
+         token_key_version = EXCLUDED.token_key_version,
+         token_fingerprint = EXCLUDED.token_fingerprint,
+         permission_status = 'granted',
+         protocol_version = EXCLUDED.protocol_version,
+         app_build = EXCLUDED.app_build,
+         os_version = EXCLUDED.os_version,
+         revision = ${schema}.push_installations.revision + 1,
+         registered_at = now(),
+         last_seen_at = now(),
+         disabled_at = NULL,
+         invalidated_at = NULL,
+         updated_at = now()
+       WHERE ${schema}.push_installations.credential_hash = EXCLUDED.credential_hash
+       RETURNING *`,
+      [
+        candidate.id,
+        candidate.userId,
+        candidate.authSessionTokenHash,
+        candidate.credentialHash,
+        candidate.environment,
+        candidate.topic,
+        candidate.tokenCiphertext,
+        candidate.tokenNonce,
+        candidate.tokenTag,
+        candidate.tokenKeyVersion,
+        candidate.tokenFingerprint,
+        candidate.protocolVersion,
+        String(candidate.appBuild || '').slice(0, 80),
+        String(candidate.osVersion || '').slice(0, 80),
+      ],
+    );
+    if (!saved.rows[0]) return { status: 'unavailable', row: null };
+    await client.query(
+      `UPDATE ${schema}.push_deliveries AS delivery
+       SET state = 'cancelled', lease_owner = NULL, leased_until = NULL, updated_at = now()
+       FROM ${schema}.push_events AS event
+       WHERE delivery.event_id = event.id AND delivery.installation_id = $1
+         AND event.recipient_user_id <> $2 AND delivery.state IN ('pending', 'leased')`,
+      [candidate.id, candidate.userId],
+    );
+    await client.query(
+      `INSERT INTO ${schema}.push_preferences (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [candidate.userId],
+    );
+    return { status: 'saved', row: saved.rows[0] };
+  });
+  return {
+    status: result?.status ?? 'unavailable',
+    installation: pushInstallationRecord(result?.row),
+  };
+}
+
+export async function deletePushInstallation({ id, userId, authSessionTokenHash, credentialHash }) {
+  if (!id || !userId || !authSessionTokenHash || !credentialHash) return false;
+  if (!pool) {
+    return withMemoryPushInstallationLock(id, async () => {
+      const installation = memoryPushInstallations.get(id);
+      if (
+        !installation
+        || installation.userId !== userId
+        || installation.authSessionTokenHash !== authSessionTokenHash
+        || installation.credentialHash !== credentialHash
+      ) return false;
+      memoryPushInstallations.delete(id);
+      memoryPushInstallationIdByFingerprint.delete(pushInstallationFingerprintKey(installation));
+      for (const [key, delivery] of memoryPushDeliveries) {
+        if (delivery.installationId === id) memoryPushDeliveries.delete(key);
+      }
+      return true;
+    });
+  }
+  const result = await withPersistenceLock(`push-installation:${id}`, (client) => client.query(
+    `DELETE FROM ${schema}.push_installations
+     WHERE id = $1 AND user_id = $2 AND auth_session_token_hash = $3 AND credential_hash = $4
+     RETURNING id`,
+    [id, userId, authSessionTokenHash, credentialHash],
+  ));
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function loadPushPreferences(userId) {
+  if (!userId) return { ...defaultPushPreferences };
+  if (!pool) return pushPreferencesRecord(memoryPushPreferences.get(userId));
+  const result = await query(
+    `SELECT live_audio, friend_requests, friend_connections, track_shares
+     FROM ${schema}.push_preferences WHERE user_id = $1`,
+    [userId],
+  );
+  return pushPreferencesRecord(result?.rows?.[0]);
+}
+
+export async function savePushPreferences(userId, patch) {
+  if (!userId || !patch || typeof patch !== 'object') return null;
+  if (!pool) {
+    if (!memoryAuthUsersById.has(userId)) return null;
+    const current = pushPreferencesRecord(memoryPushPreferences.get(userId));
+    const next = {
+      liveAudio: typeof patch.liveAudio === 'boolean' ? patch.liveAudio : current.liveAudio,
+      friendRequests: typeof patch.friendRequests === 'boolean' ? patch.friendRequests : current.friendRequests,
+      friendConnections: typeof patch.friendConnections === 'boolean'
+        ? patch.friendConnections
+        : current.friendConnections,
+      trackShares: typeof patch.trackShares === 'boolean' ? patch.trackShares : current.trackShares,
+    };
+    memoryPushPreferences.set(userId, { ...next, updatedAt: new Date().toISOString() });
+    return next;
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.push_preferences AS current (
+       user_id, live_audio, friend_requests, friend_connections, track_shares
+     ) VALUES (
+       $1, COALESCE($2::boolean, true), COALESCE($3::boolean, true),
+       COALESCE($4::boolean, true), COALESCE($5::boolean, true)
+     )
+     ON CONFLICT (user_id) DO UPDATE SET
+       live_audio = COALESCE($2::boolean, current.live_audio),
+       friend_requests = COALESCE($3::boolean, current.friend_requests),
+       friend_connections = COALESCE($4::boolean, current.friend_connections),
+       track_shares = COALESCE($5::boolean, current.track_shares),
+       updated_at = now()
+     RETURNING live_audio, friend_requests, friend_connections, track_shares`,
+    [
+      userId,
+      typeof patch.liveAudio === 'boolean' ? patch.liveAudio : null,
+      typeof patch.friendRequests === 'boolean' ? patch.friendRequests : null,
+      typeof patch.friendConnections === 'boolean' ? patch.friendConnections : null,
+      typeof patch.trackShares === 'boolean' ? patch.trackShares : null,
+    ],
+  );
+  return pushPreferencesRecord(result?.rows?.[0]);
+}
+
+export async function listActivePushInstallations(userId, now = Date.now()) {
+  if (!userId) return [];
+  if (!pool) {
+    return [...memoryPushInstallations.values()]
+      .filter((installation) => installation.userId === userId && activeMemoryPushInstallation(installation, now))
+      .sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt))
+      .slice(0, maximumActivePushInstallationsPerAccount)
+      .map(pushInstallationRecord);
+  }
+  const result = await query(
+    `SELECT installation.*
+     FROM ${schema}.push_installations AS installation
+     JOIN ${schema}.auth_sessions AS session
+       ON session.token_hash = installation.auth_session_token_hash
+      AND session.user_id = installation.user_id
+      AND session.expires_at > now()
+     WHERE installation.user_id = $1
+       AND installation.permission_status = 'granted'
+       AND installation.disabled_at IS NULL AND installation.invalidated_at IS NULL
+       AND installation.last_seen_at > to_timestamp($2 / 1000.0) - interval '30 days'
+     ORDER BY installation.last_seen_at DESC, installation.id
+     LIMIT $3`,
+    [userId, now, maximumActivePushInstallationsPerAccount],
+  );
+  return (result?.rows ?? []).map(pushInstallationRecord);
+}
+
+function pushEventRecord(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    notificationId: row.notification_id ?? row.notificationId,
+    recipientUserId: row.recipient_user_id ?? row.recipientUserId,
+    actorUserId: row.actor_user_id ?? row.actorUserId ?? null,
+    kind: row.kind,
+    objectId: row.object_id ?? row.objectId,
+    idempotencyKey: row.idempotency_key ?? row.idempotencyKey,
+    collapseId: row.collapse_id ?? row.collapseId,
+    originInstanceId: row.origin_instance_id ?? row.originInstanceId ?? null,
+    state: row.state ?? 'pending',
+    notBefore: new Date(row.not_before ?? row.notBefore).toISOString(),
+    expiresAt: new Date(row.expires_at ?? row.expiresAt).toISOString(),
+    attemptCount: Number(row.attempt_count ?? row.attemptCount) || 0,
+    nextAttemptAt: new Date(row.next_attempt_at ?? row.nextAttemptAt).toISOString(),
+    leaseOwner: row.lease_owner ?? row.leaseOwner ?? null,
+    leasedUntil: row.leased_until == null && row.leasedUntil == null
+      ? null
+      : new Date(row.leased_until ?? row.leasedUntil).toISOString(),
+    lastErrorCode: row.last_error_code ?? row.lastErrorCode ?? '',
+    createdAt: new Date(row.created_at ?? row.createdAt).toISOString(),
+    updatedAt: new Date(row.updated_at ?? row.updatedAt).toISOString(),
+  };
+}
+
+function pushDeliveryKey(eventId, installationId) {
+  return `${eventId}\0${installationId}`;
+}
+
+function pushDeliveryRecord(row) {
+  if (!row) return null;
+  return {
+    eventId: row.event_id ?? row.eventId,
+    installationId: row.installation_id ?? row.installationId,
+    apnsId: row.apns_id ?? row.apnsId,
+    state: row.state ?? 'pending',
+    attemptCount: Number(row.attempt_count ?? row.attemptCount) || 0,
+    nextAttemptAt: new Date(row.next_attempt_at ?? row.nextAttemptAt).toISOString(),
+    leaseOwner: row.lease_owner ?? row.leaseOwner ?? null,
+    leasedUntil: row.leased_until == null && row.leasedUntil == null
+      ? null
+      : new Date(row.leased_until ?? row.leasedUntil).toISOString(),
+    lastStatus: row.last_status == null && row.lastStatus == null
+      ? null
+      : Number(row.last_status ?? row.lastStatus),
+    lastErrorCode: row.last_error_code ?? row.lastErrorCode ?? '',
+    createdAt: new Date(row.created_at ?? row.createdAt).toISOString(),
+    updatedAt: new Date(row.updated_at ?? row.updatedAt).toISOString(),
+  };
+}
+
+function normalizedPushEvent(candidate, now = Date.now()) {
+  const expiresAt = Number(candidate?.expiresAt);
+  const notBefore = Number.isFinite(Number(candidate?.notBefore)) ? Number(candidate.notBefore) : now;
+  if (
+    !candidate?.id || !candidate.notificationId || !candidate.recipientUserId
+    || !pushEventKinds.has(candidate.kind) || !candidate.objectId
+    || !candidate.idempotencyKey || !candidate.collapseId
+    || !Number.isFinite(expiresAt) || expiresAt <= now
+    || notBefore > expiresAt
+  ) return null;
+  return {
+    id: candidate.id,
+    notificationId: candidate.notificationId,
+    recipientUserId: candidate.recipientUserId,
+    actorUserId: candidate.actorUserId || null,
+    kind: candidate.kind,
+    objectId: String(candidate.objectId).slice(0, 180),
+    idempotencyKey: String(candidate.idempotencyKey).slice(0, 300),
+    collapseId: String(candidate.collapseId).slice(0, 64),
+    originInstanceId: candidate.originInstanceId || null,
+    notBefore,
+    expiresAt,
+  };
+}
+
+function samePushEventIdentity(left, right) {
+  return Boolean(
+    left && right
+    && left.recipientUserId === right.recipientUserId
+    && left.actorUserId === right.actorUserId
+    && left.kind === right.kind
+    && left.objectId === right.objectId
+    && left.idempotencyKey === right.idempotencyKey
+    && left.originInstanceId === right.originInstanceId
+  );
+}
+
+function enqueueMemoryPushEvent(candidate, now = Date.now()) {
+  const event = normalizedPushEvent(candidate, now);
+  if (!event || !memoryAuthUsersById.has(event.recipientUserId)) return null;
+  const existingId = memoryPushEventIdByIdempotencyKey.get(event.idempotencyKey);
+  if (existingId) {
+    const existing = pushEventRecord(memoryPushEvents.get(existingId));
+    return samePushEventIdentity(existing, event) ? existing : null;
+  }
+  if (memoryPushEvents.has(event.id)) return null;
+  const clock = new Date(now).toISOString();
+  const stored = {
+    ...event,
+    notBefore: new Date(event.notBefore).toISOString(),
+    expiresAt: new Date(event.expiresAt).toISOString(),
+    state: 'pending',
+    attemptCount: 0,
+    nextAttemptAt: new Date(event.notBefore).toISOString(),
+    leaseOwner: null,
+    leasedUntil: null,
+    lastErrorCode: '',
+    createdAt: clock,
+    updatedAt: clock,
+  };
+  memoryPushEvents.set(stored.id, stored);
+  memoryPushEventIdByIdempotencyKey.set(stored.idempotencyKey, stored.id);
+  return pushEventRecord(stored);
+}
+
+async function enqueuePushEventWithClient(client, candidate, now = Date.now()) {
+  const event = normalizedPushEvent(candidate, now);
+  if (!event) return null;
+  const result = await client.query(
+    `INSERT INTO ${schema}.push_events (
+       id, notification_id, recipient_user_id, actor_user_id, kind, object_id,
+       idempotency_key, collapse_id, origin_instance_id, state, not_before,
+       expires_at, attempt_count, next_attempt_at, created_at, updated_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending',
+       to_timestamp($10 / 1000.0), to_timestamp($11 / 1000.0), 0,
+       to_timestamp($10 / 1000.0), now(), now()
+     )
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING *`,
+    [
+      event.id,
+      event.notificationId,
+      event.recipientUserId,
+      event.actorUserId,
+      event.kind,
+      event.objectId,
+      event.idempotencyKey,
+      event.collapseId,
+      event.originInstanceId,
+      event.notBefore,
+      event.expiresAt,
+    ],
+  );
+  if (result.rows[0]) return pushEventRecord(result.rows[0]);
+  const existing = await client.query(
+    `SELECT * FROM ${schema}.push_events WHERE idempotency_key = $1 LIMIT 1`,
+    [event.idempotencyKey],
+  );
+  const existingEvent = pushEventRecord(existing.rows[0]);
+  return samePushEventIdentity(existingEvent, event) ? existingEvent : null;
+}
+
+export async function enqueuePushEvent(candidate, now = Date.now()) {
+  if (!pool) return enqueueMemoryPushEvent(candidate, now);
+  return withPersistenceLock(`push-event:${String(candidate?.idempotencyKey || '').slice(0, 260)}`, (client) => (
+    enqueuePushEventWithClient(client, candidate, now)
+  ));
+}
+
+function pushPreferenceAllows(preferences, kind) {
+  if (kind === 'live_audio_invite') return preferences.liveAudio === true;
+  if (kind === 'friend_request') return preferences.friendRequests === true;
+  if (kind === 'friend_connection') return preferences.friendConnections === true;
+  if (kind === 'track_share') return preferences.trackShares === true;
+  return false;
+}
+
+function memoryPushEventEligible(event, originInstanceId, now, requiredState = '') {
+  if (
+    !event || Date.parse(event.expiresAt) <= now
+    || !['pending', 'leased', 'dispatched'].includes(event.state)
+    || (requiredState && event.state !== requiredState)
+    || (event.originInstanceId && event.originInstanceId !== originInstanceId)
+    || !pushPreferenceAllows(pushPreferencesRecord(memoryPushPreferences.get(event.recipientUserId)), event.kind)
+  ) return false;
+  if (event.kind === 'live_audio_invite') {
+    const invite = memoryLiveAudioFriendInvites.get(event.objectId);
+    return Boolean(
+      invite?.status === 'pending'
+      && invite.targetUserId === event.recipientUserId
+      && invite.senderUserId === event.actorUserId
+      && invite.originInstanceId === originInstanceId
+      && Date.parse(invite.expiresAt) > now
+      && memoryHasExplicitFriendship(invite.senderUserId, invite.targetUserId)
+    );
+  }
+  if (event.kind === 'friend_request') {
+    const request = memoryAccountFriendRequests.get(event.objectId);
+    return Boolean(
+      request?.status === 'pending'
+      && request.toUserId === event.recipientUserId
+      && request.fromUserId === event.actorUserId
+      && !memoryUsersAreBlocked(request.fromUserId, request.toUserId)
+    );
+  }
+  if (event.kind === 'friend_connection') {
+    const request = memoryAccountFriendRequests.get(event.objectId);
+    const invite = [...memoryFriendInvitesByHash.values()].find((value) => value.id === event.objectId);
+    const authorizedRequest = request?.status === 'accepted'
+      && request.fromUserId === event.recipientUserId
+      && request.toUserId === event.actorUserId;
+    const authorizedInvite = invite?.claimedAt
+      && invite.inviterUserId === event.recipientUserId
+      && invite.claimedByUserId === event.actorUserId;
+    return Boolean(
+      (authorizedRequest || authorizedInvite)
+      && memoryHasExplicitFriendship(event.recipientUserId, event.actorUserId)
+    );
+  }
+  const share = memoryAccountTrackShares.get(event.objectId);
+  return Boolean(
+    share
+    && !share.openedAt
+    && share.recipientUserId === event.recipientUserId
+    && share.senderUserId === event.actorUserId
+    && memoryHasExplicitFriendship(share.senderUserId, share.recipientUserId)
+  );
+}
+
+export async function pushEventIsEligible(eventId, originInstanceId, now = Date.now(), requiredState = '') {
+  if (!eventId) return false;
+  if (requiredState && !['pending', 'leased', 'dispatched'].includes(requiredState)) return false;
+  if (!pool) return memoryPushEventEligible(
+    memoryPushEvents.get(eventId),
+    originInstanceId,
+    now,
+    requiredState,
+  );
+  const eventResult = await query(
+    `SELECT event.*,
+       COALESCE(preferences.live_audio, true) AS preference_live_audio,
+       COALESCE(preferences.friend_requests, true) AS preference_friend_requests,
+       COALESCE(preferences.friend_connections, true) AS preference_friend_connections,
+       COALESCE(preferences.track_shares, true) AS preference_track_shares
+     FROM ${schema}.push_events AS event
+     LEFT JOIN ${schema}.push_preferences AS preferences
+       ON preferences.user_id = event.recipient_user_id
+     WHERE event.id = $1 AND event.expires_at > to_timestamp($2 / 1000.0)
+       AND event.state IN ('pending', 'leased', 'dispatched')
+       AND ($4 = '' OR event.state = $4)
+       AND (event.origin_instance_id IS NULL OR event.origin_instance_id = $3)
+     LIMIT 1`,
+    [eventId, now, originInstanceId, requiredState],
+  );
+  const row = eventResult?.rows?.[0];
+  if (!row) return false;
+  const event = pushEventRecord(row);
+  if (!pushPreferenceAllows({
+    liveAudio: row.preference_live_audio,
+    friendRequests: row.preference_friend_requests,
+    friendConnections: row.preference_friend_connections,
+    trackShares: row.preference_track_shares,
+  }, event.kind)) return false;
+  let eligibility;
+  if (event.kind === 'live_audio_invite') {
+    eligibility = await query(
+      `SELECT 1
+       FROM ${schema}.live_audio_friend_invites AS invite
+       JOIN ${schema}.account_friendships AS friendship
+         ON friendship.user_id_a = LEAST(invite.sender_user_id, invite.target_user_id)
+        AND friendship.user_id_b = GREATEST(invite.sender_user_id, invite.target_user_id)
+        AND friendship.source <> 'official'
+       WHERE invite.id = $1 AND invite.target_user_id = $2 AND invite.sender_user_id = $3
+         AND invite.origin_instance_id = $4 AND invite.status = 'pending'
+         AND invite.expires_at > to_timestamp($5 / 1000.0)
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = invite.sender_user_id AND block.blocked_user_id = invite.target_user_id)
+              OR (block.blocker_user_id = invite.target_user_id AND block.blocked_user_id = invite.sender_user_id)
+         ) LIMIT 1`,
+      [event.objectId, event.recipientUserId, event.actorUserId, originInstanceId, now],
+    );
+  } else if (event.kind === 'friend_request') {
+    eligibility = await query(
+      `SELECT 1 FROM ${schema}.account_friend_requests AS request
+       WHERE request.id = $1 AND request.to_user_id = $2 AND request.from_user_id = $3
+         AND request.status = 'pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = request.from_user_id AND block.blocked_user_id = request.to_user_id)
+              OR (block.blocker_user_id = request.to_user_id AND block.blocked_user_id = request.from_user_id)
+         ) LIMIT 1`,
+      [event.objectId, event.recipientUserId, event.actorUserId],
+    );
+  } else if (event.kind === 'friend_connection') {
+    eligibility = await query(
+      `SELECT 1
+       FROM ${schema}.account_friendships AS friendship
+       WHERE friendship.user_id_a = LEAST($2, $3)
+         AND friendship.user_id_b = GREATEST($2, $3)
+         AND friendship.source <> 'official'
+         AND (
+           EXISTS (
+             SELECT 1 FROM ${schema}.account_friend_requests AS request
+             WHERE request.id = $1 AND request.from_user_id = $2
+               AND request.to_user_id = $3 AND request.status = 'accepted'
+           ) OR EXISTS (
+             SELECT 1 FROM ${schema}.friend_invites AS invite
+             WHERE invite.id = $1 AND invite.inviter_user_id = $2
+               AND invite.claimed_by_user_id = $3 AND invite.claimed_at IS NOT NULL
+           )
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = $2 AND block.blocked_user_id = $3)
+              OR (block.blocker_user_id = $3 AND block.blocked_user_id = $2)
+         ) LIMIT 1`,
+      [event.objectId, event.recipientUserId, event.actorUserId],
+    );
+  } else {
+    eligibility = await query(
+      `SELECT 1
+       FROM ${schema}.account_track_shares AS share
+       JOIN ${schema}.account_friendships AS friendship
+         ON friendship.user_id_a = LEAST(share.sender_user_id, share.recipient_user_id)
+        AND friendship.user_id_b = GREATEST(share.sender_user_id, share.recipient_user_id)
+        AND friendship.source <> 'official'
+       WHERE share.id = $1 AND share.recipient_user_id = $2 AND share.sender_user_id = $3
+         AND share.opened_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = share.sender_user_id AND block.blocked_user_id = share.recipient_user_id)
+              OR (block.blocker_user_id = share.recipient_user_id AND block.blocked_user_id = share.sender_user_id)
+         ) LIMIT 1`,
+      [event.objectId, event.recipientUserId, event.actorUserId],
+    );
+  }
+  return Boolean(eligibility?.rows?.[0]);
+}
+
+export async function leasePushEvents({ leaseOwner, originInstanceId, now = Date.now(), limit = 20, leaseMs = 30_000 }) {
+  const boundedLimit = Math.max(1, Math.min(100, Math.round(Number(limit) || 20)));
+  const boundedLeaseMs = Math.max(5_000, Math.min(5 * 60_000, Math.round(Number(leaseMs) || 30_000)));
+  if (!leaseOwner || !originInstanceId) return [];
+  if (!pool) {
+    const leased = [];
+    for (const event of [...memoryPushEvents.values()].sort((left, right) => (
+      Number(right.kind === 'live_audio_invite') - Number(left.kind === 'live_audio_invite')
+      || Date.parse(left.expiresAt) - Date.parse(right.expiresAt)
+      || Date.parse(left.nextAttemptAt) - Date.parse(right.nextAttemptAt)
+      || Date.parse(left.createdAt) - Date.parse(right.createdAt)
+    ))) {
+      if (leased.length >= boundedLimit) break;
+      if (Date.parse(event.expiresAt) <= now) {
+        if (['pending', 'leased'].includes(event.state)) event.state = 'cancelled';
+        continue;
+      }
+      if (event.originInstanceId && event.originInstanceId !== originInstanceId) continue;
+      if (Date.parse(event.notBefore) > now || Date.parse(event.nextAttemptAt) > now) continue;
+      if (event.state === 'leased' && Date.parse(event.leasedUntil || '') > now) continue;
+      if (!['pending', 'leased'].includes(event.state)) continue;
+      event.state = 'leased';
+      event.leaseOwner = leaseOwner;
+      event.leasedUntil = new Date(now + boundedLeaseMs).toISOString();
+      event.attemptCount += 1;
+      event.updatedAt = new Date(now).toISOString();
+      leased.push(pushEventRecord(event));
+    }
+    return leased;
+  }
+  const result = await withPersistenceLock('push-event-dispatch-lease', async (client) => {
+    await client.query(
+      `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+         leased_until = NULL, last_error_code = 'expired', updated_at = now()
+       WHERE state IN ('pending', 'leased') AND expires_at <= to_timestamp($1 / 1000.0)`,
+      [now],
+    );
+    return client.query(
+      `WITH candidates AS (
+         SELECT id FROM ${schema}.push_events
+         WHERE state IN ('pending', 'leased')
+           AND (state = 'pending' OR leased_until IS NULL OR leased_until <= to_timestamp($1 / 1000.0))
+           AND not_before <= to_timestamp($1 / 1000.0)
+           AND next_attempt_at <= to_timestamp($1 / 1000.0)
+           AND expires_at > to_timestamp($1 / 1000.0)
+           AND (origin_instance_id IS NULL OR origin_instance_id = $2)
+         ORDER BY (kind = 'live_audio_invite') DESC, expires_at, next_attempt_at, created_at, id
+         LIMIT $3 FOR UPDATE SKIP LOCKED
+       )
+       UPDATE ${schema}.push_events AS event SET
+         state = 'leased', lease_owner = $4,
+         leased_until = to_timestamp(($1 + $5) / 1000.0),
+         attempt_count = event.attempt_count + 1, updated_at = now()
+       FROM candidates WHERE event.id = candidates.id
+       RETURNING event.*`,
+      [now, originInstanceId, boundedLimit, leaseOwner, boundedLeaseMs],
+    );
+  });
+  return (result?.rows ?? []).map(pushEventRecord);
+}
+
+export async function preparePushDeliveries(eventId, candidates, now = Date.now()) {
+  const values = Array.isArray(candidates)
+    ? candidates.filter((candidate) => candidate?.installationId && candidate?.apnsId).slice(0, maximumActivePushInstallationsPerAccount)
+    : [];
+  if (!eventId || values.length === 0) return [];
+  if (!pool) {
+    const event = memoryPushEvents.get(eventId);
+    if (!event || event.state !== 'leased') return [];
+    const prepared = [];
+    for (const candidate of values) {
+      const installation = memoryPushInstallations.get(candidate.installationId);
+      if (
+        !installation || installation.userId !== event.recipientUserId
+        || !activeMemoryPushInstallation(installation, now)
+      ) continue;
+      const key = pushDeliveryKey(eventId, candidate.installationId);
+      let delivery = memoryPushDeliveries.get(key);
+      if (!delivery) {
+        const clock = new Date(now).toISOString();
+        delivery = {
+          eventId,
+          installationId: candidate.installationId,
+          apnsId: candidate.apnsId,
+          state: 'pending',
+          attemptCount: 0,
+          nextAttemptAt: clock,
+          leaseOwner: null,
+          leasedUntil: null,
+          lastStatus: null,
+          lastErrorCode: '',
+          createdAt: clock,
+          updatedAt: clock,
+        };
+        memoryPushDeliveries.set(key, delivery);
+      }
+      prepared.push(pushDeliveryRecord(delivery));
+    }
+    return prepared;
+  }
+  const placeholders = values.map((_, index) => `($1, $${(index * 2) + 2}, $${(index * 2) + 3})`).join(', ');
+  const params = [eventId, ...values.flatMap((candidate) => [candidate.installationId, candidate.apnsId])];
+  const result = await query(
+    `INSERT INTO ${schema}.push_deliveries (event_id, installation_id, apns_id)
+     SELECT input.event_id, input.installation_id, input.apns_id
+     FROM (VALUES ${placeholders}) AS input(event_id, installation_id, apns_id)
+     JOIN ${schema}.push_events AS event
+       ON event.id = input.event_id AND event.recipient_user_id IS NOT NULL
+      AND event.state = 'leased'
+     JOIN ${schema}.push_installations AS installation
+       ON installation.id = input.installation_id
+      AND installation.user_id = event.recipient_user_id
+     JOIN ${schema}.auth_sessions AS session
+       ON session.token_hash = installation.auth_session_token_hash
+      AND session.user_id = installation.user_id AND session.expires_at > now()
+     WHERE installation.permission_status = 'granted'
+       AND installation.disabled_at IS NULL AND installation.invalidated_at IS NULL
+       AND installation.last_seen_at > now() - interval '30 days'
+     ON CONFLICT (event_id, installation_id) DO NOTHING
+     RETURNING *`,
+    params,
+  );
+  if ((result?.rows ?? []).length === values.length) return result.rows.map(pushDeliveryRecord);
+  const loaded = await query(
+    `SELECT * FROM ${schema}.push_deliveries
+     WHERE event_id = $1 AND installation_id = ANY($2::text[])`,
+    [eventId, values.map((candidate) => candidate.installationId)],
+  );
+  return (loaded?.rows ?? []).map(pushDeliveryRecord);
+}
+
+export async function markPushEventState(
+  eventId,
+  state,
+  errorCode = '',
+  now = Date.now(),
+  leaseOwner = '',
+) {
+  if (!eventId || !['pending', 'dispatched', 'cancelled', 'dead'].includes(state)) return false;
+  if (!pool) {
+    const event = memoryPushEvents.get(eventId);
+    if (!event || (leaseOwner && (event.state !== 'leased' || event.leaseOwner !== leaseOwner))) return false;
+    event.state = state;
+    event.leaseOwner = null;
+    event.leasedUntil = null;
+    event.lastErrorCode = String(errorCode || '').slice(0, 120);
+    event.updatedAt = new Date(now).toISOString();
     return true;
   }
   const result = await query(
-    `DELETE FROM ${schema}.account_track_shares
-     WHERE id = $1 AND recipient_user_id = $2
-     RETURNING id`,
-    [shareId, recipientUserId],
+    `UPDATE ${schema}.push_events SET state = $2, lease_owner = NULL, leased_until = NULL,
+       last_error_code = $3, updated_at = now()
+     WHERE id = $1 AND ($4 = '' OR (state = 'leased' AND lease_owner = $4)) RETURNING id`,
+    [eventId, state, String(errorCode || '').slice(0, 120), leaseOwner],
   );
   return Boolean(result?.rows?.[0]);
+}
+
+function leasedPushDeliveryValue(row) {
+  const event = pushEventRecord({
+    id: row.event_id,
+    notification_id: row.event_notification_id,
+    recipient_user_id: row.event_recipient_user_id,
+    actor_user_id: row.event_actor_user_id,
+    kind: row.event_kind,
+    object_id: row.event_object_id,
+    idempotency_key: row.event_idempotency_key,
+    collapse_id: row.event_collapse_id,
+    origin_instance_id: row.event_origin_instance_id,
+    state: row.event_state,
+    not_before: row.event_not_before,
+    expires_at: row.event_expires_at,
+    attempt_count: row.event_attempt_count,
+    next_attempt_at: row.event_next_attempt_at,
+    lease_owner: null,
+    leased_until: null,
+    last_error_code: row.event_last_error_code,
+    created_at: row.event_created_at,
+    updated_at: row.event_updated_at,
+  });
+  return {
+    delivery: pushDeliveryRecord(row),
+    event,
+    installation: pushInstallationRecord({
+      id: row.installation_id,
+      user_id: row.installation_user_id,
+      auth_session_token_hash: row.installation_auth_session_token_hash,
+      credential_hash: row.installation_credential_hash,
+      environment: row.installation_environment,
+      topic: row.installation_topic,
+      token_ciphertext: row.installation_token_ciphertext,
+      token_nonce: row.installation_token_nonce,
+      token_tag: row.installation_token_tag,
+      token_key_version: row.installation_token_key_version,
+      token_fingerprint: row.installation_token_fingerprint,
+      permission_status: row.installation_permission_status,
+      protocol_version: row.installation_protocol_version,
+      app_build: row.installation_app_build,
+      os_version: row.installation_os_version,
+      revision: row.installation_revision,
+      registered_at: row.installation_registered_at,
+      last_seen_at: row.installation_last_seen_at,
+      disabled_at: row.installation_disabled_at,
+      invalidated_at: row.installation_invalidated_at,
+      created_at: row.installation_created_at,
+      updated_at: row.installation_updated_at,
+    }),
+  };
+}
+
+export async function leasePushDeliveries({ leaseOwner, originInstanceId, now = Date.now(), limit = 40, leaseMs = 30_000 }) {
+  const boundedLimit = Math.max(1, Math.min(100, Math.round(Number(limit) || 40)));
+  const boundedLeaseMs = Math.max(5_000, Math.min(5 * 60_000, Math.round(Number(leaseMs) || 30_000)));
+  if (!leaseOwner || !originInstanceId) return [];
+  if (!pool) {
+    const leased = [];
+    for (const delivery of [...memoryPushDeliveries.values()].sort((left, right) => (
+      Number(memoryPushEvents.get(right.eventId)?.kind === 'live_audio_invite')
+        - Number(memoryPushEvents.get(left.eventId)?.kind === 'live_audio_invite')
+      || Date.parse(memoryPushEvents.get(left.eventId)?.expiresAt ?? '')
+        - Date.parse(memoryPushEvents.get(right.eventId)?.expiresAt ?? '')
+      || Date.parse(left.nextAttemptAt) - Date.parse(right.nextAttemptAt)
+      || Date.parse(left.createdAt) - Date.parse(right.createdAt)
+    ))) {
+      if (leased.length >= boundedLimit) break;
+      const event = memoryPushEvents.get(delivery.eventId);
+      const installation = memoryPushInstallations.get(delivery.installationId);
+      if (
+        !event || event.state !== 'dispatched' || !installation || event.recipientUserId !== installation.userId
+        || Date.parse(event.expiresAt) <= now
+        || (event.originInstanceId && event.originInstanceId !== originInstanceId)
+        || !activeMemoryPushInstallation(installation, now)
+      ) {
+        if (['pending', 'leased'].includes(delivery.state)) delivery.state = 'cancelled';
+        continue;
+      }
+      if (Date.parse(delivery.nextAttemptAt) > now) continue;
+      if (delivery.state === 'leased' && Date.parse(delivery.leasedUntil || '') > now) continue;
+      if (!['pending', 'leased'].includes(delivery.state)) continue;
+      delivery.state = 'leased';
+      delivery.leaseOwner = leaseOwner;
+      delivery.leasedUntil = new Date(now + boundedLeaseMs).toISOString();
+      delivery.attemptCount += 1;
+      delivery.updatedAt = new Date(now).toISOString();
+      leased.push({
+        delivery: pushDeliveryRecord(delivery),
+        event: pushEventRecord(event),
+        installation: pushInstallationRecord(installation),
+      });
+    }
+    return leased;
+  }
+  const result = await withPersistenceLock('push-delivery-dispatch-lease', (client) => client.query(
+    `WITH candidates AS (
+       SELECT delivery.event_id, delivery.installation_id
+       FROM ${schema}.push_deliveries AS delivery
+       JOIN ${schema}.push_events AS event ON event.id = delivery.event_id
+       JOIN ${schema}.push_installations AS installation
+         ON installation.id = delivery.installation_id
+        AND installation.user_id = event.recipient_user_id
+       JOIN ${schema}.auth_sessions AS session
+         ON session.token_hash = installation.auth_session_token_hash
+        AND session.user_id = installation.user_id
+        AND session.expires_at > to_timestamp($1 / 1000.0)
+       WHERE delivery.state IN ('pending', 'leased')
+         AND (delivery.state = 'pending' OR delivery.leased_until IS NULL OR delivery.leased_until <= to_timestamp($1 / 1000.0))
+         AND delivery.next_attempt_at <= to_timestamp($1 / 1000.0)
+         AND event.expires_at > to_timestamp($1 / 1000.0)
+         AND event.state = 'dispatched'
+         AND (event.origin_instance_id IS NULL OR event.origin_instance_id = $2)
+         AND installation.permission_status = 'granted'
+         AND installation.disabled_at IS NULL AND installation.invalidated_at IS NULL
+         AND installation.last_seen_at > to_timestamp($1 / 1000.0) - interval '30 days'
+       ORDER BY (event.kind = 'live_audio_invite') DESC, event.expires_at,
+         delivery.next_attempt_at, delivery.created_at, delivery.event_id, delivery.installation_id
+       LIMIT $3 FOR UPDATE OF delivery SKIP LOCKED
+     ), leased AS (
+       UPDATE ${schema}.push_deliveries AS delivery SET
+         state = 'leased', lease_owner = $4,
+         leased_until = to_timestamp(($1 + $5) / 1000.0),
+         attempt_count = delivery.attempt_count + 1, updated_at = now()
+       FROM candidates
+       WHERE delivery.event_id = candidates.event_id
+         AND delivery.installation_id = candidates.installation_id
+       RETURNING delivery.*
+     )
+     SELECT leased.*,
+       event.notification_id AS event_notification_id,
+       event.recipient_user_id AS event_recipient_user_id,
+       event.actor_user_id AS event_actor_user_id,
+       event.kind AS event_kind, event.object_id AS event_object_id,
+       event.idempotency_key AS event_idempotency_key,
+       event.collapse_id AS event_collapse_id,
+       event.origin_instance_id AS event_origin_instance_id,
+       event.state AS event_state, event.not_before AS event_not_before,
+       event.expires_at AS event_expires_at,
+       event.attempt_count AS event_attempt_count,
+       event.next_attempt_at AS event_next_attempt_at,
+       event.last_error_code AS event_last_error_code,
+       event.created_at AS event_created_at, event.updated_at AS event_updated_at,
+       installation.user_id AS installation_user_id,
+       installation.auth_session_token_hash AS installation_auth_session_token_hash,
+       installation.credential_hash AS installation_credential_hash,
+       installation.environment AS installation_environment,
+       installation.topic AS installation_topic,
+       installation.token_ciphertext AS installation_token_ciphertext,
+       installation.token_nonce AS installation_token_nonce,
+       installation.token_tag AS installation_token_tag,
+       installation.token_key_version AS installation_token_key_version,
+       installation.token_fingerprint AS installation_token_fingerprint,
+       installation.permission_status AS installation_permission_status,
+       installation.protocol_version AS installation_protocol_version,
+       installation.app_build AS installation_app_build,
+       installation.os_version AS installation_os_version,
+       installation.revision AS installation_revision,
+       installation.registered_at AS installation_registered_at,
+       installation.last_seen_at AS installation_last_seen_at,
+       installation.disabled_at AS installation_disabled_at,
+       installation.invalidated_at AS installation_invalidated_at,
+       installation.created_at AS installation_created_at,
+       installation.updated_at AS installation_updated_at
+     FROM leased
+     JOIN ${schema}.push_events AS event ON event.id = leased.event_id
+     JOIN ${schema}.push_installations AS installation ON installation.id = leased.installation_id`,
+    [now, originInstanceId, boundedLimit, leaseOwner, boundedLeaseMs],
+  ));
+  return (result?.rows ?? []).map(leasedPushDeliveryValue);
+}
+
+function currentMemoryPushDeliveryLease(candidate, now) {
+  const delivery = memoryPushDeliveries.get(
+    pushDeliveryKey(candidate.eventId, candidate.installationId),
+  );
+  const event = memoryPushEvents.get(candidate.eventId);
+  const installation = memoryPushInstallations.get(candidate.installationId);
+  return Boolean(
+    delivery?.state === 'leased'
+    && delivery.leaseOwner === candidate.leaseOwner
+    && Date.parse(delivery.leasedUntil || '') > now
+    && event?.state === 'dispatched'
+    && event.recipientUserId === candidate.recipientUserId
+    && Date.parse(event.expiresAt) > now
+    && (!event.originInstanceId || event.originInstanceId === candidate.originInstanceId)
+    && installation?.userId === candidate.recipientUserId
+    && installation.authSessionTokenHash === candidate.authSessionTokenHash
+    && installation.tokenFingerprint === candidate.tokenFingerprint
+    && installation.revision === candidate.installationRevision
+    && activeMemoryPushInstallation(installation, now)
+  );
+}
+
+export async function withCurrentPushDeliveryLease(candidate, operation, now = Date.now()) {
+  if (
+    !candidate?.eventId || !candidate.installationId || !candidate.leaseOwner
+    || !candidate.recipientUserId || !candidate.authSessionTokenHash
+    || !candidate.tokenFingerprint || !candidate.originInstanceId
+    || !Number.isSafeInteger(candidate.installationRevision)
+    || candidate.installationRevision < 1 || typeof operation !== 'function'
+  ) return { status: 'stale', value: null };
+  if (!pool) {
+    return withMemoryPushInstallationLock(candidate.installationId, async () => {
+      if (!currentMemoryPushDeliveryLease(candidate, now)) {
+        return { status: 'stale', value: null };
+      }
+      return { status: 'current', value: await operation() };
+    });
+  }
+  const result = await withPersistenceLock(
+    `push-installation:${candidate.installationId}`,
+    async (client) => {
+      const current = await client.query(
+        `SELECT delivery.event_id
+         FROM ${schema}.push_deliveries AS delivery
+         JOIN ${schema}.push_events AS event ON event.id = delivery.event_id
+         JOIN ${schema}.push_installations AS installation
+           ON installation.id = delivery.installation_id
+          AND installation.user_id = event.recipient_user_id
+         JOIN ${schema}.auth_sessions AS session
+           ON session.token_hash = installation.auth_session_token_hash
+          AND session.user_id = installation.user_id
+         WHERE delivery.event_id = $1 AND delivery.installation_id = $2
+           AND delivery.state = 'leased' AND delivery.lease_owner = $3
+           AND delivery.leased_until > to_timestamp($9 / 1000.0)
+           AND event.state = 'dispatched' AND event.recipient_user_id = $4
+           AND event.expires_at > to_timestamp($9 / 1000.0)
+           AND (event.origin_instance_id IS NULL OR event.origin_instance_id = $5)
+           AND installation.user_id = $4
+           AND installation.auth_session_token_hash = $6
+           AND installation.token_fingerprint = $7
+           AND installation.revision = $8
+           AND installation.permission_status = 'granted'
+           AND installation.disabled_at IS NULL AND installation.invalidated_at IS NULL
+           AND installation.last_seen_at > to_timestamp($9 / 1000.0) - interval '30 days'
+           AND session.expires_at > to_timestamp($9 / 1000.0)
+         FOR UPDATE OF delivery, installation`,
+        [
+          candidate.eventId,
+          candidate.installationId,
+          candidate.leaseOwner,
+          candidate.recipientUserId,
+          candidate.originInstanceId,
+          candidate.authSessionTokenHash,
+          candidate.tokenFingerprint,
+          candidate.installationRevision,
+          now,
+        ],
+      );
+      if (!current.rows[0]) return { status: 'stale', value: null };
+      return { status: 'current', value: await operation() };
+    },
+  );
+  return result ?? { status: 'unavailable', value: null };
+}
+
+export async function recordPushDeliveryResult({
+  eventId,
+  installationId,
+  state,
+  nextAttemptAt = null,
+  status = null,
+  errorCode = '',
+  leaseOwner,
+  now = Date.now(),
+}) {
+  if (
+    !eventId || !installationId || !leaseOwner
+    || !['pending', 'sent', 'cancelled', 'dead'].includes(state)
+  ) return false;
+  const retryAt = Number.isFinite(Number(nextAttemptAt)) ? Number(nextAttemptAt) : now;
+  if (!pool) {
+    const delivery = memoryPushDeliveries.get(pushDeliveryKey(eventId, installationId));
+    if (!delivery || delivery.state !== 'leased' || delivery.leaseOwner !== leaseOwner) return false;
+    delivery.state = state;
+    delivery.nextAttemptAt = new Date(retryAt).toISOString();
+    delivery.leaseOwner = null;
+    delivery.leasedUntil = null;
+    delivery.lastStatus = status == null ? null : Number(status);
+    delivery.lastErrorCode = String(errorCode || '').slice(0, 120);
+    delivery.updatedAt = new Date(now).toISOString();
+    return true;
+  }
+  const result = await query(
+    `UPDATE ${schema}.push_deliveries SET
+       state = $3, next_attempt_at = to_timestamp($4 / 1000.0),
+       lease_owner = NULL, leased_until = NULL, last_status = $5,
+       last_error_code = $6, updated_at = now()
+     WHERE event_id = $1 AND installation_id = $2
+       AND state = 'leased' AND lease_owner = $7 RETURNING event_id`,
+    [
+      eventId,
+      installationId,
+      state,
+      retryAt,
+      status,
+      String(errorCode || '').slice(0, 120),
+      leaseOwner,
+    ],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function invalidatePushInstallation({
+  installationId,
+  tokenFingerprint,
+  installationRevision = null,
+  invalidatedAt,
+  now = Date.now(),
+}) {
+  if (!installationId || !tokenFingerprint) return false;
+  const expectedRevision = installationRevision != null
+    && Number.isSafeInteger(Number(installationRevision))
+    ? Number(installationRevision)
+    : null;
+  const apnsInvalidatedAt = invalidatedAt == null
+    ? null
+    : Number.isFinite(Number(invalidatedAt))
+      ? Number(invalidatedAt)
+      : null;
+  if (!pool) {
+    const installation = memoryPushInstallations.get(installationId);
+    if (
+      !installation
+      || installation.tokenFingerprint !== tokenFingerprint
+      || (expectedRevision != null && installation.revision !== expectedRevision)
+    ) return false;
+    if (apnsInvalidatedAt != null && Date.parse(installation.registeredAt) > apnsInvalidatedAt) return false;
+    installation.invalidatedAt = new Date(now).toISOString();
+    installation.updatedAt = installation.invalidatedAt;
+    return true;
+  }
+  const result = await query(
+    `UPDATE ${schema}.push_installations SET invalidated_at = to_timestamp($4 / 1000.0), updated_at = now()
+     WHERE id = $1 AND token_fingerprint = $2
+       AND ($3::double precision IS NULL OR registered_at <= to_timestamp($3 / 1000.0))
+       AND ($5::bigint IS NULL OR revision = $5)
+     RETURNING id`,
+    [installationId, tokenFingerprint, apnsInvalidatedAt, now, expectedRevision],
+  );
+  return Boolean(result?.rows?.[0]);
+}
+
+export async function cancelPushEventsForPair(userIdA, userIdB, now = Date.now()) {
+  if (!userIdA || !userIdB || userIdA === userIdB) return 0;
+  if (!pool) {
+    let cancelled = 0;
+    for (const event of memoryPushEvents.values()) {
+      if (
+        !['pending', 'leased'].includes(event.state)
+        || !new Set([event.recipientUserId, event.actorUserId]).has(userIdA)
+        || !new Set([event.recipientUserId, event.actorUserId]).has(userIdB)
+      ) continue;
+      event.state = 'cancelled';
+      event.leaseOwner = null;
+      event.leasedUntil = null;
+      event.updatedAt = new Date(now).toISOString();
+      cancelled += 1;
+    }
+    return cancelled;
+  }
+  const result = await query(
+    `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+       leased_until = NULL, last_error_code = 'friend-access-ended', updated_at = now()
+     WHERE state IN ('pending', 'leased')
+       AND recipient_user_id IN ($1, $2) AND actor_user_id IN ($1, $2)
+     RETURNING id`,
+    [userIdA, userIdB],
+  );
+  return result?.rowCount ?? result?.rows?.length ?? 0;
+}
+
+export async function cancelPushEventsForObject(kind, objectId, reason = 'no-longer-available') {
+  if (!pushEventKinds.has(kind) || !objectId) return 0;
+  if (!pool) {
+    let cancelled = 0;
+    for (const event of memoryPushEvents.values()) {
+      if (event.kind !== kind || event.objectId !== objectId || !['pending', 'leased'].includes(event.state)) continue;
+      event.state = 'cancelled';
+      event.leaseOwner = null;
+      event.leasedUntil = null;
+      event.lastErrorCode = String(reason).slice(0, 120);
+      event.updatedAt = new Date().toISOString();
+      cancelled += 1;
+    }
+    return cancelled;
+  }
+  const result = await query(
+    `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+       leased_until = NULL, last_error_code = $3, updated_at = now()
+     WHERE kind = $1 AND object_id = $2 AND state IN ('pending', 'leased') RETURNING id`,
+    [kind, objectId, String(reason).slice(0, 120)],
+  );
+  return result?.rowCount ?? result?.rows?.length ?? 0;
+}
+
+function liveAudioFriendInviteRecord(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    senderUserId: row.sender_user_id ?? row.senderUserId,
+    targetUserId: row.target_user_id ?? row.targetUserId,
+    roomId: row.room_id ?? row.roomId,
+    originInstanceId: row.origin_instance_id ?? row.originInstanceId,
+    status: row.status,
+    createdAt: new Date(row.created_at ?? row.createdAt).toISOString(),
+    expiresAt: new Date(row.expires_at ?? row.expiresAt).toISOString(),
+    respondedAt: row.responded_at == null && row.respondedAt == null
+      ? null
+      : new Date(row.responded_at ?? row.respondedAt).toISOString(),
+    updatedAt: new Date(row.updated_at ?? row.updatedAt).toISOString(),
+  };
+}
+
+function normalizedLiveAudioFriendInvite(candidate, now = Date.now()) {
+  const createdAt = Number(candidate?.createdAt ?? now);
+  const expiresAt = Number(candidate?.expiresAt);
+  if (
+    !candidate?.id || !candidate.senderUserId || !candidate.targetUserId
+    || candidate.senderUserId === candidate.targetUserId
+    || !candidate.roomId || !candidate.originInstanceId
+    || !Number.isFinite(createdAt) || !Number.isFinite(expiresAt)
+    || createdAt > now + 5_000 || expiresAt <= now || expiresAt > now + (2 * 60_000)
+  ) return null;
+  return {
+    id: String(candidate.id).slice(0, 64),
+    senderUserId: candidate.senderUserId,
+    targetUserId: candidate.targetUserId,
+    roomId: String(candidate.roomId).slice(0, 64),
+    originInstanceId: String(candidate.originInstanceId).slice(0, 180),
+    createdAt,
+    expiresAt,
+  };
+}
+
+function memoryLiveAudioInteractionFor(userId, now) {
+  return [...memoryLiveAudioFriendInvites.values()].find((invite) => (
+    ['pending', 'accepted'].includes(invite.status)
+    && Date.parse(invite.expiresAt) > now
+    && (invite.senderUserId === userId || invite.targetUserId === userId)
+  ));
+}
+
+export async function createDurableLiveAudioFriendInvite(candidate, pushEvent = null, now = Date.now()) {
+  const invite = normalizedLiveAudioFriendInvite(candidate, now);
+  if (!invite) return { status: 'unavailable', invite: null };
+  if (!pool) {
+    const replay = memoryLiveAudioFriendInvites.get(invite.id);
+    if (
+      replay?.status === 'pending'
+      && replay.senderUserId === invite.senderUserId
+      && replay.targetUserId === invite.targetUserId
+      && replay.roomId === invite.roomId
+      && replay.originInstanceId === invite.originInstanceId
+      && Date.parse(replay.expiresAt) > now
+    ) return { status: 'replay', invite: liveAudioFriendInviteRecord(replay) };
+    if (
+      replay
+      || !memoryAuthUsersById.has(invite.senderUserId)
+      || !memoryAuthUsersById.has(invite.targetUserId)
+      || !memoryHasExplicitFriendship(invite.senderUserId, invite.targetUserId)
+      || memoryUsersAreBlocked(invite.senderUserId, invite.targetUserId)
+    ) return { status: 'unavailable', invite: null };
+    if (
+      memoryLiveAudioInteractionFor(invite.senderUserId, now)
+      || memoryLiveAudioInteractionFor(invite.targetUserId, now)
+    ) return { status: 'busy', invite: null };
+    const clock = new Date(now).toISOString();
+    const stored = {
+      ...invite,
+      status: 'pending',
+      createdAt: new Date(invite.createdAt).toISOString(),
+      expiresAt: new Date(invite.expiresAt).toISOString(),
+      respondedAt: null,
+      updatedAt: clock,
+    };
+    memoryLiveAudioFriendInvites.set(stored.id, stored);
+    if (pushEvent) {
+      const event = enqueueMemoryPushEvent({
+        ...pushEvent,
+        recipientUserId: invite.targetUserId,
+        actorUserId: invite.senderUserId,
+        kind: 'live_audio_invite',
+        objectId: invite.id,
+        originInstanceId: invite.originInstanceId,
+        expiresAt: invite.expiresAt,
+      }, now);
+      if (!event) {
+        memoryLiveAudioFriendInvites.delete(stored.id);
+        return { status: 'unavailable', invite: null };
+      }
+    }
+    return { status: 'created', invite: liveAudioFriendInviteRecord(stored) };
+  }
+  const result = await withPersistenceLock(
+    `live-audio-pair:${accountPair(invite.senderUserId, invite.targetUserId).join(':')}`,
+    async (client) => {
+      const orderedAccounts = accountPair(invite.senderUserId, invite.targetUserId);
+      for (const accountId of orderedAccounts) {
+        await client.query(
+          `SELECT pg_advisory_xact_lock(hashtext($1))`,
+          [`live-audio-account:${accountId}`],
+        );
+      }
+      const replay = await client.query(
+        `SELECT * FROM ${schema}.live_audio_friend_invites
+         WHERE id = $1 FOR UPDATE`,
+        [invite.id],
+      );
+      const replayRow = replay.rows[0];
+      if (replayRow) {
+        const exactReplay = replayRow.status === 'pending'
+          && replayRow.sender_user_id === invite.senderUserId
+          && replayRow.target_user_id === invite.targetUserId
+          && replayRow.room_id === invite.roomId
+          && replayRow.origin_instance_id === invite.originInstanceId
+          && Date.parse(replayRow.expires_at) > now;
+        return exactReplay
+          ? { status: 'replay', row: replayRow }
+          : { status: 'unavailable', row: null };
+      }
+      const eligible = await client.query(
+        `SELECT 1
+         FROM ${schema}.account_friendships AS friendship
+         JOIN ${schema}.auth_users AS sender ON sender.id = $1
+         JOIN ${schema}.auth_users AS target ON target.id = $2
+         WHERE friendship.user_id_a = LEAST($1, $2)
+           AND friendship.user_id_b = GREATEST($1, $2)
+           AND friendship.source <> 'official'
+           AND NOT EXISTS (
+             SELECT 1 FROM ${schema}.friend_blocks AS block
+             WHERE (block.blocker_user_id = $1 AND block.blocked_user_id = $2)
+                OR (block.blocker_user_id = $2 AND block.blocked_user_id = $1)
+           ) LIMIT 1`,
+        [invite.senderUserId, invite.targetUserId],
+      );
+      if (!eligible.rows[0]) return { status: 'unavailable', row: null };
+      const active = await client.query(
+        `SELECT id FROM ${schema}.live_audio_friend_invites
+         WHERE status IN ('pending', 'accepted') AND expires_at > to_timestamp($3 / 1000.0)
+           AND (
+             sender_user_id IN ($1, $2) OR target_user_id IN ($1, $2)
+           )
+         LIMIT 1 FOR UPDATE`,
+        [invite.senderUserId, invite.targetUserId, now],
+      );
+      if (active.rows[0]) return { status: 'busy', row: null };
+      const inserted = await client.query(
+        `INSERT INTO ${schema}.live_audio_friend_invites (
+           id, sender_user_id, target_user_id, room_id, origin_instance_id,
+           status, created_at, expires_at, updated_at
+         ) VALUES (
+           $1, $2, $3, $4, $5, 'pending',
+           to_timestamp($6 / 1000.0), to_timestamp($7 / 1000.0), now()
+         ) RETURNING *`,
+        [
+          invite.id,
+          invite.senderUserId,
+          invite.targetUserId,
+          invite.roomId,
+          invite.originInstanceId,
+          invite.createdAt,
+          invite.expiresAt,
+        ],
+      );
+      if (!inserted.rows[0]) return { status: 'unavailable', row: null };
+      if (pushEvent) {
+        const event = await enqueuePushEventWithClient(client, {
+          ...pushEvent,
+          recipientUserId: invite.targetUserId,
+          actorUserId: invite.senderUserId,
+          kind: 'live_audio_invite',
+          objectId: invite.id,
+          originInstanceId: invite.originInstanceId,
+          expiresAt: invite.expiresAt,
+        }, now);
+        if (!event) throw new Error('Live audio push event could not be created.');
+      }
+      return { status: 'created', row: inserted.rows[0] };
+    },
+  );
+  return {
+    status: result?.status ?? 'unavailable',
+    invite: liveAudioFriendInviteRecord(result?.row),
+  };
+}
+
+export async function listPendingDurableLiveAudioFriendInvites(targetUserId, originInstanceId, now = Date.now()) {
+  if (!targetUserId || !originInstanceId) return [];
+  if (!pool) {
+    return [...memoryLiveAudioFriendInvites.values()]
+      .filter((invite) => (
+        invite.targetUserId === targetUserId
+        && invite.originInstanceId === originInstanceId
+        && invite.status === 'pending'
+        && Date.parse(invite.expiresAt) > now
+        && memoryHasExplicitFriendship(invite.senderUserId, invite.targetUserId)
+      ))
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+      .map(liveAudioFriendInviteRecord);
+  }
+  const result = await query(
+    `SELECT invite.*
+     FROM ${schema}.live_audio_friend_invites AS invite
+     JOIN ${schema}.account_friendships AS friendship
+       ON friendship.user_id_a = LEAST(invite.sender_user_id, invite.target_user_id)
+      AND friendship.user_id_b = GREATEST(invite.sender_user_id, invite.target_user_id)
+      AND friendship.source <> 'official'
+     WHERE invite.target_user_id = $1 AND invite.origin_instance_id = $2
+       AND invite.status = 'pending' AND invite.expires_at > to_timestamp($3 / 1000.0)
+       AND NOT EXISTS (
+         SELECT 1 FROM ${schema}.friend_blocks AS block
+         WHERE (block.blocker_user_id = invite.sender_user_id AND block.blocked_user_id = invite.target_user_id)
+            OR (block.blocker_user_id = invite.target_user_id AND block.blocked_user_id = invite.sender_user_id)
+       )
+     ORDER BY invite.created_at DESC, invite.id DESC`,
+    [targetUserId, originInstanceId, now],
+  );
+  return (result?.rows ?? []).map(liveAudioFriendInviteRecord);
+}
+
+export async function transitionDurableLiveAudioFriendInvite({
+  inviteId,
+  actorUserId,
+  action,
+  originInstanceId,
+  expiresAt = null,
+  now = Date.now(),
+}) {
+  if (!inviteId || !actorUserId || !originInstanceId || !['accept', 'join', 'decline', 'cancel', 'expire'].includes(action)) {
+    return null;
+  }
+  const nextStatus = action === 'accept'
+    ? 'accepted'
+    : action === 'join'
+      ? 'joined'
+      : action === 'decline'
+        ? 'declined'
+        : action === 'cancel'
+          ? 'cancelled'
+          : 'expired';
+  if (!pool) {
+    const invite = memoryLiveAudioFriendInvites.get(inviteId);
+    const authorized = action === 'cancel'
+      ? invite?.senderUserId === actorUserId
+      : action === 'expire'
+        ? invite?.senderUserId === actorUserId || invite?.targetUserId === actorUserId
+        : invite?.targetUserId === actorUserId;
+    const mutableStatus = action === 'join'
+      ? invite?.status === 'accepted'
+      : ['cancel', 'expire'].includes(action)
+        ? ['pending', 'accepted'].includes(invite?.status)
+        : invite?.status === 'pending';
+    if (
+      !invite || invite.originInstanceId !== originInstanceId || !mutableStatus
+      || !authorized || (action !== 'expire' && Date.parse(invite.expiresAt) <= now)
+    ) return null;
+    if (['accept', 'join'].includes(action) && !memoryHasExplicitFriendship(invite.senderUserId, invite.targetUserId)) return null;
+    invite.status = nextStatus;
+    if (action === 'accept' && expiresAt != null && Number.isFinite(Number(expiresAt))) {
+      invite.expiresAt = new Date(Math.min(Date.parse(invite.expiresAt), Number(expiresAt))).toISOString();
+    }
+    invite.respondedAt = new Date(now).toISOString();
+    invite.updatedAt = invite.respondedAt;
+    await cancelPushEventsForObject('live_audio_invite', invite.id, `invite-${nextStatus}`);
+    return liveAudioFriendInviteRecord(invite);
+  }
+  const result = await withPersistenceLock(`live-audio-invite:${inviteId}`, async (client) => {
+    const ownerCondition = action === 'cancel'
+      ? 'invite.sender_user_id = $2'
+      : action === 'expire'
+        ? '$2 IN (invite.sender_user_id, invite.target_user_id)'
+        : 'invite.target_user_id = $2';
+    const friendshipCondition = ['accept', 'join'].includes(action)
+      ? `AND EXISTS (
+           SELECT 1 FROM ${schema}.account_friendships AS friendship
+           WHERE friendship.user_id_a = LEAST(invite.sender_user_id, invite.target_user_id)
+             AND friendship.user_id_b = GREATEST(invite.sender_user_id, invite.target_user_id)
+             AND friendship.source <> 'official'
+         ) AND NOT EXISTS (
+           SELECT 1 FROM ${schema}.friend_blocks AS block
+           WHERE (block.blocker_user_id = invite.sender_user_id AND block.blocked_user_id = invite.target_user_id)
+              OR (block.blocker_user_id = invite.target_user_id AND block.blocked_user_id = invite.sender_user_id)
+         )`
+      : '';
+    const expiryCondition = action === 'expire' ? '' : 'AND invite.expires_at > to_timestamp($5 / 1000.0)';
+    const statusCondition = action === 'join'
+      ? "invite.status = 'accepted'"
+      : ['cancel', 'expire'].includes(action)
+        ? "invite.status IN ('pending', 'accepted')"
+        : "invite.status = 'pending'";
+    const updated = await client.query(
+      `UPDATE ${schema}.live_audio_friend_invites AS invite
+       SET status = $4,
+         expires_at = CASE WHEN $6::double precision IS NOT NULL AND $4 = 'accepted'
+           THEN LEAST(invite.expires_at, to_timestamp($6 / 1000.0)) ELSE invite.expires_at END,
+         responded_at = to_timestamp($5 / 1000.0), updated_at = now()
+       WHERE invite.id = $1 AND ${ownerCondition}
+         AND invite.origin_instance_id = $3 AND ${statusCondition}
+         ${expiryCondition} ${friendshipCondition}
+       RETURNING invite.*`,
+      [
+        inviteId,
+        actorUserId,
+        originInstanceId,
+        nextStatus,
+        now,
+        expiresAt != null && Number.isFinite(Number(expiresAt)) ? Number(expiresAt) : null,
+      ],
+    );
+    if (!updated.rows[0]) return null;
+    await client.query(
+      `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+         leased_until = NULL, last_error_code = $2, updated_at = now()
+       WHERE kind = 'live_audio_invite' AND object_id = $1
+         AND state IN ('pending', 'leased')`,
+      [inviteId, `invite-${nextStatus}`],
+    );
+    return updated.rows[0];
+  });
+  return liveAudioFriendInviteRecord(result);
+}
+
+export async function cancelDurableLiveAudioFriendInvitesForPair(userIdA, userIdB, now = Date.now()) {
+  if (!userIdA || !userIdB || userIdA === userIdB) return 0;
+  if (!pool) {
+    let cancelled = 0;
+    for (const invite of memoryLiveAudioFriendInvites.values()) {
+      if (
+        !['pending', 'accepted'].includes(invite.status)
+        || Date.parse(invite.expiresAt) <= now
+        || ![invite.senderUserId, invite.targetUserId].includes(userIdA)
+        || ![invite.senderUserId, invite.targetUserId].includes(userIdB)
+      ) continue;
+      invite.status = 'cancelled';
+      invite.respondedAt = new Date(now).toISOString();
+      invite.updatedAt = invite.respondedAt;
+      cancelled += 1;
+    }
+    await cancelPushEventsForPair(userIdA, userIdB, now);
+    return cancelled;
+  }
+  const result = await withAccountPairTransaction(userIdA, userIdB, async (client) => {
+    const updated = await client.query(
+      `UPDATE ${schema}.live_audio_friend_invites SET status = 'cancelled',
+         responded_at = to_timestamp($3 / 1000.0), updated_at = now()
+       WHERE status IN ('pending', 'accepted') AND expires_at > to_timestamp($3 / 1000.0)
+         AND sender_user_id IN ($1, $2) AND target_user_id IN ($1, $2)
+       RETURNING id`,
+      [userIdA, userIdB, now],
+    );
+    await client.query(
+      `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+         leased_until = NULL, last_error_code = 'friend-access-ended', updated_at = now()
+       WHERE state IN ('pending', 'leased')
+         AND recipient_user_id IN ($1, $2) AND actor_user_id IN ($1, $2)`,
+      [userIdA, userIdB],
+    );
+    return updated.rowCount ?? updated.rows.length;
+  });
+  return Number(result) || 0;
+}
+
+export async function expireDurableLiveAudioFriendInvites(originInstanceId, now = Date.now()) {
+  if (!originInstanceId) return [];
+  if (!pool) {
+    const expired = [];
+    for (const invite of memoryLiveAudioFriendInvites.values()) {
+      if (invite.originInstanceId !== originInstanceId || invite.status !== 'pending' || Date.parse(invite.expiresAt) > now) continue;
+      invite.status = 'expired';
+      invite.respondedAt = new Date(now).toISOString();
+      invite.updatedAt = invite.respondedAt;
+      expired.push(liveAudioFriendInviteRecord(invite));
+    }
+    for (const invite of expired) await cancelPushEventsForObject('live_audio_invite', invite.id, 'invite-expired');
+    return expired;
+  }
+  const result = await withPersistenceLock(`live-audio-expire:${originInstanceId}`, async (client) => {
+    const updated = await client.query(
+      `UPDATE ${schema}.live_audio_friend_invites SET status = 'expired',
+         responded_at = to_timestamp($2 / 1000.0), updated_at = now()
+       WHERE origin_instance_id = $1 AND status = 'pending'
+         AND expires_at <= to_timestamp($2 / 1000.0)
+       RETURNING *`,
+      [originInstanceId, now],
+    );
+    if (updated.rows.length > 0) {
+      await client.query(
+        `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+           leased_until = NULL, last_error_code = 'invite-expired', updated_at = now()
+         WHERE kind = 'live_audio_invite' AND object_id = ANY($1::text[])
+           AND state IN ('pending', 'leased')`,
+        [updated.rows.map((row) => row.id)],
+      );
+    }
+    return updated.rows;
+  });
+  return (result ?? []).map(liveAudioFriendInviteRecord);
 }
 
 function memoryUsersShareClaimedClub(userIdA, userIdB) {
@@ -10603,7 +12400,7 @@ export async function loadBlockedAccountProfileIds(userId) {
   return [...new Set((result?.rows ?? []).map((row) => row.profile_id).filter(Boolean))];
 }
 
-export async function createAccountFriendRequest({ id, fromUserId, toUserId }) {
+export async function createAccountFriendRequest({ id, fromUserId, toUserId, pushEvent = null }) {
   if (!fromUserId || !toUserId || fromUserId === toUserId) {
     return null;
   }
@@ -10663,6 +12460,19 @@ export async function createAccountFriendRequest({ id, fromUserId, toUserId }) {
       createdAt: new Date().toISOString(),
     };
     memoryAccountFriendRequests.set(id, request);
+    if (pushEvent) {
+      const event = enqueueMemoryPushEvent({
+        ...pushEvent,
+        recipientUserId: toUserId,
+        actorUserId: fromUserId,
+        kind: 'friend_request',
+        objectId: id,
+      });
+      if (!event) {
+        memoryAccountFriendRequests.delete(id);
+        return null;
+      }
+    }
     return {
       requestId: id,
       direction: 'outgoing',
@@ -10728,6 +12538,16 @@ export async function createAccountFriendRequest({ id, fromUserId, toUserId }) {
        RETURNING id, to_user_id, created_at`,
       [id, fromUserId, toUserId],
     );
+    if (inserted.rows[0] && pushEvent) {
+      const event = await enqueuePushEventWithClient(client, {
+        ...pushEvent,
+        recipientUserId: toUserId,
+        actorUserId: fromUserId,
+        kind: 'friend_request',
+        objectId: id,
+      });
+      if (!event) throw new Error('Friend request push event could not be created.');
+    }
     return { request: inserted.rows[0] ?? null };
   });
   if (result?.unavailableReason) return result;
@@ -10744,7 +12564,7 @@ export async function createAccountFriendRequest({ id, fromUserId, toUserId }) {
   };
 }
 
-export async function respondToAccountFriendRequest(requestId, userId, action) {
+export async function respondToAccountFriendRequest(requestId, userId, action, pushEvent = null) {
   if (!['accept', 'decline', 'cancel'].includes(action)) {
     return null;
   }
@@ -10758,13 +12578,18 @@ export async function respondToAccountFriendRequest(requestId, userId, action) {
     }
     request.status = action === 'accept' ? 'accepted' : action === 'decline' ? 'declined' : 'cancelled';
     request.respondedAt = new Date().toISOString();
+    let priorFriendship = null;
+    let priorSuppression = null;
+    let pairKey = '';
     if (action === 'accept') {
       const [userIdA, userIdB] = accountPair(request.fromUserId, request.toUserId);
-      const pairKey = accountPairKey(userIdA, userIdB);
+      pairKey = accountPairKey(userIdA, userIdB);
       if (memoryUsersAreBlocked(userIdA, userIdB)) {
         request.status = 'blocked';
         return null;
       }
+      priorFriendship = memoryAccountFriendships.get(pairKey) ?? null;
+      priorSuppression = memoryFriendshipSuppressions.get(pairKey) ?? null;
       memoryFriendshipSuppressions.delete(pairKey);
       memoryAccountFriendships.set(pairKey, {
         userIdA,
@@ -10772,6 +12597,24 @@ export async function respondToAccountFriendRequest(requestId, userId, action) {
         source: 'request',
         createdAt: request.respondedAt,
       });
+    }
+    await cancelPushEventsForObject('friend_request', requestId, `request-${request.status}`);
+    if (action === 'accept' && pushEvent) {
+      const event = enqueueMemoryPushEvent({
+        ...pushEvent,
+        recipientUserId: request.fromUserId,
+        actorUserId: request.toUserId,
+        kind: 'friend_connection',
+        objectId: requestId,
+      });
+      if (!event) {
+        request.status = 'pending';
+        request.respondedAt = null;
+        if (priorFriendship) memoryAccountFriendships.set(pairKey, priorFriendship);
+        else memoryAccountFriendships.delete(pairKey);
+        if (priorSuppression) memoryFriendshipSuppressions.set(pairKey, priorSuppression);
+        return null;
+      }
     }
     const otherUserId = request.fromUserId === userId ? request.toUserId : request.fromUserId;
     return {
@@ -10784,13 +12627,24 @@ export async function respondToAccountFriendRequest(requestId, userId, action) {
   if (action !== 'accept') {
     const ownerColumn = action === 'cancel' ? 'from_user_id' : 'to_user_id';
     const status = action === 'cancel' ? 'cancelled' : 'declined';
-    const result = await query(
-      `UPDATE ${schema}.account_friend_requests
-       SET status = $3, responded_at = now()
-       WHERE id = $1 AND ${ownerColumn} = $2 AND status = 'pending'
-       RETURNING id, from_user_id, to_user_id`,
-      [requestId, userId, status],
-    );
+    const result = await withPersistenceLock(`friend-request:${requestId}`, async (client) => {
+      const updated = await client.query(
+        `UPDATE ${schema}.account_friend_requests
+         SET status = $3, responded_at = now()
+         WHERE id = $1 AND ${ownerColumn} = $2 AND status = 'pending'
+         RETURNING id, from_user_id, to_user_id`,
+        [requestId, userId, status],
+      );
+      if (updated.rows[0]) {
+        await client.query(
+          `UPDATE ${schema}.push_events SET state = 'cancelled', lease_owner = NULL,
+             leased_until = NULL, last_error_code = $2, updated_at = now()
+           WHERE kind = 'friend_request' AND object_id = $1 AND state IN ('pending', 'leased')`,
+          [requestId, `request-${status}`],
+        );
+      }
+      return updated;
+    });
     const request = result?.rows?.[0];
     if (!request) {
       return null;
@@ -10813,7 +12667,8 @@ export async function respondToAccountFriendRequest(requestId, userId, action) {
   const result = await withAccountPairTransaction(
     pendingRequest.from_user_id,
     pendingRequest.to_user_id,
-    (client) => client.query(
+    async (client) => {
+      const accepted = await client.query(
     `WITH accepted AS (
        UPDATE ${schema}.account_friend_requests AS request
        SET status = 'accepted', responded_at = now()
@@ -10836,10 +12691,30 @@ export async function respondToAccountFriendRequest(requestId, userId, action) {
        SELECT LEAST(from_user_id, to_user_id), GREATEST(from_user_id, to_user_id), 'request', responded_at
        FROM accepted
        ON CONFLICT (user_id_a, user_id_b) DO NOTHING
+     ), request_push_cancelled AS (
+       UPDATE ${schema}.push_events AS event
+       SET state = 'cancelled', lease_owner = NULL, leased_until = NULL,
+         last_error_code = 'request-accepted', updated_at = now()
+       FROM accepted
+       WHERE event.kind = 'friend_request' AND event.object_id = accepted.id
+         AND event.state IN ('pending', 'leased')
      )
      SELECT * FROM accepted`,
     [requestId, userId],
-    ),
+      );
+      const row = accepted.rows[0];
+      if (row && pushEvent) {
+        const event = await enqueuePushEventWithClient(client, {
+          ...pushEvent,
+          recipientUserId: row.from_user_id,
+          actorUserId: row.to_user_id,
+          kind: 'friend_connection',
+          objectId: row.id,
+        });
+        if (!event) throw new Error('Friend connection push event could not be created.');
+      }
+      return accepted;
+    },
   );
   const request = result?.rows?.[0];
   if (!request) {
@@ -10878,6 +12753,7 @@ export async function removeAccountFriend(userId, friendUserId) {
         createdAt: new Date().toISOString(),
       });
     }
+    await cancelDurableLiveAudioFriendInvitesForPair(userIdA, userIdB);
     return memoryAccountProfile(memoryAuthUsersById.get(friendUserId));
   }
 
@@ -10889,6 +12765,17 @@ export async function removeAccountFriend(userId, friendUserId) {
      ), track_shares_removed AS (
        DELETE FROM ${schema}.account_track_shares
        WHERE sender_user_id IN ($1, $2) AND recipient_user_id IN ($1, $2)
+     ), live_audio_cancelled AS (
+       UPDATE ${schema}.live_audio_friend_invites
+       SET status = 'cancelled', responded_at = now(), updated_at = now()
+       WHERE status IN ('pending', 'accepted')
+         AND sender_user_id IN ($1, $2) AND target_user_id IN ($1, $2)
+     ), push_cancelled AS (
+       UPDATE ${schema}.push_events
+       SET state = 'cancelled', lease_owner = NULL, leased_until = NULL,
+         last_error_code = 'friend-access-ended', updated_at = now()
+       WHERE state IN ('pending', 'leased')
+         AND recipient_user_id IN ($1, $2) AND actor_user_id IN ($1, $2)
      ), legacy_removed AS (
        DELETE FROM ${schema}.friendships
        WHERE (guest_key_a = 'user:' || $1 AND guest_key_b = 'user:' || $2)
@@ -10959,6 +12846,7 @@ export async function blockAccountProfile(userId, blockedUserId) {
       reason: 'blocked',
       createdAt: new Date().toISOString(),
     });
+    await cancelDurableLiveAudioFriendInvitesForPair(userIdA, userIdB);
     return memoryAccountProfile(target);
   }
 
@@ -10974,6 +12862,17 @@ export async function blockAccountProfile(userId, blockedUserId) {
      ), track_shares_removed AS (
        DELETE FROM ${schema}.account_track_shares
        WHERE sender_user_id IN ($1, $2) AND recipient_user_id IN ($1, $2)
+     ), live_audio_cancelled AS (
+       UPDATE ${schema}.live_audio_friend_invites
+       SET status = 'cancelled', responded_at = now(), updated_at = now()
+       WHERE status IN ('pending', 'accepted')
+         AND sender_user_id IN ($1, $2) AND target_user_id IN ($1, $2)
+     ), push_cancelled AS (
+       UPDATE ${schema}.push_events
+       SET state = 'cancelled', lease_owner = NULL, leased_until = NULL,
+         last_error_code = 'friend-access-ended', updated_at = now()
+       WHERE state IN ('pending', 'leased')
+         AND recipient_user_id IN ($1, $2) AND actor_user_id IN ($1, $2)
      ), legacy_removed AS (
        DELETE FROM ${schema}.friendships
        WHERE (guest_key_a = 'user:' || $1 AND guest_key_b = 'user:' || $2)
@@ -11247,7 +13146,7 @@ export async function previewFriendInvite(tokenHashValue) {
   } : null;
 }
 
-export async function claimFriendInvite(tokenHashValue, claimantUserId) {
+export async function claimFriendInvite(tokenHashValue, claimantUserId, pushEvent = null) {
   if (!pool) {
     const invite = memoryFriendInvitesByHash.get(tokenHashValue);
     if (
@@ -11263,12 +13162,30 @@ export async function claimFriendInvite(tokenHashValue, claimantUserId) {
     const [userIdA, userIdB] = accountPair(invite.inviterUserId, claimantUserId);
     const pairKey = accountPairKey(userIdA, userIdB);
     const claimedAt = new Date().toISOString();
+    const priorSuppression = memoryFriendshipSuppressions.get(pairKey) ?? null;
     invite.claimedByUserId = claimantUserId;
     invite.claimedAt = claimedAt;
     memoryFriendshipSuppressions.delete(pairKey);
     const existingFriendship = memoryAccountFriendships.get(pairKey);
     if (!existingFriendship || ['official', 'legacy'].includes(existingFriendship.source)) {
       memoryAccountFriendships.set(pairKey, { userIdA, userIdB, source: 'invite', createdAt: claimedAt });
+    }
+    if (pushEvent) {
+      const event = enqueueMemoryPushEvent({
+        ...pushEvent,
+        recipientUserId: invite.inviterUserId,
+        actorUserId: claimantUserId,
+        kind: 'friend_connection',
+        objectId: invite.id,
+      });
+      if (!event) {
+        invite.claimedByUserId = null;
+        invite.claimedAt = null;
+        if (existingFriendship) memoryAccountFriendships.set(pairKey, existingFriendship);
+        else memoryAccountFriendships.delete(pairKey);
+        if (priorSuppression) memoryFriendshipSuppressions.set(pairKey, priorSuppression);
+        return null;
+      }
     }
     const friendshipSource = memoryAccountFriendships.get(pairKey)?.source ?? 'invite';
     return {
@@ -11289,7 +13206,8 @@ export async function claimFriendInvite(tokenHashValue, claimantUserId) {
   if (!inviterUserId || inviterUserId === claimantUserId) {
     return null;
   }
-  const result = await withAccountPairTransaction(inviterUserId, claimantUserId, (client) => client.query(
+  const result = await withAccountPairTransaction(inviterUserId, claimantUserId, async (client) => {
+    const claimed = await client.query(
     `WITH claimed AS (
        UPDATE ${schema}.friend_invites AS invite
        SET claimed_by_user_id = $2, claimed_at = now()
@@ -11335,7 +13253,20 @@ export async function claimFriendInvite(tokenHashValue, claimantUserId) {
      JOIN ${schema}.auth_users AS inviter ON inviter.id = claimed.inviter_user_id
      LEFT JOIN ${schema}.official_friend_accounts AS official ON official.user_id = inviter.id`,
     [tokenHashValue, claimantUserId],
-  ));
+    );
+    const row = claimed.rows[0];
+    if (row && pushEvent) {
+      const event = await enqueuePushEventWithClient(client, {
+        ...pushEvent,
+        recipientUserId: row.inviter_user_id,
+        actorUserId: claimantUserId,
+        kind: 'friend_connection',
+        objectId: row.id,
+      });
+      if (!event) throw new Error('Friend invite connection push event could not be created.');
+    }
+    return claimed;
+  });
   const row = result?.rows?.[0];
   return row ? {
     inviteId: row.id,
@@ -12277,11 +14208,18 @@ export async function pruneExpiredData(now = Date.now()) {
   let removedHeartRateInvitations = 0;
   let removedHeartRatePairings = 0;
   let removedClubMonitorSprintAuthorizations = 0;
+  let removedPushEvents = 0;
+  let removedLiveAudioFriendInvites = 0;
 
   for (const [tokenHash, session] of memoryAuthSessionsByToken.entries()) {
     if (Date.parse(session.expiresAt) <= cutoff.getTime()) {
-      memoryAuthSessionsByToken.delete(tokenHash);
-      removedSessions += 1;
+      await withMemoryAuthSessionLock(tokenHash, async () => {
+        const current = memoryAuthSessionsByToken.get(tokenHash);
+        if (!current || Date.parse(current.expiresAt) > cutoff.getTime()) return;
+        memoryAuthSessionsByToken.delete(tokenHash);
+        await removeMemoryPushInstallationsForSession(tokenHash);
+        removedSessions += 1;
+      });
     }
   }
 
@@ -12328,6 +14266,22 @@ export async function pruneExpiredData(now = Date.now()) {
     }
   }
 
+  const privateNotificationRetentionCutoff = cutoff.getTime() - (7 * 24 * 60 * 60 * 1000);
+  for (const [eventId, event] of memoryPushEvents) {
+    if (Date.parse(event.expiresAt) > privateNotificationRetentionCutoff) continue;
+    memoryPushEvents.delete(eventId);
+    memoryPushEventIdByIdempotencyKey.delete(event.idempotencyKey);
+    for (const [deliveryKey, delivery] of memoryPushDeliveries) {
+      if (delivery.eventId === eventId) memoryPushDeliveries.delete(deliveryKey);
+    }
+    removedPushEvents += 1;
+  }
+  for (const [inviteId, invite] of memoryLiveAudioFriendInvites) {
+    if (Date.parse(invite.expiresAt) > privateNotificationRetentionCutoff) continue;
+    memoryLiveAudioFriendInvites.delete(inviteId);
+    removedLiveAudioFriendInvites += 1;
+  }
+
   for (const [key, binding] of memoryHeartRateTrainingSegmentBindings.entries()) {
     if (binding.expiresAt <= cutoff.getTime()) {
       memoryHeartRateTrainingSegmentBindings.delete(key);
@@ -12341,10 +14295,21 @@ export async function pruneExpiredData(now = Date.now()) {
       removedHeartRateInvitations,
       removedHeartRatePairings,
       removedClubMonitorSprintAuthorizations,
+      removedPushEvents,
+      removedLiveAudioFriendInvites,
     };
   }
 
-  const [sessions, checkouts, invitations, pairings, monitorAuthorizations] = await Promise.all([
+  const [
+    sessions,
+    checkouts,
+    invitations,
+    pairings,
+    monitorAuthorizations,
+    ,
+    pushEvents,
+    liveAudioInvites,
+  ] = await Promise.all([
     query(
       `DELETE FROM ${schema}.auth_sessions
        WHERE expires_at <= $1::timestamptz
@@ -12390,6 +14355,18 @@ export async function pruneExpiredData(now = Date.now()) {
        WHERE expires_at <= $1::timestamptz`,
       [cutoff],
     ),
+    query(
+      `DELETE FROM ${schema}.push_events
+       WHERE expires_at <= $1::timestamptz - interval '7 days'
+       RETURNING id`,
+      [cutoff],
+    ),
+    query(
+      `DELETE FROM ${schema}.live_audio_friend_invites
+       WHERE expires_at <= $1::timestamptz - interval '7 days'
+       RETURNING id`,
+      [cutoff],
+    ),
   ]);
 
   return {
@@ -12399,6 +14376,8 @@ export async function pruneExpiredData(now = Date.now()) {
     removedHeartRatePairings: removedHeartRatePairings + (pairings?.rowCount ?? 0),
     removedClubMonitorSprintAuthorizations: removedClubMonitorSprintAuthorizations
       + (monitorAuthorizations?.rowCount ?? 0),
+    removedPushEvents: removedPushEvents + (pushEvents?.rowCount ?? 0),
+    removedLiveAudioFriendInvites: removedLiveAudioFriendInvites + (liveAudioInvites?.rowCount ?? 0),
   };
 }
 

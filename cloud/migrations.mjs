@@ -1538,6 +1538,134 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ON ${schema}.account_track_shares (recipient_user_id, updated_at DESC, id)`,
       ],
     },
+    {
+      version: 26,
+      name: 'add private ios push installations and transactional social alerts',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.push_installations (
+          id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 32 AND 64),
+          user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          auth_session_token_hash TEXT NOT NULL
+            REFERENCES ${schema}.auth_sessions(token_hash) ON DELETE CASCADE,
+          credential_hash TEXT NOT NULL CHECK (char_length(credential_hash) BETWEEN 32 AND 180),
+          platform TEXT NOT NULL DEFAULT 'ios' CHECK (platform = 'ios'),
+          environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+          topic TEXT NOT NULL CHECK (char_length(topic) BETWEEN 3 AND 180),
+          token_ciphertext TEXT NOT NULL CHECK (char_length(token_ciphertext) BETWEEN 16 AND 2048),
+          token_nonce TEXT NOT NULL CHECK (char_length(token_nonce) BETWEEN 8 AND 180),
+          token_tag TEXT NOT NULL CHECK (char_length(token_tag) BETWEEN 8 AND 180),
+          token_key_version INTEGER NOT NULL DEFAULT 1 CHECK (token_key_version > 0),
+          token_fingerprint TEXT NOT NULL CHECK (char_length(token_fingerprint) BETWEEN 32 AND 180),
+          permission_status TEXT NOT NULL DEFAULT 'granted'
+            CHECK (permission_status IN ('granted', 'denied', 'prompt')),
+          protocol_version INTEGER NOT NULL DEFAULT 1 CHECK (protocol_version BETWEEN 1 AND 1000),
+          app_build TEXT NOT NULL DEFAULT '' CHECK (char_length(app_build) <= 80),
+          os_version TEXT NOT NULL DEFAULT '' CHECK (char_length(os_version) <= 80),
+          revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
+          registered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          disabled_at TIMESTAMPTZ,
+          invalidated_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          UNIQUE (topic, environment, token_fingerprint)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_push_installations_user_active
+          ON ${schema}.push_installations (user_id, last_seen_at DESC, id)
+          WHERE disabled_at IS NULL AND invalidated_at IS NULL
+            AND permission_status = 'granted'`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_push_installations_session
+          ON ${schema}.push_installations (auth_session_token_hash, id)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.push_preferences (
+          user_id TEXT PRIMARY KEY
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          live_audio BOOLEAN NOT NULL DEFAULT true,
+          friend_requests BOOLEAN NOT NULL DEFAULT true,
+          friend_connections BOOLEAN NOT NULL DEFAULT true,
+          track_shares BOOLEAN NOT NULL DEFAULT true,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.live_audio_friend_invites (
+          id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 6 AND 64),
+          sender_user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          target_user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          room_id TEXT NOT NULL CHECK (char_length(room_id) BETWEEN 6 AND 64),
+          origin_instance_id TEXT NOT NULL CHECK (char_length(origin_instance_id) BETWEEN 8 AND 180),
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'accepted', 'joined', 'declined', 'cancelled', 'expired')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          expires_at TIMESTAMPTZ NOT NULL,
+          responded_at TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CHECK (sender_user_id <> target_user_id),
+          CHECK (expires_at > created_at)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_live_audio_invites_target_pending
+          ON ${schema}.live_audio_friend_invites (target_user_id, expires_at, created_at DESC)
+          WHERE status = 'pending'`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_live_audio_invites_sender_pending
+          ON ${schema}.live_audio_friend_invites (sender_user_id, expires_at, created_at DESC)
+          WHERE status = 'pending'`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.push_events (
+          id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 32 AND 64),
+          notification_id TEXT UNIQUE NOT NULL CHECK (char_length(notification_id) BETWEEN 32 AND 64),
+          recipient_user_id TEXT NOT NULL
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          actor_user_id TEXT
+            REFERENCES ${schema}.auth_users(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL
+            CHECK (kind IN ('live_audio_invite', 'friend_request', 'friend_connection', 'track_share')),
+          object_id TEXT NOT NULL CHECK (char_length(object_id) BETWEEN 1 AND 180),
+          idempotency_key TEXT UNIQUE NOT NULL CHECK (char_length(idempotency_key) BETWEEN 8 AND 300),
+          collapse_id TEXT NOT NULL CHECK (char_length(collapse_id) BETWEEN 1 AND 64),
+          origin_instance_id TEXT CHECK (origin_instance_id IS NULL OR char_length(origin_instance_id) BETWEEN 8 AND 180),
+          state TEXT NOT NULL DEFAULT 'pending'
+            CHECK (state IN ('pending', 'leased', 'dispatched', 'cancelled', 'dead')),
+          not_before TIMESTAMPTZ NOT NULL DEFAULT now(),
+          expires_at TIMESTAMPTZ NOT NULL,
+          attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+          next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          lease_owner TEXT,
+          leased_until TIMESTAMPTZ,
+          last_error_code TEXT NOT NULL DEFAULT '' CHECK (char_length(last_error_code) <= 120),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CHECK (actor_user_id IS NULL OR actor_user_id <> recipient_user_id),
+          CHECK (expires_at > created_at)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_push_events_dispatch
+          ON ${schema}.push_events (next_attempt_at, created_at, id)
+          WHERE state IN ('pending', 'leased')`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_push_events_pair_active
+          ON ${schema}.push_events (recipient_user_id, actor_user_id, created_at DESC)
+          WHERE state IN ('pending', 'leased')`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.push_deliveries (
+          event_id TEXT NOT NULL
+            REFERENCES ${schema}.push_events(id) ON DELETE CASCADE,
+          installation_id TEXT NOT NULL
+            REFERENCES ${schema}.push_installations(id) ON DELETE CASCADE,
+          apns_id TEXT NOT NULL CHECK (char_length(apns_id) BETWEEN 32 AND 64),
+          state TEXT NOT NULL DEFAULT 'pending'
+            CHECK (state IN ('pending', 'leased', 'sent', 'cancelled', 'dead')),
+          attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+          next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          lease_owner TEXT,
+          leased_until TIMESTAMPTZ,
+          last_status INTEGER,
+          last_error_code TEXT NOT NULL DEFAULT '' CHECK (char_length(last_error_code) <= 120),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (event_id, installation_id)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_push_deliveries_retry
+          ON ${schema}.push_deliveries (next_attempt_at, created_at, event_id, installation_id)
+          WHERE state IN ('pending', 'leased')`,
+      ],
+    },
   ];
 }
 

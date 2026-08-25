@@ -36,5 +36,14 @@ describe('public App Store pages', () => {
     expect(markup).toContain('does not store personal health information in iCloud');
     expect(markup).toContain('Explicitly accepted friends can see whether the other account is');
     expect(markup).toContain('An auto-added official connection cannot see an ordinary rider');
+    expect(markup).toContain('request to talk live');
+    expect(markup).toContain('does not create a message history or inbox');
+    expect(markup).toContain('limited to the two connected friends');
+    expect(markup).toContain('Optional app notifications');
+    expect(markup).toContain('opaque device token');
+    expect(markup).toContain('not workout, heart-rate, microphone, message, or payment data');
+    expect(markup).toContain('cannot accept an invitation, join live audio, or enable the microphone');
+    expect(markup).toContain('iOS Keychain using device-only storage');
+    expect(markup).toContain('does not register personal push alerts in Club Tablet kiosk mode');
   });
 });

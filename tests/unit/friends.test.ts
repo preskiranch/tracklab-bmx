@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
-import { FriendsView, friendGhostDetail, friendInviteTokenFromHref, preloadFriendsView } from '../../src/components/FriendsView';
+import {
+  FriendsView,
+  friendCanTalkLive,
+  friendGhostDetail,
+  friendInviteTokenFromHref,
+  preloadFriendsView,
+} from '../../src/components/FriendsView';
 import {
   clearQueuedFriendRequests,
   createFriendsApi,
@@ -20,6 +26,11 @@ import {
   type FriendProfile,
   type FriendsApi,
 } from '../../src/lib/friends';
+import {
+  createLiveFriendAudioApi,
+  normalizeLiveFriendAudioInviteList,
+  normalizeLiveFriendAudioInviteResponse,
+} from '../../src/lib/liveFriendAudio';
 import {
   createTrackSharesApi,
   normalizeTrackShare,
@@ -281,6 +292,65 @@ describe('TrackLab friends client', () => {
     expect(officialFriendLabel('founder')).toBe('TrackLab founder');
   });
 
+  it('offers live audio only to online, explicitly accepted, non-official friends', () => {
+    const eligible = profile({
+      online: true,
+      relationship: 'friend',
+      canTalkLive: true,
+    });
+
+    expect(friendCanTalkLive(eligible)).toBe(true);
+    expect(friendCanTalkLive({ ...eligible, online: false })).toBe(false);
+    expect(friendCanTalkLive({ ...eligible, relationship: 'none' })).toBe(false);
+    expect(friendCanTalkLive({ ...eligible, officialKind: 'club' })).toBe(false);
+    expect(friendCanTalkLive({ ...eligible, canTalkLive: false, canShareTrack: false })).toBe(false);
+    expect(friendCanTalkLive({ ...eligible, canTalkLive: undefined, canShareTrack: true })).toBe(false);
+  });
+
+  it('normalizes short-lived live audio invitations without private sender fields', () => {
+    expect(normalizeLiveFriendAudioInviteList({
+      invites: [{
+        id: ' invite-new ',
+        from: {
+          id: ' friend-1 ',
+          displayName: ' Friend One ',
+          handle: '@friend one!',
+          photoUrl: 'javascript:alert(1)',
+          email: 'private@example.com',
+        },
+        createdAt: '2026-08-24T20:00:01.000Z',
+        expiresAt: '2026-08-24T20:01:31.000Z',
+        roomId: 'must-not-survive',
+      }, {
+        id: 'invite-old',
+        from: { id: 'friend-2', displayName: 'Friend Two', handle: 'friend.two' },
+        createdAt: '2026-08-24T20:00:00.000Z',
+        expiresAt: '2026-08-24T20:01:30.000Z',
+      }, {
+        id: 'invite-invalid',
+        from: { id: 'friend-3', displayName: 'Friend Three', handle: 'friend.three' },
+        createdAt: 'not-a-date',
+        expiresAt: 9e20,
+      }],
+    })).toEqual([{
+      id: 'invite-new',
+      from: { id: 'friend-1', displayName: 'Friend One', handle: 'friendone' },
+      createdAt: '2026-08-24T20:00:01.000Z',
+      expiresAt: '2026-08-24T20:01:31.000Z',
+    }, {
+      id: 'invite-old',
+      from: { id: 'friend-2', displayName: 'Friend Two', handle: 'friend.two' },
+      createdAt: '2026-08-24T20:00:00.000Z',
+      expiresAt: '2026-08-24T20:01:30.000Z',
+    }]);
+    expect(normalizeLiveFriendAudioInviteResponse({ accepted: false, roomId: 'hidden-room' }))
+      .toEqual({ accepted: false });
+    expect(normalizeLiveFriendAudioInviteResponse({ accepted: true, roomId: ' room-1 ' }))
+      .toEqual({ accepted: true, roomId: 'room-1' });
+    expect(() => normalizeLiveFriendAudioInviteResponse({ accepted: true }))
+      .toThrow(/without opening its private room/i);
+  });
+
   it('accepts the canonical and legacy friend invitation URL formats', () => {
     expect(friendInviteTokenFromHref('https://tracklab.test/?friendInvite=canonical-token')).toBe('canonical-token');
     expect(friendInviteTokenFromHref('https://tracklab.test/friends/invite?token=legacy-token')).toBe('legacy-token');
@@ -316,9 +386,24 @@ describe('TrackLab friends client', () => {
       if (url === '/api/friends/privacy') {
         return jsonResponse({ privacy: { discoverable: method === 'PATCH', profile: { id: 'me', handle: 'my.handle', displayName: 'Me' } } });
       }
+      if (url === '/api/friends/live-audio-invites' && method === 'GET') {
+        return jsonResponse({
+          invites: [{
+            id: 'live-invite-1',
+            from: { id: 'friend-1', displayName: 'Friend One', handle: 'friend.one' },
+            createdAt: '2026-08-24T20:00:00.000Z',
+            expiresAt: '2026-08-24T20:01:30.000Z',
+          }],
+        });
+      }
+      if (url.endsWith('/respond') && method === 'POST') {
+        const accepted = JSON.parse(String(init?.body)).accepted === true;
+        return jsonResponse(accepted ? { accepted: true, roomId: 'live-room-1' } : { accepted: false });
+      }
       return jsonResponse({});
     }) as unknown as typeof fetch;
     const api = createFriendsApi(fetcher);
+    const liveAudioApi = createLiveFriendAudioApi(fetcher);
 
     const requests = await api.listRequests({ limit: 1 });
     expect(requests.incomingTotal).toBe(3);
@@ -343,6 +428,15 @@ describe('TrackLab friends client', () => {
     expect((await api.getPrivacy()).profile?.handle).toBe('my.handle');
     expect((await api.updatePrivacy(true)).discoverable).toBe(true);
     expect((await api.listBlocked()).items[0]).toMatchObject({ id: 'blocked-1', relationship: 'blocked' });
+    expect((await liveAudioApi.listLiveAudioInvites())[0]).toMatchObject({
+      id: 'live-invite-1',
+      from: { id: 'friend-1', displayName: 'Friend One' },
+    });
+    expect(await liveAudioApi.respondToLiveAudioInvite('live-invite-1', true))
+      .toEqual({ accepted: true, roomId: 'live-room-1' });
+    expect(await liveAudioApi.respondToLiveAudioInvite('live-invite-1', false))
+      .toEqual({ accepted: false });
+    await liveAudioApi.cancelLiveAudioInvite('live-invite-1');
 
     await api.sendFriendRequest('rider-2', 'client-1');
     await api.cancelFriendRequest('request-2');
@@ -360,6 +454,18 @@ describe('TrackLab friends client', () => {
       expect.objectContaining({ url: '/api/friends/blocks/rider-4', method: 'DELETE' }),
       expect.objectContaining({ url: '/api/friends/reports', method: 'POST', body: { profileId: 'rider-5', reason: 'spam' } }),
       expect.objectContaining({ url: '/api/friends/invites/claim', method: 'POST', body: { token: 'secure-token' } }),
+      expect.objectContaining({ url: '/api/friends/live-audio-invites', method: 'GET' }),
+      expect.objectContaining({
+        url: '/api/friends/live-audio-invites/live-invite-1/respond',
+        method: 'POST',
+        body: { accepted: true },
+      }),
+      expect.objectContaining({
+        url: '/api/friends/live-audio-invites/live-invite-1/respond',
+        method: 'POST',
+        body: { accepted: false },
+      }),
+      expect.objectContaining({ url: '/api/friends/live-audio-invites/live-invite-1', method: 'DELETE' }),
     ]));
   });
 
@@ -409,6 +515,39 @@ describe('TrackLab friends client', () => {
     await preloadFriendsView('another-account', api, false, sharesApi);
     expect(fetcher).toHaveBeenCalledTimes(6);
     expect(sharesApi.listReceived).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders Talk live as a primary action only for eligible online friends', async () => {
+    const friends = [
+      profile({ id: 'online-friend', displayName: 'Online Friend', online: true, relationship: 'friend', canTalkLive: true }),
+      profile({ id: 'offline-friend', displayName: 'Offline Friend', online: false, relationship: 'friend', canTalkLive: true }),
+      profile({ id: 'official-friend', displayName: 'Official Friend', online: true, relationship: 'friend', canTalkLive: true, officialKind: 'club' }),
+      profile({ id: 'suggested-rider', displayName: 'Suggested Rider', online: true, relationship: 'none', canTalkLive: true }),
+    ];
+    const api = {
+      listFriends: vi.fn(async () => ({ items: friends, nextCursor: null, total: friends.length })),
+      listRequests: vi.fn(async () => blankRequests),
+      getPrivacy: vi.fn(async () => ({ discoverable: false, profile: null })),
+    } as unknown as FriendsApi;
+    const sharesApi: TrackSharesApi = {
+      listReceived: vi.fn(async () => blankTrackShares),
+      send: vi.fn(),
+      markOpened: vi.fn(),
+      dismiss: vi.fn(),
+    };
+    await preloadFriendsView('talk-live-me', api, true, sharesApi);
+
+    const markup = renderToStaticMarkup(createElement(FriendsView, {
+      currentProfileId: 'talk-live-me',
+      api,
+      trackSharesApi: sharesApi,
+      onTalkLive: vi.fn(),
+    }));
+
+    expect(markup).toContain('aria-label="Talk live with Online Friend"');
+    expect(markup).not.toContain('aria-label="Talk live with Offline Friend"');
+    expect(markup).not.toContain('aria-label="Talk live with Official Friend"');
+    expect(markup).not.toContain('aria-label="Talk live with Suggested Rider"');
   });
 
   it('queues one fresh shared-track read when invalidation arrives during an older request', async () => {
@@ -541,12 +680,14 @@ describe('TrackLab friends client', () => {
     stream?.dispatch('open');
     stream?.dispatch('graph-invalidated');
     stream?.dispatch('track-shares-invalidated');
-    expect(invalidated).toHaveBeenCalledTimes(3);
+    stream?.dispatch('live-audio-invites-invalidated');
+    expect(invalidated).toHaveBeenCalledTimes(4);
 
     unsubscribe();
     stream?.dispatch('graph-invalidated');
     stream?.dispatch('track-shares-invalidated');
-    expect(invalidated).toHaveBeenCalledTimes(3);
+    stream?.dispatch('live-audio-invites-invalidated');
+    expect(invalidated).toHaveBeenCalledTimes(4);
     expect(stream?.close).toHaveBeenCalledOnce();
   });
 

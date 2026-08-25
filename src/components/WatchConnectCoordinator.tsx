@@ -1,10 +1,12 @@
 import {
   useCallback,
   useEffect,
+  lazy,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  Suspense,
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { UseHeartRateResult } from '../hooks/useHeartRate';
@@ -80,12 +82,18 @@ export type WatchConnectCoordinatorProps = Readonly<{
   knownPairingIds?: Set<string>;
   onMessage?: (message: string) => void;
   onOpenSettings?: () => void;
+  friendNetworkRefreshRevision?: string | number;
+  onNativeNotification?: (opened: boolean) => void;
 }>;
 
 const emptySnapshot: WatchConnectCloudSnapshot = Object.freeze({
   enrollments: [],
   connections: [],
 });
+const LiveFriendAudioCoordinator = lazy(() => import('./LiveFriendAudioCoordinator')
+  .then((module) => ({ default: module.LiveFriendAudioCoordinator })));
+const NativeNotificationsCoordinator = lazy(() => import('./NativeNotificationsCoordinator')
+  .then((module) => ({ default: module.NativeNotificationsCoordinator })));
 
 // The coordinator moves between the account-completion and full-app trees
 // while profile data hydrates. Keep the native privacy operation keyed at the
@@ -494,6 +502,8 @@ export function WatchConnectCoordinator({
   knownPairingIds,
   onMessage,
   onOpenSettings = () => undefined,
+  friendNetworkRefreshRevision = 0,
+  onNativeNotification = () => undefined,
 }: WatchConnectCoordinatorProps) {
   const [snapshot, setSnapshot] = useState<WatchConnectCloudSnapshot>(emptySnapshot);
   const [nativeState, setNativeState] = useState<NativeWatchConnectState | null>(heartRate.watchConnect);
@@ -1333,12 +1343,26 @@ export function WatchConnectCoordinator({
     }
   }, [accountId, connection, disconnect, enrollment, onPairedIPhone]);
 
-  if (
-    authStatus !== 'signed-in'
-    || !accountId
-  ) return null;
+  const nativeNotifications = <Suspense fallback={null}>
+    <NativeNotificationsCoordinator
+      accountId={accountId}
+      authStatus={authStatus}
+      kioskMode={false}
+      settingsOpen={settingsOpen}
+      onFriendsActivity={onNativeNotification}
+    />
+  </Suspense>;
+  if (authStatus !== 'signed-in' || !accountId) return nativeNotifications;
   return (
     <>
+    {nativeNotifications}
+    <Suspense fallback={null}>
+      <LiveFriendAudioCoordinator
+        key={accountId}
+        accountId={accountId}
+        refreshToken={friendNetworkRefreshRevision}
+      />
+    </Suspense>
     {indicatorTarget && createPortal(
       <WatchConnectIndicator
         state={indicatorState}

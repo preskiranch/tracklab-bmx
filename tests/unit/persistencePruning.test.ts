@@ -14,9 +14,9 @@ describe('expired persistence pruning', () => {
       source.indexOf('export async function closePersistence'),
     );
 
-    expect(pruneSource.match(/\$1::timestamptz - interval/g)).toHaveLength(5);
+    expect(pruneSource.match(/\$1::timestamptz - interval/g)).toHaveLength(7);
     expect(pruneSource).not.toMatch(/\$1(?!::timestamptz)\s*-\s*interval/);
-    expect(pruneSource.match(/\$1::timestamptz/g)).toHaveLength(8);
+    expect(pruneSource.match(/\$1::timestamptz/g)).toHaveLength(10);
   });
 
   it('removes expired memory records without pruning a fresh checkout', async () => {

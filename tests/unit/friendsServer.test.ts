@@ -50,10 +50,18 @@ async function request(
   pathname: string,
   options: { cookie?: string; method?: string; body?: unknown; headers?: Record<string, string> } = {},
 ) {
-  return fetch(`${baseUrl}${pathname}`, {
+  return requestAt(baseUrl, pathname, options);
+}
+
+async function requestAt(
+  origin: string,
+  pathname: string,
+  options: { cookie?: string; method?: string; body?: unknown; headers?: Record<string, string> } = {},
+) {
+  return fetch(`${origin}${pathname}`, {
     method: options.method ?? 'GET',
     headers: {
-      Origin: baseUrl,
+      Origin: origin,
       ...(options.cookie ? { Cookie: options.cookie } : {}),
       ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
@@ -78,10 +86,11 @@ async function register(email: string, name: string, forwardedFor = '') {
   return { cookie, user: body.user };
 }
 
-async function login(email: string) {
+async function login(email: string, forwardedFor = '') {
   const response = await request('/api/auth/login', {
     method: 'POST',
     body: { email, password: 'friends-test-password' },
+    ...(forwardedFor ? { headers: { 'X-Forwarded-For': forwardedFor } } : {}),
   });
   expect(response.status).toBe(200);
   return String(response.headers.get('set-cookie')).split(';')[0];
@@ -106,7 +115,7 @@ async function openFriendEventStream(authCookie: string): Promise<TestEventStrea
   return { controller, reader: response.body.getReader(), decoder: new TextDecoder(), buffer: '' };
 }
 
-async function waitForFriendGraphEvent(stream: TestEventStream, timeoutMs = 3_000) {
+async function waitForFriendEvent(stream: TestEventStream, eventName: string, timeoutMs = 3_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const separator = stream.buffer.indexOf('\n\n');
@@ -115,7 +124,7 @@ async function waitForFriendGraphEvent(stream: TestEventStream, timeoutMs = 3_00
       stream.buffer = stream.buffer.slice(separator + 2);
       const event = block.match(/^event:\s*(.+)$/m)?.[1]?.trim();
       const data = block.match(/^data:\s*(.*)$/m)?.[1]?.trim();
-      if (event === 'graph-invalidated') {
+      if (event === eventName) {
         return { block, data: data ? JSON.parse(data) : null };
       }
       continue;
@@ -124,13 +133,17 @@ async function waitForFriendGraphEvent(stream: TestEventStream, timeoutMs = 3_00
     const chunk = await Promise.race([
       stream.reader.read(),
       new Promise<never>((_resolve, reject) => {
-        setTimeout(() => reject(new Error('Timed out waiting for graph-invalidated.')), remaining);
+        setTimeout(() => reject(new Error(`Timed out waiting for ${eventName}.`)), remaining);
       }),
     ]);
-    if (chunk.done) throw new Error('Friend event stream ended before graph-invalidated.');
+    if (chunk.done) throw new Error(`Friend event stream ended before ${eventName}.`);
     stream.buffer += stream.decoder.decode(chunk.value, { stream: true }).replace(/\r\n/g, '\n');
   }
-  throw new Error('Timed out waiting for graph-invalidated.');
+  throw new Error(`Timed out waiting for ${eventName}.`);
+}
+
+async function waitForFriendGraphEvent(stream: TestEventStream, timeoutMs = 3_000) {
+  return waitForFriendEvent(stream, 'graph-invalidated', timeoutMs);
 }
 
 async function expectNoFriendGraphEvent(stream: TestEventStream, timeoutMs = 250) {
@@ -145,8 +158,12 @@ function closeFriendEventStream(stream: TestEventStream) {
 }
 
 async function openTestSocket(authCookie: string): Promise<TestSocket> {
-  const socket = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/multiplayer`, {
-    headers: { Cookie: authCookie, Origin: baseUrl },
+  return openTestSocketAt(baseUrl, authCookie);
+}
+
+async function openTestSocketAt(origin: string, authCookie: string): Promise<TestSocket> {
+  const socket = new WebSocket(`${origin.replace(/^http/, 'ws')}/multiplayer`, {
+    headers: { Cookie: authCookie, Origin: origin },
   });
   const state: TestSocket = { socket, messages: [] };
   testSockets.add(socket);
@@ -164,6 +181,46 @@ async function openTestSocket(authCookie: string): Promise<TestSocket> {
   return state;
 }
 
+async function connectTestSocket(authCookie: string, origin = baseUrl) {
+  const state = await openTestSocketAt(origin, authCookie);
+  const connected = await waitForSocketMessage(state, (message) => message.type === 'connected');
+  const startAt = state.messages.length;
+  state.socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 1 }));
+  await waitForSocketMessage(state, (message) => message.type === 'welcome', startAt);
+  return { ...state, clientId: String(connected.clientId) };
+}
+
+async function connectClubTabletTestSocket(sessionToken: string, origin = baseUrl) {
+  const ticketResponse = await requestAt(origin, '/api/club-tablet/multiplayer-ticket', {
+    method: 'POST',
+    headers: { 'X-TrackLab-Club-Tablet-Session': sessionToken },
+  });
+  expect(ticketResponse.status).toBe(201);
+  const ticketPayload = await json(ticketResponse);
+  const socket = new WebSocket(
+    `${origin.replace(/^http/, 'ws')}/multiplayer?clubTabletTicket=${encodeURIComponent(String(ticketPayload.ticket))}`,
+    { headers: { Origin: origin } },
+  );
+  const state: TestSocket = { socket, messages: [] };
+  testSockets.add(socket);
+  socket.on('message', (data) => {
+    try {
+      state.messages.push(JSON.parse(data.toString()));
+    } catch {
+      // Ignore non-JSON test frames.
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  const connected = await waitForSocketMessage(state, (message) => message.type === 'connected');
+  const startAt = state.messages.length;
+  socket.send(JSON.stringify({ type: 'hello', available: true, bikeCount: 1 }));
+  await waitForSocketMessage(state, (message) => message.type === 'welcome', startAt);
+  return { ...state, clientId: String(connected.clientId) };
+}
+
 async function waitForSocketMessage(
   state: TestSocket,
   predicate: (message: Record<string, any>) => boolean,
@@ -177,6 +234,38 @@ async function waitForSocketMessage(
     await new Promise((resolve) => setTimeout(resolve, 15));
   }
   throw new Error(`Timed out waiting for WebSocket message. Seen: ${JSON.stringify(state.messages.slice(startAt))}`);
+}
+
+async function expectNoSocketMessage(
+  state: TestSocket,
+  predicate: (message: Record<string, any>) => boolean,
+  startAt: number,
+  timeoutMs = 250,
+) {
+  await expect(waitForSocketMessage(state, predicate, startAt, timeoutMs)).rejects.toThrow(
+    /Timed out waiting for WebSocket message/,
+  );
+}
+
+async function makeExplicitFriends(
+  inviterCookie: string,
+  recipientCookie: string,
+  origin = baseUrl,
+) {
+  const invitationResponse = await requestAt(origin, '/api/friends/invites', {
+    cookie: inviterCookie,
+    method: 'POST',
+  });
+  expect(invitationResponse.status).toBe(201);
+  const invitation = await json(invitationResponse);
+  const token = new URL(String(invitation.invite.inviteUrl)).searchParams.get('friendInvite');
+  expect(token).toMatch(/^[a-zA-Z0-9_-]{32,96}$/);
+  const claimResponse = await requestAt(origin, '/api/friends/invites/claim', {
+    cookie: recipientCookie,
+    method: 'POST',
+    body: { token },
+  });
+  expect(claimResponse.status).toBe(200);
 }
 
 beforeAll(async () => {
@@ -1230,6 +1319,1014 @@ describe('authenticated Friends API', () => {
       method: 'POST',
       body: { token: otherInvite.token },
     })).status).toBe(200);
+  }, 30_000);
+
+  it('keeps a live-audio alert private, admits exactly the two friends, and relays only their voice', async () => {
+    const host = await register(
+      'live-audio-host@tracklab.test',
+      'Live Audio Host',
+      '198.51.100.111',
+    );
+    const target = await register(
+      'live-audio-target@tracklab.test',
+      'Live Audio Target',
+      '198.51.100.112',
+    );
+    const outsider = await register(
+      'live-audio-outsider@tracklab.test',
+      'Live Audio Outsider',
+      '198.51.100.113',
+    );
+    await makeExplicitFriends(host.cookie, target.cookie);
+
+    const clubAdminCookie = await login('preskiranch@gmail.com', '198.51.100.130');
+    const studioRiderId = 'live-audio-claimed-tablet-target';
+    const rosterSaved = await request('/api/user-data', {
+      cookie: clubAdminCookie,
+      method: 'PATCH',
+      body: {
+        studioRiders: [{
+          id: studioRiderId,
+          name: 'Live Audio Target',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }],
+      },
+    });
+    expect(rosterSaved.status).toBe(200);
+    const clubInviteResponse = await request('/api/club-connect/invites', {
+      cookie: clubAdminCookie,
+      method: 'POST',
+      body: { studioRiderId },
+    });
+    expect(clubInviteResponse.status).toBe(201);
+    const clubInvite = await json(clubInviteResponse);
+    expect((await request('/api/club-connect/claim', {
+      cookie: target.cookie,
+      method: 'POST',
+      body: { token: clubInvite.token, fullName: 'Live Audio Target' },
+    })).status).toBe(200);
+    const enrollmentCookie = await login('preskiranch@gmail.com', '198.51.100.131');
+    const enrollmentResponse = await request('/api/club-tablet/devices', {
+      cookie: enrollmentCookie,
+      method: 'POST',
+      body: { name: 'Live Audio Privacy Tablet' },
+    });
+    expect(enrollmentResponse.status).toBe(201);
+    const enrollment = await json(enrollmentResponse);
+    const tabletSessionResponse = await request('/api/club-tablet/sessions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${enrollment.deviceToken}` },
+      body: { studioRiderId, bikeDeviceId: 'Wattbike-LIVE-AUDIO-PRIVACY' },
+    });
+    expect(tabletSessionResponse.status).toBe(201);
+    const tabletSession = await json(tabletSessionResponse);
+
+    const targetEvents = await openFriendEventStream(target.cookie);
+    const hostSocket = await connectTestSocket(host.cookie);
+    const targetSocket = await connectTestSocket(target.cookie);
+    const targetSecondCookie = await login('live-audio-target@tracklab.test', '198.51.100.132');
+    const targetSecondSocket = await connectTestSocket(targetSecondCookie);
+    const targetTabletSocket = await connectClubTabletTestSocket(String(tabletSession.sessionToken));
+    const outsiderSocket = await connectTestSocket(outsider.cookie);
+
+    const visibleTarget = await json(await request('/api/friends?q=Live%20Audio%20Target', {
+      cookie: host.cookie,
+    }));
+    expect(visibleTarget.items).toEqual([
+      expect.objectContaining({
+        id: target.user.id,
+        online: true,
+        relationship: 'friend',
+        canTalkLive: true,
+      }),
+    ]);
+
+    const hostInviteStart = hostSocket.messages.length;
+    hostSocket.socket.send(JSON.stringify({
+      type: 'create-live-audio-invite',
+      targetProfileId: target.user.id,
+    }));
+    const sentStatus = await waitForSocketMessage(
+      hostSocket,
+      (message) => message.type === 'live-audio-invite-status' && message.state === 'sent',
+      hostInviteStart,
+    );
+    const waitingRoomState = await waitForSocketMessage(
+      hostSocket,
+      (message) => message.type === 'room-state' && message.room?.purpose === 'live-audio',
+      hostInviteStart,
+    );
+    expect(waitingRoomState).toMatchObject({
+      messages: [],
+      raceStates: [],
+      room: {
+        private: true,
+        purpose: 'live-audio',
+        memberCount: 1,
+        racerCount: 0,
+        spectatorCount: 1,
+      },
+    });
+    const roomId = String(waitingRoomState.room.id);
+    const inviteId = String(sentStatus.invite.id);
+
+    expect(await waitForFriendEvent(targetEvents, 'live-audio-invites-invalidated')).toEqual({
+      block: 'event: live-audio-invites-invalidated\ndata: {}',
+      data: {},
+    });
+    const targetInvites = await json(await request('/api/friends/live-audio-invites', {
+      cookie: target.cookie,
+    }));
+    expect(targetInvites).toEqual({
+      invites: [{
+        id: inviteId,
+        from: {
+          id: host.user.id,
+          handle: host.user.username,
+          displayName: 'Live Audio Host',
+        },
+        createdAt: expect.any(String),
+        expiresAt: expect.any(String),
+      }],
+    });
+    expect(JSON.stringify(targetInvites)).not.toContain(roomId);
+    expect(JSON.stringify(targetInvites)).not.toContain('live-audio-host@tracklab.test');
+    expect(targetInvites.invites[0]).not.toHaveProperty('roomId');
+    expect(targetInvites.invites[0].from).not.toHaveProperty('email');
+
+    const preAcceptJoinStart = targetSocket.messages.length;
+    targetSocket.socket.send(JSON.stringify({ type: 'join-room', roomId }));
+    await waitForSocketMessage(
+      targetSocket,
+      (message) => message.type === 'room-error' && /no longer available/i.test(message.message),
+      preAcceptJoinStart,
+    );
+    const preAcceptTabletJoinStart = targetTabletSocket.messages.length;
+    targetTabletSocket.socket.send(JSON.stringify({ type: 'join-room', roomId }));
+    await waitForSocketMessage(
+      targetTabletSocket,
+      (message) => message.type === 'room-error' && /no longer available/i.test(message.message),
+      preAcceptTabletJoinStart,
+    );
+
+    expect(await json(await request('/api/friends/live-audio-invites', {
+      cookie: outsider.cookie,
+    }))).toEqual({ invites: [] });
+    expect((await request(`/api/friends/live-audio-invites/${inviteId}/respond`, {
+      cookie: outsider.cookie,
+      method: 'POST',
+      body: { accepted: true },
+    })).status).toBe(404);
+    const outsiderLobby = outsiderSocket.messages
+      .filter((message) => message.type === 'lobby-state')
+      .at(-1);
+    expect(outsiderLobby?.rooms ?? []).not.toContainEqual(expect.objectContaining({ id: roomId }));
+
+    const hostAcceptedStart = hostSocket.messages.length;
+    const responses = await Promise.all([
+      request(`/api/friends/live-audio-invites/${inviteId}/respond`, {
+        cookie: target.cookie,
+        method: 'POST',
+        body: { accepted: true },
+      }),
+      request(`/api/friends/live-audio-invites/${inviteId}/respond`, {
+        cookie: targetSecondCookie,
+        method: 'POST',
+        body: { accepted: true },
+      }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 404]);
+    const acceptedResponse = responses.find((response) => response.status === 200)!;
+    expect(await json(acceptedResponse)).toEqual({ accepted: true, roomId });
+    await waitForSocketMessage(
+      hostSocket,
+      (message) => message.type === 'live-audio-invite-status' && message.state === 'accepted',
+      hostAcceptedStart,
+    );
+    expect(await json(await request('/api/friends/live-audio-invites', {
+      cookie: target.cookie,
+    }))).toEqual({ invites: [] });
+
+    const acceptedTabletJoinStart = targetTabletSocket.messages.length;
+    targetTabletSocket.socket.send(JSON.stringify({ type: 'join-room', roomId }));
+    await waitForSocketMessage(
+      targetTabletSocket,
+      (message) => message.type === 'room-error' && /no longer available/i.test(message.message),
+      acceptedTabletJoinStart,
+    );
+
+    const outsiderJoinStart = outsiderSocket.messages.length;
+    outsiderSocket.socket.send(JSON.stringify({ type: 'join-room', roomId }));
+    await waitForSocketMessage(
+      outsiderSocket,
+      (message) => message.type === 'room-error' && /no longer available/i.test(message.message),
+      outsiderJoinStart,
+    );
+
+    const targetJoinStart = targetSocket.messages.length;
+    const hostJoinedStart = hostSocket.messages.length;
+    targetSocket.socket.send(JSON.stringify({ type: 'join-room', roomId }));
+    const joined = await waitForSocketMessage(
+      targetSocket,
+      (message) => message.type === 'room-state' && message.room?.id === roomId && message.room?.memberCount === 2,
+      targetJoinStart,
+    );
+    await waitForSocketMessage(
+      hostSocket,
+      (message) => message.type === 'room-state' && message.room?.id === roomId && message.room?.memberCount === 2,
+      hostJoinedStart,
+    );
+    expect(joined).toMatchObject({
+      messages: [],
+      raceStates: [],
+      room: {
+        purpose: 'live-audio',
+        racerCount: 0,
+        racerSeatCount: 0,
+        spectatorCount: 2,
+      },
+    });
+    expect(joined.room.members.map((member: any) => member.id).sort()).toEqual(
+      [hostSocket.clientId, targetSocket.clientId].sort(),
+    );
+
+    const duplicateJoinStart = targetSecondSocket.messages.length;
+    targetSecondSocket.socket.send(JSON.stringify({ type: 'join-room', roomId }));
+    await waitForSocketMessage(
+      targetSecondSocket,
+      (message) => message.type === 'room-error' && /no longer available/i.test(message.message),
+      duplicateJoinStart,
+    );
+
+    const targetVoiceStart = targetSocket.messages.length;
+    hostSocket.socket.send(JSON.stringify({
+      type: 'voice-signal',
+      signal: { type: 'ready' },
+    }));
+    await waitForSocketMessage(
+      targetSocket,
+      (message) => message.type === 'voice-signal'
+        && message.signal?.fromId === hostSocket.clientId
+        && message.signal?.signal?.type === 'ready',
+      targetVoiceStart,
+    );
+
+    const hostVoiceStart = hostSocket.messages.length;
+    targetSocket.socket.send(JSON.stringify({
+      type: 'voice-signal',
+      targetId: hostSocket.clientId,
+      signal: { type: 'candidate', candidate: { candidate: 'candidate:live-audio-test' } },
+    }));
+    await waitForSocketMessage(
+      hostSocket,
+      (message) => message.type === 'voice-signal'
+        && message.signal?.fromId === targetSocket.clientId
+        && message.signal?.targetId === hostSocket.clientId
+        && message.signal?.signal?.type === 'candidate',
+      hostVoiceStart,
+    );
+
+    const hostUnauthorizedVoiceStart = hostSocket.messages.length;
+    outsiderSocket.socket.send(JSON.stringify({
+      type: 'voice-signal',
+      targetId: hostSocket.clientId,
+      signal: { type: 'ready' },
+    }));
+    await expectNoSocketMessage(
+      hostSocket,
+      (message) => message.type === 'voice-signal' && message.signal?.fromId === outsiderSocket.clientId,
+      hostUnauthorizedVoiceStart,
+    );
+    const outsiderUnauthorizedVoiceStart = outsiderSocket.messages.length;
+    hostSocket.socket.send(JSON.stringify({
+      type: 'voice-signal',
+      targetId: outsiderSocket.clientId,
+      signal: { type: 'ready' },
+    }));
+    await expectNoSocketMessage(
+      outsiderSocket,
+      (message) => message.type === 'voice-signal' && message.signal?.fromId === hostSocket.clientId,
+      outsiderUnauthorizedVoiceStart,
+    );
+
+    const targetChatStart = targetSocket.messages.length;
+    hostSocket.socket.send(JSON.stringify({ type: 'room-chat', text: 'This must not be stored.' }));
+    await expectNoSocketMessage(targetSocket, (message) => message.type === 'room-chat', targetChatStart);
+    const targetRaceStart = targetSocket.messages.length;
+    hostSocket.socket.send(JSON.stringify({
+      type: 'race-sync',
+      state: { raceState: 'racing', sessionId: 'must-not-relay' },
+    }));
+    await expectNoSocketMessage(targetSocket, (message) => message.type === 'race-sync', targetRaceStart);
+
+    const hostLeaveStart = hostSocket.messages.length;
+    const targetLeaveStart = targetSocket.messages.length;
+    targetSocket.socket.send(JSON.stringify({ type: 'leave-room' }));
+    await waitForSocketMessage(hostSocket, (message) => message.type === 'room-left' && message.roomId === roomId, hostLeaveStart);
+    await waitForSocketMessage(targetSocket, (message) => message.type === 'room-left' && message.roomId === roomId, targetLeaveStart);
+
+    closeFriendEventStream(targetEvents);
+    [hostSocket, targetSocket, targetSecondSocket, targetTabletSocket, outsiderSocket].forEach((state) => {
+      state.socket.close();
+      testSockets.delete(state.socket);
+    });
+    expect((await request('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: { 'X-TrackLab-Club-Tablet-Session': String(tabletSession.sessionToken) },
+    })).status).toBe(200);
+  }, 30_000);
+
+  it('serializes live-audio interactions across account devices and participant roles', async () => {
+    const hostEmail = 'live-audio-multi-device-host@tracklab.test';
+    const host = await register(hostEmail, 'Multi Device Host', '198.51.100.140');
+    const targetA = await register(
+      'live-audio-multi-device-target-a@tracklab.test',
+      'Multi Device Target A',
+      '198.51.100.141',
+    );
+    const targetB = await register(
+      'live-audio-multi-device-target-b@tracklab.test',
+      'Multi Device Target B',
+      '198.51.100.142',
+    );
+    await makeExplicitFriends(host.cookie, targetA.cookie);
+    await makeExplicitFriends(host.cookie, targetB.cookie);
+    await makeExplicitFriends(targetA.cookie, targetB.cookie);
+
+    const hostSecondCookie = await login(hostEmail, '198.51.100.143');
+    const sockets: TestSocket[] = [];
+    const hostOneSocket = await connectTestSocket(host.cookie);
+    const hostTwoSocket = await connectTestSocket(hostSecondCookie);
+    const targetASocket = await connectTestSocket(targetA.cookie);
+    const targetBSocket = await connectTestSocket(targetB.cookie);
+    sockets.push(hostOneSocket, hostTwoSocket, targetASocket, targetBSocket);
+
+    try {
+      const firstStart = hostOneSocket.messages.length;
+      hostOneSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: targetA.user.id,
+      }));
+      const firstStatus = await waitForSocketMessage(
+        hostOneSocket,
+        (message) => message.type === 'live-audio-invite-status' && message.state === 'sent',
+        firstStart,
+      );
+      const firstRoom = await waitForSocketMessage(
+        hostOneSocket,
+        (message) => message.type === 'room-state' && message.room?.purpose === 'live-audio',
+        firstStart,
+      );
+      const firstInviteId = String(firstStatus.invite.id);
+      const firstRoomId = String(firstRoom.room.id);
+
+      const exactReplayStart = hostTwoSocket.messages.length;
+      hostTwoSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: targetA.user.id,
+      }));
+      const exactReplay = await waitForSocketMessage(
+        hostTwoSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'sent'
+          && message.invite?.id === firstInviteId,
+        exactReplayStart,
+      );
+      expect(exactReplay.invite.targetProfileId).toBe(targetA.user.id);
+      await expectNoSocketMessage(
+        hostTwoSocket,
+        (message) => message.type === 'room-state' && message.room?.purpose === 'live-audio',
+        exactReplayStart,
+      );
+
+      const hostOneStableStart = hostOneSocket.messages.length;
+      const secondDeviceStart = hostTwoSocket.messages.length;
+      hostTwoSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: targetB.user.id,
+      }));
+      const secondDeviceRejected = await waitForSocketMessage(
+        hostTwoSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'error'
+          && /not available/i.test(message.message),
+        secondDeviceStart,
+      );
+      expect(secondDeviceRejected).not.toHaveProperty('invite');
+      expect(JSON.stringify(secondDeviceRejected)).not.toContain(firstInviteId);
+      expect(JSON.stringify(secondDeviceRejected)).not.toContain(firstRoomId);
+      await expectNoSocketMessage(
+        hostOneSocket,
+        (message) => message.type === 'live-audio-invite-status' && message.state === 'error',
+        hostOneStableStart,
+      );
+
+      const senderAlreadyTargetStart = targetASocket.messages.length;
+      targetASocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: targetB.user.id,
+      }));
+      await waitForSocketMessage(
+        targetASocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'error'
+          && /not available/i.test(message.message),
+        senderAlreadyTargetStart,
+      );
+
+      const busyTargetStart = targetBSocket.messages.length;
+      targetBSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: targetA.user.id,
+      }));
+      await waitForSocketMessage(
+        targetBSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'error'
+          && /not available/i.test(message.message),
+        busyTargetStart,
+      );
+
+      expect(await json(await request('/api/friends/live-audio-invites', {
+        cookie: targetA.cookie,
+      }))).toEqual({
+        invites: [expect.objectContaining({ id: firstInviteId })],
+      });
+      expect(await json(await request('/api/friends/live-audio-invites', {
+        cookie: targetB.cookie,
+      }))).toEqual({ invites: [] });
+
+      expect((await request(`/api/friends/live-audio-invites/${firstInviteId}/respond`, {
+        cookie: targetA.cookie,
+        method: 'POST',
+        body: { accepted: true },
+      })).status).toBe(200);
+      const targetJoinStart = targetASocket.messages.length;
+      targetASocket.socket.send(JSON.stringify({ type: 'join-room', roomId: firstRoomId }));
+      await waitForSocketMessage(
+        targetASocket,
+        (message) => message.type === 'room-state'
+          && message.room?.id === firstRoomId
+          && message.room?.memberCount === 2,
+        targetJoinStart,
+      );
+      const firstLeaveStart = hostOneSocket.messages.length;
+      targetASocket.socket.send(JSON.stringify({ type: 'leave-room' }));
+      await waitForSocketMessage(
+        hostOneSocket,
+        (message) => message.type === 'room-left' && message.roomId === firstRoomId,
+        firstLeaveStart,
+      );
+
+      // The rejected H2 -> B attempt did not reserve the pair or consume a
+      // sender slot, so that exact interaction is available once H1 -> A ends.
+      const secondAllowedStart = hostTwoSocket.messages.length;
+      hostTwoSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: targetB.user.id,
+      }));
+      const secondAllowed = await waitForSocketMessage(
+        hostTwoSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'sent'
+          && message.invite?.targetProfileId === targetB.user.id,
+        secondAllowedStart,
+      );
+      expect((await request(`/api/friends/live-audio-invites/${secondAllowed.invite.id}`, {
+        cookie: hostSecondCookie,
+        method: 'DELETE',
+      })).status).toBe(200);
+
+      // The rejected B -> A attempt was likewise quota-neutral and can commit
+      // after A is no longer a participant in another pending/active room.
+      const symmetricAllowedStart = targetBSocket.messages.length;
+      targetBSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: targetA.user.id,
+      }));
+      const symmetricAllowed = await waitForSocketMessage(
+        targetBSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'sent'
+          && message.invite?.targetProfileId === targetA.user.id,
+        symmetricAllowedStart,
+      );
+      expect((await request(`/api/friends/live-audio-invites/${symmetricAllowed.invite.id}`, {
+        cookie: targetB.cookie,
+        method: 'DELETE',
+      })).status).toBe(200);
+    } finally {
+      sockets.forEach((state) => {
+        state.socket.close();
+        testSockets.delete(state.socket);
+      });
+    }
+  }, 30_000);
+
+  it('retains pair cooldown through decline and cancel while block and unfriend revoke access', async () => {
+    type LiveAudioPair = {
+      host: Awaited<ReturnType<typeof register>>;
+      target: Awaited<ReturnType<typeof register>>;
+      hostSocket: Awaited<ReturnType<typeof connectTestSocket>>;
+      targetSocket: Awaited<ReturnType<typeof connectTestSocket>>;
+    };
+    const sockets: TestSocket[] = [];
+    const setupPair = async (slug: string, label: string, hostIp: string, targetIp: string): Promise<LiveAudioPair> => {
+      const host = await register(`${slug}-host@tracklab.test`, `${label} Host`, hostIp);
+      const target = await register(`${slug}-target@tracklab.test`, `${label} Target`, targetIp);
+      await makeExplicitFriends(host.cookie, target.cookie);
+      const hostSocket = await connectTestSocket(host.cookie);
+      const targetSocket = await connectTestSocket(target.cookie);
+      sockets.push(hostSocket, targetSocket);
+      return { host, target, hostSocket, targetSocket };
+    };
+    const sendPendingInvite = async (pair: LiveAudioPair) => {
+      const startAt = pair.hostSocket.messages.length;
+      pair.hostSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: pair.target.user.id,
+      }));
+      const status = await waitForSocketMessage(
+        pair.hostSocket,
+        (message) => message.type === 'live-audio-invite-status' && message.state === 'sent',
+        startAt,
+      );
+      const roomState = await waitForSocketMessage(
+        pair.hostSocket,
+        (message) => message.type === 'room-state' && message.room?.purpose === 'live-audio',
+        startAt,
+      );
+      return {
+        inviteId: String(status.invite.id),
+        roomId: String(roomState.room.id),
+        startAt: pair.hostSocket.messages.length,
+      };
+    };
+    const expectCooldownWithoutLeak = async (
+      pair: LiveAudioPair,
+      previous: { inviteId: string; roomId: string },
+    ) => {
+      const resendStart = pair.hostSocket.messages.length;
+      pair.hostSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: pair.target.user.id,
+      }));
+      const rejected = await waitForSocketMessage(
+        pair.hostSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'error'
+          && /wait a moment/i.test(message.message),
+        resendStart,
+      );
+      expect(rejected).toEqual({
+        type: 'live-audio-invite-status',
+        state: 'error',
+        message: 'Wait a moment before sending another live audio invite.',
+      });
+      expect(JSON.stringify(rejected)).not.toContain(previous.inviteId);
+      expect(JSON.stringify(rejected)).not.toContain(previous.roomId);
+      await expectNoSocketMessage(
+        pair.hostSocket,
+        (message) => message.type === 'room-state' && message.room?.purpose === 'live-audio',
+        resendStart,
+      );
+      expect(await json(await request('/api/friends/live-audio-invites', {
+        cookie: pair.target.cookie,
+      }))).toEqual({ invites: [] });
+    };
+
+    const declinePair = await setupPair(
+      'live-audio-lifecycle-decline',
+      'Decline Lifecycle',
+      '198.51.100.114',
+      '198.51.100.115',
+    );
+    const declined = await sendPendingInvite(declinePair);
+    expect((await request(`/api/friends/live-audio-invites/${declined.inviteId}/respond`, {
+      cookie: declinePair.target.cookie,
+      method: 'POST',
+      body: { accepted: false },
+    })).status).toBe(200);
+    await waitForSocketMessage(
+      declinePair.hostSocket,
+      (message) => message.type === 'live-audio-invite-status' && message.state === 'declined',
+      declined.startAt,
+    );
+    await waitForSocketMessage(
+      declinePair.hostSocket,
+      (message) => message.type === 'room-left'
+        && message.roomId === declined.roomId
+        && message.reason === 'invite-declined',
+      declined.startAt,
+    );
+    await expectCooldownWithoutLeak(declinePair, declined);
+
+    const cancelPair = await setupPair(
+      'live-audio-lifecycle-cancel',
+      'Cancel Lifecycle',
+      '198.51.100.121',
+      '198.51.100.122',
+    );
+    const cancelled = await sendPendingInvite(cancelPair);
+    expect((await request(`/api/friends/live-audio-invites/${cancelled.inviteId}`, {
+      cookie: cancelPair.target.cookie,
+      method: 'DELETE',
+    })).status).toBe(404);
+    expect((await request(`/api/friends/live-audio-invites/${cancelled.inviteId}`, {
+      cookie: cancelPair.host.cookie,
+      method: 'DELETE',
+    })).status).toBe(200);
+    await waitForSocketMessage(
+      cancelPair.hostSocket,
+      (message) => message.type === 'live-audio-invite-status' && message.state === 'cancelled',
+      cancelled.startAt,
+    );
+    await waitForSocketMessage(
+      cancelPair.hostSocket,
+      (message) => message.type === 'room-left'
+        && message.roomId === cancelled.roomId
+        && message.reason === 'invite-cancelled',
+      cancelled.startAt,
+    );
+    expect((await request(`/api/friends/live-audio-invites/${cancelled.inviteId}/respond`, {
+      cookie: cancelPair.target.cookie,
+      method: 'POST',
+      body: { accepted: true },
+    })).status).toBe(404);
+    await expectCooldownWithoutLeak(cancelPair, cancelled);
+
+    const blockPair = await setupPair(
+      'live-audio-lifecycle-block',
+      'Block Lifecycle',
+      '198.51.100.123',
+      '198.51.100.124',
+    );
+    const blocked = await sendPendingInvite(blockPair);
+    expect((await request('/api/friends/blocks', {
+      cookie: blockPair.target.cookie,
+      method: 'POST',
+      body: { profileId: blockPair.host.user.id },
+    })).status).toBe(201);
+    await waitForSocketMessage(
+      blockPair.hostSocket,
+      (message) => message.type === 'live-audio-invite-status' && message.state === 'cancelled',
+      blocked.startAt,
+    );
+    expect((await request(`/api/friends/live-audio-invites/${blocked.inviteId}/respond`, {
+      cookie: blockPair.target.cookie,
+      method: 'POST',
+      body: { accepted: true },
+    })).status).toBe(404);
+
+    const unfriendPair = await setupPair(
+      'live-audio-lifecycle-unfriend',
+      'Unfriend Lifecycle',
+      '198.51.100.116',
+      '198.51.100.117',
+    );
+    const unfriendInvite = await sendPendingInvite(unfriendPair);
+    expect((await request(`/api/friends/${unfriendPair.host.user.id}`, {
+      cookie: unfriendPair.target.cookie,
+      method: 'DELETE',
+    })).status).toBe(200);
+    await waitForSocketMessage(
+      unfriendPair.hostSocket,
+      (message) => message.type === 'live-audio-invite-status' && message.state === 'cancelled',
+      unfriendInvite.startAt,
+    );
+    expect((await request(`/api/friends/live-audio-invites/${unfriendInvite.inviteId}/respond`, {
+      cookie: unfriendPair.target.cookie,
+      method: 'POST',
+      body: { accepted: true },
+    })).status).toBe(404);
+
+    sockets.forEach((state) => {
+      state.socket.close();
+      testSockets.delete(state.socket);
+    });
+  }, 30_000);
+
+  it('does not charge invalid official-only attempts against the valid live-audio sender limit', async () => {
+    let officialCookie = '';
+    const existingOfficial = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'preskiranch@gmail.com', password: 'friends-test-password' },
+    });
+    if (existingOfficial.status === 200) {
+      officialCookie = String(existingOfficial.headers.get('set-cookie')).split(';')[0];
+    } else {
+      officialCookie = (await register('preskiranch@gmail.com', 'Preski Ranch BMX Club')).cookie;
+    }
+    const rider = await register(
+      'live-audio-official-only@tracklab.test',
+      'Official Only Rider',
+      '198.51.100.118',
+    );
+    const officialSocket = await connectTestSocket(officialCookie);
+    const riderSocket = await connectTestSocket(rider.cookie);
+    const officialFriend = (await json(await request('/api/friends?limit=20', { cookie: rider.cookie })))
+      .items.find((friend: any) => friend.id !== rider.user.id && friend.officialKind === 'club');
+    expect(officialFriend).toMatchObject({
+      online: true,
+      relationship: 'friend',
+      officialKind: 'club',
+      canTalkLive: false,
+    });
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const startAt = riderSocket.messages.length;
+      riderSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: officialFriend.id,
+      }));
+      await waitForSocketMessage(
+        riderSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'error'
+          && /not available/i.test(message.message),
+        startAt,
+      );
+    }
+    expect(await json(await request('/api/friends/live-audio-invites', { cookie: officialCookie })))
+      .toEqual({ invites: [] });
+
+    const eligibleFriend = await register(
+      'live-audio-after-invalid@tracklab.test',
+      'Eligible After Invalid',
+      '198.51.100.125',
+    );
+    await makeExplicitFriends(rider.cookie, eligibleFriend.cookie);
+    const eligibleSocket = await connectTestSocket(eligibleFriend.cookie);
+    const validStart = riderSocket.messages.length;
+    riderSocket.socket.send(JSON.stringify({
+      type: 'create-live-audio-invite',
+      targetProfileId: eligibleFriend.user.id,
+    }));
+    const validInvite = await waitForSocketMessage(
+      riderSocket,
+      (message) => message.type === 'live-audio-invite-status' && message.state === 'sent',
+      validStart,
+    );
+    expect(validInvite.invite).toMatchObject({ targetProfileId: eligibleFriend.user.id });
+    expect((await request(`/api/friends/live-audio-invites/${validInvite.invite.id}`, {
+      cookie: rider.cookie,
+      method: 'DELETE',
+    })).status).toBe(200);
+
+    officialSocket.socket.close();
+    riderSocket.socket.close();
+    eligibleSocket.socket.close();
+    testSockets.delete(officialSocket.socket);
+    testSockets.delete(riderSocket.socket);
+    testSockets.delete(eligibleSocket.socket);
+  }, 20_000);
+
+  it('expires an unanswered live-audio alert on its configured short test deadline', async () => {
+    const expiryPort = await availablePort();
+    const expiryBaseUrl = `http://127.0.0.1:${expiryPort}`;
+    const expiryChild = spawn(process.execPath, ['cloud/server.mjs'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PORT: String(expiryPort),
+        DATABASE_URL: '',
+        TRACKLAB_LIVE_AUDIO_INVITE_TTL_MS: '500',
+        TRACKLAB_LIVE_AUDIO_JOIN_TTL_MS: '500',
+        TRACKLAB_LIVE_AUDIO_INVITE_AUTH_RECHECK_DELAY_MS: '1500',
+        OPENAI_API_KEY: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const expirySockets: TestSocket[] = [];
+    try {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        try {
+          if ((await fetch(`${expiryBaseUrl}/api/health`)).ok) break;
+        } catch {
+          // The isolated expiry server may still be binding its port.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      const registerAt = async (email: string, name: string, forwardedFor: string) => {
+        const response = await requestAt(expiryBaseUrl, '/api/auth/register', {
+          method: 'POST',
+          headers: { 'X-Forwarded-For': forwardedFor },
+          body: { email, name, password: 'friends-test-password' },
+        });
+        expect(response.status).toBe(201);
+        const cookie = String(response.headers.get('set-cookie')).split(';')[0];
+        const body = await json(response);
+        return { cookie, user: body.user };
+      };
+      const host = await registerAt(
+        'live-audio-expiry-host@tracklab.test',
+        'Expiry Host',
+        '198.51.100.119',
+      );
+      const target = await registerAt(
+        'live-audio-expiry-target@tracklab.test',
+        'Expiry Target',
+        '198.51.100.120',
+      );
+      await makeExplicitFriends(host.cookie, target.cookie, expiryBaseUrl);
+      const hostSocket = await connectTestSocket(host.cookie, expiryBaseUrl);
+      const targetSocket = await connectTestSocket(target.cookie, expiryBaseUrl);
+      expirySockets.push(hostSocket, targetSocket);
+
+      const startAt = hostSocket.messages.length;
+      hostSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: target.user.id,
+      }));
+      const sent = await waitForSocketMessage(
+        hostSocket,
+        (message) => message.type === 'live-audio-invite-status' && message.state === 'sent',
+        startAt,
+      );
+      const waitingRoom = await waitForSocketMessage(
+        hostSocket,
+        (message) => message.type === 'room-state' && message.room?.purpose === 'live-audio',
+        startAt,
+      );
+      const pending = await json(await requestAt(expiryBaseUrl, '/api/friends/live-audio-invites', {
+        cookie: target.cookie,
+      }));
+      expect(pending.invites).toHaveLength(1);
+      expect(Date.parse(pending.invites[0].expiresAt) - Date.parse(pending.invites[0].createdAt)).toBe(500);
+
+      await waitForSocketMessage(
+        hostSocket,
+        (message) => message.type === 'live-audio-invite-status' && message.state === 'expired',
+        startAt,
+        3_000,
+      );
+      expect(await json(await requestAt(expiryBaseUrl, '/api/friends/live-audio-invites', {
+        cookie: target.cookie,
+      }))).toEqual({ invites: [] });
+      expect((await requestAt(
+        expiryBaseUrl,
+        `/api/friends/live-audio-invites/${sent.invite.id}/respond`,
+        { cookie: target.cookie, method: 'POST', body: { accepted: true } },
+      )).status).toBe(404);
+      const resendStart = hostSocket.messages.length;
+      hostSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: target.user.id,
+      }));
+      const rateLimited = await waitForSocketMessage(
+        hostSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'error'
+          && /wait a moment/i.test(message.message),
+        resendStart,
+      );
+      expect(rateLimited).not.toHaveProperty('invite');
+      expect(JSON.stringify(rateLimited)).not.toContain(String(sent.invite.id));
+      expect(JSON.stringify(rateLimited)).not.toContain(String(waitingRoom.room.id));
+      await expectNoSocketMessage(
+        hostSocket,
+        (message) => message.type === 'room-state' && message.room?.purpose === 'live-audio',
+        resendStart,
+      );
+
+      const acceptedHost = await registerAt(
+        'live-audio-accepted-expiry-host@tracklab.test',
+        'Accepted Expiry Host',
+        '198.51.100.126',
+      );
+      const acceptedTarget = await registerAt(
+        'live-audio-accepted-expiry-target@tracklab.test',
+        'Accepted Expiry Target',
+        '198.51.100.127',
+      );
+      await makeExplicitFriends(acceptedHost.cookie, acceptedTarget.cookie, expiryBaseUrl);
+      const acceptedHostSocket = await connectTestSocket(acceptedHost.cookie, expiryBaseUrl);
+      const acceptedTargetSocket = await connectTestSocket(acceptedTarget.cookie, expiryBaseUrl);
+      expirySockets.push(acceptedHostSocket, acceptedTargetSocket);
+      const acceptedInviteStart = acceptedHostSocket.messages.length;
+      acceptedHostSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: acceptedTarget.user.id,
+      }));
+      const acceptedSent = await waitForSocketMessage(
+        acceptedHostSocket,
+        (message) => message.type === 'live-audio-invite-status' && message.state === 'sent',
+        acceptedInviteStart,
+      );
+      const acceptedRoomState = await waitForSocketMessage(
+        acceptedHostSocket,
+        (message) => message.type === 'room-state' && message.room?.purpose === 'live-audio',
+        acceptedInviteStart,
+      );
+      const acceptedStatusStart = acceptedHostSocket.messages.length;
+      const acceptedJoinResponse = await requestAt(
+        expiryBaseUrl,
+        `/api/friends/live-audio-invites/${acceptedSent.invite.id}/respond`,
+        { cookie: acceptedTarget.cookie, method: 'POST', body: { accepted: true } },
+      );
+      expect(acceptedJoinResponse.status).toBe(200);
+      expect(await json(acceptedJoinResponse)).toEqual({
+        accepted: true,
+        roomId: acceptedRoomState.room.id,
+      });
+      await waitForSocketMessage(
+        acceptedHostSocket,
+        (message) => message.type === 'live-audio-invite-status' && message.state === 'accepted',
+        acceptedStatusStart,
+      );
+      const acceptedExpired = await waitForSocketMessage(
+        acceptedHostSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'expired'
+          && /could not join/i.test(message.message),
+        acceptedStatusStart,
+        3_000,
+      );
+      await waitForSocketMessage(
+        acceptedHostSocket,
+        (message) => message.type === 'room-left'
+          && message.roomId === acceptedRoomState.room.id
+          && message.reason === 'accepted-invite-join-timeout',
+        acceptedStatusStart,
+        3_000,
+      );
+      const acceptedExpiredIndex = acceptedHostSocket.messages.indexOf(acceptedExpired);
+      const acceptedRoomLeftIndex = acceptedHostSocket.messages.findIndex((message, index) => (
+        index >= acceptedStatusStart
+        && message.type === 'room-left'
+        && message.roomId === acceptedRoomState.room.id
+      ));
+      expect(acceptedExpiredIndex).toBeGreaterThanOrEqual(acceptedStatusStart);
+      expect(acceptedRoomLeftIndex).toBeGreaterThan(acceptedExpiredIndex);
+      expect(JSON.stringify(acceptedExpired)).not.toContain(String(acceptedRoomState.room.id));
+      const lateJoinStart = acceptedTargetSocket.messages.length;
+      acceptedTargetSocket.socket.send(JSON.stringify({
+        type: 'join-room',
+        roomId: acceptedRoomState.room.id,
+      }));
+      await waitForSocketMessage(
+        acceptedTargetSocket,
+        (message) => message.type === 'room-error',
+        lateJoinStart,
+      );
+
+      const raceHost = await registerAt(
+        'live-audio-auth-race-host@tracklab.test',
+        'Authorization Race Host',
+        '198.51.100.128',
+      );
+      const raceTarget = await registerAt(
+        'live-audio-auth-race-target@tracklab.test',
+        'Authorization Race Target',
+        '198.51.100.129',
+      );
+      await makeExplicitFriends(raceHost.cookie, raceTarget.cookie, expiryBaseUrl);
+      const raceHostSocket = await connectTestSocket(raceHost.cookie, expiryBaseUrl);
+      const raceTargetSocket = await connectTestSocket(raceTarget.cookie, expiryBaseUrl);
+      expirySockets.push(raceHostSocket, raceTargetSocket);
+      const raceStart = raceHostSocket.messages.length;
+      raceHostSocket.socket.send(JSON.stringify({
+        type: 'create-live-audio-invite',
+        targetProfileId: raceTarget.user.id,
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect((await requestAt(expiryBaseUrl, `/api/friends/${raceHost.user.id}`, {
+        cookie: raceTarget.cookie,
+        method: 'DELETE',
+      })).status).toBe(200);
+      await waitForSocketMessage(
+        raceHostSocket,
+        (message) => message.type === 'live-audio-invite-status'
+          && message.state === 'error'
+          && /not available/i.test(message.message),
+        raceStart,
+        3_000,
+      );
+      expect(raceHostSocket.messages.slice(raceStart)).not.toContainEqual(
+        expect.objectContaining({ type: 'room-state' }),
+      );
+      expect(await json(await requestAt(expiryBaseUrl, '/api/friends/live-audio-invites', {
+        cookie: raceTarget.cookie,
+      }))).toEqual({ invites: [] });
+    } finally {
+      expirySockets.forEach((state) => {
+        state.socket.terminate();
+        testSockets.delete(state.socket);
+      });
+      if (expiryChild.exitCode == null) {
+        expiryChild.kill('SIGTERM');
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 2_000);
+          expiryChild.once('exit', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        });
+      }
+    }
   }, 30_000);
 
   it('supports group invites in memory mode and removes pending invites when either rider blocks', async () => {

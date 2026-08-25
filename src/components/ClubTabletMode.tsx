@@ -254,6 +254,12 @@ export default function ClubTabletMode({
     setMessage(null);
     try {
       const credential = await enrollClubTablet(tabletName);
+      // Enrollment atomically revokes the owner's server session and push
+      // delivery. Also unregister this physical app before kiosk state mounts;
+      // that local operation still runs if the best-effort DELETE is now 401.
+      await import('./NativeNotificationsCoordinator')
+        .then(({ clearNativePushAccountBoundary }) => clearNativePushAccountBoundary())
+        .catch(() => undefined);
       onDeviceChange(credential);
       setMessage('Tablet saved. Verifying authorization…');
     } catch (error) {

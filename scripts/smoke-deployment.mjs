@@ -23,6 +23,7 @@ const baseUrl = normalizedBaseUrl(target);
 const timeoutMs = Number(process.env.TRACKLAB_SMOKE_TIMEOUT_MS) || defaultTimeoutMs;
 const expectPostgres = process.env.TRACKLAB_EXPECT_POSTGRES === '1';
 const expectFriends = process.env.TRACKLAB_EXPECT_FRIENDS === '1';
+const expectApns = process.env.TRACKLAB_EXPECT_APNS === '1';
 
 async function request(pathname, init = {}) {
   const startedAt = performance.now();
@@ -63,6 +64,15 @@ if (expectPostgres) {
       && health.storage?.mode === 'postgres'
       && health.requirements?.database === true,
     'Production smoke expected required PostgreSQL persistence, but the service is not configured to fail closed.',
+  );
+}
+if (expectApns) {
+  assert(
+    health.requirements?.apns === true
+      && health.push?.enabled === true
+      && health.push?.ready === true
+      && health.push?.degraded === false,
+    `Production smoke expected operational APNs, but push health is ${health.push?.reason || 'unavailable'}.`,
   );
 }
 results.push(['health', healthRequest.durationMs]);

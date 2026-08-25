@@ -12,6 +12,7 @@ inside the shell because iPhone and iPad browsers do not expose Web Bluetooth.
 - URL scheme: `tracklabbmx`
 - Minimum iOS version: iOS 15
 - Supported layouts: portrait and landscape on iPhone and iPad
+- Push-capable native release baseline: version 1.1, build 12
 
 ## Local validation
 
@@ -36,6 +37,23 @@ npm run ios:open
 
 Bluetooth cannot be validated in the iOS Simulator. Use a physical iPhone or
 iPad with a Wattbike monitor awake and showing Just Ride.
+
+## Native notifications
+
+Build 12 includes the Push Notifications capability and the native TrackLab
+installation bridge. Notification permission is requested only after the rider
+explicitly opts in from personal account settings. A shared Club Tablet session
+must unregister any personal installation and cannot register for account
+pushes. Talk live, friend request/connection, and explicit track-share pushes
+contain only generic routing data; the app refetches the signed-in account's
+authoritative Friends state and never accepts, joins, or enables the microphone
+from a notification payload.
+
+Development-signed builds use APNs sandbox tokens. TestFlight and App Store
+builds use production tokens. Validate both on physical hardware; Simulator and
+unsigned builds do not prove APNs delivery. Before TestFlight, follow the
+server-secret, health, rotation, and rollback procedure in
+[`../operations/apns-notifications.md`](../operations/apns-notifications.md).
 
 ## Native Wattbike pairing
 
@@ -86,7 +104,11 @@ After those blockers are cleared:
 3. Create the TrackLab BMX app record in App Store Connect.
 4. Add the support URL, privacy-policy URL, category, age rating, and screenshots.
 5. Archive from Xcode and upload the build to TestFlight.
-6. Test login, profile photos, one-to-four Wattbike pairing, all three ride
+6. Explicitly opt in to notifications, background and terminate the app, send
+   each eligible social alert, and confirm a tap only opens/refetches Friends
+   for the same authenticated account. Confirm denied permission and logout do
+   not leave an active installation.
+7. Test login, profile photos, one-to-four Wattbike pairing, all three ride
    modes, landscape fullscreen, and account data sync on physical iPhone and
    iPad hardware before external TestFlight review.
 

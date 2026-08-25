@@ -38,6 +38,7 @@ jobs:
         env:
           TRACKLAB_SMOKE_URL: ${{ inputs.target_url }}
           TRACKLAB_EXPECT_POSTGRES: "1"
+          TRACKLAB_EXPECT_APNS: "1"
 
       - name: Run bounded read-only load probe
         if: inputs.run_load_probe

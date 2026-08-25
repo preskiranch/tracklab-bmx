@@ -77,6 +77,18 @@ import {
 import { fetchExploreElevationProfile } from './exploreElevation.mjs';
 import { generateSmartExplorePlan } from './exploreSmartRoute.mjs';
 import { createAuthSessionCache } from './authSessionCache.mjs';
+import {
+  ApnsProvider,
+  apnsConfigurationFromEnv,
+  apnsHealthSnapshot,
+  apnsResponseIndicatesProviderFailure,
+  apnsRetryDelayMs,
+  classifyApnsResponse,
+  protectApnsDeviceToken,
+  pushTokenProtectionConfiguration,
+  trackLabApnsTopic,
+  unprotectApnsDeviceToken,
+} from './apns.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(__dirname, '..');
@@ -84,12 +96,26 @@ const distDirectory = path.join(rootDirectory, 'dist');
 const port = Number(process.env.PORT ?? 10000);
 const websocketPath = '/multiplayer';
 const databaseRequired = process.env.TRACKLAB_REQUIRE_DATABASE === '1';
+const serverInstanceId = randomUUID();
+const apnsConfiguration = apnsConfigurationFromEnv(process.env);
+const pushTokenProtection = pushTokenProtectionConfiguration(process.env);
+const apnsProvider = new ApnsProvider(apnsConfiguration);
+let apnsRuntimeFailure = '';
+let apnsRuntimeFailureAt = 0;
+let pushWorkerRunning = false;
+let pushWorkerKickScheduled = false;
+let pushWorkerNeedsRerun = false;
+let pushWorkerKickTimer = null;
 
 const clients = new Map();
 const trainingHistoryStreams = new Map();
 const friendEventStreams = new Map();
 const friendEventStreamSessions = new WeakMap();
 const friendPresenceOnlineProfiles = new Set();
+const friendPresenceLastOnlineAt = new Map();
+const liveAudioFriendInvites = new Map();
+const liveAudioFriendInviteSendTimes = new Map();
+const liveAudioFriendInvitePairSendTimes = new Map();
 const heartRateOwnerLiveStreams = new Map();
 const heartRateClubLiveStreams = new Map();
 const heartRateStreamWriteChains = new Map();
@@ -191,6 +217,8 @@ const friendReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 const friendMutationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const friendRequestRateLimiter = createRateLimiter({ windowMs: 24 * 60 * 60 * 1000 });
 const friendTrackShareRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const pushInstallationRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
+const pushPreferenceRateLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000 });
 const heartRateReadRateLimiter = createRateLimiter({ windowMs: 60 * 1000 });
 // This admission limiter runs before database-backed authentication. It keeps
 // a broken native polling loop from consuming every PostgreSQL connection and
@@ -254,6 +282,22 @@ const friendReportReasons = new Set([
   'other',
 ]);
 const friendInviteTtlMs = 7 * 24 * 60 * 60 * 1000;
+const liveAudioFriendInviteTtlMs = Math.max(250, Math.min(
+  90 * 1000,
+  Math.round(Number(process.env.TRACKLAB_LIVE_AUDIO_INVITE_TTL_MS) || (90 * 1000)),
+));
+const liveAudioFriendJoinTtlMs = Math.max(250, Math.min(
+  30 * 1000,
+  Math.round(Number(process.env.TRACKLAB_LIVE_AUDIO_JOIN_TTL_MS) || (30 * 1000)),
+));
+const liveAudioFriendInviteAuthRecheckDelayMs = Math.max(0, Math.min(
+  2_000,
+  Math.round(Number(process.env.TRACKLAB_LIVE_AUDIO_INVITE_AUTH_RECHECK_DELAY_MS) || 0),
+));
+const liveAudioFriendInvitePairCooldownMs = 60 * 1000;
+const liveAudioFriendInviteSenderWindowMs = 10 * 60 * 1000;
+const liveAudioFriendInviteSenderLimit = 5;
+const liveAudioPresencePushFallbackMs = 15_000;
 const maxFriendEventStreamsPerAccount = 6;
 const maxFriendEventStreamsTotal = 1_000;
 const maxFriendEventStreamWritableBytes = 64 * 1024;
@@ -323,6 +367,345 @@ function randomId(prefix, length = 8) {
   return `${prefix}-${value}`;
 }
 
+function pushHealthStatus() {
+  return apnsHealthSnapshot(
+    apnsConfiguration,
+    pushTokenProtection,
+    apnsRuntimeFailure,
+    apnsRuntimeFailureAt,
+  );
+}
+
+function pushOutboxEnabled() {
+  return apnsConfiguration.enabled && apnsConfiguration.ready && pushTokenProtection.ready;
+}
+
+function pushProviderDispatchReady() {
+  return pushOutboxEnabled() && !apnsRuntimeFailure;
+}
+
+function socialPushEvent(kind, {
+  recipientUserId,
+  actorUserId,
+  objectId,
+  idempotencyKey,
+  expiresAt,
+  originInstanceId = null,
+}) {
+  if (!pushOutboxEnabled()) return null;
+  const notificationId = randomUUID();
+  return {
+    id: randomUUID(),
+    notificationId,
+    recipientUserId,
+    actorUserId,
+    kind,
+    objectId,
+    idempotencyKey,
+    collapseId: `tl-${kind}-${notificationId}`.slice(0, 64),
+    originInstanceId,
+    notBefore: Date.now(),
+    expiresAt,
+  };
+}
+
+function runtimePushEventIsEligible(event) {
+  if (event?.kind !== 'live_audio_invite') return true;
+  const invite = liveAudioFriendInvites.get(event.objectId);
+  const room = invite ? rooms.get(invite.roomId) : null;
+  const host = room ? clients.get(room.hostId) : null;
+  return Boolean(
+    invite
+    && invite.senderProfileId === event.actorUserId
+    && invite.targetProfileId === event.recipientUserId
+    && invite.expiresAt > Date.now()
+    && room?.purpose === 'live-audio'
+    && host?.profileId === invite.senderProfileId
+    && host.authSessionTokenHash
+    && !host.clubTabletSessionTokenHash
+    && host.socket?.readyState === WebSocket.OPEN
+    && room.members.has(host.id)
+  );
+}
+
+async function dispatchPushOutbox() {
+  if (pushWorkerRunning || !pushProviderDispatchReady()) return;
+  pushWorkerRunning = true;
+  let moreWorkLikely = false;
+  const workerId = `push-worker:${serverInstanceId}`;
+  try {
+    const now = Date.now();
+    const events = await persistence.leasePushEvents({
+      leaseOwner: workerId,
+      originInstanceId: serverInstanceId,
+      now,
+      limit: 20,
+    });
+    moreWorkLikely ||= events.length >= 20;
+    for (const event of events) {
+      if (
+        !runtimePushEventIsEligible(event)
+        || !(await persistence.pushEventIsEligible(event.id, serverInstanceId, Date.now(), 'leased'))
+      ) {
+        await persistence.markPushEventState(
+          event.id,
+          'cancelled',
+          'no-longer-eligible',
+          Date.now(),
+          workerId,
+        );
+        continue;
+      }
+      const installations = await persistence.listActivePushInstallations(event.recipientUserId, Date.now());
+      if (installations.length === 0) {
+        await persistence.markPushEventState(
+          event.id,
+          'dispatched',
+          'no-active-installation',
+          Date.now(),
+          workerId,
+        );
+        cloudTelemetry.increment('tracklab_push_events_total', { kind: event.kind, outcome: 'no-device' });
+        continue;
+      }
+      await persistence.preparePushDeliveries(
+        event.id,
+        installations.map((installation) => ({ installationId: installation.id, apnsId: randomUUID() })),
+      );
+      const dispatched = await persistence.markPushEventState(
+        event.id,
+        'dispatched',
+        '',
+        Date.now(),
+        workerId,
+      );
+      if (!dispatched) continue;
+    }
+
+    const deliveries = await persistence.leasePushDeliveries({
+      leaseOwner: workerId,
+      originInstanceId: serverInstanceId,
+      now: Date.now(),
+      // Sends are intentionally sequential so provider-wide failures stop the
+      // batch immediately. Twelve 8s transport timeouts fit comfortably inside
+      // this three-minute lease, preventing another instance from reclaiming a
+      // still-active delivery while preserving its stable APNs id.
+      limit: 12,
+      leaseMs: 3 * 60 * 1000,
+    });
+    moreWorkLikely ||= deliveries.length >= 12;
+    for (const { delivery, event, installation } of deliveries) {
+      if (
+        !runtimePushEventIsEligible(event)
+        || !(await persistence.pushEventIsEligible(event.id, serverInstanceId, Date.now(), 'dispatched'))
+      ) {
+        await persistence.recordPushDeliveryResult({
+          eventId: event.id,
+          installationId: installation.id,
+          state: 'cancelled',
+          errorCode: 'no-longer-eligible',
+          leaseOwner: workerId,
+        });
+        continue;
+      }
+      // Hold the same installation lock used by registration/rebinding while
+      // checking the exact leased revision and performing the bounded send.
+      // This gives account switches a strict order: either the old account's
+      // send has already begun while its binding is current, or the rebind
+      // commits first and this stale delivery never reaches APNs.
+      const protectedDispatch = await persistence.withCurrentPushDeliveryLease({
+        eventId: event.id,
+        installationId: installation.id,
+        leaseOwner: workerId,
+        recipientUserId: event.recipientUserId,
+        originInstanceId: serverInstanceId,
+        authSessionTokenHash: installation.authSessionTokenHash,
+        tokenFingerprint: installation.tokenFingerprint,
+        installationRevision: installation.revision,
+      }, async () => {
+        // Installation-lock acquisition can wait behind a registration or
+        // deletion. Recheck the live room and authoritative social state here,
+        // after that wait and immediately before starting the provider request.
+        const authoritativeEventEligible = await persistence.pushEventIsEligible(
+          event.id,
+          serverInstanceId,
+          Date.now(),
+          'dispatched',
+        );
+        if (!authoritativeEventEligible || !runtimePushEventIsEligible(event)) {
+          return { status: 'no-longer-eligible', result: null };
+        }
+        const deviceToken = unprotectApnsDeviceToken(installation, pushTokenProtection);
+        if (!deviceToken) return { status: 'token-unavailable', result: null };
+        const result = await apnsProvider.send({
+          deviceToken,
+          environment: installation.environment,
+          kind: event.kind,
+          notificationId: event.notificationId,
+          apnsId: delivery.apnsId,
+          collapseId: event.collapseId,
+          expiration: Math.floor(Date.parse(event.expiresAt) / 1_000),
+        });
+        return { status: 'sent', result };
+      }, Date.now());
+      if (protectedDispatch.status !== 'current') {
+        await persistence.recordPushDeliveryResult({
+          eventId: event.id,
+          installationId: installation.id,
+          state: 'cancelled',
+          errorCode: 'installation-binding-changed',
+          leaseOwner: workerId,
+        });
+        cloudTelemetry.increment('tracklab_push_deliveries_total', {
+          kind: event.kind,
+          outcome: 'stale-installation',
+        });
+        continue;
+      }
+      if (protectedDispatch.value?.status === 'no-longer-eligible') {
+        await persistence.recordPushDeliveryResult({
+          eventId: event.id,
+          installationId: installation.id,
+          state: 'cancelled',
+          errorCode: 'no-longer-eligible',
+          leaseOwner: workerId,
+        });
+        continue;
+      }
+      if (protectedDispatch.value?.status === 'token-unavailable') {
+        const encryptionKeyAvailable = pushTokenProtection.encryptionKeys?.has(
+          Number(installation.tokenKeyVersion),
+        );
+        if (!encryptionKeyAvailable) {
+          apnsRuntimeFailure = 'push-token-key-version-unavailable';
+          apnsRuntimeFailureAt = Date.now();
+          const retryAt = Date.now() + (15 * 60 * 1000);
+          const canRetryAfterKeyRestore = retryAt < Date.parse(event.expiresAt);
+          await persistence.recordPushDeliveryResult({
+            eventId: event.id,
+            installationId: installation.id,
+            state: canRetryAfterKeyRestore ? 'pending' : 'dead',
+            ...(canRetryAfterKeyRestore ? { nextAttemptAt: retryAt } : {}),
+            errorCode: apnsRuntimeFailure,
+            leaseOwner: workerId,
+          });
+          cloudTelemetry.error('push.token_key_unavailable', {
+            keyVersion: Number(installation.tokenKeyVersion) || 0,
+          });
+          break;
+        }
+        await persistence.recordPushDeliveryResult({
+          eventId: event.id,
+          installationId: installation.id,
+          state: 'dead',
+          errorCode: 'token-unavailable',
+          leaseOwner: workerId,
+        });
+        await persistence.invalidatePushInstallation({
+          installationId: installation.id,
+          tokenFingerprint: installation.tokenFingerprint,
+          installationRevision: installation.revision,
+          invalidatedAt: null,
+        });
+        cloudTelemetry.increment('tracklab_push_deliveries_total', { kind: event.kind, outcome: 'token-unavailable' });
+        continue;
+      }
+      const result = protectedDispatch.value?.result ?? {
+        status: 0,
+        reason: 'TransportError',
+        timestamp: null,
+      };
+      const classification = classifyApnsResponse(result.status, result.reason);
+      if (result.status === 200) {
+        apnsRuntimeFailure = '';
+        apnsRuntimeFailureAt = 0;
+        await persistence.recordPushDeliveryResult({
+          eventId: event.id,
+          installationId: installation.id,
+          state: 'sent',
+          status: result.status,
+          leaseOwner: workerId,
+        });
+      } else if (apnsResponseIndicatesProviderFailure(result.status, result.reason)) {
+        apnsRuntimeFailure = String(result.reason || `provider-http-${result.status}`).slice(0, 120);
+        apnsRuntimeFailureAt = Date.now();
+        const retryAt = Date.now() + (15 * 60 * 1000);
+        const canRetryAfterOperatorRecovery = retryAt < Date.parse(event.expiresAt);
+        await persistence.recordPushDeliveryResult({
+          eventId: event.id,
+          installationId: installation.id,
+          state: canRetryAfterOperatorRecovery ? 'pending' : 'dead',
+          ...(canRetryAfterOperatorRecovery ? { nextAttemptAt: retryAt } : {}),
+          status: result.status,
+          errorCode: apnsRuntimeFailure,
+          leaseOwner: workerId,
+        });
+        cloudTelemetry.error('push.provider_degraded', {
+          status: result.status,
+          reason: apnsRuntimeFailure,
+        });
+      } else if (classification.invalidateDevice) {
+        await persistence.invalidatePushInstallation({
+          installationId: installation.id,
+          tokenFingerprint: installation.tokenFingerprint,
+          installationRevision: installation.revision,
+          invalidatedAt: result.timestamp,
+        });
+        await persistence.recordPushDeliveryResult({
+          eventId: event.id,
+          installationId: installation.id,
+          state: 'dead',
+          status: result.status,
+          errorCode: result.reason || 'device-invalid',
+          leaseOwner: workerId,
+        });
+      } else {
+        const retryDelayMs = apnsRetryDelayMs(result, delivery.attemptCount);
+        const retryAt = retryDelayMs == null ? null : Date.now() + retryDelayMs;
+        const retryableBeforeExpiry = retryAt != null && retryAt < Date.parse(event.expiresAt);
+        await persistence.recordPushDeliveryResult({
+          eventId: event.id,
+          installationId: installation.id,
+          state: retryableBeforeExpiry ? 'pending' : 'dead',
+          ...(retryableBeforeExpiry ? { nextAttemptAt: retryAt } : {}),
+          status: result.status,
+          errorCode: result.reason || classification.outcome,
+          leaseOwner: workerId,
+        });
+      }
+      cloudTelemetry.increment('tracklab_push_deliveries_total', {
+        kind: event.kind,
+        outcome: classification.outcome,
+      });
+      if (apnsRuntimeFailure) break;
+    }
+  } catch (error) {
+    cloudTelemetry.warn('push.worker_failed', { error });
+  } finally {
+    pushWorkerRunning = false;
+    if (moreWorkLikely || pushWorkerNeedsRerun) {
+      pushWorkerNeedsRerun = false;
+      kickPushWorker();
+    }
+  }
+}
+
+function kickPushWorker() {
+  if (!pushProviderDispatchReady()) return;
+  if (pushWorkerRunning) {
+    pushWorkerNeedsRerun = true;
+    return;
+  }
+  if (pushWorkerKickScheduled) return;
+  pushWorkerKickScheduled = true;
+  pushWorkerKickTimer = setTimeout(() => {
+    pushWorkerKickTimer = null;
+    pushWorkerKickScheduled = false;
+    void dispatchPushOutbox();
+  }, 25);
+  pushWorkerKickTimer.unref();
+}
+
 function rememberRaceResultKey(key, now = Date.now()) {
   if (persistedRaceResultKeys.has(key)) {
     return false;
@@ -334,6 +717,7 @@ function rememberRaceResultKey(key, now = Date.now()) {
 
 function pruneTransientState(now = Date.now()) {
   pruneClubLiveSessions(now);
+  pruneLiveAudioFriendInvites(now);
 
   for (const [key, savedAt] of persistedRaceResultKeys.entries()) {
     if (savedAt <= now - transientStateMaxAgeMs) {
@@ -933,11 +1317,13 @@ function syncFriendPresenceTransition(profileId) {
   if (!normalizedProfileId) return;
   const wasOnline = friendPresenceOnlineProfiles.has(normalizedProfileId);
   const isOnline = accountProfileIsOnline(normalizedProfileId);
+  if (isOnline) friendPresenceLastOnlineAt.set(normalizedProfileId, Date.now());
   if (wasOnline === isOnline) return;
   if (isOnline) {
     friendPresenceOnlineProfiles.add(normalizedProfileId);
   } else {
     friendPresenceOnlineProfiles.delete(normalizedProfileId);
+    cancelLiveAudioFriendInvitesForDisconnectedProfile(normalizedProfileId);
   }
   void notifyFriendPresenceAudience(normalizedProfileId);
 }
@@ -1087,6 +1473,22 @@ function notifyFriendTrackShareProfiles(profileIds) {
   });
 }
 
+function notifyLiveAudioInviteProfiles(profileIds) {
+  const targets = new Set([...profileIds]
+    .map((profileId) => sanitizeAccountProfileId(profileId))
+    .filter(Boolean));
+  targets.forEach((profileId) => {
+    const streams = friendEventStreams.get(profileId);
+    streams?.forEach((response) => {
+      if (!writeFriendEventStream(response, 'event: live-audio-invites-invalidated\ndata: {}\n\n')) {
+        removeFriendEventStream(profileId, response);
+        response.end();
+      }
+    });
+    notifyFriendProfile(profileId, { event: 'live-audio-invites-invalidated' });
+  });
+}
+
 function publicFriendGhostPreview(value) {
   if (!value || typeof value !== 'object') return null;
   const id = sanitizeText(value.id, '', 180);
@@ -1148,6 +1550,7 @@ function publicFriendProfile(profile, relationship = profile?.relationship || 'n
     available: liveClients.some((client) => client.available),
     hasGhost: Boolean(ghostPreview),
     canShareTrack: relationship === 'friend' && profile.friendshipSource !== 'official',
+    canTalkLive: relationship === 'friend' && profile.friendshipSource !== 'official',
     ...(ghostPreview ? { ghostPreview } : {}),
     mutualFriendCount: Math.max(0, Math.round(Number(profile.mutualFriendCount) || 0)),
     relationship,
@@ -7168,6 +7571,7 @@ function publicRoom(room) {
     id: room.id,
     hostId: room.hostId,
     private: room.private,
+    purpose: room.purpose === 'live-audio' ? 'live-audio' : 'race',
     track: room.track,
     flow: publicRoomFlow(room),
     createdAt: room.createdAt,
@@ -7478,6 +7882,467 @@ function scheduleTrackVoteResolution(room, delayMs) {
   voteTimers.set(room.id, timer);
 }
 
+function liveAudioInvitePublic(invite) {
+  if (!invite) return null;
+  return {
+    id: invite.id,
+    from: {
+      id: invite.senderProfileId,
+      handle: invite.senderHandle,
+      displayName: invite.senderName,
+    },
+    createdAt: new Date(invite.createdAt).toISOString(),
+    expiresAt: new Date(invite.expiresAt).toISOString(),
+  };
+}
+
+function liveAudioInviteStatus(invite, state, message) {
+  activeAccountClients(invite.senderProfileId).forEach((client) => send(client, {
+    type: 'live-audio-invite-status',
+    invite: {
+      id: invite.id,
+      targetProfileId: invite.targetProfileId,
+      targetName: invite.targetName,
+      expiresAt: new Date(invite.expiresAt).toISOString(),
+    },
+    state,
+    message,
+  }));
+}
+
+function persistLiveAudioInviteTerminalState(invite, state) {
+  if (!invite) return;
+  const action = state === 'declined'
+    ? 'decline'
+    : state === 'expired'
+      ? 'expire'
+      : 'cancel';
+  const actorUserId = action === 'decline' ? invite.targetProfileId : invite.senderProfileId;
+  void persistence.transitionDurableLiveAudioFriendInvite({
+    inviteId: invite.id,
+    actorUserId,
+    action,
+    originInstanceId: serverInstanceId,
+  });
+}
+
+function closeLiveAudioRoom(room, reason = 'live-audio-ended') {
+  if (!room || room.purpose !== 'live-audio') return;
+  clearRoomTimers(room.id);
+  const participantProfileIds = new Set();
+  [...room.members].forEach((memberId) => {
+    const member = clients.get(memberId);
+    if (!member) return;
+    if (member.profileId) participantProfileIds.add(member.profileId);
+    member.roomId = null;
+    member.roomRole = null;
+    member.racerSeatCount = 0;
+    send(member, { type: 'room-left', roomId: room.id, reason });
+  });
+  room.members.clear();
+  room.racers.clear();
+  room.spectators.clear();
+  room.racerSeatCounts.clear();
+  rooms.delete(room.id);
+  if (room.liveAudioAcceptedInvite) {
+    persistLiveAudioInviteTerminalState(room.liveAudioAcceptedInvite, 'cancelled');
+    room.liveAudioAcceptedInvite = null;
+  }
+  for (const [inviteId, invite] of liveAudioFriendInvites) {
+    if (invite.roomId !== room.id) continue;
+    liveAudioFriendInvites.delete(inviteId);
+    persistLiveAudioInviteTerminalState(invite, 'cancelled');
+    liveAudioInviteStatus(invite, 'cancelled', 'Live audio invite ended.');
+    participantProfileIds.add(invite.senderProfileId);
+    participantProfileIds.add(invite.targetProfileId);
+  }
+  if (participantProfileIds.size > 0) notifyLiveAudioInviteProfiles(participantProfileIds);
+  cloudTelemetry.increment('tracklab_live_audio_rooms_closed_total', { reason });
+  cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
+  broadcastLobby();
+}
+
+function removeLiveAudioInvite(
+  invite,
+  state,
+  message,
+  { closeWaitingRoom = false, persistenceAlreadyTransitioned = false } = {},
+) {
+  if (!invite || !liveAudioFriendInvites.delete(invite.id)) return false;
+  if (!persistenceAlreadyTransitioned) persistLiveAudioInviteTerminalState(invite, state);
+  liveAudioInviteStatus(invite, state, message);
+  notifyLiveAudioInviteProfiles([invite.senderProfileId, invite.targetProfileId]);
+  const room = rooms.get(invite.roomId);
+  if (closeWaitingRoom && room?.purpose === 'live-audio') {
+    closeLiveAudioRoom(room, `invite-${state}`);
+  }
+  return true;
+}
+
+function expireAcceptedLiveAudioRoom(room) {
+  if (!room || room.purpose !== 'live-audio') return;
+  const acceptedInvite = room.liveAudioAcceptedInvite;
+  if (acceptedInvite) {
+    liveAudioInviteStatus(
+      acceptedInvite,
+      'expired',
+      `${acceptedInvite.targetName} could not join the live audio room.`,
+    );
+    persistLiveAudioInviteTerminalState(acceptedInvite, 'expired');
+    room.liveAudioAcceptedInvite = null;
+  }
+  closeLiveAudioRoom(room, 'accepted-invite-join-timeout');
+}
+
+function pruneLiveAudioFriendInvites(now = Date.now()) {
+  for (const invite of liveAudioFriendInvites.values()) {
+    if (invite.expiresAt <= now) {
+      removeLiveAudioInvite(invite, 'expired', `${invite.targetName} did not join.`, {
+        closeWaitingRoom: true,
+      });
+    }
+  }
+  for (const [senderProfileId, times] of liveAudioFriendInviteSendTimes) {
+    const recent = times.filter((at) => at > now - liveAudioFriendInviteSenderWindowMs);
+    if (recent.length > 0) liveAudioFriendInviteSendTimes.set(senderProfileId, recent);
+    else liveAudioFriendInviteSendTimes.delete(senderProfileId);
+  }
+  for (const [pairKey, sentAt] of liveAudioFriendInvitePairSendTimes) {
+    if (sentAt <= now - liveAudioFriendInvitePairCooldownMs) {
+      liveAudioFriendInvitePairSendTimes.delete(pairKey);
+    }
+  }
+  for (const room of rooms.values()) {
+    if (
+      room.purpose !== 'live-audio'
+      || !Number.isFinite(room.liveAudioJoinDeadlineAt)
+      || room.liveAudioJoinDeadlineAt > now
+      || room.members.size > 1
+    ) continue;
+    expireAcceptedLiveAudioRoom(room);
+  }
+}
+
+function cancelLiveAudioFriendInvitesForProfiles(profileIds, message = 'Live audio invite is no longer available.') {
+  const ids = new Set(profileIds.map((value) => sanitizeAccountProfileId(value)).filter(Boolean));
+  for (const invite of liveAudioFriendInvites.values()) {
+    if (!ids.has(invite.senderProfileId) && !ids.has(invite.targetProfileId)) continue;
+    removeLiveAudioInvite(invite, 'cancelled', message, { closeWaitingRoom: true });
+  }
+  for (const room of rooms.values()) {
+    if (
+      room.purpose === 'live-audio'
+      && [...(room.liveAudioParticipantProfileIds ?? [])].some((profileId) => ids.has(profileId))
+    ) {
+      closeLiveAudioRoom(room, 'friend-access-ended');
+    }
+  }
+}
+
+function cancelLiveAudioFriendInvitesForDisconnectedProfile(profileId) {
+  const id = sanitizeAccountProfileId(profileId);
+  if (!id) return;
+  // The caller must remain on a live personal socket. The target may briefly
+  // background after an online-only Talk card was shown; keep that pending
+  // invite alive for its original 90-second bound so APNs can wake the app.
+  for (const invite of liveAudioFriendInvites.values()) {
+    if (invite.senderProfileId !== id) continue;
+    removeLiveAudioInvite(invite, 'cancelled', 'Live audio invite is no longer available.', {
+      closeWaitingRoom: true,
+    });
+  }
+  for (const room of rooms.values()) {
+    if (room.purpose !== 'live-audio') continue;
+    const host = clients.get(room.hostId);
+    const joinedProfile = [...room.members]
+      .map((memberId) => clients.get(memberId)?.profileId)
+      .includes(id);
+    if (host?.profileId === id || joinedProfile) closeLiveAudioRoom(room, 'friend-disconnected');
+  }
+}
+
+function cancelLiveAudioFriendInvitesForPair(leftProfileId, rightProfileId) {
+  const pair = new Set([
+    sanitizeAccountProfileId(leftProfileId),
+    sanitizeAccountProfileId(rightProfileId),
+  ].filter(Boolean));
+  if (pair.size !== 2) return;
+  void persistence.cancelDurableLiveAudioFriendInvitesForPair(...pair);
+  for (const invite of liveAudioFriendInvites.values()) {
+    if (!pair.has(invite.senderProfileId) || !pair.has(invite.targetProfileId)) continue;
+    removeLiveAudioInvite(invite, 'cancelled', 'Live audio invite is no longer available.', {
+      closeWaitingRoom: true,
+    });
+  }
+  for (const room of rooms.values()) {
+    if (
+      room.purpose === 'live-audio'
+      && [...pair].every((profileId) => room.liveAudioParticipantProfileIds?.has(profileId))
+    ) {
+      closeLiveAudioRoom(room, 'friend-access-ended');
+    }
+  }
+}
+
+function liveAudioFriendInvitePairKey(leftProfileId, rightProfileId) {
+  return [leftProfileId, rightProfileId].sort().join('\u0000');
+}
+
+function accountHasLiveAudioInteraction(profileId) {
+  const id = sanitizeAccountProfileId(profileId);
+  if (!id) return false;
+  for (const invite of liveAudioFriendInvites.values()) {
+    if (invite.senderProfileId === id || invite.targetProfileId === id) return true;
+  }
+  return [...rooms.values()].some((room) => (
+    room.purpose === 'live-audio'
+    && room.liveAudioParticipantProfileIds?.has(id)
+  ));
+}
+
+function consumeLiveAudioFriendInviteRateSlot(senderProfileId, targetProfileId, now = Date.now()) {
+  const recent = (liveAudioFriendInviteSendTimes.get(senderProfileId) ?? [])
+    .filter((at) => at > now - liveAudioFriendInviteSenderWindowMs);
+  const pairKey = liveAudioFriendInvitePairKey(senderProfileId, targetProfileId);
+  const pairSentAt = liveAudioFriendInvitePairSendTimes.get(pairKey) ?? 0;
+  if (pairSentAt > now - liveAudioFriendInvitePairCooldownMs || recent.length >= liveAudioFriendInviteSenderLimit) {
+    return false;
+  }
+  liveAudioFriendInviteSendTimes.set(senderProfileId, [...recent, now]);
+  liveAudioFriendInvitePairSendTimes.set(pairKey, now);
+  return true;
+}
+
+function releaseLiveAudioFriendInviteRateSlot(senderProfileId, targetProfileId, reservedAt) {
+  const recent = liveAudioFriendInviteSendTimes.get(senderProfileId) ?? [];
+  const index = recent.lastIndexOf(reservedAt);
+  if (index >= 0) recent.splice(index, 1);
+  if (recent.length > 0) liveAudioFriendInviteSendTimes.set(senderProfileId, recent);
+  else liveAudioFriendInviteSendTimes.delete(senderProfileId);
+  const pairKey = liveAudioFriendInvitePairKey(senderProfileId, targetProfileId);
+  if (liveAudioFriendInvitePairSendTimes.get(pairKey) === reservedAt) {
+    liveAudioFriendInvitePairSendTimes.delete(pairKey);
+  }
+}
+
+function liveAudioTargetPresenceWasRecentlyOnline(profileId, now = Date.now()) {
+  return accountProfileIsOnline(profileId)
+    || (friendPresenceLastOnlineAt.get(profileId) ?? 0) > now - liveAudioPresencePushFallbackMs;
+}
+
+function createLiveAudioRoom(host, targetProfileId) {
+  let id = randomId('TALK', 8);
+  while (rooms.has(id)) id = randomId('TALK', 8);
+  const room = {
+    id,
+    hostId: host.id,
+    private: true,
+    purpose: 'live-audio',
+    liveAudioParticipantProfileIds: new Set([host.profileId, targetProfileId]),
+    liveAudioAcceptedProfileIds: new Set([host.profileId]),
+    liveAudioJoinDeadlineAt: null,
+    liveAudioAcceptedInvite: null,
+    track: { id: 'friend-live-audio', name: 'Live audio', country: 'Private', state: 'Friends' },
+    flow: defaultRoomFlow(),
+    createdAt: Date.now(),
+    members: new Set(),
+    racers: new Set(),
+    spectators: new Set(),
+    racerSeatCounts: new Map(),
+    raceStates: new Map(),
+    exploreStates: new Map(),
+    exploreRoute: null,
+    exploreSession: null,
+    messages: [],
+  };
+  rooms.set(id, room);
+  cloudTelemetry.increment('tracklab_live_audio_rooms_created_total');
+  cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
+  joinRoom(host, room, 'spectator', 0);
+  return room;
+}
+
+async function createLiveAudioFriendInvite(host, targetProfileId) {
+  pruneLiveAudioFriendInvites();
+  const senderProfileId = sanitizeAccountProfileId(host?.profileId);
+  const targetId = sanitizeAccountProfileId(targetProfileId);
+  const unavailable = () => send(host, {
+    type: 'live-audio-invite-status',
+    state: 'error',
+    message: 'That friend is not available for live audio right now.',
+  });
+  if (!senderProfileId || host.clubTabletSessionTokenHash || !targetId || targetId === senderProfileId) {
+    unavailable();
+    return;
+  }
+  if (!liveAudioTargetPresenceWasRecentlyOnline(targetId)) {
+    unavailable();
+    return;
+  }
+  const currentRoom = host.roomId ? rooms.get(host.roomId) : null;
+  if (currentRoom && (
+    currentRoom.purpose !== 'live-audio'
+    || currentRoom.hostId !== host.id
+    || !currentRoom.liveAudioParticipantProfileIds?.has(targetId)
+    || currentRoom.members.size > 1
+  )) {
+    unavailable();
+    return;
+  }
+  const existing = [...liveAudioFriendInvites.values()].find((invite) => (
+    invite.senderProfileId === senderProfileId
+    && invite.targetProfileId === targetId
+    && invite.expiresAt > Date.now()
+  ));
+  if (existing) {
+    liveAudioInviteStatus(existing, 'sent', `Live audio invite already sent to ${existing.targetName}.`);
+    return;
+  }
+  const [sender, target, explicitFriends] = await Promise.all([
+    persistence.findAuthUserById(senderProfileId),
+    persistence.findAuthUserById(targetId),
+    persistence.hasExplicitAccountFriendship(senderProfileId, targetId),
+  ]);
+  if (
+    !sender
+    || sender.id !== senderProfileId
+    || !target
+    || target.id !== targetId
+    || !explicitFriends
+    || clients.get(host.id) !== host
+    || host.profileId !== senderProfileId
+    || host.clubTabletSessionTokenHash
+    || host.socket?.readyState !== WebSocket.OPEN
+    || !liveAudioTargetPresenceWasRecentlyOnline(targetId)
+  ) {
+    unavailable();
+    return;
+  }
+  if (liveAudioFriendInviteAuthRecheckDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, liveAudioFriendInviteAuthRecheckDelayMs));
+  }
+  const explicitFriendsAtCommit = await persistence.hasExplicitAccountFriendship(senderProfileId, targetId);
+  const targetOnlineAtCommit = accountProfileIsOnline(targetId);
+  const pushFallbackInstallations = !targetOnlineAtCommit
+    && pushProviderDispatchReady()
+    && liveAudioTargetPresenceWasRecentlyOnline(targetId)
+    ? await persistence.listActivePushInstallations(targetId, Date.now())
+    : [];
+  const targetReachableAtCommit = targetOnlineAtCommit || pushFallbackInstallations.length > 0;
+  pruneLiveAudioFriendInvites();
+  const currentRoomAtCommit = host.roomId ? rooms.get(host.roomId) : null;
+  const existingAtCommit = [...liveAudioFriendInvites.values()].find((invite) => (
+    invite.senderProfileId === senderProfileId
+    && invite.targetProfileId === targetId
+    && invite.expiresAt > Date.now()
+  ));
+  if (existingAtCommit) {
+    liveAudioInviteStatus(
+      existingAtCommit,
+      'sent',
+      `Live audio invite already sent to ${existingAtCommit.targetName}.`,
+    );
+    return;
+  }
+  if (
+    accountHasLiveAudioInteraction(senderProfileId)
+    || accountHasLiveAudioInteraction(targetId)
+  ) {
+    unavailable();
+    return;
+  }
+  if (
+    !explicitFriendsAtCommit
+    || clients.get(host.id) !== host
+    || host.profileId !== senderProfileId
+    || host.clubTabletSessionTokenHash
+    || !host.authSessionTokenHash
+    || host.socket?.readyState !== WebSocket.OPEN
+    || !targetReachableAtCommit
+  ) {
+    unavailable();
+    return;
+  }
+  if (currentRoomAtCommit && (
+    currentRoomAtCommit.purpose !== 'live-audio'
+    || currentRoomAtCommit.hostId !== host.id
+    || !currentRoomAtCommit.liveAudioParticipantProfileIds?.has(targetId)
+    || currentRoomAtCommit.members.size > 1
+  )) {
+    unavailable();
+    return;
+  }
+  const rateReservedAt = Date.now();
+  if (!consumeLiveAudioFriendInviteRateSlot(senderProfileId, targetId, rateReservedAt)) {
+    send(host, {
+      type: 'live-audio-invite-status',
+      state: 'error',
+      message: 'Wait a moment before sending another live audio invite.',
+    });
+    return;
+  }
+  const room = currentRoomAtCommit ?? createLiveAudioRoom(host, targetId);
+  const now = Date.now();
+  const invite = {
+    id: randomId('LIVE', 12),
+    senderProfileId,
+    senderHandle: sanitizeText(sender.username, 'tracklab-rider', 40),
+    senderName: sanitizeText(sender.displayName, 'A TrackLab friend', 80),
+    targetProfileId: targetId,
+    targetName: sanitizeText(target.displayName, 'Your friend', 80),
+    roomId: room.id,
+    createdAt: now,
+    expiresAt: now + liveAudioFriendInviteTtlMs,
+    committed: false,
+  };
+  liveAudioFriendInvites.set(invite.id, invite);
+  const invitePush = socialPushEvent('live_audio_invite', {
+    recipientUserId: targetId,
+    actorUserId: senderProfileId,
+    objectId: invite.id,
+    idempotencyKey: `live-audio-invite:${invite.id}`,
+    expiresAt: invite.expiresAt,
+    originInstanceId: serverInstanceId,
+  });
+  const durable = await persistence.createDurableLiveAudioFriendInvite({
+    id: invite.id,
+    senderUserId: senderProfileId,
+    targetUserId: targetId,
+    roomId: room.id,
+    originInstanceId: serverInstanceId,
+    createdAt: now,
+    expiresAt: invite.expiresAt,
+  }, invitePush, now);
+  const hostStillValid = liveAudioFriendInvites.get(invite.id) === invite
+    && clients.get(host.id) === host
+    && host.profileId === senderProfileId
+    && host.authSessionTokenHash
+    && !host.clubTabletSessionTokenHash
+    && host.socket?.readyState === WebSocket.OPEN
+    && rooms.get(room.id) === room
+    && room.members.has(host.id);
+  if (durable.status !== 'created' || !durable.invite || !hostStillValid) {
+    liveAudioFriendInvites.delete(invite.id);
+    releaseLiveAudioFriendInviteRateSlot(senderProfileId, targetId, rateReservedAt);
+    if (durable.invite) {
+      await persistence.transitionDurableLiveAudioFriendInvite({
+        inviteId: invite.id,
+        actorUserId: senderProfileId,
+        action: 'cancel',
+        originInstanceId: serverInstanceId,
+      });
+    }
+    if (rooms.get(room.id) === room && room.members.size <= 1) closeLiveAudioRoom(room, 'invite-unavailable');
+    unavailable();
+    return;
+  }
+  invite.committed = true;
+  liveAudioInviteStatus(invite, 'sent', `Live audio invite sent to ${invite.targetName}.`);
+  notifyLiveAudioInviteProfiles([targetId]);
+  if (invitePush) kickPushWorker();
+  cloudTelemetry.increment('tracklab_live_audio_invites_total', { outcome: 'sent' });
+}
+
 function leaveRoom(client, reason = 'left') {
   if (!client.roomId) {
     return;
@@ -7485,6 +8350,10 @@ function leaveRoom(client, reason = 'left') {
 
   const room = rooms.get(client.roomId);
   const oldRoomId = client.roomId;
+  if (room?.purpose === 'live-audio') {
+    closeLiveAudioRoom(room, reason);
+    return;
+  }
   client.roomId = null;
   void persistence.saveRoomLeave(oldRoomId, client);
 
@@ -7523,7 +8392,55 @@ function leaveRoom(client, reason = 'left') {
   broadcastLobby();
 }
 
-function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1) {
+async function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1) {
+  if (room.purpose === 'live-audio') {
+    if (
+      Number.isFinite(room.liveAudioJoinDeadlineAt)
+      && room.liveAudioJoinDeadlineAt <= Date.now()
+      && room.members.size <= 1
+    ) {
+      expireAcceptedLiveAudioRoom(room);
+      send(client, { type: 'room-error', message: 'That live audio room is no longer available.' });
+      return false;
+    }
+    const personalAccountClient = Boolean(
+      client.profileId
+      && client.authSessionTokenHash
+      && !client.clubTabletSessionTokenHash
+      && client.guestKey === `user:${client.profileId}`
+    );
+    const authorized = personalAccountClient
+      && room.liveAudioParticipantProfileIds?.has(client.profileId)
+      && room.liveAudioAcceptedProfileIds?.has(client.profileId);
+    const duplicateDevice = [...room.members]
+      .map((memberId) => clients.get(memberId))
+      .some((member) => member?.profileId === client.profileId && member.id !== client.id);
+    if (!authorized || duplicateDevice || room.members.size >= 2) {
+      send(client, { type: 'room-error', message: 'That live audio room is no longer available.' });
+      return false;
+    }
+    const acceptedInvite = room.liveAudioAcceptedInvite;
+    if (acceptedInvite && client.profileId === acceptedInvite.targetProfileId) {
+      const joined = await persistence.transitionDurableLiveAudioFriendInvite({
+        inviteId: acceptedInvite.id,
+        actorUserId: client.profileId,
+        action: 'join',
+        originInstanceId: serverInstanceId,
+      });
+      if (
+        !joined
+        || rooms.get(room.id) !== room
+        || room.liveAudioAcceptedInvite !== acceptedInvite
+        || client.socket?.readyState !== WebSocket.OPEN
+      ) {
+        if (rooms.get(room.id) === room) expireAcceptedLiveAudioRoom(room);
+        send(client, { type: 'room-error', message: 'That live audio room is no longer available.' });
+        return false;
+      }
+    }
+    preferredRole = 'spectator';
+    requestedSeatCount = 0;
+  }
   if (client.roomId && client.roomId !== room.id) {
     leaveRoom(client, 'joined-another-room');
   }
@@ -7575,10 +8492,17 @@ function joinRoom(client, room, preferredRole = 'racer', requestedSeatCount = 1)
   client.roomId = room.id;
   client.roomRole = preferredRole;
   client.track = room.track;
-  void persistence.saveRoomJoin(room, client, preferredRole, client.racerSeatCount);
+  if (room.purpose === 'live-audio' && room.members.size >= 2) {
+    room.liveAudioJoinDeadlineAt = null;
+    room.liveAudioAcceptedInvite = null;
+  }
+  if (room.purpose !== 'live-audio') {
+    void persistence.saveRoomJoin(room, client, preferredRole, client.racerSeatCount);
+  }
   cloudTelemetry.increment('tracklab_multiplayer_room_joins_total', { role: preferredRole });
   broadcastRoom(room.id, roomState(room));
   broadcastLobby();
+  return true;
 }
 
 function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
@@ -7591,6 +8515,7 @@ function createRoom(host, track, privateRoom = true, hostSeatCount = 1) {
     id,
     hostId: host.id,
     private: privateRoom,
+    purpose: 'race',
     track: sanitizeTrack(track ?? host.track),
     flow: defaultRoomFlow(),
     createdAt: Date.now(),
@@ -7764,6 +8689,7 @@ async function findRoom(roomId) {
   }
 
   savedRoom.track = sanitizeTrack(savedRoom.track);
+  savedRoom.purpose = 'race';
   savedRoom.flow = defaultRoomFlow();
   savedRoom.racers = savedRoom.racers ?? new Set();
   savedRoom.spectators = savedRoom.spectators ?? new Set();
@@ -7860,6 +8786,11 @@ async function handleClientMessage(client, rawMessage) {
     return;
   }
 
+  if (message.type === 'create-live-audio-invite') {
+    await createLiveAudioFriendInvite(client, message.targetProfileId);
+    return;
+  }
+
   if (message.type === 'join-room') {
     const roomId = sanitizeText(message.roomId, '', 32).toUpperCase();
     const room = await findRoom(roomId);
@@ -7875,7 +8806,7 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
-    joinRoom(
+    await joinRoom(
       client,
       room,
       clientHasRacerAccess(client) ? 'racer' : 'spectator',
@@ -8110,7 +9041,7 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     const room = rooms.get(client.roomId);
-    if (!room) {
+    if (!room || room.purpose === 'live-audio') {
       return;
     }
 
@@ -8137,7 +9068,7 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     const room = rooms.get(client.roomId);
-    if (!room) {
+    if (!room || room.purpose === 'live-audio') {
       return;
     }
 
@@ -8201,10 +9132,11 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     const room = rooms.get(client.roomId);
-    if (!room || !room.racers?.has(client.id) || !requireRacerClient(
-      client,
-      'Voice chat is available to the four room racers.',
-    )) {
+    const liveAudioMember = room?.purpose === 'live-audio' && room.members.has(client.id);
+    const raceVoiceMember = room?.purpose !== 'live-audio'
+      && room?.racers?.has(client.id)
+      && requireRacerClient(client, 'Voice chat is available to the four room racers.');
+    if (!room || (!liveAudioMember && !raceVoiceMember)) {
       return;
     }
 
@@ -8226,13 +9158,13 @@ async function handleClientMessage(client, rawMessage) {
     };
 
     if (targetId) {
-      if (room.racers.has(targetId)) {
+      if ((room.purpose === 'live-audio' ? room.members : room.racers).has(targetId)) {
         send(clients.get(targetId), payload);
       }
       return;
     }
 
-    room.racers.forEach((memberId) => {
+    (room.purpose === 'live-audio' ? room.members : room.racers).forEach((memberId) => {
       if (memberId !== client.id) {
         send(clients.get(memberId), payload);
       }
@@ -11261,6 +12193,198 @@ async function handleClubGroupTrainingHistoryApi(request, response, requestUrl) 
   writeJson(response, 404, { error: 'Assigned club training endpoint not found.' });
 }
 
+function pushInstallationId(value) {
+  const id = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id)
+    ? id
+    : '';
+}
+
+function pushInstallationCredential(value) {
+  const credential = typeof value === 'string' ? value.trim() : '';
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(credential)) return '';
+  try {
+    const decoded = Buffer.from(credential, 'base64url');
+    return decoded.length === 32 && decoded.toString('base64url') === credential ? credential : '';
+  } catch {
+    return '';
+  }
+}
+
+function publicPushInstallation(installation) {
+  return installation ? {
+    id: installation.id,
+    environment: installation.environment,
+    permissionStatus: 'granted',
+    registeredAt: installation.registeredAt,
+    lastSeenAt: installation.lastSeenAt,
+  } : null;
+}
+
+async function handlePushApi(request, response, requestUrl) {
+  if (!enforceRateLimit(
+    request,
+    response,
+    pushInstallationRateLimiter,
+    240,
+    `push-admission:${authCredentialRateLimitKey(request)}`,
+  )) return;
+  const session = await requireAccountFriendSession(request, response);
+  if (!session) return;
+  const userId = session.user.id;
+  const authSessionTokenHash = tokenHash(session.token);
+
+  if (requestUrl.pathname === '/api/push/preferences') {
+    if (!['GET', 'PATCH'].includes(request.method || '')) {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const limit = request.method === 'GET' ? 240 : 60;
+    if (!enforceRateLimit(
+      request,
+      response,
+      pushPreferenceRateLimiter,
+      limit,
+      `push-preferences:${request.method}:${userId}`,
+    )) return;
+    if (request.method === 'GET') {
+      const preferences = await persistence.loadPushPreferences(userId);
+      writeJson(response, 200, { preferences }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const payload = await readJsonBody(request, 2_000);
+    const keys = ['liveAudio', 'friendRequests', 'friendConnections', 'trackShares'];
+    const provided = keys.filter((key) => Object.prototype.hasOwnProperty.call(payload, key));
+    if (
+      !payload || typeof payload !== 'object' || Array.isArray(payload)
+      || provided.length === 0
+      || Object.keys(payload).some((key) => !keys.includes(key))
+      || provided.some((key) => typeof payload[key] !== 'boolean')
+    ) {
+      writeJson(response, 400, { error: 'Choose valid notification preferences.' });
+      return;
+    }
+    const preferences = await persistence.savePushPreferences(userId, payload);
+    if (!preferences) {
+      writeJson(response, 503, { error: 'Notification preferences are temporarily unavailable.' });
+      return;
+    }
+    writeJson(response, 200, { preferences }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const match = /^\/api\/push\/installations\/([^/]+)$/u.exec(requestUrl.pathname);
+  const installationId = pushInstallationId(match?.[1]);
+  if (!match || !installationId) {
+    writeJson(response, 404, { error: 'Not found' });
+    return;
+  }
+  if (!['PUT', 'DELETE'].includes(request.method || '')) {
+    writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+  if (!enforceRateLimit(
+    request,
+    response,
+    pushInstallationRateLimiter,
+    request.method === 'PUT' ? 30 : 60,
+    `push-installation:${request.method}:${userId}:${installationId}`,
+  )) return;
+
+  const payload = await readJsonBody(request, request.method === 'PUT' ? 4_000 : 2_000);
+  const credential = pushInstallationCredential(payload?.credential);
+  if (!credential) {
+    writeJson(response, request.method === 'DELETE' ? 404 : 400, {
+      error: request.method === 'DELETE'
+        ? 'That notification installation is unavailable.'
+        : 'Notification installation data is invalid.',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+  const credentialHash = tokenHash(credential);
+  if (request.method === 'DELETE') {
+    if (
+      !payload || typeof payload !== 'object' || Array.isArray(payload)
+      || Object.keys(payload).some((key) => key !== 'credential')
+    ) {
+      writeJson(response, 404, { error: 'That notification installation is unavailable.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    const removed = await persistence.deletePushInstallation({
+      id: installationId,
+      userId,
+      authSessionTokenHash,
+      credentialHash,
+    });
+    if (!removed) {
+      writeJson(response, 404, { error: 'That notification installation is unavailable.' }, {
+        'Cache-Control': 'no-store',
+      });
+      return;
+    }
+    writeJson(response, 200, { removed: true }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  const allowedKeys = new Set([
+    'credential',
+    'deviceToken',
+    'environment',
+    'permissionStatus',
+    'protocolVersion',
+    'appBuild',
+    'osVersion',
+  ]);
+  const appBuild = payload?.appBuild == null ? '' : sanitizeText(payload.appBuild, '', 80);
+  const osVersion = payload?.osVersion == null ? '' : sanitizeText(payload.osVersion, '', 80);
+  const deviceToken = typeof payload?.deviceToken === 'string' ? payload.deviceToken : '';
+  const environment = payload?.environment;
+  const protectedToken = protectApnsDeviceToken(deviceToken, environment, pushTokenProtection);
+  if (
+    !pushTokenProtection.ready
+    || !payload || typeof payload !== 'object' || Array.isArray(payload)
+    || Object.keys(payload).some((key) => !allowedKeys.has(key))
+    || !protectedToken
+    || !['sandbox', 'production'].includes(environment)
+    || payload.permissionStatus !== 'granted'
+    || payload.protocolVersion !== 1
+    || (payload.appBuild != null && (typeof payload.appBuild !== 'string' || appBuild !== payload.appBuild.trim()))
+    || (payload.osVersion != null && (typeof payload.osVersion !== 'string' || osVersion !== payload.osVersion.trim()))
+  ) {
+    writeJson(response, pushTokenProtection.ready ? 400 : 503, {
+      error: pushTokenProtection.ready
+        ? 'Notification installation data is invalid.'
+        : 'Notification registration is temporarily unavailable.',
+    }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+  const result = await persistence.registerPushInstallation({
+    id: installationId,
+    userId,
+    authSessionTokenHash,
+    credentialHash,
+    platform: 'ios',
+    environment,
+    topic: trackLabApnsTopic,
+    ...protectedToken,
+    permissionStatus: 'granted',
+    protocolVersion: 1,
+    appBuild,
+    osVersion,
+  });
+  if (result.status !== 'saved' || !result.installation) {
+    writeJson(response, 409, { error: 'That notification installation is unavailable.' }, {
+      'Cache-Control': 'no-store',
+    });
+    return;
+  }
+  writeJson(response, 200, { installation: publicPushInstallation(result.installation) }, {
+    'Cache-Control': 'no-store',
+  });
+}
+
 async function serveStatic(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
   if (
@@ -11308,6 +12432,10 @@ async function serveStatic(request, response) {
     await handleHeartRateApi(request, response, requestUrl);
     return;
   }
+  if (requestUrl.pathname === '/api/push/preferences' || requestUrl.pathname.startsWith('/api/push/installations/')) {
+    await handlePushApi(request, response, requestUrl);
+    return;
+  }
   if (
     requestUrl.pathname.startsWith('/api/club-live/monitor-authorizations')
     || requestUrl.pathname === '/api/club-live/monitor-training-sessions'
@@ -11330,15 +12458,19 @@ async function serveStatic(request, response) {
 
     const storage = persistence.persistenceStatus();
     const storageReady = storage.ready && (!databaseRequired || storage.configured);
+    const pushHealth = pushHealthStatus();
+    const push = pushHealth.push;
+    const serviceReady = storageReady && pushHealth.startupReady;
     const body = JSON.stringify({
-      status: storageReady ? 'ok' : 'unavailable',
+      status: serviceReady ? 'ok' : 'unavailable',
       service: 'tracklab-bmx',
       storage,
-      requirements: { database: databaseRequired },
+      push,
+      requirements: { database: databaseRequired, apns: apnsConfiguration.enabled },
       uptimeSeconds: Math.round(process.uptime()),
       version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
     });
-    response.writeHead(storageReady ? 200 : 503, {
+    response.writeHead(serviceReady ? 200 : 503, {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
       'Content-Length': Buffer.byteLength(body),
@@ -12087,13 +13219,25 @@ async function serveStatic(request, response) {
     const officialFriendChanges = await persistence.ensureOfficialFriendships(createdUser.id);
     notifyFriendGraphProfiles(officialFriendChanges ?? []);
     if (registrationInviteToken) {
-      const inviteResult = await persistence.claimFriendInvite(tokenHash(registrationInviteToken), createdUser.id);
+      const connectionPush = socialPushEvent('friend_connection', {
+        recipientUserId: 'resolved-at-commit',
+        actorUserId: createdUser.id,
+        objectId: 'resolved-at-commit',
+        idempotencyKey: `friend-invite-registration-claim:${createdUser.id}`,
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000),
+      });
+      const inviteResult = await persistence.claimFriendInvite(
+        tokenHash(registrationInviteToken),
+        createdUser.id,
+        connectionPush,
+      );
       if (inviteResult) {
         notifyFriendProfile(inviteResult.profile?.profileId, {
           event: 'invite-claimed',
           profileId: createdUser.id,
         });
         notifyFriendGraphProfiles([createdUser.id, inviteResult.profile?.profileId]);
+        if (connectionPush) kickPushWorker();
       }
     }
 
@@ -12304,6 +13448,151 @@ async function serveStatic(request, response) {
       return;
     }
 
+    if (requestUrl.pathname === '/api/friends/live-audio-invites') {
+      if (request.method !== 'GET') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      pruneLiveAudioFriendInvites();
+      const durable = await persistence.listPendingDurableLiveAudioFriendInvites(
+        userId,
+        serverInstanceId,
+        Date.now(),
+      );
+      const pending = durable.map((saved) => {
+        const invite = liveAudioFriendInvites.get(saved.id);
+        return invite?.committed
+          && invite.targetProfileId === saved.targetUserId
+          && invite.senderProfileId === saved.senderUserId
+          && rooms.get(invite.roomId)?.purpose === 'live-audio'
+          ? liveAudioInvitePublic(invite)
+          : null;
+      }).filter(Boolean);
+      writeJson(response, 200, { invites: pending }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const liveAudioRespondMatch = /^\/api\/friends\/live-audio-invites\/([a-zA-Z0-9-]{6,40})\/respond$/.exec(
+      requestUrl.pathname,
+    );
+    if (liveAudioRespondMatch) {
+      if (request.method !== 'POST') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      pruneLiveAudioFriendInvites();
+      const payload = await readJsonBody(request, 2_000);
+      if (typeof payload?.accepted !== 'boolean') {
+        writeJson(response, 400, { error: 'Choose Join or Not now.' });
+        return;
+      }
+      const invite = liveAudioFriendInvites.get(liveAudioRespondMatch[1]);
+      if (!invite || invite.targetProfileId !== userId || invite.expiresAt <= Date.now()) {
+        writeJson(response, 404, { error: 'That live audio invite is no longer available.' });
+        return;
+      }
+      if (!payload.accepted) {
+        const transitioned = await persistence.transitionDurableLiveAudioFriendInvite({
+          inviteId: invite.id,
+          actorUserId: userId,
+          action: 'decline',
+          originInstanceId: serverInstanceId,
+        });
+        if (!transitioned) {
+          writeJson(response, 404, { error: 'That live audio invite is no longer available.' });
+          return;
+        }
+        removeLiveAudioInvite(invite, 'declined', `${invite.targetName} chose not to join.`, {
+          closeWaitingRoom: true,
+          persistenceAlreadyTransitioned: true,
+        });
+        cloudTelemetry.increment('tracklab_live_audio_invites_total', { outcome: 'declined' });
+        writeJson(response, 200, { accepted: false }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      const room = rooms.get(invite.roomId);
+      const host = room ? clients.get(room.hostId) : null;
+      const stillFriends = await persistence.hasExplicitAccountFriendship(userId, invite.senderProfileId);
+      if (
+        liveAudioFriendInvites.get(invite.id) !== invite
+        || !stillFriends
+        || room?.purpose !== 'live-audio'
+        || host?.profileId !== invite.senderProfileId
+        || !host.authSessionTokenHash
+        || host.clubTabletSessionTokenHash
+        || host.socket?.readyState !== WebSocket.OPEN
+        || !room.liveAudioParticipantProfileIds?.has(userId)
+        || !room.liveAudioAcceptedProfileIds?.has(invite.senderProfileId)
+        || room.liveAudioAcceptedProfileIds?.has(userId)
+        || room.members.size !== 1
+        || !room.members.has(host.id)
+      ) {
+        removeLiveAudioInvite(invite, 'expired', 'That live audio invite is no longer available.', {
+          closeWaitingRoom: true,
+        });
+        writeJson(response, 404, { error: 'That live audio invite is no longer available.' });
+        return;
+      }
+      const joinDeadlineAt = Date.now() + liveAudioFriendJoinTtlMs;
+      const acceptedInvite = { ...invite, expiresAt: joinDeadlineAt };
+      const transitioned = await persistence.transitionDurableLiveAudioFriendInvite({
+        inviteId: invite.id,
+        actorUserId: userId,
+        action: 'accept',
+        originInstanceId: serverInstanceId,
+        expiresAt: joinDeadlineAt,
+      });
+      if (!transitioned) {
+        removeLiveAudioInvite(invite, 'expired', 'That live audio invite is no longer available.', {
+          closeWaitingRoom: true,
+          persistenceAlreadyTransitioned: true,
+        });
+        writeJson(response, 404, { error: 'That live audio invite is no longer available.' });
+        return;
+      }
+      room.liveAudioAcceptedProfileIds.add(userId);
+      room.liveAudioJoinDeadlineAt = joinDeadlineAt;
+      room.liveAudioAcceptedInvite = acceptedInvite;
+      liveAudioFriendInvites.delete(invite.id);
+      liveAudioInviteStatus(acceptedInvite, 'accepted', `${invite.targetName} accepted your live audio invite.`);
+      notifyLiveAudioInviteProfiles([invite.senderProfileId, invite.targetProfileId]);
+      cloudTelemetry.increment('tracklab_live_audio_invites_total', { outcome: 'accepted' });
+      writeJson(response, 200, { accepted: true, roomId: room.id }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const liveAudioCancelMatch = /^\/api\/friends\/live-audio-invites\/([a-zA-Z0-9-]{6,40})$/.exec(
+      requestUrl.pathname,
+    );
+    if (liveAudioCancelMatch) {
+      if (request.method !== 'DELETE') {
+        writeJson(response, 405, { error: 'Method not allowed' });
+        return;
+      }
+      const invite = liveAudioFriendInvites.get(liveAudioCancelMatch[1]);
+      if (!invite || invite.senderProfileId !== userId) {
+        writeJson(response, 404, { error: 'That live audio invite is no longer available.' });
+        return;
+      }
+      const transitioned = await persistence.transitionDurableLiveAudioFriendInvite({
+        inviteId: invite.id,
+        actorUserId: userId,
+        action: 'cancel',
+        originInstanceId: serverInstanceId,
+      });
+      if (!transitioned) {
+        writeJson(response, 404, { error: 'That live audio invite is no longer available.' });
+        return;
+      }
+      removeLiveAudioInvite(invite, 'cancelled', 'Live audio invite cancelled.', {
+        closeWaitingRoom: true,
+        persistenceAlreadyTransitioned: true,
+      });
+      cloudTelemetry.increment('tracklab_live_audio_invites_total', { outcome: 'cancelled' });
+      writeJson(response, 200, { cancelled: true }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
     if (requestUrl.pathname === '/api/friends/track-shares') {
       if (request.method === 'GET') {
         const page = friendPageOptions(requestUrl);
@@ -12361,12 +13650,20 @@ async function serveStatic(request, response) {
           writeJson(response, 404, { error: 'That BMX track is not in the TrackLab directory.' });
           return;
         }
+        const trackSharePush = socialPushEvent('track_share', {
+          recipientUserId,
+          actorUserId: userId,
+          objectId: clientRequestId,
+          idempotencyKey: `track-share:${clientRequestId}`,
+          expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000),
+        });
         const saved = await persistence.createAccountTrackShare({
           id: clientRequestId,
           senderUserId: userId,
           recipientUserId,
           trackId,
           trackSnapshot: track,
+          pushEvent: trackSharePush,
         });
         const recipientShare = publicTrackShare(saved, 'recipient');
         const sender = publicTrackShareIdentity({
@@ -12382,6 +13679,7 @@ async function serveStatic(request, response) {
         }
         const share = { ...recipientShare, sender };
         notifyFriendTrackShareProfiles([recipientUserId]);
+        if (trackSharePush) kickPushWorker();
         writeJson(response, 201, { share }, { 'Cache-Control': 'no-store' });
         return;
       }
@@ -12526,10 +13824,18 @@ async function serveStatic(request, response) {
           writeJson(response, 400, { error: 'Choose another TrackLab rider.' });
           return;
         }
+        const requestPush = socialPushEvent('friend_request', {
+          recipientUserId: profileId,
+          actorUserId: userId,
+          objectId: clientRequestId,
+          idempotencyKey: `friend-request:${clientRequestId}`,
+          expiresAt: Date.now() + (7 * 24 * 60 * 60 * 1000),
+        });
         const friendRequest = await persistence.createAccountFriendRequest({
           id: clientRequestId,
           fromUserId: userId,
           toUserId: profileId,
+          pushEvent: requestPush,
         });
         if (friendRequest?.unavailableReason) {
           const declined = friendRequest.unavailableReason === 'declined-cooldown';
@@ -12552,6 +13858,7 @@ async function serveStatic(request, response) {
           profileId: userId,
         });
         notifyFriendGraphProfiles([userId, profileId]);
+        if (requestPush) kickPushWorker();
         writeJson(response, 201, { request: publicFriendRequest(friendRequest) }, { 'Cache-Control': 'no-store' });
         return;
       }
@@ -12566,7 +13873,19 @@ async function serveStatic(request, response) {
         return;
       }
       const [, requestId, action] = requestActionMatch;
-      const result = await persistence.respondToAccountFriendRequest(requestId, userId, action);
+      const connectionPush = action === 'accept' ? socialPushEvent('friend_connection', {
+        recipientUserId: 'resolved-at-commit',
+        actorUserId: userId,
+        objectId: requestId,
+        idempotencyKey: `friend-request:${requestId}:accepted`,
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000),
+      }) : null;
+      const result = await persistence.respondToAccountFriendRequest(
+        requestId,
+        userId,
+        action,
+        connectionPush,
+      );
       if (!result) {
         writeJson(response, 404, { error: 'That friend request is no longer available.' });
         return;
@@ -12577,6 +13896,7 @@ async function serveStatic(request, response) {
         profileId: userId,
       });
       notifyFriendGraphProfiles([userId, result.profile?.profileId]);
+      if (connectionPush) kickPushWorker();
       writeJson(response, 200, {
         result: {
           requestId: result.requestId,
@@ -12657,6 +13977,7 @@ async function serveStatic(request, response) {
         notifyFriendGraphProfiles([userId, profileId]);
         notifyFriendTrackShareProfiles([userId, profileId]);
         await refreshRealtimeBlockState([userId, profileId], { addBlockedPair: [userId, profileId] });
+        cancelLiveAudioFriendInvitesForPair(userId, profileId);
         writeJson(response, 201, { blocked: publicFriendProfile(blocked, 'blocked') }, { 'Cache-Control': 'no-store' });
         return;
       }
@@ -12764,7 +14085,14 @@ async function serveStatic(request, response) {
         writeJson(response, 400, { error: 'The friend invitation link is invalid.' });
         return;
       }
-      const result = await persistence.claimFriendInvite(tokenHash(inviteToken), userId);
+      const connectionPush = socialPushEvent('friend_connection', {
+        recipientUserId: 'resolved-at-commit',
+        actorUserId: userId,
+        objectId: 'resolved-at-commit',
+        idempotencyKey: `friend-invite-claim:${userId}:${randomUUID()}`,
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000),
+      });
+      const result = await persistence.claimFriendInvite(tokenHash(inviteToken), userId, connectionPush);
       if (!result) {
         writeJson(response, 409, { error: 'This friend invitation is invalid, expired, used, blocked, or belongs to you.' });
         return;
@@ -12774,6 +14102,7 @@ async function serveStatic(request, response) {
         profileId: userId,
       });
       notifyFriendGraphProfiles([userId, result.profile?.profileId]);
+      if (connectionPush) kickPushWorker();
       writeJson(response, 200, {
         result: {
           inviteId: result.inviteId,
@@ -12813,6 +14142,7 @@ async function serveStatic(request, response) {
       notifyFriendProfile(friend.profileId, { event: 'friend-removed', profileId: userId });
       notifyFriendGraphProfiles([userId, friend.profileId]);
       notifyFriendTrackShareProfiles([userId, friend.profileId]);
+      cancelLiveAudioFriendInvitesForPair(userId, friend.profileId);
       writeJson(response, 200, { friend: publicFriendProfile(friend, 'none') }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -14792,6 +16122,21 @@ const friendEventStreamHeartbeat = setInterval(() => {
 }, 20_000);
 friendEventStreamHeartbeat.unref();
 
+const liveAudioInviteMaintenance = setInterval(
+  () => pruneLiveAudioFriendInvites(Date.now()),
+  Math.max(100, Math.min(
+    5_000,
+    Math.floor(Math.min(liveAudioFriendInviteTtlMs, liveAudioFriendJoinTtlMs) / 3),
+  )),
+);
+liveAudioInviteMaintenance.unref();
+
+// A producer kick is only a latency optimization. This bounded wake also
+// recovers leased work after a crash, future retries, and backlog present at
+// process startup without relying on a new user mutation.
+const pushOutboxMaintenance = setInterval(kickPushWorker, 5_000);
+pushOutboxMaintenance.unref();
+
 const heartRateLiveStreamHeartbeat = setInterval(() => {
   [heartRateOwnerLiveStreams, heartRateClubLiveStreams].forEach((streamsByKey) => {
     streamsByKey.forEach((streams, key) => {
@@ -14830,6 +16175,10 @@ async function shutdown(signal) {
   clearInterval(websocketHeartbeat);
   clearInterval(trainingHistoryStreamHeartbeat);
   clearInterval(friendEventStreamHeartbeat);
+  clearInterval(liveAudioInviteMaintenance);
+  clearInterval(pushOutboxMaintenance);
+  if (pushWorkerKickTimer) clearTimeout(pushWorkerKickTimer);
+  pushWorkerKickTimer = null;
   clearInterval(heartRateLiveStreamHeartbeat);
   clearInterval(clubLiveAccessMaintenance);
   clearInterval(persistenceMaintenance);
@@ -14863,6 +16212,7 @@ async function shutdown(signal) {
   await persistence.closePersistence().catch((error) => {
     cloudTelemetry.warn('persistence.shutdown_failed', { error });
   });
+  apnsProvider.close();
   clearTimeout(forceExit);
   process.exitCode = 0;
 }
@@ -14876,5 +16226,5 @@ server.listen(port, () => {
     websocketPath,
     version: String(process.env.RENDER_GIT_COMMIT || 'development').slice(0, 12),
   });
-  void persistence.initPersistence();
+  void persistence.initPersistence().finally(kickPushWorker);
 });

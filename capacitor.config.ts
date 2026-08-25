@@ -18,6 +18,12 @@ const config: CapacitorConfig = {
     url: 'https://tracklab-bmx.onrender.com',
   },
   plugins: {
+    PushNotifications: {
+      // Foreground remote alerts make one sound; TrackLab renders the visible,
+      // account-fenced banner itself. Local Recovery cues use a separate
+      // NotificationRouter handler and keep their existing presentation.
+      presentationOptions: ['sound'],
+    },
     BluetoothLe: {
       displayStrings: {
         availableDevices: 'Nearby Bluetooth devices',

@@ -29,6 +29,7 @@ export type FriendProfile = {
   relationship: FriendRelationship;
   officialKind?: FriendOfficialKind;
   canShareTrack?: boolean;
+  canTalkLive?: boolean;
 };
 
 export type FriendRequestDirection = 'incoming' | 'outgoing';
@@ -233,6 +234,7 @@ export function normalizeFriendProfile(value: unknown): FriendProfile | null {
     relationship: relationship(raw.relationship),
     ...(officialKind(raw.officialKind ?? raw.officialType) ? { officialKind: officialKind(raw.officialKind ?? raw.officialType) } : {}),
     ...(raw.canShareTrack === true ? { canShareTrack: true } : {}),
+    ...(raw.canTalkLive === true ? { canTalkLive: true } : {}),
   };
 }
 
@@ -548,10 +550,12 @@ export function subscribeToFriendNetworkEvents(onInvalidated: () => void) {
   stream.addEventListener('open', handleInvalidation);
   stream.addEventListener('graph-invalidated', handleInvalidation);
   stream.addEventListener('track-shares-invalidated', handleInvalidation);
+  stream.addEventListener('live-audio-invites-invalidated', handleInvalidation);
   return () => {
     stream.removeEventListener('open', handleInvalidation);
     stream.removeEventListener('graph-invalidated', handleInvalidation);
     stream.removeEventListener('track-shares-invalidated', handleInvalidation);
+    stream.removeEventListener('live-audio-invites-invalidated', handleInvalidation);
     stream.close();
   };
 }

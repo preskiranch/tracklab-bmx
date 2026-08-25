@@ -32,6 +32,22 @@ services:
         value: "0"
       - key: TRACKLAB_SLOW_REQUEST_MS
         value: "1000"
+      - key: TRACKLAB_APNS_ENABLED
+        value: "1"
+      - key: TRACKLAB_APNS_TEAM_ID
+        sync: false
+      - key: TRACKLAB_APNS_KEY_ID
+        sync: false
+      - key: TRACKLAB_APNS_PRIVATE_KEY
+        sync: false
+      - key: TRACKLAB_PUSH_TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: TRACKLAB_PUSH_TOKEN_FINGERPRINT_KEY
+        sync: false
+      - key: TRACKLAB_PUSH_TOKEN_KEY_VERSION
+        value: "1"
+      - key: TRACKLAB_PUSH_TOKEN_PREVIOUS_ENCRYPTION_KEYS
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: SQUARE_ENVIRONMENT

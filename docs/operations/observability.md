@@ -36,6 +36,7 @@ Recommended initial alerts:
 | Database query failures | Any sustained increase for 5 minutes |
 | WebSocket rate limits | More than 20 per minute |
 | Process uptime reset | Unexpected restart outside deployment windows |
+| APNs degraded | `push.enabled=true` and `push.degraded=true` in `/api/health` for any check |
 
 Tune these thresholds after collecting at least one week of normal traffic.
 
@@ -70,6 +71,8 @@ increases log volume.
 
 1. Record the affected user's request ID, time, browser, track, and connection method.
 2. Check `/api/health` and process restart history.
+   Treat a degraded push section as an APNs incident even when core health
+   correctly remains HTTP 200.
 3. Inspect HTTP error ratio, latency, WebSocket clients, and database failures.
 4. For bike issues, inspect the local connector health and connected-bike gauge.
 5. Confirm no deployment, database migration, or credential rotation overlapped the incident.
@@ -82,6 +85,7 @@ Run the production smoke test after every deploy:
 ```bash
 TRACKLAB_SMOKE_URL=https://tracklab-bmx.onrender.com \
 TRACKLAB_EXPECT_POSTGRES=1 \
+TRACKLAB_EXPECT_APNS=1 \
 npm run smoke:deployment
 ```
 
