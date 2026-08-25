@@ -21,6 +21,10 @@ import {
   clubTabletFreshHeartRateReading,
 } from '../../src/components/ClubTabletMode';
 import { expireClubTabletSessionLocallyFirst } from '../../src/components/ClubTabletRuntime';
+import {
+  releaseClubTabletAthleteAfterSaves,
+  safelyReleaseCompletedClubTabletSession,
+} from '../../src/lib/clubTabletExerciseCompletion';
 import type { HeartRateLiveEvent } from '../../src/lib/heartRateCloud';
 
 class MemoryStorage implements Storage {
@@ -81,13 +85,30 @@ afterEach(() => {
 });
 
 describe('Club Tablet client state', () => {
+  it('keeps the roster upsert compatible with the production club_members schema', () => {
+    const persistenceSource = readFileSync(
+      new URL('../../cloud/persistence.mjs', import.meta.url),
+      'utf8',
+    );
+    const upsertStart = persistenceSource.indexOf('export async function ensureClubRosterMember');
+    const upsertEnd = persistenceSource.indexOf('export async function saveClubInvite', upsertStart);
+    const upsertSource = persistenceSource.slice(upsertStart, upsertEnd);
+
+    expect(upsertStart).toBeGreaterThanOrEqual(0);
+    expect(upsertEnd).toBeGreaterThan(upsertStart);
+    expect(upsertSource).toContain('athlete_profile_key = CASE');
+    expect(upsertSource).toContain("WHEN existing.revoked_at IS NOT NULL THEN 'unclaimed'");
+    expect(upsertSource).not.toContain('athlete_name =');
+    expect(persistenceSource).toContain('users.display_name AS athlete_name');
+  });
+
   it('leaves enrollment verification to the runtime and starts kiosk sign-out only once', () => {
     const modeSource = readFileSync(
       new URL('../../src/components/ClubTabletMode.tsx', import.meta.url),
       'utf8',
     );
     const authorizeStart = modeSource.indexOf('const authorizeTablet = async () =>');
-    const authorizeEnd = modeSource.indexOf('const startAthlete = async () =>', authorizeStart);
+    const authorizeEnd = modeSource.indexOf('const startAthlete = async (', authorizeStart);
     const authorizeSource = modeSource.slice(authorizeStart, authorizeEnd);
     expect(authorizeStart).toBeGreaterThanOrEqual(0);
     expect(authorizeEnd).toBeGreaterThan(authorizeStart);
@@ -170,6 +191,57 @@ describe('Club Tablet client state', () => {
 
     expect(readStoredClubTabletSession()).toBeNull();
     expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
+  });
+
+  it('releases the athlete only after every completed-exercise artifact is durable', async () => {
+    let finishHistory: (() => void) | null = null;
+    let finishHeartRate: (() => void) | null = null;
+    const history = new Promise<void>((resolve) => { finishHistory = resolve; });
+    const heartRate = new Promise<void>((resolve) => { finishHeartRate = resolve; });
+    const release = vi.fn(async () => undefined);
+
+    const completion = releaseClubTabletAthleteAfterSaves([history, heartRate], release);
+    finishHistory?.();
+    await Promise.resolve();
+    expect(release).not.toHaveBeenCalled();
+    finishHeartRate?.();
+    await completion;
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the athlete selected when any completed-exercise save fails', async () => {
+    const release = vi.fn(async () => undefined);
+
+    await expect(releaseClubTabletAthleteAfterSaves(
+      [Promise.resolve(), Promise.reject(new Error('save failed'))],
+      release,
+    )).rejects.toThrow('save failed');
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('does not let athlete A finishing late clear athlete B', async () => {
+    const athleteA = sessionCredential;
+    const athleteB: ClubTabletSessionCredential = {
+      ...sessionCredential,
+      sessionToken: 'athlete-session-token-b',
+      session: {
+        ...sessionCredential.session,
+        studioRiderId: 'rider-2',
+        riderName: 'Rider Two',
+      },
+    };
+    let currentSession: ClubTabletSessionCredential | null = athleteB;
+    const endCompletedSession = vi.fn(async () => undefined);
+
+    await safelyReleaseCompletedClubTabletSession({
+      completedSession: athleteA,
+      currentSession: () => currentSession,
+      clearCurrentSession: () => { currentSession = null; },
+      endCompletedSession,
+    });
+
+    expect(currentSession).toBe(athleteB);
+    expect(endCompletedSession).toHaveBeenCalledWith(athleteA);
   });
 
   it('does not let a delayed athlete A sign-out erase athlete B on the same tablet', async () => {

@@ -76,9 +76,11 @@
 .club-tablet-header button,
 .club-tablet-end { display: inline-flex; min-height: 42px; align-items: center; gap: 8px; padding: 0 13px; border: 1px solid #c6d0c1; border-radius: 11px; background: #fff; color: #263323; font-weight: 850; }
 .club-tablet-workflow { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr); gap: 18px; }
+.club-tablet-home-actions { display: grid; align-content: start; gap: 18px; }
 .club-tablet-step { min-width: 0; padding: 19px; border-radius: 19px; }
 .club-tablet-step-title { display: flex; align-items: center; gap: 11px; margin-bottom: 15px; }
 .club-tablet-step-title > b { display: grid; width: 35px; height: 35px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #142019; color: #8eef42; }
+.club-tablet-step-icon { display: grid; width: 35px; height: 35px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #eaf7e3; color: #3d9720; }
 .club-tablet-step-title strong,
 .club-tablet-step-title small { display: block; }
 .club-tablet-step-title small { margin-top: 2px; color: #737e70; }
@@ -90,6 +92,8 @@
 .club-tablet-bikes > button { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 10px; border: 2px solid #e2e7df; border-radius: 14px; background: #f9fbf8; text-align: left; }
 .club-tablet-athletes > button.selected,
 .club-tablet-bikes > button.selected { border-color: #74d837; background: #effbe8; box-shadow: 0 0 0 3px rgba(116, 216, 55, 0.12); }
+.club-tablet-athletes > button:disabled,
+.club-tablet-bikes > button:disabled { opacity: 0.62; }
 .club-tablet-athletes strong,
 .club-tablet-athletes small,
 .club-tablet-bikes strong,
@@ -120,6 +124,11 @@
 .club-tablet-programs strong,
 .club-tablet-programs small { display: block; }
 .club-tablet-programs small { margin-top: 4px; color: #bcc9b7; }
+.club-tablet-home-programs { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 0; }
+.club-tablet-home-programs button { position: relative; min-height: 104px; padding: 15px; }
+.club-tablet-home-programs button.selected { border-color: #78dc38; background: #243d27; box-shadow: 0 0 0 3px rgba(116, 216, 55, 0.18); }
+.club-tablet-home-programs button:disabled { opacity: 0.65; }
+.club-tablet-program-check { position: absolute; top: 9px; right: 9px; width: 20px !important; height: 20px !important; color: #8eef42 !important; }
 .club-tablet-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 18px; }
 .club-tablet-info-grid > div { display: flex; gap: 11px; padding: 16px; border-radius: 15px; }
 .club-tablet-info-grid svg { flex: 0 0 auto; color: #4cad21; }
@@ -129,7 +138,6 @@
 
 @media (max-width: 900px) {
   .club-tablet-workflow { grid-template-columns: 1fr; }
-  .club-tablet-programs,
   .club-tablet-info-grid { grid-template-columns: 1fr; }
 }
 
@@ -138,5 +146,6 @@
   .club-tablet-active-card,
   .club-tablet-start { align-items: stretch; flex-direction: column; }
   .club-tablet-athletes { grid-template-columns: 1fr; }
+  .club-tablet-programs { grid-template-columns: 1fr; }
   .club-tablet-active-avatar { width: 68px; height: 68px; }
 }

@@ -1888,6 +1888,11 @@ export default function App() {
     getNativeBluetoothBootstrapStatus,
   );
   const clubTabletEmergencyExitRef = useRef<() => void>(() => undefined);
+  const clubTabletSessionRef = useRef<ClubTabletSessionCredential | null>(clubTabletSession);
+  const clubTabletExerciseSavedRef = useRef<(
+    session: ClubTabletSessionCredential,
+  ) => Promise<void> | void>(() => undefined);
+  clubTabletSessionRef.current = clubTabletSession;
   const clubTabletAutoSignOutStartedRef = useRef(false);
   const clubTrainingRequestGenerationRef = useRef(0);
   const activeClubProfileKeyRef = useRef<string | null>(null);
@@ -6102,6 +6107,11 @@ export default function App() {
       console.warn('Club Tablet race result was not saved because the selected athlete could not be matched safely.');
       return;
     }
+    const completedTabletSession = tabletLocalPlayer ? clubTabletSession : null;
+    if (tabletLocalPlayer && !completedTabletSession) {
+      console.warn('Club Tablet race save has no athlete credential.');
+      return;
+    }
     const authorizedClubPlayerIds = clubOwnerTrainingAuthorizedPlayersRef.current.get(sessionId) ?? new Set<PlayerSlot['id']>();
     const capturedSummaries = (tabletLocalPlayer
       ? raceCapture.summary.filter((summary) => summary.playerId === tabletLocalPlayer.id)
@@ -6183,7 +6193,7 @@ export default function App() {
         trackName: effectiveTrack.name,
         summaries: raceResultSummaries,
         localPlayerId: tabletLocalPlayer.id,
-      }, clubTabletSession))
+      }, completedTabletSession))
       : fetch('/api/race-results', {
         method: 'POST',
         headers: {
@@ -6213,7 +6223,7 @@ export default function App() {
         ...(photoUrl ? { photoUrl } : {}),
       };
     });
-    void import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
+    const trainingHistorySave = import('./lib/trainingHistory').then(({ saveTrainingSession }) => saveTrainingSession({
       id: sessionId,
       activityType: appMode === 'straight-sprint' ? 'straight-sprint' : 'bmx-race',
       title: appMode === 'straight-sprint' && activeSprintDistanceFeet != null
@@ -6244,21 +6254,33 @@ export default function App() {
       },
     }, clubTrainingSelection, {
       localPlayerId: tabletLocalPlayer?.id ?? null,
+      tabletSession: completedTabletSession,
     })).then(() => {
       setTrainingHistoryRevision((revision) => revision + 1);
-    }).catch((error: Error) => {
+    });
+    void trainingHistorySave.catch((error: Error) => {
       console.warn(`Could not save TrackLab training session: ${error.message}`);
     });
-    nextGhosts.forEach((ghost) => {
-      const ghostSave = tabletLocalPlayer
+    const ghostSaves = nextGhosts.map((ghost) => (
+      tabletLocalPlayer
         ? import('./lib/clubTablet').then(({ saveClubTabletGhost }) => (
-          saveClubTabletGhost(ghost, tabletLocalPlayer.id, clubTabletSession)
+          saveClubTabletGhost(ghost, tabletLocalPlayer.id, completedTabletSession)
         ))
-        : syncGhostLapToCloud(ghost, ownerKey);
+        : syncGhostLapToCloud(ghost, ownerKey)
+    ));
+    ghostSaves.forEach((ghostSave) => {
       void ghostSave.catch((error: Error) => {
         console.warn(`Could not sync TrackLab ghost: ${error.message}`);
       });
     });
+    if (tabletLocalPlayer) {
+      if (!completedTabletSession) return;
+      void Promise.all([raceResultSave, trainingHistorySave, ...ghostSaves])
+        .then(() => clubTabletExerciseSavedRef.current(completedTabletSession))
+        .catch((error: Error) => {
+          console.warn(`Club Tablet save failed; athlete remains selected: ${error.message}`);
+        });
+    }
   }, [
     authUser?.name,
     activeSprintAirSetting,
@@ -9025,6 +9047,22 @@ export default function App() {
     await endClubTabletSession(activeSession).catch(() => undefined);
   }, [clubTabletSession, handleClubTabletSessionChange]);
 
+  const handleClubTabletExerciseSaved = useCallback(async (
+    completedSession: ClubTabletSessionCredential,
+  ) => {
+    const [{ endClubTabletSession }, { safelyReleaseCompletedClubTabletSession }] = await Promise.all([
+      import('./lib/clubTablet'),
+      import('./lib/clubTabletExerciseCompletion'),
+    ]);
+    await safelyReleaseCompletedClubTabletSession({
+      completedSession,
+      currentSession: () => clubTabletSessionRef.current,
+      clearCurrentSession: () => handleClubTabletSessionChange(null),
+      endCompletedSession: (session) => endClubTabletSession(session).catch(() => undefined),
+    });
+  }, [handleClubTabletSessionChange]);
+  clubTabletExerciseSavedRef.current = handleClubTabletExerciseSaved;
+
   const shareMultiplayerInvite = useCallback(() => {
     if (!multiplayer.inviteUrl) {
       return;
@@ -9836,6 +9874,7 @@ export default function App() {
       completionRef: clubOwnerUtilityCompletionRef,
       cancelActiveGroup: cancelActiveClubOwnerTrainingGroup,
       onHistoryChanged: () => setTrainingHistoryRevision((revision) => revision + 1),
+      onTabletExerciseSaved: handleClubTabletExerciseSaved,
     },
     heartRateContext: {
       heartRate: {
@@ -10916,30 +10955,17 @@ export default function App() {
               <button
                 className={appMode === 'club-tablet' ? 'selected' : ''}
                 type="button"
-                onClick={returnToClubTablet}
+                onClick={() => {
+                  if (clubTabletSessionActive) {
+                    void handleClubTabletEndAthlete();
+                  } else {
+                    returnToClubTablet();
+                  }
+                }}
               >
                 <TabletSmartphone size={17} />
-                {appMode === 'club-tablet' ? 'Club Tablet' : 'Return to Club Tablet'}
+                {clubTabletSessionActive ? 'End activity & choose athlete' : 'Club Tablet Home'}
               </button>
-              {clubTabletSessionActive && (
-                <>
-                  <button className={appMode === 'race' ? 'selected' : ''} type="button" onClick={openBmxRaceIntervals}>
-                    <Activity size={17} /> BMX Race Intervals
-                  </button>
-                  <button className={appMode === 'explore' ? 'selected' : ''} type="button" onClick={() => setAppMode('explore')}>
-                    <Compass size={17} /> Explore the World
-                  </button>
-                  <button className={appMode === 'straight-sprint' ? 'selected' : ''} type="button" onClick={openStraightSprint}>
-                    <Route size={17} /> Straight Sprint
-                  </button>
-                  <button className={appMode === 'get-pulled' ? 'selected' : ''} type="button" onClick={openGetPulled}>
-                    <Gauge size={17} /> Get Pulled
-                  </button>
-                  <button type="button" onClick={() => void handleClubTabletEndAthlete()}>
-                    <LogOut size={17} /> End athlete session
-                  </button>
-                </>
-              )}
             </>
           ) : (
           <>

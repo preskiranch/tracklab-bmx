@@ -1,5 +1,8 @@
 import type { RaceSummaryEntry, RaceZoneResult, TrainingActivityType, TrainingSession } from '../types';
-import { readStoredClubTabletSession } from './clubTabletStorage';
+import {
+  readStoredClubTabletSession,
+  type ClubTabletSessionCredential,
+} from './clubTabletStorage';
 import {
   acceptedBikeCadenceRpm,
   acceptedTrainingSpeedKph,
@@ -222,6 +225,7 @@ export async function loadTrainingHistory(from?: number, to?: number): Promise<T
 
 export type SaveTrainingSessionOptions = {
   localPlayerId?: string | number | null;
+  tabletSession?: ClubTabletSessionCredential | null;
 };
 
 function inferLocalPlayerId(
@@ -249,7 +253,7 @@ export async function saveTrainingSession(
   clubSession?: ClubTrainingSelection | null,
   options: SaveTrainingSessionOptions = {},
 ) {
-  const tabletSession = readStoredClubTabletSession();
+  const tabletSession = options.tabletSession ?? readStoredClubTabletSession();
   const localPlayerId = options.localPlayerId ?? inferLocalPlayerId(session, clubSession);
   if (tabletSession && localPlayerId == null) {
     throw new Error('Club Tablet could not identify the local athlete result. The session was not saved to the wrong profile.');

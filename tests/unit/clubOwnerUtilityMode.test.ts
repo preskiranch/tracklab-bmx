@@ -64,18 +64,33 @@ function entry(): ClubOwnerTrainingCoordinatorEntry {
   };
 }
 
-function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null) {
+function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = false) {
   const begin = vi.fn(async () => true);
   const finalize = vi.fn(async () => undefined);
   const cancelActiveGroup = vi.fn(async () => undefined);
+  const onTabletExerciseSaved = vi.fn(async () => undefined);
+  const onHistoryChanged = vi.fn();
   const props = {
     owner: {
-      authUser: { id: 'owner', profileKey: 'owner-profile' },
+      authUser: tablet ? null : { id: 'owner', profileKey: 'owner-profile' },
       ownedClub: null,
       clubOwnerActive: false,
-      clubTabletSessionActive: false,
-      clubTabletSession: null,
-      clubTrainingSelection: null,
+      clubTabletSessionActive: tablet,
+      clubTabletSession: tablet ? {
+        deviceId: 'tablet-one',
+        sessionToken: 'tablet-session-token',
+        session: {
+          clubId: 'club-one',
+          clubName: 'Preski Ranch',
+          studioRiderId: 'rider-one',
+          riderName: 'Rider One',
+          bikeDeviceId: 101,
+          expiresAt: Date.now() + 60_000,
+        },
+        heartbeatTtlMs: 60_000,
+        pollAfterMs: 15_000,
+      } : null,
+      clubTrainingSelection: tablet ? { clubId: 'club-one', studioRiderId: 'rider-one' } : null,
       playMode: 'local',
       preparation: { phase: 'idle', sessionId: null, playerIds: [], detail: '' },
       setPreparation: vi.fn(),
@@ -88,7 +103,8 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null) {
       startedAtRef: { current: null },
       completionRef: { current: null },
       cancelActiveGroup,
-      onHistoryChanged: vi.fn(),
+      onHistoryChanged,
+      onTabletExerciseSaved,
     },
     heartRateContext: {
       heartRate: {
@@ -115,7 +131,14 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null) {
       onOpen: vi.fn(),
     },
   };
-  return { props, begin, finalize, cancelActiveGroup };
+  return {
+    props,
+    begin,
+    finalize,
+    cancelActiveGroup,
+    onHistoryChanged,
+    onTabletExerciseSaved,
+  };
 }
 
 beforeEach(() => {
@@ -191,6 +214,128 @@ describe('ClubOwnerUtilityMode integration', () => {
     await vi.waitFor(() => expect(mocks.complete).toHaveBeenCalledWith(expect.objectContaining({ entry: group, result })));
     expect(finalize).not.toHaveBeenCalled();
     expect(mocks.saveLegacyGetPulled).not.toHaveBeenCalled();
+  });
+
+  it('releases a Club Tablet athlete only after Get Pulled history and heart rate finish saving', async () => {
+    let finishHistory: (() => void) | null = null;
+    mocks.saveLegacyGetPulled.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishHistory = resolve;
+    }));
+    const { props, finalize, onTabletExerciseSaved } = sharedProps(null, true);
+    renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
+      ...props,
+      mode: 'get-pulled',
+      viewProps: { demoMode: false },
+    } as unknown as ClubOwnerUtilityModeProps));
+
+    const result: GetPulledResult = {
+      id: 'tablet-pull',
+      playerId: 1,
+      riderId: 'rider-one',
+      riderName: 'Rider One',
+      startedAt: 2_000,
+      endedAt: 8_000,
+      durationSeconds: 6,
+      airSetting: 5,
+      distanceMeters: 70,
+      averageWatts: 650,
+      peakWatts: 1_200,
+      averageCadence: 150,
+      peakCadence: 210,
+      averageSpeedKph: 42,
+      peakSpeedKph: 58,
+    };
+    const onComplete = mocks.getPulledProps?.onComplete as (value: GetPulledResult) => void;
+    onComplete(result);
+
+    await vi.waitFor(() => expect(finalize).toHaveBeenCalledOnce());
+    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
+    finishHistory?.();
+    await vi.waitFor(() => expect(onTabletExerciseSaved).toHaveBeenCalledOnce());
+  });
+
+  it('refreshes regular account history even when independent heart-rate finalization fails', async () => {
+    const { props, finalize, onHistoryChanged, onTabletExerciseSaved } = sharedProps(null);
+    finalize.mockRejectedValueOnce(new Error('heart rate unavailable'));
+    renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
+      ...props,
+      mode: 'get-pulled',
+      viewProps: { demoMode: false },
+    } as unknown as ClubOwnerUtilityModeProps));
+
+    const onComplete = mocks.getPulledProps?.onComplete as (value: GetPulledResult) => void;
+    onComplete({
+      id: 'personal-pull',
+      playerId: 1,
+      riderId: 'account:owner',
+      riderName: 'Owner',
+      startedAt: 2_000,
+      endedAt: 8_000,
+      durationSeconds: 6,
+      airSetting: 5,
+      distanceMeters: 70,
+      averageWatts: 650,
+      peakWatts: 1_200,
+      averageCadence: 150,
+      peakCadence: 210,
+      averageSpeedKph: 42,
+      peakSpeedKph: 58,
+    });
+
+    await vi.waitFor(() => expect(onHistoryChanged).toHaveBeenCalledOnce());
+    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Club Tablet athlete selected when a completed Explore ride cannot be saved', async () => {
+    mocks.saveLegacyExplore.mockRejectedValueOnce(new Error('offline'));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { props, onTabletExerciseSaved } = sharedProps(null, true);
+    renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
+      ...props,
+      mode: 'explore',
+      viewProps: { demoMode: false },
+    } as unknown as ClubOwnerUtilityModeProps));
+
+    const onComplete = mocks.exploreProps?.onRideComplete as (value: Record<string, unknown>) => void;
+    onComplete({
+      sessionId: 'tablet-explore',
+      route: {
+        id: 'route-one',
+        origin: { lat: 38.5, lng: -121.5 },
+        destination: { lat: 38.6, lng: -121.4 },
+        originLabel: 'Studio',
+        destinationLabel: 'Finish',
+        travelMode: 'bicycle',
+        distanceMeters: 1_000,
+        durationSeconds: 600,
+        encodedPolyline: 'encoded',
+        createdAt: 1_000,
+      },
+      riders: [{
+        id: 'explore-rider-one',
+        clientId: 'local',
+        playerId: 1,
+        riderId: 'rider-one',
+        name: 'Rider One',
+        colorName: 'lime',
+        accent: '#7ade36',
+        distanceMeters: 1_000,
+        velocityMps: 0,
+        cadence: 90,
+        watts: 400,
+        signal: 1,
+        finishedAt: 8_000,
+        at: 8_000,
+      }],
+      startedAt: 2_000,
+      endedAt: 8_000,
+      durationMs: 6_000,
+      activeClockSegments: [{ startedAt: 2_000, endedAt: 8_000 }],
+    });
+
+    await vi.waitFor(() => expect(warning).toHaveBeenCalledWith(expect.stringContaining('Could not save Explore')));
+    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
+    warning.mockRestore();
   });
 
   it('fails a legacy Explore restore closed before any ride resumes', async () => {
