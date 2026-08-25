@@ -6785,6 +6785,9 @@ test('club athletes see only their own connection and never the studio roster', 
       }),
     });
   });
+  await page.route('**/api/public-track-mappings*', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ trackMappings: {}, customRoutes: [] }) });
+  });
   await page.route('**/api/training-sessions*', async (route) => {
     if (new URL(route.request().url()).pathname.endsWith('/stream')) {
       await route.abort();
@@ -6796,13 +6799,13 @@ test('club athletes see only their own connection and never the studio roster', 
         sessions: [{
           id: 'club:preski:phone-zone-metrics',
           activityType: 'bmx-race',
-          title: 'Mapped interval phone sync',
+          title: 'Chula Vista interval race',
           startedAt: now - 9_000,
           endedAt: now - 1_000,
           durationMs: 8_000,
           distanceMeters: 44.2,
-          trackId: 'mapped-interval',
-          trackName: 'Mapped interval',
+          trackId: 'chula-vista-elite-bmx',
+          trackName: 'Chula Vista Elite BMX',
           source: 'live',
           createdAt: now - 9_000,
           updatedAt: now - 1_000,
@@ -6852,6 +6855,48 @@ test('club athletes see only their own connection and never the studio roster', 
               }],
             }],
           },
+        }, {
+          id: 'club:preski:phone-sprint-metrics',
+          activityType: 'straight-sprint',
+          title: '300 ft sprint at Chula Vista Elite BMX',
+          startedAt: now - 30_000,
+          endedAt: now - 20_000,
+          durationMs: 10_000,
+          distanceMeters: 91.44,
+          trackId: 'chula-vista-elite-bmx',
+          trackName: 'Chula Vista Elite BMX',
+          source: 'live',
+          createdAt: now - 30_000,
+          updatedAt: now - 20_000,
+          club: {
+            id: 'club-preski-ranch',
+            name: 'Preski Ranch LLC',
+            studioRiderId: 'studio-rasheen',
+            riderName: 'Rasheen “The Machine” Hicks',
+            role: 'athlete',
+          },
+          details: {
+            sprintDistanceFeet: 300,
+            sprintAirSetting: 1,
+            summaries: [{
+              playerId: 1,
+              riderId: 'studio-rasheen',
+              riderName: 'Rasheen “The Machine” Hicks',
+              rank: 1,
+              finishTimeMs: 10_000,
+              thirtyFootTimeMs: 1_920,
+              distanceMeters: 91.44,
+              sampleCount: 38,
+              topSpeedKph: 43.1,
+              averageSpeedKph: 36.7,
+              topCadence: 176,
+              averageCadence: 161,
+              topWatts: 980,
+              averageWatts: 810,
+            }],
+            reactionTimesByPlayer: { 1: 205 },
+            zoneResults: [],
+          },
         }],
         totals: {},
       }),
@@ -6870,15 +6915,79 @@ test('club athletes see only their own connection and never the studio roster', 
   await expect(clubConnect.getByText('Bobby', { exact: true })).toHaveCount(0);
   await expect(clubConnect.getByText('Cali', { exact: true })).toHaveCount(0);
 
-  const recordedMetrics = page.getByText(/Complete recorded metrics · 1 mapped pedal zone/);
-  await expect(recordedMetrics).toBeVisible();
-  await recordedMetrics.click();
-  await expect(page.getByText(/Rank 1 · Finish 8\.00s · 30 ft 1\.640s · Reaction 178 ms/)).toBeVisible();
-  await expect(page.getByText('First straight drive', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Entry\/exit\/duration: 110 ms \/ 490 ms \/ 380 ms/)).toBeVisible();
-  await expect(page.getByText(/Cadence avg\/top: 169.5 \/ 181.0 rpm/)).toBeVisible();
-  await expect(page.getByText(/Power avg\/top: 891 \/ 1100 W · private/)).toBeVisible();
+  const spreadsheet = page.getByRole('region', { name: 'Training results spreadsheet' });
+  await expect(spreadsheet).toBeVisible();
+  await expect(spreadsheet.getByRole('tab', { name: /Power by rep/ })).toBeVisible();
+  await spreadsheet.getByRole('tab', { name: /Race & sprint/ }).click();
 
+  const resultTable = spreadsheet.getByRole('table', { name: /Race & sprint/ });
+  await expect(resultTable.getByRole('columnheader', { name: 'Finish' })).toBeVisible();
+  await expect(resultTable.getByRole('columnheader', { name: '30 ft split' })).toBeVisible();
+  const intervalRow = resultTable.getByRole('row').filter({ hasText: 'Chula Vista interval race' });
+  await expect(intervalRow).toContainText('Rasheen “The Machine” Hicks');
+  await expect(intervalRow).toContainText('8.00s');
+  await expect(intervalRow).toContainText('1.640s');
+  await expect(intervalRow).toContainText('178 ms');
+  await expect(intervalRow).toContainText('182.0 RPM');
+  await expect(intervalRow).toContainText('1,120 W');
+
+  await spreadsheet.getByRole('tab', { name: /Power by rep/ }).click();
+  const powerTable = spreadsheet.getByRole('table', { name: /Peak power by rider and repetition/ });
+  await expect(powerTable.getByRole('columnheader', { name: /Sprint 1 peak W/ })).toBeVisible();
+  await expect(powerTable.getByRole('columnheader', { name: /Race 1 peak W/ })).toBeVisible();
+  const powerRow = powerTable.getByRole('row').filter({ hasText: 'Rasheen “The Machine” Hicks' });
+  await expect(powerRow).toContainText('980');
+  await expect(powerRow).toContainText('1,120');
+
+  await spreadsheet.getByRole('tab', { name: /Race & sprint/ }).click();
+  await intervalRow.getByRole('button', { name: 'Review zones' }).click();
+  const zoneReview = page.getByLabel('Track and zone review for Chula Vista Elite BMX');
+  await expect(zoneReview).toBeVisible();
+  await expect(zoneReview.getByText(/current estimated catalog route/)).toBeVisible();
+  const zoneTable = zoneReview.getByRole('table', { name: /Recorded zone data/ });
+  const zoneButton = zoneTable.getByRole('button', { name: 'Zone 1: First straight drive' });
+  await expect(zoneButton).toHaveAttribute('aria-pressed', 'true');
+  const zoneRow = zoneTable.getByRole('row').filter({ hasText: 'First straight drive' });
+  await expect(zoneRow).toContainText('0.11s');
+  await expect(zoneRow).toContainText('0.49s');
+  await expect(zoneRow).toContainText('0.38s');
+  await expect(zoneRow).toContainText('169.5 / 181.0 rpm');
+  await expect(zoneRow).toContainText('891 / 1,100 W');
+
+  const zoneMap = zoneReview.locator('.training-zone-review__map');
+  const zoneGrid = zoneReview.getByRole('region', { name: 'Recorded track zone spreadsheet' });
+  const desktopMapBox = await zoneMap.boundingBox();
+  const desktopGridBox = await zoneGrid.boundingBox();
+  expect(desktopMapBox).not.toBeNull();
+  expect(desktopGridBox).not.toBeNull();
+  expect(desktopGridBox!.x).toBeGreaterThan(desktopMapBox!.x + desktopMapBox!.width - 2);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await zoneReview.scrollIntoViewIfNeeded();
+  const mobileMapBox = await zoneMap.boundingBox();
+  const mobileGridBox = await zoneGrid.boundingBox();
+  expect(mobileMapBox).not.toBeNull();
+  expect(mobileGridBox).not.toBeNull();
+  expect(mobileGridBox!.y).toBeGreaterThan(mobileMapBox!.y + mobileMapBox!.height);
+  expect(mobileMapBox!.width).toBeLessThanOrEqual(390);
+  expect(mobileGridBox!.width).toBeLessThanOrEqual(390);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  for (const control of [
+    spreadsheet.getByRole('button', { name: 'Numbers / Excel (.xlsx)' }),
+    zoneButton,
+    page.getByRole('button', { name: 'Close session details' }),
+  ]) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+
+  const downloadPromise = page.waitForEvent('download');
+  await spreadsheet.getByRole('button', { name: 'Numbers / Excel (.xlsx)' }).click();
+  const workbook = await downloadPromise;
+  expect(workbook.suggestedFilename()).toMatch(/^tracklab-training-\d{4}-\d{2}-\d{2}\.xlsx$/u);
+
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Club Live Monitor', exact: true })).toHaveCount(0);
   await expect(page.getByText('Owner-only view', { exact: true })).toHaveCount(0);

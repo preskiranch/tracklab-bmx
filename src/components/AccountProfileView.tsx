@@ -21,7 +21,6 @@ import type {
   DistanceUnit,
   SpeedUnit,
   StudioRider,
-  TrainingActivityType,
   TrainingSession,
 } from '../types';
 import {
@@ -37,8 +36,6 @@ import {
 import {
   downloadTrainingSession,
   loadTrainingHistory,
-  trainingSessionRaceSummaries,
-  trainingSessionReactionTimes,
   trainingSessionZoneResults,
   type TrainingHistoryResponse,
 } from '../lib/trainingHistory';
@@ -54,10 +51,10 @@ import {
 import {
   formatDistanceMeters,
   formatExploreDistanceMeters,
-  formatSpeedFromKph,
-  speedUnitLabel,
 } from '../units';
 import { RiderAvatar, RiderPhotoEditor } from './RiderAvatar';
+import { TrainingResultsSpreadsheet } from './TrainingResultsSpreadsheet';
+import { TrainingTrackZoneReview } from './TrainingTrackZoneReview';
 import './AccountProfileView.css';
 
 type AccountProfileViewProps = {
@@ -81,14 +78,6 @@ const emptyClubState: ClubConnectState = {
   canManageClub: false,
   ownedClub: null,
   memberships: [],
-};
-
-const activityLabels: Record<TrainingActivityType, string> = {
-  'bmx-race': 'BMX Race Interval',
-  'straight-sprint': 'Straight Sprint',
-  explore: 'Explore the World',
-  'get-pulled': 'Get Pulled',
-  'monitor-sprint': 'Monitor Sprint',
 };
 
 function localDateKey(timestamp: number) {
@@ -153,82 +142,6 @@ export function displayedProfileSessionTitle(session: TrainingSession, distanceU
   );
 }
 
-function sessionIcon(type: TrainingActivityType) {
-  if (type === 'explore') return <Compass size={19} />;
-  if (type === 'straight-sprint') return <Timer size={19} />;
-  if (type === 'get-pulled' || type === 'monitor-sprint') return <Activity size={19} />;
-  return <Bike size={19} />;
-}
-
-function summarizeSession(session: TrainingSession, distanceUnit: DistanceUnit) {
-  const details = session.details as {
-    summaries?: Array<{ riderName?: string; rank?: number; finishTimeMs?: number; topCadence?: number; topWatts?: number }>;
-    riders?: Array<{ name?: string; distanceMeters?: number; averageSpeedMph?: number }>;
-    durationSeconds?: number;
-    airSetting?: number;
-    sprintDistanceFeet?: number;
-    sprintAirSetting?: number;
-  };
-  if (session.activityType === 'explore') {
-    return (details.riders ?? []).map((rider) => (
-      `${rider.name ?? 'Rider'} · ${formatProfileExploreDistance(Number(rider.distanceMeters) || 0, distanceUnit)}`
-    )).join(' · ');
-  }
-  if (session.activityType === 'get-pulled') {
-    const rider = details.riders?.[0] as { name?: string; peakWatts?: number } | undefined;
-    return [
-      rider?.name,
-      details.durationSeconds ? `${details.durationSeconds}s pull` : undefined,
-      details.airSetting ? `Air ${details.airSetting}` : undefined,
-      rider?.peakWatts ? `${rider.peakWatts} W peak` : undefined,
-    ].filter(Boolean).join(' · ');
-  }
-  if (session.activityType === 'monitor-sprint') {
-    const rider = details.riders?.[0] as {
-      name?: string;
-      peakWatts?: number;
-      peakCadence?: number;
-      peakSpeedKph?: number;
-    } | undefined;
-    return [
-      rider?.name,
-      rider?.peakCadence ? `${Math.round(rider.peakCadence)} rpm peak` : undefined,
-      rider?.peakWatts ? `${Math.round(rider.peakWatts)} W peak` : undefined,
-    ].filter(Boolean).join(' · ');
-  }
-  const winner = (details.summaries ?? []).find((summary) => summary.rank === 1) ?? details.summaries?.[0];
-  const sprint = details.sprintDistanceFeet
-    ? `${formatDistanceMeters(details.sprintDistanceFeet * 0.3048, distanceUnit)}${details.sprintAirSetting ? ` · Air ${details.sprintAirSetting}` : ''}`
-    : '';
-  const result = winner?.riderName
-    ? `${winner.riderName}${winner.finishTimeMs != null ? ` · ${formatProfileRaceTime(winner.finishTimeMs, 2)}` : ''}`
-    : '';
-  return [sprint, result].filter(Boolean).join(' · ');
-}
-
-function privatePeakPower(session: TrainingSession) {
-  let peak = 0;
-  const visit = (value: unknown, key = '') => {
-    if (typeof value === 'number' && Number.isFinite(value) && /^(?:watts|topWatts|peakWatts|maxWatts|peakPower|maxPower)$/i.test(key)) {
-      peak = Math.max(peak, value);
-      return;
-    }
-    if (Array.isArray(value)) {
-      value.forEach((item) => visit(item));
-      return;
-    }
-    if (value && typeof value === 'object') {
-      Object.entries(value).forEach(([nestedKey, nestedValue]) => visit(nestedValue, nestedKey));
-    }
-  };
-  visit(session.details);
-  return peak > 0 ? Math.round(peak) : null;
-}
-
-function recordedNumber(value: number | null | undefined, digits = 1) {
-  return value != null && Number.isFinite(value) ? value.toFixed(digits) : '—';
-}
-
 export function formatProfileRecordedDistance(
   meters: number | null | undefined,
   distanceUnit: DistanceUnit,
@@ -253,18 +166,8 @@ export function formatProfileRecordedDistanceRange(
   return `${(startMeters * multiplier).toFixed(2)}–${(endMeters * multiplier).toFixed(2)} ${distanceUnit}`;
 }
 
-function recordedMilliseconds(value: number | null | undefined) {
-  return value != null && Number.isFinite(value) ? `${Math.round(value)} ms` : '—';
-}
-
 export function formatProfileRaceTime(value: number | null | undefined, precision: 2 | 3) {
   return value != null && Number.isFinite(value) ? `${(value / 1_000).toFixed(precision)}s` : '—';
-}
-
-function recordedSpeed(value: number | null | undefined, speedUnit: SpeedUnit) {
-  return value != null && Number.isFinite(value)
-    ? `${formatSpeedFromKph(value, speedUnit)} ${speedUnitLabel(speedUnit)}`
-    : '—';
 }
 
 export function privateHeartRateSessionId(session: TrainingSession) {
@@ -503,59 +406,6 @@ function PrivateHeartRateHistoryForSession({
   );
 }
 
-function CompleteRecordedMetrics({
-  session,
-  speedUnit,
-  distanceUnit,
-}: {
-  session: TrainingSession;
-  speedUnit: SpeedUnit;
-  distanceUnit: DistanceUnit;
-}) {
-  const summaries = trainingSessionRaceSummaries(session);
-  const zones = trainingSessionZoneResults(session);
-  const reactionTimes = trainingSessionReactionTimes(session);
-  if (summaries.length === 0 && zones.length === 0) return null;
-  const riderNames = new Map(summaries.map((summary) => [summary.playerId, summary.riderName ?? `Rider ${summary.playerId}`]));
-
-  return (
-    <details style={{ marginTop: 7 }}>
-      <summary style={{ color: '#344054', cursor: 'pointer', fontSize: 12, fontWeight: 800 }}>
-        Complete recorded metrics{zones.length > 0 ? ` · ${zones.length} mapped pedal ${zones.length === 1 ? 'zone' : 'zones'}` : ''}
-      </summary>
-      <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-        {summaries.map((summary) => (
-          <div key={`summary-${summary.playerId}`} style={{ border: '1px solid #d0d5dd', borderRadius: 8, display: 'grid', gap: 2, padding: 8 }}>
-            <strong>{summary.riderName ?? `Rider ${summary.playerId}`}</strong>
-            <small>
-              Rank {summary.rank ?? '—'} · Finish {formatProfileRaceTime(summary.finishTimeMs, 2)} · {profileSplitDistanceLabel(distanceUnit)} {formatProfileRaceTime(summary.thirtyFootTimeMs, 3)} · Reaction {recordedMilliseconds(reactionTimes[String(summary.playerId)])}
-            </small>
-            <small>Distance {formatProfileRecordedDistance(summary.distanceMeters, distanceUnit)} · {summary.sampleCount ?? 0} analysis points</small>
-            <small>Speed avg/top: {recordedSpeed(summary.averageSpeedKph, speedUnit)} / {recordedSpeed(summary.topSpeedKph, speedUnit)}</small>
-            <small>Cadence avg/top: {recordedNumber(summary.averageCadence)} / {recordedNumber(summary.topCadence)} rpm</small>
-            <small>Power avg/top: {recordedNumber(summary.averageWatts, 0)} / {recordedNumber(summary.topWatts, 0)} W · private</small>
-          </div>
-        ))}
-        {zones.map((zone) => (
-          <div key={zone.zoneId} style={{ border: '1px solid #d0d5dd', borderRadius: 8, display: 'grid', gap: 5, padding: 8 }}>
-            <strong>{zone.zoneName || zone.zoneId}</strong>
-            <small>{zone.zoneType} · {formatProfileRecordedDistanceRange(zone.startMeter, zone.endMeter, distanceUnit)} · ID {zone.zoneId}</small>
-            {zone.riders.map((rider) => (
-              <div key={`${zone.zoneId}-${rider.playerId}`} style={{ borderTop: '1px solid #eaecf0', display: 'grid', gap: 2, paddingTop: 5 }}>
-                <small><b>{riderNames.get(rider.playerId) ?? `Rider ${rider.playerId}`}</b> · {rider.sampleCount} analysis points</small>
-                <small>Entry/exit/duration: {recordedMilliseconds(rider.entryElapsedMs)} / {recordedMilliseconds(rider.exitElapsedMs)} / {recordedMilliseconds(rider.durationMs)}</small>
-                <small>Speed avg/top: {recordedSpeed(rider.averageSpeedKph, speedUnit)} / {recordedSpeed(rider.topSpeedKph, speedUnit)}</small>
-                <small>Cadence avg/top: {recordedNumber(rider.averageCadence)} / {recordedNumber(rider.topCadence)} rpm</small>
-                <small>Power avg/top: {recordedNumber(rider.averageWatts, 0)} / {recordedNumber(rider.topWatts, 0)} W · private</small>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function editableAccountName(value: string) {
   const match = value.trim().match(/^(.+?)\s*\(([^()]+)\)$/u);
   return {
@@ -597,7 +447,9 @@ export function AccountProfileView({
   const [clubPhotoDraft, setClubPhotoDraft] = useState(profile.photoUrl);
   const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
   const [clubBusyId, setClubBusyId] = useState<string | null>(null);
+  const [spreadsheetExportMessage, setSpreadsheetExportMessage] = useState('');
   const historyRequestRef = useRef(0);
+  const spreadsheetExportPendingRef = useRef(false);
 
   const loadHistory = useCallback((showLoading: boolean) => {
     const range = monthRange(month);
@@ -759,7 +611,20 @@ export function AccountProfileView({
     });
     return grouped;
   }, [history.sessions]);
-  const selectedSessions = sessionsByDay.get(selectedDate) ?? [];
+  const selectedSessions = useMemo(
+    () => [...(sessionsByDay.get(selectedDate) ?? [])]
+      .sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id)),
+    [selectedDate, sessionsByDay],
+  );
+  const selectedDateLabel = useMemo(
+    () => new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined, {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    }),
+    [selectedDate],
+  );
   const days = monthDays(month);
 
   const changeMonth = (offset: number) => {
@@ -767,6 +632,44 @@ export function AccountProfileView({
     setMonth(next);
     setSelectedDate(localDateKey(next.getTime()));
   };
+
+  const exportSelectedDay = useCallback(() => {
+    if (spreadsheetExportPendingRef.current || selectedSessions.length === 0) return;
+    spreadsheetExportPendingRef.current = true;
+    setSpreadsheetExportMessage('Preparing your Numbers / Excel workbook…');
+    void import('../lib/trainingSpreadsheetExport')
+      .then(({ downloadTrainingDaySpreadsheet }) => (
+        downloadTrainingDaySpreadsheet(selectedSessions, selectedDate)
+      ))
+      .then(() => setSpreadsheetExportMessage('Workbook downloaded. Open the .xlsx file in Numbers or Excel.'))
+      .catch((error: unknown) => {
+        setSpreadsheetExportMessage(`Workbook export failed: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        spreadsheetExportPendingRef.current = false;
+      });
+  }, [selectedDate, selectedSessions]);
+
+  const renderTrainingSessionDetail = useCallback((session: TrainingSession) => (
+    <div className="training-session-detail-content">
+      {trainingSessionZoneResults(session).length > 0 && (
+        <TrainingTrackZoneReview
+          session={session}
+          speedUnit={speedUnit}
+          distanceUnit={distanceUnit}
+        />
+      )}
+      <PrivateHeartRateHistoryForSession
+        session={session}
+        refreshKey={`${historyRevision}:${session.updatedAt}`}
+      />
+      <div className="training-session-downloads">
+        <span>Session files exclude Apple Watch health data.</span>
+        <button type="button" onClick={() => downloadTrainingSession(session, 'json')}><Download size={15} /> JSON</button>
+        <button type="button" onClick={() => downloadTrainingSession(session, 'csv')}><Download size={15} /> CSV</button>
+      </div>
+    </div>
+  ), [distanceUnit, historyRevision, speedUnit]);
 
   return (
     <div className="account-profile-view">
@@ -916,6 +819,7 @@ export function AccountProfileView({
                 <button
                   className={`${key === selectedDate ? 'selected' : ''}${count > 0 ? ' has-sessions' : ''}`}
                   type="button"
+                  aria-pressed={key === selectedDate}
                   aria-label={`${day.toLocaleDateString()}, ${count} training sessions`}
                   onClick={() => setSelectedDate(key)}
                   key={key}
@@ -929,60 +833,19 @@ export function AccountProfileView({
           {status !== 'ready' || message ? <p className={`training-history-message ${status}`}>{message}</p> : null}
         </section>
 
-        <section className="training-day-sessions" aria-label="Selected day training sessions">
-          <header>
-            <span className="eyebrow">Selected day</span>
-            <h2>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
-            <p>{selectedSessions.length} saved {selectedSessions.length === 1 ? 'session' : 'sessions'}</p>
-          </header>
-          {selectedSessions.length > 0 ? selectedSessions.map((session) => (
-            <article className={`training-session-card ${session.activityType}`} key={session.id}>
-              <div className="training-session-icon">{sessionIcon(session.activityType)}</div>
-              <div className="training-session-copy">
-                <span>{activityLabels[session.activityType]}</span>
-                <strong>{displayedProfileSessionTitle(session, distanceUnit)}</strong>
-                <small>
-                  {new Date(session.startedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                  {' · '}{formatDuration(session.durationMs)}{' · '}{session.activityType === 'explore'
-                    ? formatProfileExploreDistance(session.distanceMeters, distanceUnit)
-                    : formatDistanceMeters(session.distanceMeters, distanceUnit)}
-                </small>
-                {session.club && (
-                  <small>
-                    {session.club.role === 'owner'
-                      ? `${session.club.riderName} · Training at ${session.club.name}`
-                      : `Training at ${session.club.name}`}
-                  </small>
-                )}
-                {summarizeSession(session, distanceUnit) && <p>{summarizeSession(session, distanceUnit)}</p>}
-                {privatePeakPower(session) != null && (
-                  <small>Private power · {privatePeakPower(session)} W peak · visible only to you</small>
-                )}
-                <PrivateHeartRateHistoryForSession
-                  session={session}
-                  refreshKey={`${historyRevision}:${session.updatedAt}`}
-                />
-                <CompleteRecordedMetrics
-                  session={session}
-                  speedUnit={speedUnit}
-                  distanceUnit={distanceUnit}
-                />
-              </div>
-              <div className="training-session-downloads">
-                <button type="button" onClick={() => downloadTrainingSession(session, 'json')}><Download size={15} /> JSON</button>
-                <button type="button" onClick={() => downloadTrainingSession(session, 'csv')}><Download size={15} /> CSV</button>
-              </div>
-            </article>
-          )) : (
-            <div className="training-day-empty">
-              <CalendarDays size={36} />
-              <strong>No training saved on this day</strong>
-              <p>Finished races, individual sprints, and Explore rides will appear here automatically.</p>
-            </div>
-          )}
-        </section>
+        <TrainingResultsSpreadsheet
+          sessions={selectedSessions}
+          dateLabel={selectedDateLabel}
+          speedUnit={speedUnit}
+          distanceUnit={distanceUnit}
+          onExportWorkbook={exportSelectedDay}
+          renderSessionDetail={renderTrainingSessionDetail}
+        />
+        {spreadsheetExportMessage && (
+          <p className="training-spreadsheet-export-status" role="status">{spreadsheetExportMessage}</p>
+        )}
       </div>
-      <small className="account-history-sync-note">Calendar month: {monthKey(month)} · Live cloud sync is active. JSON and CSV contain the non-health session record. Apple Watch data stays in a protected panel; club views are summary-only and require rider consent.</small>
+      <small className="account-history-sync-note">Calendar month: {monthKey(month)} · Live cloud sync is active. The in-app spreadsheet and Numbers / Excel workbook contain the non-health session record. Apple Watch data stays in a protected panel; club views are summary-only and require rider consent.</small>
     </div>
   );
 }

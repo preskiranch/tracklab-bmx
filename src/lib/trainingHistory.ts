@@ -37,6 +37,30 @@ export type TrainingSessionRaceSummary = Partial<RaceSummaryEntry> & {
   riderName?: string;
 };
 
+function privateHealthPayloadKey(key: string) {
+  const normalized = key.replace(/[^a-zA-Z0-9]/gu, '').toLocaleLowerCase();
+  const tokens = key
+    .replace(/([a-z0-9])([A-Z])/gu, '$1 $2')
+    .toLocaleLowerCase()
+    .split(/[^a-z0-9]+/gu)
+    .filter(Boolean);
+  return normalized.includes('heartrate')
+    || normalized.includes('health')
+    || normalized.includes('applewatch')
+    || normalized.startsWith('watch')
+    || normalized.includes('bpm')
+    || normalized.includes('pulse')
+    || normalized.includes('cardiac')
+    || normalized.includes('bloodoxygen')
+    || normalized.includes('oxygensaturation')
+    || normalized.includes('spo2')
+    || normalized.includes('ecg')
+    || normalized.includes('ekg')
+    || normalized.startsWith('hr')
+    || tokens.includes('heart')
+    || tokens.includes('hr');
+}
+
 export function sanitizeRecordedBikeMetrics(value: unknown, depth = 0): unknown {
   if (depth > 32) return null;
   if (Array.isArray(value)) {
@@ -44,29 +68,49 @@ export function sanitizeRecordedBikeMetrics(value: unknown, depth = 0): unknown 
   }
   if (!value || typeof value !== 'object') return value;
 
-  return Object.fromEntries(Object.entries(value).map(([key, nested]) => {
+  return Object.fromEntries(Object.entries(value).flatMap(([key, nested]) => {
+    if (privateHealthPayloadKey(key)) return [];
     const metricKind = recordedBikeMetricKind(key);
     if (metricKind === 'cadence') {
-      return [key, nested == null ? null : acceptedBikeCadenceRpm(nested)];
+      return [[key, nested == null ? null : acceptedBikeCadenceRpm(nested)]];
     }
     if (metricKind === 'speed-kph') {
-      return [key, nested == null ? null : acceptedTrainingSpeedKph(nested)];
+      return [[key, nested == null ? null : acceptedTrainingSpeedKph(nested)]];
     }
     if (metricKind === 'speed-mph') {
-      return [key, nested == null ? null : acceptedTrainingSpeedMph(nested)];
+      return [[key, nested == null ? null : acceptedTrainingSpeedMph(nested)]];
     }
     if (metricKind === 'speed-mps') {
       const speedMps = Number(nested);
-      return [key, nested == null || acceptedTrainingSpeedKph(speedMps * 3.6) == null ? null : speedMps];
+      return [[key, nested == null || acceptedTrainingSpeedKph(speedMps * 3.6) == null ? null : speedMps]];
     }
-    return [key, sanitizeRecordedBikeMetrics(nested, depth + 1)];
+    return [[key, sanitizeRecordedBikeMetrics(nested, depth + 1)]];
   }));
 }
 
-function sanitizedTrainingSession(session: TrainingSession): TrainingSession {
+export function sanitizeTrainingSessionForExport(session: TrainingSession): TrainingSession {
+  const club = session.club && typeof session.club === 'object' ? {
+    id: String(session.club.id ?? ''),
+    name: String(session.club.name ?? ''),
+    studioRiderId: String(session.club.studioRiderId ?? ''),
+    riderName: String(session.club.riderName ?? ''),
+    role: session.club.role === 'owner' ? 'owner' as const : 'athlete' as const,
+  } : null;
   return {
-    ...session,
+    id: String(session.id),
+    activityType: normalizeActivityType(session.activityType),
+    title: String(session.title),
+    startedAt: Number(session.startedAt),
+    endedAt: Number(session.endedAt),
+    durationMs: Math.max(0, Number(session.durationMs) || 0),
+    distanceMeters: Math.max(0, Number(session.distanceMeters) || 0),
+    ...(typeof session.trackId === 'string' && session.trackId ? { trackId: session.trackId } : {}),
+    ...(typeof session.trackName === 'string' && session.trackName ? { trackName: session.trackName } : {}),
+    source: session.source === 'imported' ? 'imported' : 'live',
+    ...(club ? { club } : {}),
     details: sanitizeRecordedBikeMetrics(session.details) as Record<string, unknown>,
+    createdAt: Number(session.createdAt) || Number(session.startedAt),
+    updatedAt: Number(session.updatedAt) || Number(session.endedAt),
   };
 }
 
@@ -121,6 +165,13 @@ function normalizeTrainingSession(value: Partial<TrainingSession>): TrainingSess
   const startedAt = Number(value.startedAt);
   const endedAt = Number(value.endedAt);
   if (!id || !Number.isFinite(startedAt) || !Number.isFinite(endedAt)) return null;
+  const club = value.club && typeof value.club === 'object' ? {
+    id: String(value.club.id ?? ''),
+    name: String(value.club.name ?? ''),
+    studioRiderId: String(value.club.studioRiderId ?? ''),
+    riderName: String(value.club.riderName ?? ''),
+    role: value.club.role === 'owner' ? 'owner' as const : 'athlete' as const,
+  } : null;
   return {
     id,
     activityType: normalizeActivityType(value.activityType),
@@ -132,7 +183,7 @@ function normalizeTrainingSession(value: Partial<TrainingSession>): TrainingSess
     ...(typeof value.trackId === 'string' && value.trackId ? { trackId: value.trackId } : {}),
     ...(typeof value.trackName === 'string' && value.trackName ? { trackName: value.trackName } : {}),
     source: value.source === 'imported' ? 'imported' : 'live',
-    ...(value.club && typeof value.club === 'object' ? { club: value.club } : {}),
+    ...(club ? { club } : {}),
     details: value.details && typeof value.details === 'object'
       ? sanitizeRecordedBikeMetrics(value.details) as Record<string, unknown>
       : {},
@@ -237,11 +288,17 @@ function downloadFile(name: string, type: string, content: string) {
 
 function csvCell(value: unknown) {
   const text = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
+  // Spreadsheet apps can execute a quoted CSV field as a formula. Leave
+  // numeric values untouched while forcing untrusted formula-looking text to
+  // remain text when the file is opened in Numbers, Excel, or similar apps.
+  const safeText = typeof value === 'string' && /^[\s\u0000-\u001f\u007f-\u009f\uFEFF]*[=+@-]/u.test(text)
+    ? `'${text}`
+    : text;
+  return `"${safeText.replace(/"/g, '""')}"`;
 }
 
 export function trainingSessionCsv(session: TrainingSession) {
-  const safeSession = sanitizedTrainingSession(session);
+  const safeSession = sanitizeTrainingSessionForExport(session);
   const reactionTimes = trainingSessionReactionTimes(safeSession);
   const summaryRows = trainingSessionRaceSummaries(safeSession).map((summary) => {
     return [
@@ -316,13 +373,19 @@ export function trainingSessionCsv(session: TrainingSession) {
   return `${sections.join('\n\n')}\n`;
 }
 
+export function trainingSessionCsvFile(session: TrainingSession) {
+  // The UTF-8 BOM keeps rider and track names intact in spreadsheet apps that
+  // otherwise guess a legacy encoding. CRLF is the most portable CSV newline.
+  return `\uFEFF${trainingSessionCsv(session).replace(/\r?\n/g, '\r\n')}`;
+}
+
 export function downloadTrainingSession(session: TrainingSession, format: 'json' | 'csv') {
-  const safeSession = sanitizedTrainingSession(session);
+  const safeSession = sanitizeTrainingSessionForExport(session);
   const day = new Date(safeSession.startedAt).toISOString().slice(0, 10);
   const base = `tracklab-${safeSession.activityType}-${day}-${safeSession.id.replace(/[^a-z0-9_-]+/gi, '-').slice(0, 48)}`;
   if (format === 'json') {
     downloadFile(`${base}.json`, 'application/json', `${JSON.stringify(safeSession, null, 2)}\n`);
     return;
   }
-  downloadFile(`${base}.csv`, 'text/csv;charset=utf-8', trainingSessionCsv(safeSession));
+  downloadFile(`${base}.csv`, 'text/csv;charset=utf-8', trainingSessionCsvFile(safeSession));
 }

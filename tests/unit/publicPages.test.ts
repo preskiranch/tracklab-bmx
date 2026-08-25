@@ -29,7 +29,7 @@ describe('public App Store pages', () => {
     expect(markup).toContain('starts each four-hour studio connection with one');
     expect(markup).toContain('club owner can disconnect studio');
     expect(markup).toContain('does not automatically erase heart-rate samples already saved');
-    expect(markup).toContain('excluded from generic session JSON/CSV and public or club exports');
+    expect(markup).toContain('excluded from generic session JSON/CSV, selected-day Numbers/Excel workbooks, and public or club exports');
     expect(markup).toContain('must not be enabled for a minor without the permission');
     expect(markup).toContain('does not store personal health information in iCloud');
     expect(markup).toContain('Explicitly accepted friends can see whether the other account is');

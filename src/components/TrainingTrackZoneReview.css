@@ -1,0 +1,1 @@
+.training-zone-review__layout{display:grid;grid-template-columns:minmax(0,3fr) minmax(14rem,2fr);gap:12px}@media(max-width:760px){.training-zone-review__layout{grid-template-columns:1fr}}

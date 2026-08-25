@@ -57,6 +57,7 @@ import {
   cleanWattbikeCadenceRpm,
   maximumAcceptedWattbikeCadenceRpm,
   maximumAcceptedTrainingSpeedKph,
+  maximumAcceptedTrainingSpeedMph,
 } from '../bridge/bike-metric-sanity.mjs';
 import {
   createRacerSubscriptionCheckout,
@@ -2930,8 +2931,18 @@ function privateHeartRatePayloadKey(key) {
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
   return normalized.includes('heartrate')
-    || normalized.includes('healthkit')
+    || normalized.includes('health')
+    || normalized.includes('applewatch')
+    || normalized.startsWith('watch')
     || normalized.includes('bpm')
+    || normalized.includes('pulse')
+    || normalized.includes('cardiac')
+    || normalized.includes('bloodoxygen')
+    || normalized.includes('oxygensaturation')
+    || normalized.includes('spo2')
+    || normalized.includes('ecg')
+    || normalized.includes('ekg')
+    || normalized.startsWith('hr')
     || tokens.includes('heart')
     || tokens.includes('hr');
 }
@@ -3091,9 +3102,12 @@ function publicTrainingSession(session, clubRole) {
     _clubRiderName,
     ...publicSession
   } = session;
+  const healthSafePublicSession = stripPrivateHeartRateFields(publicSession);
   const privateHealthRedactedSession = {
-    ...publicSession,
-    details: sanitizeRecordedBikeMetrics(stripPrivateHeartRateFields(publicSession.details ?? {})),
+    ...healthSafePublicSession,
+    details: sanitizeRecordedBikeMetrics(stripPrivateHeartRateFields(
+      healthSafePublicSession.details ?? {},
+    )),
   };
   const visiblePublicSession = clubRole === 'owner'
     ? { ...privateHealthRedactedSession, details: redactPrivatePower(privateHealthRedactedSession.details) }
@@ -3134,6 +3148,144 @@ function normalizedRiderClaimName(value) {
   return sanitizeText(value, '', 120).replace(/\s+/g, ' ').trim().toLocaleLowerCase();
 }
 
+function projectedRiderIdentity(entry) {
+  const rawPlayerId = entry?.playerId;
+  const numericPlayerId = rawPlayerId == null ? Number.NaN : Number(rawPlayerId);
+  const playerId = Number.isFinite(numericPlayerId)
+    ? numericPlayerId
+    : sanitizeText(rawPlayerId, '', 160);
+  const riderId = sanitizeText(entry?.riderId, '', 160);
+  const studioRiderId = sanitizeText(entry?.studioRiderId, '', 160);
+  const name = sanitizeText(entry?.name, '', 120);
+  const riderName = sanitizeText(entry?.riderName, '', 120);
+  return {
+    ...(playerId !== '' ? { playerId } : {}),
+    ...(riderId ? { riderId } : {}),
+    ...(studioRiderId ? { studioRiderId } : {}),
+    ...(name ? { name } : {}),
+    ...(riderName ? { riderName } : {}),
+  };
+}
+
+function projectedNumber(value, maximum = 10_000_000) {
+  const number = Number(value);
+  return value == null || !Number.isFinite(number)
+    ? null
+    : Math.min(maximum, Math.max(0, number));
+}
+
+function projectedBikeResult(entry) {
+  const resultStatus = entry?.resultStatus === 'dnf' || entry?.resultStatus === 'finished'
+    ? entry.resultStatus
+    : null;
+  const rank = projectedNumber(entry?.rank, 10_000);
+  const finishTimeMs = projectedNumber(entry?.finishTimeMs, 7 * 24 * 60 * 60 * 1000);
+  const thirtyFootTimeMs = projectedNumber(entry?.thirtyFootTimeMs, 7 * 24 * 60 * 60 * 1000);
+  const distanceMeters = projectedNumber(entry?.distanceMeters, 2_000_000);
+  const sampleCount = projectedNumber(entry?.sampleCount, 10_000_000);
+  const topSpeedKph = projectedNumber(entry?.topSpeedKph, maximumAcceptedTrainingSpeedKph);
+  const peakSpeedKph = projectedNumber(entry?.peakSpeedKph, maximumAcceptedTrainingSpeedKph);
+  const averageSpeedKph = projectedNumber(entry?.averageSpeedKph, maximumAcceptedTrainingSpeedKph);
+  const topSpeedMph = projectedNumber(entry?.topSpeedMph, maximumAcceptedTrainingSpeedMph);
+  const peakSpeedMph = projectedNumber(entry?.peakSpeedMph, maximumAcceptedTrainingSpeedMph);
+  const averageSpeedMph = projectedNumber(entry?.averageSpeedMph, maximumAcceptedTrainingSpeedMph);
+  const topCadence = projectedNumber(entry?.topCadence, maximumAcceptedWattbikeCadenceRpm);
+  const peakCadence = projectedNumber(entry?.peakCadence, maximumAcceptedWattbikeCadenceRpm);
+  const averageCadence = projectedNumber(entry?.averageCadence, maximumAcceptedWattbikeCadenceRpm);
+  const topWatts = projectedNumber(entry?.topWatts, 100_000);
+  const peakWatts = projectedNumber(entry?.peakWatts, 100_000);
+  const averageWatts = projectedNumber(entry?.averageWatts, 100_000);
+  const elevationGainMeters = projectedNumber(entry?.elevationGainMeters, 100_000);
+  const elevationLossMeters = projectedNumber(entry?.elevationLossMeters, 100_000);
+  return {
+    ...projectedRiderIdentity(entry),
+    ...(resultStatus ? { resultStatus } : {}),
+    ...(rank != null ? { rank } : {}),
+    ...(finishTimeMs != null ? { finishTimeMs } : {}),
+    ...(thirtyFootTimeMs != null ? { thirtyFootTimeMs } : {}),
+    ...(distanceMeters != null ? { distanceMeters } : {}),
+    ...(sampleCount != null ? { sampleCount } : {}),
+    ...(topSpeedKph != null ? { topSpeedKph } : {}),
+    ...(peakSpeedKph != null ? { peakSpeedKph } : {}),
+    ...(averageSpeedKph != null ? { averageSpeedKph } : {}),
+    ...(topSpeedMph != null ? { topSpeedMph } : {}),
+    ...(peakSpeedMph != null ? { peakSpeedMph } : {}),
+    ...(averageSpeedMph != null ? { averageSpeedMph } : {}),
+    ...(topCadence != null ? { topCadence } : {}),
+    ...(peakCadence != null ? { peakCadence } : {}),
+    ...(averageCadence != null ? { averageCadence } : {}),
+    ...(topWatts != null ? { topWatts } : {}),
+    ...(peakWatts != null ? { peakWatts } : {}),
+    ...(averageWatts != null ? { averageWatts } : {}),
+    ...(elevationGainMeters != null ? { elevationGainMeters } : {}),
+    ...(elevationLossMeters != null ? { elevationLossMeters } : {}),
+  };
+}
+
+function projectedRaceZone(zone, playerIds) {
+  if (!zone || typeof zone !== 'object') return null;
+  const riders = (Array.isArray(zone.riders) ? zone.riders : [])
+    .filter((rider) => playerIds.has(Number(rider?.playerId)))
+    .map((rider) => {
+      const playerId = projectedNumber(rider?.playerId, maxRaceBikeCount);
+      const sampleCount = projectedNumber(rider?.sampleCount, 10_000_000);
+      const entryElapsedMs = projectedNumber(rider?.entryElapsedMs, 7 * 24 * 60 * 60 * 1000);
+      const exitElapsedMs = projectedNumber(rider?.exitElapsedMs, 7 * 24 * 60 * 60 * 1000);
+      const durationMs = projectedNumber(rider?.durationMs, 7 * 24 * 60 * 60 * 1000);
+      const topSpeedKph = projectedNumber(rider?.topSpeedKph, maximumAcceptedTrainingSpeedKph);
+      const averageSpeedKph = projectedNumber(rider?.averageSpeedKph, maximumAcceptedTrainingSpeedKph);
+      const topCadence = projectedNumber(rider?.topCadence, maximumAcceptedWattbikeCadenceRpm);
+      const averageCadence = projectedNumber(rider?.averageCadence, maximumAcceptedWattbikeCadenceRpm);
+      const topWatts = projectedNumber(rider?.topWatts, 100_000);
+      const averageWatts = projectedNumber(rider?.averageWatts, 100_000);
+      return {
+        ...(playerId != null ? { playerId } : {}),
+        ...(sampleCount != null ? { sampleCount } : {}),
+        ...(entryElapsedMs != null ? { entryElapsedMs } : {}),
+        ...(exitElapsedMs != null ? { exitElapsedMs } : {}),
+        ...(durationMs != null ? { durationMs } : {}),
+        ...(topSpeedKph != null ? { topSpeedKph } : {}),
+        ...(averageSpeedKph != null ? { averageSpeedKph } : {}),
+        ...(topCadence != null ? { topCadence } : {}),
+        ...(averageCadence != null ? { averageCadence } : {}),
+        ...(topWatts != null ? { topWatts } : {}),
+        ...(averageWatts != null ? { averageWatts } : {}),
+      };
+    });
+  if (riders.length === 0) return null;
+  const zoneId = sanitizeText(zone.zoneId, '', 180);
+  const zoneName = sanitizeText(zone.zoneName, '', 180);
+  const zoneType = sanitizeText(zone.zoneType, '', 80);
+  const startMeter = projectedNumber(zone.startMeter, 2_000_000);
+  const endMeter = projectedNumber(zone.endMeter, 2_000_000);
+  return {
+    ...(zoneId ? { zoneId } : {}),
+    ...(zoneName ? { zoneName } : {}),
+    ...(zoneType ? { zoneType } : {}),
+    ...(startMeter != null ? { startMeter } : {}),
+    ...(endMeter != null ? { endMeter } : {}),
+    riders,
+  };
+}
+
+function projectedExploreClockSegments(value) {
+  return (Array.isArray(value) ? value : []).slice(0, 10_000).flatMap((segment) => (
+    segment && typeof segment === 'object'
+      ? [{
+        ...(projectedNumber(segment.startedAt, Number.MAX_SAFE_INTEGER) != null
+          ? { startedAt: projectedNumber(segment.startedAt, Number.MAX_SAFE_INTEGER) }
+          : {}),
+        ...(projectedNumber(segment.endedAt, Number.MAX_SAFE_INTEGER) != null
+          ? { endedAt: projectedNumber(segment.endedAt, Number.MAX_SAFE_INTEGER) }
+          : {}),
+        ...(projectedNumber(segment.activeElapsedAtStartMs, 7 * 24 * 60 * 60 * 1000) != null
+          ? { activeElapsedAtStartMs: projectedNumber(segment.activeElapsedAtStartMs, 7 * 24 * 60 * 60 * 1000) }
+          : {}),
+      }]
+      : []
+  ));
+}
+
 function projectClubTrainingSession(session, membership) {
   const visibleSession = publicTrainingSession(session);
   if (!visibleSession) return null;
@@ -3142,37 +3294,76 @@ function projectClubTrainingSession(session, membership) {
   );
   const riderId = membership.studioRiderId;
   const legacyName = normalizedRiderClaimName(membership.riderName);
+  const attributedStudioRiderId = sanitizeText(session?._studioRiderId, '', 160);
+  const attributedClubId = sanitizeText(session?._clubId, '', 160);
+  if (
+    Boolean(attributedStudioRiderId) !== Boolean(attributedClubId)
+    || (attributedStudioRiderId && attributedStudioRiderId !== riderId)
+    || (attributedClubId && attributedClubId !== membership.clubId)
+  ) return null;
+  const sessionUpdatedAt = Number(session?.updatedAt);
+  const membershipClaimedAt = Number(membership?.claimedAt);
+  const legacyNameFallbackAllowed = !attributedStudioRiderId
+    && !attributedClubId
+    && Number.isFinite(sessionUpdatedAt)
+    && Number.isFinite(membershipClaimedAt)
+    && sessionUpdatedAt < membershipClaimedAt;
   const matchesRider = (entry) => {
     const entryRiderId = sanitizeText(entry?.riderId ?? entry?.studioRiderId, '', 160);
     if (entryRiderId) return entryRiderId === riderId;
-    return Boolean(legacyName) && normalizedRiderClaimName(entry?.riderName ?? entry?.name) === legacyName;
+    return legacyNameFallbackAllowed
+      && Boolean(legacyName)
+      && normalizedRiderClaimName(entry?.riderName ?? entry?.name) === legacyName;
   };
+  const club = {
+    id: membership.clubId,
+    name: membership.clubName,
+    studioRiderId: membership.studioRiderId,
+    riderName: membership.riderName,
+    role: 'athlete',
+  };
+  const detailClub = { id: membership.clubId, name: membership.clubName, role: 'athlete' };
 
   if (session.activityType === 'explore') {
-    const riders = Array.isArray(details.riders) ? details.riders.filter(matchesRider) : [];
+    const riders = Array.isArray(details.riders)
+      ? details.riders.filter(matchesRider).map(projectedBikeResult)
+      : [];
     if (riders.length === 0) return null;
     const distanceMeters = Math.max(0, ...riders.map((rider) => finiteNumber(rider.distanceMeters, 0)));
     return {
       ...visibleSession,
       id: `club:${membership.clubId}:${session.id}`,
       distanceMeters,
-      club: {
-        id: membership.clubId,
-        name: membership.clubName,
-        studioRiderId: membership.studioRiderId,
-        riderName: membership.riderName,
-        role: 'athlete',
-      },
+      club,
       details: {
-        ...details,
+        ...(sanitizeText(details.originLabel, '', 180)
+          ? { originLabel: sanitizeText(details.originLabel, '', 180) }
+          : {}),
+        ...(sanitizeText(details.destinationLabel, '', 180)
+          ? { destinationLabel: sanitizeText(details.destinationLabel, '', 180) }
+          : {}),
+        ...(['bicycle', 'drive', 'car'].includes(details.travelMode)
+          ? { travelMode: details.travelMode }
+          : {}),
+        ...(projectedNumber(details.elevationGainMeters, 100_000) != null
+          ? { elevationGainMeters: projectedNumber(details.elevationGainMeters, 100_000) }
+          : {}),
+        ...(projectedNumber(details.elevationLossMeters, 100_000) != null
+          ? { elevationLossMeters: projectedNumber(details.elevationLossMeters, 100_000) }
+          : {}),
+        ...(Array.isArray(details.activeClockSegments)
+          ? { activeClockSegments: projectedExploreClockSegments(details.activeClockSegments) }
+          : {}),
         riders,
-        club: { id: membership.clubId, name: membership.clubName, role: 'athlete' },
+        club: detailClub,
       },
     };
   }
 
   if (session.activityType === 'get-pulled') {
-    const riders = Array.isArray(details.riders) ? details.riders.filter(matchesRider) : [];
+    const riders = Array.isArray(details.riders)
+      ? details.riders.filter(matchesRider).map(projectedBikeResult)
+      : [];
     if (riders.length === 0) return null;
     const durationSeconds = Math.round(boundedNumber(details.durationSeconds, 1, 300, 3));
     const airSetting = Math.round(boundedNumber(details.airSetting, 1, 10, 1));
@@ -3180,38 +3371,46 @@ function projectClubTrainingSession(session, membership) {
       ...visibleSession,
       id: `club:${membership.clubId}:${session.id}`,
       distanceMeters: Math.max(0, ...riders.map((rider) => finiteNumber(rider.distanceMeters, 0))),
-      club: {
-        id: membership.clubId,
-        name: membership.clubName,
-        studioRiderId: membership.studioRiderId,
-        riderName: membership.riderName,
-        role: 'athlete',
-      },
+      club,
       details: {
         durationSeconds,
         airSetting,
         recordKey: `${durationSeconds}s-air-${airSetting}`,
         riders,
-        club: { id: membership.clubId, name: membership.clubName, role: 'athlete' },
+        club: detailClub,
       },
     };
   }
 
-  const summaries = Array.isArray(details.summaries) ? details.summaries.filter(matchesRider) : [];
+  if (session.activityType === 'monitor-sprint') {
+    const riders = Array.isArray(details.riders)
+      ? details.riders.filter(matchesRider).map(projectedBikeResult)
+      : [];
+    if (riders.length === 0) return null;
+    return {
+      ...visibleSession,
+      id: `club:${membership.clubId}:${session.id}`,
+      distanceMeters: Math.max(0, ...riders.map((rider) => finiteNumber(rider.distanceMeters, 0))),
+      club,
+      details: { riders, club: detailClub },
+    };
+  }
+
+  const summaries = Array.isArray(details.summaries)
+    ? details.summaries.filter(matchesRider).map(projectedBikeResult)
+    : [];
   if (summaries.length === 0) return null;
   const playerIds = new Set(summaries.map((summary) => Number(summary.playerId)).filter(Number.isFinite));
   const zoneResults = Array.isArray(details.zoneResults)
-    ? details.zoneResults.map((zone) => ({
-      ...zone,
-      riders: Array.isArray(zone?.riders)
-        ? zone.riders.filter((rider) => playerIds.has(Number(rider?.playerId)))
-        : [],
-    }))
+    ? details.zoneResults.map((zone) => projectedRaceZone(zone, playerIds)).filter(Boolean)
     : [];
   const reactionTimesByPlayer = details.reactionTimesByPlayer && typeof details.reactionTimesByPlayer === 'object'
-    ? Object.fromEntries(Object.entries(details.reactionTimesByPlayer).filter(([playerId]) => (
-      playerIds.has(Number(playerId))
-    )))
+    ? Object.fromEntries(Object.entries(details.reactionTimesByPlayer).flatMap(([playerId, value]) => {
+      const reactionTime = projectedNumber(value, 60_000);
+      return playerIds.has(Number(playerId)) && reactionTime != null
+        ? [[playerId, reactionTime]]
+        : [];
+    }))
     : {};
   const distanceMeters = Math.max(0, ...summaries.map((summary) => finiteNumber(summary.distanceMeters, 0)));
   const finishTimeMs = Math.max(0, ...summaries.map((summary) => finiteNumber(summary.finishTimeMs, 0)));
@@ -3220,20 +3419,56 @@ function projectClubTrainingSession(session, membership) {
     id: `club:${membership.clubId}:${session.id}`,
     distanceMeters,
     durationMs: finishTimeMs || session.durationMs,
-    club: {
-      id: membership.clubId,
-      name: membership.clubName,
-      studioRiderId: membership.studioRiderId,
-      riderName: membership.riderName,
-      role: 'athlete',
-    },
+    club,
     details: {
-      ...details,
       summaries,
       zoneResults,
       reactionTimesByPlayer,
       events: [],
-      club: { id: membership.clubId, name: membership.clubName, role: 'athlete' },
+      ...(Array.isArray(details.selectedMetrics)
+        ? { selectedMetrics: details.selectedMetrics.filter((metric) => (
+          ['cadence', 'speed', 'power', 'reaction'].includes(metric)
+        )).slice(0, 4) }
+        : {}),
+      ...(projectedNumber(details.lapCount, 20) != null
+        ? { lapCount: Math.max(1, Math.round(projectedNumber(details.lapCount, 20))) }
+        : {}),
+      ...(['default', 'amateur', 'pro'].includes(details.routeVariantId)
+        ? { routeVariantId: details.routeVariantId }
+        : {}),
+      ...(projectedNumber(details.sprintDistanceFeet, 1_500) != null
+        ? { sprintDistanceFeet: Math.round(projectedNumber(details.sprintDistanceFeet, 1_500)) }
+        : {}),
+      ...(projectedNumber(details.sprintAirSetting, 10) != null
+        ? { sprintAirSetting: Math.round(projectedNumber(details.sprintAirSetting, 10)) }
+        : {}),
+      club: detailClub,
+    },
+  };
+}
+
+function projectOwnedClubTrainingSession(session) {
+  const clubId = sanitizeText(session?._clubId, '', 160);
+  const studioRiderId = sanitizeText(session?._studioRiderId, '', 160);
+  if (!clubId || !studioRiderId) return null;
+  const clubName = sanitizeText(session?._clubName, 'Connected club', 160);
+  const riderName = sanitizeText(session?._clubRiderName, 'Club athlete', 120);
+  const projected = projectClubTrainingSession(session, {
+    clubId,
+    clubName,
+    studioRiderId,
+    riderName,
+    claimedAt: null,
+  });
+  if (!projected) return null;
+  const club = { id: clubId, name: clubName, studioRiderId, riderName, role: 'owner' };
+  return {
+    ...projected,
+    id: `club-owner:${clubId}:${studioRiderId}:${session.id}`,
+    club,
+    details: {
+      ...redactPrivatePower(projected.details ?? {}),
+      club: { id: clubId, name: clubName, role: 'owner' },
     },
   };
 }
@@ -3243,17 +3478,40 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
   const ownedStudioRiderIds = new Set(
     (clubState.ownedClub?.members ?? []).map((member) => member.studioRiderId).filter(Boolean),
   );
-  const containsOwnedStudioRider = (value) => {
-    if (Array.isArray(value)) return value.some(containsOwnedStudioRider);
+  const claimedAtByRiderName = new Map(
+    (clubState.ownedClub?.members ?? [])
+      .filter((member) => member.status === 'claimed')
+      .flatMap((member) => {
+        const name = normalizedRiderClaimName(member.riderName);
+        const claimedAt = Number(member.claimedAt);
+        return name && Number.isFinite(claimedAt) ? [[name, claimedAt]] : [];
+      }),
+  );
+  const containsOwnedStudioRider = (value, legacySessionUpdatedAt) => {
+    if (Array.isArray(value)) {
+      return value.some((entry) => containsOwnedStudioRider(entry, legacySessionUpdatedAt));
+    }
     if (!value || typeof value !== 'object') return false;
     return Object.entries(value).some(([key, nested]) => (
       (key === 'riderId' || key === 'studioRiderId') && ownedStudioRiderIds.has(String(nested))
-    ) || containsOwnedStudioRider(nested));
+    ) || (
+      (key === 'riderName' || key === 'name')
+      && Number.isFinite(legacySessionUpdatedAt)
+      && legacySessionUpdatedAt < (
+        claimedAtByRiderName.get(normalizedRiderClaimName(nested)) ?? Number.NEGATIVE_INFINITY
+      )
+    ) || containsOwnedStudioRider(nested, legacySessionUpdatedAt));
   };
   const ownSessions = (await persistence.loadTrainingSessions(profileKey, options))
     .map((session) => publicTrainingSession(
       session,
-      clubState.ownedClub?.id === session?._clubId || containsOwnedStudioRider(session?.details)
+      (Boolean(clubState.ownedClub?.id) && clubState.ownedClub.id === session?._clubId)
+        || containsOwnedStudioRider(
+          session?.details,
+          !session?._clubId && !session?._studioRiderId
+            ? Number(session?.updatedAt)
+            : Number.NaN,
+        )
         ? 'owner'
         : 'athlete',
     ))
@@ -3272,10 +3530,7 @@ async function loadTrainingSessionsForAccount(profileKey, options) {
   }))).flat();
   const ownedClubSessions = clubState.ownedClub
     ? (await persistence.loadClubTrainingSessions(profileKey, options)).flatMap((session) => {
-      const projected = publicTrainingSession({
-        ...session,
-        id: `club-owner:${session._clubId}:${session._studioRiderId}:${session.id}`,
-      }, 'owner');
+      const projected = projectOwnedClubTrainingSession(session);
       return projected ? [projected] : [];
     })
     : [];

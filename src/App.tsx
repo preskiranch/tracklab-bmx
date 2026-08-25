@@ -10333,7 +10333,7 @@ export default function App() {
   }
 
   const analyticsPanel = (
-    <Suspense fallback={<div className="panel-section">Loading post-race analysis…</div>}>
+    <Suspense fallback={<div className="panel-section">Loading results…</div>}>
       <AnalyticsPanel
         track={effectiveTrack}
         players={racePlayers}
@@ -10417,7 +10417,7 @@ export default function App() {
         && monitorHeartRateOverlayPlayer
         && monitorHeartRateOverlayRiderId
         && ownedClub && (
-        <Suspense fallback={<div className="explore-loading">Loading Apple Watch setup…</div>}>
+        <Suspense fallback={<div className="explore-loading">Loading Watch…</div>}>
           <StudioHeartRateBlockOverlay
             action={monitorHeartRateOverlayAction}
             anchorContext={{
@@ -11276,7 +11276,7 @@ export default function App() {
         )}
 
         {appMode === 'club-tablet' ? (
-          <Suspense fallback={<div className="explore-loading">Opening Club Tablet…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading tablet…</div>}>
             <ClubTabletMode
               canAuthorize={clubOwnerActive && !clubTabletDevice}
               device={clubTabletDevice}
@@ -11311,7 +11311,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'friends' && authUser ? (
-          <Suspense fallback={<div className="explore-loading">Loading your TrackLab friends…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading friends…</div>}>
             <FriendsView
               key={authUser.id}
               currentProfileId={authUser.id}
@@ -11342,7 +11342,7 @@ export default function App() {
               <div id="watch" style={{ display: 'grid', gap: 16 }}>
                 <div id="heart-rate-account-block-settings-slot" style={{ display: 'contents' }} />
                 <div id="watch-connect-settings-slot" style={{ display: 'contents' }} />
-                <Suspense fallback={<div className="explore-loading">Checking Apple Watch…</div>}>
+                <Suspense fallback={<div className="explore-loading">Checking Watch…</div>}>
                   {watchConnectCapable === false && <HeartRateSettingsCard
                     availability={heartRate.availability}
                     status={heartRate.status}
@@ -11372,9 +11372,9 @@ export default function App() {
             </div>}
           </>
         ) : appMode === 'profile' && authUser ? (
-          <Suspense fallback={<div className="explore-loading">Loading your profile and training history…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading profile…</div>}>
           <AccountProfileView
-            key={authUser.profileKey}
+            key={authUser.id}
             name={authUser.name}
             email={authUser.email}
             membershipLabel={membershipLabel}
@@ -11392,7 +11392,7 @@ export default function App() {
         ) : resultsMode ? (
           analyticsPanel
         ) : appMode === 'club-monitor' && clubOwnerActive ? (
-          <Suspense fallback={<div className="explore-loading">Opening Club Live Monitor…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading Club Live…</div>}>
             <ClubLiveMonitor
               studioRiders={activeStudioRiders(activeProfileStudioRiders)}
               speedUnit={speedUnit}
@@ -11424,7 +11424,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'explore' ? (
-          <Suspense fallback={<div className="explore-loading">Loading Explore the World…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading Explore…</div>}>
             <ClubOwnerUtilityMode
               {...clubOwnerUtilitySharedProps}
               mode="explore"
@@ -11544,7 +11544,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'developer' && developerUiActive ? (
-          <Suspense fallback={<div className="explore-loading">Loading developer tools…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading tools…</div>}>
             <DeveloperToolsPanel />
           </Suspense>
         ) : (
@@ -11552,7 +11552,7 @@ export default function App() {
             <div className="dashboard-grid">
               <div className="dashboard-primary-column">
                 <div className="race-canvas-shell">
-                  <Suspense fallback={<div className="explore-loading">Loading track view…</div>}>
+                  <Suspense fallback={<div className="explore-loading">Loading track…</div>}>
                   <EarthTrackView
                   track={effectiveTrack}
                   riders={stagedRiders}
@@ -11641,7 +11641,7 @@ export default function App() {
               </div>
 
               <div className="dashboard-secondary-column">
-                <Suspense fallback={<div className="panel-section">Loading race controls…</div>}>
+                <Suspense fallback={<div className="panel-section">Loading controls…</div>}>
                   <SessionControlPanel
                   track={effectiveTrack}
                   selectedMetrics={selectedMetrics}

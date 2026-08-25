@@ -718,6 +718,49 @@ describe('cloud API trust boundaries', () => {
     expect(otherAccountTraining.status).toBe(200);
     await expect(otherAccountTraining.json()).resolves.toMatchObject({ sessions: [], totals: { sessions: 0 } });
 
+    const otherAccountClubState = await api('/api/club-connect');
+    expect(otherAccountClubState.status).toBe(200);
+    await expect(otherAccountClubState.json()).resolves.toMatchObject({ ownedClub: null });
+
+    const personalPowerSessionId = `personal-power-${Date.now()}`;
+    const personalPowerStartedAt = Date.now() - 2 * 60 * 60_000;
+    const personalPowerSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: personalPowerSessionId,
+          activityType: 'straight-sprint',
+          title: 'Personal power review',
+          startedAt: personalPowerStartedAt,
+          endedAt: personalPowerStartedAt + 1_000,
+          durationMs: 1_000,
+          distanceMeters: 9.144,
+          details: {
+            summaries: [{
+              playerId: 1,
+              riderName: 'Other Rider',
+              topWatts: 1_120,
+              averageWatts: 875,
+            }],
+          },
+        },
+      }),
+    });
+    expect(personalPowerSave.status).toBe(201);
+    const personalPowerHistory = await api('/api/training-sessions?from=0');
+    expect(personalPowerHistory.status).toBe(200);
+    const personalPowerHistoryPayload = await personalPowerHistory.json();
+    const personalPowerSession = personalPowerHistoryPayload.sessions.find(
+      (session: { id: string }) => session.id === personalPowerSessionId,
+    );
+    expect(personalPowerSession).toBeDefined();
+    expect(personalPowerSession).not.toHaveProperty('club');
+    expect(personalPowerSession).toMatchObject({
+      details: {
+        summaries: [{ topWatts: 1_120, averageWatts: 875 }],
+      },
+    });
+
     cookie = firstAccountCookie;
     const restoredAfterBrowserReset = await api('/api/explore/recent-routes');
     expect(restoredAfterBrowserReset.status).toBe(200);
@@ -833,6 +876,166 @@ describe('cloud API trust boundaries', () => {
     });
     expect(trainingSave.status).toBe(201);
 
+    const legacyNameRaceId = `legacy-name-race-${now}`;
+    const legacyNameRaceSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: legacyNameRaceId,
+          activityType: 'bmx-race',
+          title: 'Legacy name-only race',
+          startedAt: now - 9_500,
+          endedAt: now - 1_500,
+          durationMs: 8_000,
+          distanceMeters: 300,
+          trackId: 'legacy-name-track',
+          trackName: 'Legacy Name Track',
+          details: {
+            summaries: [{
+              playerId: 3,
+              riderName: 'Maya Torres',
+              finishTimeMs: 7_900,
+              distanceMeters: 300,
+              topWatts: 1_050,
+              averageWatts: 790,
+              allowedBikeNote: 'allowed bike result',
+              siblingTelemetry: { riderName: 'Jordan Lee', privateValue: 'race sibling secret' },
+              pulse: 188,
+              restingPulse: 51,
+              AppleWatch: { bpm: 188 },
+            }],
+            reactionTimesByPlayer: { 3: 177, 4: 199 },
+            zoneResults: [
+              {
+                zoneId: 'maya-zone',
+                zoneName: 'Maya drive',
+                zoneType: 'pedal',
+                startMeter: 5,
+                endMeter: 25,
+                siblingTelemetry: 'zone sibling secret',
+                riders: [{ playerId: 3, topWatts: 1_020, pulse: 187 }],
+              },
+              {
+                zoneId: 'sibling-only-zone',
+                zoneName: 'Jordan private zone',
+                zoneType: 'pedal',
+                startMeter: 25,
+                endMeter: 50,
+                riders: [{ playerId: 4, topWatts: 990 }],
+              },
+            ],
+            events: [{ label: 'sibling event secret' }],
+            siblingTelemetry: { privateValue: 'top-level sibling secret' },
+            healthKit: { bpm: 188 },
+            appleHealth: { restingBpm: 51 },
+            hrv: 44,
+          },
+        },
+      }),
+    });
+    expect(legacyNameRaceSave.status).toBe(201);
+    const legacyNameRaceSavePayload = await legacyNameRaceSave.json();
+    expect(JSON.stringify(legacyNameRaceSavePayload.session.details)).not.toMatch(
+      /apple.?watch|apple.?health|health.?kit|resting.?pulse|"pulse"|"hrv"|"bpm"/iu,
+    );
+
+    const legacyExploreId = `legacy-name-explore-${now}`;
+    expect((await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: legacyExploreId,
+          activityType: 'explore',
+          title: 'Legacy Explore ride',
+          startedAt: now - 9_000,
+          endedAt: now - 1_000,
+          durationMs: 8_000,
+          distanceMeters: 1_000,
+          details: {
+            originLabel: 'Studio start',
+            destinationLabel: 'Hill finish',
+            travelMode: 'bicycle',
+            elevationGainMeters: 31.5,
+            elevationLossMeters: 12.25,
+            activeClockSegments: [{
+              startedAt: now - 9_000,
+              endedAt: now - 1_000,
+              activeElapsedAtStartMs: 0,
+              siblingTelemetry: 'segment sibling secret',
+            }],
+            riders: [
+              {
+                playerId: 3,
+                riderName: 'Maya Torres',
+                distanceMeters: 1_000,
+                averageSpeedMph: 12,
+                siblingTelemetry: 'explore sibling secret',
+              },
+              { playerId: 4, riderName: 'Jordan Lee', distanceMeters: 950 },
+            ],
+            siblingTelemetry: 'explore top-level sibling secret',
+          },
+        },
+      }),
+    })).status).toBe(201);
+
+    const legacyPullId = `legacy-name-pull-${now}`;
+    expect((await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: legacyPullId,
+          activityType: 'get-pulled',
+          title: 'Legacy Get Pulled',
+          startedAt: now - 8_500,
+          endedAt: now - 2_500,
+          durationMs: 6_000,
+          distanceMeters: 24,
+          details: {
+            durationSeconds: 6,
+            airSetting: 7,
+            recordKey: 'forged-private-record-key',
+            riders: [{
+              playerId: 3,
+              riderName: 'Maya Torres',
+              distanceMeters: 24,
+              peakWatts: 1_030,
+              averageWatts: 780,
+              siblingTelemetry: 'pull sibling secret',
+            }],
+            siblingTelemetry: 'pull top-level sibling secret',
+          },
+        },
+      }),
+    })).status).toBe(201);
+
+    const legacyMonitorId = `legacy-name-monitor-${now}`;
+    expect((await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: legacyMonitorId,
+          activityType: 'monitor-sprint',
+          title: 'Legacy monitor sprint',
+          startedAt: now - 8_000,
+          endedAt: now - 2_000,
+          durationMs: 6_000,
+          distanceMeters: 70,
+          details: {
+            riders: [{
+              playerId: 3,
+              riderName: 'Maya Torres',
+              distanceMeters: 70,
+              peakWatts: 1_010,
+              averageWatts: 770,
+              siblingTelemetry: 'monitor sibling secret',
+            }],
+            monitor: { siblingTelemetry: 'monitor device secret' },
+          },
+        },
+      }),
+    })).status).toBe(201);
+
     const inviteResponse = await api('/api/club-connect/invites', {
       method: 'POST',
       body: JSON.stringify({ studioRiderId: 'studio-maya' }),
@@ -862,6 +1065,135 @@ describe('cloud API trust boundaries', () => {
       memberships: [{ clubName: 'Review Rider', studioRiderId: 'studio-maya', riderName: 'Maya Torres' }],
     });
     const claimedMembership = claimPayload.memberships[0];
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    cookie = ownerCookie;
+    const postClaimNameInjectionId = `post-claim-name-injection-${now}`;
+    const postClaimNameInjectionSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        session: {
+          id: postClaimNameInjectionId,
+          activityType: 'straight-sprint',
+          title: 'Post-claim owner name injection',
+          startedAt: now - 750,
+          endedAt: now - 250,
+          durationMs: 500,
+          distanceMeters: 30,
+          details: {
+            summaries: [{
+              playerId: 6,
+              riderName: 'Maya Torres',
+              finishTimeMs: 500,
+              distanceMeters: 30,
+              topWatts: 9_999,
+            }],
+          },
+        },
+      }),
+    });
+    expect(postClaimNameInjectionSave.status).toBe(201);
+
+    const jordanInviteResponse = await api('/api/club-connect/invites', {
+      method: 'POST',
+      body: JSON.stringify({ studioRiderId: 'studio-jordan' }),
+    });
+    expect(jordanInviteResponse.status).toBe(201);
+    const jordanInvite = await jordanInviteResponse.json();
+
+    cookie = '';
+    const jordanRegistration = await api('/api/auth/register', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '198.51.100.77' },
+      body: JSON.stringify({
+        name: 'Jordan Account',
+        email: `jordan-attribution-${now}@tracklab.test`,
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(jordanRegistration.status).toBe(201);
+    cookie = String(jordanRegistration.headers.get('set-cookie')).split(';')[0];
+    const jordanClaim = await api('/api/club-connect/claim', {
+      method: 'POST',
+      body: JSON.stringify({ token: jordanInvite.token, fullName: 'Jordan Lee' }),
+    });
+    expect(jordanClaim.status).toBe(200);
+    const jordanClaimPayload = await jordanClaim.json();
+    const jordanMembership = jordanClaimPayload.memberships[0];
+    expect(jordanMembership).toMatchObject({
+      clubId: claimedMembership.clubId,
+      studioRiderId: 'studio-jordan',
+    });
+
+    const jordanAttributedSessionId = `jordan-attributed-${now}`;
+    const jordanAttributedSave = await api('/api/training-sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        clubSession: {
+          clubId: jordanMembership.clubId,
+          studioRiderId: jordanMembership.studioRiderId,
+        },
+        session: {
+          id: jordanAttributedSessionId,
+          activityType: 'bmx-race',
+          title: 'Jordan attributed adversarial race',
+          startedAt: now - 700,
+          endedAt: now - 200,
+          durationMs: 500,
+          distanceMeters: 35,
+          details: {
+            summaries: [
+              {
+                playerId: 1,
+                riderId: 'studio-maya',
+                riderName: 'Maya Torres',
+                finishTimeMs: 450,
+                topWatts: 1_500,
+                siblingTelemetry: 'attributed sibling secret',
+              },
+              {
+                playerId: 2,
+                riderId: 'studio-jordan',
+                riderName: 'Jordan Lee',
+                finishTimeMs: 500,
+                topWatts: 1_100,
+              },
+            ],
+            reactionTimesByPlayer: { 1: 175, 2: 190 },
+            zoneResults: [
+              {
+                zoneId: 'shared-attributed-zone',
+                zoneName: 'Shared attributed zone',
+                zoneType: 'pedal',
+                startMeter: 5,
+                endMeter: 25,
+                siblingTelemetry: 'attributed zone sibling secret',
+                riders: [
+                  { playerId: 1, topWatts: 1_450, siblingTelemetry: 'Maya zone secret' },
+                  { playerId: 2, topWatts: 1_050, sampleCount: 8 },
+                ],
+              },
+              {
+                zoneId: 'maya-only-attributed-zone',
+                zoneName: 'Maya private attributed zone',
+                zoneType: 'pedal',
+                startMeter: 25,
+                endMeter: 45,
+                riders: [{ playerId: 1, topWatts: 1_400 }],
+              },
+            ],
+            events: [{ label: 'attributed sibling event secret' }],
+            siblingTelemetry: { privateValue: 'attributed top-level sibling secret' },
+          },
+        },
+      }),
+    });
+    expect(jordanAttributedSave.status).toBe(201);
+    await expect(jordanAttributedSave.json()).resolves.toMatchObject({
+      session: { club: { studioRiderId: 'studio-jordan', role: 'athlete' } },
+    });
+
+    cookie = athleteCookie;
 
     const athleteClubState = await api('/api/club-connect?profileKey=user:club-owner');
     expect(athleteClubState.status).toBe(200);
@@ -918,14 +1250,106 @@ describe('cloud API trust boundaries', () => {
     const athleteHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
     expect(athleteHistory.status).toBe(200);
     const athleteHistoryPayload = await athleteHistory.json();
-    expect(athleteHistoryPayload.sessions).toHaveLength(1);
-    expect(athleteHistoryPayload.sessions[0].details.summaries).toEqual([
+    expect(athleteHistoryPayload.sessions).toHaveLength(5);
+    expect(athleteHistoryPayload.sessions.map((session: { id: string }) => session.id)).not.toContain(
+      postClaimNameInjectionId,
+    );
+    expect(athleteHistoryPayload.sessions.some(
+      (session: { id: string }) => session.id.includes(jordanAttributedSessionId),
+    )).toBe(false);
+    const originalLegacyRace = athleteHistoryPayload.sessions.find(
+      (session: { id: string }) => session.id.includes(`club-race-${now}`),
+    );
+    expect(originalLegacyRace.details.summaries).toEqual([
       expect.objectContaining({ riderId: 'studio-maya', riderName: 'Maya Torres' }),
     ]);
-    expect(athleteHistoryPayload.sessions[0].details.zoneResults[0].riders).toEqual([
+    expect(originalLegacyRace.details.zoneResults[0].riders).toEqual([
       expect.objectContaining({ playerId: 1, topWatts: 900 }),
     ]);
-    expect(athleteHistoryPayload.sessions[0].details.events).toEqual([]);
+    expect(originalLegacyRace.details.events).toEqual([]);
+
+    const projectedLegacyNameRace = athleteHistoryPayload.sessions.find(
+      (session: { id: string }) => session.id.includes(legacyNameRaceId),
+    );
+    expect(projectedLegacyNameRace).toMatchObject({
+      details: {
+        summaries: [{
+          playerId: 3,
+          riderName: 'Maya Torres',
+          finishTimeMs: 7_900,
+          topWatts: 1_050,
+          averageWatts: 790,
+        }],
+        reactionTimesByPlayer: { 3: 177 },
+        zoneResults: [{
+          zoneId: 'maya-zone',
+          riders: [{ playerId: 3, topWatts: 1_020 }],
+        }],
+        events: [],
+      },
+    });
+    expect(Object.keys(projectedLegacyNameRace.details).sort()).toEqual([
+      'club', 'events', 'reactionTimesByPlayer', 'summaries', 'zoneResults',
+    ]);
+    expect(Object.keys(projectedLegacyNameRace.details.summaries[0]).sort()).toEqual([
+      'averageWatts', 'distanceMeters', 'finishTimeMs', 'playerId', 'riderName', 'topWatts',
+    ]);
+    expect(projectedLegacyNameRace.details.zoneResults).toHaveLength(1);
+
+    const projectedExplore = athleteHistoryPayload.sessions.find(
+      (session: { id: string }) => session.id.includes(legacyExploreId),
+    );
+    expect(projectedExplore).toMatchObject({
+      details: {
+        originLabel: 'Studio start',
+        destinationLabel: 'Hill finish',
+        travelMode: 'bicycle',
+        elevationGainMeters: 31.5,
+        elevationLossMeters: 12.25,
+        activeClockSegments: [{
+          startedAt: now - 9_000,
+          endedAt: now - 1_000,
+          activeElapsedAtStartMs: 0,
+        }],
+        riders: [{
+          playerId: 3,
+          riderName: 'Maya Torres',
+          distanceMeters: 1_000,
+          averageSpeedMph: 12,
+        }],
+      },
+    });
+    expect(Object.keys(projectedExplore.details).sort()).toEqual([
+      'activeClockSegments', 'club', 'destinationLabel', 'elevationGainMeters',
+      'elevationLossMeters', 'originLabel', 'riders', 'travelMode',
+    ]);
+
+    const projectedPull = athleteHistoryPayload.sessions.find(
+      (session: { id: string }) => session.id.includes(legacyPullId),
+    );
+    expect(projectedPull).toMatchObject({
+      durationMs: 6_000,
+      details: {
+        durationSeconds: 6,
+        airSetting: 7,
+        recordKey: '6s-air-7',
+        riders: [{ riderName: 'Maya Torres', peakWatts: 1_030, averageWatts: 780 }],
+      },
+    });
+
+    const projectedMonitor = athleteHistoryPayload.sessions.find(
+      (session: { id: string }) => session.id.includes(legacyMonitorId),
+    );
+    expect(projectedMonitor).toMatchObject({
+      details: {
+        riders: [{ riderName: 'Maya Torres', peakWatts: 1_010, averageWatts: 770 }],
+      },
+    });
+    const initialProjectionJson = JSON.stringify(athleteHistoryPayload);
+    expect(initialProjectionJson).not.toMatch(/sibling secret|sibling telemetry|Jordan private zone/iu);
+    expect(initialProjectionJson).not.toMatch(
+      /apple.?watch|apple.?health|health.?kit|resting.?pulse|"pulse"|"hrv"|"bpm"/iu,
+    );
 
     const athleteHistoryStream = await openTrainingHistoryStream(athleteCookie);
     const immediateSessionId = `club-race-live-sync-${now}`;
@@ -1499,16 +1923,19 @@ describe('cloud API trust boundaries', () => {
       ]),
     });
     const connectedRoster = await api('/api/club-connect');
-    await expect(connectedRoster.json()).resolves.toMatchObject({
+    const connectedRosterPayload = await connectedRoster.json();
+    expect(connectedRosterPayload).toMatchObject({
       canManageClub: true,
-      ownedClub: {
-        members: [expect.objectContaining({
+      ownedClub: { id: claimedMembership.clubId },
+    });
+    expect(connectedRosterPayload.ownedClub.members).toEqual(expect.arrayContaining([
+      expect.objectContaining({
           studioRiderId: 'studio-maya',
           athleteName: 'Maya Alexandria Torres (Rocket)',
           status: 'claimed',
-        })],
-      },
-    });
+      }),
+      expect.objectContaining({ studioRiderId: 'studio-jordan', status: 'claimed' }),
+    ]));
 
     const ownerCombinedHistory = await api(`/api/training-sessions?from=${now - 20_000}&to=${now}`);
     const ownerCombinedPayload = await ownerCombinedHistory.json();
@@ -1523,6 +1950,46 @@ describe('cloud API trust boundaries', () => {
       (session: { id: string }) => session.id === `club-owner:${claimedMembership.clubId}:studio-maya:${athleteClubSessionId}`,
     );
     expect(JSON.stringify(ownerViewOfAthleteSession)).not.toMatch(/watts?|power/i);
+    const ownerViewOfLegacyNameRace = ownerCombinedPayload.sessions.find(
+      (session: { id: string }) => session.id === legacyNameRaceId,
+    );
+    expect(ownerViewOfLegacyNameRace).toBeDefined();
+    expect(JSON.stringify(ownerViewOfLegacyNameRace)).not.toMatch(/watts?|power/i);
+    const ownerViewOfPostClaimInjection = ownerCombinedPayload.sessions.find(
+      (session: { id: string }) => session.id === postClaimNameInjectionId,
+    );
+    expect(ownerViewOfPostClaimInjection).toMatchObject({
+      details: { summaries: [{ topWatts: 9_999 }] },
+    });
+    const ownerViewOfJordanAttributed = ownerCombinedPayload.sessions.find(
+      (session: { id: string }) => session.id.includes(jordanAttributedSessionId),
+    );
+    expect(ownerViewOfJordanAttributed).toMatchObject({
+      id: `club-owner:${claimedMembership.clubId}:studio-jordan:${jordanAttributedSessionId}`,
+      club: { studioRiderId: 'studio-jordan', riderName: 'Jordan Lee', role: 'owner' },
+      details: {
+        summaries: [{
+          playerId: 2,
+          riderId: 'studio-jordan',
+          riderName: 'Jordan Lee',
+          finishTimeMs: 500,
+        }],
+        reactionTimesByPlayer: { 2: 190 },
+        zoneResults: [{
+          zoneId: 'shared-attributed-zone',
+          zoneName: 'Shared attributed zone',
+          zoneType: 'pedal',
+          startMeter: 5,
+          endMeter: 25,
+          riders: [{ playerId: 2, sampleCount: 8 }],
+        }],
+        events: [],
+        club: { role: 'owner' },
+      },
+    });
+    const ownerJordanJson = JSON.stringify(ownerViewOfJordanAttributed);
+    expect(ownerJordanJson).not.toMatch(/watts?|power/i);
+    expect(ownerJordanJson).not.toMatch(/studio-maya|Maya Torres|sibling secret|maya-only-attributed-zone/iu);
     expect(ownerCombinedPayload.sessions).toEqual(expect.arrayContaining([
       expect.objectContaining({
         activityType: 'get-pulled',

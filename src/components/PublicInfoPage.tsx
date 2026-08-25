@@ -113,7 +113,7 @@ function PrivacyPage() {
           Signed-in profiles and training records are stored so they remain available across devices.
         </SummaryCard>
         <SummaryCard icon={<Download aria-hidden="true" />} title="Portable sessions">
-          Saved training sessions can be downloaded from TrackLab in JSON or CSV format.
+          Download individual sessions as JSON or CSV, or a selected day as a Numbers/Excel workbook.
         </SummaryCard>
       </section>
 
@@ -328,7 +328,10 @@ function PrivacyPage() {
                 <li>Room microphone access starts only after a racer turns voice chat on.</li>
                 <li>Race commentary and ambient track sound each have an on/off control.</li>
                 <li>Ghost replay analytics have a separate sharing choice.</li>
-                <li>Training sessions can be exported as JSON or CSV from the account calendar.</li>
+                <li>
+                  Individual training sessions can be exported as JSON or CSV, and the selected day&apos;s non-health
+                  spreadsheet can be downloaded as a Numbers/Excel workbook (.xlsx) from the account calendar.
+                </li>
                 <li>
                   Apple Watch heart rate is optional. After one-time setup, you press <em>Watch Connect</em> on the paired
                   iPhone to start a visible four-hour connection, can end it early from TrackLab, and can use TrackLab
@@ -337,7 +340,8 @@ function PrivacyPage() {
                 <li>
                   Revoking Apple Health access stops future collection but does not automatically erase heart-rate
                   samples already saved to TrackLab. Heart rate remains visible in the rider&apos;s private session history
-                  and is deliberately excluded from generic session JSON/CSV and public or club exports. Contact support
+                  and is deliberately excluded from generic session JSON/CSV, selected-day Numbers/Excel workbooks, and
+                  public or club exports. Contact support
                   for a separate verified health-data export or deletion request while self-service controls remain unavailable.
                 </li>
                 <li>You can sign out to end the current browser or app session.</li>
@@ -521,7 +525,10 @@ function SupportPage() {
             <li>Claim a Club Connect invite while signed into the athlete&apos;s own account.</li>
             <li>A claim can add the athlete&apos;s full name, nickname, and profile photo.</li>
             <li>Club-linked sessions can appear for the athlete and connected club owner.</li>
-            <li>Session cards provide JSON and CSV downloads.</li>
+            <li>
+              The selected-day spreadsheet downloads as a Numbers/Excel workbook (.xlsx); expanded session details also
+              provide individual JSON and CSV downloads.
+            </li>
           </ul>
         </SupportCard>
 

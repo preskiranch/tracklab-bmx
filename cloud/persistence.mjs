@@ -187,6 +187,53 @@ const storedSpeedMpsMetricKeys = new Set([
   'topspeedmps', 'velocitymps',
 ]);
 
+function storedPrivateHealthPayloadKey(key) {
+  const raw = String(key || '');
+  const normalized = raw.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  const tokens = raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return normalized.includes('heartrate')
+    || normalized.includes('health')
+    || normalized.includes('applewatch')
+    || normalized.startsWith('watch')
+    || normalized.includes('bpm')
+    || normalized.includes('pulse')
+    || normalized.includes('cardiac')
+    || normalized.includes('bloodoxygen')
+    || normalized.includes('oxygensaturation')
+    || normalized.includes('spo2')
+    || normalized.includes('ecg')
+    || normalized.includes('ekg')
+    || normalized.startsWith('hr')
+    || tokens.includes('heart')
+    || tokens.includes('hr');
+}
+
+function stripStoredPrivateHealthFields(value, depth = 0) {
+  if (depth > 32) return null;
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripStoredPrivateHealthFields(entry, depth + 1));
+  }
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).flatMap(([key, nested]) => (
+    storedPrivateHealthPayloadKey(key)
+      ? []
+      : [[key, stripStoredPrivateHealthFields(nested, depth + 1)]]
+  )));
+}
+
+function trainingSessionWithPrivateHealthRemoved(session) {
+  if (!session || typeof session !== 'object') return session;
+  const safeSession = stripStoredPrivateHealthFields(session);
+  return {
+    ...safeSession,
+    details: stripStoredPrivateHealthFields(safeSession.details ?? {}),
+  };
+}
+
 function storedBikeMetricsAreAccepted(value, depth = 0) {
   if (depth > 32) return false;
   if (Array.isArray(value)) return value.every((entry) => storedBikeMetricsAreAccepted(entry, depth + 1));
@@ -1102,7 +1149,7 @@ export async function saveUserData(guestKey, patch) {
 
 function trainingSessionFromRow(row) {
   if (!row) return null;
-  const details = fromJson(row.details, {});
+  const details = stripStoredPrivateHealthFields(fromJson(row.details, {}));
   if (!storedBikeMetricsAreAccepted(details)) return null;
   return {
     id: row.id,
@@ -1138,16 +1185,17 @@ function enrichMemoryClubTrainingSession(session) {
 }
 
 export async function saveTrainingSession(profileKey, session) {
-  if (!storedBikeMetricsAreAccepted(session?.details)) return null;
+  const safeSession = trainingSessionWithPrivateHealthRemoved(session);
+  if (!storedBikeMetricsAreAccepted(safeSession?.details)) return null;
   const saved = {
-    ...cloneJson(session, session),
+    ...cloneJson(safeSession, safeSession),
     _profileKey: profileKey,
-    createdAt: Number(session.createdAt) || Date.now(),
+    createdAt: Number(safeSession.createdAt) || Date.now(),
     updatedAt: Date.now(),
   };
   if (!pool) {
-    memoryTrainingSessions.set(`${profileKey}:${session.id}`, saved);
-    await linkHeartRateStreamsToTrainingSession(profileKey, session.id);
+    memoryTrainingSessions.set(`${profileKey}:${safeSession.id}`, saved);
+    await linkHeartRateStreamsToTrainingSession(profileKey, safeSession.id);
     return cloneJson(enrichMemoryClubTrainingSession(saved), saved);
   }
   const result = await query(
@@ -1174,29 +1222,29 @@ export async function saveTrainingSession(profileKey, session) {
      RETURNING *`,
     [
       profileKey,
-      session.id,
-      session.activityType,
-      session.title,
-      session.startedAt,
-      session.endedAt,
-      session.durationMs,
-      session.distanceMeters,
-      session.trackId ?? null,
-      session.trackName ?? null,
-      session.source,
-      json(session.details),
-      session._clubId ?? null,
-      session._studioRiderId ?? null,
+      safeSession.id,
+      safeSession.activityType,
+      safeSession.title,
+      safeSession.startedAt,
+      safeSession.endedAt,
+      safeSession.durationMs,
+      safeSession.distanceMeters,
+      safeSession.trackId ?? null,
+      safeSession.trackName ?? null,
+      safeSession.source,
+      json(safeSession.details),
+      safeSession._clubId ?? null,
+      safeSession._studioRiderId ?? null,
       saved.createdAt,
     ],
   );
   const stored = trainingSessionFromRow(result?.rows?.[0]);
   if (!stored) return null;
-  await linkHeartRateStreamsToTrainingSession(profileKey, session.id);
+  await linkHeartRateStreamsToTrainingSession(profileKey, safeSession.id);
   return {
     ...stored,
-    ...(session._clubName ? { _clubName: session._clubName } : {}),
-    ...(session._clubRiderName ? { _clubRiderName: session._clubRiderName } : {}),
+    ...(safeSession._clubName ? { _clubName: safeSession._clubName } : {}),
+    ...(safeSession._clubRiderName ? { _clubRiderName: safeSession._clubRiderName } : {}),
   };
 }
 
@@ -1205,7 +1253,9 @@ export async function loadTrainingSessionById(profileKey, id) {
   if (!pool) {
     const session = memoryTrainingSessions.get(`${profileKey}:${id}`);
     return session && storedBikeMetricsAreAccepted(session.details)
-      ? cloneJson(enrichMemoryClubTrainingSession(session), session)
+      ? cloneJson(trainingSessionWithPrivateHealthRemoved(
+        enrichMemoryClubTrainingSession(session),
+      ), session)
       : null;
   }
   const result = await query(
@@ -6689,7 +6739,9 @@ export async function consumeClubMonitorSprintAuthorizationAndSave({
       }
       return {
         status: 'duplicate',
-        session: cloneJson(enrichMemoryClubTrainingSession(existing), existing),
+        session: cloneJson(trainingSessionWithPrivateHealthRemoved(
+          enrichMemoryClubTrainingSession(existing),
+        ), existing),
         heartRateSegment: await createHeartRateTrainingSegmentForClubSession({
           athleteProfileKey: authorization.athleteProfileKey,
           clubId,
@@ -6735,7 +6787,7 @@ export async function consumeClubMonitorSprintAuthorizationAndSave({
     });
     return {
       status: 'saved',
-      session: cloneJson(stored, stored),
+      session: cloneJson(trainingSessionWithPrivateHealthRemoved(stored), stored),
       heartRateSegment,
     };
   }
@@ -7840,7 +7892,9 @@ export async function completeClubGroupTrainingAuthorization({
         const session = memoryTrainingSessions.get(
           `${assignment.athleteProfileKey}:${authorization.sessionId}`,
         );
-        return session ? [cloneJson(enrichMemoryClubTrainingSession(session), session)] : [];
+        return session ? [cloneJson(trainingSessionWithPrivateHealthRemoved(
+          enrichMemoryClubTrainingSession(session),
+        ), session)] : [];
       });
       return {
         status: sessions.length === authorization.assignments.length ? 'duplicate' : 'session-conflict',
@@ -7892,7 +7946,10 @@ export async function completeClubGroupTrainingAuthorization({
     const sessions = [];
     for (const { assignment, completion, existing } of prepared) {
       const stored = existing ?? {
-        ...cloneJson(completion.session, completion.session),
+        ...cloneJson(
+          trainingSessionWithPrivateHealthRemoved(completion.session),
+          completion.session,
+        ),
         updatedAt: now,
       };
       memoryTrainingSessions.set(`${assignment.athleteProfileKey}:${authorization.sessionId}`, stored);
@@ -7917,7 +7974,9 @@ export async function completeClubGroupTrainingAuthorization({
       assignment.trainingSessionId = authorization.sessionId;
       assignment.heartRateAttachmentStatus = heartRateAttachment.attachmentStatus;
       assignment.updatedAt = now;
-      sessions.push(cloneJson(enrichMemoryClubTrainingSession(stored), stored));
+      sessions.push(cloneJson(trainingSessionWithPrivateHealthRemoved(
+        enrichMemoryClubTrainingSession(stored),
+      ), stored));
     }
     authorization.completionDigest = completionDigest;
     authorization.completedAt = now;
@@ -8080,7 +8139,7 @@ export async function completeClubGroupTrainingAuthorization({
             session.distanceMeters,
             session.trackId ?? null,
             session.trackName ?? null,
-            json(session.details),
+            json(stripStoredPrivateHealthFields(session.details)),
             authorization.clubId,
             assignment.studioRiderId,
             session.createdAt,
@@ -8158,7 +8217,9 @@ function legacyRaceSessions(entries, profileKey) {
   });
   return [...groups.entries()].map(([id, results]) => {
     const first = results[0];
-    const summaries = results.map((result) => result.summary ?? {});
+    const summaries = results.map((result) => (
+      stripStoredPrivateHealthFields(result.summary ?? {})
+    ));
     const sprint = summaries.find((summary) => Number(summary.sprintDistanceFeet) > 0);
     const startedAt = Date.parse(first.createdAt) || Date.now();
     const durationMs = Math.max(0, ...results.map((result) => Number(result.finishTimeMs) || 0));
@@ -8202,7 +8263,9 @@ export async function loadTrainingSessions(profileKey, { from = 0, to = Date.now
         && session.startedAt <= to
         && storedBikeMetricsAreAccepted(session.details)
       ))
-      .map(([, session]) => cloneJson(enrichMemoryClubTrainingSession(session), session));
+      .map(([, session]) => cloneJson(trainingSessionWithPrivateHealthRemoved(
+        enrichMemoryClubTrainingSession(session),
+      ), session));
     raceEntries = allRaceEntries
       .filter((entry) => (
         entry.guestKey === profileKey
@@ -8279,7 +8342,9 @@ export async function loadClubTrainingSessions(ownerProfileKey, { from = 0, to =
         && session.startedAt <= to
         && storedBikeMetricsAreAccepted(session.details)
       ))
-      .map((session) => cloneJson(enrichMemoryClubTrainingSession(session), session))
+      .map((session) => cloneJson(trainingSessionWithPrivateHealthRemoved(
+        enrichMemoryClubTrainingSession(session),
+      ), session))
       .sort((left, right) => right.startedAt - left.startedAt)
       .slice(0, safeLimit);
   }
