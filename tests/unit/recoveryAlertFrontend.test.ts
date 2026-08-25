@@ -264,7 +264,7 @@ describe('Recovery Alert individual finish lifecycle', () => {
     expect(freshB === boundary).toBe(true);
   });
 
-  it('prompts only from explicit save and surfaces denied background delivery', () => {
+  it('requests alerts once on a fresh enabled device and surfaces denied background delivery', () => {
     const notDetermined = {
       version: 1 as const,
       supported: true,
@@ -290,14 +290,11 @@ describe('Recovery Alert individual finish lifecycle', () => {
     );
     const bind = source.indexOf('await nativeRecoveryAlerts.bindAccount(preferenceResult.accountId)');
     const status = source.indexOf('await nativeRecoveryAlerts.getPermissionStatus()', bind);
-    const open = source.indexOf('openNativeRecoveryAccountBoundary(preferenceResult.accountId)', status);
-    const hydration = source.slice(bind, open);
-    const save = source.indexOf('const save = async');
-    const request = source.indexOf('await nativeRecoveryAlerts.requestPermission()', save);
+    const request = source.indexOf('await nativeRecoveryAlerts.requestPermission()', status);
+    const open = source.indexOf('openNativeRecoveryAccountBoundary(preferenceResult.accountId)', request);
     expect(status).toBeGreaterThan(bind);
-    expect(hydration).not.toContain('requestPermission()');
-    expect(open).toBeGreaterThan(status);
-    expect(request).toBeGreaterThan(save);
+    expect(request).toBeGreaterThan(status);
+    expect(open).toBeGreaterThan(request);
     expect(source).toContain("preferenceResult.preference.mode !== 'off'");
   });
 

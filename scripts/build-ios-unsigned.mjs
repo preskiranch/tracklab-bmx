@@ -21,25 +21,13 @@ const projectRoot = process.cwd()
 const manifestPaths = [
   path.join(projectRoot, 'ios/App/CapApp-SPM/Package.swift'),
   path.join(projectRoot, 'node_modules/@capacitor/app/Package.swift'),
-  path.join(projectRoot, 'node_modules/@capacitor/push-notifications/Package.swift'),
   path.join(projectRoot, 'node_modules/@capacitor-community/bluetooth-le/Package.swift'),
 ]
-const workspaceResolvedPath = path.join(
-  projectRoot,
-  'ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved',
-)
 const cacheRoot = path.join(os.tmpdir(), `tracklab-capacitor-swift-pm-${CAPACITOR_VERSION}`)
 const localPackagePath = path.join(cacheRoot, 'package')
 const binariesPath = path.join(localPackagePath, 'Binaries')
 const derivedDataPath = process.env.TRACKLAB_IOS_DERIVED_DATA
   || path.join(os.tmpdir(), 'tracklab-ios-derived')
-const sdk = process.env.TRACKLAB_IOS_SDK || 'iphoneos'
-if (sdk !== 'iphoneos' && sdk !== 'iphonesimulator') {
-  throw new Error('TRACKLAB_IOS_SDK must be iphoneos or iphonesimulator')
-}
-const destination = sdk === 'iphoneos'
-  ? 'generic/platform=iOS'
-  : 'generic/platform=iOS Simulator'
 
 function resolveDeveloperDirectory() {
   if (process.env.DEVELOPER_DIR) {
@@ -92,18 +80,6 @@ function checksum(filePath) {
   return hash.digest('hex')
 }
 
-function binaryArtifactIsValid(name, frameworkPath) {
-  const binaryPath = path.join(
-    frameworkPath,
-    'ios-arm64',
-    `${name}.framework`,
-    name,
-  )
-  return fs.existsSync(path.join(frameworkPath, 'Info.plist'))
-    && fs.existsSync(binaryPath)
-    && fs.statSync(binaryPath).size > 0
-}
-
 function prepareArtifact({ name, checksum: expectedChecksum }) {
   const archivePath = path.join(cacheRoot, `${name}.xcframework.zip`)
   const frameworkPath = path.join(binariesPath, `${name}.xcframework`)
@@ -131,13 +107,9 @@ function prepareArtifact({ name, checksum: expectedChecksum }) {
     fs.renameSync(temporaryPath, archivePath)
   }
 
-  if (!binaryArtifactIsValid(name, frameworkPath)) {
-    fs.rmSync(frameworkPath, { force: true, recursive: true })
+  if (!fs.existsSync(frameworkPath)) {
     fs.mkdirSync(binariesPath, { recursive: true })
     run('/usr/bin/ditto', ['-x', '-k', archivePath, binariesPath])
-    if (!binaryArtifactIsValid(name, frameworkPath)) {
-      throw new Error(`${name} binary artifact could not be extracted`)
-    }
   }
 }
 
@@ -181,9 +153,6 @@ for (const artifact of ARTIFACTS) {
 writeLocalPackage()
 
 const originalManifests = new Map()
-const originalWorkspaceResolved = fs.existsSync(workspaceResolvedPath)
-  ? fs.readFileSync(workspaceResolvedPath)
-  : null
 
 try {
   for (const manifestPath of manifestPaths) {
@@ -198,9 +167,9 @@ try {
     '-scheme',
     'App',
     '-sdk',
-    sdk,
+    'iphoneos',
     '-destination',
-    destination,
+    'generic/platform=iOS',
     '-derivedDataPath',
     derivedDataPath,
     'CODE_SIGNING_ALLOWED=NO',
@@ -216,11 +185,5 @@ try {
 } finally {
   for (const [manifestPath, source] of originalManifests) {
     fs.writeFileSync(manifestPath, source)
-  }
-  if (originalWorkspaceResolved) {
-    fs.mkdirSync(path.dirname(workspaceResolvedPath), { recursive: true })
-    fs.writeFileSync(workspaceResolvedPath, originalWorkspaceResolved)
-  } else {
-    fs.rmSync(workspaceResolvedPath, { force: true })
   }
 }

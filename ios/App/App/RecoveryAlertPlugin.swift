@@ -1,16 +1,5 @@
 import Capacitor
 import Foundation
-import UserNotifications
-
-private final class RecoveryAlertNotificationHandler: NSObject, NotificationHandlerProtocol {
-    func willPresent(notification: UNNotification) -> UNNotificationPresentationOptions {
-        RecoveryAlertManager.shared.willPresentLocalNotification(notification)
-    }
-
-    func didReceive(response: UNNotificationResponse) {
-        RecoveryAlertManager.shared.didReceiveLocalNotificationResponse(response)
-    }
-}
 
 @objc(RecoveryAlertPlugin)
 public final class RecoveryAlertPlugin: CAPPlugin, CAPBridgedPlugin, RecoveryAlertManagerObserver {
@@ -25,10 +14,8 @@ public final class RecoveryAlertPlugin: CAPPlugin, CAPBridgedPlugin, RecoveryAle
         CAPPluginMethod(name: "cancelEpisode", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "clearAllEpisodes", returnType: CAPPluginReturnPromise),
     ]
-    private let notificationHandler = RecoveryAlertNotificationHandler()
 
     public override func load() {
-        bridge?.notificationRouter.localNotificationHandler = notificationHandler
         RecoveryAlertManager.shared.configureAtLaunch()
         RecoveryAlertManager.shared.addObserver(self)
     }

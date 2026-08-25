@@ -482,8 +482,8 @@ describe('native Recovery Alert source safety boundaries', () => {
     expect(watch).toContain('without a second haptic');
     expect(wire).toContain('func matchesSchedule(_ plan: RecoveryAlertWirePlan)');
     expect(manager).toContain('event.matchesSchedule(record.plan)');
-    expect(manager).toContain('request.identifier == record.notificationId');
-    expect(manager).toContain('guard isCurrentRequest else { return [] }');
+    expect(manager).toContain('notification.request.identifier == record.notificationId');
+    expect(manager).toContain('completionHandler([])');
     expect(manager).toContain('preservesScheduledNotification');
     expect(manager).toContain('shouldShowImmediateNotification');
     expect(manager).toContain('candidate.alertTrigger == .target && readyAt < current.plan.deadlineAt');
@@ -585,17 +585,14 @@ describe('native Recovery Alert source safety boundaries', () => {
     expect(relay).toContain('self.state.activeJob = nil');
   });
 
-  it('restores at launch, uses Capacitor local routing, and does not gate iPad timers on Watch', () => {
+  it('restores at launch, serializes notification callbacks, and does not gate iPad timers on Watch', () => {
     expect(appDelegate).toContain('RecoveryAlertManager.shared.configureAtLaunch()');
     expect(manager).toContain('private func restore()');
     expect(manager).toContain('restored.watchOwnsCue = false');
     expect(manager).toContain('reconcileDeadlines()');
     expect(manager).toMatch(/private func reconcileDeadline[\s\S]+scheduleNotification\(record\)[\s\S]+scheduleTimer\(record\)/u);
-    expect(manager).toContain('func willPresentLocalNotification(');
-    expect(manager).toContain('func didReceiveLocalNotificationResponse(');
-    expect(manager).toContain('DispatchQueue.main.sync(execute: apply)');
-    expect(manager).not.toContain('center.delegate = self');
-    expect(pluginSource).toContain('notificationRouter.localNotificationHandler = notificationHandler');
+    expect(manager).toMatch(/willPresent notification:[\s\S]+DispatchQueue\.main\.async/);
+    expect(manager).toMatch(/didReceive response:[\s\S]+DispatchQueue\.main\.async/);
     expect(manager).not.toContain('userInterfaceIdiom');
     expect(manager).not.toContain('isWatchAppInstalled');
   });

@@ -323,7 +323,6 @@ export type MultiplayerRoom = {
   id: string;
   hostId: string | null;
   private: boolean;
-  purpose?: 'race' | 'live-audio';
   track: MultiplayerTrackSummary;
   flow: MultiplayerRoomFlow;
   createdAt: number;

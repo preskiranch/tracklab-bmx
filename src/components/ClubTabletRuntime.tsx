@@ -67,12 +67,6 @@ export default function ClubTabletRuntime({
   const activityVersionRef = useRef(0);
 
   useEffect(() => {
-    void import('../lib/nativePushNotifications')
-      .then(({ disableNativePushDelivery }) => disableNativePushDelivery())
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
     if (!session) return;
     lastActivityAtRef.current = Date.now();
     activityVersionRef.current += 1;

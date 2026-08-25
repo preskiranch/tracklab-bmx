@@ -10,7 +10,6 @@ import {
   LoaderCircle,
   LockKeyhole,
   MapPinned,
-  PhoneCall,
   QrCode,
   Search,
   Share2,
@@ -56,7 +55,6 @@ import {
   type FriendSuggestion,
 } from '../lib/friends';
 import { trackLocatorShareUrl } from '../lib/mapLinks';
-import { queueLiveFriendAudioRequest } from '../lib/liveFriendAudio';
 import {
   createTrackSharesApi,
   type TrackShare,
@@ -65,13 +63,6 @@ import {
 } from '../lib/trackShares';
 import { RiderAvatar } from './RiderAvatar';
 import './FriendsView.css';
-
-export function friendCanTalkLive(profile: FriendProfile) {
-  return profile.online
-    && profile.relationship === 'friend'
-    && !profile.officialKind
-    && profile.canTalkLive === true;
-}
 
 export type FriendsTab = 'friends' | 'requests' | 'suggestions' | 'shared-tracks' | 'invite';
 
@@ -84,7 +75,6 @@ export type FriendsViewProps = {
   friendInviteToken?: string | null;
   onPendingCountChange?: (count: number) => void;
   onFriendGraphChange?: () => void;
-  onTalkLive?: (profile: FriendProfile) => void;
   onInviteToRace?: (profile: FriendProfile) => void;
   onRaceGhost?: (profile: FriendProfile) => void | string;
   onOpenProfile?: (profile: FriendProfile) => void;
@@ -428,21 +418,12 @@ export function FriendsView({
   friendInviteToken = null,
   onPendingCountChange,
   onFriendGraphChange,
-  onTalkLive,
   onInviteToRace,
   onRaceGhost,
   onOpenProfile,
   distanceUnit = 'ft',
 }: FriendsViewProps) {
   const friendsApi = api ?? defaultFriendsApi;
-  const talkLive = useCallback((profile: FriendProfile) => {
-    if (onTalkLive) onTalkLive(profile);
-    else queueLiveFriendAudioRequest({
-      accountId: currentProfileId,
-      targetProfileId: profile.id,
-      targetName: profile.displayName,
-    });
-  }, [currentProfileId, onTalkLive]);
   const sharesApi = useMemo(() => trackSharesApi ?? defaultTrackSharesApi, [trackSharesApi]);
   const hubCache = useMemo(() => friendHubCache(friendsApi, currentProfileId), [currentProfileId, friendsApi]);
   const sharesCache = useMemo(
@@ -1244,14 +1225,6 @@ export function FriendsView({
                       : presenceMeta;
                     return (
                       <ProfileCard key={profile.id} profile={profile} detail={<small>{meta}</small>} onOpenProfile={onOpenProfile}>
-                        {friendCanTalkLive(profile) && (
-                          <button
-                            type="button"
-                            className="primary friend-talk-live"
-                            aria-label={`Talk live with ${profile.displayName}`}
-                            onClick={() => talkLive(profile)}
-                          ><PhoneCall size={15} aria-hidden="true" /> Talk live</button>
-                        )}
                         {onInviteToRace && profile.online && profile.available && (
                           <button type="button" className="primary" onClick={() => onInviteToRace(profile)}><Bike size={15} /> Invite to race</button>
                         )}

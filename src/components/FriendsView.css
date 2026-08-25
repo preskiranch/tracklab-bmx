@@ -214,7 +214,6 @@
 
 .friend-card-actions > button.primary,
 .friend-share-button { background: #7ade36; border-color: #67c22d; color: #13250b; }
-.friend-card-actions > button.friend-talk-live { white-space: nowrap; }
 .friend-card-actions > button:disabled { cursor: default; opacity: 0.58; }
 .friend-more-actions { position: relative; }
 .friend-more-actions summary { cursor: pointer; list-style: none; }

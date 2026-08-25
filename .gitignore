@@ -3,7 +3,6 @@ dist/
 captures/
 .npm-cache/
 .env.local
-AuthKey_*.p8
 .venv-commentary/
 *.tsbuildinfo
 playwright-report/

@@ -107,6 +107,7 @@ final class RecoveryAlertManager: NSObject {
             return
         }
         configured = true
+        center.delegate = self
         center.setNotificationCategories([
             UNNotificationCategory(
                 identifier: Self.notificationCategory,
@@ -1188,61 +1189,66 @@ final class RecoveryAlertManager: NSObject {
     private static func nowMilliseconds() -> Int64 {
         Int64((Date().timeIntervalSince1970 * 1_000).rounded())
     }
+}
 
-    /// Called exclusively through Capacitor's NotificationRouter local handler.
-    /// Keeping the router as the sole UNUserNotificationCenter delegate allows
-    /// the official push plugin to own remote notifications at the same time.
-    func willPresentLocalNotification(
-        _ notification: UNNotification
-    ) -> UNNotificationPresentationOptions {
-        let apply = { () -> Bool in
-            guard let record = self.currentRecord(for: notification.request) else {
-                return false
+extension RecoveryAlertManager: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        let info = notification.request.content.userInfo
+        DispatchQueue.main.async {
+            let isCurrentRequest: Bool
+            if let accountId = info["accountId"] as? String,
+               let record = self.records[accountId],
+               notification.request.identifier == record.notificationId,
+               info["recoveryId"] as? String == record.plan.recoveryId,
+               info["repetitionId"] as? String == record.plan.repetitionId,
+               info["sessionId"] as? String == record.plan.sessionId {
+                isCurrentRequest = true
+                self.markReady(
+                    accountId: accountId,
+                    trigger: self.deadlineTrigger(record.plan),
+                    triggeredAt: record.plan.deadlineAt,
+                    showImmediateNotification: false
+                )
+            } else {
+                isCurrentRequest = false
             }
-            self.markReady(
-                accountId: record.plan.accountId,
-                trigger: self.deadlineTrigger(record.plan),
-                triggeredAt: record.plan.deadlineAt,
-                showImmediateNotification: false
-            )
-            return true
-        }
-        let isCurrentRequest = Thread.isMainThread
-            ? apply()
-            : DispatchQueue.main.sync(execute: apply)
-        guard isCurrentRequest else { return [] }
-        return [.banner, .list, .sound]
-    }
-
-    func didReceiveLocalNotificationResponse(_ response: UNNotificationResponse) {
-        let apply = {
-            guard let record = self.currentRecord(for: response.notification.request) else {
+            guard isCurrentRequest else {
+                completionHandler([])
                 return
             }
-            self.markReady(
-                accountId: record.plan.accountId,
-                trigger: record.trigger ?? self.deadlineTrigger(record.plan),
-                triggeredAt: record.triggeredAt ?? record.plan.deadlineAt,
-                showImmediateNotification: false
-            )
-        }
-        if Thread.isMainThread {
-            apply()
-        } else {
-            DispatchQueue.main.sync(execute: apply)
+            if #available(iOS 14.0, *) {
+                completionHandler([.banner, .list, .sound])
+            } else {
+                completionHandler([.alert, .sound])
+            }
         }
     }
 
-    private func currentRecord(for request: UNNotificationRequest) -> StoredRecord? {
-        let info = request.content.userInfo
-        guard let accountId = info["accountId"] as? String,
-              let record = records[accountId],
-              request.identifier == record.notificationId,
-              info["recoveryId"] as? String == record.plan.recoveryId,
-              info["repetitionId"] as? String == record.plan.repetitionId,
-              info["sessionId"] as? String == record.plan.sessionId else {
-            return nil
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let info = response.notification.request.content.userInfo
+        DispatchQueue.main.async {
+            if let accountId = info["accountId"] as? String,
+               let record = self.records[accountId],
+               response.notification.request.identifier == record.notificationId,
+               info["recoveryId"] as? String == record.plan.recoveryId,
+               info["repetitionId"] as? String == record.plan.repetitionId,
+               info["sessionId"] as? String == record.plan.sessionId {
+                self.markReady(
+                    accountId: accountId,
+                    trigger: record.trigger ?? self.deadlineTrigger(record.plan),
+                    triggeredAt: record.triggeredAt ?? record.plan.deadlineAt,
+                    showImmediateNotification: false
+                )
+            }
+            completionHandler()
         }
-        return record
     }
 }

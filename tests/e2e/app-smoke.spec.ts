@@ -723,7 +723,6 @@ test('Friends hub shows removable official connections and private account disco
             displayName: 'Ghost Friend',
             relationship: 'friend',
             online: true,
-            canTalkLive: true,
             hasGhost: true,
             ghostPreview: friendGhostPreview,
           }),
@@ -792,102 +791,6 @@ test('Friends hub shows removable official connections and private account disco
     });
   });
   await page.route('https://maps.googleapis.com/**', (route) => route.abort());
-  await page.addInitScript(() => {
-    (window as any).__tracklabMicRequests = 0;
-    Object.defineProperty(navigator, 'mediaDevices', {
-      configurable: true,
-      value: {
-        getUserMedia: async () => {
-          (window as any).__tracklabMicRequests += 1;
-          const track = { stop: () => undefined };
-          return {
-            getAudioTracks: () => [track],
-            getTracks: () => [track],
-          };
-        },
-      },
-    });
-    (window as any).RTCPeerConnection = class extends EventTarget {};
-
-    class TestLiveAudioSocket extends EventTarget {
-      static CONNECTING = 0;
-      static OPEN = 1;
-      static CLOSING = 2;
-      static CLOSED = 3;
-      readyState = TestLiveAudioSocket.CONNECTING;
-
-      constructor() {
-        super();
-        (window as any).__tracklabTestLiveAudioSocket = this;
-        window.setTimeout(() => {
-          this.readyState = TestLiveAudioSocket.OPEN;
-          this.dispatchEvent(new Event('open'));
-        }, 0);
-      }
-
-      private emitMessage(payload: object) {
-        this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(payload) }));
-      }
-
-      send(raw: string) {
-        const message = JSON.parse(raw) as { type?: string; targetProfileId?: string };
-        if (message.type === 'hello') {
-          window.setTimeout(() => this.emitMessage({ type: 'welcome', clientId: 'live-client' }), 0);
-        } else if (message.type === 'create-live-audio-invite') {
-          window.setTimeout(() => {
-            this.emitMessage({
-              type: 'room-state',
-              room: {
-                id: 'TALK-TEST',
-                purpose: 'live-audio',
-                members: [{ id: 'live-client', displayName: 'Friends Rider', roomRole: 'spectator' }],
-              },
-            });
-            this.emitMessage({
-              type: 'live-audio-invite-status',
-              state: 'sent',
-              invite: {
-                id: 'LIVE-TEST',
-                targetProfileId: message.targetProfileId,
-                targetName: 'Ghost Friend',
-                expiresAt: new Date(Date.now() + 90_000).toISOString(),
-              },
-            });
-          }, 0);
-        } else if (message.type === 'leave-room') {
-          this.serverLeave();
-        }
-      }
-
-      serverLeave() {
-        if (this.readyState === TestLiveAudioSocket.CLOSED) return;
-        this.emitMessage({ type: 'room-left', roomId: 'TALK-TEST' });
-      }
-
-      serverPeerJoin() {
-        if (this.readyState === TestLiveAudioSocket.CLOSED) return;
-        this.emitMessage({
-          type: 'room-state',
-          room: {
-            id: 'TALK-TEST',
-            purpose: 'live-audio',
-            members: [
-              { id: 'live-client', displayName: 'Friends Rider', roomRole: 'spectator' },
-              { id: 'ghost-live', displayName: 'Ghost Friend', roomRole: 'spectator' },
-            ],
-          },
-        });
-      }
-
-      close() {
-        if (this.readyState === TestLiveAudioSocket.CLOSED) return;
-        this.readyState = TestLiveAudioSocket.CLOSED;
-        this.dispatchEvent(new CloseEvent('close'));
-      }
-    }
-
-    (window as any).WebSocket = TestLiveAudioSocket;
-  });
 
   await page.goto('/?track=rock-hill-bmx-supercross');
   await openSignedInAppIfNeeded(page);
@@ -909,42 +812,6 @@ test('Friends hub shows removable official connections and private account disco
   await expect(officialCards.getByRole('button', { name: 'Race ghost', exact: true })).toHaveCount(0);
   const ghostFriendCard = page.locator('.friend-profile-card').filter({ hasText: 'Ghost Friend' });
   await expect(ghostFriendCard).toContainText('Recent ghost · Chula Vista Elite BMX · 90.00s');
-  const talkLiveWithGhost = ghostFriendCard.getByRole('button', { name: 'Talk live with Ghost Friend' });
-  await expect(talkLiveWithGhost).toBeVisible();
-  await expect(officialCards.getByRole('button', { name: /Talk live with/ })).toHaveCount(0);
-  await talkLiveWithGhost.click();
-  const outgoingLiveAudio = page.locator('.live-friend-audio-card').filter({ hasText: 'Waiting for Ghost Friend' });
-  await expect(outgoingLiveAudio).toBeVisible();
-  await expect(outgoingLiveAudio).toContainText('Microphone stays off until your friend joins');
-  await expect(outgoingLiveAudio.getByRole('button', { name: 'Cancel invite' })).toBeVisible();
-  await expect(outgoingLiveAudio.getByRole('button', { name: 'Start talking' })).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => (window as any).__tracklabMicRequests)).toBe(0);
-  await page.evaluate(() => (window as any).__tracklabTestLiveAudioSocket?.serverPeerJoin());
-  const activeLiveAudio = page.locator('.live-friend-audio-card').filter({ hasText: 'Talking with Ghost Friend' });
-  const startTalking = activeLiveAudio.getByRole('button', { name: 'Start talking' });
-  await expect(activeLiveAudio).toBeVisible();
-  await expect(startTalking).toBeEnabled();
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  const mobileLiveAudioLayout = await page.evaluate(() => {
-    const nav = document.querySelector('.side-nav')?.getBoundingClientRect();
-    const card = document.querySelector('.live-friend-audio-card')?.getBoundingClientRect();
-    return nav && card ? {
-      clearsNavigationBy: card.top - nav.bottom,
-      withinViewport: card.left >= 0 && card.right <= window.innerWidth && card.bottom <= window.innerHeight,
-    } : null;
-  });
-  expect(mobileLiveAudioLayout).not.toBeNull();
-  expect(mobileLiveAudioLayout!.clearsNavigationBy).toBeGreaterThanOrEqual(8);
-  expect(mobileLiveAudioLayout!.withinViewport).toBe(true);
-  await page.screenshot({ fullPage: false, path: testInfo.outputPath('friend-live-audio-mobile.png') });
-  await expect.poll(() => page.evaluate(() => (window as any).__tracklabMicRequests)).toBe(0);
-  await startTalking.click();
-  await expect.poll(() => page.evaluate(() => (window as any).__tracklabMicRequests)).toBe(1);
-  await expect(activeLiveAudio.getByRole('button', { name: 'Mute' })).toBeVisible();
-  await activeLiveAudio.getByRole('button', { name: 'End' }).click();
-  await expect(page.locator('.live-friend-audio-card')).toHaveCount(0);
-  await page.setViewportSize({ width: 1280, height: 720 });
   await ghostFriendCard.getByRole('button', { name: 'Race ghost', exact: true }).click();
   await expect(page).toHaveURL(/track=chula-vista-elite-bmx/);
   const selectedFriendGhost = page.locator('.ghost-leaderboard-entry').filter({ hasText: 'Patient Friend Ghost' });
@@ -1077,9 +944,7 @@ test('Friends hub shows removable official connections and private account disco
   expect(friendMutations).toContain('invite:revoked');
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await friendsTab.click();
-  const talkLiveButton = page.getByRole('button', { name: 'Talk live with Ghost Friend' });
-  for (const control of [discoverySwitch, sharedTracksTab, inviteTab, blockedRidersTrigger, talkLiveButton]) {
+  for (const control of [discoverySwitch, sharedTracksTab, inviteTab, blockedRidersTrigger]) {
     await expect.poll(async () => (await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await expect.poll(async () => (await control.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(44);
   }

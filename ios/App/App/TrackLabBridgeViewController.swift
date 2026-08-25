@@ -7,6 +7,5 @@ final class TrackLabBridgeViewController: CAPBridgeViewController {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(HeartRatePlugin())
         bridge?.registerPluginInstance(RecoveryAlertPlugin())
-        bridge?.registerPluginInstance(PushInstallationPlugin())
     }
 }

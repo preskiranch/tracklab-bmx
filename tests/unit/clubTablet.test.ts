@@ -92,9 +92,6 @@ describe('Club Tablet client state', () => {
     expect(authorizeStart).toBeGreaterThanOrEqual(0);
     expect(authorizeEnd).toBeGreaterThan(authorizeStart);
     expect(authorizeSource).toContain('onDeviceChange(credential)');
-    expect(authorizeSource).toContain('clearNativePushAccountBoundary()');
-    expect(authorizeSource.indexOf('clearNativePushAccountBoundary()'))
-      .toBeLessThan(authorizeSource.indexOf('onDeviceChange(credential)'));
     expect(authorizeSource).not.toContain('loadClubTabletRoster(');
     expect(authorizeSource).not.toContain('onRosterChange(');
 
