@@ -111,6 +111,26 @@ describe('database migration runner', () => {
     expect(clubTabletMigration?.statements.join('\n')).toContain('revoked_at');
   });
 
+  it('adds one durable four-tablet Club Event lobby per club without raw credentials', () => {
+    const clubEventMigration = databaseMigrations().find((candidate) => candidate.version === 27);
+    const statements = clubEventMigration?.statements.join('\n') ?? '';
+
+    expect(clubEventMigration).toMatchObject({
+      version: 27,
+      name: 'add durable club event tablet lobbies',
+    });
+    expect(statements).toContain('club_events');
+    expect(statements).toContain('club_event_participants');
+    expect(statements).toContain("activity_type IN ('bmx-race', 'straight-sprint', 'explore')");
+    expect(statements).toContain("WHERE status IN ('lobby', 'active')");
+    expect(statements).toContain('seat_number BETWEEN 1 AND 4');
+    expect(statements).toContain('UNIQUE (event_id, device_id)');
+    expect(statements).toContain('UNIQUE (event_id, studio_rider_id)');
+    expect(statements).toContain('UNIQUE (event_id, bike_device_id)');
+    expect(statements).toContain('session_token_hash TEXT NOT NULL');
+    expect(statements).not.toContain('session_token TEXT');
+  });
+
   it('adds durable per-account display unit preferences', () => {
     const unitPreferencesMigration = databaseMigrations().find((candidate) => candidate.version === 14);
 

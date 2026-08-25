@@ -122,6 +122,8 @@ const heartRateStreamWriteChains = new Map();
 const heartRateWatchStatusSnapshots = new Map();
 let friendEventStreamCount = 0;
 const rooms = new Map();
+const clubEventRoomIdByEventId = new Map();
+const clubEventClosedAtByEventId = new Map();
 const challenges = new Map();
 const matchInvites = new Map();
 const persistedRaceResultKeys = new Map();
@@ -140,6 +142,7 @@ const globalRaceViewProfileKey = 'global:developer-race-view';
 let commentarySpeechProviderStatus = 'unknown';
 let commentarySpeechProviderRetryAt = 0;
 const maxRaceBikeCount = 4;
+const clubEventClosedTombstoneTtlMs = 6 * 60 * 60 * 1000;
 const maxBillingBikeSeats = 1000;
 const configuredClubLiveSessionTtlMs = Number(process.env.TRACKLAB_CLUB_LIVE_SESSION_TTL_MS);
 const clubLiveSessionTtlMs = Number.isFinite(configuredClubLiveSessionTtlMs)
@@ -722,6 +725,12 @@ function pruneTransientState(now = Date.now()) {
   for (const [key, savedAt] of persistedRaceResultKeys.entries()) {
     if (savedAt <= now - transientStateMaxAgeMs) {
       persistedRaceResultKeys.delete(key);
+    }
+  }
+
+  for (const [eventId, closedAt] of clubEventClosedAtByEventId.entries()) {
+    if (closedAt <= now - clubEventClosedTombstoneTtlMs) {
+      clubEventClosedAtByEventId.delete(eventId);
     }
   }
 
@@ -5048,6 +5057,177 @@ async function loadClubTabletDeviceFromRequest(request) {
   return persistence.loadClubTabletDeviceByTokenHash(tokenHash(token));
 }
 
+function sanitizeClubEventConfigurationValue(value, depth = 0) {
+  if (depth > 10 || value === undefined) return undefined;
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.max(-1_000_000_000, Math.min(1_000_000_000, value)) : undefined;
+  }
+  if (typeof value === 'string') return value.trim().slice(0, 300);
+  if (Array.isArray(value)) {
+    return value.slice(0, 1_000).flatMap((item) => {
+      const sanitized = sanitizeClubEventConfigurationValue(item, depth + 1);
+      return sanitized === undefined ? [] : [sanitized];
+    });
+  }
+  if (typeof value !== 'object') return undefined;
+  const output = {};
+  for (const [rawKey, rawValue] of Object.entries(value).slice(0, 160)) {
+    const key = sanitizeText(rawKey, '', 80);
+    if (!key || key === '__proto__' || key === 'prototype' || key === 'constructor') continue;
+    const sanitized = sanitizeClubEventConfigurationValue(rawValue, depth + 1);
+    if (sanitized !== undefined) output[key] = sanitized;
+  }
+  return output;
+}
+
+function sanitizeClubEventConfiguration(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const sanitized = sanitizeClubEventConfigurationValue(value);
+  return sanitized && JSON.stringify(sanitized).length <= 300_000 ? sanitized : null;
+}
+
+async function loadClubEventRequestContext(request, { renewSession = false } = {}) {
+  const suppliedSessionToken = requestClubTabletSessionToken(request);
+  if (suppliedSessionToken) {
+    const tabletSession = await loadClubTabletSessionToken(suppliedSessionToken, { renew: renewSession });
+    return tabletSession ? {
+      kind: 'athlete-session',
+      clubId: tabletSession.clubId,
+      ownerProfileKey: tabletSession.ownerProfileKey,
+      tabletSession,
+      sessionTokenHash: tokenHash(suppliedSessionToken),
+    } : null;
+  }
+  if (/^Bearer\s+/i.test(String(request.headers.authorization || ''))) {
+    const device = await loadClubTabletDeviceFromRequest(request);
+    return device ? {
+      kind: 'device',
+      clubId: device.clubId,
+      ownerProfileKey: device.ownerProfileKey,
+      device,
+    } : null;
+  }
+  const authSession = await currentAuthSession(request);
+  if (!authSession?.user || !canManageClubConnect(authSession.user)) return null;
+  const ownerProfileKey = authProfileKey(authSession.user);
+  const state = await persistence.loadClubConnectState(ownerProfileKey);
+  return {
+    kind: 'owner',
+    clubId: state.ownedClub?.id ?? null,
+    ownerProfileKey,
+    authSession,
+  };
+}
+
+async function loadCurrentClubEventOrThrow(clubId) {
+  if (!clubId) return null;
+  try {
+    return await persistence.loadCurrentClubEvent(clubId);
+  } catch (error) {
+    if (error?.code === 'TRACKLAB_CLUB_EVENT_PERSISTENCE_UNAVAILABLE') {
+      throw new HttpRequestError(503, 'Club Event storage is temporarily unavailable.', error.code);
+    }
+    throw error;
+  }
+}
+
+function currentClubEventParticipantSession(participant) {
+  const tabletSession = clubTabletSessionsByTokenHash.get(participant.sessionTokenHash);
+  return clubTabletSessionIsCurrent(tabletSession)
+    && tabletSession.deviceId === participant.deviceId
+    && tabletSession.studioRiderId === participant.studioRiderId
+    && tabletSession.bikeDeviceId === participant.bikeDeviceId
+    ? tabletSession
+    : null;
+}
+
+function clubEventParticipantIsLaunched(event, participant) {
+  const roomId = clubEventRoomIdByEventId.get(event.id);
+  const room = roomId ? rooms.get(roomId) : null;
+  if (!room || room.purpose !== 'club-event' || room.clubEventId !== event.id) return false;
+  return [...room.members].some((clientId) => {
+    const client = clients.get(clientId);
+    return room.racers?.has(clientId)
+      && client?.clubTabletSessionTokenHash === participant.sessionTokenHash;
+  });
+}
+
+function clubEventDeviceActivityAt(device) {
+  return Math.max(Number(device?.lastSeenAt) || 0, Number(device?.createdAt) || 0);
+}
+
+async function publicClubEvent(event) {
+  if (!event) return null;
+  const devices = await persistence.listClubTabletDevices(event.ownerProfileKey);
+  const deviceById = new Map(devices.map((device) => [device.id, device]));
+  const participants = Array.isArray(event.participants) ? event.participants.slice(0, 4) : [];
+  const occupiedSeats = new Set(participants.map((participant) => participant.seatNumber));
+  const participantDeviceIds = new Set(participants.map((participant) => participant.deviceId));
+  const availableSeatNumbers = [1, 2, 3, 4].filter((seatNumber) => !occupiedSeats.has(seatNumber));
+  const slots = participants.map((participant) => {
+    const device = deviceById.get(participant.deviceId);
+    const tabletSession = currentClubEventParticipantSession(participant);
+    const ready = participant.ready === true && Boolean(device) && Boolean(tabletSession);
+    return {
+      seatNumber: participant.seatNumber,
+      deviceId: participant.deviceId,
+      deviceName: device?.name || participant.deviceName || 'Club Tablet',
+      deviceLastSeenAt: device?.lastSeenAt ?? participant.deviceLastSeenAt ?? null,
+      status: ready && event.status === 'active' && clubEventParticipantIsLaunched(event, participant)
+        ? 'active'
+        : ready ? 'ready' : 'stale',
+      ready,
+      athlete: {
+        studioRiderId: participant.studioRiderId,
+        riderName: participant.riderName,
+        athleteName: tabletSession?.athleteName || participant.athleteName || null,
+      },
+      bikeDeviceId: participant.bikeDeviceId,
+      joinedAt: participant.joinedAt,
+    };
+  });
+  devices
+    .filter((device) => !participantDeviceIds.has(device.id))
+    .sort((left, right) => clubEventDeviceActivityAt(right) - clubEventDeviceActivityAt(left)
+      || Number(right.createdAt || 0) - Number(left.createdAt || 0)
+      || String(right.id).localeCompare(String(left.id)))
+    .slice(0, Math.max(0, 4 - slots.length))
+    .forEach((device, index) => {
+      slots.push({
+        seatNumber: availableSeatNumbers[index],
+        deviceId: device.id,
+        deviceName: device.name,
+        deviceLastSeenAt: device.lastSeenAt ?? null,
+        status: 'available',
+        ready: false,
+        athlete: null,
+        bikeDeviceId: null,
+        joinedAt: null,
+      });
+    });
+  slots.sort((left, right) => left.seatNumber - right.seatNumber);
+  return {
+    id: event.id,
+    clubId: event.clubId,
+    clubName: event.clubName,
+    activityType: event.activityType,
+    configuration: event.configuration,
+    status: event.status,
+    startAt: event.startAt ?? null,
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt,
+    slots,
+  };
+}
+
+async function publicClubEventResponse(event) {
+  return {
+    event: await publicClubEvent(event),
+    pollAfterMs: 2_000,
+  };
+}
+
 async function loadClubTabletRoster(device) {
   if (!device) return [];
   const [userData, state, watchProjection] = await Promise.all([
@@ -5128,7 +5308,7 @@ function publicClubTabletSession(session) {
 }
 
 function stopClubTabletSession(session) {
-  if (!session) return;
+  if (!session) return Promise.resolve({ status: 'not-joined', eventId: null });
   if (session._expiryTimer) clearTimeout(session._expiryTimer);
   session._expiryTimer = null;
   clubTabletSessionsByTokenHash.delete(session.tokenHash);
@@ -5147,10 +5327,18 @@ function stopClubTabletSession(session) {
   }
   for (const client of clients.values()) {
     if (client.clubTabletSessionTokenHash === session.tokenHash) {
+      if (rooms.get(client.roomId)?.purpose === 'club-event') {
+        leaveRoom(client, 'club-tablet-session-ended');
+      }
       demoteClubLiveClient(client);
       client.socket?.close(1008, 'Club tablet athlete session ended');
     }
   }
+  return persistence.releaseCurrentClubEventParticipantForSession({
+    clubId: session.clubId,
+    deviceId: session.deviceId,
+    sessionTokenHash: session.tokenHash,
+  });
 }
 
 function scheduleClubTabletSessionExpiry(session) {
@@ -5172,7 +5360,7 @@ function pruneClubTabletSessions(now = Date.now()) {
     if (
       session.expiresAt <= now
       || session.maxExpiresAt <= now
-    ) stopClubTabletSession(session);
+    ) void stopClubTabletSession(session);
   }
 }
 
@@ -5190,12 +5378,12 @@ async function loadClubTabletSessionByHash(sessionTokenHash, { renew = false } =
   const session = clubTabletSessionsByTokenHash.get(sessionTokenHash);
   const now = Date.now();
   if (!session || session.expiresAt <= now || session.maxExpiresAt <= now) {
-    if (session) stopClubTabletSession(session);
+    if (session) await stopClubTabletSession(session);
     return null;
   }
   const device = await persistence.loadClubTabletDeviceByTokenHash(session.deviceTokenHash);
   if (!device || device.id !== session.deviceId || device.clubId !== session.clubId) {
-    stopClubTabletSession(session);
+    await stopClubTabletSession(session);
     return null;
   }
   const [ownerData, clubBikeAccess] = await Promise.all([
@@ -5208,7 +5396,7 @@ async function loadClubTabletSessionByHash(sessionTokenHash, { renew = false } =
     !rosterStillContainsAthlete
     || !clubBikeAccess.active
   ) {
-    stopClubTabletSession(session);
+    await stopClubTabletSession(session);
     return null;
   }
   if (renew) {
@@ -6388,7 +6576,10 @@ function publicClubLiveSession(session) {
     _publisherClubTabletSessionHash: _privateTabletSessionHash,
     ...visibleSession
   } = session;
-  return visibleSession;
+  return {
+    ...visibleSession,
+    ...(_privatePublisherDeviceId ? { deviceId: _privatePublisherDeviceId } : {}),
+  };
 }
 
 function publicUserData(userData, user) {
@@ -7469,7 +7660,7 @@ function demoteClubLiveClient(client) {
       clientHasRacerAccess(clients.get(clientId))
     )) ?? null;
   }
-  void persistence.saveRoomJoin(room, client, 'spectator', 0);
+  if (room.purpose === 'race') void persistence.saveRoomJoin(room, client, 'spectator', 0);
   broadcastRoom(room.id, roomState(room));
   broadcastLobby();
 }
@@ -7569,9 +7760,12 @@ function publicRoom(room) {
 
   return {
     id: room.id,
+    ...(room.purpose === 'club-event' ? { clubEventId: room.clubEventId } : {}),
     hostId: room.hostId,
     private: room.private,
-    purpose: room.purpose === 'live-audio' ? 'live-audio' : 'race',
+    purpose: room.purpose === 'live-audio'
+      ? 'live-audio'
+      : room.purpose === 'club-event' ? 'club-event' : 'race',
     track: room.track,
     flow: publicRoomFlow(room),
     createdAt: room.createdAt,
@@ -7758,7 +7952,7 @@ function addRoomSystemMessage(room, text) {
     at: new Date().toISOString(),
   };
   room.messages = [...room.messages, message].slice(-40);
-  void persistence.saveRoomMessage(room.id, null, message);
+  if (room.purpose === 'race') void persistence.saveRoomMessage(room.id, null, message);
 }
 
 function applyRoomTrack(room, track) {
@@ -7769,7 +7963,7 @@ function applyRoomTrack(room, track) {
       member.track = room.track;
     }
   });
-  void persistence.updateRoomTrack(room);
+  if (room.purpose === 'race') void persistence.updateRoomTrack(room);
 }
 
 function beginRoomRace(room, source = 'route selection') {
@@ -8343,6 +8537,110 @@ async function createLiveAudioFriendInvite(host, targetProfileId) {
   cloudTelemetry.increment('tracklab_live_audio_invites_total', { outcome: 'sent' });
 }
 
+function clubEventWasClosed(eventId, now = Date.now()) {
+  const closedAt = clubEventClosedAtByEventId.get(eventId);
+  if (!closedAt) return false;
+  if (closedAt <= now - clubEventClosedTombstoneTtlMs) {
+    clubEventClosedAtByEventId.delete(eventId);
+    return false;
+  }
+  return true;
+}
+
+function closeClubEventRoom(eventId, reason = 'club-event-closed') {
+  clubEventClosedAtByEventId.set(eventId, Date.now());
+  const roomId = clubEventRoomIdByEventId.get(eventId);
+  const room = roomId ? rooms.get(roomId) : null;
+  clubEventRoomIdByEventId.delete(eventId);
+  if (!room || room.purpose !== 'club-event' || room.clubEventId !== eventId) return;
+  clearRoomTimers(room.id);
+  room.members.forEach((clientId) => {
+    const member = clients.get(clientId);
+    if (!member || member.roomId !== room.id) return;
+    member.roomId = null;
+    member.roomRole = null;
+    member.racerSeatCount = 0;
+    send(member, { type: 'room-left', roomId: room.id, reason });
+  });
+  rooms.delete(room.id);
+  cloudTelemetry.increment('tracklab_multiplayer_rooms_closed_total', { reason });
+  cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
+  broadcastLobby();
+}
+
+function evictClubEventParticipant(eventId, sessionTokenHash, reason = 'club-event-seat-released') {
+  const roomId = clubEventRoomIdByEventId.get(eventId);
+  const room = roomId ? rooms.get(roomId) : null;
+  if (!room || room.purpose !== 'club-event' || room.clubEventId !== eventId) return;
+  [...room.members].forEach((clientId) => {
+    const client = clients.get(clientId);
+    if (client?.clubTabletSessionTokenHash === sessionTokenHash) leaveRoom(client, reason);
+  });
+}
+
+function clubEventRoomTrack(event) {
+  return sanitizeTrack({
+    id: sanitizeText(event.configuration?.trackId, `${event.activityType}-club-event`, 120),
+    name: sanitizeText(event.configuration?.trackName, event.activityType === 'straight-sprint'
+      ? 'Club Straight Sprint'
+      : event.activityType === 'explore' ? 'Club Explore Ride' : 'Club BMX Race', 120),
+    country: 'Club Event',
+    state: 'Studio',
+  });
+}
+
+function createClubEventRoom(event) {
+  if (clubEventWasClosed(event.id)) return null;
+  const mappedRoom = rooms.get(clubEventRoomIdByEventId.get(event.id));
+  if (mappedRoom?.purpose === 'club-event' && mappedRoom.clubEventId === event.id) return mappedRoom;
+  let id = randomId('EVENT', 8);
+  while (rooms.has(id)) id = randomId('EVENT', 8);
+  const selectedTrackId = sanitizeText(event.configuration?.trackId, `${event.activityType}-club-event`, 120);
+  const room = {
+    id,
+    hostId: null,
+    private: true,
+    purpose: 'club-event',
+    clubEventId: event.id,
+    clubEventActivityType: event.activityType,
+    clubEventStartAt: event.startAt,
+    track: clubEventRoomTrack(event),
+    flow: event.activityType === 'explore' ? defaultRoomFlow() : {
+      ...defaultRoomFlow(),
+      phase: 'race',
+      selectedTrackId,
+      raceToken: event.id,
+      raceStartAt: event.startAt,
+    },
+    createdAt: Date.now(),
+    members: new Set(),
+    racers: new Set(),
+    spectators: new Set(),
+    racerSeatCounts: new Map(),
+    raceStates: new Map(),
+    exploreStates: new Map(),
+    exploreRoute: null,
+    exploreSession: event.activityType === 'explore' ? {
+      id: event.id,
+      routeId: sanitizeText(event.configuration?.routeId, event.id, 120),
+      status: 'ready',
+      startedAt: event.startAt,
+      updatedAt: Date.now(),
+    } : null,
+    messages: [{
+      id: randomId('MSG', 10),
+      author: 'TrackLab',
+      text: 'Secure Club Event room opened.',
+      at: new Date().toISOString(),
+    }],
+  };
+  rooms.set(id, room);
+  clubEventRoomIdByEventId.set(event.id, id);
+  cloudTelemetry.increment('tracklab_multiplayer_rooms_created_total', { visibility: 'private' });
+  cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
+  return room;
+}
+
 function leaveRoom(client, reason = 'left') {
   if (!client.roomId) {
     return;
@@ -8355,7 +8653,7 @@ function leaveRoom(client, reason = 'left') {
     return;
   }
   client.roomId = null;
-  void persistence.saveRoomLeave(oldRoomId, client);
+  if (!room || room.purpose === 'race') void persistence.saveRoomLeave(oldRoomId, client);
 
   if (!room) {
     send(client, { type: 'room-left', roomId: oldRoomId, reason });
@@ -8381,9 +8679,12 @@ function leaveRoom(client, reason = 'left') {
   if (room.members.size === 0) {
     clearRoomTimers(room.id);
     rooms.delete(room.id);
+    if (room.purpose === 'club-event' && clubEventRoomIdByEventId.get(room.clubEventId) === room.id) {
+      clubEventRoomIdByEventId.delete(room.clubEventId);
+    }
     cloudTelemetry.increment('tracklab_multiplayer_rooms_closed_total', { reason });
     cloudTelemetry.setGauge('tracklab_multiplayer_rooms', rooms.size);
-    void persistence.closeRoom(room.id);
+    if (room.purpose === 'race') void persistence.closeRoom(room.id);
     broadcastLobby();
     return;
   }
@@ -8468,7 +8769,11 @@ async function joinRoom(client, room, preferredRole = 'racer', requestedSeatCoun
     preferredRole = 'spectator';
   }
 
-  if (!room.hostId && preferredRole === 'racer') {
+  if (
+    !room.hostId
+    && preferredRole === 'racer'
+    && (room.purpose !== 'club-event' || room.clubEventActivityType === 'explore')
+  ) {
     room.hostId = client.id;
   }
 
@@ -8496,7 +8801,7 @@ async function joinRoom(client, room, preferredRole = 'racer', requestedSeatCoun
     room.liveAudioJoinDeadlineAt = null;
     room.liveAudioAcceptedInvite = null;
   }
-  if (room.purpose !== 'live-audio') {
+  if (room.purpose === 'race') {
     void persistence.saveRoomJoin(room, client, preferredRole, client.racerSeatCount);
   }
   cloudTelemetry.increment('tracklab_multiplayer_room_joins_total', { role: preferredRole });
@@ -8791,11 +9096,64 @@ async function handleClientMessage(client, rawMessage) {
     return;
   }
 
+  if (message.type === 'join-club-event') {
+    const eventId = sanitizeText(message.eventId, '', 180);
+    if (!eventId || !client.clubTabletSessionTokenHash || !client.clubLiveAccess?.clubId) {
+      send(client, { type: 'room-error', message: 'Choose an athlete on an authorized Club Tablet before joining this event.' });
+      return;
+    }
+    const tabletSession = await loadClubTabletSessionByHash(client.clubTabletSessionTokenHash, { renew: true });
+    const authorization = tabletSession && !clubEventWasClosed(eventId)
+      ? await persistence.authorizeClubEventRoomJoin({
+        clubId: tabletSession.clubId,
+        eventId,
+        deviceId: tabletSession.deviceId,
+        studioRiderId: tabletSession.studioRiderId,
+        bikeDeviceId: tabletSession.bikeDeviceId,
+        sessionTokenHash: client.clubTabletSessionTokenHash,
+      })
+      : null;
+    if (authorization?.status === 'unavailable') {
+      send(client, { type: 'room-error', message: 'Club Event storage is temporarily unavailable.' });
+      return;
+    }
+    const event = authorization?.status === 'authorized' ? authorization.event : null;
+    if (
+      !tabletSession
+      || !event
+      || event.id !== eventId
+      || event.status !== 'active'
+      || event.clubId !== client.clubLiveAccess.clubId
+      || clubEventWasClosed(eventId)
+    ) {
+      send(client, { type: 'room-error', message: 'This Club Tablet is not authorized for that active Club Event.' });
+      return;
+    }
+    const room = createClubEventRoom(event);
+    if (!room) {
+      send(client, { type: 'room-error', message: 'This Club Event has ended.' });
+      return;
+    }
+    const duplicateSessionClient = [...room.members]
+      .map((memberId) => clients.get(memberId))
+      .find((member) => member?.clubTabletSessionTokenHash === client.clubTabletSessionTokenHash && member.id !== client.id);
+    if (duplicateSessionClient || (!room.members.has(client.id) && room.members.size >= maxRaceBikeCount)) {
+      send(client, { type: 'room-error', message: 'That Club Event tablet seat is already connected.' });
+      return;
+    }
+    await joinRoom(client, room, 'racer', 1);
+    return;
+  }
+
   if (message.type === 'join-room') {
     const roomId = sanitizeText(message.roomId, '', 32).toUpperCase();
     const room = await findRoom(roomId);
     if (!room) {
       send(client, { type: 'room-error', message: `Room ${roomId || 'unknown'} is not available.` });
+      return;
+    }
+    if (room.purpose === 'club-event') {
+      send(client, { type: 'room-error', message: 'Club Event rooms require the authorized event join.' });
       return;
     }
     const blockedRoomMember = [...room.members]
@@ -8827,6 +9185,13 @@ async function handleClientMessage(client, rawMessage) {
     }
     const room = rooms.get(client.roomId);
     if (!room) {
+      return;
+    }
+    if (room.purpose === 'club-event' && (
+      room.clubEventActivityType !== 'explore'
+      || room.exploreRoute
+    )) {
+      send(client, { type: 'room-error', message: 'The coach controls this Club Event route.' });
       return;
     }
     if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
@@ -8865,13 +9230,23 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
     const action = sanitizeText(message.action, '', 24);
+    if (room.purpose === 'club-event' && (
+      room.clubEventActivityType !== 'explore'
+      || action !== 'start'
+      || room.exploreSession?.status !== 'ready'
+    )) {
+      send(client, { type: 'room-error', message: 'The coach controls this Club Event ride.' });
+      return;
+    }
     const now = Date.now();
     if (action === 'start' || action === 'reset') {
       room.exploreSession = {
         id: randomId('RIDE', 12),
         routeId: room.exploreRoute.id,
         status: action === 'start' ? 'riding' : 'ready',
-        startedAt: action === 'start' ? now + 800 : null,
+        startedAt: action === 'start'
+          ? (room.purpose === 'club-event' ? room.clubEventStartAt : now + 800)
+          : null,
         updatedAt: now,
       };
       room.exploreStates = new Map();
@@ -8904,6 +9279,11 @@ async function handleClientMessage(client, rawMessage) {
       return;
     }
 
+    if (room.purpose === 'club-event') {
+      send(client, { type: 'room-error', message: 'The coach controls this Club Event track.' });
+      return;
+    }
+
     if (room.hostId !== client.id || !room.racers?.has(client.id) || !requireRacerClient(client)) {
       send(client, { type: 'room-error', message: 'Only the room host can change the track.' });
       return;
@@ -8924,6 +9304,11 @@ async function handleClientMessage(client, rawMessage) {
 
     const room = rooms.get(client.roomId);
     if (!room) {
+      return;
+    }
+
+    if (room.purpose === 'club-event') {
+      send(client, { type: 'room-error', message: 'Track voting is disabled during a coach-controlled Club Event.' });
       return;
     }
 
@@ -8959,6 +9344,10 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     const room = rooms.get(client.roomId);
+    if (room?.purpose === 'club-event') {
+      send(client, { type: 'room-error', message: 'Track voting is disabled during a coach-controlled Club Event.' });
+      return;
+    }
     if (!room || room.flow?.phase !== 'voting') {
       return;
     }
@@ -8994,6 +9383,10 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     const room = rooms.get(client.roomId);
+    if (room?.purpose === 'club-event') {
+      send(client, { type: 'room-error', message: 'The coach controls this Club Event route.' });
+      return;
+    }
     if (!room || room.flow?.phase !== 'route-select') {
       return;
     }
@@ -9020,6 +9413,11 @@ async function handleClientMessage(client, rawMessage) {
 
     const room = rooms.get(client.roomId);
     if (!room) {
+      return;
+    }
+
+    if (room.purpose === 'club-event') {
+      send(client, { type: 'room-error', message: 'The coach controls this Club Event start.' });
       return;
     }
 
@@ -9057,7 +9455,7 @@ async function handleClientMessage(client, rawMessage) {
     }
 
     room.messages = [...room.messages, chatMessage].slice(-40);
-    void persistence.saveRoomMessage(room.id, client, chatMessage);
+    if (room.purpose === 'race') void persistence.saveRoomMessage(room.id, client, chatMessage);
     broadcastRoom(room.id, { type: 'room-chat', message: chatMessage, messages: room.messages });
     return;
   }
@@ -14382,6 +14780,229 @@ async function serveStatic(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === '/api/club-events/current' && request.method === 'GET') {
+    const context = await loadClubEventRequestContext(request);
+    if (!context) {
+      writeJson(response, 401, { error: 'A club owner or authorized Club Tablet is required.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const event = await loadCurrentClubEventOrThrow(context.clubId);
+    writeJson(response, 200, await publicClubEventResponse(event), { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-events') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const authSession = await requireClubMonitorOwnerSession(request, response);
+    if (!authSession) return;
+    if (!canManageClubConnect(authSession.user)) {
+      writeJson(response, 403, { error: 'Only the TrackLab club owner can create Club Events.' });
+      return;
+    }
+    const ownerProfileKey = authProfileKey(authSession.user);
+    if (!enforceRateLimit(request, response, clubTabletRateLimiter, 60, `club-events-owner:${ownerProfileKey}`)) return;
+    const payload = await readJsonBody(request, 350_000);
+    const activityType = sanitizeText(payload?.activityType, '', 40);
+    if (!['bmx-race', 'straight-sprint', 'explore'].includes(activityType)) {
+      writeJson(response, 400, { error: 'Choose BMX Race Intervals, Straight Sprint, or Explore for this Club Event.' });
+      return;
+    }
+    const configuration = sanitizeClubEventConfiguration(payload?.configuration ?? {});
+    if (!configuration) {
+      writeJson(response, 400, { error: 'The Club Event configuration is too large or invalid.' });
+      return;
+    }
+    const state = await persistence.loadClubConnectState(ownerProfileKey);
+    const club = state.ownedClub ?? await persistence.ensureClub(
+      ownerProfileKey,
+      sanitizeText(authSession.user.displayName, 'TrackLab Club', 120),
+      `club-${randomUUID()}`,
+    );
+    if (!club) {
+      writeJson(response, 503, { error: 'Club Event storage is temporarily unavailable.' });
+      return;
+    }
+    const replacedEvent = await loadCurrentClubEventOrThrow(club.id);
+    const created = await persistence.createClubEvent({
+      id: randomUUID(),
+      ownerProfileKey,
+      activityType,
+      configuration,
+    });
+    if (created.status !== 'created' || !created.event) {
+      writeJson(response, created.status === 'not-found' ? 404 : 503, {
+        error: created.status === 'not-found'
+          ? 'Create the club before starting a Club Event.'
+          : 'Club Event storage is temporarily unavailable.',
+      });
+      return;
+    }
+    clubEventClosedAtByEventId.delete(created.event.id);
+    if (replacedEvent?.id && replacedEvent.id !== created.event.id) {
+      closeClubEventRoom(replacedEvent.id, 'club-event-replaced');
+    }
+    writeJson(response, 201, await publicClubEventResponse(created.event), { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-events/current/join') {
+    if (request.method !== 'POST' && request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const context = await loadClubEventRequestContext(request, { renewSession: true });
+    if (!context || context.kind !== 'athlete-session') {
+      writeJson(response, 401, { error: 'Choose an athlete on this Club Tablet before joining the event.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceRateLimit(request, response, clubTabletRateLimiter, 90, `club-event-join:${context.tabletSession.deviceId}`)) return;
+    const payload = await readJsonBody(request, 8_000);
+    let eventId = sanitizeText(payload?.eventId, '', 180);
+    if (!eventId) {
+      const current = await loadCurrentClubEventOrThrow(context.clubId);
+      eventId = current?.id ?? '';
+    }
+    if (!eventId) {
+      writeJson(response, 404, { error: 'There is no current Club Event to join.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (request.method === 'DELETE') {
+      const released = await persistence.releaseClubEventParticipant({
+        clubId: context.clubId,
+        eventId,
+        deviceId: context.tabletSession.deviceId,
+        sessionTokenHash: context.sessionTokenHash,
+      });
+      if (released.status === 'not-found') {
+        writeJson(response, 404, { error: 'That Club Event is no longer current.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      if (released.status === 'unavailable') {
+        writeJson(response, 503, { error: 'Club Event storage is temporarily unavailable.' }, { 'Cache-Control': 'no-store' });
+        return;
+      }
+      // Treat an idempotent release exactly like the first successful release
+      // for live transport state. A prior HTTP attempt may have committed the
+      // row deletion even when its response never reached the tablet.
+      evictClubEventParticipant(eventId, context.sessionTokenHash);
+      writeJson(response, 200, await publicClubEventResponse(released.event), { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const joined = await persistence.joinClubEvent({
+      clubId: context.clubId,
+      eventId,
+      deviceId: context.tabletSession.deviceId,
+      studioRiderId: context.tabletSession.studioRiderId,
+      riderName: context.tabletSession.riderName,
+      bikeDeviceId: context.tabletSession.bikeDeviceId,
+      sessionTokenHash: context.sessionTokenHash,
+    });
+    const joinErrors = {
+      'not-found': [404, 'That Club Event is no longer current.'],
+      'not-lobby': [409, 'This Club Event has already started.'],
+      'device-invalid': [401, 'This Club Tablet is no longer authorized.'],
+      'athlete-conflict': [409, 'That athlete is already in this Club Event.'],
+      'bike-conflict': [409, 'That Wattbike is already in this Club Event.'],
+      full: [409, 'This Club Event already has four tablets.'],
+      unavailable: [503, 'Club Event storage is temporarily unavailable.'],
+    };
+    if (joinErrors[joined.status]) {
+      const [statusCode, error] = joinErrors[joined.status];
+      writeJson(response, statusCode, { error }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    writeJson(response, 200, await publicClubEventResponse(joined.event), { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-events/current/start') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const authSession = await requireClubMonitorOwnerSession(request, response);
+    if (!authSession) return;
+    if (!canManageClubConnect(authSession.user)) {
+      writeJson(response, 403, { error: 'Only the TrackLab club owner can start Club Events.' });
+      return;
+    }
+    const ownerProfileKey = authProfileKey(authSession.user);
+    const payload = await readJsonBody(request, 8_000);
+    const eventId = sanitizeText(payload?.eventId, '', 180);
+    const state = await persistence.loadClubConnectState(ownerProfileKey);
+    const current = await loadCurrentClubEventOrThrow(state.ownedClub?.id);
+    if (!eventId || !current || current.id !== eventId) {
+      writeJson(response, 404, { error: 'That Club Event is no longer current.' });
+      return;
+    }
+    const preview = await publicClubEvent(current);
+    const joinedSlots = preview.slots.filter((slot) => slot.athlete);
+    if (joinedSlots.length === 0) {
+      writeJson(response, 409, { error: 'At least one Club Tablet must join before the event starts.' });
+      return;
+    }
+    if (joinedSlots.some((slot) => !slot.ready)) {
+      writeJson(response, 409, { error: 'Every joined Club Tablet must have an active athlete and Wattbike before starting.' });
+      return;
+    }
+    const now = Date.now();
+    const started = await persistence.startClubEvent({
+      ownerProfileKey,
+      eventId,
+      startAt: now + 8_000,
+      now,
+    });
+    const startErrors = {
+      'not-found': [404, 'That Club Event is no longer current.'],
+      'not-lobby': [409, 'This Club Event has already started.'],
+      empty: [409, 'At least one Club Tablet must join before the event starts.'],
+      'not-ready': [409, 'Every joined Club Tablet must be ready before starting.'],
+      unavailable: [503, 'Club Event storage is temporarily unavailable.'],
+    };
+    if (startErrors[started.status]) {
+      const [statusCode, error] = startErrors[started.status];
+      writeJson(response, statusCode, { error });
+      return;
+    }
+    writeJson(response, 200, await publicClubEventResponse(started.event), { 'Cache-Control': 'no-store' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-events/current/cancel') {
+    if (request.method !== 'POST') {
+      writeJson(response, 405, { error: 'Method not allowed' });
+      return;
+    }
+    const authSession = await requireClubMonitorOwnerSession(request, response);
+    if (!authSession) return;
+    if (!canManageClubConnect(authSession.user)) {
+      writeJson(response, 403, { error: 'Only the TrackLab club owner can cancel Club Events.' });
+      return;
+    }
+    const ownerProfileKey = authProfileKey(authSession.user);
+    const payload = await readJsonBody(request, 8_000);
+    const eventId = sanitizeText(payload?.eventId, '', 180);
+    if (!eventId) {
+      writeJson(response, 400, { error: 'Choose the Club Event to cancel.' });
+      return;
+    }
+    const cancelled = await persistence.cancelClubEvent({ ownerProfileKey, eventId });
+    if (cancelled.status !== 'cancelled') {
+      writeJson(response, cancelled.status === 'not-found' ? 404 : 503, {
+        error: cancelled.status === 'not-found'
+          ? 'That Club Event is no longer current.'
+          : 'Club Event storage is temporarily unavailable.',
+      });
+      return;
+    }
+    closeClubEventRoom(eventId, 'club-event-cancelled');
+    writeJson(response, 200, { event: null, pollAfterMs: 2_000 }, { 'Cache-Control': 'no-store' });
+    return;
+  }
+
   if (requestUrl.pathname === '/api/club-tablet/devices') {
     const authSession = await requireAuthSession(request, response);
     if (!authSession) return;
@@ -14448,7 +15069,7 @@ async function serveStatic(request, response) {
         return;
       }
       const tokenHashForSession = clubTabletSessionTokenHashByDeviceId.get(deviceId);
-      if (tokenHashForSession) stopClubTabletSession(clubTabletSessionsByTokenHash.get(tokenHashForSession));
+      if (tokenHashForSession) await stopClubTabletSession(clubTabletSessionsByTokenHash.get(tokenHashForSession));
       writeJson(response, 200, { revoked: true }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -14582,7 +15203,7 @@ async function serveStatic(request, response) {
         }
         // Keep the current athlete active until the requested replacement has
         // passed every roster, bike, athlete, capacity, and storage check.
-        if (existingSession) stopClubTabletSession(existingSession);
+        if (existingSession) await stopClubTabletSession(existingSession);
         const sessionToken = createSessionToken();
         const sessionTokenHash = tokenHash(sessionToken);
         const maxExpiresAt = now + clubTabletSessionMaxTtlMs;
@@ -14635,7 +15256,7 @@ async function serveStatic(request, response) {
       return;
     }
     if (request.method === 'DELETE') {
-      stopClubTabletSession(tabletSession);
+      await stopClubTabletSession(tabletSession);
       writeJson(response, 200, { stopped: true }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -14701,7 +15322,7 @@ async function serveStatic(request, response) {
     const now = Date.now();
     const clubBikeAccess = await clubBikeAccessForOwnerProfileKey(tabletSession.ownerProfileKey);
     if (!clubBikeAccess.active) {
-      stopClubTabletSession(tabletSession);
+      await stopClubTabletSession(tabletSession);
       writeJson(response, 409, { error: 'This club Wattbike membership is no longer active.' }, { 'Cache-Control': 'no-store' });
       return;
     }
@@ -14763,7 +15384,7 @@ async function serveStatic(request, response) {
     }
     const identity = await clubTabletMemberAndProfile(tabletSession);
     if (!identity) {
-      stopClubTabletSession(tabletSession);
+      await stopClubTabletSession(tabletSession);
       writeJson(response, 403, { error: 'This athlete is no longer in the enrolled tablet club.' });
       return;
     }
@@ -14839,7 +15460,7 @@ async function serveStatic(request, response) {
     }
     const identity = await clubTabletMemberAndProfile(tabletSession);
     if (!identity) {
-      stopClubTabletSession(tabletSession);
+      await stopClubTabletSession(tabletSession);
       writeJson(response, 403, { error: 'This athlete is no longer in the enrolled tablet club.' });
       return;
     }
@@ -14872,7 +15493,7 @@ async function serveStatic(request, response) {
     }
     const identity = await clubTabletMemberAndProfile(tabletSession);
     if (!identity) {
-      stopClubTabletSession(tabletSession);
+      await stopClubTabletSession(tabletSession);
       writeJson(response, 403, { error: 'This athlete is no longer in the enrolled tablet club.' });
       return;
     }
