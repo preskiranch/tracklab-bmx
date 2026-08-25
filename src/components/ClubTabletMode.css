@@ -118,8 +118,11 @@
 .club-tablet-heart-rate.live { background: #e6f8df; color: #276c18; }
 .club-tablet-heart-rate small { margin: 0; color: inherit; }
 .club-tablet-end { border-color: #efb0a8; color: #a52d20; }
+.club-tablet-independent-heading { margin: 24px 2px -4px; }
+.club-tablet-independent-heading h3 { margin: 4px 0; font-size: clamp(21px, 2vw, 28px); }
 .club-tablet-programs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 19px; }
 .club-tablet-programs button { display: flex; min-width: 0; align-items: center; gap: 13px; padding: 18px; border: 1px solid #cbd5c6; border-radius: 16px; background: #142019; color: #fff; text-align: left; }
+.club-tablet-programs button:disabled { cursor: not-allowed; opacity: 0.48; }
 .club-tablet-programs button > svg { width: 31px; height: 31px; flex: 0 0 auto; color: #8eef42; }
 .club-tablet-programs strong,
 .club-tablet-programs small { display: block; }
@@ -127,7 +130,7 @@
 .club-tablet-home-programs { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 0; }
 .club-tablet-home-programs button { position: relative; min-height: 104px; padding: 15px; }
 .club-tablet-home-programs button.selected { border-color: #78dc38; background: #243d27; box-shadow: 0 0 0 3px rgba(116, 216, 55, 0.18); }
-.club-tablet-home-programs button:disabled { opacity: 0.65; }
+.club-tablet-home-programs button:disabled { opacity: 0.48; }
 .club-tablet-program-check { position: absolute; top: 9px; right: 9px; width: 20px !important; height: 20px !important; color: #8eef42 !important; }
 .club-tablet-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin-top: 18px; }
 .club-tablet-info-grid > div { display: flex; gap: 11px; padding: 16px; border-radius: 15px; }
