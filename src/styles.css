@@ -2048,6 +2048,19 @@ input:focus {
   padding: 0 6px;
 }
 
+.nav-badges {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.nav-badges > .friends-online,
+.nav-badges > .side-nav-count {
+  margin-left: 0;
+}
+
 .friends-online {
   background: #eaf9e2;
   border: 1px solid #a7dc8c;
@@ -7498,23 +7511,28 @@ input:focus {
     overflow-wrap: anywhere;
   }
 
-  .friends-online,
-  .side-nav-count {
+  .nav-badges {
+    flex-direction: row-reverse;
+    gap: 4px;
+    margin-left: 0;
+    position: absolute;
+    right: 2px;
+    top: 2px;
+  }
+
+  .nav-badges > .friends-online,
+  .nav-badges > .side-nav-count {
     height: 18px;
     margin-left: 0;
     min-width: 18px;
     padding: 0 4px;
-    position: absolute;
-    right: 2px;
-    top: 2px;
+    position: static;
   }
 
   .friends-online::before {
     height: 6px;
     width: 6px;
   }
-
-  .side-nav-count + .friends-online { right: 32px; }
 
   .connection-card {
     order: 3;

@@ -10934,19 +10934,21 @@ export default function App() {
           >
             <UserPlus size={17} />
             Friends
-            {pendingFriendRequestCount > 0 && (
-              <span className="side-nav-count" aria-label={`${pendingFriendRequestCount} new`}>
-                {pendingFriendRequestCount > 99 ? '99+' : pendingFriendRequestCount}
-              </span>
-            )}
-            {onlineFriendCount > 0 && (
-              <span
-                className="friends-online"
-                aria-label={`${onlineFriendCount} friend${onlineFriendCount === 1 ? '' : 's'} online`}
-              >
-                {onlineFriendCount > 99 ? '99+' : onlineFriendCount}
-              </span>
-            )}
+            <span className="nav-badges">
+              {pendingFriendRequestCount > 0 && (
+                <span className="side-nav-count" aria-label={`${pendingFriendRequestCount} new`}>
+                  {pendingFriendRequestCount > 99 ? '99+' : pendingFriendRequestCount}
+                </span>
+              )}
+              {onlineFriendCount > 0 && (
+                <span
+                  className="friends-online"
+                  aria-label={`${onlineFriendCount} friend${onlineFriendCount === 1 ? '' : 's'} online`}
+                >
+                  {onlineFriendCount > 99 ? '99+' : onlineFriendCount}
+                </span>
+              )}
+            </span>
           </button>
           <button
             className={appMode === 'race' && !mappingMode ? 'selected' : ''}

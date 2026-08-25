@@ -956,7 +956,7 @@ test('Friends hub shows removable official connections and private account disco
   ]);
   expect(notificationBadgeBox).not.toBeNull();
   expect(onlineBadgeBox).not.toBeNull();
-  expect(onlineBadgeBox!.x + onlineBadgeBox!.width).toBeLessThanOrEqual(notificationBadgeBox!.x);
+  expect(notificationBadgeBox!.x - (onlineBadgeBox!.x + onlineBadgeBox!.width)).toBeGreaterThanOrEqual(3);
   await expect.poll(() => page.evaluate(() => (
     document.documentElement.scrollWidth <= document.documentElement.clientWidth
   ))).toBe(true);
