@@ -1477,6 +1477,9 @@ const idleStartGateStatus: StartGateStatus = {
 };
 
 const startTreeLabels = ['RED', 'YELLOW 1', 'YELLOW 2', 'GREEN'] as const;
+const advancedConnectorMembershipMessage = 'Advanced Connector requires a personal Racer bike membership.';
+const clubBikeAccessUnavailableMessage = 'Club bike access is unavailable. The club may be using all purchased bike seats or its membership may need attention.';
+const unitPreferencesSavingMessage = 'Saving display units to your TrackLab profile.';
 
 function isGoogleLocationPermissionError(message: string) {
   return /REQUEST_DENIED|blocked|not allowed|not authorized|places\.googleapis\.com|Geocoding Service/i.test(message);
@@ -3981,9 +3984,9 @@ export default function App() {
     writeStoredUnitPreferences(cloudProfileKey, normalized);
     if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
       setCloudUserDataStatus('loading');
-      setCloudUserDataMessage('Saving display units to your TrackLab profile.');
+      setCloudUserDataMessage(unitPreferencesSavingMessage);
       setUnitPreferencesSyncStatus('loading');
-      setUnitPreferencesSyncMessage('Saving display units to your TrackLab profile.');
+      setUnitPreferencesSyncMessage(unitPreferencesSavingMessage);
       void queueCloudUserDataPatch(cloudProfileKey, { unitPreferences: normalized })
         .then((data) => {
           if (cloudUserDataLoadedKeyRef.current !== cloudProfileKey) return;
@@ -5108,7 +5111,7 @@ export default function App() {
             writeStoredUnitPreferences(cloudProfileKey, accountUnitPreferences);
             if (!data.unitPreferences || !unitPreferencesMatch(data.unitPreferences, accountUnitPreferences)) {
               setUnitPreferencesSyncStatus('loading');
-              setUnitPreferencesSyncMessage('Saving display units to your TrackLab profile.');
+              setUnitPreferencesSyncMessage(unitPreferencesSavingMessage);
               void queueCloudUserDataPatch(cloudProfileKey, {
                 unitPreferences: accountUnitPreferences,
               })
@@ -8311,7 +8314,7 @@ export default function App() {
     }
 
     if (source === 'advanced' && !authenticatedRacerAccess) {
-      setCheckoutMessage('Advanced Connector requires a personal Racer bike membership.');
+      setCheckoutMessage(advancedConnectorMembershipMessage);
       setCheckoutStatus('idle');
       setShowMembershipLanding(true);
       return;
@@ -8319,7 +8322,7 @@ export default function App() {
 
     if (source === 'bluetooth' && liveBikeAccessLocked) {
       setCheckoutMessage(selectedClubTrainingMembershipActive
-        ? 'Club bike access is unavailable. The club may be using all purchased bike seats or its membership may need attention.'
+        ? clubBikeAccessUnavailableMessage
         : 'Choose “Training at your club” for temporary studio access, or upgrade to Racer.');
       setCheckoutStatus('idle');
       return;
@@ -9956,7 +9959,7 @@ export default function App() {
   const bridgeRunning = bridge.sourceState === 'running';
   const showLiveBikeUpgrade = () => {
     setCheckoutMessage(selectedClubTrainingMembershipActive && !authenticatedRacerAccess
-      ? 'Club bike access is unavailable. The club may be using all purchased bike seats or its membership may need attention.'
+      ? clubBikeAccessUnavailableMessage
       : 'Upgrade to Racer to connect personal Wattbikes.');
     setCheckoutStatus('idle');
     if (!selectedClubTrainingMembershipActive) {
@@ -9964,7 +9967,7 @@ export default function App() {
     }
   };
   const showAdvancedConnectorUpgrade = () => {
-    setCheckoutMessage('Advanced Connector requires a personal Racer bike membership.');
+    setCheckoutMessage(advancedConnectorMembershipMessage);
     setCheckoutStatus('idle');
     setShowMembershipLanding(true);
   };
@@ -10285,7 +10288,7 @@ export default function App() {
         {heartRateStudioInviteDialog}
         {heartRateAccountBlockCoordinator}
         {watchConnectCoordinator}
-        <Suspense fallback={<div className="explore-loading">Loading TrackLab…</div>}>
+        <Suspense fallback={<div className="explore-loading">Loading…</div>}>
           <MembershipLanding
           membership={membership}
           bikeSeats={checkoutBikeSeats}
@@ -10333,7 +10336,7 @@ export default function App() {
   }
 
   const analyticsPanel = (
-    <Suspense fallback={<div className="panel-section">Loading results…</div>}>
+    <Suspense fallback={<div className="panel-section">Loading…</div>}>
       <AnalyticsPanel
         track={effectiveTrack}
         players={racePlayers}
@@ -10417,7 +10420,7 @@ export default function App() {
         && monitorHeartRateOverlayPlayer
         && monitorHeartRateOverlayRiderId
         && ownedClub && (
-        <Suspense fallback={<div className="explore-loading">Loading Watch…</div>}>
+        <Suspense fallback={<div className="explore-loading">Loading…</div>}>
           <StudioHeartRateBlockOverlay
             action={monitorHeartRateOverlayAction}
             anchorContext={{
@@ -11278,7 +11281,7 @@ export default function App() {
         )}
 
         {appMode === 'club-tablet' ? (
-          <Suspense fallback={<div className="explore-loading">Loading tablet…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
             <ClubTabletMode
               canAuthorize={clubOwnerActive && !clubTabletDevice}
               device={clubTabletDevice}
@@ -11313,7 +11316,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'friends' && authUser ? (
-          <Suspense fallback={<div className="explore-loading">Loading friends…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
             <FriendsView
               key={authUser.id}
               currentProfileId={authUser.id}
@@ -11374,7 +11377,7 @@ export default function App() {
             </div>}
           </>
         ) : appMode === 'profile' && authUser ? (
-          <Suspense fallback={<div className="explore-loading">Loading profile…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
           <AccountProfileView
             key={authUser.id}
             name={authUser.name}
@@ -11394,7 +11397,7 @@ export default function App() {
         ) : resultsMode ? (
           analyticsPanel
         ) : appMode === 'club-monitor' && clubOwnerActive ? (
-          <Suspense fallback={<div className="explore-loading">Loading Club Live…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
             <ClubLiveMonitor
               studioRiders={activeStudioRiders(activeProfileStudioRiders)}
               speedUnit={speedUnit}
@@ -11404,7 +11407,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'get-pulled' ? (
-          <Suspense fallback={<div className="explore-loading">Loading Get Pulled…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
             <ClubOwnerUtilityMode
               {...clubOwnerUtilitySharedProps}
               mode="get-pulled"
@@ -11426,7 +11429,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'explore' ? (
-          <Suspense fallback={<div className="explore-loading">Loading Explore…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
             <ClubOwnerUtilityMode
               {...clubOwnerUtilitySharedProps}
               mode="explore"
@@ -11475,7 +11478,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'monitor' ? (
-          <Suspense fallback={<div className="explore-loading">Loading monitor…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
             <MonitorView
               players={explorePlayers}
               samplesByDevice={samplesByDevice}
@@ -11494,7 +11497,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'diagnostics' ? (
-          <Suspense fallback={<div className="explore-loading">Loading diagnostics…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
             <DiagnosticsPanel
             bridgeConnection={bridge.connection}
             bridgeMode={bridge.mode}
@@ -11546,7 +11549,7 @@ export default function App() {
             />
           </Suspense>
         ) : appMode === 'developer' && developerUiActive ? (
-          <Suspense fallback={<div className="explore-loading">Loading tools…</div>}>
+          <Suspense fallback={<div className="explore-loading">Loading…</div>}>
             <DeveloperToolsPanel />
           </Suspense>
         ) : (
@@ -11554,7 +11557,7 @@ export default function App() {
             <div className="dashboard-grid">
               <div className="dashboard-primary-column">
                 <div className="race-canvas-shell">
-                  <Suspense fallback={<div className="explore-loading">Loading track…</div>}>
+                  <Suspense fallback={<div className="explore-loading">Loading…</div>}>
                   <EarthTrackView
                   track={effectiveTrack}
                   riders={stagedRiders}
@@ -11643,7 +11646,7 @@ export default function App() {
               </div>
 
               <div className="dashboard-secondary-column">
-                <Suspense fallback={<div className="panel-section">Loading controls…</div>}>
+                <Suspense fallback={<div className="panel-section">Loading…</div>}>
                   <SessionControlPanel
                   track={effectiveTrack}
                   selectedMetrics={selectedMetrics}
@@ -11764,7 +11767,7 @@ export default function App() {
                   />
                 </Suspense>
 
-                <Suspense fallback={<div className="panel-section">Loading multiplayer…</div>}>
+                <Suspense fallback={<div className="panel-section">Loading…</div>}>
                   <MultiplayerPanel
                   playMode={playMode}
                   connection={multiplayer.connection}
