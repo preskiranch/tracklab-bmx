@@ -31,6 +31,7 @@ import {
   saveLegacyExploreHistory,
   saveLegacyGetPulledHistory,
 } from '../lib/clubOwnerUtilityTrainingActions';
+import { releaseClubTabletAthleteAfterSaves } from '../lib/clubTabletExerciseCompletion';
 import type {
   ExploreRideAuthorizationReferences,
   ExploreRideCompleteEvent,
@@ -84,6 +85,7 @@ type OwnerContext = Readonly<{
   completionRef: ValueRef<GetPulledResult | ExploreRideCompleteEvent | null>;
   cancelActiveGroup: (options?: { keepalive?: boolean; preserveStatus?: boolean }) => Promise<void>;
   onHistoryChanged: () => void;
+  onTabletExerciseSaved: (session: ClubTabletSessionCredential) => Promise<void> | void;
 }>;
 
 type HeartRateContext = Readonly<{
@@ -249,18 +251,28 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
       console.warn('Get Pulled result was not saved because the selected club athlete could not be matched safely.');
       return;
     }
+    const completedTabletSession = owner.clubTabletSessionActive ? owner.clubTabletSession : null;
     const group = owner.groupRef.current;
     if (group?.request.activityType === 'get-pulled' && group.request.sessionId === result.id) {
       if (!owner.completionStartedRef.current.has(result.id)) void saveGroup(result, group).catch(() => undefined);
       return;
     }
-    void heartRateContext.finalize({
+    const heartRateSave = heartRateContext.finalize({
       sessionId: result.id,
       endedAt: result.endedAt,
       activeDurationMs: Math.max(0, result.endedAt - result.startedAt),
     });
-    void saveLegacyGetPulledHistory(result, owner.clubTrainingSelection)
-      .then(owner.onHistoryChanged)
+    const historySave = saveLegacyGetPulledHistory(result, owner.clubTrainingSelection);
+    if (completedTabletSession) {
+      void releaseClubTabletAthleteAfterSaves([heartRateSave, historySave], async () => {
+        owner.onHistoryChanged();
+        await owner.onTabletExerciseSaved(completedTabletSession);
+      })
+        .catch((error: Error) => console.warn(`Could not save Get Pulled history: ${error.message}`));
+      return;
+    }
+    void heartRateSave.catch(() => undefined);
+    void historySave.then(owner.onHistoryChanged)
       .catch((error: Error) => console.warn(`Could not save Get Pulled history: ${error.message}`));
   };
 
@@ -360,7 +372,8 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
 
   const completeExplore = (result: ExploreRideCompleteEvent) => {
     if (demoMode || (!owner.authUser && !owner.clubTabletSessionActive)) return;
-    const tabletRider = owner.clubTabletSessionActive && owner.clubTabletSession
+    const completedTabletSession = owner.clubTabletSessionActive ? owner.clubTabletSession : null;
+    const tabletRider = completedTabletSession
       ? result.riders.find((rider) => rider.riderId === owner.clubTabletSession?.session.studioRiderId)
       : undefined;
     if (owner.clubTabletSessionActive && !tabletRider) {
@@ -379,19 +392,30 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
       .filter((rider) => !authorizedPlayerIds.has(rider.playerId));
     if (savedRiders.length === 0) return;
     const accountRiderId = owner.authUser ? `account:${owner.authUser.id}` : null;
-    if (owner.clubTabletSessionActive || savedRiders.some((rider) => rider.riderId === accountRiderId)) {
-      void heartRateContext.finalize({
+    const heartRateSave = owner.clubTabletSessionActive
+      || savedRiders.some((rider) => rider.riderId === accountRiderId)
+      ? heartRateContext.finalize({
         sessionId: result.sessionId,
         endedAt: result.endedAt,
         activeDurationMs: result.durationMs,
-      });
-    }
-    void saveLegacyExploreHistory({
+      })
+      : Promise.resolve();
+    const historySave = saveLegacyExploreHistory({
       result,
       riders: savedRiders,
       clubTrainingSelection: owner.clubTrainingSelection,
       localPlayerId: tabletRider?.playerId ?? null,
-    }).then(owner.onHistoryChanged)
+    });
+    if (completedTabletSession) {
+      void releaseClubTabletAthleteAfterSaves([heartRateSave, historySave], async () => {
+        owner.onHistoryChanged();
+        await owner.onTabletExerciseSaved(completedTabletSession);
+      })
+        .catch((error: Error) => console.warn(`Could not save Explore the World history: ${error.message}`));
+      return;
+    }
+    void heartRateSave.catch(() => undefined);
+    void historySave.then(owner.onHistoryChanged)
       .catch((error: Error) => console.warn(`Could not save Explore the World history: ${error.message}`));
   };
 

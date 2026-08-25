@@ -8729,10 +8729,6 @@ export async function ensureClubRosterMember(ownerProfileKey, studioRiderId, rid
          WHEN existing.revoked_at IS NOT NULL THEN NULL
          ELSE existing.athlete_profile_key
        END,
-       athlete_name = CASE
-         WHEN existing.revoked_at IS NOT NULL THEN NULL
-         ELSE existing.athlete_name
-       END,
        status = CASE
          WHEN existing.revoked_at IS NOT NULL THEN 'unclaimed'
          ELSE existing.status

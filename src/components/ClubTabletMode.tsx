@@ -46,6 +46,43 @@ type ClubTabletBike = {
   label: string;
 };
 
+export type ClubTabletProgram = Extract<
+  AppMode,
+  'race' | 'straight-sprint' | 'explore' | 'get-pulled'
+>;
+
+const clubTabletPrograms = [
+  {
+    mode: 'race',
+    title: 'BMX Race Intervals',
+    detail: 'Tracks, pedal zones, races, and multiplayer',
+    Icon: Bike,
+  },
+  {
+    mode: 'straight-sprint',
+    title: 'Straight Sprint',
+    detail: 'Timed sprint distances and personal records',
+    Icon: Route,
+  },
+  {
+    mode: 'get-pulled',
+    title: 'Get Pulled',
+    detail: 'Timed sled pulls with Wattbike Air 1–10 records',
+    Icon: Gauge,
+  },
+  {
+    mode: 'explore',
+    title: 'Explore the World',
+    detail: 'Solo or multiplayer route riding',
+    Icon: Compass,
+  },
+] as const satisfies ReadonlyArray<{
+  mode: ClubTabletProgram;
+  title: string;
+  detail: string;
+  Icon: typeof Bike;
+}>;
+
 type ClubTabletModeProps = {
   canAuthorize: boolean;
   device: ClubTabletDeviceCredential | null;
@@ -65,7 +102,7 @@ type ClubTabletModeProps = {
   openPairing: () => void;
   reconnectBikes: () => Promise<void> | void;
   retryAuthorization: () => void;
-  openProgram: (mode: Extract<AppMode, 'race' | 'straight-sprint' | 'explore' | 'get-pulled'>) => void;
+  openProgram: (mode: ClubTabletProgram) => void;
 };
 
 export function clubTabletBikeAccessReady(
@@ -127,6 +164,8 @@ export default function ClubTabletMode({
   const [search, setSearch] = useState('');
   const [selectedRiderId, setSelectedRiderId] = useState('');
   const [selectedBikeId, setSelectedBikeId] = useState<number | null>(null);
+  const [selectedProgram, setSelectedProgram] = useState<ClubTabletProgram | null>(null);
+  const [sessionStartFailed, setSessionStartFailed] = useState(false);
   const [busy, setBusy] = useState<'idle' | 'authorizing' | 'roster' | 'starting' | 'ending'>('idle');
   const [managedDevices, setManagedDevices] = useState<ClubTabletDevice[]>([]);
   const [deviceManagementBusy, setDeviceManagementBusy] = useState(false);
@@ -150,6 +189,7 @@ export default function ClubTabletMode({
     ? `${activeSession.sessionToken}:${activeSession.session.clubId}:${activeSession.session.studioRiderId}`
     : '';
   const activeWatchRequestKeyRef = useRef(activeWatchRequestKey);
+  const sessionStartPendingRef = useRef(false);
   activeWatchRequestKeyRef.current = activeWatchRequestKey;
   const filteredAthletes = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -161,15 +201,11 @@ export default function ClubTabletMode({
   }, [roster?.athletes, search]);
 
   useEffect(() => {
-    if (bikes.length === 1) setSelectedBikeId(bikes[0].deviceId);
-    if (bikes.length === 0) setSelectedBikeId(null);
+    setSelectedBikeId((current) => {
+      if (current != null && bikes.some((bike) => bike.deviceId === current)) return current;
+      return bikes.length === 1 ? bikes[0].deviceId : null;
+    });
   }, [bikes]);
-
-  useEffect(() => {
-    if (!selectedRiderId && filteredAthletes.length === 1) {
-      setSelectedRiderId(filteredAthletes[0].studioRiderId);
-    }
-  }, [filteredAthletes, selectedRiderId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setWatchClock(Date.now()), 1_000);
@@ -269,13 +305,19 @@ export default function ClubTabletMode({
     }
   };
 
-  const startAthlete = async () => {
-    if (!selectedRiderId || selectedBikeId == null) return;
+  const startAthlete = async (
+    riderId = selectedRiderId,
+    program = selectedProgram,
+    bikeId = selectedBikeId,
+  ) => {
+    if (!riderId || !program || bikeId == null || sessionStartPendingRef.current) return;
+    sessionStartPendingRef.current = true;
     setBusy('starting');
     setMessage(null);
+    setSessionStartFailed(false);
     try {
-      const session = await startClubTabletSession(selectedRiderId, selectedBikeId, deviceCredential);
-      const selectedAthlete = roster?.athletes.find((athlete) => athlete.studioRiderId === selectedRiderId);
+      const session = await startClubTabletSession(riderId, bikeId, deviceCredential);
+      const selectedAthlete = roster?.athletes.find((athlete) => athlete.studioRiderId === riderId);
       onSessionChange({
         ...session,
         session: {
@@ -284,12 +326,41 @@ export default function ClubTabletMode({
           ...(selectedAthlete?.photoUrl ? { photoUrl: selectedAthlete.photoUrl } : {}),
         },
       });
-      setMessage(`${selectedAthlete ? clubTabletAthleteDisplayName(selectedAthlete) : 'Athlete'} is ready. Choose a program below.`);
+      onOpenProgram(program);
     } catch (error) {
+      setSessionStartFailed(true);
       setMessage(error instanceof Error ? error.message : 'Could not start this athlete session.');
     } finally {
+      sessionStartPendingRef.current = false;
       setBusy('idle');
     }
+  };
+
+  const chooseAthlete = (athlete: ClubTabletAthlete) => {
+    if (sessionStartPendingRef.current) return;
+    setSelectedRiderId(athlete.studioRiderId);
+    setSessionStartFailed(false);
+    if (selectedProgram && selectedBikeId != null) {
+      void startAthlete(athlete.studioRiderId, selectedProgram, selectedBikeId);
+      return;
+    }
+    setMessage(selectedBikeId == null
+      ? `${clubTabletAthleteDisplayName(athlete)} selected. Connect this tablet's Wattbike, then choose an activity.`
+      : `${clubTabletAthleteDisplayName(athlete)} selected. Now choose an activity.`);
+  };
+
+  const chooseProgram = (program: ClubTabletProgram) => {
+    if (sessionStartPendingRef.current) return;
+    setSelectedProgram(program);
+    setSessionStartFailed(false);
+    if (selectedRiderId && selectedBikeId != null) {
+      void startAthlete(selectedRiderId, program, selectedBikeId);
+      return;
+    }
+    const programTitle = clubTabletPrograms.find((candidate) => candidate.mode === program)?.title ?? 'Activity';
+    setMessage(selectedBikeId == null
+      ? `${programTitle} selected. Connect this tablet's Wattbike, then choose your athlete.`
+      : `${programTitle} selected. Now choose your athlete.`);
   };
 
   const endAthlete = async () => {
@@ -503,18 +574,11 @@ export default function ClubTabletMode({
         </div>
 
         <div className="club-tablet-programs">
-          <button type="button" onClick={() => onOpenProgram('race')}>
-            <Bike /><span><strong>BMX Race Intervals</strong><small>Tracks, pedal zones, races, and multiplayer</small></span>
-          </button>
-          <button type="button" onClick={() => onOpenProgram('straight-sprint')}>
-            <Route /><span><strong>Straight Sprint</strong><small>Timed sprint distances and personal records</small></span>
-          </button>
-          <button type="button" onClick={() => onOpenProgram('get-pulled')}>
-            <Gauge /><span><strong>Get Pulled</strong><small>Timed sled pulls with Wattbike Air 1–10 records</small></span>
-          </button>
-          <button type="button" onClick={() => onOpenProgram('explore')}>
-            <Compass /><span><strong>Explore the World</strong><small>Solo or multiplayer route riding</small></span>
-          </button>
+          {clubTabletPrograms.map(({ mode, title, detail, Icon }) => (
+            <button type="button" key={mode} onClick={() => onOpenProgram(mode)}>
+              <Icon /><span><strong>{title}</strong><small>{detail}</small></span>
+            </button>
+          ))}
         </div>
 
         <div className="club-tablet-info-grid">
@@ -532,8 +596,8 @@ export default function ClubTabletMode({
       <header className="club-tablet-header">
         <div>
           <span className="eyebrow">{deviceCredential.device.clubName}</span>
-          <h2>Who is training on this tablet?</h2>
-          <p>Choose a student, then choose the Wattbike currently paired to this tablet. The choices are independent.</p>
+          <h2>Club Tablet home</h2>
+          <p>Choose an athlete and an activity in either order. TrackLab opens the activity as soon as both are selected.</p>
         </div>
         <button type="button" disabled={busy !== 'idle'} onClick={() => void refreshRoster()}>
           <RefreshCw size={17} /> Refresh roster
@@ -562,7 +626,8 @@ export default function ClubTabletMode({
                   className={selected ? 'selected' : ''}
                   type="button"
                   key={athlete.studioRiderId}
-                  onClick={() => setSelectedRiderId(athlete.studioRiderId)}
+                  disabled={busy === 'starting'}
+                  onClick={() => chooseAthlete(athlete)}
                 >
                   <RiderAvatar name={clubTabletAthleteDisplayName(athlete)} photoUrl={athlete.photoUrl} accent={selected ? '#7ade36' : '#8d9a87'} />
                   <span>
@@ -584,11 +649,20 @@ export default function ClubTabletMode({
           </div>
         </section>
 
-        <section className="club-tablet-step">
-          <div className="club-tablet-step-title"><b>2</b><span><strong>Choose this tablet’s bike</strong><small>Any club Wattbike can be paired. Its saved pairing stays after sign-out.</small></span></div>
+        <div className="club-tablet-home-actions">
+        <section className="club-tablet-step club-tablet-bike-step">
+          <div className="club-tablet-step-title"><span className="club-tablet-step-icon"><Bluetooth size={19} /></span><span><strong>This tablet’s Wattbike</strong><small>The saved pairing stays assigned after every athlete is released.</small></span></div>
           <div className="club-tablet-bikes">
             {bikes.map((bike) => (
-              <button className={selectedBikeId === bike.deviceId ? 'selected' : ''} type="button" key={bike.deviceId} onClick={() => setSelectedBikeId(bike.deviceId)}>
+              <button
+                className={selectedBikeId === bike.deviceId ? 'selected' : ''}
+                type="button"
+                key={bike.deviceId}
+                disabled={busy === 'starting'}
+                onClick={() => {
+                  if (!sessionStartPendingRef.current) setSelectedBikeId(bike.deviceId);
+                }}
+              >
                 <Bluetooth size={21} />
                 <span><strong>{bikeLabel(bike)}</strong><small>Connected and available</small></span>
                 {selectedBikeId === bike.deviceId && <CheckCircle2 size={20} />}
@@ -615,13 +689,41 @@ export default function ClubTabletMode({
             </div>
           )}
         </section>
+
+        <section className="club-tablet-step club-tablet-activity-step">
+          <div className="club-tablet-step-title"><b>2</b><span><strong>Choose activity</strong><small>You can choose the activity before or after the athlete.</small></span></div>
+          <div className="club-tablet-programs club-tablet-home-programs">
+            {clubTabletPrograms.map(({ mode, title, detail, Icon }) => (
+              <button
+                className={selectedProgram === mode ? 'selected' : ''}
+                type="button"
+                key={mode}
+                disabled={busy === 'starting'}
+                onClick={() => chooseProgram(mode)}
+              >
+                <Icon /><span><strong>{title}</strong><small>{detail}</small></span>
+                {selectedProgram === mode && <CheckCircle2 className="club-tablet-program-check" size={20} />}
+              </button>
+            ))}
+          </div>
+        </section>
+        </div>
       </div>
 
       <footer className="club-tablet-start">
-        <span><ShieldCheck size={18} /> The server verifies the selected athlete before any data is saved.</span>
-        <button className="club-tablet-primary" type="button" disabled={!selectedRiderId || selectedBikeId == null || busy !== 'idle'} onClick={startAthlete}>
-          <UserRoundCheck size={20} /> {busy === 'starting' ? 'Starting athlete session…' : 'Start athlete session'}
-        </button>
+        <span><ShieldCheck size={18} /> {busy === 'starting'
+          ? 'Verifying the athlete and opening the selected activity…'
+          : 'The athlete is released after the completed exercise. The Wattbike stays with this tablet.'}</span>
+        {sessionStartFailed && (
+          <button
+            className="club-tablet-primary"
+            type="button"
+            disabled={!selectedRiderId || !selectedProgram || selectedBikeId == null || busy !== 'idle'}
+            onClick={() => void startAthlete()}
+          >
+            <RefreshCw size={20} /> Retry selected activity
+          </button>
+        )}
       </footer>
       {message && <p className="club-tablet-message">{message}</p>}
     </section>

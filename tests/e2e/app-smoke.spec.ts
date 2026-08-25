@@ -7380,6 +7380,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   let logoutRequests = 0;
   let failNextRosterAuthorization = false;
   let sessionRequest: unknown = null;
+  let sessionPosts = 0;
   let sessionDeletes = 0;
   let tabletLiveRequests = 0;
   let tabletLiveSessionHeader = '';
@@ -7516,7 +7517,9 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   });
   await page.route('**/api/club-tablet/sessions', async (route) => {
     if (route.request().method() === 'POST') {
+      sessionPosts += 1;
       sessionRequest = route.request().postDataJSON();
+      await new Promise((resolve) => setTimeout(resolve, 125));
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
@@ -7570,7 +7573,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
 
   await page.getByLabel('Tablet name').fill(tabletDevice.name);
   await page.getByRole('button', { name: 'Authorize this tablet', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
   expect(enrollmentRequest).toEqual({ name: tabletDevice.name });
   await page.waitForTimeout(250);
   expect(rosterRequests).toBeGreaterThanOrEqual(1);
@@ -7582,7 +7585,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
 
   const primaryNav = page.getByRole('navigation', { name: 'Primary' });
   await expect(primaryNav.getByRole('button')).toHaveCount(1);
-  await expect(primaryNav.getByRole('button', { name: 'Club Tablet', exact: true })).toBeVisible();
+  await expect(primaryNav.getByRole('button', { name: 'Club Tablet Home', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'My Profile', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'More', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Club Live Monitor', exact: true })).toHaveCount(0);
@@ -7592,48 +7595,60 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(page.getByRole('button', { name: /Bobby/ })).toBeVisible();
   const rasheen = page.getByRole('button', { name: /Rasheen Hicks/ });
   await expect(rasheen).toBeVisible();
-  const startAthlete = page.getByRole('button', { name: 'Start athlete session', exact: true });
-  await expect(startAthlete).toBeDisabled();
   const bikeChoices = page.locator('.club-tablet-bikes');
   await expect(bikeChoices.getByRole('button')).toHaveCount(1);
   await expect(bikeChoices.getByText('FTMS · PM 701', { exact: false })).toBeVisible();
 
-  await rasheen.click();
-  await expect(startAthlete).toBeEnabled();
-  await startAthlete.click();
-  expect(sessionRequest).toEqual({ studioRiderId: 'studio-rasheen', bikeDeviceId: '58701' });
-
-  const programs = page.locator('.club-tablet-programs');
+  const programs = page.locator('.club-tablet-home-programs');
   await expect(programs.getByRole('button')).toHaveCount(4);
   await expect(programs.getByRole('button', { name: /BMX Race Intervals/ })).toBeVisible();
   await expect(programs.getByRole('button', { name: /Straight Sprint/ })).toBeVisible();
   await expect(programs.getByRole('button', { name: /Explore the World/ })).toBeVisible();
   await expect(programs.getByRole('button', { name: /Get Pulled/ })).toBeVisible();
-  await expect(page.getByRole('status', {
-    name: /Rasheen Hicks heart rate: 156 beats per minute/,
-  })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start athlete session', exact: true })).toHaveCount(0);
+
+  // Program-first: choosing the athlete second creates exactly one secure
+  // session and opens the selected exercise without a Settings detour.
+  await programs.getByRole('button', { name: /Get Pulled/ }).click();
+  await expect(page.getByText('Get Pulled selected. Now choose your athlete.')).toBeVisible();
+  await rasheen.click();
+  const pendingAthletes = page.locator('.club-tablet-athletes').getByRole('button');
+  await expect(pendingAthletes).toHaveCount(2);
+  await expect(pendingAthletes.nth(0)).toBeDisabled();
+  await expect(pendingAthletes.nth(1)).toBeDisabled();
+  await expect(page.locator('.club-tablet-bikes').getByRole('button')).toBeDisabled();
+  await expect.poll(() => sessionPosts).toBe(1);
+  expect(sessionRequest).toEqual({ studioRiderId: 'studio-rasheen', bikeDeviceId: '58701' });
+  await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toBeVisible();
   await expect.poll(() => tabletLiveRequests).toBeGreaterThanOrEqual(1);
   expect(tabletLiveSessionHeader).toBe('tablet-athlete-session-token-rasheen-123456');
-  await expect(page.getByRole('button', { name: /heart rate|BPM/i })).toHaveCount(0);
-  tabletLiveReadingAvailable = false;
-  await expect(page.getByRole('status', {
-    name: /Rasheen Hicks heart rate: No recent reading/,
-  })).toBeVisible({ timeout: 7_000 });
 
-  await page.locator('.club-tablet-active-card')
-    .getByRole('button', { name: 'End athlete session', exact: true })
-    .click();
+  await primaryNav.getByRole('button', { name: 'End activity & choose athlete', exact: true }).click();
   // Shared-screen identity and BPM disappear before the DELETE round-trip;
   // an offline sign-out cannot leave the former athlete visible.
-  await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
   await expect(page.getByRole('status', { name: /Rasheen Hicks heart rate/ })).toHaveCount(0);
   await expect.poll(() => sessionDeletes).toBe(1);
   expect(await page.evaluate(() => (
     window.sessionStorage.getItem('tracklab.club-tablet-athlete-session.v1')
   ))).toBeNull();
   finishSessionDelete?.();
-  await expect(page.getByText('Athlete signed out. The Wattbike remains paired to this tablet for the next student.')).toBeVisible();
   expect(sessionDeletes).toBe(1);
+
+  // Athlete-first: choosing the activity second follows the same one-tap
+  // launch path and returns to the same home for the next athlete.
+  await page.getByRole('button', { name: /Rasheen Hicks/ }).click();
+  await expect(page.getByText('Rasheen Hicks selected. Now choose an activity.')).toBeVisible();
+  await page.locator('.club-tablet-home-programs')
+    .getByRole('button', { name: /Explore the World/ })
+    .click();
+  await expect.poll(() => sessionPosts).toBe(2);
+  await expect(page.getByRole('heading', { name: 'Explore the World' })).toBeVisible();
+  await primaryNav.getByRole('button', { name: 'End activity & choose athlete', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
+  await expect.poll(() => sessionDeletes).toBe(2);
+  finishSessionDelete?.();
+
   expect(await page.evaluate(() => ({
     device: JSON.parse(window.localStorage.getItem('tracklab.club-tablet-device.v1') ?? 'null'),
     session: window.sessionStorage.getItem('tracklab.club-tablet-athlete-session.v1'),
@@ -7647,7 +7662,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   });
 
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
   await expect.poll(() => logoutRequests).toBe(2);
   await page.waitForTimeout(250);
   expect(logoutRequests).toBe(2);
@@ -7663,7 +7678,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(page.getByRole('button', { name: 'Pair a Wattbike' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Retry authorization', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Verifying tablet authorization…' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Who is training on this tablet?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
 });
 
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {
