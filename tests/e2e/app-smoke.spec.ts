@@ -3574,14 +3574,15 @@ test('dashboard analysis follows the map without a blank grid row', async ({ pag
   await expect(controlPanel.getByText('Heading', { exact: true })).toHaveCount(0);
   await expect(controlPanel.getByText('Speed units', { exact: true })).toBeVisible();
 
-  const mapBounds = await earthPanel.boundingBox();
-  const analysisBounds = await page.locator('.analytics-panel').boundingBox();
-  expect(mapBounds).not.toBeNull();
-  expect(analysisBounds).not.toBeNull();
-
-  const analysisGap = analysisBounds!.y - (mapBounds!.y + mapBounds!.height);
-  expect(analysisGap).toBeGreaterThanOrEqual(10);
-  expect(analysisGap).toBeLessThanOrEqual(18);
+  await expect.poll(async () => {
+    const analysisGap = await page.evaluate(() => {
+      const map = document.querySelector<HTMLElement>('.earth-panel');
+      const analysis = document.querySelector<HTMLElement>('.analytics-panel');
+      if (!map || !analysis) throw new Error('Dashboard panels are missing');
+      return analysis.getBoundingClientRect().top - map.getBoundingClientRect().bottom;
+    });
+    return analysisGap >= 10 && analysisGap <= 18 ? 'aligned' : `gap ${analysisGap}`;
+  }).toBe('aligned');
 
   await page.screenshot({
     fullPage: false,
@@ -3589,19 +3590,25 @@ test('dashboard analysis follows the map without a blank grid row', async ({ pag
   });
 
   await page.setViewportSize({ width: 1024, height: 768 });
-  const tabletMapBounds = await page.locator('.earth-panel').boundingBox();
-  const tabletControlBounds = await page.locator('.control-panel').boundingBox();
-  const tabletAnalysisBounds = await page.locator('.analytics-panel').boundingBox();
-  expect(tabletMapBounds).not.toBeNull();
-  expect(tabletControlBounds).not.toBeNull();
-  expect(tabletAnalysisBounds).not.toBeNull();
-
-  const tabletControlGap = tabletControlBounds!.y - (tabletMapBounds!.y + tabletMapBounds!.height);
-  const tabletAnalysisGap = tabletAnalysisBounds!.y - (tabletControlBounds!.y + tabletControlBounds!.height);
-  expect(tabletControlGap).toBeGreaterThanOrEqual(10);
-  expect(tabletControlGap).toBeLessThanOrEqual(18);
-  expect(tabletAnalysisGap).toBeGreaterThanOrEqual(10);
-  expect(tabletAnalysisGap).toBeLessThanOrEqual(18);
+  await expect.poll(async () => {
+    const { tabletControlGap, tabletAnalysisGap } = await page.evaluate(() => {
+      const map = document.querySelector<HTMLElement>('.earth-panel');
+      const control = document.querySelector<HTMLElement>('.control-panel');
+      const analysis = document.querySelector<HTMLElement>('.analytics-panel');
+      if (!map || !control || !analysis) throw new Error('Tablet dashboard panels are missing');
+      const mapBounds = map.getBoundingClientRect();
+      const controlBounds = control.getBoundingClientRect();
+      const analysisBounds = analysis.getBoundingClientRect();
+      return {
+        tabletControlGap: controlBounds.top - mapBounds.bottom,
+        tabletAnalysisGap: analysisBounds.top - controlBounds.bottom,
+      };
+    });
+    return tabletControlGap >= 10 && tabletControlGap <= 18
+      && tabletAnalysisGap >= 10 && tabletAnalysisGap <= 18
+      ? 'aligned'
+      : `gaps ${tabletControlGap}, ${tabletAnalysisGap}`;
+  }).toBe('aligned');
 
   await page.screenshot({
     fullPage: false,
