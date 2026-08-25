@@ -17,4 +17,4 @@
 .training-result-review{min-height:44px;padding:6px 9px;border:1px solid #83cc5a;border-radius:7px;background:#f1fbe9;color:#245f0b;font-weight:850;white-space:nowrap}
 .training-result-detail{display:grid;gap:10px;padding:14px 18px 18px;border-top:1px solid var(--line);background:#f8fafb}.training-result-detail>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .training-results-empty{display:grid;place-items:center;gap:6px;min-height:210px;padding:20px;color:var(--muted);text-align:center}
-@media(max-width:640px){.training-results-heading{align-items:stretch;flex-direction:column;padding:14px}.training-sheet-tabs{padding:0 10px}.training-results-grid table{min-width:980px}.training-result-detail{padding:12px}.training-result-detail>div:first-child{align-items:stretch;flex-direction:column}}
+@media(max-width:640px){.training-results-heading{align-items:stretch;flex-direction:column;padding:14px}.training-sheet-tabs{padding:0 10px}.training-results-grid table{min-width:1240px}.training-result-detail{padding:12px}.training-result-detail>div:first-child{align-items:stretch;flex-direction:column}}

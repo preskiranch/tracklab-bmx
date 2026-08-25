@@ -4878,26 +4878,39 @@ export async function deleteHeartRateStream(ownerProfileKey, streamId) {
   return Boolean(result?.rows?.[0]);
 }
 
-export async function loadClubHeartRateStreamSummaries(clubId, sessionId) {
+export async function loadClubHeartRateStreamSummaries(clubId, sessionId, studioRiderId) {
   if (!pool) {
     return [...memoryHeartRateStreams.values()]
-      .filter((stream) => (
-        stream.clubId === clubId
+      .filter((stream) => {
+        const pairing = memoryHeartRatePairings.get(stream.pairingId);
+        return stream.clubId === clubId
         && stream.sessionId === sessionId
+        && stream.studioRiderId === studioRiderId
         && stream.relayScope === 'session'
         && stream.sessionStudioConsent
         && stream.finalizedAt != null
-      ))
+        && pairing?.clubId === clubId
+        && pairing.studioRiderId === studioRiderId
+        && pairing.sessionStudioConsent
+        && pairing.revokedAt == null;
+      })
       .sort((left, right) => left.playerId - right.playerId)
       .map((stream) => cloneJson(stream, stream));
   }
   const result = await query(
-    `SELECT * FROM ${schema}.heart_rate_streams
-     WHERE club_id = $1 AND session_id = $2
-       AND relay_scope = 'session'
-       AND session_studio_consent = true AND finalized_at IS NOT NULL
-     ORDER BY player_id NULLS LAST, started_at, id`,
-    [clubId, sessionId],
+    `SELECT streams.* FROM ${schema}.heart_rate_streams AS streams
+     JOIN ${schema}.heart_rate_pairings AS pairings ON pairings.id = streams.pairing_id
+     WHERE streams.club_id = $1 AND streams.session_id = $2
+       AND streams.studio_rider_id = $3
+       AND streams.relay_scope = 'session'
+       AND streams.session_studio_consent = true
+       AND streams.finalized_at IS NOT NULL
+       AND pairings.club_id = $1
+       AND pairings.studio_rider_id = $3
+       AND pairings.session_studio_consent = true
+       AND pairings.revoked_at IS NULL
+     ORDER BY streams.player_id NULLS LAST, streams.started_at, streams.id`,
+    [clubId, sessionId, studioRiderId],
   );
   return (result?.rows ?? []).map(heartRateStreamFromRow).filter(Boolean);
 }
@@ -6190,7 +6203,7 @@ export async function loadHeartRateTrainingSegments(ownerProfileKey, sessionId =
   return (result?.rows ?? []).map(heartRateTrainingSegmentFromRow).filter(Boolean);
 }
 
-export async function loadClubHeartRateTrainingSegments(clubId, sessionId = null) {
+export async function loadClubHeartRateTrainingSegments(clubId, sessionId, studioRiderId) {
   if (!pool) {
     const now = Date.now();
     memoryHeartRateTrainingSegments.forEach((segment) => {
@@ -6201,21 +6214,30 @@ export async function loadClubHeartRateTrainingSegments(clubId, sessionId = null
       }
     });
     return [...memoryHeartRateTrainingSegments.values()]
-      .filter((segment) => (
-        segment.clubId === clubId
+      .filter((segment) => {
+        const pairing = memoryHeartRatePairings.get(segment.pairingId);
+        return segment.clubId === clubId
+        && segment.studioRiderId === studioRiderId
         && segment.relayScope === 'studio-block'
         && segment.studioVisible
-        && (!sessionId || segment.trainingSessionId === sessionId)
-      ))
+        && segment.trainingSessionId === sessionId
+        && pairing?.clubId === clubId
+        && pairing.studioRiderId === studioRiderId
+        && pairing.sessionStudioConsent
+        && pairing.revokedAt == null;
+      })
       .sort((left, right) => right.startedAt - left.startedAt)
       .map((segment) => cloneJson(segment, segment));
   }
   await query(
     `UPDATE ${schema}.heart_rate_training_segments AS segments
      SET finalized_at = now(), updated_at = now()
-     WHERE segments.club_id = $1 AND segments.finalized_at IS NULL
+     WHERE segments.club_id = $1
+       AND segments.training_session_id = $2
+       AND segments.studio_rider_id = $3
+       AND segments.finalized_at IS NULL
        AND NOT EXISTS (${openHeartRateTrainingSegmentCandidateSql})`,
-    [clubId],
+    [clubId, sessionId, studioRiderId],
   );
   const result = await query(
     `SELECT segments.*
@@ -6223,12 +6245,16 @@ export async function loadClubHeartRateTrainingSegments(clubId, sessionId = null
      JOIN ${schema}.heart_rate_pairings AS pairings ON pairings.id = segments.pairing_id
      WHERE segments.club_id = $1
        AND segments.relay_scope = 'studio-block'
+       AND segments.studio_rider_id = $3
        AND segments.studio_visible = true
+       AND pairings.club_id = $1
+       AND pairings.studio_rider_id = $3
+       AND pairings.session_studio_consent = true
        AND pairings.revoked_at IS NULL
-       AND ($2::text IS NULL OR segments.training_session_id = $2)
+       AND segments.training_session_id = $2
      ORDER BY segments.started_at DESC, segments.id DESC
      LIMIT 1000`,
-    [clubId, sessionId || null],
+    [clubId, sessionId, studioRiderId],
   );
   return (result?.rows ?? []).map(heartRateTrainingSegmentFromRow).filter(Boolean);
 }

@@ -11,6 +11,11 @@ import {
 } from '../lib/googleMaps';
 import { trainingSessionRaceSummaries, trainingSessionZoneResults } from '../lib/trainingHistory';
 import {
+  privateTrainingHeartRateForPlayer,
+  privateTrainingHeartRateZone,
+  type PrivateTrainingHeartRateProjection,
+} from '../lib/privateTrainingHeartRate';
+import {
   buildTrainingTrackSchematic,
   loadTrainingTrackReview,
   trainingTrackReviewRouteSegments,
@@ -26,6 +31,7 @@ export type TrainingTrackZoneReviewProps = {
   speedUnit: SpeedUnit;
   selectedZoneId?: string | null;
   onSelectedZoneChange?: (zoneId: string) => void;
+  privateHeartRateProjections?: readonly PrivateTrainingHeartRateProjection[];
   className?: string;
 };
 
@@ -56,6 +62,73 @@ function pairedMetric(average: number | null | undefined, peak: number | null | 
     ? '—'
     : value.toLocaleString(undefined, { minimumFractionDigits: precision, maximumFractionDigits: precision });
   return `${format(average)} / ${format(peak)} ${suffix}`;
+}
+
+function coverageLabel(sampleCount: number, coveragePercent: number) {
+  const percentage = Number.isInteger(coveragePercent)
+    ? coveragePercent.toFixed(0)
+    : coveragePercent.toFixed(1);
+  return `${sampleCount.toLocaleString()} ${sampleCount === 1 ? 'sample' : 'samples'} · ${percentage}%`;
+}
+
+export function privateZoneHeartRateLabels(
+  projections: readonly PrivateTrainingHeartRateProjection[],
+  playerId: number,
+  riderCount: number,
+  sourceZoneId: string,
+  expectedWindow?: Readonly<{ startElapsedMs: number; endElapsedMs: number }>,
+) {
+  if (!expectedWindow
+    || !Number.isFinite(expectedWindow.startElapsedMs)
+    || !Number.isFinite(expectedWindow.endElapsedMs)
+    || expectedWindow.startElapsedMs < 0
+    || expectedWindow.endElapsedMs <= expectedWindow.startElapsedMs) {
+    return {
+      averagePeak: 'No recorded zone window',
+      coverage: 'No recorded zone window',
+    };
+  }
+  const matched = privateTrainingHeartRateForPlayer(projections, playerId, riderCount);
+  if (matched.length > 1) {
+    return {
+      averagePeak: 'Multiple Watch segments — see private details',
+      coverage: 'Multiple Watch segments — see private details',
+    };
+  }
+  if (matched.length === 1) {
+    const projection = matched[0];
+    const zone = privateTrainingHeartRateZone(projection, sourceZoneId, expectedWindow);
+    if (zone?.summary.sampleCount) {
+      return {
+        averagePeak: pairedMetric(zone.summary.averageBpm, zone.summary.peakBpm, 'BPM'),
+        coverage: `${coverageLabel(zone.summary.sampleCount, zone.summary.coveragePercent)}${projection.state === 'syncing' ? ' · syncing' : ''}`,
+      };
+    }
+    const message = projection.state === 'syncing' ? 'Syncing…' : 'No valid zone samples';
+    return { averagePeak: message, coverage: message };
+  }
+  const stateOnly = projections.filter((projection) => (
+    projection.state === 'loading'
+    || projection.state === 'not-recorded'
+    || projection.state === 'error'
+    || (projection.state === 'syncing' && projection.summary == null)
+  ));
+  const exactState = stateOnly.find((projection) => projection.playerId === playerId);
+  const placeholder = exactState ?? (riderCount === 1 ? stateOnly[0] : undefined);
+  if (!placeholder && riderCount > 1) {
+    return {
+      averagePeak: 'Private rider only',
+      coverage: 'Private rider only',
+    };
+  }
+  const message = placeholder?.state === 'loading'
+    ? 'Loading…'
+    : placeholder?.state === 'error'
+      ? 'Unavailable'
+      : placeholder?.state === 'syncing'
+        ? 'Syncing…'
+        : 'Not recorded';
+  return { averagePeak: message, coverage: message };
 }
 
 export function refitTrainingTrackReviewMap(
@@ -134,6 +207,7 @@ export function TrainingTrackZoneReview({
   speedUnit,
   selectedZoneId,
   onSelectedZoneChange,
+  privateHeartRateProjections = [],
   className = '',
 }: TrainingTrackZoneReviewProps) {
   const recordedZones = useMemo(() => trainingSessionZoneResults(session), [session]);
@@ -281,6 +355,11 @@ export function TrainingTrackZoneReview({
 
   const selected = review.zones.find((zone) => zone.id === effectiveSelectedId);
   const riderNames = new Map(raceSummaries.map((summary) => [String(summary.playerId), summary.riderName?.trim() || `Rider ${summary.playerId}`]));
+  const riderCount = Math.max(
+    1,
+    raceSummaries.length,
+    ...recordedZones.map((zone) => zone.riders.length),
+  );
   const chooseZone = (zoneId: string) => {
     if (uncontrolledSelection) setInternalSelectedId(zoneId);
     onSelectedZoneChange?.(zoneId);
@@ -307,10 +386,10 @@ export function TrainingTrackZoneReview({
         </figure>
         <div role="region" tabIndex={0} aria-label="Recorded track zone spreadsheet" style={{ maxHeight: 360, overflow: 'auto', border: '1px solid #d8e0e8', borderRadius: 10 }}>
           {review.zones.length > 0 ? (
-            <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 980, width: '100%', fontVariantNumeric: 'tabular-nums' }}>
+            <table style={{ borderCollapse: 'separate', borderSpacing: 0, minWidth: 1240, width: '100%', fontVariantNumeric: 'tabular-nums' }}>
               <caption style={{ padding: 8, textAlign: 'left', fontWeight: 800, color: '#111827' }}>Recorded zone data · select a zone to review it on the map when current geometry supports placement</caption>
               <thead>
-                <tr>{['Zone', 'Type / saved range', 'Rider', 'Entry', 'Exit', 'Zone time', 'Points', `Avg / peak ${speedUnitLabel(speedUnit)}`, 'Avg / peak cadence', 'Avg / peak power'].map((label) => (
+                <tr>{['Zone', 'Type / saved range', 'Rider', 'Entry', 'Exit', 'Zone time', 'Points', `Avg / peak ${speedUnitLabel(speedUnit)}`, 'Avg / peak cadence', 'Avg / peak power', 'Private avg / peak heart rate', 'Heart-rate coverage / status'].map((label) => (
                   <th key={label} scope="col" style={{ ...tableCell, position: 'sticky', top: 0, zIndex: 2, background: '#eef2f7', color: '#475569', fontWeight: 800 }}>{label}</th>
                 ))}</tr>
               </thead>
@@ -322,6 +401,19 @@ export function TrainingTrackZoneReview({
                     const active = zone.id === effectiveSelectedId;
                     const speedAverage = rider?.averageSpeedKph == null ? null : `${formatSpeedFromKph(rider.averageSpeedKph, speedUnit)}`;
                     const speedPeak = rider?.topSpeedKph == null ? null : `${formatSpeedFromKph(rider.topSpeedKph, speedUnit)}`;
+                    const startElapsedMs = rider?.entryElapsedMs;
+                    const endElapsedMs = rider?.exitElapsedMs;
+                    const expectedWindow = startElapsedMs != null && endElapsedMs != null
+                      && Number.isFinite(startElapsedMs) && Number.isFinite(endElapsedMs)
+                      ? { startElapsedMs, endElapsedMs }
+                      : undefined;
+                    const heartRate = privateZoneHeartRateLabels(
+                      privateHeartRateProjections,
+                      Number.isInteger(Number(rider?.playerId)) ? Number(rider?.playerId) : -1,
+                      riderCount,
+                      zone.sourceZoneId,
+                      expectedWindow,
+                    );
                     return (
                       <tr key={`${zone.id}:${rider?.playerId ?? riderIndex}`} style={{ background: active ? '#f7fee7' : '#fff' }}>
                         <th scope="row" style={{ ...tableCell, textAlign: 'left', position: 'sticky', left: 0, zIndex: 1, background: active ? '#f7fee7' : '#fff' }}>
@@ -341,6 +433,8 @@ export function TrainingTrackZoneReview({
                         <td style={tableCell}>{`${speedAverage ?? '—'} / ${speedPeak ?? '—'} ${speedUnitLabel(speedUnit)}`}</td>
                         <td style={tableCell}>{pairedMetric(rider?.averageCadence, rider?.topCadence, 'rpm', 1)}</td>
                         <td style={tableCell}>{pairedMetric(rider?.averageWatts, rider?.topWatts, 'W')}</td>
+                        <td style={tableCell}>{heartRate.averagePeak}</td>
+                        <td style={tableCell}>{heartRate.coverage}</td>
                       </tr>
                     );
                   });

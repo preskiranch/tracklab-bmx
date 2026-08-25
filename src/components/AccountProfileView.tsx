@@ -42,12 +42,18 @@ import {
 import type { AuthUser } from '../lib/auth';
 import {
   loadClubHeartRateSummaryHistory,
-  loadPrivateHeartRateSessionHistoryResult,
   type ClubHeartRateHistoryItem,
   type PrivateHeartRateAttachmentStatus,
-  type PrivateHeartRateHistoryItem,
   type HeartRateStream,
 } from '../lib/heartRateCloud';
+import {
+  loadPrivateTrainingHeartRateDay,
+  privateTrainingHeartRatePlaceholder,
+  privateTrainingHeartRateTarget,
+  type PrivateTrainingHeartRateBySession,
+  type PrivateTrainingHeartRateProjection,
+  type PrivateTrainingHeartRateTarget,
+} from '../lib/privateTrainingHeartRate';
 import {
   formatDistanceMeters,
   formatExploreDistanceMeters,
@@ -79,6 +85,16 @@ const emptyClubState: ClubConnectState = {
   ownedClub: null,
   memberships: [],
 };
+
+type PrivateHeartRateCacheEntry = Readonly<{
+  revisionKey: string;
+  projections: readonly PrivateTrainingHeartRateProjection[];
+}>;
+
+type PrivateHeartRateLoadEntry = Readonly<{
+  target: PrivateTrainingHeartRateTarget;
+  revisionKey: string;
+}>;
 
 function localDateKey(timestamp: number) {
   const date = new Date(timestamp);
@@ -171,18 +187,14 @@ export function formatProfileRaceTime(value: number | null | undefined, precisio
 }
 
 export function privateHeartRateSessionId(session: TrainingSession) {
-  if (session.club?.role === 'owner') return null;
-  if (session.club?.role !== 'athlete') return session.id;
-  const projectedPrefix = `club:${session.club.id}:`;
-  return session.id.startsWith(projectedPrefix)
-    ? session.id.slice(projectedPrefix.length)
-    : session.id;
+  return privateTrainingHeartRateTarget(session)?.canonicalSessionId ?? null;
 }
 
 export type ClubHeartRateHistoryTarget = Readonly<{
   clubId: string;
   clubName: string;
   sessionId: string;
+  studioRiderId: string;
 }>;
 
 export function clubHeartRateHistoryTarget(session: TrainingSession): ClubHeartRateHistoryTarget | null {
@@ -191,10 +203,29 @@ export function clubHeartRateHistoryTarget(session: TrainingSession): ClubHeartR
   const sessionId = session.id.startsWith(projectedPrefix)
     ? session.id.slice(projectedPrefix.length)
     : session.id;
-  return sessionId ? { clubId: session.club.id, clubName: session.club.name, sessionId } : null;
+  return sessionId ? {
+    clubId: session.club.id,
+    clubName: session.club.name,
+    sessionId,
+    studioRiderId: session.club.studioRiderId,
+  } : null;
 }
 
-type HeartRateHistorySummaryStream = PrivateHeartRateHistoryItem | ClubHeartRateHistoryItem;
+type HeartRateHistorySummaryStream =
+  | PrivateTrainingHeartRateProjection
+  | ClubHeartRateHistoryItem;
+
+function isPrivateTrainingHeartRateProjection(
+  stream: HeartRateHistorySummaryStream,
+): stream is PrivateTrainingHeartRateProjection {
+  return 'access' in stream && stream.access === 'athlete-private';
+}
+
+function heartRateHistoryStreamPending(stream: HeartRateHistorySummaryStream) {
+  return isPrivateTrainingHeartRateProjection(stream)
+    ? stream.state === 'loading' || stream.state === 'syncing'
+    : stream.finalizedAt == null;
+}
 
 function heartRateMetric(value: number | null | undefined) {
   return value != null && Number.isFinite(value) ? `${Math.round(value)} BPM` : '—';
@@ -221,6 +252,26 @@ export const privateHeartRateSyncPollLimit = 20;
 export function privateHeartRateSyncPollDelay(attempt: number) {
   if (!Number.isInteger(attempt) || attempt < 0 || attempt >= privateHeartRateSyncPollLimit) return null;
   return Math.min(10_000, 2_000 + attempt * 1_000);
+}
+
+export function privateHeartRateCacheRevisionKey(
+  historyRevision: number,
+  sessionUpdatedAt: number,
+  retryRevision: number,
+) {
+  return `${historyRevision}:${sessionUpdatedAt}:${retryRevision}`;
+}
+
+export function privateHeartRateCacheNeedsLoad(
+  cachedRevisionKey: string | null | undefined,
+  cachedProjections: readonly Pick<PrivateTrainingHeartRateProjection, 'state'>[],
+  revisionKey: string,
+) {
+  return cachedRevisionKey !== revisionKey || cachedProjections.some((projection) => (
+    projection.state === 'loading'
+    || projection.state === 'syncing'
+    || projection.state === 'error'
+  ));
 }
 
 export function PrivateHeartRateHistoryPanel({
@@ -261,14 +312,19 @@ export function PrivateHeartRateHistoryPanel({
             : attachmentStatus === 'syncing'
               ? 'Apple Watch heart-rate data is still syncing for this session.'
               : 'No Apple Watch heart-rate data was saved for this session.'}</span>
-          {!sharingLabel && attachmentStatus === 'syncing' && onRetry && (
+          {!sharingLabel && (attachmentStatus === 'syncing' || attachmentStatus === 'not-recorded') && onRetry && (
             <button type="button" onClick={onRetry}><RefreshCw size={13} /> Check again</button>
           )}
         </div>
       ) : (
         <div className="private-heart-rate-streams">
           {streams.map((stream, index) => (
-            <div className="private-heart-rate-stream" key={stream.id}>
+            <div
+              className="private-heart-rate-stream"
+              key={isPrivateTrainingHeartRateProjection(stream)
+                ? `${stream.displayedSessionId}:${stream.playerId ?? 'single'}:${index}`
+                : stream.id}
+            >
               {streams.length > 1 && <strong className="private-heart-rate-segment">Watch segment {index + 1}</strong>}
               {stream.summary && stream.summary.sampleCount > 0 ? (
                 <dl className="private-heart-rate-metrics">
@@ -279,10 +335,10 @@ export function PrivateHeartRateHistoryPanel({
                 </dl>
               ) : (
                 <div className="private-heart-rate-message">
-                  <span>{stream.finalizedAt == null
+                  <span>{heartRateHistoryStreamPending(stream)
                     ? 'Apple Watch data is still syncing for this session.'
                     : 'No valid Apple Watch samples were recorded for this session.'}</span>
-                  {stream.finalizedAt == null && onRetry && (
+                  {heartRateHistoryStreamPending(stream) && onRetry && (
                     <button type="button" onClick={onRetry}><RefreshCw size={13} /> Check again</button>
                   )}
                 </div>
@@ -292,7 +348,9 @@ export function PrivateHeartRateHistoryPanel({
                 <div className="private-heart-rate-zones">
                   <strong>Heart rate by pedal zone</strong>
                   {stream.zoneSummaries.filter((zone) => zone.summary.sampleCount > 0).map((zone) => (
-                    <article key={`${stream.id}:${zone.zoneId}`}>
+                    <article key={`${isPrivateTrainingHeartRateProjection(stream)
+                      ? stream.displayedSessionId
+                      : stream.id}:${zone.zoneId}:${zone.startElapsedMs}:${zone.endElapsedMs}`}>
                       <div>
                         <strong>{zone.zoneName || zone.zoneId}</strong>
                         <small>{activeClockLabel(zone.startElapsedMs)}–{activeClockLabel(zone.endElapsedMs)} active time</small>
@@ -319,12 +377,14 @@ export function PrivateHeartRateHistoryPanel({
 
 function PrivateHeartRateHistoryForSession({
   session,
-  refreshKey,
+  privateProjections,
+  onRetryPrivate,
 }: {
   session: TrainingSession;
-  refreshKey: string;
+  privateProjections?: readonly PrivateTrainingHeartRateProjection[];
+  onRetryPrivate?: () => void;
 }) {
-  const sessionId = privateHeartRateSessionId(session);
+  const privateTarget = useMemo(() => privateTrainingHeartRateTarget(session), [session]);
   const clubTarget = useMemo(() => clubHeartRateHistoryTarget(session), [session]);
   const [state, setState] = useState<PrivateHeartRateHistoryState>('loading');
   const [streams, setStreams] = useState<readonly HeartRateHistorySummaryStream[]>([]);
@@ -335,12 +395,10 @@ function PrivateHeartRateHistoryForSession({
   const loadTargetRef = useRef('');
 
   useEffect(() => {
-    if (!sessionId && !clubTarget) return undefined;
+    if (!clubTarget) return undefined;
     let cancelled = false;
     let syncTimer: number | null = null;
-    const loadTarget = clubTarget
-      ? `club:${clubTarget.clubId}:${clubTarget.sessionId}`
-      : `private:${sessionId}`;
+    const loadTarget = `club:${clubTarget.clubId}:${clubTarget.studioRiderId}:${clubTarget.sessionId}`;
     if (loadTargetRef.current !== loadTarget) {
       loadTargetRef.current = loadTarget;
       syncPollCountRef.current = 0;
@@ -353,29 +411,21 @@ function PrivateHeartRateHistoryForSession({
       setState((current) => current === 'error' ? 'loading' : current);
     }
     setError('');
-    const request = clubTarget
-      ? loadClubHeartRateSummaryHistory(clubTarget.clubId, clubTarget.sessionId).then((items) => ({
-        items,
-        status: 'saved' as const,
-      }))
-      : loadPrivateHeartRateSessionHistoryResult(sessionId!);
+    const request = loadClubHeartRateSummaryHistory(
+      clubTarget.clubId,
+      clubTarget.sessionId,
+      clubTarget.studioRiderId,
+    ).then((items) => ({
+      items,
+      status: 'saved' as const,
+    }));
     void request
       .then((next) => {
         if (cancelled) return;
         setStreams(next.items);
         setAttachmentStatus(next.status);
         setState('ready');
-        const delayMs = !clubTarget && next.status === 'syncing'
-          ? privateHeartRateSyncPollDelay(syncPollCountRef.current)
-          : null;
-        if (delayMs != null) {
-          syncPollCountRef.current += 1;
-          syncTimer = window.setTimeout(() => {
-            if (!cancelled) setRetryRevision((revision) => revision + 1);
-          }, delayMs);
-        } else if (next.status !== 'syncing') {
-          syncPollCountRef.current = 0;
-        }
+        syncPollCountRef.current = 0;
       })
       .catch((loadError: unknown) => {
         if (cancelled) return;
@@ -388,9 +438,39 @@ function PrivateHeartRateHistoryForSession({
       cancelled = true;
       if (syncTimer != null) window.clearTimeout(syncTimer);
     };
-  }, [clubTarget, refreshKey, retryRevision, sessionId]);
+  }, [clubTarget, retryRevision]);
 
-  if (!sessionId && !clubTarget) return null;
+  if (privateTarget) {
+    const projections = privateProjections ?? [
+      privateTrainingHeartRatePlaceholder(privateTarget, 'loading'),
+    ];
+    const privateState = projections.some((projection) => projection.state === 'loading')
+      ? 'loading'
+      : projections.some((projection) => projection.state === 'error')
+        ? 'error'
+        : 'ready';
+    const privateAttachmentStatus: PrivateHeartRateAttachmentStatus =
+      projections.some((projection) => projection.state === 'loading' || projection.state === 'syncing')
+        ? 'syncing'
+        : projections.some((projection) => projection.state === 'saved')
+          ? 'saved'
+          : 'not-recorded';
+    const visibleProjections = projections.filter((projection) => (
+      projection.state === 'saved'
+      || (projection.state === 'syncing' && (
+        projection.summary != null || projection.zoneSummaries.length > 0
+      ))
+    ));
+    return (
+      <PrivateHeartRateHistoryPanel
+        state={privateState}
+        streams={visibleProjections}
+        attachmentStatus={privateAttachmentStatus}
+        onRetry={onRetryPrivate}
+      />
+    );
+  }
+  if (!clubTarget) return null;
   return (
     <PrivateHeartRateHistoryPanel
       state={state}
@@ -448,8 +528,24 @@ export function AccountProfileView({
   const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
   const [clubBusyId, setClubBusyId] = useState<string | null>(null);
   const [spreadsheetExportMessage, setSpreadsheetExportMessage] = useState('');
+  const [privateHeartRateCache, setPrivateHeartRateCache] = useState<ReadonlyMap<string, PrivateHeartRateCacheEntry>>(
+    () => new Map(),
+  );
+  const [privateHeartRateRetryRevision, setPrivateHeartRateRetryRevision] = useState(0);
   const historyRequestRef = useRef(0);
   const spreadsheetExportPendingRef = useRef(false);
+  const privateHeartRateCacheRef = useRef<ReadonlyMap<string, PrivateHeartRateCacheEntry>>(new Map());
+
+  const commitPrivateHeartRateCache = useCallback((
+    updates: ReadonlyMap<string, PrivateHeartRateCacheEntry>,
+  ) => {
+    setPrivateHeartRateCache((current) => {
+      const next = new Map(current);
+      updates.forEach((entry, displayedSessionId) => next.set(displayedSessionId, entry));
+      privateHeartRateCacheRef.current = next;
+      return next;
+    });
+  }, []);
 
   const loadHistory = useCallback((showLoading: boolean) => {
     const range = monthRange(month);
@@ -616,6 +712,106 @@ export function AccountProfileView({
       .sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id)),
     [selectedDate, sessionsByDay],
   );
+  const selectedPrivateHeartRateEntries = useMemo<readonly PrivateHeartRateLoadEntry[]>(
+    () => selectedSessions.flatMap((session) => {
+      const target = privateTrainingHeartRateTarget(session);
+      return target ? [{
+        target,
+        revisionKey: privateHeartRateCacheRevisionKey(
+          historyRevision,
+          session.updatedAt,
+          privateHeartRateRetryRevision,
+        ),
+      }] : [];
+    }),
+    [historyRevision, privateHeartRateRetryRevision, selectedSessions],
+  );
+  const selectedPrivateHeartRateSignature = useMemo(
+    () => selectedPrivateHeartRateEntries.map(({ target, revisionKey }) => (
+      `${target.displayedSessionId}:${target.canonicalSessionId}:${target.activityType}:${revisionKey}`
+    )).join('|'),
+    [selectedPrivateHeartRateEntries],
+  );
+  const privateHeartRateBySession = useMemo<PrivateTrainingHeartRateBySession>(() => {
+    const selected = new Map<string, readonly PrivateTrainingHeartRateProjection[]>();
+    selectedPrivateHeartRateEntries.forEach(({ target, revisionKey }) => {
+      const cached = privateHeartRateCache.get(target.displayedSessionId);
+      selected.set(
+        target.displayedSessionId,
+        cached?.revisionKey === revisionKey
+          ? cached.projections
+          : [privateTrainingHeartRatePlaceholder(target, 'loading')],
+      );
+    });
+    return selected;
+  }, [privateHeartRateCache, selectedPrivateHeartRateEntries]);
+  const privateHeartRateExportPending = [...privateHeartRateBySession.values()].some((projections) => (
+    projections.some((projection) => projection.state === 'loading' || projection.state === 'syncing')
+  ));
+
+  useEffect(() => {
+    if (selectedPrivateHeartRateEntries.length === 0) return undefined;
+    const controller = new AbortController();
+    let syncTimer: number | null = null;
+    const initialEntries = selectedPrivateHeartRateEntries.filter(({ target, revisionKey }) => {
+      const cached = privateHeartRateCacheRef.current.get(target.displayedSessionId);
+      return privateHeartRateCacheNeedsLoad(
+        cached?.revisionKey,
+        cached?.projections ?? [],
+        revisionKey,
+      );
+    });
+    const loadingUpdates = new Map<string, PrivateHeartRateCacheEntry>();
+    initialEntries.forEach(({ target, revisionKey }) => {
+      const cached = privateHeartRateCacheRef.current.get(target.displayedSessionId);
+      if (cached?.revisionKey === revisionKey) return;
+      loadingUpdates.set(target.displayedSessionId, {
+        revisionKey,
+        projections: [privateTrainingHeartRatePlaceholder(target, 'loading')],
+      });
+    });
+    if (loadingUpdates.size > 0) commitPrivateHeartRateCache(loadingUpdates);
+
+    const loadWave = async (entries: readonly PrivateHeartRateLoadEntry[], pollAttempt: number) => {
+      if (entries.length === 0 || controller.signal.aborted) return;
+      try {
+        const loaded = await loadPrivateTrainingHeartRateDay(
+          entries.map((entry) => entry.target),
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        const updates = new Map<string, PrivateHeartRateCacheEntry>();
+        entries.forEach(({ target, revisionKey }) => {
+          const projections = loaded.get(target.displayedSessionId) ?? [
+            privateTrainingHeartRatePlaceholder(target, 'error'),
+          ];
+          updates.set(target.displayedSessionId, { revisionKey, projections });
+        });
+        commitPrivateHeartRateCache(updates);
+        const syncing = entries.filter(({ target }) => (
+          loaded.get(target.displayedSessionId)?.some((projection) => projection.state === 'syncing')
+        ));
+        const delayMs = syncing.length > 0 ? privateHeartRateSyncPollDelay(pollAttempt) : null;
+        if (delayMs != null) {
+          syncTimer = window.setTimeout(() => {
+            void loadWave(syncing, pollAttempt + 1);
+          }, delayMs);
+        }
+      } catch {
+        // Aborted day/account changes intentionally leave no late state writes.
+      }
+    };
+    void loadWave(initialEntries, 0);
+    return () => {
+      controller.abort();
+      if (syncTimer != null) window.clearTimeout(syncTimer);
+    };
+  }, [
+    commitPrivateHeartRateCache,
+    privateHeartRateRetryRevision,
+    selectedPrivateHeartRateEntries,
+    selectedPrivateHeartRateSignature,
+  ]);
   const selectedDateLabel = useMemo(
     () => new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined, {
       weekday: 'long',
@@ -650,6 +846,44 @@ export function AccountProfileView({
       });
   }, [selectedDate, selectedSessions]);
 
+  const exportSelectedDayPrivate = useCallback(() => {
+    if (
+      spreadsheetExportPendingRef.current
+      || selectedSessions.length === 0
+      || selectedPrivateHeartRateEntries.length === 0
+      || privateHeartRateExportPending
+    ) return;
+    spreadsheetExportPendingRef.current = true;
+    setSpreadsheetExportMessage('Preparing your private Apple Watch workbook…');
+    void import('../lib/trainingSpreadsheetExport')
+      .then(({ downloadPrivateTrainingDaySpreadsheet }) => (
+        downloadPrivateTrainingDaySpreadsheet(
+          selectedSessions,
+          selectedDate,
+          privateHeartRateBySession,
+        )
+      ))
+      .then(() => setSpreadsheetExportMessage(
+        'Private Apple Watch workbook downloaded. It includes owner-only health data.',
+      ))
+      .catch((error: unknown) => {
+        setSpreadsheetExportMessage(`Private workbook export failed: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        spreadsheetExportPendingRef.current = false;
+      });
+  }, [
+    privateHeartRateBySession,
+    privateHeartRateExportPending,
+    selectedDate,
+    selectedPrivateHeartRateEntries.length,
+    selectedSessions,
+  ]);
+
+  const retrySelectedPrivateHeartRate = useCallback(() => {
+    setPrivateHeartRateRetryRevision((revision) => revision + 1);
+  }, []);
+
   const renderTrainingSessionDetail = useCallback((session: TrainingSession) => (
     <div className="training-session-detail-content">
       {trainingSessionZoneResults(session).length > 0 && (
@@ -657,11 +891,13 @@ export function AccountProfileView({
           session={session}
           speedUnit={speedUnit}
           distanceUnit={distanceUnit}
+          privateHeartRateProjections={privateHeartRateBySession.get(session.id)}
         />
       )}
       <PrivateHeartRateHistoryForSession
         session={session}
-        refreshKey={`${historyRevision}:${session.updatedAt}`}
+        privateProjections={privateHeartRateBySession.get(session.id)}
+        onRetryPrivate={retrySelectedPrivateHeartRate}
       />
       <div className="training-session-downloads">
         <span>Session files exclude Apple Watch health data.</span>
@@ -669,7 +905,7 @@ export function AccountProfileView({
         <button type="button" onClick={() => downloadTrainingSession(session, 'csv')}><Download size={15} /> CSV</button>
       </div>
     </div>
-  ), [distanceUnit, historyRevision, speedUnit]);
+  ), [distanceUnit, privateHeartRateBySession, retrySelectedPrivateHeartRate, speedUnit]);
 
   return (
     <div className="account-profile-view">
@@ -838,14 +1074,19 @@ export function AccountProfileView({
           dateLabel={selectedDateLabel}
           speedUnit={speedUnit}
           distanceUnit={distanceUnit}
+          privateHeartRateBySession={privateHeartRateBySession}
           onExportWorkbook={exportSelectedDay}
+          onExportPrivateWorkbook={selectedPrivateHeartRateEntries.length > 0
+            ? exportSelectedDayPrivate
+            : undefined}
+          privateExportDisabled={privateHeartRateExportPending}
           renderSessionDetail={renderTrainingSessionDetail}
         />
         {spreadsheetExportMessage && (
           <p className="training-spreadsheet-export-status" role="status">{spreadsheetExportMessage}</p>
         )}
       </div>
-      <small className="account-history-sync-note">Calendar month: {monthKey(month)} · Live cloud sync is active. The in-app spreadsheet and Numbers / Excel workbook contain the non-health session record. Apple Watch data stays in a protected panel; club views are summary-only and require rider consent.</small>
+      <small className="account-history-sync-note">Calendar month: {monthKey(month)} · Live cloud sync is active. The standard Numbers / Excel workbook and generic JSON/CSV files remain non-health records. The separately labeled private workbook includes only your authorized Apple Watch summaries; club views stay summary-only and require rider consent.</small>
     </div>
   );
 }

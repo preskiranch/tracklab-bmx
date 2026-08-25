@@ -10480,8 +10480,9 @@ async function handleHeartRateApi(request, response, requestUrl) {
     const profileKey = authProfileKey(session.user);
     const clubId = sanitizeText(requestUrl.searchParams.get('clubId'), '', 160);
     const sessionId = sanitizeText(requestUrl.searchParams.get('sessionId'), '', 160);
-    if (!clubId || !sessionId) {
-      writeJson(response, 400, { error: 'clubId and sessionId are required.' });
+    const studioRiderId = sanitizeText(requestUrl.searchParams.get('studioRiderId'), '', 160);
+    if (!clubId || !sessionId || !studioRiderId) {
+      writeJson(response, 400, { error: 'clubId, studioRiderId, and sessionId are required.' });
       return;
     }
     const clubState = await persistence.loadClubConnectState(profileKey);
@@ -10490,8 +10491,8 @@ async function handleHeartRateApi(request, response, requestUrl) {
       return;
     }
     const [streams, segments] = await Promise.all([
-      persistence.loadClubHeartRateStreamSummaries(clubId, sessionId),
-      persistence.loadClubHeartRateTrainingSegments(clubId, sessionId),
+      persistence.loadClubHeartRateStreamSummaries(clubId, sessionId, studioRiderId),
+      persistence.loadClubHeartRateTrainingSegments(clubId, sessionId, studioRiderId),
     ]);
     writeJson(response, 200, {
       streams: streams.map((stream) => publicHeartRateStream(stream, { club: true })),

@@ -340,9 +340,11 @@ function PrivacyPage() {
                 <li>
                   Revoking Apple Health access stops future collection but does not automatically erase heart-rate
                   samples already saved to TrackLab. Heart rate remains visible in the rider&apos;s private session history
-                  and is deliberately excluded from generic session JSON/CSV, selected-day Numbers/Excel workbooks, and
-                  public or club exports. Contact support
-                  for a separate verified health-data export or deletion request while self-service controls remain unavailable.
+                  and is deliberately excluded from generic session JSON/CSV, the standard selected-day workbook, and
+                  public or club exports. A signed-in rider can deliberately download a separate private Numbers/Excel
+                  workbook containing heart-rate summaries alongside their session and zone metrics; that workbook does
+                  not include raw heart-rate samples. Contact support for a separate verified raw health-data export or
+                  deletion request while self-service controls remain unavailable.
                 </li>
                 <li>You can sign out to end the current browser or app session.</li>
               </ul>
@@ -527,7 +529,8 @@ function SupportPage() {
             <li>Club-linked sessions can appear for the athlete and connected club owner.</li>
             <li>
               The selected-day spreadsheet downloads as a Numbers/Excel workbook (.xlsx); expanded session details also
-              provide individual JSON and CSV downloads.
+              provide individual JSON and CSV downloads. A separate private workbook can include the signed-in rider&apos;s
+              heart-rate summary and zone results; raw samples and other riders&apos; health data stay excluded.
             </li>
           </ul>
         </SupportCard>

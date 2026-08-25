@@ -491,7 +491,7 @@ describe('private Apple Watch heart-rate cloud relay', () => {
     });
     expect(studioFinalize.status).toBe(200);
     const clubSummariesResponse = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(studioSessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(studioSessionId)}&studioRiderId=${encodeURIComponent(studioRiderId)}`,
       {},
       clubOwner.cookie,
     );
@@ -506,6 +506,18 @@ describe('private Apple Watch heart-rate cloud relay', () => {
     });
     expect(clubSummaries.streams[0]).not.toHaveProperty('riderId');
     expect(clubSummaries.streams[0]).not.toHaveProperty('pairingId');
+    expect((await api(
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(studioSessionId)}`,
+      {},
+      clubOwner.cookie,
+    )).status).toBe(400);
+    const wrongRiderSummaries = await api(
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(studioSessionId)}&studioRiderId=another-studio-rider`,
+      {},
+      clubOwner.cookie,
+    );
+    expect(wrongRiderSummaries.status).toBe(200);
+    expect((await wrongRiderSummaries.json() as any).streams).toEqual([]);
     const clubOwnerRawSamples = await api(
       `/api/heart-rate/streams/${studioStreamId}/samples`,
       {},
@@ -518,7 +530,7 @@ describe('private Apple Watch heart-rate cloud relay', () => {
     }, clubOwner.cookie);
     expect(revokeMembership.status).toBe(200);
     const summariesAfterRevoke = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(studioSessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(studioSessionId)}&studioRiderId=${encodeURIComponent(studioRiderId)}`,
       {},
       clubOwner.cookie,
     );

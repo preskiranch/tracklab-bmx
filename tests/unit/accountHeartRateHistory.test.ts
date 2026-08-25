@@ -10,6 +10,8 @@ import type {
 import {
   PrivateHeartRateHistoryPanel,
   clubHeartRateHistoryTarget,
+  privateHeartRateCacheNeedsLoad,
+  privateHeartRateCacheRevisionKey,
   privateHeartRateSyncPollDelay,
   privateHeartRateSyncPollLimit,
   privateHeartRateSessionId,
@@ -139,7 +141,9 @@ describe('owner-only Account profile heart-rate history', () => {
 
   it('keeps loading, no-data, and error states explicit', () => {
     expect(markup('loading', [])).toContain('Loading private heart-rate history');
-    expect(markup('ready', [])).toContain('No Apple Watch heart-rate data was saved');
+    const noData = markup('ready', []);
+    expect(noData).toContain('No Apple Watch heart-rate data was saved');
+    expect(noData).toContain('Check again');
     const error = markup('error', [], 'Network interrupted');
     expect(error).toContain('Private heart-rate history is temporarily unavailable');
     expect(error).toContain('Try again');
@@ -159,6 +163,18 @@ describe('owner-only Account profile heart-rate history', () => {
     expect(privateHeartRateSyncPollDelay(privateHeartRateSyncPollLimit - 1)).toBe(10_000);
     expect(privateHeartRateSyncPollDelay(privateHeartRateSyncPollLimit)).toBeNull();
     expect(privateHeartRateSyncPollDelay(-1)).toBeNull();
+  });
+
+  it('forces a cached not-recorded day to revalidate and accepts a late saved result after retry', () => {
+    const initialKey = privateHeartRateCacheRevisionKey(3, 11_000, 0);
+    const retryKey = privateHeartRateCacheRevisionKey(3, 11_000, 1);
+
+    expect(privateHeartRateCacheNeedsLoad(initialKey, [{ state: 'not-recorded' }], initialKey))
+      .toBe(false);
+    expect(privateHeartRateCacheNeedsLoad(initialKey, [{ state: 'not-recorded' }], retryKey))
+      .toBe(true);
+    expect(privateHeartRateCacheNeedsLoad(retryKey, [{ state: 'saved' }], retryKey))
+      .toBe(false);
   });
 
   it('shows a studio sprint slice as pending until its late-sample grace period is finalized', () => {
@@ -185,6 +201,7 @@ describe('owner-only Account profile heart-rate history', () => {
       clubId: 'club-1',
       clubName: 'Test club',
       sessionId: 'session-1',
+      studioRiderId: 'rider-1',
     });
     expect(privateHeartRateSessionId(trainingSession(
       'club:club-1:session-1',

@@ -242,13 +242,21 @@ describe('private heart-rate history cloud client', () => {
         pairingId: 'must-not-cross-client-boundary',
         riderId: 'account:must-not-cross-client-boundary',
         samples: [{ bpm: 155 }],
+      }, {
+        ...rawStream('session-1'),
+        id: 'wrong-studio-rider-stream',
+        studioRiderId: 'studio-rider-2',
       }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
-    const streams = await loadClubHeartRateSummaryHistory(' club-1 ', ' session-1 ');
+    const streams = await loadClubHeartRateSummaryHistory(
+      ' club-1 ',
+      ' session-1 ',
+      ' studio-rider-1 ',
+    );
 
     expect(fetch).toHaveBeenCalledWith(
-      '/api/heart-rate/club-streams?clubId=club-1&sessionId=session-1',
+      '/api/heart-rate/club-streams?clubId=club-1&sessionId=session-1&studioRiderId=studio-rider-1',
       expect.objectContaining({ cache: 'no-store' }),
     );
     expect(streams).toHaveLength(1);
@@ -269,7 +277,11 @@ describe('private heart-rate history cloud client', () => {
       segments: [rawStudioSegment('session-1')],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
-    const history = await loadClubHeartRateSummaryHistory('club-1', 'session-1');
+    const history = await loadClubHeartRateSummaryHistory(
+      'club-1',
+      'session-1',
+      'studio-rider-1',
+    );
 
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({

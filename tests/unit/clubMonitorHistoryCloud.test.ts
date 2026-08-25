@@ -657,7 +657,7 @@ describe('owner-operated Monitor View athlete history', () => {
       }),
     ]);
     const clubHeartRate = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(sessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(sessionId)}&studioRiderId=${encodeURIComponent(riderOne)}`,
       {},
       owner.cookie,
     );
@@ -820,7 +820,7 @@ describe('owner-operated Monitor View athlete history', () => {
     expect(JSON.stringify(tabletRaceSaveBody.session.details))
       .not.toMatch(/heart.?rate|health.?kit|bpm|"HR"/i);
     const tabletRaceClubHeartRate = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(tabletRaceSessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(tabletRaceSessionId)}&studioRiderId=${encodeURIComponent(riderOne)}`,
       {},
       owner.cookie,
     );
@@ -925,7 +925,7 @@ describe('owner-operated Monitor View athlete history', () => {
       activeDurationMs: blockEndedAt - blockStartedAt,
     });
     const clubAfterBlockFinalize = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(sessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(sessionId)}&studioRiderId=${encodeURIComponent(riderOne)}`,
       {},
       owner.cookie,
     );
@@ -996,7 +996,7 @@ describe('owner-operated Monitor View athlete history', () => {
       state: 'stopped',
     });
     const clubAfterOwnerStop = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(sessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(clubId)}&sessionId=${encodeURIComponent(sessionId)}&studioRiderId=${encodeURIComponent(riderOne)}`,
       {},
       owner.cookie,
     );

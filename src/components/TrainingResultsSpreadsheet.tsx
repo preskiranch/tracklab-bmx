@@ -18,6 +18,11 @@ import {
   type TrainingResultSheetDefinition,
   type TrainingResultSheetId,
 } from '../lib/trainingResultsGrid';
+import {
+  privateTrainingHeartRateForPlayer,
+  type PrivateTrainingHeartRateBySession,
+  type PrivateTrainingHeartRateProjection,
+} from '../lib/privateTrainingHeartRate';
 import './TrainingResultsSpreadsheet.css';
 
 export type TrainingResultsSpreadsheetProps = Readonly<{
@@ -28,7 +33,11 @@ export type TrainingResultsSpreadsheetProps = Readonly<{
   selectedSessionId?: string | null;
   onSelectedSessionChange?: (session: TrainingSession | null) => void;
   onExportWorkbook?: () => void;
+  onExportPrivateWorkbook?: () => void;
+  privateExportDisabled?: boolean;
   exportLabel?: string;
+  privateExportLabel?: string;
+  privateHeartRateBySession?: PrivateTrainingHeartRateBySession;
   renderSessionDetail?: (session: TrainingSession) => ReactNode;
 }>;
 
@@ -85,6 +94,80 @@ function distance(value: number | null | undefined, unit: DistanceUnit, explore 
     : formatDistanceMeters(value, unit);
 }
 
+function heartRatePercentage(value: number) {
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
+}
+
+function heartRateProjectionLabel(
+  projection: PrivateTrainingHeartRateProjection,
+  metricKind: 'average' | 'peak' | 'coverage',
+) {
+  if (projection.state === 'loading') return 'Loading…';
+  if (projection.state === 'error') return 'Unavailable';
+  if (projection.state === 'not-recorded') return 'Not recorded';
+  const summary = projection.summary;
+  if (!summary || summary.sampleCount <= 0) {
+    return projection.state === 'syncing' ? 'Syncing…' : 'No valid samples';
+  }
+  if (metricKind === 'average') {
+    return summary.averageBpm == null ? 'No valid samples' : `${Math.round(summary.averageBpm)} BPM`;
+  }
+  if (metricKind === 'peak') {
+    return summary.peakBpm == null ? 'No valid samples' : `${Math.round(summary.peakBpm)} BPM`;
+  }
+  return `${summary.sampleCount.toLocaleString()} ${summary.sampleCount === 1 ? 'sample' : 'samples'} · ${heartRatePercentage(summary.coveragePercent)}%${projection.state === 'syncing' ? ' · syncing' : ''}`;
+}
+
+function PrivateHeartRateCell({
+  resolution,
+  metricKind,
+}: {
+  resolution: PrivateHeartRateResolution;
+  metricKind: 'average' | 'peak' | 'coverage';
+}) {
+  const visible = resolution.projections.length > 0 ? resolution.projections : null;
+  return (
+    <span style={{ display: 'grid', gap: 2, minWidth: 112 }}>
+      {visible ? visible.map((projection, index) => (
+        <span style={{ display: 'grid' }} key={`${projection.canonicalSessionId}:${projection.playerId ?? 'rider'}:${index}`}>
+          {visible.length > 1 && <small style={{ color: '#667085', fontSize: 9, fontWeight: 700 }}>Watch segment {index + 1}</small>}
+          {heartRateProjectionLabel(projection, metricKind)}
+        </span>
+      )) : <span>{resolution.emptyLabel}</span>}
+    </span>
+  );
+}
+
+type PrivateHeartRateResolution = Readonly<{
+  projections: readonly PrivateTrainingHeartRateProjection[];
+  emptyLabel: 'Not recorded' | 'Private rider only';
+}>;
+
+type PrivateHeartRateResolver = (row: TrainingResultRow) => PrivateHeartRateResolution;
+
+function privateHeartRateColumns(resolve: PrivateHeartRateResolver): GridColumn[] {
+  return [
+    {
+      id: 'average-heart-rate',
+      label: 'Private average heart rate',
+      render: (row) => <PrivateHeartRateCell resolution={resolve(row)} metricKind="average" />,
+      numeric: true,
+    },
+    {
+      id: 'peak-heart-rate',
+      label: 'Private peak heart rate',
+      render: (row) => <PrivateHeartRateCell resolution={resolve(row)} metricKind="peak" />,
+      numeric: true,
+    },
+    {
+      id: 'heart-rate-coverage',
+      label: 'Heart-rate coverage / status',
+      render: (row) => <PrivateHeartRateCell resolution={resolve(row)} metricKind="coverage" />,
+      numeric: true,
+    },
+  ];
+}
+
 function result(row: TrainingResultRow) {
   if (row.status === 'dnf') return 'DNF';
   if (row.activityType === 'bmx-race' || row.activityType === 'straight-sprint') {
@@ -105,6 +188,7 @@ function sessionCell(row: TrainingResultRow) {
 
 function commonColumns(
   distanceUnit: DistanceUnit,
+  resolveHeartRate: PrivateHeartRateResolver,
   canReview: boolean,
   review: (row: TrainingResultRow) => ReactNode,
 ): GridColumn[] {
@@ -118,6 +202,7 @@ function commonColumns(
     { id: 'recorded-time', label: 'Recorded time', render: primaryTime, numeric: true },
     { id: 'distance', label: 'Distance', render: (row) => distance(row.distanceMeters, distanceUnit, row.activityType === 'explore'), numeric: true },
     { id: 'peak-power', label: 'Peak power', render: (row) => metric(row.peakWatts, 'W'), numeric: true },
+    ...privateHeartRateColumns(resolveHeartRate),
     ...(canReview ? [{ id: 'review', label: 'Review', render: review } satisfies GridColumn] : []),
   ];
 }
@@ -125,6 +210,7 @@ function commonColumns(
 function raceColumns(
   speedUnit: SpeedUnit,
   distanceUnit: DistanceUnit,
+  resolveHeartRate: PrivateHeartRateResolver,
   canReview: boolean,
   review: (row: TrainingResultRow) => ReactNode,
 ): GridColumn[] {
@@ -145,6 +231,7 @@ function raceColumns(
     { id: 'peak-cadence', label: 'Peak cadence', render: (row) => metric(row.peakCadence, 'RPM', 1), numeric: true },
     { id: 'average-power', label: 'Avg power', render: (row) => metric(row.averageWatts, 'W'), numeric: true },
     { id: 'peak-power', label: 'Peak power', render: (row) => metric(row.peakWatts, 'W'), numeric: true },
+    ...privateHeartRateColumns(resolveHeartRate),
     { id: 'zones', label: 'Zones', render: (row) => row.zoneCount > 0 ? row.zoneCount : missing, numeric: true },
     ...(canReview ? [{ id: 'review', label: 'Review', render: review } satisfies GridColumn] : []),
   ];
@@ -153,6 +240,7 @@ function raceColumns(
 function getPulledColumns(
   speedUnit: SpeedUnit,
   distanceUnit: DistanceUnit,
+  resolveHeartRate: PrivateHeartRateResolver,
   canReview: boolean,
   review: (row: TrainingResultRow) => ReactNode,
 ): GridColumn[] {
@@ -171,6 +259,7 @@ function getPulledColumns(
     { id: 'peak-cadence', label: 'Peak cadence', render: (row) => metric(row.peakCadence, 'RPM', 1), numeric: true },
     { id: 'average-power', label: 'Avg power', render: (row) => metric(row.averageWatts, 'W'), numeric: true },
     { id: 'peak-power', label: 'Peak power', render: (row) => metric(row.peakWatts, 'W'), numeric: true },
+    ...privateHeartRateColumns(resolveHeartRate),
     ...(canReview ? [{ id: 'review', label: 'Review', render: review } satisfies GridColumn] : []),
   ];
 }
@@ -178,10 +267,11 @@ function getPulledColumns(
 function monitorColumns(
   speedUnit: SpeedUnit,
   distanceUnit: DistanceUnit,
+  resolveHeartRate: PrivateHeartRateResolver,
   canReview: boolean,
   review: (row: TrainingResultRow) => ReactNode,
 ): GridColumn[] {
-  return getPulledColumns(speedUnit, distanceUnit, canReview, review).filter((column) => (
+  return getPulledColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review).filter((column) => (
     column.id !== 'target' && column.id !== 'air'
   ));
 }
@@ -189,6 +279,7 @@ function monitorColumns(
 function exploreColumns(
   speedUnit: SpeedUnit,
   distanceUnit: DistanceUnit,
+  resolveHeartRate: PrivateHeartRateResolver,
   canReview: boolean,
   review: (row: TrainingResultRow) => ReactNode,
 ): GridColumn[] {
@@ -203,6 +294,7 @@ function exploreColumns(
     { id: 'elevation-gain', label: 'Elevation gain', render: (row) => distance(row.elevationGainMeters, distanceUnit), numeric: true },
     { id: 'elevation-loss', label: 'Elevation loss', render: (row) => distance(row.elevationLossMeters, distanceUnit), numeric: true },
     { id: 'status', label: 'Status', render: result },
+    ...privateHeartRateColumns(resolveHeartRate),
     ...(canReview ? [{ id: 'review', label: 'Review', render: review } satisfies GridColumn] : []),
   ];
 }
@@ -263,7 +355,11 @@ export function TrainingResultsSpreadsheet({
   selectedSessionId,
   onSelectedSessionChange,
   onExportWorkbook,
+  onExportPrivateWorkbook,
+  privateExportDisabled = false,
   exportLabel = 'Numbers / Excel (.xlsx)',
+  privateExportLabel = 'Private workbook + heart rate (.xlsx)',
+  privateHeartRateBySession,
   renderSessionDetail,
 }: TrainingResultsSpreadsheetProps) {
   const regionId = useId().replace(/:/g, '');
@@ -279,6 +375,38 @@ export function TrainingResultsSpreadsheet({
   const effectiveSelectedId = selectedSession?.id ?? null;
   const activeSheet = sheets.find((sheet) => sheet.id === activeSheetId) ?? sheets[0];
   const canReview = Boolean(renderSessionDetail || onSelectedSessionChange);
+  const riderCountBySession = useMemo(() => {
+    const resultSlots = new Map<string, number>();
+    rows.forEach((row) => {
+      resultSlots.set(row.sessionId, (resultSlots.get(row.sessionId) ?? 0) + 1);
+    });
+    return resultSlots;
+  }, [rows]);
+  const resolveHeartRate: PrivateHeartRateResolver = (row) => {
+    const projections = privateHeartRateBySession?.get(row.sessionId) ?? [];
+    const riderCount = riderCountBySession.get(row.sessionId) ?? 1;
+    const emptyLabel = sessionById.get(row.sessionId)?.club?.role === 'owner' || riderCount > 1
+      ? 'Private rider only' as const
+      : 'Not recorded' as const;
+    const numericPlayerId = Number(row.playerId);
+    const matched = privateTrainingHeartRateForPlayer(
+      projections,
+      Number.isInteger(numericPlayerId) ? numericPlayerId : -1,
+      riderCount,
+    );
+    if (matched.length > 0) return { projections: matched, emptyLabel };
+    const stateOnly = projections.filter((projection) => (
+      projection.state === 'loading'
+      || projection.state === 'not-recorded'
+      || projection.state === 'error'
+      || (projection.state === 'syncing' && projection.summary == null)
+    ));
+    const exactState = stateOnly.filter((projection) => (
+      Number.isInteger(numericPlayerId) && projection.playerId === numericPlayerId
+    ));
+    if (exactState.length > 0) return { projections: exactState, emptyLabel };
+    return { projections: riderCount === 1 ? stateOnly : [], emptyLabel };
+  };
 
   useEffect(() => {
     if (!sheets.some((sheet) => sheet.id === activeSheetId)) setActiveSheetId('all');
@@ -323,20 +451,34 @@ export function TrainingResultsSpreadsheet({
     ? []
     : rowsForTrainingResultSheet(rows, activeSheet.id);
   const columns = activeSheet.id === 'race-sprint'
-    ? raceColumns(speedUnit, distanceUnit, canReview, review)
+    ? raceColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review)
     : activeSheet.id === 'get-pulled'
-      ? getPulledColumns(speedUnit, distanceUnit, canReview, review)
+      ? getPulledColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review)
       : activeSheet.id === 'monitor-sprint'
-        ? monitorColumns(speedUnit, distanceUnit, canReview, review)
+        ? monitorColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review)
         : activeSheet.id === 'explore'
-          ? exploreColumns(speedUnit, distanceUnit, canReview, review)
-          : commonColumns(distanceUnit, canReview, review);
+          ? exploreColumns(speedUnit, distanceUnit, resolveHeartRate, canReview, review)
+          : commonColumns(distanceUnit, resolveHeartRate, canReview, review);
 
   return (
-    <section className="training-results-sheet" aria-labelledby={`${regionId}-title`}>
+    <section
+      className="training-results-sheet"
+      aria-labelledby={`${regionId}-title`}
+      aria-busy={privateExportDisabled || undefined}
+    >
       <header className="training-results-heading">
         <div><span className="eyebrow">Selected day</span><h2 id={`${regionId}-title`}>Training results spreadsheet</h2><p>{dateLabel} · {sessions.length} saved {sessions.length === 1 ? 'session' : 'sessions'}</p></div>
-        {onExportWorkbook && <button type="button" disabled={sessions.length === 0} onClick={onExportWorkbook}><Download size={16} /> {exportLabel}</button>}
+        {(onExportWorkbook || onExportPrivateWorkbook) && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7, flexWrap: 'wrap' }}>
+          {onExportWorkbook && <button type="button" disabled={sessions.length === 0} onClick={onExportWorkbook}><Download size={16} /> {exportLabel}</button>}
+          {onExportPrivateWorkbook && <button
+            type="button"
+            style={{ borderColor: '#b7a1dc', background: '#f6f0ff', color: '#43217b' }}
+            disabled={sessions.length === 0 || privateExportDisabled}
+            aria-label={`${privateExportLabel}${privateExportDisabled ? '. Unavailable while private heart-rate data is loading or syncing.' : ''}`}
+            title={privateExportDisabled ? 'Wait for private heart-rate data to finish loading and syncing.' : undefined}
+            onClick={onExportPrivateWorkbook}
+          ><Download size={16} /> {privateExportLabel}</button>}
+        </div>}
       </header>
 
       {sessions.length > 0 ? <>

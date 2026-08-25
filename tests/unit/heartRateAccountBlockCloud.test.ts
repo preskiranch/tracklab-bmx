@@ -396,7 +396,7 @@ describe('private continuous account heart-rate blocks', () => {
     });
     expect((await api(`/api/heart-rate/streams/${stream.id}/samples`, {}, other.cookie)).status).toBe(404);
     expect((await api(
-      `/api/heart-rate/club-streams?clubId=untrusted-club&sessionId=${encodeURIComponent(trainingSessionId)}`,
+      `/api/heart-rate/club-streams?clubId=untrusted-club&sessionId=${encodeURIComponent(trainingSessionId)}&studioRiderId=untrusted-rider`,
       {},
       athlete.cookie,
     )).status).toBe(403);

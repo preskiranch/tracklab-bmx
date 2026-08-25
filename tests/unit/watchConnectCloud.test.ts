@@ -638,7 +638,7 @@ describe('Watch Connect cloud workflow', () => {
     expect(studioSave.status).toBe(201);
     expect((await studioSave.json() as any).heartRate).toMatchObject({ status: 'created' });
     const summariesBeforeDisconnect = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(membership.clubId)}&sessionId=${encodeURIComponent(studioTrainingSessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(membership.clubId)}&sessionId=${encodeURIComponent(studioTrainingSessionId)}&studioRiderId=${encodeURIComponent(studioRiderId)}`,
       {},
       owner.cookie,
     );
@@ -903,7 +903,7 @@ describe('Watch Connect cloud workflow', () => {
       liveSharingEnabled: false,
     });
     const summariesAfterDisconnect = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(membership.clubId)}&sessionId=${encodeURIComponent(studioTrainingSessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(membership.clubId)}&sessionId=${encodeURIComponent(studioTrainingSessionId)}&studioRiderId=${encodeURIComponent(studioRiderId)}`,
       {},
       ownerCookie,
     );
@@ -928,7 +928,7 @@ describe('Watch Connect cloud workflow', () => {
     expect(privateQueuedSample.status).toBe(200);
     expect(await privateQueuedSample.json()).toEqual({ accepted: 1, duplicates: 0 });
     const summariesAfterPrivateDrain = await api(
-      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(membership.clubId)}&sessionId=${encodeURIComponent(studioTrainingSessionId)}`,
+      `/api/heart-rate/club-streams?clubId=${encodeURIComponent(membership.clubId)}&sessionId=${encodeURIComponent(studioTrainingSessionId)}&studioRiderId=${encodeURIComponent(studioRiderId)}`,
       {},
       ownerCookie,
     );
@@ -1286,6 +1286,173 @@ describe('Watch Connect cloud workflow', () => {
       ...exact,
       watchEnrollmentId: `different-enrollment-${suffix}`,
     })).resolves.toBeNull();
+  });
+
+  it('keeps same-session club heart-rate streams and segments scoped to the exact studio rider', async () => {
+    const now = Date.now();
+    const suffix = `${now}-${Math.random().toString(16).slice(2)}`;
+    const ownerProfileKey = `user:shared-session-owner-${suffix}`;
+    const clubId = `shared-session-club-${suffix}`;
+    const sessionId = `shared-session-${suffix}`;
+    const startedAt = now + 1_000;
+    const endedAt = now + 5_000;
+    const club = await persistence.ensureClub(ownerProfileKey, 'Shared Session Club', clubId);
+
+    const setupRider = async (label: string, playerId: number, bpm: number) => {
+      const athleteProfileKey = `user:shared-session-${label}-${suffix}`;
+      const studioRiderId = `shared-session-rider-${label}-${suffix}`;
+      await persistence.ensureClubRosterMember(ownerProfileKey, studioRiderId, `Rider ${label}`);
+      const inviteTokenHash = `shared-session-invite-${label}-${suffix}`;
+      await persistence.saveClubInvite({
+        club,
+        studioRiderId,
+        riderName: `Rider ${label}`,
+        inviteId: `shared-session-invite-id-${label}-${suffix}`,
+        tokenHash: inviteTokenHash,
+        expiresAt: now + 60_000,
+      });
+      await expect(persistence.claimClubInvite(
+        inviteTokenHash,
+        athleteProfileKey,
+        `Rider ${label}`,
+      )).resolves.toEqual({ clubId, studioRiderId });
+
+      const createPairingAndStream = async (relayScope: 'session' | 'studio-block') => {
+        const pairingId = `shared-session-${relayScope}-pairing-${label}-${suffix}`;
+        const pairCodeHash = `shared-session-${relayScope}-code-${label}-${suffix}`;
+        const ingestTokenHash = `shared-session-${relayScope}-token-${label}-${suffix}`;
+        expect(await persistence.createHeartRatePairing({
+          id: pairingId,
+          ownerProfileKey: athleteProfileKey,
+          sessionId,
+          activityType: relayScope === 'session' ? 'bmx-race' : 'training-block',
+          riderId: `account:shared-session-${label}-${suffix}`,
+          playerId,
+          relayScope,
+          clubId,
+          studioRiderId,
+          pairCodeHash,
+          pairCodeExpiresAt: now + 60_000,
+          liveStudioConsent: true,
+          sessionStudioConsent: true,
+          createdAt: now,
+        })).toMatchObject({ id: pairingId, studioRiderId, relayScope });
+        expect(await persistence.claimHeartRatePairing(
+          pairCodeHash,
+          ingestTokenHash,
+          now + 1,
+          now + 60_000,
+          now + 60_000,
+          athleteProfileKey,
+        )).toMatchObject({ id: pairingId });
+        const streamId = `shared-session-${relayScope}-stream-${label}-${suffix}`;
+        expect(await persistence.createHeartRateStream(
+          pairingId,
+          ingestTokenHash,
+          streamId,
+          now,
+          now + 2,
+        )).toMatchObject({ id: streamId, studioRiderId, relayScope });
+        return { streamId, ingestTokenHash };
+      };
+
+      const sessionStream = await createPairingAndStream('session');
+      const summary = {
+        sampleCount: 1,
+        coverageMs: 1_000,
+        coveragePercent: 25,
+        firstSampleElapsedMs: 1_000,
+        lastSampleElapsedMs: 1_000,
+        minimumBpm: bpm,
+        averageBpm: bpm,
+        peakBpm: bpm,
+      };
+      expect(await persistence.finalizeHeartRateStream(
+        sessionStream.streamId,
+        sessionStream.ingestTokenHash,
+        { endedAt, activeDurationMs: 4_000, summary, finalizedAt: endedAt + 1 },
+      )).toMatchObject({ id: sessionStream.streamId, summary });
+
+      const blockStream = await createPairingAndStream('studio-block');
+      expect(await persistence.insertHeartRateSamples(blockStream.streamId, blockStream.ingestTokenHash, [{
+        sequence: 0,
+        recordedAt: startedAt + 1_000,
+        activeElapsedMs: 2_000,
+        bpm,
+      }], startedAt + 1_000)).toEqual([0]);
+      const segment = await persistence.createHeartRateTrainingSegmentForClubSession({
+        athleteProfileKey,
+        clubId,
+        studioRiderId,
+        trainingSessionId: sessionId,
+        activityType: 'bmx-race',
+        playerId,
+        startedAt,
+        endedAt,
+        zoneWindows: [],
+        activeClockSegments: [],
+        now: endedAt + 2,
+      });
+      expect(segment).toMatchObject({
+        status: 'created',
+        segment: { trainingSessionId: sessionId, studioRiderId, playerId },
+      });
+      return { studioRiderId, sessionStreamId: sessionStream.streamId, segmentId: segment.segment.id };
+    };
+
+    const riderA = await setupRider('a', 1, 151);
+    const riderB = await setupRider('b', 2, 171);
+    await expect(persistence.loadClubHeartRateStreamSummaries(
+      clubId,
+      sessionId,
+      riderA.studioRiderId,
+    )).resolves.toEqual([expect.objectContaining({
+      id: riderA.sessionStreamId,
+      studioRiderId: riderA.studioRiderId,
+    })]);
+    await expect(persistence.loadClubHeartRateStreamSummaries(
+      clubId,
+      sessionId,
+      riderB.studioRiderId,
+    )).resolves.toEqual([expect.objectContaining({
+      id: riderB.sessionStreamId,
+      studioRiderId: riderB.studioRiderId,
+    })]);
+    await expect(persistence.loadClubHeartRateTrainingSegments(
+      clubId,
+      sessionId,
+      riderA.studioRiderId,
+    )).resolves.toEqual([expect.objectContaining({
+      id: riderA.segmentId,
+      studioRiderId: riderA.studioRiderId,
+    })]);
+    await expect(persistence.loadClubHeartRateTrainingSegments(
+      clubId,
+      sessionId,
+      riderB.studioRiderId,
+    )).resolves.toEqual([expect.objectContaining({
+      id: riderB.segmentId,
+      studioRiderId: riderB.studioRiderId,
+    })]);
+
+    const persistenceSource = readFileSync(
+      new URL('../../cloud/persistence.mjs', import.meta.url),
+      'utf8',
+    );
+    const streamLoaderSource = persistenceSource.slice(
+      persistenceSource.indexOf('export async function loadClubHeartRateStreamSummaries'),
+      persistenceSource.indexOf('function heartRateTrainingSegmentId'),
+    );
+    expect(streamLoaderSource).toContain('streams.studio_rider_id = $3');
+    expect(streamLoaderSource).toContain('pairings.studio_rider_id = $3');
+    expect(streamLoaderSource).toContain('[clubId, sessionId, studioRiderId]');
+    const segmentLoaderSource = persistenceSource.slice(
+      persistenceSource.indexOf('export async function loadClubHeartRateTrainingSegments'),
+      persistenceSource.indexOf('async function linkHeartRateStreamsToTrainingSession'),
+    );
+    expect(segmentLoaderSource).toContain('segments.studio_rider_id = $3');
+    expect(segmentLoaderSource).toContain('pairings.studio_rider_id = $3');
+    expect(segmentLoaderSource.match(/\[clubId, sessionId, studioRiderId\]/g)).toHaveLength(2);
   });
 
   it('attaches exact private history after a Watch signal freezes without making the stale BPM live', async () => {

@@ -6,9 +6,11 @@ import type {
   RaceSummaryEntry,
   RaceZoneResult,
   RaceZoneRiderResult,
+  SplitBranchChoice,
   TrackZone,
 } from '../types';
 import { reportedBmxTopSpeedKph } from '../game/bmxRollout';
+import { zoneMatchesBranchSelections } from './trackMapping';
 import {
   acceptedBikeCadenceRpm,
   acceptedTrainingSpeedKph,
@@ -256,7 +258,10 @@ function zoneResultForPlayer(
   };
 }
 
-export function buildRaceZoneResults(capture: RaceCapture): RaceZoneResult[] {
+export function buildRaceZoneResults(
+  capture: RaceCapture,
+  actualBranchesByPlayer: Partial<Record<PlayerSlot['id'], Record<string, SplitBranchChoice>>> = {},
+): RaceZoneResult[] {
   const pointsByPlayer = new Map(capture.players.map((player) => [
     player.id,
     pointsForPlayer(capture, player.id),
@@ -271,7 +276,10 @@ export function buildRaceZoneResults(capture: RaceCapture): RaceZoneResult[] {
     riders: capture.players.map((player) => zoneResultForPlayer(
       player.id,
       zone,
-      pointsByPlayer.get(player.id) ?? [],
+      actualBranchesByPlayer[player.id] == null
+        || zoneMatchesBranchSelections(zone, actualBranchesByPlayer[player.id])
+        ? pointsByPlayer.get(player.id) ?? []
+        : [],
     )),
   }));
 }

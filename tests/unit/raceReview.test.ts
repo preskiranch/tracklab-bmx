@@ -179,6 +179,69 @@ describe('post-race pedal-zone results', () => {
     expect(hydratedSummary[0].averageWatts).toBeGreaterThan(0);
   });
 
+  it('records only each rider’s actual amateur/pro branch zone so Watch windows cannot overlap', () => {
+    const capture = baseCapture();
+    capture.zones = [{
+      id: 'amateur-zone',
+      name: 'Amateur first straight',
+      startMeter: 10,
+      endMeter: 30,
+      type: 'pedal',
+      branchSelections: { 'split-1': 'a' },
+    }, {
+      id: 'pro-zone',
+      name: 'Pro first straight',
+      startMeter: 10,
+      endMeter: 30,
+      type: 'pedal',
+      branchSelections: { 'split-1': 'b' },
+    }];
+    capture.frames = [
+      frame(1_000, [
+        { playerId: 1, distanceMeters: 0, speedKph: 0, cadence: 0, watts: 0 },
+        { playerId: 2, distanceMeters: 0, speedKph: 0, cadence: 0, watts: 0 },
+      ]),
+      frame(2_000, [
+        { playerId: 1, distanceMeters: 20, speedKph: 25, cadence: 95, watts: 600 },
+        { playerId: 2, distanceMeters: 20, speedKph: 27, cadence: 100, watts: 700 },
+      ]),
+      frame(3_000, [
+        { playerId: 1, distanceMeters: 40, speedKph: 30, cadence: 110, watts: 800 },
+        { playerId: 2, distanceMeters: 40, speedKph: 32, cadence: 115, watts: 900 },
+      ]),
+    ];
+
+    const results = buildRaceZoneResults(capture, {
+      1: { 'split-1': 'a' },
+      2: { 'split-1': 'b' },
+    });
+
+    expect(zoneRiderResult(results, 'amateur-zone', 1)).toMatchObject({
+      entryElapsedMs: 500,
+      exitElapsedMs: 1_500,
+      sampleCount: 3,
+    });
+    expect(zoneRiderResult(results, 'amateur-zone', 2)).toMatchObject({
+      entryElapsedMs: null,
+      exitElapsedMs: null,
+      sampleCount: 0,
+    });
+    expect(zoneRiderResult(results, 'pro-zone', 1)).toMatchObject({
+      entryElapsedMs: null,
+      exitElapsedMs: null,
+      sampleCount: 0,
+    });
+    expect(zoneRiderResult(results, 'pro-zone', 2)).toMatchObject({
+      entryElapsedMs: 500,
+      exitElapsedMs: 1_500,
+      sampleCount: 3,
+    });
+
+    const unknownBranches = buildRaceZoneResults(capture);
+    expect(zoneRiderResult(unknownBranches, 'amateur-zone', 1).sampleCount).toBe(3);
+    expect(zoneRiderResult(unknownBranches, 'pro-zone', 1).sampleCount).toBe(3);
+  });
+
   it('keeps corrected demo cadence and reported peak speed in the same order', () => {
     const capture = baseCapture();
     capture.frames = [

@@ -6788,6 +6788,67 @@ test('club athletes see only their own connection and never the studio roster', 
   await page.route('**/api/public-track-mappings*', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ trackMappings: {}, customRoutes: [] }) });
   });
+  await page.route('**/api/heart-rate/streams?*', async (route) => {
+    const sessionId = new URL(route.request().url()).searchParams.get('sessionId');
+    const savedSummary = (averageBpm: number, peakBpm: number, sampleCount: number, coveragePercent: number) => ({
+      sampleCount,
+      coverageMs: Math.round(8_000 * coveragePercent / 100),
+      coveragePercent,
+      firstSampleElapsedMs: 100,
+      lastSampleElapsedMs: 7_500,
+      minimumBpm: averageBpm - 24,
+      averageBpm,
+      peakBpm,
+    });
+    const segment = sessionId === 'phone-zone-metrics' ? {
+      id: 'private-zone-segment',
+      streamId: 'private-zone-stream',
+      trainingSessionId: sessionId,
+      activityType: 'bmx-race',
+      relayScope: 'studio-block',
+      studioRiderId: 'studio-rasheen',
+      playerId: 1,
+      startedAt: now - 9_000,
+      endedAt: now - 1_000,
+      activeDurationMs: 8_000,
+      summary: savedSummary(154, 181, 8, 87.5),
+      zoneSummaries: [{
+        zoneId: 'mapped-pedal-zone',
+        zoneName: 'First straight drive',
+        startElapsedMs: 110,
+        endElapsedMs: 490,
+        summary: {
+          ...savedSummary(162, 176, 4, 75),
+          coverageMs: 285,
+          firstSampleElapsedMs: 110,
+          lastSampleElapsedMs: 395,
+        },
+      }],
+      finalizedAt: now - 500,
+    } : sessionId === 'phone-sprint-metrics' ? {
+      id: 'private-sprint-segment',
+      streamId: 'private-sprint-stream',
+      trainingSessionId: sessionId,
+      activityType: 'straight-sprint',
+      relayScope: 'studio-block',
+      studioRiderId: 'studio-rasheen',
+      playerId: 1,
+      startedAt: now - 30_000,
+      endedAt: now - 20_000,
+      activeDurationMs: 10_000,
+      summary: savedSummary(145, 166, 7, 70),
+      zoneSummaries: [],
+      finalizedAt: now - 19_500,
+    } : null;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        streams: [],
+        segments: segment ? [segment] : [],
+        attachment: { status: segment ? 'saved' : 'not-recorded' },
+      }),
+    });
+  });
   await page.route('**/api/training-sessions*', async (route) => {
     if (new URL(route.request().url()).pathname.endsWith('/stream')) {
       await route.abort();
@@ -6797,7 +6858,7 @@ test('club athletes see only their own connection and never the studio roster', 
       contentType: 'application/json',
       body: JSON.stringify({
         sessions: [{
-          id: 'club:preski:phone-zone-metrics',
+          id: 'club:club-preski-ranch:phone-zone-metrics',
           activityType: 'bmx-race',
           title: 'Chula Vista interval race',
           startedAt: now - 9_000,
@@ -6856,7 +6917,7 @@ test('club athletes see only their own connection and never the studio roster', 
             }],
           },
         }, {
-          id: 'club:preski:phone-sprint-metrics',
+          id: 'club:club-preski-ranch:phone-sprint-metrics',
           activityType: 'straight-sprint',
           title: '300 ft sprint at Chula Vista Elite BMX',
           startedAt: now - 30_000,
@@ -6923,6 +6984,9 @@ test('club athletes see only their own connection and never the studio roster', 
   const resultTable = spreadsheet.getByRole('table', { name: /Race & sprint/ });
   await expect(resultTable.getByRole('columnheader', { name: 'Finish' })).toBeVisible();
   await expect(resultTable.getByRole('columnheader', { name: '30 ft split' })).toBeVisible();
+  await expect(resultTable.getByRole('columnheader', { name: 'Private average heart rate' })).toBeVisible();
+  await expect(resultTable.getByRole('columnheader', { name: 'Private peak heart rate' })).toBeVisible();
+  await expect(resultTable.getByRole('columnheader', { name: 'Heart-rate coverage / status' })).toBeVisible();
   const intervalRow = resultTable.getByRole('row').filter({ hasText: 'Chula Vista interval race' });
   await expect(intervalRow).toContainText('Rasheen “The Machine” Hicks');
   await expect(intervalRow).toContainText('8.00s');
@@ -6930,6 +6994,9 @@ test('club athletes see only their own connection and never the studio roster', 
   await expect(intervalRow).toContainText('178 ms');
   await expect(intervalRow).toContainText('182.0 RPM');
   await expect(intervalRow).toContainText('1,120 W');
+  await expect(intervalRow).toContainText('154 BPM');
+  await expect(intervalRow).toContainText('181 BPM');
+  await expect(intervalRow).toContainText('8 samples · 87.5%');
 
   await spreadsheet.getByRole('tab', { name: /Power by rep/ }).click();
   const powerTable = spreadsheet.getByRole('table', { name: /Peak power by rider and repetition/ });
@@ -6953,6 +7020,8 @@ test('club athletes see only their own connection and never the studio roster', 
   await expect(zoneRow).toContainText('0.38s');
   await expect(zoneRow).toContainText('169.5 / 181.0 rpm');
   await expect(zoneRow).toContainText('891 / 1,100 W');
+  await expect(zoneRow).toContainText('162 / 176 BPM');
+  await expect(zoneRow).toContainText('4 samples · 75%');
 
   const zoneMap = zoneReview.locator('.training-zone-review__map');
   const zoneGrid = zoneReview.getByRole('region', { name: 'Recorded track zone spreadsheet' });
@@ -6974,6 +7043,7 @@ test('club athletes see only their own connection and never the studio roster', 
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   for (const control of [
     spreadsheet.getByRole('button', { name: 'Numbers / Excel (.xlsx)' }),
+    spreadsheet.getByRole('button', { name: 'Private workbook + heart rate (.xlsx)' }),
     zoneButton,
     page.getByRole('button', { name: 'Close session details' }),
   ]) {
@@ -6986,6 +7056,10 @@ test('club athletes see only their own connection and never the studio roster', 
   await spreadsheet.getByRole('button', { name: 'Numbers / Excel (.xlsx)' }).click();
   const workbook = await downloadPromise;
   expect(workbook.suggestedFilename()).toMatch(/^tracklab-training-\d{4}-\d{2}-\d{2}\.xlsx$/u);
+  const privateDownloadPromise = page.waitForEvent('download');
+  await spreadsheet.getByRole('button', { name: 'Private workbook + heart rate (.xlsx)' }).click();
+  const privateWorkbook = await privateDownloadPromise;
+  expect(privateWorkbook.suggestedFilename()).toMatch(/^tracklab-private-training-\d{4}-\d{2}-\d{2}\.xlsx$/u);
 
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('button', { name: 'More', exact: true }).click();

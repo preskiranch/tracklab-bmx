@@ -1363,6 +1363,7 @@ export async function loadHeartRateStreams(sessionId?: string) {
  */
 export async function loadPrivateHeartRateSessionHistoryResult(
   sessionId: string,
+  options: Readonly<{ signal?: AbortSignal }> = {},
 ): Promise<PrivateHeartRateSessionHistory> {
   const normalizedSessionId = sessionId.trim();
   if (!normalizedSessionId || normalizedSessionId.length > 160) {
@@ -1372,6 +1373,7 @@ export async function loadPrivateHeartRateSessionHistoryResult(
   const response = await fetch(`/api/heart-rate/streams?${params}`, {
     cache: 'no-store',
     headers: { Accept: 'application/json' },
+    signal: options.signal,
   });
   const payload = await jsonResponse<{
     streams?: unknown;
@@ -1405,17 +1407,28 @@ export async function loadPrivateHeartRateSessionHistory(sessionId: string) {
   return (await loadPrivateHeartRateSessionHistoryResult(sessionId)).items;
 }
 
-/** Loads consented summary-only health data for an authenticated club owner. */
-export async function loadClubHeartRateSummaryHistory(clubId: string, sessionId: string) {
+/** Loads one rider's consented summary-only health data for an authenticated club owner. */
+export async function loadClubHeartRateSummaryHistory(
+  clubId: string,
+  sessionId: string,
+  studioRiderId: string,
+) {
   const normalizedClubId = clubId.trim();
   const normalizedSessionId = sessionId.trim();
+  const normalizedStudioRiderId = studioRiderId.trim();
   if (
     !normalizedClubId
     || normalizedClubId.length > 160
     || !normalizedSessionId
     || normalizedSessionId.length > 160
-  ) throw new Error('A valid club and training session are required to load consented heart-rate summaries.');
-  const params = new URLSearchParams({ clubId: normalizedClubId, sessionId: normalizedSessionId });
+    || !normalizedStudioRiderId
+    || normalizedStudioRiderId.length > 160
+  ) throw new Error('A valid club, rider, and training session are required to load consented heart-rate summaries.');
+  const params = new URLSearchParams({
+    clubId: normalizedClubId,
+    sessionId: normalizedSessionId,
+    studioRiderId: normalizedStudioRiderId,
+  });
   const response = await fetch(`/api/heart-rate/club-streams?${params}`, {
     cache: 'no-store',
     headers: { Accept: 'application/json' },
@@ -1424,13 +1437,15 @@ export async function loadClubHeartRateSummaryHistory(clubId: string, sessionId:
   const streams = Array.isArray(payload.streams)
     ? payload.streams.flatMap((value) => {
       const stream = normalizeClubSummaryStream(value);
-      return stream?.sessionId === normalizedSessionId ? [stream] : [];
+      return stream?.sessionId === normalizedSessionId
+        && stream.studioRiderId === normalizedStudioRiderId ? [stream] : [];
     })
     : [];
   const segments = Array.isArray(payload.segments)
     ? payload.segments.flatMap((value) => {
       const segment = normalizeTrainingSegment(value);
-      return segment?.trainingSessionId === normalizedSessionId ? [segment] : [];
+      return segment?.trainingSessionId === normalizedSessionId
+        && segment.studioRiderId === normalizedStudioRiderId ? [segment] : [];
     })
     : [];
   return ([...streams, ...segments] satisfies ClubHeartRateHistoryItem[])

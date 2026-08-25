@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { TrainingActivityType, TrainingSession } from '../../src/types';
+import type { PrivateTrainingHeartRateProjection } from '../../src/lib/privateTrainingHeartRate';
 import { TrainingResultsSpreadsheet } from '../../src/components/TrainingResultsSpreadsheet';
 import {
   availableTrainingResultSheets,
@@ -334,5 +335,111 @@ describe('training results spreadsheet semantics', () => {
     expect(html).toContain('Review zones');
     expect(html).not.toContain('role="grid"');
     expect(html).not.toContain('contenteditable');
+  });
+
+  it('shows private heart-rate summary columns beside recorded bike metrics', () => {
+    const sprint = race('sprint-heart-rate', 0, [{
+      playerId: 1, riderId: 'rider-one', riderName: 'Rider One', watts: 900,
+    }]);
+    const projection: PrivateTrainingHeartRateProjection = {
+      access: 'athlete-private',
+      displayedSessionId: sprint.id,
+      canonicalSessionId: sprint.id,
+      state: 'saved',
+      playerId: 1,
+      summary: {
+        sampleCount: 8,
+        coverageMs: 8_000,
+        coveragePercent: 80,
+        firstSampleElapsedMs: 0,
+        lastSampleElapsedMs: 9_000,
+        minimumBpm: 101,
+        averageBpm: 142.5,
+        peakBpm: 181,
+      },
+      zoneSummaries: [],
+    };
+    const html = renderToStaticMarkup(createElement(TrainingResultsSpreadsheet, {
+      sessions: [sprint],
+      dateLabel: 'August 24, 2026',
+      speedUnit: 'mph',
+      distanceUnit: 'ft',
+      privateHeartRateBySession: new Map([[sprint.id, [projection]]]),
+      onExportPrivateWorkbook: () => undefined,
+    }));
+
+    expect(html).toContain('Private average heart rate');
+    expect(html).toContain('Private peak heart rate');
+    expect(html).toContain('Heart-rate coverage / status');
+    expect(html).toContain('143 BPM');
+    expect(html).toContain('181 BPM');
+    expect(html).toContain('8 samples · 80%');
+    expect(html).toContain('Private workbook + heart rate (.xlsx)');
+  });
+
+  it('announces day-level loading and does not assign a null placeholder to every rider', () => {
+    const sprint = race('multi-rider-heart-rate', 0, [
+      { playerId: 1, riderId: 'rider-one', riderName: 'Rider One', watts: 900 },
+      { playerId: 2, riderId: 'rider-two', riderName: 'Rider Two', watts: 850 },
+    ]);
+    const loading: PrivateTrainingHeartRateProjection = {
+      access: 'athlete-private',
+      displayedSessionId: sprint.id,
+      canonicalSessionId: sprint.id,
+      state: 'loading',
+      playerId: null,
+      summary: null,
+      zoneSummaries: [],
+    };
+    const html = renderToStaticMarkup(createElement(TrainingResultsSpreadsheet, {
+      sessions: [sprint],
+      dateLabel: 'August 24, 2026',
+      speedUnit: 'mph',
+      distanceUnit: 'ft',
+      privateHeartRateBySession: new Map([[sprint.id, [loading]]]),
+      privateExportDisabled: true,
+      onExportPrivateWorkbook: () => undefined,
+    }));
+
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('Private rider only');
+    expect(html).not.toContain('Loading…');
+  });
+
+  it('does not treat duplicate rider names and ids as one result slot for legacy HR fallback', () => {
+    const sprint = race('duplicate-rider-identity', 0, [
+      { playerId: 1, riderId: 'shared-rider', riderName: 'Same Name', watts: 900 },
+      { playerId: 2, riderId: 'shared-rider', riderName: 'Same Name', watts: 850 },
+    ]);
+    const nullPlayerProjection: PrivateTrainingHeartRateProjection = {
+      access: 'athlete-private',
+      displayedSessionId: sprint.id,
+      canonicalSessionId: sprint.id,
+      state: 'saved',
+      playerId: null,
+      summary: {
+        sampleCount: 8,
+        coverageMs: 8_000,
+        coveragePercent: 80,
+        firstSampleElapsedMs: 0,
+        lastSampleElapsedMs: 9_000,
+        minimumBpm: 101,
+        averageBpm: 142.5,
+        peakBpm: 181,
+      },
+      zoneSummaries: [],
+    };
+    const html = renderToStaticMarkup(createElement(TrainingResultsSpreadsheet, {
+      sessions: [sprint],
+      dateLabel: 'August 24, 2026',
+      speedUnit: 'mph',
+      distanceUnit: 'ft',
+      privateHeartRateBySession: new Map([[sprint.id, [nullPlayerProjection]]]),
+    }));
+
+    expect(html).toContain('Private rider only');
+    expect(html).not.toContain('143 BPM');
+    expect(html).not.toContain('181 BPM');
   });
 });

@@ -5906,10 +5906,12 @@ export default function App() {
 
       return {
         ...finalizedCapture,
-        zoneResults: buildRaceZoneResults(finalizedCapture),
+        zoneResults: buildRaceZoneResults(finalizedCapture, Object.fromEntries(
+          riders.map((rider) => [rider.playerId, rider.actualBranches]),
+        )),
       };
     });
-  }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer]);
+  }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer, riders]);
 
   useEffect(() => {
     if (demoMode || raceState !== 'finished' || !raceCapture || raceCapture.status !== 'finished') return;

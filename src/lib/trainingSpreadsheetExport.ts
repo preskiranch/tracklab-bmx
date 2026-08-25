@@ -11,6 +11,13 @@ import {
   trainingActivityLabels,
   type TrainingResultRow,
 } from './trainingResultsGrid';
+import {
+  privateTrainingHeartRateForPlayer,
+  privateTrainingHeartRateTarget,
+  privateTrainingHeartRateZone,
+  type PrivateTrainingHeartRateBySession,
+  type PrivateTrainingHeartRateProjection,
+} from './privateTrainingHeartRate';
 
 type BrowserWorkbookSheet = Sheet<File | Blob | ArrayBuffer>;
 
@@ -348,6 +355,387 @@ function zoneResultsSheet(
   };
 }
 
+const privateHeartRateHeaders = [
+  'Private heart-rate status', 'Minimum heart rate (bpm)', 'Average heart rate (bpm)',
+  'Peak heart rate (bpm)', 'Heart-rate samples', 'Heart-rate coverage (s)',
+  'Heart-rate coverage (%)',
+] as const;
+
+function privateProjectionStatus(projection: PrivateTrainingHeartRateProjection) {
+  if (projection.state === 'loading') return 'Loading';
+  if (projection.state === 'error') return 'Unavailable';
+  if (projection.state === 'not-recorded') return 'Not recorded';
+  if (!projection.summary || projection.summary.sampleCount <= 0) {
+    return projection.state === 'syncing' ? 'Syncing' : 'No valid samples';
+  }
+  return projection.state === 'syncing' ? 'Syncing — partial' : 'Saved';
+}
+
+function privateSummaryCells(
+  projections: readonly PrivateTrainingHeartRateProjection[],
+  emptyStatus: string,
+): SheetData[number] {
+  if (projections.length > 1) {
+    return [
+      textCell('Multiple Watch segments — see Private HR Summary'),
+      null, null, null, null, null, null,
+    ];
+  }
+  const projection = projections[0];
+  if (!projection) return [textCell(emptyStatus), null, null, null, null, null, null];
+  const summary = projection.summary;
+  return [
+    textCell(privateProjectionStatus(projection)),
+    numberCell(summary?.minimumBpm, '0'),
+    numberCell(summary?.averageBpm, '0.0'),
+    numberCell(summary?.peakBpm, '0'),
+    numberCell(summary?.sampleCount, '0'),
+    numberCell(summary == null ? null : summary.coverageMs / 1_000, '0.00'),
+    numberCell(summary?.coveragePercent, '0.0'),
+  ];
+}
+
+function privateZoneSummaryCells(
+  projections: readonly PrivateTrainingHeartRateProjection[],
+  zoneId: string,
+  expectedWindow: Readonly<{ startElapsedMs: number; endElapsedMs: number }> | undefined,
+  emptyStatus: string,
+): SheetData[number] {
+  if (!expectedWindow
+    || !Number.isFinite(expectedWindow.startElapsedMs)
+    || !Number.isFinite(expectedWindow.endElapsedMs)
+    || expectedWindow.startElapsedMs < 0
+    || expectedWindow.endElapsedMs <= expectedWindow.startElapsedMs) {
+    return [textCell('No recorded zone window'), null, null, null, null, null, null];
+  }
+  if (projections.length > 1) {
+    return [
+      textCell('Multiple Watch segments — see Private HR Zones'),
+      null, null, null, null, null, null,
+    ];
+  }
+  const projection = projections[0];
+  if (!projection) return [textCell(emptyStatus), null, null, null, null, null, null];
+  const zone = privateTrainingHeartRateZone(projection, zoneId, expectedWindow);
+  if (!zone) {
+    const state = projection.state === 'loading'
+      ? 'Loading'
+      : projection.state === 'error'
+        ? 'Unavailable'
+        : projection.state === 'syncing'
+          ? 'Syncing'
+          : projection.state === 'not-recorded'
+            ? 'Not recorded'
+            : 'No valid zone samples';
+    return [textCell(state), null, null, null, null, null, null];
+  }
+  const status = zone.summary.sampleCount <= 0
+    ? 'No valid zone samples'
+    : projection.state === 'syncing' ? 'Syncing — partial' : 'Saved';
+  return [
+    textCell(status),
+    numberCell(zone.summary.minimumBpm, '0'),
+    numberCell(zone.summary.averageBpm, '0.0'),
+    numberCell(zone.summary.peakBpm, '0'),
+    numberCell(zone.summary.sampleCount, '0'),
+    numberCell(zone.summary.coverageMs / 1_000, '0.00'),
+    numberCell(zone.summary.coveragePercent, '0.0'),
+  ];
+}
+
+function privateSessionProjections(
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+  session: TrainingSession,
+) {
+  const target = privateTrainingHeartRateTarget(session);
+  if (!target) return [];
+  return (heartRateBySession.get(session.id) ?? []).filter((projection) => (
+    projection.access === 'athlete-private'
+    && projection.displayedSessionId === target.displayedSessionId
+    && projection.canonicalSessionId === target.canonicalSessionId
+  ));
+}
+
+function riderCounts(results: readonly TrainingResultRow[]) {
+  const resultSlots = new Map<string, number>();
+  results.forEach((result) => {
+    resultSlots.set(result.sessionId, (resultSlots.get(result.sessionId) ?? 0) + 1);
+  });
+  return resultSlots;
+}
+
+type PrivateResultHeartRateResolution = Readonly<{
+  projections: readonly PrivateTrainingHeartRateProjection[];
+  emptyStatus: 'Not recorded' | 'Private rider only';
+}>;
+
+function privateHeartRateForResult(
+  result: TrainingResultRow,
+  session: TrainingSession,
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+  counts: ReadonlyMap<string, number>,
+): PrivateResultHeartRateResolution {
+  const projections = privateSessionProjections(heartRateBySession, session);
+  const numericPlayerId = Number(result.playerId);
+  const riderCount = counts.get(result.sessionId) ?? 1;
+  const matched = privateTrainingHeartRateForPlayer(
+    projections,
+    Number.isInteger(numericPlayerId) ? numericPlayerId : -1,
+    riderCount,
+  );
+  if (matched.length > 0) return { projections: matched, emptyStatus: 'Not recorded' };
+  const stateOnly = projections.filter((projection) => (
+    projection.state === 'loading'
+    || projection.state === 'not-recorded'
+    || projection.state === 'error'
+    || (projection.state === 'syncing' && projection.summary == null)
+  ));
+  const exactState = stateOnly.filter((projection) => (
+    Number.isInteger(numericPlayerId) && projection.playerId === numericPlayerId
+  ));
+  if (exactState.length > 0) return { projections: exactState, emptyStatus: 'Not recorded' };
+  if (riderCount === 1 && stateOnly.length > 0) {
+    return { projections: stateOnly, emptyStatus: 'Not recorded' };
+  }
+  return {
+    projections: [],
+    emptyStatus: session.club?.role === 'owner' || riderCount > 1 || projections.length > 0
+      ? 'Private rider only'
+      : 'Not recorded',
+  };
+}
+
+function privateSessionMatchedProjections(
+  session: TrainingSession,
+  results: readonly TrainingResultRow[],
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+  counts: ReadonlyMap<string, number>,
+) {
+  const matched = new Set<PrivateTrainingHeartRateProjection>();
+  results.filter((result) => result.sessionId === session.id).forEach((result) => {
+    privateHeartRateForResult(result, session, heartRateBySession, counts)
+      .projections.forEach((projection) => matched.add(projection));
+  });
+  return privateSessionProjections(heartRateBySession, session)
+    .filter((projection) => matched.has(projection));
+}
+
+function privateRiderResultsSheet(
+  sessions: readonly TrainingSession[],
+  results: readonly TrainingResultRow[],
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+): BrowserWorkbookSheet {
+  const base = riderResultsSheet(sessions, results);
+  const counts = riderCounts(results);
+  const sessionById = new Map(sessions.map((session) => [session.id, session]));
+  const headers = [...rowValuesForExport(base.data[1]), ...privateHeartRateHeaders];
+  const data: SheetData = [
+    titleRow(`TrackLab private training · ${workbookDateLabel(sessions)} · Rider Results`, headers.length),
+    headers.map((header) => textCell(header, true)),
+  ];
+  results.forEach((result, index) => {
+    const session = sessionById.get(result.sessionId);
+    const resolution = session
+      ? privateHeartRateForResult(result, session, heartRateBySession, counts)
+      : { projections: [], emptyStatus: 'Private rider only' as const };
+    data.push([
+      ...base.data[index + 2],
+      ...privateSummaryCells(
+        resolution.projections,
+        resolution.emptyStatus,
+      ),
+    ]);
+  });
+  return {
+    ...base,
+    data,
+    sheet: 'Private Rider Results',
+    columns: [
+      ...(base.columns ?? []),
+      { width: 36 }, { width: 24 }, { width: 24 }, { width: 22 },
+      { width: 20 }, { width: 22 }, { width: 22 },
+    ],
+  };
+}
+
+function rowValuesForExport(row: SheetData[number]) {
+  return row.map((cell) => cell && typeof cell === 'object' && 'value' in cell ? cell.value : cell);
+}
+
+function privateZoneResultsSheet(
+  sessions: readonly TrainingSession[],
+  results: readonly TrainingResultRow[],
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+): BrowserWorkbookSheet {
+  const base = zoneResultsSheet(sessions, results);
+  const counts = riderCounts(results);
+  const resultsBySession = new Map<string, TrainingResultRow[]>();
+  results.forEach((result) => {
+    resultsBySession.set(result.sessionId, [...(resultsBySession.get(result.sessionId) ?? []), result]);
+  });
+  const bindings: Array<{
+    session: TrainingSession;
+    zoneId: string;
+    playerId: number;
+    expectedWindow?: { startElapsedMs: number; endElapsedMs: number };
+  }> = [];
+  sessions.forEach((session) => {
+    trainingSessionZoneResults(session).forEach((zone) => {
+      zone.riders.forEach((rider) => {
+        const startElapsedMs = Number(rider.entryElapsedMs);
+        const endElapsedMs = Number(rider.exitElapsedMs);
+        bindings.push({
+          session,
+          zoneId: zone.zoneId,
+          playerId: Number(rider.playerId),
+          ...(Number.isFinite(startElapsedMs) && Number.isFinite(endElapsedMs)
+            && rider.entryElapsedMs != null && rider.exitElapsedMs != null
+            ? { expectedWindow: { startElapsedMs, endElapsedMs } }
+            : {}),
+        });
+      });
+    });
+  });
+  const headers = [...rowValuesForExport(base.data[1]), ...privateHeartRateHeaders];
+  const data: SheetData = [
+    titleRow(`TrackLab private training · ${workbookDateLabel(sessions)} · Zone Results`, headers.length),
+    headers.map((header) => textCell(header, true)),
+  ];
+  bindings.forEach((binding, index) => {
+    const sessionResults = resultsBySession.get(binding.session.id) ?? [];
+    const exactResults = sessionResults.filter((result) => Number(result.playerId) === binding.playerId);
+    const result = exactResults.length === 1
+      ? exactResults[0]
+      : sessionResults.length === 1 ? sessionResults[0] : undefined;
+    const resolution = result
+      ? privateHeartRateForResult(result, binding.session, heartRateBySession, counts)
+      : { projections: [], emptyStatus: 'Private rider only' as const };
+    data.push([
+      ...base.data[index + 2],
+      ...privateZoneSummaryCells(
+        resolution.projections,
+        binding.zoneId,
+        binding.expectedWindow,
+        resolution.emptyStatus,
+      ),
+    ]);
+  });
+  return {
+    ...base,
+    data,
+    sheet: 'Private Zone Results',
+    columns: [
+      ...(base.columns ?? []),
+      { width: 36 }, { width: 24 }, { width: 24 }, { width: 22 },
+      { width: 20 }, { width: 22 }, { width: 22 },
+    ],
+  };
+}
+
+function privateProjectionRiderName(
+  projection: PrivateTrainingHeartRateProjection,
+  results: readonly TrainingResultRow[],
+) {
+  const sessionResults = results.filter((result) => result.sessionId === projection.displayedSessionId);
+  const exact = projection.playerId == null
+    ? []
+    : sessionResults.filter((result) => Number(result.playerId) === projection.playerId);
+  if (exact.length === 1) return exact[0].riderName;
+  return sessionResults.length === 1 && projection.playerId == null
+    ? sessionResults[0].riderName
+    : 'Private rider (unmatched)';
+}
+
+function privateHeartRateSummarySheet(
+  sessions: readonly TrainingSession[],
+  results: readonly TrainingResultRow[],
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+): BrowserWorkbookSheet {
+  const counts = riderCounts(results);
+  const headers = [
+    'Session', 'Started', 'Activity', 'Rider', 'Watch segment', ...privateHeartRateHeaders,
+    'First sample active time (s)', 'Last sample active time (s)',
+  ];
+  const data: SheetData = [
+    titleRow(`TrackLab private training · ${workbookDateLabel(sessions)} · Heart-rate Summary`, headers.length),
+    headers.map((header) => textCell(header, true)),
+  ];
+  sessions.forEach((session, sessionIndex) => {
+    privateSessionMatchedProjections(session, results, heartRateBySession, counts).forEach((projection, segmentIndex) => {
+      const summary = projection.summary;
+      data.push([
+        numberCell(sessionIndex + 1, '0'),
+        dateCell(session.startedAt),
+        textCell(trainingActivityLabels[session.activityType]),
+        textCell(privateProjectionRiderName(projection, results)),
+        numberCell(segmentIndex + 1, '0'),
+        ...privateSummaryCells([projection], 'Not recorded'),
+        numberCell(millisecondsToSeconds(summary?.firstSampleElapsedMs), '0.000'),
+        numberCell(millisecondsToSeconds(summary?.lastSampleElapsedMs), '0.000'),
+      ]);
+    });
+  });
+  return {
+    data,
+    sheet: 'Private HR Summary',
+    stickyRowsCount: 2,
+    stickyColumnsCount: 4,
+    showGridLines: true,
+    columns: [
+      { width: 10 }, { width: 22 }, { width: 20 }, { width: 28 }, { width: 15 },
+      { width: 36 }, { width: 24 }, { width: 24 }, { width: 22 }, { width: 20 },
+      { width: 22 }, { width: 22 }, { width: 26 }, { width: 26 },
+    ],
+  };
+}
+
+function privateHeartRateZonesSheet(
+  sessions: readonly TrainingSession[],
+  results: readonly TrainingResultRow[],
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+): BrowserWorkbookSheet {
+  const counts = riderCounts(results);
+  const headers = [
+    'Session', 'Started', 'Activity', 'Rider', 'Watch segment', 'Zone', 'Zone name',
+    'Start active time (s)', 'End active time (s)', ...privateHeartRateHeaders,
+  ];
+  const data: SheetData = [
+    titleRow(`TrackLab private training · ${workbookDateLabel(sessions)} · Heart rate by Zone`, headers.length),
+    headers.map((header) => textCell(header, true)),
+  ];
+  sessions.forEach((session, sessionIndex) => {
+    privateSessionMatchedProjections(session, results, heartRateBySession, counts).forEach((projection, segmentIndex) => {
+      projection.zoneSummaries.forEach((zone, zoneIndex) => {
+        const zoneProjection: PrivateTrainingHeartRateProjection = { ...projection, summary: zone.summary };
+        data.push([
+          numberCell(sessionIndex + 1, '0'),
+          dateCell(session.startedAt),
+          textCell(trainingActivityLabels[session.activityType]),
+          textCell(privateProjectionRiderName(projection, results)),
+          numberCell(segmentIndex + 1, '0'),
+          numberCell(zoneIndex + 1, '0'),
+          textCell(zone.zoneName || zone.zoneId),
+          numberCell(millisecondsToSeconds(zone.startElapsedMs), '0.000'),
+          numberCell(millisecondsToSeconds(zone.endElapsedMs), '0.000'),
+          ...privateSummaryCells([zoneProjection], 'No valid zone samples'),
+        ]);
+      });
+    });
+  });
+  return {
+    data,
+    sheet: 'Private HR Zones',
+    stickyRowsCount: 2,
+    stickyColumnsCount: 4,
+    showGridLines: true,
+    columns: [
+      { width: 10 }, { width: 22 }, { width: 20 }, { width: 28 }, { width: 15 },
+      { width: 9 }, { width: 25 }, { width: 23 }, { width: 23 }, { width: 36 },
+      { width: 24 }, { width: 24 }, { width: 22 }, { width: 20 }, { width: 22 }, { width: 22 },
+    ],
+  };
+}
+
 function powerByRepSheet(
   sessions: readonly TrainingSession[],
   results: readonly TrainingResultRow[],
@@ -392,6 +780,30 @@ export function buildTrainingDayWorkbook(sessions: readonly TrainingSession[]): 
   return sheets;
 }
 
+/**
+ * Builds a separate athlete-private workbook from an already authorized,
+ * least-data projection. The standard workbook above remains non-health.
+ */
+export function buildPrivateTrainingDayWorkbook(
+  sessions: readonly TrainingSession[],
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+): BrowserWorkbookSheet[] {
+  const orderedSessions = sortedSessions(sessions);
+  const results = buildTrainingResultRows(orderedSessions);
+  const sheets = [
+    sessionsSheet(orderedSessions),
+    privateRiderResultsSheet(orderedSessions, results, heartRateBySession),
+    privateZoneResultsSheet(orderedSessions, results, heartRateBySession),
+  ];
+  const powerSheet = powerByRepSheet(orderedSessions, results);
+  if (powerSheet) sheets.push(powerSheet);
+  sheets.push(
+    privateHeartRateSummarySheet(orderedSessions, results, heartRateBySession),
+    privateHeartRateZonesSheet(orderedSessions, results, heartRateBySession),
+  );
+  return sheets;
+}
+
 function localDateKey(timestamp: number) {
   const date = new Date(timestamp);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -413,6 +825,14 @@ export function trainingDaySpreadsheetFilename(
   return `tracklab-training-${explicitDate}.xlsx`;
 }
 
+export function privateTrainingDaySpreadsheetFilename(
+  selectedDate?: string | number | Date,
+  sessions: readonly TrainingSession[] = [],
+) {
+  return trainingDaySpreadsheetFilename(selectedDate, sessions)
+    .replace(/^tracklab-training-/u, 'tracklab-private-training-');
+}
+
 export async function downloadTrainingDaySpreadsheet(
   sessions: readonly TrainingSession[],
   selectedDate?: string | number | Date,
@@ -422,4 +842,16 @@ export async function downloadTrainingDaySpreadsheet(
     fontFamily: 'Arial',
     fontSize: 10,
   }).toFile(trainingDaySpreadsheetFilename(selectedDate, sessions));
+}
+
+export async function downloadPrivateTrainingDaySpreadsheet(
+  sessions: readonly TrainingSession[],
+  selectedDate: string | number | Date | undefined,
+  heartRateBySession: PrivateTrainingHeartRateBySession,
+) {
+  const { default: writeExcelFile } = await import('write-excel-file/browser');
+  await writeExcelFile(buildPrivateTrainingDayWorkbook(sessions, heartRateBySession), {
+    fontFamily: 'Arial',
+    fontSize: 10,
+  }).toFile(privateTrainingDaySpreadsheetFilename(selectedDate, sessions));
 }

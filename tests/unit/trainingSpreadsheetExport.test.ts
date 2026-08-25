@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { Cell, SheetData } from 'write-excel-file/browser';
 import type { TrainingSession } from '../../src/types';
 import {
+  buildPrivateTrainingDayWorkbook,
   buildTrainingDayWorkbook,
+  privateTrainingDaySpreadsheetFilename,
   trainingDaySpreadsheetFilename,
   trainingSessionSpreadsheetResults,
 } from '../../src/lib/trainingSpreadsheetExport';
+import type { PrivateTrainingHeartRateProjection } from '../../src/lib/privateTrainingHeartRate';
 
 function cellValue(cell: Cell) {
   return cell && typeof cell === 'object' && !(cell instanceof Date)
@@ -123,6 +126,46 @@ function utilitySession(overrides: Partial<TrainingSession> = {}): TrainingSessi
         peakWatts: 1_190,
       }],
     },
+    ...overrides,
+  };
+}
+
+function privateProjection(
+  session: TrainingSession,
+  overrides: Partial<PrivateTrainingHeartRateProjection> = {},
+): PrivateTrainingHeartRateProjection {
+  return {
+    access: 'athlete-private',
+    displayedSessionId: session.id,
+    canonicalSessionId: session.id,
+    state: 'saved',
+    playerId: 1,
+    summary: {
+      sampleCount: 8,
+      coverageMs: 8_000,
+      coveragePercent: 80,
+      firstSampleElapsedMs: 0,
+      lastSampleElapsedMs: 9_000,
+      minimumBpm: 101,
+      averageBpm: 142.5,
+      peakBpm: 181,
+    },
+    zoneSummaries: [{
+      zoneId: 'zone-drive-one',
+      zoneName: 'Drive one',
+      startElapsedMs: 300,
+      endElapsedMs: 1_180,
+      summary: {
+        sampleCount: 4,
+        coverageMs: 700,
+        coveragePercent: 79.5,
+        firstSampleElapsedMs: 320,
+        lastSampleElapsedMs: 1_100,
+        minimumBpm: 130,
+        averageBpm: 151.4,
+        peakBpm: 169,
+      },
+    }],
     ...overrides,
   };
 }
@@ -381,6 +424,201 @@ describe('training day spreadsheet export', () => {
   it('uses the selected local day in a safe Numbers-compatible workbook filename', () => {
     expect(trainingDaySpreadsheetFilename('2026-08-24')).toBe('tracklab-training-2026-08-24.xlsx');
     expect(trainingDaySpreadsheetFilename(undefined, [raceSession()])).toBe('tracklab-training-2026-08-24.xlsx');
+    expect(privateTrainingDaySpreadsheetFilename('2026-08-24')).toBe('tracklab-private-training-2026-08-24.xlsx');
+  });
+
+  it('adds exact private heart-rate metrics inline and in segment-preserving private sheets', () => {
+    const session = raceSession();
+    const heartRate = new Map([[session.id, [privateProjection(session)]]]);
+    const workbook = buildPrivateTrainingDayWorkbook([session], heartRate);
+
+    expect(workbook.map((sheet) => sheet.sheet)).toEqual([
+      'Sessions',
+      'Private Rider Results',
+      'Private Zone Results',
+      'Private HR Summary',
+      'Private HR Zones',
+    ]);
+    expect(rowRecord(workbook[1].data, 2)).toMatchObject({
+      'Private heart-rate status': 'Saved',
+      'Minimum heart rate (bpm)': 101,
+      'Average heart rate (bpm)': 142.5,
+      'Peak heart rate (bpm)': 181,
+      'Heart-rate samples': 8,
+      'Heart-rate coverage (s)': 8,
+      'Heart-rate coverage (%)': 80,
+    });
+    expect(rowRecord(workbook[2].data, 2)).toMatchObject({
+      'Private heart-rate status': 'Saved',
+      'Average heart rate (bpm)': 151.4,
+      'Peak heart rate (bpm)': 169,
+      'Heart-rate samples': 4,
+      'Heart-rate coverage (%)': 79.5,
+    });
+    expect(rowRecord(workbook[3].data, 2)).toMatchObject({
+      Rider: '@Rider One',
+      'Watch segment': 1,
+      'Average heart rate (bpm)': 142.5,
+    });
+    expect(rowRecord(workbook[4].data, 2)).toMatchObject({
+      Rider: '@Rider One',
+      'Watch segment': 1,
+      'Zone name': 'Drive one',
+      'Average heart rate (bpm)': 151.4,
+    });
+    expect(JSON.stringify(workbook)).not.toMatch(/pairingId|streamId|canonicalSessionId|recordedAt|sequence/iu);
+  });
+
+  it('does not average multiple Watch segments in inline cells', () => {
+    const session = raceSession();
+    const heartRate = new Map([[session.id, [
+      privateProjection(session),
+      privateProjection(session, {
+        summary: {
+          sampleCount: 3,
+          coverageMs: 2_000,
+          coveragePercent: 20,
+          firstSampleElapsedMs: 9_100,
+          lastSampleElapsedMs: 11_000,
+          minimumBpm: 170,
+          averageBpm: 175,
+          peakBpm: 185,
+        },
+      }),
+    ]]]);
+    const workbook = buildPrivateTrainingDayWorkbook([session], heartRate);
+
+    const inline = rowRecord(workbook[1].data, 2);
+    expect(inline['Private heart-rate status']).toBe('Multiple Watch segments — see Private HR Summary');
+    expect(inline['Average heart rate (bpm)']).toBeNull();
+    expect(workbook.find((sheet) => sheet.sheet === 'Private HR Summary')!.data).toHaveLength(4);
+    expect(workbook.find((sheet) => sheet.sheet === 'Private HR Zones')!.data).toHaveLength(4);
+  });
+
+  it('rejects wrong-canonical and club-owner projections from the private workbook', () => {
+    const personal = raceSession();
+    const wrongCanonical = privateProjection(personal, { canonicalSessionId: 'another-session' });
+    const personalWorkbook = buildPrivateTrainingDayWorkbook(
+      [personal],
+      new Map([[personal.id, [wrongCanonical]]]),
+    );
+    expect(rowRecord(personalWorkbook[1].data, 2)['Private heart-rate status']).toBe('Not recorded');
+    expect(personalWorkbook.find((sheet) => sheet.sheet === 'Private HR Summary')!.data).toHaveLength(2);
+
+    const ownerSession = raceSession({
+      id: 'club-owner:club-1:rider-1:race-session',
+      club: {
+        id: 'club-1', name: 'Test club', studioRiderId: 'rider-1',
+        riderName: 'Rider One', role: 'owner',
+      },
+    });
+    const forgedOwnerProjection = privateProjection(ownerSession, {
+      canonicalSessionId: 'race-session',
+    });
+    const ownerWorkbook = buildPrivateTrainingDayWorkbook(
+      [ownerSession],
+      new Map([[ownerSession.id, [forgedOwnerProjection]]]),
+    );
+    expect(rowRecord(ownerWorkbook[1].data, 2)['Private heart-rate status']).toBe('Private rider only');
+    expect(ownerWorkbook.find((sheet) => sheet.sheet === 'Private HR Summary')!.data).toHaveLength(2);
+  });
+
+  it('keeps unmatched entrants private in multi-rider results and excludes wrong-player details', () => {
+    const session = raceSession();
+    const summaries = session.details.summaries as Array<Record<string, unknown>>;
+    summaries.push({
+      ...summaries[0],
+      playerId: 2,
+      riderId: 'rider-two',
+      riderName: 'Rider Two',
+      rank: 2,
+    });
+    const zones = session.details.zoneResults as Array<{ riders: Array<Record<string, unknown>> }>;
+    zones[0].riders.push({ ...zones[0].riders[0], playerId: 2 });
+    const workbook = buildPrivateTrainingDayWorkbook(
+      [session],
+      new Map([[session.id, [privateProjection(session)]]]),
+    );
+
+    expect(rowRecord(workbook[1].data, 2)['Private heart-rate status']).toBe('Saved');
+    expect(rowRecord(workbook[1].data, 3)['Private heart-rate status']).toBe('Private rider only');
+    expect(rowRecord(workbook[2].data, 2)['Private heart-rate status']).toBe('Saved');
+    expect(rowRecord(workbook[2].data, 3)['Private heart-rate status']).toBe('Private rider only');
+    expect(workbook.find((sheet) => sheet.sheet === 'Private HR Summary')!.data).toHaveLength(3);
+
+    const wrongPlayerWorkbook = buildPrivateTrainingDayWorkbook(
+      [raceSession()],
+      new Map([['race-session', [privateProjection(raceSession(), { playerId: 99 })]]]),
+    );
+    expect(rowRecord(wrongPlayerWorkbook[1].data, 2)['Private heart-rate status']).toBe('Private rider only');
+    expect(wrongPlayerWorkbook.find((sheet) => sheet.sheet === 'Private HR Summary')!.data).toHaveLength(2);
+    expect(wrongPlayerWorkbook.find((sheet) => sheet.sheet === 'Private HR Zones')!.data).toHaveLength(2);
+  });
+
+  it('requires an exact recorded entry/exit window for inline private zone heart rate', () => {
+    const missingWindow = raceSession();
+    const missingWindowRider = (missingWindow.details.zoneResults as Array<{
+      riders: Array<Record<string, unknown>>;
+    }>)[0].riders[0];
+    missingWindowRider.entryElapsedMs = null;
+    missingWindowRider.exitElapsedMs = null;
+    const missingWindowWorkbook = buildPrivateTrainingDayWorkbook(
+      [missingWindow],
+      new Map([[missingWindow.id, [privateProjection(missingWindow)]]]),
+    );
+    expect(rowRecord(missingWindowWorkbook[2].data, 2)).toMatchObject({
+      'Private heart-rate status': 'No recorded zone window',
+      'Average heart rate (bpm)': null,
+      'Peak heart rate (bpm)': null,
+    });
+    expect(missingWindowWorkbook.find((sheet) => sheet.sheet === 'Private HR Zones')!.data)
+      .toHaveLength(3);
+
+    const zeroWindow = raceSession();
+    const zeroWindowRider = (zeroWindow.details.zoneResults as Array<{
+      riders: Array<Record<string, unknown>>;
+    }>)[0].riders[0];
+    zeroWindowRider.entryElapsedMs = 300;
+    zeroWindowRider.exitElapsedMs = 300;
+    expect(rowRecord(buildPrivateTrainingDayWorkbook(
+      [zeroWindow],
+      new Map([[zeroWindow.id, [privateProjection(zeroWindow)]]]),
+    )[2].data, 2)['Private heart-rate status']).toBe('No recorded zone window');
+
+    const wrongWindow = raceSession();
+    const wrongWindowRider = (wrongWindow.details.zoneResults as Array<{
+      riders: Array<Record<string, unknown>>;
+    }>)[0].riders[0];
+    wrongWindowRider.entryElapsedMs = 301;
+    const wrongWindowWorkbook = buildPrivateTrainingDayWorkbook(
+      [wrongWindow],
+      new Map([[wrongWindow.id, [privateProjection(wrongWindow)]]]),
+    );
+    expect(rowRecord(wrongWindowWorkbook[2].data, 2)).toMatchObject({
+      'Private heart-rate status': 'No valid zone samples',
+      'Average heart rate (bpm)': null,
+      'Peak heart rate (bpm)': null,
+    });
+  });
+
+  it('does not collapse duplicate rider names and ids into the single-rider null fallback', () => {
+    const session = raceSession();
+    const summaries = session.details.summaries as Array<Record<string, unknown>>;
+    summaries.push({
+      ...summaries[0],
+      playerId: 2,
+      rank: 2,
+    });
+    const nullPlayerProjection = privateProjection(session, { playerId: null });
+    const workbook = buildPrivateTrainingDayWorkbook(
+      [session],
+      new Map([[session.id, [nullPlayerProjection]]]),
+    );
+
+    expect(rowRecord(workbook[1].data, 2)['Private heart-rate status']).toBe('Private rider only');
+    expect(rowRecord(workbook[1].data, 3)['Private heart-rate status']).toBe('Private rider only');
+    expect(workbook.find((sheet) => sheet.sheet === 'Private HR Summary')!.data).toHaveLength(2);
+    expect(workbook.find((sheet) => sheet.sheet === 'Private HR Zones')!.data).toHaveLength(2);
   });
 
   it('generates a valid formula-free XLSX with local wall-clock times', async () => {
