@@ -5,6 +5,7 @@ import {
   type ClubTabletDeviceCredential,
   type ClubTabletSessionCredential,
 } from './clubTabletStorage';
+import type { ClubLiveSession } from './clubLive';
 
 export type ClubEventActivityType = 'bmx-race' | 'straight-sprint' | 'explore';
 export type ClubEventProgram = 'race' | 'straight-sprint' | 'explore';
@@ -107,11 +108,11 @@ function normalizeJsonValue(value: unknown, depth = 0): unknown {
   if (depth > 10) return null;
   if (value == null || typeof value === 'boolean' || typeof value === 'string') return value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (Array.isArray(value)) return value.slice(0, 100).map((entry) => normalizeJsonValue(entry, depth + 1));
+  if (Array.isArray(value)) return value.slice(0, 1_000).map((entry) => normalizeJsonValue(entry, depth + 1));
   if (typeof value !== 'object') return null;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>)
     .filter(([key]) => key !== '__proto__' && key !== 'constructor' && key !== 'prototype')
-    .slice(0, 100)
+    .slice(0, 160)
     .map(([key, nested]) => [key.slice(0, 120), normalizeJsonValue(nested, depth + 1)]));
 }
 
@@ -226,11 +227,41 @@ export function clubEventActivityTitle(activityType: ClubEventActivityType) {
     : activityType === 'straight-sprint' ? 'Straight Sprint' : 'Explore the World';
 }
 
+export function clubEventMultiplayerRoomReady(
+  activeEventId: string | null | undefined,
+  roomEventId: string | null | undefined,
+) {
+  return !activeEventId || activeEventId === roomEventId;
+}
+
 export function clubEventSlotForDevice(event: ClubEventSnapshot | null | undefined, deviceId: string) {
   const safeDeviceId = text(deviceId, 160);
   return safeDeviceId
     ? event?.slots.find((slot) => slot.deviceId === safeDeviceId) ?? null
     : null;
+}
+
+/**
+ * Club Event HTTP state only proves that a tablet held a Ready athlete lock
+ * when the owner pressed Start. Club Live is the existing client-to-owner
+ * acknowledgement path: `multiplayer` becomes true only after the tablet has
+ * opened the requested program and joined its private event room.
+ */
+export function clubEventLaunchAcknowledged(
+  event: ClubEventSnapshot | null | undefined,
+  slot: ClubEventSlot | null | undefined,
+  sessions: readonly ClubLiveSession[],
+  now = Date.now(),
+) {
+  if (event?.status !== 'active' || !slot?.deviceId || !slot.athlete) return false;
+  return sessions.some((session) => (
+    session.deviceId === slot.deviceId
+    && session.studioRiderId === slot.athlete?.studioRiderId
+    && session.activityType === event.activityType
+    && session.multiplayer
+    && session.expiresAt > now
+    && now - session.updatedAt < 10_000
+  ));
 }
 
 function slotAthleteName(slot: ClubEventSlot) {

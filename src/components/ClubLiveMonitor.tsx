@@ -10,7 +10,10 @@ import {
   RefreshCw,
   Route,
   Signal,
+  Tablet,
   Users,
+  Wifi,
+  WifiOff,
   Zap,
 } from 'lucide-react';
 import {
@@ -19,8 +22,10 @@ import {
   loadClubLiveSessions,
   type ClubLiveSession,
 } from '../lib/clubLive';
+import { loadClubTabletDevices, type ClubTabletDevice } from '../lib/clubTablet';
 import { RiderAvatar } from './RiderAvatar';
 import { PullSledScene } from './PullSledScene';
+import { ClubEventConsole, type ClubEventCourseOption } from './ClubEventConsole';
 import {
   formatDistanceMeters,
   formatExploreDistanceMeters,
@@ -34,6 +39,8 @@ type ClubLiveMonitorProps = {
   studioRiders: StudioRider[];
   speedUnit: SpeedUnit;
   distanceUnit: DistanceUnit;
+  raceTracks?: readonly ClubEventCourseOption[];
+  sprintRoutes?: readonly ClubEventCourseOption[];
   fullscreen?: boolean;
   onFullscreenChange?: (enabled: boolean) => void;
 };
@@ -70,6 +77,50 @@ function formatElapsed(elapsedMs: number) {
     : `${minutes}:${String(remainder).padStart(2, '0')}`;
 }
 
+function tabletSeenLabel(lastSeenAt: number | undefined, now: number) {
+  if (!lastSeenAt) return 'Waiting for first check-in';
+  const elapsedSeconds = Math.max(0, Math.floor((now - lastSeenAt) / 1_000));
+  if (elapsedSeconds < 10) return 'Online now';
+  if (elapsedSeconds < 60) return `Seen ${elapsedSeconds}s ago`;
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `Seen ${elapsedMinutes}m ago`;
+  return `Last seen ${new Date(lastSeenAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+export function clubTabletMonitorOnline(
+  tablet: ClubTabletDevice | null | undefined,
+  session: ClubLiveSession | null | undefined,
+  now: number,
+) {
+  return Boolean(
+    tablet?.lastSeenAt && now - tablet.lastSeenAt < 30_000
+    || session && session.expiresAt > now && now - session.updatedAt < 30_000,
+  );
+}
+
+export function selectClubTabletOverviewDevices(
+  tablets: readonly ClubTabletDevice[],
+  sessions: readonly ClubLiveSession[],
+  now: number,
+) {
+  if (tablets.length <= 4) return [...tablets];
+  const sessionByDeviceId = new Map(sessions.flatMap((session) => (
+    session.deviceId ? [[session.deviceId, session] as const] : []
+  )));
+  return [...tablets]
+    .sort((left, right) => {
+      const leftSession = sessionByDeviceId.get(left.id);
+      const rightSession = sessionByDeviceId.get(right.id);
+      const onlineDifference = Number(clubTabletMonitorOnline(right, rightSession, now))
+        - Number(clubTabletMonitorOnline(left, leftSession, now));
+      if (onlineDifference) return onlineDifference;
+      const leftSeenAt = Math.max(left.lastSeenAt ?? 0, leftSession?.updatedAt ?? 0);
+      const rightSeenAt = Math.max(right.lastSeenAt ?? 0, rightSession?.updatedAt ?? 0);
+      return rightSeenAt - leftSeenAt || (right.createdAt ?? 0) - (left.createdAt ?? 0);
+    })
+    .slice(0, 4);
+}
+
 export function formatClubLiveActivityDistance(
   distanceMeters: number,
   distanceUnit: DistanceUnit,
@@ -84,11 +135,15 @@ export function ClubLiveMonitor({
   studioRiders,
   speedUnit,
   distanceUnit,
+  raceTracks = [],
+  sprintRoutes = [],
   fullscreen = false,
   onFullscreenChange,
 }: ClubLiveMonitorProps) {
   const requestGenerationRef = useRef(0);
+  const lastTabletRefreshAtRef = useRef(0);
   const [sessions, setSessions] = useState<ClubLiveSession[]>([]);
+  const [tablets, setTablets] = useState<ClubTabletDevice[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [message, setMessage] = useState('Opening the private club feed…');
   const [now, setNow] = useState(Date.now());
@@ -100,13 +155,34 @@ export function ClubLiveMonitor({
     () => activeClubLiveSessions(sessions, now),
     [now, sessions],
   );
+  const tabletSlots = useMemo(() => {
+    const enrolled = selectClubTabletOverviewDevices(tablets, liveSessions, now).map((tablet, index) => ({
+      seatNumber: index + 1,
+      tablet,
+      session: liveSessions.find((candidate) => candidate.deviceId === tablet.id) ?? null,
+    }));
+    return [
+      ...enrolled,
+      ...Array.from({ length: Math.max(0, 4 - enrolled.length) }, (_, index) => ({
+        seatNumber: enrolled.length + index + 1,
+        tablet: null,
+        session: null,
+      })),
+    ];
+  }, [liveSessions, now, tablets]);
 
   const refresh = useCallback(async () => {
     const generation = ++requestGenerationRef.current;
     try {
-      const next = await loadClubLiveSessions();
+      const refreshTablets = Date.now() - lastTabletRefreshAtRef.current >= 5_000;
+      if (refreshTablets) lastTabletRefreshAtRef.current = Date.now();
+      const [next, nextTablets] = await Promise.all([
+        loadClubLiveSessions(),
+        refreshTablets ? loadClubTabletDevices().catch(() => null) : Promise.resolve(null),
+      ]);
       if (generation !== requestGenerationRef.current) return;
       setSessions(next);
+      if (nextTablets) setTablets(nextTablets);
       setStatus('ready');
       setMessage(next.length > 0 ? '' : 'No club athletes are sharing a live training session right now.');
       setNow(Date.now());
@@ -174,6 +250,47 @@ export function ClubLiveMonitor({
           )}
         </div>
       </header>
+
+      <ClubEventConsole raceTracks={raceTracks} sprintRoutes={sprintRoutes} liveSessions={liveSessions} />
+
+      <section className="club-live-tablet-overview" aria-label="Four Club Tablet status">
+        <div className="club-live-tablet-overview-copy">
+          <span><Tablet size={18} /> Four Club Tablets</span>
+          <p>Independent Training stays available on every tablet. Riders choose their own athlete and program while this owner screen only watches.</p>
+        </div>
+        {tablets.length > 4 && (
+          <p className="club-live-tablet-overflow-warning" role="alert">
+            {tablets.length} tablets are enrolled. The four online or most recently seen tablets are shown here; revoke retired authorizations before opening a four-tablet coach lobby.
+          </p>
+        )}
+        <div className="club-live-tablet-slots">
+          {tabletSlots.map(({ seatNumber, tablet, session }) => {
+            const online = clubTabletMonitorOnline(tablet, session, now);
+            const lastSeenAt = Math.max(tablet?.lastSeenAt ?? 0, session?.updatedAt ?? 0) || undefined;
+            const displayName = session?.athleteName || session?.riderName;
+            return (
+              <article
+                className={`club-live-tablet-slot${session ? ' training' : ''}${online ? ' online' : ''}`}
+                key={tablet?.id ?? `empty-${seatNumber}`}
+              >
+                <span className="club-live-tablet-number">{seatNumber}</span>
+                <div>
+                  <strong>{tablet?.name ?? `Tablet ${seatNumber}`}</strong>
+                  <small>{session
+                    ? `${displayName} · ${activityLabel(session.activityType)}`
+                    : tablet
+                      ? 'Ready for an athlete'
+                      : 'Not enrolled yet'}</small>
+                </div>
+                <span className={`club-live-tablet-presence ${online ? 'online' : 'offline'}`}>
+                  {online ? <Wifi size={14} /> : <WifiOff size={14} />}
+                  {tablet ? tabletSeenLabel(lastSeenAt, now) : 'Open slot'}
+                </span>
+              </article>
+            );
+          })}
+        </div>
+      </section>
 
       {liveSessions.length > 0 ? (
         <div className={`club-live-grid count-${liveSessions.length}`}>

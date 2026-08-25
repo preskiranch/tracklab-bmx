@@ -10,9 +10,10 @@ function budgetFromEnvironment(name, fallback) {
 }
 
 const budgets = {
-  // The independently mapped North Bay selector adds under 1 KB here; its
-  // renderer and mapping canvas remain lazy-loaded and compressed budgets stay unchanged.
-  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 602_000),
+  // Club Event orchestration adds only a small entry-point controller; the
+  // tablet, owner-console, and Explore surfaces remain lazy-loaded. Keep the
+  // network-relevant compressed budgets unchanged.
+  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 608_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
   cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 134_000),
   cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_000),

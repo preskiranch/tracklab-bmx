@@ -162,6 +162,17 @@
   color: #aebda9;
   font-size: 12px;
 }
+.club-tablet-event-card.unavailable { border-color: #e8a65f; }
+.club-tablet-event-unavailable {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+.club-tablet-event-unavailable > svg { color: #f0ad62; }
+.club-tablet-event-unavailable strong,
+.club-tablet-event-unavailable small { display: block; }
+.club-tablet-event-unavailable small { margin-top: 3px; color: #d9c7b3; }
 .club-tablet-event-spin { animation: club-tablet-event-spin 1s linear infinite; }
 @keyframes club-tablet-event-spin { to { transform: rotate(360deg); } }
 

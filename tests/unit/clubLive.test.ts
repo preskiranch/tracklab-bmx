@@ -15,6 +15,11 @@ import {
   shouldAutoStartAdvancedConnector,
   shouldStopAdvancedConnector,
 } from '../../src/lib/advancedConnectorPolicy';
+import {
+  clubTabletMonitorOnline,
+  selectClubTabletOverviewDevices,
+} from '../../src/components/ClubLiveMonitor';
+import type { ClubTabletDevice } from '../../src/lib/clubTablet';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -48,7 +53,7 @@ describe('Club Live Monitor client state', () => {
     const sessions = normalizeClubLiveSessions({
       sessions: [
         { ...baseSession, id: 'old', updatedAt: 1_000 },
-        { ...baseSession, id: 'new', updatedAt: 9_000, progress: 2, roomId: 'must-not-surface' },
+        { ...baseSession, id: 'new', deviceId: 'tablet-1', updatedAt: 9_000, progress: 2, roomId: 'must-not-surface' },
         ...Array.from({ length: 5 }, (_, index) => ({
           ...baseSession,
           id: `other-${index}`,
@@ -60,7 +65,7 @@ describe('Club Live Monitor client state', () => {
     });
 
     expect(sessions).toHaveLength(6);
-    expect(sessions[0]).toMatchObject({ id: 'new', progress: { fraction: 1 }, metrics: { watts: 500 } });
+    expect(sessions[0]).toMatchObject({ id: 'new', deviceId: 'tablet-1', progress: { fraction: 1 }, metrics: { watts: 500 } });
     expect(sessions.filter((session) => session.studioRiderId === 'rider-1')).toHaveLength(1);
     expect(sessions[0]).not.toHaveProperty('roomId');
   });
@@ -85,6 +90,31 @@ describe('Club Live Monitor client state', () => {
     const live = { ...baseSession, id: 'live', studioRiderId: 'rider-2', expiresAt: 10_001 };
 
     expect(activeClubLiveSessions([expired, live], 10_000)).toEqual([live]);
+  });
+
+  it('counts a fresh training session as online and shows the four most relevant tablets', () => {
+    const now = 100_000;
+    const tablets: ClubTabletDevice[] = Array.from({ length: 6 }, (_, index) => ({
+      id: `tablet-${index + 1}`,
+      clubId: 'club-1',
+      name: `Tablet ${index + 1}`,
+      createdAt: index + 1,
+      lastSeenAt: index === 4 ? now - 1_000 : now - 90_000 - index,
+    }));
+    const trainingSession = {
+      ...baseSession,
+      id: 'tablet-six-session',
+      studioRiderId: 'rider-6',
+      deviceId: 'tablet-6',
+      updatedAt: now - 500,
+      expiresAt: now + 10_000,
+    };
+
+    expect(clubTabletMonitorOnline(tablets[5], trainingSession, now)).toBe(true);
+    const selected = selectClubTabletOverviewDevices(tablets, [trainingSession], now);
+    expect(selected).toHaveLength(4);
+    expect(selected.slice(0, 2).map((tablet) => tablet.id)).toEqual(['tablet-6', 'tablet-5']);
+    expect(selected.map((tablet) => tablet.id)).not.toContain('tablet-4');
   });
 
   it('fails closed when an access response belongs to another club', () => {

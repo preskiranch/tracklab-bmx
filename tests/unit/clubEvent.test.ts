@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ClubEventRequestError,
   cancelCurrentClubEvent,
+  clubEventLaunchAcknowledged,
+  clubEventMultiplayerRoomReady,
   clubEventLaunchForDevice,
   clubEventLaunchWasHandled,
   clubEventSelectionConflict,
@@ -22,6 +24,8 @@ import type {
   ClubTabletSessionCredential,
 } from '../../src/lib/clubTabletStorage';
 import { clubTabletCoachEventLocksIndependentTraining } from '../../src/components/ClubTabletMode';
+import { clubTabletEventPollingMessage } from '../../src/components/ClubTabletEventCard';
+import type { ClubLiveSession } from '../../src/lib/clubLive';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -141,6 +145,20 @@ describe('club event normalization', () => {
     expect(normalizeClubEventEnvelope({ event: null, pollAfterMs: 50 })?.pollAfterMs).toBe(1_000);
     expect(normalizeClubEventEnvelope({ event: null, pollAfterMs: 99_999 })?.pollAfterMs).toBe(15_000);
   });
+
+  it('preserves the complete private course snapshot needed by another club tablet', () => {
+    const centerline = Array.from({ length: 150 }, (_, index) => ({
+      lat: 38 + (index * 0.00001),
+      lng: -122,
+    }));
+    const event = normalizedEvent({
+      configuration: {
+        trackId: 'private-drag-strip',
+        trackRecord: { id: 'private-drag-strip', centerline },
+      },
+    });
+    expect((event.configuration.trackRecord as { centerline: unknown[] }).centerline).toHaveLength(150);
+  });
 });
 
 describe('club event tablet selection and launch state', () => {
@@ -206,6 +224,50 @@ describe('club event tablet selection and launch state', () => {
     markClubEventLaunchHandled(launch!);
     expect(clubEventLaunchWasHandled(launch!)).toBe(true);
     expect(clubEventLaunchForDevice(event, 'tablet-missing')).toBeNull();
+  });
+
+  it('requires fresh matching multiplayer telemetry before declaring a tablet launched', () => {
+    const now = Date.now();
+    const event = normalizedEvent({ status: 'active', startAt: now + 8_000 });
+    const slot = event.slots[0];
+    const liveSession: ClubLiveSession = {
+      id: 'club-1:rider-1',
+      clubId: 'club-1',
+      studioRiderId: 'rider-1',
+      riderName: 'Rider One',
+      athleteName: 'Rasheen',
+      deviceId: 'tablet-1',
+      activityType: 'bmx-race',
+      status: 'staging',
+      progress: { fraction: 0 },
+      metrics: {
+        watts: 0,
+        cadence: 0,
+        speedKph: 0,
+        distanceMeters: 0,
+        elapsedMs: 0,
+        position: 1,
+        participantCount: 2,
+      },
+      updatedAt: now - 1_000,
+      expiresAt: now + 20_000,
+      multiplayer: true,
+    };
+
+    expect(clubEventLaunchAcknowledged(event, slot, [], now)).toBe(false);
+    expect(clubEventLaunchAcknowledged(event, slot, [liveSession], now)).toBe(true);
+    expect(clubEventLaunchAcknowledged(event, slot, [{ ...liveSession, multiplayer: false }], now)).toBe(false);
+    expect(clubEventLaunchAcknowledged(event, slot, [{ ...liveSession, updatedAt: now - 11_000 }], now)).toBe(false);
+    expect(clubEventMultiplayerRoomReady('event-1', undefined)).toBe(false);
+    expect(clubEventMultiplayerRoomReady('event-1', 'event-other')).toBe(false);
+    expect(clubEventMultiplayerRoomReady('event-1', 'event-1')).toBe(true);
+    expect(clubEventMultiplayerRoomReady(null, undefined)).toBe(true);
+  });
+
+  it('provides actionable first-load and later-refresh polling errors', () => {
+    expect(clubTabletEventPollingMessage(false)).toContain('Could not load');
+    expect(clubTabletEventPollingMessage(false)).toContain('connection');
+    expect(clubTabletEventPollingMessage(true)).toContain('Could not refresh');
   });
 });
 

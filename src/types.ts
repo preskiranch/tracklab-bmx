@@ -321,9 +321,11 @@ export type MultiplayerRider = {
 
 export type MultiplayerRoom = {
   id: string;
+  /** Present only for secure rooms opened by a coach-led Club Event. */
+  clubEventId?: string;
   hostId: string | null;
   private: boolean;
-  purpose?: 'race' | 'live-audio';
+  purpose?: 'race' | 'live-audio' | 'club-event';
   track: MultiplayerTrackSummary;
   flow: MultiplayerRoomFlow;
   createdAt: number;

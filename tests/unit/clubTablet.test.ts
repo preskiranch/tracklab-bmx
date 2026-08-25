@@ -19,6 +19,7 @@ import {
 import {
   clubTabletBikeAccessReady,
   clubTabletFreshHeartRateReading,
+  clubTabletShouldAutoStartSelection,
 } from '../../src/components/ClubTabletMode';
 import { expireClubTabletSessionLocallyFirst } from '../../src/components/ClubTabletRuntime';
 import {
@@ -139,6 +140,25 @@ describe('Club Tablet client state', () => {
     expect(clubTabletBikeAccessReady('revoked', false)).toBe(false);
     expect(clubTabletBikeAccessReady('active', false)).toBe(false);
     expect(clubTabletBikeAccessReady('active', true)).toBe(true);
+  });
+
+  it('automatically starts once a late saved-bike reconnect completes both selections', () => {
+    const base = {
+      hasActiveSession: false,
+      startPending: false,
+      startFailed: false,
+      selectedRiderId: 'rider-1',
+      selectedProgram: 'straight-sprint' as const,
+      selectedBikeId: null,
+      coachEventLocked: false,
+    };
+    expect(clubTabletShouldAutoStartSelection(base)).toBe(false);
+    expect(clubTabletShouldAutoStartSelection({ ...base, selectedBikeId: 733_112 })).toBe(true);
+    expect(clubTabletShouldAutoStartSelection({
+      ...base,
+      selectedBikeId: 733_112,
+      coachEventLocked: true,
+    })).toBe(false);
   });
 
   it('normalizes only safe devices and approved claimed or unclaimed roster athletes', () => {
@@ -382,12 +402,12 @@ describe('Club Tablet client state', () => {
       localPlayerId: 1,
     };
 
-    await expect(saveClubTabletRaceResult(result, sessionCredential)).rejects.toMatchObject({ status: 503 });
-    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toBeNull();
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-1');
+    await expect(saveClubTabletRaceResult(result, sessionCredential)).resolves.toBeUndefined();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-1');
+    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBeNull();
     await expect(flushClubTabletOutbox(sessionCredential)).resolves.toBe(1);
     await expect(flushClubTabletOutbox(sessionCredential)).resolves.toBe(0);
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -421,12 +441,13 @@ describe('Club Tablet client state', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(flushClubTabletOutbox(sessionCredential)).resolves.toBe(1);
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
+    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBeNull();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][1]?.body).toContain('"topCadence":200');
   });
 
-  it('purges pending athlete artifacts on sign-out without erasing tablet enrollment', async () => {
+  it('keeps a durably queued artifact after visible sign-out so it can retry', async () => {
     const localStorage = new MemoryStorage();
     const sessionStorage = new MemoryStorage();
     vi.stubGlobal('window', { localStorage, sessionStorage });
@@ -443,13 +464,53 @@ describe('Club Tablet client state', () => {
       trackName: 'Private athlete track',
       summaries: [{ playerId: 1, watts: 1234 }],
       localPlayerId: 1,
-    }, sessionCredential)).rejects.toMatchObject({ status: 503 });
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-private');
+    }, sessionCredential)).resolves.toBeUndefined();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-private');
 
     clearStoredClubTabletSession();
 
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBeNull();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-private');
     expect(readStoredClubTabletSession()).toBeNull();
     expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
+  });
+
+  it('releases the visible athlete after queueing, uploads in the background, then retires the token', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    storeClubTabletSession(sessionCredential);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'offline' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ stopped: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await saveClubTabletRaceResult({
+      sessionId: 'race-deferred-release',
+      trackId: 'track-1',
+      trackName: 'Track One',
+      summaries: [{ playerId: 1, watts: 800 }],
+      localPlayerId: 1,
+    }, sessionCredential);
+    await endClubTabletSession(sessionCredential);
+
+    expect(readStoredClubTabletSession()).toBeNull();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('"releaseAfterFlush":true');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await expect(flushClubTabletOutbox()).resolves.toBe(1);
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.at(-1)?.[1]).toMatchObject({ method: 'DELETE' });
   });
 });

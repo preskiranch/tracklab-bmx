@@ -8,8 +8,12 @@ import {
 } from '../lib/bikeSampleSanity';
 import {
   assignBluetoothBikeDeviceId,
+  bluetoothBikePreferencesStorageKey,
   parseBluetoothBikeIdentityAssignments,
+  parseBluetoothBikePreferences,
+  prioritizePreferredBluetoothDevice,
   serializeBluetoothBikeIdentityAssignments,
+  serializeBluetoothBikePreferences,
 } from '../lib/bluetoothBikeIdentity';
 import { KeyedCleanupRegistry } from '../lib/keyedCleanupRegistry';
 import { removeBikeSample, upsertBoundedBikeSample } from '../lib/liveBikeRegistry';
@@ -43,6 +47,8 @@ type BluetoothBikeSnapshot = {
 type BluetoothBikeOptions = {
   enabled?: boolean;
   maxDevices?: number;
+  /** Enrolled Club Tablet ID used to keep one physical Wattbike preferred. */
+  preferredDeviceScope?: string | null;
 };
 
 type BluetoothValueEvent = Event & {
@@ -162,6 +168,33 @@ function persistBluetoothBikeIdentities(assignments: Map<string, number>) {
     );
   } catch {
     // Bluetooth remains usable when browser storage is unavailable.
+  }
+}
+
+function preferredBluetoothBikeDeviceId(scope: string | null | undefined) {
+  if (!scope) return null;
+  try {
+    return parseBluetoothBikePreferences(
+      window.localStorage.getItem(bluetoothBikePreferencesStorageKey),
+    ).get(scope) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function persistPreferredBluetoothBikeDevice(scope: string | null | undefined, browserDeviceId: string) {
+  if (!scope || !browserDeviceId) return;
+  try {
+    const preferences = parseBluetoothBikePreferences(
+      window.localStorage.getItem(bluetoothBikePreferencesStorageKey),
+    );
+    preferences.set(scope, browserDeviceId);
+    window.localStorage.setItem(
+      bluetoothBikePreferencesStorageKey,
+      serializeBluetoothBikePreferences(preferences),
+    );
+  } catch {
+    // The live connection still works when preference storage is unavailable.
   }
 }
 
@@ -378,7 +411,11 @@ function parseCscMeasurement(
   return { cadence };
 }
 
-export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothBikeOptions = {}): BluetoothBikeSnapshot {
+export function useBluetoothBikes({
+  enabled = true,
+  maxDevices = 4,
+  preferredDeviceScope = null,
+}: BluetoothBikeOptions = {}): BluetoothBikeSnapshot {
   const [connection, setConnection] = useState<BluetoothConnectionState>(() => (
     (navigator as BluetoothNavigator).bluetooth ? 'idle' : 'unsupported'
   ));
@@ -650,9 +687,13 @@ export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothB
     try {
       const grantedDevices = await bluetooth.getDevices();
       const savedBrowserDeviceIds = new Set(deviceIdsRef.current.keys());
-      const savedBikeDevices = grantedDevices.filter((device) => (
+      const reconnectableDevices = grantedDevices.filter((device) => (
         shouldReconnectWattbikeBluetoothDevice(device.id, device.name, savedBrowserDeviceIds)
-      )).slice(0, maxDevicesRef.current);
+      ));
+      const savedBikeDevices = prioritizePreferredBluetoothDevice(
+        reconnectableDevices,
+        preferredBluetoothBikeDeviceId(preferredDeviceScope),
+      ).slice(0, maxDevicesRef.current);
       setAuthorizedCount(Math.min(maxDevicesRef.current, savedBikeDevices.length));
       if (savedBikeDevices.length === 0) {
         return connectedBrowserDeviceIdsRef.current.size;
@@ -682,7 +723,7 @@ export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothB
     } finally {
       reconnectInFlightRef.current = false;
     }
-  }, [connectBluetoothDevice]);
+  }, [connectBluetoothDevice, preferredDeviceScope]);
 
   useEffect(() => {
     if (!supported || !enabled) {
@@ -768,6 +809,7 @@ export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothB
         setConnection(connectedBrowserDeviceIdsRef.current.size > 0 ? 'open' : 'idle');
         return false;
       }
+      persistPreferredBluetoothBikeDevice(preferredDeviceScope, device.id);
       setAuthorizedCount((current) => Math.min(
         maxDevicesRef.current,
         Math.max(current, connectedBrowserDeviceIdsRef.current.size),
@@ -785,7 +827,7 @@ export function useBluetoothBikes({ enabled = true, maxDevices = 4 }: BluetoothB
       setError(connectError instanceof Error ? connectError.message : 'Bluetooth pairing failed.');
       return false;
     }
-  }, [connectBluetoothDevice]);
+  }, [connectBluetoothDevice, preferredDeviceScope]);
 
   return useMemo(() => {
     const connectedCount = [...samplesByDevice.values()]

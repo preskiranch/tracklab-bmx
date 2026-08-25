@@ -73,6 +73,20 @@ export default function ClubTabletRuntime({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    const flushDurableResults = async () => {
+      await flushClubTabletOutbox().catch(() => undefined);
+      if (!cancelled) timer = window.setTimeout(flushDurableResults, 5_000);
+    };
+    void flushDurableResults();
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearTimeout(timer);
+    };
+  }, [device.device.id]);
+
+  useEffect(() => {
     if (!session) return;
     lastActivityAtRef.current = Date.now();
     activityVersionRef.current += 1;

@@ -121,6 +121,12 @@ import './ExploreView.css';
 import { heartRateReadingState } from './HeartRateMetric';
 import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
 import { demoHeartRateReadingForBikeSample } from '../lib/demoHeartRate';
+import type { ClubEventLaunchPayload } from '../lib/clubEvent';
+import {
+  buildClubEventExploreRoute,
+  clubEventExplorePlan,
+  clubEventExploreStartControlDelayMs,
+} from '../lib/clubEventExplore';
 
 type ExploreViewProps = {
   developerMode: boolean;
@@ -146,6 +152,8 @@ type ExploreViewProps = {
   voiceSupported: boolean;
   voiceStatus: string;
   voiceRemoteCount: number;
+  /** Active only for a coach-led Explore event; independent Explore leaves this unset. */
+  clubEventLaunch?: ClubEventLaunchPayload | null;
   onPlayModeChange: (mode: PlayMode) => void;
   onCreatePrivateRoom: () => boolean;
   onShareInvite: () => void;
@@ -358,6 +366,7 @@ export function ExploreView({
   voiceSupported,
   voiceStatus,
   voiceRemoteCount,
+  clubEventLaunch = null,
   onPlayModeChange,
   onCreatePrivateRoom,
   onShareInvite,
@@ -459,6 +468,9 @@ export function ExploreView({
   const [selectedLandmark, setSelectedLandmark] = useState<ExploreLandmarkPopup | null>(null);
   const [streetViewLandmark, setStreetViewLandmark] = useState<GoogleLandmarkDetails | null>(null);
   const appliedRoomSessionRef = useRef<string | null>(null);
+  const clubEventRouteBuildKeyRef = useRef<string | null>(null);
+  const clubEventStartCommandKeyRef = useRef<string | null>(null);
+  const [clubEventRouteBuildAttempt, setClubEventRouteBuildAttempt] = useState(0);
   const landmarkRequestRef = useRef(0);
   const routeRequestRef = useRef(0);
   const recentRouteProfileRef = useRef(recentProfileKey);
@@ -534,9 +546,17 @@ export function ExploreView({
   fullscreenChangeRef.current = onFullscreenChange;
   const rideSessionCancelRef = useRef(onRideSessionCancel);
   rideSessionCancelRef.current = onRideSessionCancel;
+  const syncExploreRouteRef = useRef(onSyncRoute);
+  syncExploreRouteRef.current = onSyncRoute;
+  const controlExploreSessionRef = useRef(onControlSession);
+  controlExploreSessionRef.current = onControlSession;
 
   const roomHost = Boolean(currentRoom && currentRoom.hostId === currentUserId);
   const canChooseRoute = playMode === 'local' || roomHost;
+  const clubExplorePlan = useMemo(
+    () => clubEventExplorePlan(clubEventLaunch),
+    [clubEventLaunch],
+  );
   const activeRemoteRiders = useMemo(() => {
     if (playMode !== 'multiplayer' || !route) {
       return [];
@@ -754,6 +774,129 @@ export function ExploreView({
         console.warn(`Could not save this personal Explore route to TrackLab cloud: ${error.message}`);
       });
   }, [cloudRecentRoutesEnabled, recentProfileKey]);
+
+  useEffect(() => {
+    if (
+      !clubExplorePlan
+      || playMode !== 'multiplayer'
+      || currentRoom?.purpose !== 'club-event'
+      || currentRoom.clubEventId !== clubExplorePlan.eventId
+      || !roomHost
+      || currentRoom.exploreRoute
+    ) {
+      return undefined;
+    }
+
+    const buildKey = `${clubExplorePlan.eventId}:${currentRoom.id}`;
+    if (clubEventRouteBuildKeyRef.current === buildKey) return undefined;
+    clubEventRouteBuildKeyRef.current = buildKey;
+    let cancelled = false;
+    let retryTimer: number | null = null;
+
+    setOriginText(clubExplorePlan.origin);
+    setDestinationText(clubExplorePlan.destination);
+    setRouteName(clubExplorePlan.routeName);
+    setSelectedOrigin(null);
+    setSelectedDestination(null);
+    setSelectedOriginPrediction(null);
+    setSelectedDestinationPrediction(null);
+    setSmartRoutePlan(null);
+    setRouteStatus('loading');
+    setRouteMessage('The coach route is being prepared for every Club Tablet…');
+
+    void buildClubEventExploreRoute(
+      clubExplorePlan,
+      resolveLocationText,
+      fetchExploreRoute,
+    ).then((nextRoute) => {
+      if (cancelled) return;
+      setSelectedOrigin({ point: nextRoute.origin, label: nextRoute.originLabel });
+      setSelectedDestination({ point: nextRoute.destination, label: nextRoute.destinationLabel });
+      setOriginText(nextRoute.originLabel);
+      setDestinationText(nextRoute.destinationLabel);
+      setRouteName(nextRoute.name ?? clubExplorePlan.routeName);
+      resetPlaceAutocompleteSession();
+      if (!syncExploreRouteRef.current(nextRoute)) {
+        throw new Error('The shared Club Event room is reconnecting.');
+      }
+      rememberExploreRoute(nextRoute);
+      setRouteStatus('idle');
+      setRouteMessage('Coach route ready. The ride will start automatically on every ready tablet.');
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      clubEventRouteBuildKeyRef.current = null;
+      setRouteStatus('error');
+      setRouteMessage(
+        `The coach route could not be prepared yet. ${error instanceof Error ? error.message : String(error)}`,
+      );
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        setClubEventRouteBuildAttempt((attempt) => attempt + 1);
+      }, 3_000);
+    });
+
+    return () => {
+      cancelled = true;
+      if (retryTimer != null) window.clearTimeout(retryTimer);
+      if (clubEventRouteBuildKeyRef.current === buildKey && !currentRoom.exploreRoute) {
+        clubEventRouteBuildKeyRef.current = null;
+      }
+    };
+  }, [
+    clubEventRouteBuildAttempt,
+    clubExplorePlan,
+    currentRoom?.clubEventId,
+    currentRoom?.exploreRoute,
+    currentRoom?.id,
+    playMode,
+    rememberExploreRoute,
+    roomHost,
+  ]);
+
+  useEffect(() => {
+    if (
+      !clubExplorePlan
+      || playMode !== 'multiplayer'
+      || currentRoom?.purpose !== 'club-event'
+      || currentRoom.clubEventId !== clubExplorePlan.eventId
+      || !roomHost
+      || !currentRoom.exploreRoute
+      || currentRoom.exploreSession?.status !== 'ready'
+    ) {
+      return undefined;
+    }
+
+    const commandKey = `${clubExplorePlan.eventId}:${currentRoom.exploreSession.id}`;
+    if (clubEventStartCommandKeyRef.current === commandKey) return undefined;
+    let cancelled = false;
+    let timer: number | null = null;
+    const requestStart = () => {
+      if (cancelled) return;
+      if (controlExploreSessionRef.current('start')) {
+        clubEventStartCommandKeyRef.current = commandKey;
+        return;
+      }
+      timer = window.setTimeout(requestStart, 250);
+    };
+    timer = window.setTimeout(
+      requestStart,
+      clubEventExploreStartControlDelayMs(clubExplorePlan.startAt),
+    );
+
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearTimeout(timer);
+    };
+  }, [
+    clubExplorePlan,
+    currentRoom?.clubEventId,
+    currentRoom?.exploreRoute,
+    currentRoom?.exploreSession?.id,
+    currentRoom?.exploreSession?.status,
+    currentRoom?.id,
+    playMode,
+    roomHost,
+  ]);
 
   const closeLandmark = useCallback(() => {
     landmarkRequestRef.current += 1;

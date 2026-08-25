@@ -41,6 +41,8 @@ export type ClubLiveSnapshot = {
 
 export type ClubLiveSession = ClubLiveSnapshot & {
   id: string;
+  /** Opaque enrolled-tablet ID. Present only for Club Tablet publishers. */
+  deviceId?: string;
   riderName: string;
   athleteName: string | null;
   updatedAt: number;
@@ -120,6 +122,7 @@ export function normalizeClubLiveSession(value: unknown): ClubLiveSession | null
     return null;
   }
   const riderName = optionalText(candidate.riderName) ?? 'Club rider';
+  const deviceId = optionalText(candidate.deviceId);
   const athleteName = optionalText(candidate.athleteName) ?? null;
   const updatedAt = nonNegativeNumber(candidate.updatedAt);
   const expiresAt = nonNegativeNumber(candidate.expiresAt, updatedAt);
@@ -131,6 +134,7 @@ export function normalizeClubLiveSession(value: unknown): ClubLiveSession | null
   if (!metrics) return null;
   return {
     id,
+    ...(deviceId ? { deviceId } : {}),
     clubId,
     studioRiderId,
     riderName,

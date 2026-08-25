@@ -7211,6 +7211,7 @@ test('club athletes see only their own connection and never the studio roster', 
 
 test('club owners can open the read-only Club Live Monitor while athletes cannot control sessions', async ({ page }) => {
   const now = Date.now();
+  let currentClubEvent: Record<string, unknown> | null = null;
   const studioRider = {
     id: 'studio-rasheen',
     name: 'Rasheen “The Machine” Hicks',
@@ -7269,6 +7270,86 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
       body: JSON.stringify({ sessions: [], totals: {} }),
     });
   });
+  await page.route('**/api/club-tablet/devices', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        devices: Array.from({ length: 4 }, (_, index) => ({
+          id: `club-tablet-${index + 1}`,
+          name: `Studio Tablet ${index + 1}`,
+          clubId: 'club-preski-ranch',
+          clubName: 'Preski Ranch LLC',
+          createdAt: now - 60_000,
+          lastSeenAt: now,
+        })),
+      }),
+    });
+  });
+  await page.route('**/api/club-events/current', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ event: currentClubEvent, pollAfterMs: 2_000 }),
+    });
+  });
+  await page.route('**/api/club-events', async (route) => {
+    const request = route.request().postDataJSON() as Record<string, unknown>;
+    currentClubEvent = {
+      id: 'coach-explore-event',
+      clubId: 'club-preski-ranch',
+      clubName: 'Preski Ranch LLC',
+      activityType: request.activityType,
+      configuration: request.configuration,
+      status: 'lobby',
+      startAt: null,
+      createdAt: now,
+      updatedAt: now,
+      slots: Array.from({ length: 4 }, (_, index) => index === 1 ? {
+        seatNumber: index + 1,
+        deviceId: `club-tablet-${index + 1}`,
+        deviceName: `Studio Tablet ${index + 1}`,
+        deviceLastSeenAt: now,
+        status: 'ready',
+        ready: true,
+        athlete: {
+          studioRiderId: studioRider.id,
+          riderName: studioRider.name,
+          athleteName: 'Rasheen Hicks',
+        },
+        bikeDeviceId: '58702',
+        joinedAt: now,
+      } : {
+        seatNumber: index + 1,
+        deviceId: `club-tablet-${index + 1}`,
+        deviceName: `Studio Tablet ${index + 1}`,
+        deviceLastSeenAt: now,
+        status: 'available',
+        ready: false,
+        athlete: null,
+        bikeDeviceId: null,
+        joinedAt: null,
+      }),
+    };
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ event: currentClubEvent, pollAfterMs: 2_000 }),
+    });
+  });
+  await page.route('**/api/club-events/current/start', async (route) => {
+    currentClubEvent = currentClubEvent ? {
+      ...currentClubEvent,
+      status: 'active',
+      startAt: Date.now() + 8_000,
+      updatedAt: Date.now(),
+      slots: (currentClubEvent.slots as Array<Record<string, unknown>>).map((slot) => (
+        slot.ready ? { ...slot, status: 'active' } : slot
+      )),
+    } : null;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ event: currentClubEvent, pollAfterMs: 2_000 }),
+    });
+  });
   await page.route('**/api/club-live/sessions', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -7276,6 +7357,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
         club: { id: 'club-preski-ranch', name: 'Preski Ranch LLC' },
         sessions: [{
           id: 'club-preski-ranch:studio-rasheen',
+          deviceId: 'club-tablet-2',
           clubId: 'club-preski-ranch',
           studioRiderId: studioRider.id,
           riderName: studioRider.name,
@@ -7312,6 +7394,12 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
 
   const monitor = page.getByLabel('Club Live Monitor');
   await expect(monitor.getByText('Owner-only view', { exact: true })).toBeVisible();
+  await expect(monitor.getByRole('button', { name: /Independent Training/ })).toBeVisible();
+  await expect(monitor.getByRole('button', { name: /Coach-led Event/ })).toBeVisible();
+  await expect(monitor.getByText('Riders control their own tablet', { exact: true })).toBeVisible();
+  await expect(monitor.locator('.club-live-tablet-slot')).toHaveCount(4);
+  await expect(monitor.locator('.club-live-tablet-slot').nth(1)).toContainText('Studio Tablet 2');
+  await expect(monitor.locator('.club-live-tablet-slot').nth(1)).toContainText('Rasheen Hicks · Explore the World');
   await expect(monitor.getByRole('heading', { name: 'Rasheen Hicks' })).toBeVisible();
   await expect(monitor.getByText('Explore the World', { exact: true })).toBeVisible();
   await expect(monitor.getByText('Golden Gate Bridge', { exact: true })).toBeVisible();
@@ -7320,6 +7408,16 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await expect(monitor.getByText('watts', { exact: true })).toBeVisible();
   await expect(monitor.getByText('Read-only live feed', { exact: true })).toBeVisible();
   await expect(monitor.getByRole('button', { name: /Pause|Resume|Stop|Cancel|Control/i })).toHaveCount(0);
+
+  const eventConsole = monitor.getByRole('region', { name: 'Club Event control' });
+  await eventConsole.getByRole('button', { name: /Coach-led Event/ }).click();
+  await eventConsole.getByRole('combobox', { name: 'Event', exact: true }).selectOption('explore');
+  await eventConsole.getByLabel('Destination', { exact: true }).fill('Golden Gate Bridge');
+  await eventConsole.getByRole('button', { name: 'Open four-tablet lobby' }).click();
+  await expect(eventConsole.getByText('1 of 4 ready', { exact: true })).toBeVisible();
+  await expect(eventConsole.locator('.club-event-seat').filter({ hasText: 'Studio Tablet 2' })).toContainText('Rasheen Hicks');
+  await eventConsole.getByRole('button', { name: 'Start all ready riders' }).click();
+  await expect(eventConsole.locator('.club-event-lobby')).toContainText(/Starting in 8|tablets launched/);
 });
 
 test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode between sessions', async ({ page }) => {
@@ -7573,7 +7671,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
 
   await page.getByLabel('Tablet name').fill(tabletDevice.name);
   await page.getByRole('button', { name: 'Authorize this tablet', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
   expect(enrollmentRequest).toEqual({ name: tabletDevice.name });
   await page.waitForTimeout(250);
   expect(rosterRequests).toBeGreaterThanOrEqual(1);
@@ -7626,7 +7724,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await primaryNav.getByRole('button', { name: 'End activity & choose athlete', exact: true }).click();
   // Shared-screen identity and BPM disappear before the DELETE round-trip;
   // an offline sign-out cannot leave the former athlete visible.
-  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
   await expect(page.getByRole('status', { name: /Rasheen Hicks heart rate/ })).toHaveCount(0);
   await expect.poll(() => sessionDeletes).toBe(1);
   expect(await page.evaluate(() => (
@@ -7645,7 +7743,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect.poll(() => sessionPosts).toBe(2);
   await expect(page.getByRole('heading', { name: 'Explore the World' })).toBeVisible();
   await primaryNav.getByRole('button', { name: 'End activity & choose athlete', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
   await expect.poll(() => sessionDeletes).toBe(2);
   finishSessionDelete?.();
 
@@ -7662,7 +7760,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   });
 
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
   await expect.poll(() => logoutRequests).toBe(2);
   await page.waitForTimeout(250);
   expect(logoutRequests).toBe(2);
@@ -7678,7 +7776,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(page.getByRole('button', { name: 'Pair a Wattbike' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Retry authorization', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Verifying tablet authorization…' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Club Tablet home' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
 });
 
 test('studio rider roster syncs to the account and can be assigned to a connected bike', async ({ page }) => {

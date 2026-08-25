@@ -14,11 +14,9 @@ import {
   clubEventActivityTitle,
   clubEventLaunchForDevice,
   clubEventLaunchKey,
-  clubEventLaunchWasHandled,
   clubEventSlotForDevice,
   clubEventTabletState,
   loadCurrentClubEvent,
-  markClubEventLaunchHandled,
   type ClubEventEnvelope,
   type ClubEventLaunchPayload,
   type ClubEventSelection,
@@ -84,6 +82,17 @@ function countdownLabel(startAt: number, now: number) {
   return `Starts in ${Math.ceil(remainingMs / 1_000)}s`;
 }
 
+export function clubTabletEventPollingMessage(hasLoadedEvent: boolean) {
+  return hasLoadedEvent
+    ? 'Could not refresh the coach event. TrackLab will keep trying.'
+    : 'Could not load the coach event. Check this tablet’s connection; TrackLab will keep trying.';
+}
+
+function isClubTabletEventPollingMessage(message: string | null) {
+  return message?.startsWith('Could not load the coach event')
+    || message?.startsWith('Could not refresh the coach event');
+}
+
 export default function ClubTabletEventCard({
   device,
   session,
@@ -133,7 +142,7 @@ export default function ClubTabletEventCard({
         nextPollAfterMs = next.pollAfterMs;
         envelopeRef.current = next;
         setEnvelope(next);
-        setMessage((current) => current?.startsWith('Could not refresh') ? null : current);
+        setMessage((current) => isClubTabletEventPollingMessage(current) ? null : current);
       } catch (error) {
         if (disposed || controller.signal.aborted) return;
         if (error instanceof ClubEventRequestError && error.status === 404) {
@@ -141,8 +150,8 @@ export default function ClubTabletEventCard({
           envelopeRef.current = empty;
           setEnvelope(empty);
           nextPollAfterMs = 5_000;
-        } else if (envelopeRef.current?.event) {
-          setMessage('Could not refresh the coach event. TrackLab will keep trying.');
+        } else {
+          setMessage(clubTabletEventPollingMessage(Boolean(envelopeRef.current?.event)));
         }
       } finally {
         if (!disposed) timer = window.setTimeout(() => void poll(), nextPollAfterMs);
@@ -183,12 +192,11 @@ export default function ClubTabletEventCard({
   useEffect(() => {
     if (!launch) return undefined;
     const key = clubEventLaunchKey(launch);
-    if (launchedKeyRef.current === key || clubEventLaunchWasHandled(launch)) return undefined;
+    if (launchedKeyRef.current === key) return undefined;
     // Open and configure the program as soon as the coach starts the event.
     // The program owns the shared startAt countdown so every tablet begins the
     // actual exercise together after its screen is ready.
     launchedKeyRef.current = key;
-    markClubEventLaunchHandled(launch);
     onLaunch(launch);
     return undefined;
   }, [launch, onLaunch]);
@@ -200,7 +208,17 @@ export default function ClubTabletEventCard({
     return () => window.clearInterval(timer);
   }, [launch]);
 
-  if (!event) return null;
+  if (!event) {
+    return message ? (
+      <section className="club-tablet-event-card unavailable" aria-label="Coach event connection" role="alert">
+        <div className="club-tablet-event-unavailable">
+          <CircleAlert />
+          <span><strong>Coach event connection interrupted</strong><small>{message}</small></span>
+          <RefreshCw className="club-tablet-event-spin" />
+        </div>
+      </section>
+    ) : null;
+  }
 
   const ready = async () => {
     if (!selection || event.status !== 'lobby' || tabletState?.conflict) return;

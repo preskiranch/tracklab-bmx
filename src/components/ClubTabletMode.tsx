@@ -152,6 +152,24 @@ export function clubTabletCoachEventLocksIndependentTraining(
   return Boolean(slot?.ready && slot.status !== 'stale');
 }
 
+export function clubTabletShouldAutoStartSelection(input: Readonly<{
+  hasActiveSession: boolean;
+  startPending: boolean;
+  startFailed: boolean;
+  selectedRiderId: string;
+  selectedProgram: ClubTabletProgram | null;
+  selectedBikeId: number | null;
+  coachEventLocked: boolean;
+}>) {
+  return !input.hasActiveSession
+    && !input.startPending
+    && !input.startFailed
+    && Boolean(input.selectedRiderId)
+    && input.selectedProgram != null
+    && input.selectedBikeId != null
+    && !input.coachEventLocked;
+}
+
 function bikeLabel(bike: ClubTabletBike) {
   const suffix = String(Math.round(bike.deviceId)).slice(-3).padStart(3, '0');
   return `${bike.label || 'Wattbike'} · PM ${suffix}`;
@@ -400,6 +418,32 @@ export default function ClubTabletMode({
       ? `${programTitle} selected. Connect this tablet's Wattbike, then choose your athlete.`
       : `${programTitle} selected. Now choose your athlete.`);
   };
+
+  useEffect(() => {
+    if (!clubTabletShouldAutoStartSelection({
+      hasActiveSession: Boolean(activeSession),
+      startPending: sessionStartPendingRef.current,
+      startFailed: sessionStartFailed,
+      selectedRiderId,
+      selectedProgram,
+      selectedBikeId,
+      coachEventLocked: Boolean(deviceCredential && clubTabletCoachEventLocksIndependentTraining(
+        clubEventSnapshotRef.current,
+        deviceCredential.device.id,
+      )),
+    })) return;
+    // Athlete and activity can be chosen while a saved Wattbike is still
+    // reconnecting. Complete the same two-order workflow when that final bike
+    // prerequisite arrives instead of requiring another tap.
+    void startAthlete(selectedRiderId, selectedProgram, selectedBikeId);
+  }, [
+    activeSession,
+    deviceCredential,
+    selectedBikeId,
+    selectedProgram,
+    selectedRiderId,
+    sessionStartFailed,
+  ]);
 
   const endAthlete = async () => {
     const endingSession = sessionCredential;
