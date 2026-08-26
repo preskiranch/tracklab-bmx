@@ -659,6 +659,13 @@ export function useMultiplayer({
     return send({ type: 'join-room', roomId });
   }, [send]);
 
+  const joinClubEvent = useCallback((eventId: string) => {
+    const normalizedEventId = eventId.trim().slice(0, 180);
+    if (!normalizedEventId) return false;
+    setStatus('Joining the coach-led Club Event.');
+    return send({ type: 'join-club-event', eventId: normalizedEventId });
+  }, [send]);
+
   const leaveRoom = useCallback(() => {
     return send({ type: 'leave-room' });
   }, [send]);
@@ -796,6 +803,7 @@ export function useMultiplayer({
     incomingMatchInvites,
     inviteUrl,
     inviteToGroup,
+    joinClubEvent,
     joinRoom,
     latency,
     leaveRoom,

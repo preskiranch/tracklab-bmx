@@ -31,7 +31,7 @@ export type LiveFriendAudioRoomMember = {
 
 export type LiveFriendAudioRoom = {
   id: string;
-  purpose?: 'race' | 'live-audio';
+  purpose?: 'race' | 'live-audio' | 'club-event';
   members: LiveFriendAudioRoomMember[];
 };
 

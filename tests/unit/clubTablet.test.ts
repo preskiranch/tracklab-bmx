@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearStoredClubTabletSession,
   clubTabletOutboxStorageKey,
+  clubTabletResultUploadHeader,
   endClubTabletSession,
   flushClubTabletOutbox,
   normalizeClubTabletDeviceCredential,
   normalizeClubTabletRoster,
+  normalizeClubTabletSessionCredential,
   readStoredClubTabletDevice,
   readStoredClubTabletSession,
   saveClubTabletRaceResult,
@@ -19,6 +21,7 @@ import {
 import {
   clubTabletBikeAccessReady,
   clubTabletFreshHeartRateReading,
+  clubTabletShouldAutoStartSelection,
 } from '../../src/components/ClubTabletMode';
 import { expireClubTabletSessionLocallyFirst } from '../../src/components/ClubTabletRuntime';
 import {
@@ -78,6 +81,12 @@ const sessionCredential: ClubTabletSessionCredential = {
   },
   heartbeatTtlMs: 60_000,
   pollAfterMs: 15_000,
+};
+
+const durableSessionCredential: ClubTabletSessionCredential = {
+  ...sessionCredential,
+  resultUploadToken: 'result-upload-token-rider-1',
+  resultUploadExpiresAt: Date.now() + 14 * 24 * 60 * 60 * 1_000,
 };
 
 afterEach(() => {
@@ -141,6 +150,25 @@ describe('Club Tablet client state', () => {
     expect(clubTabletBikeAccessReady('active', true)).toBe(true);
   });
 
+  it('automatically starts once a late saved-bike reconnect completes both selections', () => {
+    const base = {
+      hasActiveSession: false,
+      startPending: false,
+      startFailed: false,
+      selectedRiderId: 'rider-1',
+      selectedProgram: 'straight-sprint' as const,
+      selectedBikeId: null,
+      coachEventLocked: false,
+    };
+    expect(clubTabletShouldAutoStartSelection(base)).toBe(false);
+    expect(clubTabletShouldAutoStartSelection({ ...base, selectedBikeId: 733_112 })).toBe(true);
+    expect(clubTabletShouldAutoStartSelection({
+      ...base,
+      selectedBikeId: 733_112,
+      coachEventLocked: true,
+    })).toBe(false);
+  });
+
   it('normalizes only safe devices and approved claimed or unclaimed roster athletes', () => {
     expect(normalizeClubTabletDeviceCredential({
       ...deviceCredential,
@@ -178,6 +206,28 @@ describe('Club Tablet client state', () => {
         }),
       }),
     ]);
+  });
+
+  it('preserves durable result credentials while accepting old stored athlete sessions', () => {
+    expect(normalizeClubTabletSessionCredential(durableSessionCredential)).toMatchObject(durableSessionCredential);
+    expect(normalizeClubTabletSessionCredential(sessionCredential)).toMatchObject(sessionCredential);
+    expect(normalizeClubTabletSessionCredential({
+      ...sessionCredential,
+      resultUploadToken: 'token-without-expiry',
+    })).toMatchObject(sessionCredential);
+    expect(normalizeClubTabletSessionCredential({
+      ...sessionCredential,
+      resultUploadToken: 'token-without-expiry',
+    })).not.toHaveProperty('resultUploadToken');
+
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    storeClubTabletSession(sessionCredential);
+    expect(readStoredClubTabletSession()).toMatchObject(sessionCredential);
+    storeClubTabletSession(durableSessionCredential);
+    expect(readStoredClubTabletSession()).toMatchObject(durableSessionCredential);
   });
 
   it('clears athlete identity without erasing the tablet or saved bike authorization', () => {
@@ -331,7 +381,7 @@ describe('Club Tablet client state', () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       expect(body).toEqual({ studioRiderId: 'rider-1', bikeDeviceId: '733112' });
-      return new Response(JSON.stringify(sessionCredential), {
+      return new Response(JSON.stringify(durableSessionCredential), {
         status: 201,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -339,6 +389,8 @@ describe('Club Tablet client state', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(startClubTabletSession('rider-1', 733_112)).resolves.toMatchObject({
+      resultUploadToken: durableSessionCredential.resultUploadToken,
+      resultUploadExpiresAt: durableSessionCredential.resultUploadExpiresAt,
       session: { bikeDeviceId: 733_112 },
     });
     expect(fetchMock).toHaveBeenCalledWith('/api/club-tablet/sessions', expect.objectContaining({
@@ -382,12 +434,12 @@ describe('Club Tablet client state', () => {
       localPlayerId: 1,
     };
 
-    await expect(saveClubTabletRaceResult(result, sessionCredential)).rejects.toMatchObject({ status: 503 });
-    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toBeNull();
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-1');
+    await expect(saveClubTabletRaceResult(result, sessionCredential)).resolves.toBeUndefined();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-1');
+    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBeNull();
     await expect(flushClubTabletOutbox(sessionCredential)).resolves.toBe(1);
     await expect(flushClubTabletOutbox(sessionCredential)).resolves.toBe(0);
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -421,12 +473,13 @@ describe('Club Tablet client state', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(flushClubTabletOutbox(sessionCredential)).resolves.toBe(1);
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
+    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBeNull();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][1]?.body).toContain('"topCadence":200');
   });
 
-  it('purges pending athlete artifacts on sign-out without erasing tablet enrollment', async () => {
+  it('keeps a durably queued artifact after visible sign-out so it can retry', async () => {
     const localStorage = new MemoryStorage();
     const sessionStorage = new MemoryStorage();
     vi.stubGlobal('window', { localStorage, sessionStorage });
@@ -443,13 +496,113 @@ describe('Club Tablet client state', () => {
       trackName: 'Private athlete track',
       summaries: [{ playerId: 1, watts: 1234 }],
       localPlayerId: 1,
-    }, sessionCredential)).rejects.toMatchObject({ status: 503 });
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-private');
+    }, sessionCredential)).resolves.toBeUndefined();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-private');
 
     clearStoredClubTabletSession();
 
-    expect(sessionStorage.getItem(clubTabletOutboxStorageKey)).toBeNull();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('race-private');
     expect(readStoredClubTabletSession()).toBeNull();
     expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
+  });
+
+  it('uses the durable result credential after a 401 and release without blocking the next athlete', async () => {
+    const localStorage = new MemoryStorage();
+    const sessionStorage = new MemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
+    storeClubTabletDevice(deviceCredential);
+    storeClubTabletSession(durableSessionCredential);
+    const athleteB: ClubTabletSessionCredential = {
+      ...durableSessionCredential,
+      sessionToken: 'athlete-session-token-b',
+      resultUploadToken: 'result-upload-token-rider-2',
+      session: {
+        ...durableSessionCredential.session,
+        studioRiderId: 'rider-2',
+        riderName: 'Rider Two',
+      },
+    };
+    let raceRequestCount = 0;
+    let resolveDurableRetry: ((response: Response) => void) | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === '/api/club-tablet/race-results') {
+        raceRequestCount += 1;
+        if (raceRequestCount === 1) return new Response(JSON.stringify({ error: 'expired session' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+        return new Promise<Response>((resolve) => {
+          resolveDurableRetry = resolve;
+        });
+      }
+      if (path === '/api/club-tablet/sessions' && init?.method === 'POST') {
+        return new Response(JSON.stringify(athleteB), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ stopped: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await saveClubTabletRaceResult({
+      sessionId: 'race-deferred-release',
+      trackId: 'track-1',
+      trackName: 'Track One',
+      summaries: [{ playerId: 1, watts: 800 }],
+      localPlayerId: 1,
+    }, durableSessionCredential);
+    await endClubTabletSession(durableSessionCredential);
+
+    expect(readStoredClubTabletSession()).toBeNull();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('"releaseAfterFlush":true');
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toContain('"resultUploadToken":"result-upload-token-rider-1"');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const startingNextAthlete = startClubTabletSession('rider-2', 733_112);
+    await vi.waitFor(() => expect(raceRequestCount).toBe(2));
+    await expect(startingNextAthlete).resolves.toMatchObject({
+      sessionToken: athleteB.sessionToken,
+      session: { studioRiderId: 'rider-2' },
+    });
+    expect(readStoredClubTabletSession()).toMatchObject({
+      sessionToken: athleteB.sessionToken,
+      session: { studioRiderId: 'rider-2' },
+    });
+
+    const retryCall = fetchMock.mock.calls.findLast(([input]) => (
+      String(input) === '/api/club-tablet/race-results'
+    ));
+    const retryHeaders = new Headers(retryCall?.[1]?.headers);
+    expect(retryHeaders.get('Authorization')).toBe('Bearer device-token');
+    expect(retryHeaders.get(clubTabletResultUploadHeader)).toBe('result-upload-token-rider-1');
+
+    resolveDurableRetry?.(new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    await flushClubTabletOutbox();
+    expect(localStorage.getItem(clubTabletOutboxStorageKey)).toBe('[]');
+  });
+
+  it('retries a room race token until the latest start handler accepts it', () => {
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const handlerAssignment = appSource.indexOf('roomRaceStartHandlerRef.current = handleStart;');
+    const effectStart = appSource.indexOf("const roomFlow = multiplayer.currentRoom?.flow;", handlerAssignment);
+    const effectEnd = appSource.indexOf("const nativeBluetoothFailed", effectStart);
+    const effectSource = appSource.slice(effectStart, effectEnd);
+
+    expect(effectStart).toBeGreaterThanOrEqual(0);
+    expect(effectEnd).toBeGreaterThan(effectStart);
+    expect(handlerAssignment).toBeGreaterThanOrEqual(0);
+    expect(effectSource).toContain('started = await roomRaceStartHandlerRef.current();');
+    expect(effectSource).toContain('lastRoomRaceTokenRef.current = raceToken;');
+    expect(effectSource.indexOf('started = await roomRaceStartHandlerRef.current();'))
+      .toBeLessThan(effectSource.indexOf('lastRoomRaceTokenRef.current = raceToken;'));
+    expect(effectSource).toContain('}, 250);');
   });
 });

@@ -5,6 +5,7 @@ export const clubTabletDeviceStorageKey = 'tracklab.club-tablet-device.v1';
 export const clubTabletSessionStorageKey = 'tracklab.club-tablet-athlete-session.v1';
 export const clubTabletOutboxStorageKey = 'tracklab.club-tablet-save-outbox.v1';
 export const clubTabletSessionHeader = 'X-TrackLab-Club-Tablet-Session';
+export const clubTabletResultUploadHeader = 'X-TrackLab-Club-Tablet-Result-Token';
 
 export type ClubTabletDevice = {
   id: string;
@@ -58,6 +59,13 @@ export type ClubTabletSessionCredential = {
   /** Local enrollment that authorized this short-lived athlete identity. */
   deviceId: string;
   sessionToken: string;
+  /**
+   * Durable, device-bound credential used only to finish this athlete's queued
+   * result uploads after the interactive athlete session has been released.
+   * Older stored sessions legitimately omit both result-upload fields.
+   */
+  resultUploadToken?: string;
+  resultUploadExpiresAt?: number;
   session: ClubTabletSession;
   heartbeatTtlMs: number;
   pollAfterMs: number;
@@ -203,11 +211,17 @@ export function normalizeClubTabletSessionCredential(value: unknown): ClubTablet
   const candidate = value as Partial<ClubTabletSessionCredential>;
   const deviceId = clubTabletText(candidate.deviceId, 120);
   const sessionToken = clubTabletText(candidate.sessionToken, 2048);
+  const resultUploadToken = clubTabletText(candidate.resultUploadToken, 2048);
+  const resultUploadExpiresAt = positiveClubTabletNumber(candidate.resultUploadExpiresAt);
   const session = normalizeSession(candidate.session);
   if (!deviceId || !sessionToken || !session) return null;
   return {
     deviceId,
     sessionToken,
+    ...(resultUploadToken && resultUploadExpiresAt ? {
+      resultUploadToken,
+      resultUploadExpiresAt,
+    } : {}),
     session,
     heartbeatTtlMs: positiveClubTabletNumber(candidate.heartbeatTtlMs, 60_000),
     pollAfterMs: positiveClubTabletNumber(candidate.pollAfterMs, 15_000),
@@ -235,6 +249,8 @@ export function storeClubTabletDevice(credential: ClubTabletDeviceCredential) {
 export function clearStoredClubTabletDevice() {
   try {
     window.localStorage.removeItem(clubTabletDeviceStorageKey);
+    window.localStorage.removeItem(clubTabletOutboxStorageKey);
+    window.sessionStorage.removeItem(clubTabletOutboxStorageKey);
   } catch {
     // A blocked storage backend must not prevent the server-side authorization from ending.
   }
@@ -280,11 +296,10 @@ export function storeClubTabletSession(credential: ClubTabletSessionCredential) 
 export function clearStoredClubTabletSession() {
   try {
     window.sessionStorage.removeItem(clubTabletSessionStorageKey);
-    window.sessionStorage.removeItem(clubTabletOutboxStorageKey);
   } catch {
     // Ignore storage cleanup errors; server-side DELETE still revokes the identity.
-    // Both values live in the same athlete-only sessionStorage scope so a shared
-    // tablet never carries raw workout data into the next athlete's session.
+    // Durable queued artifacts have their own exact athlete/session scope and
+    // are removed only after upload (or when the tablet enrollment is revoked).
   }
 }
 

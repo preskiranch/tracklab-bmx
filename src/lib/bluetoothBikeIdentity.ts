@@ -1,5 +1,6 @@
 const fallbackDeviceIdStart = 700_001;
 const fallbackDeviceIdEnd = 899_999;
+export const bluetoothBikePreferencesStorageKey = 'tracklab.bluetooth-bike-preferences.v1';
 
 function validDeviceId(value: unknown) {
   const deviceId = Number(value);
@@ -88,4 +89,37 @@ export function parseBluetoothBikeIdentityAssignments(serialized: string | null)
 
 export function serializeBluetoothBikeIdentityAssignments(assignments: Map<string, number>) {
   return JSON.stringify(Object.fromEntries(assignments));
+}
+
+export function parseBluetoothBikePreferences(serialized: string | null) {
+  const preferences = new Map<string, string>();
+  if (!serialized) return preferences;
+  try {
+    const value = JSON.parse(serialized) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return preferences;
+    Object.entries(value).slice(-32).forEach(([scope, browserDeviceId]) => {
+      const safeScope = scope.trim().slice(0, 160);
+      const safeDeviceId = typeof browserDeviceId === 'string'
+        ? browserDeviceId.trim().slice(0, 240)
+        : '';
+      if (safeScope && safeDeviceId) preferences.set(safeScope, safeDeviceId);
+    });
+  } catch {
+    return preferences;
+  }
+  return preferences;
+}
+
+export function serializeBluetoothBikePreferences(preferences: Map<string, string>) {
+  return JSON.stringify(Object.fromEntries([...preferences.entries()].slice(-32)));
+}
+
+export function prioritizePreferredBluetoothDevice<T extends { id: string }>(
+  devices: readonly T[],
+  preferredBrowserDeviceId: string | null | undefined,
+) {
+  if (!preferredBrowserDeviceId) return [...devices];
+  return [...devices].sort((left, right) => (
+    Number(right.id === preferredBrowserDeviceId) - Number(left.id === preferredBrowserDeviceId)
+  ));
 }

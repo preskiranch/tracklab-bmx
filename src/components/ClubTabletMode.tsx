@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bike,
   Bluetooth,
@@ -39,6 +39,17 @@ import type { ClubTabletDeviceStatus } from './ClubTabletRuntime';
 import { loadClubTabletWatchConnectStatus } from '../lib/watchConnectCloud';
 import { clubTabletWatchConnectSelectionState } from '../lib/studioWatchConnectSelection';
 import { StudioWatchConnectStatus } from './StudioWatchConnectStatus';
+import ClubTabletEventCard, {
+  type ClubTabletEventReadyRequest,
+} from './ClubTabletEventCard';
+import {
+  clubEventSlotForDevice,
+  joinCurrentClubEvent,
+  leaveCurrentClubEvent,
+  type ClubEventEnvelope,
+  type ClubEventLaunchPayload,
+  type ClubEventSnapshot,
+} from '../lib/clubEvent';
 import './ClubTabletMode.css';
 
 type ClubTabletBike = {
@@ -103,6 +114,8 @@ type ClubTabletModeProps = {
   reconnectBikes: () => Promise<void> | void;
   retryAuthorization: () => void;
   openProgram: (mode: ClubTabletProgram) => void;
+  /** Opens/configures a synchronized program before its shared startAt. */
+  onClubEventLaunch?: (payload: ClubEventLaunchPayload) => void;
 };
 
 export function clubTabletBikeAccessReady(
@@ -131,9 +144,49 @@ export function clubTabletFreshHeartRateReading(
   return reading;
 }
 
+export function clubTabletCoachEventLocksIndependentTraining(
+  event: ClubEventSnapshot | null | undefined,
+  deviceId: string,
+) {
+  const slot = clubEventSlotForDevice(event, deviceId);
+  return Boolean(slot?.ready && slot.status !== 'stale');
+}
+
+export function clubTabletShouldAutoStartSelection(input: Readonly<{
+  hasActiveSession: boolean;
+  startPending: boolean;
+  startFailed: boolean;
+  selectedRiderId: string;
+  selectedProgram: ClubTabletProgram | null;
+  selectedBikeId: number | null;
+  coachEventLocked: boolean;
+}>) {
+  return !input.hasActiveSession
+    && !input.startPending
+    && !input.startFailed
+    && Boolean(input.selectedRiderId)
+    && input.selectedProgram != null
+    && input.selectedBikeId != null
+    && !input.coachEventLocked;
+}
+
 function bikeLabel(bike: ClubTabletBike) {
   const suffix = String(Math.round(bike.deviceId)).slice(-3).padStart(3, '0');
   return `${bike.label || 'Wattbike'} · PM ${suffix}`;
+}
+
+function enrichClubTabletSession(
+  session: ClubTabletSessionCredential,
+  athlete: ClubTabletAthlete | null | undefined,
+) {
+  return {
+    ...session,
+    session: {
+      ...session.session,
+      ...(athlete?.athleteName ? { athleteName: athlete.athleteName } : {}),
+      ...(athlete?.photoUrl ? { photoUrl: athlete.photoUrl } : {}),
+    },
+  };
 }
 
 export default function ClubTabletMode({
@@ -156,6 +209,7 @@ export default function ClubTabletMode({
   reconnectBikes: onReconnectSavedBikes,
   retryAuthorization: onRetryAuthorization,
   openProgram: onOpenProgram,
+  onClubEventLaunch,
 }: ClubTabletModeProps) {
   const [tabletName, setTabletName] = useState(() => {
     const platform = navigator.platform?.trim();
@@ -172,6 +226,8 @@ export default function ClubTabletMode({
   const [message, setMessage] = useState<string | null>(null);
   const [watchStatus, setWatchStatus] = useState<ClubTabletWatchConnectStatus | null>(null);
   const [watchClock, setWatchClock] = useState(Date.now());
+  const [clubEventSnapshot, setClubEventSnapshot] = useState<ClubEventSnapshot | null>(null);
+  const clubEventSnapshotRef = useRef<ClubEventSnapshot | null>(null);
   const bikeAccessReady = clubTabletBikeAccessReady(deviceStatus, accessReady);
   const nativeBluetoothFailed = nativeBluetoothStatus.state === 'failed';
 
@@ -318,14 +374,7 @@ export default function ClubTabletMode({
     try {
       const session = await startClubTabletSession(riderId, bikeId, deviceCredential);
       const selectedAthlete = roster?.athletes.find((athlete) => athlete.studioRiderId === riderId);
-      onSessionChange({
-        ...session,
-        session: {
-          ...session.session,
-          ...(selectedAthlete?.athleteName ? { athleteName: selectedAthlete.athleteName } : {}),
-          ...(selectedAthlete?.photoUrl ? { photoUrl: selectedAthlete.photoUrl } : {}),
-        },
-      });
+      onSessionChange(enrichClubTabletSession(session, selectedAthlete));
       onOpenProgram(program);
     } catch (error) {
       setSessionStartFailed(true);
@@ -351,6 +400,13 @@ export default function ClubTabletMode({
 
   const chooseProgram = (program: ClubTabletProgram) => {
     if (sessionStartPendingRef.current) return;
+    if (deviceCredential && clubTabletCoachEventLocksIndependentTraining(
+      clubEventSnapshotRef.current,
+      deviceCredential.device.id,
+    )) {
+      setMessage('Leave the coach event before opening an Independent Training activity.');
+      return;
+    }
     setSelectedProgram(program);
     setSessionStartFailed(false);
     if (selectedRiderId && selectedBikeId != null) {
@@ -363,8 +419,38 @@ export default function ClubTabletMode({
       : `${programTitle} selected. Now choose your athlete.`);
   };
 
+  useEffect(() => {
+    if (!clubTabletShouldAutoStartSelection({
+      hasActiveSession: Boolean(activeSession),
+      startPending: sessionStartPendingRef.current,
+      startFailed: sessionStartFailed,
+      selectedRiderId,
+      selectedProgram,
+      selectedBikeId,
+      coachEventLocked: Boolean(deviceCredential && clubTabletCoachEventLocksIndependentTraining(
+        clubEventSnapshotRef.current,
+        deviceCredential.device.id,
+      )),
+    })) return;
+    // Athlete and activity can be chosen while a saved Wattbike is still
+    // reconnecting. Complete the same two-order workflow when that final bike
+    // prerequisite arrives instead of requiring another tap.
+    void startAthlete(selectedRiderId, selectedProgram, selectedBikeId);
+  }, [
+    activeSession,
+    deviceCredential,
+    selectedBikeId,
+    selectedProgram,
+    selectedRiderId,
+    sessionStartFailed,
+  ]);
+
   const endAthlete = async () => {
     const endingSession = sessionCredential;
+    const currentEvent = clubEventSnapshotRef.current;
+    const eventSlot = deviceCredential
+      ? clubEventSlotForDevice(currentEvent, deviceCredential.device.id)
+      : null;
     setBusy('ending');
     setMessage(null);
     // Remove the selected identity and its BPM before the network request. A
@@ -372,15 +458,152 @@ export default function ClubTabletMode({
     // shared tablet.
     onSessionChange(null);
     setSelectedRiderId('');
+    setSelectedProgram(null);
+    let releaseWarning = '';
+    if (
+      endingSession
+      && currentEvent
+      && eventSlot?.athlete?.studioRiderId === endingSession.session.studioRiderId
+    ) {
+      try {
+        await leaveCurrentClubEvent(currentEvent.id, endingSession);
+      } catch (error) {
+        releaseWarning = error instanceof Error ? error.message : 'The coach-event seat could not be released.';
+      }
+    }
     try {
       await endClubTabletSession(endingSession);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The athlete was cleared locally.');
+      releaseWarning ||= error instanceof Error ? error.message : 'The athlete was cleared locally.';
     } finally {
       setBusy('idle');
-      setMessage('Athlete signed out. The Wattbike remains paired to this tablet for the next student.');
+      setMessage(releaseWarning
+        ? `${releaseWarning} The athlete was cleared from this tablet.`
+        : 'Athlete signed out. The Wattbike remains paired to this tablet for the next student.');
     }
   };
+
+  const readyForClubEvent = useCallback(async ({
+    event,
+    selection,
+  }: ClubTabletEventReadyRequest): Promise<ClubEventEnvelope> => {
+    if (!deviceCredential || event.clubId !== deviceCredential.device.clubId) {
+      throw new Error('This coach event belongs to a different club.');
+    }
+    if (event.status !== 'lobby') throw new Error('This coach event has already started.');
+    if (selection.deviceId !== deviceCredential.device.id) {
+      throw new Error('This coach-event selection belongs to a different tablet.');
+    }
+    if (sessionStartPendingRef.current) throw new Error('This tablet is already starting an athlete session.');
+
+    sessionStartPendingRef.current = true;
+    setBusy('starting');
+    setMessage(null);
+    let eventSession = activeSession;
+    let createdSession = false;
+    try {
+      if (eventSession) {
+        if (
+          eventSession.deviceId !== deviceCredential.device.id
+          || eventSession.session.clubId !== event.clubId
+          || eventSession.session.studioRiderId !== selection.studioRiderId
+          || eventSession.session.bikeDeviceId !== selection.bikeDeviceId
+        ) {
+          throw new Error('End the current athlete session before choosing someone else for the coach event.');
+        }
+      } else {
+        const created = await startClubTabletSession(
+          selection.studioRiderId,
+          selection.bikeDeviceId,
+          deviceCredential,
+        );
+        const selectedAthlete = roster?.athletes.find((athlete) => (
+          athlete.studioRiderId === selection.studioRiderId
+        ));
+        eventSession = enrichClubTabletSession(created, selectedAthlete);
+        createdSession = true;
+        onSessionChange(eventSession);
+      }
+
+      const joined = await joinCurrentClubEvent(event.id, eventSession);
+      clubEventSnapshotRef.current = joined.event;
+      setClubEventSnapshot(joined.event);
+      return joined;
+    } catch (error) {
+      // Creating the authoritative athlete lock and joining the event are one
+      // user action. Roll that new lock back if the seat could not be claimed.
+      if (createdSession) {
+        onSessionChange(null);
+        setSelectedRiderId('');
+        await endClubTabletSession(eventSession).catch(() => undefined);
+      }
+      throw error;
+    } finally {
+      sessionStartPendingRef.current = false;
+      setBusy('idle');
+    }
+  }, [activeSession, deviceCredential, onSessionChange, roster?.athletes]);
+
+  const leaveCoachEvent = useCallback(async (event: ClubEventSnapshot) => {
+    const endingSession = activeSession;
+    if (!endingSession) throw new Error('No athlete is signed into this coach event.');
+    try {
+      const left = await leaveCurrentClubEvent(event.id, endingSession);
+      clubEventSnapshotRef.current = left.event;
+      setClubEventSnapshot(left.event);
+      return left;
+    } finally {
+      // A shared tablet must not retain the athlete identity merely because a
+      // network-side event release failed. Ending the secure session is also a
+      // server-side fallback for releasing its event seat.
+      onSessionChange(null);
+      setSelectedRiderId('');
+      setSelectedProgram(null);
+      await endClubTabletSession(endingSession).catch(() => undefined);
+    }
+  }, [activeSession, onSessionChange]);
+
+  const releaseCancelledClubEvent = useCallback((event: ClubEventSnapshot) => {
+    const endingSession = activeSession;
+    const slot = deviceCredential
+      ? clubEventSlotForDevice(event, deviceCredential.device.id)
+      : null;
+    if (
+      !endingSession
+      || !slot?.athlete
+      || slot.athlete.studioRiderId !== endingSession.session.studioRiderId
+    ) return;
+    onSessionChange(null);
+    setSelectedRiderId('');
+    setSelectedProgram(null);
+    clubEventSnapshotRef.current = null;
+    setClubEventSnapshot(null);
+    void endClubTabletSession(endingSession).catch(() => undefined);
+  }, [activeSession, deviceCredential, onSessionChange]);
+
+  const launchClubEvent = useCallback((payload: ClubEventLaunchPayload) => {
+    if (
+      !activeSession
+      || activeSession.session.studioRiderId !== payload.studioRiderId
+      || activeSession.session.bikeDeviceId !== payload.bikeDeviceId
+    ) {
+      setMessage('This coach event could not open because its athlete session is no longer active.');
+      return;
+    }
+    if (onClubEventLaunch) onClubEventLaunch(payload);
+    else onOpenProgram(payload.program);
+  }, [activeSession, onClubEventLaunch, onOpenProgram]);
+
+  const updateClubEventSnapshot = useCallback((event: ClubEventSnapshot | null) => {
+    clubEventSnapshotRef.current = event;
+    setClubEventSnapshot((current) => (
+      current?.id === event?.id
+      && current?.updatedAt === event?.updatedAt
+      && current?.status === event?.status
+        ? current
+        : event
+    ));
+  }, []);
 
   const openBikePairing = () => {
     if (!bikeAccessReady) {
@@ -528,6 +751,33 @@ export default function ClubTabletMode({
     );
   }
 
+  const coachRiderId = activeSession?.session.studioRiderId || selectedRiderId;
+  const coachBikeId = activeSession?.session.bikeDeviceId ?? selectedBikeId;
+  const coachAthlete = roster?.athletes.find((athlete) => athlete.studioRiderId === coachRiderId);
+  const coachBike = bikes.find((bike) => bike.deviceId === coachBikeId);
+  const waitingForCoach = clubTabletCoachEventLocksIndependentTraining(
+    clubEventSnapshot,
+    deviceCredential.device.id,
+  );
+  const coachEventCard = (
+    <ClubTabletEventCard
+      key="coach-event"
+      device={deviceCredential}
+      session={activeSession}
+      selectedRiderId={coachRiderId}
+      selectedBikeId={coachBikeId}
+      selectedAthleteName={coachAthlete
+        ? clubTabletAthleteDisplayName(coachAthlete)
+        : activeSession?.session.athleteName || activeSession?.session.riderName}
+      selectedBikeName={coachBike ? bikeLabel(coachBike) : null}
+      onReady={readyForClubEvent}
+      onLeave={leaveCoachEvent}
+      onLobbyEnded={releaseCancelledClubEvent}
+      onLaunch={launchClubEvent}
+      onSnapshotChange={updateClubEventSnapshot}
+    />
+  );
+
   if (activeSession) {
     const athleteName = sessionAthlete
       ? clubTabletAthleteDisplayName(sessionAthlete)
@@ -540,6 +790,7 @@ export default function ClubTabletMode({
     });
     return (
       <section className="club-tablet-mode active">
+        {coachEventCard}
         <div className="club-tablet-active-card">
           <RiderAvatar
             name={athleteName}
@@ -573,9 +824,24 @@ export default function ClubTabletMode({
           </button>
         </div>
 
+        <div className="club-tablet-independent-heading">
+          <span className="eyebrow">Always available</span>
+          <h3>Independent Training</h3>
+          <p>{waitingForCoach
+            ? 'This tablet is Ready for the coach. Leave the coach event before opening an independent activity.'
+            : 'Choose any activity below when this tablet is not waiting for a coach start.'}</p>
+        </div>
         <div className="club-tablet-programs">
           {clubTabletPrograms.map(({ mode, title, detail, Icon }) => (
-            <button type="button" key={mode} onClick={() => onOpenProgram(mode)}>
+            <button
+              type="button"
+              key={mode}
+              disabled={waitingForCoach}
+              title={waitingForCoach ? 'Leave the coach event before opening Independent Training.' : undefined}
+              onClick={() => {
+                if (!waitingForCoach) onOpenProgram(mode);
+              }}
+            >
               <Icon /><span><strong>{title}</strong><small>{detail}</small></span>
             </button>
           ))}
@@ -593,10 +859,11 @@ export default function ClubTabletMode({
 
   return (
     <section className="club-tablet-mode">
+      {coachEventCard}
       <header className="club-tablet-header">
         <div>
-          <span className="eyebrow">{deviceCredential.device.clubName}</span>
-          <h2>Club Tablet home</h2>
+          <span className="eyebrow">{deviceCredential.device.clubName} · Club Tablet home</span>
+          <h2>Independent Training</h2>
           <p>Choose an athlete and an activity in either order. TrackLab opens the activity as soon as both are selected.</p>
         </div>
         <button type="button" disabled={busy !== 'idle'} onClick={() => void refreshRoster()}>
@@ -698,7 +965,7 @@ export default function ClubTabletMode({
                 className={selectedProgram === mode ? 'selected' : ''}
                 type="button"
                 key={mode}
-                disabled={busy === 'starting'}
+                disabled={busy === 'starting' || waitingForCoach}
                 onClick={() => chooseProgram(mode)}
               >
                 <Icon /><span><strong>{title}</strong><small>{detail}</small></span>

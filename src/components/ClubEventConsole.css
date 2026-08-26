@@ -1,0 +1,144 @@
+.club-event-console {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 22px;
+  padding: clamp(18px, 2.2vw, 28px);
+  border: 1px solid #cdd9c7;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(35, 55, 31, 0.09);
+}
+
+.club-event-console-header,
+.club-event-lobby-title,
+.club-event-lobby-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.club-event-console-header h3 { margin: 4px 0 0; color: #1d2b1a; font-size: clamp(19px, 2vw, 27px); }
+.club-event-console-header .eyebrow { display: inline-flex; align-items: center; gap: 6px; color: #438625; }
+
+.club-event-mode-switch {
+  display: flex;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid #d4ded0;
+  border-radius: 14px;
+  background: #f1f5ef;
+}
+
+.club-event-mode-switch button,
+.club-event-lobby-actions button,
+.club-event-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-weight: 900;
+}
+
+.club-event-mode-switch button { background: transparent; color: #576354; }
+.club-event-mode-switch button.selected { background: #172118; color: #fff; box-shadow: 0 5px 14px rgba(23, 33, 24, 0.18); }
+.club-event-mode-switch button:disabled { opacity: 0.62; }
+
+.club-event-independent {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #bfe1b0;
+  border-radius: 15px;
+  background: #f1faed;
+  color: #2e6e19;
+}
+
+.club-event-independent strong { display: block; color: #24481a; }
+.club-event-independent p { margin: 4px 0 0; color: #52664c; }
+
+.club-event-builder {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #f4f7f2;
+}
+
+.club-event-builder label { display: grid; min-width: 0; gap: 6px; }
+.club-event-builder label > span { color: #586454; font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.club-event-builder input,
+.club-event-builder select {
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid #cbd6c6;
+  border-radius: 10px;
+  background: #fff;
+  color: #1f2a1d;
+}
+
+.club-event-builder-wide { grid-column: span 2; }
+.club-event-builder .club-event-primary { align-self: end; }
+
+.club-event-primary { border-color: #65bc35 !important; background: #7ade36 !important; color: #16220f !important; }
+.club-event-primary:disabled { border-color: #d5ddd1 !important; background: #e4e9e1 !important; color: #828c7e !important; }
+
+.club-event-lobby {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #c9d8c2;
+  border-radius: 17px;
+  background: linear-gradient(145deg, #f7fbf5, #eef6e9);
+}
+
+.club-event-lobby.active { border-color: #72c549; background: linear-gradient(145deg, #f0faeb, #e3f5d9); }
+.club-event-icon { display: grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border-radius: 13px; background: #172118; color: #7ade36; }
+.club-event-lobby-title > div { min-width: 0; margin-right: auto; }
+.club-event-lobby-title > div > span { color: #4e8c30; font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.club-event-lobby-title h4 { margin: 2px 0; font-size: 20px; }
+.club-event-lobby-title p { margin: 0; color: #5e6b59; font-size: 12px; }
+.club-event-lobby-title > strong { flex: 0 0 auto; padding: 7px 10px; border-radius: 999px; background: #fff; color: #397b20; font-size: 12px; }
+
+.club-event-seats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.club-event-seat { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 11px; border: 1px solid #d4ddd0; border-radius: 12px; background: #fff; }
+.club-event-seat > b { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; background: #e7eee3; color: #344331; }
+.club-event-seat strong,
+.club-event-seat small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.club-event-seat strong { font-size: 12px; }
+.club-event-seat small { margin-top: 2px; color: #707b6c; font-size: 10px; }
+.club-event-seat > span { display: inline-flex; grid-column: 1 / -1; align-items: center; gap: 4px; color: #7a8476; font-size: 10px; font-weight: 900; }
+.club-event-seat.ready,
+.club-event-seat.active { border-color: #8ed16a; box-shadow: inset 0 3px #70d13a; }
+.club-event-seat.ready > span,
+.club-event-seat.active > span { color: #367c1e; }
+.club-event-seat.stale { border-color: #e5bf7a; background: #fff9ee; }
+
+.club-event-lobby-actions { justify-content: flex-end; }
+.club-event-lobby-actions button:not(.club-event-primary) { border-color: #d1dad0; background: #fff; color: #4c5849; }
+.club-event-message { margin: 0; color: #566252; font-size: 13px; }
+
+@media (max-width: 900px) {
+  .club-event-console-header { align-items: flex-start; flex-direction: column; }
+  .club-event-builder { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .club-event-seats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .club-event-mode-switch { width: 100%; flex-direction: column; }
+  .club-event-builder { grid-template-columns: minmax(0, 1fr); }
+  .club-event-builder-wide { grid-column: auto; }
+  .club-event-seats { grid-template-columns: minmax(0, 1fr); }
+  .club-event-lobby-title { align-items: flex-start; flex-wrap: wrap; }
+  .club-event-lobby-actions { align-items: stretch; flex-direction: column; }
+}
+
+.spin { animation: club-event-spin 900ms linear infinite; }
+@keyframes club-event-spin { to { transform: rotate(360deg); } }

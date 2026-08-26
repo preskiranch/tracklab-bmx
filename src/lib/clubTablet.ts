@@ -2,6 +2,7 @@ import {
   clearStoredClubTabletDevice,
   clearStoredClubTabletSession,
   clearStoredClubTabletSessionIfCurrent,
+  clubTabletResultUploadHeader,
   clubTabletSessionMatchesCurrentDevice,
   clubTabletSessionHeaders,
   clubTabletOutboxStorageKey,
@@ -59,6 +60,12 @@ type ClubTabletOutboxEntry = {
   deviceId: string;
   clubId: string;
   studioRiderId: string;
+  bikeDeviceId: string;
+  sessionToken: string;
+  sessionExpiresAt: number;
+  resultUploadToken: string;
+  resultUploadExpiresAt: number;
+  releaseAfterFlush: boolean;
   payload: unknown;
   createdAt: number;
   attempts: number;
@@ -67,7 +74,10 @@ type ClubTabletOutboxEntry = {
 function readClubTabletOutbox(): ClubTabletOutboxEntry[] {
   if (typeof window === 'undefined') return [];
   try {
-    const value = JSON.parse(window.sessionStorage.getItem(clubTabletOutboxStorageKey) ?? '[]') as unknown;
+    const stored = window.localStorage.getItem(clubTabletOutboxStorageKey)
+      ?? window.sessionStorage.getItem(clubTabletOutboxStorageKey)
+      ?? '[]';
+    const value = JSON.parse(stored) as unknown;
     if (!Array.isArray(value)) return [];
     return value.flatMap((entry) => {
       if (!entry || typeof entry !== 'object') return [];
@@ -84,6 +94,12 @@ function readClubTabletOutbox(): ClubTabletOutboxEntry[] {
         deviceId,
         clubId,
         studioRiderId,
+        bikeDeviceId: text(candidate.bikeDeviceId, 160),
+        sessionToken: text(candidate.sessionToken, 2048),
+        sessionExpiresAt: positiveNumber(candidate.sessionExpiresAt),
+        resultUploadToken: text(candidate.resultUploadToken, 2048),
+        resultUploadExpiresAt: positiveNumber(candidate.resultUploadExpiresAt),
+        releaseAfterFlush: candidate.releaseAfterFlush === true,
         payload: candidate.payload,
         createdAt: positiveNumber(candidate.createdAt, Date.now()),
         attempts: Math.max(0, Math.floor(Number(candidate.attempts) || 0)),
@@ -97,10 +113,14 @@ function readClubTabletOutbox(): ClubTabletOutboxEntry[] {
 function writeClubTabletOutbox(entries: ClubTabletOutboxEntry[]) {
   if (typeof window === 'undefined') return;
   try {
-    window.sessionStorage.setItem(clubTabletOutboxStorageKey, JSON.stringify(entries.slice(-100)));
+    const serialized = JSON.stringify(entries.slice(-100));
+    window.localStorage.setItem(clubTabletOutboxStorageKey, serialized);
+    window.sessionStorage.removeItem(clubTabletOutboxStorageKey);
+    if (window.localStorage.getItem(clubTabletOutboxStorageKey) !== serialized) {
+      throw new Error('The tablet could not verify its local result queue.');
+    }
   } catch {
-    // A blocked sessionStorage backend cannot retain retries, but must not cause
-    // a completed remote save to fail or leak an athlete artifact elsewhere.
+    throw new Error('This tablet could not save the completed result locally. Free storage space and try again.');
   }
 }
 
@@ -117,6 +137,12 @@ function queueClubTabletArtifact(
     deviceId: credential.deviceId,
     clubId: credential.session.clubId,
     studioRiderId: credential.session.studioRiderId,
+    bikeDeviceId: String(credential.session.bikeDeviceId),
+    sessionToken: credential.sessionToken,
+    sessionExpiresAt: credential.session.expiresAt,
+    resultUploadToken: credential.resultUploadToken ?? '',
+    resultUploadExpiresAt: credential.resultUploadExpiresAt ?? 0,
+    releaseAfterFlush: false,
     payload,
     createdAt: Date.now(),
     attempts: 0,
@@ -129,16 +155,23 @@ function queueClubTabletArtifact(
 
 async function sendClubTabletOutboxEntry(
   entry: ClubTabletOutboxEntry,
-  credential: NonNullable<ReturnType<typeof readStoredClubTabletSession>>,
+  sessionToken = '',
 ) {
   const path = entry.kind === 'training'
     ? '/api/club-tablet/training-sessions'
     : entry.kind === 'race'
       ? '/api/club-tablet/race-results'
       : '/api/club-tablet/ghosts';
+  const device = readStoredClubTabletDevice();
   const payload = await tabletFetch(path, {
     method: 'POST',
-    headers: clubTabletSessionHeaders(credential.sessionToken),
+    headers: {
+      ...clubTabletSessionHeaders(sessionToken),
+      ...(device?.device.id === entry.deviceId && entry.resultUploadToken ? {
+        Authorization: `Bearer ${device.deviceToken}`,
+        [clubTabletResultUploadHeader]: entry.resultUploadToken,
+      } : {}),
+    },
     body: JSON.stringify(entry.payload),
   });
   writeClubTabletOutbox(readClubTabletOutbox().filter((candidate) => candidate.id !== entry.id));
@@ -148,29 +181,119 @@ async function sendClubTabletOutboxEntry(
 function outboxEntryMatchesSession(entry: ClubTabletOutboxEntry, credential: ClubTabletSessionCredential) {
   return entry.deviceId === credential.deviceId
     && entry.clubId === credential.session.clubId
-    && entry.studioRiderId === credential.session.studioRiderId;
+    && entry.studioRiderId === credential.session.studioRiderId
+    && (!entry.sessionToken || entry.sessionToken === credential.sessionToken);
 }
 
-export async function flushClubTabletOutbox(credential = readStoredClubTabletSession()) {
-  if (!credential || !clubTabletSessionMatchesCurrentDevice(credential)) return 0;
+function incrementClubTabletOutboxAttempt(entryId: string) {
+  writeClubTabletOutbox(readClubTabletOutbox().map((candidate) => (
+    candidate.id === entryId ? { ...candidate, attempts: candidate.attempts + 1 } : candidate
+  )));
+}
+
+function retryableClubTabletArtifactError(error: unknown) {
+  return !(error instanceof ClubTabletRequestError)
+    || error.status === 401
+    || error.status === 403
+    || error.status === 408
+    || error.status === 429
+    || error.status >= 500;
+}
+
+async function saveQueuedClubTabletArtifact(
+  entry: ClubTabletOutboxEntry,
+  credential: ClubTabletSessionCredential,
+) {
+  try {
+    return await sendClubTabletOutboxEntry(entry, credential.sessionToken);
+  } catch (error) {
+    if (!retryableClubTabletArtifactError(error)) {
+      writeClubTabletOutbox(readClubTabletOutbox().filter((candidate) => candidate.id !== entry.id));
+      throw error;
+    }
+    incrementClubTabletOutboxAttempt(entry.id);
+    return { queued: true } as const;
+  }
+}
+
+function markClubTabletOutboxReleasePending(credential: ClubTabletSessionCredential) {
+  let pending = 0;
+  writeClubTabletOutbox(readClubTabletOutbox().map((entry) => {
+    if (!outboxEntryMatchesSession(entry, credential)) return entry;
+    pending += 1;
+    return {
+      ...entry,
+      sessionToken: entry.sessionToken || credential.sessionToken,
+      sessionExpiresAt: entry.sessionExpiresAt || credential.session.expiresAt,
+      resultUploadToken: entry.resultUploadToken || credential.resultUploadToken || '',
+      resultUploadExpiresAt: entry.resultUploadExpiresAt || credential.resultUploadExpiresAt || 0,
+      releaseAfterFlush: true,
+    };
+  }));
+  return pending;
+}
+
+export function pendingClubTabletReleaseCount() {
+  const deviceId = readStoredClubTabletDevice()?.device.id;
+  if (!deviceId) return 0;
+  return readClubTabletOutbox().filter((entry) => (
+    entry.deviceId === deviceId && entry.releaseAfterFlush
+  )).length;
+}
+
+async function finishDeferredClubTabletRelease(entry: ClubTabletOutboxEntry) {
+  if (!entry.releaseAfterFlush || !entry.sessionToken) return;
+  const stillPending = readClubTabletOutbox().some((candidate) => (
+    candidate.deviceId === entry.deviceId
+    && candidate.sessionToken === entry.sessionToken
+  ));
+  if (stillPending) return;
+  await tabletFetch('/api/club-tablet/sessions', {
+    method: 'DELETE',
+    headers: clubTabletSessionHeaders(entry.sessionToken),
+  }).catch(() => undefined);
+}
+
+async function flushClubTabletOutboxNow(credential?: ClubTabletSessionCredential | null) {
+  const device = readStoredClubTabletDevice();
+  if (!device) return 0;
+  if (credential && !clubTabletSessionMatchesCurrentDevice(credential)) return 0;
   let sent = 0;
-  for (const entry of readClubTabletOutbox().filter((candidate) => outboxEntryMatchesSession(candidate, credential))) {
+  const activeCredential = credential ?? readStoredClubTabletSession();
+  const candidates = readClubTabletOutbox().filter((entry) => (
+    entry.deviceId === device.device.id
+    && (!credential || outboxEntryMatchesSession(entry, credential))
+  ));
+  for (const entry of candidates) {
     if (!recordedBikeMetricsAreAccepted(entry.payload)) {
       writeClubTabletOutbox(readClubTabletOutbox().filter((candidate) => candidate.id !== entry.id));
+      await finishDeferredClubTabletRelease(entry);
       continue;
     }
+    const sessionToken = entry.sessionToken
+      || (activeCredential && outboxEntryMatchesSession(entry, activeCredential)
+        ? activeCredential.sessionToken
+        : '');
+    if (!sessionToken && !entry.resultUploadToken) continue;
     try {
-      await sendClubTabletOutboxEntry(entry, credential);
+      await sendClubTabletOutboxEntry(entry, sessionToken);
       sent += 1;
+      await finishDeferredClubTabletRelease(entry);
     } catch {
-      const entries = readClubTabletOutbox();
-      writeClubTabletOutbox(entries.map((candidate) => (
-        candidate.id === entry.id ? { ...candidate, attempts: candidate.attempts + 1 } : candidate
-      )));
+      incrementClubTabletOutboxAttempt(entry.id);
       break;
     }
   }
   return sent;
+}
+
+let clubTabletOutboxFlushPromise: Promise<number> | null = null;
+
+export function flushClubTabletOutbox(credential?: ClubTabletSessionCredential | null) {
+  if (clubTabletOutboxFlushPromise) return clubTabletOutboxFlushPromise;
+  clubTabletOutboxFlushPromise = flushClubTabletOutboxNow(credential)
+    .finally(() => { clubTabletOutboxFlushPromise = null; });
+  return clubTabletOutboxFlushPromise;
 }
 
 export async function saveClubTabletTrainingSession(
@@ -184,7 +307,7 @@ export async function saveClubTabletTrainingSession(
   const sessionId = session && typeof session === 'object' ? text((session as { id?: unknown }).id, 160) : '';
   if (!sessionId) throw new Error('The training session is missing its durable session ID.');
   const entry = queueClubTabletArtifact('training', sessionId, { session, localPlayerId }, credential);
-  return sendClubTabletOutboxEntry(entry, credential);
+  return saveQueuedClubTabletArtifact(entry, credential);
 }
 
 export async function enrollClubTablet(name: string) {
@@ -238,6 +361,10 @@ export async function startClubTabletSession(
   credential = readStoredClubTabletDevice(),
 ) {
   if (!credential) throw new Error('This tablet has not been authorized by the club owner.');
+  // A previous athlete's durable result upload is independent of this new
+  // interactive selection. Never make the next rider wait for that background
+  // network request; the device-bound result token keeps the identities scoped.
+  void flushClubTabletOutbox().catch(() => undefined);
   const payload = await tabletFetch('/api/club-tablet/sessions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${credential.deviceToken}` },
@@ -284,6 +411,13 @@ export async function endClubTabletSession(credential = readStoredClubTabletSess
     return;
   }
   try {
+    markClubTabletOutboxReleasePending(credential);
+  } catch {
+    // The completed artifact was already written before this handoff. A
+    // storage-quota failure while marking the optional cleanup flag must not
+    // keep the athlete or event seat selected on the server.
+  }
+  try {
     await tabletFetch('/api/club-tablet/sessions', {
       method: 'DELETE',
       headers: clubTabletSessionHeaders(credential.sessionToken),
@@ -306,7 +440,7 @@ export async function saveClubTabletRaceResult(
   if (!credential) throw new Error('No athlete is signed into this club tablet.');
   if (!clubTabletSessionMatchesCurrentDevice(credential)) throw new Error('This athlete session is no longer active on this tablet.');
   const entry = queueClubTabletArtifact('race', payload.sessionId, payload, credential);
-  await sendClubTabletOutboxEntry(entry, credential);
+  await saveQueuedClubTabletArtifact(entry, credential);
 }
 
 export async function saveClubTabletGhost(
@@ -322,7 +456,7 @@ export async function saveClubTabletGhost(
     : '';
   if (!ghostId) throw new Error('The ghost is missing its durable ID.');
   const entry = queueClubTabletArtifact('ghost', ghostId, { ghost, localPlayerId }, credential);
-  await sendClubTabletOutboxEntry(entry, credential);
+  await saveQueuedClubTabletArtifact(entry, credential);
 }
 
 export async function loadClubTabletGhosts(

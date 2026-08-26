@@ -1666,6 +1666,73 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           WHERE state IN ('pending', 'leased')`,
       ],
     },
+    {
+      version: 27,
+      name: 'add durable club event tablet lobbies',
+      statements: [
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_events (
+          id TEXT PRIMARY KEY CHECK (char_length(id) BETWEEN 8 AND 180),
+          club_id TEXT NOT NULL REFERENCES ${schema}.clubs(id) ON DELETE CASCADE,
+          activity_type TEXT NOT NULL
+            CHECK (activity_type IN ('bmx-race', 'straight-sprint', 'explore')),
+          configuration JSONB NOT NULL DEFAULT '{}'::jsonb
+            CHECK (jsonb_typeof(configuration) = 'object'),
+          status TEXT NOT NULL DEFAULT 'lobby'
+            CHECK (status IN ('lobby', 'active', 'cancelled')),
+          start_at TIMESTAMPTZ,
+          cancelled_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          CHECK (status <> 'active' OR start_at IS NOT NULL),
+          CHECK (status <> 'lobby' OR start_at IS NULL),
+          CHECK (status <> 'cancelled' OR cancelled_at IS NOT NULL)
+        )`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_tracklab_club_events_one_current
+          ON ${schema}.club_events (club_id)
+          WHERE status IN ('lobby', 'active')`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_club_events_history
+          ON ${schema}.club_events (club_id, created_at DESC, id)`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_event_participants (
+          event_id TEXT NOT NULL REFERENCES ${schema}.club_events(id) ON DELETE CASCADE,
+          seat_number SMALLINT NOT NULL CHECK (seat_number BETWEEN 1 AND 4),
+          device_id TEXT NOT NULL REFERENCES ${schema}.club_tablet_devices(id) ON DELETE CASCADE,
+          studio_rider_id TEXT NOT NULL CHECK (char_length(studio_rider_id) BETWEEN 1 AND 160),
+          rider_name TEXT NOT NULL CHECK (char_length(rider_name) BETWEEN 1 AND 120),
+          bike_device_id TEXT NOT NULL CHECK (char_length(bike_device_id) BETWEEN 1 AND 160),
+          session_token_hash TEXT NOT NULL CHECK (char_length(session_token_hash) = 64),
+          ready BOOLEAN NOT NULL DEFAULT true,
+          joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (event_id, seat_number),
+          UNIQUE (event_id, device_id),
+          UNIQUE (event_id, studio_rider_id),
+          UNIQUE (event_id, bike_device_id)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_club_event_participants_device
+          ON ${schema}.club_event_participants (device_id, event_id)`,
+      ],
+    },
+    {
+      version: 28,
+      name: 'harden club event launches and deferred tablet results',
+      statements: [
+        `ALTER TABLE ${schema}.club_event_participants
+          ADD COLUMN IF NOT EXISTS launched_at TIMESTAMPTZ`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_tablet_result_authorizations (
+          token_hash TEXT PRIMARY KEY CHECK (char_length(token_hash) = 64),
+          device_id TEXT NOT NULL REFERENCES ${schema}.club_tablet_devices(id) ON DELETE CASCADE,
+          club_id TEXT NOT NULL REFERENCES ${schema}.clubs(id) ON DELETE CASCADE,
+          studio_rider_id TEXT NOT NULL CHECK (char_length(studio_rider_id) BETWEEN 1 AND 160),
+          rider_name TEXT NOT NULL CHECK (char_length(rider_name) BETWEEN 1 AND 120),
+          bike_device_id TEXT NOT NULL CHECK (char_length(bike_device_id) BETWEEN 1 AND 160),
+          session_token_hash TEXT NOT NULL UNIQUE CHECK (char_length(session_token_hash) = 64),
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_club_tablet_result_authorizations_expiry
+          ON ${schema}.club_tablet_result_authorizations (expires_at, device_id)`,
+      ],
+    },
   ];
 }
 
