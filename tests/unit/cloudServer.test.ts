@@ -4143,6 +4143,203 @@ describe('cloud API trust boundaries', () => {
     expect(manifest.headers.get('cache-control')).toBe('no-cache');
   });
 
+  it('authorizes commentary for only the exact active club-tablet athlete session', async () => {
+    const originalCookie = cookie;
+    const now = Date.now();
+    let loginSequence = 210;
+    const signInOwner = async () => {
+      loginSequence += 1;
+      const login = await api('/api/auth/login', {
+        method: 'POST',
+        headers: { 'X-Forwarded-For': `192.0.2.${loginSequence}` },
+        body: JSON.stringify({
+          email: 'club-owner-admin@tracklab.test',
+          password: 'correct-horse-battery-staple',
+        }),
+      });
+      expect(login.status).toBe(200);
+      const signedInCookie = String(login.headers.get('set-cookie')).split(';')[0];
+      cookie = signedInCookie;
+      return signedInCookie;
+    };
+
+    const monitorCookie = await signInOwner();
+    const riders = [
+      {
+        id: `commentary-tablet-one-${now}`,
+        name: 'Commentary Tablet One',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: `commentary-tablet-two-${now}`,
+        name: 'Commentary Tablet Two',
+        createdAt: now + 1,
+        updatedAt: now + 1,
+      },
+    ];
+    expect((await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({ studioRiders: riders }),
+    })).status).toBe(200);
+
+    const enroll = async (name: string) => {
+      await signInOwner();
+      const response = await api('/api/club-tablet/devices', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      expect(response.status).toBe(201);
+      const device = await response.json();
+      cookie = '';
+      return device;
+    };
+    const firstDevice = await enroll(`Commentary iPad A ${now}`);
+    const secondDevice = await enroll(`Commentary iPad B ${now}`);
+    const startSession = async (
+      device: { deviceToken: string },
+      studioRiderId: string,
+      bikeDeviceId: string,
+    ) => {
+      const response = await api('/api/club-tablet/sessions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${device.deviceToken}` },
+        body: JSON.stringify({ studioRiderId, bikeDeviceId }),
+      });
+      expect(response.status).toBe(201);
+      return response.json() as Promise<{ sessionToken: string }>;
+    };
+    const firstSession = await startSession(firstDevice, riders[0].id, `commentary-bike-a-${now}`);
+    const secondSession = await startSession(secondDevice, riders[1].id, `commentary-bike-b-${now}`);
+    const tabletHeaders = (sessionToken: string): HeadersInit => ({
+      'X-TrackLab-Club-Tablet-Session': sessionToken,
+    });
+
+    const trackId = `commentary-tablet-scope-${now}`;
+    const track = {
+      id: trackId,
+      name: 'Commentary Scope Track',
+      country: 'United States',
+      countryCode: 'US',
+      state: 'California',
+      region: 'North America',
+      city: 'Napa',
+      surface: 'dirt',
+      lengthMeters: 320,
+      zoneCount: 1,
+      pedalZoneCount: 1,
+      pedalMeters: 45,
+      recoveryZoneCount: 0,
+      recoveryMeters: 0,
+      technicalZoneCount: 0,
+      technicalMeters: 0,
+      splitCount: 0,
+      hasProSet: false,
+      lapCount: 1,
+      riders: [
+        { playerId: 1, name: riders[0].name, colorName: 'lime' },
+        { playerId: 2, name: riders[1].name, colorName: 'blue' },
+      ],
+    };
+    const preRace = (sessionToken?: string) => api('/api/commentary/pre-race', {
+      method: 'POST',
+      ...(sessionToken ? { headers: tabletHeaders(sessionToken) } : {}),
+      body: JSON.stringify({ track, voicePreset: 'american-man' }),
+    });
+
+    const baseline = await preRace(firstSession.sessionToken);
+    expect(baseline.status).toBe(200);
+    const baselinePayload = await baseline.json() as { variableCount: number };
+
+    const protectedSpeech = await api('/api/commentary/speech', {
+      method: 'POST',
+      headers: tabletHeaders(firstSession.sessionToken),
+      body: JSON.stringify({
+        line: `${riders[0].name} is holding 120 RPM.`,
+        voicePreset: 'american-man',
+        eventKind: 'final-push',
+        riderNames: [riders[0].name],
+      }),
+    });
+    expect(protectedSpeech.status).toBe(400);
+    await expect(protectedSpeech.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/safe, natural race action/i),
+    });
+
+    cookie = monitorCookie;
+    const wrongExplicitToken = await preRace('wrong-commentary-tablet-session-token-1234567890');
+    expect(wrongExplicitToken.status).toBe(401);
+    cookie = '';
+    expect((await preRace()).status).toBe(401);
+
+    const saveRace = (
+      sessionToken: string,
+      sessionId: string,
+      localPlayerId: number,
+      finishTimeMs: number,
+    ) => api('/api/club-tablet/race-results', {
+      method: 'POST',
+      headers: tabletHeaders(sessionToken),
+      body: JSON.stringify({
+        sessionId,
+        trackId,
+        trackName: track.name,
+        localPlayerId,
+        summaries: [{
+          playerId: localPlayerId,
+          riderName: 'Forged tablet name',
+          rank: 1,
+          finishTimeMs,
+          distanceMeters: 320,
+          topSpeedKph: 35,
+          averageSpeedKph: 30,
+          topCadence: 120,
+          averageCadence: 100,
+          topWatts: 800,
+          averageWatts: 600,
+        }],
+      }),
+    });
+    expect((await saveRace(
+      firstSession.sessionToken,
+      `commentary-selected-race-${now}`,
+      1,
+      1_050,
+    )).status).toBe(201);
+    const selectedWithHistory = await preRace(firstSession.sessionToken);
+    expect(selectedWithHistory.status).toBe(200);
+    const selectedWithHistoryPayload = await selectedWithHistory.json() as { variableCount: number };
+    expect(selectedWithHistoryPayload.variableCount).toBe(baselinePayload.variableCount + 4);
+
+    expect((await saveRace(
+      secondSession.sessionToken,
+      `commentary-sibling-race-${now}`,
+      2,
+      1_100,
+    )).status).toBe(201);
+    const selectedAfterSiblingSave = await preRace(firstSession.sessionToken);
+    expect(selectedAfterSiblingSave.status).toBe(200);
+    await expect(selectedAfterSiblingSave.json()).resolves.toMatchObject({
+      variableCount: selectedWithHistoryPayload.variableCount,
+    });
+    const siblingWithHistory = await preRace(secondSession.sessionToken);
+    expect(siblingWithHistory.status).toBe(200);
+    await expect(siblingWithHistory.json()).resolves.toMatchObject({
+      variableCount: baselinePayload.variableCount + 4,
+    });
+
+    expect((await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: tabletHeaders(firstSession.sessionToken),
+    })).status).toBe(200);
+    expect((await preRace(firstSession.sessionToken)).status).toBe(401);
+    expect((await api('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: tabletHeaders(secondSession.sessionToken),
+    })).status).toBe(200);
+    cookie = originalCookie;
+  });
+
   it('returns actionable client errors for malformed and oversized JSON', async () => {
     const malformed = await api('/api/auth/login', {
       method: 'POST',

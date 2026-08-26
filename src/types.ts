@@ -436,6 +436,8 @@ export type MultiplayerRaceRider = {
   pitch: number;
   phase: RiderPhase;
   rank: number;
+  /** Display-only false-start status; server persistence never trusts it. */
+  disqualified?: boolean;
   finishedAt: number | null;
   selectedBranch: SplitBranchChoice;
   actualBranches: Record<string, SplitBranchChoice>;

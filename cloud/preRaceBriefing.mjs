@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { selectNovelCommentaryLine } from './commentaryVariation.mjs';
 import {
   commentaryRiderNameFact,
@@ -9,6 +10,54 @@ import { commentaryLineMentionsRider } from './commentarySafety.mjs';
 const maxRacers = 4;
 const maxResearchFacts = 8;
 const researchMaxAgeMs = 30 * 24 * 60 * 60 * 1000;
+const trackResearchMetadataFields = Object.freeze([
+  'id',
+  'name',
+  'country',
+  'countryCode',
+  'state',
+  'region',
+  'city',
+  'county',
+  'district',
+  'postalCode',
+  'address',
+  'addressStatus',
+  'latitude',
+  'longitude',
+  'coordinateSource',
+  'coordinateAccuracy',
+  'surface',
+  'lengthMeters',
+  'elevationMeters',
+  'routeStatus',
+  'routeVariantId',
+  'routeVariantName',
+  'lapCount',
+  'source',
+  'sourceUrl',
+  'sourceType',
+  'websiteUrl',
+  'facebookUrl',
+  'instagramUrl',
+  'verificationStatus',
+  'lastVerifiedAt',
+  'outlinePointCount',
+  'centerlinePointCount',
+  'routeVariantCount',
+  'zoneCount',
+  'zoneNames',
+  'pedalZoneCount',
+  'pedalMeters',
+  'recoveryZoneCount',
+  'recoveryMeters',
+  'technicalZoneCount',
+  'technicalMeters',
+  'splitCount',
+  'splitNames',
+  'branchNames',
+  'hasProSet',
+]);
 export const supportedPreRaceVariables = Object.freeze([
   'track name', 'country', 'country code', 'state', 'region', 'city', 'county',
   'district', 'postal code', 'address', 'address provenance', 'latitude', 'longitude',
@@ -146,6 +195,19 @@ export function sanitizePreRaceTrackContext(value) {
     knownTrackBestAt: text(value.knownTrackBestAt, '', 40),
   };
   return Object.fromEntries(Object.entries(sanitized).filter(([, item]) => item !== undefined && item !== ''));
+}
+
+export function preRaceTrackResearchCacheKey(track) {
+  // Research is shared because it contains public track facts. Bind that shared
+  // cache to all sanitized public track metadata rather than the caller-chosen
+  // track id alone. Rider identities and result statistics are deliberately not
+  // part of the key, so they cannot leak through the cache or cause needless
+  // research churn.
+  const metadata = trackResearchMetadataFields.map((field) => [field, track?.[field] ?? null]);
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify(metadata))
+    .digest('hex');
+  return `track-research-v2:${fingerprint}`;
 }
 
 function outputText(payload) {

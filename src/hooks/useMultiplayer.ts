@@ -60,6 +60,12 @@ type IncomingMatchInvite = {
   from: MultiplayerRider;
 };
 
+export type MultiplayerRoomExit = Readonly<{
+  sequence: number;
+  roomId: string | null;
+  reason: string | null;
+}>;
+
 const emptySocialState: MultiplayerSocialState = {
   friends: [],
   incomingFriendRequests: [],
@@ -251,6 +257,11 @@ export function useMultiplayer({
   const [onlineRiders, setOnlineRiders] = useState<MultiplayerRider[]>([]);
   const [rooms, setRooms] = useState<MultiplayerRoom[]>([]);
   const [currentRoom, setCurrentRoom] = useState<MultiplayerRoom | null>(null);
+  const [roomExit, setRoomExit] = useState<MultiplayerRoomExit>({
+    sequence: 0,
+    roomId: null,
+    reason: null,
+  });
   const [roomMessages, setRoomMessages] = useState<MultiplayerRoomMessage[]>([]);
   const [roomRaceStates, setRoomRaceStates] = useState<MultiplayerRaceState[]>([]);
   const [roomExploreStates, setRoomExploreStates] = useState<MultiplayerExploreState[]>([]);
@@ -493,6 +504,11 @@ export function useMultiplayer({
         }
 
         if (message.type === 'room-left') {
+          setRoomExit((current) => ({
+            sequence: current.sequence + 1,
+            roomId: typeof message.roomId === 'string' ? message.roomId : null,
+            reason: typeof message.reason === 'string' ? message.reason : null,
+          }));
           setCurrentRoom(null);
           setRoomMessages([]);
           setRoomRaceStates([]);
@@ -813,6 +829,7 @@ export function useMultiplayer({
     quickMatch,
     respondToChallenge,
     roomMessages,
+    roomExit,
     roomExploreStates,
     roomRaceStates,
     rooms,

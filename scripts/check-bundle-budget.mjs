@@ -11,10 +11,11 @@ function budgetFromEnvironment(name, fallback) {
 
 const budgets = {
   // Event camera precedence, mapped Sprint fallback, remote tablet-bike
-  // wiring, and the guarded club-tablet demo entry add about 3 KB to the
-  // entry controller; the full owner/tablet surfaces remain lazy-loaded and
-  // network-relevant compressed budgets stay unchanged.
-  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 612_000),
+  // wiring, guarded club-tablet demos, and the server-clock gate controller
+  // and DQ-safe event lifecycle add about 8 KB to the entry controller. The
+  // full tablet/map runtimes stay lazy-loaded and the network-relevant
+  // compressed budgets remain unchanged.
+  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 617_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
   cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 134_000),
   cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_000),

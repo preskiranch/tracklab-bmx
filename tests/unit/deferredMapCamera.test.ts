@@ -72,6 +72,20 @@ describe('deferred Google Maps camera relay', () => {
     });
   });
 
+  it('preserves every locked satellite camera field even when the saved vantage is outside track bounds', () => {
+    const camera = {
+      angle: 31,
+      heading: 244,
+      center: { lat: 37.7749, lng: -122.4194 },
+      zoom: 21.5,
+    };
+    const viewRef: { current: DeferredSatelliteMapView } = {
+      current: { track, camera, cameraLocked: true },
+    };
+
+    expect(resolveDeferredSatelliteMapView(viewRef)).toEqual({ track, camera });
+  });
+
   it('uses the latest 3D camera when the library resolves after a saved-view rerender', async () => {
     const viewRef: { current: Deferred3DMapView } = {
       current: {

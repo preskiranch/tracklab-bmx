@@ -35,6 +35,23 @@ function courseTrack(name: string, countryCode = 'CUSTOM'): TrackRecord {
 }
 
 describe('Club Event owner race view', () => {
+  it('keeps the complete BMX event camera in the owner-authored snapshot', () => {
+    const camera = {
+      angle: 17,
+      heading: 271,
+      center: { lat: 38.4207, lng: -122.6994 },
+      zoom: 20.25,
+    };
+    const course: ClubEventCourseOption = {
+      id: 'saved-bmx-track',
+      name: 'Saved BMX Track',
+      track: { ...courseTrack('Saved BMX Track', 'US'), id: 'saved-bmx-track' },
+      raceView: { mode: '3d', camera },
+    };
+
+    expect(clubEventRaceViewForCourse(course, '3d')).toEqual({ mode: '3d', camera });
+  });
+
   it('waits for cold-start camera hydration before opening a race or sprint lobby', () => {
     expect(clubEventLobbyNeedsRaceViews('bmx-race', false)).toBe(true);
     expect(clubEventLobbyNeedsRaceViews('straight-sprint', false)).toBe(true);
@@ -64,6 +81,37 @@ describe('Club Event owner race view', () => {
       mode: 'satellite',
       camera: { angle: 10, heading: 20, center: { lat: 38.42, lng: -122.7 }, zoom: 16 },
     });
+  });
+
+  it('keeps the event snapshot immutable through map initialization and fullscreen relayouts', () => {
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const earthViewSource = readFileSync(new URL('../../src/components/EarthTrackView.tsx', import.meta.url), 'utf8');
+    const map3DSource = readFileSync(new URL('../../src/components/GoogleMaps3DTrackLayer.tsx', import.meta.url), 'utf8');
+    const satelliteSource = readFileSync(new URL('../../src/components/GoogleMapsTrackLayer.tsx', import.meta.url), 'utf8');
+
+    expect(appSource).toContain('raceCameraSnapshot={clubEventRaceCamera}');
+    expect(earthViewSource).toContain('const presentedEarthAngle = raceCameraImmutable');
+    expect(appSource).toContain('raceCameraImmutable={clubEventRaceViewApplies}');
+    expect(earthViewSource).toContain('cameraLocked={raceCameraImmutable || (');
+    expect(map3DSource).toContain('if (cameraLockedRef.current) {');
+    expect(map3DSource).toContain('if (cameraLockedRef.current) return;');
+    expect(map3DSource).toContain("observer.observe(container);");
+    expect(satelliteSource).toContain('const raceCameraInputLocked = cameraLocked;');
+    expect(satelliteSource).toContain('cameraForTrack(latest.camera, latest.track, latest.cameraLocked)');
+    expect(satelliteSource).toContain('cameraForTrack(cameraRef.current, track, cameraLocked)');
+    expect(appSource).toContain('if (clubEventConfigurationLocked) {\n        return current;');
+  });
+
+  it('does not clamp or recenter an exact saved race camera in 3D', () => {
+    const source = readFileSync(new URL('../../src/components/EarthTrackView.tsx', import.meta.url), 'utf8');
+    const raceCameraStart = source.indexOf('const race3DCamera = {');
+    const activeCameraStart = source.indexOf('const active3DCamera', raceCameraStart);
+    const raceCameraSource = source.slice(raceCameraStart, activeCameraStart);
+
+    expect(raceCameraSource).toContain('angle: presentedEarthAngle');
+    expect(raceCameraSource).toContain('center: presentedEarthCenter');
+    expect(raceCameraSource).not.toContain('Math.max');
+    expect(raceCameraSource).not.toContain('mapping3DSafeCenter');
   });
 
   it('offers a camera-free Game Arena only for an eligible custom Dragstrip', () => {

@@ -25,6 +25,7 @@ type RaceReviewPanelProps = {
   track: TrackRecord;
   players: PlayerSlot[];
   raceSummary: RaceSummaryEntry[];
+  disqualifiedPlayerIds?: PlayerSlot['id'][];
   raceCapture: RaceCapture | null;
   activeZones: TrackZone[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
@@ -92,6 +93,7 @@ export function RaceReviewPanel({
   track,
   players,
   raceSummary,
+  disqualifiedPlayerIds = [],
   raceCapture,
   activeZones,
   reactionTimesByPlayer,
@@ -120,14 +122,25 @@ export function RaceReviewPanel({
   const reviewSummary = raceCapture?.status === 'finished' && raceCapture.summary.length > 0
     ? raceCapture.summary
     : raceSummary;
-  const orderedPlayers = reviewSummary.length > 0
-    ? reviewSummary.map((summary) => ({
+  const disqualifiedPlayerIdSet = useMemo(
+    () => new Set(disqualifiedPlayerIds),
+    [disqualifiedPlayerIds],
+  );
+  const disqualifiedPlayers = players.filter((player) => disqualifiedPlayerIdSet.has(player.id));
+  const rankedPlayers = reviewSummary.map((summary) => ({
       id: summary.playerId,
       name: summary.riderName,
       colorName: summary.colorName,
       accent: summary.accent,
       deviceId: null,
-    }))
+    }));
+  const orderedPlayers = reviewSummary.length > 0 || disqualifiedPlayers.length > 0
+    ? [
+      ...rankedPlayers,
+      ...disqualifiedPlayers.filter(
+        (player) => !rankedPlayers.some((ranked) => ranked.id === player.id),
+      ),
+    ]
     : players;
   const playerById = useMemo(
     () => new Map(players.map((player) => [player.id, player])),
@@ -166,7 +179,7 @@ export function RaceReviewPanel({
         </div>
       </div>
 
-      {reviewSummary.length > 0 && (
+      {(reviewSummary.length > 0 || disqualifiedPlayers.length > 0) && (
         <div className="race-review-results">
           {reviewSummary.map((summary) => (
             <div className="race-review-rider-card" key={summary.playerId}>
@@ -200,6 +213,29 @@ export function RaceReviewPanel({
                 <span><strong>{formatNullableSpeed(summary.averageSpeedKph, speedUnit)}</strong><small>avg speed</small></span>
                 <span><strong>{formatNullableMetric(summary.topCadence, 'RPM')}</strong><small>max cadence</small></span>
                 <span><strong>{formatNullableMetric(summary.averageCadence, 'RPM')}</strong><small>avg cadence</small></span>
+              </div>
+            </div>
+          ))}
+          {disqualifiedPlayers.map((player) => (
+            <div className="race-review-rider-card" key={`dq-${player.id}`}>
+              <div className="race-review-rider-heading">
+                <RiderAvatar
+                  name={player.name}
+                  photoUrl={player.photoUrl}
+                  accent={player.accent}
+                  className="race-review-rider-avatar"
+                />
+                <span
+                  className="player-chip"
+                  style={{ '--player-color': player.accent } as CSSProperties}
+                >
+                  P{player.id}
+                </span>
+                <div>
+                  <strong>{player.name}</strong>
+                  <small>False start · not ranked or saved</small>
+                </div>
+                <span className="place-badge">DQ</span>
               </div>
             </div>
           ))}

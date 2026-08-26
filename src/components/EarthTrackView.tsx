@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   Box,
   ChevronDown,
@@ -57,6 +57,7 @@ import type {
 import type { CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 import type { PersonalRecordAchievements } from '../lib/personalRecords';
 import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
+import { normalizedRaceDisplayRanks } from '../lib/raceDisplayRanking';
 
 const GoogleMaps3DTrackLayer = lazy(async () => {
   const module = await import('./GoogleMaps3DTrackLayer');
@@ -102,12 +103,15 @@ type EarthTrackViewProps = {
   finishCountdownSeconds: number | null;
   reactionTimesByPlayer: ReactionTimesByPlayer;
   newPersonalRecordsByPlayer: PersonalRecordAchievements;
+  disqualifiedPlayerIds: PlayerSlot['id'][];
   heartRateByPlayer?: LiveHeartRateByPlayer;
   earthAngle: number;
   earthHeading: number;
   earthCenter: TrackPoint | null;
   earthZoom: number | null;
   raceCameraLocked: boolean;
+  raceCameraImmutable?: boolean;
+  raceCameraSnapshot?: Partial<EarthCamera>;
   canEditRaceLayout: boolean;
   riderOverlayPreference?: RaceRiderOverlayLayout;
   activeZones: TrackZone[];
@@ -206,12 +210,15 @@ export function EarthTrackView({
   finishCountdownSeconds,
   reactionTimesByPlayer,
   newPersonalRecordsByPlayer,
+  disqualifiedPlayerIds,
   heartRateByPlayer,
   earthAngle,
   earthHeading,
   earthCenter,
   earthZoom,
   raceCameraLocked,
+  raceCameraImmutable = false,
+  raceCameraSnapshot,
   canEditRaceLayout,
   riderOverlayPreference,
   activeZones,
@@ -269,6 +276,20 @@ export function EarthTrackView({
     && race3DFallbackTrackId !== track.id;
   const showingGameArena = raceViewMode === 'game';
   const showingAny3D = showingPedalZone3D || showingRace3D;
+  // Resolve the coach snapshot during render. A warm Google Maps loader can
+  // mount before App's passive restore effect copies it into local state.
+  const presentedEarthAngle = raceCameraImmutable
+    ? raceCameraSnapshot?.angle ?? earthAngle
+    : earthAngle;
+  const presentedEarthHeading = raceCameraImmutable
+    ? raceCameraSnapshot?.heading ?? earthHeading
+    : earthHeading;
+  const presentedEarthCenter = raceCameraImmutable
+    ? raceCameraSnapshot?.center ?? earthCenter
+    : earthCenter;
+  const presentedEarthZoom = raceCameraImmutable
+    ? raceCameraSnapshot?.zoom ?? earthZoom
+    : earthZoom;
   const mapping3DTrackCenter = trackCenter(track);
   const mapping3DSafeCenter = mapping3DCenterForTrack(
     earthCenter,
@@ -298,14 +319,17 @@ export function EarthTrackView({
     track.id,
   ]);
   const race3DCamera = {
-    angle: Math.max(55, earthAngle),
-    heading: earthHeading,
-    center: mapping3DSafeCenter,
-    zoom: earthZoom,
+    // A race camera is already a validated saved view. The steeper tilt and
+    // near-track center are safety defaults for temporary obstacle mapping,
+    // not transformations that should change a saved race presentation.
+    angle: presentedEarthAngle,
+    heading: presentedEarthHeading,
+    center: presentedEarthCenter,
+    zoom: presentedEarthZoom,
   };
   const active3DCamera = showingPedalZone3D ? mapping3DCamera : race3DCamera;
-  const activeEarthAngle = showingAny3D ? active3DCamera.angle : earthAngle;
-  const activeEarthHeading = showingAny3D ? active3DCamera.heading : earthHeading;
+  const activeEarthAngle = showingAny3D ? active3DCamera.angle : presentedEarthAngle;
+  const activeEarthHeading = showingAny3D ? active3DCamera.heading : presentedEarthHeading;
   const imageryLabel = showingPedalZone3D
     ? '3D obstacle view'
     : showingRace3D
@@ -326,9 +350,55 @@ export function EarthTrackView({
         ? 'Supplemental locator'
         : 'Source pending verification';
   const showMappingUi = mappingMode && !raceViewFullscreen;
-  const mapRiders = mappingMode ? [] : riders;
-  const mapGhostRiders = mappingMode ? [] : ghostRiders;
-  const mapRemoteRaceStates = mappingMode ? [] : remoteRaceStates;
+  const disqualifiedPlayerIdSet = useMemo(
+    () => new Set(disqualifiedPlayerIds),
+    [disqualifiedPlayerIds],
+  );
+  const displayRaceState = useMemo(() => {
+    const rankById = normalizedRaceDisplayRanks([
+      ...riders.map((rider) => ({
+        id: `local-${rider.playerId}`,
+        distanceMeters: rider.distance,
+        finishedAt: rider.finishedAt,
+        rank: rider.rank,
+        disqualified: disqualifiedPlayerIdSet.has(rider.playerId),
+      })),
+      ...remoteRaceStates.flatMap((state) => state.riders.map((rider) => ({
+        id: `remote-${state.clientId}-${rider.id}`,
+        distanceMeters: rider.distance,
+        finishedAt: rider.finishedAt,
+        rank: rider.rank,
+        disqualified: rider.disqualified === true,
+      }))),
+      ...ghostRiders.map((rider) => ({
+        id: `ghost-${rider.id}`,
+        distanceMeters: rider.distance,
+        finishedAt: rider.finishedAt,
+        rank: rider.rank,
+      })),
+    ]);
+
+    return {
+      riders: riders.map((rider) => ({
+        ...rider,
+        rank: rankById.get(`local-${rider.playerId}`) ?? rider.rank,
+      })),
+      remoteRaceStates: remoteRaceStates.map((state) => ({
+        ...state,
+        riders: state.riders.map((rider) => ({
+          ...rider,
+          rank: rankById.get(`remote-${state.clientId}-${rider.id}`) ?? rider.rank,
+        })),
+      })),
+      ghostRiders: ghostRiders.map((rider) => ({
+        ...rider,
+        rank: rankById.get(`ghost-${rider.id}`) ?? rider.rank,
+      })),
+    };
+  }, [disqualifiedPlayerIdSet, ghostRiders, remoteRaceStates, riders]);
+  const mapRiders = mappingMode ? [] : displayRaceState.riders;
+  const mapGhostRiders = mappingMode ? [] : displayRaceState.ghostRiders;
+  const mapRemoteRaceStates = mappingMode ? [] : displayRaceState.remoteRaceStates;
   const progressLengthMeters = raceDistanceMeters ?? track.lengthMeters;
 
   return (
@@ -369,6 +439,7 @@ export function EarthTrackView({
               speedUnit={speedUnit}
               distanceUnit={distanceUnit}
               newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
+              disqualifiedPlayerIds={disqualifiedPlayerIds}
               showHud={raceViewFullscreen && !mappingMode}
             />
           </Suspense>
@@ -403,7 +474,9 @@ export function EarthTrackView({
                 earthHeading={active3DCamera.heading}
                 earthCenter={active3DCamera.center}
                 earthZoom={active3DCamera.zoom}
-                cameraLocked={showingRace3D && raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
+                cameraLocked={raceCameraImmutable || (
+                  showingRace3D && raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)
+                )}
                 mappingMode={showingPedalZone3D}
                 mappingEditMode={showingPedalZone3D ? 'zones' : 'navigate'}
                 mappingRouteVariantId={mappingRouteVariantId}
@@ -453,13 +526,15 @@ export function EarthTrackView({
               distanceUnit={distanceUnit}
               cStartOffsetsByPlayer={cStartOffsetsByPlayer}
               raceViewFullscreen={raceViewFullscreen}
-              cameraLocked={raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)}
+              cameraLocked={raceCameraImmutable || (
+                raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)
+              )}
               raceState={raceState}
               raceDistanceMeters={raceDistanceMeters}
-              earthAngle={earthAngle}
-              earthHeading={earthHeading}
-              earthCenter={earthCenter}
-              earthZoom={earthZoom}
+              earthAngle={presentedEarthAngle}
+              earthHeading={presentedEarthHeading}
+              earthCenter={presentedEarthCenter}
+              earthZoom={presentedEarthZoom}
               activeZones={activeZones}
               mappingMode={mappingMode}
               mappingEditMode={mappingEditMode}
@@ -648,9 +723,9 @@ export function EarthTrackView({
           <Suspense fallback={null}>
             <RaceRiderOverlay
               trackId={track.id}
-              riders={riders}
-              ghostRiders={ghostRiders}
-              remoteRaceStates={remoteRaceStates}
+              riders={displayRaceState.riders}
+              ghostRiders={displayRaceState.ghostRiders}
+              remoteRaceStates={displayRaceState.remoteRaceStates}
               players={players}
               raceState={raceState}
               visible={raceViewFullscreen && !mappingMode}
@@ -661,6 +736,7 @@ export function EarthTrackView({
               onPreferenceChange={onRiderOverlayPreferenceChange}
               onFullscreenInteraction={onRaceFullscreenInteraction}
               newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
+              disqualifiedPlayerIds={disqualifiedPlayerIds}
               heartRateByPlayer={heartRateByPlayer}
               samplesByDevice={samplesByDevice}
             />
@@ -785,10 +861,11 @@ export function EarthTrackView({
         <div className="rider-strip">
           {players.length === 0 ? (
             <div className="empty-compact">No live bikes detected. Start pedaling or run the simulator bridge.</div>
-          ) : riders.map((rider) => {
+          ) : displayRaceState.riders.map((rider) => {
             const player = players.find((slot) => slot.id === rider.playerId);
             const sample = player?.deviceId == null ? undefined : samplesByDevice.get(player.deviceId);
             const reactionTime = player ? reactionTimesByPlayer[player.id] : null;
+            const disqualified = disqualifiedPlayerIdSet.has(rider.playerId);
 
             return (
               <div className="rider-stat" style={{ '--player-color': player?.accent ?? '#111827' } as CSSProperties} key={rider.playerId}>
@@ -800,33 +877,37 @@ export function EarthTrackView({
                 />
                 <div className="rider-stat-identity">
                   <strong>{player?.name ?? `Player ${rider.playerId}`}</strong>
-                  <span>Gate P{rider.playerId} / {raceProgressPercent(rider.distance, progressLengthMeters)}% / RT {formatReactionTime(reactionTime)}</span>
+                  <span>{disqualified
+                    ? `Gate P${rider.playerId} / False start / not ranked`
+                    : `Gate P${rider.playerId} / ${raceProgressPercent(rider.distance, progressLengthMeters)}% / RT ${formatReactionTime(reactionTime)}`}</span>
                 </div>
                 <div className="rider-stat-live">
                   <Signal size={14} />
                   <span>{sample ? `${Math.round(sample.signal * 100)}%` : 'Waiting'}</span>
                 </div>
                 <strong className={`rider-card-place ${raceState === 'ready' ? 'ready' : ''}`}>
-                  {raceState === 'ready' ? 'READY' : formatPlacement(rider.rank)}
+                  {disqualified ? 'DQ' : raceState === 'ready' ? 'READY' : formatPlacement(rider.rank)}
                 </strong>
               </div>
             );
           })}
-          {remoteRaceStates.flatMap((state) => state.riders.map((rider) => (
+          {displayRaceState.remoteRaceStates.flatMap((state) => state.riders.map((rider) => (
             <div className="rider-stat remote" style={{ '--player-color': rider.accent } as CSSProperties} key={`${state.clientId}-${rider.id}`}>
               <RiderAvatar name={rider.name} photoUrl={rider.photoUrl} accent={rider.accent} className="rider-stat-avatar" />
               <div className="rider-stat-identity">
                 <strong>{rider.name}</strong>
-                <span>Remote / {raceProgressPercent(rider.distance, progressLengthMeters)}% / {state.raceState}</span>
+                <span>{rider.disqualified
+                  ? 'Remote / False start / not ranked'
+                  : `Remote / ${raceProgressPercent(rider.distance, progressLengthMeters)}% / ${state.raceState}`}</span>
               </div>
               <div className="rider-stat-live">
                 <Signal size={14} />
                 <span>{rider.sampleAt ? `${Math.round(rider.signal * 100)}%` : 'Remote'}</span>
               </div>
-              <strong className="rider-card-place">{formatPlacement(rider.rank)}</strong>
+              <strong className="rider-card-place">{rider.disqualified ? 'DQ' : formatPlacement(rider.rank)}</strong>
             </div>
           )))}
-          {ghostRiders.map((rider, index) => (
+          {displayRaceState.ghostRiders.map((rider, index) => (
             <div className="rider-stat ghost" style={{ '--player-color': rider.accent } as CSSProperties} key={rider.id}>
               <RiderAvatar name={rider.name} accent={rider.accent} className="rider-stat-avatar" />
               <div className="rider-stat-identity">

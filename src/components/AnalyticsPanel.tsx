@@ -32,6 +32,7 @@ type AnalyticsPanelProps = {
   track: TrackRecord;
   players: PlayerSlot[];
   raceSummary: RaceSummaryEntry[];
+  disqualifiedPlayerIds?: PlayerSlot['id'][];
   selectedMetrics: MetricKey[];
   reactionTimesByPlayer: ReactionTimesByPlayer;
   speedUnit: SpeedUnit;
@@ -182,6 +183,7 @@ export function AnalyticsPanel({
   track,
   players,
   raceSummary,
+  disqualifiedPlayerIds = [],
   selectedMetrics,
   reactionTimesByPlayer,
   speedUnit,
@@ -217,6 +219,11 @@ export function AnalyticsPanel({
   const showCadenceSummary = selectedMetrics.includes('cadence');
   const showReactionSummary = selectedMetrics.includes('reaction');
   const winner = raceSummary[0];
+  const disqualifiedPlayerIdSet = useMemo(
+    () => new Set(disqualifiedPlayerIds),
+    [disqualifiedPlayerIds],
+  );
+  const disqualifiedPlayers = players.filter((player) => disqualifiedPlayerIdSet.has(player.id));
   const bestSpeed = bestSummaryValue(raceSummary, (summary) => summary.topSpeedKph);
   const bestCadence = bestSummaryValue(raceSummary, (summary) => summary.topCadence);
   const bestReaction = bestReactionTime(raceSummary, reactionTimesByPlayer);
@@ -354,7 +361,7 @@ export function AnalyticsPanel({
         </div>
       )}
 
-      {raceSummary.length > 0 && (
+      {(raceSummary.length > 0 || disqualifiedPlayers.length > 0) && (
         <div className="race-summary-card">
           <div className="section-heading">
             <div>
@@ -463,6 +470,40 @@ export function AnalyticsPanel({
                       </td>
                     )}
                     <td>{summary.sampleCount}</td>
+                  </tr>
+                ))}
+                {disqualifiedPlayers.map((player) => (
+                  <tr key={`dq-${player.id}`}>
+                    <td><span className="place-badge">DQ</span></td>
+                    <td>
+                      <div className="summary-rider">
+                        <RiderAvatar
+                          name={player.name}
+                          photoUrl={player.photoUrl}
+                          accent={player.accent}
+                          className="summary-rider-avatar"
+                        />
+                        <span
+                          className="player-chip"
+                          style={{ '--player-color': player.accent } as CSSProperties}
+                        >
+                          P{player.id}
+                        </span>
+                        <div>
+                          <strong>{player.name}</strong>
+                          <span>False start · not ranked or saved</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>DQ</td>
+                    <td>--</td>
+                    {showReactionSummary && <td>--</td>}
+                    {showSpeedSummary && <td>--</td>}
+                    {showSpeedSummary && <td>--</td>}
+                    {showCadenceSummary && <td>--</td>}
+                    {showCadenceSummary && <td>--</td>}
+                    {hasHeartRate && <td>--</td>}
+                    <td>--</td>
                   </tr>
                 ))}
               </tbody>

@@ -100,6 +100,27 @@ describe('race audio resilience', () => {
     expect(speak).not.toHaveBeenCalled();
   });
 
+  it('does not revive a pending UCI voice after the gate audio is stopped', async () => {
+    const {
+      playUciRandomStartVoice,
+      stopStartGateAudio,
+      uciRandomStartVoiceUrl,
+    } = await import('../../src/lib/audioCues');
+
+    const voiceStart = playUciRandomStartVoice(100);
+    const cadenceAudio = StalledAudio.instances.find((audio) => (
+      audio.src.endsWith(uciRandomStartVoiceUrl)
+    ));
+    expect(cadenceAudio).toBeDefined();
+
+    stopStartGateAudio();
+    await vi.advanceTimersByTimeAsync(101);
+
+    await expect(voiceStart).resolves.toMatchObject({ source: 'cancelled' });
+    expect(cadenceAudio).toMatchObject({ paused: true, currentTime: 0 });
+    expect(StalledAudio.instances).toHaveLength(1);
+  });
+
   it('uses the primed media cadence when playback is available', async () => {
     StalledAudio.stallPlayback = false;
     const {
@@ -279,6 +300,68 @@ describe('race audio resilience', () => {
       volume: 1,
     });
     expect(StalledAudio.instances[0].src).toMatch(/^data:audio\/wav;base64,/);
+  });
+
+  it('does not revive a stale gate tone after a delayed audio-context resume', async () => {
+    const frequencies: number[] = [];
+    let resolveResume: (() => void) | undefined;
+    const resumed = new Promise<void>((resolve) => {
+      resolveResume = resolve;
+    });
+
+    class DelayedGateAudioContext {
+      currentTime = 0;
+      destination = {};
+      state = 'suspended';
+
+      createGain() {
+        return {
+          connect() {},
+          gain: {
+            exponentialRampToValueAtTime() {},
+            setValueAtTime() {},
+          },
+        };
+      }
+
+      createOscillator() {
+        return {
+          connect() {},
+          frequency: {
+            setValueAtTime(value: number) {
+              frequencies.push(value);
+            },
+          },
+          start() {},
+          stop() {},
+          type: 'sine',
+        };
+      }
+
+      resume() {
+        return resumed.then(() => {
+          this.state = 'running';
+        });
+      }
+    }
+    vi.stubGlobal('window', {
+      AudioContext: DelayedGateAudioContext,
+      webkitAudioContext: undefined,
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+      speechSynthesis: undefined,
+    });
+    const { playStartGateTone, stopStartGateAudio } = await import('../../src/lib/audioCues');
+
+    playStartGateTone('uci-red');
+    await vi.advanceTimersByTimeAsync(501);
+    stopStartGateAudio();
+    resolveResume?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(frequencies).toEqual([]);
+    expect(StalledAudio.instances[0]).toMatchObject({ paused: true, currentTime: 0 });
   });
 
   it('does not reload or stop ambience when cadence preparation runs', async () => {

@@ -12,6 +12,8 @@ let raceAudioKeepAliveOscillator: OscillatorNode | null = null;
 let raceAudioKeepAliveGain: GainNode | null = null;
 let activeStartGateAudio: HTMLAudioElement | null = null;
 let activeStartGateBufferSource: AudioBufferSourceNode | null = null;
+let startGateAudioGeneration = 0;
+let startGateToneGeneration = 0;
 let startGateToneAudioPool: HTMLAudioElement[] = [];
 let startGateToneAudioIndex = 0;
 let startGateToneMediaPrimed = false;
@@ -91,7 +93,7 @@ export function bmxEventAmbienceProfile(index: number): BmxEventAmbienceProfile 
   };
 }
 
-type UciVoiceStartSource = 'audio' | 'fallback';
+type UciVoiceStartSource = 'audio' | 'fallback' | 'cancelled';
 type StartGateToneKind = 'tick' | 'gate' | 'uci-red' | 'uci-green';
 
 export type UciVoiceStartResult = {
@@ -628,6 +630,8 @@ function playStartGateToneWithWebAudio(kind: StartGateToneKind) {
 }
 
 export function playStartGateTone(kind: StartGateToneKind) {
+  const toneGeneration = ++startGateToneGeneration;
+  const toneWasCancelled = () => toneGeneration !== startGateToneGeneration;
   if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
     window.dispatchEvent(new CustomEvent('tracklab-start-gate-tone', {
       detail: { kind, at: Date.now() },
@@ -654,18 +658,31 @@ export function playStartGateTone(kind: StartGateToneKind) {
     500,
     false,
   ).then((started) => {
+    if (toneWasCancelled()) {
+      audio.pause();
+      audio.currentTime = 0;
+      return;
+    }
     if (started || !context || context.state === 'closed') {
       return;
     }
     void context.resume()
       .then(() => {
-        playStartGateToneWithWebAudio(kind);
+        if (!toneWasCancelled()) {
+          playStartGateToneWithWebAudio(kind);
+        }
       })
       .catch(() => undefined);
   });
 }
 
 export function stopStartGateAudio() {
+  // Invalidate async voice startup work as well as stopping sources that have
+  // already started. A slow media element, AudioContext resume, or buffer load
+  // must not revive the cadence after a red/green phase or explicit cancel.
+  startGateAudioGeneration += 1;
+  startGateToneGeneration += 1;
+
   if (activeStartGateBufferSource) {
     try {
       activeStartGateBufferSource.stop();
@@ -691,6 +708,12 @@ export function stopStartGateAudio() {
 
 export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoiceStartResult> {
   stopStartGateAudio();
+  const playbackGeneration = startGateAudioGeneration;
+  const playbackWasCancelled = () => playbackGeneration !== startGateAudioGeneration;
+  const cancelledResult = (): UciVoiceStartResult => ({
+    startedAt: Date.now(),
+    source: 'cancelled',
+  });
   const audio = getStartGateAudio();
   if (!audio.src.endsWith(uciRandomStartVoiceUrl)) {
     audio.src = uciRandomStartVoiceUrl;
@@ -735,6 +758,9 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
       })
       .catch(() => finish(null));
   });
+  if (playbackWasCancelled()) {
+    return cancelledResult();
+  }
 
   if (mediaResult) {
     return mediaResult;
@@ -744,11 +770,20 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
   const context = getAudioContext();
   if (context && context.state !== 'running' && context.state !== 'closed') {
     await settleWithin(context.resume(), 1_200, undefined);
+    if (playbackWasCancelled()) {
+      return cancelledResult();
+    }
   }
 
   if (context?.state === 'running') {
     const voiceBuffer = await settleWithin(loadUciVoiceBuffer(context), 2_500, null);
+    if (playbackWasCancelled()) {
+      return cancelledResult();
+    }
     if (voiceBuffer) {
+      if (playbackWasCancelled()) {
+        return cancelledResult();
+      }
       const source = context.createBufferSource();
       source.buffer = voiceBuffer;
       source.connect(context.destination);
@@ -760,11 +795,19 @@ export async function playUciRandomStartVoice(timeoutMs = 2_500): Promise<UciVoi
       }, { once: true });
       activeStartGateBufferSource = source;
       const startedAt = Date.now();
+      if (playbackWasCancelled()) {
+        activeStartGateBufferSource = null;
+        source.disconnect();
+        return cancelledResult();
+      }
       source.start();
       return { startedAt, source: 'audio' };
     }
   }
 
+  if (playbackWasCancelled()) {
+    return cancelledResult();
+  }
   playStartGateTone('tick');
   return { startedAt: Date.now(), source: 'fallback' };
 }

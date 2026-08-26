@@ -85,6 +85,8 @@ type PreparedRaceSpeech = {
 
 type UseRaceCommentaryOptions = {
   preferences: RaceCommentaryPreferences;
+  clubTabletSessionToken?: string | null;
+  accountProfileKey?: string | null;
   raceState: RaceState;
   startGateActive: boolean;
   startGatePhase: 'idle' | 'staging' | 'cadence' | 'false-start' | 'go';
@@ -158,6 +160,7 @@ function preparedPreRaceSpeechKey(
   ghostLaps: GhostLap[],
   lapCount: number,
   preferences: RaceCommentaryPreferences,
+  accessPrincipal: string,
 ) {
   const riderKey = players.map((player) => `${player.id}:${player.name}`).join('|');
   const ghostKey = ghostLaps
@@ -170,6 +173,7 @@ function preparedPreRaceSpeechKey(
     riderKey,
     ghostKey,
     preferences.voicePreset,
+    accessPrincipal,
   ].join('::');
 }
 
@@ -186,22 +190,42 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, tim
   }
 }
 
+export function raceCommentaryRequestHeaders(
+  accept: string,
+  clubTabletSessionToken?: string | null,
+) {
+  const sessionToken = clubTabletSessionToken?.trim();
+  return {
+    Accept: accept,
+    'Content-Type': 'application/json',
+    ...(sessionToken ? { 'X-TrackLab-Club-Tablet-Session': sessionToken } : {}),
+  };
+}
+
+export function raceCommentaryAccessPrincipalKey(
+  clubTabletSessionToken?: string | null,
+  accountProfileKey?: string | null,
+) {
+  const sessionToken = clubTabletSessionToken?.trim();
+  if (sessionToken) return `club-tablet:${sessionToken}`;
+  const profileKey = accountProfileKey?.trim();
+  return profileKey ? `account:${profileKey}` : 'anonymous';
+}
+
 async function requestAiSpeechBlob(
   line: string,
   preferences: RaceCommentaryPreferences,
   eventKind: CommentarySpeechEventKind,
   riderNames: string[],
   deliveryStyle: CommentaryDeliveryStyle = 'straight',
+  clubTabletSessionToken?: string | null,
   timeoutMs = 12_000,
   signal?: AbortSignal,
 ) {
   const response = await fetchWithTimeout('/api/commentary/speech', {
     method: 'POST',
     signal,
-    headers: {
-      Accept: 'audio/wav',
-      'Content-Type': 'application/json',
-    },
+    headers: raceCommentaryRequestHeaders('audio/wav', clubTabletSessionToken),
     body: JSON.stringify({
       line,
       voicePreset: preferences.voicePreset,
@@ -541,6 +565,8 @@ async function playAudioBlob(
 
 export function useRaceCommentary({
   preferences,
+  clubTabletSessionToken,
+  accountProfileKey,
   raceState,
   startGateActive,
   startGatePhase,
@@ -662,13 +688,19 @@ export function useRaceCommentary({
     () => buildPreRaceTrackContext(track, players, ghostLaps, lapCount),
     [ghostLaps, lapCount, players, track],
   );
+  const accessPrincipalKey = raceCommentaryAccessPrincipalKey(
+    clubTabletSessionToken,
+    accountProfileKey,
+  );
   const preRaceKey = preparedPreRaceSpeechKey(
     track.id,
     players,
     ghostLaps,
     lapCount,
     preferences,
+    accessPrincipalKey,
   );
+  const accessPrincipalRef = useRef(accessPrincipalKey);
   const startSpeechKey = preparedStartSpeechKey(startLine, preferences, players);
 
   const setPlaybackPhase = useCallback((phase: CommentaryPlaybackPhase) => {
@@ -728,6 +760,7 @@ export function useRaceCommentary({
         eventKind,
         riderNames,
         deliveryStyle,
+        clubTabletSessionToken,
         commentarySpeechTimeoutMs(eventKind),
         signal,
       );
@@ -737,7 +770,7 @@ export function useRaceCommentary({
       recordSpeechFailure(error);
       throw error;
     }
-  }, [recordSpeechFailure, recordSpeechReady]);
+  }, [clubTabletSessionToken, recordSpeechFailure, recordSpeechReady]);
 
   const playCommentarySpeech = useCallback(async (
     line: string,
@@ -813,6 +846,18 @@ export function useRaceCommentary({
     activeBufferSourceRef.current = null;
     setPlaybackPhase('idle');
   }, [setPlaybackPhase]);
+
+  useEffect(() => {
+    if (accessPrincipalRef.current === accessPrincipalKey) return;
+    accessPrincipalRef.current = accessPrincipalKey;
+    preRacePrefetchRequestRef.current += 1;
+    preparedPreRaceSpeechRef.current = null;
+    playedPreRaceKeyRef.current = '';
+    setPreRaceReport(null);
+    // An in-app account or athlete switch is an identity boundary. Stop any
+    // private briefing that was fetched for the previous principal.
+    stopPlayback();
+  }, [accessPrincipalKey, stopPlayback]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1050,10 +1095,7 @@ export function useRaceCommentary({
     void fetchWithTimeout('/api/commentary/pre-race', {
       method: 'POST',
       signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
+      headers: raceCommentaryRequestHeaders('application/json', clubTabletSessionToken),
       body: JSON.stringify({
         track: preRaceContext,
         voicePreset: preferences.voicePreset,

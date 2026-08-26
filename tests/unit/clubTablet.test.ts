@@ -145,6 +145,40 @@ describe('Club Tablet client state', () => {
       .toBeLessThan(guardSource.indexOf('void handleSignOut()'));
   });
 
+  it('primes club-tablet race audio inside the rider gesture before any coach-event request', () => {
+    const eventSource = readFileSync(
+      new URL('../../src/components/ClubTabletEventCard.tsx', import.meta.url),
+      'utf8',
+    );
+    const readyStart = eventSource.indexOf('const ready = async () =>');
+    const readyEnd = eventSource.indexOf('const leave = async () =>', readyStart);
+    const readySource = eventSource.slice(readyStart, readyEnd);
+    expect(readyStart).toBeGreaterThanOrEqual(0);
+    expect(readyEnd).toBeGreaterThan(readyStart);
+    expect(readySource).toContain('void onPrimeAudio?.()');
+    expect(readySource.indexOf('void onPrimeAudio?.()'))
+      .toBeLessThan(readySource.indexOf('await onReady('));
+
+    const modeSource = readFileSync(
+      new URL('../../src/components/ClubTabletMode.tsx', import.meta.url),
+      'utf8',
+    );
+    const programStart = modeSource.indexOf('const chooseProgram = (program: ClubTabletProgram) =>');
+    const programEnd = modeSource.indexOf('useEffect(() => {', programStart);
+    const programSource = modeSource.slice(programStart, programEnd);
+    expect(programSource).toContain('void onPrimeAudio?.()');
+    expect(programSource.indexOf('void onPrimeAudio?.()'))
+      .toBeLessThan(programSource.indexOf('onOpenProgram(program)'));
+
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const kioskStart = appSource.indexOf('<ClubTabletMode');
+    const kioskEnd = appSource.indexOf('/>', kioskStart);
+    const kioskSource = appSource.slice(kioskStart, kioskEnd);
+    expect(kioskSource).toContain('onPrimeAudio={() => Promise.allSettled([');
+    expect(kioskSource).toContain('primeRaceAudio()');
+    expect(kioskSource).toContain('primeBikeRaceAudio()');
+  });
+
   it('keeps Wattbike pairing locked until server authorization is active', () => {
     expect(clubTabletBikeAccessReady('checking', false)).toBe(false);
     expect(clubTabletBikeAccessReady('error', false)).toBe(false);
@@ -674,7 +708,7 @@ describe('Club Tablet client state', () => {
 
   it('retries a room race token until the latest start handler accepts it', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
-    const handlerAssignment = appSource.indexOf("roomRaceStartHandlerRef.current = () => handleStart('room-clock');");
+    const handlerAssignment = appSource.indexOf("roomRaceStartHandlerRef.current = (authority) => handleStart('room-clock', authority);");
     const effectStart = appSource.indexOf("const roomFlow = multiplayer.currentRoom?.flow;", handlerAssignment);
     const effectEnd = appSource.indexOf("const nativeBluetoothFailed", effectStart);
     const effectSource = appSource.slice(effectStart, effectEnd);
@@ -682,21 +716,89 @@ describe('Club Tablet client state', () => {
     expect(effectStart).toBeGreaterThanOrEqual(0);
     expect(effectEnd).toBeGreaterThan(effectStart);
     expect(handlerAssignment).toBeGreaterThanOrEqual(0);
-    expect(effectSource).toContain('started = await roomRaceStartHandlerRef.current();');
+    expect(effectSource).toContain('started = await roomRaceStartHandlerRef.current(roomAuthority);');
     expect(effectSource).toContain('lastRoomRaceTokenRef.current = raceToken;');
-    expect(effectSource.indexOf('started = await roomRaceStartHandlerRef.current();'))
+    expect(effectSource.indexOf('started = await roomRaceStartHandlerRef.current(roomAuthority);'))
       .toBeLessThan(effectSource.indexOf('lastRoomRaceTokenRef.current = raceToken;'));
     expect(effectSource).toContain('}, 250);');
   });
 
   it('lets only the synchronized room clock start an active coach-led race', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const multiplayerSource = readFileSync(new URL('../../src/hooks/useMultiplayer.ts', import.meta.url), 'utf8');
     const startHandler = appSource.slice(
-      appSource.indexOf("const handleStart = async (source: 'manual' | 'room-clock' = 'manual')"),
+      appSource.indexOf('const handleStart = async ('),
       appSource.indexOf('// The server-clock timer must call the newest render', appSource.indexOf('const handleStart = async')),
     );
     expect(startHandler).toContain("if (clubEventConfigurationLocked && source !== 'room-clock') return false;");
-    expect(appSource).toContain("roomRaceStartHandlerRef.current = () => handleStart('room-clock');");
+    expect(startHandler).toContain('return await scheduleClubEventGate(startingTrackId, sequenceId, roomAuthority);');
+    expect(appSource).toContain("roomRaceStartHandlerRef.current = (authority) => handleStart('room-clock', authority);");
+    expect(appSource).toContain('(clubEventLaunch != null && multiplayer.latency.measuredAt == null)');
+    expect(appSource).toContain('cadenceStartedAtRef.current = plan.cadenceLocalAt;');
+    expect(appSource).toContain('// Stop any slow/stale cadence media before every coalesced red phase;');
+    expect(appSource).toContain('stopStartGateAudio();');
+    const synchronizedGreenHandler = appSource.slice(
+      appSource.indexOf('onGreen: (gateDropLocalAt, playTone) => {'),
+      appSource.indexOf('beginRaceAtGateDrop(startingTrackId, sequenceId, gateDropLocalAt);') + 80,
+    );
+    expect(synchronizedGreenHandler).toContain('stopStartGateAudio();');
+    expect(synchronizedGreenHandler.indexOf('stopStartGateAudio();'))
+      .toBeLessThan(synchronizedGreenHandler.indexOf("playStartGateTone('uci-green')"));
+    expect(appSource).toContain("if (roomPhase == null || roomPhase === 'race')");
+    expect(appSource).toContain('multiplayer.roomExit.sequence > activeClubEventGateRoomExitSequenceRef.current');
+    expect(appSource).toContain('|| latestRoomExitSequenceRef.current !== roomExitSequence');
+    expect(appSource.indexOf('const roomExitSequence = latestRoomExitSequenceRef.current;'))
+      .toBeLessThan(appSource.indexOf("await import('./lib/clubEventGateTimeline')"));
+    expect(appSource).toContain('synchronizedFalseStartPlayerIdsRef.current.add(detection.playerId);');
+    expect(appSource).toContain('setSynchronizedFalseStartPlayerIds((current) => (');
+    expect(appSource).toContain('(summary) => !synchronizedFalseStartPlayerIdSet.has(summary.playerId)');
+    expect(appSource).toContain('.map((summary, index) => ({ ...summary, rank: index + 1 }))');
+    expect(appSource).toContain('disqualifiedPlayerIds={synchronizedFalseStartPlayerIds}');
+    expect(appSource).toContain('players: commentaryRacePlayers,');
+    expect(appSource).toContain('riders: commentaryRiders,');
+    expect(appSource).toContain('newPersonalRecordsByPlayer: commentaryPersonalRecordsByPlayer,');
+    expect(appSource).toContain('!synchronizedFalseStartPlayerIdSet.has(rider.playerId)');
+    expect(appSource).toContain('.map((rider, index) => ({ ...rider, rank: index + 1 }))');
+    const personalRecordDerivation = appSource.slice(
+      appSource.indexOf('const newPersonalRecordsByPlayer = useMemo'),
+      appSource.indexOf('const commentaryRacePlayers = useMemo'),
+    );
+    expect(personalRecordDerivation).toContain(
+      '.filter((rider) => !synchronizedFalseStartPlayerIdSet.has(rider.playerId))',
+    );
+    const falseStartReaction = appSource.slice(
+      appSource.indexOf('if (synchronizedFalseStartPlayerIdsRef.current.has(player.id))'),
+      appSource.indexOf('const sample = samplesByDevice.get(player.deviceId);'),
+    );
+    expect(falseStartReaction).not.toContain('next[player.id] = 0');
+    const eventCancellation = appSource.slice(
+      appSource.indexOf('const cancelActiveClubEventGateAndRace = useCallback'),
+      appSource.indexOf('useEffect(() => {', appSource.indexOf('const cancelActiveClubEventGateAndRace = useCallback')),
+    );
+    expect(eventCancellation).toContain("status: 'cancelled'");
+    expect(eventCancellation).toContain('resetRace();');
+    expect(eventCancellation).toContain("bridge.sendControlCommand('race-reset')");
+    expect(eventCancellation).toContain("const preserveCompletedResults = raceState === 'finished';");
+    expect(eventCancellation).toContain('clearStartGateSequence(preserveCompletedResults);');
+    const completedResultCleanup = appSource.slice(
+      appSource.indexOf('const clearStartGateSequence = useCallback'),
+      appSource.indexOf('const cancelActiveClubEventGateAndRace = useCallback'),
+    );
+    expect(completedResultCleanup).toContain('if (!preserveCompletedResults) {');
+    expect(completedResultCleanup).toContain('setReactionTimesByPlayer({});');
+    expect(appSource).toContain("'Race finished / false-start disqualification captured'");
+    expect(appSource).toContain('!synchronizedFalseStartPlayerIdSet.has(tabletLocalPlayer.id)');
+    expect(appSource).toContain('clubTabletExerciseSavedRef.current(completedSession);');
+    const explicitExit = multiplayerSource.slice(
+      multiplayerSource.indexOf("if (message.type === 'room-left')"),
+      multiplayerSource.indexOf("if (message.type === 'room-chat')"),
+    );
+    const transportClose = multiplayerSource.slice(
+      multiplayerSource.indexOf("socket.addEventListener('close'"),
+      multiplayerSource.indexOf("socket.addEventListener('error'"),
+    );
+    expect(explicitExit).toContain('setRoomExit((current) => ({');
+    expect(transportClose).not.toContain('setRoomExit');
     expect(appSource).toContain('disabled={clubEventConfigurationLocked}');
     expect(appSource).toContain('const lapControlsDisabled = clubEventConfigurationLocked');
     expect(appSource).toContain('const canChooseStartHereSplitLine = !clubEventConfigurationLocked');
