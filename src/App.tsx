@@ -209,6 +209,7 @@ import {
 import {
   bikeSampleIsLive,
   connectedDeviceFromBikeSample,
+  retainConnectedBikeRosterIdentity,
   selectRaceBikeDevices,
 } from './lib/liveBikeRegistry';
 import {
@@ -2862,10 +2863,10 @@ export default function App() {
   }, [clubTabletSessionActive, clubTabletSession?.sessionToken]);
 
   useEffect(() => {
-    if (clubTabletKioskMode && !clubTabletSessionActive && appMode !== 'club-tablet') {
+    if (clubTabletKioskMode && !clubTabletSessionActive && !demoMode && appMode !== 'club-tablet') {
       setAppMode('club-tablet');
     }
-  }, [appMode, clubTabletKioskMode, clubTabletSessionActive]);
+  }, [appMode, clubTabletKioskMode, clubTabletSessionActive, demoMode]);
 
   useEffect(() => {
     storedMappingsRef.current = storedMappings;
@@ -3750,8 +3751,10 @@ export default function App() {
     [draftSplitBuilder],
   );
   const exploreDemoCandidates = useMemo(
-    () => createDemoPlayers(maxPlayers, demoRiderNames, demoRiderPhotos),
-    [demoRiderNames, demoRiderPhotos],
+    () => clubTabletKioskMode && demoMode
+      ? createDemoPlayers(1)
+      : createDemoPlayers(maxPlayers, demoRiderNames, demoRiderPhotos),
+    [clubTabletKioskMode, demoMode, demoRiderNames, demoRiderPhotos],
   );
   const demoPlayers = exploreDemoCandidates.filter((player) => selectedDemoPlayerIds.includes(player.id));
   const connectedBikeSamples = useMemo(() => {
@@ -3772,33 +3775,37 @@ export default function App() {
     return latestBikeDriveSignalAt(sample);
   }, [clubTabletSession, clubTabletSessionActive, connectedBikeSamples]);
   const samplesByDevice = demoMode ? demo.samplesByDevice : connectedBikeSamples;
-  const liveBikeDeviceIds = useMemo(() => {
-    const deviceIds = new Set<number>();
-    connectedBikeSamples.forEach((sample, deviceId) => {
-      if (bikeSampleIsLive(sample, now, liveBikeTimeoutMs)) {
-        deviceIds.add(deviceId);
-      }
-    });
-    return deviceIds;
-  }, [connectedBikeSamples, now]);
+  const connectedBikeRosterRef = useRef<ConnectedBikeDevice[]>([]);
   const connectedBikeDevices = useMemo(() => {
     const devices: ConnectedBikeDevice[] = [
       ...(clubTabletKioskMode ? [] : bridge.devices),
       ...bluetooth.devices,
     ];
+    const transportDeviceIds = new Set(devices.map((device) => device.deviceId));
 
-    connectedBikeSamples.forEach((sample) => {
-      if (now - sample.at <= connectedBikeDeviceTimeoutMs) {
-        devices.push(connectedDeviceFromBikeSample(sample));
+    connectedBikeSamples.forEach((sample, deviceId) => {
+      if (!transportDeviceIds.has(deviceId) && bikeSampleIsLive(sample, now, liveBikeTimeoutMs)) {
+        const fallback = connectedDeviceFromBikeSample(sample);
+        const previous = connectedBikeRosterRef.current.find((device) => device.deviceId === deviceId);
+        devices.push(previous ? {
+          ...fallback,
+          label: previous.label,
+          source: previous.source,
+        } : fallback);
       }
     });
 
-    return selectRaceBikeDevices(devices, now, {
+    const nextRoster = selectRaceBikeDevices(devices, now, {
       deviceTimeoutMs: connectedBikeDeviceTimeoutMs,
       maxDevices: liveBikeSeatLimit,
-    })
-      .filter((device) => liveBikeDeviceIds.has(device.deviceId));
-  }, [bluetooth.devices, bridge.devices, clubTabletKioskMode, connectedBikeSamples, liveBikeDeviceIds, liveBikeSeatLimit, now]);
+    });
+    const stableRoster = retainConnectedBikeRosterIdentity(
+      connectedBikeRosterRef.current,
+      nextRoster,
+    );
+    connectedBikeRosterRef.current = stableRoster;
+    return stableRoster;
+  }, [bluetooth.devices, bridge.devices, clubTabletKioskMode, connectedBikeSamples, liveBikeSeatLimit, now]);
   const connectedBikeDeviceById = useMemo(
     () => new Map(connectedBikeDevices.map((device) => [device.deviceId, device])),
     [connectedBikeDevices],
@@ -3816,8 +3823,7 @@ export default function App() {
       const visual = profileVisual(index);
       const profile = profileByDevice.get(deviceId);
       const connectedDevice = connectedBikeDeviceById.get(deviceId);
-      const sample = connectedBikeSamples.get(deviceId);
-      const deviceLabel = connectedDevice?.label ?? sample?.label;
+      const deviceLabel = connectedDevice?.label;
       const customProfileName = profile && customBikeDisplayName(profile);
 
       return {
@@ -3827,10 +3833,10 @@ export default function App() {
         accent: visual.accent,
         deviceId,
         deviceLabel,
-        deviceSource: connectedDevice?.source ?? sample?.source,
+        deviceSource: connectedDevice?.source,
       };
     }),
-    [connectedBikeDeviceById, connectedBikeSamples, connectedDeviceIds, profileByDevice],
+    [connectedBikeDeviceById, connectedDeviceIds, profileByDevice],
   );
   const activePlayers = demoMode ? demoPlayers : sessionPlayers;
   const accountRider = useMemo<StudioRider | null>(() => (
@@ -5157,10 +5163,14 @@ export default function App() {
   }, [bikeConnectionSource]);
 
   useEffect(() => {
-    if ((clubTabletKioskMode || (!authenticatedRacerAccess && clubLiveAccessActive)) && bikeConnectionSource !== 'bluetooth') {
+    if (
+      !demoMode
+      && (clubTabletKioskMode || (!authenticatedRacerAccess && clubLiveAccessActive))
+      && bikeConnectionSource !== 'bluetooth'
+    ) {
       setBikeConnectionSource('bluetooth');
     }
-  }, [authenticatedRacerAccess, bikeConnectionSource, clubLiveAccessActive, clubTabletKioskMode]);
+  }, [authenticatedRacerAccess, bikeConnectionSource, clubLiveAccessActive, clubTabletKioskMode, demoMode]);
 
   useEffect(() => {
     if (shouldStopAdvancedConnector({
@@ -5642,7 +5652,7 @@ export default function App() {
   }, [adminProfileActive, bridge.connection, storedMappings]);
 
   useEffect(() => {
-    if (!raceCapture) {
+    if (!raceCapture || (clubTabletKioskMode && raceCapture.source === 'demo')) {
       window.localStorage.removeItem(raceCaptureStorageKey);
       (window as typeof window & { __tracklabLastRaceCapture?: RaceCapture | null }).__tracklabLastRaceCapture = null;
       return;
@@ -5650,7 +5660,7 @@ export default function App() {
 
     safeSetLocalStorage(raceCaptureStorageKey, JSON.stringify(raceCapture));
     (window as typeof window & { __tracklabLastRaceCapture?: RaceCapture | null }).__tracklabLastRaceCapture = raceCapture;
-  }, [raceCapture]);
+  }, [clubTabletKioskMode, raceCapture]);
 
   useEffect(() => {
     const liveDebug = {
@@ -8652,7 +8662,7 @@ export default function App() {
   ]);
 
   const handleDemoModeChange = (enabled: boolean, nextSource: BikeConnectionSource = enabled ? 'demo' : 'bluetooth') => {
-    if (enabled && !adminProfileActive) {
+    if (enabled && !adminProfileActive && !clubTabletKioskMode) {
       return;
     }
 
@@ -8736,6 +8746,16 @@ export default function App() {
     setDemoRaceStartedAt(null);
     setDemoSignalsStopped(false);
     resetRace();
+  };
+
+  const handleClubTabletDemoModeChange = (enabled: boolean) => {
+    if (!clubTabletDeviceActive || clubTabletSessionActive) return;
+    if (enabled) {
+      setPlayMode('local');
+      setDemoBikeCount(1);
+      setSelectedDemoPlayerIds(defaultPlayerSlots.slice(0, 1).map((player) => player.id));
+    }
+    handleDemoModeChange(enabled, enabled ? 'demo' : 'bluetooth');
   };
 
   const requireAccountProfile = useCallback((message = 'Create an account or sign in before entering TrackLab.') => {
@@ -9227,6 +9247,7 @@ export default function App() {
     setLockedRacePlayers(null);
     setMappingMode(false);
     setMappingFullscreen(false);
+    setUtilityFullscreen(false);
     setExploreRideFullscreen(false);
     setExploreClubLiveState(null);
     setDemoRaceStartedAt(null);
@@ -9263,6 +9284,8 @@ export default function App() {
     setChatMessages([]);
     if (!next) {
       clubTabletEmergencyExitRef.current();
+      setDemoMode(false);
+      setBikeConnectionSource('bluetooth');
       clearStoredClubTabletSession();
       clearStoredClubTabletDevice();
       setClubTabletSession(null);
@@ -10721,8 +10744,8 @@ export default function App() {
         device={clubTabletDevice}
         roster={clubTabletRoster}
         session={clubTabletSession}
-        bikeActivityAt={clubTabletBikeActivityAt}
-        connectedBike={bluetooth.devices.find((bike) => bike.connected) ?? null}
+        bikeActivityAt={demoMode ? 0 : clubTabletBikeActivityAt}
+        connectedBike={demoMode ? null : bluetooth.devices.find((bike) => bike.connected) ?? null}
         onDeviceReady={handleClubTabletDeviceReady}
         onDeviceError={handleClubTabletDeviceError}
         onDeviceRevoked={handleClubTabletDeviceRevoked}
@@ -10908,6 +10931,12 @@ export default function App() {
       {heartRateStudioInviteDialog}
       {heartRateAccountBlockCoordinator}
       {watchConnectCoordinator}
+      {clubTabletKioskMode && demoMode && appMode !== 'club-tablet' && (
+        <div className="club-tablet-demo-banner" role="status" aria-label="Club Tablet demo mode active">
+          <Activity size={22} />
+          <span><strong>DEMO MODE</strong><small>Simulated rider · nothing is saved to athletes or Club Live</small></span>
+        </div>
+      )}
       {!clubTabletKioskMode && (
         raceViewFullscreen || mappingFullscreen || exploreRideFullscreen || utilityFullscreen
       ) && <div className="watch-connect-indicator-slot fullscreen" id="watch-connect-indicator-slot" />}
@@ -10971,13 +11000,16 @@ export default function App() {
       )}
       {clubLiveAthleteBridge}
       {clubTabletRuntime}
-      {clubTabletSessionActive
+      {(clubTabletSessionActive || (clubTabletKioskMode && demoMode))
         && appMode !== 'club-tablet'
         && (raceViewFullscreen || exploreRideFullscreen || utilityFullscreen) && (
         <button
           className="race-cancel-overlay"
           type="button"
-          onClick={() => void handleClubTabletEndAthlete()}
+          onClick={() => {
+            if (clubTabletSessionActive) void handleClubTabletEndAthlete();
+            else returnToClubTablet();
+          }}
           style={{
             position: 'fixed',
             top: 'max(70px, calc(env(safe-area-inset-top, 0px) + 70px))',
@@ -10986,7 +11018,7 @@ export default function App() {
             zIndex: 2147483001,
           }}
         >
-          <TabletSmartphone size={18} /> End athlete session
+          <TabletSmartphone size={18} /> {clubTabletSessionActive ? 'End athlete session' : 'Exit demo activity'}
         </button>
       )}
       {bluetoothPairingOpen && showBluetoothPairing && !liveBikeAccessLocked && !nativeBluetoothFailed && (
@@ -11423,7 +11455,11 @@ export default function App() {
                 }}
               >
                 <TabletSmartphone size={17} />
-                {clubTabletSessionActive ? 'End activity & choose athlete' : 'Club Tablet Home'}
+                {clubTabletSessionActive
+                  ? 'End activity & choose athlete'
+                  : demoMode && appMode !== 'club-tablet'
+                    ? 'Exit demo activity'
+                    : 'Club Tablet Home'}
               </button>
             </>
           ) : (
@@ -11837,8 +11873,19 @@ export default function App() {
                 await bluetooth.reconnectSavedBikes();
               }}
               retryAuthorization={retryClubTabletAuthorization}
+              demoActive={demoMode}
+              setDemoActive={handleClubTabletDemoModeChange}
               onClubEventLaunch={openClubEventLaunch}
               openProgram={(mode) => {
+                if (demoMode) {
+                  setPlayMode('local');
+                  setDemoBikeCount(1);
+                  setSelectedDemoPlayerIds(defaultPlayerSlots.slice(0, 1).map((player) => player.id));
+                  setDemoRaceSeed(Date.now());
+                  setDemoRaceStartedAt(null);
+                  setDemoSignalsStopped(false);
+                  resetRace();
+                }
                 setMappingMode(false);
                 if (mode === 'race') openBmxRaceIntervals();
                 else if (mode === 'straight-sprint') openStraightSprint();

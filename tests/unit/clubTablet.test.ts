@@ -156,6 +156,7 @@ describe('Club Tablet client state', () => {
   it('automatically starts once a late saved-bike reconnect completes both selections', () => {
     const base = {
       hasActiveSession: false,
+      demoActive: false,
       startPending: false,
       startFailed: false,
       selectedRiderId: 'rider-1',
@@ -165,6 +166,11 @@ describe('Club Tablet client state', () => {
     };
     expect(clubTabletShouldAutoStartSelection(base)).toBe(false);
     expect(clubTabletShouldAutoStartSelection({ ...base, selectedBikeId: 733_112 })).toBe(true);
+    expect(clubTabletShouldAutoStartSelection({
+      ...base,
+      demoActive: true,
+      selectedBikeId: 733_112,
+    })).toBe(false);
     expect(clubTabletShouldAutoStartSelection({
       ...base,
       selectedBikeId: 733_112,

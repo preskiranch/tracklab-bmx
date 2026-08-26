@@ -786,7 +786,9 @@ export function GetPulledView({
           </div>
           <div className="get-pulled-panel get-pulled-air-panel">
             <h3><Gauge size={18} /> Wattbike Air setting</h3>
-            <p>Select the physical Wattbike Air setting used for this pull. Records are compared only within the same time and Air setting.</p>
+            <p>{demoMode
+              ? 'Choose a simulated Wattbike Air setting to compare values on this demo screen.'
+              : 'Select the physical Wattbike Air setting used for this pull. Records are compared only within the same time and Air setting.'}</p>
             <div className="get-pulled-air-options" aria-label="Wattbike Air setting">
               {getPulledAirSettings.map((setting) => (
                 <button
@@ -854,7 +856,9 @@ export function GetPulledView({
               })}
             </div>
           </div>
-          <p className="get-pulled-privacy">Watts and power results are saved privately to the selected athlete. They are visible on the athlete’s records and authorized club monitors, never public leaderboards or shared ghosts.</p>
+          <p className="get-pulled-privacy">{demoMode
+            ? 'DEMO MODE · Simulated pull results are for testing only and are not saved, published, or assigned to an athlete.'
+            : 'Watts and power results are saved privately to the selected athlete. They are visible on the athlete’s records and authorized club monitors, never public leaderboards or shared ghosts.'}</p>
           <div className="get-pulled-actions">
             <button
               className="primary"
@@ -894,13 +898,18 @@ export function GetPulledView({
             )}
           </section>
           {phase === 'results' && (
-            <div className="get-pulled-actions" aria-label={`Result recorded at Wattbike Air ${sessionAirSetting}`}>
-              <button className="primary" type="button" onClick={() => reset()}><RotateCcw size={18} /> Next athlete now</button>
+            <div
+              className="get-pulled-actions"
+              aria-label={sessionDemoMode
+                ? `Demo result shown at Wattbike Air ${sessionAirSetting}; not saved`
+                : `Result recorded at Wattbike Air ${sessionAirSetting}`}
+            >
+              <button className="primary" type="button" onClick={() => reset()}><RotateCcw size={18} /> {sessionDemoMode ? 'Run another demo' : 'Next athlete now'}</button>
             </div>
           )}
         </>
       )}
-      {sessionDemoMode && <p className="get-pulled-privacy">Demo pull results are for testing only and are not saved or published.</p>}
+      {sessionDemoMode && phase !== 'setup' && <p className="get-pulled-privacy">Demo pull results are for testing only and are not saved or published.</p>}
     </main>
   );
 }

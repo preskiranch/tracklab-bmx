@@ -3,7 +3,6 @@ import { sanitizeBikeSample } from '../lib/bikeSampleSanity';
 import { parseBridgeMessage } from '../lib/bridgeMessages';
 import {
   connectedDeviceFromBikeSample,
-  retainBikeSamples,
   upsertBoundedBikeSample,
 } from '../lib/liveBikeRegistry';
 import type {
@@ -119,12 +118,11 @@ export function useWattbikeBridge(): BridgeSnapshot {
             setDevices(normalizedDevices);
             if (statusMessage.sourceState !== 'running') {
               setSamplesByDevice(new Map());
-            } else if (statusDevices) {
-              const connectedIds = new Set(
-                normalizedDevices.filter((device) => device.connected).map((device) => device.deviceId),
-              );
-              setSamplesByDevice((current) => retainBikeSamples(current, connectedIds));
             }
+            // A running connector heartbeat can briefly contain only the
+            // devices discovered during that scan pass. Keep recent samples
+            // until their normal freshness window expires so one partial
+            // heartbeat cannot remove/re-number the four rider rows.
           }
         }
 

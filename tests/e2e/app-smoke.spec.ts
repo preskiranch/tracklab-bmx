@@ -1918,7 +1918,7 @@ test('Get Pulled runs a six-second countdown and keeps Air records separated', a
     return Object.values(audio?.seenModes ?? {}).flat();
   }), { timeout: 3_000 }).toContain('pedaling');
   await expect(view.getByText('Pull complete', { exact: false })).toBeVisible({ timeout: 4_500 });
-  await expect(view.getByLabel('Result recorded at Wattbike Air 7')).toBeVisible();
+  await expect(view.getByLabel('Demo result shown at Wattbike Air 7; not saved')).toBeVisible();
   await expect(view.getByText('Peak cadence', { exact: true })).toBeVisible();
   await expect(view.getByText('Demo pull results are for testing only and are not saved or published.')).toBeHidden();
   expect(trainingSaveCount).toBe(0);
@@ -3667,7 +3667,7 @@ test('Bluetooth pairing stays open for multiple Wattbikes and restores approved 
 
   await page.reload();
   await openSignedInAppIfNeeded(page);
-  await expect(page.getByText('Bluetooth Direct paired')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Bluetooth Direct online')).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Pair Wattbike', exact: true }).click();
   pairingDialog = page.getByRole('dialog', { name: 'Connect Wattbikes' });
   await expect(pairingDialog.locator('.bluetooth-pairing-slots article.connected')).toHaveCount(2);
@@ -7536,6 +7536,19 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   let tabletLiveSessionHeader = '';
   let tabletLiveReadingAvailable = true;
   let finishSessionDelete: (() => void) | null = null;
+  const demoSensitiveMutationUrls: string[] = [];
+
+  page.on('request', (request) => {
+    if (!['POST', 'PUT', 'PATCH'].includes(request.method())) return;
+    const pathname = new URL(request.url()).pathname;
+    if (
+      /^\/api\/club-tablet\/(?:sessions|live|training-sessions|race-results|ghosts)$/.test(pathname)
+      || /^\/api\/(?:training-sessions|race-results|ghosts)$/.test(pathname)
+      || pathname.startsWith('/api/heart-rate/')
+    ) {
+      demoSensitiveMutationUrls.push(pathname);
+    }
+  });
 
   await page.addInitScript(() => {
     const packet = new ArrayBuffer(6);
@@ -7560,9 +7573,15 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
         return characteristic;
       },
     });
+    let bikeConnected = true;
+    let bikeAvailable = true;
     const server = {
-      connected: true,
-      disconnect: () => undefined,
+      get connected() { return bikeConnected; },
+      disconnect: () => {
+        if (!bikeConnected) return;
+        bikeConnected = false;
+        device.dispatchEvent(new Event('gattserverdisconnected'));
+      },
       getPrimaryService: async (uuid: string) => {
         if (!uuid.startsWith('00001826')) {
           throw new Error('Service unavailable in test device.');
@@ -7574,10 +7593,24 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       id: 'browser-club-tablet-bike',
       name: 'WattbikePM25058701',
       gatt: {
-        connected: true,
-        connect: async () => server,
+        get connected() { return bikeConnected; },
+        connect: async () => {
+          bikeConnected = true;
+          return server;
+        },
       },
     });
+    const testControls = window as typeof window & {
+      __tracklabDisconnectClubTabletBike?: () => void;
+      __tracklabRestoreClubTabletBike?: () => void;
+    };
+    testControls.__tracklabDisconnectClubTabletBike = () => {
+      bikeAvailable = false;
+      server.disconnect();
+    };
+    testControls.__tracklabRestoreClubTabletBike = () => {
+      bikeAvailable = true;
+    };
     window.localStorage.setItem(
       'tracklab.bluetooth-bike-identities.v1',
       JSON.stringify({ 'browser-club-tablet-bike': 58701 }),
@@ -7585,7 +7618,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     Object.defineProperty(navigator, 'bluetooth', {
       configurable: true,
       value: {
-        getDevices: async () => [device],
+        getDevices: async () => bikeAvailable ? [device] : [],
         requestDevice: async () => device,
       },
     });
@@ -7747,7 +7780,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(rasheen).toBeVisible();
   const bikeChoices = page.locator('.club-tablet-bikes');
   await expect(bikeChoices.getByRole('button')).toHaveCount(1);
-  await expect(bikeChoices.getByText('FTMS · PM 701', { exact: false })).toBeVisible();
+  await expect(bikeChoices.getByText('WattbikePM25058701 · PM 701', { exact: false })).toBeVisible();
 
   const programs = page.locator('.club-tablet-home-programs');
   await expect(programs.getByRole('button')).toHaveCount(4);
@@ -7756,6 +7789,118 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(programs.getByRole('button', { name: /Explore the World/ })).toBeVisible();
   await expect(programs.getByRole('button', { name: /Get Pulled/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start athlete session', exact: true })).toHaveCount(0);
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 820, height: 1_180 },
+    { width: 1_280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const cardLayout = await programs.getByRole('button').evaluateAll((buttons) => buttons.map((button) => {
+      const card = button.getBoundingClientRect();
+      const icon = button.querySelector('svg:not(.club-tablet-program-check)')?.getBoundingClientRect();
+      const title = button.querySelector('strong');
+      const detail = button.querySelector('small');
+      const centerOffset = (rect?: DOMRect) => rect
+        ? Math.abs((rect.left + rect.width / 2) - (card.left + card.width / 2))
+        : Number.POSITIVE_INFINITY;
+      const lineCount = (element: Element | null) => {
+        if (!element) return Number.POSITIVE_INFINITY;
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        return [...range.getClientRects()].filter((rect) => rect.width > 1).length;
+      };
+      const styles = window.getComputedStyle(button);
+      return {
+        detailLines: lineCount(detail),
+        detailOffset: centerOffset(detail?.getBoundingClientRect()),
+        flexDirection: styles.flexDirection,
+        iconOffset: centerOffset(icon),
+        overflow: button.scrollWidth > button.clientWidth,
+        textAlign: styles.textAlign,
+        titleLines: lineCount(title),
+        titleOffset: centerOffset(title?.getBoundingClientRect()),
+      };
+    }));
+    expect(cardLayout).toHaveLength(4);
+    for (const card of cardLayout) {
+      expect(card.flexDirection).toBe('column');
+      expect(card.textAlign).toBe('center');
+      expect(card.overflow).toBe(false);
+      expect(card.iconOffset).toBeLessThan(2);
+      expect(card.titleOffset).toBeLessThan(2);
+      expect(card.detailOffset).toBeLessThan(2);
+      expect(card.titleLines).toBeLessThanOrEqual(2);
+      expect(card.detailLines).toBeLessThanOrEqual(3);
+    }
+  }
+  await page.setViewportSize({ width: 1_280, height: 720 });
+
+  // An authorized shared tablet can exercise every activity without hardware,
+  // but the demo never creates an athlete lock or presents simulated input as
+  // a real connected Wattbike.
+  await page.evaluate(() => {
+    (window as typeof window & { __tracklabDisconnectClubTabletBike?: () => void })
+      .__tracklabDisconnectClubTabletBike?.();
+  });
+  await expect(bikeChoices.getByRole('button')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Reconnect saved Wattbike', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Use demo bike', exact: true }).click();
+  await expect(page.getByLabel('Club Tablet demo mode')).toContainText('DEMO');
+  await expect(page.getByText('Demo Bike 1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Simulated input · no hardware or records', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Rasheen Hicks/ })).toBeDisabled();
+  expect(sessionPosts).toBe(0);
+
+  const demoActivities = [
+    { button: /BMX Race Intervals/, workflow: 'BMX Race Intervals setup workflow' },
+    { button: /Straight Sprint/, workflow: 'Straight Sprint setup workflow' },
+    { button: /Get Pulled/, workflow: 'Get Pulled setup workflow', start: true },
+    { button: /Explore the World/, workflow: 'Explore the World setup workflow', picker: true },
+  ];
+  for (const activity of demoActivities) {
+    await page.locator('.club-tablet-home-programs').getByRole('button', { name: activity.button }).click();
+    await expect(page.getByRole('status', { name: 'Club Tablet demo mode active' })).toContainText('DEMO MODE');
+    await expect(page.getByRole('region', { name: activity.workflow })).toBeVisible();
+    if (activity.picker) {
+      const demoRiderChooser = page.getByRole('group', { name: 'Choose demo riders' });
+      await expect(demoRiderChooser.getByRole('button')).toHaveCount(1);
+      await expect(demoRiderChooser).toContainText('Demo Rider 1');
+      await expect(demoRiderChooser).not.toContainText('Demo Rider 2');
+    } else if (!activity.start) {
+      await expect(page.getByRole('group', { name: 'Choose demo riders' })).toHaveCount(0);
+    }
+    if (activity.start) {
+      await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toContainText('Demo Rider 1');
+      await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toContainText(
+        'Simulated pull results are for testing only and are not saved, published, or assigned to an athlete.',
+      );
+      await page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })
+        .getByRole('button', { name: 'Start 3 seconds pull · Air 1', exact: true })
+        .click();
+      await expect(page.locator('.platform-shell')).toHaveClass(/utility-fullscreen/);
+      await page.getByRole('button', { name: 'Exit demo activity', exact: true }).click();
+      await expect(page.locator('.platform-shell')).not.toHaveClass(/utility-fullscreen/);
+    } else {
+      await primaryNav.getByRole('button', { name: 'Exit demo activity', exact: true }).click();
+    }
+    await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
+    expect(sessionPosts).toBe(0);
+  }
+  expect(demoSensitiveMutationUrls).toEqual([]);
+  expect(await page.evaluate(() => (
+    window.sessionStorage.getItem('tracklab.club-tablet-athlete-session.v1')
+  ))).toBeNull();
+
+  await page.getByRole('button', { name: 'Exit demo mode', exact: true }).click();
+  await expect(page.getByText('Demo Bike 1', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Rasheen Hicks/ })).toBeEnabled();
+  await page.evaluate(() => {
+    (window as typeof window & { __tracklabRestoreClubTabletBike?: () => void })
+      .__tracklabRestoreClubTabletBike?.();
+  });
+  await page.getByRole('button', { name: 'Reconnect saved Wattbike', exact: true }).click();
+  await expect(bikeChoices.getByRole('button')).toHaveCount(1);
 
   // Program-first: choosing the athlete second creates exactly one secure
   // session and opens the selected exercise without a Settings detour.
@@ -7933,6 +8078,102 @@ test('studio rider roster syncs to the account and can be assigned to a connecte
       await studioManager.locator('summary').click();
     }
     await expect(page.getByLabel('Jordan H profile picture').locator('img')).toBeVisible();
+  } finally {
+    clearInterval(sampleTimer);
+    await bridge.close();
+  }
+});
+
+test('four-bike Bluetooth heartbeat and sample churn keeps the exact rider selection stable', async ({ page }) => {
+  const deviceIds = [58701, 58702, 58703, 58704];
+  const bridge = await createMockBikeBridge(deviceIds);
+  let sampledDeviceIds = [...deviceIds];
+  const sampleTimer = setInterval(() => {
+    sampledDeviceIds.forEach((deviceId, index) => bridge.broadcast(mockBikeSample({
+      deviceId,
+      watts: 210 + index * 15,
+      cadence: 72 + index,
+      speedKph: 0,
+    })));
+  }, 60);
+  const now = Date.now();
+  const studioRiders = [
+    { id: 'studio-jordan', name: 'Jordan H', createdAt: now, updatedAt: now },
+    { id: 'studio-maya', name: 'Maya T', createdAt: now, updatedAt: now },
+  ];
+  const authUser = {
+    id: 'four-bike-stable-racer',
+    profileKey: 'user:four-bike-stable-racer',
+    email: 'four-bike-stable@tracklab.test',
+    name: 'Four Bike Stable Coach',
+    admin: true,
+    membership: { tier: 'racer', bikeSeats: 4, updatedAt: now },
+  };
+  const heartbeat = (ids: number[]) => bridge.broadcast({
+    type: 'bridge-status',
+    mode: 'bluetooth',
+    sourceState: 'running',
+    message: `${ids.length} mock bikes discovered in this scan pass.`,
+    connectedDevices: ids.map((deviceId, index) => ({
+      deviceId,
+      label: `WattbikePM250${deviceId}`,
+      connected: true,
+      source: 'bluetooth',
+      signal: 80 + index,
+      at: Date.now(),
+    })),
+  });
+
+  try {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('tracklab-bmx-bike-connection-source-v1', 'advanced');
+    });
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: authUser }) });
+    });
+    await page.route('**/api/user-data*', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          trackMappings: {},
+          customRoutes: [],
+          bikeProfiles: [],
+          studioRiders,
+          accountProfile: { updatedAt: now },
+        }),
+      });
+    });
+    await page.route('https://maps.googleapis.com/**', (route) => route.abort());
+
+    await page.goto('/?track=black-mountain-bmx');
+    await openSignedInAppIfNeeded(page);
+    await expect(page.getByText(/4 connected bikes/i)).toBeVisible({ timeout: 15_000 });
+
+    const selectedBike = page.getByLabel(/Student assigned to monitor ID 701/i);
+    await selectedBike.selectOption('studio-jordan');
+    await expect(selectedBike).toHaveValue('studio-jordan');
+
+    // Connector discovery order is not a rider-seat order. Reversing it must
+    // not rebuild P1-P4 or clear a controlled athlete selector.
+    heartbeat([...deviceIds].reverse());
+    await page.waitForTimeout(350);
+    await expect(page.getByText(/4 connected bikes/i)).toBeVisible();
+    await expect(selectedBike).toHaveValue('studio-jordan');
+
+    // A real multi-bike scan can omit one monitor for a pass even while its
+    // GATT/sample connection is still alive. Stop only that sample briefly and
+    // publish the partial heartbeat; its rider row must not flash away.
+    sampledDeviceIds = deviceIds.slice(1);
+    heartbeat(deviceIds.slice(1).reverse());
+    await page.waitForTimeout(1_200);
+    await expect(page.getByText(/4 connected bikes/i)).toBeVisible();
+    await expect(selectedBike).toBeVisible();
+    await expect(selectedBike).toHaveValue('studio-jordan');
+
+    sampledDeviceIds = [...deviceIds];
+    heartbeat(deviceIds);
+    await page.waitForTimeout(350);
+    await expect(selectedBike).toHaveValue('studio-jordan');
   } finally {
     clearInterval(sampleTimer);
     await bridge.close();

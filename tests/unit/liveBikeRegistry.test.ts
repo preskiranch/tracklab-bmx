@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bikeMetricIsLive,
   bikeSampleIsLive,
+  retainConnectedBikeRosterIdentity,
   selectRaceBikeDevices,
   upsertBoundedBikeSample,
 } from '../../src/lib/liveBikeRegistry';
@@ -76,6 +77,29 @@ describe('live bike registry', () => {
     })).toEqual([
       expect.objectContaining({ deviceId: 58701, label: 'Wattbike 58701' }),
     ]);
+  });
+
+  it('keeps the exact roster identity through heartbeat reordering and telemetry churn', () => {
+    const current = [58701, 58702, 58703, 58704].map((deviceId) => ({
+      at: 9_000,
+      connected: true,
+      connectionOrigin: 'bridge-status' as const,
+      deviceId,
+      label: `WattbikePM250${deviceId}`,
+      signal: .9,
+      source: 'bluetooth' as const,
+    }));
+    const heartbeat = [...current]
+      .reverse()
+      .map((device) => ({
+        ...device,
+        at: 10_000,
+        connectionOrigin: 'bridge-sample' as const,
+        signal: .72,
+      }));
+
+    expect(retainConnectedBikeRosterIdentity(current, heartbeat)).toBe(current);
+    expect(retainConnectedBikeRosterIdentity(current, heartbeat.slice(1))).not.toBe(current);
   });
 
   it('ignores out-of-order samples and bounds retained device history', () => {

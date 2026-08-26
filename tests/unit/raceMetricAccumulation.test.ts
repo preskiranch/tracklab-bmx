@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createMetricAccumulator,
+  readyRaceRosterSignature,
   recordRaceMetricSample,
 } from '../../src/hooks/useRaceEngine';
 import { bmxSpeedKphFromCadence } from '../../src/game/bmxRollout';
@@ -23,6 +24,24 @@ function sample(overrides: Partial<BikeSample> = {}): BikeSample {
 }
 
 describe('race metric accumulation', () => {
+  it('does not treat packet-created player objects or array order as a new ready roster', () => {
+    const players = [1, 2, 3, 4].map((id) => ({
+      id,
+      name: `Bike ${id}`,
+      colorName: 'lime',
+      accent: '#7ade36',
+      deviceId: 58_700 + id,
+    }));
+    const packetRefresh = [...players]
+      .reverse()
+      .map((player) => ({ ...player, deviceLabel: `WattbikePM250${player.deviceId}` }));
+
+    expect(readyRaceRosterSignature(packetRefresh, {}))
+      .toBe(readyRaceRosterSignature(players, {}));
+    expect(readyRaceRosterSignature(players, { 2: 'b' }))
+      .not.toBe(readyRaceRosterSignature(players, {}));
+  });
+
   it('counts a cadence timestamp once while fresh power packets keep arriving', () => {
     const stats = createMetricAccumulator('Wattbike 1');
     recordRaceMetricSample(stats, sample(), 30, 900);
