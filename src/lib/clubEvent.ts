@@ -5,7 +5,7 @@ import {
   type ClubTabletDeviceCredential,
   type ClubTabletSessionCredential,
 } from './clubTabletStorage';
-import type { ClubLiveSession } from './clubLive';
+export { clubEventMultiplayerRoomReady } from './clubEventRuntime';
 
 export type ClubEventActivityType = 'bmx-race' | 'straight-sprint' | 'explore';
 export type ClubEventProgram = 'race' | 'straight-sprint' | 'explore';
@@ -84,6 +84,7 @@ const defaultPollAfterMs = 2_000;
 const minPollAfterMs = 1_000;
 const maxPollAfterMs = 15_000;
 const launchStorageKey = 'tracklab.club-event-launch.v1';
+const maxClubEventConfigurationArrayLength = 10_000;
 
 function text(value: unknown, maxLength = 160) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
@@ -108,7 +109,11 @@ function normalizeJsonValue(value: unknown, depth = 0): unknown {
   if (depth > 10) return null;
   if (value == null || typeof value === 'boolean' || typeof value === 'string') return value;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (Array.isArray(value)) return value.slice(0, 1_000).map((entry) => normalizeJsonValue(entry, depth + 1));
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, maxClubEventConfigurationArrayLength)
+      .map((entry) => normalizeJsonValue(entry, depth + 1));
+  }
   if (typeof value !== 'object') return null;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>)
     .filter(([key]) => key !== '__proto__' && key !== 'constructor' && key !== 'prototype')
@@ -227,13 +232,6 @@ export function clubEventActivityTitle(activityType: ClubEventActivityType) {
     : activityType === 'straight-sprint' ? 'Straight Sprint' : 'Explore the World';
 }
 
-export function clubEventMultiplayerRoomReady(
-  activeEventId: string | null | undefined,
-  roomEventId: string | null | undefined,
-) {
-  return !activeEventId || activeEventId === roomEventId;
-}
-
 export function clubEventSlotForDevice(event: ClubEventSnapshot | null | undefined, deviceId: string) {
   const safeDeviceId = text(deviceId, 160);
   return safeDeviceId
@@ -241,27 +239,20 @@ export function clubEventSlotForDevice(event: ClubEventSnapshot | null | undefin
     : null;
 }
 
-/**
- * Club Event HTTP state only proves that a tablet held a Ready athlete lock
- * when the owner pressed Start. Club Live is the existing client-to-owner
- * acknowledgement path: `multiplayer` becomes true only after the tablet has
- * opened the requested program and joined its private event room.
- */
 export function clubEventLaunchAcknowledged(
   event: ClubEventSnapshot | null | undefined,
   slot: ClubEventSlot | null | undefined,
-  sessions: readonly ClubLiveSession[],
-  now = Date.now(),
 ) {
-  if (event?.status !== 'active' || !slot?.deviceId || !slot.athlete) return false;
-  return sessions.some((session) => (
-    session.deviceId === slot.deviceId
-    && session.studioRiderId === slot.athlete?.studioRiderId
-    && session.activityType === event.activityType
-    && session.multiplayer
-    && session.expiresAt > now
-    && now - session.updatedAt < 10_000
-  ));
+  // The server promotes a slot to active only after the authenticated tablet
+  // socket joins this exact event's private room. General Club Live telemetry
+  // has no event ID and therefore must not be used as a launch receipt.
+  return Boolean(
+    event?.status === 'active'
+    && slot?.status === 'active'
+    && slot.ready
+    && slot.deviceId
+    && slot.athlete,
+  );
 }
 
 function slotAthleteName(slot: ClubEventSlot) {

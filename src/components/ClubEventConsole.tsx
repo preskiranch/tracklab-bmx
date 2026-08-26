@@ -21,7 +21,10 @@ import {
   type ClubEventActivityType,
   type ClubEventSnapshot,
 } from '../lib/clubEvent';
-import type { ClubLiveSession } from '../lib/clubLive';
+import { prepareClubEventExploreConfiguration } from '../lib/clubEventExplore';
+import { fetchExploreRoute } from '../lib/exploreRoutes';
+import { resolveLocationText } from '../lib/googleMaps';
+import { straightSprintDistanceOptions } from '../lib/straightSprint';
 import type { TrackRecord } from '../types';
 import './ClubEventConsole.css';
 
@@ -34,10 +37,7 @@ export type ClubEventCourseOption = Readonly<{
 type ClubEventConsoleProps = Readonly<{
   raceTracks: readonly ClubEventCourseOption[];
   sprintRoutes: readonly ClubEventCourseOption[];
-  liveSessions?: readonly ClubLiveSession[];
 }>;
-
-const sprintDistances = [30, 60, 100, 200, 300] as const;
 
 function displayAthlete(event: ClubEventSnapshot, deviceId: string | null) {
   const slot = event.slots.find((candidate) => candidate.deviceId === deviceId);
@@ -62,7 +62,7 @@ function eventConfigurationSummary(event: ClubEventSnapshot) {
   return origin && destination ? `${origin} → ${destination}` : 'Shared Explore ride';
 }
 
-export function ClubEventConsole({ raceTracks, sprintRoutes, liveSessions = [] }: ClubEventConsoleProps) {
+export function ClubEventConsole({ raceTracks, sprintRoutes }: ClubEventConsoleProps) {
   const requestGenerationRef = useRef(0);
   const [mode, setMode] = useState<'independent' | 'coach'>('independent');
   const [event, setEvent] = useState<ClubEventSnapshot | null>(null);
@@ -128,9 +128,9 @@ export function ClubEventConsole({ raceTracks, sprintRoutes, liveSessions = [] }
   const readyCount = event?.slots.filter((slot) => slot.ready && slot.athlete).length ?? 0;
   const synchronizedDeviceIds = useMemo(() => new Set(
     event?.slots
-      .filter((slot) => clubEventLaunchAcknowledged(event, slot, liveSessions, now))
+      .filter((slot) => clubEventLaunchAcknowledged(event, slot))
       .flatMap((slot) => slot.deviceId ? [slot.deviceId] : []) ?? [],
-  ), [event, liveSessions, now]);
+  ), [event]);
   const countdownSeconds = event?.status === 'active' && event.startAt
     ? Math.max(0, Math.ceil((event.startAt - now) / 1_000))
     : null;
@@ -144,7 +144,7 @@ export function ClubEventConsole({ raceTracks, sprintRoutes, liveSessions = [] }
   );
 
   const create = async () => {
-    let configuration: Record<string, unknown>;
+    let configuration: Record<string, unknown> | null = null;
     if (activityType === 'bmx-race') {
       if (!selectedRaceTrack) {
         setMessage('Choose a mapped BMX track before opening the lobby.');
@@ -173,16 +173,22 @@ export function ClubEventConsole({ raceTracks, sprintRoutes, liveSessions = [] }
         setMessage('Enter the shared start and destination before opening the Explore lobby.');
         return;
       }
-      configuration = {
-        origin: exploreOrigin.trim(),
-        destination: exploreDestination.trim(),
-        routeName: exploreName.trim() || 'Club Explore ride',
-      };
     }
 
     setBusy('creating');
-    setMessage('Opening the four-tablet lobby…');
+    setMessage(activityType === 'explore'
+      ? 'Resolving both locations and building the shared bicycle route…'
+      : 'Opening the four-tablet lobby…');
     try {
+      if (activityType === 'explore') {
+        configuration = await prepareClubEventExploreConfiguration({
+          origin: exploreOrigin,
+          destination: exploreDestination,
+          routeName: exploreName,
+        }, resolveLocationText, fetchExploreRoute);
+        setMessage('Route ready. Opening the four-tablet lobby…');
+      }
+      if (!configuration) throw new Error('The coach event configuration could not be prepared.');
       const envelope = await createClubEvent(activityType, configuration);
       setEvent(envelope.event);
       setMode('coach');
@@ -295,7 +301,7 @@ export function ClubEventConsole({ raceTracks, sprintRoutes, liveSessions = [] }
             <label>
               <span>Distance</span>
               <select value={sprintDistanceFeet} onChange={(event) => setSprintDistanceFeet(Number(event.target.value))}>
-                {sprintDistances.map((distance) => <option value={distance} key={distance}>{distance} ft</option>)}
+                {straightSprintDistanceOptions.map((distance) => <option value={distance} key={distance}>{distance} ft</option>)}
               </select>
             </label>
             <label>

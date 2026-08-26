@@ -2,6 +2,7 @@ import {
   clearStoredClubTabletDevice,
   clearStoredClubTabletSession,
   clearStoredClubTabletSessionIfCurrent,
+  clubTabletResultUploadHeader,
   clubTabletSessionMatchesCurrentDevice,
   clubTabletSessionHeaders,
   clubTabletOutboxStorageKey,
@@ -59,8 +60,11 @@ type ClubTabletOutboxEntry = {
   deviceId: string;
   clubId: string;
   studioRiderId: string;
+  bikeDeviceId: string;
   sessionToken: string;
   sessionExpiresAt: number;
+  resultUploadToken: string;
+  resultUploadExpiresAt: number;
   releaseAfterFlush: boolean;
   payload: unknown;
   createdAt: number;
@@ -90,8 +94,11 @@ function readClubTabletOutbox(): ClubTabletOutboxEntry[] {
         deviceId,
         clubId,
         studioRiderId,
+        bikeDeviceId: text(candidate.bikeDeviceId, 160),
         sessionToken: text(candidate.sessionToken, 2048),
         sessionExpiresAt: positiveNumber(candidate.sessionExpiresAt),
+        resultUploadToken: text(candidate.resultUploadToken, 2048),
+        resultUploadExpiresAt: positiveNumber(candidate.resultUploadExpiresAt),
         releaseAfterFlush: candidate.releaseAfterFlush === true,
         payload: candidate.payload,
         createdAt: positiveNumber(candidate.createdAt, Date.now()),
@@ -130,8 +137,11 @@ function queueClubTabletArtifact(
     deviceId: credential.deviceId,
     clubId: credential.session.clubId,
     studioRiderId: credential.session.studioRiderId,
+    bikeDeviceId: String(credential.session.bikeDeviceId),
     sessionToken: credential.sessionToken,
     sessionExpiresAt: credential.session.expiresAt,
+    resultUploadToken: credential.resultUploadToken ?? '',
+    resultUploadExpiresAt: credential.resultUploadExpiresAt ?? 0,
     releaseAfterFlush: false,
     payload,
     createdAt: Date.now(),
@@ -145,16 +155,23 @@ function queueClubTabletArtifact(
 
 async function sendClubTabletOutboxEntry(
   entry: ClubTabletOutboxEntry,
-  sessionToken: string,
+  sessionToken = '',
 ) {
   const path = entry.kind === 'training'
     ? '/api/club-tablet/training-sessions'
     : entry.kind === 'race'
       ? '/api/club-tablet/race-results'
       : '/api/club-tablet/ghosts';
+  const device = readStoredClubTabletDevice();
   const payload = await tabletFetch(path, {
     method: 'POST',
-    headers: clubTabletSessionHeaders(sessionToken),
+    headers: {
+      ...clubTabletSessionHeaders(sessionToken),
+      ...(device?.device.id === entry.deviceId && entry.resultUploadToken ? {
+        Authorization: `Bearer ${device.deviceToken}`,
+        [clubTabletResultUploadHeader]: entry.resultUploadToken,
+      } : {}),
+    },
     body: JSON.stringify(entry.payload),
   });
   writeClubTabletOutbox(readClubTabletOutbox().filter((candidate) => candidate.id !== entry.id));
@@ -176,6 +193,8 @@ function incrementClubTabletOutboxAttempt(entryId: string) {
 
 function retryableClubTabletArtifactError(error: unknown) {
   return !(error instanceof ClubTabletRequestError)
+    || error.status === 401
+    || error.status === 403
     || error.status === 408
     || error.status === 429
     || error.status >= 500;
@@ -206,6 +225,8 @@ function markClubTabletOutboxReleasePending(credential: ClubTabletSessionCredent
       ...entry,
       sessionToken: entry.sessionToken || credential.sessionToken,
       sessionExpiresAt: entry.sessionExpiresAt || credential.session.expiresAt,
+      resultUploadToken: entry.resultUploadToken || credential.resultUploadToken || '',
+      resultUploadExpiresAt: entry.resultUploadExpiresAt || credential.resultUploadExpiresAt || 0,
       releaseAfterFlush: true,
     };
   }));
@@ -253,7 +274,7 @@ async function flushClubTabletOutboxNow(credential?: ClubTabletSessionCredential
       || (activeCredential && outboxEntryMatchesSession(entry, activeCredential)
         ? activeCredential.sessionToken
         : '');
-    if (!sessionToken) continue;
+    if (!sessionToken && !entry.resultUploadToken) continue;
     try {
       await sendClubTabletOutboxEntry(entry, sessionToken);
       sent += 1;
@@ -340,10 +361,10 @@ export async function startClubTabletSession(
   credential = readStoredClubTabletDevice(),
 ) {
   if (!credential) throw new Error('This tablet has not been authorized by the club owner.');
-  await flushClubTabletOutbox();
-  if (pendingClubTabletReleaseCount() > 0) {
-    throw new Error('The previous athlete’s completed result is saved on this tablet and still syncing. Check the connection, then retry.');
-  }
+  // A previous athlete's durable result upload is independent of this new
+  // interactive selection. Never make the next rider wait for that background
+  // network request; the device-bound result token keeps the identities scoped.
+  void flushClubTabletOutbox().catch(() => undefined);
   const payload = await tabletFetch('/api/club-tablet/sessions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${credential.deviceToken}` },
@@ -390,13 +411,17 @@ export async function endClubTabletSession(credential = readStoredClubTabletSess
     return;
   }
   try {
-    const deferredArtifactCount = markClubTabletOutboxReleasePending(credential);
-    if (deferredArtifactCount === 0) {
-      await tabletFetch('/api/club-tablet/sessions', {
-        method: 'DELETE',
-        headers: clubTabletSessionHeaders(credential.sessionToken),
-      });
-    }
+    markClubTabletOutboxReleasePending(credential);
+  } catch {
+    // The completed artifact was already written before this handoff. A
+    // storage-quota failure while marking the optional cleanup flag must not
+    // keep the athlete or event seat selected on the server.
+  }
+  try {
+    await tabletFetch('/api/club-tablet/sessions', {
+      method: 'DELETE',
+      headers: clubTabletSessionHeaders(credential.sessionToken),
+    });
   } finally {
     clearStoredClubTabletSessionIfCurrent(credential);
   }

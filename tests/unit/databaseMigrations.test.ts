@@ -131,6 +131,22 @@ describe('database migration runner', () => {
     expect(statements).not.toContain('session_token TEXT');
   });
 
+  it('persists Club Event launch acknowledgments and deferred tablet-result credentials', () => {
+    const hardeningMigration = databaseMigrations().find((candidate) => candidate.version === 28);
+    const statements = hardeningMigration?.statements.join('\n') ?? '';
+
+    expect(hardeningMigration).toMatchObject({
+      version: 28,
+      name: 'harden club event launches and deferred tablet results',
+    });
+    expect(statements).toContain('ADD COLUMN IF NOT EXISTS launched_at TIMESTAMPTZ');
+    expect(statements).toContain('club_tablet_result_authorizations');
+    expect(statements).toContain('token_hash TEXT PRIMARY KEY');
+    expect(statements).toContain('session_token_hash TEXT NOT NULL UNIQUE');
+    expect(statements).toContain('expires_at TIMESTAMPTZ NOT NULL');
+    expect(statements).not.toContain('session_token TEXT');
+  });
+
   it('adds durable per-account display unit preferences', () => {
     const unitPreferencesMigration = databaseMigrations().find((candidate) => candidate.version === 14);
 

@@ -1712,6 +1712,27 @@ export function databaseMigrations(schemaName = TRACKLAB_SCHEMA) {
           ON ${schema}.club_event_participants (device_id, event_id)`,
       ],
     },
+    {
+      version: 28,
+      name: 'harden club event launches and deferred tablet results',
+      statements: [
+        `ALTER TABLE ${schema}.club_event_participants
+          ADD COLUMN IF NOT EXISTS launched_at TIMESTAMPTZ`,
+        `CREATE TABLE IF NOT EXISTS ${schema}.club_tablet_result_authorizations (
+          token_hash TEXT PRIMARY KEY CHECK (char_length(token_hash) = 64),
+          device_id TEXT NOT NULL REFERENCES ${schema}.club_tablet_devices(id) ON DELETE CASCADE,
+          club_id TEXT NOT NULL REFERENCES ${schema}.clubs(id) ON DELETE CASCADE,
+          studio_rider_id TEXT NOT NULL CHECK (char_length(studio_rider_id) BETWEEN 1 AND 160),
+          rider_name TEXT NOT NULL CHECK (char_length(rider_name) BETWEEN 1 AND 120),
+          bike_device_id TEXT NOT NULL CHECK (char_length(bike_device_id) BETWEEN 1 AND 160),
+          session_token_hash TEXT NOT NULL UNIQUE CHECK (char_length(session_token_hash) = 64),
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_tracklab_club_tablet_result_authorizations_expiry
+          ON ${schema}.club_tablet_result_authorizations (expires_at, device_id)`,
+      ],
+    },
   ];
 }
 

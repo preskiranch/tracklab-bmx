@@ -256,6 +256,10 @@ function customSprintTrack(id: string) {
       { lat: 43.031, lng: -71.077 },
       { lat: 43.032, lng: -71.076 },
     ],
+    centerline: [
+      { lat: 43.031, lng: -71.077 },
+      { lat: 43.032, lng: -71.076 },
+    ],
     routeStatus: 'locator-only',
     zones: [],
     leaderboards: { rpm: [], speed: [] },
@@ -293,6 +297,7 @@ beforeAll(async () => {
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
       TRACKLAB_CLUB_LIVE_SESSION_TTL_MS: '600',
       TRACKLAB_CLUB_TABLET_WS_TICKET_TTL_MS: '120',
+      TRACKLAB_CLUB_EVENT_START_LEAD_MS: '3000',
       APPLE_MAPKIT_JS_TOKEN: 'test-domain-restricted-mapkit-token',
       OPENAI_API_KEY: '',
     },
@@ -2369,21 +2374,24 @@ describe('cloud API trust boundaries', () => {
     let secondSelectedPayload = await secondSelected.json();
 
     cookie = monitorCookie;
+    const privateDragStrip = {
+      ...customSprintTrack('private-drag-strip'),
+      name: 'Private Drag Strip',
+      centerline: Array.from({ length: 80 }, (_, index) => ({
+        lat: 38 + (index * 0.00001),
+        lng: -122,
+      })),
+    };
     const eventCreated = await api('/api/club-events', {
       method: 'POST',
       body: JSON.stringify({
         activityType: 'straight-sprint',
         configuration: {
+          trackId: privateDragStrip.id,
+          trackName: privateDragStrip.name,
           distanceFeet: 300,
           airSetting: 1,
-          trackRecord: {
-            id: 'private-drag-strip',
-            name: 'Private Drag Strip',
-            centerline: Array.from({ length: 80 }, (_, index) => ({
-              lat: 38 + (index * 0.00001),
-              lng: -122,
-            })),
-          },
+          trackRecord: privateDragStrip,
           constructor: 'must not survive',
         },
       }),
@@ -2514,6 +2522,14 @@ describe('cloud API trust boundaries', () => {
       expect.objectContaining({ deviceId: firstDevice.device.id, status: 'ready' }),
       expect.objectContaining({ deviceId: secondDevice.device.id, status: 'ready' }),
     ]));
+    const replayedStart = await api('/api/club-events/current/start', {
+      method: 'POST',
+      body: JSON.stringify({ eventId }),
+    });
+    expect(replayedStart.status).toBe(200);
+    await expect(replayedStart.json()).resolves.toMatchObject({
+      event: { id: eventId, status: 'active', startAt: eventStartedPayload.event.startAt },
+    });
     cookie = '';
     expect((await api('/api/club-events/current/join', {
       method: 'POST',
@@ -2521,8 +2537,8 @@ describe('cloud API trust boundaries', () => {
       body: JSON.stringify({ eventId }),
     })).status).toBe(409);
 
-    const eventSocketOne = await openClubTabletSocket(selectedPayload.sessionToken);
-    const eventSocketTwo = await openClubTabletSocket(secondSelectedPayload.sessionToken);
+    let eventSocketOne = await openClubTabletSocket(selectedPayload.sessionToken);
+    let eventSocketTwo = await openClubTabletSocket(secondSelectedPayload.sessionToken);
     eventSocketOne.socket.send(JSON.stringify({ type: 'join-club-event', eventId }));
     const firstEventRoom = await waitForSocketMessage(
       eventSocketOne,
@@ -2534,10 +2550,10 @@ describe('cloud API trust boundaries', () => {
     const oneTabletLaunchedSlots = (await oneTabletLaunched.json()).event.slots;
     expect(oneTabletLaunchedSlots.find(
       (slot: { deviceId: string }) => slot.deviceId === firstDevice.device.id,
-    )).toMatchObject({ status: 'active' });
+    )).toMatchObject({ status: 'active', online: true });
     expect(oneTabletLaunchedSlots.find(
       (slot: { deviceId: string }) => slot.deviceId === secondDevice.device.id,
-    )).toMatchObject({ status: 'ready' });
+    )).toMatchObject({ status: 'ready', online: false });
     cookie = '';
 
     const blockedResetIndex = eventSocketOne.messages.length;
@@ -2564,10 +2580,62 @@ describe('cloud API trust boundaries', () => {
     });
     cookie = monitorCookie;
     const bothTabletsLaunched = await api('/api/club-events/current');
-    expect((await bothTabletsLaunched.json()).event.slots.filter(
+    const bothTabletsLaunchedSlots = (await bothTabletsLaunched.json()).event.slots;
+    expect(bothTabletsLaunchedSlots.filter(
       (slot: { status: string }) => slot.status === 'active',
     )).toHaveLength(2);
+    expect(bothTabletsLaunchedSlots.filter(
+      (slot: { online: boolean }) => slot.online,
+    )).toHaveLength(2);
     cookie = '';
+
+    // Durable launched_at permits a deadline reconnect, but the coach's live
+    // status is transport presence: it drops as soon as the socket leaves.
+    eventSocketTwo.socket.terminate();
+    testSockets.delete(eventSocketTwo.socket);
+    let disconnectedSecondSlot: Record<string, any> | undefined;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      cookie = monitorCookie;
+      const disconnectedSnapshot = await api('/api/club-events/current');
+      disconnectedSecondSlot = (await disconnectedSnapshot.json()).event.slots.find(
+        (slot: { deviceId: string }) => slot.deviceId === secondDevice.device.id,
+      );
+      cookie = '';
+      if (disconnectedSecondSlot?.online === false) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(disconnectedSecondSlot).toMatchObject({ status: 'ready', online: false });
+
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      Math.max(1, eventStartedPayload.event.startAt - Date.now() + 50),
+    ));
+    eventSocketTwo = await openClubTabletSocket(secondSelectedPayload.sessionToken);
+    eventSocketTwo.socket.send(JSON.stringify({ type: 'join-club-event', eventId }));
+    await waitForSocketMessage(
+      eventSocketTwo,
+      (message) => message.type === 'room-state' && message.room?.id === firstEventRoom.room.id,
+    );
+    cookie = monitorCookie;
+    const secondTabletReconnected = await api('/api/club-events/current');
+    expect((await secondTabletReconnected.json()).event.slots.find(
+      (slot: { deviceId: string }) => slot.deviceId === secondDevice.device.id,
+    )).toMatchObject({ status: 'active', online: true });
+    cookie = '';
+    const replacedEventSocketOne = eventSocketOne;
+    const reconnectedEventSocketOne = await openClubTabletSocket(selectedPayload.sessionToken);
+    reconnectedEventSocketOne.socket.send(JSON.stringify({ type: 'join-club-event', eventId }));
+    const reconnectedEventRoom = await waitForSocketMessage(
+      reconnectedEventSocketOne,
+      (message) => message.type === 'room-state' && message.room?.id === firstEventRoom.room.id,
+    );
+    expect(reconnectedEventRoom.room).toMatchObject({
+      purpose: 'club-event',
+      racerCount: 2,
+    });
+    testSockets.delete(replacedEventSocketOne.socket);
+    eventSocketOne = reconnectedEventSocketOne;
+
     const ordinaryJoinIndex = eventSocketOne.messages.length;
     eventSocketOne.socket.send(JSON.stringify({ type: 'join-room', roomId: firstEventRoom.room.id }));
     await waitForSocketMessage(
@@ -2619,6 +2687,194 @@ describe('cloud API trust boundaries', () => {
     cancelledEventSocket.socket.terminate();
     testSockets.delete(cancelledEventSocket.socket);
 
+    // Explore Club Events freeze the owner's route before the lobby opens.
+    // Tablets receive that exact snapshot and server start clock; none of the
+    // four tablet sockets becomes a host or can mutate/control the ride.
+    cookie = monitorCookie;
+    expect((await api('/api/club-events', {
+      method: 'POST',
+      body: JSON.stringify({
+        activityType: 'explore',
+        configuration: { origin: 'Preski Ranch', destination: 'Golden Gate Bridge' },
+      }),
+    })).status).toBe(400);
+    const ownerExploreRoute = {
+      id: 'club-owner-explore-route',
+      name: 'Preski to Golden Gate',
+      origin: { lat: 38.1, lng: -122.2 },
+      destination: { lat: 37.8199, lng: -122.4783 },
+      originLabel: 'Preski Ranch',
+      destinationLabel: 'Golden Gate Bridge',
+      travelMode: 'bicycle',
+      distanceMeters: 12_345,
+      durationSeconds: 2_400,
+      encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+      createdAt: Date.now(),
+      privateToken: 'must-not-survive',
+    };
+    expect((await api('/api/club-events', {
+      method: 'POST',
+      body: JSON.stringify({
+        activityType: 'explore',
+        configuration: {
+          routeId: ownerExploreRoute.id,
+          route: { ...ownerExploreRoute, travelMode: 'hovercraft' },
+        },
+      }),
+    })).status).toBe(400);
+    const exploreCreated = await api('/api/club-events', {
+      method: 'POST',
+      body: JSON.stringify({
+        activityType: 'explore',
+        configuration: {
+          origin: 'client display must not win',
+          destination: 'client display must not win',
+          routeName: ownerExploreRoute.name,
+          routeId: ownerExploreRoute.id,
+          route: ownerExploreRoute,
+        },
+      }),
+    });
+    expect(exploreCreated.status).toBe(201);
+    const exploreCreatedPayload = await exploreCreated.json();
+    expect(exploreCreatedPayload.event.configuration).toMatchObject({
+      origin: ownerExploreRoute.originLabel,
+      destination: ownerExploreRoute.destinationLabel,
+      routeName: ownerExploreRoute.name,
+      routeId: ownerExploreRoute.id,
+      route: {
+        id: ownerExploreRoute.id,
+        travelMode: 'bicycle',
+        encodedPolyline: ownerExploreRoute.encodedPolyline,
+      },
+    });
+    expect(exploreCreatedPayload.event.configuration.route).not.toHaveProperty('privateToken');
+    const exploreEventId = exploreCreatedPayload.event.id;
+    cookie = '';
+    expect((await api('/api/club-events/current/join', {
+      method: 'POST',
+      headers: athleteHeaders(selectedPayload.sessionToken),
+      body: JSON.stringify({ eventId: exploreEventId }),
+    })).status).toBe(200);
+    cookie = monitorCookie;
+    const exploreStarted = await api('/api/club-events/current/start', {
+      method: 'POST',
+      body: JSON.stringify({ eventId: exploreEventId }),
+    });
+    expect(exploreStarted.status).toBe(200);
+    const exploreStartedPayload = await exploreStarted.json();
+    cookie = '';
+    const exploreSocket = await openClubTabletSocket(selectedPayload.sessionToken);
+    exploreSocket.socket.send(JSON.stringify({ type: 'join-club-event', eventId: exploreEventId }));
+    const exploreRoom = await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'room-state' && message.room?.clubEventId === exploreEventId,
+    );
+    expect(exploreRoom.room).toMatchObject({
+      hostId: null,
+      exploreRoute: {
+        id: ownerExploreRoute.id,
+        encodedPolyline: ownerExploreRoute.encodedPolyline,
+      },
+      exploreSession: {
+        id: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        status: 'riding',
+        startedAt: exploreStartedPayload.event.startAt,
+      },
+    });
+    const preStartExploreSyncIndex = exploreSocket.messages.length;
+    exploreSocket.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'pre-start', distanceMeters: 1, velocityMps: 1 }],
+      },
+    }));
+    const wrongActivitySyncIndex = exploreSocket.messages.length;
+    exploreSocket.socket.send(JSON.stringify({
+      type: 'race-sync',
+      state: {
+        sessionId: exploreEventId,
+        trackId: exploreRoom.room.track.id,
+        raceState: 'racing',
+        riders: [],
+        summary: [],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(exploreSocket.messages.slice(preStartExploreSyncIndex).some(
+      (message) => message.type === 'explore-sync',
+    )).toBe(false);
+    expect(exploreSocket.messages.slice(wrongActivitySyncIndex).some(
+      (message) => message.type === 'race-sync',
+    )).toBe(false);
+
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      Math.max(1, exploreStartedPayload.event.startAt - Date.now() + 30),
+    ));
+    const validExploreSyncIndex = exploreSocket.messages.length;
+    exploreSocket.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: exploreEventId,
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'server-bound-rider', distanceMeters: 25, velocityMps: 4 }],
+      },
+    }));
+    const acceptedExploreSync = await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'explore-sync',
+      validExploreSyncIndex,
+    );
+    expect(acceptedExploreSync.state).toMatchObject({
+      sessionId: exploreEventId,
+      eventId: exploreEventId,
+      activityType: 'explore',
+      routeId: ownerExploreRoute.id,
+      startedAt: exploreStartedPayload.event.startAt,
+    });
+    const wrongSessionSyncIndex = exploreSocket.messages.length;
+    exploreSocket.socket.send(JSON.stringify({
+      type: 'explore-sync',
+      state: {
+        sessionId: 'forged-explore-session',
+        routeId: ownerExploreRoute.id,
+        riders: [{ id: 'wrong-session', distanceMeters: 30, velocityMps: 4 }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(exploreSocket.messages.slice(wrongSessionSyncIndex).some(
+      (message) => message.type === 'explore-sync',
+    )).toBe(false);
+    const blockedExploreControlIndex = exploreSocket.messages.length;
+    exploreSocket.socket.send(JSON.stringify({ type: 'room-explore-action', action: 'pause' }));
+    await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'room-error' && /coach controls/i.test(String(message.message)),
+      blockedExploreControlIndex,
+    );
+    const blockedExploreRouteIndex = exploreSocket.messages.length;
+    exploreSocket.socket.send(JSON.stringify({
+      type: 'room-explore-route',
+      route: { ...ownerExploreRoute, id: 'forged-tablet-route' },
+    }));
+    await waitForSocketMessage(
+      exploreSocket,
+      (message) => message.type === 'room-error' && /coach controls/i.test(String(message.message)),
+      blockedExploreRouteIndex,
+    );
+    exploreSocket.socket.terminate();
+    testSockets.delete(exploreSocket.socket);
+    cookie = monitorCookie;
+    expect((await api('/api/club-events/current/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ eventId: exploreEventId }),
+    })).status).toBe(200);
+    cookie = '';
+
     const failedAtomicSwitch = await startTabletSession(
       firstDevice.deviceToken,
       'shared-tablet-rider-two',
@@ -2651,9 +2907,18 @@ describe('cloud API trust boundaries', () => {
     expect(wrongOrigin.status).toBe(403);
 
     cookie = monitorCookie;
+    const revokeRaceTrack = customSprintTrack('revoke-race');
     const revokeRaceEvent = await api('/api/club-events', {
       method: 'POST',
-      body: JSON.stringify({ activityType: 'bmx-race', configuration: { trackId: 'revoke-race' } }),
+      body: JSON.stringify({
+        activityType: 'bmx-race',
+        configuration: {
+          trackId: revokeRaceTrack.id,
+          trackName: revokeRaceTrack.name,
+          trackRecord: revokeRaceTrack,
+          lapCount: 1,
+        },
+      }),
     });
     expect(revokeRaceEvent.status).toBe(201);
     const revokeRaceEventId = (await revokeRaceEvent.json()).event.id;

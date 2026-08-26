@@ -25,7 +25,6 @@ import type {
 } from '../../src/lib/clubTabletStorage';
 import { clubTabletCoachEventLocksIndependentTraining } from '../../src/components/ClubTabletMode';
 import { clubTabletEventPollingMessage } from '../../src/components/ClubTabletEventCard';
-import type { ClubLiveSession } from '../../src/lib/clubLive';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -147,7 +146,7 @@ describe('club event normalization', () => {
   });
 
   it('preserves the complete private course snapshot needed by another club tablet', () => {
-    const centerline = Array.from({ length: 150 }, (_, index) => ({
+    const centerline = Array.from({ length: 2_500 }, (_, index) => ({
       lat: 38 + (index * 0.00001),
       lng: -122,
     }));
@@ -157,7 +156,7 @@ describe('club event normalization', () => {
         trackRecord: { id: 'private-drag-strip', centerline },
       },
     });
-    expect((event.configuration.trackRecord as { centerline: unknown[] }).centerline).toHaveLength(150);
+    expect((event.configuration.trackRecord as { centerline: unknown[] }).centerline).toHaveLength(2_500);
   });
 });
 
@@ -226,38 +225,13 @@ describe('club event tablet selection and launch state', () => {
     expect(clubEventLaunchForDevice(event, 'tablet-missing')).toBeNull();
   });
 
-  it('requires fresh matching multiplayer telemetry before declaring a tablet launched', () => {
+  it('requires the server-authenticated event slot to become active before declaring launch', () => {
     const now = Date.now();
     const event = normalizedEvent({ status: 'active', startAt: now + 8_000 });
     const slot = event.slots[0];
-    const liveSession: ClubLiveSession = {
-      id: 'club-1:rider-1',
-      clubId: 'club-1',
-      studioRiderId: 'rider-1',
-      riderName: 'Rider One',
-      athleteName: 'Rasheen',
-      deviceId: 'tablet-1',
-      activityType: 'bmx-race',
-      status: 'staging',
-      progress: { fraction: 0 },
-      metrics: {
-        watts: 0,
-        cadence: 0,
-        speedKph: 0,
-        distanceMeters: 0,
-        elapsedMs: 0,
-        position: 1,
-        participantCount: 2,
-      },
-      updatedAt: now - 1_000,
-      expiresAt: now + 20_000,
-      multiplayer: true,
-    };
-
-    expect(clubEventLaunchAcknowledged(event, slot, [], now)).toBe(false);
-    expect(clubEventLaunchAcknowledged(event, slot, [liveSession], now)).toBe(true);
-    expect(clubEventLaunchAcknowledged(event, slot, [{ ...liveSession, multiplayer: false }], now)).toBe(false);
-    expect(clubEventLaunchAcknowledged(event, slot, [{ ...liveSession, updatedAt: now - 11_000 }], now)).toBe(false);
+    expect(clubEventLaunchAcknowledged(event, slot)).toBe(false);
+    expect(clubEventLaunchAcknowledged(event, { ...slot, status: 'active' })).toBe(true);
+    expect(clubEventLaunchAcknowledged(event, { ...slot, status: 'active', ready: false })).toBe(false);
     expect(clubEventMultiplayerRoomReady('event-1', undefined)).toBe(false);
     expect(clubEventMultiplayerRoomReady('event-1', 'event-other')).toBe(false);
     expect(clubEventMultiplayerRoomReady('event-1', 'event-1')).toBe(true);

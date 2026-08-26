@@ -123,9 +123,8 @@ import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
 import { demoHeartRateReadingForBikeSample } from '../lib/demoHeartRate';
 import type { ClubEventLaunchPayload } from '../lib/clubEvent';
 import {
-  buildClubEventExploreRoute,
-  clubEventExplorePlan,
-  clubEventExploreStartControlDelayMs,
+  clubEventExploreIsServerControlled,
+  clubEventExploreLaunch,
 } from '../lib/clubEventExplore';
 
 type ExploreViewProps = {
@@ -142,6 +141,7 @@ type ExploreViewProps = {
   playMode: PlayMode;
   demoMode: boolean;
   multiplayerConnection: string;
+  multiplayerClockOffsetMs: number;
   currentRoom: MultiplayerRoom | null;
   currentUserId: string | null;
   accountProfileKey: string | null;
@@ -154,6 +154,7 @@ type ExploreViewProps = {
   voiceRemoteCount: number;
   /** Active only for a coach-led Explore event; independent Explore leaves this unset. */
   clubEventLaunch?: ClubEventLaunchPayload | null;
+  onClubEventProgramReady?: (eventId: string) => void;
   onPlayModeChange: (mode: PlayMode) => void;
   onCreatePrivateRoom: () => boolean;
   onShareInvite: () => void;
@@ -356,6 +357,7 @@ export function ExploreView({
   playMode,
   demoMode,
   multiplayerConnection,
+  multiplayerClockOffsetMs,
   currentRoom,
   currentUserId,
   accountProfileKey,
@@ -367,6 +369,7 @@ export function ExploreView({
   voiceStatus,
   voiceRemoteCount,
   clubEventLaunch = null,
+  onClubEventProgramReady,
   onPlayModeChange,
   onCreatePrivateRoom,
   onShareInvite,
@@ -468,9 +471,6 @@ export function ExploreView({
   const [selectedLandmark, setSelectedLandmark] = useState<ExploreLandmarkPopup | null>(null);
   const [streetViewLandmark, setStreetViewLandmark] = useState<GoogleLandmarkDetails | null>(null);
   const appliedRoomSessionRef = useRef<string | null>(null);
-  const clubEventRouteBuildKeyRef = useRef<string | null>(null);
-  const clubEventStartCommandKeyRef = useRef<string | null>(null);
-  const [clubEventRouteBuildAttempt, setClubEventRouteBuildAttempt] = useState(0);
   const landmarkRequestRef = useRef(0);
   const routeRequestRef = useRef(0);
   const recentRouteProfileRef = useRef(recentProfileKey);
@@ -479,9 +479,28 @@ export function ExploreView({
   const destinationInputRef = useRef<HTMLInputElement | null>(null);
   const latestRidersRef = useRef<ReturnType<typeof useExploreRide>['riders']>([]);
   const previousRideStatusRef = useRef<ReturnType<typeof useExploreRide>['status']>('ready');
-  const sourceRoute = playMode === 'multiplayer'
-    ? currentRoom?.exploreRoute ?? null
-    : localRoute;
+  const serverControlledExplore = clubEventExploreIsServerControlled(clubEventLaunch);
+  const clubExploreEvent = useMemo(
+    () => clubEventExploreLaunch(clubEventLaunch),
+    [clubEventLaunch],
+  );
+  const roomClubEventRoute = clubExploreEvent
+    && currentRoom?.purpose === 'club-event'
+    && currentRoom.clubEventId === clubExploreEvent.eventId
+    && currentRoom.exploreRoute?.id === clubExploreEvent.route.id
+    ? currentRoom.exploreRoute
+    : null;
+  const clubEventRoomReady = !serverControlledExplore || Boolean(
+    roomClubEventRoute
+    && currentRoom?.exploreSession?.routeId === roomClubEventRoute.id,
+  );
+  // The owner resolves the route before opening the lobby. Tablets consume
+  // that server-authored immutable snapshot and never rebuild it locally.
+  const sourceRoute = serverControlledExplore
+    ? roomClubEventRoute ?? clubExploreEvent?.route ?? null
+    : playMode === 'multiplayer'
+      ? currentRoom?.exploreRoute ?? null
+      : localRoute;
   const route = useMemo(() => {
     if (!sourceRoute || recoveredElevation?.routeId !== sourceRoute.id) {
       return sourceRoute;
@@ -493,6 +512,9 @@ export function ExploreView({
       elevationLossMeters: recoveredElevation.elevationLossMeters,
     };
   }, [recoveredElevation, sourceRoute]);
+  useEffect(() => {
+    if (clubExploreEvent && route) onClubEventProgramReady?.(clubExploreEvent.eventId);
+  }, [clubExploreEvent, onClubEventProgramReady, route]);
   const effectiveMapRenderer = developerMode ? mapRenderer : 'google-satellite';
   const localClientId = currentUserId ?? 'local';
   const ride = useExploreRide({
@@ -546,17 +568,8 @@ export function ExploreView({
   fullscreenChangeRef.current = onFullscreenChange;
   const rideSessionCancelRef = useRef(onRideSessionCancel);
   rideSessionCancelRef.current = onRideSessionCancel;
-  const syncExploreRouteRef = useRef(onSyncRoute);
-  syncExploreRouteRef.current = onSyncRoute;
-  const controlExploreSessionRef = useRef(onControlSession);
-  controlExploreSessionRef.current = onControlSession;
-
   const roomHost = Boolean(currentRoom && currentRoom.hostId === currentUserId);
-  const canChooseRoute = playMode === 'local' || roomHost;
-  const clubExplorePlan = useMemo(
-    () => clubEventExplorePlan(clubEventLaunch),
-    [clubEventLaunch],
-  );
+  const canChooseRoute = !serverControlledExplore && (playMode === 'local' || roomHost);
   const activeRemoteRiders = useMemo(() => {
     if (playMode !== 'multiplayer' || !route) {
       return [];
@@ -775,129 +788,6 @@ export function ExploreView({
       });
   }, [cloudRecentRoutesEnabled, recentProfileKey]);
 
-  useEffect(() => {
-    if (
-      !clubExplorePlan
-      || playMode !== 'multiplayer'
-      || currentRoom?.purpose !== 'club-event'
-      || currentRoom.clubEventId !== clubExplorePlan.eventId
-      || !roomHost
-      || currentRoom.exploreRoute
-    ) {
-      return undefined;
-    }
-
-    const buildKey = `${clubExplorePlan.eventId}:${currentRoom.id}`;
-    if (clubEventRouteBuildKeyRef.current === buildKey) return undefined;
-    clubEventRouteBuildKeyRef.current = buildKey;
-    let cancelled = false;
-    let retryTimer: number | null = null;
-
-    setOriginText(clubExplorePlan.origin);
-    setDestinationText(clubExplorePlan.destination);
-    setRouteName(clubExplorePlan.routeName);
-    setSelectedOrigin(null);
-    setSelectedDestination(null);
-    setSelectedOriginPrediction(null);
-    setSelectedDestinationPrediction(null);
-    setSmartRoutePlan(null);
-    setRouteStatus('loading');
-    setRouteMessage('The coach route is being prepared for every Club Tablet…');
-
-    void buildClubEventExploreRoute(
-      clubExplorePlan,
-      resolveLocationText,
-      fetchExploreRoute,
-    ).then((nextRoute) => {
-      if (cancelled) return;
-      setSelectedOrigin({ point: nextRoute.origin, label: nextRoute.originLabel });
-      setSelectedDestination({ point: nextRoute.destination, label: nextRoute.destinationLabel });
-      setOriginText(nextRoute.originLabel);
-      setDestinationText(nextRoute.destinationLabel);
-      setRouteName(nextRoute.name ?? clubExplorePlan.routeName);
-      resetPlaceAutocompleteSession();
-      if (!syncExploreRouteRef.current(nextRoute)) {
-        throw new Error('The shared Club Event room is reconnecting.');
-      }
-      rememberExploreRoute(nextRoute);
-      setRouteStatus('idle');
-      setRouteMessage('Coach route ready. The ride will start automatically on every ready tablet.');
-    }).catch((error: unknown) => {
-      if (cancelled) return;
-      clubEventRouteBuildKeyRef.current = null;
-      setRouteStatus('error');
-      setRouteMessage(
-        `The coach route could not be prepared yet. ${error instanceof Error ? error.message : String(error)}`,
-      );
-      retryTimer = window.setTimeout(() => {
-        retryTimer = null;
-        setClubEventRouteBuildAttempt((attempt) => attempt + 1);
-      }, 3_000);
-    });
-
-    return () => {
-      cancelled = true;
-      if (retryTimer != null) window.clearTimeout(retryTimer);
-      if (clubEventRouteBuildKeyRef.current === buildKey && !currentRoom.exploreRoute) {
-        clubEventRouteBuildKeyRef.current = null;
-      }
-    };
-  }, [
-    clubEventRouteBuildAttempt,
-    clubExplorePlan,
-    currentRoom?.clubEventId,
-    currentRoom?.exploreRoute,
-    currentRoom?.id,
-    playMode,
-    rememberExploreRoute,
-    roomHost,
-  ]);
-
-  useEffect(() => {
-    if (
-      !clubExplorePlan
-      || playMode !== 'multiplayer'
-      || currentRoom?.purpose !== 'club-event'
-      || currentRoom.clubEventId !== clubExplorePlan.eventId
-      || !roomHost
-      || !currentRoom.exploreRoute
-      || currentRoom.exploreSession?.status !== 'ready'
-    ) {
-      return undefined;
-    }
-
-    const commandKey = `${clubExplorePlan.eventId}:${currentRoom.exploreSession.id}`;
-    if (clubEventStartCommandKeyRef.current === commandKey) return undefined;
-    let cancelled = false;
-    let timer: number | null = null;
-    const requestStart = () => {
-      if (cancelled) return;
-      if (controlExploreSessionRef.current('start')) {
-        clubEventStartCommandKeyRef.current = commandKey;
-        return;
-      }
-      timer = window.setTimeout(requestStart, 250);
-    };
-    timer = window.setTimeout(
-      requestStart,
-      clubEventExploreStartControlDelayMs(clubExplorePlan.startAt),
-    );
-
-    return () => {
-      cancelled = true;
-      if (timer != null) window.clearTimeout(timer);
-    };
-  }, [
-    clubExplorePlan,
-    currentRoom?.clubEventId,
-    currentRoom?.exploreRoute,
-    currentRoom?.exploreSession?.id,
-    currentRoom?.exploreSession?.status,
-    currentRoom?.id,
-    playMode,
-    roomHost,
-  ]);
-
   const closeLandmark = useCallback(() => {
     landmarkRequestRef.current += 1;
     setSelectedLandmark(null);
@@ -994,6 +884,13 @@ export function ExploreView({
       setElevationRecoveryStatus('ready');
       return undefined;
     }
+    if (serverControlledExplore) {
+      // Preserve the owner's immutable snapshot. A Club Tablet must not
+      // enrich and republish a different route after the lobby opens.
+      setRecoveredElevation(null);
+      setElevationRecoveryStatus('error');
+      return undefined;
+    }
 
     let controller: AbortController | null = null;
     let retryTimer: number | null = null;
@@ -1047,6 +944,7 @@ export function ExploreView({
     playMode,
     rememberExploreRoute,
     roomHost,
+    serverControlledExplore,
     sourceRoute?.distanceMeters,
     sourceRoute?.elevationSamples?.length,
     sourceRoute?.encodedPolyline,
@@ -1195,43 +1093,72 @@ export function ExploreView({
   }, []);
 
   useEffect(() => {
-    if (playMode !== 'multiplayer' || !currentRoom?.exploreSession) {
+    let cancelled = false;
+    const clearScheduledStart = () => {
+      if (scheduledStartTimerRef.current != null) {
+        window.clearTimeout(scheduledStartTimerRef.current);
+        scheduledStartTimerRef.current = null;
+      }
+    };
+    if (
+      playMode !== 'multiplayer'
+      || !currentRoom?.exploreSession
+      || !clubEventRoomReady
+    ) {
+      clearScheduledStart();
       appliedRoomSessionRef.current = null;
-      return;
+      return () => { cancelled = true; };
     }
     const session = currentRoom.exploreSession;
     if (session.routeId !== route?.id) {
-      return;
+      clearScheduledStart();
+      return () => { cancelled = true; };
     }
     if (session.status === 'ready') {
-      appliedRoomSessionRef.current = session.id;
+      clearScheduledStart();
+      appliedRoomSessionRef.current = null;
       resetLocalRide();
       onFullscreenChange(false);
-      return;
+      return () => { cancelled = true; };
     }
     if (session.status === 'paused') {
+      clearScheduledStart();
       pauseLocalRide();
-      return;
+      return () => { cancelled = true; };
     }
     if (session.status === 'riding') {
       onFullscreenChange(true);
       if (appliedRoomSessionRef.current === session.id) {
         resumeLocalRide();
-        return;
+        return () => { cancelled = true; };
       }
-      appliedRoomSessionRef.current = session.id;
-      const startAt = session.startedAt ?? Date.now();
-      const delayMs = Math.max(0, startAt - Date.now());
-      if (scheduledStartTimerRef.current != null) {
-        window.clearTimeout(scheduledStartTimerRef.current);
-      }
-      scheduledStartTimerRef.current = window.setTimeout(() => {
+      const localStartAt = (session.startedAt ?? Date.now()) - multiplayerClockOffsetMs;
+      const attemptStart = () => {
         scheduledStartTimerRef.current = null;
-        void primeBikeRaceAudio().then(() => startLocalRide(startAt));
-      }, delayMs);
+        if (cancelled) return;
+        if (startLocalRide(localStartAt)) {
+          appliedRoomSessionRef.current = session.id;
+          return;
+        }
+        scheduledStartTimerRef.current = window.setTimeout(attemptStart, 250);
+      };
+      clearScheduledStart();
+      // Warm audio during the shared countdown. Fetching or decoding audio
+      // must never delay the server-clock start on a slower tablet.
+      void primeBikeRaceAudio();
+      scheduledStartTimerRef.current = window.setTimeout(
+        attemptStart,
+        Math.max(0, localStartAt - Date.now()),
+      );
     }
+    return () => {
+      cancelled = true;
+      clearScheduledStart();
+    };
   }, [
     currentRoom?.exploreSession,
+    clubEventRoomReady,
+    multiplayerClockOffsetMs,
     pauseLocalRide,
     onFullscreenChange,
     playMode,
@@ -1286,7 +1213,7 @@ export function ExploreView({
   ]);
 
   useEffect(() => {
-    if (playMode !== 'multiplayer' || !currentRoom || !route) {
+    if (playMode !== 'multiplayer' || !currentRoom || !route || !clubEventRoomReady) {
       return undefined;
     }
     const timer = window.setInterval(() => {
@@ -1297,7 +1224,7 @@ export function ExploreView({
       });
     }, 300);
     return () => window.clearInterval(timer);
-  }, [currentRoom, onSendState, playMode, route]);
+  }, [clubEventRoomReady, currentRoom, onSendState, playMode, route]);
 
   const useCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -1329,6 +1256,7 @@ export function ExploreView({
   };
 
   const applyExploreRoute = (nextRoute: ExploreRoute, message = '') => {
+    if (serverControlledExplore) return;
     if (playMode === 'local' && recentProfileKey && nextRoute.id !== localRoute?.id) {
       clearExploreRideCheckpoint(recentProfileKey);
     }
@@ -1564,6 +1492,7 @@ export function ExploreView({
   };
 
   const startOrResume = async () => {
+    if (serverControlledExplore) return;
     void primeBikeRaceAudio();
     if (playMode === 'multiplayer') {
       if (!roomHost) {
@@ -1690,6 +1619,7 @@ export function ExploreView({
   };
 
   const pauseRide = () => {
+    if (serverControlledExplore) return;
     if (playMode === 'multiplayer') {
       if (roomHost) {
         onControlSession('pause');
@@ -1710,6 +1640,7 @@ export function ExploreView({
   };
 
   const resetRide = () => {
+    if (serverControlledExplore) return;
     onFullscreenChange(false);
     if (playMode === 'multiplayer') {
       if (roomHost) {
@@ -1761,6 +1692,7 @@ export function ExploreView({
           <button
             className={playMode === 'local' ? 'selected' : ''}
             type="button"
+            disabled={serverControlledExplore}
             onClick={() => onPlayModeChange('local')}
           >
             <Bike size={17} /> Local bikes
@@ -1768,6 +1700,7 @@ export function ExploreView({
           <button
             className={playMode === 'multiplayer' ? 'selected' : ''}
             type="button"
+            disabled={serverControlledExplore}
             onClick={() => onPlayModeChange('multiplayer')}
           >
             <Users size={17} /> Private room
@@ -1925,8 +1858,8 @@ export function ExploreView({
 
           {playMode === 'multiplayer' && (
             <section className="explore-room-card">
-              <span className="eyebrow">Private multiplayer</span>
-              {currentRoom ? (
+              <span className="eyebrow">{serverControlledExplore ? 'Coach-led Club Event' : 'Private multiplayer'}</span>
+              {currentRoom && clubEventRoomReady ? (
                 <>
                   <strong>Room {currentRoom.id}</strong>
                   <small>{currentRoom.racerSeatCount ?? 0} / 4 rider seats</small>
@@ -1946,10 +1879,17 @@ export function ExploreView({
                     {voiceStatus}{voiceEnabled ? ` ${voiceRemoteCount} rider${voiceRemoteCount === 1 ? '' : 's'} connected.` : ''}
                     {' '}Off by default. TrackLab does not record room audio.
                   </small>
-                  {!roomHost && <p>The room host chooses and controls the shared route.</p>}
+                  {serverControlledExplore
+                    ? <p>The coach selected this route and the server controls the synchronized start.</p>
+                    : !roomHost && <p>The room host chooses and controls the shared route.</p>}
                 </>
               ) : (
-                <>
+                serverControlledExplore ? (
+                  <>
+                    <strong>Joining the coach event…</strong>
+                    <small>The saved route and synchronized start will appear automatically.</small>
+                  </>
+                ) : <>
                   <strong>{multiplayerConnection === 'open' ? 'Open a room' : 'Connecting…'}</strong>
                   <button type="button" onClick={onCreatePrivateRoom} disabled={multiplayerConnection !== 'open'}>
                     <Users size={15} /> Create private room
@@ -1991,6 +1931,7 @@ export function ExploreView({
             </section>
           )}
 
+          {!serverControlledExplore && (
           <section className="explore-route-builder">
             <span className="eyebrow">Route</span>
             <label className="explore-recent-route-field">
@@ -2191,6 +2132,7 @@ export function ExploreView({
               Routes favor bicycle-accessible roads and paths and avoid major interstates. This is an indoor virtual ride—not outdoor navigation.
             </small>
           </section>
+          )}
         </aside>
 
         <div className="explore-stage">
@@ -2401,7 +2343,7 @@ export function ExploreView({
                 )}
                 {fullscreen && (
                   <div className="explore-session-actions">
-                    {ride.status === 'riding' ? (
+                    {!serverControlledExplore && (ride.status === 'riding' ? (
                       <button
                         className="explore-pause-ride"
                         type="button"
@@ -2426,7 +2368,7 @@ export function ExploreView({
                         <Play size={18} />
                         <span>{ride.status === 'paused' ? 'Resume' : 'Start'}</span>
                       </button>
-                    )}
+                    ))}
                     <button
                       className="explore-exit-fullscreen"
                       type="button"
@@ -2729,6 +2671,7 @@ export function ExploreView({
                 </section>
               )}
 
+              {!serverControlledExplore && (
               <div className="explore-controls">
                 {ride.status === 'riding' ? (
                   <button
@@ -2769,13 +2712,18 @@ export function ExploreView({
                   <RotateCcw size={18} /> Reset
                 </button>
               </div>
+              )}
             </>
           ) : (
             <div className="explore-empty-state">
               <MapPinned size={48} />
-              <h3>{playMode === 'multiplayer' && currentRoom && !roomHost ? 'Waiting for the host' : 'Where should we ride?'}</h3>
+              <h3>{serverControlledExplore
+                ? 'Loading the coach route'
+                : playMode === 'multiplayer' && currentRoom && !roomHost ? 'Waiting for the host' : 'Where should we ride?'}</h3>
               <p>
-                {playMode === 'multiplayer' && currentRoom && !roomHost
+                {serverControlledExplore
+                  ? 'This tablet will use the exact route saved with the Club Event.'
+                  : playMode === 'multiplayer' && currentRoom && !roomHost
                   ? 'The route will appear here for everyone in the private room.'
                   : 'Choose a real starting location and destination to create a satellite ride.'}
               </p>

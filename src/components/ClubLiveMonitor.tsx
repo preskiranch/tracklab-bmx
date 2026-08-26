@@ -251,7 +251,7 @@ export function ClubLiveMonitor({
         </div>
       </header>
 
-      <ClubEventConsole raceTracks={raceTracks} sprintRoutes={sprintRoutes} liveSessions={liveSessions} />
+      <ClubEventConsole raceTracks={raceTracks} sprintRoutes={sprintRoutes} />
 
       <section className="club-live-tablet-overview" aria-label="Four Club Tablet status">
         <div className="club-live-tablet-overview-copy">

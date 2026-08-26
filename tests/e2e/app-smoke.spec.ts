@@ -7350,6 +7350,27 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
       body: JSON.stringify({ event: currentClubEvent, pollAfterMs: 2_000 }),
     });
   });
+  await page.route('**/api/explore/route', async (route) => {
+    const request = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        route: {
+          id: 'owner-authored-club-route',
+          name: request.routeName,
+          origin: request.origin,
+          destination: request.destination,
+          originLabel: request.originLabel,
+          destinationLabel: request.destinationLabel,
+          travelMode: 'bicycle',
+          distanceMeters: 12_345,
+          durationSeconds: 2_400,
+          encodedPolyline: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+          createdAt: now,
+        },
+      }),
+    });
+  });
   await page.route('**/api/club-live/sessions', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -7412,7 +7433,8 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   const eventConsole = monitor.getByRole('region', { name: 'Club Event control' });
   await eventConsole.getByRole('button', { name: /Coach-led Event/ }).click();
   await eventConsole.getByRole('combobox', { name: 'Event', exact: true }).selectOption('explore');
-  await eventConsole.getByLabel('Destination', { exact: true }).fill('Golden Gate Bridge');
+  await eventConsole.getByLabel('Start', { exact: true }).fill('38.1, -122.2');
+  await eventConsole.getByLabel('Destination', { exact: true }).fill('37.8199, -122.4783');
   await eventConsole.getByRole('button', { name: 'Open four-tablet lobby' }).click();
   await expect(eventConsole.getByText('1 of 4 ready', { exact: true })).toBeVisible();
   await expect(eventConsole.locator('.club-event-seat').filter({ hasText: 'Studio Tablet 2' })).toContainText('Rasheen Hicks');

@@ -78,6 +78,7 @@ const memoryClubMembers = new Map();
 const memoryClubInvitesByHash = new Map();
 const memoryClubTabletDevicesById = new Map();
 const memoryClubTabletDeviceIdByTokenHash = new Map();
+const memoryClubTabletResultAuthorizationsByTokenHash = new Map();
 const memoryClubEventsById = new Map();
 const memoryCurrentClubEventIdByClubId = new Map();
 const memoryClubEventParticipantsByEventId = new Map();
@@ -486,19 +487,20 @@ async function withPersistenceLock(lockKey, operation) {
   if (!ready || !pool) {
     return null;
   }
-  const client = await pool.connect();
+  let client = null;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [lockKey]);
     const value = await operation(client);
     await client.query('COMMIT');
     return value;
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client?.query('ROLLBACK').catch(() => {});
     cloudTelemetry.warn('persistence.transaction_failed', { error });
     return null;
   } finally {
-    client.release();
+    client?.release();
   }
 }
 
@@ -8637,8 +8639,12 @@ export async function enrollClubTabletDevice({
   }
 }
 
-export async function loadClubTabletDeviceByTokenHash(deviceTokenHash) {
+export async function loadClubTabletDeviceByTokenHash(
+  deviceTokenHash,
+  { requireAvailable = false } = {},
+) {
   if (!pool) {
+    if (requireAvailable && databaseConfigured) throw new ClubEventPersistenceUnavailableError();
     const id = memoryClubTabletDeviceIdByTokenHash.get(deviceTokenHash);
     const device = id ? memoryClubTabletDevicesById.get(id) : null;
     if (!device || device.revokedAt) return null;
@@ -8656,11 +8662,13 @@ export async function loadClubTabletDeviceByTokenHash(deviceTokenHash) {
      RETURNING devices.*, clubs.name AS club_name, clubs.owner_profile_key`,
     [deviceTokenHash],
   );
+  if (!result && requireAvailable) throw new ClubEventPersistenceUnavailableError();
   return clubTabletDeviceFromRow(result?.rows?.[0]);
 }
 
-export async function listClubTabletDevices(ownerProfileKey) {
+export async function listClubTabletDevices(ownerProfileKey, { requireAvailable = false } = {}) {
   if (!pool) {
+    if (requireAvailable && databaseConfigured) throw new ClubEventPersistenceUnavailableError();
     const clubId = memoryClubIdByOwner.get(ownerProfileKey);
     if (!clubId) return [];
     return [...memoryClubTabletDevicesById.values()]
@@ -8676,7 +8684,159 @@ export async function listClubTabletDevices(ownerProfileKey) {
      ORDER BY devices.created_at`,
     [ownerProfileKey],
   );
+  if (!result && requireAvailable) throw new ClubEventPersistenceUnavailableError();
   return (result?.rows ?? []).map(clubTabletDeviceFromRow).filter(Boolean);
+}
+
+function clubTabletResultAuthorizationFromRow(row) {
+  if (!row) return null;
+  return {
+    deviceId: row.device_id,
+    clubId: row.club_id,
+    clubName: row.club_name,
+    ownerProfileKey: row.owner_profile_key,
+    studioRiderId: row.studio_rider_id,
+    riderName: row.rider_name,
+    athleteName: row.athlete_name || null,
+    bikeDeviceId: row.bike_device_id,
+    sessionTokenHash: row.session_token_hash,
+    expiresAt: new Date(row.expires_at).getTime(),
+    member: {
+      clubId: row.club_id,
+      studioRiderId: row.studio_rider_id,
+      riderName: row.rider_name,
+      athleteProfileKey: row.athlete_profile_key || null,
+      athleteName: row.athlete_name || null,
+      status: row.member_status === 'claimed' ? 'claimed' : 'unclaimed',
+      revokedAt: null,
+    },
+  };
+}
+
+export async function createClubTabletResultAuthorization({
+  tokenHash: resultTokenHash,
+  deviceId,
+  clubId,
+  studioRiderId,
+  riderName,
+  bikeDeviceId,
+  sessionTokenHash,
+  expiresAt,
+  now = Date.now(),
+}) {
+  if (!pool) {
+    if (databaseConfigured) return { status: 'unavailable', authorization: null };
+    const device = memoryClubTabletDevicesById.get(deviceId);
+    const member = memoryClubMembers.get(clubMemberKey(clubId, studioRiderId));
+    if (
+      !device
+      || device.clubId !== clubId
+      || device.revokedAt
+      || !member
+      || member.revokedAt
+      || memoryClubTabletResultAuthorizationsByTokenHash.has(resultTokenHash)
+    ) return { status: 'unauthorized', authorization: null };
+    const authorization = {
+      tokenHash: resultTokenHash,
+      deviceId,
+      clubId,
+      clubName: memoryClubsById.get(clubId)?.name || '',
+      ownerProfileKey: memoryClubsById.get(clubId)?.ownerProfileKey || '',
+      studioRiderId,
+      riderName,
+      athleteName: member.athleteName || null,
+      bikeDeviceId,
+      sessionTokenHash,
+      expiresAt,
+      createdAt: now,
+      member: cloneJson(member, member),
+    };
+    memoryClubTabletResultAuthorizationsByTokenHash.set(resultTokenHash, authorization);
+    return { status: 'created', authorization: cloneJson(authorization, authorization) };
+  }
+  const result = await query(
+    `INSERT INTO ${schema}.club_tablet_result_authorizations (
+       token_hash, device_id, club_id, studio_rider_id, rider_name,
+       bike_device_id, session_token_hash, expires_at, created_at
+     )
+     SELECT $1, devices.id, devices.club_id, members.studio_rider_id, $5,
+       $6, $7, to_timestamp($8 / 1000.0), to_timestamp($9 / 1000.0)
+     FROM ${schema}.club_tablet_devices AS devices
+     JOIN ${schema}.club_members AS members
+       ON members.club_id = devices.club_id AND members.studio_rider_id = $4
+     WHERE devices.id = $2 AND devices.club_id = $3
+       AND devices.revoked_at IS NULL AND members.revoked_at IS NULL
+     RETURNING *`,
+    [
+      resultTokenHash,
+      deviceId,
+      clubId,
+      studioRiderId,
+      riderName,
+      bikeDeviceId,
+      sessionTokenHash,
+      expiresAt,
+      now,
+    ],
+  );
+  if (!result) return { status: 'unavailable', authorization: null };
+  return result.rows?.[0]
+    ? { status: 'created', authorization: result.rows[0] }
+    : { status: 'unauthorized', authorization: null };
+}
+
+export async function loadClubTabletResultAuthorization({
+  tokenHash: resultTokenHash,
+  deviceId,
+  now = Date.now(),
+}) {
+  if (!pool) {
+    if (databaseConfigured) return { status: 'unavailable', authorization: null };
+    const authorization = memoryClubTabletResultAuthorizationsByTokenHash.get(resultTokenHash);
+    const device = authorization ? memoryClubTabletDevicesById.get(authorization.deviceId) : null;
+    const member = authorization
+      ? memoryClubMembers.get(clubMemberKey(authorization.clubId, authorization.studioRiderId))
+      : null;
+    if (
+      !authorization
+      || authorization.deviceId !== deviceId
+      || authorization.expiresAt <= now
+      || !device
+      || device.revokedAt
+      || !member
+      || member.revokedAt
+    ) return { status: 'unauthorized', authorization: null };
+    return {
+      status: 'authorized',
+      authorization: {
+        ...cloneJson(authorization, authorization),
+        member: cloneJson(member, member),
+      },
+    };
+  }
+  const result = await query(
+    `SELECT authorizations.*, clubs.name AS club_name, clubs.owner_profile_key,
+       members.status AS member_status, members.athlete_profile_key,
+       users.display_name AS athlete_name
+     FROM ${schema}.club_tablet_result_authorizations AS authorizations
+     JOIN ${schema}.club_tablet_devices AS devices
+       ON devices.id = authorizations.device_id AND devices.revoked_at IS NULL
+     JOIN ${schema}.clubs AS clubs ON clubs.id = authorizations.club_id
+     JOIN ${schema}.club_members AS members
+       ON members.club_id = authorizations.club_id
+       AND members.studio_rider_id = authorizations.studio_rider_id
+       AND members.revoked_at IS NULL
+     LEFT JOIN ${schema}.auth_users AS users
+       ON ('user:' || users.id) = members.athlete_profile_key
+     WHERE authorizations.token_hash = $1 AND authorizations.device_id = $2
+       AND authorizations.expires_at > to_timestamp($3 / 1000.0)`,
+    [resultTokenHash, deviceId, now],
+  );
+  if (!result) return { status: 'unavailable', authorization: null };
+  const authorization = clubTabletResultAuthorizationFromRow(result.rows?.[0]);
+  return authorization
+    ? { status: 'authorized', authorization }
+    : { status: 'unauthorized', authorization: null };
 }
 
 export async function revokeClubTabletDevice(ownerProfileKey, deviceId) {
@@ -8771,6 +8931,7 @@ function clubEventParticipantFromRow(row) {
     bikeDeviceId: row.bike_device_id,
     sessionTokenHash: row.session_token_hash,
     ready: row.ready === true,
+    launchedAt: row.launched_at ? new Date(row.launched_at).getTime() : null,
     joinedAt: new Date(row.joined_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
   };
@@ -8829,8 +8990,9 @@ export async function loadCurrentClubEvent(clubId) {
   }
   const ready = await initPersistence();
   if (!ready || !pool) throw new ClubEventPersistenceUnavailableError();
-  const client = await pool.connect();
+  let client = null;
   try {
+    client = await pool.connect();
     const result = await client.query(
       `SELECT events.*, clubs.name AS club_name, clubs.owner_profile_key
        FROM ${schema}.club_events AS events
@@ -8844,7 +9006,27 @@ export async function loadCurrentClubEvent(clubId) {
     cloudTelemetry.warn('persistence.club_event_load_failed', { error });
     throw new ClubEventPersistenceUnavailableError();
   } finally {
-    client.release();
+    client?.release();
+  }
+}
+
+export async function loadClubEventOwnerClubId(ownerProfileKey) {
+  if (!ownerProfileKey) return null;
+  if (!pool) {
+    if (databaseConfigured) throw new ClubEventPersistenceUnavailableError();
+    return memoryClubIdByOwner.get(ownerProfileKey) ?? null;
+  }
+  const ready = await initPersistence();
+  if (!ready || !pool) throw new ClubEventPersistenceUnavailableError();
+  try {
+    const result = await pool.query(
+      `SELECT id FROM ${schema}.clubs WHERE owner_profile_key = $1`,
+      [ownerProfileKey],
+    );
+    return result.rows?.[0]?.id ?? null;
+  } catch (error) {
+    cloudTelemetry.warn('persistence.club_event_owner_club_load_failed', { error });
+    throw new ClubEventPersistenceUnavailableError();
   }
 }
 
@@ -8878,6 +9060,10 @@ export async function authorizeClubEventRoomJoin({
         || participant.bikeDeviceId !== bikeDeviceId
         || participant.sessionTokenHash !== sessionTokenHash
       ) return { status: 'unauthorized', event: null };
+      if (!event.startAt) return { status: 'not-active', event: null };
+      if (!participant.launchedAt && event.startAt <= Date.now()) {
+        return { status: 'missed-start', event: null };
+      }
       return { status: 'authorized', event: cloneMemoryClubEvent(event) };
     });
   }
@@ -8900,17 +9086,102 @@ export async function authorizeClubEventRoomJoin({
     );
     if (!device.rows?.[0]) return { status: 'unauthorized', event: null };
     const participant = await client.query(
-      `SELECT seat_number
+      `SELECT seat_number, launched_at
        FROM ${schema}.club_event_participants
        WHERE event_id = $1 AND device_id = $2 AND studio_rider_id = $3
          AND bike_device_id = $4 AND session_token_hash = $5 AND ready = true
        FOR UPDATE`,
       [eventId, deviceId, studioRiderId, bikeDeviceId, sessionTokenHash],
     );
-    if (!participant.rows?.[0]) return { status: 'unauthorized', event: null };
+    const participantRow = participant.rows?.[0];
+    if (!participantRow) return { status: 'unauthorized', event: null };
+    if (!eventRow.start_at) return { status: 'not-active', event: null };
+    if (!participantRow.launched_at && new Date(eventRow.start_at).getTime() <= Date.now()) {
+      return { status: 'missed-start', event: null };
+    }
     return { status: 'authorized', event: await clubEventAggregateWithClient(client, eventRow) };
   });
   return result ?? { status: 'unavailable', event: null };
+}
+
+// The WebSocket server calls this only after joinRoom has placed an open
+// socket in the exact Club Event racer set. Keeping this mutation separate
+// from authorization prevents a session check from becoming a durable launch
+// acknowledgement when the transport never actually joined.
+export async function markClubEventParticipantLaunched({
+  clubId,
+  eventId,
+  deviceId,
+  studioRiderId,
+  bikeDeviceId,
+  sessionTokenHash,
+  now = Date.now(),
+}) {
+  if (!pool) {
+    if (databaseConfigured) return { status: 'unavailable' };
+    return withMemoryPersistenceLock(`club-event:${clubId}`, async () => {
+      const event = memoryClubEventsById.get(eventId);
+      if (
+        !event
+        || event.clubId !== clubId
+        || event.status !== 'active'
+        || memoryCurrentClubEventIdByClubId.get(clubId) !== eventId
+      ) return { status: 'not-active' };
+      const participant = memoryClubEventParticipantsByEventId.get(eventId)?.get(deviceId);
+      if (
+        !participant
+        || participant.ready !== true
+        || participant.studioRiderId !== studioRiderId
+        || participant.bikeDeviceId !== bikeDeviceId
+        || participant.sessionTokenHash !== sessionTokenHash
+      ) return { status: 'unauthorized' };
+      if (!participant.launchedAt && Number(event.startAt) <= now) {
+        return { status: 'missed-start' };
+      }
+      if (!participant.launchedAt) {
+        participant.launchedAt = now;
+        participant.updatedAt = now;
+      }
+      return { status: 'launched', launchedAt: participant.launchedAt };
+    });
+  }
+  const result = await withPersistenceLock(`club-event:${clubId}`, async (client) => {
+    const eligible = await client.query(
+      `SELECT participants.launched_at, events.start_at
+       FROM ${schema}.club_event_participants AS participants
+       JOIN ${schema}.club_events AS events ON events.id = participants.event_id
+       JOIN ${schema}.club_tablet_devices AS devices ON devices.id = participants.device_id
+       WHERE events.id = $1 AND events.club_id = $2 AND events.status = 'active'
+         AND devices.id = $3 AND devices.club_id = $2 AND devices.revoked_at IS NULL
+         AND participants.studio_rider_id = $4
+         AND participants.bike_device_id = $5
+         AND participants.session_token_hash = $6
+         AND participants.ready = true
+       FOR UPDATE OF participants, events, devices`,
+      [eventId, clubId, deviceId, studioRiderId, bikeDeviceId, sessionTokenHash],
+    );
+    const eligibleRow = eligible.rows?.[0];
+    if (!eligibleRow) return { status: 'unauthorized' };
+    if (!eligibleRow.launched_at && new Date(eligibleRow.start_at).getTime() <= now) {
+      return { status: 'missed-start' };
+    }
+    const updated = await client.query(
+      `UPDATE ${schema}.club_event_participants AS participants
+       SET launched_at = COALESCE(participants.launched_at, to_timestamp($3 / 1000.0)),
+         updated_at = CASE
+           WHEN participants.launched_at IS NULL THEN to_timestamp($3 / 1000.0)
+           ELSE participants.updated_at
+         END
+       WHERE participants.event_id = $1 AND participants.device_id = $2
+       RETURNING participants.launched_at`,
+      [eventId, deviceId, now],
+    );
+    const launchedAt = updated.rows?.[0]?.launched_at;
+    return launchedAt
+      ? { status: 'launched', launchedAt: new Date(launchedAt).getTime() }
+      : { status: 'unauthorized' };
+  });
+  return result ?? { status: 'unavailable' };
 }
 
 export async function createClubEvent({
@@ -8920,12 +9191,14 @@ export async function createClubEvent({
   configuration,
   now = Date.now(),
 }) {
+  if (!pool && databaseConfigured) return { status: 'unavailable', event: null };
   if (!pool) {
     const clubId = memoryClubIdByOwner.get(ownerProfileKey);
     if (!clubId) return { status: 'not-found', event: null };
     return withMemoryPersistenceLock(`club-event:${clubId}`, async () => {
       const currentId = memoryCurrentClubEventIdByClubId.get(clubId);
       const current = currentId ? memoryClubEventsById.get(currentId) : null;
+      const replacedEventId = current?.id ?? null;
       if (current) {
         current.status = 'cancelled';
         current.cancelledAt = now;
@@ -8948,13 +9221,14 @@ export async function createClubEvent({
       memoryClubEventsById.set(id, event);
       memoryClubEventParticipantsByEventId.set(id, new Map());
       memoryCurrentClubEventIdByClubId.set(clubId, id);
-      return { status: 'created', event: cloneMemoryClubEvent(event) };
+      return { status: 'created', event: cloneMemoryClubEvent(event), replacedEventId };
     });
   }
   const clubResult = await query(
     `SELECT id FROM ${schema}.clubs WHERE owner_profile_key = $1`,
     [ownerProfileKey],
   );
+  if (!clubResult) return { status: 'unavailable', event: null };
   const clubId = clubResult?.rows?.[0]?.id;
   if (!clubId) return { status: 'not-found', event: null };
   const result = await withPersistenceLock(`club-event:${clubId}`, async (client) => {
@@ -8963,10 +9237,11 @@ export async function createClubEvent({
       [clubId, ownerProfileKey],
     );
     if (!club.rows?.[0]) return { status: 'not-found', event: null };
-    await client.query(
+    const cancelled = await client.query(
       `UPDATE ${schema}.club_events
        SET status = 'cancelled', cancelled_at = to_timestamp($2 / 1000.0), updated_at = to_timestamp($2 / 1000.0)
-       WHERE club_id = $1 AND status IN ('lobby', 'active')`,
+       WHERE club_id = $1 AND status IN ('lobby', 'active')
+       RETURNING id`,
       [clubId, now],
     );
     const inserted = await client.query(
@@ -8978,6 +9253,7 @@ export async function createClubEvent({
     );
     return {
       status: 'created',
+      replacedEventId: cancelled.rows?.[0]?.id ?? null,
       event: await clubEventAggregateWithClient(client, {
         ...inserted.rows[0],
         club_name: club.rows[0].name,
@@ -8998,6 +9274,7 @@ export async function joinClubEvent({
   sessionTokenHash,
   now = Date.now(),
 }) {
+  if (!pool && databaseConfigured) return { status: 'unavailable', event: null };
   if (!pool) {
     return withMemoryPersistenceLock(`club-event:${clubId}`, async () => {
       const event = memoryClubEventsById.get(eventId);
@@ -9036,6 +9313,7 @@ export async function joinClubEvent({
         bikeDeviceId,
         sessionTokenHash,
         ready: true,
+        launchedAt: null,
         joinedAt: existing?.joinedAt ?? now,
         updatedAt: now,
       });
@@ -9085,7 +9363,8 @@ export async function joinClubEvent({
       await client.query(
         `UPDATE ${schema}.club_event_participants
          SET studio_rider_id = $3, rider_name = $4, bike_device_id = $5,
-           session_token_hash = $6, ready = true, updated_at = to_timestamp($7 / 1000.0)
+           session_token_hash = $6, ready = true, launched_at = NULL,
+           updated_at = to_timestamp($7 / 1000.0)
          WHERE event_id = $1 AND device_id = $2`,
         [eventId, deviceId, studioRiderId, riderName, bikeDeviceId, sessionTokenHash, now],
       );
@@ -9124,6 +9403,7 @@ export async function releaseClubEventParticipant({
   sessionTokenHash,
   now = Date.now(),
 }) {
+  if (!pool && databaseConfigured) return { status: 'unavailable', event: null };
   if (!pool) {
     return withMemoryPersistenceLock(`club-event:${clubId}`, async () => {
       const event = memoryClubEventsById.get(eventId);
@@ -9220,17 +9500,27 @@ export async function releaseCurrentClubEventParticipantForSession({
   return result ?? { status: 'unavailable', eventId: null };
 }
 
-export async function startClubEvent({ ownerProfileKey, eventId, startAt, now = Date.now() }) {
-  const clubId = !pool ? memoryClubIdByOwner.get(ownerProfileKey) : (await query(
+export async function startClubEvent({ ownerProfileKey, eventId, leadMs = 8_000 }) {
+  if (!pool && databaseConfigured) return { status: 'unavailable', event: null };
+  const clubResult = pool ? await query(
     `SELECT id FROM ${schema}.clubs WHERE owner_profile_key = $1`,
     [ownerProfileKey],
-  ))?.rows?.[0]?.id;
+  ) : null;
+  if (databaseConfigured && !clubResult) return { status: 'unavailable', event: null };
+  const clubId = databaseConfigured
+    ? clubResult?.rows?.[0]?.id
+    : memoryClubIdByOwner.get(ownerProfileKey);
   if (!clubId) return { status: 'not-found', event: null };
   if (!pool) {
     return withMemoryPersistenceLock(`club-event:${clubId}`, async () => {
+      const now = Date.now();
+      const startAt = now + Math.max(3_000, Math.min(30_000, Math.round(Number(leadMs) || 8_000)));
       const event = memoryClubEventsById.get(eventId);
       if (!event || event.clubId !== clubId || memoryCurrentClubEventIdByClubId.get(clubId) !== eventId) {
         return { status: 'not-found', event: null };
+      }
+      if (event.status === 'active') {
+        return { status: 'started', replayed: true, event: cloneMemoryClubEvent(event) };
       }
       if (event.status !== 'lobby') return { status: 'not-lobby', event: cloneMemoryClubEvent(event) };
       const participants = [...(memoryClubEventParticipantsByEventId.get(eventId)?.values() ?? [])];
@@ -9245,6 +9535,8 @@ export async function startClubEvent({ ownerProfileKey, eventId, startAt, now = 
     });
   }
   const result = await withPersistenceLock(`club-event:${clubId}`, async (client) => {
+    const now = Date.now();
+    const startAt = now + Math.max(3_000, Math.min(30_000, Math.round(Number(leadMs) || 8_000)));
     const loaded = await client.query(
       `SELECT events.*, clubs.name AS club_name, clubs.owner_profile_key
        FROM ${schema}.club_events AS events
@@ -9256,6 +9548,13 @@ export async function startClubEvent({ ownerProfileKey, eventId, startAt, now = 
     );
     const row = loaded.rows?.[0];
     if (!row) return { status: 'not-found', event: null };
+    if (row.status === 'active') {
+      return {
+        status: 'started',
+        replayed: true,
+        event: await clubEventAggregateWithClient(client, row),
+      };
+    }
     if (row.status !== 'lobby') return { status: 'not-lobby', event: await clubEventAggregateWithClient(client, row) };
     const participants = await client.query(
       `SELECT ready FROM ${schema}.club_event_participants WHERE event_id = $1 FOR UPDATE`,
@@ -9284,10 +9583,15 @@ export async function startClubEvent({ ownerProfileKey, eventId, startAt, now = 
 }
 
 export async function cancelClubEvent({ ownerProfileKey, eventId, now = Date.now() }) {
-  const clubId = !pool ? memoryClubIdByOwner.get(ownerProfileKey) : (await query(
+  if (!pool && databaseConfigured) return { status: 'unavailable' };
+  const clubResult = pool ? await query(
     `SELECT id FROM ${schema}.clubs WHERE owner_profile_key = $1`,
     [ownerProfileKey],
-  ))?.rows?.[0]?.id;
+  ) : null;
+  if (databaseConfigured && !clubResult) return { status: 'unavailable' };
+  const clubId = databaseConfigured
+    ? clubResult?.rows?.[0]?.id
+    : memoryClubIdByOwner.get(ownerProfileKey);
   if (!clubId) return { status: 'not-found' };
   if (!pool) {
     return withMemoryPersistenceLock(`club-event:${clubId}`, async () => {
@@ -9561,6 +9865,11 @@ export async function revokeClubMember(ownerProfileKey, studioRiderId) {
         authorization.updatedAt = now;
       }
     }
+    for (const [tokenHash, authorization] of memoryClubTabletResultAuthorizationsByTokenHash.entries()) {
+      if (authorization.clubId === clubId && authorization.studioRiderId === studioRiderId) {
+        memoryClubTabletResultAuthorizationsByTokenHash.delete(tokenHash);
+      }
+    }
     return true;
   }
   await query(
@@ -9571,13 +9880,22 @@ export async function revokeClubMember(ownerProfileKey, studioRiderId) {
     [ownerProfileKey, studioRiderId],
   );
   const result = await query(
-    `UPDATE ${schema}.club_members AS members
-     SET athlete_profile_key = NULL, status = 'unclaimed', claimed_at = NULL,
-       revoked_at = now(), updated_at = now()
-     FROM ${schema}.clubs AS clubs
-     WHERE members.club_id = clubs.id AND clubs.owner_profile_key = $1
-       AND members.studio_rider_id = $2
-     RETURNING members.club_id`,
+    `WITH revoked_member AS (
+       UPDATE ${schema}.club_members AS members
+       SET athlete_profile_key = NULL, status = 'unclaimed', claimed_at = NULL,
+         revoked_at = now(), updated_at = now()
+       FROM ${schema}.clubs AS clubs
+       WHERE members.club_id = clubs.id AND clubs.owner_profile_key = $1
+         AND members.studio_rider_id = $2
+       RETURNING members.club_id, members.studio_rider_id
+     ), revoked_result_authorizations AS (
+       DELETE FROM ${schema}.club_tablet_result_authorizations AS authorizations
+       USING revoked_member
+       WHERE authorizations.club_id = revoked_member.club_id
+         AND authorizations.studio_rider_id = revoked_member.studio_rider_id
+       RETURNING authorizations.token_hash
+     )
+     SELECT club_id FROM revoked_member`,
     [ownerProfileKey, studioRiderId],
   );
   const clubId = result?.rows?.[0]?.club_id;
@@ -14830,6 +15148,7 @@ export async function pruneExpiredData(now = Date.now()) {
   let removedHeartRateInvitations = 0;
   let removedHeartRatePairings = 0;
   let removedClubMonitorSprintAuthorizations = 0;
+  let removedClubTabletResultAuthorizations = 0;
   let removedPushEvents = 0;
   let removedLiveAudioFriendInvites = 0;
 
@@ -14888,6 +15207,13 @@ export async function pruneExpiredData(now = Date.now()) {
     }
   }
 
+  for (const [resultTokenHash, authorization] of memoryClubTabletResultAuthorizationsByTokenHash.entries()) {
+    if (authorization.expiresAt <= cutoff.getTime()) {
+      memoryClubTabletResultAuthorizationsByTokenHash.delete(resultTokenHash);
+      removedClubTabletResultAuthorizations += 1;
+    }
+  }
+
   const privateNotificationRetentionCutoff = cutoff.getTime() - (7 * 24 * 60 * 60 * 1000);
   for (const [eventId, event] of memoryPushEvents) {
     if (Date.parse(event.expiresAt) > privateNotificationRetentionCutoff) continue;
@@ -14917,6 +15243,7 @@ export async function pruneExpiredData(now = Date.now()) {
       removedHeartRateInvitations,
       removedHeartRatePairings,
       removedClubMonitorSprintAuthorizations,
+      removedClubTabletResultAuthorizations,
       removedPushEvents,
       removedLiveAudioFriendInvites,
     };
@@ -14928,6 +15255,7 @@ export async function pruneExpiredData(now = Date.now()) {
     invitations,
     pairings,
     monitorAuthorizations,
+    resultAuthorizations,
     ,
     pushEvents,
     liveAudioInvites,
@@ -14973,6 +15301,12 @@ export async function pruneExpiredData(now = Date.now()) {
       [cutoff],
     ),
     query(
+      `DELETE FROM ${schema}.club_tablet_result_authorizations
+       WHERE expires_at <= $1::timestamptz
+       RETURNING token_hash`,
+      [cutoff],
+    ),
+    query(
       `DELETE FROM ${schema}.heart_rate_training_segment_bindings
        WHERE expires_at <= $1::timestamptz`,
       [cutoff],
@@ -14998,6 +15332,8 @@ export async function pruneExpiredData(now = Date.now()) {
     removedHeartRatePairings: removedHeartRatePairings + (pairings?.rowCount ?? 0),
     removedClubMonitorSprintAuthorizations: removedClubMonitorSprintAuthorizations
       + (monitorAuthorizations?.rowCount ?? 0),
+    removedClubTabletResultAuthorizations: removedClubTabletResultAuthorizations
+      + (resultAuthorizations?.rowCount ?? 0),
     removedPushEvents: removedPushEvents + (pushEvents?.rowCount ?? 0),
     removedLiveAudioFriendInvites: removedLiveAudioFriendInvites + (liveAudioInvites?.rowCount ?? 0),
   };
