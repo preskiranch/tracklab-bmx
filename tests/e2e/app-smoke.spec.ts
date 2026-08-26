@@ -7524,10 +7524,73 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     bikeDeviceId: 58701,
     expiresAt: now + 10 * 60_000,
   };
+  let racePresentation = {
+    cameraLocked: true,
+    cameraLockedUpdatedAt: 760,
+    earthCamerasByTrack: {
+      'black-mountain-bmx': {
+        angle: 47,
+        heading: 180,
+        center: { lat: 33.71225, lng: -112.0663 },
+        zoom: 20.78,
+        referenceViewport: { width: 1366, height: 1024 },
+        updatedAt: 750,
+      },
+      'black-mountain-bmx:sprint:100ft': {
+        angle: 32,
+        heading: 90,
+        center: { lat: 33.71225, lng: -112.0663 },
+        zoom: 20.2,
+        referenceViewport: { width: 1366, height: 1024 },
+        updatedAt: 755,
+      },
+    },
+    riderOverlaysByTrack: {
+      'black-mountain-bmx': {
+        xPct: 0.04,
+        yPct: 0.7,
+        width: 940,
+        height: 220,
+        locked: true,
+        referenceViewport: { width: 1366, height: 1024 },
+      },
+    },
+    riderOverlayUpdatedAtByTrack: { 'black-mountain-bmx': 760 },
+  };
+  let cloudRaceViewPreferences = {
+    ...racePresentation,
+    cameraLocked: false,
+    earthCamerasByTrack: {
+      'black-mountain-bmx': {
+        ...racePresentation.earthCamerasByTrack['black-mountain-bmx'],
+        angle: 10,
+        heading: 20,
+        updatedAt: 700,
+      },
+    },
+    demoRiderNames: { 1: 'Private Owner Rider' },
+    demoRiderNamesUpdatedAt: 700,
+    demoRiderPhotos: { 1: 'data:image/png;base64,aGVsbG8=' },
+    demoRiderPhotosUpdatedAt: 700,
+    commentary: {
+      enabled: true,
+      ambientEnabled: true,
+      ambientVolume: 0.065,
+      ambientVolumeLocked: true,
+      voicePreset: 'american-man',
+      volume: 1,
+      adaptiveMemory: true,
+      recentLines: ['Private owner race memory'],
+    },
+    commentaryUpdatedAt: 700,
+  };
   let enrollmentRequest: unknown = null;
   let rosterAuthorization = '';
   let rosterRequests = 0;
   let logoutRequests = 0;
+  let raceViewSaveCompletedAt = 0;
+  let raceViewSaveRequests = 0;
+  let enrollmentStartedAt = 0;
   let failNextRosterAuthorization = false;
   let sessionRequest: unknown = null;
   let sessionPosts = 0;
@@ -7631,6 +7694,25 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) });
   });
   await page.route('**/api/user-data*', async (route) => {
+    if (logoutRequests > 0) {
+      await route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Sign in to continue.' }),
+      });
+      return;
+    }
+    if (route.request().method() === 'PATCH') {
+      const payload = route.request().postDataJSON() as {
+        raceViewPreferences?: typeof cloudRaceViewPreferences;
+      };
+      if (payload.raceViewPreferences) {
+        raceViewSaveRequests += 1;
+        await new Promise((resolve) => setTimeout(resolve, 125));
+        cloudRaceViewPreferences = payload.raceViewPreferences;
+        raceViewSaveCompletedAt = Date.now();
+      }
+    }
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -7644,6 +7726,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
           updatedAt: now,
         })),
         accountProfile: { updatedAt: now },
+        raceViewPreferences: cloudRaceViewPreferences,
       }),
     });
   });
@@ -7665,8 +7748,18 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       }),
     });
   });
+  await page.route('**/api/public-track-mappings*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackMappings: { 'black-mountain-bmx': mockPedalZoneMapping },
+        customRoutes: [],
+      }),
+    });
+  });
   await page.route('**/api/club-tablet/devices', async (route) => {
     if (route.request().method() === 'POST') {
+      enrollmentStartedAt = Date.now();
       enrollmentRequest = route.request().postDataJSON();
       await route.fulfill({
         status: 201,
@@ -7695,7 +7788,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ device: tabletDevice, athletes }),
+      body: JSON.stringify({ device: tabletDevice, athletes, racePresentation }),
     });
   });
   await page.route('**/api/club-tablet/sessions', async (route) => {
@@ -7755,9 +7848,16 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await page.getByRole('button', { name: 'Club Tablets', exact: true }).click();
 
   await page.getByLabel('Tablet name').fill(tabletDevice.name);
+  // Count only the explicit pre-enrollment flush below. Any earlier account
+  // reconciliation must not be able to satisfy this ordering assertion.
+  raceViewSaveRequests = 0;
+  raceViewSaveCompletedAt = 0;
   await page.getByRole('button', { name: 'Authorize this tablet', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Independent Training' })).toBeVisible();
   expect(enrollmentRequest).toEqual({ name: tabletDevice.name });
+  expect(raceViewSaveRequests).toBeGreaterThanOrEqual(1);
+  expect(raceViewSaveCompletedAt).toBeGreaterThan(0);
+  expect(enrollmentStartedAt).toBeGreaterThanOrEqual(raceViewSaveCompletedAt);
   await page.waitForTimeout(250);
   expect(rosterRequests).toBeGreaterThanOrEqual(1);
   expect(rosterRequests).toBeLessThanOrEqual(2);
@@ -7834,7 +7934,7 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
       expect(card.detailLines).toBeLessThanOrEqual(3);
     }
   }
-  await page.setViewportSize({ width: 1_280, height: 720 });
+  await page.setViewportSize({ width: 1_024, height: 768 });
 
   // An authorized shared tablet can exercise every activity without hardware,
   // but the demo never creates an athlete lock or presents simulated input as
@@ -7848,13 +7948,35 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await page.getByRole('button', { name: 'Use demo bike', exact: true }).click();
   await expect(page.getByLabel('Club Tablet demo mode')).toContainText('DEMO');
   await expect(page.getByText('Demo Bike 1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Private Owner Rider', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Simulated input · no hardware or records', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /Rasheen Hicks/ })).toBeDisabled();
   expect(sessionPosts).toBe(0);
 
+  // The owner can adjust a saved view while an enrolled tablet stays open.
+  // The next program launch must re-read that presentation without a reload.
+  racePresentation = {
+    ...racePresentation,
+    cameraLockedUpdatedAt: 860,
+    earthCamerasByTrack: {
+      ...racePresentation.earthCamerasByTrack,
+      'black-mountain-bmx': {
+        ...racePresentation.earthCamerasByTrack['black-mountain-bmx'],
+        angle: 43,
+        heading: 195,
+        updatedAt: 850,
+      },
+    },
+  };
+  const rosterRequestsBeforeProgramLaunch = rosterRequests;
+
   const demoActivities = [
-    { button: /BMX Race Intervals/, workflow: 'BMX Race Intervals setup workflow' },
-    { button: /Straight Sprint/, workflow: 'Straight Sprint setup workflow' },
+    { button: /BMX Race Intervals/, workflow: 'BMX Race Intervals setup workflow', race: true },
+    {
+      button: /Straight Sprint/,
+      workflow: 'Straight Sprint setup workflow',
+      camera: { angle: 32, heading: 90 },
+    },
     { button: /Get Pulled/, workflow: 'Get Pulled setup workflow', start: true },
     { button: /Explore the World/, workflow: 'Explore the World setup workflow', picker: true },
   ];
@@ -7870,7 +7992,39 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
     } else if (!activity.start) {
       await expect(page.getByRole('group', { name: 'Choose demo riders' })).toHaveCount(0);
     }
-    if (activity.start) {
+    if (activity.camera) {
+      await expect(page.getByText(`Angle ${activity.camera.angle} deg`, { exact: true })).toBeVisible();
+      await expect(page.getByText(`Heading ${activity.camera.heading} deg`, { exact: true })).toBeVisible();
+    }
+    if (activity.race) {
+      expect(rosterRequests).toBeGreaterThan(rosterRequestsBeforeProgramLaunch);
+      await expect(page.getByText('Angle 43 deg', { exact: true })).toBeVisible();
+      await expect(page.getByText('Heading 195 deg', { exact: true })).toBeVisible();
+      await page.locator('.workflow-step.primary-action').click();
+      await expect(page.locator('.platform-shell')).toHaveClass(/race-fullscreen/);
+      const riderPanel = page.locator('.race-rider-overlay');
+      await expect(riderPanel).toBeVisible();
+      const geometry = await riderPanel.evaluate((panel) => {
+        const panelRect = panel.getBoundingClientRect();
+        const stageRect = panel.parentElement?.getBoundingClientRect();
+        return {
+          height: panelRect.height,
+          insideStage: Boolean(stageRect)
+            && panelRect.left >= stageRect!.left - 1
+            && panelRect.top >= stageRect!.top - 1
+            && panelRect.right <= stageRect!.right + 1
+            && panelRect.bottom <= stageRect!.bottom + 1,
+          width: panelRect.width,
+        };
+      });
+      expect(geometry.width).toBeGreaterThan(680);
+      expect(geometry.width).toBeLessThan(730);
+      expect(geometry.height).toBeGreaterThan(150);
+      expect(geometry.height).toBeLessThan(180);
+      expect(geometry.insideStage).toBe(true);
+      await page.getByRole('button', { name: 'Exit demo activity', exact: true }).click();
+      await expect(page.locator('.platform-shell')).not.toHaveClass(/race-fullscreen/);
+    } else if (activity.start) {
       await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toContainText('Demo Rider 1');
       await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toContainText(
         'Simulated pull results are for testing only and are not saved, published, or assigned to an athlete.',

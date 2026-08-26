@@ -120,7 +120,7 @@ describe('Club Tablet client state', () => {
       'utf8',
     );
     const authorizeStart = modeSource.indexOf('const authorizeTablet = async () =>');
-    const authorizeEnd = modeSource.indexOf('const startAthlete = async (', authorizeStart);
+    const authorizeEnd = modeSource.indexOf('const openIndependentProgram = useCallback(', authorizeStart);
     const authorizeSource = modeSource.slice(authorizeStart, authorizeEnd);
     expect(authorizeStart).toBeGreaterThanOrEqual(0);
     expect(authorizeEnd).toBeGreaterThan(authorizeStart);
@@ -168,7 +168,7 @@ describe('Club Tablet client state', () => {
     const programSource = modeSource.slice(programStart, programEnd);
     expect(programSource).toContain('void onPrimeAudio?.()');
     expect(programSource.indexOf('void onPrimeAudio?.()'))
-      .toBeLessThan(programSource.indexOf('onOpenProgram(program)'));
+      .toBeLessThan(programSource.indexOf('openIndependentProgram(program)'));
 
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
     const kioskStart = appSource.indexOf('<ClubTabletMode');
@@ -254,7 +254,7 @@ describe('Club Tablet client state', () => {
       },
     })?.device).not.toHaveProperty('connectedBike');
 
-    expect(normalizeClubTabletRoster({
+    const normalizedRoster = normalizeClubTabletRoster({
       device: deviceCredential.device,
       athletes: [
         {
@@ -272,7 +272,35 @@ describe('Club Tablet client state', () => {
         { studioRiderId: 'rider-1', riderName: 'Alex', claimed: false },
         { studioRiderId: '', riderName: 'Invalid' },
       ],
-    })?.athletes).toEqual([
+      racePresentation: {
+        cameraLocked: true,
+        cameraLockedUpdatedAt: 750,
+        earthCamerasByTrack: {
+          'chula-vista-elite-bmx': {
+            angle: 47,
+            heading: 180,
+            zoom: 20.78,
+            referenceViewport: { width: 1366, height: 1024 },
+            updatedAt: 750,
+          },
+        },
+        riderOverlaysByTrack: {
+          'chula-vista-elite-bmx': {
+            xPct: 0.02,
+            yPct: 0.76,
+            width: 1240,
+            height: 210,
+            locked: true,
+            referenceViewport: { width: 1366, height: 1024 },
+          },
+        },
+        riderOverlayUpdatedAtByTrack: { 'chula-vista-elite-bmx': 760 },
+        demoRiderNames: { 1: 'Must stay private' },
+        demoRiderPhotos: { 1: 'data:image/png;base64,aGVsbG8=' },
+        commentary: { recentLines: ['Must stay private'] },
+      },
+    });
+    expect(normalizedRoster?.athletes).toEqual([
       expect.objectContaining({ studioRiderId: 'rider-1', riderName: 'Alex', status: 'unclaimed' }),
       expect.objectContaining({
         studioRiderId: 'rider-2',
@@ -285,6 +313,50 @@ describe('Club Tablet client state', () => {
         }),
       }),
     ]);
+    expect(normalizedRoster?.racePresentation).toMatchObject({
+      cameraLocked: true,
+      earthCamerasByTrack: {
+        'chula-vista-elite-bmx': expect.objectContaining({ angle: 47, heading: 180, zoom: 20.78 }),
+      },
+      riderOverlaysByTrack: {
+        'chula-vista-elite-bmx': expect.objectContaining({ width: 1240, height: 210, locked: true }),
+      },
+    });
+    expect(normalizedRoster?.racePresentation).not.toHaveProperty('demoRiderNames');
+    expect(normalizedRoster?.racePresentation).not.toHaveProperty('demoRiderPhotos');
+    expect(normalizedRoster?.racePresentation).not.toHaveProperty('commentary');
+
+    const overlayOnlyRoster = normalizeClubTabletRoster({
+      device: deviceCredential.device,
+      athletes: [],
+      racePresentation: {
+        cameraLocked: true,
+        cameraLockedUpdatedAt: 0,
+        earthCamerasByTrack: {},
+        riderOverlaysByTrack: {
+          'overlay-only-track': {
+            xPct: 0.08,
+            yPct: 0.68,
+            width: 980,
+            height: 205,
+            locked: true,
+            referenceViewport: { width: 1366, height: 1024 },
+          },
+        },
+        riderOverlayUpdatedAtByTrack: { 'overlay-only-track': 810 },
+      },
+    });
+    expect(overlayOnlyRoster?.racePresentation).toMatchObject({
+      earthCamerasByTrack: {},
+      riderOverlaysByTrack: {
+        'overlay-only-track': expect.objectContaining({
+          width: 980,
+          height: 205,
+          locked: true,
+        }),
+      },
+      riderOverlayUpdatedAtByTrack: { 'overlay-only-track': 810 },
+    });
   });
 
   it('publishes and clears connected-bike presence with only the enrolled tablet credential', async () => {

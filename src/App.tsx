@@ -3364,6 +3364,19 @@ export default function App() {
   const raceCameraPreferenceKey = raceWorkspaceMode === 'straight-sprint'
     ? straightSprintCameraPreferenceKey(selectedTrack.id, straightSprintDistanceFeet)
     : selectedTrack.id;
+  const clubTabletRacePresentation = clubTabletKioskMode
+    && clubTabletRoster?.device.id === clubTabletDevice?.device.id
+    ? clubTabletRoster?.racePresentation ?? null
+    : null;
+  const clubTabletRaceCamera = clubTabletRacePresentation
+    ? clubTabletRacePresentation.earthCamerasByTrack[raceCameraPreferenceKey]
+      ?? clubTabletRacePresentation.earthCamerasByTrack[selectedTrack.id]
+    : undefined;
+  // Every enrolled tablet replays a fixed owner-authored presentation. Even a
+  // track without a saved camera uses the legacy authoring frame so the rider
+  // panel and 3-D scene still scale to this tablet instead of using raw pixels.
+  const clubTabletRaceViewApplies = !clubEventRaceViewApplies
+    && clubTabletKioskMode;
   useEffect(() => {
     selectedTrackIdRef.current = selectedTrack.id;
     if (selectedTrack.countryCode === 'CUSTOM') {
@@ -3410,8 +3423,10 @@ export default function App() {
   useEffect(() => {
     const savedCamera = clubEventRaceViewApplies
       ? activeClubEventRaceView?.camera
-      : earthCamerasByTrack[raceCameraPreferenceKey]
-        ?? earthCamerasByTrack[selectedTrack.id];
+      : clubTabletKioskMode
+        ? clubTabletRaceCamera
+        : earthCamerasByTrack[raceCameraPreferenceKey]
+          ?? earthCamerasByTrack[selectedTrack.id];
     const isCustomRoute = selectedTrack.countryCode === 'CUSTOM';
     const fallbackCenter = isCustomRoute ? trackCenter(selectedTrack) : null;
     const fallbackZoom = isCustomRoute ? customRouteInitialZoom : null;
@@ -3421,6 +3436,8 @@ export default function App() {
     setEarthZoom(savedCamera?.zoom ?? fallbackZoom);
   }, [
     activeClubEventRaceView?.camera,
+    clubTabletRaceCamera,
+    clubTabletKioskMode,
     clubEventRaceViewApplies,
     earthCamerasByTrack,
     raceCameraPreferenceKey,
@@ -4360,17 +4377,28 @@ export default function App() {
   const persistRaceViewPreferences = useCallback((preferences: RaceViewPreferences) => {
     const normalized = normalizeRaceViewPreferences(preferences);
     raceViewPreferencesRef.current = normalized;
+    if (clubTabletKioskMode) {
+      return;
+    }
     writeStoredRaceViewPreferences(cloudProfileKey, normalized);
     if (cloudUserDataAvailableRef.current && cloudUserDataLoadedKeyRef.current === cloudProfileKey) {
       void queueCloudUserDataPatch(cloudProfileKey, { raceViewPreferences: normalized }).catch((error: Error) => {
         console.warn(`Could not save race view preferences to TrackLab cloud: ${error.message}`);
       });
     }
-  }, [cloudProfileKey]);
+  }, [cloudProfileKey, clubTabletKioskMode]);
   useEffect(() => {
+    if (clubTabletKioskMode) {
+      // Enrollment is an account boundary. Never retain the signed-out
+      // owner's demo identities, photos, commentary memory, or camera fallback
+      // in the shared kiosk process; the device-bound roster supplies only the
+      // public presentation after it has been verified.
+      applyRaceViewPreferences(normalizeRaceViewPreferences(null));
+      return;
+    }
     const localPreferences = readStoredRaceViewPreferences(cloudProfileKey, readStoredEarthCameras());
     applyRaceViewPreferences(localPreferences);
-  }, [applyRaceViewPreferences, cloudProfileKey]);
+  }, [applyRaceViewPreferences, cloudProfileKey, clubTabletKioskMode]);
   const handleRaceCommentaryPreferencesChange = useCallback((preferences: RaceCommentaryPreferences) => {
     const normalized = normalizeRaceCommentaryPreferences(preferences);
     setRaceCommentaryPreferences(normalized);
@@ -5447,6 +5475,15 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (clubTabletKioskMode) {
+      cloudUserDataAvailableRef.current = false;
+      cloudUserDataLoadedKeyRef.current = null;
+      setCloudUserDataStatus('online');
+      setCloudUserDataMessage('This club tablet is using the club owner’s saved race presentation.');
+      setUnitPreferencesSyncStatus('online');
+      setUnitPreferencesSyncMessage('This club tablet uses its saved local display units.');
+      return;
+    }
     if (!cloudProfileKey) {
       setCloudUserDataStatus('offline');
       setCloudUserDataMessage('No profile key is available for cloud sync.');
@@ -5700,6 +5737,7 @@ export default function App() {
     authUser,
     canManageStudioRiders,
     cloudProfileKey,
+    clubTabletKioskMode,
     developerRaceLayoutActive,
     mergeStudioRidersForProfile,
   ]);
@@ -8339,7 +8377,7 @@ export default function App() {
       // A coach-event camera is an immutable launch snapshot. Tablet riders
       // may adjust their live view, but that temporary movement must not
       // overwrite either the owner view or this tablet's personal preference.
-      if (clubEventConfigurationLocked) {
+      if (clubEventConfigurationLocked || clubTabletKioskMode) {
         return current;
       }
       const accountPreferencesAreHydrated = authStatus !== 'loading'
@@ -8370,6 +8408,7 @@ export default function App() {
     authStatus,
     authUser,
     clubEventConfigurationLocked,
+    clubTabletKioskMode,
     cloudProfileKey,
     earthAngle,
     earthCenter,
@@ -9666,6 +9705,7 @@ export default function App() {
       setGhostLaps(readStoredGhostLaps());
       return;
     }
+    setClubTabletRoster(null);
     setClubTabletDevice(next);
     setClubTabletDeviceStatus('checking');
     setDemoMode(false);
@@ -12263,6 +12303,13 @@ export default function App() {
                 await bluetooth.reconnectSavedBikes();
               }}
               retryAuthorization={retryClubTabletAuthorization}
+              beforeAuthorize={async () => {
+                const pendingRaceViewSave = queueCloudUserDataPatch(cloudProfileKey, {
+                  raceViewPreferences: raceViewPreferencesRef.current,
+                });
+                await flushCloudUserDataPatches(cloudProfileKey);
+                await pendingRaceViewSave;
+              }}
               demoActive={demoMode}
               setDemoActive={handleClubTabletDemoModeChange}
               onClubEventLaunch={openClubEventLaunch}
@@ -12620,8 +12667,10 @@ export default function App() {
                   earthCenter={earthCenter}
                   earthZoom={earthZoom}
                   raceCameraLocked={raceCameraLocked}
-                  raceCameraImmutable={clubEventRaceViewApplies}
-                  raceCameraSnapshot={clubEventRaceCamera}
+                  raceCameraImmutable={clubEventRaceViewApplies || clubTabletRaceViewApplies}
+                  raceCameraSnapshot={clubEventRaceViewApplies
+                    ? clubEventRaceCamera
+                    : clubTabletRaceCamera}
                   canEditRaceLayout={developerRaceLayoutActive && !regularUserPreview}
                   riderOverlayPreference={clubEventRaceViewApplies
                     ? activeClubEventRaceView?.riderOverlay ?? {
@@ -12629,7 +12678,13 @@ export default function App() {
                         referenceViewport: clubEventRaceCamera?.referenceViewport
                           ?? legacyRacePresentationViewport,
                       }
-                    : riderOverlaysByTrack[effectiveTrack.id]}
+                    : clubTabletRaceViewApplies
+                      ? clubTabletRacePresentation?.riderOverlaysByTrack[effectiveTrack.id] ?? {
+                          ...defaultRaceRiderOverlayLayout,
+                          referenceViewport: clubTabletRaceCamera?.referenceViewport
+                            ?? legacyRacePresentationViewport,
+                        }
+                      : riderOverlaysByTrack[effectiveTrack.id]}
                   activeZones={activeZones}
                   canCancelRace={canCancelRace}
                   mappingMode={mappingMode}

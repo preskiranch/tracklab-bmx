@@ -291,7 +291,7 @@ beforeAll(async () => {
       ...process.env,
       PORT: String(port),
       DATABASE_URL: '',
-      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,club-owner-admin@tracklab.test',
+      TRACKLAB_ADMIN_EMAILS: 'admin-only@tracklab.test,usage-admin@tracklab.test,global-view-admin@tracklab.test,club-owner-admin@tracklab.test,overlay-only-admin@tracklab.test',
       TRACKLAB_ALLOW_RACER_MAP_PUBLISH: '0',
       TRACKLAB_METRICS_TOKEN: 'test-metrics-token',
       TRACKLAB_3D_FREE_LOAD_CAP: '5000',
@@ -2194,6 +2194,81 @@ describe('cloud API trust boundaries', () => {
     cookie = originalCookie;
   });
 
+  it('retains an owner-authored club tablet rider panel when no camera has been saved', async () => {
+    const originalCookie = cookie;
+    const now = Date.now();
+    const registration = await api('/api/auth/register', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '198.51.100.219' },
+      body: JSON.stringify({
+        name: 'Overlay Only Club',
+        email: 'overlay-only-admin@tracklab.test',
+        password: 'correct-horse-battery-staple',
+      }),
+    });
+    expect(registration.status).toBe(201);
+    cookie = String(registration.headers.get('set-cookie')).split(';')[0];
+
+    const saved = await api('/api/user-data', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        studioRiders: [{
+          id: 'overlay-only-rider',
+          name: 'Overlay Only Rider',
+          createdAt: now,
+          updatedAt: now,
+        }],
+        raceViewPreferences: {
+          cameraLocked: false,
+          cameraLockedUpdatedAt: 0,
+          earthCamerasByTrack: {},
+          riderOverlaysByTrack: {
+            'overlay-only-track': {
+              xPct: 0.08,
+              yPct: 0.68,
+              width: 980,
+              height: 205,
+              locked: true,
+              referenceViewport: { width: 1366, height: 1024 },
+            },
+          },
+          riderOverlayUpdatedAtByTrack: { 'overlay-only-track': 810 },
+        },
+      }),
+    });
+    expect(saved.status).toBe(200);
+
+    const enrollment = await api('/api/club-tablet/devices', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Overlay Test Tablet' }),
+    });
+    expect(enrollment.status).toBe(201);
+    const enrolled = await enrollment.json();
+    cookie = '';
+    const roster = await api('/api/club-tablet/roster', {
+      headers: { Authorization: `Bearer ${enrolled.deviceToken}` },
+    });
+    expect(roster.status).toBe(200);
+    await expect(roster.json()).resolves.toMatchObject({
+      racePresentation: {
+        cameraLocked: true,
+        earthCamerasByTrack: {},
+        riderOverlaysByTrack: {
+          'overlay-only-track': {
+            xPct: 0.08,
+            yPct: 0.68,
+            width: 980,
+            height: 205,
+            locked: true,
+            referenceViewport: { width: 1366, height: 1024 },
+          },
+        },
+        riderOverlayUpdatedAtByTrack: { 'overlay-only-track': 810 },
+      },
+    });
+    cookie = originalCookie;
+  });
+
   it('authorizes shared club tablets without exposing the roster or binding athletes to bikes', async () => {
     const originalCookie = cookie;
     let ownerCookie = '';
@@ -2215,6 +2290,26 @@ describe('cloud API trust boundaries', () => {
     };
     await signInOwner();
     const now = Date.now();
+    const globalViewSave = await api('/api/global-race-view', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        raceViewPreferences: {
+          cameraLocked: true,
+          cameraLockedUpdatedAt: 750,
+          earthCamerasByTrack: {
+            'chula-vista-elite-bmx': {
+              angle: 47,
+              heading: 180,
+              center: { lat: 32.6001, lng: -116.9987 },
+              zoom: 20.78,
+              referenceViewport: { width: 1366, height: 1024 },
+              updatedAt: 750,
+            },
+          },
+        },
+      }),
+    });
+    expect(globalViewSave.status).toBe(200);
     const rosterSave = await api('/api/user-data', {
       method: 'PATCH',
       body: JSON.stringify({
@@ -2228,6 +2323,35 @@ describe('cloud API trust boundaries', () => {
           },
           { id: 'shared-tablet-rider-two', name: 'Tablet Rider Two', createdAt: now, updatedAt: now },
         ],
+        raceViewPreferences: {
+          cameraLocked: true,
+          cameraLockedUpdatedAt: 750,
+          earthCamerasByTrack: {
+            'chula-vista-elite-bmx': {
+              // Deliberately stale/conflicting. The developer-global camera
+              // must win exactly as it does for a signed-in administrator.
+              angle: 56,
+              heading: 120,
+              center: { lat: 32.6001, lng: -116.9987 },
+              zoom: 20.78,
+              referenceViewport: { width: 1366, height: 1024 },
+              updatedAt: 750,
+            },
+          },
+          riderOverlaysByTrack: {
+            'chula-vista-elite-bmx': {
+              xPct: 0.02,
+              yPct: 0.76,
+              width: 1240,
+              height: 210,
+              locked: true,
+              referenceViewport: { width: 1366, height: 1024 },
+            },
+          },
+          riderOverlayUpdatedAtByTrack: { 'chula-vista-elite-bmx': 760 },
+          demoRiderNames: { 1: 'Must stay private' },
+          commentary: { recentLines: ['Must stay private'] },
+        },
       }),
     });
     expect(rosterSave.status).toBe(200);
@@ -2403,6 +2527,27 @@ describe('cloud API trust boundaries', () => {
         status: 'unclaimed',
       }),
     ]);
+    expect(rosterPayload.racePresentation).toMatchObject({
+      cameraLocked: true,
+      earthCamerasByTrack: {
+        'chula-vista-elite-bmx': {
+          angle: 47,
+          heading: 180,
+          zoom: 20.78,
+          referenceViewport: { width: 1366, height: 1024 },
+        },
+      },
+      riderOverlaysByTrack: {
+        'chula-vista-elite-bmx': {
+          width: 1240,
+          height: 210,
+          locked: true,
+          referenceViewport: { width: 1366, height: 1024 },
+        },
+      },
+    });
+    expect(rosterPayload.racePresentation).not.toHaveProperty('demoRiderNames');
+    expect(rosterPayload.racePresentation).not.toHaveProperty('commentary');
     expect(JSON.stringify(rosterPayload)).not.toContain('@');
     expect(JSON.stringify(rosterPayload)).not.toContain('ProfileKey');
 

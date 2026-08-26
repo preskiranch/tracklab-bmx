@@ -113,6 +113,8 @@ type ClubTabletModeProps = {
   openPairing: () => void;
   reconnectBikes: () => Promise<void> | void;
   retryAuthorization: () => void;
+  /** Flushes the owner's latest camera/layout before enrollment revokes auth. */
+  beforeAuthorize?: () => Promise<void> | void;
   demoActive: boolean;
   setDemoActive: (active: boolean) => void;
   openProgram: (mode: ClubTabletProgram) => void;
@@ -214,6 +216,7 @@ export default function ClubTabletMode({
   openPairing: onOpenBikePairing,
   reconnectBikes: onReconnectSavedBikes,
   retryAuthorization: onRetryAuthorization,
+  beforeAuthorize: onBeforeAuthorize,
   demoActive,
   setDemoActive: onDemoActiveChange,
   openProgram: onOpenProgram,
@@ -255,6 +258,7 @@ export default function ClubTabletMode({
     : '';
   const activeWatchRequestKeyRef = useRef(activeWatchRequestKey);
   const sessionStartPendingRef = useRef(false);
+  const programOpenPendingRef = useRef(false);
   activeWatchRequestKeyRef.current = activeWatchRequestKey;
   const filteredAthletes = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -355,6 +359,7 @@ export default function ClubTabletMode({
     setBusy('authorizing');
     setMessage(null);
     try {
+      await onBeforeAuthorize?.();
       const credential = await enrollClubTablet(tabletName);
       // Enrollment atomically revokes the owner's server session and push
       // delivery. Also unregister this physical app before kiosk state mounts;
@@ -371,6 +376,30 @@ export default function ClubTabletMode({
     }
   };
 
+  const openIndependentProgram = useCallback(async (program: ClubTabletProgram) => {
+    if (programOpenPendingRef.current) return;
+    programOpenPendingRef.current = true;
+    try {
+      if (deviceCredential) {
+        try {
+          // Camera and rider-panel geometry can be edited from the owner's
+          // laptop while this enrolled tablet remains open. Re-read the
+          // device-bound presentation immediately before each independent
+          // activity so the next render never depends on a stale mount-time
+          // roster snapshot.
+          onRosterChange(await loadClubTabletRoster(deviceCredential));
+        } catch {
+          // Independent training remains available offline with the last
+          // verified roster/presentation. ClubTabletRuntime separately owns
+          // authorization-revocation recovery.
+        }
+      }
+      onOpenProgram(program);
+    } finally {
+      programOpenPendingRef.current = false;
+    }
+  }, [deviceCredential, onOpenProgram, onRosterChange]);
+
   const startAthlete = async (
     riderId = selectedRiderId,
     program = selectedProgram,
@@ -385,7 +414,7 @@ export default function ClubTabletMode({
       const session = await startClubTabletSession(riderId, bikeId, deviceCredential);
       const selectedAthlete = roster?.athletes.find((athlete) => athlete.studioRiderId === riderId);
       onSessionChange(enrichClubTabletSession(session, selectedAthlete));
-      onOpenProgram(program);
+      await openIndependentProgram(program);
     } catch (error) {
       setSessionStartFailed(true);
       setMessage(error instanceof Error ? error.message : 'Could not start this athlete session.');
@@ -416,7 +445,7 @@ export default function ClubTabletMode({
     void onPrimeAudio?.();
     if (demoActive) {
       setSelectedProgram(program);
-      onOpenProgram(program);
+      void openIndependentProgram(program);
       return;
     }
     if (deviceCredential && clubTabletCoachEventLocksIndependentTraining(
@@ -876,7 +905,7 @@ export default function ClubTabletMode({
               onClick={() => {
                 if (!waitingForCoach) {
                   void onPrimeAudio?.();
-                  onOpenProgram(mode);
+                  void openIndependentProgram(mode);
                 }
               }}
             >
