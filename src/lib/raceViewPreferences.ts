@@ -9,6 +9,7 @@ import type {
   RaceViewPreferences,
 } from '../types';
 import { safeSetLocalStorage } from './browserStorage';
+import { normalizeRacePresentationViewport } from './racePresentation';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
 
 export const defaultRaceRiderOverlayLayout: RaceRiderOverlayLayout = {
@@ -25,7 +26,7 @@ export const defaultRaceCommentaryPreferences: RaceCommentaryPreferences = {
   ambientVolume: 0.065,
   ambientVolumeLocked: true,
   voicePreset: 'american-man',
-  volume: 0.9,
+  volume: 1,
   adaptiveMemory: true,
   recentLines: [],
 };
@@ -53,11 +54,13 @@ function normalizedCamera(value: unknown): EarthCamera | null {
     ? { lat: camera.center.lat, lng: camera.center.lng }
     : undefined;
   const zoom = Number.isFinite(camera.zoom) ? camera.zoom : undefined;
+  const referenceViewport = normalizeRacePresentationViewport(camera.referenceViewport);
   return {
     angle: Math.max(0, Math.min(67, finiteNumber(camera.angle, 0))),
     heading: ((finiteNumber(camera.heading, 0) % 360) + 360) % 360,
     ...(center ? { center } : {}),
     ...(zoom != null ? { zoom } : {}),
+    ...(referenceViewport ? { referenceViewport } : {}),
     updatedAt: normalizedRevision(camera.updatedAt),
   };
 }
@@ -66,12 +69,14 @@ export function normalizeRaceRiderOverlayLayout(value: unknown): RaceRiderOverla
   const layout = value && typeof value === 'object'
     ? value as Partial<RaceRiderOverlayLayout>
     : {};
+  const referenceViewport = normalizeRacePresentationViewport(layout.referenceViewport);
   return {
     xPct: Math.max(0, Math.min(1, finiteNumber(layout.xPct, defaultRaceRiderOverlayLayout.xPct))),
     yPct: Math.max(0, Math.min(1, finiteNumber(layout.yPct, defaultRaceRiderOverlayLayout.yPct))),
     width: Math.max(320, Math.min(1800, finiteNumber(layout.width, defaultRaceRiderOverlayLayout.width))),
     height: Math.max(190, Math.min(900, finiteNumber(layout.height, defaultRaceRiderOverlayLayout.height))),
     locked: Boolean(layout.locked),
+    ...(referenceViewport ? { referenceViewport } : {}),
   };
 }
 

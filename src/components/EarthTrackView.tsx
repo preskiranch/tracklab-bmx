@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   Box,
   ChevronDown,
@@ -44,6 +44,7 @@ import type {
   RaceState,
   ReactionTimesByPlayer,
   RaceRiderOverlayLayout,
+  RacePresentationViewport,
   RiderState,
   SplitBranchChoice,
   SpeedUnit,
@@ -58,6 +59,16 @@ import type { CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 import type { PersonalRecordAchievements } from '../lib/personalRecords';
 import type { LiveHeartRateByPlayer } from './RaceRiderOverlay';
 import { normalizedRaceDisplayRanks } from '../lib/raceDisplayRanking';
+import {
+  legacyRacePresentationViewport,
+  normalizeRacePresentationViewport,
+  racePresentationFrame,
+  raceRiderOverlayRectForPresentation,
+  satelliteZoomForRacePresentation,
+  threeDimensionalRangeScaleForAspect,
+} from '../lib/racePresentation';
+import { defaultRaceRiderOverlayLayout } from '../lib/raceViewPreferences';
+import { normalizeRiderPresentationScale } from '../lib/riderPresentation';
 
 const GoogleMaps3DTrackLayer = lazy(async () => {
   const module = await import('./GoogleMaps3DTrackLayer');
@@ -263,6 +274,38 @@ export function EarthTrackView({
 }: EarthTrackViewProps) {
   const googleMapsConfigured = hasGoogleMapsApiKey();
   const googleMapsUrl = trackGoogleMapsUrl(track);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [presentationViewport, setPresentationViewport] = useState<RacePresentationViewport | null>(() => (
+    typeof window === 'undefined'
+      ? null
+      : normalizeRacePresentationViewport({
+          width: window.innerWidth,
+          height: window.innerHeight,
+        })
+  ));
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return undefined;
+    const syncViewport = () => {
+      const viewport = normalizeRacePresentationViewport({
+        width: stage.clientWidth,
+        height: stage.clientHeight,
+      });
+      setPresentationViewport((current) => (
+        current?.width === viewport?.width && current?.height === viewport?.height
+          ? current
+          : viewport
+      ));
+    };
+    syncViewport();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', syncViewport);
+      return () => window.removeEventListener('resize', syncViewport);
+    }
+    const observer = new ResizeObserver(syncViewport);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [raceViewFullscreen, track.id]);
   const [race3DFallbackTrackId, setRace3DFallbackTrackId] = useState<string | null>(null);
   useEffect(() => {
     setRace3DFallbackTrackId(null);
@@ -276,6 +319,21 @@ export function EarthTrackView({
     && race3DFallbackTrackId !== track.id;
   const showingGameArena = raceViewMode === 'game';
   const showingAny3D = showingPedalZone3D || showingRace3D;
+  const cameraReferenceViewport = normalizeRacePresentationViewport(
+    raceCameraSnapshot?.referenceViewport,
+  ) ?? legacyRacePresentationViewport;
+  const riderOverlayReferenceViewport = normalizeRacePresentationViewport(
+    riderOverlayPreference?.referenceViewport,
+  ) ?? cameraReferenceViewport;
+  const cameraPresentationFrame = raceCameraImmutable && presentationViewport
+    ? racePresentationFrame(cameraReferenceViewport, presentationViewport)
+    : null;
+  const riderPresentationScale = normalizeRiderPresentationScale(
+    cameraPresentationFrame?.uniformScale ?? 1,
+  );
+  const riderOverlayPresentationFrame = raceCameraImmutable && presentationViewport
+    ? racePresentationFrame(riderOverlayReferenceViewport, presentationViewport)
+    : null;
   // Resolve the coach snapshot during render. A warm Google Maps loader can
   // mount before App's passive restore effect copies it into local state.
   const presentedEarthAngle = raceCameraImmutable
@@ -287,9 +345,48 @@ export function EarthTrackView({
   const presentedEarthCenter = raceCameraImmutable
     ? raceCameraSnapshot?.center ?? earthCenter
     : earthCenter;
-  const presentedEarthZoom = raceCameraImmutable
+  const authoredEarthZoom = raceCameraImmutable
     ? raceCameraSnapshot?.zoom ?? earthZoom
     : earthZoom;
+  const presentedEarthZoom = raceCameraImmutable
+    && authoredEarthZoom != null
+    && presentationViewport
+    ? showingRace3D
+      ? authoredEarthZoom - Math.log2(threeDimensionalRangeScaleForAspect(
+          cameraReferenceViewport,
+          presentationViewport,
+        ))
+      : satelliteZoomForRacePresentation(
+          authoredEarthZoom,
+          cameraReferenceViewport,
+          presentationViewport,
+        )
+    : authoredEarthZoom;
+  const presentedRiderOverlayPreference = useMemo<RaceRiderOverlayLayout>(() => {
+    const authoredLayout = riderOverlayPreference ?? {
+      ...defaultRaceRiderOverlayLayout,
+      referenceViewport: riderOverlayReferenceViewport,
+    };
+    if (!raceCameraImmutable || !presentationViewport) return authoredLayout;
+    const rect = raceRiderOverlayRectForPresentation(
+      authoredLayout,
+      presentationViewport,
+      riderOverlayReferenceViewport,
+    );
+    if (!rect) return authoredLayout;
+    return {
+      ...authoredLayout,
+      xPct: rect.left / presentationViewport.width,
+      yPct: rect.top / presentationViewport.height,
+      width: rect.width,
+      height: rect.height,
+    };
+  }, [
+    presentationViewport,
+    raceCameraImmutable,
+    riderOverlayReferenceViewport,
+    riderOverlayPreference,
+  ]);
   const mapping3DTrackCenter = trackCenter(track);
   const mapping3DSafeCenter = mapping3DCenterForTrack(
     earthCenter,
@@ -330,6 +427,12 @@ export function EarthTrackView({
   const active3DCamera = showingPedalZone3D ? mapping3DCamera : race3DCamera;
   const activeEarthAngle = showingAny3D ? active3DCamera.angle : presentedEarthAngle;
   const activeEarthHeading = showingAny3D ? active3DCamera.heading : presentedEarthHeading;
+  const saveEarthCameraWithViewport = (camera: Partial<EarthCamera>) => {
+    onEarthCameraChange({
+      ...camera,
+      referenceViewport: presentationViewport ?? cameraReferenceViewport,
+    });
+  };
   const imageryLabel = showingPedalZone3D
     ? '3D obstacle view'
     : showingRace3D
@@ -423,7 +526,7 @@ export function EarthTrackView({
         </div>
       </div>
 
-      <div className="earth-stage google-enabled">
+      <div className="earth-stage google-enabled" ref={stageRef}>
         {showingGameArena ? (
           <Suspense fallback={<div className="google-map-status loading">Loading BMX game arena…</div>}>
             <DragStripGameArenaLayer
@@ -468,6 +571,7 @@ export function EarthTrackView({
                 distanceUnit={distanceUnit}
                 cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                 raceViewFullscreen={showingRace3D ? raceViewFullscreen : false}
+                presentationScale={riderPresentationScale}
                 raceState={raceState}
                 raceDistanceMeters={raceDistanceMeters}
                 earthAngle={active3DCamera.angle}
@@ -499,7 +603,7 @@ export function EarthTrackView({
                       zoom: camera.zoom ?? current.zoom,
                     }));
                   } else {
-                    onEarthCameraChange(camera);
+                    saveEarthCameraWithViewport(camera);
                   }
                 }}
                 onMappingZonePointAdd={onMappingZonePointAdd}
@@ -526,6 +630,7 @@ export function EarthTrackView({
               distanceUnit={distanceUnit}
               cStartOffsetsByPlayer={cStartOffsetsByPlayer}
               raceViewFullscreen={raceViewFullscreen}
+              presentationScale={riderPresentationScale}
               cameraLocked={raceCameraImmutable || (
                 raceViewFullscreen && (!canEditRaceLayout || raceCameraLocked)
               )}
@@ -549,7 +654,7 @@ export function EarthTrackView({
               draftSplitSections={draftSplitSections}
               draftRouteSplitSections={draftRouteSplitSections}
               draftSplitBuilder={draftSplitBuilder}
-              onEarthCameraChange={onEarthCameraChange}
+              onEarthCameraChange={saveEarthCameraWithViewport}
               onMappingPathPointAdd={onMappingPathPointAdd}
               onMappingPathPointMove={onMappingPathPointMove}
               onMappingPathPointRemove={onMappingPathPointRemove}
@@ -731,7 +836,10 @@ export function EarthTrackView({
               visible={raceViewFullscreen && !mappingMode}
               speedUnit={speedUnit}
               trackLengthMeters={progressLengthMeters}
-              preference={riderOverlayPreference}
+              preference={presentedRiderOverlayPreference}
+              presentationScale={raceCameraImmutable
+                ? riderOverlayPresentationFrame?.uniformScale ?? 1
+                : 1}
               canEditLayout={canEditRaceLayout}
               onPreferenceChange={onRiderOverlayPreferenceChange}
               onFullscreenInteraction={onRaceFullscreenInteraction}

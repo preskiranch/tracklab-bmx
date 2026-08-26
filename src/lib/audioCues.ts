@@ -27,6 +27,8 @@ let raceAmbiencePrimed = false;
 let raceAmbiencePrimePromise: Promise<void> | null = null;
 let activeRaceAmbienceProfile: BmxEventAmbienceProfile | null = null;
 let lastRaceAmbienceProfileIndex = -1;
+let raceAmbienceMasterVolume = 0.065;
+let raceAmbienceCommentaryDucked = false;
 
 export const uciRandomStartVoiceUrl = '/assets/uci-random-start.mp3';
 export const bmxEventAmbienceUrl = '/assets/bmx-event-ambience.mp3';
@@ -48,6 +50,7 @@ const raceCrowdSource = bmxEventAmbienceSources[1];
 const raceCrowdLoopEndSeconds = 68;
 const raceAmbienceBedMix = 0.74;
 const raceAmbienceCrowdMix = 0.34;
+const raceAmbienceCommentaryDuckMix = 0.2;
 export const uciVoiceWatchGateOffsetMs = 5300;
 
 export type BmxEventAmbienceProfile = {
@@ -311,11 +314,24 @@ function prepareRaceAmbience() {
   return { bed, crowd, profile };
 }
 
-function setRaceAmbienceVolume(volume: number) {
-  const masterVolume = Math.max(0, Math.min(0.2, volume));
+function applyRaceAmbienceVolume() {
+  const masterVolume = raceAmbienceMasterVolume
+    * (raceAmbienceCommentaryDucked ? raceAmbienceCommentaryDuckMix : 1);
   const { bed, crowd } = getRaceAmbienceAudioLayers();
   bed.volume = masterVolume * raceAmbienceBedMix;
   crowd.volume = masterVolume * raceAmbienceCrowdMix;
+}
+
+function setRaceAmbienceVolume(volume: number) {
+  raceAmbienceMasterVolume = Math.max(0, Math.min(0.2, volume));
+  applyRaceAmbienceVolume();
+}
+
+/** Keeps the announcer intelligible without stopping or reloading ambience. */
+export function setBmxEventAmbienceCommentaryDucked(ducked: boolean) {
+  if (raceAmbienceCommentaryDucked === ducked) return;
+  raceAmbienceCommentaryDucked = ducked;
+  applyRaceAmbienceVolume();
 }
 
 function loadUciVoiceBuffer(context: AudioContext) {
@@ -513,7 +529,7 @@ export async function primeAudioCues() {
         raceAmbiencePrimed = results.every((result) => result.status === 'fulfilled');
       })
       .finally(() => {
-        setRaceAmbienceVolume(0.065);
+        applyRaceAmbienceVolume();
         bed.muted = false;
         crowd.muted = false;
         raceAmbiencePrimePromise = null;

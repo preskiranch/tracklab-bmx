@@ -52,6 +52,7 @@ import { formatDistanceMeters, formatSpeedFromKph, speedUnitLabel } from '../uni
 import { recordMap3DLoad, type Map3DLoadContext } from '../lib/map3dUsage';
 import { cStartVisualDistance, type CStartOffsetsByPlayer } from '../lib/bmxGateStart';
 import {
+  normalizeRiderPresentationScale,
   riderAirPixelsToMeters,
   riderLaneOffsetsByPlayer,
   riderMarkerCanvasSize,
@@ -78,6 +79,7 @@ type GoogleMaps3DTrackLayerProps = {
   distanceUnit: DistanceUnit;
   cStartOffsetsByPlayer?: CStartOffsetsByPlayer;
   raceViewFullscreen?: boolean;
+  presentationScale?: number;
   cameraLocked?: boolean;
   raceState: RaceState;
   raceDistanceMeters?: number;
@@ -456,16 +458,18 @@ function createRiderContent(
   player: Pick<PlayerSlot, 'colorName' | 'accent'>,
   label: string,
   appearance: 'live' | 'ghost' | 'remote',
+  presentationScale: number,
 ) {
+  const scale = normalizeRiderPresentationScale(presentationScale);
   const content = document.createElement('div');
   content.className = `map-3d-rider-marker map-3d-rider-marker-${appearance}`;
   content.style.setProperty('--rider-accent', appearance === 'ghost' ? ghostPlaybackAccent : player.accent);
   content.dataset.riderCanvasSize = String(riderMarkerCanvasSize);
-  content.style.height = `${riderMarkerCanvasSize}px`;
+  content.style.height = `${riderMarkerCanvasSize * scale}px`;
   content.style.overflow = 'visible';
   content.style.pointerEvents = 'none';
   content.style.position = 'relative';
-  content.style.width = `${riderMarkerCanvasSize}px`;
+  content.style.width = `${riderMarkerCanvasSize * scale}px`;
   content.title = label;
   content.setAttribute('aria-label', label);
   const image = document.createElement('img');
@@ -475,13 +479,13 @@ function createRiderContent(
     appearance === 'ghost' ? ghostPlaybackColorName : player.colorName
   ];
   image.style.display = 'block';
-  image.style.height = `${riderMarkerDrawSize}px`;
-  image.style.left = `${riderMarkerSafetyInsetPixels}px`;
+  image.style.height = `${riderMarkerDrawSize * scale}px`;
+  image.style.left = `${riderMarkerSafetyInsetPixels * scale}px`;
   image.style.objectFit = 'contain';
   image.style.position = 'absolute';
-  image.style.top = `${riderMarkerSafetyInsetPixels}px`;
+  image.style.top = `${riderMarkerSafetyInsetPixels * scale}px`;
   image.style.transformOrigin = '50% 100%';
-  image.style.width = `${riderMarkerDrawSize}px`;
+  image.style.width = `${riderMarkerDrawSize * scale}px`;
   if (appearance === 'ghost') {
     content.dataset.ghostColor = 'fluorescent-orange';
     image.style.filter = `hue-rotate(-28deg) saturate(2.6) brightness(1.18) drop-shadow(0 0 5px ${ghostPlaybackGlow})`;
@@ -500,6 +504,7 @@ function createDynamicRiderMarker(
   title: string,
   appearance: 'live' | 'ghost' | 'remote',
   zIndex: number,
+  presentationScale: number,
 ) {
   const MarkerConstructor = library.MarkerElement ?? library.Marker3DElement;
   if (!MarkerConstructor) {
@@ -527,7 +532,9 @@ function createDynamicRiderMarker(
   if (library.MarkerElement) {
     marker.style.zIndex = String(zIndex);
   }
-  const content = library.MarkerElement ? createRiderContent(player, label, appearance) : null;
+  const content = library.MarkerElement
+    ? createRiderContent(player, label, appearance, presentationScale)
+    : null;
   if (content) {
     marker.append(content);
   }
@@ -544,6 +551,7 @@ function updateDynamicRiderMarker(
   label: string,
   title: string,
   cStartLoaded: boolean,
+  presentationScale: number,
 ) {
   dynamic.marker.position = { ...position, altitude };
   dynamic.marker.title = title;
@@ -554,20 +562,27 @@ function updateDynamicRiderMarker(
   dynamic.content.title = title;
   dynamic.content.setAttribute('aria-label', label);
   dynamic.content.classList.toggle('map-3d-rider-marker-c-start', cStartLoaded);
+  const scale = normalizeRiderPresentationScale(presentationScale);
+  dynamic.content.style.height = `${riderMarkerCanvasSize * scale}px`;
+  dynamic.content.style.width = `${riderMarkerCanvasSize * scale}px`;
   const image = dynamic.content.querySelector<HTMLImageElement>('.map-3d-rider-image');
   if (image) {
     const orientation = uprightRiderOrientation(bearing - mapHeading - 90);
     const radians = (orientation.leanDegrees * Math.PI) / 180;
-    const tireX = riderMarkerDrawSize * 0.465 * (orientation.mirrored ? -1 : 1);
-    const tireY = -riderMarkerDrawSize * 0.04;
+    const tireX = riderMarkerDrawSize * scale * 0.465 * (orientation.mirrored ? -1 : 1);
+    const tireY = -riderMarkerDrawSize * scale * 0.04;
     const anchorX = tireX * Math.cos(radians) - tireY * Math.sin(radians);
     const anchorY = tireX * Math.sin(radians) + tireY * Math.cos(radians);
     // MarkerElement anchors custom content at its bottom center. The larger
     // safety envelope moves that edge down by the inset, so compensate here
     // to leave the visible 58px rider at exactly the same screen position.
     dynamic.content.style.transform = `translate(${-anchorX}px, ${
-      riderMarkerSafetyInsetPixels - anchorY
+      (riderMarkerSafetyInsetPixels * scale) - anchorY
     }px)`;
+    image.style.height = `${riderMarkerDrawSize * scale}px`;
+    image.style.left = `${riderMarkerSafetyInsetPixels * scale}px`;
+    image.style.top = `${riderMarkerSafetyInsetPixels * scale}px`;
+    image.style.width = `${riderMarkerDrawSize * scale}px`;
     image.style.transform = `rotate(${orientation.leanDegrees}deg) scaleX(${orientation.mirrored ? -1 : 1})`;
   }
 }
@@ -606,6 +621,7 @@ export function GoogleMaps3DTrackLayer({
   distanceUnit,
   cStartOffsetsByPlayer = {},
   raceViewFullscreen = false,
+  presentationScale = 1,
   cameraLocked = false,
   raceState,
   raceDistanceMeters,
@@ -637,6 +653,7 @@ export function GoogleMaps3DTrackLayer({
   onMappingSplitDrawEnd,
   onUseSatellite,
 }: GoogleMaps3DTrackLayerProps) {
+  const normalizedPresentationScale = normalizeRiderPresentationScale(presentationScale);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<GoogleMap3DElement | null>(null);
   const libraryRef = useRef<GoogleMaps3DLibrary | null>(null);
@@ -1186,7 +1203,17 @@ export function GoogleMaps3DTrackLayer({
       const title = `${player.name} / ${formatSpeedFromKph(speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`;
       let dynamic = dynamicMarkersRef.current.get(key);
       if (!dynamic) {
-        dynamic = createDynamicRiderMarker(map, library, position, player, label, title, appearance, zIndex) ?? undefined;
+        dynamic = createDynamicRiderMarker(
+          map,
+          library,
+          position,
+          player,
+          label,
+          title,
+          appearance,
+          zIndex,
+          normalizedPresentationScale,
+        ) ?? undefined;
         if (!dynamic) return;
         dynamicMarkersRef.current.set(key, dynamic);
       }
@@ -1199,6 +1226,7 @@ export function GoogleMaps3DTrackLayer({
         label,
         title,
         cStartBackoffMeters > 0,
+        normalizedPresentationScale,
       );
     };
 
@@ -1280,7 +1308,7 @@ export function GoogleMaps3DTrackLayer({
         dynamicMarkersRef.current.delete(key);
       }
     });
-  }, [cStartOffsetsByPlayer, earthHeading, ghostRiders, mappingMode, players, raceState, remoteRaceStates, riders, samplesByDevice, sceneVersion, speedUnit, track]);
+  }, [cStartOffsetsByPlayer, earthHeading, ghostRiders, mappingMode, normalizedPresentationScale, players, raceState, remoteRaceStates, riders, samplesByDevice, sceneVersion, speedUnit, track]);
 
   const clearCurveStroke = useCallback(() => {
     curvePointerIdRef.current = null;

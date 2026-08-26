@@ -131,7 +131,17 @@ describe('club event normalization', () => {
         heading: 90,
         center: { lat: 38.42, lng: -122.7, altitude: 500 },
         zoom: 18.5,
+        referenceViewport: { width: 1366.125, height: 1024.555 },
         updatedAt: 99_999,
+      },
+      riderOverlay: {
+        xPct: 0.04,
+        yPct: 0.7,
+        width: 940,
+        height: 220,
+        locked: true,
+        referenceViewport: { width: 1366.125, height: 1024.555 },
+        ownerOnly: 'must-not-survive',
       },
       accountKey: 'must-not-survive',
     })).toEqual({
@@ -141,6 +151,15 @@ describe('club event normalization', () => {
         heading: 90,
         center: { lat: 38.42, lng: -122.7 },
         zoom: 18.5,
+        referenceViewport: { width: 1366.13, height: 1024.56 },
+      },
+      riderOverlay: {
+        xPct: 0.04,
+        yPct: 0.7,
+        width: 940,
+        height: 220,
+        locked: true,
+        referenceViewport: { width: 1366.13, height: 1024.56 },
       },
     });
     expect(normalizeClubEventRaceView({ mode: 'game' })).toEqual({ mode: 'game' });
@@ -149,6 +168,14 @@ describe('club event normalization', () => {
     expect(normalizeClubEventRaceView({
       mode: 'satellite',
       camera: { angle: 0, heading: 0, center: { lat: 91, lng: 0 } },
+    })).toBeNull();
+    expect(normalizeClubEventRaceView({
+      mode: 'satellite',
+      camera: { angle: 0, heading: 0, referenceViewport: { width: 100, height: 768 } },
+    })).toBeNull();
+    expect(normalizeClubEventRaceView({
+      mode: 'satellite',
+      riderOverlay: { xPct: 0, yPct: 0.7, width: 940, height: 220, locked: 'yes' },
     })).toBeNull();
     expect(normalizeClubEventRaceView({ mode: 'street' })).toBeNull();
   });

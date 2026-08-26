@@ -5,6 +5,8 @@ import {
   type ClubTabletDeviceCredential,
   type ClubTabletSessionCredential,
 } from './clubTabletStorage';
+import { normalizeRacePresentationViewport } from './racePresentation';
+import type { RacePresentationViewport } from '../types';
 export { clubEventMultiplayerRoomReady } from './clubEventRuntime';
 
 export type ClubEventActivityType = 'bmx-race' | 'straight-sprint' | 'explore';
@@ -18,12 +20,23 @@ export type ClubEventRaceViewCamera = Readonly<{
   heading: number;
   center?: Readonly<{ lat: number; lng: number }>;
   zoom?: number;
+  referenceViewport?: RacePresentationViewport;
+}>;
+
+export type ClubEventRaceRiderOverlay = Readonly<{
+  xPct: number;
+  yPct: number;
+  width: number;
+  height: number;
+  locked: boolean;
+  referenceViewport?: RacePresentationViewport;
 }>;
 
 /** Immutable display snapshot selected by the owner when the lobby opens. */
 export type ClubEventRaceView = Readonly<{
   mode: ClubEventRaceViewMode;
   camera?: ClubEventRaceViewCamera;
+  riderOverlay?: ClubEventRaceRiderOverlay;
 }>;
 
 export type ClubEventAthlete = Readonly<{
@@ -147,59 +160,112 @@ export function normalizeClubEventRaceView(value: unknown): ClubEventRaceView | 
     ? candidate.mode
     : null;
   if (!mode) return null;
-  if (!Object.prototype.hasOwnProperty.call(candidate, 'camera')) return { mode };
-  if (!candidate.camera || typeof candidate.camera !== 'object' || Array.isArray(candidate.camera)) return null;
+  let normalizedCamera: ClubEventRaceViewCamera | undefined;
+  if (Object.prototype.hasOwnProperty.call(candidate, 'camera')) {
+    if (!candidate.camera || typeof candidate.camera !== 'object' || Array.isArray(candidate.camera)) return null;
 
-  const camera = candidate.camera as Record<string, unknown>;
-  const angle = camera.angle;
-  const heading = camera.heading;
-  if (
-    typeof angle !== 'number'
-    || !Number.isFinite(angle)
-    || angle < 0
-    || angle > 67
-    || typeof heading !== 'number'
-    || !Number.isFinite(heading)
-    || heading < 0
-    || heading >= 360
-  ) return null;
-
-  let center: ClubEventRaceViewCamera['center'];
-  if (Object.prototype.hasOwnProperty.call(camera, 'center')) {
-    if (!camera.center || typeof camera.center !== 'object' || Array.isArray(camera.center)) return null;
-    const point = camera.center as Record<string, unknown>;
+    const camera = candidate.camera as Record<string, unknown>;
+    const angle = camera.angle;
+    const heading = camera.heading;
     if (
-      typeof point.lat !== 'number'
-      || !Number.isFinite(point.lat)
-      || point.lat < -90
-      || point.lat > 90
-      || typeof point.lng !== 'number'
-      || !Number.isFinite(point.lng)
-      || point.lng < -180
-      || point.lng > 180
+      typeof angle !== 'number'
+      || !Number.isFinite(angle)
+      || angle < 0
+      || angle > 67
+      || typeof heading !== 'number'
+      || !Number.isFinite(heading)
+      || heading < 0
+      || heading >= 360
     ) return null;
-    center = { lat: point.lat, lng: point.lng };
-  }
 
-  let zoom: number | undefined;
-  if (Object.prototype.hasOwnProperty.call(camera, 'zoom')) {
-    if (
-      typeof camera.zoom !== 'number'
-      || !Number.isFinite(camera.zoom)
-      || camera.zoom < 0
-      || camera.zoom > 30
-    ) return null;
-    zoom = camera.zoom;
-  }
+    let center: ClubEventRaceViewCamera['center'];
+    if (Object.prototype.hasOwnProperty.call(camera, 'center')) {
+      if (!camera.center || typeof camera.center !== 'object' || Array.isArray(camera.center)) return null;
+      const point = camera.center as Record<string, unknown>;
+      if (
+        typeof point.lat !== 'number'
+        || !Number.isFinite(point.lat)
+        || point.lat < -90
+        || point.lat > 90
+        || typeof point.lng !== 'number'
+        || !Number.isFinite(point.lng)
+        || point.lng < -180
+        || point.lng > 180
+      ) return null;
+      center = { lat: point.lat, lng: point.lng };
+    }
 
-  return {
-    mode,
-    camera: {
+    let zoom: number | undefined;
+    if (Object.prototype.hasOwnProperty.call(camera, 'zoom')) {
+      if (
+        typeof camera.zoom !== 'number'
+        || !Number.isFinite(camera.zoom)
+        || camera.zoom < 0
+        || camera.zoom > 30
+      ) return null;
+      zoom = camera.zoom;
+    }
+
+    let cameraReferenceViewport: RacePresentationViewport | null = null;
+    if (Object.prototype.hasOwnProperty.call(camera, 'referenceViewport')) {
+      cameraReferenceViewport = normalizeRacePresentationViewport(camera.referenceViewport);
+      if (!cameraReferenceViewport) return null;
+    }
+    normalizedCamera = {
       angle,
       heading,
       ...(center ? { center } : {}),
       ...(zoom != null ? { zoom } : {}),
-    },
+      ...(cameraReferenceViewport ? { referenceViewport: cameraReferenceViewport } : {}),
+    };
+  }
+
+  let normalizedRiderOverlay: ClubEventRaceRiderOverlay | undefined;
+  if (Object.prototype.hasOwnProperty.call(candidate, 'riderOverlay')) {
+    if (
+      !candidate.riderOverlay
+      || typeof candidate.riderOverlay !== 'object'
+      || Array.isArray(candidate.riderOverlay)
+    ) return null;
+    const overlay = candidate.riderOverlay as Record<string, unknown>;
+    if (
+      typeof overlay.xPct !== 'number'
+      || !Number.isFinite(overlay.xPct)
+      || overlay.xPct < 0
+      || overlay.xPct > 1
+      || typeof overlay.yPct !== 'number'
+      || !Number.isFinite(overlay.yPct)
+      || overlay.yPct < 0
+      || overlay.yPct > 1
+      || typeof overlay.width !== 'number'
+      || !Number.isFinite(overlay.width)
+      || overlay.width < 320
+      || overlay.width > 1800
+      || typeof overlay.height !== 'number'
+      || !Number.isFinite(overlay.height)
+      || overlay.height < 190
+      || overlay.height > 900
+      || typeof overlay.locked !== 'boolean'
+    ) return null;
+    let overlayReferenceViewport: RacePresentationViewport | null = null;
+    if (Object.prototype.hasOwnProperty.call(overlay, 'referenceViewport')) {
+      overlayReferenceViewport = normalizeRacePresentationViewport(overlay.referenceViewport);
+      if (!overlayReferenceViewport) return null;
+    }
+    normalizedRiderOverlay = {
+      xPct: overlay.xPct,
+      yPct: overlay.yPct,
+      width: overlay.width,
+      height: overlay.height,
+      locked: overlay.locked,
+      ...(overlayReferenceViewport ? { referenceViewport: overlayReferenceViewport } : {}),
+    };
+  }
+
+  return {
+    mode,
+    ...(normalizedCamera ? { camera: normalizedCamera } : {}),
+    ...(normalizedRiderOverlay ? { riderOverlay: normalizedRiderOverlay } : {}),
   };
 }
 

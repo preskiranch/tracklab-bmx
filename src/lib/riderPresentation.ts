@@ -8,6 +8,8 @@ const riderLaneMaxSpreadMeters = 1.26;
 const riderScreenLaneSpacingPixels = 0;
 const riderAirMetersPerPixel = 0.025;
 const riderMaximumAltitudeMeters = 0.85;
+const minimumRiderPresentationScale = 0.5;
+const maximumRiderPresentationScale = 1.5;
 
 // The rider stays 58px tall, but turns can lean the square source art by up
 // to 24 degrees. The transparent envelope also has to contain the downward
@@ -21,6 +23,16 @@ export const riderMarkerSafetyInsetPixels = (
 export const riderMarkerShadowBlurPixels = 8;
 export const riderMarkerMaximumShadowBlurPixels = 14;
 export const riderMarkerShadowOffsetYPixels = 5;
+
+/**
+ * Keeps rider art proportional to the viewport where the race presentation
+ * was authored without allowing an extreme phone/desktop size to make a
+ * rider disappear or cover the course.
+ */
+export function normalizeRiderPresentationScale(value: number | null | undefined) {
+  const scale = Number.isFinite(value) ? Number(value) : 1;
+  return Math.max(minimumRiderPresentationScale, Math.min(maximumRiderPresentationScale, scale));
+}
 
 function normalizeHeading(value: number) {
   return ((value % 360) + 360) % 360;

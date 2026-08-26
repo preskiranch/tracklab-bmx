@@ -9,6 +9,7 @@ const pedalLoopEndSeconds = 8.2;
 const freewheelLoopStartSeconds = 10.2;
 const freewheelLoopEndSeconds = 26.5;
 const bikeAudioMasterVolume = 0.34;
+const bikeAudioCommentaryDuckMix = 0.26;
 const pedalLayerVolume = 0.44;
 const freewheelLayerVolume = 0.085;
 const minimumCoastingVelocityMps = 0.4;
@@ -33,6 +34,25 @@ let bikeAudioContext: AudioContext | null = null;
 let bikeAudioMasterGain: GainNode | null = null;
 let bikeAudioChannels = new Map<number, BikeAudioChannel>();
 let bikeAudioSeenModes = new Map<number, Set<BikeRaceAudioMode>>();
+let bikeAudioCommentaryDucked = false;
+
+function effectiveBikeAudioMasterVolume() {
+  return bikeAudioMasterVolume
+    * (bikeAudioCommentaryDucked ? bikeAudioCommentaryDuckMix : 1);
+}
+
+/** Smoothly clears space for live commentary, then restores the saved mix. */
+export function setBikeRaceAudioCommentaryDucked(ducked: boolean) {
+  if (bikeAudioCommentaryDucked === ducked) return;
+  bikeAudioCommentaryDucked = ducked;
+  if (!bikeAudioContext || !bikeAudioMasterGain) return;
+  bikeAudioMasterGain.gain.cancelScheduledValues(bikeAudioContext.currentTime);
+  bikeAudioMasterGain.gain.setTargetAtTime(
+    effectiveBikeAudioMasterVolume(),
+    bikeAudioContext.currentTime,
+    0.045,
+  );
+}
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
@@ -212,7 +232,7 @@ async function ensureBikeAudioChannels() {
     bikeAudioContext = context;
     bikeAudioMasterGain = context.createGain();
     bikeAudioMasterGain.gain.setValueAtTime(
-      bikeAudioMasterVolume,
+      effectiveBikeAudioMasterVolume(),
       context.currentTime,
     );
     bikeAudioMasterGain.connect(context.destination);

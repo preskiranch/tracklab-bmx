@@ -74,7 +74,20 @@ function riderCards(positionsPending = false) {
     `).join('');
 }
 
-function raceMarkup(overlayHeight: number, positionsPending = false) {
+function raceMarkup(
+  overlayHeight: number,
+  positionsPending = false,
+  presentation?: {
+    scale: number;
+    width: number;
+    height: number;
+    xPct: number;
+    yPct: number;
+  },
+) {
+  const overlayStyle = presentation
+    ? `--overlay-x:${presentation.xPct * 100}%;--overlay-y:${presentation.yPct * 100}%;--overlay-width:${presentation.width}px;--overlay-height:${presentation.height}px;--race-overlay-min-height:${presentation.height}px`
+    : `--overlay-x:4%;--overlay-y:70%;--overlay-width:940px;--overlay-height:${overlayHeight}px`;
   return `
     <main class="platform-shell race-fullscreen">
       <section class="platform-main">
@@ -100,9 +113,11 @@ function raceMarkup(overlayHeight: number, positionsPending = false) {
                     ? '<div class="race-staging-countdown" aria-label="Race staging countdown"><strong>5</strong><span>Adjust the view, then return to your bike</span></div>'
                     : '<div class="start-tree-light" aria-label="BMX start tree light"><span class="tree-lamp red"></span><span class="tree-lamp yellow"></span><span class="tree-lamp yellow"></span><span class="tree-lamp green"></span></div>'}
                   <div class="earth-overlay bottom-left"><span>Angle 55 deg</span><span>Heading 20 deg</span><span>Satellite</span></div>
-                  <div class="race-rider-overlay locked" aria-label="Race rider positions" style="--overlay-x:4%;--overlay-y:70%;--overlay-width:940px;--overlay-height:${overlayHeight}px">
-                    <div class="race-rider-overlay-toolbar"><div class="race-rider-overlay-handle">Rider positions</div></div>
-                    <div class="race-rider-overlay-grid">${riderCards(positionsPending)}</div>
+                  <div class="race-rider-overlay locked${presentation ? ' presentation-scaled' : ''}" aria-label="Race rider positions" style="${overlayStyle}">
+                    <div class="race-rider-overlay-presentation" style="width:${presentation ? presentation.width / presentation.scale : '100%'}${presentation ? 'px' : ''};height:${presentation ? presentation.height / presentation.scale : '100%'}${presentation ? 'px' : ''};display:grid;grid-template-rows:auto minmax(0,1fr);transform:${presentation ? `scale(${presentation.scale})` : 'none'};transform-origin:top left">
+                      <div class="race-rider-overlay-toolbar"><div class="race-rider-overlay-handle">Rider positions</div></div>
+                      <div class="race-rider-overlay-grid">${riderCards(positionsPending)}</div>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -294,6 +309,45 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
     }
     await expectStableAcrossFrames(page.locator('.earth-stage'));
   }
+});
+
+test('replays the iPad Pro rider panel at the same studio-tablet composition', async ({ page }) => {
+  const ownerViewport = { width: 1366, height: 1024 };
+  const studioViewport = { width: 1024, height: 768 };
+  const studioScale = studioViewport.width / ownerViewport.width;
+
+  const measure = async (viewport: { width: number; height: number }, scale: number) => {
+    await page.setViewportSize(viewport);
+    await page.setContent(raceMarkup(220, false, {
+      scale,
+      width: 940 * scale,
+      height: 220 * scale,
+      xPct: 0.04,
+      yPct: 0.7,
+    }));
+    await installTrackStyles(page);
+    return page.getByLabel('Race rider positions').evaluate((panel) => {
+      const panelBounds = panel.getBoundingClientRect();
+      const avatarBounds = panel.querySelector<HTMLElement>('.race-rider-overlay-avatar')!
+        .getBoundingClientRect();
+      return {
+        xPct: panelBounds.x / window.innerWidth,
+        yPct: panelBounds.y / window.innerHeight,
+        widthPct: panelBounds.width / window.innerWidth,
+        heightPct: panelBounds.height / window.innerHeight,
+        avatarSize: avatarBounds.width,
+      };
+    });
+  };
+
+  const owner = await measure(ownerViewport, 1);
+  const studio = await measure(studioViewport, studioScale);
+  expect(studio.xPct).toBeCloseTo(owner.xPct, 3);
+  expect(studio.yPct).toBeCloseTo(owner.yPct, 3);
+  expect(studio.widthPct).toBeCloseTo(owner.widthPct, 3);
+  expect(studio.heightPct).toBeCloseTo(owner.heightPct, 3);
+  expect(studio.avatarSize / owner.avatarSize).toBeCloseTo(studioScale, 2);
+  await expectInsideViewport(page, page.getByLabel('Race rider positions'));
 });
 
 test('locks map editing to the dynamic viewport through phone rotation without overflow or shaking', async ({ page }) => {

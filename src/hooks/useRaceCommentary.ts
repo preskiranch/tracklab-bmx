@@ -21,7 +21,13 @@ import {
 import {
   getTrackLabAudioContext,
   primeAudioCues,
+  setBmxEventAmbienceCommentaryDucked,
 } from '../lib/audioCues';
+import { setBikeRaceAudioCommentaryDucked } from '../lib/bikeRaceAudio';
+import {
+  primeCommentaryMediaElement,
+  type CommentaryMediaGenerationRef,
+} from '../lib/commentaryMediaPrime';
 import {
   buildPreRaceTrackContext,
   localPreRaceReportLine,
@@ -431,61 +437,22 @@ async function playAudioBlobWithMediaElement(
   volume: number,
   activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>,
   activePlaybackCancelRef: ActivePlaybackCancelRef,
+  mediaGenerationRef: CommentaryMediaGenerationRef,
   shouldContinue: () => boolean,
   onStart: () => void,
   watchdogMs: number,
 ) {
-  if (!shouldContinue()) {
-    return false;
-  }
-
-  const audioUrl = URL.createObjectURL(audioBlob);
   const audio = commentaryAudioElement(activeAudioRef);
-  audio.src = audioUrl;
-  audio.preload = 'auto';
-  audio.setAttribute('playsinline', '');
-  audio.muted = false;
-  audio.volume = volume;
-  audio.load();
-  return await new Promise<boolean>((resolve, reject) => {
-    let settled = false;
-    let watchdogId: number | null = null;
-    const release = (played: boolean, error?: unknown) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (watchdogId != null) {
-        window.clearTimeout(watchdogId);
-      }
-      audio.onended = null;
-      audio.onerror = null;
-      URL.revokeObjectURL(audioUrl);
-      if (activePlaybackCancelRef.current === cancel) {
-        activePlaybackCancelRef.current = null;
-      }
-      if (error) {
-        reject(error);
-      } else {
-        resolve(played);
-      }
-    };
-    const cancel = () => {
-      audio.pause();
-      release(false);
-    };
-    audio.onended = () => {
-      release(true);
-    };
-    audio.onerror = () => {
-      release(false, new Error('AI speech audio could not be played.'));
-    };
-    activePlaybackCancelRef.current = cancel;
-    onStart();
-    watchdogId = window.setTimeout(cancel, watchdogMs);
-    void audio.play().catch((error) => {
-      release(false, error);
-    });
+  const { playCommentaryMediaBlob } = await import('../lib/commentaryMediaPlayback');
+  return await playCommentaryMediaBlob({
+    audio,
+    audioBlob,
+    volume,
+    generationRef: mediaGenerationRef,
+    activeCancelRef: activePlaybackCancelRef,
+    shouldContinue,
+    onStart,
+    watchdogMs,
   });
 }
 
@@ -495,6 +462,7 @@ async function playAudioBlob(
   activeAudioRef: React.MutableRefObject<HTMLAudioElement | null>,
   activeBufferSourceRef: React.MutableRefObject<AudioBufferSourceNode | null>,
   activePlaybackCancelRef: ActivePlaybackCancelRef,
+  mediaGenerationRef: CommentaryMediaGenerationRef,
   shouldContinue: () => boolean,
   onStart: () => void,
   watchdogMs: number,
@@ -521,6 +489,7 @@ async function playAudioBlob(
       volume,
       activeAudioRef,
       activePlaybackCancelRef,
+      mediaGenerationRef,
       shouldContinue,
       onStart,
       watchdogMs,
@@ -534,6 +503,7 @@ async function playAudioBlob(
       volume,
       activeAudioRef,
       activePlaybackCancelRef,
+      mediaGenerationRef,
       shouldContinue,
       onStart,
       watchdogMs,
@@ -604,6 +574,9 @@ export function useRaceCommentary({
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeBufferSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const activePlaybackCancelRef = useRef<(() => void) | null>(null);
+  const mediaGenerationRef = useRef(0);
+  const commentaryPrimePromiseRef = useRef<Promise<void> | null>(null);
+  const commentaryMediaPrimedRef = useRef(false);
   const activeRequestAbortRef = useRef<AbortController | null>(null);
   const preRacePlaybackAbortRef = useRef<AbortController | null>(null);
   const preparedStartSpeechRef = useRef<PreparedStartSpeech | null>(null);
@@ -617,6 +590,9 @@ export function useRaceCommentary({
     retryAt: 0,
   });
   const preRacePrefetchRequestRef = useRef(0);
+  const preRaceInFlightKeyRef = useRef('');
+  const preRacePlaybackAttemptRef = useRef({ key: '', count: 0 });
+  const [preRaceRetryRevision, setPreRaceRetryRevision] = useState(0);
   const [preRaceReport, setPreRaceReport] = useState<PreRaceReport | null>(null);
   const serviceModeRef = useRef<CommentaryServiceMode>('checking');
   const speechStatusRef = useRef<CommentarySpeechStatus>('checking');
@@ -704,7 +680,13 @@ export function useRaceCommentary({
   const startSpeechKey = preparedStartSpeechKey(startLine, preferences, players);
 
   const setPlaybackPhase = useCallback((phase: CommentaryPlaybackPhase) => {
+    const wasSpeaking = playbackPhaseRef.current === 'speaking';
+    const isSpeaking = phase === 'speaking';
     playbackPhaseRef.current = phase;
+    if (wasSpeaking !== isSpeaking) {
+      setBmxEventAmbienceCommentaryDucked(isSpeaking);
+      setBikeRaceAudioCommentaryDucked(isSpeaking);
+    }
   }, []);
 
   const recordSpeechReady = useCallback(() => {
@@ -801,6 +783,7 @@ export function useRaceCommentary({
           activeAudio,
           activeBufferSource,
           activePlaybackCancel,
+          mediaGenerationRef,
           shouldContinue,
           onStart,
           browserSpeechWatchdogMs(line),
@@ -835,6 +818,7 @@ export function useRaceCommentary({
     activeFinishCallRef.current = false;
     activePlaybackCancelRef.current?.();
     activePlaybackCancelRef.current = null;
+    mediaGenerationRef.current += 1;
     activeRequestAbortRef.current?.abort();
     activeRequestAbortRef.current = null;
     activeEventKindRef.current = null;
@@ -1243,10 +1227,16 @@ export function useRaceCommentary({
       || !startGateActive
       || startGatePhase !== 'staging'
       || playedPreRaceKeyRef.current === preRaceKey
+      || preRaceInFlightKeyRef.current === preRaceKey
     ) {
       return;
     }
-    playedPreRaceKeyRef.current = preRaceKey;
+    if (preRacePlaybackAttemptRef.current.key !== preRaceKey) {
+      preRacePlaybackAttemptRef.current = { key: preRaceKey, count: 0 };
+    }
+    if (preRacePlaybackAttemptRef.current.count >= 2) return;
+    preRacePlaybackAttemptRef.current.count += 1;
+    preRaceInFlightKeyRef.current = preRaceKey;
     const prepared = preparedPreRaceSpeechRef.current?.key === preRaceKey
       ? preparedPreRaceSpeechRef.current
       : null;
@@ -1264,6 +1254,9 @@ export function useRaceCommentary({
       weather: { available: false },
     };
     const controller = new AbortController();
+    let confirmedStart = false;
+    let playbackFailed = false;
+    let retryTimeoutId: number | null = null;
     preRacePlaybackAbortRef.current = controller;
     const lifecycleGeneration = lifecycleGenerationRef.current;
     const shouldContinue = () => (
@@ -1273,6 +1266,9 @@ export function useRaceCommentary({
     );
     const beginSpeaking = () => {
       if (shouldContinue()) {
+        confirmedStart = true;
+        playedPreRaceKeyRef.current = preRaceKey;
+        preRaceInFlightKeyRef.current = '';
         rememberLine(report.line);
         setPlaybackPhase('speaking');
         notifyCommentaryPlaybackStart('pre-race');
@@ -1294,6 +1290,7 @@ export function useRaceCommentary({
             activeAudioRef,
             activeBufferSourceRef,
             activePlaybackCancelRef,
+            mediaGenerationRef,
             shouldContinue,
             beginSpeaking,
             browserSpeechWatchdogMs(report.line),
@@ -1317,6 +1314,7 @@ export function useRaceCommentary({
           controller.signal,
         );
       } catch (error) {
+        playbackFailed = true;
         console.warn('Commentary pre-race audio could not play.', error);
       }
     })()
@@ -1324,21 +1322,41 @@ export function useRaceCommentary({
         if (preRacePlaybackAbortRef.current === controller) {
           preRacePlaybackAbortRef.current = null;
         }
+        if (preRaceInFlightKeyRef.current === preRaceKey) {
+          preRaceInFlightKeyRef.current = '';
+        }
         if (shouldContinue()) {
           setPlaybackPhase('idle');
+          if (
+            playbackFailed
+            && !confirmedStart
+            && preRacePlaybackAttemptRef.current.key === preRaceKey
+            && preRacePlaybackAttemptRef.current.count < 2
+          ) {
+            retryTimeoutId = window.setTimeout(() => {
+              if (shouldContinue() && playedPreRaceKeyRef.current !== preRaceKey) {
+                setPreRaceRetryRevision((current) => current + 1);
+              }
+            }, 600);
+          }
         }
       });
     return () => {
+      if (retryTimeoutId != null) window.clearTimeout(retryTimeoutId);
       controller.abort();
       activePlaybackCancelRef.current?.();
       activePlaybackCancelRef.current = null;
       activeAudioRef.current?.pause();
       activeBufferSourceRef.current = null;
+      if (preRaceInFlightKeyRef.current === preRaceKey) {
+        preRaceInFlightKeyRef.current = '';
+      }
       setPlaybackPhase('idle');
     };
   }, [
     preRaceContext,
     preRaceKey,
+    preRaceRetryRevision,
     preferences.enabled,
     preferences.voicePreset,
     preferences.volume,
@@ -1352,6 +1370,8 @@ export function useRaceCommentary({
   useEffect(() => {
     if (!startGateActive && startGatePhase === 'idle') {
       playedPreRaceKeyRef.current = '';
+      preRaceInFlightKeyRef.current = '';
+      preRacePlaybackAttemptRef.current = { key: '', count: 0 };
     }
   }, [startGateActive, startGatePhase]);
 
@@ -1422,6 +1442,7 @@ export function useRaceCommentary({
                   activeAudioRef,
                   activeBufferSourceRef,
                   activePlaybackCancelRef,
+                  mediaGenerationRef,
                   shouldContinue,
                   beginSpeaking,
                   browserSpeechWatchdogMs(line),
@@ -1511,6 +1532,7 @@ export function useRaceCommentary({
                 activeAudioRef,
                 activeBufferSourceRef,
                 activePlaybackCancelRef,
+                mediaGenerationRef,
                 shouldContinue,
                 beginSpeaking,
                 browserSpeechWatchdogMs(line),
@@ -1760,19 +1782,41 @@ export function useRaceCommentary({
     const contextPrime = context && context.state !== 'closed'
       ? context.resume().catch(() => undefined)
       : Promise.resolve();
+
+    // A later automatic room-clock start is not a new user gesture. Once this
+    // exact element is primed—or while it is carrying live speech—only resume
+    // Web Audio; never replace its source with the unlock clip again.
+    if (
+      commentaryMediaPrimedRef.current
+      || activePlaybackCancelRef.current
+      || playbackPhaseRef.current === 'speaking'
+    ) {
+      return contextPrime.then(() => undefined);
+    }
+    if (commentaryPrimePromiseRef.current) {
+      return Promise.allSettled([
+        contextPrime,
+        commentaryPrimePromiseRef.current,
+      ]).then(() => undefined);
+    }
+
     const audio = commentaryAudioElement(activeAudioRef);
-    audio.pause();
-    audio.src = commentaryUnlockAudioDataUrl;
-    audio.preload = 'auto';
-    audio.muted = false;
-    audio.volume = 0.01;
-    audio.load();
-    const mediaPrime = audio.play()
-      .then(() => {
-        audio.pause();
-        audio.currentTime = 0;
+    // Keep this invocation synchronous with the pointer handler. WKWebView and
+    // Safari can clear transient media activation across an import/await hop.
+    const mediaPrime = primeCommentaryMediaElement({
+      audio,
+      generationRef: mediaGenerationRef,
+      unlockSource: commentaryUnlockAudioDataUrl,
+    })
+      .then((primed) => {
+        if (primed) commentaryMediaPrimedRef.current = true;
       })
-      .catch(() => undefined);
+      .finally(() => {
+        if (commentaryPrimePromiseRef.current === mediaPrime) {
+          commentaryPrimePromiseRef.current = null;
+        }
+      });
+    commentaryPrimePromiseRef.current = mediaPrime;
     return Promise.race([
       Promise.allSettled([contextPrime, mediaPrime]).then(() => undefined),
       new Promise<void>((resolve) => {

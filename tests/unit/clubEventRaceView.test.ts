@@ -83,6 +83,46 @@ describe('Club Event owner race view', () => {
     });
   });
 
+  it('keeps the owner rider-panel snapshot when switching view mode or Sprint distance', () => {
+    const riderOverlay = {
+      xPct: 0.04,
+      yPct: 0.7,
+      width: 940,
+      height: 220,
+      locked: true,
+      referenceViewport: { width: 1366, height: 1024 },
+    } as const;
+    const course: ClubEventCourseOption = {
+      id: 'owner-layout',
+      name: 'Owner Layout',
+      track: { ...courseTrack('Owner Layout', 'US'), id: 'owner-layout' },
+      raceView: {
+        mode: 'satellite',
+        camera: {
+          angle: 47,
+          heading: 90,
+          zoom: 19,
+          referenceViewport: { width: 1366, height: 1024 },
+        },
+        riderOverlay,
+      },
+      sprintRaceViewCamerasByDistance: {
+        300: {
+          angle: 40,
+          heading: 80,
+          zoom: 18,
+          referenceViewport: { width: 1366, height: 1024 },
+        },
+      },
+    };
+
+    expect(clubEventRaceViewForCourse(course, '3d', 300)).toEqual({
+      mode: '3d',
+      camera: course.sprintRaceViewCamerasByDistance?.[300],
+      riderOverlay,
+    });
+  });
+
   it('keeps the event snapshot immutable through map initialization and fullscreen relayouts', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
     const earthViewSource = readFileSync(new URL('../../src/components/EarthTrackView.tsx', import.meta.url), 'utf8');
@@ -100,6 +140,20 @@ describe('Club Event owner race view', () => {
     expect(satelliteSource).toContain('cameraForTrack(latest.camera, latest.track, latest.cameraLocked)');
     expect(satelliteSource).toContain('cameraForTrack(cameraRef.current, track, cameraLocked)');
     expect(appSource).toContain('if (clubEventConfigurationLocked) {\n        return current;');
+  });
+
+  it('uses the historical iPad frame for legacy views and scales the camera and rider panel independently', () => {
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const earthViewSource = readFileSync(
+      new URL('../../src/components/EarthTrackView.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(appSource).toContain('fallbackReferenceViewport = legacyRacePresentationViewport');
+    expect(appSource).not.toContain('fallbackReferenceViewport = currentRacePresentationViewport()');
+    expect(earthViewSource).toContain('const cameraPresentationFrame =');
+    expect(earthViewSource).toContain('const riderOverlayPresentationFrame =');
+    expect(earthViewSource).toContain('presentationScale={raceCameraImmutable\n                ? riderOverlayPresentationFrame?.uniformScale ?? 1');
   });
 
   it('does not clamp or recenter an exact saved race camera in 3D', () => {

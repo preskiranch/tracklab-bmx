@@ -481,7 +481,13 @@ describe('cloud API trust boundaries', () => {
           cameraLocked: true,
           cameraLockedUpdatedAt: 200,
           earthCamerasByTrack: {
-            'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 200 },
+            'north-bay-bmx': {
+              angle: 42,
+              heading: 180,
+              zoom: 19,
+              referenceViewport: { width: 1366.125, height: 1024.555 },
+              updatedAt: 200,
+            },
           },
           riderOverlaysByTrack: {
             'north-bay-bmx': {
@@ -490,6 +496,7 @@ describe('cloud API trust boundaries', () => {
               width: 1040,
               height: 190,
               locked: true,
+              referenceViewport: { width: 1366.125, height: 1024.555 },
             },
           },
           riderOverlayUpdatedAtByTrack: {
@@ -543,7 +550,13 @@ describe('cloud API trust boundaries', () => {
         cameraLocked: true,
         cameraLockedUpdatedAt: 200,
         earthCamerasByTrack: {
-          'north-bay-bmx': { angle: 42, heading: 180, zoom: 19, updatedAt: 200 },
+          'north-bay-bmx': {
+            angle: 42,
+            heading: 180,
+            zoom: 19,
+            referenceViewport: { width: 1366.13, height: 1024.56 },
+            updatedAt: 200,
+          },
         },
         riderOverlaysByTrack: {
           'north-bay-bmx': {
@@ -552,6 +565,7 @@ describe('cloud API trust boundaries', () => {
             width: 1040,
             height: 190,
             locked: true,
+            referenceViewport: { width: 1366.13, height: 1024.56 },
           },
         },
         riderOverlayUpdatedAtByTrack: {
@@ -2516,7 +2530,17 @@ describe('cloud API trust boundaries', () => {
               heading: 90,
               center: { lat: 38.0004, lng: -122, altitude: 500 },
               zoom: 18.5,
+              referenceViewport: { width: 1366.125, height: 1024.555 },
               updatedAt: 99_999,
+            },
+            riderOverlay: {
+              xPct: 0.04,
+              yPct: 0.7,
+              width: 940,
+              height: 220,
+              locked: true,
+              referenceViewport: { width: 1366.125, height: 1024.555 },
+              accountKey: 'must not survive',
             },
             accountKey: 'must not survive',
           },
@@ -2540,6 +2564,15 @@ describe('cloud API trust boundaries', () => {
               heading: 90,
               center: { lat: 38.0004, lng: -122 },
               zoom: 18.5,
+              referenceViewport: { width: 1366.13, height: 1024.56 },
+            },
+            riderOverlay: {
+              xPct: 0.04,
+              yPct: 0.7,
+              width: 940,
+              height: 220,
+              locked: true,
+              referenceViewport: { width: 1366.13, height: 1024.56 },
             },
           },
         },
@@ -2555,6 +2588,7 @@ describe('cloud API trust boundaries', () => {
     expect(eventCreatedPayload.event.configuration.raceView).not.toHaveProperty('accountKey');
     expect(eventCreatedPayload.event.configuration.raceView.camera).not.toHaveProperty('updatedAt');
     expect(eventCreatedPayload.event.configuration.raceView.camera.center).not.toHaveProperty('altitude');
+    expect(eventCreatedPayload.event.configuration.raceView.riderOverlay).not.toHaveProperty('accountKey');
     const eventId = eventCreatedPayload.event.id;
     expect(JSON.stringify(eventCreatedPayload)).not.toMatch(/token|ProfileKey|constructor/i);
     const createdSlotDeviceIds = new Set(eventCreatedPayload.event.slots.map(

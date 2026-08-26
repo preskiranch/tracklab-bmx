@@ -13,9 +13,11 @@ const budgets = {
   // Event camera precedence, mapped Sprint fallback, remote tablet-bike
   // wiring, guarded club-tablet demos, and the server-clock gate controller
   // and DQ-safe event lifecycle add about 8 KB to the entry controller. The
-  // full tablet/map runtimes stay lazy-loaded and the network-relevant
+  // responsive Club Event snapshot projection and reliable iPad commentary
+  // startup add a small amount to that controller. The media state machine
+  // and full tablet/map runtimes stay lazy-loaded, while the network-relevant
   // compressed budgets remain unchanged.
-  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 617_000),
+  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 621_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
   cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 134_000),
   cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_000),
