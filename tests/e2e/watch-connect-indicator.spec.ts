@@ -510,7 +510,7 @@ test('iPhone native connecting event cannot cancel its newly created Watch conne
   const demoHeartRates = page.locator('.race-rider-overlay-heart-rate');
   await expect(demoHeartRates).toHaveCount(4);
   for (let index = 0; index < 4; index += 1) {
-    await expect(demoHeartRates.nth(index)).toContainText(/Simulated · \d+ BPM/);
+    await expect(demoHeartRates.nth(index)).toContainText(/Sim ·\s*\d+ BPM/);
     await expect(demoHeartRates.nth(index)).toHaveAttribute(
       'aria-label',
       /Simulated heart rate \d+ beats per minute/,

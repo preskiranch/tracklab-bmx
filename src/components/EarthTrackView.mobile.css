@@ -351,7 +351,7 @@
     --race-overlay-phone-bottom-gap: max(28px, calc(env(safe-area-inset-bottom, 0px) + 8px));
     --race-overlay-phone-height: min(
       var(--overlay-height),
-      clamp(132px, 34dvh, 148px),
+      clamp(138px, 36dvh, 156px),
       var(--race-overlay-safe-height)
     );
     --race-overlay-safe-width: calc(
@@ -369,7 +369,7 @@
     );
     width: min(var(--overlay-width), var(--race-overlay-safe-width));
     height: var(--race-overlay-phone-height);
-    min-height: min(132px, var(--race-overlay-safe-height));
+    min-height: min(138px, var(--race-overlay-safe-height));
   }
 
   .race-fullscreen .race-rider-overlay-toolbar,
@@ -411,17 +411,20 @@
     gap: 4px;
   }
 
+  .race-fullscreen .race-rider-overlay-portrait {
+    gap: 1px;
+  }
+
   .race-fullscreen .race-rider-overlay-avatar {
-    width: 28px;
-    height: 28px;
+    width: 36px;
+    height: 36px;
     border-width: 2px;
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .race-fullscreen .race-rider-overlay-badge {
-    left: 10px;
-    bottom: 1px;
     width: 22px;
+    min-width: 22px;
     height: 18px;
     padding: 0 2px;
     border-radius: 5px;
@@ -439,6 +442,15 @@
 
   .race-fullscreen .race-rider-overlay-identity span {
     font-size: 9px;
+  }
+
+  .race-fullscreen .race-rider-overlay-heart-rate {
+    font-size: 10px !important;
+    gap: 2px;
+  }
+
+  .race-fullscreen .race-rider-overlay-heart-rate-source {
+    display: none;
   }
 
   .race-fullscreen .race-rider-overlay-place strong {

@@ -82,16 +82,19 @@ function raceRiderOverlayUsesCompactLandscape(containerWidth: number, containerH
 
 export function raceRiderOverlayMinimumHeight(containerWidth: number, containerHeight: number) {
   if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
-    return 132;
+    return 138;
   }
-  return containerWidth <= 900 ? 340 : 190;
+  if (containerWidth <= 600) {
+    return 368;
+  }
+  return containerWidth <= 900 ? 340 : 220;
 }
 
 export function raceRiderOverlayMaximumHeight(containerWidth: number, containerHeight: number) {
   if (!raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
     return Number.POSITIVE_INFINITY;
   }
-  return Math.max(132, Math.min(148, Math.round(containerHeight * 0.34)));
+  return Math.max(138, Math.min(156, Math.round(containerHeight * 0.36)));
 }
 
 export function raceRiderOverlayPreferenceForViewport(
@@ -466,16 +469,18 @@ export function RaceRiderOverlay({
             key={entry.id}
           >
             <div className="race-rider-overlay-summary">
-              <RiderAvatar
-                name={entry.name}
-                photoUrl={entry.photoUrl}
-                accent={entry.accent}
-                className="race-rider-overlay-avatar"
-              />
-              <span className="race-rider-overlay-badge">{entry.badge}</span>
+              <div className="race-rider-overlay-portrait">
+                <RiderAvatar
+                  name={entry.name}
+                  photoUrl={entry.photoUrl}
+                  accent={entry.accent}
+                  className="race-rider-overlay-avatar"
+                />
+                <span className="race-rider-overlay-badge">{entry.badge}</span>
+              </div>
               <div className="race-rider-overlay-identity">
                 <strong>{entry.name}</strong>
-                <span>
+                <span className="race-rider-overlay-progress">
                   {entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId]
                     ? `${((entry.finishedAt ?? 0) / 1000).toFixed(2)}s finish`
                     : `${entry.progressPct}% track / ${formatSpeedFromKph(entry.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`}
@@ -485,7 +490,11 @@ export function RaceRiderOverlay({
                     className="race-rider-overlay-heart-rate"
                     aria-label={`${entry.heartRateSimulated ? 'Simulated heart rate' : 'Heart rate'} ${entry.heartRateBpm} beats per minute`}
                   >
-                    <b aria-hidden="true">♥</b> {entry.heartRateSimulated ? 'Simulated · ' : ''}{entry.heartRateBpm} BPM
+                    <b aria-hidden="true">♥</b>
+                    {entry.heartRateSimulated && (
+                      <span className="race-rider-overlay-heart-rate-source" aria-hidden="true">Sim ·</span>
+                    )}
+                    <span aria-hidden="true">{entry.heartRateBpm} BPM</span>
                   </span>
                 )}
                 {entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId] && (
