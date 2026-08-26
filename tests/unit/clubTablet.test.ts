@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  clearClubTabletBikePresence,
   clearStoredClubTabletSession,
   clubTabletOutboxStorageKey,
   clubTabletResultUploadHeader,
@@ -9,6 +10,7 @@ import {
   normalizeClubTabletDeviceCredential,
   normalizeClubTabletRoster,
   normalizeClubTabletSessionCredential,
+  publishClubTabletBikePresence,
   readStoredClubTabletDevice,
   readStoredClubTabletSession,
   saveClubTabletRaceResult,
@@ -25,6 +27,7 @@ import {
 } from '../../src/components/ClubTabletMode';
 import { expireClubTabletSessionLocallyFirst } from '../../src/components/ClubTabletRuntime';
 import {
+  clubTabletResultReviewHoldMs,
   releaseClubTabletAthleteAfterSaves,
   safelyReleaseCompletedClubTabletSession,
 } from '../../src/lib/clubTabletExerciseCompletion';
@@ -175,6 +178,42 @@ describe('Club Tablet client state', () => {
       deviceToken: `  ${deviceCredential.deviceToken}  `,
     })).toEqual(deviceCredential);
 
+    const presenceNow = Date.now();
+    expect(normalizeClubTabletDeviceCredential({
+      ...deviceCredential,
+      device: {
+        ...deviceCredential.device,
+        connectedBike: {
+          deviceId: 733_112,
+          label: 'WattbikePM250733112',
+          updatedAt: presenceNow,
+          expiresAt: presenceNow + 15_000,
+          privateBrowserId: 'must-not-survive',
+        },
+      },
+    })).toMatchObject({
+      device: {
+        connectedBike: {
+          deviceId: 733_112,
+          label: 'WattbikePM250733112',
+          updatedAt: presenceNow,
+          expiresAt: presenceNow + 15_000,
+        },
+      },
+    });
+    expect(normalizeClubTabletDeviceCredential({
+      ...deviceCredential,
+      device: {
+        ...deviceCredential.device,
+        connectedBike: {
+          deviceId: 733_112,
+          label: 'WattbikePM250733112',
+          updatedAt: presenceNow,
+          expiresAt: presenceNow,
+        },
+      },
+    })?.device).not.toHaveProperty('connectedBike');
+
     expect(normalizeClubTabletRoster({
       device: deviceCredential.device,
       athletes: [
@@ -206,6 +245,32 @@ describe('Club Tablet client state', () => {
         }),
       }),
     ]);
+  });
+
+  it('publishes and clears connected-bike presence with only the enrolled tablet credential', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await publishClubTabletBikePresence({
+      deviceId: 733_112,
+      label: '  WattbikePM250733112  ',
+    }, deviceCredential);
+    await clearClubTabletBikePresence(deviceCredential, { keepalive: true });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/club-tablet/bike-presence', expect.objectContaining({
+      method: 'PUT',
+      headers: expect.objectContaining({ Authorization: 'Bearer device-token' }),
+      body: JSON.stringify({ bikeDeviceId: 733_112, bikeLabel: 'WattbikePM250733112' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/club-tablet/bike-presence', expect.objectContaining({
+      method: 'DELETE',
+      keepalive: true,
+      headers: expect.objectContaining({ Authorization: 'Bearer device-token' }),
+    }));
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('clubId');
   });
 
   it('preserves durable result credentials while accepting old stored athlete sessions', () => {
@@ -243,18 +308,29 @@ describe('Club Tablet client state', () => {
     expect(readStoredClubTabletDevice()).toEqual(deviceCredential);
   });
 
-  it('releases the athlete only after every completed-exercise artifact is durable', async () => {
+  it('releases the athlete only after every completed-exercise artifact and the 15-second review hold', async () => {
     let finishHistory: (() => void) | null = null;
     let finishHeartRate: (() => void) | null = null;
+    let finishReview: (() => void) | null = null;
     const history = new Promise<void>((resolve) => { finishHistory = resolve; });
     const heartRate = new Promise<void>((resolve) => { finishHeartRate = resolve; });
+    const review = new Promise<void>((resolve) => { finishReview = resolve; });
+    const waitForReview = vi.fn(() => review);
     const release = vi.fn(async () => undefined);
 
-    const completion = releaseClubTabletAthleteAfterSaves([history, heartRate], release);
+    const completion = releaseClubTabletAthleteAfterSaves(
+      [history, heartRate],
+      release,
+      { waitForReview },
+    );
+    expect(waitForReview).toHaveBeenCalledWith(clubTabletResultReviewHoldMs);
     finishHistory?.();
     await Promise.resolve();
     expect(release).not.toHaveBeenCalled();
     finishHeartRate?.();
+    await Promise.resolve();
+    expect(release).not.toHaveBeenCalled();
+    finishReview?.();
     await completion;
     expect(release).toHaveBeenCalledOnce();
   });
@@ -265,6 +341,7 @@ describe('Club Tablet client state', () => {
     await expect(releaseClubTabletAthleteAfterSaves(
       [Promise.resolve(), Promise.reject(new Error('save failed'))],
       release,
+      { waitForReview: () => Promise.resolve() },
     )).rejects.toThrow('save failed');
     expect(release).not.toHaveBeenCalled();
   });
@@ -591,7 +668,7 @@ describe('Club Tablet client state', () => {
 
   it('retries a room race token until the latest start handler accepts it', () => {
     const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
-    const handlerAssignment = appSource.indexOf('roomRaceStartHandlerRef.current = handleStart;');
+    const handlerAssignment = appSource.indexOf("roomRaceStartHandlerRef.current = () => handleStart('room-clock');");
     const effectStart = appSource.indexOf("const roomFlow = multiplayer.currentRoom?.flow;", handlerAssignment);
     const effectEnd = appSource.indexOf("const nativeBluetoothFailed", effectStart);
     const effectSource = appSource.slice(effectStart, effectEnd);
@@ -604,5 +681,39 @@ describe('Club Tablet client state', () => {
     expect(effectSource.indexOf('started = await roomRaceStartHandlerRef.current();'))
       .toBeLessThan(effectSource.indexOf('lastRoomRaceTokenRef.current = raceToken;'));
     expect(effectSource).toContain('}, 250);');
+  });
+
+  it('lets only the synchronized room clock start an active coach-led race', () => {
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const startHandler = appSource.slice(
+      appSource.indexOf("const handleStart = async (source: 'manual' | 'room-clock' = 'manual')"),
+      appSource.indexOf('// The server-clock timer must call the newest render', appSource.indexOf('const handleStart = async')),
+    );
+    expect(startHandler).toContain("if (clubEventConfigurationLocked && source !== 'room-clock') return false;");
+    expect(appSource).toContain("roomRaceStartHandlerRef.current = () => handleStart('room-clock');");
+    expect(appSource).toContain('disabled={clubEventConfigurationLocked}');
+    expect(appSource).toContain('const lapControlsDisabled = clubEventConfigurationLocked');
+    expect(appSource).toContain('const canChooseStartHereSplitLine = !clubEventConfigurationLocked');
+  });
+
+  it('keeps a Club Event athlete selected while the completed result is under review', () => {
+    const appSource = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+    const reviewArmIndex = appSource.indexOf(
+      'clubTabletCompletionReviewSessionTokenRef.current = clubTabletSession.sessionToken;',
+    );
+    const reviewLayout = appSource.slice(
+      appSource.lastIndexOf('useLayoutEffect(() => {', reviewArmIndex),
+      appSource.indexOf('  ]);', reviewArmIndex),
+    );
+    expect(appSource).toContain('const clubTabletCompletionReviewSessionTokenRef = useRef<string | null>(null);');
+    expect(reviewLayout).toContain("raceState !== 'finished'");
+    expect(reviewLayout).toContain("raceCapture.source !== 'live'");
+    expect(reviewLayout).toContain('raceSummary.some');
+    expect(reviewLayout).not.toContain("raceCapture.status !== 'finished'");
+    expect(appSource).toContain('clubTabletCompletionReviewSessionTokenRef.current === activeSession.sessionToken');
+    expect(appSource).toContain('clubTabletCompletionReviewSessionTokenRef.current === completedSession.sessionToken');
+    expect(appSource).toContain('clubTabletCompletionReviewSessionTokenRef.current = completedSession.sessionToken;');
+    expect(appSource).not.toContain('clubTabletCompletionReviewActiveRef');
+    expect(appSource).toContain('onTabletExerciseReviewStart: handleClubTabletExerciseReviewStart,');
   });
 });

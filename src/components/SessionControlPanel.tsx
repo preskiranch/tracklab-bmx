@@ -149,6 +149,8 @@ type SessionControlPanelProps = {
   isAdminProfile: boolean;
   showCustomRoutes: boolean;
   sessionTrackAvailable: boolean;
+  /** Coach-authored event track, timing, and view cannot be changed by a kiosk rider. */
+  configurationLocked: boolean;
   raceState: RaceState;
   activeBikeCount: number;
   demoMode: boolean;
@@ -271,6 +273,7 @@ export function SessionControlPanel({
   isAdminProfile,
   showCustomRoutes,
   sessionTrackAvailable,
+  configurationLocked,
   raceState,
   activeBikeCount,
   demoMode,
@@ -365,12 +368,13 @@ export function SessionControlPanel({
   const mappingRestInvalid = mappingRestInvalidBlur || mappingRestSecondsFromInput(mappingRestInput) == null;
   const hasMappedRoute = track.routeStatus === 'user-mapped';
   const canStart = sessionTrackAvailable
+    && !configurationLocked
     && !startGateActive
     && raceState !== 'racing'
     && activeBikeCount > 0
     && hasMappedRoute
     && (!showCustomRoutes || straightSprintMappedFeet >= straightSprintDistanceFeet);
-  const canCancel = startGateActive || raceState === 'racing';
+  const canCancel = !configurationLocked && (startGateActive || raceState === 'racing');
   const canSaveMapping = draftPointCount >= 2 && !mappingRestInvalid;
   const activeMappingToolLabel = mappingEditMode === 'navigate'
     ? 'Move map'
@@ -418,9 +422,9 @@ export function SessionControlPanel({
     })
     : [];
   const splitBranchOneReady = Boolean(draftSplitBranchMetrics[0]?.ready);
-  const canChooseSplitLine = raceState !== 'racing' && !startGateActive;
+  const canChooseSplitLine = !configurationLocked && raceState !== 'racing' && !startGateActive;
   const hasRaceSplitChoices = players.length > 0 && (track.splitSections?.length ?? 0) > 0;
-  const canChooseRaceLayout = raceState !== 'racing' && !startGateActive;
+  const canChooseRaceLayout = !configurationLocked && raceState !== 'racing' && !startGateActive;
   const undoLabel = mappingEditMode === 'zones' ? 'Undo pedal pin' : mappingEditMode === 'split' ? 'Undo split' : 'Undo path';
   const redoLabel = mappingEditMode === 'zones' ? 'Redo pedal pin' : mappingEditMode === 'split' ? 'Redo split' : 'Redo path';
   const visibleTrackDistance = draftPointCount > 1 ? draftLengthMeters : hasMappedRoute ? track.lengthMeters : null;
@@ -539,22 +543,35 @@ export function SessionControlPanel({
           <Plus size={15} />
           Add Straight Sprint
         </button>
+          </section>
+      )}
 
-        {customRoutes.length > 0 && (
-          <div className="custom-route-list" aria-label="Saved custom locations">
+      {showCustomRoutes && (
+        <section className="panel-section sprint-venue-section" aria-label="Straight Sprint venue selection">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Straight Sprint</span>
+              <h3>Sprint venue</h3>
+            </div>
+            <Route size={18} />
+          </div>
+
+          <div className="custom-route-list" aria-label="Saved Straight Sprint venues">
             <div className="custom-route-list-header">
-              <span>Saved locations</span>
+              <span>Saved venues</span>
               <small>{customRoutes.length}</small>
             </div>
-            <label className="text-field compact custom-route-filter">
-              <span>Find</span>
-              <input
-                type="text"
-                value={customRouteFilter}
-                placeholder="Name or city"
-                onChange={(event) => setCustomRouteFilter(event.target.value)}
-              />
-            </label>
+            {customRoutes.length > 0 && (
+              <label className="text-field compact custom-route-filter">
+                <span>Find</span>
+                <input
+                  type="text"
+                  value={customRouteFilter}
+                  placeholder="Name or city"
+                  onChange={(event) => setCustomRouteFilter(event.target.value)}
+                />
+              </label>
+            )}
 
             {filteredCustomRoutes.map((customRoute) => {
               const isSelected = customRoute.id === selectedTrackId;
@@ -568,11 +585,12 @@ export function SessionControlPanel({
                     type="button"
                     onClick={() => onCustomRouteSelect(customRoute.id)}
                     aria-pressed={isSelected}
+                    disabled={configurationLocked || startGateActive || raceState === 'racing'}
                   >
                     <strong>{customRoute.name}</strong>
                     <span>{routeLocation}</span>
                   </button>
-                  {isPendingDelete ? (
+                  {isAdminProfile && (isPendingDelete ? (
                     <div className="custom-route-confirm" aria-label={`Confirm delete ${customRoute.name}`}>
                       <button type="button" onClick={() => setPendingCustomRouteDeleteId(null)}>
                         Keep
@@ -598,14 +616,18 @@ export function SessionControlPanel({
                     >
                       <Trash2 size={15} />
                     </button>
-                  )}
+                  ))}
                 </div>
               );
             })}
-            {filteredCustomRoutes.length === 0 && <span className="empty-inline">No saved locations match</span>}
+            {customRoutes.length === 0
+              ? <span className="empty-inline">No saved Straight Sprint venues are available yet.</span>
+              : filteredCustomRoutes.length === 0 && <span className="empty-inline">No saved venues match.</span>}
           </div>
-        )}
-          </section>
+          <p className="panel-helper">
+            Choose the venue on this club tablet, then select the sprint distance and Wattbike Air setting.
+          </p>
+        </section>
       )}
 
       {showCustomRoutes && sessionTrackAvailable && (
@@ -622,7 +644,7 @@ export function SessionControlPanel({
             <span>Sprint distance</span>
             <select
               value={straightSprintDistanceFeet}
-              disabled={startGateActive || raceState === 'racing'}
+              disabled={configurationLocked || startGateActive || raceState === 'racing'}
               onChange={(event) => onStraightSprintDistanceChange(Number(event.target.value))}
             >
               {straightSprintDistanceOptions.map((feet) => (
@@ -640,7 +662,7 @@ export function SessionControlPanel({
                   className={straightSprintAirSetting === setting ? 'selected' : ''}
                   type="button"
                   aria-pressed={straightSprintAirSetting === setting}
-                  disabled={startGateActive || raceState === 'racing'}
+                  disabled={configurationLocked || startGateActive || raceState === 'racing'}
                   onClick={() => onStraightSprintAirSettingChange(setting)}
                 >
                   {setting}
@@ -659,7 +681,7 @@ export function SessionControlPanel({
                 <button
                   className={straightSprintViewMode === 'satellite' ? 'selected' : ''}
                   type="button"
-                  disabled={startGateActive || raceState === 'racing'}
+                  disabled={configurationLocked || startGateActive || raceState === 'racing'}
                   aria-pressed={straightSprintViewMode === 'satellite'}
                   onClick={() => onStraightSprintViewModeChange('satellite')}
                 >
@@ -669,7 +691,7 @@ export function SessionControlPanel({
                 <button
                   className={straightSprintViewMode === '3d' ? 'selected' : ''}
                   type="button"
-                  disabled={startGateActive || raceState === 'racing'}
+                  disabled={configurationLocked || startGateActive || raceState === 'racing'}
                   aria-pressed={straightSprintViewMode === '3d'}
                   onClick={() => onStraightSprintViewModeChange('3d')}
                 >
@@ -679,7 +701,7 @@ export function SessionControlPanel({
                 <button
                   className={straightSprintViewMode === 'game' ? 'selected' : ''}
                   type="button"
-                  disabled={startGateActive || raceState === 'racing'}
+                  disabled={configurationLocked || startGateActive || raceState === 'racing'}
                   aria-pressed={straightSprintViewMode === 'game'}
                   onClick={() => onStraightSprintViewModeChange('game')}
                 >
@@ -1440,7 +1462,7 @@ export function SessionControlPanel({
               Cancel
             </button>
           )}
-          <button className="action-button secondary" type="button" onClick={onReset}>
+          <button className="action-button secondary" type="button" onClick={onReset} disabled={configurationLocked}>
             <RotateCcw size={18} />
             Reset
           </button>
@@ -1544,7 +1566,7 @@ export function SessionControlPanel({
               aria-label="Decrease lap count"
               title="Decrease lap count"
               onClick={() => onLapCountChange(Math.max(1, lapCount - 1))}
-              disabled={lapCount <= 1 || startGateActive || raceState === 'racing'}
+              disabled={configurationLocked || lapCount <= 1 || startGateActive || raceState === 'racing'}
             >
               <Minus size={17} />
             </button>
@@ -1556,7 +1578,7 @@ export function SessionControlPanel({
                 max="20"
                 value={lapCount}
                 onChange={(event) => onLapCountChange(Math.max(1, Math.min(20, Math.round(Number(event.target.value) || 1))))}
-                disabled={startGateActive || raceState === 'racing'}
+                disabled={configurationLocked || startGateActive || raceState === 'racing'}
               />
             </label>
             <button
@@ -1564,7 +1586,7 @@ export function SessionControlPanel({
               aria-label="Increase lap count"
               title="Increase lap count"
               onClick={() => onLapCountChange(Math.min(20, lapCount + 1))}
-              disabled={lapCount >= 20 || startGateActive || raceState === 'racing'}
+              disabled={configurationLocked || lapCount >= 20 || startGateActive || raceState === 'racing'}
             >
               <Plus size={17} />
             </button>

@@ -301,6 +301,10 @@ export async function enrollWatchConnect(input: WatchConnectEnrollmentInput) {
     !enrollment
     || enrollment.scope !== input.scope
     || (input.scope === 'studio' && enrollment.clubId !== clubId)
+    || (input.scope === 'studio' && (
+      enrollment.liveStudioConsent !== (input.liveStudioConsent === true)
+      || enrollment.sessionStudioConsent !== (input.sessionStudioConsent === true)
+    ))
   ) throw new Error('Watch Connect setup returned an invalid response.');
   return { enrollment, replayed: payload.replayed === true };
 }

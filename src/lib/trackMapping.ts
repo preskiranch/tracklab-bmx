@@ -81,6 +81,20 @@ export function newestTrackMapping(
   return mappingSavedAtMs(candidate) > mappingSavedAtMs(preferred) ? candidate : preferred;
 }
 
+/**
+ * Club Event snapshots may include an unpublished browser draft only while the
+ * developer mapping UI is active. Shared tablets and regular club owners must
+ * use the published mapping so another profile's localStorage cannot replace
+ * the course that every rider receives.
+ */
+export function clubEventTrackMapping(
+  local: UserTrackMapping | null | undefined,
+  published: UserTrackMapping | null | undefined,
+  developerUiActive: boolean,
+) {
+  return newestTrackMapping(developerUiActive ? local : undefined, published);
+}
+
 export function mergeTrackMappingsBySavedAt(
   current: StoredTrackMappings,
   incoming: StoredTrackMappings,

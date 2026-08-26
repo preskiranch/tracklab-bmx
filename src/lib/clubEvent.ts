@@ -11,6 +11,20 @@ export type ClubEventActivityType = 'bmx-race' | 'straight-sprint' | 'explore';
 export type ClubEventProgram = 'race' | 'straight-sprint' | 'explore';
 export type ClubEventStatus = 'lobby' | 'active';
 export type ClubEventSlotStatus = 'available' | 'ready' | 'active' | 'stale';
+export type ClubEventRaceViewMode = 'satellite' | '3d' | 'game';
+
+export type ClubEventRaceViewCamera = Readonly<{
+  angle: number;
+  heading: number;
+  center?: Readonly<{ lat: number; lng: number }>;
+  zoom?: number;
+}>;
+
+/** Immutable display snapshot selected by the owner when the lobby opens. */
+export type ClubEventRaceView = Readonly<{
+  mode: ClubEventRaceViewMode;
+  camera?: ClubEventRaceViewCamera;
+}>;
 
 export type ClubEventAthlete = Readonly<{
   studioRiderId: string;
@@ -31,7 +45,10 @@ export type ClubEventSlot = Readonly<{
   joinedAt: number | null;
 }>;
 
-export type ClubEventConfiguration = Readonly<Record<string, unknown>>;
+export type ClubEventConfiguration = Readonly<{
+  [key: string]: unknown;
+  raceView?: ClubEventRaceView;
+}>;
 
 export type ClubEventSnapshot = Readonly<{
   id: string;
@@ -121,9 +138,80 @@ function normalizeJsonValue(value: unknown, depth = 0): unknown {
     .map(([key, nested]) => [key.slice(0, 120), normalizeJsonValue(nested, depth + 1)]));
 }
 
+export function normalizeClubEventRaceView(value: unknown): ClubEventRaceView | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const mode = candidate.mode === 'satellite'
+    || candidate.mode === '3d'
+    || candidate.mode === 'game'
+    ? candidate.mode
+    : null;
+  if (!mode) return null;
+  if (!Object.prototype.hasOwnProperty.call(candidate, 'camera')) return { mode };
+  if (!candidate.camera || typeof candidate.camera !== 'object' || Array.isArray(candidate.camera)) return null;
+
+  const camera = candidate.camera as Record<string, unknown>;
+  const angle = camera.angle;
+  const heading = camera.heading;
+  if (
+    typeof angle !== 'number'
+    || !Number.isFinite(angle)
+    || angle < 0
+    || angle > 67
+    || typeof heading !== 'number'
+    || !Number.isFinite(heading)
+    || heading < 0
+    || heading >= 360
+  ) return null;
+
+  let center: ClubEventRaceViewCamera['center'];
+  if (Object.prototype.hasOwnProperty.call(camera, 'center')) {
+    if (!camera.center || typeof camera.center !== 'object' || Array.isArray(camera.center)) return null;
+    const point = camera.center as Record<string, unknown>;
+    if (
+      typeof point.lat !== 'number'
+      || !Number.isFinite(point.lat)
+      || point.lat < -90
+      || point.lat > 90
+      || typeof point.lng !== 'number'
+      || !Number.isFinite(point.lng)
+      || point.lng < -180
+      || point.lng > 180
+    ) return null;
+    center = { lat: point.lat, lng: point.lng };
+  }
+
+  let zoom: number | undefined;
+  if (Object.prototype.hasOwnProperty.call(camera, 'zoom')) {
+    if (
+      typeof camera.zoom !== 'number'
+      || !Number.isFinite(camera.zoom)
+      || camera.zoom < 0
+      || camera.zoom > 30
+    ) return null;
+    zoom = camera.zoom;
+  }
+
+  return {
+    mode,
+    camera: {
+      angle,
+      heading,
+      ...(center ? { center } : {}),
+      ...(zoom != null ? { zoom } : {}),
+    },
+  };
+}
+
 function normalizeConfiguration(value: unknown): ClubEventConfiguration {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  return normalizeJsonValue(value) as ClubEventConfiguration;
+  const normalized = normalizeJsonValue(value) as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(value, 'raceView')) {
+    const raceView = normalizeClubEventRaceView((value as Record<string, unknown>).raceView);
+    if (raceView) normalized.raceView = raceView;
+    else delete normalized.raceView;
+  }
+  return normalized as ClubEventConfiguration;
 }
 
 function normalizeAthlete(value: unknown): ClubEventAthlete | null {

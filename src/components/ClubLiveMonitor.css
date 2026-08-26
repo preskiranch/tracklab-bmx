@@ -99,6 +99,18 @@
   text-align: right;
 }
 
+.club-live-bike-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 8px;
+  color: #367c1e;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.club-live-bike-count.error { color: #a9362a; }
+
 .club-live-tablet-slots {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -148,6 +160,11 @@
 .club-live-tablet-slot small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .club-live-tablet-slot strong { color: #263323; font-size: 13px; }
 .club-live-tablet-slot small { margin-top: 2px; color: #687364; font-size: 11px; }
+
+.club-live-tablet-slot .club-live-tablet-bike {
+  color: #367c1e;
+  font-weight: 900;
+}
 
 .club-live-tablet-presence {
   display: inline-flex;

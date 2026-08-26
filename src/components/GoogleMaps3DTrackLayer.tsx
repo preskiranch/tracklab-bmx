@@ -150,6 +150,32 @@ function rangeToZoom(baseRange: number, range: number | undefined, fallback: num
   return 19 - Math.log2(range / baseRange);
 }
 
+export type Deferred3DMapView = Readonly<{
+  trackId: string;
+  trackCenter: TrackPoint;
+  baseRange: number;
+  angle: number;
+  heading: number;
+  center: TrackPoint | null;
+  zoom: number | null;
+}>;
+
+/** Resolve the newest camera only when the asynchronous 3D map is ready. */
+export function resolveDeferred3DMapView(
+  viewRef: Readonly<{ current: Deferred3DMapView }>,
+) {
+  const latest = viewRef.current;
+  return {
+    trackId: latest.trackId,
+    center: latest.center ?? latest.trackCenter,
+    angle: latest.angle,
+    heading: latest.heading,
+    range: zoomToRange(latest.baseRange, latest.zoom),
+    baseRange: latest.baseRange,
+    zoom: latest.zoom,
+  };
+}
+
 function applyTerrainRelativeCamera(
   map: GoogleMap3DElement,
   center: TrackPoint,
@@ -640,6 +666,24 @@ export function GoogleMaps3DTrackLayer({
     () => previewRangeMeters(boundsPoints.length > 0 ? boundsPoints : savedRoute, center),
     [boundsPoints, center, savedRoute],
   );
+  const latestMapViewRef = useRef<Deferred3DMapView>({
+    trackId: track.id,
+    trackCenter: center,
+    baseRange,
+    angle: earthAngle,
+    heading: earthHeading,
+    center: earthCenter,
+    zoom: earthZoom,
+  });
+  latestMapViewRef.current = {
+    trackId: track.id,
+    trackCenter: center,
+    baseRange,
+    angle: earthAngle,
+    heading: earthHeading,
+    center: earthCenter,
+    zoom: earthZoom,
+  };
   const draftRoute = useMemo(
     () => routeWithDefaultSplitBranches(draftPoints, draftRouteSplitSections),
     [draftPoints, draftRouteSplitSections],
@@ -703,14 +747,13 @@ export function GoogleMaps3DTrackLayer({
           return;
         }
         libraryRef.current = library;
-        const initialCenter = earthCenter ?? center;
-        const initialRange = zoomToRange(baseRange, earthZoom);
+        const readyView = resolveDeferred3DMapView(latestMapViewRef);
         const map = new library.Map3DElement({
-          center: { ...initialCenter, altitude: 0 },
-          heading: earthHeading,
+          center: { ...readyView.center, altitude: 0 },
+          heading: readyView.heading,
           mode: 'SATELLITE',
-          range: initialRange,
-          tilt: earthAngle,
+          range: readyView.range,
+          tilt: readyView.angle,
         });
         map.style.width = '100%';
         map.style.height = '100%';
@@ -719,12 +762,13 @@ export function GoogleMaps3DTrackLayer({
         const saveCamera = () => {
           window.clearTimeout(cameraTimerRef.current);
           cameraTimerRef.current = window.setTimeout(() => {
+            const currentView = resolveDeferred3DMapView(latestMapViewRef);
             const nextCenter = map.center;
             cameraChangeRef.current?.({
-              angle: Math.round(map.tilt ?? earthAngle),
-              center: nextCenter ? { lat: nextCenter.lat, lng: nextCenter.lng } : center,
-              heading: Math.round(map.heading ?? earthHeading),
-              zoom: rangeToZoom(baseRangeRef.current, map.range, earthZoom),
+              angle: Math.round(map.tilt ?? currentView.angle),
+              center: nextCenter ? { lat: nextCenter.lat, lng: nextCenter.lng } : currentView.center,
+              heading: Math.round(map.heading ?? currentView.heading),
+              zoom: rangeToZoom(currentView.baseRange, map.range, currentView.zoom),
             });
           }, 180);
         };
@@ -773,10 +817,10 @@ export function GoogleMaps3DTrackLayer({
         mapRef.current = map;
         applyTerrainRelativeCamera(
           map,
-          initialCenter,
-          earthHeading,
-          earthAngle,
-          initialRange,
+          readyView.center,
+          readyView.heading,
+          readyView.angle,
+          readyView.range,
         );
         readinessTimer = window.setTimeout(() => {
           if (!cancelled && !sceneFailed && mountedMap === map) {
@@ -819,12 +863,13 @@ export function GoogleMaps3DTrackLayer({
     if (!map) {
       return;
     }
+    const latestView = resolveDeferred3DMapView(latestMapViewRef);
     applyTerrainRelativeCamera(
       map,
-      earthCenter ?? center,
-      earthHeading,
-      earthAngle,
-      zoomToRange(baseRange, earthZoom),
+      latestView.center,
+      latestView.heading,
+      latestView.angle,
+      latestView.range,
     );
   }, [baseRange, center, earthAngle, earthCenter, earthHeading, earthZoom]);
 

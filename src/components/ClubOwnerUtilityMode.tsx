@@ -85,6 +85,7 @@ type OwnerContext = Readonly<{
   completionRef: ValueRef<GetPulledResult | ExploreRideCompleteEvent | null>;
   cancelActiveGroup: (options?: { keepalive?: boolean; preserveStatus?: boolean }) => Promise<void>;
   onHistoryChanged: () => void;
+  onTabletExerciseReviewStart: (session: ClubTabletSessionCredential) => void;
   onTabletExerciseSaved: (session: ClubTabletSessionCredential) => Promise<void> | void;
 }>;
 
@@ -264,6 +265,7 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
     });
     const historySave = saveLegacyGetPulledHistory(result, owner.clubTrainingSelection);
     if (completedTabletSession) {
+      owner.onTabletExerciseReviewStart(completedTabletSession);
       void releaseClubTabletAthleteAfterSaves([heartRateSave, historySave], async () => {
         owner.onHistoryChanged();
         await owner.onTabletExerciseSaved(completedTabletSession);
@@ -407,6 +409,7 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
       localPlayerId: tabletRider?.playerId ?? null,
     });
     if (completedTabletSession) {
+      owner.onTabletExerciseReviewStart(completedTabletSession);
       void releaseClubTabletAthleteAfterSaves([heartRateSave, historySave], async () => {
         owner.onHistoryChanged();
         await owner.onTabletExerciseSaved(completedTabletSession);

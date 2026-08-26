@@ -2306,6 +2306,71 @@ describe('cloud API trust boundaries', () => {
     const athleteHeaders = (sessionToken: string): HeadersInit => ({
       'X-TrackLab-Club-Tablet-Session': sessionToken,
     });
+
+    expect((await api('/api/club-tablet/bike-presence', {
+      method: 'PUT',
+      body: JSON.stringify({ bikeDeviceId: 43_950, bikeLabel: 'WattbikePM25043950' }),
+    })).status).toBe(401);
+    cookie = '';
+    const publishedBikePresence = await api('/api/club-tablet/bike-presence', {
+      method: 'PUT',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({
+        deviceId: secondDevice.device.id,
+        clubId: 'forged-club',
+        bikeDeviceId: 43_950,
+        bikeLabel: 'WattbikePM25043950',
+      }),
+    });
+    expect(publishedBikePresence.status).toBe(200);
+    await expect(publishedBikePresence.json()).resolves.toMatchObject({
+      connectedBike: {
+        deviceId: 43_950,
+        label: 'WattbikePM25043950',
+        updatedAt: expect.any(Number),
+        expiresAt: expect.any(Number),
+      },
+      heartbeatTtlMs: 12_000,
+    });
+    cookie = monitorCookie;
+    const devicesWithPresence = await api('/api/club-tablet/devices');
+    const firstDeviceWithPresence = (await devicesWithPresence.json()).devices.find(
+      (device: { id: string }) => device.id === firstDevice.device.id,
+    );
+    expect(firstDeviceWithPresence).toMatchObject({
+      id: firstDevice.device.id,
+      connectedBike: {
+        deviceId: 43_950,
+        label: 'WattbikePM25043950',
+      },
+    });
+    expect(firstDeviceWithPresence).not.toHaveProperty('deviceToken');
+    expect(firstDeviceWithPresence.connectedBike).not.toHaveProperty('clubId');
+
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    const devicesAfterConfiguredLiveTtl = await api('/api/club-tablet/devices');
+    const presenceProtectedByHeartbeatFloor = (await devicesAfterConfiguredLiveTtl.json()).devices.find(
+      (device: { id: string }) => device.id === firstDevice.device.id,
+    );
+    expect(presenceProtectedByHeartbeatFloor).toHaveProperty('connectedBike');
+
+    cookie = '';
+    expect((await api('/api/club-tablet/bike-presence', {
+      method: 'PUT',
+      headers: deviceHeaders(firstDevice.deviceToken),
+      body: JSON.stringify({ bikeDeviceId: 43_950, bikeLabel: 'WattbikePM25043950' }),
+    })).status).toBe(200);
+    expect((await api('/api/club-tablet/bike-presence', {
+      method: 'DELETE',
+      headers: deviceHeaders(firstDevice.deviceToken),
+    })).status).toBe(200);
+    cookie = monitorCookie;
+    const devicesAfterPresenceClear = await api('/api/club-tablet/devices');
+    const clearedPresenceDevice = (await devicesAfterPresenceClear.json()).devices.find(
+      (device: { id: string }) => device.id === firstDevice.device.id,
+    );
+    expect(clearedPresenceDevice).not.toHaveProperty('connectedBike');
+
     const roster = await api('/api/club-tablet/roster', {
       headers: deviceHeaders(firstDevice.deviceToken),
     });
@@ -2382,6 +2447,58 @@ describe('cloud API trust boundaries', () => {
         lng: -122,
       })),
     };
+    const invalidRaceView = await api('/api/club-events', {
+      method: 'POST',
+      body: JSON.stringify({
+        activityType: 'straight-sprint',
+        configuration: {
+          trackId: privateDragStrip.id,
+          trackName: privateDragStrip.name,
+          distanceFeet: 300,
+          airSetting: 1,
+          trackRecord: privateDragStrip,
+          raceView: { mode: '3d', camera: { angle: 68, heading: 90 } },
+        },
+      }),
+    });
+    expect(invalidRaceView.status).toBe(400);
+
+    const nonDragstripTrack = { ...privateDragStrip, name: 'Private Sprint' };
+    const invalidGameArena = await api('/api/club-events', {
+      method: 'POST',
+      body: JSON.stringify({
+        activityType: 'straight-sprint',
+        configuration: {
+          trackId: nonDragstripTrack.id,
+          trackName: nonDragstripTrack.name,
+          distanceFeet: 300,
+          airSetting: 1,
+          trackRecord: nonDragstripTrack,
+          raceView: { mode: 'game' },
+        },
+      }),
+    });
+    expect(invalidGameArena.status).toBe(400);
+
+    const gameArenaCreated = await api('/api/club-events', {
+      method: 'POST',
+      body: JSON.stringify({
+        activityType: 'straight-sprint',
+        configuration: {
+          trackId: privateDragStrip.id,
+          trackName: privateDragStrip.name,
+          distanceFeet: 300,
+          airSetting: 1,
+          trackRecord: privateDragStrip,
+          raceView: { mode: 'game' },
+        },
+      }),
+    });
+    expect(gameArenaCreated.status).toBe(201);
+    await expect(gameArenaCreated.json()).resolves.toMatchObject({
+      event: { configuration: { raceView: { mode: 'game' } } },
+    });
+
     const eventCreated = await api('/api/club-events', {
       method: 'POST',
       body: JSON.stringify({
@@ -2392,6 +2509,17 @@ describe('cloud API trust boundaries', () => {
           distanceFeet: 300,
           airSetting: 1,
           trackRecord: privateDragStrip,
+          raceView: {
+            mode: '3d',
+            camera: {
+              angle: 47,
+              heading: 90,
+              center: { lat: 38.0004, lng: -122, altitude: 500 },
+              zoom: 18.5,
+              updatedAt: 99_999,
+            },
+            accountKey: 'must not survive',
+          },
           constructor: 'must not survive',
         },
       }),
@@ -2402,7 +2530,19 @@ describe('cloud API trust boundaries', () => {
       pollAfterMs: 2_000,
       event: {
         activityType: 'straight-sprint',
-        configuration: { distanceFeet: 300, airSetting: 1 },
+        configuration: {
+          distanceFeet: 300,
+          airSetting: 1,
+          raceView: {
+            mode: '3d',
+            camera: {
+              angle: 47,
+              heading: 90,
+              center: { lat: 38.0004, lng: -122 },
+              zoom: 18.5,
+            },
+          },
+        },
         status: 'lobby',
         startAt: null,
         slots: expect.arrayContaining([
@@ -2412,6 +2552,9 @@ describe('cloud API trust boundaries', () => {
       },
     });
     expect(eventCreatedPayload.event.configuration.trackRecord.centerline).toHaveLength(80);
+    expect(eventCreatedPayload.event.configuration.raceView).not.toHaveProperty('accountKey');
+    expect(eventCreatedPayload.event.configuration.raceView.camera).not.toHaveProperty('updatedAt');
+    expect(eventCreatedPayload.event.configuration.raceView.camera.center).not.toHaveProperty('altitude');
     const eventId = eventCreatedPayload.event.id;
     expect(JSON.stringify(eventCreatedPayload)).not.toMatch(/token|ProfileKey|constructor/i);
     const createdSlotDeviceIds = new Set(eventCreatedPayload.event.slots.map(
@@ -2445,7 +2588,14 @@ describe('cloud API trust boundaries', () => {
       }),
     ]);
     expect(joinedResponses.map((response) => response.status)).toEqual([200, 200]);
-    const joinedPayload = await joinedResponses[1].json();
+    // Either concurrent request may acquire the per-club event lock first, so
+    // an individual 200 response can legitimately contain only that first
+    // participant. Verify the authoritative snapshot after both commits.
+    const joinedSnapshot = await api('/api/club-events/current', {
+      headers: athleteHeaders(secondSelectedPayload.sessionToken),
+    });
+    expect(joinedSnapshot.status).toBe(200);
+    const joinedPayload = await joinedSnapshot.json();
     expect(joinedPayload.event.slots).toEqual(expect.arrayContaining([
       expect.objectContaining({
         deviceId: firstDevice.device.id,
@@ -2922,6 +3072,13 @@ describe('cloud API trust boundaries', () => {
     });
     expect(revokeRaceEvent.status).toBe(201);
     const revokeRaceEventId = (await revokeRaceEvent.json()).event.id;
+    cookie = '';
+    expect((await api('/api/club-tablet/bike-presence', {
+      method: 'PUT',
+      headers: deviceHeaders(secondDevice.deviceToken),
+      body: JSON.stringify({ bikeDeviceId: 43_951, bikeLabel: 'WattbikePM25043951' }),
+    })).status).toBe(200);
+    cookie = monitorCookie;
     const [concurrentRejoin, revokeSecond] = await Promise.all([
       api('/api/club-events/current/join', {
         method: 'POST',
@@ -2935,6 +3092,13 @@ describe('cloud API trust boundaries', () => {
     ]);
     expect([200, 401]).toContain(concurrentRejoin.status);
     expect(revokeSecond.status).toBe(200);
+    cookie = '';
+    expect((await api('/api/club-tablet/bike-presence', {
+      method: 'PUT',
+      headers: deviceHeaders(secondDevice.deviceToken),
+      body: JSON.stringify({ bikeDeviceId: 43_951, bikeLabel: 'WattbikePM25043951' }),
+    })).status).toBe(401);
+    cookie = monitorCookie;
     const afterConcurrentRevoke = await api('/api/club-events/current');
     expect((await afterConcurrentRevoke.json()).event.slots.some(
       (slot: { deviceId: string }) => slot.deviceId === secondDevice.device.id,
@@ -2987,9 +3151,12 @@ describe('cloud API trust boundaries', () => {
     });
     expect(explicitAthleteHeartbeat.status).toBe(200);
     const explicitAthleteHeartbeatPayload = await explicitAthleteHeartbeat.json();
-    expect(explicitAthleteHeartbeatPayload.session.expiresAt).toBeGreaterThan(
+    // Ending the Club Event caps both expiry fields, so later live publishing
+    // and explicit heartbeats cannot renew the athlete beyond the release grace.
+    expect(explicitAthleteHeartbeatPayload.session.expiresAt).toBe(
       livePublishPayload.athleteSessionExpiresAt,
     );
+    expect(explicitAthleteHeartbeatPayload.session.expiresAt).toBeLessThanOrEqual(Date.now() + 30_000);
     cookie = monitorCookie;
     const monitored = await api('/api/club-live/sessions');
     await expect(monitored.json()).resolves.toMatchObject({

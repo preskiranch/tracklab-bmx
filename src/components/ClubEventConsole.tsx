@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bike,
+  Box,
   CheckCircle2,
   Compass,
+  Gamepad2,
   LoaderCircle,
   Play,
   RadioTower,
   Route,
+  Satellite,
   Tablet,
   Users,
   X,
@@ -19,9 +22,13 @@ import {
   loadCurrentClubEventForOwner,
   startCurrentClubEvent,
   type ClubEventActivityType,
+  type ClubEventRaceView,
+  type ClubEventRaceViewCamera,
+  type ClubEventRaceViewMode,
   type ClubEventSnapshot,
 } from '../lib/clubEvent';
 import { prepareClubEventExploreConfiguration } from '../lib/clubEventExplore';
+import { supportsDragStripGameArena } from '../lib/dragStripGameArena';
 import { fetchExploreRoute } from '../lib/exploreRoutes';
 import { resolveLocationText } from '../lib/googleMaps';
 import { straightSprintDistanceOptions } from '../lib/straightSprint';
@@ -32,11 +39,16 @@ export type ClubEventCourseOption = Readonly<{
   id: string;
   name: string;
   track: TrackRecord;
+  /** Saved owner view for this course. App supplies the current mapped mode and base camera. */
+  raceView?: ClubEventRaceView;
+  /** Straight Sprint cameras are saved separately for each selected distance. */
+  sprintRaceViewCamerasByDistance?: Readonly<Partial<Record<number, ClubEventRaceViewCamera>>>;
 }>;
 
 type ClubEventConsoleProps = Readonly<{
   raceTracks: readonly ClubEventCourseOption[];
   sprintRoutes: readonly ClubEventCourseOption[];
+  raceViewsReady?: boolean;
 }>;
 
 function displayAthlete(event: ClubEventSnapshot, deviceId: string | null) {
@@ -44,25 +56,60 @@ function displayAthlete(event: ClubEventSnapshot, deviceId: string | null) {
   return slot?.athlete?.athleteName || slot?.athlete?.riderName || null;
 }
 
+export function clubEventRaceViewForCourse(
+  course: ClubEventCourseOption,
+  mode: ClubEventRaceViewMode,
+  sprintDistanceFeet?: number,
+): ClubEventRaceView {
+  const safeMode = mode === 'game' && !supportsDragStripGameArena(course.track)
+    ? 'satellite'
+    : mode;
+  if (safeMode === 'game') return { mode: safeMode };
+  const distanceCamera = sprintDistanceFeet == null
+    ? undefined
+    : course.sprintRaceViewCamerasByDistance?.[sprintDistanceFeet];
+  const camera = distanceCamera ?? course.raceView?.camera;
+  return { mode: safeMode, ...(camera ? { camera } : {}) };
+}
+
+export function clubEventLobbyNeedsRaceViews(
+  activityType: ClubEventActivityType,
+  raceViewsReady: boolean,
+) {
+  return activityType !== 'explore' && !raceViewsReady;
+}
+
+function raceViewLabel(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const mode = (value as { mode?: unknown }).mode;
+  return mode === 'game' ? 'Game Arena' : mode === '3d' ? '3D Terrain' : mode === 'satellite' ? 'Satellite' : '';
+}
+
 function eventConfigurationSummary(event: ClubEventSnapshot) {
   const configuration = event.configuration;
   if (event.activityType === 'bmx-race') {
     const track = typeof configuration.trackName === 'string' ? configuration.trackName : 'Selected BMX track';
     const laps = Math.max(1, Math.round(Number(configuration.lapCount ?? configuration.laps) || 1));
-    return `${track} · ${laps} lap${laps === 1 ? '' : 's'}`;
+    const view = raceViewLabel(configuration.raceView);
+    return `${track} · ${laps} lap${laps === 1 ? '' : 's'}${view ? ` · ${view}` : ''}`;
   }
   if (event.activityType === 'straight-sprint') {
     const distance = Math.max(30, Math.round(Number(configuration.distanceFeet) || 100));
     const air = Math.max(1, Math.min(10, Math.round(Number(configuration.airSetting) || 1)));
     const route = typeof configuration.trackName === 'string' ? ` · ${configuration.trackName}` : '';
-    return `${distance} ft · Wattbike Air ${air}${route}`;
+    const view = raceViewLabel(configuration.raceView);
+    return `${distance} ft · Wattbike Air ${air}${route}${view ? ` · ${view}` : ''}`;
   }
   const origin = typeof configuration.origin === 'string' ? configuration.origin : '';
   const destination = typeof configuration.destination === 'string' ? configuration.destination : '';
   return origin && destination ? `${origin} → ${destination}` : 'Shared Explore ride';
 }
 
-export function ClubEventConsole({ raceTracks, sprintRoutes }: ClubEventConsoleProps) {
+export function ClubEventConsole({
+  raceTracks,
+  sprintRoutes,
+  raceViewsReady = true,
+}: ClubEventConsoleProps) {
   const requestGenerationRef = useRef(0);
   const [mode, setMode] = useState<'independent' | 'coach'>('independent');
   const [event, setEvent] = useState<ClubEventSnapshot | null>(null);
@@ -72,6 +119,7 @@ export function ClubEventConsole({ raceTracks, sprintRoutes }: ClubEventConsoleP
   const [sprintRouteId, setSprintRouteId] = useState(sprintRoutes[0]?.id ?? '');
   const [sprintDistanceFeet, setSprintDistanceFeet] = useState(100);
   const [airSetting, setAirSetting] = useState(1);
+  const [raceViewMode, setRaceViewMode] = useState<ClubEventRaceViewMode>('satellite');
   const [exploreOrigin, setExploreOrigin] = useState('Preski Ranch');
   const [exploreDestination, setExploreDestination] = useState('');
   const [exploreName, setExploreName] = useState('Club Explore ride');
@@ -142,9 +190,30 @@ export function ClubEventConsole({ raceTracks, sprintRoutes }: ClubEventConsoleP
     () => sprintRoutes.find((route) => route.id === sprintRouteId) ?? null,
     [sprintRouteId, sprintRoutes],
   );
+  const selectedCourse = activityType === 'bmx-race' ? selectedRaceTrack : selectedSprintRoute;
+  const gameArenaAvailable = activityType === 'straight-sprint'
+    && Boolean(selectedSprintRoute && supportsDragStripGameArena(selectedSprintRoute.track));
+
+  useEffect(() => {
+    if (activityType === 'explore') return;
+    const savedMode = selectedCourse?.raceView?.mode;
+    setRaceViewMode(savedMode === '3d'
+      ? '3d'
+      : savedMode === 'game' && gameArenaAvailable ? 'game' : 'satellite');
+  }, [
+    activityType,
+    gameArenaAvailable,
+    raceTrackId,
+    selectedCourse?.raceView?.mode,
+    sprintRouteId,
+  ]);
 
   const create = async () => {
     let configuration: Record<string, unknown> | null = null;
+    if (clubEventLobbyNeedsRaceViews(activityType, raceViewsReady)) {
+      setMessage('Loading saved track views. Wait a moment, then open the lobby.');
+      return;
+    }
     if (activityType === 'bmx-race') {
       if (!selectedRaceTrack) {
         setMessage('Choose a mapped BMX track before opening the lobby.');
@@ -155,6 +224,7 @@ export function ClubEventConsole({ raceTracks, sprintRoutes }: ClubEventConsoleP
         trackName: selectedRaceTrack.name,
         trackRecord: selectedRaceTrack.track,
         lapCount,
+        raceView: clubEventRaceViewForCourse(selectedRaceTrack, raceViewMode),
       };
     } else if (activityType === 'straight-sprint') {
       if (!selectedSprintRoute) {
@@ -167,6 +237,7 @@ export function ClubEventConsole({ raceTracks, sprintRoutes }: ClubEventConsoleP
         trackRecord: selectedSprintRoute.track,
         distanceFeet: sprintDistanceFeet,
         airSetting,
+        raceView: clubEventRaceViewForCourse(selectedSprintRoute, raceViewMode, sprintDistanceFeet),
       };
     } else {
       if (!exploreOrigin.trim() || !exploreDestination.trim()) {
@@ -222,7 +293,7 @@ export function ClubEventConsole({ raceTracks, sprintRoutes }: ClubEventConsoleP
       const envelope = await cancelCurrentClubEvent(event.id);
       setEvent(envelope.event);
       setMode('independent');
-      setMessage('Coach event ended. All tablets are back in Independent Training.');
+      setMessage('Coach event ended. Tablets will release each athlete after the results review and return to Independent Training shortly.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'The coach event could not be ended.');
     } finally {
@@ -312,15 +383,57 @@ export function ClubEventConsole({ raceTracks, sprintRoutes }: ClubEventConsoleP
             </label>
           </>}
 
+          {(activityType === 'bmx-race' || activityType === 'straight-sprint') && selectedCourse && (
+            <div className="club-event-race-view club-event-builder-wide">
+              <span>Tablet race view</span>
+              <div role="group" aria-label="Club Event race view">
+                <button
+                  className={raceViewMode === 'satellite' ? 'selected' : ''}
+                  type="button"
+                  aria-pressed={raceViewMode === 'satellite'}
+                  onClick={() => setRaceViewMode('satellite')}
+                >
+                  <Satellite size={15} /> Satellite
+                </button>
+                <button
+                  className={raceViewMode === '3d' ? 'selected' : ''}
+                  type="button"
+                  aria-pressed={raceViewMode === '3d'}
+                  onClick={() => setRaceViewMode('3d')}
+                >
+                  <Box size={15} /> 3D Terrain
+                </button>
+                {gameArenaAvailable && (
+                  <button
+                    className={raceViewMode === 'game' ? 'selected' : ''}
+                    type="button"
+                    aria-pressed={raceViewMode === 'game'}
+                    onClick={() => setRaceViewMode('game')}
+                  >
+                    <Gamepad2 size={15} /> Game Arena
+                  </button>
+                )}
+              </div>
+              <small>The selected view and saved camera will open identically on every ready tablet.</small>
+            </div>
+          )}
+
           {activityType === 'explore' && <>
             <label><span>Start</span><input value={exploreOrigin} onChange={(event) => setExploreOrigin(event.target.value)} placeholder="Preski Ranch" /></label>
             <label><span>Destination</span><input value={exploreDestination} onChange={(event) => setExploreDestination(event.target.value)} placeholder="Choose a shared destination" /></label>
             <label className="club-event-builder-wide"><span>Ride name</span><input value={exploreName} onChange={(event) => setExploreName(event.target.value)} /></label>
           </>}
 
-          <button className="club-event-primary" type="button" disabled={busy !== 'idle'} onClick={() => void create()}>
+          <button
+            className="club-event-primary"
+            type="button"
+            disabled={busy !== 'idle' || clubEventLobbyNeedsRaceViews(activityType, raceViewsReady)}
+            onClick={() => void create()}
+          >
             {busy === 'creating' ? <LoaderCircle className="spin" size={18} /> : <Users size={18} />}
-            Open four-tablet lobby
+            {clubEventLobbyNeedsRaceViews(activityType, raceViewsReady)
+              ? 'Loading saved track views…'
+              : 'Open four-tablet lobby'}
           </button>
         </div>
       )}

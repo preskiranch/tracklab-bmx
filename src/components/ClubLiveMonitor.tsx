@@ -23,6 +23,7 @@ import {
   type ClubLiveSession,
 } from '../lib/clubLive';
 import { loadClubTabletDevices, type ClubTabletDevice } from '../lib/clubTablet';
+import { wattbikeMonitorLastThree } from '../lib/bikeProfileIdentity';
 import { RiderAvatar } from './RiderAvatar';
 import { PullSledScene } from './PullSledScene';
 import { ClubEventConsole, type ClubEventCourseOption } from './ClubEventConsole';
@@ -41,6 +42,7 @@ type ClubLiveMonitorProps = {
   distanceUnit: DistanceUnit;
   raceTracks?: readonly ClubEventCourseOption[];
   sprintRoutes?: readonly ClubEventCourseOption[];
+  raceViewsReady?: boolean;
   fullscreen?: boolean;
   onFullscreenChange?: (enabled: boolean) => void;
 };
@@ -98,6 +100,23 @@ export function clubTabletMonitorOnline(
   );
 }
 
+export function clubTabletMonitorConnectedBike(
+  tablet: ClubTabletDevice | null | undefined,
+  deviceFeedAvailable = true,
+) {
+  if (!deviceFeedAvailable) return null;
+  // The owner endpoint has already checked expiry against the server clock.
+  // Rechecking with this PC's clock can hide a valid tablet when clocks differ.
+  return tablet?.connectedBike ?? null;
+}
+
+export function clubTabletDeviceFeedErrorMessage(error: unknown) {
+  const detail = error instanceof Error ? error.message.trim() : '';
+  return detail
+    ? `Connected-bike status is unavailable: ${detail}`
+    : 'Connected-bike status is unavailable. Refresh the monitor to try again.';
+}
+
 export function selectClubTabletOverviewDevices(
   tablets: readonly ClubTabletDevice[],
   sessions: readonly ClubLiveSession[],
@@ -137,6 +156,7 @@ export function ClubLiveMonitor({
   distanceUnit,
   raceTracks = [],
   sprintRoutes = [],
+  raceViewsReady = true,
   fullscreen = false,
   onFullscreenChange,
 }: ClubLiveMonitorProps) {
@@ -144,6 +164,7 @@ export function ClubLiveMonitor({
   const lastTabletRefreshAtRef = useRef(0);
   const [sessions, setSessions] = useState<ClubLiveSession[]>([]);
   const [tablets, setTablets] = useState<ClubTabletDevice[]>([]);
+  const [tabletFeedError, setTabletFeedError] = useState<string | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [message, setMessage] = useState('Opening the private club feed…');
   const [now, setNow] = useState(Date.now());
@@ -154,6 +175,10 @@ export function ClubLiveMonitor({
   const liveSessions = useMemo(
     () => activeClubLiveSessions(sessions, now),
     [now, sessions],
+  );
+  const connectedBikeCount = useMemo(
+    () => tablets.filter((tablet) => clubTabletMonitorConnectedBike(tablet, tabletFeedError == null)).length,
+    [tabletFeedError, tablets],
   );
   const tabletSlots = useMemo(() => {
     const enrolled = selectClubTabletOverviewDevices(tablets, liveSessions, now).map((tablet, index) => ({
@@ -171,18 +196,25 @@ export function ClubLiveMonitor({
     ];
   }, [liveSessions, now, tablets]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceTabletFeed = false) => {
     const generation = ++requestGenerationRef.current;
     try {
-      const refreshTablets = Date.now() - lastTabletRefreshAtRef.current >= 5_000;
+      const refreshTablets = forceTabletFeed || Date.now() - lastTabletRefreshAtRef.current >= 5_000;
       if (refreshTablets) lastTabletRefreshAtRef.current = Date.now();
+      let nextTabletFeedError: string | null = null;
       const [next, nextTablets] = await Promise.all([
         loadClubLiveSessions(),
-        refreshTablets ? loadClubTabletDevices().catch(() => null) : Promise.resolve(null),
+        refreshTablets ? loadClubTabletDevices().catch((error: unknown) => {
+          nextTabletFeedError = clubTabletDeviceFeedErrorMessage(error);
+          return null;
+        }) : Promise.resolve(null),
       ]);
       if (generation !== requestGenerationRef.current) return;
       setSessions(next);
-      if (nextTablets) setTablets(nextTablets);
+      if (refreshTablets) {
+        if (nextTablets) setTablets(nextTablets);
+        setTabletFeedError(nextTabletFeedError);
+      }
       setStatus('ready');
       setMessage(next.length > 0 ? '' : 'No club athletes are sharing a live training session right now.');
       setNow(Date.now());
@@ -235,7 +267,7 @@ export function ClubLiveMonitor({
         <div className={`club-live-connection ${status}`}>
           <Signal size={17} />
           <span>{status === 'error' ? 'Feed interrupted' : `${liveSessions.length} live`}</span>
-          <button type="button" onClick={() => void refresh()} aria-label="Refresh Club Live Monitor">
+          <button type="button" onClick={() => void refresh(true)} aria-label="Refresh Club Live Monitor">
             <RefreshCw size={16} />
           </button>
           {fullscreen && (
@@ -251,13 +283,27 @@ export function ClubLiveMonitor({
         </div>
       </header>
 
-      <ClubEventConsole raceTracks={raceTracks} sprintRoutes={sprintRoutes} />
+      <ClubEventConsole
+        raceTracks={raceTracks}
+        sprintRoutes={sprintRoutes}
+        raceViewsReady={raceViewsReady}
+      />
 
       <section className="club-live-tablet-overview" aria-label="Four Club Tablet status">
         <div className="club-live-tablet-overview-copy">
           <span><Tablet size={18} /> Four Club Tablets</span>
-          <p>Independent Training stays available on every tablet. Riders choose their own athlete and program while this owner screen only watches.</p>
+          <p>
+            <strong className={`club-live-bike-count${tabletFeedError ? ' error' : ''}`}>
+              {tabletFeedError
+                ? <><WifiOff size={14} /> Bike status unavailable</>
+                : <><Bike size={14} /> {connectedBikeCount} bike{connectedBikeCount === 1 ? '' : 's'} connected</>}
+            </strong>
+            Independent Training stays available on every tablet. Riders choose their own athlete and program while this owner screen only watches.
+          </p>
         </div>
+        {tabletFeedError && (
+          <p className="club-live-tablet-overflow-warning" role="alert">{tabletFeedError}</p>
+        )}
         {tablets.length > 4 && (
           <p className="club-live-tablet-overflow-warning" role="alert">
             {tablets.length} tablets are enrolled. The four online or most recently seen tablets are shown here; revoke retired authorizations before opening a four-tablet coach lobby.
@@ -266,6 +312,7 @@ export function ClubLiveMonitor({
         <div className="club-live-tablet-slots">
           {tabletSlots.map(({ seatNumber, tablet, session }) => {
             const online = clubTabletMonitorOnline(tablet, session, now);
+            const connectedBike = clubTabletMonitorConnectedBike(tablet, tabletFeedError == null);
             const lastSeenAt = Math.max(tablet?.lastSeenAt ?? 0, session?.updatedAt ?? 0) || undefined;
             const displayName = session?.athleteName || session?.riderName;
             return (
@@ -281,6 +328,14 @@ export function ClubLiveMonitor({
                     : tablet
                       ? 'Ready for an athlete'
                       : 'Not enrolled yet'}</small>
+                  {connectedBike && (
+                    <small className="club-live-tablet-bike">
+                      Bike connected · PM {wattbikeMonitorLastThree(
+                        connectedBike.label,
+                        connectedBike.deviceId,
+                      )}
+                    </small>
+                  )}
                 </div>
                 <span className={`club-live-tablet-presence ${online ? 'online' : 'offline'}`}>
                   {online ? <Wifi size={14} /> : <WifiOff size={14} />}

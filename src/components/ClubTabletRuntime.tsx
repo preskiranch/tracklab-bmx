@@ -1,16 +1,19 @@
 import { useEffect, useRef } from 'react';
 import {
   ClubTabletRequestError,
+  clearClubTabletBikePresence,
   clearStoredClubTabletDevice,
   clearStoredClubTabletSession,
   clearStoredClubTabletSessionIfCurrent,
   endClubTabletSession,
   flushClubTabletOutbox,
   loadClubTabletRoster,
+  publishClubTabletBikePresence,
   readStoredClubTabletSession,
   refreshClubTabletSession,
   storeClubTabletSession,
   type ClubTabletDeviceCredential,
+  type ClubTabletBikePresenceInput,
   type ClubTabletRoster,
   type ClubTabletSessionCredential,
 } from '../lib/clubTablet';
@@ -38,6 +41,8 @@ type ClubTabletRuntimeProps = {
   device: ClubTabletDeviceCredential;
   roster: ClubTabletRoster | null;
   session: ClubTabletSessionCredential | null;
+  /** The tablet's actual GATT-connected bike, independent of pedaling. */
+  connectedBike?: ClubTabletBikePresenceInput | null;
   bikeActivityAt: number;
   onDeviceReady: (roster: ClubTabletRoster, hasStoredSession: boolean) => void;
   onDeviceError: () => void;
@@ -55,6 +60,7 @@ export default function ClubTabletRuntime({
   device,
   roster,
   session,
+  connectedBike = null,
   bikeActivityAt,
   onDeviceReady,
   onDeviceError,
@@ -71,6 +77,56 @@ export default function ClubTabletRuntime({
       .then(({ disableNativePushDelivery }) => disableNativePushDelivery())
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    const bikeDeviceId = Math.round(Number(connectedBike?.deviceId));
+    const bikeLabel = connectedBike?.label?.trim() ?? '';
+    const controller = new AbortController();
+    let cancelled = false;
+    let requestActive = false;
+
+    if (!Number.isSafeInteger(bikeDeviceId) || bikeDeviceId <= 0 || !bikeLabel) {
+      void clearClubTabletBikePresence(device, { signal: controller.signal }).catch(() => undefined);
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
+    }
+
+    const publish = async () => {
+      if (cancelled || requestActive || document.visibilityState === 'hidden') return;
+      requestActive = true;
+      try {
+        await publishClubTabletBikePresence({ deviceId: bikeDeviceId, label: bikeLabel }, device, {
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if ((error as Error).name !== 'AbortError') {
+          // Presence is deliberately ephemeral. Authorization and roster
+          // coordinators own user-visible recovery for an offline tablet.
+        }
+      } finally {
+        requestActive = false;
+      }
+    };
+
+    void publish();
+    const timer = window.setInterval(() => { void publish(); }, 4_000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void publish();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [connectedBike?.deviceId, connectedBike?.label, device.device.id, device.deviceToken]);
+
+  useEffect(() => () => {
+    void clearClubTabletBikePresence(device, { keepalive: true }).catch(() => undefined);
+  }, [device.device.id, device.deviceToken]);
 
   useEffect(() => {
     let cancelled = false;

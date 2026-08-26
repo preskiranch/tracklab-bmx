@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TrackZone, UserTrackMapping } from '../../src/types';
 import {
   appendProSetZoneBoundaryMeter,
+  clubEventTrackMapping,
   createTrackZones,
   mergeTrackMappingsBySavedAt,
   newestTrackMapping,
@@ -45,6 +46,14 @@ describe('cross-browser track mapping resolution', () => {
     const currentPublished = mapping('north-bay', '2026-07-10T12:00:00.000Z', 8);
 
     expect(newestTrackMapping(staleLocal, currentPublished)).toBe(currentPublished);
+  });
+
+  it('never lets a regular Club Event snapshot prefer a newer browser-local draft', () => {
+    const newerLocal = mapping('north-bay', '2026-07-20T12:00:00.000Z', 2);
+    const published = mapping('north-bay', '2026-07-10T12:00:00.000Z', 8);
+
+    expect(clubEventTrackMapping(newerLocal, published, false)).toBe(published);
+    expect(clubEventTrackMapping(newerLocal, published, true)).toBe(newerLocal);
   });
 
   it('merges cloud mappings without replacing newer work from the current device', () => {

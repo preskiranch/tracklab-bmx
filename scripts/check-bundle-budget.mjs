@@ -10,10 +10,10 @@ function budgetFromEnvironment(name, fallback) {
 }
 
 const budgets = {
-  // Club Event orchestration adds only a small entry-point controller; the
-  // tablet, owner-console, and Explore surfaces remain lazy-loaded. Keep the
-  // network-relevant compressed budgets unchanged.
-  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 608_000),
+  // Event camera precedence, mapped Sprint fallback, and remote tablet-bike
+  // wiring add about 2 KB to the entry controller; the full owner/tablet
+  // surfaces remain lazy-loaded and network-relevant compressed budgets stay unchanged.
+  javascriptRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_RAW_BYTES', 611_000),
   javascriptBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_JS_BR_BYTES', 175_000),
   cssRawBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_RAW_BYTES', 134_000),
   cssBrotliBytes: budgetFromEnvironment('TRACKLAB_BUDGET_CSS_BR_BYTES', 20_000),

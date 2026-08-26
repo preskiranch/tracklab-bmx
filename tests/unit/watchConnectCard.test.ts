@@ -54,6 +54,62 @@ describe('WatchConnectCard', () => {
     expect(markup).not.toContain('Share with');
   });
 
+  it('lets the paired iPhone turn Live BPM on for a remembered studio', () => {
+    const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
+      athleteName: 'Mason Fleming',
+      context: 'studio',
+      studioName: 'Preski Ranch',
+      enrolled: true,
+      liveStudioConsent: false,
+      sessionStudioConsent: true,
+      studioConsentDetail: 'Live BPM is private. Turn it on here.',
+      onLiveStudioConsentChange: vi.fn(),
+      state: {
+        phase: 'connected',
+        connectedUntil: Date.now() + 13_320_000,
+        remainingMs: 13_320_000,
+        detail: 'Ready for every TrackLab program during this four-hour session.',
+      },
+    }));
+
+    const liveBpmInput = markup.match(
+      /<input[^>]*aria-label="Share Live BPM with Preski Ranch"[^>]*>/u,
+    )?.[0];
+    const summaryInput = markup.match(
+      /<input[^>]*aria-label="Share training summaries with Preski Ranch"[^>]*>/u,
+    )?.[0];
+    expect(markup).toContain('Studio sharing with Preski Ranch');
+    expect(markup).toContain('Live BPM is private. Turn it on here.');
+    expect(liveBpmInput).toBeTruthy();
+    expect(liveBpmInput).not.toContain('disabled');
+    expect(summaryInput).toContain('disabled');
+  });
+
+  it('shows studio consent read-only on a tablet observer', () => {
+    const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
+      athleteName: 'Mason Fleming',
+      context: 'studio',
+      studioName: 'Preski Ranch',
+      enrolled: true,
+      observer: true,
+      liveStudioConsent: false,
+      sessionStudioConsent: true,
+      studioConsentDetail: 'Live BPM is private. Turn it on here.',
+      state: {
+        phase: 'connected',
+        connectedUntil: Date.now() + 13_320_000,
+        remainingMs: 13_320_000,
+        detail: 'Connected through the paired iPhone.',
+      },
+    }));
+
+    const consentInputs = markup.match(/<input[^>]*aria-label="Share [^"]+"[^>]*>/gu) ?? [];
+    expect(consentInputs).toHaveLength(2);
+    expect(consentInputs.every((input) => input.includes('disabled'))).toBe(true);
+    expect(markup).toContain('To change Live BPM sharing, use TrackLab on the paired iPhone.');
+    expect(markup).not.toContain('Turn it on here.');
+  });
+
   it('uses one press to reconnect after four hours without repeating setup', () => {
     const markup = renderToStaticMarkup(createElement(WatchConnectCard, {
       athleteName: 'Mason Fleming',

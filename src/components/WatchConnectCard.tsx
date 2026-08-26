@@ -24,6 +24,7 @@ export type WatchConnectCardProps = Readonly<{
   state: WatchConnectViewState;
   context?: 'personal' | 'studio';
   studioName?: string;
+  studioConsentDetail?: string;
   enrolled?: boolean;
   liveStudioConsent?: boolean;
   sessionStudioConsent?: boolean;
@@ -51,6 +52,7 @@ export function WatchConnectCard({
   state,
   context = 'personal',
   studioName,
+  studioConsentDetail,
   enrolled = false,
   liveStudioConsent = false,
   sessionStudioConsent = false,
@@ -172,12 +174,14 @@ export function WatchConnectCard({
         </div>
       )}
 
-      {context === 'studio' && !enrolled && (
+      {context === 'studio' && (
         <fieldset className="watch-connect-card-consent">
-          <legend>Share with {studio}</legend>
+          <legend>{enrolled ? `Studio sharing with ${studio}` : `Share with ${studio}`}</legend>
           <label>
             <input
+              aria-label={`Share training summaries with ${studio}`}
               checked={sessionStudioConsent}
+              disabled={disabled || busy || enrolled || !onSessionStudioConsentChange}
               onChange={(event) => onSessionStudioConsentChange?.(event.currentTarget.checked)}
               type="checkbox"
             />
@@ -188,7 +192,9 @@ export function WatchConnectCard({
           </label>
           <label>
             <input
+              aria-label={`Share Live BPM with ${studio}`}
               checked={liveStudioConsent}
+              disabled={disabled || busy || !onLiveStudioConsentChange}
               onChange={(event) => onLiveStudioConsentChange?.(event.currentTarget.checked)}
               type="checkbox"
             />
@@ -197,6 +203,13 @@ export function WatchConnectCard({
               <small>Show a current reading on the studio screen while this athlete is training.</small>
             </span>
           </label>
+          <small role="status">
+            {observer && !liveStudioConsent
+              ? 'To change Live BPM sharing, use TrackLab on the paired iPhone.'
+              : studioConsentDetail || (onLiveStudioConsentChange
+              ? 'Live BPM can be changed here on the paired iPhone.'
+              : 'To change Live BPM sharing, use TrackLab on the paired iPhone.')}
+          </small>
         </fieldset>
       )}
 

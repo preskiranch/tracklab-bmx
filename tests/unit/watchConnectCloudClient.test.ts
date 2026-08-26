@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   disconnectStudioWatchConnectEnrollment,
+  enrollWatchConnect,
   loadClubTabletWatchConnectStatus,
 } from '../../src/lib/watchConnectCloud';
 import { watchConnectSessionDurationMs } from '../../src/lib/watchConnect';
@@ -9,6 +10,83 @@ import { clubTabletWatchStatusRequestIsCurrent } from '../../src/components/Club
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Watch Connect tablet client', () => {
+  it('refreshes studio Live BPM consent through the existing enrollment POST', async () => {
+    const installId = `wci_${'a'.repeat(64)}`;
+    const updatedAt = Date.now();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      enrollment: {
+        id: 'enrollment-one',
+        scope: 'studio',
+        clubId: 'club-one',
+        studioRiderId: 'rider-one',
+        state: 'trusted',
+        liveStudioConsent: true,
+        sessionStudioConsent: true,
+        createdAt: updatedAt - 1,
+        updatedAt,
+      },
+      replayed: false,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(enrollWatchConnect({
+      requestId: 'watch-connect-consent-123456789',
+      installId,
+      scope: 'studio',
+      clubId: 'club-one',
+      liveStudioConsent: true,
+      sessionStudioConsent: true,
+    })).resolves.toMatchObject({
+      enrollment: {
+        id: 'enrollment-one',
+        studioRiderId: 'rider-one',
+        liveStudioConsent: true,
+        sessionStudioConsent: true,
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/heart-rate/watch-connect/enrollments',
+      {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: 'watch-connect-consent-123456789',
+          installId,
+          scope: 'studio',
+          clubId: 'club-one',
+          liveStudioConsent: true,
+          sessionStudioConsent: true,
+        }),
+      },
+    );
+  });
+
+  it('rejects an enrollment refresh response that does not confirm Live BPM consent', async () => {
+    const updatedAt = Date.now();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      enrollment: {
+        id: 'enrollment-one',
+        scope: 'studio',
+        clubId: 'club-one',
+        studioRiderId: 'rider-one',
+        state: 'trusted',
+        liveStudioConsent: false,
+        sessionStudioConsent: true,
+        createdAt: updatedAt - 1,
+        updatedAt,
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    await expect(enrollWatchConnect({
+      requestId: 'watch-connect-consent-123456789',
+      installId: `wci_${'a'.repeat(64)}`,
+      scope: 'studio',
+      clubId: 'club-one',
+      liveStudioConsent: true,
+      sessionStudioConsent: true,
+    })).rejects.toThrow('invalid response');
+  });
+
   it('ignores a delayed response after the selected athlete changes', () => {
     expect(clubTabletWatchStatusRequestIsCurrent('token-a:rider-a', 'token-b:rider-b')).toBe(false);
     expect(clubTabletWatchStatusRequestIsCurrent('token-b:rider-b', 'token-b:rider-b')).toBe(true);

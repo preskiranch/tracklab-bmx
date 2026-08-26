@@ -211,6 +211,57 @@ export type StopWatchConnectResult = Readonly<{
   connection: WatchConnectConnection;
 }>;
 
+export type UpdateWatchConnectStudioConsentInput = Readonly<{
+  enrollment: WatchConnectEnrollment;
+  liveStudioConsent: boolean;
+  enrollmentRequestId: string;
+}>;
+
+/**
+ * Refreshes consent on the exact remembered studio enrollment. The existing
+ * enrollment POST is intentionally reused so the server can atomically copy
+ * the new choice to an active Watch pairing and stream without exposing any
+ * relay credentials to JavaScript.
+ */
+export async function updateWatchConnectStudioConsentAction(
+  input: UpdateWatchConnectStudioConsentInput,
+  dependencies: Pick<WatchConnectActionDependencies, 'getIdentity' | 'enroll'>,
+) {
+  const current = input.enrollment;
+  if (
+    current.state !== 'trusted'
+    || current.scope !== 'studio'
+    || !current.clubId
+    || !current.studioRiderId
+    || current.sessionStudioConsent !== true
+  ) {
+    throw new Error('Choose a valid remembered studio Watch before changing Live BPM sharing.');
+  }
+  const identity = await dependencies.getIdentity();
+  const enroll = dependencies.enroll ?? enrollWatchConnect;
+  const refreshed = await enroll({
+    requestId: input.enrollmentRequestId,
+    installId: identity.installId,
+    scope: 'studio',
+    clubId: current.clubId,
+    liveStudioConsent: input.liveStudioConsent,
+    sessionStudioConsent: true,
+  });
+  const next = refreshed.enrollment;
+  if (
+    next.id !== current.id
+    || next.state !== 'trusted'
+    || next.scope !== 'studio'
+    || next.clubId !== current.clubId
+    || next.studioRiderId !== current.studioRiderId
+    || next.liveStudioConsent !== input.liveStudioConsent
+    || next.sessionStudioConsent !== true
+  ) {
+    throw new Error('Watch Connect could not confirm the updated studio sharing choice.');
+  }
+  return next;
+}
+
 /** Native queues final samples first; server visibility then stops immediately. */
 export async function stopWatchConnectAction(
   connection: WatchConnectConnection,
