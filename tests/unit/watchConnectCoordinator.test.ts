@@ -10,11 +10,13 @@ import {
   activeWatchConnectTarget,
   cleanupStaleWatchConnectStart,
   defaultWatchConnectClubId,
+  invalidateWatchConnectRefreshGeneration,
   nativeWatchConnectHeartRate,
   runWatchConnectKeyedSingleFlight,
   watchConnectAccountBoundarySealKey,
   watchConnectAccountRequestIsCurrent,
   watchConnectCanRetryCloudConnection,
+  watchConnectConsentTargetRequestIsCurrent,
   watchConnectCoordinatorRequestIsCurrent,
   watchConnectCoordinatorBoundarySealKey,
   watchConnectLegacyHeartRateIsBusy,
@@ -113,6 +115,54 @@ describe('WatchConnectCoordinator native adapter', () => {
     expect(watchConnectCoordinatorRequestIsCurrent(
       'account-one', 'account-one', 4, 4, 'loading',
     )).toBe(false);
+  });
+
+  it('invalidates an overlapping status refresh before committing Live BPM consent', () => {
+    const refreshGeneration = { current: 7 };
+    const olderRefreshGeneration = refreshGeneration.current;
+
+    invalidateWatchConnectRefreshGeneration(refreshGeneration);
+
+    expect(refreshGeneration.current).toBe(8);
+    expect(olderRefreshGeneration).not.toBe(refreshGeneration.current);
+
+    const source = readFileSync(
+      new URL('../../src/components/WatchConnectCoordinator.tsx', import.meta.url),
+      'utf8',
+    );
+    const consentHandler = source.slice(
+      source.indexOf('const changeLiveStudioConsent'),
+      source.indexOf('const disconnect', source.indexOf('const changeLiveStudioConsent')),
+    );
+    expect(consentHandler.indexOf('invalidateWatchConnectRefreshGeneration'))
+      .toBeGreaterThan(consentHandler.indexOf('.then((updated)'));
+    expect(consentHandler.indexOf('invalidateWatchConnectRefreshGeneration'))
+      .toBeLessThan(consentHandler.indexOf('setSnapshot'));
+  });
+
+  it('merges consent for the account but fences target-local UI after a studio reset', () => {
+    expect(watchConnectConsentTargetRequestIsCurrent('club-one', 'club-one', 4, 4)).toBe(true);
+    expect(watchConnectConsentTargetRequestIsCurrent('club-one', 'club-two', 4, 4)).toBe(false);
+    expect(watchConnectConsentTargetRequestIsCurrent('club-one', 'club-one', 4, 5)).toBe(false);
+
+    const source = readFileSync(
+      new URL('../../src/components/WatchConnectCoordinator.tsx', import.meta.url),
+      'utf8',
+    );
+    const handlerStart = source.indexOf('const changeLiveStudioConsent');
+    const consentHandler = source.slice(
+      handlerStart,
+      source.indexOf('const disconnect', handlerStart),
+    );
+    expect(consentHandler).toMatch(
+      /\.then\(\(updated\)[\s\S]*setSnapshot[\s\S]*if \(!targetRequestIsCurrent\(\)\) return;[\s\S]*setLiveStudioConsent/,
+    );
+    expect(consentHandler).toMatch(
+      /\.catch\(\(error: unknown\)[\s\S]*if \(!targetRequestIsCurrent\(\)\) return;/,
+    );
+    expect(consentHandler).toMatch(
+      /\.finally\(\(\)[\s\S]*if \(targetRequestIsCurrent\(\)\) setStudioConsentBusy\(false\)/,
+    );
   });
 
   it('cleans a deferred start after logout with only its exact cloud and pairing identities', async () => {
@@ -786,13 +836,14 @@ describe('WatchConnectCoordinator native adapter', () => {
     const sole = [{ clubId: 'club-one', clubName: 'One Studio' }];
     const multiple = [...sole, { clubId: 'club-two', clubName: 'Two Studio' }];
     expect(defaultWatchConnectClubId({ contexts: sole })).toBe('club-one');
-    expect(defaultWatchConnectClubId({ contexts: sole, preferPersonal: true })).toBeNull();
+    expect(defaultWatchConnectClubId({ contexts: sole, preferPersonal: true })).toBe('club-one');
     expect(defaultWatchConnectClubId({
       contexts: multiple,
       preferredClubId: 'club-two',
       preferPersonal: true,
-    })).toBeNull();
+    })).toBe('club-two');
     expect(defaultWatchConnectClubId({ contexts: multiple })).toBeNull();
+    expect(defaultWatchConnectClubId({ contexts: multiple, preferPersonal: true })).toBeNull();
     expect(defaultWatchConnectClubId({
       contexts: multiple,
       preferredClubId: 'club-two',

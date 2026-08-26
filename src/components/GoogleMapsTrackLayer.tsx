@@ -414,6 +414,26 @@ function cameraForTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
   };
 }
 
+export type DeferredSatelliteMapView = Readonly<{
+  track: TrackRecord;
+  camera: Partial<EarthCamera>;
+}>;
+
+/**
+ * Read the camera at map-readiness time, not at loader-start time. Club Event
+ * launches replace the course and then restore its saved camera in a React
+ * effect, so a cold Google Maps load must observe the latest render.
+ */
+export function resolveDeferredSatelliteMapView(
+  viewRef: Readonly<{ current: DeferredSatelliteMapView }>,
+) {
+  const latest = viewRef.current;
+  return {
+    track: latest.track,
+    camera: cameraForTrack(latest.camera, latest.track),
+  };
+}
+
 function refreshSatelliteTiles(google: GoogleMapsRuntime, map: GoogleMap, camera: Partial<EarthCamera>, track: TrackRecord) {
   map.setOptions({ mapTypeId: 'satellite' });
   google.maps.event?.trigger(map, 'resize');
@@ -1232,19 +1252,27 @@ export function GoogleMapsTrackLayer({
   const markerRefs = useRef<Map<number, RiderMapMarker>>(new Map());
   const ghostMarkerRefs = useRef<Map<string, RiderMapMarker>>(new Map());
   const remoteMarkerRefs = useRef<Map<string, RiderMapMarker>>(new Map());
-  const cameraRef = useRef<Partial<EarthCamera>>({
-    angle: earthAngle,
-    heading: earthHeading,
-    ...(earthCenter ? { center: earthCenter } : {}),
-    ...(earthZoom != null ? { zoom: earthZoom } : {}),
-  });
-  const initialMapViewRef = useRef({
+  const latestMapViewRef = useRef<DeferredSatelliteMapView>({
     track,
-    earthAngle,
-    earthHeading,
-    earthCenter,
-    earthZoom,
+    camera: {
+      angle: earthAngle,
+      heading: earthHeading,
+      ...(earthCenter ? { center: earthCenter } : {}),
+      ...(earthZoom != null ? { zoom: earthZoom } : {}),
+    },
   });
+  latestMapViewRef.current = {
+    track,
+    camera: {
+      angle: earthAngle,
+      heading: earthHeading,
+      ...(earthCenter ? { center: earthCenter } : {}),
+      ...(earthZoom != null ? { zoom: earthZoom } : {}),
+    },
+  };
+  const cameraRef = useRef<Partial<EarthCamera>>(
+    resolveDeferredSatelliteMapView(latestMapViewRef).camera,
+  );
   const suppressCameraSyncRef = useRef(false);
   const cameraSyncReleaseTimerRef = useRef<number | null>(null);
   const lastFitKeyRef = useRef('');
@@ -1279,14 +1307,10 @@ export function GoogleMapsTrackLayer({
         }
 
         googleRef.current = google;
-        const initialMapView = initialMapViewRef.current;
-        const initialCamera = cameraForTrack({
-          angle: initialMapView.earthAngle,
-          heading: initialMapView.earthHeading,
-          center: initialMapView.earthCenter ?? trackCenter(initialMapView.track),
-          ...(initialMapView.earthZoom != null ? { zoom: initialMapView.earthZoom } : {}),
-        }, initialMapView.track);
-        const center = initialCamera.center ?? trackCenter(initialMapView.track);
+        const readyView = resolveDeferredSatelliteMapView(latestMapViewRef);
+        const initialCamera = readyView.camera;
+        cameraRef.current = initialCamera;
+        const center = initialCamera.center ?? trackCenter(readyView.track);
         const map = new google.maps.Map(containerRef.current, {
           cameraControl: true,
           center,
@@ -1295,7 +1319,7 @@ export function GoogleMapsTrackLayer({
           disableDefaultUI: false,
           fullscreenControl: false,
           gestureHandling: 'greedy',
-          heading: initialMapView.earthHeading,
+          heading: initialCamera.heading ?? 0,
           headingInteractionEnabled: true,
           isFractionalZoomEnabled: true,
           keyboardShortcuts: true,
@@ -1306,7 +1330,7 @@ export function GoogleMapsTrackLayer({
           scaleControl: true,
           streetViewControl: false,
           tiltInteractionEnabled: true,
-          tilt: initialCamera.angle ?? initialMapView.earthAngle,
+          tilt: initialCamera.angle ?? 0,
           zoomControl: true,
           zoom: initialCamera.zoom ?? 19,
         });
@@ -1377,18 +1401,12 @@ export function GoogleMapsTrackLayer({
   }, []);
 
   useEffect(() => {
+    const nextCamera = resolveDeferredSatelliteMapView(latestMapViewRef).camera;
+    cameraRef.current = nextCamera;
     const map = mapRef.current;
     if (!map) {
       return;
     }
-
-    const nextCamera = cameraForTrack({
-      angle: earthAngle,
-      heading: earthHeading,
-      ...(earthCenter ? { center: earthCenter } : {}),
-      ...(earthZoom != null ? { zoom: earthZoom } : {}),
-    }, track);
-    cameraRef.current = nextCamera;
     const currentTilt = map.getTilt?.();
     const currentHeading = map.getHeading?.();
     const currentCenter = map.getCenter?.()?.toJSON();

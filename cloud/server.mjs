@@ -130,6 +130,7 @@ const persistedRaceResultKeys = new Map();
 const clubLiveSessions = new Map();
 const clubLiveMonitorPresence = new Map();
 const clubLiveAccessSelections = new Map();
+const clubTabletBikePresenceByDeviceId = new Map();
 const clubTabletSessionsByTokenHash = new Map();
 const clubTabletSessionTokenHashByDeviceId = new Map();
 const clubTabletWsTicketsByHash = new Map();
@@ -149,6 +150,13 @@ const configuredClubLiveSessionTtlMs = Number(process.env.TRACKLAB_CLUB_LIVE_SES
 const clubLiveSessionTtlMs = Number.isFinite(configuredClubLiveSessionTtlMs)
   ? Math.max(250, Math.min(120_000, Math.round(configuredClubLiveSessionTtlMs)))
   : 15_000;
+// Tablets publish GATT bike presence every four seconds. Keep three heartbeat
+// windows so a delayed request cannot make a still-connected bike flicker out.
+const clubTabletBikePresenceHeartbeatMs = 4_000;
+const clubTabletBikePresenceTtlMs = Math.max(
+  clubLiveSessionTtlMs,
+  clubTabletBikePresenceHeartbeatMs * 3,
+);
 const clubTabletSessionIdleTtlMs = 15 * 60 * 1000;
 // A shared studio tablet is a kiosk, so an abandoned athlete identity must not
 // survive an entire day. Active workouts can renew the 15-minute idle window,
@@ -157,6 +165,16 @@ const clubTabletSessionMaxTtlMs = 4 * 60 * 60 * 1000;
 const clubTabletResultAuthorizationTtlMs = 14 * 24 * 60 * 60 * 1000;
 const clubEventParticipantReleaseRetryBaseMs = 1_000;
 const clubEventParticipantReleaseRetryMaxMs = 60_000;
+const configuredClubEventSessionReleaseGraceMs = Number(
+  process.env.TRACKLAB_CLUB_EVENT_SESSION_RELEASE_GRACE_MS,
+);
+// A completed exercise remains visible for 15 seconds on a Club Tablet. Keep a
+// five-second timing buffer around that review when event closure shortens an
+// athlete selection. The upper bound prevents a cancelled event from leaving a
+// shared tablet claimed for an unexpectedly long time.
+const clubEventSessionReleaseGraceMs = Number.isFinite(configuredClubEventSessionReleaseGraceMs)
+  ? Math.max(20_000, Math.min(60_000, Math.round(configuredClubEventSessionReleaseGraceMs)))
+  : 30_000;
 const configuredClubEventStartLeadMs = Number(process.env.TRACKLAB_CLUB_EVENT_START_LEAD_MS);
 const clubEventStartLeadMs = Number.isFinite(configuredClubEventStartLeadMs)
   ? Math.max(3_000, Math.min(30_000, Math.round(configuredClubEventStartLeadMs)))
@@ -5056,15 +5074,38 @@ function clubTabletResultTokenHash(token) {
   return tokenHash(`club-tablet-result:${token}`);
 }
 
-function publicClubTabletDevice(device) {
-  return device ? {
+function activeClubTabletBikePresence(deviceId, now = Date.now()) {
+  const presence = clubTabletBikePresenceByDeviceId.get(deviceId);
+  if (!presence || presence.expiresAt <= now) {
+    clubTabletBikePresenceByDeviceId.delete(deviceId);
+    return null;
+  }
+  return presence;
+}
+
+function publicClubTabletConnectedBike(presence) {
+  return presence ? {
+    deviceId: presence.bikeDeviceId,
+    label: presence.bikeLabel,
+    updatedAt: presence.updatedAt,
+    expiresAt: presence.expiresAt,
+  } : null;
+}
+
+function publicClubTabletDevice(device, now = Date.now()) {
+  if (!device) return null;
+  const connectedBike = publicClubTabletConnectedBike(
+    activeClubTabletBikePresence(device.id, now),
+  );
+  return {
     id: device.id,
     name: device.name,
     clubId: device.clubId,
     clubName: device.clubName,
     lastSeenAt: device.lastSeenAt ?? null,
     createdAt: device.createdAt,
-  } : null;
+    ...(connectedBike ? { connectedBike } : {}),
+  };
 }
 
 async function loadClubTabletDeviceFromRequest(request, { requireAvailable = false } = {}) {
@@ -5144,6 +5185,55 @@ function validClubEventTrackSnapshot(value, expectedTrackId) {
     && !Array.isArray(value.leaderboards);
 }
 
+function sanitizeClubEventRaceView(activityType, value, trackRecord) {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const mode = value.mode === 'satellite' || value.mode === '3d' || value.mode === 'game'
+    ? value.mode
+    : null;
+  if (!mode) return null;
+  if (mode === 'game') {
+    const normalizedTrackName = String(trackRecord?.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (
+      activityType !== 'straight-sprint'
+      || trackRecord?.countryCode !== 'CUSTOM'
+      || !normalizedTrackName.includes('dragstrip')
+    ) return null;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(value, 'camera')) return { mode };
+  const candidate = value.camera;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  if (
+    !Number.isFinite(candidate.angle)
+    || candidate.angle < 0
+    || candidate.angle > 67
+    || !Number.isFinite(candidate.heading)
+    || candidate.heading < 0
+    || candidate.heading >= 360
+  ) return null;
+
+  let center;
+  if (Object.prototype.hasOwnProperty.call(candidate, 'center')) {
+    if (!validClubEventTrackPoint(candidate.center)) return null;
+    center = { lat: candidate.center.lat, lng: candidate.center.lng };
+  }
+  let zoom;
+  if (Object.prototype.hasOwnProperty.call(candidate, 'zoom')) {
+    if (!Number.isFinite(candidate.zoom) || candidate.zoom < 0 || candidate.zoom > 30) return null;
+    zoom = candidate.zoom;
+  }
+  return {
+    mode,
+    camera: {
+      angle: candidate.angle,
+      heading: candidate.heading,
+      ...(center ? { center } : {}),
+      ...(zoom !== undefined ? { zoom } : {}),
+    },
+  };
+}
+
 function sanitizeClubEventActivityConfiguration(activityType, value) {
   if (activityType === 'explore') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -5170,11 +5260,13 @@ function sanitizeClubEventActivityConfiguration(activityType, value) {
   const trackName = sanitizeText(configuration.trackName, '', 120);
   const trackRecord = configuration.trackRecord;
   if (!trackId || !trackName || !validClubEventTrackSnapshot(trackRecord, trackId)) return null;
+  const raceView = sanitizeClubEventRaceView(activityType, configuration.raceView, trackRecord);
+  if (raceView === null) return null;
 
   if (activityType === 'bmx-race') {
     const lapCount = Number(configuration.lapCount ?? configuration.laps);
     if (!Number.isInteger(lapCount) || lapCount < 1 || lapCount > 20) return null;
-    return { trackId, trackName, trackRecord, lapCount };
+    return { trackId, trackName, trackRecord, lapCount, ...(raceView ? { raceView } : {}) };
   }
 
   if (activityType === 'straight-sprint') {
@@ -5190,7 +5282,14 @@ function sanitizeClubEventActivityConfiguration(activityType, value) {
       || airSetting > 10
       || trackRecord.lengthMeters + 0.5 < distanceFeet * 0.3048
     ) return null;
-    return { trackId, trackName, trackRecord, distanceFeet, airSetting };
+    return {
+      trackId,
+      trackName,
+      trackRecord,
+      distanceFeet,
+      airSetting,
+      ...(raceView ? { raceView } : {}),
+    };
   }
 
   return null;
@@ -5594,6 +5693,29 @@ function scheduleClubTabletSessionExpiry(session) {
     }
   }, Math.max(1, deadline - Date.now() + 25));
   session._expiryTimer.unref?.();
+}
+
+function capClubEventParticipantSessionExpiries(event, now = Date.now()) {
+  if (!event || event.status !== 'cancelled' || !Array.isArray(event.participants)) return 0;
+  const releaseAt = now + clubEventSessionReleaseGraceMs;
+  let cappedCount = 0;
+  for (const participant of event.participants) {
+    const session = clubTabletSessionsByTokenHash.get(participant?.sessionTokenHash);
+    if (
+      !clubTabletSessionIsCurrent(session, now)
+      || session.clubId !== event.clubId
+      || session.deviceId !== participant.deviceId
+      || session.studioRiderId !== participant.studioRiderId
+      || session.bikeDeviceId !== participant.bikeDeviceId
+    ) {
+      continue;
+    }
+    session.expiresAt = Math.min(session.expiresAt, releaseAt);
+    session.maxExpiresAt = Math.min(session.maxExpiresAt, releaseAt);
+    scheduleClubTabletSessionExpiry(session);
+    cappedCount += 1;
+  }
+  return cappedCount;
 }
 
 function pruneClubTabletSessions(now = Date.now()) {
@@ -15282,6 +15404,9 @@ async function serveStatic(request, response) {
     }
     clubEventClosedAtByEventId.delete(created.event.id);
     if (created.replacedEventId && created.replacedEventId !== created.event.id) {
+      if (created.replacedEvent?.id === created.replacedEventId) {
+        capClubEventParticipantSessionExpiries(created.replacedEvent);
+      }
       closeClubEventRoom(created.replacedEventId, 'club-event-replaced');
     }
     writeJson(
@@ -15481,6 +15606,9 @@ async function serveStatic(request, response) {
       });
       return;
     }
+    if (cancelled.event?.id === eventId) {
+      capClubEventParticipantSessionExpiries(cancelled.event);
+    }
     closeClubEventRoom(eventId, 'club-event-cancelled');
     writeJson(response, 200, { event: null, pollAfterMs: 2_000 }, { 'Cache-Control': 'no-store' });
     return;
@@ -15498,7 +15626,9 @@ async function serveStatic(request, response) {
 
     if (request.method === 'GET') {
       const devices = await persistence.listClubTabletDevices(ownerProfileKey);
-      writeJson(response, 200, { devices: devices.map(publicClubTabletDevice) }, { 'Cache-Control': 'no-store' });
+      writeJson(response, 200, {
+        devices: devices.map((device) => publicClubTabletDevice(device)),
+      }, { 'Cache-Control': 'no-store' });
       return;
     }
 
@@ -15553,11 +15683,60 @@ async function serveStatic(request, response) {
       }
       const tokenHashForSession = clubTabletSessionTokenHashByDeviceId.get(deviceId);
       if (tokenHashForSession) await stopClubTabletSession(clubTabletSessionsByTokenHash.get(tokenHashForSession));
+      clubTabletBikePresenceByDeviceId.delete(deviceId);
       writeJson(response, 200, { revoked: true }, { 'Cache-Control': 'no-store' });
       return;
     }
 
     writeJson(response, 405, { error: 'Method not allowed' });
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/club-tablet/bike-presence') {
+    if (request.method !== 'PUT' && request.method !== 'DELETE') {
+      writeJson(response, 405, { error: 'Method not allowed' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const device = await loadClubTabletDeviceFromRequest(request);
+    if (!device) {
+      writeJson(response, 401, { error: 'This club tablet is not enrolled or was revoked.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    if (!enforceRateLimit(
+      request,
+      response,
+      clubTabletRateLimiter,
+      180,
+      `club-tablet-bike-presence:${device.id}`,
+    )) return;
+
+    if (request.method === 'DELETE') {
+      clubTabletBikePresenceByDeviceId.delete(device.id);
+      writeJson(response, 200, { stopped: true }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+
+    const payload = await readJsonBody(request, 8_000);
+    const bikeDeviceId = Number(payload?.bikeDeviceId);
+    const bikeLabel = sanitizeText(payload?.bikeLabel, '', 120);
+    if (!Number.isSafeInteger(bikeDeviceId) || bikeDeviceId <= 0 || !bikeLabel) {
+      writeJson(response, 400, { error: 'A valid connected Wattbike is required.' }, { 'Cache-Control': 'no-store' });
+      return;
+    }
+    const now = Date.now();
+    const presence = {
+      deviceId: device.id,
+      clubId: device.clubId,
+      bikeDeviceId,
+      bikeLabel,
+      updatedAt: now,
+      expiresAt: now + clubTabletBikePresenceTtlMs,
+    };
+    clubTabletBikePresenceByDeviceId.set(device.id, presence);
+    writeJson(response, 200, {
+      connectedBike: publicClubTabletConnectedBike(presence),
+      heartbeatTtlMs: clubTabletBikePresenceTtlMs,
+    }, { 'Cache-Control': 'no-store' });
     return;
   }
 

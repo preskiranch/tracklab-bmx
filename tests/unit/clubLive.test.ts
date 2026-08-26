@@ -16,6 +16,8 @@ import {
   shouldStopAdvancedConnector,
 } from '../../src/lib/advancedConnectorPolicy';
 import {
+  clubTabletDeviceFeedErrorMessage,
+  clubTabletMonitorConnectedBike,
   clubTabletMonitorOnline,
   selectClubTabletOverviewDevices,
 } from '../../src/components/ClubLiveMonitor';
@@ -115,6 +117,37 @@ describe('Club Live Monitor client state', () => {
     expect(selected).toHaveLength(4);
     expect(selected.slice(0, 2).map((tablet) => tablet.id)).toEqual(['tablet-6', 'tablet-5']);
     expect(selected.map((tablet) => tablet.id)).not.toContain('tablet-4');
+  });
+
+  it('trusts server-validated bike presence instead of hiding it due to PC clock skew', () => {
+    const now = 100_000;
+    const tablet: ClubTabletDevice = {
+      id: 'tablet-bike',
+      clubId: 'club-1',
+      clubName: 'Preski Ranch',
+      name: 'Studio Tablet',
+      connectedBike: {
+        deviceId: 73_311,
+        label: 'WattbikePM25043950',
+        updatedAt: now - 1_000,
+        expiresAt: now + 1_000,
+      },
+    };
+
+    expect(clubTabletMonitorConnectedBike(tablet)).toMatchObject({ deviceId: 73_311 });
+    expect(clubTabletMonitorConnectedBike({
+      ...tablet,
+      connectedBike: { ...tablet.connectedBike!, updatedAt: now + 3_000 },
+    })).toMatchObject({ deviceId: 73_311 });
+    expect(clubTabletMonitorConnectedBike(tablet, false)).toBeNull();
+    expect(clubTabletMonitorConnectedBike(undefined)).toBeNull();
+  });
+
+  it('turns device-feed failures into an actionable connected-bike status', () => {
+    expect(clubTabletDeviceFeedErrorMessage(new Error('Club Tablet returned 503')))
+      .toBe('Connected-bike status is unavailable: Club Tablet returned 503');
+    expect(clubTabletDeviceFeedErrorMessage(null))
+      .toBe('Connected-bike status is unavailable. Refresh the monitor to try again.');
   });
 
   it('fails closed when an access response belongs to another club', () => {

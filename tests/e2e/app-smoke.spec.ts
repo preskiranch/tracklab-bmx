@@ -7212,6 +7212,7 @@ test('club athletes see only their own connection and never the studio roster', 
 test('club owners can open the read-only Club Live Monitor while athletes cannot control sessions', async ({ page }) => {
   const now = Date.now();
   let currentClubEvent: Record<string, unknown> | null = null;
+  let tabletDeviceFeedFails = false;
   const studioRider = {
     id: 'studio-rasheen',
     name: 'Rasheen “The Machine” Hicks',
@@ -7271,6 +7272,15 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
     });
   });
   await page.route('**/api/club-tablet/devices', async (route) => {
+    if (tabletDeviceFeedFails) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Tablet device feed temporarily unavailable.' }),
+      });
+      return;
+    }
+    const deviceNow = Date.now();
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -7280,7 +7290,15 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
           clubId: 'club-preski-ranch',
           clubName: 'Preski Ranch LLC',
           createdAt: now - 60_000,
-          lastSeenAt: now,
+          lastSeenAt: deviceNow,
+          ...(index === 1 ? {
+            connectedBike: {
+              deviceId: 43_950,
+              label: 'WattbikePM25043950',
+              updatedAt: deviceNow,
+              expiresAt: deviceNow + 15_000,
+            },
+          } : {}),
         })),
       }),
     });
@@ -7372,6 +7390,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
     });
   });
   await page.route('**/api/club-live/sessions', async (route) => {
+    const sessionNow = Date.now();
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -7398,8 +7417,8 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
           destinationLabel: 'Golden Gate Bridge',
           multiplayer: true,
           startedAt: now - 321_000,
-          updatedAt: now,
-          expiresAt: now + 60_000,
+          updatedAt: sessionNow,
+          expiresAt: sessionNow + 60_000,
         }],
       }),
     });
@@ -7409,7 +7428,7 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await openSignedInAppIfNeeded(page);
 
   await page.getByRole('button', { name: 'More', exact: true }).click();
-  await page.getByRole('button', { name: 'Club Live Monitor', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:Club Live Monitor|Studio Tablet Monitor)$/ }).click();
 
   await expect(page.locator('.platform-shell')).toHaveClass(/utility-fullscreen/);
 
@@ -7419,8 +7438,10 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await expect(monitor.getByRole('button', { name: /Coach-led Event/ })).toBeVisible();
   await expect(monitor.getByText('Riders control their own tablet', { exact: true })).toBeVisible();
   await expect(monitor.locator('.club-live-tablet-slot')).toHaveCount(4);
+  await expect(monitor.getByText('1 bike connected', { exact: true })).toBeVisible();
   await expect(monitor.locator('.club-live-tablet-slot').nth(1)).toContainText('Studio Tablet 2');
   await expect(monitor.locator('.club-live-tablet-slot').nth(1)).toContainText('Rasheen Hicks · Explore the World');
+  await expect(monitor.locator('.club-live-tablet-slot').nth(1)).toContainText('Bike connected · PM 950');
   await expect(monitor.getByRole('heading', { name: 'Rasheen Hicks' })).toBeVisible();
   await expect(monitor.getByText('Explore the World', { exact: true })).toBeVisible();
   await expect(monitor.getByText('Golden Gate Bridge', { exact: true })).toBeVisible();
@@ -7440,6 +7461,15 @@ test('club owners can open the read-only Club Live Monitor while athletes cannot
   await expect(eventConsole.locator('.club-event-seat').filter({ hasText: 'Studio Tablet 2' })).toContainText('Rasheen Hicks');
   await eventConsole.getByRole('button', { name: 'Start all ready riders' }).click();
   await expect(eventConsole.locator('.club-event-lobby')).toContainText(/Starting in 8|tablets launched/);
+
+  tabletDeviceFeedFails = true;
+  await monitor.getByRole('button', { name: 'Refresh Club Live Monitor' }).click();
+  await expect(monitor.getByLabel('Four Club Tablet status').getByRole('alert')).toHaveText(
+    'Connected-bike status is unavailable: Tablet device feed temporarily unavailable.',
+  );
+  await expect(monitor.getByText('Bike status unavailable', { exact: true })).toBeVisible();
+  await expect(monitor.getByText('0 bikes connected', { exact: true })).toHaveCount(0);
+  await expect(monitor.getByText('Bike connected · PM 950', { exact: true })).toHaveCount(0);
 });
 
 test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode between sessions', async ({ page }) => {
@@ -7668,9 +7698,9 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await page.route('**/api/heart-rate/watch-connect/tablet-live', async (route) => {
     tabletLiveRequests += 1;
     tabletLiveSessionHeader = route.request().headers()['x-tracklab-club-tablet-session'] ?? '';
-    // Start just inside the freshness window so the card must age itself to
-    // "No recent reading" before the four-second network poll runs again.
-    const recordedAt = Date.now() - 9_000;
+    // Model the fresh cloud projection written by the athlete's paired iPhone.
+    // The tablet must bind it to the exact selected claimed profile.
+    const recordedAt = Date.now() - 250;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -7742,6 +7772,16 @@ test('club owner enrolls a shared tablet that stays in athlete-only kiosk mode b
   await expect(page.getByRole('main', { name: 'Get Pulled timed Wattbike test' })).toBeVisible();
   await expect.poll(() => tabletLiveRequests).toBeGreaterThanOrEqual(1);
   expect(tabletLiveSessionHeader).toBe('tablet-athlete-session-token-rasheen-123456');
+  const getPulled = page.getByRole('main', { name: 'Get Pulled timed Wattbike test' });
+  await getPulled.getByRole('button', { name: 'Start 3 seconds pull · Air 1', exact: true }).click();
+  const rasheenHeartRate = getPulled.getByRole('status', {
+    name: 'Rasheen Hicks heart rate: 156 beats per minute, live now',
+  });
+  await expect(rasheenHeartRate).toHaveAttribute('data-heart-rate-source', 'apple-watch');
+  await expect(rasheenHeartRate.locator('strong')).toHaveText('156');
+  await expect(rasheenHeartRate.locator('small')).toHaveText('BPM');
+  await expect(page.getByRole('status', { name: /Bobby heart rate/ })).toHaveCount(0);
+  await getPulled.getByRole('button', { name: 'Cancel sprint', exact: true }).click();
 
   await primaryNav.getByRole('button', { name: 'End activity & choose athlete', exact: true }).click();
   // Shared-screen identity and BPM disappear before the DELETE round-trip;

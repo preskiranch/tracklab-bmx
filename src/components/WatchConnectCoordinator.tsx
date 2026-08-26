@@ -21,6 +21,7 @@ import {
   finishWatchConnectDisconnect,
   runWatchConnectSingleFlight,
   startWatchConnectAction,
+  updateWatchConnectStudioConsentAction,
   WatchConnectStartError,
   type WatchConnectNativeResult,
 } from '../lib/watchConnectActions';
@@ -295,11 +296,13 @@ export function defaultWatchConnectClubId({
   preferredClubId?: string | null;
   preferPersonal?: boolean;
 }) {
-  if (preferPersonal) return null;
   if (preferredClubId && contexts.some((context) => context.clubId === preferredClubId)) {
     return preferredClubId;
   }
-  return contexts.length === 1 ? contexts[0].clubId : null;
+  if (contexts.length === 1) return contexts[0].clubId;
+  if (preferPersonal) return null;
+  // More than one studio always requires an explicit choice.
+  return null;
 }
 
 export function watchConnectAccountRequestIsCurrent(
@@ -319,6 +322,22 @@ export function watchConnectCoordinatorRequestIsCurrent(
   return watchConnectAccountRequestIsCurrent(requestedAccountId, currentAccountId)
     && requestedGeneration === currentGeneration
     && currentAuthStatus === 'signed-in';
+}
+
+export function invalidateWatchConnectRefreshGeneration(
+  generationRef: { current: number },
+) {
+  generationRef.current += 1;
+}
+
+export function watchConnectConsentTargetRequestIsCurrent(
+  requestedClubId: string,
+  currentClubId: string | null,
+  requestedGeneration: number,
+  currentGeneration: number,
+) {
+  return requestedClubId === currentClubId
+    && requestedGeneration === currentGeneration;
 }
 
 export async function cleanupStaleWatchConnectStart({
@@ -517,6 +536,8 @@ export function WatchConnectCoordinator({
   const [indicatorTarget, setIndicatorTarget] = useState<HTMLElement | null>(null);
   const [liveStudioConsent, setLiveStudioConsent] = useState(false);
   const [sessionStudioConsent, setSessionStudioConsent] = useState(false);
+  const [studioConsentDetail, setStudioConsentDetail] = useState('');
+  const [studioConsentBusy, setStudioConsentBusy] = useState(false);
   const [recoveryRetryConnectionId, setRecoveryRetryConnectionId] = useState<string | null>(null);
   const contextsKey = studioContexts.map((context) => `${context.clubId}:${context.clubName}`).join('|');
   const [targetClubId, setTargetClubId] = useState<string | null>(() => defaultWatchConnectClubId({
@@ -531,6 +552,8 @@ export function WatchConnectCoordinator({
   const connectPromiseRef = useRef<Promise<void> | null>(null);
   const refreshFlightsRef = useRef(new Map<string, Promise<void>>());
   const refreshRequestGenerationRef = useRef(0);
+  const targetGenerationRef = useRef(0);
+  const currentTargetClubIdRef = useRef(targetClubId);
   const accountBoundarySealRequestKeyRef = useRef<string | null>(null);
   const recoveryAttemptedConnectionRef = useRef<string | null>(null);
   const unmatchedLiveSessionRefreshRef = useRef<string | null>(null);
@@ -546,6 +569,14 @@ export function WatchConnectCoordinator({
   }
   currentAccountIdRef.current = accountId;
   currentAuthStatusRef.current = authStatus;
+  const updateTargetClubId = useCallback((nextClubId: string | null, reset = false) => {
+    if (reset || currentTargetClubIdRef.current !== nextClubId) {
+      currentTargetClubIdRef.current = nextClubId;
+      targetGenerationRef.current += 1;
+      setStudioConsentBusy(false);
+    }
+    setTargetClubId(nextClubId);
+  }, []);
   const {
     availability,
     clearAllRelays,
@@ -571,6 +602,21 @@ export function WatchConnectCoordinator({
     () => newestConnection(snapshot, enrollment),
     [enrollment, snapshot],
   );
+  useEffect(() => {
+    if (scope !== 'studio') {
+      setLiveStudioConsent(false);
+      setSessionStudioConsent(false);
+      setStudioConsentDetail('');
+      return;
+    }
+    setLiveStudioConsent(enrollment?.liveStudioConsent ?? false);
+    setSessionStudioConsent(enrollment?.sessionStudioConsent ?? false);
+    setStudioConsentDetail(enrollment
+      ? enrollment.liveStudioConsent
+        ? 'Live BPM is shared with this studio while Watch Connect is active.'
+        : 'Live BPM is private. Turn it on here to show fresh readings on the selected studio tablet.'
+      : 'Choose whether this studio may see fresh Live BPM before the first connection.');
+  }, [enrollment, scope]);
   const availabilityKnown = availability != null;
   const onIPhone = availability?.platform === 'iphone';
   const onPairedIPhone = onIPhone
@@ -771,20 +817,22 @@ export function WatchConnectCoordinator({
   }, [watchConnect]);
 
   useEffect(() => {
-    setTargetClubId(defaultWatchConnectClubId({
+    updateTargetClubId(defaultWatchConnectClubId({
       contexts: studioContexts,
       preferredClubId: studioContext?.clubId,
       preferPersonal,
-    }));
+    }), true);
     setLiveStudioConsent(false);
     setSessionStudioConsent(false);
+    setStudioConsentDetail('');
+    setStudioConsentBusy(false);
     requestIdsRef.current = null;
     recoveryAttemptedConnectionRef.current = null;
     unmatchedLiveSessionRefreshRef.current = null;
     setRecoveryRetryConnectionId(null);
     // contextsKey avoids resetting the choice when App recreates the array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, contextsKey, preferPersonal, studioContext?.clubId]);
+  }, [accountId, contextsKey, preferPersonal, studioContext?.clubId, updateTargetClubId]);
 
   useEffect(() => {
     if (
@@ -795,14 +843,14 @@ export function WatchConnectCoordinator({
       candidate.id === nativeState.connectionId
       && candidate.connectedUntil === nativeState.connectedUntil
     ));
-    if (exact) setTargetClubId(exact.scope === 'studio' ? exact.clubId : null);
-  }, [nativeState?.connectedUntil, nativeState?.connectionId, snapshot.connections]);
+    if (exact) updateTargetClubId(exact.scope === 'studio' ? exact.clubId : null);
+  }, [nativeState?.connectedUntil, nativeState?.connectionId, snapshot.connections, updateTargetClubId]);
 
   useEffect(() => {
     if (!readOnlyObserver || hydratedAccountId !== accountId) return;
     const active = activeWatchConnectTarget(snapshot, now);
-    if (active) setTargetClubId(active.scope === 'studio' ? active.clubId : null);
-  }, [accountId, hydratedAccountId, now, readOnlyObserver, snapshot]);
+    if (active) updateTargetClubId(active.scope === 'studio' ? active.clubId : null);
+  }, [accountId, hydratedAccountId, now, readOnlyObserver, snapshot, updateTargetClubId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -917,6 +965,8 @@ export function WatchConnectCoordinator({
     setBusy(false);
     setSealingEarlierSession(false);
     setActionDetail('');
+    setStudioConsentDetail('');
+    setStudioConsentBusy(false);
   }, [accountId, authStatus]);
 
   useEffect(() => {
@@ -1267,6 +1317,104 @@ export function WatchConnectCoordinator({
     void connect(true);
   }, [accountId, connect, connection, enrollment, hydratedAccountId, nativeState, now]);
 
+  const changeLiveStudioConsent = useCallback((enabled: boolean) => {
+    setLiveStudioConsent(enabled);
+    if (!enrollment) return;
+    if (
+      !onPairedIPhone
+      || !accountId
+      || scope !== 'studio'
+      || enrollment.scope !== 'studio'
+      || !clubId
+      || enrollment.clubId !== clubId
+      || studioConsentBusy
+    ) {
+      setLiveStudioConsent(enrollment.liveStudioConsent);
+      return;
+    }
+    const requestedAccountId = accountId;
+    const requestedAccountGeneration = accountGenerationRef.current;
+    const requestedClubId = clubId;
+    const requestedTargetGeneration = targetGenerationRef.current;
+    const requestIsCurrent = () => watchConnectCoordinatorRequestIsCurrent(
+      requestedAccountId,
+      currentAccountIdRef.current,
+      requestedAccountGeneration,
+      accountGenerationRef.current,
+      currentAuthStatusRef.current,
+    );
+    const targetRequestIsCurrent = () => requestIsCurrent()
+      && watchConnectConsentTargetRequestIsCurrent(
+        requestedClubId,
+        currentTargetClubIdRef.current,
+        requestedTargetGeneration,
+        targetGenerationRef.current,
+      );
+    setStudioConsentBusy(true);
+    setStudioConsentDetail(enabled
+      ? 'Turning on Live BPM for this studio…'
+      : 'Turning off Live BPM for this studio…');
+    const operation = updateWatchConnectStudioConsentAction({
+      enrollment,
+      liveStudioConsent: enabled,
+      enrollmentRequestId: createWatchConnectRequestId('watch-connect-consent'),
+    }, {
+      getIdentity: async () => {
+        const identity = await getWatchConnectIdentity();
+        if (!targetRequestIsCurrent()) throw new Error('Studio sharing update was cancelled.');
+        if (!identity) throw new Error('Use the TrackLab iPhone app paired with this Apple Watch.');
+        return identity;
+      },
+    }).then((updated) => {
+      if (!requestIsCurrent()) return;
+      invalidateWatchConnectRefreshGeneration(refreshRequestGenerationRef);
+      setSnapshot((current) => ({
+        enrollments: [
+          updated,
+          ...current.enrollments.filter((candidate) => candidate.id !== updated.id),
+        ],
+        connections: current.connections.map((candidate) => (
+          candidate.enrollmentId === updated.id
+            ? {
+              ...candidate,
+              liveStudioConsent: updated.liveStudioConsent,
+              sessionStudioConsent: updated.sessionStudioConsent,
+            }
+            : candidate
+        )),
+      }));
+      if (!targetRequestIsCurrent()) return;
+      setLiveStudioConsent(updated.liveStudioConsent);
+      setSessionStudioConsent(updated.sessionStudioConsent);
+      setStudioConsentDetail(updated.liveStudioConsent
+        ? 'Live BPM is on. Fresh readings can now appear on the selected studio tablet.'
+        : 'Live BPM is off. Current heart rate remains private to this athlete.');
+      onMessage?.(updated.liveStudioConsent
+        ? 'Live BPM sharing is on for this studio.'
+        : 'Live BPM sharing is off for this studio.');
+    }).catch((error: unknown) => {
+      if (!targetRequestIsCurrent()) return;
+      setLiveStudioConsent(enrollment.liveStudioConsent);
+      const message = error instanceof Error ? error.message : String(error);
+      setStudioConsentDetail(message);
+      onMessage?.(message);
+    }).finally(() => {
+      if (targetRequestIsCurrent()) setStudioConsentBusy(false);
+    });
+    actionPromises?.add(operation);
+    void operation.finally(() => actionPromises?.delete(operation)).catch(() => undefined);
+  }, [
+    accountId,
+    actionPromises,
+    clubId,
+    enrollment,
+    getWatchConnectIdentity,
+    onMessage,
+    onPairedIPhone,
+    scope,
+    studioConsentBusy,
+  ]);
+
   const disconnect = useCallback(async (forgetEnrollmentId: string | null = null) => {
     if (!connection || !onPairedIPhone || !accountId) return;
     const requestedAccountId = accountId;
@@ -1375,11 +1523,11 @@ export function WatchConnectCoordinator({
     {portalTarget && createPortal(<>
     {capable === true && <WatchConnectCard
       athleteName={accountName}
-      busy={actionBusy}
+      busy={actionBusy || studioConsentBusy}
       context={scope === 'studio' ? 'studio' : 'personal'}
       disabled={hydratedAccountId !== accountId}
       enrolled={Boolean(enrollment)}
-      liveStudioConsent={enrollment?.liveStudioConsent ?? liveStudioConsent}
+      liveStudioConsent={liveStudioConsent}
       onConnect={onPairedIPhone ? () => { void connect(); } : undefined}
       onCheckAgain={availability?.platform === 'iphone' && availability.supported === false
         ? () => { void refreshAvailability(); }
@@ -1388,10 +1536,12 @@ export function WatchConnectCoordinator({
         ? () => { void disconnect(); }
         : undefined}
       onForgetWatch={onPairedIPhone && enrollment ? () => { void forget(); } : undefined}
-      onLiveStudioConsentChange={setLiveStudioConsent}
-      onSessionStudioConsentChange={setSessionStudioConsent}
+      onLiveStudioConsentChange={onPairedIPhone ? changeLiveStudioConsent : undefined}
+      onSessionStudioConsentChange={onPairedIPhone && !enrollment
+        ? setSessionStudioConsent
+        : undefined}
       onTargetChange={(value) => {
-        setTargetClubId(value === 'personal' ? null : value);
+        updateTargetClubId(value === 'personal' ? null : value);
         setLiveStudioConsent(false);
         setSessionStudioConsent(false);
         setActionDetail('');
@@ -1399,10 +1549,11 @@ export function WatchConnectCoordinator({
         recoveryAttemptedConnectionRef.current = null;
         setRecoveryRetryConnectionId(null);
       }}
-      sessionStudioConsent={enrollment?.sessionStudioConsent ?? sessionStudioConsent}
+      sessionStudioConsent={sessionStudioConsent}
       state={cardState}
+      studioConsentDetail={studioConsentDetail}
       studioName={selectedStudioContext?.clubName}
-      targetDisabled={actionBusy || Boolean(nativeState && [
+      targetDisabled={actionBusy || studioConsentBusy || Boolean(nativeState && [
         'connecting',
         'connected',
         'disconnecting',

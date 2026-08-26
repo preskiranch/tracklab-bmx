@@ -35,6 +35,16 @@ export class ClubTabletRequestError extends Error {
   }
 }
 
+export type ClubTabletBikePresenceInput = Readonly<{
+  deviceId: number;
+  label: string;
+}>;
+
+type ClubTabletBikePresenceRequestOptions = Readonly<{
+  keepalive?: boolean;
+  signal?: AbortSignal;
+}>;
+
 async function tabletFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
     ...init,
@@ -329,6 +339,39 @@ export async function loadClubTabletDevices() {
   return payload.devices.flatMap((value) => {
     const device = normalizeDevice(value);
     return device ? [device] : [];
+  });
+}
+
+export async function publishClubTabletBikePresence(
+  bike: ClubTabletBikePresenceInput,
+  credential = readStoredClubTabletDevice(),
+  options: ClubTabletBikePresenceRequestOptions = {},
+) {
+  if (!credential) throw new Error('This tablet has not been authorized by the club owner.');
+  const bikeDeviceId = Math.round(Number(bike.deviceId));
+  const bikeLabel = text(bike.label, 120);
+  if (!Number.isSafeInteger(bikeDeviceId) || bikeDeviceId <= 0 || !bikeLabel) {
+    throw new Error('TrackLab could not identify the connected Wattbike.');
+  }
+  return tabletFetch('/api/club-tablet/bike-presence', {
+    method: 'PUT',
+    keepalive: options.keepalive,
+    signal: options.signal,
+    headers: { Authorization: `Bearer ${credential.deviceToken}` },
+    body: JSON.stringify({ bikeDeviceId, bikeLabel }),
+  });
+}
+
+export async function clearClubTabletBikePresence(
+  credential = readStoredClubTabletDevice(),
+  options: ClubTabletBikePresenceRequestOptions = {},
+) {
+  if (!credential) return;
+  await tabletFetch('/api/club-tablet/bike-presence', {
+    method: 'DELETE',
+    keepalive: options.keepalive,
+    signal: options.signal,
+    headers: { Authorization: `Bearer ${credential.deviceToken}` },
   });
 }
 

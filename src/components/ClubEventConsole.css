@@ -87,6 +87,53 @@
 .club-event-builder-wide { grid-column: span 2; }
 .club-event-builder .club-event-primary { align-self: end; }
 
+.club-event-race-view {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid #cbd6c6;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.club-event-race-view > span {
+  color: #586454;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.club-event-race-view > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.club-event-race-view button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid #d0dacb;
+  border-radius: 9px;
+  background: #f5f8f3;
+  color: #53604f;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.club-event-race-view button.selected {
+  border-color: #68bc3e;
+  background: #e2f8d6;
+  color: #254f16;
+  box-shadow: inset 0 0 0 1px #91d66d;
+}
+
+.club-event-race-view small { color: #687464; font-size: 10px; line-height: 1.35; }
+
 .club-event-primary { border-color: #65bc35 !important; background: #7ade36 !important; color: #16220f !important; }
 .club-event-primary:disabled { border-color: #d5ddd1 !important; background: #e4e9e1 !important; color: #828c7e !important; }
 
@@ -135,6 +182,7 @@
   .club-event-mode-switch { width: 100%; flex-direction: column; }
   .club-event-builder { grid-template-columns: minmax(0, 1fr); }
   .club-event-builder-wide { grid-column: auto; }
+  .club-event-race-view > div { grid-template-columns: minmax(0, 1fr); }
   .club-event-seats { grid-template-columns: minmax(0, 1fr); }
   .club-event-lobby-title { align-items: flex-start; flex-wrap: wrap; }
   .club-event-lobby-actions { align-items: stretch; flex-direction: column; }

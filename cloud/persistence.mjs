@@ -9204,6 +9204,7 @@ export async function createClubEvent({
         current.cancelledAt = now;
         current.updatedAt = now;
       }
+      const replacedEvent = cloneMemoryClubEvent(current);
       const club = memoryClubsById.get(clubId);
       const event = {
         id,
@@ -9221,7 +9222,12 @@ export async function createClubEvent({
       memoryClubEventsById.set(id, event);
       memoryClubEventParticipantsByEventId.set(id, new Map());
       memoryCurrentClubEventIdByClubId.set(clubId, id);
-      return { status: 'created', event: cloneMemoryClubEvent(event), replacedEventId };
+      return {
+        status: 'created',
+        event: cloneMemoryClubEvent(event),
+        replacedEventId,
+        replacedEvent,
+      };
     });
   }
   const clubResult = await query(
@@ -9241,7 +9247,7 @@ export async function createClubEvent({
       `UPDATE ${schema}.club_events
        SET status = 'cancelled', cancelled_at = to_timestamp($2 / 1000.0), updated_at = to_timestamp($2 / 1000.0)
        WHERE club_id = $1 AND status IN ('lobby', 'active')
-       RETURNING id`,
+       RETURNING *`,
       [clubId, now],
     );
     const inserted = await client.query(
@@ -9251,9 +9257,17 @@ export async function createClubEvent({
        RETURNING *`,
       [id, clubId, activityType, json(configuration), now],
     );
+    const replacedEvent = cancelled.rows?.[0]
+      ? await clubEventAggregateWithClient(client, {
+          ...cancelled.rows[0],
+          club_name: club.rows[0].name,
+          owner_profile_key: club.rows[0].owner_profile_key,
+        })
+      : null;
     return {
       status: 'created',
-      replacedEventId: cancelled.rows?.[0]?.id ?? null,
+      replacedEventId: replacedEvent?.id ?? null,
+      replacedEvent,
       event: await clubEventAggregateWithClient(client, {
         ...inserted.rows[0],
         club_name: club.rows[0].name,
@@ -9603,7 +9617,7 @@ export async function cancelClubEvent({ ownerProfileKey, eventId, now = Date.now
       event.cancelledAt = now;
       event.updatedAt = now;
       memoryCurrentClubEventIdByClubId.delete(clubId);
-      return { status: 'cancelled' };
+      return { status: 'cancelled', event: cloneMemoryClubEvent(event) };
     });
   }
   const result = await withPersistenceLock(`club-event:${clubId}`, async (client) => {
@@ -9613,10 +9627,13 @@ export async function cancelClubEvent({ ownerProfileKey, eventId, now = Date.now
        FROM ${schema}.clubs AS clubs
        WHERE events.club_id = clubs.id AND clubs.owner_profile_key = $1
          AND events.id = $2 AND events.status IN ('lobby', 'active')
-       RETURNING events.id`,
+       RETURNING events.*, clubs.name AS club_name, clubs.owner_profile_key`,
       [ownerProfileKey, eventId, now],
     );
-    return { status: updated.rows?.[0] ? 'cancelled' : 'not-found' };
+    const event = updated.rows?.[0]
+      ? await clubEventAggregateWithClient(client, updated.rows[0])
+      : null;
+    return event ? { status: 'cancelled', event } : { status: 'not-found' };
   });
   return result ?? { status: 'unavailable' };
 }

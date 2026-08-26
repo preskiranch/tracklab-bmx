@@ -14,6 +14,7 @@ import {
   loadCurrentClubEvent,
   loadCurrentClubEventForOwner,
   markClubEventLaunchHandled,
+  normalizeClubEventRaceView,
   normalizeClubEventEnvelope,
   normalizeClubEventSnapshot,
   startCurrentClubEvent,
@@ -122,6 +123,36 @@ afterEach(() => {
 });
 
 describe('club event normalization', () => {
+  it('keeps only a bounded immutable race-view snapshot', () => {
+    expect(normalizeClubEventRaceView({
+      mode: '3d',
+      camera: {
+        angle: 47,
+        heading: 90,
+        center: { lat: 38.42, lng: -122.7, altitude: 500 },
+        zoom: 18.5,
+        updatedAt: 99_999,
+      },
+      accountKey: 'must-not-survive',
+    })).toEqual({
+      mode: '3d',
+      camera: {
+        angle: 47,
+        heading: 90,
+        center: { lat: 38.42, lng: -122.7 },
+        zoom: 18.5,
+      },
+    });
+    expect(normalizeClubEventRaceView({ mode: 'game' })).toEqual({ mode: 'game' });
+    expect(normalizeClubEventRaceView({ mode: '3d', camera: { angle: 68, heading: 90 } })).toBeNull();
+    expect(normalizeClubEventRaceView({ mode: '3d', camera: { angle: 47, heading: 360 } })).toBeNull();
+    expect(normalizeClubEventRaceView({
+      mode: 'satellite',
+      camera: { angle: 0, heading: 0, center: { lat: 91, lng: 0 } },
+    })).toBeNull();
+    expect(normalizeClubEventRaceView({ mode: 'street' })).toBeNull();
+  });
+
   it('normalizes the server contract, keeps string bike IDs, and rejects duplicate or excess seats', () => {
     const unsafeConfiguration = JSON.parse('{"trackName":"Preski Ranch","__proto__":{"polluted":true}}') as Record<string, unknown>;
     const event = normalizedEvent({ configuration: unsafeConfiguration });
@@ -135,6 +166,27 @@ describe('club event normalization', () => {
       athlete: { studioRiderId: 'rider-1', athleteName: 'Rasheen' },
     });
     expect(Object.prototype.hasOwnProperty.call(event.configuration, '__proto__')).toBe(false);
+  });
+
+  it('preserves a valid event race view and drops a malformed rolling-deployment value', () => {
+    const valid = normalizedEvent({
+      configuration: {
+        trackName: 'Preski Ranch',
+        raceView: { mode: 'satellite', camera: { angle: 20, heading: 185, zoom: 17 } },
+      },
+    });
+    expect(valid.configuration.raceView).toEqual({
+      mode: 'satellite',
+      camera: { angle: 20, heading: 185, zoom: 17 },
+    });
+
+    const malformed = normalizedEvent({
+      configuration: {
+        trackName: 'Preski Ranch',
+        raceView: { mode: 'satellite', camera: { angle: -1, heading: 185 } },
+      },
+    });
+    expect(malformed.configuration).not.toHaveProperty('raceView');
   });
 
   it('requires a valid shared start time for active events and tolerates direct snapshots', () => {

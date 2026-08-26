@@ -4822,6 +4822,11 @@ input:focus {
   background: #eef4f7;
 }
 
+.custom-route-open:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .custom-route-row.selected .custom-route-open:hover {
   background: #e8f7dd;
 }

@@ -4,6 +4,7 @@ import {
   startWatchConnectAction,
   stopWatchConnectAction,
   stopWatchConnectForAccountBoundary,
+  updateWatchConnectStudioConsentAction,
   WatchConnectStartError,
   type WatchConnectActionDependencies,
 } from '../../src/lib/watchConnectActions';
@@ -261,6 +262,68 @@ describe('Watch Connect actions', () => {
       connectionRequestId: 'watch-connect-session-123456789',
     }, deps)).rejects.toThrow('Approve Training summaries');
     expect(deps.getIdentity).not.toHaveBeenCalled();
+  });
+
+  it('turns Live BPM on for the exact remembered studio through enrollment refresh', async () => {
+    const saved: WatchConnectEnrollment = {
+      ...enrollment,
+      id: 'enrollment-studio-consent',
+      scope: 'studio',
+      clubId: 'club-one',
+      studioRiderId: 'rider-one',
+      liveStudioConsent: false,
+      sessionStudioConsent: true,
+    };
+    const refreshed = {
+      ...saved,
+      liveStudioConsent: true,
+      updatedAt: now + 1,
+    };
+    const enroll = vi.fn(async () => ({ enrollment: refreshed, replayed: false }));
+
+    await expect(updateWatchConnectStudioConsentAction({
+      enrollment: saved,
+      liveStudioConsent: true,
+      enrollmentRequestId: 'watch-connect-consent-123456789',
+    }, {
+      getIdentity: async () => ({ version: 1, installId }),
+      enroll,
+    })).resolves.toEqual(refreshed);
+
+    expect(enroll).toHaveBeenCalledWith({
+      requestId: 'watch-connect-consent-123456789',
+      installId,
+      scope: 'studio',
+      clubId: 'club-one',
+      liveStudioConsent: true,
+      sessionStudioConsent: true,
+    });
+  });
+
+  it('rejects consent refreshes that change the claimed studio athlete identity', async () => {
+    const saved: WatchConnectEnrollment = {
+      ...enrollment,
+      id: 'enrollment-studio-consent',
+      scope: 'studio',
+      clubId: 'club-one',
+      studioRiderId: 'rider-one',
+      sessionStudioConsent: true,
+    };
+    await expect(updateWatchConnectStudioConsentAction({
+      enrollment: saved,
+      liveStudioConsent: true,
+      enrollmentRequestId: 'watch-connect-consent-123456789',
+    }, {
+      getIdentity: async () => ({ version: 1, installId }),
+      enroll: async () => ({
+        enrollment: {
+          ...saved,
+          studioRiderId: 'rider-two',
+          liveStudioConsent: true,
+        },
+        replayed: false,
+      }),
+    })).rejects.toThrow('could not confirm');
   });
 
   it('stops studio visibility while finalized native samples keep syncing privately', async () => {

@@ -7,6 +7,13 @@ export const clubTabletOutboxStorageKey = 'tracklab.club-tablet-save-outbox.v1';
 export const clubTabletSessionHeader = 'X-TrackLab-Club-Tablet-Session';
 export const clubTabletResultUploadHeader = 'X-TrackLab-Club-Tablet-Result-Token';
 
+export type ClubTabletConnectedBike = {
+  deviceId: number;
+  label: string;
+  updatedAt: number;
+  expiresAt: number;
+};
+
 export type ClubTabletDevice = {
   id: string;
   name: string;
@@ -15,6 +22,7 @@ export type ClubTabletDevice = {
   createdAt?: number;
   lastSeenAt?: number;
   revokedAt?: number | null;
+  connectedBike?: ClubTabletConnectedBike;
 };
 
 export type ClubTabletDeviceCredential = {
@@ -80,6 +88,29 @@ export function positiveClubTabletNumber(value: unknown, fallback = 0) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
+export function normalizeClubTabletConnectedBike(value: unknown): ClubTabletConnectedBike | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<ClubTabletConnectedBike>;
+  const deviceId = positiveClubTabletNumber(candidate.deviceId);
+  const label = clubTabletText(candidate.label, 120);
+  const updatedAt = positiveClubTabletNumber(candidate.updatedAt);
+  const expiresAt = positiveClubTabletNumber(candidate.expiresAt);
+  const roundedDeviceId = Math.round(deviceId);
+  if (
+    !Number.isSafeInteger(roundedDeviceId)
+    || roundedDeviceId <= 0
+    || !label
+    || !updatedAt
+    || expiresAt <= updatedAt
+  ) return null;
+  return {
+    deviceId: roundedDeviceId,
+    label,
+    updatedAt,
+    expiresAt,
+  };
+}
+
 export function normalizeClubTabletDevice(value: unknown): ClubTabletDevice | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<ClubTabletDevice>;
@@ -91,6 +122,7 @@ export function normalizeClubTabletDevice(value: unknown): ClubTabletDevice | nu
   const createdAt = positiveClubTabletNumber(candidate.createdAt);
   const lastSeenAt = positiveClubTabletNumber(candidate.lastSeenAt);
   const revokedAt = positiveClubTabletNumber(candidate.revokedAt);
+  const connectedBike = normalizeClubTabletConnectedBike(candidate.connectedBike);
   return {
     id,
     name,
@@ -99,6 +131,7 @@ export function normalizeClubTabletDevice(value: unknown): ClubTabletDevice | nu
     ...(createdAt ? { createdAt } : {}),
     ...(lastSeenAt ? { lastSeenAt } : {}),
     ...(revokedAt ? { revokedAt } : {}),
+    ...(connectedBike ? { connectedBike } : {}),
   };
 }
 

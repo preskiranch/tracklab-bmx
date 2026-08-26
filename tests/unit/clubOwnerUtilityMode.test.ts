@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GetPulledResult } from '../../src/lib/getPulled';
 import type { ClubOwnerTrainingCoordinatorEntry } from '../../src/lib/clubOwnerTrainingCoordinator';
 import type { ClubOwnerUtilityModeProps } from '../../src/components/ClubOwnerUtilityMode';
@@ -50,6 +50,10 @@ vi.mock('../../src/lib/clubOwnerTrainingCoordinator', () => ({
 
 import { ClubOwnerUtilityMode } from '../../src/components/ClubOwnerUtilityMode';
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function entry(): ClubOwnerTrainingCoordinatorEntry {
   return {
     request: {
@@ -68,6 +72,7 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = f
   const begin = vi.fn(async () => true);
   const finalize = vi.fn(async () => undefined);
   const cancelActiveGroup = vi.fn(async () => undefined);
+  const onTabletExerciseReviewStart = vi.fn();
   const onTabletExerciseSaved = vi.fn(async () => undefined);
   const onHistoryChanged = vi.fn();
   const props = {
@@ -104,6 +109,7 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = f
       completionRef: { current: null },
       cancelActiveGroup,
       onHistoryChanged,
+      onTabletExerciseReviewStart,
       onTabletExerciseSaved,
     },
     heartRateContext: {
@@ -137,6 +143,7 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = f
     finalize,
     cancelActiveGroup,
     onHistoryChanged,
+    onTabletExerciseReviewStart,
     onTabletExerciseSaved,
   };
 }
@@ -217,11 +224,17 @@ describe('ClubOwnerUtilityMode integration', () => {
   });
 
   it('releases a Club Tablet athlete only after Get Pulled history and heart rate finish saving', async () => {
+    vi.useFakeTimers();
     let finishHistory: (() => void) | null = null;
     mocks.saveLegacyGetPulled.mockImplementationOnce(() => new Promise<void>((resolve) => {
       finishHistory = resolve;
     }));
-    const { props, finalize, onTabletExerciseSaved } = sharedProps(null, true);
+    const {
+      props,
+      finalize,
+      onTabletExerciseReviewStart,
+      onTabletExerciseSaved,
+    } = sharedProps(null, true);
     renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
       ...props,
       mode: 'get-pulled',
@@ -248,10 +261,14 @@ describe('ClubOwnerUtilityMode integration', () => {
     const onComplete = mocks.getPulledProps?.onComplete as (value: GetPulledResult) => void;
     onComplete(result);
 
-    await vi.waitFor(() => expect(finalize).toHaveBeenCalledOnce());
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(onTabletExerciseReviewStart).toHaveBeenCalledOnce();
     expect(onTabletExerciseSaved).not.toHaveBeenCalled();
     finishHistory?.();
-    await vi.waitFor(() => expect(onTabletExerciseSaved).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onTabletExerciseSaved).toHaveBeenCalledOnce();
   });
 
   it('refreshes regular account history even when independent heart-rate finalization fails', async () => {

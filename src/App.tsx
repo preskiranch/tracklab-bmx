@@ -93,6 +93,7 @@ import {
   appendProSetZoneBoundaryMeter,
   applyUserTrackMapping,
   captureZoneBoundaryAnchors,
+  clubEventTrackMapping,
   createTrackZonesForBoundarySets,
   createZoneBoundarySet,
   createTrackZones,
@@ -170,6 +171,7 @@ import {
   normalizeStraightSprintAirSetting,
   normalizeStraightSprintDistance,
   straightSprintCameraPreferenceKey,
+  straightSprintDistanceOptions,
   straightSprintFeetToMeters,
   straightSprintMaximumFeet,
 } from './lib/straightSprint';
@@ -250,7 +252,10 @@ import {
 import type { ClubTrainingSelection } from './lib/trainingHistory';
 import type { ClubOwnerTrainingCoordinatorEntry } from './lib/clubOwnerTrainingCoordinator';
 import type { ClubLiveAccess } from './lib/clubLive';
-import type { ClubEventLaunchPayload } from './lib/clubEvent';
+import type {
+  ClubEventLaunchPayload,
+  ClubEventRaceViewCamera,
+} from './lib/clubEvent';
 import { clubEventMultiplayerRoomReady } from './lib/clubEventRuntime';
 import type { GetPulledLiveState, GetPulledResult } from './lib/getPulled';
 import {
@@ -1052,6 +1057,22 @@ function normalizeEarthCamera(value: Partial<EarthCamera> | unknown): EarthCamer
     updatedAt: Number.isFinite(camera.updatedAt) ? Number(camera.updatedAt) : 0,
   };
 }
+
+function clubEventCameraSnapshot(camera: EarthCamera | undefined): ClubEventRaceViewCamera | undefined {
+  if (!camera) return undefined;
+  return {
+    angle: camera.angle,
+    heading: camera.heading,
+    ...(camera.center ? { center: camera.center } : {}),
+    ...(camera.zoom != null ? { zoom: camera.zoom } : {}),
+  };
+}
+
+type StraightSprintCourse = Readonly<{
+  track: TrackRecord;
+  course: TrackRecord;
+  mapping?: UserTrackMapping;
+}>;
 
 function earthCamerasMatch(left: EarthCamera | undefined, right: EarthCamera) {
   const leftHasCenter = Boolean(left?.center);
@@ -1945,6 +1966,7 @@ export default function App() {
   const clubTabletExerciseSavedRef = useRef<(
     session: ClubTabletSessionCredential,
   ) => Promise<void> | void>(() => undefined);
+  const clubTabletCompletionReviewSessionTokenRef = useRef<string | null>(null);
   clubTabletSessionRef.current = clubTabletSession;
   const clubTabletAutoSignOutStartedRef = useRef(false);
   const clubTrainingRequestGenerationRef = useRef(0);
@@ -2718,7 +2740,7 @@ export default function App() {
       membership.clubId === clubTrainingSelection.clubId
       && membership.studioRiderId === clubTrainingSelection.studioRiderId
     )) ?? null
-    : !ownedClub && activeClubTrainingMemberships.length === 1
+    : activeClubTrainingMemberships.length === 1
       ? activeClubTrainingMemberships[0]
       : null;
 
@@ -3155,6 +3177,42 @@ export default function App() {
     () => mergeCustomRoutes(publicCustomRoutes, customRoutes),
     [customRoutes, publicCustomRoutes],
   );
+  const publicStraightSprintCourses = useMemo<StraightSprintCourse[]>(() => publicCustomRoutes.flatMap<StraightSprintCourse>((track) => {
+    const mapping = publicTrackMappings[track.id];
+    if (mapping) return [{ track, course: applyUserTrackMapping(track, mapping), mapping }];
+    return track.routeStatus === 'user-mapped' ? [{ track, course: track, mapping: undefined }] : [];
+  }), [publicCustomRoutes, publicTrackMappings]);
+  const savedStraightSprintCourses = useMemo<StraightSprintCourse[]>(() => {
+    if (clubTabletKioskMode) return publicStraightSprintCourses;
+    return availableCustomRoutes.flatMap<StraightSprintCourse>((track) => {
+      const mapping = clubEventTrackMapping(
+        storedMappings[track.id],
+        publicTrackMappings[track.id],
+        developerUiActive,
+      );
+      if (mapping) return [{ track, course: applyUserTrackMapping(track, mapping), mapping }];
+      return track.routeStatus === 'user-mapped' ? [{ track, course: track, mapping: undefined }] : [];
+    });
+  }, [
+    availableCustomRoutes,
+    clubTabletKioskMode,
+    developerUiActive,
+    publicStraightSprintCourses,
+    publicTrackMappings,
+    storedMappings,
+  ]);
+  const clubEventStraightSprintCourses = developerUiActive
+    ? savedStraightSprintCourses
+    : publicStraightSprintCourses;
+  const straightSprintVenueCourses = useMemo<StraightSprintCourse[]>(() => {
+    if (clubEventLaunch?.activityType !== 'straight-sprint' || !clubEventTrack) {
+      return savedStraightSprintCourses;
+    }
+    return [
+      { track: clubEventTrack, course: clubEventTrack, mapping: undefined },
+      ...savedStraightSprintCourses.filter(({ track }) => track.id !== clubEventTrack.id),
+    ];
+  }, [clubEventLaunch?.activityType, clubEventTrack, savedStraightSprintCourses]);
   const persistentCatalogTracks = useMemo(
     () => {
       const regularTracks = [...baseCatalogTracks, ...availableCustomRoutes];
@@ -3237,6 +3295,24 @@ export default function App() {
     () => catalogTracks.find((track) => track.id === selectedTrackId) ?? availableTracks[0] ?? defaultTrack,
     [availableTracks, catalogTracks, selectedTrackId],
   );
+  // Club event envelopes are normalized at the clubEvent boundary before a
+  // launch reaches App, so keep this type-only to preserve the lazy event UI
+  // chunk instead of pulling the entire event client into the initial bundle.
+  const activeClubEventRaceView = clubEventLaunch?.configuration.raceView ?? null;
+  const clubEventConfigurationLocked = clubEventLaunch?.activityType === 'bmx-race'
+    || clubEventLaunch?.activityType === 'straight-sprint';
+  const clubEventLaunchMatchesTrack = Boolean(
+    clubEventLaunch
+    && clubEventLaunch.activityType === (
+      raceWorkspaceMode === 'straight-sprint' ? 'straight-sprint' : 'bmx-race'
+    )
+    && typeof clubEventLaunch.configuration.trackId === 'string'
+    && clubEventLaunch.configuration.trackId.trim() === selectedTrack.id,
+  );
+  const clubEventTrackSnapshotApplies = clubEventLaunchMatchesTrack
+    && clubEventTrack?.id === selectedTrack.id;
+  const clubEventRaceViewApplies = clubEventLaunchMatchesTrack
+    && activeClubEventRaceView != null;
   const raceCameraPreferenceKey = raceWorkspaceMode === 'straight-sprint'
     ? straightSprintCameraPreferenceKey(selectedTrack.id, straightSprintDistanceFeet)
     : selectedTrack.id;
@@ -3254,10 +3330,12 @@ export default function App() {
     setMappingSaveStatus('idle');
     setMappingSaveMessage(null);
   }, [selectedTrack.id]);
-  const selectedTrackMapping = newestTrackMapping(
-    developerUiActive ? storedMappings[selectedTrack.id] : undefined,
-    publicTrackMappings[selectedTrack.id],
-  );
+  const selectedTrackMapping = clubEventTrackSnapshotApplies
+    ? undefined
+    : newestTrackMapping(
+      developerUiActive ? storedMappings[selectedTrack.id] : undefined,
+      publicTrackMappings[selectedTrack.id],
+    );
   const selectedRouteVariants = useMemo(
     () => (selectedTrackMapping ? routeVariantsFromMapping(selectedTrackMapping) : []),
     [selectedTrackMapping],
@@ -3282,8 +3360,10 @@ export default function App() {
     [mappingRouteVariantId, selectedTrackMapping],
   );
   useEffect(() => {
-    const savedCamera = earthCamerasByTrack[raceCameraPreferenceKey]
-      ?? earthCamerasByTrack[selectedTrack.id];
+    const savedCamera = clubEventRaceViewApplies
+      ? activeClubEventRaceView?.camera
+      : earthCamerasByTrack[raceCameraPreferenceKey]
+        ?? earthCamerasByTrack[selectedTrack.id];
     const isCustomRoute = selectedTrack.countryCode === 'CUSTOM';
     const fallbackCenter = isCustomRoute ? trackCenter(selectedTrack) : null;
     const fallbackZoom = isCustomRoute ? customRouteInitialZoom : null;
@@ -3292,6 +3372,8 @@ export default function App() {
     setEarthCenter(savedCamera?.center ?? fallbackCenter);
     setEarthZoom(savedCamera?.zoom ?? fallbackZoom);
   }, [
+    activeClubEventRaceView?.camera,
+    clubEventRaceViewApplies,
     earthCamerasByTrack,
     raceCameraPreferenceKey,
     selectedTrack.countryCode,
@@ -3308,6 +3390,12 @@ export default function App() {
   const bmxRaceViewMode: TrackRaceViewMode = selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite';
   const effectiveTrack = satelliteEffectiveTrack;
   const straightSprintGameArenaAvailable = supportsDragStripGameArena(effectiveTrack);
+  const activeClubEventRaceViewMode: TrackRaceViewMode | null = clubEventRaceViewApplies
+    && activeClubEventRaceView
+    ? activeClubEventRaceView.mode === 'game'
+      ? raceWorkspaceMode === 'straight-sprint' && straightSprintGameArenaAvailable ? 'game' : 'satellite'
+      : activeClubEventRaceView.mode
+    : null;
   useEffect(() => {
     setStraightSprintViewMode(selectedTrackMapping?.raceViewMode === '3d' ? '3d' : 'satellite');
   }, [selectedTrack.id, selectedTrackMapping?.raceViewMode]);
@@ -6181,6 +6269,38 @@ export default function App() {
     void saveClubOwnerRaceGroup(raceCapture, entry).catch(() => undefined);
   }, [raceCapture, raceState, saveClubOwnerRaceGroup]);
 
+  useLayoutEffect(() => {
+    if (
+      raceState !== 'finished'
+      || !raceCapture
+      || raceCapture.source !== 'live'
+      || raceSummary.length === 0
+      || !clubTabletSessionActive
+      || !clubTabletSession
+    ) {
+      return;
+    }
+
+    const tabletLocalPlayer = racePlayers.find(
+      (player) => player.riderId === clubTabletSession.session.studioRiderId,
+    );
+    if (!tabletLocalPlayer || !raceSummary.some((summary) => summary.playerId === tabletLocalPlayer.id)) {
+      return;
+    }
+
+    // A Club Event can disappear from the tablet feed immediately after the
+    // finish. Arm the review synchronously after DOM commit so its passive
+    // polling cleanup cannot release this athlete before results are saved.
+    clubTabletCompletionReviewSessionTokenRef.current = clubTabletSession.sessionToken;
+  }, [
+    clubTabletSession,
+    clubTabletSessionActive,
+    raceCapture,
+    racePlayers,
+    raceSummary,
+    raceState,
+  ]);
+
   useEffect(() => {
     if (
       raceState !== 'finished'
@@ -6372,7 +6492,10 @@ export default function App() {
     });
     if (tabletLocalPlayer) {
       if (!completedTabletSession) return;
-      void Promise.all([raceResultSave, trainingHistorySave, ...ghostSaves])
+      const resultReviewHold = new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 15_000);
+      });
+      void Promise.all([raceResultSave, trainingHistorySave, ...ghostSaves, resultReviewHold])
         .then(() => clubTabletExerciseSavedRef.current(completedTabletSession))
         .catch((error: Error) => {
           console.warn(`Club Tablet save failed; athlete remains selected: ${error.message}`);
@@ -6645,8 +6768,9 @@ export default function App() {
     setCustomRouteStatus((current) => current ?? 'Create a custom location or choose a saved sprint route.');
 
     if (selectedTrack.countryCode !== 'CUSTOM') {
-      const nextTrack = availableCustomRoutes.find((track) => track.id === lastStraightSprintTrackIdRef.current)
-        ?? availableCustomRoutes[0];
+      const nextTrack = savedStraightSprintCourses.find(({ track }) => (
+        track.id === lastStraightSprintTrackIdRef.current
+      ))?.track ?? savedStraightSprintCourses[0]?.track;
       if (nextTrack) {
         handleTrackChange(nextTrack.id);
       }
@@ -6656,6 +6780,33 @@ export default function App() {
       document.getElementById('custom-route-location-input')?.focus();
     }, 80);
   };
+
+  useEffect(() => {
+    if (
+      appMode !== 'straight-sprint'
+      || selectedTrack.countryCode === 'CUSTOM'
+      || clubEventLaunchRef.current?.activityType === 'straight-sprint'
+    ) return;
+
+    // Public route mappings can arrive after the tablet has already opened
+    // Straight Sprint. Move off the BMX catalog as soon as a saved dragstrip
+    // is available instead of leaving the kiosk on the stale LaSalle default.
+    const nextTrack = savedStraightSprintCourses.find(({ track }) => (
+      track.id === lastStraightSprintTrackIdRef.current
+    ))?.track ?? savedStraightSprintCourses[0]?.track;
+    if (!nextTrack) return;
+    discardCustomRoutePreview();
+    prepareForTrackSelection(nextTrack.id);
+    setSelectedCountry(nextTrack.country);
+    setSelectedState(nextTrack.state);
+    setSelectedTrackId(nextTrack.id);
+  }, [
+    appMode,
+    discardCustomRoutePreview,
+    prepareForTrackSelection,
+    savedStraightSprintCourses,
+    selectedTrack.countryCode,
+  ]);
 
   const openGetPulled = () => {
     setMappingMode(false);
@@ -7933,6 +8084,12 @@ export default function App() {
     ));
 
     setEarthCamerasByTrack((current) => {
+      // A coach-event camera is an immutable launch snapshot. Tablet riders
+      // may adjust their live view, but that temporary movement must not
+      // overwrite either the owner view or this tablet's personal preference.
+      if (clubEventConfigurationLocked) {
+        return current;
+      }
       const accountPreferencesAreHydrated = authStatus !== 'loading'
         && (!authUser || cloudUserDataLoadedKeyRef.current === cloudProfileKey);
       if (!accountPreferencesAreHydrated) {
@@ -7960,6 +8117,7 @@ export default function App() {
   }, [
     authStatus,
     authUser,
+    clubEventConfigurationLocked,
     cloudProfileKey,
     earthAngle,
     earthCenter,
@@ -9128,6 +9286,14 @@ export default function App() {
   }, [clearRaceCaptureForClubTablet]);
 
   const handleClubTabletSessionChange = useCallback((next: ClubTabletSessionCredential | null) => {
+    const previousSession = clubTabletSessionRef.current;
+    if (
+      previousSession
+      && previousSession.sessionToken !== next?.sessionToken
+      && clubTabletCompletionReviewSessionTokenRef.current === previousSession.sessionToken
+    ) {
+      clubTabletCompletionReviewSessionTokenRef.current = null;
+    }
     clubTabletSessionRef.current = next;
     setLiveHeartRateByRider({});
     clearRaceCaptureForClubTablet();
@@ -9235,6 +9401,10 @@ export default function App() {
         const { loadCurrentClubEvent } = await import('./lib/clubEvent');
         const envelope = await loadCurrentClubEvent({ session: activeSession });
         if (!disposed && envelope.event?.id !== eventId) {
+          if (clubTabletCompletionReviewSessionTokenRef.current === activeSession.sessionToken) {
+            timer = window.setTimeout(() => void poll(), 2_000);
+            return;
+          }
           await handleClubTabletEndAthlete();
           return;
         }
@@ -9254,6 +9424,9 @@ export default function App() {
   const handleClubTabletExerciseSaved = useCallback((
     completedSession: ClubTabletSessionCredential,
   ) => {
+    if (clubTabletCompletionReviewSessionTokenRef.current === completedSession.sessionToken) {
+      clubTabletCompletionReviewSessionTokenRef.current = null;
+    }
     const completedEvent = clubEventLaunchRef.current;
     const currentSession = clubTabletSessionRef.current;
     const currentSessionMatches = Boolean(
@@ -9285,6 +9458,18 @@ export default function App() {
     ]).catch(() => undefined);
   }, [handleClubTabletSessionChange]);
   clubTabletExerciseSavedRef.current = handleClubTabletExerciseSaved;
+
+  const handleClubTabletExerciseReviewStart = useCallback((
+    completedSession: ClubTabletSessionCredential,
+  ) => {
+    const currentSession = clubTabletSessionRef.current;
+    if (
+      currentSession?.deviceId === completedSession.deviceId
+      && currentSession.sessionToken === completedSession.sessionToken
+    ) {
+      clubTabletCompletionReviewSessionTokenRef.current = completedSession.sessionToken;
+    }
+  }, []);
 
   const shareMultiplayerInvite = useCallback(() => {
     if (!multiplayer.inviteUrl) {
@@ -9917,7 +10102,8 @@ export default function App() {
     setSelectedGhostIds([]);
   }, []);
 
-  const handleStart = async (): Promise<boolean> => {
+  const handleStart = async (source: 'manual' | 'room-clock' = 'manual'): Promise<boolean> => {
+    if (clubEventConfigurationLocked && source !== 'room-clock') return false;
     const startingRacePlayers = racePlayers;
     if (startGateStatus.active || raceState === 'racing') return true;
     if (
@@ -10051,7 +10237,7 @@ export default function App() {
   // The server-clock timer must call the newest render's start logic. Keeping
   // the handler in a ref prevents a one-shot room token from being consumed by
   // a stale closure while bikes, track readiness, or club authorization finish.
-  roomRaceStartHandlerRef.current = handleStart;
+  roomRaceStartHandlerRef.current = () => handleStart('room-clock');
 
   const clubOwnerPreparationDialogVisible = raceWorkspaceActive && (
     clubOwnerRacePreparation.phase === 'authorizing'
@@ -10101,6 +10287,7 @@ export default function App() {
       completionRef: clubOwnerUtilityCompletionRef,
       cancelActiveGroup: cancelActiveClubOwnerTrainingGroup,
       onHistoryChanged: () => setTrainingHistoryRevision((revision) => revision + 1),
+      onTabletExerciseReviewStart: handleClubTabletExerciseReviewStart,
       onTabletExerciseSaved: handleClubTabletExerciseSaved,
     },
     heartRateContext: {
@@ -10365,10 +10552,20 @@ export default function App() {
   const workflowMapReady = sessionTrackAvailable
     && effectiveTrack.routeStatus === 'user-mapped'
     && straightSprintRouteReady;
-  const workflowRaceReady = workflowConnectionReady && workflowRaceEntryReady && workflowMapReady && !startGateStatus.active && raceState !== 'racing';
+  const workflowRaceReady = workflowConnectionReady
+    && workflowRaceEntryReady
+    && workflowMapReady
+    && !clubEventConfigurationLocked
+    && !startGateStatus.active
+    && raceState !== 'racing';
   const hasStartHereSplitChoices = racePlayers.length > 0 && (effectiveTrack.splitSections?.length ?? 0) > 0;
-  const canChooseStartHereSplitLine = raceState !== 'racing' && !startGateStatus.active;
-  const canEditLiveRaceEntry = !demoMode && raceState !== 'racing' && !startGateStatus.active;
+  const canChooseStartHereSplitLine = !clubEventConfigurationLocked
+    && raceState !== 'racing'
+    && !startGateStatus.active;
+  const canEditLiveRaceEntry = !clubEventConfigurationLocked
+    && !demoMode
+    && raceState !== 'racing'
+    && !startGateStatus.active;
   const workflowSteps: RaceWorkflowStep[] = [
     {
       kind: 'action',
@@ -10448,6 +10645,8 @@ export default function App() {
         : raceWorkspaceMode === 'straight-sprint' ? 'Sprint' : 'Race',
       detail: workflowRaceReady
         ? 'Ready'
+        : clubEventConfigurationLocked
+          ? 'Coach controls start'
         : !sessionTrackAvailable
           ? 'Create sprint first'
           : !workflowMapReady
@@ -10523,6 +10722,7 @@ export default function App() {
         roster={clubTabletRoster}
         session={clubTabletSession}
         bikeActivityAt={clubTabletBikeActivityAt}
+        connectedBike={bluetooth.devices.find((bike) => bike.connected) ?? null}
         onDeviceReady={handleClubTabletDeviceReady}
         onDeviceError={handleClubTabletDeviceError}
         onDeviceRevoked={handleClubTabletDeviceRevoked}
@@ -10594,7 +10794,7 @@ export default function App() {
         friendNetworkRefreshRevision={friendNetworkRefreshRevision}
         ownedStudio={ownedClub ? { clubId: ownedClub.id, clubName: ownedClub.name } : null}
         settingsOpen={settingsMode}
-        preferPersonal={Boolean(ownedClub)}
+        preferPersonal={false}
         studioContext={watchConnectStudioMembership ? {
           clubId: watchConnectStudioMembership.clubId,
           clubName: watchConnectStudioMembership.clubName,
@@ -11078,7 +11278,9 @@ export default function App() {
           <div className="workflow-list">
             {workflowSteps.map((step, index) => {
               if (step.kind === 'laps') {
-                const lapControlsDisabled = startGateStatus.active || raceState === 'racing';
+                const lapControlsDisabled = clubEventConfigurationLocked
+                  || startGateStatus.active
+                  || raceState === 'racing';
                 return (
                   <div
                     className={`workflow-step workflow-loop-laps ${step.state}`}
@@ -11123,6 +11325,7 @@ export default function App() {
                   type="button"
                   onPointerDown={step.onPointerDown}
                   onClick={step.onClick}
+                  disabled={clubEventConfigurationLocked}
                   key={`${index}-${step.label}`}
                 >
                   <span className="workflow-index">{index + 1}</span>
@@ -11356,13 +11559,17 @@ export default function App() {
               <button type="button" onClick={openTrackLocator}>
                 <MapPinned size={17} /> Track Locator
               </button>
-              <button className={appMode === 'monitor' ? 'selected' : ''} type="button" onClick={() => openFullscreenUtility('monitor')}>
-                <Gauge size={17} /> Live Monitor
+              <button
+                className={(clubOwnerActive ? clubMonitorReleasesLocalBikes : appMode === 'monitor') ? 'selected' : ''}
+                type="button"
+                onClick={() => openFullscreenUtility(clubOwnerActive ? 'club-monitor' : 'monitor')}
+              >
+                <Gauge size={17} /> {clubOwnerActive ? 'Studio Tablet Monitor' : 'Live Monitor'}
               </button>
               {clubOwnerActive && (
                 <>
-                  <button className={clubMonitorReleasesLocalBikes ? 'selected' : ''} type="button" onClick={() => openFullscreenUtility('club-monitor')}>
-                    <Radio size={17} /> Club Live Monitor
+                  <button className={appMode === 'monitor' ? 'selected' : ''} type="button" onClick={() => openFullscreenUtility('monitor')}>
+                    <Radio size={17} /> This PC&apos;s Bikes
                   </button>
                   <button className={appMode === 'club-tablet' ? 'selected' : ''} type="button" onClick={() => setAppMode('club-tablet')}>
                     <TabletSmartphone size={17} /> Club Tablets
@@ -11506,19 +11713,31 @@ export default function App() {
           <div className="track-selectors">
             <label>
               <span>Country</span>
-              <select value={selectedCountry} onChange={(event) => handleCountryChange(event.target.value)}>
+              <select
+                value={selectedCountry}
+                disabled={clubEventConfigurationLocked}
+                onChange={(event) => handleCountryChange(event.target.value)}
+              >
                 {countries.map((country) => <option value={country} key={country}>{country}</option>)}
               </select>
             </label>
             <label>
               <span>State / region</span>
-              <select value={selectedState} onChange={(event) => handleStateChange(event.target.value)}>
+              <select
+                value={selectedState}
+                disabled={clubEventConfigurationLocked}
+                onChange={(event) => handleStateChange(event.target.value)}
+              >
                 {states.map((state) => <option value={state} key={state}>{state}</option>)}
               </select>
             </label>
             <label>
               <span>Track</span>
-              <select value={selectedTrack.id} onChange={(event) => handleTrackChange(event.target.value)}>
+              <select
+                value={selectedTrack.id}
+                disabled={clubEventConfigurationLocked}
+                onChange={(event) => handleTrackChange(event.target.value)}
+              >
                 {availableTracks.map((track) => <option value={track.id} key={track.id}>{track.name}</option>)}
               </select>
             </label>
@@ -11716,23 +11935,49 @@ export default function App() {
               studioRiders={activeStudioRiders(activeProfileStudioRiders)}
               speedUnit={speedUnit}
               distanceUnit={distanceUnit}
-              raceTracks={catalogTracks
-                .filter((track) => track.countryCode !== 'CUSTOM'
-                  && (track.routeStatus === 'user-mapped' || Boolean(newestTrackMapping(
+              raceViewsReady={cloudUserDataStatus !== 'loading'
+                && cloudUserDataLoadedKeyRef.current === cloudProfileKey}
+              raceTracks={catalogTracks.flatMap((track) => {
+                  if (track.countryCode === 'CUSTOM') return [];
+                  const mapping = clubEventTrackMapping(
                     storedMappings[track.id],
                     publicTrackMappings[track.id],
-                  ))))
-                .map((track) => {
-                  const mapping = newestTrackMapping(
-                    storedMappings[track.id],
-                    publicTrackMappings[track.id],
+                    developerUiActive,
                   );
+                  if (track.routeStatus !== 'user-mapped' && !mapping) return [];
                   const course = mapping ? applyUserTrackMapping(track, mapping) : track;
-                  return { id: track.id, name: track.name, track: clubEventTrackSnapshot(course) };
+                  const camera = clubEventCameraSnapshot(earthCamerasByTrack[track.id]);
+                  return [{
+                    id: track.id,
+                    name: track.name,
+                    track: clubEventTrackSnapshot(course),
+                    raceView: {
+                      mode: mapping?.raceViewMode === '3d' ? '3d' as const : 'satellite' as const,
+                      ...(camera ? { camera } : {}),
+                    },
+                  }];
                 })}
-              sprintRoutes={availableCustomRoutes
-                .filter((track) => track.routeStatus === 'user-mapped')
-                .map((track) => ({ id: track.id, name: track.name, track: clubEventTrackSnapshot(track) }))}
+              sprintRoutes={clubEventStraightSprintCourses.map(({ track, course, mapping }) => {
+                const camera = clubEventCameraSnapshot(earthCamerasByTrack[track.id]);
+                const sprintRaceViewCamerasByDistance = Object.fromEntries(
+                  straightSprintDistanceOptions.flatMap((distanceFeet) => {
+                    const distanceCamera = clubEventCameraSnapshot(earthCamerasByTrack[
+                      straightSprintCameraPreferenceKey(track.id, distanceFeet)
+                    ]);
+                    return distanceCamera ? [[distanceFeet, distanceCamera]] : [];
+                  }),
+                );
+                return {
+                  id: track.id,
+                  name: track.name,
+                  track: clubEventTrackSnapshot(course),
+                  raceView: {
+                    mode: mapping?.raceViewMode === '3d' ? '3d' as const : 'satellite' as const,
+                    ...(camera ? { camera } : {}),
+                  },
+                  sprintRaceViewCamerasByDistance,
+                };
+              })}
               fullscreen={utilityFullscreen}
               onFullscreenChange={handleUtilityFullscreenChange}
             />
@@ -11937,11 +12182,12 @@ export default function App() {
                   mappingFullscreen={mappingFullscreen}
                   mappingEditMode={mappingEditMode}
                   mappingObstacleView3D={mappingObstacleView3D}
-                  raceViewMode={appMode === 'straight-sprint' && straightSprintGameArenaAvailable
-                    ? straightSprintViewMode
-                    : mappingMode
-                      ? mappingRaceViewMode
-                      : bmxRaceViewMode}
+                  raceViewMode={activeClubEventRaceViewMode
+                    ?? (appMode === 'straight-sprint' && straightSprintGameArenaAvailable
+                      ? straightSprintViewMode
+                      : mappingMode
+                        ? mappingRaceViewMode
+                        : bmxRaceViewMode)}
                   mappingRouteVariantId={mappingRouteVariantId}
                   mappingZoneBranchChoice={mappingZoneBranchChoice}
                   draftPoints={draftPoints}
@@ -11994,7 +12240,7 @@ export default function App() {
                   customRoutePredictions={customRoutePredictions}
                   customRoutePredictionStatus={customRoutePredictionStatus}
                   selectedCustomRoutePredictionId={selectedCustomRoutePrediction?.id ?? null}
-                  customRoutes={availableCustomRoutes}
+                  customRoutes={straightSprintVenueCourses.map(({ course }) => course)}
                   selectedTrackId={selectedTrack.id}
                   players={racePlayers}
                   demoPlayerOptions={exploreDemoCandidates}
@@ -12011,11 +12257,12 @@ export default function App() {
                   straightSprintAirSetting={straightSprintAirSetting}
                   straightSprintMappedFeet={straightSprintMappedFeet}
                   straightSprintMaximumRouteReady={straightSprintMaximumRouteReady}
-                  straightSprintViewMode={straightSprintViewMode}
+                  straightSprintViewMode={activeClubEventRaceViewMode ?? straightSprintViewMode}
                   straightSprintGameArenaAvailable={straightSprintGameArenaAvailable}
                   isAdminProfile={developerUiActive}
                   showCustomRoutes={appMode === 'straight-sprint'}
                   sessionTrackAvailable={sessionTrackAvailable}
+                  configurationLocked={clubEventConfigurationLocked}
                   raceState={raceState}
                   activeBikeCount={racePlayers.length}
                   demoMode={demoMode}
