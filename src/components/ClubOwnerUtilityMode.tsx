@@ -240,6 +240,7 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
   };
 
   const cancelGetPulled = (session: GetPulledSessionCancellation) => {
+    if (demoMode) return;
     if (owner.groupRef.current?.request.activityType === 'get-pulled'
       && owner.groupRef.current.request.sessionId === session.sessionId) {
       void owner.cancelActiveGroup({ preserveStatus: session.reason === 'authorization-failed' }).catch(() => undefined);
@@ -314,6 +315,7 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
   };
 
   const restoreExplore = async (session: ExploreRideSessionRestored) => {
+    if (demoMode) return;
     if (!session.studioBinding.authorizationCheckpoint) {
       throw new Error('This older studio ride has no secure recovery checkpoint. Reset it and start a new ride.');
     }
@@ -345,6 +347,7 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
   };
 
   const cancelExplore = (session: ExploreRideSessionCancellation) => {
+    if (demoMode) return;
     if (owner.groupRef.current?.request.sessionId === session.sessionId) {
       void owner.cancelActiveGroup({ preserveStatus: session.reason === 'authorization-failed' }).catch(() => undefined);
     }
@@ -356,6 +359,7 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
     at: number;
     activeElapsedMs: number;
   }) => {
+    if (demoMode) return;
     if (heartRateContext.accountBlockCoveredSessionIdsRef.current.has(session.sessionId)
       || heartRateContext.accountBlockCoversSessionsRef.current) return;
     void (async () => {
@@ -422,6 +426,11 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
       .catch((error: Error) => console.warn(`Could not save Explore the World history: ${error.message}`));
   };
 
+  const clearHeartRate = (sessionId: string) => {
+    if (demoMode) return;
+    heartRateContext.clear(sessionId);
+  };
+
   // App receives live bike/map frames many times per second. Keep the mode
   // lifecycle props stable across those parent renders so Get Pulled's
   // countdown/sample timers and Explore's session effects are not repeatedly
@@ -438,7 +447,7 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
     cancelExplore,
     pauseOrResumeExplore,
     completeExplore,
-    clearHeartRate: heartRateContext.clear,
+    clearHeartRate,
   });
   lifecycleRef.current = {
     armGetPulled,
@@ -451,7 +460,7 @@ export function ClubOwnerUtilityMode(props: ClubOwnerUtilityModeProps) {
     cancelExplore,
     pauseOrResumeExplore,
     completeExplore,
-    clearHeartRate: heartRateContext.clear,
+    clearHeartRate,
   };
   const onGetPulledArm = useCallback((arm: GetPulledSessionArm) => (
     lifecycleRef.current.armGetPulled(arm)

@@ -71,6 +71,9 @@ function entry(): ClubOwnerTrainingCoordinatorEntry {
 function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = false) {
   const begin = vi.fn(async () => true);
   const finalize = vi.fn(async () => undefined);
+  const clear = vi.fn();
+  const pauseRelay = vi.fn(async () => ({ configured: false }));
+  const resumeRelay = vi.fn(async () => ({ configured: false }));
   const cancelActiveGroup = vi.fn(async () => undefined);
   const onTabletExerciseReviewStart = vi.fn();
   const onTabletExerciseSaved = vi.fn(async () => undefined);
@@ -115,12 +118,12 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = f
     heartRateContext: {
       heartRate: {
         measurements: [],
-        pauseRelay: vi.fn(async () => ({ configured: false })),
-        resumeRelay: vi.fn(async () => ({ configured: false })),
+        pauseRelay,
+        resumeRelay,
       },
       begin,
       finalize,
-      clear: vi.fn(),
+      clear,
       relayStartPromisesRef: { current: new Map() },
       cancelledSessionsRef: { current: new Set<string>() },
       activeSessionRef: { current: null },
@@ -141,6 +144,9 @@ function sharedProps(group: ClubOwnerTrainingCoordinatorEntry | null, tablet = f
     props,
     begin,
     finalize,
+    clear,
+    pauseRelay,
+    resumeRelay,
     cancelActiveGroup,
     onHistoryChanged,
     onTabletExerciseReviewStart,
@@ -174,6 +180,63 @@ describe('ClubOwnerUtilityMode integration', () => {
       durationMs: 6_000,
       airSetting: 5,
     })).resolves.toBe(true);
+  });
+
+  it('keeps a Club Tablet Get Pulled demo outside athlete, heart-rate, and history persistence', async () => {
+    const {
+      props,
+      begin,
+      finalize,
+      clear,
+      onHistoryChanged,
+      onTabletExerciseReviewStart,
+      onTabletExerciseSaved,
+    } = sharedProps(null, true);
+    renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
+      ...props,
+      mode: 'get-pulled',
+      viewProps: { demoMode: true },
+    } as unknown as ClubOwnerUtilityModeProps));
+
+    const onStart = mocks.getPulledProps?.onSessionStart as (value: Record<string, unknown>) => void;
+    const onCancel = mocks.getPulledProps?.onSessionCancel as (sessionId: string) => void;
+    const onComplete = mocks.getPulledProps?.onComplete as (value: GetPulledResult) => void;
+    onStart({
+      sessionId: 'tablet-demo-pull',
+      playerId: 1,
+      riderName: 'Demo Rider 1',
+      deviceId: 101,
+      armedAt: 1_000,
+      durationMs: 6_000,
+      airSetting: 5,
+      startedAt: 2_000,
+    });
+    onComplete({
+      id: 'tablet-demo-pull',
+      playerId: 1,
+      riderName: 'Demo Rider 1',
+      startedAt: 2_000,
+      endedAt: 8_000,
+      durationSeconds: 6,
+      airSetting: 5,
+      distanceMeters: 70,
+      averageWatts: 650,
+      peakWatts: 1_200,
+      averageCadence: 150,
+      peakCadence: 210,
+      averageSpeedKph: 42,
+      peakSpeedKph: 58,
+    });
+    onCancel('tablet-demo-pull');
+
+    expect(begin).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
+    expect(mocks.saveLegacyGetPulled).not.toHaveBeenCalled();
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(onHistoryChanged).not.toHaveBeenCalled();
+    expect(onTabletExerciseReviewStart).not.toHaveBeenCalled();
+    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
   });
 
   it('activates and atomically completes an authorized Get Pulled session without legacy or personal duplicates', async () => {
@@ -353,6 +416,91 @@ describe('ClubOwnerUtilityMode integration', () => {
     await vi.waitFor(() => expect(warning).toHaveBeenCalledWith(expect.stringContaining('Could not save Explore')));
     expect(onTabletExerciseSaved).not.toHaveBeenCalled();
     warning.mockRestore();
+  });
+
+  it('keeps a Club Tablet Explore demo outside athlete, heart-rate, and history persistence', () => {
+    const {
+      props,
+      begin,
+      finalize,
+      clear,
+      pauseRelay,
+      resumeRelay,
+      onHistoryChanged,
+      onTabletExerciseReviewStart,
+      onTabletExerciseSaved,
+    } = sharedProps(null, true);
+    renderToStaticMarkup(createElement(ClubOwnerUtilityMode, {
+      ...props,
+      mode: 'explore',
+      viewProps: { demoMode: true },
+    } as unknown as ClubOwnerUtilityModeProps));
+
+    const onStart = mocks.exploreProps?.onRideSessionStart as (value: Record<string, unknown>) => void;
+    const onPause = mocks.exploreProps?.onRideSessionPause as (value: Record<string, unknown>) => void;
+    const onResume = mocks.exploreProps?.onRideSessionResume as (value: Record<string, unknown>) => void;
+    const onCancel = mocks.exploreProps?.onRideSessionCancel as (value: Record<string, unknown>) => void;
+    const onReset = mocks.exploreProps?.onRideSessionReset as (sessionId: string) => void;
+    const onComplete = mocks.exploreProps?.onRideComplete as (value: Record<string, unknown>) => void;
+    onStart({
+      sessionId: 'tablet-demo-explore',
+      startedAt: 2_000,
+      riders: [{ playerId: 1, name: 'Demo Rider 1' }],
+    });
+    onPause({ sessionId: 'tablet-demo-explore', at: 4_000, activeElapsedMs: 2_000 });
+    onResume({ sessionId: 'tablet-demo-explore', at: 5_000, activeElapsedMs: 2_000 });
+    onComplete({
+      sessionId: 'tablet-demo-explore',
+      route: {
+        id: 'demo-route',
+        origin: { lat: 38.5, lng: -121.5 },
+        destination: { lat: 38.6, lng: -121.4 },
+        originLabel: 'Demo start',
+        destinationLabel: 'Demo finish',
+        travelMode: 'bicycle',
+        distanceMeters: 1_000,
+        durationSeconds: 600,
+        encodedPolyline: 'encoded',
+        createdAt: 1_000,
+      },
+      riders: [{
+        id: 'demo-explore-rider-one',
+        clientId: 'local',
+        playerId: 1,
+        name: 'Demo Rider 1',
+        colorName: 'lime',
+        accent: '#7ade36',
+        distanceMeters: 1_000,
+        velocityMps: 0,
+        cadence: 90,
+        watts: 400,
+        signal: 1,
+        finishedAt: 8_000,
+        at: 8_000,
+      }],
+      startedAt: 2_000,
+      endedAt: 8_000,
+      durationMs: 6_000,
+      activeClockSegments: [{ startedAt: 2_000, endedAt: 8_000 }],
+    });
+    onCancel({
+      sessionId: 'tablet-demo-explore',
+      at: 8_100,
+      activeElapsedMs: 6_000,
+      reason: 'reset',
+    });
+    onReset('tablet-demo-explore');
+
+    expect(begin).not.toHaveBeenCalled();
+    expect(finalize).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
+    expect(pauseRelay).not.toHaveBeenCalled();
+    expect(resumeRelay).not.toHaveBeenCalled();
+    expect(mocks.saveLegacyExplore).not.toHaveBeenCalled();
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(onHistoryChanged).not.toHaveBeenCalled();
+    expect(onTabletExerciseReviewStart).not.toHaveBeenCalled();
+    expect(onTabletExerciseSaved).not.toHaveBeenCalled();
   });
 
   it('fails a legacy Explore restore closed before any ride resumes', async () => {

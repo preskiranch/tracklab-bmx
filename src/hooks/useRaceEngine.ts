@@ -27,6 +27,19 @@ export type RaceMetricAccumulator = {
   wattsSamples: number;
 };
 
+export function readyRaceRosterSignature(
+  players: PlayerSlot[],
+  branchChoicesByPlayer: BranchChoicesByPlayer = {},
+) {
+  return JSON.stringify(players
+    .map((player) => [
+      String(player.id),
+      player.deviceId ?? null,
+      branchChoicesByPlayer[player.id] ?? 'a',
+    ] as const)
+    .sort(([leftId], [rightId]) => leftId.localeCompare(rightId)));
+}
+
 export function createMetricAccumulator(label: string): RaceMetricAccumulator {
   return {
     deviceLabel: label,
@@ -194,6 +207,7 @@ export function useRaceEngine(
   branchChoicesRef.current = branchChoicesByPlayer;
   splitDecisionPointsRef.current = splitDecisionPoints;
   trackZonesRef.current = trackZones;
+  const readyRosterSignature = readyRaceRosterSignature(players, branchChoicesByPlayer);
 
   const resetRace = useCallback(() => {
     window.cancelAnimationFrame(frameRef.current);
@@ -278,9 +292,9 @@ export function useRaceEngine(
 
   useEffect(() => {
     if (raceState === 'ready') {
-      setRiders(createInitialRiders(players, branchChoicesByPlayer));
+      setRiders(createInitialRiders(playersRef.current, branchChoicesRef.current));
     }
-  }, [branchChoicesByPlayer, players, raceState]);
+  }, [raceState, readyRosterSignature]);
 
   useEffect(() => {
     if (raceState !== 'racing' || raceStartedAtRef.current === 0) {

@@ -7,6 +7,30 @@ type RaceBikeDeviceOptions = {
   maxDevices: number;
 };
 
+/**
+ * Preserve the connected-roster reference while only transport telemetry has
+ * changed. BLE samples and connector heartbeats update `at`, signal strength,
+ * and connection origin frequently; none of those fields changes which rider
+ * is assigned to an exact Wattbike. Keeping the previous reference prevents a
+ * live packet from looking like a brand-new P1-P4 roster to React consumers.
+ */
+export function retainConnectedBikeRosterIdentity(
+  current: ConnectedBikeDevice[],
+  next: ConnectedBikeDevice[],
+) {
+  const nextByDeviceId = new Map(next.map((device) => [device.deviceId, device]));
+  const matches = current.length === next.length
+    && nextByDeviceId.size === next.length
+    && current.every((device) => {
+      const candidate = nextByDeviceId.get(device.deviceId);
+      return candidate != null
+        && device.connected === candidate.connected
+        && device.label === candidate.label
+        && device.source === candidate.source;
+    });
+  return matches ? current : next;
+}
+
 export function bikeMetricIsLive(
   metricAt: number | undefined,
   now: number,
