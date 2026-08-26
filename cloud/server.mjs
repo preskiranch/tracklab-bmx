@@ -46,6 +46,7 @@ import {
   commentaryPcmToWav,
   commentaryRealtimeResponseCreate,
   commentaryRealtimeSessionUpdate,
+  commentarySpeechMixVersion,
   commentarySpeechModel,
 } from './commentaryVoices.mjs';
 import { createCommentaryCapacity } from './commentaryCapacity.mjs';
@@ -2073,7 +2074,13 @@ function releaseCommentaryCapacity(release) {
 
 function commentarySpeechCacheKey(line, voicePreset, eventKind, deliveryStyle) {
   return createHash('sha256')
-    .update(JSON.stringify({ line, voicePreset, eventKind, deliveryStyle }))
+    .update(JSON.stringify({
+      line,
+      voicePreset,
+      eventKind,
+      deliveryStyle,
+      mixVersion: commentarySpeechMixVersion,
+    }))
     .digest('hex');
 }
 
@@ -3175,6 +3182,62 @@ function sanitizedPreferenceRevisionMap(value) {
   );
 }
 
+function sanitizeRacePresentationViewport(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (
+    typeof value.width !== 'number'
+    || !Number.isFinite(value.width)
+    || value.width < 240
+    || value.width > 10_000
+    || typeof value.height !== 'number'
+    || !Number.isFinite(value.height)
+    || value.height < 240
+    || value.height > 10_000
+  ) return null;
+  return {
+    width: Math.round(value.width * 100) / 100,
+    height: Math.round(value.height * 100) / 100,
+  };
+}
+
+function sanitizeSavedEarthCamera(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const angle = Math.max(0, Math.min(67, finiteNumber(value.angle, 0)));
+  const heading = ((finiteNumber(value.heading, 0) % 360) + 360) % 360;
+  const center = value.center && typeof value.center === 'object' && !Array.isArray(value.center)
+    && Number.isFinite(value.center.lat)
+    && value.center.lat >= -90
+    && value.center.lat <= 90
+    && Number.isFinite(value.center.lng)
+    && value.center.lng >= -180
+    && value.center.lng <= 180
+    ? { lat: value.center.lat, lng: value.center.lng }
+    : null;
+  const zoom = Number.isFinite(value.zoom) ? Math.max(0, Math.min(30, value.zoom)) : null;
+  const referenceViewport = sanitizeRacePresentationViewport(value.referenceViewport);
+  return {
+    angle,
+    heading,
+    ...(center ? { center } : {}),
+    ...(zoom !== null ? { zoom } : {}),
+    ...(referenceViewport ? { referenceViewport } : {}),
+    updatedAt: sanitizedPreferenceRevision(value.updatedAt),
+  };
+}
+
+function sanitizeSavedRaceRiderOverlay(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const referenceViewport = sanitizeRacePresentationViewport(value.referenceViewport);
+  return {
+    xPct: Math.max(0, Math.min(1, finiteNumber(value.xPct, 0.04))),
+    yPct: Math.max(0, Math.min(1, finiteNumber(value.yPct, 0.7))),
+    width: Math.max(320, Math.min(1800, finiteNumber(value.width, 940))),
+    height: Math.max(190, Math.min(900, finiteNumber(value.height, 220))),
+    locked: Boolean(value.locked),
+    ...(referenceViewport ? { referenceViewport } : {}),
+  };
+}
+
 function sanitizeRaceViewPreferences(value) {
   if (!value || typeof value !== 'object') {
     return null;
@@ -3190,10 +3253,22 @@ function sanitizeRaceViewPreferences(value) {
     cameraLocked: Boolean(value.cameraLocked),
     cameraLockedUpdatedAt: sanitizedPreferenceRevision(value.cameraLockedUpdatedAt),
     earthCamerasByTrack: cameras && typeof cameras === 'object' && !Array.isArray(cameras)
-      ? Object.fromEntries(Object.entries(cameras).slice(0, 500))
+      ? Object.fromEntries(
+        Object.entries(cameras)
+          .slice(0, 500)
+          .filter(([trackId]) => trackId.trim().length > 0)
+          .map(([trackId, camera]) => [trackId, sanitizeSavedEarthCamera(camera)])
+          .filter(([, camera]) => Boolean(camera)),
+      )
       : {},
     riderOverlaysByTrack: overlays && typeof overlays === 'object' && !Array.isArray(overlays)
-      ? Object.fromEntries(Object.entries(overlays).slice(0, 500))
+      ? Object.fromEntries(
+        Object.entries(overlays)
+          .slice(0, 500)
+          .filter(([trackId]) => trackId.trim().length > 0)
+          .map(([trackId, overlay]) => [trackId, sanitizeSavedRaceRiderOverlay(overlay)])
+          .filter(([, overlay]) => Boolean(overlay)),
+      )
       : {},
     riderOverlayUpdatedAtByTrack: sanitizedPreferenceRevisionMap(value.riderOverlayUpdatedAtByTrack),
     demoRiderNames: demoRiderNames && typeof demoRiderNames === 'object' && !Array.isArray(demoRiderNames)
@@ -3223,7 +3298,7 @@ function sanitizeRaceViewPreferences(value) {
         ? true
         : Boolean(commentary.ambientVolumeLocked),
       voicePreset: commentaryVoicePreset,
-      volume: Math.max(0, Math.min(1, finiteNumber(commentary?.volume, 0.9))),
+      volume: Math.max(0, Math.min(1, finiteNumber(commentary?.volume, 1))),
       adaptiveMemory: commentary?.adaptiveMemory == null ? true : Boolean(commentary.adaptiveMemory),
       recentLines: Array.isArray(commentary?.recentLines)
         ? commentary.recentLines
@@ -5274,36 +5349,80 @@ function sanitizeClubEventRaceView(activityType, value, trackRecord) {
     ) return null;
   }
 
-  if (!Object.prototype.hasOwnProperty.call(value, 'camera')) return { mode };
-  const candidate = value.camera;
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
-  if (
-    !Number.isFinite(candidate.angle)
-    || candidate.angle < 0
-    || candidate.angle > 67
-    || !Number.isFinite(candidate.heading)
-    || candidate.heading < 0
-    || candidate.heading >= 360
-  ) return null;
+  let camera;
+  if (Object.prototype.hasOwnProperty.call(value, 'camera')) {
+    const candidate = value.camera;
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+    if (
+      !Number.isFinite(candidate.angle)
+      || candidate.angle < 0
+      || candidate.angle > 67
+      || !Number.isFinite(candidate.heading)
+      || candidate.heading < 0
+      || candidate.heading >= 360
+    ) return null;
 
-  let center;
-  if (Object.prototype.hasOwnProperty.call(candidate, 'center')) {
-    if (!validClubEventTrackPoint(candidate.center)) return null;
-    center = { lat: candidate.center.lat, lng: candidate.center.lng };
-  }
-  let zoom;
-  if (Object.prototype.hasOwnProperty.call(candidate, 'zoom')) {
-    if (!Number.isFinite(candidate.zoom) || candidate.zoom < 0 || candidate.zoom > 30) return null;
-    zoom = candidate.zoom;
-  }
-  return {
-    mode,
-    camera: {
+    let center;
+    if (Object.prototype.hasOwnProperty.call(candidate, 'center')) {
+      if (!validClubEventTrackPoint(candidate.center)) return null;
+      center = { lat: candidate.center.lat, lng: candidate.center.lng };
+    }
+    let zoom;
+    if (Object.prototype.hasOwnProperty.call(candidate, 'zoom')) {
+      if (!Number.isFinite(candidate.zoom) || candidate.zoom < 0 || candidate.zoom > 30) return null;
+      zoom = candidate.zoom;
+    }
+    let referenceViewport;
+    if (Object.prototype.hasOwnProperty.call(candidate, 'referenceViewport')) {
+      referenceViewport = sanitizeRacePresentationViewport(candidate.referenceViewport);
+      if (!referenceViewport) return null;
+    }
+    camera = {
       angle: candidate.angle,
       heading: candidate.heading,
       ...(center ? { center } : {}),
       ...(zoom !== undefined ? { zoom } : {}),
-    },
+      ...(referenceViewport ? { referenceViewport } : {}),
+    };
+  }
+
+  let riderOverlay;
+  if (Object.prototype.hasOwnProperty.call(value, 'riderOverlay')) {
+    const candidate = value.riderOverlay;
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+    if (
+      !Number.isFinite(candidate.xPct)
+      || candidate.xPct < 0
+      || candidate.xPct > 1
+      || !Number.isFinite(candidate.yPct)
+      || candidate.yPct < 0
+      || candidate.yPct > 1
+      || !Number.isFinite(candidate.width)
+      || candidate.width < 320
+      || candidate.width > 1800
+      || !Number.isFinite(candidate.height)
+      || candidate.height < 190
+      || candidate.height > 900
+      || typeof candidate.locked !== 'boolean'
+    ) return null;
+    let referenceViewport;
+    if (Object.prototype.hasOwnProperty.call(candidate, 'referenceViewport')) {
+      referenceViewport = sanitizeRacePresentationViewport(candidate.referenceViewport);
+      if (!referenceViewport) return null;
+    }
+    riderOverlay = {
+      xPct: candidate.xPct,
+      yPct: candidate.yPct,
+      width: candidate.width,
+      height: candidate.height,
+      locked: candidate.locked,
+      ...(referenceViewport ? { referenceViewport } : {}),
+    };
+  }
+  return {
+    mode,
+    ...(camera ? { camera } : {}),
+    ...(riderOverlay ? { riderOverlay } : {}),
   };
 }
 

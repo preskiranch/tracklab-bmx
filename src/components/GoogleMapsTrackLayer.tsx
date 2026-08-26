@@ -65,6 +65,7 @@ import {
   type RiderRigPoint,
 } from '../lib/riderRig';
 import {
+  normalizeRiderPresentationScale,
   riderMarkerCanvasSize,
   riderMarkerDrawSize,
   riderMarkerDrawTop,
@@ -100,6 +101,7 @@ type GoogleMapsTrackLayerProps = {
   distanceUnit: DistanceUnit;
   cStartOffsetsByPlayer?: CStartOffsetsByPlayer;
   raceViewFullscreen?: boolean;
+  presentationScale?: number;
   cameraLocked?: boolean;
   raceState: RaceState;
   raceDistanceMeters?: number;
@@ -170,6 +172,7 @@ type RiderMapMarker = {
   setMap: (map: GoogleMap | null) => void;
   setLabel: (label: string) => void;
   setPosition: (position: TrackPoint) => void;
+  setPresentationScale: (scale: number) => void;
   setVisual: (
     rotationDegrees: number,
     animation: RiderAnimationState,
@@ -649,20 +652,21 @@ function riderFrontTireAnchorPoint(
   google: GoogleMapsRuntime,
   rotationDegrees: number,
   laneOffsetPixels: number,
+  presentationScale = 1,
 ) {
   const anchor = riderFrontTireAnchor(rotationDegrees);
   const laneTranslation = riderScreenLaneTranslation(rotationDegrees, laneOffsetPixels);
   return new google.maps.Point(
-    anchor.x - laneTranslation.x,
-    anchor.y - laneTranslation.y,
+    (anchor.x - laneTranslation.x) * presentationScale,
+    (anchor.y - laneTranslation.y) * presentationScale,
   );
 }
 
-function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot) {
+function baseRiderIcon(google: GoogleMapsRuntime, player: PlayerSlot, presentationScale = 1) {
   return {
-    anchor: new google.maps.Point(38, 40),
-    labelOrigin: new google.maps.Point(74, 13),
-    scaledSize: new google.maps.Size(38, 43),
+    anchor: new google.maps.Point(38 * presentationScale, 40 * presentationScale),
+    labelOrigin: new google.maps.Point(74 * presentationScale, 13 * presentationScale),
+    scaledSize: new google.maps.Size(38 * presentationScale, 43 * presentationScale),
     url: riderRigBaseAssetByColor[player.colorName],
   };
 }
@@ -964,6 +968,7 @@ function createPersistentRiderOverlay(
   initialTitle: string,
   zIndex: number,
   appearance: RiderMarkerAppearance,
+  initialPresentationScale: number,
 ): RiderMapMarker | null {
   if (!google.maps.OverlayView) {
     return null;
@@ -977,13 +982,10 @@ function createPersistentRiderOverlay(
   element.dataset.riderCanvasSize = String(riderMarkerCanvasSize);
   element.title = initialTitle;
   element.setAttribute('aria-label', initialTitle);
-  element.style.background = `center / ${riderMarkerDrawSize}px ${riderMarkerDrawSize}px no-repeat url("${riderRigBaseAssetByColor[player.colorName]}")`;
-  element.style.height = `${riderMarkerCanvasSize}px`;
   element.style.overflow = 'visible';
   element.style.pointerEvents = 'none';
   element.style.position = 'absolute';
   element.style.transformOrigin = '0 0';
-  element.style.width = `${riderMarkerCanvasSize}px`;
   element.style.willChange = 'left, top, transform';
   element.style.zIndex = String(zIndex);
   canvas.height = riderMarkerCanvasSize;
@@ -999,6 +1001,20 @@ function createPersistentRiderOverlay(
   let frameRequest: number | null = null;
   let riderImage: HTMLImageElement | null = null;
   let disposed = false;
+  let presentationScale = normalizeRiderPresentationScale(initialPresentationScale);
+
+  const applyPresentationScale = (nextScale: number) => {
+    presentationScale = normalizeRiderPresentationScale(nextScale);
+    const canvasSize = riderMarkerCanvasSize * presentationScale;
+    const drawSize = riderMarkerDrawSize * presentationScale;
+    element.style.background = riderImage
+      ? 'none'
+      : `center / ${drawSize}px ${drawSize}px no-repeat url("${riderRigBaseAssetByColor[player.colorName]}")`;
+    element.style.height = `${canvasSize}px`;
+    element.style.width = `${canvasSize}px`;
+    canvas.style.height = `${canvasSize}px`;
+    canvas.style.width = `${canvasSize}px`;
+  };
 
   const drawPosition = () => {
     const projection = overlay.getProjection();
@@ -1016,8 +1032,8 @@ function createPersistentRiderOverlay(
     element.style.left = `${pixel.x}px`;
     element.style.top = `${pixel.y}px`;
     element.style.transform = `translate3d(${
-      -anchor.x + laneTranslation.x
-    }px, ${-anchor.y + laneTranslation.y}px, 0)`;
+      (-anchor.x + laneTranslation.x) * presentationScale
+    }px, ${(-anchor.y + laneTranslation.y) * presentationScale}px, 0)`;
   };
 
   const scheduleCanvasDraw = () => {
@@ -1090,6 +1106,7 @@ function createPersistentRiderOverlay(
     .catch(() => undefined);
 
   overlay.setMap(map);
+  applyPresentationScale(presentationScale);
   applyVisual(initialRotationDegrees, initialAnimation, initialLaneOffsetPixels);
 
   return {
@@ -1100,6 +1117,10 @@ function createPersistentRiderOverlay(
     setLabel: () => undefined,
     setPosition: (nextPosition) => {
       position = nextPosition;
+      drawPosition();
+    },
+    setPresentationScale: (nextScale) => {
+      applyPresentationScale(nextScale);
       drawPosition();
     },
     setVisual: applyVisual,
@@ -1121,7 +1142,9 @@ function createRiderMapMarker(
   title: string,
   zIndex = 760 + player.id,
   appearance: RiderMarkerAppearance = 'live',
+  initialPresentationScale = 1,
 ): RiderMapMarker {
+  let presentationScale = normalizeRiderPresentationScale(initialPresentationScale);
   const persistentOverlay = createPersistentRiderOverlay(
     google,
     map,
@@ -1133,6 +1156,7 @@ function createRiderMapMarker(
     title,
     zIndex,
     appearance,
+    presentationScale,
   );
   if (persistentOverlay) {
     return persistentOverlay;
@@ -1140,8 +1164,11 @@ function createRiderMapMarker(
 
   let iconVersion = 0;
   let visualKey = '';
+  let currentRotation = rotationDegrees;
+  let currentAnimation = animation;
+  let currentLaneOffsetPixels = laneOffsetPixels;
   const marker = new google.maps.Marker({
-    icon: baseRiderIcon(google, player),
+    icon: baseRiderIcon(google, player, presentationScale),
     map,
     optimized: false,
     position,
@@ -1154,6 +1181,9 @@ function createRiderMapMarker(
     nextAnimation: RiderAnimationState,
     nextLaneOffsetPixels: number,
   ) => {
+    currentRotation = nextRotation;
+    currentAnimation = nextAnimation;
+    currentLaneOffsetPixels = nextLaneOffsetPixels;
     const orientation = uprightRiderOrientation(nextRotation);
     const nextVisualKey = `${orientation.mirrored ? 'left' : 'right'}:${riderLeanBucket(nextRotation)}:${nextAnimation.crankStep}:${nextAnimation.wheelFrameIndex}:${nextLaneOffsetPixels}`;
     if (nextVisualKey === visualKey) {
@@ -1170,15 +1200,23 @@ function createRiderMapMarker(
         }
 
         marker.setIcon({
-          anchor: riderFrontTireAnchorPoint(google, nextRotation, nextLaneOffsetPixels),
-          labelOrigin: new google.maps.Point(74, 15),
-          scaledSize: new google.maps.Size(riderMarkerCanvasSize, riderMarkerCanvasSize),
+          anchor: riderFrontTireAnchorPoint(
+            google,
+            nextRotation,
+            nextLaneOffsetPixels,
+            presentationScale,
+          ),
+          labelOrigin: new google.maps.Point(74 * presentationScale, 15 * presentationScale),
+          scaledSize: new google.maps.Size(
+            riderMarkerCanvasSize * presentationScale,
+            riderMarkerCanvasSize * presentationScale,
+          ),
           url,
         });
       })
       .catch(() => {
         if (version === iconVersion) {
-          marker.setIcon(baseRiderIcon(google, player));
+          marker.setIcon(baseRiderIcon(google, player, presentationScale));
         }
       });
   };
@@ -1189,6 +1227,14 @@ function createRiderMapMarker(
     setMap: (nextMap) => marker.setMap(nextMap),
     setLabel: () => marker.setLabel?.(null),
     setPosition: (nextPosition) => marker.setPosition(nextPosition),
+    setPresentationScale: (nextScale) => {
+      const normalizedScale = normalizeRiderPresentationScale(nextScale);
+      if (normalizedScale === presentationScale) return;
+      presentationScale = normalizedScale;
+      marker.setIcon(baseRiderIcon(google, player, presentationScale));
+      visualKey = '';
+      applyVisual(currentRotation, currentAnimation, currentLaneOffsetPixels);
+    },
     setVisual: applyVisual,
     setTitle: (nextTitle) => {
       marker.setTitle?.(nextTitle);
@@ -1208,6 +1254,7 @@ export function GoogleMapsTrackLayer({
   distanceUnit,
   cStartOffsetsByPlayer = {},
   raceViewFullscreen = false,
+  presentationScale = 1,
   cameraLocked = false,
   raceState,
   raceDistanceMeters,
@@ -1238,6 +1285,7 @@ export function GoogleMapsTrackLayer({
   onMappingSplitPointAdd,
   onMappingSplitDrawEnd,
 }: GoogleMapsTrackLayerProps) {
+  const normalizedPresentationScale = normalizeRiderPresentationScale(presentationScale);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const googleRef = useRef<GoogleMapsRuntime | null>(null);
   const mapRef = useRef<GoogleMap | null>(null);
@@ -2853,6 +2901,7 @@ export function GoogleMapsTrackLayer({
       );
 
       if (existing) {
+        existing.setPresentationScale(normalizedPresentationScale);
         existing.setPosition(position);
         existing.setVisual(rotation, animation, laneOffsetPixels);
         existing.setLabel('');
@@ -2869,10 +2918,13 @@ export function GoogleMapsTrackLayer({
         animation,
         laneOffsetPixels,
         title,
+        undefined,
+        undefined,
+        normalizedPresentationScale,
       );
       markerRefs.current.set(player.id, marker);
     });
-  }, [cStartOffsetsByPlayer, earthHeading, players, raceState, riders, samplesByDevice, speedUnit, status, track]);
+  }, [cStartOffsetsByPlayer, earthHeading, normalizedPresentationScale, players, raceState, riders, samplesByDevice, speedUnit, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -2918,6 +2970,7 @@ export function GoogleMapsTrackLayer({
       );
 
       if (existing) {
+        existing.setPresentationScale(normalizedPresentationScale);
         existing.setPosition(position);
         existing.setVisual(rotation, animation, 0);
         existing.setLabel('');
@@ -2936,10 +2989,11 @@ export function GoogleMapsTrackLayer({
         title,
         820 + index,
         'ghost',
+        normalizedPresentationScale,
       );
       ghostMarkerRefs.current.set(rider.id, marker);
     });
-  }, [earthHeading, ghostRiders, speedUnit, status, track]);
+  }, [earthHeading, ghostRiders, normalizedPresentationScale, speedUnit, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -2991,6 +3045,7 @@ export function GoogleMapsTrackLayer({
         );
 
         if (existing) {
+          existing.setPresentationScale(normalizedPresentationScale);
           existing.setPosition(position);
           existing.setVisual(rotation, animation, 0);
           existing.setTitle(title);
@@ -3005,6 +3060,8 @@ export function GoogleMapsTrackLayer({
             0,
             title,
             900 + remoteIndex,
+            'live',
+            normalizedPresentationScale,
           );
           remoteMarkerRefs.current.set(markerKey, marker);
         }
@@ -3019,7 +3076,7 @@ export function GoogleMapsTrackLayer({
         remoteMarkerRefs.current.delete(markerKey);
       }
     });
-  }, [earthHeading, remoteRaceStates, speedUnit, status, track]);
+  }, [earthHeading, normalizedPresentationScale, remoteRaceStates, speedUnit, status, track]);
 
   return (
     <>

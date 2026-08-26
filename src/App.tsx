@@ -194,6 +194,7 @@ import {
   uciStartToneIntervalMs,
 } from './lib/uciStartGate';
 import {
+  defaultRaceRiderOverlayLayout,
   mergeRaceViewPreferences,
   normalizeRaceViewPreferences,
   normalizeRaceCommentaryPreferences,
@@ -201,6 +202,10 @@ import {
   readStoredRaceViewPreferences,
   writeStoredRaceViewPreferences,
 } from './lib/raceViewPreferences';
+import {
+  legacyRacePresentationViewport,
+  normalizeRacePresentationViewport,
+} from './lib/racePresentation';
 import {
   customBikeDisplayName,
   monitorBikeName,
@@ -255,6 +260,7 @@ import type { ClubOwnerTrainingCoordinatorEntry } from './lib/clubOwnerTrainingC
 import type { ClubLiveAccess } from './lib/clubLive';
 import type {
   ClubEventLaunchPayload,
+  ClubEventRaceRiderOverlay,
   ClubEventRaceViewCamera,
 } from './lib/clubEvent';
 import { clubEventMultiplayerRoomReady } from './lib/clubEventRuntime';
@@ -1046,23 +1052,52 @@ function normalizeEarthCamera(value: Partial<EarthCamera> | unknown): EarthCamer
   const camera = value && typeof value === 'object' ? value as Partial<EarthCamera> : {};
   const center = normalizeEarthCenter(camera.center);
   const zoom = normalizeEarthZoom(camera.zoom);
+  const referenceViewport = normalizeRacePresentationViewport(camera.referenceViewport);
 
   return {
     angle: normalizeEarthAngle(camera.angle),
     heading: normalizeEarthHeading(camera.heading),
     ...(center ? { center } : {}),
     ...(zoom !== undefined ? { zoom } : {}),
+    ...(referenceViewport ? { referenceViewport } : {}),
     updatedAt: Number.isFinite(camera.updatedAt) ? Number(camera.updatedAt) : 0,
   };
 }
 
-function clubEventCameraSnapshot(camera: EarthCamera | undefined): ClubEventRaceViewCamera | undefined {
+function currentRacePresentationViewport() {
+  if (typeof window === 'undefined') return legacyRacePresentationViewport;
+  return normalizeRacePresentationViewport({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }) ?? legacyRacePresentationViewport;
+}
+
+function clubEventCameraSnapshot(
+  camera: EarthCamera | undefined,
+  fallbackReferenceViewport = legacyRacePresentationViewport,
+): ClubEventRaceViewCamera | undefined {
   if (!camera) return undefined;
   return {
     angle: camera.angle,
     heading: camera.heading,
     ...(camera.center ? { center: camera.center } : {}),
     ...(camera.zoom != null ? { zoom: camera.zoom } : {}),
+    referenceViewport: camera.referenceViewport ?? fallbackReferenceViewport,
+  };
+}
+
+function clubEventRiderOverlaySnapshot(
+  layout: RaceRiderOverlayLayout | undefined,
+  fallbackReferenceViewport = legacyRacePresentationViewport,
+): ClubEventRaceRiderOverlay {
+  const authored = layout ?? defaultRaceRiderOverlayLayout;
+  return {
+    xPct: authored.xPct,
+    yPct: authored.yPct,
+    width: authored.width,
+    height: authored.height,
+    locked: authored.locked,
+    referenceViewport: authored.referenceViewport ?? fallbackReferenceViewport,
   };
 }
 
@@ -1077,6 +1112,8 @@ function earthCamerasMatch(left: EarthCamera | undefined, right: EarthCamera) {
   const rightHasCenter = Boolean(right.center);
   const leftHasZoom = typeof left?.zoom === 'number';
   const rightHasZoom = typeof right.zoom === 'number';
+  const leftReference = left?.referenceViewport;
+  const rightReference = right.referenceViewport;
 
   return Boolean(left)
     && left?.angle === right.angle
@@ -1085,7 +1122,10 @@ function earthCamerasMatch(left: EarthCamera | undefined, right: EarthCamera) {
     && Math.abs((left.zoom ?? -1) - (right.zoom ?? -1)) < 0.01
     && leftHasCenter === rightHasCenter
     && Math.abs((left.center?.lat ?? 0) - (right.center?.lat ?? 0)) < 0.0000001
-    && Math.abs((left.center?.lng ?? 0) - (right.center?.lng ?? 0)) < 0.0000001;
+    && Math.abs((left.center?.lng ?? 0) - (right.center?.lng ?? 0)) < 0.0000001
+    && Boolean(leftReference) === Boolean(rightReference)
+    && Math.abs((leftReference?.width ?? 0) - (rightReference?.width ?? 0)) < 0.01
+    && Math.abs((leftReference?.height ?? 0) - (rightReference?.height ?? 0)) < 0.01;
 }
 
 function cameraCenterBelongsToTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
@@ -8244,11 +8284,17 @@ export default function App() {
   }, [resetRace]);
 
   const handleEarthCameraChange = useCallback((camera: Partial<EarthCamera>) => {
+    const savedReferenceViewport = raceViewPreferencesRef.current
+      .earthCamerasByTrack[raceCameraPreferenceKey]
+      ?.referenceViewport;
     const nextCamera = normalizeEarthCamera({
       angle: camera.angle ?? earthAngle,
       heading: camera.heading ?? earthHeading,
       center: camera.center ?? earthCenter ?? undefined,
       zoom: camera.zoom ?? earthZoom ?? undefined,
+      referenceViewport: camera.referenceViewport
+        ?? savedReferenceViewport
+        ?? currentRacePresentationViewport(),
       updatedAt: Date.now(),
     });
     const cameraIsOnSelectedTrack = cameraCenterBelongsToTrack(nextCamera, effectiveTrack);
@@ -12342,6 +12388,7 @@ export default function App() {
                   if (track.routeStatus !== 'user-mapped' && !mapping) return [];
                   const course = mapping ? applyUserTrackMapping(track, mapping) : track;
                   const camera = clubEventCameraSnapshot(earthCamerasByTrack[track.id]);
+                  const riderOverlay = clubEventRiderOverlaySnapshot(riderOverlaysByTrack[track.id]);
                   return [{
                     id: track.id,
                     name: track.name,
@@ -12349,11 +12396,13 @@ export default function App() {
                     raceView: {
                       mode: mapping?.raceViewMode === '3d' ? '3d' as const : 'satellite' as const,
                       ...(camera ? { camera } : {}),
+                      riderOverlay,
                     },
                   }];
                 })}
               sprintRoutes={clubEventStraightSprintCourses.map(({ track, course, mapping }) => {
                 const camera = clubEventCameraSnapshot(earthCamerasByTrack[track.id]);
+                const riderOverlay = clubEventRiderOverlaySnapshot(riderOverlaysByTrack[track.id]);
                 const sprintRaceViewCamerasByDistance = Object.fromEntries(
                   straightSprintDistanceOptions.flatMap((distanceFeet) => {
                     const distanceCamera = clubEventCameraSnapshot(earthCamerasByTrack[
@@ -12369,6 +12418,7 @@ export default function App() {
                   raceView: {
                     mode: mapping?.raceViewMode === '3d' ? '3d' as const : 'satellite' as const,
                     ...(camera ? { camera } : {}),
+                    riderOverlay,
                   },
                   sprintRaceViewCamerasByDistance,
                 };
@@ -12573,7 +12623,13 @@ export default function App() {
                   raceCameraImmutable={clubEventRaceViewApplies}
                   raceCameraSnapshot={clubEventRaceCamera}
                   canEditRaceLayout={developerRaceLayoutActive && !regularUserPreview}
-                  riderOverlayPreference={riderOverlaysByTrack[effectiveTrack.id]}
+                  riderOverlayPreference={clubEventRaceViewApplies
+                    ? activeClubEventRaceView?.riderOverlay ?? {
+                        ...defaultRaceRiderOverlayLayout,
+                        referenceViewport: clubEventRaceCamera?.referenceViewport
+                          ?? legacyRacePresentationViewport,
+                      }
+                    : riderOverlaysByTrack[effectiveTrack.id]}
                   activeZones={activeZones}
                   canCancelRace={canCancelRace}
                   mappingMode={mappingMode}

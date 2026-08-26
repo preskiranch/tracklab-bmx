@@ -57,6 +57,39 @@ describe('race view preferences', () => {
     expect(preferences.commentary).toEqual(defaultRaceCommentaryPreferences);
   });
 
+  it('keeps the CSS reference viewport with saved camera and rider-panel composition', () => {
+    const preferences = normalizeRaceViewPreferences({
+      earthCamerasByTrack: {
+        north: {
+          angle: 47,
+          heading: 90,
+          zoom: 20,
+          updatedAt: 12,
+          referenceViewport: { width: 1366.125, height: 1024.555 },
+        },
+      },
+      riderOverlaysByTrack: {
+        north: {
+          xPct: 0.04,
+          yPct: 0.7,
+          width: 940,
+          height: 220,
+          locked: true,
+          referenceViewport: { width: 1366.125, height: 1024.555 },
+        },
+      },
+    });
+
+    expect(preferences.earthCamerasByTrack.north.referenceViewport).toEqual({
+      width: 1366.13,
+      height: 1024.56,
+    });
+    expect(preferences.riderOverlaysByTrack.north.referenceViewport).toEqual({
+      width: 1366.13,
+      height: 1024.56,
+    });
+  });
+
   it('normalizes the single announcer engine and bounded adaptive memory', () => {
     const commentary = normalizeRaceCommentaryPreferences({
       enabled: false,
@@ -76,7 +109,7 @@ describe('race view preferences', () => {
       ambientVolume: 0.2,
       ambientVolumeLocked: false,
       voicePreset: 'american-man',
-      volume: 0.9,
+      volume: 1,
       adaptiveMemory: true,
     });
     expect(commentary.recentLines).toHaveLength(240);
@@ -156,7 +189,7 @@ describe('race view preferences', () => {
     expect(merged.riderOverlaysByTrack.north).toMatchObject({ width: 1100, height: 260, locked: true });
     expect(merged.demoRiderNames).toEqual({ 1: 'Maya Torres', 2: 'Jordan Lee' });
     expect(merged.demoRiderPhotos).toEqual({ 1: 'data:image/jpeg;base64,QUJDRA==' });
-    expect(merged.commentary.volume).toBe(0.9);
+    expect(merged.commentary.volume).toBe(1);
   });
 
   it('uses zero revisions for legacy cameras so loading them does not invent a newer edit', () => {

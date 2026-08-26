@@ -29,6 +29,11 @@ describe('race rider responsive layout', () => {
     expect(raceRiderOverlayMaximumHeight(1280, 500)).toBe(Number.POSITIVE_INFINITY);
   });
 
+  it('replays the iPad Pro panel at the studio tablet presentation scale', () => {
+    expect(raceRiderOverlayMinimumHeight(1024, 768, 1024 / 1366)).toBe(165);
+    expect(raceRiderOverlayMinimumHeight(1366, 1024, 1)).toBe(220);
+  });
+
   it('does not save phone-only presentation dimensions over the shared layout', () => {
     const requested = { xPct: 0.04, yPct: 0.7, width: 940, height: 220, locked: false };
     const presented = { xPct: 0.01, yPct: 0.58, width: 784, height: 133, locked: true };

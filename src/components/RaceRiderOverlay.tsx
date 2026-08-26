@@ -11,6 +11,8 @@ import type { PersonalRecordAchievements } from '../lib/personalRecords';
 import { ghostPlaybackAccent } from '../lib/ghosts';
 import { heartRateReadingState } from './HeartRateMetric';
 import { demoHeartRateReadingForBikeSample } from '../lib/demoHeartRate';
+import { normalizeRiderPresentationScale } from '../lib/riderPresentation';
+import { normalizeRacePresentationViewport } from '../lib/racePresentation';
 
 export type LiveHeartRateByPlayer = Partial<Record<PlayerSlot['id'], {
   bpm: number | null;
@@ -67,6 +69,7 @@ type RaceRiderOverlayProps = {
   speedUnit: SpeedUnit;
   trackLengthMeters: number;
   preference?: RaceRiderOverlayLayout;
+  presentationScale?: number;
   canEditLayout: boolean;
   onPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onFullscreenInteraction: () => void;
@@ -82,7 +85,15 @@ function raceRiderOverlayUsesCompactLandscape(containerWidth: number, containerH
     && containerHeight <= 500;
 }
 
-export function raceRiderOverlayMinimumHeight(containerWidth: number, containerHeight: number) {
+export function raceRiderOverlayMinimumHeight(
+  containerWidth: number,
+  containerHeight: number,
+  presentationScale = 1,
+) {
+  const scale = normalizeRiderPresentationScale(presentationScale);
+  if (Math.abs(scale - 1) > 0.001) {
+    return Math.max(110, Math.round(defaultRaceRiderOverlayLayout.height * scale));
+  }
   if (raceRiderOverlayUsesCompactLandscape(containerWidth, containerHeight)) {
     return 138;
   }
@@ -115,20 +126,30 @@ function ordinal(value: number) {
   return `${value}${suffix}`;
 }
 
-function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | null) {
+function clampLayout(
+  layout: RaceRiderOverlayLayout,
+  container: HTMLElement | null,
+  presentationScale = 1,
+) {
   if (!container) {
     return layout;
   }
 
+  const scale = normalizeRiderPresentationScale(presentationScale);
+  const presentationScaled = Math.abs(scale - 1) > 0.001;
   const minimumHeight = raceRiderOverlayMinimumHeight(
     container.clientWidth,
     container.clientHeight,
+    scale,
   );
-  const maximumHeight = raceRiderOverlayMaximumHeight(
-    container.clientWidth,
-    container.clientHeight,
+  const maximumHeight = presentationScaled
+    ? Number.POSITIVE_INFINITY
+    : raceRiderOverlayMaximumHeight(container.clientWidth, container.clientHeight);
+  const minimumWidth = presentationScaled ? Math.max(220, Math.round(320 * scale)) : 320;
+  const width = Math.max(
+    minimumWidth,
+    Math.min(layout.width, Math.max(minimumWidth, container.clientWidth - 24)),
   );
-  const width = Math.max(320, Math.min(layout.width, Math.max(320, container.clientWidth - 24)));
   const height = Math.max(
     minimumHeight,
     Math.min(layout.height, maximumHeight, Math.max(minimumHeight, container.clientHeight - 24)),
@@ -136,6 +157,7 @@ function clampLayout(layout: RaceRiderOverlayLayout, container: HTMLElement | nu
   const maxX = Math.max(0, 1 - (width / Math.max(1, container.clientWidth)));
   const maxY = Math.max(0, 1 - (height / Math.max(1, container.clientHeight)));
   return {
+    ...layout,
     width,
     height,
     xPct: Math.max(0, Math.min(maxX, layout.xPct)),
@@ -155,6 +177,7 @@ export function RaceRiderOverlay({
   speedUnit,
   trackLengthMeters,
   preference,
+  presentationScale = 1,
   canEditLayout,
   onPreferenceChange,
   onFullscreenInteraction,
@@ -163,8 +186,12 @@ export function RaceRiderOverlay({
   heartRateByPlayer = {},
   samplesByDevice = new Map(),
 }: RaceRiderOverlayProps) {
+  const normalizedPresentationScale = normalizeRiderPresentationScale(presentationScale);
+  const presentationScaled = Math.abs(normalizedPresentationScale - 1) > 0.001;
   const [layout, setLayout] = useState<RaceRiderOverlayLayout>(
-    () => normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout),
+    () => presentationScaled && preference
+      ? preference
+      : normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout),
   );
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -180,12 +207,18 @@ export function RaceRiderOverlay({
   }, [layout]);
 
   useEffect(() => {
-    const next = normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout);
+    const next = presentationScaled && preference
+      ? preference
+      : normalizeRaceRiderOverlayLayout(preference ?? defaultRaceRiderOverlayLayout);
     requestedLayoutRef.current = next;
-    const presented = clampLayout(next, overlayRef.current?.parentElement ?? null);
+    const presented = clampLayout(
+      next,
+      overlayRef.current?.parentElement ?? null,
+      normalizedPresentationScale,
+    );
     layoutRef.current = presented;
     setLayout(presented);
-  }, [preference, trackId]);
+  }, [normalizedPresentationScale, preference, presentationScaled, trackId]);
 
   useEffect(() => {
     if (!visible) {
@@ -198,7 +231,11 @@ export function RaceRiderOverlay({
     }
 
     const syncLayoutToViewport = () => {
-      const nextLayout = clampLayout(requestedLayoutRef.current, container);
+      const nextLayout = clampLayout(
+        requestedLayoutRef.current,
+        container,
+        normalizedPresentationScale,
+      );
       const currentLayout = layoutRef.current;
       if (
         nextLayout.width === currentLayout.width
@@ -223,7 +260,7 @@ export function RaceRiderOverlay({
     const resizeObserver = new ResizeObserver(syncLayoutToViewport);
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
-  }, [trackId, visible]);
+  }, [normalizedPresentationScale, trackId, visible]);
 
   const entries = useMemo<OverlayEntry[]>(() => {
     const localEntries = riders.flatMap((rider) => {
@@ -318,8 +355,19 @@ export function RaceRiderOverlay({
           container.clientHeight,
         )
         : layoutRef.current;
-      requestedLayoutRef.current = nextPreference;
-      onPreferenceChange(trackId, nextPreference);
+      const referenceViewport = container
+        && !raceRiderOverlayUsesCompactLandscape(container.clientWidth, container.clientHeight)
+        ? normalizeRacePresentationViewport({
+            width: container.clientWidth,
+            height: container.clientHeight,
+          })
+        : nextPreference.referenceViewport;
+      const savedPreference = {
+        ...nextPreference,
+        ...(referenceViewport ? { referenceViewport } : {}),
+      };
+      requestedLayoutRef.current = savedPreference;
+      onPreferenceChange(trackId, savedPreference);
       if (drag.captureTarget.hasPointerCapture?.(drag.pointerId)) {
         drag.captureTarget.releasePointerCapture(drag.pointerId);
       }
@@ -344,7 +392,7 @@ export function RaceRiderOverlay({
         ...drag.layout,
         xPct: drag.layout.xPct + ((event.clientX - drag.startX) / Math.max(1, rect.width)),
         yPct: drag.layout.yPct + ((event.clientY - drag.startY) / Math.max(1, rect.height)),
-      }, container);
+      }, container, normalizedPresentationScale);
       requestedLayoutRef.current = next;
       layoutRef.current = next;
       setLayout(next);
@@ -355,11 +403,11 @@ export function RaceRiderOverlay({
       ...drag.layout,
       width: drag.layout.width + (event.clientX - drag.startX),
       height: drag.layout.height + (event.clientY - drag.startY),
-    }, container);
+    }, container, normalizedPresentationScale);
     requestedLayoutRef.current = next;
     layoutRef.current = next;
     setLayout(next);
-  }, []);
+  }, [normalizedPresentationScale]);
 
   useEffect(() => {
     window.addEventListener('pointermove', moveDrag, { passive: false });
@@ -415,8 +463,23 @@ export function RaceRiderOverlay({
       return;
     }
     dragRef.current = null;
-    const nextPreference = { ...requestedLayoutRef.current, locked: !layout.locked };
-    const nextLayout = clampLayout(nextPreference, overlayRef.current?.parentElement ?? null);
+    const container = overlayRef.current?.parentElement ?? null;
+    const referenceViewport = container
+      ? normalizeRacePresentationViewport({
+          width: container.clientWidth,
+          height: container.clientHeight,
+        })
+      : null;
+    const nextPreference = {
+      ...requestedLayoutRef.current,
+      locked: !layout.locked,
+      ...(referenceViewport ? { referenceViewport } : {}),
+    };
+    const nextLayout = clampLayout(
+      nextPreference,
+      container,
+      normalizedPresentationScale,
+    );
     requestedLayoutRef.current = nextPreference;
     layoutRef.current = nextLayout;
     setLayout(nextLayout);
@@ -429,7 +492,7 @@ export function RaceRiderOverlay({
 
   return (
     <div
-      className={`race-rider-overlay${!canEditLayout || layout.locked ? ' locked' : ''}`}
+      className={`race-rider-overlay${!canEditLayout || layout.locked ? ' locked' : ''}${presentationScaled ? ' presentation-scaled' : ''}`}
       ref={overlayRef}
       aria-label="Race rider positions"
       style={{
@@ -437,8 +500,24 @@ export function RaceRiderOverlay({
         '--overlay-y': `${layout.yPct * 100}%`,
         '--overlay-width': `${layout.width}px`,
         '--overlay-height': `${layout.height}px`,
+        '--race-overlay-min-height': `${raceRiderOverlayMinimumHeight(
+          overlayRef.current?.parentElement?.clientWidth ?? 1366,
+          overlayRef.current?.parentElement?.clientHeight ?? 1024,
+          normalizedPresentationScale,
+        )}px`,
       } as CSSProperties}
     >
+      <div
+        className="race-rider-overlay-presentation"
+        style={{
+          width: presentationScaled ? `${layout.width / normalizedPresentationScale}px` : '100%',
+          height: presentationScaled ? `${layout.height / normalizedPresentationScale}px` : '100%',
+          display: 'grid',
+          gridTemplateRows: 'auto minmax(0, 1fr)',
+          transform: presentationScaled ? `scale(${normalizedPresentationScale})` : undefined,
+          transformOrigin: 'top left',
+        }}
+      >
       <div className="race-rider-overlay-toolbar">
         <div
           className="race-rider-overlay-handle"
@@ -529,6 +608,7 @@ export function RaceRiderOverlay({
             )}
           </div>
         ))}
+      </div>
       </div>
       {canEditLayout && !layout.locked && (
         <button

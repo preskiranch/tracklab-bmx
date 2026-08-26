@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  normalizeRiderPresentationScale,
   riderAirPixelsToMeters,
   riderLaneOffsetsByPlayer,
   riderMarkerCanvasSize,
@@ -20,6 +21,13 @@ const players: PlayerSlot[] = [
 ];
 
 describe('3D rider presentation', () => {
+  it('keeps responsive rider art within readable, track-safe bounds', () => {
+    expect(normalizeRiderPresentationScale(undefined)).toBe(1);
+    expect(normalizeRiderPresentationScale(0.75)).toBe(0.75);
+    expect(normalizeRiderPresentationScale(0.1)).toBe(0.5);
+    expect(normalizeRiderPresentationScale(4)).toBe(1.5);
+  });
+
   it('keeps rider art upright while mirroring it for reverse travel', () => {
     expect(uprightRiderOrientation(0)).toEqual({ leanDegrees: 0, mirrored: false });
     expect(uprightRiderOrientation(180)).toEqual({ leanDegrees: 0, mirrored: true });

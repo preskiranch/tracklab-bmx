@@ -794,11 +794,18 @@ export type TrackPoint = {
   lng: number;
 };
 
+/** CSS-pixel viewport used when a saved race presentation was authored. */
+export type RacePresentationViewport = Readonly<{
+  width: number;
+  height: number;
+}>;
+
 export type EarthCamera = {
   angle: number;
   heading: number;
   center?: TrackPoint;
   zoom?: number;
+  referenceViewport?: RacePresentationViewport;
   updatedAt: number;
 };
 
@@ -808,6 +815,7 @@ export type RaceRiderOverlayLayout = {
   width: number;
   height: number;
   locked: boolean;
+  referenceViewport?: RacePresentationViewport;
 };
 
 export type RaceCommentaryVoicePreset = 'american-man';

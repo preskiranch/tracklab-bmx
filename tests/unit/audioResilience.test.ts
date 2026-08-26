@@ -411,4 +411,29 @@ describe('race audio resilience', () => {
     expect(crowd!.currentTime).toBeGreaterThanOrEqual(4);
     expect(crowd!.currentTime).toBeLessThan(68);
   });
+
+  it('ducks both ambience layers for commentary and restores the exact mix', async () => {
+    StalledAudio.stallPlayback = false;
+    const {
+      bmxEventAmbienceSources,
+      setBmxEventAmbienceCommentaryDucked,
+      startBmxEventAmbience,
+    } = await import('../../src/lib/audioCues');
+
+    await startBmxEventAmbience(0.1);
+    const layers = StalledAudio.instances.filter((audio) => (
+      bmxEventAmbienceSources.some((source) => audio.src.endsWith(source.url))
+    ));
+    const normalVolumes = layers.map((audio) => audio.volume);
+
+    setBmxEventAmbienceCommentaryDucked(true);
+    layers.forEach((audio, index) => {
+      expect(audio.volume).toBeCloseTo(normalVolumes[index] * 0.2, 8);
+    });
+
+    setBmxEventAmbienceCommentaryDucked(false);
+    layers.forEach((audio, index) => {
+      expect(audio.volume).toBeCloseTo(normalVolumes[index], 8);
+    });
+  });
 });

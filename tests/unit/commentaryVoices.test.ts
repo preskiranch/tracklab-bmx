@@ -3,8 +3,10 @@ import {
   commentaryPcmToWav,
   commentaryRealtimeResponseCreate,
   commentaryRealtimeSessionUpdate,
+  commentarySpeechMixVersion,
   commentarySpeechModel,
   commentaryVoiceDefinition,
+  normalizeCommentaryPcm16,
 } from '../../cloud/commentaryVoices.mjs';
 
 const legacyVoicePresets = [
@@ -107,5 +109,43 @@ describe('commentary voice', () => {
     expect(wav.readUInt32LE(40)).toBe(pcm.length);
     expect(wav.subarray(44).equals(pcm)).toBe(true);
     expect(() => commentaryPcmToWav([])).toThrow(/no usable PCM audio/i);
+  });
+
+  it('raises quiet active speech to a bounded tablet-friendly broadcast level', () => {
+    const quiet = Buffer.alloc(240 * 2);
+    for (let index = 0; index < 240; index += 1) {
+      quiet.writeInt16LE(Math.round(Math.sin(index / 5) * 1_200), index * 2);
+    }
+
+    const mixed = normalizeCommentaryPcm16(quiet);
+    const rms = (buffer: Buffer) => Math.sqrt(
+      Array.from({ length: buffer.length / 2 }, (_, index) => (
+        buffer.readInt16LE(index * 2) / 32_768
+      )).reduce((sum, sample) => sum + sample * sample, 0) / (buffer.length / 2),
+    );
+    const mixedPeaks = Array.from(
+      { length: mixed.length / 2 },
+      (_, index) => Math.abs(mixed.readInt16LE(index * 2)),
+    );
+
+    expect(commentarySpeechMixVersion).toBe('broadcast-v2');
+    expect(rms(mixed)).toBeGreaterThan(rms(quiet) * 3.5);
+    expect(Math.max(...mixedPeaks)).toBeLessThanOrEqual(Math.round(32_767 * 0.92));
+  });
+
+  it('leaves silence intact and soft-limits already-hot PCM', () => {
+    const silence = Buffer.alloc(240 * 2);
+    expect(normalizeCommentaryPcm16(silence).equals(silence)).toBe(true);
+
+    const hot = Buffer.alloc(240 * 2);
+    for (let index = 0; index < 240; index += 1) {
+      hot.writeInt16LE(index % 2 === 0 ? 32_767 : -32_768, index * 2);
+    }
+    const limited = normalizeCommentaryPcm16(hot);
+    const peak = Math.max(...Array.from(
+      { length: limited.length / 2 },
+      (_, index) => Math.abs(limited.readInt16LE(index * 2)),
+    ));
+    expect(peak).toBeLessThanOrEqual(Math.round(32_767 * 0.92));
   });
 });

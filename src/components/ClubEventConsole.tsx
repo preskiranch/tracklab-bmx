@@ -69,7 +69,12 @@ export function clubEventRaceViewForCourse(
     ? undefined
     : course.sprintRaceViewCamerasByDistance?.[sprintDistanceFeet];
   const camera = distanceCamera ?? course.raceView?.camera;
-  return { mode: safeMode, ...(camera ? { camera } : {}) };
+  const riderOverlay = course.raceView?.riderOverlay;
+  return {
+    mode: safeMode,
+    ...(camera ? { camera } : {}),
+    ...(riderOverlay ? { riderOverlay } : {}),
+  };
 }
 
 export function clubEventLobbyNeedsRaceViews(

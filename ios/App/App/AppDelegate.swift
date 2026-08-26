@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import AVFAudio
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -11,6 +12,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // begins mirroring. Install the handler before the web view is created.
         RecoveryAlertManager.shared.configureAtLaunch()
         HeartRateCoordinator.shared.configureAtLaunch()
+        // Race calls, cadence, and gate tones are primary app audio. Configure
+        // the native shell as playback media so WebKit does not inherit the
+        // default silent-switch/lock-screen behavior on studio iPads. WebKit
+        // activates the session when playback actually begins, avoiding an
+        // unnecessary interruption to other audio at launch.
+        do {
+            try AVAudioSession.sharedInstance().setCategory(
+                .playback,
+                mode: .moviePlayback,
+                options: []
+            )
+        } catch {
+            NSLog("TrackLab could not configure its race audio session: \(error)")
+        }
         return true
     }
 

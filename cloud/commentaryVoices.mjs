@@ -5,6 +5,13 @@ const commentaryVoice = {
 
 export const commentarySpeechModel = 'gpt-realtime-2.1-mini';
 export const commentarySpeechSampleRate = 24_000;
+export const commentarySpeechMixVersion = 'broadcast-v2';
+
+const commentaryTargetActiveRms = 0.17;
+const commentaryMaximumBoost = 4;
+const commentaryLimiterThreshold = 0.72;
+const commentaryPeakCeiling = 0.92;
+const commentaryNoiseFloor = 0.008;
 
 function commentarySpeechDirection(eventKind, deliveryStyle) {
   const wryDirection = deliveryStyle === 'wry'
@@ -171,11 +178,14 @@ export function commentaryPcmToWav(
   if (pcm.length === 0) {
     throw new Error('OpenAI Realtime returned no usable PCM audio.');
   }
+  const mixedPcm = bitsPerSample === 16
+    ? normalizeCommentaryPcm16(pcm)
+    : pcm;
   const blockAlign = channelCount * (bitsPerSample / 8);
   const byteRate = sampleRate * blockAlign;
   const header = Buffer.alloc(44);
   header.write('RIFF', 0, 'ascii');
-  header.writeUInt32LE(36 + pcm.length, 4);
+  header.writeUInt32LE(36 + mixedPcm.length, 4);
   header.write('WAVE', 8, 'ascii');
   header.write('fmt ', 12, 'ascii');
   header.writeUInt32LE(16, 16);
@@ -186,6 +196,64 @@ export function commentaryPcmToWav(
   header.writeUInt16LE(blockAlign, 32);
   header.writeUInt16LE(bitsPerSample, 34);
   header.write('data', 36, 'ascii');
-  header.writeUInt32LE(pcm.length, 40);
-  return Buffer.concat([header, pcm]);
+  header.writeUInt32LE(mixedPcm.length, 40);
+  return Buffer.concat([header, mixedPcm]);
+}
+
+/**
+ * Gives every generated announcer call a consistent broadcast-level signal.
+ * Realtime returns clean signed 16-bit PCM, but its level varies by delivery.
+ * A bounded active-speech lift plus a soft ceiling makes quiet calls audible on
+ * small tablet speakers without turning silence into hiss or clipping peaks.
+ */
+export function normalizeCommentaryPcm16(value) {
+  const pcm = Buffer.from(value);
+  if (pcm.length < 2 || pcm.length % 2 !== 0) {
+    return pcm;
+  }
+
+  let activeSquareSum = 0;
+  let activeSampleCount = 0;
+  let peakMagnitude = 0;
+  for (let offset = 0; offset < pcm.length; offset += 2) {
+    const sample = pcm.readInt16LE(offset) / 32_768;
+    peakMagnitude = Math.max(peakMagnitude, Math.abs(sample));
+    if (Math.abs(sample) < commentaryNoiseFloor) continue;
+    activeSquareSum += sample * sample;
+    activeSampleCount += 1;
+  }
+
+  // Leave silence and near-silence byte-for-byte intact. Boosting it would
+  // expose codec noise between words without improving intelligibility.
+  if (activeSampleCount < 24 || activeSquareSum <= 0) {
+    return pcm;
+  }
+
+  const activeRms = Math.sqrt(activeSquareSum / activeSampleCount);
+  const gain = Math.max(1, Math.min(
+    commentaryMaximumBoost,
+    commentaryTargetActiveRms / activeRms,
+  ));
+  if (gain <= 1.0001 && peakMagnitude <= commentaryPeakCeiling) {
+    return pcm;
+  }
+
+  const mixed = Buffer.allocUnsafe(pcm.length);
+  const limiterRange = commentaryPeakCeiling - commentaryLimiterThreshold;
+  for (let offset = 0; offset < pcm.length; offset += 2) {
+    const amplified = (pcm.readInt16LE(offset) / 32_768) * gain;
+    const sign = amplified < 0 ? -1 : 1;
+    const magnitude = Math.abs(amplified);
+    const limitedMagnitude = magnitude <= commentaryLimiterThreshold
+      ? magnitude
+      : commentaryLimiterThreshold + limiterRange * (
+        1 - Math.exp(-(magnitude - commentaryLimiterThreshold) / limiterRange)
+      );
+    const limited = sign * Math.min(commentaryPeakCeiling, limitedMagnitude);
+    mixed.writeInt16LE(Math.max(
+      -32_768,
+      Math.min(32_767, Math.round(limited * 32_767)),
+    ), offset);
+  }
+  return mixed;
 }

@@ -2694,11 +2694,10 @@ input:focus {
   z-index: 1180;
   width: min(var(--overlay-width), calc(100% - 24px));
   height: min(var(--overlay-height), calc(100% - 24px));
-  min-height: 220px;
+  min-height: var(--race-overlay-min-height, 220px);
   max-width: calc(100% - 24px);
   max-height: calc(100% - 24px);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: block;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
@@ -2930,7 +2929,7 @@ input:focus {
   .race-rider-overlay {
     width: min(var(--overlay-width), calc(100% - 16px));
     height: min(var(--overlay-height), calc(100% - 16px));
-    min-height: 340px;
+    min-height: var(--race-overlay-min-height, 340px);
   }
 
   .race-rider-overlay-grid {
@@ -2992,7 +2991,7 @@ input:focus {
 }
 
 @media (max-width: 600px) {
-  .race-rider-overlay { min-height: 368px; }
+  .race-rider-overlay { min-height: var(--race-overlay-min-height, 368px); }
   .race-rider-overlay-card { grid-template-rows: minmax(68px, 1fr) 44px; }
   .race-rider-overlay .race-rider-overlay-avatar { width: 52px; height: 52px; font-size: 13px; }
   .race-rider-overlay-identity strong { font-size: 16px; }
