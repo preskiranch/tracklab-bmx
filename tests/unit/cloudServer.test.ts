@@ -2588,7 +2588,14 @@ describe('cloud API trust boundaries', () => {
       }),
     ]);
     expect(joinedResponses.map((response) => response.status)).toEqual([200, 200]);
-    const joinedPayload = await joinedResponses[1].json();
+    // Either concurrent request may acquire the per-club event lock first, so
+    // an individual 200 response can legitimately contain only that first
+    // participant. Verify the authoritative snapshot after both commits.
+    const joinedSnapshot = await api('/api/club-events/current', {
+      headers: athleteHeaders(secondSelectedPayload.sessionToken),
+    });
+    expect(joinedSnapshot.status).toBe(200);
+    const joinedPayload = await joinedSnapshot.json();
     expect(joinedPayload.event.slots).toEqual(expect.arrayContaining([
       expect.objectContaining({
         deviceId: firstDevice.device.id,
