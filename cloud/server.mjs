@@ -3361,6 +3361,61 @@ function sanitizeGlobalRaceViewPreferences(value) {
   };
 }
 
+function sanitizeClubTabletRacePresentation(value) {
+  const preferences = sanitizeRaceViewPreferences(value);
+  if (
+    !preferences
+    || (
+      Object.keys(preferences.earthCamerasByTrack).length === 0
+      && Object.keys(preferences.riderOverlaysByTrack).length === 0
+    )
+  ) {
+    return null;
+  }
+
+  const newestCameraRevision = Math.max(
+    0,
+    ...Object.values(preferences.earthCamerasByTrack)
+      .map((camera) => sanitizedPreferenceRevision(camera?.updatedAt)),
+  );
+  return {
+    cameraLocked: true,
+    cameraLockedUpdatedAt: Math.max(
+      preferences.cameraLockedUpdatedAt,
+      newestCameraRevision,
+    ),
+    earthCamerasByTrack: preferences.earthCamerasByTrack,
+    riderOverlaysByTrack: preferences.riderOverlaysByTrack,
+    riderOverlayUpdatedAtByTrack: preferences.riderOverlayUpdatedAtByTrack,
+  };
+}
+
+function mergeClubTabletRacePresentations(globalPresentation, ownerPresentation) {
+  if (!globalPresentation && !ownerPresentation) return null;
+  return {
+    cameraLocked: true,
+    cameraLockedUpdatedAt: Math.max(
+      globalPresentation?.cameraLockedUpdatedAt ?? 0,
+      ownerPresentation?.cameraLockedUpdatedAt ?? 0,
+    ),
+    earthCamerasByTrack: {
+      ...(ownerPresentation?.earthCamerasByTrack ?? {}),
+      // The developer-published view is authoritative across accounts. This
+      // matches the signed-in client merge and prevents a stale owner camera
+      // from restoring the tablet's old diagonal/default composition.
+      ...(globalPresentation?.earthCamerasByTrack ?? {}),
+    },
+    riderOverlaysByTrack: {
+      ...(globalPresentation?.riderOverlaysByTrack ?? {}),
+      ...(ownerPresentation?.riderOverlaysByTrack ?? {}),
+    },
+    riderOverlayUpdatedAtByTrack: {
+      ...(globalPresentation?.riderOverlayUpdatedAtByTrack ?? {}),
+      ...(ownerPresentation?.riderOverlayUpdatedAtByTrack ?? {}),
+    },
+  };
+}
+
 function mergePreferenceRecords(current, incoming, revisionFor) {
   const merged = { ...current };
   Object.entries(incoming).forEach(([key, value]) => {
@@ -5674,13 +5729,16 @@ async function publicClubEventResponse(event, options) {
 }
 
 async function loadClubTabletRoster(device) {
-  if (!device) return [];
-  const [userData, state, watchProjection] = await Promise.all([
+  if (!device) return { athletes: [], racePresentation: null };
+  const [userData, state, watchProjection, globalRaceViewData] = await Promise.all([
     persistence.loadUserData(device.ownerProfileKey),
     persistence.loadClubConnectState(device.ownerProfileKey),
     persistence.loadHeartRateWatchStudioProjection(device.ownerProfileKey, device.clubId),
+    persistence.loadUserData(globalRaceViewProfileKey),
   ]);
-  if (state.ownedClub?.id !== device.clubId) return [];
+  if (state.ownedClub?.id !== device.clubId) {
+    return { athletes: [], racePresentation: null };
+  }
   const watchByRiderId = new Map((watchProjection ?? []).map((row) => [
     row.studioRiderId,
     heartRateWatchStudioProjection(row, Date.now()),
@@ -5689,7 +5747,7 @@ async function loadClubTabletRoster(device) {
     member.studioRiderId,
     member,
   ]));
-  return Promise.all((Array.isArray(userData?.studioRiders) ? userData.studioRiders : [])
+  const athletes = await Promise.all((Array.isArray(userData?.studioRiders) ? userData.studioRiders : [])
     .filter((rider) => rider?.id && rider?.name && !rider?.deletedAt)
     .slice(0, 250)
     .map(async (rider) => {
@@ -5718,6 +5776,15 @@ async function loadClubTabletRoster(device) {
         ...(photoUrl ? { photoUrl } : {}),
       };
     }));
+  return {
+    athletes,
+    // Enrolled tablets need the owner's exact authored camera and rider panel,
+    // but never private demo identities, photos, commentary history, or health data.
+    racePresentation: mergeClubTabletRacePresentations(
+      sanitizeClubTabletRacePresentation(globalRaceViewData?.raceViewPreferences),
+      sanitizeClubTabletRacePresentation(userData?.raceViewPreferences),
+    ),
+  };
 }
 
 async function withClubTabletSessionStartLock(clubId, task) {
@@ -15968,10 +16035,11 @@ async function serveStatic(request, response) {
       return;
     }
     if (!enforceRateLimit(request, response, clubTabletRateLimiter, 120, `club-tablet-roster:${device.id}`)) return;
-    const athletes = await loadClubTabletRoster(device);
+    const { athletes, racePresentation } = await loadClubTabletRoster(device);
     writeJson(response, 200, {
       device: publicClubTabletDevice(device),
       athletes,
+      racePresentation,
     }, { 'Cache-Control': 'no-store' });
     return;
   }
@@ -16001,8 +16069,8 @@ async function serveStatic(request, response) {
           }, { 'Cache-Control': 'no-store' });
           return;
         }
-        const roster = await loadClubTabletRoster(device);
-        const athlete = roster.find((candidate) => candidate.studioRiderId === studioRiderId);
+        const { athletes } = await loadClubTabletRoster(device);
+        const athlete = athletes.find((candidate) => candidate.studioRiderId === studioRiderId);
         if (!athlete) {
           writeJson(response, 404, { error: 'That athlete is not in this club tablet roster.' });
           return;

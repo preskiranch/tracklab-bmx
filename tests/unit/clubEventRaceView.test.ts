@@ -129,9 +129,14 @@ describe('Club Event owner race view', () => {
     const map3DSource = readFileSync(new URL('../../src/components/GoogleMaps3DTrackLayer.tsx', import.meta.url), 'utf8');
     const satelliteSource = readFileSync(new URL('../../src/components/GoogleMapsTrackLayer.tsx', import.meta.url), 'utf8');
 
-    expect(appSource).toContain('raceCameraSnapshot={clubEventRaceCamera}');
+    expect(appSource).toContain('raceCameraSnapshot={clubEventRaceViewApplies');
+    expect(appSource).toContain('? clubEventRaceCamera\n                    : clubTabletRaceCamera}');
     expect(earthViewSource).toContain('const presentedEarthAngle = raceCameraImmutable');
-    expect(appSource).toContain('raceCameraImmutable={clubEventRaceViewApplies}');
+    expect(appSource).toContain(
+      'raceCameraImmutable={clubEventRaceViewApplies || clubTabletRaceViewApplies}',
+    );
+    expect(appSource).toContain(': clubTabletKioskMode\n        ? clubTabletRaceCamera');
+    expect(appSource).toContain('clubTabletRoster?.device.id === clubTabletDevice?.device.id');
     expect(earthViewSource).toContain('cameraLocked={raceCameraImmutable || (');
     expect(map3DSource).toContain('if (cameraLockedRef.current) {');
     expect(map3DSource).toContain('if (cameraLockedRef.current) return;');
@@ -139,7 +144,9 @@ describe('Club Event owner race view', () => {
     expect(satelliteSource).toContain('const raceCameraInputLocked = cameraLocked;');
     expect(satelliteSource).toContain('cameraForTrack(latest.camera, latest.track, latest.cameraLocked)');
     expect(satelliteSource).toContain('cameraForTrack(cameraRef.current, track, cameraLocked)');
-    expect(appSource).toContain('if (clubEventConfigurationLocked) {\n        return current;');
+    expect(appSource).toContain(
+      'if (clubEventConfigurationLocked || clubTabletKioskMode) {\n        return current;',
+    );
   });
 
   it('uses the historical iPad frame for legacy views and scales the camera and rider panel independently', () => {

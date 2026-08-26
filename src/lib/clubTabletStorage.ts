@@ -1,5 +1,7 @@
 import { safeSetLocalStorage } from './browserStorage';
+import { normalizeRaceViewPreferences } from './raceViewPreferences';
 import { normalizeRiderPhotoDataUrl } from './riderPhotos';
+import type { RaceViewPreferences } from '../types';
 
 export const clubTabletDeviceStorageKey = 'tracklab.club-tablet-device.v1';
 export const clubTabletSessionStorageKey = 'tracklab.club-tablet-athlete-session.v1';
@@ -47,9 +49,20 @@ export type ClubTabletWatchConnectStatus = {
   liveSharingEnabled: boolean;
 };
 
+export type ClubTabletRacePresentation = Pick<
+  RaceViewPreferences,
+  | 'cameraLocked'
+  | 'cameraLockedUpdatedAt'
+  | 'earthCamerasByTrack'
+  | 'riderOverlaysByTrack'
+  | 'riderOverlayUpdatedAtByTrack'
+>;
+
 export type ClubTabletRoster = {
   device: ClubTabletDevice;
   athletes: ClubTabletAthlete[];
+  /** Owner-authored public camera and rider-panel geometry for this club. */
+  racePresentation: ClubTabletRacePresentation | null;
 };
 
 export type ClubTabletSession = {
@@ -203,7 +216,11 @@ export function normalizeClubTabletWatchConnectStatus(value: unknown): ClubTable
 
 export function normalizeClubTabletRoster(value: unknown): ClubTabletRoster | null {
   if (!value || typeof value !== 'object') return null;
-  const candidate = value as { device?: unknown; athletes?: unknown };
+  const candidate = value as {
+    device?: unknown;
+    athletes?: unknown;
+    racePresentation?: unknown;
+  };
   const device = normalizeClubTabletDevice(candidate.device);
   if (!device || !Array.isArray(candidate.athletes)) return null;
   const athletes = candidate.athletes
@@ -212,7 +229,21 @@ export function normalizeClubTabletRoster(value: unknown): ClubTabletRoster | nu
       return normalized ? [normalized] : [];
     })
     .sort((left, right) => left.riderName.localeCompare(right.riderName, undefined, { sensitivity: 'base' }));
-  return { device, athletes };
+  const racePresentation = candidate.racePresentation
+    && typeof candidate.racePresentation === 'object'
+    && !Array.isArray(candidate.racePresentation)
+    ? (() => {
+        const normalized = normalizeRaceViewPreferences(candidate.racePresentation);
+        return {
+          cameraLocked: normalized.cameraLocked,
+          cameraLockedUpdatedAt: normalized.cameraLockedUpdatedAt,
+          earthCamerasByTrack: normalized.earthCamerasByTrack,
+          riderOverlaysByTrack: normalized.riderOverlaysByTrack,
+          riderOverlayUpdatedAtByTrack: normalized.riderOverlayUpdatedAtByTrack,
+        };
+      })()
+    : null;
+  return { device, athletes, racePresentation };
 }
 
 function normalizeSession(value: unknown): ClubTabletSession | null {
