@@ -450,6 +450,12 @@ type RaceWorkflowStep = {
   kind: 'laps';
   state: string;
 };
+type RoomRaceStartAuthority = Readonly<{
+  /** Immutable room start in the multiplayer server clock domain. */
+  startAt: number;
+  /** Server time minus this tablet's Date.now(). */
+  serverClockOffsetMs: number;
+}>;
 type CustomRoutePreview = {
   input: string;
   label?: string;
@@ -464,15 +470,6 @@ function isBikeConnectionSource(value: unknown): value is BikeConnectionSource {
 
 function browserSupportsBluetoothDirect() {
   return Boolean((navigator as Navigator & { bluetooth?: unknown }).bluetooth);
-}
-
-function clubEventCadenceDelayMs(eventId: string) {
-  let hash = 0;
-  for (let index = 0; index < eventId.length; index += 1) {
-    hash = ((hash * 31) + eventId.charCodeAt(index)) >>> 0;
-  }
-  const range = Math.max(1, uciRandomDelayMaxMs - uciRandomDelayMinMs + 1);
-  return uciRandomDelayMinMs + (hash % range);
 }
 
 function browserHasFriendInvite() {
@@ -1815,6 +1812,10 @@ export default function App() {
   const redLightAtRef = useRef(0);
   const cStartTriggeredPlayerIdsRef = useRef<Set<PlayerId>>(new Set());
   const cStartOffsetsByPlayerRef = useRef<CStartOffsetsByPlayer>({});
+  const synchronizedFalseStartPlayerIdsRef = useRef<Set<PlayerId>>(new Set());
+  const activeClubEventGateIdRef = useRef<string | null>(null);
+  const latestRoomExitSequenceRef = useRef(0);
+  const activeClubEventGateRoomExitSequenceRef = useRef(0);
   const falseStartActiveRef = useRef(false);
   const lastFinishToneSecondRef = useRef<number | null>(null);
   const capturedSampleKeysRef = useRef<Set<string>>(new Set());
@@ -1868,7 +1869,9 @@ export default function App() {
   const roomTrackApplyRef = useRef<string | null>(null);
   const lastRoomRaceTokenRef = useRef<string | null>(null);
   const roomRaceStartTimeoutRef = useRef<number | null>(null);
-  const roomRaceStartHandlerRef = useRef<() => Promise<boolean>>(async () => false);
+  const roomRaceStartHandlerRef = useRef<(
+    authority?: RoomRaceStartAuthority,
+  ) => Promise<boolean>>(async () => false);
   const liveRaceEntryTouchedRef = useRef(false);
   const latestRaceSyncRef = useRef<OutgoingMultiplayerRaceState | null>(null);
   const racePhotoSyncPendingRef = useRef(true);
@@ -2116,6 +2119,7 @@ export default function App() {
   const [cStartOffsetsByPlayer, setCStartOffsetsByPlayer] = useState<CStartOffsetsByPlayer>({});
   const [reactionStartAt, setReactionStartAt] = useState<number | null>(null);
   const [reactionTimesByPlayer, setReactionTimesByPlayer] = useState<ReactionTimesByPlayer>({});
+  const [synchronizedFalseStartPlayerIds, setSynchronizedFalseStartPlayerIds] = useState<PlayerId[]>([]);
   const [raceCapture, setRaceCapture] = useState<RaceCapture | null>(() => {
     if (initialClubTabletDeviceRef.current) {
       clearStoredRaceCaptureAtIdentityBoundary();
@@ -3314,6 +3318,9 @@ export default function App() {
     && clubEventTrack?.id === selectedTrack.id;
   const clubEventRaceViewApplies = clubEventLaunchMatchesTrack
     && activeClubEventRaceView != null;
+  const clubEventRaceCamera = clubEventRaceViewApplies
+    ? activeClubEventRaceView?.camera
+    : undefined;
   const raceCameraPreferenceKey = raceWorkspaceMode === 'straight-sprint'
     ? straightSprintCameraPreferenceKey(selectedTrack.id, straightSprintDistanceFeet)
     : selectedTrack.id;
@@ -3947,6 +3954,7 @@ export default function App() {
       ? handleFriendNetworkChange
       : undefined,
   });
+  latestRoomExitSequenceRef.current = multiplayer.roomExit.sequence;
   useEffect(() => {
     const eventId = clubEventLaunch?.eventId;
     if (
@@ -4550,7 +4558,14 @@ export default function App() {
       return changed ? next : current;
     });
   }, [multiplayer.clientId, multiplayer.currentRoom?.flow, playMode, racePlayers]);
-  const { raceState, riders, raceSummary, finishWindowEndsAt, startRace, resetRace } = useRaceEngine(
+  const {
+    raceState,
+    riders,
+    raceSummary: engineRaceSummary,
+    finishWindowEndsAt,
+    startRace,
+    resetRace,
+  } = useRaceEngine(
     racePlayers,
     samplesByDevice,
     effectiveRouteLengthMeters,
@@ -4558,15 +4573,47 @@ export default function App() {
     splitDecisionPoints,
     raceZones,
   );
+  const synchronizedFalseStartPlayerIdSet = useMemo(
+    () => new Set(synchronizedFalseStartPlayerIds),
+    [synchronizedFalseStartPlayerIds],
+  );
+  const raceSummary = useMemo(
+    () => engineRaceSummary.filter(
+      (summary) => !synchronizedFalseStartPlayerIdSet.has(summary.playerId),
+    ).map((summary, index) => ({ ...summary, rank: index + 1 })),
+    [engineRaceSummary, synchronizedFalseStartPlayerIdSet],
+  );
   const newPersonalRecordsByPlayer = useMemo(
     () => personalRecordAchievements(
-      riders.map((rider) => ({
-        playerId: rider.playerId,
-        finishTimeMs: rider.finishedAt,
-      })),
+      riders
+        .filter((rider) => !synchronizedFalseStartPlayerIdSet.has(rider.playerId))
+        .map((rider) => ({
+          playerId: rider.playerId,
+          finishTimeMs: rider.finishedAt,
+        })),
       previousRaceBestTimes,
     ),
-    [previousRaceBestTimes, riders],
+    [previousRaceBestTimes, riders, synchronizedFalseStartPlayerIdSet],
+  );
+  const commentaryRacePlayers = useMemo(
+    () => racePlayers.filter(
+      (player) => !synchronizedFalseStartPlayerIdSet.has(player.id),
+    ),
+    [racePlayers, synchronizedFalseStartPlayerIdSet],
+  );
+  const commentaryRiders = useMemo(
+    () => riders.filter(
+      (rider) => !synchronizedFalseStartPlayerIdSet.has(rider.playerId),
+    )
+      .sort((left, right) => left.rank - right.rank)
+      .map((rider, index) => ({ ...rider, rank: index + 1 })),
+    [riders, synchronizedFalseStartPlayerIdSet],
+  );
+  const commentaryPersonalRecordsByPlayer = useMemo(
+    () => Object.fromEntries(Object.entries(newPersonalRecordsByPlayer).filter(
+      ([playerId]) => !synchronizedFalseStartPlayerIdSet.has(Number(playerId) as PlayerId),
+    )) as typeof newPersonalRecordsByPlayer,
+    [newPersonalRecordsByPlayer, synchronizedFalseStartPlayerIdSet],
   );
   const selectedGhostFinishMs = useMemo(
     () => selectedGhostLaps.reduce(
@@ -4583,19 +4630,23 @@ export default function App() {
   );
   const raceCommentary = useRaceCommentary({
     preferences: raceCommentaryPreferences,
+    clubTabletSessionToken: clubTabletSessionActive
+      ? clubTabletSession?.sessionToken
+      : null,
+    accountProfileKey: cloudProfileKey,
     raceState,
     startGateActive: startGateStatus.active,
     startGatePhase: startGateStatus.phase,
     track: effectiveTrack,
     raceLengthMeters: effectiveRouteLengthMeters,
-    players: racePlayers,
-    riders,
+    players: commentaryRacePlayers,
+    riders: commentaryRiders,
     zones: raceZones,
     ghostLaps: availableGhostLaps,
     selectedGhostLaps,
     ghostRiders: selectedGhostRiders,
     ghostOwnerKey: clubTabletSessionActive ? clubTabletProfileKey : cloudProfileKey,
-    newPersonalRecordsByPlayer,
+    newPersonalRecordsByPlayer: commentaryPersonalRecordsByPlayer,
     lapCount: isLoopTrack ? lapCount : 1,
     reactionTimesByPlayer,
     straightSprint: raceWorkspaceMode === 'straight-sprint',
@@ -4694,7 +4745,7 @@ export default function App() {
     };
   }, [exploreRideFullscreen, raceViewFullscreen, utilityFullscreen]);
 
-  const cancelStartGateSequence = useCallback(() => {
+  const cancelStartGateSequence = useCallback((preserveCompletedResults = false) => {
     startGateSequenceIdRef.current += 1;
     startGateTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     startGateTimeoutsRef.current = [];
@@ -4707,16 +4758,49 @@ export default function App() {
     redLightAtRef.current = 0;
     cStartTriggeredPlayerIdsRef.current = new Set();
     cStartOffsetsByPlayerRef.current = {};
+    if (!preserveCompletedResults) {
+      synchronizedFalseStartPlayerIdsRef.current = new Set();
+      setSynchronizedFalseStartPlayerIds([]);
+    }
+    activeClubEventGateIdRef.current = null;
+    activeClubEventGateRoomExitSequenceRef.current = 0;
     setCStartOffsetsByPlayer({});
   }, []);
 
-  const clearStartGateSequence = useCallback(() => {
-    cancelStartGateSequence();
+  const clearStartGateSequence = useCallback((preserveCompletedResults = false) => {
+    cancelStartGateSequence(preserveCompletedResults);
     falseStartActiveRef.current = false;
     setStartGateStatus(idleStartGateStatus);
-    setReactionStartAt(null);
-    setReactionTimesByPlayer({});
+    if (!preserveCompletedResults) {
+      setReactionStartAt(null);
+      setReactionTimesByPlayer({});
+    }
   }, [cancelStartGateSequence]);
+
+  const cancelActiveClubEventGateAndRace = useCallback((reason: string) => {
+    const eventId = activeClubEventGateIdRef.current;
+    const raceWasActive = Boolean(eventId) && raceState === 'racing';
+    const preserveCompletedResults = raceState === 'finished';
+    clearStartGateSequence(preserveCompletedResults);
+    if (!raceWasActive) return;
+
+    const endedAt = Date.now();
+    setRaceCapture((current) => current && current.status === 'racing'
+      ? {
+        ...current,
+        status: 'cancelled',
+        endedAt,
+        events: [...current.events, {
+          at: endedAt,
+          elapsedMs: endedAt - current.createdAt,
+          type: 'race-cancel',
+          label: reason,
+        }],
+      }
+      : current);
+    resetRace();
+    if (!demoMode) bridge.sendControlCommand('race-reset');
+  }, [bridge, clearStartGateSequence, demoMode, raceState, resetRace]);
 
   useEffect(() => {
     if (finishCountdownSeconds == null) {
@@ -4733,7 +4817,11 @@ export default function App() {
   }, [finishCountdownSeconds]);
 
   useEffect(() => {
-    if (multiplayer.currentRoom?.flow.phase === 'race') {
+    const roomPhase = multiplayer.currentRoom?.flow.phase;
+    // A missing room is a transient transport state; the immutable server
+    // timeline must keep running through reconnects. Only an explicit room
+    // phase transition away from race is authoritative cancellation.
+    if (roomPhase == null || roomPhase === 'race') {
       return;
     }
 
@@ -4741,7 +4829,37 @@ export default function App() {
       window.clearTimeout(roomRaceStartTimeoutRef.current);
       roomRaceStartTimeoutRef.current = null;
     }
-  }, [multiplayer.currentRoom?.flow.phase]);
+    if (playMode === 'multiplayer' && startGateStatus.active) {
+      if (activeClubEventGateIdRef.current) {
+        cancelActiveClubEventGateAndRace('Club Event left the race phase');
+      } else if (raceState !== 'racing') {
+        clearStartGateSequence();
+      }
+    }
+  }, [
+    cancelActiveClubEventGateAndRace,
+    clearStartGateSequence,
+    multiplayer.currentRoom?.flow.phase,
+    playMode,
+    raceState,
+    startGateStatus.active,
+  ]);
+
+  useEffect(() => {
+    const armedEventId = activeClubEventGateIdRef.current;
+    if (armedEventId && armedEventId !== clubEventLaunch?.eventId) {
+      cancelActiveClubEventGateAndRace('Club Event ended');
+    }
+  }, [cancelActiveClubEventGateAndRace, clubEventLaunch?.eventId]);
+
+  useEffect(() => {
+    if (
+      activeClubEventGateIdRef.current
+      && multiplayer.roomExit.sequence > activeClubEventGateRoomExitSequenceRef.current
+    ) {
+      cancelActiveClubEventGateAndRace('Club Event room ended');
+    }
+  }, [cancelActiveClubEventGateAndRace, multiplayer.roomExit.sequence]);
 
   useEffect(() => () => {
     if (roomRaceStartTimeoutRef.current != null) {
@@ -4833,6 +4951,7 @@ export default function App() {
           pitch: rider.pitch,
           phase: rider.phase,
           rank: rider.rank,
+          disqualified: synchronizedFalseStartPlayerIdSet.has(player.id),
           finishedAt: rider.finishedAt,
           selectedBranch: rider.selectedBranch,
           actualBranches: rider.actualBranches,
@@ -4843,7 +4962,7 @@ export default function App() {
           sampleAt: sample?.at ?? null,
         };
       })
-      .filter((rider): rider is OutgoingMultiplayerRaceState['riders'][number] => rider != null);
+      .filter((rider): rider is NonNullable<typeof rider> => rider != null);
     const photoSignature = syncedRiders
       .map((rider) => (
         `${rider.id}:${rider.photoUrl?.length ?? 0}:${rider.photoUrl?.slice(-24) ?? ''}`
@@ -4861,7 +4980,18 @@ export default function App() {
       riders: syncedRiders,
       summary: raceSummary,
     };
-  }, [effectiveTrack.id, multiplayer.currentRoom, playMode, raceCapture?.sessionId, racePlayers, raceState, raceSummary, riders, samplesByDevice]);
+  }, [
+    effectiveTrack.id,
+    multiplayer.currentRoom,
+    playMode,
+    raceCapture?.sessionId,
+    racePlayers,
+    raceState,
+    raceSummary,
+    riders,
+    samplesByDevice,
+    synchronizedFalseStartPlayerIdSet,
+  ]);
 
   useEffect(() => {
     if (playMode !== 'multiplayer' || !multiplayer.currentRoom) {
@@ -5015,7 +5145,11 @@ export default function App() {
     });
   }, []);
 
-  const resetRaceCaptureForFalseStart = useCallback((detection: FalseStartDetection, at = Date.now()) => {
+  const resetRaceCaptureForFalseStart = useCallback((
+    detection: FalseStartDetection,
+    at = Date.now(),
+    preserveSynchronizedRace = false,
+  ) => {
     setRaceCapture((current) => {
       if (!current) {
         return current;
@@ -5023,14 +5157,16 @@ export default function App() {
 
       return {
         ...current,
-        startedAt: null,
-        endedAt: null,
-        status: 'armed',
-        samples: [],
-        frames: [],
-        reactionTimesByPlayer: {},
-        summary: [],
-        zoneResults: [],
+        ...(preserveSynchronizedRace ? {} : {
+          startedAt: null,
+          endedAt: null,
+          status: 'armed' as const,
+          samples: [],
+          frames: [],
+          reactionTimesByPlayer: {},
+          summary: [],
+          zoneResults: [],
+        }),
         events: [
           ...current.events,
           {
@@ -5084,6 +5220,13 @@ export default function App() {
 
       racePlayers.forEach((player) => {
         if (player.deviceId == null || next[player.id] != null) {
+          return;
+        }
+
+        if (synchronizedFalseStartPlayerIdsRef.current.has(player.id)) {
+          // A shared Club Event cannot locally restart one tablet's copy of
+          // the gate. The rider is disqualified from the result below, so do
+          // not manufacture a zero that could be mistaken for a best reaction.
           return;
         }
 
@@ -6096,7 +6239,12 @@ export default function App() {
   }, [raceCapture?.startedAt, raceState, riders]);
 
   useEffect(() => {
-    if (!raceCapture || raceState !== 'finished' || raceSummary.length === 0 || raceCapture.status === 'finished') {
+    if (
+      !raceCapture
+      || raceState !== 'finished'
+      || (raceSummary.length === 0 && synchronizedFalseStartPlayerIds.length === 0)
+      || raceCapture.status === 'finished'
+    ) {
       return;
     }
 
@@ -6119,7 +6267,9 @@ export default function App() {
             at: finishedAt,
             elapsedMs: finishedAt - current.createdAt,
             type: 'race-finish',
-            label: 'Race finished / summary captured',
+            label: capturedSummary.length > 0
+              ? 'Race finished / summary captured'
+              : 'Race finished / false-start disqualification captured',
           },
         ],
       };
@@ -6131,7 +6281,14 @@ export default function App() {
         )),
       };
     });
-  }, [raceCapture, raceState, raceSummary, reactionTimesByPlayer, riders]);
+  }, [
+    raceCapture,
+    raceState,
+    raceSummary,
+    reactionTimesByPlayer,
+    riders,
+    synchronizedFalseStartPlayerIds.length,
+  ]);
 
   useEffect(() => {
     if (demoMode || raceState !== 'finished' || !raceCapture || raceCapture.status !== 'finished') return;
@@ -6284,7 +6441,6 @@ export default function App() {
       raceState !== 'finished'
       || !raceCapture
       || raceCapture.source !== 'live'
-      || raceSummary.length === 0
       || !clubTabletSessionActive
       || !clubTabletSession
     ) {
@@ -6294,7 +6450,13 @@ export default function App() {
     const tabletLocalPlayer = racePlayers.find(
       (player) => player.riderId === clubTabletSession.session.studioRiderId,
     );
-    if (!tabletLocalPlayer || !raceSummary.some((summary) => summary.playerId === tabletLocalPlayer.id)) {
+    if (
+      !tabletLocalPlayer
+      || (
+        !raceSummary.some((summary) => summary.playerId === tabletLocalPlayer.id)
+        && !synchronizedFalseStartPlayerIdSet.has(tabletLocalPlayer.id)
+      )
+    ) {
       return;
     }
 
@@ -6309,6 +6471,40 @@ export default function App() {
     racePlayers,
     raceSummary,
     raceState,
+    synchronizedFalseStartPlayerIdSet,
+  ]);
+
+  useEffect(() => {
+    if (
+      raceState !== 'finished'
+      || !raceCapture
+      || raceCapture.status !== 'finished'
+      || raceCapture.source !== 'live'
+      || !clubTabletSessionActive
+      || !clubTabletSession
+    ) return undefined;
+
+    const tabletLocalPlayer = racePlayers.find(
+      (player) => player.riderId === clubTabletSession.session.studioRiderId,
+    );
+    if (!tabletLocalPlayer || !synchronizedFalseStartPlayerIdSet.has(tabletLocalPlayer.id)) {
+      return undefined;
+    }
+
+    // A false starter receives the same 15-second review window, but the DQ
+    // deliberately bypasses race history, ghost, and training-result saves.
+    const completedSession = clubTabletSession;
+    const timer = window.setTimeout(() => {
+      clubTabletExerciseSavedRef.current(completedSession);
+    }, 15_000);
+    return () => window.clearTimeout(timer);
+  }, [
+    clubTabletSession,
+    clubTabletSessionActive,
+    raceCapture,
+    racePlayers,
+    raceState,
+    synchronizedFalseStartPlayerIdSet,
   ]);
 
   useEffect(() => {
@@ -8262,7 +8458,11 @@ export default function App() {
     setReactionTimesByPlayer({});
   }, []);
 
-  const beginRaceAtGateDrop = useCallback((expectedTrackId?: string, sequenceId = startGateSequenceIdRef.current) => {
+  const beginRaceAtGateDrop = useCallback((
+    expectedTrackId?: string,
+    sequenceId = startGateSequenceIdRef.current,
+    gateDropAtOverride?: number,
+  ) => {
     if (
       (expectedTrackId && selectedTrackIdRef.current !== expectedTrackId)
       || sequenceId !== startGateSequenceIdRef.current
@@ -8270,7 +8470,9 @@ export default function App() {
       return;
     }
 
-    const gateDropAt = Date.now();
+    const gateDropAt = Number.isFinite(gateDropAtOverride) && Number(gateDropAtOverride) > 0
+      ? Number(gateDropAtOverride)
+      : Date.now();
     const inputAllowedAt = redLightAtRef.current || gateDropAt;
     cadenceStartedAtRef.current = 0;
     falseStartActiveRef.current = false;
@@ -8374,11 +8576,9 @@ export default function App() {
     }
 
     cadenceStartedAtRef.current = voiceStart.startedAt;
-    // Coach-led Club Events use one deterministic cadence delay on every
-    // tablet. Normal races retain a fresh UCI-random delay.
-    const randomDelayMs = clubEventLaunchRef.current
-      ? clubEventCadenceDelayMs(clubEventLaunchRef.current.eventId)
-      : randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
+    // Coach-led Club Events use the separate immutable server timeline below.
+    // This path remains deliberately local/random for manual races.
+    const randomDelayMs = randomIntegerInclusive(uciRandomDelayMinMs, uciRandomDelayMaxMs);
     const firstToneAtMs = uciVoiceWatchGateOffsetMs + randomDelayMs;
     const scheduleVoiceStep = (voiceOffsetMs: number, action: () => void) => {
       const elapsedSinceVoiceStartMs = Date.now() - voiceStart.startedAt;
@@ -8449,6 +8649,114 @@ export default function App() {
 
     scheduleVoiceStep(firstToneAtMs, () => runCadenceTone(0));
   }, [armReactionTimer, beginRaceAtGateDrop, demoMode, loadCStartPlayers, racePlayers, scheduleStartGateStep]);
+
+  const scheduleClubEventGate = useCallback(async (
+    startingTrackId: string,
+    sequenceId: number,
+    authority: RoomRaceStartAuthority,
+  ) => {
+    const launch = clubEventLaunchRef.current;
+    if (!launch || !Number.isFinite(authority.startAt) || authority.startAt <= 0) return false;
+    const roomExitSequence = latestRoomExitSequenceRef.current;
+
+    const gateRuntime = await import('./lib/clubEventGateTimeline');
+    if (
+      sequenceId !== startGateSequenceIdRef.current
+      || selectedTrackIdRef.current !== startingTrackId
+      || clubEventLaunchRef.current?.eventId !== launch.eventId
+      || latestRoomExitSequenceRef.current !== roomExitSequence
+    ) return false;
+
+    const plan = gateRuntime.planClubEventGateTimeline({
+      eventId: launch.eventId,
+      startAt: authority.startAt,
+      serverClockOffsetMs: authority.serverClockOffsetMs,
+      now: Date.now(),
+    });
+    activeClubEventGateIdRef.current = launch.eventId;
+    activeClubEventGateRoomExitSequenceRef.current = roomExitSequence;
+    cadenceStartedAtRef.current = plan.cadenceLocalAt;
+    const firstRedLocalAt = plan.timeline.redAt[0] - authority.serverClockOffsetMs;
+    stagingCountdownEndsAtRef.current = plan.cadenceLocalAt;
+    stagingCountdownTrackIdRef.current = startingTrackId;
+    setStartCountdownPaused(false);
+
+    gateRuntime.runClubEventGateTimelinePlan(plan, {
+      now: Date.now,
+      schedule: (delayMs, action) => scheduleStartGateStep(delayMs, action, sequenceId),
+      onStaging: (secondsRemaining) => {
+        stagingCountdownRemainingMsRef.current = secondsRemaining * 1_000;
+        setStartGateStatus({
+          active: true,
+          phase: 'staging',
+          label: String(secondsRemaining),
+          detail: 'Adjust the view, then return to your bike',
+          lightIndex: null,
+        });
+      },
+      onVoice: () => {
+        // This is best-effort playback only. Red/green remain on the immutable
+        // server clock even when a tablet's voice file starts slowly.
+        void primeAudioCues().catch(() => undefined);
+        void playUciRandomStartVoice().catch(() => {
+          if (Date.now() < firstRedLocalAt) playStartGateTone('tick');
+        });
+      },
+      onCadencePhase: (phase) => {
+        stagingCountdownEndsAtRef.current = 0;
+        stagingCountdownRemainingMsRef.current = 0;
+        stagingCountdownTrackIdRef.current = null;
+        const label = phase === 'ok-riders'
+          ? 'OK RIDERS'
+          : phase === 'riders-ready' ? 'RIDERS READY' : 'RANDOM DELAY';
+        setStartGateStatus({
+          active: true,
+          phase: 'cadence',
+          label,
+          detail: phase === 'ok-riders' ? 'UCI random start voice' : 'Watch the gate',
+          lightIndex: null,
+        });
+      },
+      onReactionArmed: (redLocalAt) => {
+        if (redLightAtRef.current === redLocalAt) return;
+        redLightAtRef.current = redLocalAt;
+        armReactionTimer(redLocalAt);
+      },
+      onRed: (index, playTone) => {
+        // Stop any slow/stale cadence media before every coalesced red phase;
+        // a blocked tablet may legitimately skip red 1 and resume on red 2.
+        stopStartGateAudio();
+        if (index === 2 && demoMode) {
+          const demoPlayerIds = racePlayers.map((player) => player.id);
+          cStartTriggeredPlayerIdsRef.current = new Set(demoPlayerIds);
+          loadCStartPlayers(demoPlayerIds);
+        }
+        setStartGateStatus({
+          active: true,
+          phase: 'cadence',
+          label: startTreeLabels[index],
+          detail: 'UCI cadence',
+          lightIndex: index,
+        });
+        if (playTone) playStartGateTone('uci-red');
+      },
+      onGreen: (gateDropLocalAt, playTone) => {
+        // A suspended tablet can wake after every red callback was skipped.
+        // Always silence stale cadence media before the decisive green cue.
+        stopStartGateAudio();
+        if (playTone) playStartGateTone('uci-green');
+        beginRaceAtGateDrop(startingTrackId, sequenceId, gateDropLocalAt);
+      },
+    });
+    return true;
+  }, [
+    armReactionTimer,
+    beginRaceAtGateDrop,
+    demoMode,
+    loadCStartPlayers,
+    racePlayers,
+    scheduleStartGateStep,
+  ]);
 
   const scheduleStagingCountdown = useCallback((
     startingTrackId: string,
@@ -8560,6 +8868,16 @@ export default function App() {
       return;
     }
 
+    if (clubEventLaunchRef.current) {
+      if (synchronizedFalseStartPlayerIdsRef.current.has(detection.playerId)) return;
+      synchronizedFalseStartPlayerIdsRef.current.add(detection.playerId);
+      setSynchronizedFalseStartPlayerIds((current) => (
+        current.includes(detection.playerId) ? current : [...current, detection.playerId]
+      ));
+      resetRaceCaptureForFalseStart(detection, Date.now(), true);
+      return;
+    }
+
     falseStartActiveRef.current = true;
     const startingTrackId = selectedTrackIdRef.current;
     cancelStartGateSequence();
@@ -8618,7 +8936,10 @@ export default function App() {
       return;
     }
 
-    const detection = detectFalseStart(racePlayers, samplesByDevice, cadenceStartedAtRef.current);
+    const eligiblePlayers = clubEventLaunchRef.current
+      ? racePlayers.filter((player) => !synchronizedFalseStartPlayerIdsRef.current.has(player.id))
+      : racePlayers;
+    const detection = detectFalseStart(eligiblePlayers, samplesByDevice, cadenceStartedAtRef.current);
     if (detection) {
       handleFalseStart(detection);
     }
@@ -10125,8 +10446,12 @@ export default function App() {
     setSelectedGhostIds([]);
   }, []);
 
-  const handleStart = async (source: 'manual' | 'room-clock' = 'manual'): Promise<boolean> => {
+  const handleStart = async (
+    source: 'manual' | 'room-clock' = 'manual',
+    roomAuthority?: RoomRaceStartAuthority,
+  ): Promise<boolean> => {
     if (clubEventConfigurationLocked && source !== 'room-clock') return false;
+    if (clubEventLaunchRef.current && source === 'room-clock' && !roomAuthority) return false;
     const startingRacePlayers = racePlayers;
     if (startGateStatus.active || raceState === 'racing') return true;
     if (
@@ -10254,13 +10579,17 @@ export default function App() {
     if (!demoMode) bridge.sendControlCommand('race-arm');
     primeRaceAudio();
     void primeBikeRaceAudio();
+    if (clubEventLaunchRef.current) {
+      if (source !== 'room-clock' || !roomAuthority) return false;
+      return await scheduleClubEventGate(startingTrackId, sequenceId, roomAuthority);
+    }
     scheduleStagingCountdown(startingTrackId, sequenceId);
     return true;
   };
   // The server-clock timer must call the newest render's start logic. Keeping
   // the handler in a ref prevents a one-shot room token from being consumed by
   // a stale closure while bikes, track readiness, or club authorization finish.
-  roomRaceStartHandlerRef.current = () => handleStart('room-clock');
+  roomRaceStartHandlerRef.current = (authority) => handleStart('room-clock', authority);
 
   const clubOwnerPreparationDialogVisible = raceWorkspaceActive && (
     clubOwnerRacePreparation.phase === 'authorizing'
@@ -10347,6 +10676,7 @@ export default function App() {
       || roomFlow?.phase !== 'race'
       || !raceToken
       || lastRoomRaceTokenRef.current === raceToken
+      || (clubEventLaunch != null && multiplayer.latency.measuredAt == null)
       || (roomFlow.selectedTrackId && roomFlow.selectedTrackId !== effectiveTrack.id)
     ) {
       return;
@@ -10361,13 +10691,19 @@ export default function App() {
     const localRaceStartAt = Number.isFinite(serverRaceStartAt)
       ? serverRaceStartAt - multiplayer.latency.clockOffsetMs
       : Date.now();
+    const roomAuthority = Number.isFinite(serverRaceStartAt) && serverRaceStartAt > 0
+      ? {
+        startAt: serverRaceStartAt,
+        serverClockOffsetMs: multiplayer.latency.clockOffsetMs,
+      } satisfies RoomRaceStartAuthority
+      : undefined;
     const delayMs = Math.max(0, localRaceStartAt - Date.now());
     let cancelled = false;
     const attemptStart = async () => {
       roomRaceStartTimeoutRef.current = null;
       let started = false;
       try {
-        started = await roomRaceStartHandlerRef.current();
+        started = await roomRaceStartHandlerRef.current(roomAuthority);
       } catch {
         // The current start path owns user-visible errors. Keep this room token
         // eligible while a transient preparation/cancellation finishes.
@@ -10391,7 +10727,14 @@ export default function App() {
         roomRaceStartTimeoutRef.current = null;
       }
     };
-  }, [effectiveTrack.id, multiplayer.currentRoom?.flow, multiplayer.latency.clockOffsetMs, playMode]);
+  }, [
+    clubEventLaunch,
+    effectiveTrack.id,
+    multiplayer.currentRoom?.flow,
+    multiplayer.latency.clockOffsetMs,
+    multiplayer.latency.measuredAt,
+    playMode,
+  ]);
 
   const nativeBluetoothFailed = nativeBluetoothStatus.state === 'failed';
   const nativeBluetoothFailureMessage = 'Native Bluetooth could not start. Close and reopen the TrackLab app. If this continues, install the latest app build.';
@@ -10889,6 +11232,7 @@ export default function App() {
         track={effectiveTrack}
         players={racePlayers}
         raceSummary={raceSummary}
+        disqualifiedPlayerIds={synchronizedFalseStartPlayerIds}
         selectedMetrics={selectedMetrics}
         reactionTimesByPlayer={reactionTimesByPlayer}
         speedUnit={speedUnit}
@@ -11876,6 +12220,10 @@ export default function App() {
               demoActive={demoMode}
               setDemoActive={handleClubTabletDemoModeChange}
               onClubEventLaunch={openClubEventLaunch}
+              onPrimeAudio={() => Promise.allSettled([
+                primeRaceAudio(),
+                primeBikeRaceAudio(),
+              ]).then(() => undefined)}
               openProgram={(mode) => {
                 if (demoMode) {
                   setPlayMode('local');
@@ -12214,13 +12562,16 @@ export default function App() {
                   cStartOffsetsByPlayer={cStartOffsetsByPlayer}
                   finishCountdownSeconds={finishCountdownSeconds}
                   reactionTimesByPlayer={reactionTimesByPlayer}
-                  newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
-                  heartRateByPlayer={heartRateByPlayer}
+	                  newPersonalRecordsByPlayer={newPersonalRecordsByPlayer}
+	                  disqualifiedPlayerIds={synchronizedFalseStartPlayerIds}
+	                  heartRateByPlayer={heartRateByPlayer}
                   earthAngle={earthAngle}
                   earthHeading={earthHeading}
                   earthCenter={earthCenter}
                   earthZoom={earthZoom}
                   raceCameraLocked={raceCameraLocked}
+                  raceCameraImmutable={clubEventRaceViewApplies}
+                  raceCameraSnapshot={clubEventRaceCamera}
                   canEditRaceLayout={developerRaceLayoutActive && !regularUserPreview}
                   riderOverlayPreference={riderOverlaysByTrack[effectiveTrack.id]}
                   activeZones={activeZones}

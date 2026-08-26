@@ -646,6 +646,7 @@ export function GoogleMaps3DTrackLayer({
   const sceneContextRef = useRef<Map3DLoadContext>('view');
   const interactionRef = useRef<(point: TrackPoint) => void>(() => undefined);
   const cameraChangeRef = useRef(onEarthCameraChange);
+  const cameraLockedRef = useRef(cameraLocked);
   const useSatelliteRef = useRef(onUseSatellite);
   const baseRangeRef = useRef(500);
   const suppressNextMapClickRef = useRef(false);
@@ -706,6 +707,7 @@ export function GoogleMaps3DTrackLayer({
       ? 'edit'
       : 'view';
   cameraChangeRef.current = onEarthCameraChange;
+  cameraLockedRef.current = cameraLocked;
   useSatelliteRef.current = onUseSatellite;
   baseRangeRef.current = baseRange;
 
@@ -760,8 +762,18 @@ export function GoogleMaps3DTrackLayer({
         map.style.display = 'block';
 
         const saveCamera = () => {
+          if (cameraLockedRef.current) {
+            window.clearTimeout(cameraTimerRef.current);
+            cameraTimerRef.current = 0;
+            return;
+          }
           window.clearTimeout(cameraTimerRef.current);
           cameraTimerRef.current = window.setTimeout(() => {
+            // Google emits center/heading/tilt/range events for programmatic
+            // initialization and fullscreen relayouts too. A coach-event
+            // camera is an immutable snapshot, so those events must never be
+            // reflected back into App as if a rider had moved the camera.
+            if (cameraLockedRef.current) return;
             const currentView = resolveDeferred3DMapView(latestMapViewRef);
             const nextCenter = map.center;
             cameraChangeRef.current?.({
@@ -859,6 +871,14 @@ export function GoogleMaps3DTrackLayer({
   }, [track.id]);
 
   useEffect(() => {
+    if (!cameraLocked) return;
+    // A debounce created immediately before a Club Event acquired the camera
+    // lock must not survive until the event later releases that lock.
+    window.clearTimeout(cameraTimerRef.current);
+    cameraTimerRef.current = 0;
+  }, [cameraLocked]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map) {
       return;
@@ -872,6 +892,36 @@ export function GoogleMaps3DTrackLayer({
       latestView.range,
     );
   }, [baseRange, center, earthAngle, earthCenter, earthHeading, earthZoom]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!cameraLocked || !container || typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    let frameRequest: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frameRequest != null) window.cancelAnimationFrame(frameRequest);
+      frameRequest = window.requestAnimationFrame(() => {
+        frameRequest = null;
+        const map = mapRef.current;
+        if (!map) return;
+        const latestView = resolveDeferred3DMapView(latestMapViewRef);
+        applyTerrainRelativeCamera(
+          map,
+          latestView.center,
+          latestView.heading,
+          latestView.angle,
+          latestView.range,
+        );
+      });
+    });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      if (frameRequest != null) window.cancelAnimationFrame(frameRequest);
+    };
+  }, [cameraLocked, track.id]);
 
   useEffect(() => {
     const map = mapRef.current;

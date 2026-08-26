@@ -402,8 +402,12 @@ function cameraCenterBelongsToTrack(camera: Partial<EarthCamera>, track: TrackRe
   return nearestRoutePointMeters <= allowedOffsetMeters;
 }
 
-function cameraForTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
-  if (cameraCenterBelongsToTrack(camera, track)) {
+function cameraForTrack(
+  camera: Partial<EarthCamera>,
+  track: TrackRecord,
+  preserveExact = false,
+) {
+  if (preserveExact || cameraCenterBelongsToTrack(camera, track)) {
     return camera;
   }
 
@@ -417,6 +421,7 @@ function cameraForTrack(camera: Partial<EarthCamera>, track: TrackRecord) {
 export type DeferredSatelliteMapView = Readonly<{
   track: TrackRecord;
   camera: Partial<EarthCamera>;
+  cameraLocked?: boolean;
 }>;
 
 /**
@@ -430,17 +435,23 @@ export function resolveDeferredSatelliteMapView(
   const latest = viewRef.current;
   return {
     track: latest.track,
-    camera: cameraForTrack(latest.camera, latest.track),
+    camera: cameraForTrack(latest.camera, latest.track, latest.cameraLocked),
   };
 }
 
-function refreshSatelliteTiles(google: GoogleMapsRuntime, map: GoogleMap, camera: Partial<EarthCamera>, track: TrackRecord) {
+function refreshSatelliteTiles(
+  google: GoogleMapsRuntime,
+  map: GoogleMap,
+  camera: Partial<EarthCamera>,
+  track: TrackRecord,
+  preserveExact = false,
+) {
   map.setOptions({ mapTypeId: 'satellite' });
   google.maps.event?.trigger(map, 'resize');
   // A resize should preserve the camera that is already on screen. Forcing a
   // fallback center here made each delayed satellite repaint visibly jump
   // between fitBounds and the catalog center on narrow/rotating viewports.
-  applyCamera(map, cameraForTrack(camera, track));
+  applyCamera(map, cameraForTrack(camera, track, preserveExact));
 }
 
 type EarthCameraRef = {
@@ -457,12 +468,13 @@ export function scheduleSatelliteTileRepaints(
   cameraRef: EarthCameraRef,
   track: TrackRecord,
   scheduleTimer: RepaintTimerScheduler,
+  preserveExact = false,
 ) {
   return satelliteRepaintDelaysMs.map((delayMs) => scheduleTimer(() => {
     // Rotation can update the authoritative camera between repaint passes. Read
     // the ref inside each callback so an older pass cannot restore stale map
     // center, zoom, heading, or tilt after the newer camera has been applied.
-    refreshSatelliteTiles(google, map, cameraRef.current, track);
+    refreshSatelliteTiles(google, map, cameraRef.current, track, preserveExact);
   }, delayMs));
 }
 
@@ -1254,6 +1266,7 @@ export function GoogleMapsTrackLayer({
   const remoteMarkerRefs = useRef<Map<string, RiderMapMarker>>(new Map());
   const latestMapViewRef = useRef<DeferredSatelliteMapView>({
     track,
+    cameraLocked,
     camera: {
       angle: earthAngle,
       heading: earthHeading,
@@ -1263,6 +1276,7 @@ export function GoogleMapsTrackLayer({
   });
   latestMapViewRef.current = {
     track,
+    cameraLocked,
     camera: {
       angle: earthAngle,
       heading: earthHeading,
@@ -1431,7 +1445,7 @@ export function GoogleMapsTrackLayer({
       cameraSyncReleaseTimerRef.current = null;
       suppressCameraSyncRef.current = false;
     }, 250);
-  }, [earthAngle, earthCenter, earthHeading, earthZoom, track]);
+  }, [cameraLocked, earthAngle, earthCenter, earthHeading, earthZoom, track]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -1446,12 +1460,13 @@ export function GoogleMapsTrackLayer({
       cameraRef,
       track,
       (callback, delayMs) => window.setTimeout(callback, delayMs),
+      cameraLocked,
     );
 
     return () => {
       repaintTimers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [status, track.id]);
+  }, [cameraLocked, status, track.id]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -1485,7 +1500,7 @@ export function GoogleMapsTrackLayer({
       frameRequest = window.requestAnimationFrame(() => {
         frameRequest = null;
         suppressCameraSyncRef.current = true;
-        refreshSatelliteTiles(google, map, cameraRef.current, track);
+        refreshSatelliteTiles(google, map, cameraRef.current, track, cameraLocked);
         if (cameraSyncReleaseTimerRef.current != null) {
           window.clearTimeout(cameraSyncReleaseTimerRef.current);
         }
@@ -1516,7 +1531,7 @@ export function GoogleMapsTrackLayer({
         suppressCameraSyncRef.current = false;
       }
     };
-  }, [status, track]);
+  }, [cameraLocked, status, track]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1577,12 +1592,12 @@ export function GoogleMapsTrackLayer({
     const fitKey = `${track.id}:${track.routeStatus ?? 'locator'}:${track.centerline?.length ?? 0}:${track.splitSections?.length ?? 0}`;
     if (lastFitKeyRef.current !== fitKey) {
       suppressCameraSyncRef.current = true;
-      const savedTrackCamera = cameraForTrack(cameraRef.current, track);
+      const savedTrackCamera = cameraForTrack(cameraRef.current, track, cameraLocked);
       const hasSavedView = Boolean(savedTrackCamera.center && typeof savedTrackCamera.zoom === 'number');
       if (hasSavedView) {
         applyCamera(map, savedTrackCamera);
         window.requestAnimationFrame(() => {
-          applyCamera(map, cameraForTrack(cameraRef.current, track));
+          applyCamera(map, cameraForTrack(cameraRef.current, track, cameraLocked));
         });
       } else {
         const bounds = new google.maps.LatLngBounds();
@@ -1598,7 +1613,7 @@ export function GoogleMapsTrackLayer({
         window.requestAnimationFrame(restoreCamera);
       }
       window.setTimeout(() => {
-        applyCamera(map, cameraForTrack(cameraRef.current, track));
+        applyCamera(map, cameraForTrack(cameraRef.current, track, cameraLocked));
         suppressCameraSyncRef.current = false;
       }, 220);
       lastFitKeyRef.current = fitKey;
@@ -1800,7 +1815,7 @@ export function GoogleMapsTrackLayer({
         zIndex: 920,
       });
     }
-  }, [activeZones, distanceUnit, mappingMode, raceDistanceMeters, raceState, raceViewFullscreen, status, track]);
+  }, [activeZones, cameraLocked, distanceUnit, mappingMode, raceDistanceMeters, raceState, raceViewFullscreen, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -1822,7 +1837,7 @@ export function GoogleMapsTrackLayer({
       route.forEach((point) => bounds.extend(point));
       suppressCameraSyncRef.current = true;
       google.maps.event?.trigger(map, 'resize');
-      const savedCamera = cameraForTrack(cameraRef.current, track);
+      const savedCamera = cameraForTrack(cameraRef.current, track, cameraLocked);
       if (!savedCamera.center || savedCamera.zoom == null) {
         map.fitBounds(bounds, 16);
       }
@@ -1832,7 +1847,7 @@ export function GoogleMapsTrackLayer({
       }
       releaseTimer = window.setTimeout(() => {
         if (cameraSyncReleaseTimerRef.current === releaseTimer) {
-          applyCamera(map, cameraForTrack(cameraRef.current, track));
+          applyCamera(map, cameraForTrack(cameraRef.current, track, cameraLocked));
           cameraSyncReleaseTimerRef.current = null;
           suppressCameraSyncRef.current = false;
         }
@@ -1862,7 +1877,7 @@ export function GoogleMapsTrackLayer({
         suppressCameraSyncRef.current = false;
       }
     };
-  }, [raceViewFullscreen, status, track]);
+  }, [cameraLocked, raceViewFullscreen, status, track]);
 
   useEffect(() => {
     const google = googleRef.current;
@@ -2447,7 +2462,10 @@ export function GoogleMapsTrackLayer({
     const isAdjustMode = mappingInputEnabled && mappingEditMode === 'adjust';
     const isDrawMode = mappingInputEnabled && (mappingEditMode === 'draw' || isCurveDrawMode || isSplitBranchDrawMode);
     const isNavigateMode = !mappingInputEnabled || mappingEditMode === 'navigate';
-    const raceCameraInputLocked = raceViewFullscreen && cameraLocked;
+    // Normal saved-layout locking is only passed while fullscreen. Coach
+    // events pass cameraLocked for their entire lifetime so the relayed view
+    // cannot be dragged away during staging before fullscreen begins.
+    const raceCameraInputLocked = cameraLocked;
     map.setOptions({
       cameraControl: !raceCameraInputLocked,
       draggable: !raceCameraInputLocked && !isDrawMode && !isSplitPlacementMode,

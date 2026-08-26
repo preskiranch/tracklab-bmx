@@ -35,6 +35,7 @@ type ArenaRider = {
   frame: number;
   ghost: boolean;
   local: boolean;
+  disqualified: boolean;
 };
 
 type DragStripGameArenaLayerProps = {
@@ -51,6 +52,7 @@ type DragStripGameArenaLayerProps = {
   distanceUnit: DistanceUnit;
   showHud: boolean;
   newPersonalRecordsByPlayer: PersonalRecordAchievements;
+  disqualifiedPlayerIds: PlayerSlot['id'][];
 };
 
 type ArenaViewport = {
@@ -388,9 +390,16 @@ function GameArenaHud({
   newPersonalRecordsByPlayer: PersonalRecordAchievements;
 }) {
   const entries = [...riders]
-    .sort((left, right) => left.rank - right.rank || right.distanceMeters - left.distanceMeters)
+    .sort((left, right) => (
+      Number(left.disqualified) - Number(right.disqualified)
+      || left.rank - right.rank
+      || right.distanceMeters - left.distanceMeters
+    ))
     .slice(0, 4);
-  const positionsEstablished = racePositionsAreEstablished(raceState, entries);
+  const positionsEstablished = racePositionsAreEstablished(
+    raceState,
+    entries.filter((entry) => !entry.disqualified),
+  );
 
   if (entries.length === 0) {
     return null;
@@ -507,11 +516,13 @@ function GameArenaHud({
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                   }}>
-                    {newPersonalRecordsByPlayer[rider.playerId] && rider.local
+                    {rider.disqualified
+                      ? 'False start · not ranked'
+                      : newPersonalRecordsByPlayer[rider.playerId] && rider.local
                       ? `${((rider.finishedAt ?? 0) / 1000).toFixed(2)}s finish`
                       : `${progress}% track · ${formatSpeedFromKph(rider.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`}
                   </span>
-                  {newPersonalRecordsByPlayer[rider.playerId] && rider.local && (
+                  {!rider.disqualified && newPersonalRecordsByPlayer[rider.playerId] && rider.local && (
                     <NewRecordBadge />
                   )}
                 </div>
@@ -524,11 +535,21 @@ function GameArenaHud({
                 gap: '8px',
                 margin: '0 clamp(5px, .6vw, 9px) clamp(5px, .6vw, 9px)',
                 borderRadius: '5px',
-                background: positionsEstablished ? rider.accent : 'rgba(255,255,255,.08)',
-                color: positionsEstablished ? '#07101b' : 'rgba(255,255,255,.72)',
+                background: rider.disqualified || positionsEstablished ? rider.accent : 'rgba(255,255,255,.08)',
+                color: rider.disqualified || positionsEstablished ? '#07101b' : 'rgba(255,255,255,.72)',
                 textTransform: 'uppercase',
               }}>
-                {positionsEstablished ? (
+                {rider.disqualified ? (
+                  <>
+                    <strong style={{
+                      fontSize: 'clamp(34px, 4.3vw, 68px)',
+                      fontWeight: 1000,
+                      letterSpacing: '-.04em',
+                      lineHeight: .88,
+                    }}>DQ</strong>
+                    <span style={{ fontSize: 'clamp(9px, .8vw, 13px)', fontWeight: 950, letterSpacing: '.1em' }}>False start</span>
+                  </>
+                ) : positionsEstablished ? (
                   <>
                     <strong style={{
                       fontSize: 'clamp(34px, 4.3vw, 68px)',
@@ -922,7 +943,12 @@ export function DragStripGameArenaLayer({
   distanceUnit,
   showHud,
   newPersonalRecordsByPlayer,
+  disqualifiedPlayerIds,
 }: DragStripGameArenaLayerProps) {
+  const disqualifiedPlayerIdSet = useMemo(
+    () => new Set(disqualifiedPlayerIds),
+    [disqualifiedPlayerIds],
+  );
   const arenaRiders = useMemo<ArenaRider[]>(() => {
     const local = riders.flatMap((rider) => {
       const player = players.find((candidate) => candidate.id === rider.playerId);
@@ -953,6 +979,7 @@ export function DragStripGameArenaLayer({
         frame: animation.pedaling ? riderFrame(animation.crankStep) : 0,
         ghost: false,
         local: true,
+        disqualified: disqualifiedPlayerIdSet.has(player.id),
       }];
     });
     const remote = remoteRaceStates.flatMap((state) => state.riders.map((rider) => ({
@@ -971,6 +998,7 @@ export function DragStripGameArenaLayer({
         : 0,
       ghost: false,
       local: false,
+      disqualified: rider.disqualified === true,
     })));
     const ghosts = ghostRiders.map((rider, index) => ({
       id: `ghost-${rider.id}`,
@@ -986,9 +1014,10 @@ export function DragStripGameArenaLayer({
       frame: raceState === 'racing' ? Math.floor(Math.max(0, rider.distance) * 1.7) % 9 : 0,
       ghost: true,
       local: false,
+      disqualified: false,
     }));
     return [...local, ...remote, ...ghosts];
-  }, [ghostRiders, players, raceState, remoteRaceStates, riders, samplesByDevice]);
+  }, [disqualifiedPlayerIdSet, ghostRiders, players, raceState, remoteRaceStates, riders, samplesByDevice]);
   const activeRiders = arenaRiders.filter((rider) => !rider.ghost);
   const arenaViewport: ArenaViewport = {
     id: 'drag-strip-adaptive-viewport',

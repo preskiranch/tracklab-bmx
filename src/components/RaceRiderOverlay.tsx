@@ -53,6 +53,7 @@ type OverlayEntry = {
   kind: 'local' | 'ghost' | 'remote';
   heartRateBpm: number | null;
   heartRateSimulated: boolean;
+  disqualified: boolean;
 };
 
 type RaceRiderOverlayProps = {
@@ -70,6 +71,7 @@ type RaceRiderOverlayProps = {
   onPreferenceChange: (trackId: string, layout: RaceRiderOverlayLayout) => void;
   onFullscreenInteraction: () => void;
   newPersonalRecordsByPlayer: PersonalRecordAchievements;
+  disqualifiedPlayerIds: PlayerSlot['id'][];
   heartRateByPlayer?: LiveHeartRateByPlayer;
   samplesByDevice?: Map<number, BikeSample>;
 };
@@ -157,6 +159,7 @@ export function RaceRiderOverlay({
   onPreferenceChange,
   onFullscreenInteraction,
   newPersonalRecordsByPlayer,
+  disqualifiedPlayerIds,
   heartRateByPlayer = {},
   samplesByDevice = new Map(),
 }: RaceRiderOverlayProps) {
@@ -167,6 +170,10 @@ export function RaceRiderOverlay({
   const dragRef = useRef<DragState | null>(null);
   const layoutRef = useRef(layout);
   const requestedLayoutRef = useRef(layout);
+  const disqualifiedPlayerIdSet = useMemo(
+    () => new Set(disqualifiedPlayerIds),
+    [disqualifiedPlayerIds],
+  );
 
   useEffect(() => {
     layoutRef.current = layout;
@@ -247,6 +254,7 @@ export function RaceRiderOverlay({
         kind: 'local' as const,
         heartRateBpm: heartRate.bpm,
         heartRateSimulated: heartRateReading?.source === 'demo-simulated',
+        disqualified: disqualifiedPlayerIdSet.has(player.id),
       }];
     });
 
@@ -265,6 +273,7 @@ export function RaceRiderOverlay({
       kind: 'ghost' as const,
       heartRateBpm: null,
       heartRateSimulated: false,
+      disqualified: false,
     }));
 
     const remoteEntries = remoteRaceStates.flatMap((state) => state.riders.map((rider, index) => ({
@@ -282,13 +291,18 @@ export function RaceRiderOverlay({
       kind: 'remote' as const,
       heartRateBpm: null,
       heartRateSimulated: false,
+      disqualified: rider.disqualified === true,
     })));
 
     return [...localEntries, ...ghostEntries, ...remoteEntries]
-      .sort((left, right) => left.rank - right.rank || right.progressPct - left.progressPct);
-  }, [ghostRiders, heartRateByPlayer, players, remoteRaceStates, riders, samplesByDevice, trackLengthMeters]);
+      .sort((left, right) => (
+        Number(left.disqualified) - Number(right.disqualified)
+        || left.rank - right.rank
+        || right.progressPct - left.progressPct
+      ));
+  }, [disqualifiedPlayerIdSet, ghostRiders, heartRateByPlayer, players, remoteRaceStates, riders, samplesByDevice, trackLengthMeters]);
   const positionsEstablished = useMemo(
-    () => racePositionsAreEstablished(raceState, entries),
+    () => racePositionsAreEstablished(raceState, entries.filter((entry) => !entry.disqualified)),
     [entries, raceState],
   );
 
@@ -464,7 +478,7 @@ export function RaceRiderOverlay({
       <div className="race-rider-overlay-grid">
         {entries.map((entry) => (
           <div
-            className={`race-rider-overlay-card race-rider-overlay-card-${entry.kind}${positionsEstablished ? '' : ' positions-pending'}`}
+            className={`race-rider-overlay-card race-rider-overlay-card-${entry.kind}${entry.disqualified ? ' disqualified' : positionsEstablished ? '' : ' positions-pending'}`}
             style={{ '--player-color': entry.accent } as CSSProperties}
             key={entry.id}
           >
@@ -481,7 +495,9 @@ export function RaceRiderOverlay({
               <div className="race-rider-overlay-identity">
                 <strong>{entry.name}</strong>
                 <span className="race-rider-overlay-progress">
-                  {entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId]
+                  {entry.disqualified
+                    ? 'False start · not ranked'
+                    : entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId]
                     ? `${((entry.finishedAt ?? 0) / 1000).toFixed(2)}s finish`
                     : `${entry.progressPct}% track / ${formatSpeedFromKph(entry.speedKph, speedUnit)} ${speedUnitLabel(speedUnit)}`}
                 </span>
@@ -497,15 +513,18 @@ export function RaceRiderOverlay({
                     <span aria-hidden="true">{entry.heartRateBpm} BPM</span>
                   </span>
                 )}
-                {entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId] && (
+                {!entry.disqualified && entry.kind === 'local' && entry.playerId != null && newPersonalRecordsByPlayer[entry.playerId] && (
                   <NewRecordBadge />
                 )}
               </div>
             </div>
-            {positionsEstablished && (
-              <div className="race-rider-overlay-place" aria-label={`${ordinal(entry.rank)} place`}>
-                <strong>{ordinal(entry.rank)}</strong>
-                <span>Place</span>
+            {(entry.disqualified || positionsEstablished) && (
+              <div
+                className="race-rider-overlay-place"
+                aria-label={entry.disqualified ? 'Disqualified false start' : `${ordinal(entry.rank)} place`}
+              >
+                <strong>{entry.disqualified ? 'DQ' : ordinal(entry.rank)}</strong>
+                <span>{entry.disqualified ? 'False start' : 'Place'}</span>
               </div>
             )}
           </div>

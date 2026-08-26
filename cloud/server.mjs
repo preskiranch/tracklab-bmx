@@ -35,6 +35,7 @@ import {
   generatePreRaceLine,
   localPreRaceLine,
   preRaceSources,
+  preRaceTrackResearchCacheKey,
   researchTrackFacts,
   sanitizePreRaceTrackContext,
   supportedPreRaceVariables,
@@ -1178,6 +1179,78 @@ async function requireAuthSession(request, response) {
   }
 
   return session;
+}
+
+async function loadCommentaryRequestAccess(request, response) {
+  const tabletSessionHeader = String(
+    request.headers['x-tracklab-club-tablet-session'] || '',
+  ).trim();
+  if (tabletSessionHeader) {
+    // An explicitly supplied tablet credential is authoritative. Never fall
+    // back to a stale owner cookie when that exact athlete session is invalid.
+    const tabletSession = await loadClubTabletSessionFromRequest(request);
+    if (!tabletSession) {
+      writeJson(response, 401, {
+        error: 'This club tablet athlete session expired or ended.',
+      }, { 'Cache-Control': 'no-store' });
+      return null;
+    }
+    return { kind: 'club-tablet', tabletSession };
+  }
+
+  const authSession = await currentAuthSession(request);
+  if (!authSession?.user) {
+    writeJson(response, 401, { error: 'Sign in to continue.' });
+    return null;
+  }
+  return { kind: 'account', authSession };
+}
+
+function commentaryAccessRateLimitScope(access, endpoint) {
+  const credentialHash = access.kind === 'club-tablet'
+    ? access.tabletSession.tokenHash
+    : tokenHash(access.authSession.token);
+  // Keep reusable credentials out of limiter keys and telemetry labels while
+  // preventing four legitimate studio tablets from sharing one IP-only quota.
+  return `${endpoint}:${access.kind}:${credentialHash.slice(0, 24)}`;
+}
+
+function commentaryAccessIsCurrent(access, now = Date.now()) {
+  return access.kind !== 'club-tablet'
+    || clubTabletSessionIsCurrent(access.tabletSession, now);
+}
+
+function requireCurrentCommentaryAccess(access, response) {
+  if (commentaryAccessIsCurrent(access)) return true;
+  writeJson(response, 401, {
+    error: 'This club tablet athlete session expired or ended.',
+  }, { 'Cache-Control': 'no-store' });
+  return false;
+}
+
+async function commentaryPreRaceProfileKeys(access, response) {
+  if (access.kind === 'account') {
+    const profileKey = authProfileKey(access.authSession.user);
+    const clubState = await persistence.loadClubConnectState(profileKey);
+    return [profileKey, ...clubTabletHistoricalProfileKeys(clubState)];
+  }
+
+  const identity = await clubTabletMemberAndProfile(access.tabletSession);
+  if (!identity || !requireCurrentCommentaryAccess(access, response)) {
+    if (!response.writableEnded) {
+      writeJson(response, 401, {
+        error: 'This club tablet athlete session expired or ended.',
+      }, { 'Cache-Control': 'no-store' });
+    }
+    return null;
+  }
+  // The kiosk may use only the selected athlete's current profile and that
+  // same athlete's pre-claim tablet history. Owner and sibling histories must
+  // never enter a tablet briefing fact pack.
+  return [...new Set([
+    identity.profileKey,
+    clubTabletHistoricalProfileKey(access.tabletSession),
+  ])];
 }
 
 async function requireAccountFriendSession(request, response) {
@@ -7938,6 +8011,9 @@ function sanitizeRaceState(value, client, room) {
         pitch: Math.max(-45, Math.min(45, finiteNumber(rider?.pitch, 0))),
         phase: ['pedaling', 'airborne', 'landing'].includes(rider?.phase) ? rider.phase : 'pedaling',
         rank: Math.max(1, Math.min(64, Math.round(finiteNumber(rider?.rank, index + 1)))),
+        // This flag is broadcast display state only. Saved results continue to
+        // be derived exclusively from the separately validated summary.
+        disqualified: rider?.disqualified === true,
         finishedAt: nullableFiniteNumber(rider?.finishedAt),
         cadence,
         speedKph: nullableAcceptedTrainingSpeed(rider?.speedKph),
@@ -13683,11 +13759,17 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
-    const session = await requireAuthSession(request, response);
-    if (!session) {
+    const commentaryAccess = await loadCommentaryRequestAccess(request, response);
+    if (!commentaryAccess) {
       return;
     }
-    if (!enforceRateLimit(request, response, commentaryRateLimiter, 12, 'commentary-pre-race')) {
+    if (!enforceRateLimit(
+      request,
+      response,
+      commentaryRateLimiter,
+      12,
+      commentaryAccessRateLimitScope(commentaryAccess, 'commentary-pre-race'),
+    )) {
       return;
     }
 
@@ -13706,9 +13788,9 @@ async function serveStatic(request, response) {
         .filter(Boolean)
       : [];
     const key = openAiApiKey();
-    const profileKey = authProfileKey(session.user);
-    const clubState = await persistence.loadClubConnectState(profileKey);
-    const personalProfileKeys = [profileKey, ...clubTabletHistoricalProfileKeys(clubState)];
+    const researchCacheKey = preRaceTrackResearchCacheKey(track);
+    const personalProfileKeys = await commentaryPreRaceProfileKeys(commentaryAccess, response);
+    if (!personalProfileKeys) return;
     const [weather, riderStats, cachedResearch] = await Promise.all([
       loadTrackWeather(track.latitude, track.longitude),
       persistence.loadPreRaceRiderStats(
@@ -13716,7 +13798,7 @@ async function serveStatic(request, response) {
         personalProfileKeys,
         track.riders.map((rider) => rider.name),
       ),
-      persistence.loadTrackBriefing(track.id),
+      persistence.loadTrackBriefing(researchCacheKey),
     ]);
     let research = cachedResearch ?? {
       facts: [],
@@ -13730,7 +13812,7 @@ async function serveStatic(request, response) {
           apiKey: key,
           model: commentaryEngineModel,
         });
-        await persistence.saveTrackBriefing(track.id, track.name, research);
+        await persistence.saveTrackBriefing(researchCacheKey, track.name, research);
       } catch (error) {
         cloudTelemetry.warn('commentary.pre_race_research_failed', {
           trackId: track.id,
@@ -13780,6 +13862,7 @@ async function serveStatic(request, response) {
       source: report.source,
       weather: weather.available ? 'available' : 'unavailable',
     });
+    if (!requireCurrentCommentaryAccess(commentaryAccess, response)) return;
     writeJson(response, 200, {
       line,
       source: report.source,
@@ -13797,11 +13880,17 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
-    const session = await requireAuthSession(request, response);
-    if (!session) {
+    const commentaryAccess = await loadCommentaryRequestAccess(request, response);
+    if (!commentaryAccess) {
       return;
     }
-    if (!enforceRateLimit(request, response, commentaryRateLimiter, 30, 'commentary-line')) {
+    if (!enforceRateLimit(
+      request,
+      response,
+      commentaryRateLimiter,
+      30,
+      commentaryAccessRateLimitScope(commentaryAccess, 'commentary-line'),
+    )) {
       return;
     }
 
@@ -13834,6 +13923,7 @@ async function serveStatic(request, response) {
     );
     const deliveryStyle = commentaryDeliveryStyleForEvent(event);
     cloudTelemetry.increment('tracklab_commentary_lines_total', { model, voicePreset });
+    if (!requireCurrentCommentaryAccess(commentaryAccess, response)) return;
     writeJson(
       response,
       200,
@@ -13848,11 +13938,17 @@ async function serveStatic(request, response) {
       writeJson(response, 405, { error: 'Method not allowed' });
       return;
     }
-    const session = await requireAuthSession(request, response);
-    if (!session) {
+    const commentaryAccess = await loadCommentaryRequestAccess(request, response);
+    if (!commentaryAccess) {
       return;
     }
-    if (!enforceRateLimit(request, response, commentaryRateLimiter, 40, 'commentary-speech')) {
+    if (!enforceRateLimit(
+      request,
+      response,
+      commentaryRateLimiter,
+      40,
+      commentaryAccessRateLimitScope(commentaryAccess, 'commentary-speech'),
+    )) {
       return;
     }
 
@@ -13886,6 +13982,7 @@ async function serveStatic(request, response) {
     }
     const voicePreset = sanitizeCommentaryVoicePreset(payload?.voicePreset);
     const deliveryStyle = sanitizeCommentaryDeliveryStyle(payload?.deliveryStyle);
+    if (!requireCurrentCommentaryAccess(commentaryAccess, response)) return;
     const speechCacheKey = commentarySpeechCacheKey(
       line,
       voicePreset,
@@ -13913,6 +14010,7 @@ async function serveStatic(request, response) {
     if (response.destroyed || response.writableEnded) {
       return;
     }
+    if (!requireCurrentCommentaryAccess(commentaryAccess, response)) return;
     cloudTelemetry.increment('tracklab_commentary_speech_total', { voicePreset, eventKind });
     response.writeHead(200, {
       'Content-Type': 'audio/wav',

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   generatePreRaceLine,
   localPreRaceLine,
+  preRaceTrackResearchCacheKey,
+  sanitizePreRaceTrackContext,
 } from '../../cloud/preRaceBriefing.mjs';
 
 const nicknameTrack = {
@@ -58,5 +60,75 @@ describe('nickname-aware pre-race calls', () => {
     expect(report.source).toBe('ai');
     expect(report.line).toContain('The Captain');
     expect(report.line).not.toContain('(The Captain)');
+  });
+});
+
+describe('pre-race track research cache scope', () => {
+  const sanitizedTrack = (overrides: Record<string, unknown> = {}) => sanitizePreRaceTrackContext({
+    id: 'shared-client-id',
+    name: 'Preski Ranch Drag Strip',
+    country: 'Custom Routes',
+    countryCode: 'CUSTOM',
+    state: 'California',
+    city: 'Napa',
+    address: '100 Track Way, Napa, CA',
+    latitude: 38.2975,
+    longitude: -122.2869,
+    surface: 'Custom sprint route',
+    lengthMeters: 300,
+    source: 'Custom',
+    sourceUrl: 'https://example.test/preski-drag-strip',
+    sourceType: 'manual',
+    zoneNames: ['Launch', 'Finish'],
+    riders: [{
+      playerId: 1,
+      name: 'Rider One',
+      colorName: 'lime',
+      personalBestMs: 14_500,
+    }],
+    ...overrides,
+  });
+
+  it('does not share research when client-supplied ids match but sanitized track metadata differs', () => {
+    const original = sanitizedTrack();
+    const impersonatingTrack = sanitizedTrack({
+      name: 'Different BMX Facility',
+      city: 'Reno',
+      latitude: 39.5296,
+      longitude: -119.8138,
+      sourceUrl: 'https://example.test/different-bmx-facility',
+    });
+
+    expect(original).not.toBeNull();
+    expect(impersonatingTrack).not.toBeNull();
+    expect(original?.id).toBe(impersonatingTrack?.id);
+    expect(preRaceTrackResearchCacheKey(original)).toMatch(/^track-research-v2:[a-f0-9]{64}$/);
+    expect(preRaceTrackResearchCacheKey(original)).not.toBe(
+      preRaceTrackResearchCacheKey(impersonatingTrack),
+    );
+  });
+
+  it('keeps custom-track research stable across rider and personal-result changes', () => {
+    const first = sanitizedTrack({
+      knownTrackBestMs: 14_100,
+      knownTrackBestRider: 'Rider One',
+      knownTrackBestAt: '2026-08-01',
+    });
+    const nextAthlete = sanitizedTrack({
+      knownTrackBestMs: 13_900,
+      knownTrackBestRider: 'Rider Two',
+      knownTrackBestAt: '2026-08-26',
+      riders: [{
+        playerId: 4,
+        name: 'Rider Two',
+        colorName: 'red',
+        personalBestMs: 13_900,
+        personalThirtyFootMs: 2_450,
+      }],
+    });
+
+    expect(first).not.toBeNull();
+    expect(nextAthlete).not.toBeNull();
+    expect(preRaceTrackResearchCacheKey(first)).toBe(preRaceTrackResearchCacheKey(nextAthlete));
   });
 });

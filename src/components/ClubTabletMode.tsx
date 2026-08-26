@@ -118,6 +118,8 @@ type ClubTabletModeProps = {
   openProgram: (mode: ClubTabletProgram) => void;
   /** Opens/configures a synchronized program before its shared startAt. */
   onClubEventLaunch?: (payload: ClubEventLaunchPayload) => void;
+  /** Primes gate, ambience, bike, and commentary audio from a rider gesture. */
+  onPrimeAudio?: () => Promise<void> | void;
 };
 
 export function clubTabletBikeAccessReady(
@@ -216,6 +218,7 @@ export default function ClubTabletMode({
   setDemoActive: onDemoActiveChange,
   openProgram: onOpenProgram,
   onClubEventLaunch,
+  onPrimeAudio,
 }: ClubTabletModeProps) {
   const [tabletName, setTabletName] = useState(() => {
     const platform = navigator.platform?.trim();
@@ -394,6 +397,8 @@ export default function ClubTabletMode({
 
   const chooseAthlete = (athlete: ClubTabletAthlete) => {
     if (sessionStartPendingRef.current || demoActive) return;
+    // This may be the final tap before an automatically opened race.
+    void onPrimeAudio?.();
     setSelectedRiderId(athlete.studioRiderId);
     setSessionStartFailed(false);
     if (selectedProgram && selectedBikeId != null) {
@@ -407,6 +412,8 @@ export default function ClubTabletMode({
 
   const chooseProgram = (program: ClubTabletProgram) => {
     if (sessionStartPendingRef.current) return;
+    // Prime even when the athlete/bike selection completes asynchronously.
+    void onPrimeAudio?.();
     if (demoActive) {
       setSelectedProgram(program);
       onOpenProgram(program);
@@ -802,6 +809,7 @@ export default function ClubTabletMode({
       onLobbyEnded={releaseCancelledClubEvent}
       onLaunch={launchClubEvent}
       onSnapshotChange={updateClubEventSnapshot}
+      onPrimeAudio={onPrimeAudio}
     />
   );
 
@@ -866,7 +874,10 @@ export default function ClubTabletMode({
               disabled={waitingForCoach}
               title={waitingForCoach ? 'Leave the coach event before opening Independent Training.' : undefined}
               onClick={() => {
-                if (!waitingForCoach) onOpenProgram(mode);
+                if (!waitingForCoach) {
+                  void onPrimeAudio?.();
+                  onOpenProgram(mode);
+                }
               }}
             >
               <Icon /><span><strong>{title}</strong><small>{detail}</small></span>
@@ -1036,7 +1047,10 @@ export default function ClubTabletMode({
             className="club-tablet-primary"
             type="button"
             disabled={!selectedRiderId || !selectedProgram || selectedBikeId == null || busy !== 'idle'}
-            onClick={() => void startAthlete()}
+            onClick={() => {
+              void onPrimeAudio?.();
+              void startAthlete();
+            }}
           >
             <RefreshCw size={20} /> Retry selected activity
           </button>

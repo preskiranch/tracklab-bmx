@@ -45,6 +45,8 @@ type ClubTabletEventCardProps = Readonly<{
   onLobbyEnded?: (event: ClubEventSnapshot) => void;
   onLaunch: (payload: ClubEventLaunchPayload) => void;
   onSnapshotChange?: (event: ClubEventSnapshot | null) => void;
+  /** Unlocks iPad media/Web Audio while the rider's Ready tap is active. */
+  onPrimeAudio?: () => Promise<void> | void;
 }>;
 
 function configurationSummary(event: ClubEventSnapshot) {
@@ -105,6 +107,7 @@ export default function ClubTabletEventCard({
   onLobbyEnded,
   onLaunch,
   onSnapshotChange,
+  onPrimeAudio,
 }: ClubTabletEventCardProps) {
   const [envelope, setEnvelope] = useState<ClubEventEnvelope | null>(null);
   const [busy, setBusy] = useState<'idle' | 'ready' | 'leaving'>('idle');
@@ -222,6 +225,10 @@ export default function ClubTabletEventCard({
 
   const ready = async () => {
     if (!selection || event.status !== 'lobby' || tabletState?.conflict) return;
+    // Safari only authorizes later gate/commentary playback when media is
+    // primed synchronously inside this rider gesture. Do this before the first
+    // network await; the coach's eventual launch is intentionally automatic.
+    void onPrimeAudio?.();
     setBusy('ready');
     setMessage(null);
     try {
