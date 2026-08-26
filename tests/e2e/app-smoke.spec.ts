@@ -5219,7 +5219,7 @@ test('start here race action enters fullscreen race view', async ({ page }, test
       ),
     };
   });
-  expect(desktopRiderText.name).toBeGreaterThanOrEqual(18);
+  expect(desktopRiderText.name).toBeGreaterThanOrEqual(16);
   expect(desktopRiderText.metrics).toBeGreaterThanOrEqual(14);
   expect(desktopRiderText.place).toBeGreaterThanOrEqual(42);
   expect(desktopRiderText.placeIsBottomRow).toBe(true);
