@@ -79,8 +79,15 @@
   font-weight: 900;
   gap: 4px;
   letter-spacing: .045em;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   text-transform: uppercase;
+  white-space: nowrap;
+  width: 100%;
 }
+
+.race-rider-overlay-heart-rate > span { flex: 0 1 auto; min-width: 0; }
 
 .race-rider-overlay-heart-rate b {
   font-size: 12px;

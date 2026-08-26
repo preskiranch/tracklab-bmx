@@ -7,24 +7,24 @@ import {
 
 describe('race rider responsive layout', () => {
   it('keeps the readable two-row panel in phone and iPad portrait', () => {
-    expect(raceRiderOverlayMinimumHeight(390, 844)).toBe(340);
+    expect(raceRiderOverlayMinimumHeight(390, 844)).toBe(368);
     expect(raceRiderOverlayMinimumHeight(820, 1180)).toBe(340);
   });
 
   it('uses the compact one-row panel on short phone landscape viewports', () => {
-    expect(raceRiderOverlayMinimumHeight(844, 390)).toBe(132);
-    expect(raceRiderOverlayMaximumHeight(844, 390)).toBe(133);
-    expect(raceRiderOverlayMinimumHeight(852, 393)).toBe(132);
-    expect(raceRiderOverlayMaximumHeight(852, 393)).toBe(134);
-    expect(raceRiderOverlayMinimumHeight(667, 375)).toBe(132);
-    expect(raceRiderOverlayMaximumHeight(667, 375)).toBe(132);
-    expect(raceRiderOverlayMaximumHeight(932, 430)).toBe(146);
+    expect(raceRiderOverlayMinimumHeight(844, 390)).toBe(138);
+    expect(raceRiderOverlayMaximumHeight(844, 390)).toBe(140);
+    expect(raceRiderOverlayMinimumHeight(852, 393)).toBe(138);
+    expect(raceRiderOverlayMaximumHeight(852, 393)).toBe(141);
+    expect(raceRiderOverlayMinimumHeight(667, 375)).toBe(138);
+    expect(raceRiderOverlayMaximumHeight(667, 375)).toBe(138);
+    expect(raceRiderOverlayMaximumHeight(932, 430)).toBe(155);
   });
 
-  it('preserves the existing iPad and desktop landscape height', () => {
-    expect(raceRiderOverlayMinimumHeight(1024, 768)).toBe(190);
-    expect(raceRiderOverlayMinimumHeight(1366, 1024)).toBe(190);
-    expect(raceRiderOverlayMinimumHeight(1280, 500)).toBe(190);
+  it('keeps enough iPad and desktop landscape height for photos, metrics, and heart rate', () => {
+    expect(raceRiderOverlayMinimumHeight(1024, 768)).toBe(220);
+    expect(raceRiderOverlayMinimumHeight(1366, 1024)).toBe(220);
+    expect(raceRiderOverlayMinimumHeight(1280, 500)).toBe(220);
     expect(raceRiderOverlayMaximumHeight(1024, 768)).toBe(Number.POSITIVE_INFINITY);
     expect(raceRiderOverlayMaximumHeight(1280, 500)).toBe(Number.POSITIVE_INFINITY);
   });

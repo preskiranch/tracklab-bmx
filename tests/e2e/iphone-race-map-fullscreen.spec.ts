@@ -3,13 +3,16 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const globalStylesUrl = new URL('../../src/styles.css', import.meta.url);
 const trackStylesUrl = new URL('../../src/components/EarthTrackView.mobile.css', import.meta.url);
+const heartRateStylesUrl = new URL('../../src/components/HeartRateMetric.css', import.meta.url);
 
 async function installTrackStyles(page: Page) {
-  const [globalStyles, trackStyles] = await Promise.all([
+  const [globalStyles, heartRateStyles, trackStyles] = await Promise.all([
     readFile(globalStylesUrl, 'utf8'),
+    readFile(heartRateStylesUrl, 'utf8'),
     readFile(trackStylesUrl, 'utf8'),
   ]);
   await page.addStyleTag({ content: globalStyles });
+  await page.addStyleTag({ content: heartRateStyles });
   await page.addStyleTag({ content: trackStyles });
 }
 
@@ -59,9 +62,12 @@ function riderCards(positionsPending = false) {
     .map((name, index) => `
       <article class="race-rider-overlay-card${positionsPending ? ' positions-pending' : ''}" style="--player-color:${['#2aa8ff', '#ffd83d', '#7ade36', '#ff4d4d'][index]}">
         <div class="race-rider-overlay-summary">
-          <span class="rider-avatar race-rider-overlay-avatar">${name.slice(0, 1)}</span>
-          <span class="race-rider-overlay-badge">P${index + 1}</span>
-          <span class="race-rider-overlay-identity"><strong>${name}</strong><span>76% track / 21 MPH</span></span>
+          <span class="race-rider-overlay-portrait"><span class="rider-avatar race-rider-overlay-avatar has-photo"><img alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23253862'/%3E%3C/svg%3E"></span><span class="race-rider-overlay-badge">P${index + 1}</span></span>
+          <span class="race-rider-overlay-identity">
+            <strong>${name}</strong>
+            <span class="race-rider-overlay-progress">76% track / 21 MPH</span>
+            <span class="race-rider-overlay-heart-rate" aria-label="Simulated heart rate ${158 + index} beats per minute"><b aria-hidden="true">♥</b><span class="race-rider-overlay-heart-rate-source" aria-hidden="true">Sim ·</span><span aria-hidden="true">${158 + index} BPM</span></span>
+          </span>
         </div>
         ${positionsPending ? '' : `<div class="race-rider-overlay-place"><strong>${index + 1}${index === 0 ? 'st' : index === 1 ? 'nd' : index === 2 ? 'rd' : 'th'}</strong><span>Place</span></div>`}
       </article>
@@ -159,7 +165,7 @@ function gameArenaMarkup() {
 
 test('keeps satellite race controls and rider data inside iPhone portrait and landscape', async ({ page }) => {
   for (const viewport of [
-    { width: 390, height: 844, columns: 2, overlayHeight: 340, positionsPending: false },
+    { width: 390, height: 844, columns: 2, overlayHeight: 368, positionsPending: false },
     { width: 844, height: 390, columns: 4, overlayHeight: 220, positionsPending: false },
     { width: 844, height: 390, columns: 4, overlayHeight: 220, positionsPending: true },
     { width: 852, height: 393, columns: 4, overlayHeight: 220, positionsPending: false },
@@ -209,39 +215,50 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
           const badge = card.querySelector<HTMLElement>('.race-rider-overlay-badge')!;
           const identity = card.querySelector<HTMLElement>('.race-rider-overlay-identity')!;
           const name = identity.querySelector<HTMLElement>('strong')!;
-          const metric = identity.querySelector<HTMLElement>('span')!;
+          const metric = identity.querySelector<HTMLElement>('.race-rider-overlay-progress')!;
+          const heartRate = identity.querySelector<HTMLElement>('.race-rider-overlay-heart-rate')!;
           const summaryBounds = summary.getBoundingClientRect();
           const avatarBounds = avatar.getBoundingClientRect();
           const badgeBounds = badge.getBoundingClientRect();
           const identityBounds = identity.getBoundingClientRect();
-          const badgeOverlapsIdentity = badgeBounds.right > identityBounds.left + 0.5
-            && badgeBounds.left < identityBounds.right - 0.5
-            && badgeBounds.bottom > identityBounds.top + 0.5
-            && badgeBounds.top < identityBounds.bottom - 0.5;
+          const nameBounds = name.getBoundingClientRect();
+          const metricBounds = metric.getBoundingClientRect();
+          const heartRateBounds = heartRate.getBoundingClientRect();
+          const intersects = (left: DOMRect, right: DOMRect) => left.right > right.left + 0.5
+            && left.left < right.right - 0.5
+            && left.bottom > right.top + 0.5
+            && left.top < right.bottom - 0.5;
           const place = card.querySelector<HTMLElement>('.race-rider-overlay-place');
+          const placeBounds = place?.getBoundingClientRect();
           return {
             summaryFits: summary.scrollHeight <= summary.clientHeight + 1,
             identityFits: identity.scrollHeight <= identity.clientHeight + 1,
             nameFits: name.scrollHeight <= name.clientHeight + 1,
-            metricFits: metric.scrollWidth <= metric.clientWidth + 1,
+            metricFits: metricBounds.left >= identityBounds.left - 0.5
+              && metricBounds.right <= identityBounds.right + 0.5,
             avatarClear: avatarBounds.right <= identityBounds.left + 0.5,
-            badgeClear: !badgeOverlapsIdentity,
-            rowsClear: !place || summaryBounds.bottom <= place.getBoundingClientRect().top + 0.5,
+            badgeClear: !intersects(badgeBounds, avatarBounds) && !intersects(badgeBounds, nameBounds),
+            heartRateClear: heartRateBounds.left >= identityBounds.left - 0.5
+              && heartRateBounds.right <= identityBounds.right + 0.5
+              && heartRateBounds.bottom <= summaryBounds.bottom + 0.5
+              && (!placeBounds || heartRateBounds.bottom <= placeBounds.top + 0.5),
+            rowsClear: !placeBounds || summaryBounds.bottom <= placeBounds.top + 0.5,
           };
         }),
       };
     });
     expect(compactLayout.cardsFit).toBe(true);
+    expect(compactLayout.contentChecks).toEqual(compactLayout.contentChecks.map(() => ({
+      summaryFits: true,
+      identityFits: true,
+      nameFits: true,
+      metricFits: true,
+      avatarClear: true,
+      badgeClear: true,
+      heartRateClear: true,
+      rowsClear: true,
+    })));
     if (viewport.width > viewport.height) {
-      expect(compactLayout.contentChecks).toEqual(compactLayout.contentChecks.map(() => ({
-        summaryFits: true,
-        identityFits: true,
-        nameFits: true,
-        metricFits: true,
-        avatarClear: true,
-        badgeClear: true,
-        rowsClear: true,
-      })));
       expect(compactLayout.height / compactLayout.viewportHeight).toBeLessThanOrEqual(0.385);
       const overlayBounds = await page.getByLabel('Race rider positions').boundingBox();
       expect(viewport.width - (overlayBounds?.x ?? 0) - (overlayBounds?.width ?? viewport.width)).toBeGreaterThanOrEqual(51.5);
@@ -273,7 +290,7 @@ test('keeps satellite race controls and rider data inside iPhone portrait and la
         expect(treeClearsControls).toBe(true);
       }
     } else {
-      expect(compactLayout.height).toBeGreaterThanOrEqual(340);
+      expect(compactLayout.height).toBeGreaterThanOrEqual(368);
     }
     await expectStableAcrossFrames(page.locator('.earth-stage'));
   }

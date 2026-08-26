@@ -4965,8 +4965,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(fullscreenNameLayout.fitsWidth).toBe(true);
   expect(fullscreenNameLayout.fitsHeight).toBe(true);
   const fullscreenAvatarBounds = await riderPanel.locator('.race-rider-overlay-avatar').first().boundingBox();
-  expect(fullscreenAvatarBounds?.width).toBe(44);
-  expect(fullscreenAvatarBounds?.height).toBe(44);
+  expect(fullscreenAvatarBounds?.width).toBe(64);
+  expect(fullscreenAvatarBounds?.height).toBe(64);
   await expect(page.locator('.race-commentary-caption')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => (
     (window as typeof window & {
@@ -5240,8 +5240,8 @@ test('start here race action enters fullscreen race view', async ({ page }, test
   expect(mobileRiderText.metrics).toBeGreaterThanOrEqual(12);
   expect(mobileRiderText.place).toBeGreaterThanOrEqual(34);
   const mobileAvatarBounds = await riderPanel.locator('.race-rider-overlay-avatar').first().boundingBox();
-  expect(mobileAvatarBounds?.width).toBe(44);
-  expect(mobileAvatarBounds?.height).toBe(44);
+  expect(mobileAvatarBounds?.width).toBe(52);
+  expect(mobileAvatarBounds?.height).toBe(52);
   const mobileCardsFit = await riderPanel.evaluate((panel) => {
     const panelBounds = panel.getBoundingClientRect();
     return [...panel.querySelectorAll('.race-rider-overlay-card')].every((card) => {
